@@ -412,6 +412,7 @@ struct DatabaseStats {
 }
 
 auto print_references(Pager &pager) -> void;
+auto print_wals(Env &env, std::size_t page_size, const std::string &prefix) -> void;
 
 } // namespace calicodb::Tools
 

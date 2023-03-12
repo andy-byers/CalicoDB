@@ -1,7 +1,9 @@
 
 #include "tools.h"
 #include "env_posix.h"
+#include "logging.h"
 #include "types.h"
+#include "wal_reader.h"
 #include <algorithm>
 #include <iomanip>
 #include <iostream>
@@ -349,18 +351,18 @@ auto RandomGenerator::Generate(std::size_t len) const -> Slice
 
 auto print_references(Pager &pager) -> void
 {
-    for (auto pid = Id::root(); pid.value <= pager.page_count(); ++pid.value) {
-        std::cerr << std::setw(6) << pid.value << ": ";
-        if (PointerMap::lookup(pager, pid) == pid) {
+    for (auto page_id = Id::root(); page_id.value <= pager.page_count(); ++page_id.value) {
+        std::cerr << std::setw(6) << page_id.value << ": ";
+        if (PointerMap::lookup(pager, page_id) == page_id) {
             std::cerr << "pointer map\n";
             continue;
         }
-        if (pid.is_root()) {
+        if (page_id.is_root()) {
             std::cerr << "node -> NULL\n";
             continue;
         }
         PointerMap::Entry entry;
-        CHECK_OK(PointerMap::read_entry(pager, pid, &entry));
+        CHECK_OK(PointerMap::read_entry(pager, page_id, &entry));
         switch (entry.type) {
         case PointerMap::kTreeNode:
             std::cerr << "node";
@@ -381,6 +383,56 @@ auto print_references(Pager &pager) -> void
             std::cerr << "root for table " << entry.back_ptr.value << '\n';
         } else {
             std::cerr << " -> " << entry.back_ptr.value << '\n';
+        }
+    }
+}
+
+auto print_wals(Env &env, std::size_t page_size, const std::string &prefix) -> void
+{
+    const auto [dir, base] = split_path(prefix);
+    std::vector<std::string> possible_segments;
+    CHECK_OK(env.get_children(dir, &possible_segments));
+
+    std::string tail_buffer(wal_block_size(page_size), '\0');
+    std::string data_buffer(wal_scratch_size(page_size), '\0');
+
+    for (auto &name : possible_segments) {
+        name = join_paths(dir, name);
+        if (!decode_segment_name(prefix, name).is_null()) {
+            Reader *file;
+            CHECK_OK(env.new_reader(name, &file));
+            WalReader reader {*file, tail_buffer};
+            std::cerr << "Start of segment " << name << '\n';
+            for (; ; ) {
+                Span payload {data_buffer};
+                auto s = reader.read(payload);
+                if (s.is_not_found()) {
+                    std::cerr << "End of segment\n";
+                    break;
+                } else if (!s.is_ok()) {
+                    std::cerr << "Encountered \"" << get_status_name(s) << "\" status: " << s.to_string() << '\n';
+                    break;
+                }
+                const auto decoded = decode_payload(payload);
+                if (std::holds_alternative<DeltaDescriptor>(decoded)) {
+                    const auto deltas = std::get<DeltaDescriptor>(decoded);
+                    std::cerr << "    Delta: page_id=" << deltas.page_id.value << ", lsn=" << deltas.lsn.value << ", deltas=[\n";
+                    std::size_t i {};
+                    for (const auto &[offset, data] : deltas.deltas) {
+                        std::cerr << "        " << i++ << ": offset=" << offset << ", data=" << escape_string(data) << '\n';
+                    }
+                } else if (std::holds_alternative<ImageDescriptor>(decoded)) {
+                    const auto image = std::get<ImageDescriptor>(decoded);
+                    std::uint64_t before_lsn {};
+                    if (image.image.size() >= 8) {
+                        before_lsn = get_u64(image.image.data() + FileHeader::kSize * image.page_id.is_root());
+                    }
+                    std::cerr << "    Image: page_id=" << image.page_id.value << ", lsn=" << image.lsn.value << ", before_lsn=" << before_lsn << ", image_size=" << image.image.size() << '\n';
+                } else if (std::holds_alternative<VacuumDescriptor>(decoded)) {
+                    const auto vacuum = std::get<VacuumDescriptor>(decoded);
+                    std::cerr << "    Vacuum: is_start=" << vacuum.is_start << ", lsn=" << vacuum.lsn.value << '\n';
+                }
+            }
         }
     }
 }

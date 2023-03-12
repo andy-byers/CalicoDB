@@ -44,7 +44,7 @@ auto WalReader::read(Span &payload) -> Status
             if (temp.size == 0 || temp.size > rest.size()) {
                 return Status::corruption("fragment size is invalid");
             }
-            mem_copy(out, rest.truncate(temp.size));
+            std::memcpy(out.data(), rest.data(), temp.size);
             m_offset += WalRecordHeader::kSize + temp.size;
             out.advance(temp.size);
 

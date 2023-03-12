@@ -37,7 +37,7 @@ auto WalWriter::write(Lsn lsn, const Slice &payload) -> Status
         // We must have room for the whole header and at least 1 payload byte.
         write_wal_record_header(rest, lhs);
         rest.advance(WalRecordHeader::kSize);
-        mem_copy(rest, data.range(0, lhs.size));
+        std::memcpy(rest.data(), data.data(), lhs.size);
 
         m_offset += WalRecordHeader::kSize + lhs.size;
         data.advance(lhs.size);
@@ -63,7 +63,7 @@ auto WalWriter::flush() -> Status
     }
 
     // Clear unused bytes at the end of the tail buffer.
-    mem_clear(m_tail.range(m_offset));
+    std::memset(m_tail.data() + m_offset, 0, m_tail.size() - m_offset);
 
     auto s = m_file->write(m_tail);
     if (s.is_ok()) {

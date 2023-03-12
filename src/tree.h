@@ -12,7 +12,7 @@ class Pager;
 class TableSet;
 
 /* Internal Cell Format:
- *     std::size_t    Name
+ *     Size    Name
  *    -----------------------
  *     8       child_id
  *     varint  key_size
@@ -20,7 +20,7 @@ class TableSet;
  *     8       [overflow_id]
  *
  * External Cell Format:
- *     std::size_t    Name
+ *     Size    Name
  *    -----------------------
  *     varint  value_size
  *     varint  key_size
@@ -193,8 +193,6 @@ public:
     [[nodiscard]] auto get(const Slice &key, std::string *value) const -> Status;
     [[nodiscard]] auto erase(const Slice &key) -> Status;
     [[nodiscard]] auto vacuum_one(Id target, TableSet &tables, bool *success) -> Status;
-    auto load_state(const FileHeader &header) -> void;
-
     [[nodiscard]] auto allocate(Node *out, bool is_external) -> Status;
     [[nodiscard]] auto acquire(Node *out, Id pid, bool upgrade) const -> Status;
     [[nodiscard]] auto destroy(Node node) -> Status;

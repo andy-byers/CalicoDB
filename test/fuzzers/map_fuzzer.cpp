@@ -76,6 +76,7 @@ auto MapFuzzer::step(const std::uint8_t *&data, std::size_t &size) -> Status
             }
             m_added[key] = value;
         }
+        reinterpret_cast<DBImpl &>(*m_db).TEST_tables().get(Id {2})->tree->TEST_validate();
         break;
     case kErase: {
         key = extract_fuzzer_key(data, size);
@@ -94,10 +95,12 @@ auto MapFuzzer::step(const std::uint8_t *&data, std::size_t &size) -> Status
             }
         }
         delete cursor;
+        reinterpret_cast<DBImpl &>(*m_db).TEST_tables().get(Id {2})->tree->TEST_validate();
         break;
     }
     case kVacuum:
         s = m_db->vacuum();
+        reinterpret_cast<DBImpl &>(*m_db).TEST_tables().get(Id {2})->tree->TEST_validate();
         break;
     case kCheckpoint:
         s = m_db->checkpoint();
@@ -112,6 +115,7 @@ auto MapFuzzer::step(const std::uint8_t *&data, std::size_t &size) -> Status
             m_erased.clear();
             expect_equal_contents();
         }
+        reinterpret_cast<DBImpl &>(*m_db).TEST_tables().get(Id {2})->tree->TEST_validate();
         break;
     default: // kReopen
         m_added.clear();

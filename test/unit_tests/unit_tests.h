@@ -167,6 +167,7 @@ public:
                                   &wal,
                                   nullptr,
                                   &commit_lsn,
+                                  &max_page_id,
                                   &status,
                                   &in_txn,
                                   kFrameCount,
@@ -185,6 +186,7 @@ public:
     std::unique_ptr<Pager> pager;
     tools::RandomGenerator random {1'024 * 1'024 * 8};
     Lsn commit_lsn;
+    Id max_page_id;
 };
 
 inline auto expect_ok(const Status &s) -> void

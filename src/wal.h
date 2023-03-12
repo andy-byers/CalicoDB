@@ -11,10 +11,7 @@ class WalWriter;
 class WriteAheadLog
 {
 public:
-    friend class Recovery;
     friend class DBImpl;
-
-    static constexpr std::size_t kSegmentCutoff {32};
 
     struct Parameters {
         std::string prefix;
@@ -45,6 +42,8 @@ private:
     [[nodiscard]] auto close_writer() -> Status;
     [[nodiscard]] auto open_writer() -> Status;
     [[nodiscard]] auto log(const Slice &payload) -> Status;
+
+    static constexpr std::size_t kSegmentCutoff {32};
 
     mutable Lsn m_flushed_lsn;
     Lsn m_last_lsn;

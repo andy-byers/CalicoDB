@@ -12,8 +12,6 @@
 namespace calicodb
 {
 
-class Frame;
-
 class PageList final
 {
 public:

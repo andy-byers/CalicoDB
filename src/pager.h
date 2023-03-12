@@ -27,6 +27,7 @@ public:
         WriteAheadLog *wal {};
         InfoLogger *info_log {};
         Lsn *commit_lsn {};
+        Id *max_page_id {};
         Status *status {};
         bool *is_running {};
         std::size_t frame_count {};
@@ -69,6 +70,7 @@ private:
     Env *m_env {};
     InfoLogger *m_info_log {};
     Lsn *m_commit_lsn {};
+    Id *m_max_page_id {};
 };
 
 } // namespace calicodb

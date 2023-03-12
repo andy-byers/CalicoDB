@@ -95,7 +95,7 @@ public:
         }
         for (const auto &[offset, size] : deltas) {
             const auto replacement = random.Generate(size);
-            mem_copy(image.range(offset, size), replacement);
+            std::memcpy(image.data() + offset, replacement.data(), size);
         }
         return deltas;
     }

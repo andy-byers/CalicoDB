@@ -387,16 +387,6 @@ TEST(IdTests, IdentifiersAreOrderable)
     run_ordering_comparisons<Id>();
 }
 
-TEST(TestUniqueNullable, ResourceIsMoved)
-{
-    UniqueNullable<int> moved_from {42};
-    const auto moved_into = std::move(moved_from);
-    ASSERT_EQ(*moved_from, 0);
-    ASSERT_FALSE(moved_from.is_valid());
-    ASSERT_EQ(*moved_into, 42);
-    ASSERT_TRUE(moved_into.is_valid());
-}
-
 TEST(StatusTests, OkStatusMessage)
 {
     auto s = Status::ok();

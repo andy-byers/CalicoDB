@@ -11,8 +11,6 @@ function(build_fuzzer NAME)
     endif()
     target_link_libraries(${NAME}
             PRIVATE calicodb_tools)
-    target_include_directories(${NAME}
-            PRIVATE "${PROJECT_SOURCE_DIR}/src")
 endfunction()
 
 build_fuzzer(ops_fuzzer)

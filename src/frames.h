@@ -18,47 +18,19 @@ class Pager;
 class Editor;
 class Env;
 
-class Frame final
+struct Frame
 {
-public:
-    Frame(char *buffer, std::size_t id, std::size_t size);
-
-    [[nodiscard]] auto pid() const -> Id
-    {
-        return m_page_id;
-    }
-
-    [[nodiscard]] auto ref_count() const -> std::size_t
-    {
-        return m_ref_count;
-    }
-
-    [[nodiscard]] auto data() const -> Slice
-    {
-        return m_bytes;
-    }
-
-    [[nodiscard]] auto data() -> Span
-    {
-        return m_bytes;
-    }
-
-    auto reset(Id id) -> void
-    {
-        CDB_EXPECT_EQ(m_ref_count, 0);
-        m_page_id = id;
-    }
+    explicit Frame(char *buffer);
 
     [[nodiscard]] auto lsn() const -> Id;
-    auto ref(Page &pagez) -> void;
-    auto upgrade(Page &page) -> void;
-    auto unref(Page &page) -> void;
+    auto ref() -> void;
+    auto upgrade() -> void;
+    auto unref() -> void;
 
-private:
-    Span m_bytes;
-    Id m_page_id;
-    std::size_t m_ref_count {};
-    bool m_is_writable {};
+    char *data;
+    Id page_id;
+    std::size_t ref_count {};
+    bool write {};
 };
 
 class FrameManager final
@@ -71,10 +43,10 @@ public:
     ~FrameManager() = default;
     [[nodiscard]] auto write_back(std::size_t index) -> Status;
     [[nodiscard]] auto sync() -> Status;
-    [[nodiscard]] auto pin(Id pid, std::size_t &fid) -> Status;
-    auto unpin(std::size_t) -> void;
+    [[nodiscard]] auto pin(Id page_id, std::size_t &index) -> Status;
+    auto unpin(std::size_t index) -> void;
     auto ref(std::size_t index, Page &out) -> void;
-    auto unref(std::size_t index, Page page) -> void;
+    auto unref(std::size_t index, Page) -> void;
     auto upgrade(std::size_t index, Page &page) -> void;
     auto load_state(const FileHeader &header) -> void;
     auto save_state(FileHeader &header) const -> void;
@@ -114,8 +86,8 @@ public:
     FrameManager(FrameManager &&) = default;
 
 private:
-    [[nodiscard]] auto read_page_from_file(Id, Span) const -> Status;
-    [[nodiscard]] auto write_page_to_file(Id pid, const Slice &page) const -> Status;
+    [[nodiscard]] auto read_page_from_file(Id page_id, char *out) const -> Status;
+    [[nodiscard]] auto write_page_to_file(Id page_id, const char *in) const -> Status;
 
     AlignedBuffer m_buffer;
     std::vector<Frame> m_frames;

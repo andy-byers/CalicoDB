@@ -22,7 +22,6 @@ class TableImpl;
 class WriteAheadLog;
 struct TableState;
 
-static constexpr Id kDefaultTableId {2};
 static constexpr auto kRootTableName = "calicodb_root";
 static constexpr auto kDefaultTableName = "default";
 
@@ -118,7 +117,7 @@ public:
 
 private:
     [[nodiscard]] auto remove_empty_table(const std::string &name, TableState &state) -> Status;
-    [[nodiscard]] auto save_file_header() -> Status;
+    [[nodiscard]] auto do_checkpoint() -> Status;
     [[nodiscard]] auto load_file_header() -> Status;
     [[nodiscard]] auto do_vacuum() -> Status;
     [[nodiscard]] auto open_wal_reader(Id segment, std::unique_ptr<Reader> *out) -> Status;
@@ -126,9 +125,6 @@ private:
     [[nodiscard]] auto recovery_phase_1() -> Status;
     [[nodiscard]] auto recovery_phase_2() -> Status;
     [[nodiscard]] auto construct_new_table(const Slice &name, LogicalPageId *root_id) -> Status;
-    auto destroy_table_state(Id table_id) -> void;
-
-    friend class TableImpl;
 
     std::string m_reader_data;
     std::string m_reader_tail;
@@ -143,6 +139,7 @@ private:
     std::string m_wal_prefix;
     Env *m_env {};
     InfoLogger *m_info_log {};
+    Id m_max_page_id {};
     Lsn m_commit_lsn;
     Id m_freelist_head;
     bool m_owns_env {};

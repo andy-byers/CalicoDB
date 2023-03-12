@@ -50,7 +50,7 @@ class Page
     bool m_write {};
 
 public:
-    friend class Frame;
+    friend class FrameManager;
     friend class Pager;
     friend struct Node;
 
