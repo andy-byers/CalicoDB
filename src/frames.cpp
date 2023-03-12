@@ -66,7 +66,6 @@ auto FrameManager::ref(std::size_t index, Page &out) -> void
 auto FrameManager::unref(std::size_t index, Page) -> void
 {
     CDB_EXPECT_LT(index, m_frames.size());
-    CDB_EXPECT_EQ(page.m_write, m_frames[index].write);
     m_frames[index].unref();
     --m_ref_sum;
 }

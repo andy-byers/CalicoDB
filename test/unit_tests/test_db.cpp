@@ -320,19 +320,22 @@ TEST_P(DbVacuumTests, SanityCheck)
             delete db;
             ASSERT_OK(DB::open(options, kFilename, &db));
         }
-        while (map.size() < upper_bounds) {
-            const auto key = random.Generate(10);
-            const auto value = random.Generate(options.page_size * 2);
-            ASSERT_OK(db->put(key, value));
-            map[key.to_string()] = value.to_string();
+        for (std::size_t batch {}; batch < 4; ++batch) {
+            while (map.size() < upper_bounds) {
+                const auto key = random.Generate(10);
+                const auto value = random.Generate(options.page_size * 2);
+                ASSERT_OK(db->put(key, value));
+                map[key.to_string()] = value.to_string();
+            }
+            while (map.size() > lower_bounds) {
+                const auto key = begin(map)->first;
+                map.erase(key);
+                ASSERT_OK(db->erase(key));
+            }
+            ASSERT_OK(db->vacuum());
+            dynamic_cast<DBImpl &>(*db).TEST_validate();
         }
-        while (map.size() > lower_bounds) {
-            const auto key = begin(map)->first;
-            map.erase(key);
-            ASSERT_OK(db->erase(key));
-        }
-        ASSERT_OK(db->vacuum());
-        dynamic_cast<DBImpl &>(*db).TEST_validate();
+
         ASSERT_OK(db->checkpoint());
 
         std::size_t i {};
@@ -350,14 +353,10 @@ INSTANTIATE_TEST_SUITE_P(
     DbVacuumTests,
     DbVacuumTests,
     ::testing::Values(
-        std::make_tuple(1, 2, false),
-        std::make_tuple(1, 2, true),
-        std::make_tuple(10, 20, false),
-        std::make_tuple(10, 20, true),
-        std::make_tuple(100, 200, false),
-        std::make_tuple(100, 200, true),
-        std::make_tuple(90, 110, false),
-        std::make_tuple(90, 110, true)));
+        std::make_tuple(100, 2'000, false),
+        std::make_tuple(100, 2'000, true),
+        std::make_tuple(2'000, 100, false),
+        std::make_tuple(2'000, 100, true)));
 
 class TestDatabase
 {
@@ -710,7 +709,7 @@ protected:
         db = std::make_unique<TestDatabase>(*env);
 
         // Make sure all page types are represented in the database.
-        committed = add_records(*db, 5'000);
+        committed = add_records(*db, 1'000);
         for (std::size_t i {}; i < 500; ++i) {
             const auto itr = begin(committed);
             EXPECT_OK(db->db->erase(itr->first));

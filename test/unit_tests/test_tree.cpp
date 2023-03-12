@@ -491,12 +491,12 @@ TEST_F(NodeTests, CellPromote)
     write_record(node_1, b, "2", 1);
 
     auto cell_a = read_cell(node_1, 0);
-    ASSERT_OK(PayloadManager::promote(*pager, freelist, cell_scratch.data(), cell_a, node_2.page.id()));
+    ASSERT_OK(PayloadManager::promote(*pager, freelist, cell_scratch.data() + sizeof(Id), cell_a, node_2.page.id()));
     ASSERT_FALSE(cell_a.has_remote) << "overflow value was copied for promoted cell";
     write_cell(node_2, 0, cell_a);
 
     auto cell_b = read_cell(node_1, 1);
-    ASSERT_OK(PayloadManager::promote(*pager, freelist, cell_scratch.data(), cell_b, node_2.page.id()));
+    ASSERT_OK(PayloadManager::promote(*pager, freelist, cell_scratch.data() + sizeof(Id), cell_b, node_2.page.id()));
     ASSERT_TRUE(cell_b.has_remote) << "overflow key was not copied for promoted cell";
     write_cell(node_2, 1, cell_b);
 

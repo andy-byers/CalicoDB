@@ -125,6 +125,7 @@ auto DBImpl::open(const Options &sanitized) -> Status
     m_commit_lsn = state.commit_lsn;
     m_state.record_count = state.record_count;
     m_freelist_head = state.freelist_head;
+    m_max_page_id.value = state.page_count;
 
     CDB_TRY(WriteAheadLog::open(
         {
@@ -141,12 +142,14 @@ auto DBImpl::open(const Options &sanitized) -> Status
             wal,
             m_info_log,
             &m_commit_lsn,
+            &m_max_page_id,
             &m_state.status,
             &m_is_running,
             sanitized.cache_size / page_size,
             page_size,
         },
         &pager));
+    pager->load_state(state);
 
     if (!db_exists) {
         m_info_log->logv("setting up a new database");
@@ -156,7 +159,6 @@ auto DBImpl::open(const Options &sanitized) -> Status
         CDB_TRY(Tree::create(*pager, Id::root(), m_freelist_head, &root_id));
         CDB_EXPECT_TRUE(root_id.is_root());
     }
-    pager->load_state(state);
 
     // Create the root and default table handles.
     CDB_TRY(create_table({}, kRootTableName, &m_root));
@@ -348,24 +350,6 @@ auto DBImpl::get_property(const Slice &name, std::string *out) const -> bool
     return false;
 }
 
-auto DBImpl::list_tables(std::vector<std::string> *out) const -> Status
-{
-    CDB_TRY(m_state.status);
-    out->clear();
-
-    auto *cursor = new_cursor(m_root);
-    cursor->seek_first();
-    while (cursor->is_valid()) {
-        out->emplace_back(cursor->key().to_string());
-        cursor->next();
-    }
-    auto s = cursor->status();
-    delete cursor;
-
-    return s.is_not_found() ? Status::ok() : s;
-}
-
-
 auto DBImpl::new_cursor(const Table *table) const -> Cursor *
 {
     CDB_EXPECT_NE(table, nullptr);
@@ -379,8 +363,8 @@ auto DBImpl::new_cursor(const Table *table) const -> Cursor *
 
 auto DBImpl::get(const Table *table, const Slice &key, std::string *value) const -> Status
 {
-    CDB_EXPECT_NE(table, nullptr);
     CDB_TRY(m_state.status);
+    CDB_EXPECT_NE(table, nullptr);
     const auto *state = m_tables.get(get_table_id(table));
     return state->tree->get(key, value);
 }
@@ -388,7 +372,6 @@ auto DBImpl::get(const Table *table, const Slice &key, std::string *value) const
 auto DBImpl::put(Table *table, const Slice &key, const Slice &value) -> Status
 {
     CDB_TRY(m_state.status);
-
     CDB_EXPECT_NE(table, nullptr);
     auto *state = m_tables.get(get_table_id(table));
 
@@ -400,14 +383,15 @@ auto DBImpl::put(Table *table, const Slice &key, const Slice &value) -> Status
     }
 
     bool record_exists;
-    if (auto s = state->tree->put(key, value, &record_exists); !s.is_ok()) {
+    auto s = state->tree->put(key, value, &record_exists);
+    if (s.is_ok()) {
+        m_state.record_count += !record_exists;
+        m_state.bytes_written += key.size() + value.size();
+        ++m_state.batch_size;
+    } else {
         SET_STATUS(s);
-        return s;
     }
-    m_state.record_count += !record_exists;
-    m_state.bytes_written += key.size() + value.size();
-    ++m_state.batch_size;
-    return Status::ok();
+    return s;
 }
 
 auto DBImpl::erase(Table *table, const Slice &key) -> Status
@@ -481,28 +465,6 @@ auto DBImpl::ensure_consistency() -> Status
     return load_file_header();
 }
 
-auto DBImpl::load_file_header() -> Status
-{
-    Page root;
-    CDB_TRY(pager->acquire(Id::root(), &root));
-
-    FileHeader header;
-    header.read(root.data());
-    const auto expected_crc = crc32c::Unmask(header.header_crc);
-    const auto computed_crc = header.compute_crc();
-    if (expected_crc != computed_crc) {
-        m_info_log->logv("file header crc mismatch (expected %u but computed %u)", expected_crc, computed_crc);
-        return Status::corruption("crc mismatch");
-    }
-
-    m_state.record_count = header.record_count;
-    m_freelist_head = header.freelist_head;
-    pager->load_state(header);
-
-    pager->release(std::move(root));
-    return Status::ok();
-}
-
 auto DBImpl::TEST_tables() const -> const TableSet &
 {
     return m_tables;
@@ -573,7 +535,6 @@ auto setup(const std::string &path, Env &env, const Options &options, FileHeader
     } else if (s.is_not_found()) {
         header->page_size = static_cast<std::uint16_t>(options.page_size);
         header->header_crc = crc32c::Mask(header->compute_crc());
-        header->page_count = 1;
 
     } else {
         return s;
@@ -593,18 +554,21 @@ auto setup(const std::string &path, Env &env, const Options &options, FileHeader
 
 auto DBImpl::checkpoint() -> Status
 {
-    if (m_state.batch_size != 0) {
-        if (auto s = save_file_header(); !s.is_ok()) {
+    CDB_TRY(m_state.status);
+
+    if (m_state.batch_size > 0) {
+        m_state.batch_size = 0;
+        if (auto s = do_checkpoint(); !s.is_ok()) {
             SET_STATUS(s);
             return s;
         }
+        m_max_page_id.value = pager->page_count();
     }
     return Status::ok();
 }
 
-auto DBImpl::save_file_header() -> Status
+auto DBImpl::do_checkpoint() -> Status
 {
-    CDB_TRY(m_state.status);
     Page db_root;
     CDB_TRY(pager->acquire(Id::root(), &db_root));
     pager->upgrade(db_root);
@@ -624,9 +588,48 @@ auto DBImpl::save_file_header() -> Status
     return wal->flush();
 }
 
+auto DBImpl::load_file_header() -> Status
+{
+    Page root;
+    CDB_TRY(pager->acquire(Id::root(), &root));
+
+    FileHeader header;
+    header.read(root.data());
+    const auto expected_crc = crc32c::Unmask(header.header_crc);
+    const auto computed_crc = header.compute_crc();
+    if (expected_crc != computed_crc) {
+        m_info_log->logv("file header crc mismatch (expected %u but computed %u)", expected_crc, computed_crc);
+        return Status::corruption("crc mismatch");
+    }
+
+    m_state.record_count = header.record_count;
+    m_freelist_head = header.freelist_head;
+    pager->load_state(header);
+
+    pager->release(std::move(root));
+    return Status::ok();
+}
+
 auto DBImpl::default_table() const -> Table *
 {
     return m_default;
+}
+
+auto DBImpl::list_tables(std::vector<std::string> *out) const -> Status
+{
+    CDB_TRY(m_state.status);
+    out->clear();
+
+    auto *cursor = new_cursor(m_root);
+    cursor->seek_first();
+    while (cursor->is_valid()) {
+        out->emplace_back(cursor->key().to_string());
+        cursor->next();
+    }
+    auto s = cursor->status();
+    delete cursor;
+
+    return s.is_not_found() ? Status::ok() : s;
 }
 
 auto DBImpl::create_table(const TableOptions &options, const std::string &name, Table **out) -> Status
@@ -638,7 +641,7 @@ auto DBImpl::create_table(const TableOptions &options, const std::string &name, 
     if (name == kRootTableName) {
         root_id = LogicalPageId::root();
     } else {
-        auto *state = m_tables.get(Id::root());
+        const auto *state = m_tables.get(Id::root());
         s = state->tree->get(name, &value);
         if (s.is_ok()) {
             CDB_TRY(decode_logical_id(value, &root_id));
@@ -709,6 +712,7 @@ auto DBImpl::drop_table(Table *table) -> Status
     }
     delete table;
     m_tables.erase(table_id);
+    ++m_state.batch_size;
     return s;
 }
 
@@ -730,7 +734,8 @@ auto DBImpl::construct_new_table(const Slice &name, LogicalPageId *root_id) -> S
     char payload[LogicalPageId::kSize];
     encode_logical_id(*root_id, payload);
 
-    // Write an entry for the new table in the root table.
+    // Write an entry for the new table in the root table. This will not increase the
+    // record count for the database.
     auto *db_root = m_tables.get(Id::root());
     CDB_TRY(db_root->tree->put(name, Slice {payload, LogicalPageId::kSize}));
     ++m_state.batch_size;
@@ -747,7 +752,7 @@ auto DBImpl::remove_empty_table(const std::string &name, TableState &state) -> S
     Node root;
     CDB_TRY(tree->acquire(&root, root_id.page_id, false));
     if (root.header.cell_count != 0) {
-        return Status::logic_error("table is not empty");
+        return Status::logic_error("table could not be emptied");
     }
     auto *root_state = m_tables.get(Id::root());
     CDB_TRY(root_state->tree->erase(name));

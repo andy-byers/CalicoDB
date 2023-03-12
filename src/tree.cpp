@@ -917,6 +917,7 @@ auto Tree::split_non_root(Node right, Node &out) -> Status
 
     if (overflow_index == header.cell_count) {
         // Note the reversal of the "left" and "right" parameters. We are splitting the other way.
+        // This can greatly improve the performance of sequential writes.
         return split_non_root_fast(
             std::move(parent),
             std::move(right),
@@ -2167,7 +2168,6 @@ class TreeValidator
                 Node next;
                 CHECK_OK(tree.acquire(&next, next_id, false));
                 traverse_inorder_helper(tree, std::move(next), callback);
-
                 CHECK_OK(tree.acquire(&node, saved_id, false));
             }
             if (index < node.header.cell_count) {

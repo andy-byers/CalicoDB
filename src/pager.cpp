@@ -51,7 +51,8 @@ Pager::Pager(const Parameters &param, Editor &file, AlignedBuffer buffer)
       m_wal {param.wal},
       m_env {param.env},
       m_info_log {param.info_log},
-      m_commit_lsn {param.commit_lsn}
+      m_commit_lsn {param.commit_lsn},
+      m_max_page_id {param.max_page_id}
 {
     CDB_EXPECT_NE(m_wal, nullptr);
     CDB_EXPECT_NE(m_status, nullptr);
@@ -129,8 +130,7 @@ auto Pager::flush(Lsn target_lsn) -> Status
         const auto [page_id, record_lsn] = *itr;
         CDB_EXPECT_TRUE(m_cache.contains(page_id));
         auto &entry = m_cache.get(page_id)->value;
-        const auto frame_id = entry.index;
-        const auto page_lsn = m_frames.get_frame(frame_id).lsn();
+        const auto page_lsn = m_frames.get_frame(entry.index).lsn();
 
         if (largest < page_lsn) {
             largest = page_lsn;
@@ -140,7 +140,7 @@ auto Pager::flush(Lsn target_lsn) -> Status
             // WAL record referencing this page has not been flushed yet.
         } else if (record_lsn <= target_lsn) {
             // Flush the page.
-            auto s = m_frames.write_back(frame_id);
+            auto s = m_frames.write_back(entry.index);
 
             // Advance to the next dirty list entry.
             itr = clean_page(entry);
@@ -209,51 +209,20 @@ auto Pager::make_frame_available() -> bool
     return true;
 }
 
-auto Pager::watch_page(Page &page, PageCache::Entry &entry, int important) -> void
-{
-    CDB_EXPECT_GT(m_frames.ref_sum(), 0);
-    const auto lsn = read_page_lsn(page);
-
-    // The "important" parameter should be used when we don't need to track the before contents of the whole
-    // page. For example, when allocating a page from the freelist, we only care about the page LSN stored in
-    // the first 8 bytes; the rest is junk.
-    std::size_t watch_size;
-    if (important < 0) {
-        watch_size = page.size();
-    } else {
-        watch_size = static_cast<std::size_t>(important);
-    }
-
-    // Make sure this page is in the dirty list. This is one place where the "record LSN" is set.
-    if (!entry.token.has_value()) {
-        entry.token = m_dirty.insert(page.id(), lsn);
-    }
-
-    // We only write a full image if the WAL does not already contain one for this page. If the page was modified
-    // during this transaction, then we already have one written.
-    if (*m_is_running) {
-        if (lsn <= *m_commit_lsn) {
-            const auto image = page.view(0, watch_size);
-            auto s = m_wal->log_image(page.id(), image, nullptr);
-
-            if (s.is_ok()) {
-                auto limit = m_recovery_lsn;
-                if (limit > *m_commit_lsn) { // TODO: Prevent the recovery LSN from getting larger than any of these values.
-                    limit = *m_commit_lsn;
-                }
-                s = m_wal->cleanup(limit);
-            }
-            if (!s.is_ok()) {
-                SET_STATUS(s);
-            }
-        }
-    }
-}
-
 auto Pager::allocate(Page *page) -> Status
 {
     CDB_TRY(acquire(Id::from_index(m_frames.page_count()), page));
-    upgrade(*page, 0);
+    if (page->id() > *m_max_page_id) {
+        upgrade(*page, 0);
+    } else {
+        // This page already has its full contents in the WAL. This page must have
+        // been vacuumed since the last checkpoint.
+        auto itr = m_cache.get(page->id());
+        CDB_EXPECT_NE(itr, m_cache.end());
+        m_frames.upgrade(itr->value.index, *page);
+        itr->value.token = m_dirty.insert(page->id(), Lsn::null());
+    }
+    ++m_max_page_id->value;
     return Status::ok();
 }
 
@@ -296,10 +265,45 @@ auto Pager::acquire(Id page_id, Page *page) -> Status
 auto Pager::upgrade(Page &page, int important) -> void
 {
     CDB_EXPECT_LE(important, static_cast<int>(page.size()));
+    const auto lsn = read_page_lsn(page);
     auto itr = m_cache.get(page.id());
     CDB_EXPECT_NE(itr, m_cache.end());
+
+    // The "important" parameter should be used when we don't need to track the before contents of the whole
+    // page. For example, when allocating a page from the freelist, we only care about the page LSN stored in
+    // the first 8 bytes; the rest is junk.
+    std::size_t watch_size;
+    if (important < 0) {
+        watch_size = page.size();
+    } else {
+        watch_size = static_cast<std::size_t>(important);
+    }
+
+    // Make sure this page is in the dirty list. This is one place where the "record LSN" is set.
+    if (!itr->value.token.has_value()) {
+        itr->value.token = m_dirty.insert(page.id(), lsn);
+    }
     m_frames.upgrade(itr->value.index, page);
-    watch_page(page, itr->value, important);
+
+    // We only write a full image if the WAL does not already contain one for this page. If the page was modified
+    // during this transaction, then we already have one written.
+    if (*m_is_running) {
+        if (lsn <= *m_commit_lsn) {
+            const auto image = page.view(0, watch_size);
+            auto s = m_wal->log_image(page.id(), image, nullptr);
+
+            if (s.is_ok()) {
+                auto limit = m_recovery_lsn;
+                if (limit > *m_commit_lsn) { // TODO: Prevent the recovery LSN from getting larger than any of these values.
+                    limit = *m_commit_lsn;
+                }
+                s = m_wal->cleanup(limit);
+            }
+            if (!s.is_ok()) {
+                SET_STATUS(s);
+            }
+        }
+    }
 }
 
 auto Pager::release(Page page) -> void

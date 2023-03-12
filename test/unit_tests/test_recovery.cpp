@@ -46,6 +46,7 @@ public:
             wal,
             nullptr,
             &commit_lsn,
+            &max_page_id,
             &status,
             &is_running,
             kFrameCount,
@@ -85,6 +86,7 @@ public:
     Status status;
     bool is_running {true};
     Lsn commit_lsn;
+    Id max_page_id;
     std::string scratch;
     std::string collect_scratch;
     std::string payload_buffer;
@@ -283,6 +285,54 @@ TEST_F(RecoveryTests, RevertsNthTransaction)
     ASSERT_EQ(get("a"), "1");
     ASSERT_EQ(get("b"), "2");
     ASSERT_EQ(get("c"), "NOT_FOUND");
+}
+
+TEST_F(RecoveryTests, VacuumRecovery)
+{
+    std::vector<Record> committed;
+    for (std::size_t i {}; i < 1'000; ++i) {
+        committed.emplace_back(Record {
+            random.Generate(100).to_string(),
+            random.Generate(100).to_string(),
+        });
+        ASSERT_OK(db->put(
+            committed.back().key,
+            committed.back().value));
+    }
+    for (std::size_t i {}; i < 1'000; ++i) {
+        ASSERT_OK(db->put(tools::integral_key(i), random.Generate(db_options.page_size)));
+    }
+    for (std::size_t i {}; i < 1'000; ++i) {
+        ASSERT_OK(db->erase(tools::integral_key(i)));
+    }
+    ASSERT_OK(db->checkpoint());
+
+    // Grow the database, then make freelist pages.
+    for (std::size_t i {}; i < 1'000; ++i) {
+        ASSERT_OK(db->put(tools::integral_key(i), random.Generate(db_options.page_size)));
+    }
+    for (std::size_t i {}; i < 1'000; ++i) {
+        ASSERT_OK(db->erase(tools::integral_key(i)));
+    }
+    // Shrink the database.
+    ASSERT_OK(db->vacuum());
+
+    // Grow the database again. This time, it will look like we need to write image records
+    // for the new pages, even though they are already in the WAL.
+    for (std::size_t i {}; i < 1'000; ++i) {
+        ASSERT_OK(db->put(tools::integral_key(i), random.Generate(db_options.page_size)));
+    }
+
+    // Now reopen the database and roll the WAL.
+    open();
+
+    // If we wrote more than one full image for a given page, we may mess up the database.
+    std::string result;
+    for (const auto &[key, value] : committed) {
+        ASSERT_OK(db->get(key, &result));
+        ASSERT_EQ(result, value);
+    }
+    reinterpret_cast<const DBImpl *>(db)->TEST_validate();
 }
 
 TEST_F(RecoveryTests, SanityCheck)
