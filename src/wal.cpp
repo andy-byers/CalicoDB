@@ -52,7 +52,9 @@ auto WriteAheadLog::open(const Parameters &param, WriteAheadLog **out) -> Status
 
 auto WriteAheadLog::close() -> Status
 {
-    CDB_EXPECT_NE(m_writer, nullptr);
+    if (m_writer == nullptr) {
+        return Status::ok();
+    }
     return close_writer();
 }
 
@@ -81,7 +83,7 @@ auto WriteAheadLog::current_lsn() const -> Lsn
 auto WriteAheadLog::log(const Slice &payload) -> Status
 {
     if (m_writer == nullptr) {
-        return Status::logic_error("segment file is not open");
+        return Status::ok();
     }
     m_bytes_written += payload.size();
 
@@ -103,7 +105,7 @@ auto WriteAheadLog::log_vacuum(bool is_start, Lsn *out) -> Status
         m_last_lsn, is_start, m_data_buffer.data()));
 }
 
-auto WriteAheadLog::log_delta(Id page_id, const Slice &image, const ChangeBuffer &delta, Lsn *out) -> Status
+auto WriteAheadLog::log_delta(Id page_id, const Slice &image, const std::vector<PageDelta> &delta, Lsn *out) -> Status
 {
     ++m_last_lsn.value;
     if (out != nullptr) {
@@ -126,7 +128,7 @@ auto WriteAheadLog::log_image(Id page_id, const Slice &image, Lsn *out) -> Statu
 auto WriteAheadLog::flush() -> Status
 {
     if (m_writer == nullptr) {
-        return Status::logic_error("segment file is not open");
+        return Status::ok();
     }
     CDB_TRY(m_writer->flush());
     return m_file->sync();

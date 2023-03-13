@@ -39,7 +39,7 @@ auto Pager::open(const Parameters &param, Pager **out) -> Status
         param.page_size * param.frame_count,
         param.page_size};
     if (buffer.get() == nullptr) {
-        return Status::system_error("out of memory");
+        return Status::io_error("out of memory");
     }
 
     auto *ptr = new Pager {param, *file, std::move(buffer)};

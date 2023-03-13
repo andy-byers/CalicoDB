@@ -10,15 +10,29 @@
 namespace calicodb
 {
 
+template <class T, class V>
+static auto clip_to_range(T &t, V min, V max) -> void
+{
+    if (static_cast<V>(t) > max) {
+        t = max;
+    }
+    if (static_cast<V>(t) < min) {
+        t = min;
+    }
+}
+
 auto DB::open(const Options &options, const std::string &filename, DB *&db) -> Status
 {
-    if (filename.empty()) {
-        return Status::invalid_argument("path is empty");
-    }
     const auto [dir, base] = split_path(filename);
     const auto clean_filename = join_paths(dir, base);
+    const Options defaults;
 
     auto sanitized = options;
+    clip_to_range(sanitized.page_size, kMinPageSize, kMaxPageSize);
+    clip_to_range(sanitized.cache_size, sanitized.page_size * kMinFrameCount, 1UL << 30);
+    if (!is_power_of_two(sanitized.page_size)) {
+        sanitized.page_size = defaults.page_size;
+    }
     if (sanitized.wal_prefix.empty()) {
         sanitized.wal_prefix = clean_filename + kDefaultWalSuffix;
     }

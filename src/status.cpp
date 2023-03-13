@@ -10,8 +10,8 @@ namespace calicodb
 
 enum Code : char {
     kInvalidArgument = 1,
-    kSystemError = 2,
-    kLogicError = 3,
+    kIOError = 2,
+    kNotSupported = 3,
     kCorruption = 4,
     kNotFound = 5,
 };
@@ -80,14 +80,14 @@ auto Status::invalid_argument(const Slice &what) -> Status
     return Status {kInvalidArgument, what};
 }
 
-auto Status::system_error(const Slice &what) -> Status
+auto Status::io_error(const Slice &what) -> Status
 {
-    return Status {kSystemError, what};
+    return Status {kIOError, what};
 }
 
-auto Status::logic_error(const Slice &what) -> Status
+auto Status::not_supported(const Slice &what) -> Status
 {
-    return Status {kLogicError, what};
+    return Status {kNotSupported, what};
 }
 
 auto Status::corruption(const Slice &what) -> Status
@@ -100,14 +100,14 @@ auto Status::is_invalid_argument() const -> bool
     return !is_ok() && Code {m_data[0]} == kInvalidArgument;
 }
 
-auto Status::is_system_error() const -> bool
+auto Status::is_io_error() const -> bool
 {
-    return !is_ok() && Code {m_data[0]} == kSystemError;
+    return !is_ok() && Code {m_data[0]} == kIOError;
 }
 
-auto Status::is_logic_error() const -> bool
+auto Status::is_not_supported() const -> bool
 {
-    return !is_ok() && Code {m_data[0]} == kLogicError;
+    return !is_ok() && Code {m_data[0]} == kNotSupported;
 }
 
 auto Status::is_corruption() const -> bool
@@ -122,7 +122,7 @@ auto Status::is_not_found() const -> bool
 
 auto Status::to_string() const -> std::string
 {
-    return {m_data ? m_data.get() + sizeof(Code) : "ok"};
+    return {m_data ? m_data.get() + sizeof(Code) : "OK"};
 }
 
 } // namespace calicodb

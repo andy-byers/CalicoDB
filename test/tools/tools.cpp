@@ -140,7 +140,7 @@ auto FakeEnv::resize_file(const std::string &path, std::size_t size) -> Status
 {
     auto itr = m_memory.find(path);
     if (itr == end(m_memory)) {
-        return Status::system_error("cannot resize file");
+        return Status::io_error("cannot resize file");
     }
     itr->second.buffer.resize(size);
     return Status::ok();

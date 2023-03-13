@@ -34,14 +34,13 @@ enum WalRecordType : char {
     kLastRecord = '\xD1',
 };
 
-/* WAL record format (based off RocksDB):
- *
- *      Offset  Size  Field
- *     ---------------------------
- *      0       1     Type
- *      1       2     Size
- *      3       4     CRC
- */
+// WAL record format (based off RocksDB):
+//
+//      Offset  Size  Field
+//     ---------------------------
+//      0       1     Type
+//      1       2     Size
+//      3       4     CRC
 struct WalRecordHeader {
     static constexpr std::size_t kSize {7};
 
@@ -55,9 +54,7 @@ struct WalRecordHeader {
     std::uint32_t crc {};
 };
 
-/*
- * Header fields associated with each payload.
- */
+// Header fields associated with each payload.
 struct WalPayloadHeader {
     static constexpr std::size_t kSize {8};
 
@@ -70,20 +67,19 @@ auto write_wal_record_header(char *out, const WalRecordHeader &header) -> void;
 [[nodiscard]] auto split_record(WalRecordHeader &lhs, const Slice &payload, std::size_t available_size) -> WalRecordHeader;
 [[nodiscard]] auto merge_records_left(WalRecordHeader &lhs, const WalRecordHeader &rhs) -> Status;
 
-/* Delta payload format:
- *
- *      Offset  Size  Field
- *     ---------------------------
- *      0       1     Flags
- *      1       8     LSN
- *      9       8     Page ID
- *      17      2     Delta count
- *      19      n     Delta content
- *
- * Each delta in the delta content area is an (offset, size, data) triplet. "offset" describes
- * where on the page the change took place, and "size" is the number of bytes in "data". Both
- * "offset" and "size" are 16-bit unsigned integers.
- */
+// Delta payload format:
+//
+//      Offset  Size  Field
+//     ---------------------------
+//      0       1     Flags
+//      1       8     LSN
+//      9       8     Page ID
+//      17      2     Delta count
+//      19      n     Delta content
+//
+// Each delta in the delta content area is an (offset, size, data) triplet. "offset" describes
+// where on the page the change took place, and "size" is the number of bytes in "data". Both
+// "offset" and "size" are 16-bit unsigned integers.
 struct DeltaDescriptor {
     static constexpr std::size_t kFixedSize {19};
 
@@ -97,19 +93,18 @@ struct DeltaDescriptor {
     std::vector<Delta> deltas;
 };
 
-/* Image payload header:
- *
- *      Offset  Size  Field
- *     ---------------------------
- *      0       1     Flags
- *      1       8     LSN
- *      9       8     Page ID
- *      17      n     Image
- *
- * The image can be any size less than or equal to the database page size. Its size is not
- * stored explicitly in the payload: it is known from the total size of the record fragments
- * it is composed from.
- */
+// Image payload header:
+//
+//      Offset  Size  Field
+//     ---------------------------
+//      0       1     Flags
+//      1       8     LSN
+//      9       8     Page ID
+//      17      n     Image
+//
+// The image can be any size less than or equal to the database page size. Its size is not
+// stored explicitly in the payload: it is known from the total size of the record fragments
+// it is composed from.
 struct ImageDescriptor {
     static constexpr std::size_t kFixedSize {17};
 
@@ -118,14 +113,13 @@ struct ImageDescriptor {
     Slice image;
 };
 
-/* Vacuum records signify the start or end of a vacuum operation.
- *
- *      Offset  Size  Field
- *     ---------------------------
- *      0       1     Flags
- *      1       8     LSN
- *      9       1     Start
- */
+// Vacuum records signify the start or end of a vacuum operation.
+//
+//      Offset  Size  Field
+//     ---------------------------
+//      0       1     Flags
+//      1       8     LSN
+//      9       1     Start
 struct VacuumDescriptor {
     static constexpr std::size_t kFixedSize {10};
 
@@ -141,13 +135,11 @@ using PayloadDescriptor = std::variant<
 
 [[nodiscard]] auto extract_payload_lsn(const Slice &in) -> Lsn;
 [[nodiscard]] auto decode_payload(const Slice &in) -> PayloadDescriptor;
-[[nodiscard]] auto encode_deltas_payload(Lsn lsn, Id page_id, const Slice &image, const ChangeBuffer &deltas, char *buffer) -> Slice;
+[[nodiscard]] auto encode_deltas_payload(Lsn lsn, Id page_id, const Slice &image, const std::vector<PageDelta> &deltas, char *buffer) -> Slice;
 [[nodiscard]] auto encode_image_payload(Lsn lsn, Id page_id, const Slice &image, char *buffer) -> Slice;
 [[nodiscard]] auto encode_vacuum_payload(Lsn lsn, bool is_start, char *buffer) -> Slice;
 
-/*
- * Stores a collection of WAL segment descriptors and caches their first LSNs.
- */
+// Stores a collection of WAL segment descriptors and caches their first LSNs.
 class WalSet final
 {
 public:

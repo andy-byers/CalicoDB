@@ -24,30 +24,6 @@ class SetupTests
 {
 };
 
-TEST_F(SetupTests, ReportsInvalidPageSizes)
-{
-    FileHeader header;
-    Options options;
-
-    options.page_size = kMinPageSize / 2;
-    ASSERT_TRUE(setup("./test", *env, options, header).is_invalid_argument());
-
-    options.page_size = kMaxPageSize * 2;
-    ASSERT_TRUE(setup("./test", *env, options, header).is_invalid_argument());
-
-    options.page_size = kMinPageSize + 1;
-    ASSERT_TRUE(setup("./test", *env, options, header).is_invalid_argument());
-}
-
-TEST_F(SetupTests, ReportsInvalidCacheSize)
-{
-    FileHeader header;
-    Options options;
-
-    options.cache_size = 1;
-    ASSERT_TRUE(setup("./test", *env, options, header).is_invalid_argument());
-}
-
 TEST_F(SetupTests, ReportsInvalidFileHeader)
 {
     FileHeader header;

@@ -10,9 +10,7 @@
 namespace calicodb
 {
 
-/* Construct for iterating over a WAL segment.
- *
- */
+// Construct for iterating over a WAL segment.
 class WalReader
 {
     Span m_tail;

@@ -16,7 +16,7 @@ Frame::Frame(char *ptr)
 {
 }
 
-auto Frame::lsn() const -> Id
+auto Frame::lsn() const -> Lsn
 {
     return {get_u64(data + page_id.is_root() * FileHeader::kSize)};
 }
@@ -155,7 +155,7 @@ auto FrameManager::read_page_from_file(Id page_id, char *out) const -> Status
         return Status::not_found("end of file");
     }
 
-    return Status::system_error("incomplete read");
+    return Status::io_error("incomplete read");
 }
 
 auto FrameManager::write_page_to_file(Id pid, const char *in) const -> Status

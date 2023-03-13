@@ -645,7 +645,7 @@ TEST_F(WalTests, UnderstandsDeltaRecords)
     ASSERT_OK(wal->start_writing());
     ASSERT_EQ(wal->bytes_written(), 0);
     const auto image = random.Generate(kPageSize);
-    ChangeBuffer delta {
+    std::vector<PageDelta> delta {
         {100, 10},
         {200, 20},
         {300, 30},

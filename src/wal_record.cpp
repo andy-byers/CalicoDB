@@ -188,7 +188,7 @@ auto encode_vacuum_payload(Lsn lsn, bool is_start, char *buffer) -> Slice
     return Slice {saved, VacuumDescriptor::kFixedSize};
 }
 
-auto encode_deltas_payload(Lsn lsn, Id page_id, const Slice &image, const ChangeBuffer &deltas, char *buffer) -> Slice
+auto encode_deltas_payload(Lsn lsn, Id page_id, const Slice &image, const std::vector<PageDelta> &deltas, char *buffer) -> Slice
 {
     auto saved = buffer;
 

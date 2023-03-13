@@ -102,7 +102,7 @@ Note that the default table is named "default", making this a reserved table nam
 ```C++
 // Insert some key-value pairs into the default table.
 calicodb::Status s = db->put("lilly", "calico");
-if (s.is_system_error()) {
+if (s.is_io_error()) {
     // Handle a system-level or I/O error.
 }
 
@@ -294,7 +294,7 @@ if (s.is_ok()) {
     // Database has been destroyed.
 } else if (s.is_not_found()) {
     // The database does not exist.
-} else if (s.is_system_error()) {
+} else if (s.is_io_error()) {
     // A system-level error has occurred.
 }
 ```

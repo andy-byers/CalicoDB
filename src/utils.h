@@ -50,6 +50,7 @@ inline constexpr auto expect(bool cond, const char *repr, const char *file, int 
 
 static constexpr std::size_t kMinPageSize {0x200};
 static constexpr std::size_t kMaxPageSize {0x8000};
+static constexpr std::size_t kMinFrameCount {16};
 static constexpr auto kDefaultWalSuffix = "-wal-";
 static constexpr auto kDefaultLogSuffix = "-log";
 
@@ -64,17 +65,17 @@ constexpr auto is_power_of_two(T v) noexcept -> bool
 {
     if (s.is_not_found()) {
         return "not found";
-    } else if (s.is_system_error()) {
-        return "system error";
-    } else if (s.is_logic_error()) {
-        return "logic error";
+    } else if (s.is_io_error()) {
+        return "I/O error";
+    } else if (s.is_not_supported()) {
+        return "not supported";
     } else if (s.is_corruption()) {
         return "corruption";
     } else if (s.is_invalid_argument()) {
         return "invalid argument";
     }
     CDB_EXPECT_TRUE(s.is_ok());
-    return "ok";
+    return "OK";
 }
 
 struct Id {

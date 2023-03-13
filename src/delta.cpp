@@ -22,7 +22,7 @@ static auto merge_deltas(const PageDelta &lhs, const PageDelta &rhs) -> PageDelt
     return PageDelta {lhs.offset, new_dx};
 }
 
-auto compress_deltas(ChangeBuffer &deltas) -> std::size_t
+auto compress_deltas(std::vector<PageDelta> &deltas) -> std::size_t
 {
     if (deltas.empty()) {
         return 0;
@@ -45,7 +45,7 @@ auto compress_deltas(ChangeBuffer &deltas) -> std::size_t
     });
 }
 
-auto insert_delta(ChangeBuffer &deltas, PageDelta delta) -> void
+auto insert_delta(std::vector<PageDelta> &deltas, PageDelta delta) -> void
 {
     if (delta.size == 0) {
         return;

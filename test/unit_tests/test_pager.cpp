@@ -20,16 +20,16 @@ class DeltaCompressionTest : public testing::Test
 public:
     static constexpr std::size_t kPageSize {0x200};
 
-    [[nodiscard]] auto build_deltas(const ChangeBuffer &unordered) const
+    [[nodiscard]] auto build_deltas(const std::vector<PageDelta> &unordered) const
     {
-        ChangeBuffer deltas;
+        std::vector<PageDelta> deltas;
         for (const auto &delta : unordered)
             insert_delta(deltas, delta);
         compress_deltas(deltas);
         return deltas;
     }
 
-    [[nodiscard]] auto insert_random_delta(ChangeBuffer &deltas) const
+    [[nodiscard]] auto insert_random_delta(std::vector<PageDelta> &deltas) const
     {
         static constexpr std::size_t MIN_DELTA_SIZE {1};
         const auto offset = random.Next<std::size_t>(kPageSize - MIN_DELTA_SIZE);
@@ -48,7 +48,7 @@ TEST_F(DeltaCompressionTest, CompressingNothingDoesNothing)
 
 TEST_F(DeltaCompressionTest, InsertingEmptyDeltaDoesNothing)
 {
-    ChangeBuffer deltas;
+    std::vector<PageDelta> deltas;
     insert_delta(deltas, {123, 0});
     ASSERT_TRUE(deltas.empty());
 }
@@ -129,7 +129,7 @@ TEST_F(DeltaCompressionTest, SanityCheck)
 {
     static constexpr std::size_t NUM_INSERTS {100};
     static constexpr std::size_t MAX_DELTA_SIZE {10};
-    ChangeBuffer deltas;
+    std::vector<PageDelta> deltas;
     for (std::size_t i {}; i < NUM_INSERTS; ++i) {
         const auto offset = random.Next<std::size_t>(kPageSize - MAX_DELTA_SIZE);
         const auto size = random.Next<std::size_t>(1, MAX_DELTA_SIZE);

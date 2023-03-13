@@ -30,17 +30,17 @@ public:
 
     // Create a non-OK status with an error message.
     [[nodiscard]] static auto invalid_argument(const Slice &what) -> Status;
-    [[nodiscard]] static auto system_error(const Slice &what) -> Status;
-    [[nodiscard]] static auto logic_error(const Slice &what) -> Status;
+    [[nodiscard]] static auto not_supported(const Slice &what) -> Status;
     [[nodiscard]] static auto corruption(const Slice &what) -> Status;
     [[nodiscard]] static auto not_found(const Slice &what) -> Status;
+    [[nodiscard]] static auto io_error(const Slice &what) -> Status;
 
     // Check error status type.
     [[nodiscard]] auto is_invalid_argument() const -> bool;
-    [[nodiscard]] auto is_system_error() const -> bool;
-    [[nodiscard]] auto is_logic_error() const -> bool;
+    [[nodiscard]] auto is_not_supported() const -> bool;
     [[nodiscard]] auto is_corruption() const -> bool;
     [[nodiscard]] auto is_not_found() const -> bool;
+    [[nodiscard]] auto is_io_error() const -> bool;
 
     // Convert the status to a printable string.
     [[nodiscard]] auto to_string() const -> std::string;

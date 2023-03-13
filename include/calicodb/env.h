@@ -11,7 +11,7 @@
 namespace calicodb
 {
 
-// Representation of a read-only random-access file.
+// Construct that provides read-only random access to a file.
 class Reader
 {
 public:
@@ -25,7 +25,7 @@ public:
     [[nodiscard]] virtual auto read(std::size_t offset, std::size_t size, char *scratch, Slice *out) -> Status = 0;
 };
 
-// Representation of a random-access file.
+// Construct that provides random access to a file.
 class Editor
 {
 public:
@@ -45,7 +45,7 @@ public:
     [[nodiscard]] virtual auto sync() -> Status = 0;
 };
 
-// Representation of a write-only append-only file.
+// Construct that appends to a file.
 class Logger
 {
 public:
