@@ -1,6 +1,6 @@
 // Copyright (c) 2022, The CalicoDB Authors. All rights reserved.
 // This source code is licensed under the MIT License, which can be found in
-// LICENSE.md. See AUTHORS.md for contributor names.
+// LICENSE.md. See AUTHORS.md for a list of contributor names.
 //
 // Checks database consistency with a std::map.
 //
@@ -9,11 +9,8 @@
 // (a) a transaction has finished, or (b) the database is reopened.
 
 #include "map_fuzzer.h"
-
-#include <map>
+#include "db_impl.h"
 #include <set>
-
-#include "calicodb/calicodb.h"
 
 namespace calicodb
 {
@@ -41,7 +38,7 @@ auto MapFuzzer::step(const std::uint8_t *&data, std::size_t &size) -> Status
     CHECK_TRUE(size >= 2);
 
     const auto expect_equal_contents = [this] {
-        CHECK_EQ(m_map.size(), reinterpret_cast<const DBImpl *>(m_db)->record_count());
+        CHECK_EQ(m_map.size(), reinterpret_cast<const DBImpl *>(m_db)->TEST_state().record_count);
 
         auto *cursor = m_db->new_cursor();
         cursor->seek_first();

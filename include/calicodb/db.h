@@ -1,12 +1,12 @@
 // Copyright (c) 2022, The CalicoDB Authors. All rights reserved.
 // This source code is licensed under the MIT License, which can be found in
-// LICENSE.md. See AUTHORS.md for contributor names.
+// LICENSE.md. See AUTHORS.md for a list of contributor names.
 
 #ifndef CALICODB_DB_H
 #define CALICODB_DB_H
 
-#include "status.h"
-#include <string>
+#include "cursor.h"
+
 #include <vector>
 
 namespace calicodb
@@ -17,19 +17,33 @@ class Env;
 class InfoLogger;
 class Slice;
 class Status;
-struct Options;
+class Table;
 struct TableOptions;
 
-// Persistent ordered mapping from keys to values within a CalicoDB database.
-//
-// Keys are unique within each table.
-class Table
-{
-public:
-    virtual ~Table() = default;
+struct Options {
+    // Size of a database page in bytes. This is the basic unit of I/O for the
+    // database file. Data is read/written in page-sized chunks.
+    std::size_t page_size {0x2000};
 
-    // Get the name used to identify this table.
-    [[nodiscard]] virtual auto name() const -> const std::string & = 0;
+    // Size of the page cache in bytes.
+    std::size_t cache_size {4'194'304}; // 4 MB
+
+    // Alternate prefix to use for WAL segment files. Defaults to "dbname-wal-",
+    // where "dbname" is the name of the database.
+    std::string wal_prefix;
+
+    // Custom destination for info log messages. Defaults to writing to a file
+    // called "dbname-log", where "dbname" is the name of the database.
+    InfoLogger *info_log {};
+
+    // Custom storage environment.
+    Env *env {};
+
+    // If true, create the database if it is missing.
+    bool create_if_missing {true};
+
+    // If true, return with an error if the database already exists.
+    bool error_if_exists {};
 };
 
 // On-disk collection of tables.
@@ -41,7 +55,7 @@ public:
     // The caller is responsible for deleting the handle when it is no longer needed.
     // All objects allocated by the DB must be destroyed before the DB itself is
     // destroyed.
-    [[nodiscard]] static auto open(const Options &options, const std::string &filename, DB **db) -> Status;
+    [[nodiscard]] static auto open(const Options &options, const std::string &filename, DB *&db) -> Status;
 
     // Attempt to fix a database that cannot be opened due to corruption.
     //
@@ -85,7 +99,7 @@ public:
     [[nodiscard]] virtual auto vacuum() -> Status = 0;
 
     // List the name of each table created by this database, excluding the default table.
-    [[nodiscard]] virtual auto list_tables(std::vector<std::string> *out) const -> Status = 0;
+    [[nodiscard]] virtual auto list_tables(std::vector<std::string> &out) const -> Status = 0;
 
     // Open a table and return an opaque handle to it.
     //
@@ -93,30 +107,35 @@ public:
     // or drop_table() before the database itself is closed. Note that the name "default"
     // is reserved for the default table, which is always open. If a table does not exist
     // named "name", one will be created.
-    [[nodiscard]] virtual auto create_table(const TableOptions &options, const std::string &name, Table **out) -> Status = 0;
+    [[nodiscard]] virtual auto create_table(const TableOptions &options, const std::string &name, Table *&out) -> Status = 0;
 
     // Remove a table and its records from the database.
-    [[nodiscard]] virtual auto drop_table(Table *table) -> Status = 0;
+    //
+    // This method destroys the table handle and sets "*table" to nullptr.
+    [[nodiscard]] virtual auto drop_table(Table *&table) -> Status = 0;
 
     // Close a table.
-    virtual auto close_table(Table *table) -> void = 0;
+    //
+    // This method destroys the table handle and sets "*table" to nullptr.
+    virtual auto close_table(Table *&table) -> void = 0;
 
     // Get a heap-allocated cursor over the contents of "table".
     //
     // Cursors are invalid upon allocation and must have one of their seek*() methods called
     // before they can be used.
-    [[nodiscard]] virtual auto new_cursor(const Table *table) const -> Cursor * = 0;
+    [[nodiscard]] virtual auto new_cursor(const Table &table) const -> Cursor * = 0;
 
     // Get the value associated with the given key, if it exists.
     //
-    // If the key does not exist, returns a Status::not_found().
-    [[nodiscard]] virtual auto get(const Table *table, const Slice &key, std::string *value) const -> Status = 0;
+    // If the key does not exist, returns Status::not_found(). If "value" is nullptr, this
+    // method is essentially an existence check for "key" in "table".
+    [[nodiscard]] virtual auto get(const Table &table, const Slice &key, std::string *value) const -> Status = 0;
 
     // Set the entry in "table" associated with "key" to "value".
-    [[nodiscard]] virtual auto put(Table *table, const Slice &key, const Slice &value) -> Status = 0;
+    [[nodiscard]] virtual auto put(Table &table, const Slice &key, const Slice &value) -> Status = 0;
 
     // Remove the record in "table" with the given key, if it exists.
-    [[nodiscard]] virtual auto erase(Table *table, const Slice &key) -> Status = 0;
+    [[nodiscard]] virtual auto erase(Table &table, const Slice &key) -> Status = 0;
 
     // Overloads that direct access to the default table.
     [[nodiscard]] virtual auto new_cursor() const -> Cursor *;

@@ -1,6 +1,6 @@
 // Copyright (c) 2022, The CalicoDB Authors. All rights reserved.
 // This source code is licensed under the MIT License, which can be found in
-// LICENSE.md. See AUTHORS.md for contributor names.
+// LICENSE.md. See AUTHORS.md for a list of contributor names.
 
 #include "tree.h"
 #include "db_impl.h"
@@ -418,7 +418,7 @@ static auto allocate_block(Node &node, PageSize index, PageSize size) -> std::si
     if (node.gap_size < sizeof(PageSize)) {
         alloc.defragment(std::nullopt);
     }
-    // insert a dummy cell pointer to save the slot.
+    // Insert a dummy cell pointer to save the slot.
     node.insert_slot(index, node.page.size() - 1);
 
     auto offset = alloc.allocate(size);
@@ -667,9 +667,9 @@ auto NodeIterator::seek(const Cell &cell, bool *found) -> Status
 auto Tree::create(Pager &pager, Id table_id, Id &freelist_head, Id *out) -> Status
 {
     Node node;
-
+    std::string scratch;
     Freelist freelist {pager, freelist_head};
-    CDB_TRY(NodeManager::allocate(pager, freelist, &node, nullptr, true));
+    CDB_TRY(NodeManager::allocate(pager, freelist, node, scratch, true));
     const auto root_id = node.page.id();
     NodeManager::release(pager, std::move(node));
 
@@ -697,14 +697,14 @@ auto Tree::node_iterator(Node &node) const -> NodeIterator
     return NodeIterator {node, param};
 }
 
-auto Tree::find_external(const Slice &key, SearchResult *out) const -> Status
+auto Tree::find_external(const Slice &key, SearchResult &out) const -> Status
 {
     Node root;
-    CDB_TRY(acquire(&root, m_root_id, false));
+    CDB_TRY(acquire(m_root_id, false, root));
     return find_external(key, std::move(root), out);
 }
 
-auto Tree::find_external(const Slice &key, Node node, SearchResult *out) const -> Status
+auto Tree::find_external(const Slice &key, Node node, SearchResult &out) const -> Status
 {
     for (;;) {
         bool exact;
@@ -712,23 +712,23 @@ auto Tree::find_external(const Slice &key, Node node, SearchResult *out) const -
         CDB_TRY(itr.seek(key, &exact));
 
         if (node.header.is_external) {
-            out->node = std::move(node);
-            out->index = itr.index();
-            out->exact = exact;
+            out.node = std::move(node);
+            out.index = itr.index();
+            out.exact = exact;
             return Status::ok();
         }
         const auto next_id = read_child_id(node, itr.index() + exact);
         CDB_EXPECT_NE(next_id, node.page.id()); // Infinite loop.
         release(std::move(node));
-        CDB_TRY(acquire(&node, next_id, false));
+        CDB_TRY(acquire(next_id, false, node));
     }
 }
 
-auto Tree::find_parent_id(Id pid, Id *out) const -> Status
+auto Tree::find_parent_id(Id pid, Id &out) const -> Status
 {
     PointerMap::Entry entry;
-    CDB_TRY(PointerMap::read_entry(*m_pager, pid, &entry));
-    *out = entry.back_ptr;
+    CDB_TRY(PointerMap::read_entry(*m_pager, pid, entry));
+    out = entry.back_ptr;
     return Status::ok();
 }
 
@@ -786,14 +786,14 @@ auto Tree::fix_links(Node &node) -> Status
     return Status::ok();
 }
 
-auto Tree::allocate(Node *out, bool is_external) -> Status
+auto Tree::allocate(bool is_external, Node &out) -> Status
 {
-    return NodeManager::allocate(*m_pager, m_freelist, out, m_node_scratch.data(), is_external);
+    return NodeManager::allocate(*m_pager, m_freelist, out, m_node_scratch, is_external);
 }
 
-auto Tree::acquire(Node *out, Id page_id, bool upgrade) const -> Status
+auto Tree::acquire(Id page_id, bool upgrade, Node &out) const -> Status
 {
-    return NodeManager::acquire(*m_pager, page_id, out, m_node_scratch.data(), upgrade);
+    return NodeManager::acquire(*m_pager, page_id, out, m_node_scratch, upgrade);
 }
 
 auto Tree::destroy(Node node) -> Status
@@ -829,7 +829,7 @@ auto Tree::resolve_overflow(Node node) -> Status
 auto Tree::split_root(Node root, Node &out) -> Status
 {
     Node child;
-    CDB_TRY(allocate(&child, root.header.is_external));
+    CDB_TRY(allocate(root.header.is_external, child));
 
     // Copy the cell content area.
     const auto after_root_headers = cell_area_offset(root);
@@ -879,12 +879,12 @@ auto Tree::split_non_root(Node right, Node &out) -> Status
     const auto &header = right.header;
 
     Id parent_id;
-    CDB_TRY(find_parent_id(right.page.id(), &parent_id));
+    CDB_TRY(find_parent_id(right.page.id(), parent_id));
     CDB_EXPECT_FALSE(parent_id.is_null());
 
     Node parent, left;
-    CDB_TRY(acquire(&parent, parent_id, true));
-    CDB_TRY(allocate(&left, header.is_external));
+    CDB_TRY(acquire(parent_id, true, parent));
+    CDB_TRY(allocate(header.is_external, left));
 
     const auto overflow_index = right.overflow_index;
     auto overflow = *right.overflow;
@@ -932,7 +932,7 @@ auto Tree::split_non_root(Node right, Node &out) -> Status
     if (header.is_external) {
         if (!header.prev_id.is_null()) {
             Node left_sibling;
-            CDB_TRY(acquire(&left_sibling, header.prev_id, true));
+            CDB_TRY(acquire(header.prev_id, true, left_sibling));
             left_sibling.header.next_id = left.page.id();
             left.header.prev_id = left_sibling.page.id();
             release(std::move(left_sibling));
@@ -971,7 +971,7 @@ auto Tree::split_non_root_fast(Node parent, Node left, Node right, const Cell &o
     if (header.is_external) {
         if (!header.next_id.is_null()) {
             Node right_sibling;
-            CDB_TRY(acquire(&right_sibling, header.next_id, true));
+            CDB_TRY(acquire(header.next_id, true, right_sibling));
             right_sibling.header.prev_id = right.page.id();
             right.header.next_id = right_sibling.page.id();
             release(std::move(right_sibling));
@@ -1016,11 +1016,11 @@ auto Tree::resolve_underflow(Node node, const Slice &anchor) -> Status
             return fix_root(std::move(node));
         }
         Id parent_id;
-        CDB_TRY(find_parent_id(node.page.id(), &parent_id));
+        CDB_TRY(find_parent_id(node.page.id(), parent_id));
         CDB_EXPECT_FALSE(parent_id.is_null());
 
         Node parent;
-        CDB_TRY(acquire(&parent, parent_id, true));
+        CDB_TRY(acquire(parent_id, true, parent));
         // NOTE: Searching for the anchor key from the node we took from should always give us the correct index
         //       due to the B+-tree ordering rules.
         bool exact;
@@ -1049,7 +1049,7 @@ auto Tree::merge_left(Node &left, Node right, Node &parent, std::size_t index) -
 
         if (!right.header.next_id.is_null()) {
             Node right_sibling;
-            CDB_TRY(acquire(&right_sibling, right.header.next_id, true));
+            CDB_TRY(acquire(right.header.next_id, true, right_sibling));
             right_sibling.header.prev_id = left.page.id();
             release(std::move(right_sibling));
         }
@@ -1089,7 +1089,7 @@ auto Tree::merge_right(Node &left, Node right, Node &parent, std::size_t index) 
         }
         if (!right.header.next_id.is_null()) {
             Node right_sibling;
-            CDB_TRY(acquire(&right_sibling, right.header.next_id, true));
+            CDB_TRY(acquire(right.header.next_id, true, right_sibling));
             right_sibling.header.prev_id = left.page.id();
             release(std::move(right_sibling));
         }
@@ -1124,7 +1124,7 @@ auto Tree::fix_non_root(Node node, Node &parent, std::size_t index) -> Status
 
     if (index > 0) {
         Node left;
-        CDB_TRY(acquire(&left, read_child_id(parent, index - 1), true));
+        CDB_TRY(acquire(read_child_id(parent, index - 1), true, left));
         if (left.header.cell_count == 1) {
             CDB_TRY(merge_right(left, std::move(node), parent, index - 1));
             release(std::move(left));
@@ -1135,7 +1135,7 @@ auto Tree::fix_non_root(Node node, Node &parent, std::size_t index) -> Status
         release(std::move(left));
     } else {
         Node right;
-        CDB_TRY(acquire(&right, read_child_id(parent, index + 1), true));
+        CDB_TRY(acquire(read_child_id(parent, index + 1), true, right));
         if (right.header.cell_count == 1) {
             CDB_TRY(merge_left(node, std::move(right), parent, index));
             release(std::move(node));
@@ -1152,7 +1152,7 @@ auto Tree::fix_non_root(Node node, Node &parent, std::size_t index) -> Status
     if (is_overflowing(parent)) {
         const auto saved_id = parent.page.id();
         CDB_TRY(resolve_overflow(std::move(parent)));
-        CDB_TRY(acquire(&parent, saved_id, true));
+        CDB_TRY(acquire(saved_id, true, parent));
     }
     return Status::ok();
 }
@@ -1164,7 +1164,7 @@ auto Tree::fix_root(Node root) -> Status
     // If the root is external here, the whole tree must be empty.
     if (!root.header.is_external) {
         Node child;
-        CDB_TRY(acquire(&child, root.header.next_id, true));
+        CDB_TRY(acquire(root.header.next_id, true, child));
 
         // We don't have enough room to transfer the child contents into the root, due to the space occupied by
         // the file header. In this case, we'll just split the child and insert the median cell into the root.
@@ -1179,7 +1179,7 @@ auto Tree::fix_root(Node root) -> Status
             Node parent;
             CDB_TRY(split_non_root(std::move(child), parent));
             release(std::move(parent));
-            CDB_TRY(acquire(&root, m_root_id, true));
+            CDB_TRY(acquire(m_root_id, true, root));
         } else {
             merge_root(root, child);
             CDB_TRY(destroy(std::move(child)));
@@ -1213,7 +1213,7 @@ auto Tree::rotate_left(Node &parent, Node &left, Node &right, std::size_t index)
         CDB_EXPECT_FALSE(right.header.is_external);
 
         Node child;
-        CDB_TRY(acquire(&child, read_child_id(right, 0), true));
+        CDB_TRY(acquire(read_child_id(right, 0), true, child));
         const auto saved_id = left.header.next_id;
         left.header.next_id = child.page.id();
         CDB_TRY(fix_parent_id(child.page.id(), left.page.id(), PointerMap::kTreeNode));
@@ -1259,7 +1259,7 @@ auto Tree::rotate_right(Node &parent, Node &left, Node &right, std::size_t index
         CDB_EXPECT_FALSE(right.header.is_external);
 
         Node child;
-        CDB_TRY(acquire(&child, left.header.next_id, true));
+        CDB_TRY(acquire(left.header.next_id, true, child));
         const auto child_id = child.page.id();
         CDB_TRY(fix_parent_id(child.page.id(), right.page.id(), PointerMap::kTreeNode));
         left.header.next_id = read_child_id(left, left.header.cell_count - 1);
@@ -1295,17 +1295,15 @@ auto Tree::cell_scratch() -> char *
     return m_cell_scratch.data() + sizeof(Id) - 1;
 }
 
-auto Tree::root(Node *out) const -> Status
+auto Tree::root(Node &out) const -> Status
 {
-    return acquire(out, m_root_id, false);
+    return acquire(m_root_id, false, out);
 }
 
 auto Tree::get(const Slice &key, std::string *value) const -> Status
 {
-    value->clear();
-
     SearchResult slot;
-    CDB_TRY(find_external(key, &slot));
+    CDB_TRY(find_external(key, slot));
     auto [node, index, exact] = std::move(slot);
 
     if (!exact) {
@@ -1313,9 +1311,12 @@ auto Tree::get(const Slice &key, std::string *value) const -> Status
         return Status::not_found("not found");
     }
 
-    Slice _;
-    const auto cell = read_cell(node, index);
-    CDB_TRY(PayloadManager::collect_value(*m_pager, *value, cell, &_));
+    if (value != nullptr) {
+        const auto cell = read_cell(node, index);
+        Slice slice;
+        CDB_TRY(PayloadManager::collect_value(*m_pager, *value, cell, &slice));
+        value->resize(slice.size());
+    }
     release(std::move(node));
     return Status::ok();
 }
@@ -1325,7 +1326,7 @@ auto Tree::put(const Slice &key, const Slice &value, bool *exists) -> Status
     CDB_EXPECT_FALSE(key.is_empty());
 
     SearchResult slot;
-    CDB_TRY(find_external(key, &slot));
+    CDB_TRY(find_external(key, slot));
     auto [node, index, exact] = std::move(slot);
     upgrade(node);
 
@@ -1346,7 +1347,7 @@ auto Tree::erase(const Slice &key) -> Status
     Tree internal {*this};
     SearchResult slot;
 
-    CDB_TRY(internal.find_external(key, &slot));
+    CDB_TRY(internal.find_external(key, slot));
     auto [node, index, exact] = std::move(slot);
 
     if (exact) {
@@ -1362,24 +1363,24 @@ auto Tree::erase(const Slice &key) -> Status
     return Status::not_found("not found");
 }
 
-auto Tree::find_lowest(Node *out) const -> Status
+auto Tree::find_lowest(Node &out) const -> Status
 {
-    CDB_TRY(acquire(out, m_root_id, false));
-    while (!out->header.is_external) {
-        const auto next_id = read_child_id(*out, 0);
-        release(std::move(*out));
-        CDB_TRY(acquire(out, next_id, false));
+    CDB_TRY(acquire(m_root_id, false, out));
+    while (!out.header.is_external) {
+        const auto next_id = read_child_id(out, 0);
+        release(std::move(out));
+        CDB_TRY(acquire(next_id, false, out));
     }
     return Status::ok();
 }
 
-auto Tree::find_highest(Node *out) const -> Status
+auto Tree::find_highest(Node &out) const -> Status
 {
-    CDB_TRY(acquire(out, m_root_id, false));
-    while (!out->header.is_external) {
-        const auto next_id = out->header.next_id;
-        release(std::move(*out));
-        CDB_TRY(acquire(out, next_id, false));
+    CDB_TRY(acquire(m_root_id, false, out));
+    while (!out.header.is_external) {
+        const auto next_id = out.header.next_id;
+        release(std::move(out));
+        CDB_TRY(acquire(next_id, false, out));
     }
     return Status::ok();
 }
@@ -1389,7 +1390,7 @@ auto Tree::vacuum_step(Page &free, TableSet &tables, Id last_id) -> Status
     CDB_EXPECT_NE(free.id(), last_id);
 
     PointerMap::Entry entry;
-    CDB_TRY(PointerMap::read_entry(*m_pager, last_id, &entry));
+    CDB_TRY(PointerMap::read_entry(*m_pager, last_id, entry));
 
     const auto fix_basic_link = [&entry, &free, this]() -> Status {
         Page parent;
@@ -1428,7 +1429,7 @@ auto Tree::vacuum_step(Page &free, TableSet &tables, Id last_id) -> Status
             // Back pointer points to the node that the overflow chain is rooted in. Search through that nodes cells
             // for the target overflowing cell.
             Node parent;
-            CDB_TRY(acquire(&parent, entry.back_ptr, true));
+            CDB_TRY(acquire(entry.back_ptr, true, parent));
             bool found {};
             for (std::size_t i {}; i < parent.header.cell_count; ++i) {
                 auto cell = read_cell(parent, i);
@@ -1458,7 +1459,7 @@ auto Tree::vacuum_step(Page &free, TableSet &tables, Id last_id) -> Status
                 // Back pointer points to another node, i.e. this is not a root. Search through the
                 // parent for the target child pointer and overwrite it with the new page ID.
                 Node parent;
-                CDB_TRY(acquire(&parent, entry.back_ptr, true));
+                CDB_TRY(acquire(entry.back_ptr, true, parent));
                 CDB_EXPECT_FALSE(parent.header.is_external);
                 bool found {};
                 for (std::size_t i {}; !found && i <= parent.header.cell_count; ++i) {
@@ -1473,7 +1474,7 @@ auto Tree::vacuum_step(Page &free, TableSet &tables, Id last_id) -> Status
             }
             // Update references.
             Node last;
-            CDB_TRY(acquire(&last, last_id, true));
+            CDB_TRY(acquire(last_id, true, last));
             for (std::size_t i {}; i < last.header.cell_count; ++i) {
                 const auto cell = read_cell(last, i);
                 CDB_TRY(maybe_fix_overflow_chain(cell, free.id()));
@@ -1486,13 +1487,13 @@ auto Tree::vacuum_step(Page &free, TableSet &tables, Id last_id) -> Status
             } else {
                 if (!last.header.prev_id.is_null()) {
                     Node prev;
-                    CDB_TRY(acquire(&prev, last.header.prev_id, true));
+                    CDB_TRY(acquire(last.header.prev_id, true, prev));
                     prev.header.next_id = free.id();
                     release(std::move(prev));
                 }
                 if (!last.header.next_id.is_null()) {
                     Node next;
-                    CDB_TRY(acquire(&next, last.header.next_id, true));
+                    CDB_TRY(acquire(last.header.next_id, true, next));
                     next.header.prev_id = free.id();
                     release(std::move(next));
                 }
@@ -1513,7 +1514,7 @@ auto Tree::vacuum_step(Page &free, TableSet &tables, Id last_id) -> Status
     if (is_link) {
         if (const auto next_id = read_next_id(last); !next_id.is_null()) {
             PointerMap::Entry next_entry;
-            CDB_TRY(PointerMap::read_entry(*m_pager, next_id, &next_entry));
+            CDB_TRY(PointerMap::read_entry(*m_pager, next_id, next_entry));
             next_entry.back_ptr = free.id();
             CDB_TRY(PointerMap::write_entry(*m_pager, next_id, next_entry));
         }
@@ -1633,7 +1634,7 @@ static auto decode_entry(const char *data) -> PointerMap::Entry
     return entry;
 }
 
-auto PointerMap::read_entry(Pager &pager, Id pid, Entry *out) -> Status
+auto PointerMap::read_entry(Pager &pager, Id pid, Entry &out) -> Status
 {
     const auto mid = lookup(pager, pid);
     CDB_EXPECT_GE(mid, kFirstMapId);
@@ -1644,7 +1645,7 @@ auto PointerMap::read_entry(Pager &pager, Id pid, Entry *out) -> Status
 
     Page map;
     CDB_TRY(pager.acquire(mid, &map));
-    *out = decode_entry(map.data() + offset);
+    out = decode_entry(map.data() + offset);
     pager.release(std::move(map));
     return Status::ok();
 }
@@ -1686,7 +1687,7 @@ auto PointerMap::lookup(const Pager &pager, Id pid) -> Id
     return {idx * inc + kFirstMapId.value};
 }
 
-auto NodeManager::allocate(Pager &pager, Freelist &freelist, Node *out, char *scratch, bool is_external) -> Status
+auto NodeManager::allocate(Pager &pager, Freelist &freelist, Node &out, std::string &scratch, bool is_external) -> Status
 {
     const auto fetch_unused_page = [&freelist, &pager](Page &page) {
         if (freelist.is_empty()) {
@@ -1703,23 +1704,23 @@ auto NodeManager::allocate(Pager &pager, Freelist &freelist, Node *out, char *sc
             return freelist.pop(page);
         }
     };
-    CDB_TRY(fetch_unused_page(out->page));
-    CDB_EXPECT_NE(PointerMap::lookup(pager, out->page.id()), out->page.id());
+    CDB_TRY(fetch_unused_page(out.page));
+    CDB_EXPECT_NE(PointerMap::lookup(pager, out.page.id()), out.page.id());
 
-    out->header.is_external = is_external;
-    out->scratch = scratch;
-    setup_node(*out);
+    out.header.is_external = is_external;
+    out.scratch = scratch.data();
+    setup_node(out);
     return Status::ok();
 }
 
-auto NodeManager::acquire(Pager &pager, Id page_id, Node *out, char *scratch, bool upgrade) -> Status
+auto NodeManager::acquire(Pager &pager, Id page_id, Node &out, std::string &scratch, bool upgrade) -> Status
 {
-    CDB_TRY(pager.acquire(page_id, &out->page));
-    out->scratch = scratch;
-    out->header.read(out->page.data() + node_header_offset(*out));
-    setup_node(*out);
+    CDB_TRY(pager.acquire(page_id, &out.page));
+    out.scratch = scratch.data();
+    out.header.read(out.page.data() + node_header_offset(out));
+    setup_node(out);
     if (upgrade) {
-        pager.upgrade(out->page);
+        pager.upgrade(out.page);
     }
     return Status::ok();
 }
@@ -1768,7 +1769,7 @@ auto OverflowList::read(Pager &pager, Span out, Id head_id, std::size_t offset) 
     return Status::ok();
 }
 
-auto OverflowList::write(Pager &pager, Freelist &freelist, Id *out, const Slice &first, const Slice &second) -> Status
+auto OverflowList::write(Pager &pager, Freelist &freelist, Id &out, const Slice &first, const Slice &second) -> Status
 {
     std::optional<Page> prev;
     auto head = Id::null();
@@ -1823,11 +1824,11 @@ auto OverflowList::write(Pager &pager, Freelist &freelist, Id *out, const Slice 
         write_next_id(*prev, Id::null());
         pager.release(std::move(*prev));
     }
-    *out = head;
+    out = head;
     return Status::ok();
 }
 
-auto OverflowList::copy(Pager &pager, Freelist &freelist, Id *out, Id overflow_id, std::size_t size) -> Status
+auto OverflowList::copy(Pager &pager, Freelist &freelist, Id &out, Id overflow_id, std::size_t size) -> Status
 {
     std::string scratch; // TODO: Copy page-by-page: no scratch is necessary.
     scratch.resize(size);
@@ -1869,7 +1870,7 @@ auto PayloadManager::emplace(Pager &pager, Freelist &freelist, char *scratch, No
 
     Id overflow_id;
     if (has_remote) {
-        CDB_TRY(OverflowList::write(pager, freelist, &overflow_id, key.range(k), value.range(v)));
+        CDB_TRY(OverflowList::write(pager, freelist, overflow_id, key.range(k), value.range(v)));
         PointerMap::Entry entry {node.page.id(), PointerMap::kOverflowHead};
         CDB_TRY(PointerMap::write_entry(pager, overflow_id, entry));
         total_size += sizeof(overflow_id);
@@ -1906,7 +1907,7 @@ auto PayloadManager::promote(Pager &pager, Freelist &freelist, char *scratch, Ce
     if (cell.key_size > cell.local_size) {
         // Part of the key is on an overflow page. No value is stored locally in this case, so the local size computation is still correct.
         Id overflow_id;
-        CDB_TRY(OverflowList::copy(pager, freelist, &overflow_id, read_overflow_id(cell), cell.key_size - cell.local_size));
+        CDB_TRY(OverflowList::copy(pager, freelist, overflow_id, read_overflow_id(cell), cell.key_size - cell.local_size));
         PointerMap::Entry entry {parent_id, PointerMap::kOverflowHead};
         CDB_TRY(PointerMap::write_entry(pager, overflow_id, entry));
         write_overflow_id(cell, overflow_id);
@@ -1944,7 +1945,9 @@ auto PayloadManager::collect_value(Pager &pager, std::string &result, const Cell
     }
     if (!cell.has_remote) {
         std::memcpy(result.data(), cell.key + cell.key_size, value_size);
-        *value = Slice {result.data(), value_size};
+        if (value != nullptr) {
+            *value = Slice {result.data(), value_size};
+        }
         return Status::ok();
     }
     std::size_t remote_key_size {};
@@ -1961,7 +1964,9 @@ auto PayloadManager::collect_value(Pager &pager, std::string &result, const Cell
     }
 
     CDB_TRY(OverflowList::read(pager, span, read_overflow_id(cell), remote_key_size));
-    *value = Slice {result}.truncate(value_size);
+    if (value != nullptr) {
+        *value = Slice {result}.truncate(value_size);
+    }
     return Status::ok();
 }
 
@@ -2077,9 +2082,9 @@ class TreeValidator
                 tree.release(std::move(node));
 
                 Node next;
-                CHECK_OK(tree.acquire(&next, next_id, false));
+                CHECK_OK(tree.acquire(next_id, false, next));
                 traverse_inorder_helper(tree, std::move(next), callback);
-                CHECK_OK(tree.acquire(&node, saved_id, false));
+                CHECK_OK(tree.acquire(saved_id, false, node));
             }
             if (index < node.header.cell_count) {
                 callback(node, index);
@@ -2091,7 +2096,7 @@ class TreeValidator
     static auto traverse_inorder(const Tree &tree, const NodeCallback &callback) -> void
     {
         Node root;
-        CHECK_OK(tree.acquire(&root, tree.m_root_id, false));
+        CHECK_OK(tree.acquire(tree.m_root_id, false, root));
         traverse_inorder_helper(tree, std::move(root), callback);
     }
 
@@ -2153,7 +2158,7 @@ class TreeValidator
 
             if (!header.is_external) {
                 Node next;
-                CHECK_OK(tree.acquire(&next, read_child_id(cell), false));
+                CHECK_OK(tree.acquire(read_child_id(cell), false, next));
                 collect_levels(tree, data, std::move(next), level + 1);
             }
 
@@ -2175,7 +2180,7 @@ class TreeValidator
         }
         if (!node.header.is_external) {
             Node next;
-            CHECK_OK(tree.acquire(&next, node.header.next_id, false));
+            CHECK_OK(tree.acquire(node.header.next_id, false, next));
             collect_levels(tree, data, std::move(next), level + 1);
         }
 
@@ -2197,7 +2202,7 @@ public:
         Id parent_id;
         traverse_chain(pager, std::move(page), [&](const auto &link) {
             Id found_id;
-            CHECK_OK(tree.find_parent_id(link.id(), &found_id));
+            CHECK_OK(tree.find_parent_id(link.id(), found_id));
             CHECK_TRUE(found_id == parent_id);
             parent_id = link.id();
         });
@@ -2210,10 +2215,10 @@ public:
 
         auto check_parent_child = [&tree](auto &node, auto index) -> void {
             Node child;
-            CHECK_OK(tree.acquire(&child, read_child_id(node, index), false));
+            CHECK_OK(tree.acquire(read_child_id(node, index), false, child));
 
             Id parent_id;
-            CHECK_OK(tree.find_parent_id(child.page.id(), &parent_id));
+            CHECK_OK(tree.find_parent_id(child.page.id(), parent_id));
             CHECK_TRUE(parent_id == node.page.id());
 
             tree.release(std::move(child));
@@ -2259,7 +2264,7 @@ public:
 
                 if (node.header.is_external && !node.header.next_id.is_null()) {
                     Node next;
-                    CHECK_OK(tree.acquire(&next, node.header.next_id, false));
+                    CHECK_OK(tree.acquire(node.header.next_id, false, next));
 
                     tree.release(std::move(next));
                 }
@@ -2268,15 +2273,15 @@ public:
 
         // Find the leftmost external node.
         Node node;
-        CHECK_OK(tree.acquire(&node, tree.m_root_id, false));
+        CHECK_OK(tree.acquire(tree.m_root_id, false, node));
         while (!node.header.is_external) {
             const auto id = read_child_id(node, 0);
             tree.release(std::move(node));
-            CHECK_OK(tree.acquire(&node, id, false));
+            CHECK_OK(tree.acquire(id, false, node));
         }
         while (!node.header.next_id.is_null()) {
             Node right;
-            CHECK_OK(tree.acquire(&right, node.header.next_id, false));
+            CHECK_OK(tree.acquire(node.header.next_id, false, right));
             std::string lhs_buffer, rhs_buffer;
             Slice lhs_key;
             CHECK_OK(PayloadManager::collect_key(*tree.m_pager, lhs_buffer, read_cell(node, 0), &lhs_key));
@@ -2296,7 +2301,7 @@ public:
         PrinterData data;
 
         Node root;
-        CHECK_OK(tree.acquire(&root, tree.m_root_id, false));
+        CHECK_OK(tree.acquire(tree.m_root_id, false, root));
         collect_levels(tree, data, std::move(root), 0);
         for (const auto &level : data.levels) {
             repr.append(level + '\n');
@@ -2357,7 +2362,7 @@ auto CursorImpl::fetch_payload() -> Status
     CDB_EXPECT_EQ(m_value_size, 0);
 
     Node node;
-    CDB_TRY(m_tree->acquire(&node, m_loc.pid, false));
+    CDB_TRY(m_tree->acquire(m_loc.pid, false, node));
 
     Slice key, value;
     auto cell = read_cell(node, m_loc.index);
@@ -2389,7 +2394,7 @@ auto CursorImpl::seek_first() -> void
     m_value_size = 0;
 
     Node lowest;
-    auto s = m_tree->find_lowest(&lowest);
+    auto s = m_tree->find_lowest(lowest);
     if (!s.is_ok()) {
         m_status = s;
         return;
@@ -2408,7 +2413,7 @@ auto CursorImpl::seek_last() -> void
     m_value_size = 0;
 
     Node highest;
-    auto s = m_tree->find_highest(&highest);
+    auto s = m_tree->find_highest(highest);
     if (!s.is_ok()) {
         m_status = s;
         return;
@@ -2428,7 +2433,7 @@ auto CursorImpl::next() -> void
     m_value_size = 0;
 
     Node node;
-    auto s = m_tree->acquire(&node, Id {m_loc.pid}, false);
+    auto s = m_tree->acquire(m_loc.pid, false, node);
     if (!s.is_ok()) {
         m_status = s;
         return;
@@ -2444,7 +2449,7 @@ auto CursorImpl::next() -> void
         m_status = default_cursor_status();
         return;
     }
-    s = m_tree->acquire(&node, next_id, false);
+    s = m_tree->acquire(next_id, false, node);
     if (!s.is_ok()) {
         m_status = s;
         return;
@@ -2459,7 +2464,7 @@ auto CursorImpl::previous() -> void
     m_value_size = 0;
 
     Node node;
-    auto s = m_tree->acquire(&node, m_loc.pid, false);
+    auto s = m_tree->acquire(m_loc.pid, false, node);
     if (!s.is_ok()) {
         m_status = s;
         return;
@@ -2475,7 +2480,7 @@ auto CursorImpl::previous() -> void
         m_status = default_cursor_status();
         return;
     }
-    s = m_tree->acquire(&node, prev_id, false);
+    s = m_tree->acquire(prev_id, false, node);
     if (!s.is_ok()) {
         m_status = s;
         return;
@@ -2506,7 +2511,7 @@ auto CursorImpl::seek(const Slice &key) -> void
     m_value_size = 0;
 
     Tree::SearchResult slot;
-    auto s = m_tree->find_external(key, &slot);
+    auto s = m_tree->find_external(key, slot);
     if (!s.is_ok()) {
         m_status = s;
         return;

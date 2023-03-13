@@ -1,6 +1,6 @@
 // Copyright (c) 2022, The CalicoDB Authors. All rights reserved.
 // This source code is licensed under the MIT License, which can be found in
-// LICENSE.md. See AUTHORS.md for contributor names.
+// LICENSE.md. See AUTHORS.md for a list of contributor names.
 
 #include "db_impl.h"
 #include "calicodb/env.h"
@@ -19,9 +19,9 @@ namespace calicodb
         }                             \
     } while (0)
 
-static auto get_table_id(const Table *table) -> Id
+static auto get_table_id(const Table &table) -> Id
 {
-    return reinterpret_cast<const TableImpl *>(table)->id();
+    return reinterpret_cast<const TableImpl &>(table).id();
 }
 
 TableImpl::TableImpl(const TableOptions &options, std::string name, Id table_id)
@@ -122,7 +122,7 @@ auto DBImpl::open(const Options &sanitized) -> Status
     }
 
     FileHeader state;
-    CDB_TRY(setup(m_filename, *m_env, sanitized, &state));
+    CDB_TRY(setup(m_filename, *m_env, sanitized, state));
     const auto page_size = state.page_size;
 
     m_state.commit_lsn = state.commit_lsn;
@@ -161,10 +161,10 @@ auto DBImpl::open(const Options &sanitized) -> Status
     }
 
     // Create the root and default table handles.
-    CDB_TRY(create_table({}, kRootTableName, &m_root));
-    CDB_TRY(create_table({}, kDefaultTableName, &m_default));
+    CDB_TRY(create_table({}, kRootTableName, m_root));
+    CDB_TRY(create_table({}, kDefaultTableName, m_default));
 
-    auto *cursor = new_cursor(m_root);
+    auto *cursor = new_cursor(*m_root);
     cursor->seek_first();
     while (cursor->is_valid()) {
         LogicalPageId root_id;
@@ -268,18 +268,18 @@ auto DBImpl::destroy(const Options &options, const std::string &filename) -> Sta
         (void)env->remove_file(path + kDefaultLogSuffix);
     }
     Reader *reader {};
-    auto s = env->new_reader(path, &reader);
+    auto s = env->new_reader(path, reader);
 
     if (s.is_ok()) {
-        char read_buffer[FileHeader::kSize];
-        auto read_size = sizeof(read_buffer);
-        s = reader->read(read_buffer, &read_size, 0);
-        if (s.is_ok() && read_size != sizeof(read_buffer)) {
+        Slice slice;
+        char buffer[FileHeader::kSize];
+        s = reader->read(0, FileHeader::kSize, buffer, &slice);
+        if (s.is_ok() && slice.size() != sizeof(buffer)) {
             s = Status::invalid_argument(path + " is too small to be a calicodb database");
         }
         if (s.is_ok()) {
             FileHeader header;
-            header.read(read_buffer);
+            header.read(buffer);
             if (header.magic_code != FileHeader::kMagicCode) {
                 s = Status::invalid_argument(path + " is not a calicodb database");
             }
@@ -290,7 +290,7 @@ auto DBImpl::destroy(const Options &options, const std::string &filename) -> Sta
         s = env->remove_file(path);
 
         std::vector<std::string> children;
-        auto t = env->get_children(dir, &children);
+        auto t = env->get_children(dir, children);
         if (t.is_ok()) {
             for (const auto &name : children) {
                 const auto sibling_filename = join_paths(dir, name);
@@ -327,22 +327,25 @@ auto DBImpl::get_property(const Slice &name, std::string *out) const -> bool
 
         if (prop == "tables") {
             // TODO: This should provide information about open tables, or maybe all tables.
-            out->append("<NOT IMPLEMENTED>");
+            if (out != nullptr) {
+                out->append("<NOT IMPLEMENTED>");
+            }
             return true;
 
         } else if (prop == "stats") {
             // TODO: This should provide information about how much data was written to/read from different files,
             //       number of cache hits and misses, and maybe other things.
-            out->append("<NOT IMPLEMENTED>");
+            if (out != nullptr) {
+                out->append("<NOT IMPLEMENTED>");
+            }
             return true;
         }
     }
     return false;
 }
 
-auto DBImpl::new_cursor(const Table *table) const -> Cursor *
+auto DBImpl::new_cursor(const Table &table) const -> Cursor *
 {
-    CDB_EXPECT_NE(table, nullptr);
     const auto *state = m_tables.get(get_table_id(table));
     auto *cursor = CursorInternal::make_cursor(*state->tree);
     if (!m_state.status.is_ok()) {
@@ -351,18 +354,16 @@ auto DBImpl::new_cursor(const Table *table) const -> Cursor *
     return cursor;
 }
 
-auto DBImpl::get(const Table *table, const Slice &key, std::string *value) const -> Status
+auto DBImpl::get(const Table &table, const Slice &key, std::string *value) const -> Status
 {
     CDB_TRY(m_state.status);
-    CDB_EXPECT_NE(table, nullptr);
     const auto *state = m_tables.get(get_table_id(table));
     return state->tree->get(key, value);
 }
 
-auto DBImpl::put(Table *table, const Slice &key, const Slice &value) -> Status
+auto DBImpl::put(Table &table, const Slice &key, const Slice &value) -> Status
 {
     CDB_TRY(m_state.status);
-    CDB_EXPECT_NE(table, nullptr);
     auto *state = m_tables.get(get_table_id(table));
 
     if (!state->write) {
@@ -383,11 +384,9 @@ auto DBImpl::put(Table *table, const Slice &key, const Slice &value) -> Status
     return s;
 }
 
-auto DBImpl::erase(Table *table, const Slice &key) -> Status
+auto DBImpl::erase(Table &table, const Slice &key) -> Status
 {
     CDB_TRY(m_state.status);
-
-    CDB_EXPECT_NE(table, nullptr);
     auto *state = m_tables.get(get_table_id(table));
 
     if (!state->write) {
@@ -483,7 +482,7 @@ auto DBImpl::TEST_validate() const -> void
     }
 }
 
-auto setup(const std::string &path, Env &env, const Options &options, FileHeader *header) -> Status
+auto setup(const std::string &path, Env &env, const Options &options, FileHeader &header) -> Status
 {
     static constexpr std::size_t kMinFrameCount {16};
 
@@ -506,50 +505,50 @@ auto setup(const std::string &path, Env &env, const Options &options, FileHeader
     std::unique_ptr<Reader> reader;
     Reader *reader_temp;
 
-    if (auto s = env.new_reader(path, &reader_temp); s.is_ok()) {
+    if (auto s = env.new_reader(path, reader_temp); s.is_ok()) {
         reader.reset(reader_temp);
         std::size_t file_size {};
-        CDB_TRY(env.file_size(path, &file_size));
+        CDB_TRY(env.file_size(path, file_size));
 
         if (file_size < FileHeader::kSize) {
             return Status::invalid_argument("file is not a database");
         }
 
+        Slice slice;
         char buffer[FileHeader::kSize];
-        auto read_size = sizeof(buffer);
-        CDB_TRY(reader->read(buffer, &read_size, 0));
-        if (read_size != sizeof(buffer)) {
+        CDB_TRY(reader->read(0, sizeof(buffer), buffer, &slice));
+        if (slice.size() != sizeof(buffer)) {
             return Status::system_error("incomplete read of file header");
         }
-        header->read(buffer);
+        header.read(buffer);
 
-        if (header->magic_code != FileHeader::kMagicCode) {
+        if (header.magic_code != FileHeader::kMagicCode) {
             return Status::invalid_argument("file is not a database");
         }
-        if (crc32c::Unmask(header->header_crc) != header->compute_crc()) {
+        if (crc32c::Unmask(header.header_crc) != header.compute_crc()) {
             return Status::corruption("file header is corrupted");
         }
-        if (header->page_size == 0) {
+        if (header.page_size == 0) {
             return Status::corruption("header indicates a page size of 0");
         }
-        if (file_size % header->page_size) {
+        if (file_size % header.page_size) {
             return Status::corruption("database size is invalid");
         }
 
     } else if (s.is_not_found()) {
-        header->page_size = static_cast<std::uint16_t>(options.page_size);
+        header.page_size = static_cast<std::uint16_t>(options.page_size);
 
     } else {
         return s;
     }
 
-    if (header->page_size < kMinPageSize) {
+    if (header.page_size < kMinPageSize) {
         return Status::corruption("header page size is too small");
     }
-    if (header->page_size > kMaxPageSize) {
+    if (header.page_size > kMaxPageSize) {
         return Status::corruption("header page size is too large");
     }
-    if (!is_power_of_two(header->page_size)) {
+    if (!is_power_of_two(header.page_size)) {
         return Status::corruption("header page size is not a power of 2");
     }
     return Status::ok();
@@ -618,16 +617,16 @@ auto DBImpl::default_table() const -> Table *
     return m_default;
 }
 
-auto DBImpl::list_tables(std::vector<std::string> *out) const -> Status
+auto DBImpl::list_tables(std::vector<std::string> &out) const -> Status
 {
     CDB_TRY(m_state.status);
-    out->clear();
+    out.clear();
 
-    auto *cursor = new_cursor(m_root);
+    auto *cursor = new_cursor(*m_root);
     cursor->seek_first();
     while (cursor->is_valid()) {
         if (cursor->key() != kDefaultTableName) {
-            out->emplace_back(cursor->key().to_string());
+            out.emplace_back(cursor->key().to_string());
         }
         cursor->next();
     }
@@ -637,7 +636,7 @@ auto DBImpl::list_tables(std::vector<std::string> *out) const -> Status
     return s.is_not_found() ? Status::ok() : s;
 }
 
-auto DBImpl::create_table(const TableOptions &options, const std::string &name, Table **out) -> Status
+auto DBImpl::create_table(const TableOptions &options, const std::string &name, Table *&out) -> Status
 {
     LogicalPageId root_id;
     std::string value;
@@ -651,7 +650,7 @@ auto DBImpl::create_table(const TableOptions &options, const std::string &name, 
         if (s.is_ok()) {
             CDB_TRY(decode_logical_id(value, &root_id));
         } else if (s.is_not_found()) {
-            s = construct_new_table(name, &root_id);
+            s = construct_new_table(name, root_id);
         }
     }
 
@@ -670,17 +669,17 @@ auto DBImpl::create_table(const TableOptions &options, const std::string &name, 
     state->tree = new Tree {*pager, root_id.page_id, m_state.freelist_head};
     state->write = options.mode == AccessMode::kReadWrite;
     state->open = true;
-    *out = new TableImpl {options, name, root_id.table_id};
+    out = new TableImpl {options, name, root_id.table_id};
 
     return s;
 }
 
-auto DBImpl::close_table(Table *table) -> void
+auto DBImpl::close_table(Table *&table) -> void
 {
     if (table == nullptr || table == default_table()) {
         return;
     }
-    auto *state = m_tables.get(get_table_id(table));
+    auto *state = m_tables.get(get_table_id(*table));
     CDB_EXPECT_NE(state, nullptr);
 
     delete state->tree;
@@ -690,15 +689,15 @@ auto DBImpl::close_table(Table *table) -> void
     delete table;
 }
 
-auto DBImpl::drop_table(Table *table) -> Status
+auto DBImpl::drop_table(Table *&table) -> Status
 {
     if (table == nullptr) {
         return Status::ok();
     } else if (table == default_table()) {
         return Status::invalid_argument("cannot drop default table");
     }
-    const auto table_id = get_table_id(table);
-    auto *cursor = new_cursor(table);
+    const auto table_id = get_table_id(*table);
+    auto *cursor = new_cursor(*table);
     Status s;
 
     while (s.is_ok()) {
@@ -706,7 +705,7 @@ auto DBImpl::drop_table(Table *table) -> Status
         if (!cursor->is_valid()) {
             break;
         }
-        s = erase(table, cursor->key());
+        s = erase(*table, cursor->key());
     }
     delete cursor;
 
@@ -721,7 +720,7 @@ auto DBImpl::drop_table(Table *table) -> Status
     return s;
 }
 
-auto DBImpl::construct_new_table(const Slice &name, LogicalPageId *root_id) -> Status
+auto DBImpl::construct_new_table(const Slice &name, LogicalPageId &root_id) -> Status
 {
     // Find the first available table ID.
     auto table_id = Id::root();
@@ -733,11 +732,11 @@ auto DBImpl::construct_new_table(const Slice &name, LogicalPageId *root_id) -> S
     }
 
     // Set the table ID manually, let the tree fill in the root page ID.
-    root_id->table_id = table_id;
-    CDB_TRY(Tree::create(*pager, table_id, m_state.freelist_head, &root_id->page_id));
+    root_id.table_id = table_id;
+    CDB_TRY(Tree::create(*pager, table_id, m_state.freelist_head, &root_id.page_id));
 
     char payload[LogicalPageId::kSize];
-    encode_logical_id(*root_id, payload);
+    encode_logical_id(root_id, payload);
 
     // Write an entry for the new table in the root table. This will not increase the
     // record count for the database.
@@ -755,7 +754,7 @@ auto DBImpl::remove_empty_table(const std::string &name, TableState &state) -> S
     }
 
     Node root;
-    CDB_TRY(tree->acquire(&root, root_id.page_id, false));
+    CDB_TRY(tree->acquire(root_id.page_id, false, root));
     if (root.header.cell_count != 0) {
         return Status::logic_error("table could not be emptied");
     }
@@ -870,7 +869,7 @@ auto DBImpl::recovery_phase_1() -> Status
     };
 
     const auto roll = [&](const auto &action) {
-        CDB_TRY(open_wal_reader(segment, &file));
+        CDB_TRY(open_wal_reader(segment, file));
         WalReader reader {*file, m_reader_tail};
 
         for (;;) {
@@ -975,12 +974,12 @@ auto DBImpl::recovery_phase_2() -> Status
     return pager->sync();
 }
 
-auto DBImpl::open_wal_reader(Id segment, std::unique_ptr<Reader> *out) -> Status
+auto DBImpl::open_wal_reader(Id segment, std::unique_ptr<Reader> &out) -> Status
 {
     Reader *file;
     const auto name = encode_segment_name(m_wal_prefix, segment);
-    CDB_TRY(m_env->new_reader(name, &file));
-    out->reset(file);
+    CDB_TRY(m_env->new_reader(name, file));
+    out.reset(file);
     return Status::ok();
 }
 

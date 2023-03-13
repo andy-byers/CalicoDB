@@ -1,11 +1,11 @@
 // Copyright (c) 2022, The CalicoDB Authors. All rights reserved.
 // This source code is licensed under the MIT License, which can be found in
-// LICENSE.md. See AUTHORS.md for contributor names.
+// LICENSE.md. See AUTHORS.md for a list of contributor names.
 
 #ifndef CALICODB_FUZZERS_FUZZER_H
 #define CALICODB_FUZZERS_FUZZER_H
 
-#include "calicodb/calicodb.h"
+#include "calicodb/db.h"
 #include "encoding.h"
 #include "logging.h"
 #include "tools.h"

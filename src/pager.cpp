@@ -1,6 +1,6 @@
 // Copyright (c) 2022, The CalicoDB Authors. All rights reserved.
 // This source code is licensed under the MIT License, which can be found in
-// LICENSE.md. See AUTHORS.md for contributor names.
+// LICENSE.md. See AUTHORS.md for a list of contributor names.
 
 #include "pager.h"
 #include "db_impl.h"
@@ -31,7 +31,7 @@ auto Pager::open(const Parameters &param, Pager **out) -> Status
     CDB_EXPECT_LE(param.page_size, kMaxPageSize);
 
     Editor *file;
-    CDB_TRY(param.env->new_editor(param.filename, &file));
+    CDB_TRY(param.env->new_editor(param.filename, file));
 
     // Allocate the frames, i.e. where pages from disk are stored in memory. Aligned to the page size, so it could
     // potentially be used for direct I/O.

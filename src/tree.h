@@ -1,6 +1,6 @@
 // Copyright (c) 2022, The CalicoDB Authors. All rights reserved.
 // This source code is licensed under the MIT License, which can be found in
-// LICENSE.md. See AUTHORS.md for contributor names.
+// LICENSE.md. See AUTHORS.md for a list of contributor names.
 
 #ifndef CALICODB_TREE_H
 #define CALICODB_TREE_H
@@ -15,23 +15,23 @@ namespace calicodb
 class Pager;
 class TableSet;
 
-/* Internal Cell Format:
- *     Size    Name
- *    -----------------------
- *     8       child_id
- *     varint  key_size
- *     n       key
- *     8       [overflow_id]
- *
- * External Cell Format:
- *     Size    Name
- *    -----------------------
- *     varint  value_size
- *     varint  key_size
- *     n       key
- *     m       value
- *     8       [overflow_id]
- */
+// Internal Cell Format:
+//     Size    Name
+//    -----------------------
+//     8       child_id
+//     varint  key_size
+//     n       key
+//     8       [overflow_id]
+//
+// External Cell Format:
+//     Size    Name
+//    -----------------------
+//     varint  value_size
+//     varint  key_size
+//     n       key
+//     m       value
+//     8       [overflow_id]
+//
 struct Cell {
     char *ptr {};
     char *key {};
@@ -76,27 +76,20 @@ struct Node {
 
 auto manual_defragment(Node &node) -> void;
 
-/*
- * Read a cell from the node at the specified index or offset. The node must remain alive for as long as the cell.
- */
+// Read a cell from the node at the specified index or offset. The node must remain alive for as long as the cell.
 [[nodiscard]] auto read_cell(Node &node, std::size_t index) -> Cell;
 
-/*
- * Write a cell to the node at the specified index. May defragment the node. The cell must be of the same
- * type as the node, or if the node is internal, promote_cell() must have been called on the cell.
- */
+// Write a cell to the node at the specified index. May defragment the node. The cell must be of the same
+// type as the node, or if the node is internal, promote_cell() must have been called on the cell.
 auto write_cell(Node &node, std::size_t index, const Cell &cell) -> std::size_t;
 
-/*
- * Erase a cell from the node at the specified index.
- */
+// Erase a cell from the node at the specified index.
 auto erase_cell(Node &node, std::size_t index) -> void;
 
-/* Freelist management. The freelist is essentially a linked list that is threaded through the database. Each freelist
- * link page contains a pointer to the next freelist link page, or to Id::null() if it is the last link. Pages that are
- * no longer needed by the tree are placed at the front of the freelist. When more pages are needed, the freelist is
- * checked first. Only if it is empty do we allocate a page from the end of the file.
- */
+// Freelist management. The freelist is essentially a linked list that is threaded through the database. Each freelist
+// link page contains a pointer to the next freelist link page, or to Id::null() if it is the last link. Pages that are
+// no longer needed by the tree are placed at the front of the freelist. When more pages are needed, the freelist is
+// checked first. Only if it is empty do we allocate a page from the end of the file.
 class Freelist
 {
     friend class Tree;
@@ -157,15 +150,15 @@ struct PointerMap {
     [[nodiscard]] static auto lookup(const Pager &pager, Id pid) -> Id;
 
     // Read an entry from a pointer map.
-    [[nodiscard]] static auto read_entry(Pager &pager, Id pid, Entry *entry) -> Status;
+    [[nodiscard]] static auto read_entry(Pager &pager, Id pid, Entry &entry) -> Status;
 
     // Write an entry to a pointer map.
     [[nodiscard]] static auto write_entry(Pager &pager, Id pid, Entry entry) -> Status;
 };
 
 struct NodeManager {
-    [[nodiscard]] static auto allocate(Pager &pager, Freelist &freelist, Node *out, char *scratch, bool is_external) -> Status;
-    [[nodiscard]] static auto acquire(Pager &pager, Id pid, Node *out, char *scratch, bool upgrade) -> Status;
+    [[nodiscard]] static auto allocate(Pager &pager, Freelist &freelist, Node &out, std::string &scratch, bool is_external) -> Status;
+    [[nodiscard]] static auto acquire(Pager &pager, Id pid, Node &out, std::string &scratch, bool upgrade) -> Status;
     [[nodiscard]] static auto destroy(Freelist &freelist, Node node) -> Status;
     static auto upgrade(Pager &pager, Node &node) -> void;
     static auto release(Pager &pager, Node node) -> void;
@@ -173,8 +166,8 @@ struct NodeManager {
 
 struct OverflowList {
     [[nodiscard]] static auto read(Pager &pager, Span out, Id head_id, std::size_t offset = 0) -> Status;
-    [[nodiscard]] static auto write(Pager &pager, Freelist &freelist, Id *out, const Slice &first, const Slice &second = {}) -> Status;
-    [[nodiscard]] static auto copy(Pager &pager, Freelist &freelist, Id *out, Id overflow_id, std::size_t size) -> Status;
+    [[nodiscard]] static auto write(Pager &pager, Freelist &freelist, Id &out, const Slice &first, const Slice &second = {}) -> Status;
+    [[nodiscard]] static auto copy(Pager &pager, Freelist &freelist, Id &out, Id overflow_id, std::size_t size) -> Status;
     [[nodiscard]] static auto erase(Pager &pager, Freelist &freelist, Id head_id) -> Status;
 };
 
@@ -190,13 +183,13 @@ class Tree
 public:
     explicit Tree(Pager &pager, Id root_id, Id &freelist_head);
     [[nodiscard]] static auto create(Pager &pager, Id table_id, Id &freelist_head, Id *out) -> Status;
-    [[nodiscard]] auto root(Node *out) const -> Status;
+    [[nodiscard]] auto root(Node &out) const -> Status;
     [[nodiscard]] auto put(const Slice &key, const Slice &value, bool *exists = nullptr) -> Status;
     [[nodiscard]] auto get(const Slice &key, std::string *value) const -> Status;
     [[nodiscard]] auto erase(const Slice &key) -> Status;
-    [[nodiscard]] auto vacuum_one(Id target, TableSet &tables, bool *success) -> Status;
-    [[nodiscard]] auto allocate(Node *out, bool is_external) -> Status;
-    [[nodiscard]] auto acquire(Node *out, Id pid, bool upgrade) const -> Status;
+    [[nodiscard]] auto vacuum_one(Id target, TableSet &tables, bool *success = nullptr) -> Status;
+    [[nodiscard]] auto allocate(bool is_external, Node &out) -> Status;
+    [[nodiscard]] auto acquire(Id pid, bool upgrade, Node &out) const -> Status;
     [[nodiscard]] auto destroy(Node node) -> Status;
     auto upgrade(Node &node) const -> void;
     auto release(Node node) const -> void;
@@ -225,14 +218,14 @@ private:
     [[nodiscard]] auto rotate_right(Node &parent, Node &left, Node &right, std::size_t index) -> Status;
     [[nodiscard]] auto transfer_left(Node &left, Node &right) -> Status;
 
-    [[nodiscard]] auto find_highest(Node *node) const -> Status;
-    [[nodiscard]] auto find_lowest(Node *node) const -> Status;
-    [[nodiscard]] auto find_external(const Slice &key, Node node, SearchResult *out) const -> Status;
-    [[nodiscard]] auto find_external(const Slice &key, SearchResult *out) const -> Status;
+    [[nodiscard]] auto find_highest(Node &node) const -> Status;
+    [[nodiscard]] auto find_lowest(Node &node) const -> Status;
+    [[nodiscard]] auto find_external(const Slice &key, Node node, SearchResult &out) const -> Status;
+    [[nodiscard]] auto find_external(const Slice &key, SearchResult &out) const -> Status;
     [[nodiscard]] auto node_iterator(Node &node) const -> NodeIterator;
     [[nodiscard]] auto insert_cell(Node &node, std::size_t index, const Cell &cell) -> Status;
     [[nodiscard]] auto remove_cell(Node &node, std::size_t index) -> Status;
-    [[nodiscard]] auto find_parent_id(Id pid, Id *out) const -> Status;
+    [[nodiscard]] auto find_parent_id(Id pid, Id &out) const -> Status;
     [[nodiscard]] auto fix_parent_id(Id pid, Id parent_id, PointerMap::Type type) -> Status;
     [[nodiscard]] auto maybe_fix_overflow_chain(const Cell &cell, Id parent_id) -> Status;
     [[nodiscard]] auto fix_links(Node &node) -> Status;

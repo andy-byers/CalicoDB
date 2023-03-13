@@ -1,10 +1,10 @@
 // Copyright (c) 2022, The CalicoDB Authors. All rights reserved.
 // This source code is licensed under the MIT License, which can be found in
-// LICENSE.md. See AUTHORS.md for contributor names.
+// LICENSE.md. See AUTHORS.md for a list of contributor names.
 //
 // Recovery tests (harness is modified from LevelDB).
 
-#include "calicodb/calicodb.h"
+#include "calicodb/db.h"
 #include "tools.h"
 #include "unit_tests.h"
 #include "wal_reader.h"
@@ -62,7 +62,7 @@ public:
     auto read_segment(Id segment_id, std::vector<PayloadDescriptor> *out) -> Status
     {
         Reader *temp;
-        EXPECT_OK(env->new_reader(encode_segment_name(kWalPrefix, segment_id), &temp));
+        EXPECT_OK(env->new_reader(encode_segment_name(kWalPrefix, segment_id), temp));
 
         std::unique_ptr<Reader> file {temp};
         WalReader reader {*file, tail_buffer};
@@ -135,8 +135,8 @@ public:
             opts.env = env.get();
         }
         tail.resize(wal_block_size(opts.page_size));
-        CDB_TRY(DB::open(opts, db_prefix, &db));
-        return db->create_table({}, "test", &table);
+        CDB_TRY(DB::open(opts, db_prefix, db));
+        return db->create_table({}, "test", table);
     }
 
     auto open(Options *options = nullptr) -> void
@@ -146,13 +146,13 @@ public:
 
     auto put(const std::string &k, const std::string &v) const -> Status
     {
-        return db->put(table, k, v);
+        return db->put(*table, k, v);
     }
 
     auto get(const std::string &k) const -> std::string
     {
         std::string result;
-        Status s = db->get(table, k, &result);
+        Status s = db->get(*table, k, &result);
         if (s.is_not_found()) {
             result = "NOT_FOUND";
         } else if (!s.is_ok()) {
@@ -181,7 +181,7 @@ public:
     auto get_logs() -> std::vector<Id>
     {
         std::vector<std::string> filenames;
-        EXPECT_OK(env->get_children(".", &filenames));
+        EXPECT_OK(env->get_children(".", filenames));
         std::vector<Id> result;
         for (const auto &name : filenames) {
             if (name.find("wal-") == 0) {
@@ -199,7 +199,7 @@ public:
     auto file_size(const std::string &fname) -> std::size_t
     {
         std::size_t result;
-        EXPECT_OK(env->file_size(fname, &result));
+        EXPECT_OK(env->file_size(fname, result));
         return result;
     }
 
@@ -346,7 +346,7 @@ TEST_F(RecoveryTests, SanityCheck)
             if (index == commit) {
                 ASSERT_OK(db->checkpoint());
             } else {
-                ASSERT_OK(db->put(table, record->first, record->second));
+                ASSERT_OK(db->put(*table, record->first, record->second));
             }
         }
         open();
@@ -355,10 +355,10 @@ TEST_F(RecoveryTests, SanityCheck)
         for (std::size_t index {}; record != end(map); ++index, ++record) {
             std::string value;
             if (index < commit) {
-                ASSERT_OK(db->get(table, record->first, &value));
+                ASSERT_OK(db->get(*table, record->first, &value));
                 ASSERT_EQ(value, record->second);
             } else {
-                ASSERT_TRUE(db->get(table, record->first, &value).is_not_found());
+                ASSERT_TRUE(db->get(*table, record->first, &value).is_not_found());
             }
         }
         close();
@@ -393,7 +393,7 @@ public:
     {
         auto record = begin(map);
         for (std::size_t index {}; record != end(map); ++index, ++record) {
-            ASSERT_OK(db->put(table, record->first, record->second));
+            ASSERT_OK(db->put(*table, record->first, record->second));
             if (record->first.front() % 10 == 1) {
                 ASSERT_OK(db->checkpoint());
             }
@@ -410,7 +410,7 @@ public:
 
         for (const auto &[k, v] : map) {
             std::string value;
-            ASSERT_OK(db->get(table, k, &value));
+            ASSERT_OK(db->get(*table, k, &value));
             ASSERT_EQ(value, v);
         }
     }
@@ -424,7 +424,7 @@ public:
 TEST_P(RecoverySanityCheck, FailureWhileRunning)
 {
     for (const auto &[k, v] : map) {
-        auto s = db->erase(table, k);
+        auto s = db->erase(*table, k);
         if (!s.is_ok()) {
             assert_special_error(s);
             break;
@@ -452,7 +452,7 @@ TEST_P(RecoverySanityCheck, FailureDuringClose)
 TEST_P(RecoverySanityCheck, FailureDuringCloseWithUncommittedUpdates)
 {
     while (db->status().is_ok()) {
-        (void)db->put(table, random.Generate(16), random.Generate(100));
+        (void)db->put(*table, random.Generate(16), random.Generate(100));
     }
 
     close();

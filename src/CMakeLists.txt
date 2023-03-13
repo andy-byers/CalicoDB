@@ -37,12 +37,12 @@ endif()
 
 file(GLOB_RECURSE CALICODB_SOURCES "*.cpp" "*.h")
 add_library(calicodb
-        STATIC "${CALICODB_INCLUDE_DIR}/calicodb/calicodb.h"
                "${CALICODB_INCLUDE_DIR}/calicodb/cursor.h"
                "${CALICODB_INCLUDE_DIR}/calicodb/db.h"
                "${CALICODB_INCLUDE_DIR}/calicodb/env.h"
                "${CALICODB_INCLUDE_DIR}/calicodb/slice.h"
                "${CALICODB_INCLUDE_DIR}/calicodb/status.h"
+               "${CALICODB_INCLUDE_DIR}/calicodb/table.h"
                "${CALICODB_SOURCES}")
 target_include_directories(calicodb
         PUBLIC  $<BUILD_INTERFACE:${CALICODB_INCLUDE_DIR}>

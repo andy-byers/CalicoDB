@@ -1,6 +1,6 @@
 // Copyright (c) 2022, The CalicoDB Authors. All rights reserved.
 // This source code is licensed under the MIT License, which can be found in
-// LICENSE.md. See AUTHORS.md for contributor names.
+// LICENSE.md. See AUTHORS.md for a list of contributor names.
 
 #ifndef CALICODB_WAL_RECORD_H
 #define CALICODB_WAL_RECORD_H
@@ -274,26 +274,23 @@ static constexpr std::size_t kWalBlockScale {4};
     }
 
     Reader *temp;
-    CDB_TRY(env.new_reader(encode_segment_name(prefix, id), &temp));
+    CDB_TRY(env.new_reader(encode_segment_name(prefix, id), temp));
 
     char buffer[sizeof(Lsn)];
-    Span bytes {buffer, sizeof(buffer)};
     std::unique_ptr<Reader> file {temp};
 
     // Read the first LSN. If it exists, it will always be at the same location: right after the first
     // record header, which is written at offset 0.
-    auto read_size = bytes.size();
-    CDB_TRY(file->read(bytes.data(), &read_size, WalRecordHeader::kSize));
+    Slice slice;
+    CDB_TRY(file->read(WalRecordHeader::kSize, sizeof(buffer), buffer, &slice));
 
-    bytes.truncate(read_size);
-
-    if (bytes.is_empty()) {
+    if (slice.is_empty()) {
         return Status::corruption("segment is empty");
     }
-    if (bytes.size() != WalPayloadHeader::kSize) {
+    if (slice.size() != WalPayloadHeader::kSize) {
         return Status::corruption("incomplete block");
     }
-    const Lsn lsn {get_u64(bytes)};
+    const Lsn lsn {get_u64(slice)};
     if (lsn.is_null()) {
         return Status::corruption("lsn is null");
     }

@@ -1,15 +1,15 @@
 // Copyright (c) 2022, The CalicoDB Authors. All rights reserved.
 // This source code is licensed under the MIT License, which can be found in
-// LICENSE.md. See AUTHORS.md for contributor names.
+// LICENSE.md. See AUTHORS.md for a list of contributor names.
 
 #ifndef CALICODB_CURSOR_H
 #define CALICODB_CURSOR_H
 
+#include "slice.h"
+#include "status.h"
+
 namespace calicodb
 {
-
-class Slice;
-class Status;
 
 // Cursor for iterating over the records in a table.
 //

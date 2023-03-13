@@ -1,6 +1,6 @@
 // Copyright (c) 2022, The CalicoDB Authors. All rights reserved.
 // This source code is licensed under the MIT License, which can be found in
-// LICENSE.md. See AUTHORS.md for contributor names.
+// LICENSE.md. See AUTHORS.md for a list of contributor names.
 
 #include "db_impl.h"
 #include "header.h"
@@ -30,13 +30,13 @@ TEST_F(SetupTests, ReportsInvalidPageSizes)
     Options options;
 
     options.page_size = kMinPageSize / 2;
-    ASSERT_TRUE(setup("./test", *env, options, &header).is_invalid_argument());
+    ASSERT_TRUE(setup("./test", *env, options, header).is_invalid_argument());
 
     options.page_size = kMaxPageSize * 2;
-    ASSERT_TRUE(setup("./test", *env, options, &header).is_invalid_argument());
+    ASSERT_TRUE(setup("./test", *env, options, header).is_invalid_argument());
 
     options.page_size = kMinPageSize + 1;
-    ASSERT_TRUE(setup("./test", *env, options, &header).is_invalid_argument());
+    ASSERT_TRUE(setup("./test", *env, options, header).is_invalid_argument());
 }
 
 TEST_F(SetupTests, ReportsInvalidCacheSize)
@@ -45,7 +45,7 @@ TEST_F(SetupTests, ReportsInvalidCacheSize)
     Options options;
 
     options.cache_size = 1;
-    ASSERT_TRUE(setup("./test", *env, options, &header).is_invalid_argument());
+    ASSERT_TRUE(setup("./test", *env, options, header).is_invalid_argument());
 }
 
 TEST_F(SetupTests, ReportsInvalidFileHeader)
@@ -54,13 +54,13 @@ TEST_F(SetupTests, ReportsInvalidFileHeader)
     Options options;
 
     Logger *logger;
-    ASSERT_OK(env->new_logger("./test", &logger));
+    ASSERT_OK(env->new_logger("./test", logger));
     char payload[FileHeader::kSize];
     header.write(payload);
     ASSERT_OK(logger->write(Slice {payload, sizeof(payload)}));
     delete logger;
 
-    ASSERT_TRUE(setup("./test", *env, options, &header).is_corruption());
+    ASSERT_TRUE(setup("./test", *env, options, header).is_corruption());
 }
 
 TEST(LeakTests, DestroysOwnObjects)
@@ -70,9 +70,9 @@ TEST(LeakTests, DestroysOwnObjects)
     DB *db;
     Table *table;
 
-    ASSERT_OK(DB::open({}, "__calicodb_test", &db));
-    ASSERT_OK(db->create_table({}, "test", &table));
-    auto *cursor = db->new_cursor(table);
+    ASSERT_OK(DB::open({}, "__calicodb_test", db));
+    ASSERT_OK(db->create_table({}, "test", table));
+    auto *cursor = db->new_cursor(*table);
 
     delete cursor;
     db->close_table(table);
@@ -88,7 +88,7 @@ TEST(LeakTests, LeavesUserObjects)
     options.info_log = new tools::StderrLogger;
 
     DB *db;
-    ASSERT_OK(DB::open(options, "__calicodb_test", &db));
+    ASSERT_OK(DB::open(options, "__calicodb_test", db));
     delete db;
 
     delete options.info_log;
@@ -106,7 +106,7 @@ TEST(BasicDestructionTests, OnlyDeletesCalicoDatabases)
 
     // File is too small to read the header.
     Editor *editor;
-    ASSERT_OK(options.env->new_editor("./test", &editor));
+    ASSERT_OK(options.env->new_editor("./test", editor));
     ASSERT_TRUE(DB::destroy(options, "./test").is_invalid_argument());
     ASSERT_OK(options.env->file_exists("./test"));
 
@@ -115,13 +115,13 @@ TEST(BasicDestructionTests, OnlyDeletesCalicoDatabases)
     FileHeader header;
     header.magic_code = 42;
     header.write(buffer);
-    ASSERT_OK(editor->write(Slice {buffer, sizeof(buffer)}, 0));
+    ASSERT_OK(editor->write(0, Slice {buffer, sizeof(buffer)}));
     ASSERT_TRUE(DB::destroy(options, "./test").is_invalid_argument());
 
     // Should work, since we just check the magic code.
     header.magic_code = FileHeader::kMagicCode;
     header.write(buffer);
-    ASSERT_OK(editor->write(Slice {buffer, sizeof(buffer)}, 0));
+    ASSERT_OK(editor->write(0, Slice {buffer, sizeof(buffer)}));
     ASSERT_OK(DB::destroy(options, "./test"));
 
     delete editor;
@@ -135,15 +135,15 @@ TEST(BasicDestructionTests, OnlyDeletesCalicoWals)
     options.wal_prefix = "./wal-";
 
     DB *db;
-    ASSERT_OK(DB::open(options, "./test", &db));
+    ASSERT_OK(DB::open(options, "./test", db));
     delete db;
 
     // Starts with the WAL prefix of "./wal-", so it is considered a WAL file.
     Editor *editor;
-    ASSERT_OK(options.env->new_editor("./wal-1", &editor));
+    ASSERT_OK(options.env->new_editor("./wal-1", editor));
     delete editor;
 
-    ASSERT_OK(options.env->new_editor("./wal_1", &editor));
+    ASSERT_OK(options.env->new_editor("./wal_1", editor));
     delete editor;
 
     ASSERT_OK(DB::destroy(options, "./test"));
@@ -178,7 +178,7 @@ TEST_F(BasicDatabaseTests, OpensAndCloses)
 {
     DB *db;
     for (std::size_t i {}; i < 3; ++i) {
-        ASSERT_OK(DB::open(options, kFilename, &db));
+        ASSERT_OK(DB::open(options, kFilename, db));
         delete db;
     }
     ASSERT_TRUE(env->file_exists(kFilename).is_ok());
@@ -187,25 +187,25 @@ TEST_F(BasicDatabaseTests, OpensAndCloses)
 TEST_F(BasicDatabaseTests, StatsAreTracked)
 {
     DB *db;
-    ASSERT_OK(DB::open(options, kFilename, &db));
+    ASSERT_OK(DB::open(options, kFilename, db));
 
     Table *table;
-    ASSERT_OK(db->create_table({}, "test", &table));
+    ASSERT_OK(db->create_table({}, "test", table));
 
     std::string property;
     ASSERT_TRUE(db->get_property("calicodb.stats", &property));
     ASSERT_TRUE(db->get_property("calicodb.tables", &property));
 
     ASSERT_EQ(db_impl(db)->TEST_state().record_count, 0);
-    ASSERT_OK(db->put(table, "a", "1"));
+    ASSERT_OK(db->put(*table, "a", "1"));
     ASSERT_EQ(db_impl(db)->TEST_state().record_count, 1);
-    ASSERT_OK(db->put(table, "a", "A"));
+    ASSERT_OK(db->put(*table, "a", "A"));
     ASSERT_EQ(db_impl(db)->TEST_state().record_count, 1);
-    ASSERT_OK(db->put(table, "b", "2"));
+    ASSERT_OK(db->put(*table, "b", "2"));
     ASSERT_EQ(db_impl(db)->TEST_state().record_count, 2);
-    ASSERT_OK(db->erase(table, "a"));
+    ASSERT_OK(db->erase(*table, "a"));
     ASSERT_EQ(db_impl(db)->TEST_state().record_count, 1);
-    ASSERT_OK(db->erase(table, "b"));
+    ASSERT_OK(db->erase(*table, "b"));
     ASSERT_EQ(db_impl(db)->TEST_state().record_count, 0);
 
     delete table;
@@ -215,7 +215,7 @@ TEST_F(BasicDatabaseTests, StatsAreTracked)
 TEST_F(BasicDatabaseTests, IsDestroyed)
 {
     DB *db;
-    ASSERT_OK(DB::open(options, kFilename, &db));
+    ASSERT_OK(DB::open(options, kFilename, db));
     delete db;
 
     ASSERT_TRUE(env->file_exists(kFilename).is_ok());
@@ -245,7 +245,7 @@ static auto insert_random_groups(DB &db, std::size_t num_groups, std::size_t gro
 TEST_F(BasicDatabaseTests, InsertOneGroup)
 {
     DB *db;
-    ASSERT_OK(DB::open(options, kFilename, &db));
+    ASSERT_OK(DB::open(options, kFilename, db));
     insert_random_groups(*db, 1, 500);
     delete db;
 }
@@ -253,7 +253,7 @@ TEST_F(BasicDatabaseTests, InsertOneGroup)
 TEST_F(BasicDatabaseTests, InsertMultipleGroups)
 {
     DB *db;
-    ASSERT_OK(DB::open(options, kFilename, &db));
+    ASSERT_OK(DB::open(options, kFilename, db));
     insert_random_groups(*db, 5, 500);
     delete db;
 }
@@ -272,7 +272,7 @@ TEST_F(BasicDatabaseTests, DataPersists)
     DB *db;
 
     for (std::size_t iteration {}; iteration < NUM_ITERATIONS; ++iteration) {
-        ASSERT_OK(DB::open(options, kFilename, &db));
+        ASSERT_OK(DB::open(options, kFilename, db));
         ASSERT_OK(db->status());
 
         for (std::size_t i {}; i < GROUP_SIZE; ++i) {
@@ -283,7 +283,7 @@ TEST_F(BasicDatabaseTests, DataPersists)
         delete db;
     }
 
-    ASSERT_OK(DB::open(options, kFilename, &db));
+    ASSERT_OK(DB::open(options, kFilename, db));
     for (const auto &[key, value] : records) {
         std::string value_out;
         ASSERT_OK(db->get(key, &value_out));
@@ -318,12 +318,12 @@ public:
 
 TEST_P(DbVacuumTests, SanityCheck)
 {
-    ASSERT_OK(DB::open(options, kFilename, &db));
+    ASSERT_OK(DB::open(options, kFilename, db));
 
     for (std::size_t iteration {}; iteration < 4; ++iteration) {
         if (reopen) {
             delete db;
-            ASSERT_OK(DB::open(options, kFilename, &db));
+            ASSERT_OK(DB::open(options, kFilename, db));
         }
         for (std::size_t batch {}; batch < 4; ++batch) {
             while (map.size() < upper_bounds) {
@@ -387,7 +387,7 @@ public:
 
         db = nullptr;
 
-        return DB::open(options, "./test", &db);
+        return DB::open(options, "./test", db);
     }
 
     Options options;
@@ -824,7 +824,7 @@ TEST_P(DbFatalErrorTests, RecoversFromVacuumFailure)
     db->db = nullptr;
 
     env->clear_interceptors();
-    ASSERT_OK(DB::open(db->options, "./test", &db->db));
+    ASSERT_OK(DB::open(db->options, "./test", db->db));
 
     for (const auto &[key, value] : committed) {
         std::string result;
@@ -834,7 +834,7 @@ TEST_P(DbFatalErrorTests, RecoversFromVacuumFailure)
     tools::validate_db(*db->db);
 
     std::size_t file_size;
-    ASSERT_OK(env->file_size("./test", &file_size));
+    ASSERT_OK(env->file_size("./test", file_size));
     ASSERT_EQ(file_size, db_impl(db->db)->TEST_pager().page_count() * db->options.page_size);
 }
 
@@ -876,29 +876,29 @@ TEST_F(DbOpenTests, CreatesMissingDb)
 {
     options.error_if_exists = false;
     options.create_if_missing = true;
-    ASSERT_OK(DB::open(options, kFilename, &db));
+    ASSERT_OK(DB::open(options, kFilename, db));
     delete db;
 
     options.create_if_missing = false;
-    ASSERT_OK(DB::open(options, kFilename, &db));
+    ASSERT_OK(DB::open(options, kFilename, db));
     delete db;
 }
 
 TEST_F(DbOpenTests, FailsIfMissingDb)
 {
     options.create_if_missing = false;
-    ASSERT_TRUE(DB::open(options, kFilename, &db).is_invalid_argument());
+    ASSERT_TRUE(DB::open(options, kFilename, db).is_invalid_argument());
 }
 
 TEST_F(DbOpenTests, FailsIfDbExists)
 {
     options.create_if_missing = true;
     options.error_if_exists = true;
-    ASSERT_OK(DB::open(options, kFilename, &db));
+    ASSERT_OK(DB::open(options, kFilename, db));
     delete db;
 
     options.create_if_missing = false;
-    ASSERT_TRUE(DB::open(options, kFilename, &db).is_invalid_argument());
+    ASSERT_TRUE(DB::open(options, kFilename, db).is_invalid_argument());
 }
 
 class ApiTests : public testing::Test
@@ -929,7 +929,7 @@ protected:
         delete db;
         db = nullptr;
 
-        ASSERT_OK(DB::open(options, "./test", &db));
+        ASSERT_OK(DB::open(options, "./test", db));
     }
 
     std::unique_ptr<tools::FaultInjectionEnv> env;
@@ -939,6 +939,12 @@ protected:
 
 TEST_F(ApiTests, OnlyReturnsValidProperties)
 {
+    // Check for existence.
+    ASSERT_TRUE(db->get_property("calicodb.stats", nullptr));
+    ASSERT_TRUE(db->get_property("calicodb.tables", nullptr));
+    ASSERT_FALSE(db->get_property("Calicodb.tables", nullptr));
+    ASSERT_FALSE(db->get_property("calicodb.nonexistent", nullptr));
+
     std::string stats, tables, scratch;
     ASSERT_TRUE(db->get_property("calicodb.stats", &stats));
     ASSERT_TRUE(db->get_property("calicodb.tables", &tables));
@@ -987,7 +993,7 @@ TEST_F(ApiTests, UncommittedTransactionIsRolledBack)
 
     reopen();
 
-    ASSERT_OK(calicodb::DB::open(options, "./test", &db));
+    ASSERT_OK(calicodb::DB::open(options, "./test", db));
     auto *cursor = db->new_cursor();
     cursor->seek_first();
     ASSERT_TRUE(cursor->is_valid());
@@ -1014,7 +1020,7 @@ TEST_F(ApiTests, EmptyTransactionsAreOk)
     ASSERT_OK(db->checkpoint());
 }
 
-TEST_F(ApiTests, KeysCanBeArbitrarychars)
+TEST_F(ApiTests, KeysCanBeArbitraryBytes)
 {
     const std::string key_1 {"\x00\x00", 2};
     const std::string key_2 {"\x00\x01", 2};
@@ -1076,6 +1082,13 @@ TEST_F(ApiTests, HandlesLargeKeys)
     ASSERT_EQ(cursor->value(), "3");
     cursor->next();
     delete cursor;
+}
+
+TEST_F(ApiTests, CheckIfKeyExists)
+{
+    ASSERT_TRUE(db->get("k", nullptr).is_not_found());
+    ASSERT_OK(db->put("k", "v"));
+    ASSERT_OK(db->get("k", nullptr));
 }
 
 class LargePayloadTests : public ApiTests
@@ -1185,7 +1198,7 @@ public:
 TEST_F(WalPrefixTests, WalDirectoryMustExist)
 {
     options.wal_prefix = "./nonexistent/wal-";
-    ASSERT_TRUE(DB::open(options, kFilename, &db).is_not_found());
+    ASSERT_TRUE(DB::open(options, kFilename, db).is_not_found());
 }
 
 } // namespace calicodb

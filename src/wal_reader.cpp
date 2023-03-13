@@ -1,6 +1,6 @@
 // Copyright (c) 2022, The CalicoDB Authors. All rights reserved.
 // This source code is licensed under the MIT License, which can be found in
-// LICENSE.md. See AUTHORS.md for contributor names.
+// LICENSE.md. See AUTHORS.md for a list of contributor names.
 
 #include "wal_reader.h"
 #include "crc.h"
@@ -10,13 +10,12 @@ namespace calicodb
 
 [[nodiscard]] static auto read_tail(Reader &file, std::size_t number, Span tail) -> Status
 {
-    auto temp = tail;
-    auto read_size = tail.size();
-    CDB_TRY(file.read(temp.data(), &read_size, number * tail.size()));
+    Slice slice;
+    CDB_TRY(file.read(number * tail.size(), tail.size(), tail.data(), &slice));
 
-    if (read_size == 0) {
+    if (slice.is_empty()) {
         return Status::not_found("end of file");
-    } else if (read_size != tail.size()) {
+    } else if (slice.size() != tail.size()) {
         return Status::corruption("incomplete block");
     }
     return Status::ok();

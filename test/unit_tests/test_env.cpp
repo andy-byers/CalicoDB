@@ -1,6 +1,6 @@
 // Copyright (c) 2022, The CalicoDB Authors. All rights reserved.
 // This source code is licensed under the MIT License, which can be found in
-// LICENSE.md. See AUTHORS.md for contributor names.
+// LICENSE.md. See AUTHORS.md for a list of contributor names.
 
 #include "calicodb/env.h"
 #include "tools.h"
@@ -62,11 +62,11 @@ template <class Base, class Store>
     Base *temp {};
 
     if constexpr (std::is_same_v<Reader, Base>) {
-        s = env.new_reader(name, &temp);
+        s = env.new_reader(name, temp);
     } else if constexpr (std::is_same_v<Editor, Base>) {
-        s = env.new_editor(name, &temp);
+        s = env.new_editor(name, temp);
     } else if constexpr (std::is_same_v<Logger, Base>) {
-        s = env.new_logger(name, &temp);
+        s = env.new_logger(name, temp);
     } else {
         ADD_FAILURE() << "Error: Unexpected blob type";
     }
@@ -106,7 +106,7 @@ constexpr auto write_out_randomly(tools::RandomGenerator &random, Writer &writer
         if constexpr (std::is_base_of_v<Logger, Writer>) {
             ASSERT_TRUE(writer.write(chunk).is_ok());
         } else {
-            ASSERT_TRUE(writer.write(chunk, counter).is_ok());
+            ASSERT_TRUE(writer.write(counter, chunk).is_ok());
             counter += chunk_size;
         }
         in.advance(chunk_size);
@@ -125,11 +125,11 @@ template <class Reader>
 
     while (!out.is_empty()) {
         const auto chunk_size = std::min(out.size(), random.Next<std::size_t>(size / num_chunks));
+        Slice slice;
         auto chunk = out.range(0, chunk_size);
-        std::size_t read_size = chunk.size();
-        const auto s = reader.read(chunk.data(), &read_size, counter);
+        const auto s = reader.read(counter, chunk_size, chunk.data(), &slice);
 
-        if (read_size != chunk_size) {
+        if (slice.size() != chunk_size) {
             return backing;
         }
 
@@ -160,7 +160,7 @@ public:
         std::filesystem::remove_all(filename);
 
         InfoLogger *temp;
-        EXPECT_OK(env->new_info_logger(filename, &temp));
+        EXPECT_OK(env->new_info_logger(filename, temp));
         file.reset(temp);
     }
 
@@ -202,10 +202,9 @@ public:
 TEST_F(PosixReaderTests, NewFileIsEmpty)
 {
     std::string backing(8, '\x00');
-    Span bytes {backing};
-    auto read_size = bytes.size();
-    ASSERT_TRUE(file->read(bytes.data(), &read_size, 0).is_ok());
-    ASSERT_EQ(read_size, 0);
+    Slice slice;
+    ASSERT_TRUE(file->read(0, 8, backing.data(), &slice).is_ok());
+    ASSERT_EQ(slice.size(), 0);
 }
 
 TEST_F(PosixReaderTests, ReadsBackContents)
@@ -229,10 +228,9 @@ public:
 TEST_F(PosixEditorTests, NewFileIsEmpty)
 {
     std::string backing(8, '\x00');
-    Span bytes {backing};
-    auto read_size = bytes.size();
-    ASSERT_TRUE(file->read(bytes.data(), &read_size, 0).is_ok());
-    ASSERT_EQ(read_size, 0);
+    Slice slice;
+    ASSERT_TRUE(file->read(0, 8, backing.data(), &slice).is_ok());
+    ASSERT_TRUE(slice.is_empty());
 }
 
 TEST_F(PosixEditorTests, WritesOutAndReadsBackData)
@@ -285,7 +283,7 @@ public:
 TEST_F(FakeEnvTests, ReaderCannotCreateFile)
 {
     Reader *temp;
-    const auto s = env->new_reader("nonexistent", &temp);
+    const auto s = env->new_reader("nonexistent", temp);
     ASSERT_TRUE(s.is_not_found()) << "Error: " << s.to_string().data();
 }
 
@@ -314,10 +312,9 @@ TEST_F(FakeEnvTests, ReaderStopsAtEOF)
     write_out_randomly(random, *ra_editor, data);
 
     std::string buffer(data.size() * 2, '\x00');
-    Span bytes {buffer};
-    auto read_size = bytes.size();
-    ASSERT_OK(ra_reader->read(bytes.data(), &read_size, 0));
-    ASSERT_EQ(bytes.truncate(read_size), data);
+    Slice slice;
+    ASSERT_OK(ra_reader->read(0, buffer.size(), buffer.data(), &slice));
+    ASSERT_EQ(slice, data);
 }
 
 } // namespace calicodb

@@ -1,6 +1,6 @@
 // Copyright (c) 2022, The CalicoDB Authors. All rights reserved.
 // This source code is licensed under the MIT License, which can be found in
-// LICENSE.md. See AUTHORS.md for contributor names.
+// LICENSE.md. See AUTHORS.md for a list of contributor names.
 
 #include "fuzzer.h"
 
@@ -13,7 +13,7 @@ DbFuzzer::DbFuzzer(std::string path, Options *options)
     if (options != nullptr) {
         m_options = *options;
     }
-    CHECK_OK(DB::open(m_options, m_path, &m_db));
+    CHECK_OK(DB::open(m_options, m_path, m_db));
 }
 
 DbFuzzer::~DbFuzzer()
@@ -30,7 +30,7 @@ auto DbFuzzer::reopen() -> Status
     delete m_db;
     m_db = nullptr;
 
-    return DB::open(m_options, m_path, &m_db);
+    return DB::open(m_options, m_path, m_db);
 }
 
 auto DbFuzzer::validate() -> void
