@@ -5,14 +5,11 @@
 #ifndef CALICODB_ENV_H
 #define CALICODB_ENV_H
 
-#include <string>
+#include "status.h"
 #include <vector>
 
 namespace calicodb
 {
-
-class Slice;
-class Status;
 
 // Representation of a read-only random-access file.
 class Reader

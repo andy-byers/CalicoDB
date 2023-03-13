@@ -5,12 +5,11 @@
 #ifndef CALICODB_STATUS_H
 #define CALICODB_STATUS_H
 
+#include "slice.h"
 #include <memory>
 
 namespace calicodb
 {
-
-class Slice;
 
 class Status final
 {

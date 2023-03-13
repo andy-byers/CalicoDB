@@ -5,8 +5,7 @@
 #ifndef CALICODB_DB_H
 #define CALICODB_DB_H
 
-#include "cursor.h"
-
+#include "status.h"
 #include <vector>
 
 namespace calicodb
@@ -15,8 +14,6 @@ namespace calicodb
 class Cursor;
 class Env;
 class InfoLogger;
-class Slice;
-class Status;
 class Table;
 struct TableOptions;
 
