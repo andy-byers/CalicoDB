@@ -1,3 +1,7 @@
+// Copyright (c) 2022, The CalicoDB Authors. All rights reserved.
+// This source code is licensed under the MIT License, which can be found in
+// LICENSE.md. See AUTHORS.md for contributor names.
+
 #ifndef CALICODB_HEADER_H
 #define CALICODB_HEADER_H
 
@@ -8,10 +12,18 @@ namespace calicodb
 
 class Page;
 
-/* The file header is located at offset 0 on the root page, which is always the first page in the database file. The root
- * page is also a node page, so it will have additional headers following the file header.
+/* There are 4 page types in CalicoDB: nodes, freelist pages, overflow chain pages, and pointer
+ * map pages. Pages that store records or separator keys are called nodes, and pages that hold
+ * parent pointers for other pages are called pointer maps. Overflow chain pages store data, as
+ * well as a pointer to the next page in the chain, while freelist pages just store the "next
+ * pointer".
  *
- * File Header Format:
+ * The first page in the database file is called the root page. The root page contains the file
+ * header at offset 0, followed by a page header and a node header (the root is always a node).
+ * All other pages have a page header at offset 0, followed by type-specific headers.
+ */
+
+/* File Header Format:
  *     Offset  Size  Name
  *    ----------------------------
  *     0       4     magic_code
@@ -39,9 +51,7 @@ struct FileHeader {
     std::uint16_t page_size {};
 };
 
-/* Every page has a page header, after the file header, but before the tree header, if they are on this page.
- *
- * Page Header Format:
+/* Page Header Format:
  *     Offset  Size  Name
  *    --------------------------
  *     0       8     page_lsn

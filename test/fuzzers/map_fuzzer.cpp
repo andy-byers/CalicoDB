@@ -1,9 +1,12 @@
-/*
- * map_fuzzer.cpp: Checks database consistency with a std::map.
- *
- * The std::map represents the records that are committed to the database. The contents of the std::map and the database should
- * be exactly the same after (a) a transaction has finished, or (b) the database is reopened.
- */
+// Copyright (c) 2022, The CalicoDB Authors. All rights reserved.
+// This source code is licensed under the MIT License, which can be found in
+// LICENSE.md. See AUTHORS.md for contributor names.
+//
+// Checks database consistency with a std::map.
+//
+// The std::map represents the records that are committed to the database. The
+// contents of the std::map and the database should be exactly the same after
+// (a) a transaction has finished, or (b) the database is reopened.
 
 #include "map_fuzzer.h"
 
@@ -66,64 +69,64 @@ auto MapFuzzer::step(const std::uint8_t *&data, std::size_t &size) -> Status
     }
 
     switch (operation_type) {
-    case kPut:
-        key = extract_fuzzer_key(data, size);
-        value = extract_fuzzer_value(data, size);
-        s = m_db->put(key, value);
-        if (s.is_ok()) {
-            if (const auto itr = m_erased.find(key); itr != end(m_erased)) {
-                m_erased.erase(itr);
-            }
-            m_added[key] = value;
-        }
-        reinterpret_cast<DBImpl &>(*m_db).TEST_tables().get(Id {2})->tree->TEST_validate();
-        break;
-    case kErase: {
-        key = extract_fuzzer_key(data, size);
-        auto *cursor = m_db->new_cursor();
-        cursor->seek(key);
-        if (cursor->is_valid()) {
-            s = m_db->erase(cursor->key());
+        case kPut:
+            key = extract_fuzzer_key(data, size);
+            value = extract_fuzzer_value(data, size);
+            s = m_db->put(key, value);
             if (s.is_ok()) {
-                key = cursor->key().to_string();
-                if (const auto itr = m_added.find(key); itr != end(m_added)) {
-                    m_added.erase(itr);
+                if (const auto itr = m_erased.find(key); itr != end(m_erased)) {
+                    m_erased.erase(itr);
                 }
-                m_erased.insert(key);
-            } else if (s.is_not_found()) {
-                s = Status::ok();
+                m_added[key] = value;
             }
+            reinterpret_cast<DBImpl &>(*m_db).TEST_tables().get(Id {2})->tree->TEST_validate();
+            break;
+        case kErase: {
+            key = extract_fuzzer_key(data, size);
+            auto *cursor = m_db->new_cursor();
+            cursor->seek(key);
+            if (cursor->is_valid()) {
+                s = m_db->erase(cursor->key());
+                if (s.is_ok()) {
+                    key = cursor->key().to_string();
+                    if (const auto itr = m_added.find(key); itr != end(m_added)) {
+                        m_added.erase(itr);
+                    }
+                    m_erased.insert(key);
+                } else if (s.is_not_found()) {
+                    s = Status::ok();
+                }
+            }
+            delete cursor;
+            reinterpret_cast<DBImpl &>(*m_db).TEST_tables().get(Id {2})->tree->TEST_validate();
+            break;
         }
-        delete cursor;
-        reinterpret_cast<DBImpl &>(*m_db).TEST_tables().get(Id {2})->tree->TEST_validate();
-        break;
-    }
-    case kVacuum:
-        s = m_db->vacuum();
-        reinterpret_cast<DBImpl &>(*m_db).TEST_tables().get(Id {2})->tree->TEST_validate();
-        break;
-    case kCheckpoint:
-        s = m_db->checkpoint();
-        if (s.is_ok()) {
-            for (const auto &[k, v] : m_added) {
-                m_map[k] = v;
+        case kVacuum:
+            s = m_db->vacuum();
+            reinterpret_cast<DBImpl &>(*m_db).TEST_tables().get(Id {2})->tree->TEST_validate();
+            break;
+        case kCheckpoint:
+            s = m_db->checkpoint();
+            if (s.is_ok()) {
+                for (const auto &[k, v] : m_added) {
+                    m_map[k] = v;
+                }
+                for (const auto &k : m_erased) {
+                    m_map.erase(k);
+                }
+                m_added.clear();
+                m_erased.clear();
+                expect_equal_contents();
             }
-            for (const auto &k : m_erased) {
-                m_map.erase(k);
-            }
+            reinterpret_cast<DBImpl &>(*m_db).TEST_tables().get(Id {2})->tree->TEST_validate();
+            break;
+        default: // kReopen
             m_added.clear();
             m_erased.clear();
-            expect_equal_contents();
-        }
-        reinterpret_cast<DBImpl &>(*m_db).TEST_tables().get(Id {2})->tree->TEST_validate();
-        break;
-    default: // kReopen
-        m_added.clear();
-        m_erased.clear();
-        s = reopen();
-        if (s.is_ok()) {
-            expect_equal_contents();
-        }
+            s = reopen();
+            if (s.is_ok()) {
+                expect_equal_contents();
+            }
     }
     if (!s.is_ok()) {
         m_added.clear();

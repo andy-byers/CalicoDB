@@ -1,3 +1,7 @@
+// Copyright (c) 2022, The CalicoDB Authors. All rights reserved.
+// This source code is licensed under the MIT License, which can be found in
+// LICENSE.md. See AUTHORS.md for contributor names.
+
 #include "pager.h"
 #include "db_impl.h"
 #include "frames.h"
@@ -11,11 +15,11 @@
 namespace calicodb
 {
 
-#define SET_STATUS(s)            \
-    do {                         \
-        if (m_status->is_ok()) { \
-            *m_status = s;       \
-        }                        \
+#define SET_STATUS(s)                  \
+    do {                               \
+        if (m_state->status.is_ok()) { \
+            m_state->status = s;       \
+        }                              \
     } while (0)
 
 static constexpr Id kMaxId {std::numeric_limits<std::size_t>::max()};
@@ -46,16 +50,18 @@ auto Pager::open(const Parameters &param, Pager **out) -> Status
 Pager::Pager(const Parameters &param, Editor &file, AlignedBuffer buffer)
     : m_filename {param.filename},
       m_frames {file, std::move(buffer), param.page_size, param.frame_count},
-      m_is_running {param.is_running},
-      m_status {param.status},
       m_wal {param.wal},
       m_env {param.env},
       m_info_log {param.info_log},
-      m_commit_lsn {param.commit_lsn},
-      m_max_page_id {param.max_page_id}
+      m_state {param.state}
 {
     CDB_EXPECT_NE(m_wal, nullptr);
-    CDB_EXPECT_NE(m_status, nullptr);
+    CDB_EXPECT_NE(m_state, nullptr);
+}
+
+auto Pager::bytes_read() const -> std::size_t
+{
+    return m_frames.bytes_read();
 }
 
 auto Pager::bytes_written() const -> std::size_t
@@ -90,7 +96,7 @@ auto Pager::do_pin_frame(Id pid) -> Status
 
     if (!m_frames.available()) {
         if (!make_frame_available()) {
-            CDB_TRY(*m_status);
+            CDB_TRY(m_state->status);
             m_info_log->logv("out of frames: flushing wal");
             CDB_TRY(m_wal->flush());
             return Status::not_found("out of frames");
@@ -180,7 +186,7 @@ auto Pager::make_frame_available() -> bool
         if (!entry.token) {
             return true;
         }
-        if (*m_is_running) {
+        if (m_state->is_running) {
             return frame.lsn() <= m_wal->flushed_lsn();
         }
         return true;
@@ -212,7 +218,7 @@ auto Pager::make_frame_available() -> bool
 auto Pager::allocate(Page *page) -> Status
 {
     CDB_TRY(acquire(Id::from_index(m_frames.page_count()), page));
-    if (page->id() > *m_max_page_id) {
+    if (page->id() > m_state->max_page_id) {
         upgrade(*page, 0);
     } else {
         // This page already has its full contents in the WAL. This page must have
@@ -222,7 +228,7 @@ auto Pager::allocate(Page *page) -> Status
         m_frames.upgrade(itr->value.index, *page);
         itr->value.token = m_dirty.insert(page->id(), Lsn::null());
     }
-    ++m_max_page_id->value;
+    ++m_state->max_page_id.value;
     return Status::ok();
 }
 
@@ -234,8 +240,8 @@ auto Pager::acquire(Id page_id, Page *page) -> Status
         m_frames.ref(entry.index, *page);
 
         // Write back pages that are too old. This is so that old WAL segments can be removed.
-        if (*m_is_running && entry.token) {
-            const auto should_write = (*entry.token)->record_lsn <= *m_commit_lsn &&
+        if (m_state->is_running && entry.token) {
+            const auto should_write = (*entry.token)->record_lsn <= m_state->commit_lsn &&
                                       read_page_lsn(*page) <= m_wal->flushed_lsn();
             if (should_write) {
                 auto s = m_frames.write_back(entry.index);
@@ -287,15 +293,15 @@ auto Pager::upgrade(Page &page, int important) -> void
 
     // We only write a full image if the WAL does not already contain one for this page. If the page was modified
     // during this transaction, then we already have one written.
-    if (*m_is_running) {
-        if (lsn <= *m_commit_lsn) {
+    if (m_state->is_running) {
+        if (lsn <= m_state->commit_lsn) {
             const auto image = page.view(0, watch_size);
             auto s = m_wal->log_image(page.id(), image, nullptr);
 
             if (s.is_ok()) {
                 auto limit = m_recovery_lsn;
-                if (limit > *m_commit_lsn) { // TODO: Prevent the recovery LSN from getting larger than any of these values.
-                    limit = *m_commit_lsn;
+                if (limit > m_state->commit_lsn) { // TODO: Prevent the recovery LSN from getting larger than any of these values.
+                    limit = m_state->commit_lsn;
                 }
                 s = m_wal->cleanup(limit);
             }
@@ -312,7 +318,7 @@ auto Pager::release(Page page) -> void
     CDB_EXPECT_TRUE(m_cache.contains(page.id()));
     auto [index, token] = m_cache.get(page.id())->value;
 
-    if (page.is_writable() && *m_is_running) {
+    if (page.is_writable() && m_state->is_running) {
         write_page_lsn(page, m_wal->current_lsn());
         auto s = m_wal->log_delta(
             page.id(), page.view(0), page.deltas(), nullptr);

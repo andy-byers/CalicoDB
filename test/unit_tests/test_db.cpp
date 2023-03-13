@@ -1,8 +1,11 @@
+// Copyright (c) 2022, The CalicoDB Authors. All rights reserved.
+// This source code is licensed under the MIT License, which can be found in
+// LICENSE.md. See AUTHORS.md for contributor names.
 
 #include "db_impl.h"
 #include "header.h"
-#include "tree.h"
 #include "tools.h"
+#include "tree.h"
 #include "unit_tests.h"
 #include "wal.h"
 #include <array>
@@ -50,7 +53,14 @@ TEST_F(SetupTests, ReportsInvalidFileHeader)
     FileHeader header;
     Options options;
 
-    ASSERT_TRUE(setup("./test", *env, options, &header).is_invalid_argument());
+    Logger *logger;
+    ASSERT_OK(env->new_logger("./test", &logger));
+    char payload[FileHeader::kSize];
+    header.write(payload);
+    ASSERT_OK(logger->write(Slice {payload, sizeof(payload)}));
+    delete logger;
+
+    ASSERT_TRUE(setup("./test", *env, options, &header).is_corruption());
 }
 
 TEST(LeakTests, DestroysOwnObjects)
@@ -160,11 +170,6 @@ public:
         delete options.info_log;
     }
 
-    [[nodiscard]] static auto db_impl(const DB *db) -> const DBImpl *
-    {
-        return reinterpret_cast<const DBImpl *>(db);
-    }
-
     std::size_t frame_count {64};
     Options options;
 };
@@ -191,17 +196,17 @@ TEST_F(BasicDatabaseTests, StatsAreTracked)
     ASSERT_TRUE(db->get_property("calicodb.stats", &property));
     ASSERT_TRUE(db->get_property("calicodb.tables", &property));
 
-    ASSERT_EQ(db_impl(db)->record_count(), 0);
+    ASSERT_EQ(db_impl(db)->TEST_state().record_count, 0);
     ASSERT_OK(db->put(table, "a", "1"));
-    ASSERT_EQ(db_impl(db)->record_count(), 1);
+    ASSERT_EQ(db_impl(db)->TEST_state().record_count, 1);
     ASSERT_OK(db->put(table, "a", "A"));
-    ASSERT_EQ(db_impl(db)->record_count(), 1);
+    ASSERT_EQ(db_impl(db)->TEST_state().record_count, 1);
     ASSERT_OK(db->put(table, "b", "2"));
-    ASSERT_EQ(db_impl(db)->record_count(), 2);
+    ASSERT_EQ(db_impl(db)->TEST_state().record_count, 2);
     ASSERT_OK(db->erase(table, "a"));
-    ASSERT_EQ(db_impl(db)->record_count(), 1);
+    ASSERT_EQ(db_impl(db)->TEST_state().record_count, 1);
     ASSERT_OK(db->erase(table, "b"));
-    ASSERT_EQ(db_impl(db)->record_count(), 0);
+    ASSERT_EQ(db_impl(db)->TEST_state().record_count, 0);
 
     delete table;
     delete db;
@@ -379,9 +384,9 @@ public:
     [[nodiscard]] auto reopen() -> Status
     {
         delete db;
-        
+
         db = nullptr;
-        
+
         return DB::open(options, "./test", &db);
     }
 
@@ -435,7 +440,7 @@ static auto run_revert_test(TestDatabase &db)
     ASSERT_OK(db.db->checkpoint());
 
     // Hack to make sure the database file is up-to-date.
-    (void)reinterpret_cast<DBImpl *>(db.db)->pager->flush({});
+    (void)const_cast<Pager &>(db_impl(db.db)->TEST_pager()).flush();
 
     add_records(db, 1'000);
     ASSERT_OK(db.reopen());
@@ -487,7 +492,7 @@ TEST_F(DbRevertTests, RevertsVacuum_1)
     ASSERT_OK(db->db->checkpoint());
 
     // Hack to make sure the database file is up-to-date.
-    (void)reinterpret_cast<DBImpl *>(db->db)->pager->flush({});
+    (void)const_cast<Pager &>(db_impl(db->db)->TEST_pager()).flush();
 
     auto uncommitted = add_records(*db, 1'000);
     for (std::size_t i {}; i < 500; ++i) {
@@ -511,7 +516,7 @@ TEST_F(DbRevertTests, RevertsVacuum_2)
     }
     ASSERT_OK(db->db->checkpoint());
 
-    (void)reinterpret_cast<DBImpl *>(db->db)->pager->flush({});
+    (void)const_cast<Pager &>(db_impl(db->db)->TEST_pager()).flush();
 
     add_records(*db, 1'000);
     ASSERT_OK(db->reopen());
@@ -529,7 +534,7 @@ TEST_F(DbRevertTests, RevertsVacuum_3)
     }
     ASSERT_OK(db->db->checkpoint());
 
-    (void)reinterpret_cast<DBImpl *>(db->db)->pager->flush({});
+    (void)const_cast<Pager &>(db_impl(db->db)->TEST_pager()).flush();
 
     auto uncommitted = add_records(*db, 1'000);
     for (std::size_t i {}; i < 500; ++i) {
@@ -563,7 +568,7 @@ TEST_F(DbRecoveryTests, RecoversFirstBatch)
         // Simulate a crash by cloning the database before cleanup has occurred.
         clone.reset(reinterpret_cast<const tools::FakeEnv &>(*env).clone());
 
-        (void)reinterpret_cast<DBImpl *>(db.db)->pager->flush({});
+        (void)const_cast<Pager &>(db_impl(db.db)->TEST_pager()).flush();
     }
     // Create a new database from the cloned data. This database will need to roll the WAL forward to become
     // consistent.
@@ -589,7 +594,7 @@ TEST_F(DbRecoveryTests, RecoversNthBatch)
 
         clone.reset(dynamic_cast<const tools::FakeEnv &>(*env).clone());
 
-        (void)reinterpret_cast<DBImpl *>(db.db)->pager->flush({});
+        (void)const_cast<Pager &>(db_impl(db.db)->TEST_pager()).flush();
     }
     TestDatabase clone_db {*clone};
     expect_contains_records(*clone_db.db, snapshot);
@@ -728,18 +733,18 @@ protected:
         };
 
         switch (GetParam().target) {
-        case ErrorTarget::kDataRead:
-            env->add_interceptor(make_interceptor("./test", tools::Interceptor::kRead));
-            break;
-        case ErrorTarget::kDataWrite:
-            env->add_interceptor(make_interceptor("./test", tools::Interceptor::kWrite));
-            break;
-        case ErrorTarget::kWalRead:
-            env->add_interceptor(make_interceptor("./wal-", tools::Interceptor::kRead));
-            break;
-        case ErrorTarget::kWalWrite:
-            env->add_interceptor(make_interceptor("./wal-", tools::Interceptor::kWrite));
-            break;
+            case ErrorTarget::kDataRead:
+                env->add_interceptor(make_interceptor("./test", tools::Interceptor::kRead));
+                break;
+            case ErrorTarget::kDataWrite:
+                env->add_interceptor(make_interceptor("./test", tools::Interceptor::kWrite));
+                break;
+            case ErrorTarget::kWalRead:
+                env->add_interceptor(make_interceptor("./wal-", tools::Interceptor::kRead));
+                break;
+            case ErrorTarget::kWalWrite:
+                env->add_interceptor(make_interceptor("./wal-", tools::Interceptor::kWrite));
+                break;
         }
     }
 
@@ -780,7 +785,7 @@ TEST_P(DbFatalErrorTests, OperationsAreNotPermittedAfterFatalError)
     delete cursor;
 }
 //
-//TEST_P(DbFatalErrorTests, RecoversFromFatalErrors)
+// TEST_P(DbFatalErrorTests, RecoversFromFatalErrors)
 //{
 //    auto itr = begin(committed);
 //    for (;;) {
@@ -830,7 +835,7 @@ TEST_P(DbFatalErrorTests, RecoversFromVacuumFailure)
 
     std::size_t file_size;
     ASSERT_OK(env->file_size("./test", &file_size));
-    ASSERT_EQ(file_size, reinterpret_cast<const DBImpl *>(db->db)->pager->page_count() * db->options.page_size);
+    ASSERT_EQ(file_size, db_impl(db->db)->TEST_pager().page_count() * db->options.page_size);
 }
 
 INSTANTIATE_TEST_SUITE_P(
@@ -1148,7 +1153,7 @@ protected:
             std::string value;
             ASSERT_OK(db->get(key, &value));
         }
-        ASSERT_EQ(reinterpret_cast<const DBImpl *>(db)->record_count(), keys.size());
+        ASSERT_EQ(db_impl(db)->TEST_state().record_count, keys.size());
     }
 };
 

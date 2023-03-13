@@ -1,3 +1,7 @@
+// Copyright (c) 2022, The CalicoDB Authors. All rights reserved.
+// This source code is licensed under the MIT License, which can be found in
+// LICENSE.md. See AUTHORS.md for contributor names.
+
 #include "wal_writer.h"
 #include "crc.h"
 #include "types.h"
@@ -35,7 +39,7 @@ auto WalWriter::write(Lsn lsn, const Slice &payload) -> Status
         }
 
         // We must have room for the whole header and at least 1 payload byte.
-        write_wal_record_header(rest, lhs);
+        write_wal_record_header(rest.data(), lhs);
         rest.advance(WalRecordHeader::kSize);
         std::memcpy(rest.data(), data.data(), lhs.size);
 

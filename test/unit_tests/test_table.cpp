@@ -1,20 +1,14 @@
+// Copyright (c) 2022, The CalicoDB Authors. All rights reserved.
+// This source code is licensed under the MIT License, which can be found in
+// LICENSE.md. See AUTHORS.md for contributor names.
 
 #include "calicodb/db.h"
 #include "db_impl.h"
 #include "logging.h"
 #include "unit_tests.h"
 
-namespace calicodb {
-
-static auto db_impl(DB *db) -> DBImpl *
+namespace calicodb
 {
-    return reinterpret_cast<DBImpl *>(db);
-}
-
-static auto table_impl(Table *table) -> TableImpl *
-{
-    return reinterpret_cast<TableImpl *>(table);
-}
 
 class DefaultTableTests
     : public InMemoryTest,
@@ -59,13 +53,12 @@ TEST_F(DefaultTableTests, SpecialTableBehavior)
 
 TEST_F(DefaultTableTests, RootAndDefaultTablesAreAlwaysOpen)
 {
-    // Root is not listed with the other tables.
-    ASSERT_NE(db_impl(db)->TEST_tables().get(Id::root()), nullptr);
+    ASSERT_NE(db_impl(db)->TEST_tables().get(Id {1}), nullptr);
+    ASSERT_NE(db_impl(db)->TEST_tables().get(Id {2}), nullptr);
 
     std::vector<std::string> names;
     ASSERT_OK(db->list_tables(&names));
-    ASSERT_EQ(names.size(), 1);
-    ASSERT_EQ(names[0], "default");
+    ASSERT_TRUE(names.empty());
 
     std::string v;
     ASSERT_OK(db->put("k", "v"));
@@ -145,12 +138,12 @@ TEST_F(TableTests, TablesMustBeUnique)
 
 TEST_F(TableTests, VacuumDroppedTable)
 {
-    ASSERT_EQ(db_impl(db)->pager->page_count(), 4);
+    ASSERT_EQ(db_impl(db)->TEST_pager().page_count(), 4);
     ASSERT_OK(db->drop_table(table));
     table = nullptr;
 
     ASSERT_OK(db->vacuum());
-    ASSERT_EQ(db_impl(db)->pager->page_count(), 3);
+    ASSERT_EQ(db_impl(db)->TEST_pager().page_count(), 3);
 }
 
 TEST_F(TableTests, TableCreationIsPartOfTransaction)
@@ -161,7 +154,6 @@ TEST_F(TableTests, TableCreationIsPartOfTransaction)
     ASSERT_NE(db_impl(db)->TEST_tables().get(Id {2}), nullptr);
     ASSERT_EQ(db_impl(db)->TEST_tables().get(Id {3}), nullptr);
 }
-
 
 TEST_F(TableTests, TableDestructionIsPartOfTransaction)
 {
@@ -259,7 +251,7 @@ TEST_F(TwoTableTests, DropTable)
     ASSERT_EQ(db_impl(db)->TEST_tables().get(Id {4}), nullptr) << "table_2 (> 1 page) was not removed";
 
     ASSERT_OK(db->vacuum());
-    ASSERT_EQ(db_impl(db)->pager->page_count(), 3);
+    ASSERT_EQ(db_impl(db)->TEST_pager().page_count(), 3);
 }
 
 TEST_F(TwoTableTests, TablesCreatedBeforeCheckpointAreRemembered)
@@ -269,10 +261,9 @@ TEST_F(TwoTableTests, TablesCreatedBeforeCheckpointAreRemembered)
 
     std::vector<std::string> tables;
     ASSERT_OK(db->list_tables(&tables));
-    ASSERT_EQ(tables.size(), 3);
-    ASSERT_EQ(tables[0], "default");
-    ASSERT_EQ(tables[1], "table");
-    ASSERT_EQ(tables[2], "table_2");
+    ASSERT_EQ(tables.size(), 2);
+    ASSERT_EQ(tables[0], "table");
+    ASSERT_EQ(tables[1], "table_2");
 }
 
 TEST_F(TwoTableTests, TablesCreatedAfterCheckpointAreForgotten)
@@ -281,8 +272,7 @@ TEST_F(TwoTableTests, TablesCreatedAfterCheckpointAreForgotten)
 
     std::vector<std::string> tables;
     ASSERT_OK(db->list_tables(&tables));
-    ASSERT_EQ(tables.size(), 1);
-    ASSERT_EQ(tables.front(), "default");
+    ASSERT_TRUE(tables.empty());
 }
 
 TEST_F(TwoTableTests, FirstAvailableTableIdIsUsed)
@@ -303,22 +293,20 @@ TEST_F(TwoTableTests, FindExistingTables)
     ASSERT_OK(db->list_tables(&table_names));
 
     // Table names should be in order, since they came from a sequential scan.
-    ASSERT_EQ(table_names.size(), 3);
-    ASSERT_EQ(table_names[0], "default");
-    ASSERT_EQ(table_names[1], "table");
-    ASSERT_EQ(table_names[2], "table_2");
+    ASSERT_EQ(table_names.size(), 2);
+    ASSERT_EQ(table_names[0], "table");
+    ASSERT_EQ(table_names[1], "table_2");
 
     ASSERT_OK(db->drop_table(table));
     table = table_1 = nullptr;
     ASSERT_OK(db->list_tables(&table_names));
-    ASSERT_EQ(table_names.size(), 2);
-    ASSERT_EQ(table_names[0], "default");
-    ASSERT_EQ(table_names[1], "table_2");
+    ASSERT_EQ(table_names.size(), 1);
+    ASSERT_EQ(table_names[0], "table_2");
 
     ASSERT_OK(db->drop_table(table_2));
     table_2 = nullptr;
     ASSERT_OK(db->list_tables(&table_names));
-    ASSERT_EQ(table_names.size(), 1);
-    ASSERT_EQ(table_names[0], "default");}
+    ASSERT_TRUE(table_names.empty());
+}
 
 } // namespace calicodb

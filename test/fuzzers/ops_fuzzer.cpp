@@ -1,6 +1,8 @@
-/*
- * ops_fuzzer.cpp: Runs normal database operations.
- */
+// Copyright (c) 2022, The CalicoDB Authors. All rights reserved.
+// This source code is licensed under the MIT License, which can be found in
+// LICENSE.md. See AUTHORS.md for contributor names.
+//
+// Runs normal database operations.
 
 #include "ops_fuzzer.h"
 
@@ -44,63 +46,63 @@ auto OpsFuzzer::step(const std::uint8_t *&data, std::size_t &size) -> Status
         operation_type = kErase;
     }
     switch (operation_type) {
-    case kGet:
-        s = m_db->get(extract_fuzzer_key(data, size), &value);
-        if (s.is_not_found()) {
-            s = Status::ok();
-        }
-        CDB_TRY(s);
-        break;
-    case kPut:
-        key = extract_fuzzer_key(data, size);
-        CDB_TRY(m_db->put(key, extract_fuzzer_value(data, size)));
-        break;
-    case kErase:
-        key = extract_fuzzer_key(data, size);
-        cursor.reset(m_db->new_cursor());
-        cursor->seek(key);
-        if (cursor->is_valid()) {
-            s = m_db->erase(cursor->key());
+        case kGet:
+            s = m_db->get(extract_fuzzer_key(data, size), &value);
             if (s.is_not_found()) {
                 s = Status::ok();
             }
-        }
-        CDB_TRY(s);
-        break;
-    case kSeekIter:
-        key = extract_fuzzer_key(data, size);
-        cursor.reset(m_db->new_cursor());
-        cursor->seek(key);
-        while (cursor->is_valid()) {
-            if (key.front() & 1) {
+            CDB_TRY(s);
+            break;
+        case kPut:
+            key = extract_fuzzer_key(data, size);
+            CDB_TRY(m_db->put(key, extract_fuzzer_value(data, size)));
+            break;
+        case kErase:
+            key = extract_fuzzer_key(data, size);
+            cursor.reset(m_db->new_cursor());
+            cursor->seek(key);
+            if (cursor->is_valid()) {
+                s = m_db->erase(cursor->key());
+                if (s.is_not_found()) {
+                    s = Status::ok();
+                }
+            }
+            CDB_TRY(s);
+            break;
+        case kSeekIter:
+            key = extract_fuzzer_key(data, size);
+            cursor.reset(m_db->new_cursor());
+            cursor->seek(key);
+            while (cursor->is_valid()) {
+                if (key.front() & 1) {
+                    cursor->next();
+                } else {
+                    cursor->previous();
+                }
+            }
+            break;
+        case kIterForward:
+            cursor.reset(m_db->new_cursor());
+            cursor->seek_first();
+            while (cursor->is_valid()) {
                 cursor->next();
-            } else {
+            }
+            break;
+        case kIterReverse:
+            cursor.reset(m_db->new_cursor());
+            cursor->seek_last();
+            while (cursor->is_valid()) {
                 cursor->previous();
             }
-        }
-        break;
-    case kIterForward:
-        cursor.reset(m_db->new_cursor());
-        cursor->seek_first();
-        while (cursor->is_valid()) {
-            cursor->next();
-        }
-        break;
-    case kIterReverse:
-        cursor.reset(m_db->new_cursor());
-        cursor->seek_last();
-        while (cursor->is_valid()) {
-            cursor->previous();
-        }
-        break;
-    case kVacuum:
-        CDB_TRY(m_db->vacuum());
-        break;
-    case kCheckpoint:
-        CDB_TRY(m_db->checkpoint());
-        break;
-    default: // kReopen
-        CDB_TRY(reopen());
+            break;
+        case kVacuum:
+            CDB_TRY(m_db->vacuum());
+            break;
+        case kCheckpoint:
+            CDB_TRY(m_db->checkpoint());
+            break;
+        default: // kReopen
+            CDB_TRY(reopen());
     }
     return m_db->status();
 }

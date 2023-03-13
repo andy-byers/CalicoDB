@@ -1,3 +1,6 @@
+// Copyright (c) 2022, The CalicoDB Authors. All rights reserved.
+// This source code is licensed under the MIT License, which can be found in
+// LICENSE.md. See AUTHORS.md for contributor names.
 
 #include "tools.h"
 #include <benchmark/benchmark.h>
@@ -8,30 +11,20 @@ enum AccessType : int64_t {
     kRandom,
 };
 
-class Benchmark final {
+class Benchmark final
+{
     static constexpr auto kFilename = "__bench_db__";
     static constexpr std::size_t kKeyLength {16};
-    static constexpr std::size_t kValueLength {100};
     static constexpr std::size_t kNumRecords {10'000};
     static constexpr std::size_t kCheckpointInterval {1'000};
 
-    std::size_t m_counter {};
-    calicodb::tools::RandomGenerator m_random {4'194'304};
-    calicodb::Options m_options;
-    calicodb::Cursor *m_cursor {};
-    calicodb::DB *m_db {};
-
-    auto use_cursor() const -> void
-    {
-        CHECK_TRUE(m_cursor->is_valid());
-        auto result_key = m_cursor->key();
-        auto result_value = m_cursor->value();
-        benchmark::DoNotOptimize(result_key);
-        benchmark::DoNotOptimize(result_value);
-    }
-
 public:
-    explicit Benchmark()
+    struct Parameters {
+        std::size_t value_length;
+    };
+
+    explicit Benchmark(const Parameters &param = {.value_length = 100})
+        : m_param {param}
     {
         m_options.page_size = 0x2000;
         m_options.cache_size = 4'194'304;
@@ -63,10 +56,8 @@ public:
     {
         state.PauseTiming();
         const auto key = calicodb::tools::integral_key<kKeyLength>(
-            state.range(0) == kSequential
-                ? m_counter
-                : m_random.Next(kNumRecords));
-        const auto value = m_random.Generate(kValueLength);
+            state.range(0) == kSequential ? m_counter : m_random.Next(kNumRecords));
+        const auto value = m_random.Generate(m_param.value_length);
         state.ResumeTiming();
 
         CHECK_OK(m_db->put(key, value));
@@ -103,9 +94,8 @@ public:
     {
         state.PauseTiming();
         const auto key = calicodb::tools::integral_key<kKeyLength>(
-            state.range(0) == kSequential
-                ? m_counter++ % kNumRecords
-                : m_random.Next(kNumRecords - 1));
+            state.range(0) == kSequential ? m_counter++ % kNumRecords
+                                          : m_random.Next(kNumRecords - 1));
         state.ResumeTiming();
 
         m_cursor->seek(key);
@@ -117,17 +107,35 @@ public:
         for (std::size_t i {}; i < kNumRecords; ++i) {
             CHECK_OK(m_db->put(
                 calicodb::tools::integral_key<kKeyLength>(i),
-                m_random.Generate(kValueLength)));
+                m_random.Generate(m_param.value_length)));
         }
         CHECK_OK(m_db->checkpoint());
         m_cursor = m_db->new_cursor();
     }
+
+private:
+    auto use_cursor() const -> void
+    {
+        CHECK_TRUE(m_cursor->is_valid());
+        auto result_key = m_cursor->key();
+        auto result_value = m_cursor->value();
+        benchmark::DoNotOptimize(result_key);
+        benchmark::DoNotOptimize(result_value);
+        benchmark::ClobberMemory();
+    }
+
+    Parameters m_param;
+    std::size_t m_counter {};
+    calicodb::tools::RandomGenerator m_random {4'194'304};
+    calicodb::Options m_options;
+    calicodb::Cursor *m_cursor {};
+    calicodb::DB *m_db {};
 };
 
 static auto BM_Writes(benchmark::State &state) -> void
 {
     Benchmark bench;
-    for (auto _: state) {
+    for (auto _ : state) {
         bench.write(state);
     }
 }
@@ -139,7 +147,7 @@ static auto BM_Reads(benchmark::State &state) -> void
 {
     Benchmark bench;
     bench.setup_for_reads();
-    for (auto _: state) {
+    for (auto _ : state) {
         bench.read(state);
     }
 }
@@ -151,7 +159,7 @@ static auto BM_IterateForward(benchmark::State &state) -> void
 {
     Benchmark bench;
     bench.setup_for_reads();
-    for (auto _: state) {
+    for (auto _ : state) {
         bench.step_forward(state);
     }
 }
@@ -161,7 +169,7 @@ static auto BM_IterateBackward(benchmark::State &state) -> void
 {
     Benchmark bench;
     bench.setup_for_reads();
-    for (auto _: state) {
+    for (auto _ : state) {
         bench.step_backward(state);
     }
 }
@@ -171,11 +179,34 @@ static auto BM_Seek(benchmark::State &state) -> void
 {
     Benchmark bench;
     bench.setup_for_reads();
-    for (auto _: state) {
+    for (auto _ : state) {
         bench.seek(state);
     }
 }
 BENCHMARK(BM_Seek)
+    ->Arg(kSequential)
+    ->Arg(kRandom);
+
+static auto BM_Writes100K(benchmark::State &state) -> void
+{
+    Benchmark bench {{.value_length = 100'000}};
+    for (auto _ : state) {
+        bench.write(state);
+    }
+}
+BENCHMARK(BM_Writes100K)
+    ->Arg(kSequential)
+    ->Arg(kRandom);
+
+static auto BM_Reads100K(benchmark::State &state) -> void
+{
+    Benchmark bench {{.value_length = 100'000}};
+    bench.setup_for_reads();
+    for (auto _ : state) {
+        bench.read(state);
+    }
+}
+BENCHMARK(BM_Reads100K)
     ->Arg(kSequential)
     ->Arg(kRandom);
 

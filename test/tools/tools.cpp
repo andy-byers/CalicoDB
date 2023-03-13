@@ -1,3 +1,6 @@
+// Copyright (c) 2022, The CalicoDB Authors. All rights reserved.
+// This source code is licensed under the MIT License, which can be found in
+// LICENSE.md. See AUTHORS.md for contributor names.
 
 #include "tools.h"
 #include "env_posix.h"
@@ -86,7 +89,7 @@ auto FakeEnv::new_reader(const std::string &path, Reader **out) -> Status
         *out = new FakeReader {path, *this, mem};
         return Status::ok();
     }
-    return Status::not_found("cannot put file");
+    return Status::not_found("cannot open file");
 }
 
 auto FakeEnv::new_editor(const std::string &path, Editor **out) -> Status
@@ -308,13 +311,13 @@ auto FaultInjectionEnv::rename_file(const std::string &old_path, const std::stri
 
 auto FaultInjectionEnv::file_size(const std::string &path, std::size_t *out) const -> Status
 {
-//    TRY_INTERCEPT_FROM(*this, Interceptor::FileSize, path);
+    //    TRY_INTERCEPT_FROM(*this, Interceptor::FileSize, path);
     return FakeEnv::file_size(path, out);
 }
 
 auto FaultInjectionEnv::file_exists(const std::string &path) const -> Status
 {
-//    TRY_INTERCEPT_FROM(*this, Interceptor::Exists, path);
+    //    TRY_INTERCEPT_FROM(*this, Interceptor::Exists, path);
     return FakeEnv::file_exists(path);
 }
 
@@ -364,20 +367,20 @@ auto print_references(Pager &pager) -> void
         PointerMap::Entry entry;
         CHECK_OK(PointerMap::read_entry(pager, page_id, &entry));
         switch (entry.type) {
-        case PointerMap::kTreeNode:
-            std::cerr << "node";
-            break;
-        case PointerMap::kTreeRoot:
-            break;
-        case PointerMap::kFreelistLink:
-            std::cerr << "freelist link";
-            break;
-        case PointerMap::kOverflowHead:
-            std::cerr << "overflow head";
-            break;
-        case PointerMap::kOverflowLink:
-            std::cerr << "overflow link";
-            break;
+            case PointerMap::kTreeNode:
+                std::cerr << "node";
+                break;
+            case PointerMap::kTreeRoot:
+                break;
+            case PointerMap::kFreelistLink:
+                std::cerr << "freelist link";
+                break;
+            case PointerMap::kOverflowHead:
+                std::cerr << "overflow head";
+                break;
+            case PointerMap::kOverflowLink:
+                std::cerr << "overflow link";
+                break;
         }
         if (entry.type == PointerMap::kTreeRoot) {
             std::cerr << "root for table " << entry.back_ptr.value << '\n';
@@ -403,7 +406,7 @@ auto print_wals(Env &env, std::size_t page_size, const std::string &prefix) -> v
             CHECK_OK(env.new_reader(name, &file));
             WalReader reader {*file, tail_buffer};
             std::cerr << "Start of segment " << name << '\n';
-            for (; ; ) {
+            for (;;) {
                 Span payload {data_buffer};
                 auto s = reader.read(payload);
                 if (s.is_not_found()) {
@@ -439,4 +442,4 @@ auto print_wals(Env &env, std::size_t page_size, const std::string &prefix) -> v
 
 #undef TRY_INTERCEPT_FROM
 
-} // namespace calicodb::Tools
+} // namespace calicodb::tools

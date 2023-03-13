@@ -1,3 +1,7 @@
+// Copyright (c) 2022, The CalicoDB Authors. All rights reserved.
+// This source code is licensed under the MIT License, which can be found in
+// LICENSE.md. See AUTHORS.md for contributor names.
+
 #ifndef CALICODB_DB_IMPL_H
 #define CALICODB_DB_IMPL_H
 
@@ -108,12 +112,11 @@ public:
     using DB::erase;
     [[nodiscard]] auto erase(Table *table, const Slice &key) -> Status override;
 
-    [[nodiscard]] auto record_count() const -> std::size_t;
+    [[nodiscard]] auto TEST_wal() const -> const WriteAheadLog &;
+    [[nodiscard]] auto TEST_pager() const -> const Pager &;
     [[nodiscard]] auto TEST_tables() const -> const TableSet &;
+    [[nodiscard]] auto TEST_state() const -> DBState;
     auto TEST_validate() const -> void;
-
-    WriteAheadLog *wal {};
-    Pager *pager {};
 
 private:
     [[nodiscard]] auto remove_empty_table(const std::string &name, TableState &state) -> Status;
@@ -139,12 +142,10 @@ private:
     std::string m_wal_prefix;
     Env *m_env {};
     InfoLogger *m_info_log {};
-    Id m_max_page_id {};
-    Lsn m_commit_lsn;
-    Id m_freelist_head;
+    WriteAheadLog *wal {};
+    Pager *pager {};
     bool m_owns_env {};
     bool m_owns_info_log {};
-    bool m_is_running {};
 };
 
 auto setup(const std::string &, Env &, const Options &, FileHeader *state) -> Status;

@@ -1,6 +1,6 @@
-/*
- * Slice objects based off of https://github.com/google/leveldb/blob/main/include/leveldb/slice.h.
- */
+// Copyright (c) 2022, The CalicoDB Authors. All rights reserved.
+// This source code is licensed under the MIT License, which can be found in
+// LICENSE.md. See AUTHORS.md for contributor names.
 
 #ifndef CALICODB_SLICE_H
 #define CALICODB_SLICE_H

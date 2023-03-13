@@ -1,3 +1,6 @@
+// Copyright (c) 2022, The CalicoDB Authors. All rights reserved.
+// This source code is licensed under the MIT License, which can be found in
+// LICENSE.md. See AUTHORS.md for contributor names.
 
 #include "calicodb/calicodb.h"
 #include "db_impl.h"
@@ -12,14 +15,10 @@ auto DB::open(const Options &options, const std::string &filename, DB **db) -> S
     if (filename.empty()) {
         return Status::invalid_argument("path is empty");
     }
-    auto sanitized = options;
-    if (sanitized.cache_size == 0) {
-        sanitized.cache_size = options.page_size * 64;
-    }
-
     const auto [dir, base] = split_path(filename);
     const auto clean_filename = join_paths(dir, base);
 
+    auto sanitized = options;
     if (sanitized.wal_prefix.empty()) {
         sanitized.wal_prefix = clean_filename + kDefaultWalSuffix;
     }

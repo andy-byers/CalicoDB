@@ -1,6 +1,7 @@
-/*
- * CalicoDB storage environment. The interface is based off of https://github.com/google/leveldb/blob/main/include/leveldb/env.h.
- */
+// Copyright (c) 2022, The CalicoDB Authors. All rights reserved.
+// This source code is licensed under the MIT License, which can be found in
+// LICENSE.md. See AUTHORS.md for contributor names.
+
 #ifndef CALICODB_ENV_H
 #define CALICODB_ENV_H
 
@@ -13,6 +14,7 @@ namespace calicodb
 class Slice;
 class Status;
 
+// Representation of a read-only random-access file.
 class Reader
 {
 public:
@@ -20,6 +22,7 @@ public:
     [[nodiscard]] virtual auto read(char *out, std::size_t *size, std::size_t offset) -> Status = 0;
 };
 
+// Representation of a random-access file.
 class Editor
 {
 public:
@@ -29,6 +32,7 @@ public:
     [[nodiscard]] virtual auto sync() -> Status = 0;
 };
 
+// Representation of a write-only append-only file.
 class Logger
 {
 public:
@@ -37,6 +41,7 @@ public:
     [[nodiscard]] virtual auto sync() -> Status = 0;
 };
 
+// Construct for logging information about the program.
 class InfoLogger
 {
 public:
@@ -44,6 +49,10 @@ public:
     virtual auto logv(const char *fmt, ...) -> void = 0;
 };
 
+// CalicoDB storage environment.
+//
+// Performs platform-specific filesystem manipulations and manages allocation of I/O
+// helper objects (Reader, Editor, etc.).
 class Env
 {
 public:

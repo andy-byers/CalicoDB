@@ -1,3 +1,7 @@
+// Copyright (c) 2022, The CalicoDB Authors. All rights reserved.
+// This source code is licensed under the MIT License, which can be found in
+// LICENSE.md. See AUTHORS.md for contributor names.
+
 #ifndef CALICODB_FRAMES_H
 #define CALICODB_FRAMES_H
 
@@ -18,8 +22,7 @@ class Pager;
 class Editor;
 class Env;
 
-struct Frame
-{
+struct Frame {
     explicit Frame(char *buffer);
 
     [[nodiscard]] auto lsn() const -> Id;
@@ -77,6 +80,11 @@ public:
         return m_frames[index];
     }
 
+    [[nodiscard]] auto bytes_read() const -> std::size_t
+    {
+        return m_bytes_read;
+    }
+
     [[nodiscard]] auto bytes_written() const -> std::size_t
     {
         return m_bytes_written;
@@ -96,7 +104,9 @@ private:
     std::size_t m_page_count {};
     std::size_t m_page_size {};
     std::size_t m_ref_sum {};
-    std::size_t m_bytes_written {};
+
+    mutable std::size_t m_bytes_read {};
+    mutable std::size_t m_bytes_written {};
 };
 
 } // namespace calicodb
