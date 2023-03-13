@@ -1,6 +1,6 @@
 // Copyright (c) 2022, The CalicoDB Authors. All rights reserved.
 // This source code is licensed under the MIT License, which can be found in
-// LICENSE.md. See AUTHORS.md for contributor names.
+// LICENSE.md. See AUTHORS.md for a list of contributor names.
 
 #include "wal.h"
 #include "env_posix.h"
@@ -29,7 +29,7 @@ auto WriteAheadLog::open(const Parameters &param, WriteAheadLog **out) -> Status
 {
     const auto [dir, base] = split_path(param.prefix);
     std::vector<std::string> possible_segments;
-    CDB_TRY(param.env->get_children(dir, &possible_segments));
+    CDB_TRY(param.env->get_children(dir, possible_segments));
 
     std::vector<Id> segments;
     for (auto &name : possible_segments) {
@@ -191,7 +191,7 @@ auto WriteAheadLog::open_writer() -> Status
     ++id.value;
 
     // TODO: Should we fsync() the containing directory here? This is a new file.
-    CDB_TRY(m_env->new_logger(encode_segment_name(m_prefix, id), &m_file));
+    CDB_TRY(m_env->new_logger(encode_segment_name(m_prefix, id), m_file));
     m_writer = new WalWriter {*m_file, m_tail_buffer};
     return Status::ok();
 }

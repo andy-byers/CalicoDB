@@ -1,6 +1,6 @@
 // Copyright (c) 2022, The CalicoDB Authors. All rights reserved.
 // This source code is licensed under the MIT License, which can be found in
-// LICENSE.md. See AUTHORS.md for contributor names.
+// LICENSE.md. See AUTHORS.md for a list of contributor names.
 
 #include "frames.h"
 #include "header.h"
@@ -550,7 +550,7 @@ public:
     explicit FrameManagerTests()
     {
         Editor *file;
-        EXPECT_OK(env->new_editor("./test", &file));
+        EXPECT_OK(env->new_editor("./test", file));
 
         AlignedBuffer buffer {0x200 * 8, 0x200};
 

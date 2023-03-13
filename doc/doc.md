@@ -82,7 +82,7 @@ const calicodb::Options options {
 
 // Create or open a database at "/tmp/cats".
 calicodb::DB *db;
-calicodb::Status s = calicodb::DB::open(options, "/tmp/cats", &db);
+calicodb::Status s = calicodb::DB::open(options, "/tmp/cats", db);
 
 // Handle failure. s.to_string() provides a string representation of the status.
 if (!s.is_ok()) {
@@ -133,8 +133,11 @@ if (s.is_ok()) {
 
 ```C++
 // Query a value by key. This example uses the same table from the last section.
+// Note that the "value" parameter is a pointer, indicating that it is optional.
+// If omitted, the DB will check if the key "lilly" exists, without attempting
+// to determine its value.
 std::string value;
-calicodb::Status s = db->get("lilly", value);
+calicodb::Status s = db->get("lilly", &value);
 if (s.is_ok()) {
     // value is populated with the record's value.
 } else if (s.is_not_found()) {
@@ -206,18 +209,18 @@ calicodb::TableOptions table_options {
 
 // Open or create a table.
 calicodb::Table *table_1, *table_2;
-calicodb::Status s = db->create_table(table_options, "name_1", &table_1);
+calicodb::Status s = db->create_table(table_options, "name_1", table_1);
 if (s.is_ok()) {
     // "table_1" contains a heap-allocated table handle.
 }
 
 // Now, "table_1" can be passed as the first parameter to DB methods that access or modify data. Those calls
 // will be directed to the table represented by "table_1", rather than the default table.
-s = db->put(table_1, "key", "value");
+s = db->put(*table_1, "key", "value");
 assert(s.is_ok());
 
 // Any number of tables may be open at the same time, however, each table can only have 1 handle in existence.
-s = db->create_table(table_options, "name_2", &table_2);
+s = db->create_table(table_options, "name_2", table_2);
 assert(s.is_ok());
 
 // Tables should be closed when they are no longer needed.
@@ -225,13 +228,13 @@ s = db->close_table(table_1);
 assert(s.is_ok());
 
 // Tables can also be dropped, which will erase their records and remove them from the table list. Note that
-// close_table() and drop_table() free the heap-allocated resource, but do not null-out the pointer, so one
-// must be careful not to close or drop a table handle more than once (unless it is first set to nullptr).
+// close_table() and drop_table() take ownership of the heap-allocated table handle, as well as NULL-out the
+// pointer. Calling close_table() or drop_table() on a nullptr is a NOOP.
 s = db->drop_table(table_2);
 assert(s.is_ok());
 
 std::vector<std::string> tables;
-s = db->list_tables(&tables);
+s = db->list_tables(tables);
 if (s.is_ok()) {
     // "tables" contains the name of each table, in unspecified order. The default table is not included.
 }
@@ -263,12 +266,13 @@ if (s.is_ok()) {
 ### Database properties
 
 ```C++
-std::string prop;
-bool exists;
-
 // Database properties are made available as strings.
-exists = db->get_property("calicodb.tables", prop);
-exists = db->get_property("calicodb.stats", prop);
+std::string prop;
+bool exists = db->get_property("calicodb.tables", &prop);
+
+// Passing nullptr for the property value causes get_property() to perform a simple existence check, 
+// without attempting to populate the property value string.
+exists = db->get_property("calicodb.stats", nullptr);
 ```
 
 ### Closing a database 
@@ -285,7 +289,8 @@ delete db;
 ### Destroying a database
 
 ```C++
-if (const auto s = calicodb::DB::destroy(options, "/tmp/cats"); s.is_ok()) {
+calicodb::Status s = calicodb::DB::destroy(options, "/tmp/cats");
+if (s.is_ok()) {
     // Database has been destroyed.
 } else if (s.is_not_found()) {
     // The database does not exist.

@@ -1,10 +1,11 @@
 // Copyright (c) 2022, The CalicoDB Authors. All rights reserved.
 // This source code is licensed under the MIT License, which can be found in
-// LICENSE.md. See AUTHORS.md for contributor names.
+// LICENSE.md. See AUTHORS.md for a list of contributor names.
 //
 // Runs normal database operations.
 
 #include "ops_fuzzer.h"
+#include "db_impl.h"
 
 namespace calicodb
 {
@@ -33,7 +34,7 @@ auto OpsFuzzer::step(const std::uint8_t *&data, std::size_t &size) -> Status
 {
     CHECK_TRUE(size >= 2);
 
-    const auto record_count = reinterpret_cast<const DBImpl *>(m_db)->record_count();
+    const auto record_count = reinterpret_cast<const DBImpl *>(m_db)->TEST_state().record_count;
     auto operation_type = static_cast<OperationType>(*data++ % OperationType::kOpCount);
     --size;
 

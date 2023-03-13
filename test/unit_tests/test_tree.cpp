@@ -1,6 +1,6 @@
 // Copyright (c) 2022, The CalicoDB Authors. All rights reserved.
 // This source code is licensed under the MIT License, which can be found in
-// LICENSE.md. See AUTHORS.md for contributor names.
+// LICENSE.md. See AUTHORS.md for a list of contributor names.
 
 #include "tree.h"
 #include "unit_tests.h"
@@ -26,7 +26,7 @@ static constexpr std::size_t kInitialRecordCount {100};
 //     Freelist freelist {*pager, &freelist_head};
 //
 //     Node node;
-//     ASSERT_OK(NodeManager::allocate(*pager, freelist, &node, scratch.data(), true));
+//     ASSERT_OK(NodeManager::allocate(*pager, freelist, node, scratch.data(), true));
 //
 //     node.insert_slot(0, 2);
 //     node.insert_slot(1, 4);
@@ -67,14 +67,14 @@ static constexpr std::size_t kInitialRecordCount {100};
 //         freelist = std::make_unique<Freelist>(*pager, &freelist_head);
 //
 //         Node root;
-//         ASSERT_OK(NodeManager::allocate(*pager, *freelist, &root, node_scratch.data(), true));
+//         ASSERT_OK(NodeManager::allocate(*pager, *freelist, &root, node_scratch, true));
 //         NodeManager::release(*pager, std::move(root));
 //     }
 //
 //     auto acquire_node(Id page_id, bool writable = false)
 //     {
 //         Node node;
-//         EXPECT_OK(NodeManager::acquire(*pager, page_id, &node, node_scratch.data(), writable));
+//         EXPECT_OK(NodeManager::acquire(*pager, page_id, node, node_scratch, writable));
 //         return node;
 //     }
 //
@@ -347,7 +347,7 @@ public:
     [[nodiscard]] auto get_node(bool is_external) -> Node
     {
         Node node;
-        EXPECT_OK(NodeManager::allocate(*pager, freelist, &node, node_scratch.data(), is_external));
+        EXPECT_OK(NodeManager::allocate(*pager, freelist, node, node_scratch, is_external));
         return node;
     }
 
@@ -1040,9 +1040,9 @@ TEST_P(PointerMapTests, ReadsAndWritesEntries)
     ASSERT_OK(PointerMap::write_entry(*pager, Id {5}, PointerMap::Entry {Id {55}, PointerMap::kOverflowLink}));
 
     PointerMap::Entry entry_1, entry_2, entry_3;
-    ASSERT_OK(PointerMap::read_entry(*pager, Id {3}, &entry_1));
-    ASSERT_OK(PointerMap::read_entry(*pager, Id {4}, &entry_2));
-    ASSERT_OK(PointerMap::read_entry(*pager, Id {5}, &entry_3));
+    ASSERT_OK(PointerMap::read_entry(*pager, Id {3}, entry_1));
+    ASSERT_OK(PointerMap::read_entry(*pager, Id {4}, entry_2));
+    ASSERT_OK(PointerMap::read_entry(*pager, Id {5}, entry_3));
 
     ASSERT_EQ(entry_1.back_ptr.value, 33);
     ASSERT_EQ(entry_2.back_ptr.value, 44);
@@ -1072,7 +1072,7 @@ TEST_P(PointerMapTests, PointerMapCanFitAllPointers)
         if (i != map_size()) {
             const Id id {i + 3};
             PointerMap::Entry entry;
-            ASSERT_OK(PointerMap::read_entry(*pager, id, &entry));
+            ASSERT_OK(PointerMap::read_entry(*pager, id, entry));
             ASSERT_EQ(entry.back_ptr.value, id.value);
             ASSERT_EQ(entry.type, PointerMap::kTreeNode);
         }
@@ -1132,14 +1132,14 @@ public:
     auto acquire_node(Id pid, bool is_writable = false)
     {
         Node node;
-        EXPECT_OK(NodeManager::acquire(*pager, pid, &node, node_scratch.data(), is_writable));
+        EXPECT_OK(NodeManager::acquire(*pager, pid, node, node_scratch, is_writable));
         return node;
     }
 
     auto allocate_node(bool is_external)
     {
         Node node;
-        EXPECT_OK(NodeManager::allocate(*pager, *freelist, &node, node_scratch.data(), is_external));
+        EXPECT_OK(NodeManager::allocate(*pager, *freelist, node, node_scratch, is_external));
         return node;
     }
 
@@ -1244,15 +1244,15 @@ TEST_P(VacuumTests, FreelistRegistersBackPointers)
     ASSERT_OK(freelist->push(std::move(node_3.page)));
 
     PointerMap::Entry entry;
-    ASSERT_OK(PointerMap::read_entry(*pager, Id {5}, &entry));
+    ASSERT_OK(PointerMap::read_entry(*pager, Id {5}, entry));
     ASSERT_EQ(entry.type, PointerMap::kFreelistLink);
     ASSERT_EQ(entry.back_ptr, Id {4});
 
-    ASSERT_OK(PointerMap::read_entry(*pager, Id {4}, &entry));
+    ASSERT_OK(PointerMap::read_entry(*pager, Id {4}, entry));
     ASSERT_EQ(entry.type, PointerMap::kFreelistLink);
     ASSERT_EQ(entry.back_ptr, Id {3});
 
-    ASSERT_OK(PointerMap::read_entry(*pager, Id {3}, &entry));
+    ASSERT_OK(PointerMap::read_entry(*pager, Id {3}, entry));
     ASSERT_EQ(entry.type, PointerMap::kFreelistLink);
     ASSERT_EQ(entry.back_ptr, Id::null());
 }
@@ -1264,8 +1264,8 @@ TEST_P(VacuumTests, OverflowChainRegistersBackPointers)
     ASSERT_OK(tree->put("a", overflow_data));
 
     PointerMap::Entry head_entry, tail_entry;
-    ASSERT_OK(PointerMap::read_entry(*pager, Id {3}, &head_entry));
-    ASSERT_OK(PointerMap::read_entry(*pager, Id {4}, &tail_entry));
+    ASSERT_OK(PointerMap::read_entry(*pager, Id {3}, head_entry));
+    ASSERT_OK(PointerMap::read_entry(*pager, Id {4}, tail_entry));
 
     ASSERT_TRUE(head_entry.back_ptr.is_root());
     ASSERT_EQ(tail_entry.back_ptr, Id {3});
@@ -1322,7 +1322,7 @@ TEST_P(VacuumTests, VacuumsFreelistInOrder)
     ASSERT_TRUE(vacuumed);
 
     PointerMap::Entry entry;
-    ASSERT_OK(PointerMap::read_entry(*pager, Id {4}, &entry));
+    ASSERT_OK(PointerMap::read_entry(*pager, Id {4}, entry));
     ASSERT_EQ(entry.type, PointerMap::kFreelistLink);
     ASSERT_EQ(entry.back_ptr, Id::null());
 
@@ -1331,7 +1331,7 @@ TEST_P(VacuumTests, VacuumsFreelistInOrder)
     // Page IDs:       1   2   3   4   5
     ASSERT_OK(tree->vacuum_one(Id {4}, table_set, &vacuumed));
     ASSERT_TRUE(vacuumed);
-    ASSERT_OK(PointerMap::read_entry(*pager, Id {3}, &entry));
+    ASSERT_OK(PointerMap::read_entry(*pager, Id {3}, entry));
     ASSERT_EQ(entry.type, PointerMap::kFreelistLink);
     ASSERT_EQ(entry.back_ptr, Id::null());
 
@@ -1382,7 +1382,7 @@ TEST_P(VacuumTests, VacuumsFreelistInReverseOrder)
     ASSERT_OK(tree->vacuum_one(Id {5}, table_set, &vacuumed));
     ASSERT_TRUE(vacuumed);
     PointerMap::Entry entry;
-    ASSERT_OK(PointerMap::read_entry(*pager, Id {4}, &entry));
+    ASSERT_OK(PointerMap::read_entry(*pager, Id {4}, entry));
     ASSERT_EQ(entry.back_ptr, Id::null());
     ASSERT_EQ(entry.type, PointerMap::kFreelistLink);
     {
@@ -1397,7 +1397,7 @@ TEST_P(VacuumTests, VacuumsFreelistInReverseOrder)
     // Page IDs:       1   2   3   4   5
     ASSERT_OK(tree->vacuum_one(Id {4}, table_set, &vacuumed));
     ASSERT_TRUE(vacuumed);
-    ASSERT_OK(PointerMap::read_entry(*pager, Id {3}, &entry));
+    ASSERT_OK(PointerMap::read_entry(*pager, Id {3}, entry));
     ASSERT_EQ(entry.type, PointerMap::kFreelistLink);
     ASSERT_EQ(entry.back_ptr, Id::null());
 
@@ -1531,8 +1531,8 @@ TEST_P(VacuumTests, VacuumsOverflowChain_A)
     vacuum_and_validate(*this, overflow_data);
 
     PointerMap::Entry head_entry, tail_entry;
-    ASSERT_OK(PointerMap::read_entry(*pager, Id {3}, &head_entry));
-    ASSERT_OK(PointerMap::read_entry(*pager, Id {4}, &tail_entry));
+    ASSERT_OK(PointerMap::read_entry(*pager, Id {3}, head_entry));
+    ASSERT_OK(PointerMap::read_entry(*pager, Id {4}, tail_entry));
 
     ASSERT_TRUE(head_entry.back_ptr.is_root());
     ASSERT_EQ(tail_entry.back_ptr, Id {3});
@@ -1575,8 +1575,8 @@ TEST_P(VacuumTests, VacuumsOverflowChain_B)
     vacuum_and_validate(*this, overflow_data);
 
     PointerMap::Entry head_entry, tail_entry;
-    ASSERT_OK(PointerMap::read_entry(*pager, Id {4}, &head_entry));
-    ASSERT_OK(PointerMap::read_entry(*pager, Id {3}, &tail_entry));
+    ASSERT_OK(PointerMap::read_entry(*pager, Id {4}, head_entry));
+    ASSERT_OK(PointerMap::read_entry(*pager, Id {3}, tail_entry));
 
     ASSERT_TRUE(head_entry.back_ptr.is_root());
     ASSERT_EQ(tail_entry.back_ptr, Id {4});

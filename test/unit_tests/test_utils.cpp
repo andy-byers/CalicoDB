@@ -1,6 +1,6 @@
 // Copyright (c) 2022, The CalicoDB Authors. All rights reserved.
 // This source code is licensed under the MIT License, which can be found in
-// LICENSE.md. See AUTHORS.md for contributor names.
+// LICENSE.md. See AUTHORS.md for a list of contributor names.
 
 #include <array>
 #include <gtest/gtest.h>
@@ -670,8 +670,8 @@ TEST_F(InterceptorTests, RespectsPrefix)
     QUICK_INTERCEPTOR("./test", tools::Interceptor::kOpen);
 
     Editor *editor;
-    assert_special_error(env->new_editor("./test", &editor));
-    expect_ok(env->new_editor("./wal-", &editor));
+    assert_special_error(env->new_editor("./test", editor));
+    expect_ok(env->new_editor("./wal-", editor));
     delete editor;
 }
 
@@ -680,8 +680,8 @@ TEST_F(InterceptorTests, RespectsSyscallType)
     QUICK_INTERCEPTOR("./test", tools::Interceptor::kWrite);
 
     Editor *editor;
-    expect_ok(env->new_editor("./test", &editor));
-    assert_special_error(editor->write({}, 0));
+    expect_ok(env->new_editor("./test", editor));
+    assert_special_error(editor->write(0, {}));
     delete editor;
 }
 

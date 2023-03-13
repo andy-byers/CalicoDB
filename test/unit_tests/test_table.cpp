@@ -1,6 +1,6 @@
 // Copyright (c) 2022, The CalicoDB Authors. All rights reserved.
 // This source code is licensed under the MIT License, which can be found in
-// LICENSE.md. See AUTHORS.md for contributor names.
+// LICENSE.md. See AUTHORS.md for a list of contributor names.
 
 #include "calicodb/db.h"
 #include "db_impl.h"
@@ -37,7 +37,7 @@ public:
         delete db;
         db = nullptr;
 
-        return DB::open(options, kFilename, &db);
+        return DB::open(options, kFilename, db);
     }
 
     Options options;
@@ -47,8 +47,9 @@ public:
 TEST_F(DefaultTableTests, SpecialTableBehavior)
 {
     Table *table;
-    ASSERT_TRUE(db->create_table({}, "calicodb_root", &table).is_invalid_argument()) << "not allowed to create root table";
-    ASSERT_TRUE(db->drop_table(db->default_table()).is_invalid_argument()) << "not allowed to drop default table";
+    auto *default_table = db->default_table();
+    ASSERT_TRUE(db->create_table({}, "calicodb_root", table).is_invalid_argument()) << "not allowed to create root table";
+    ASSERT_TRUE(db->drop_table(default_table).is_invalid_argument()) << "not allowed to drop default table";
 }
 
 TEST_F(DefaultTableTests, RootAndDefaultTablesAreAlwaysOpen)
@@ -57,7 +58,7 @@ TEST_F(DefaultTableTests, RootAndDefaultTablesAreAlwaysOpen)
     ASSERT_NE(db_impl(db)->TEST_tables().get(Id {2}), nullptr);
 
     std::vector<std::string> names;
-    ASSERT_OK(db->list_tables(&names));
+    ASSERT_OK(db->list_tables(names));
     ASSERT_TRUE(names.empty());
 
     std::string v;
@@ -107,7 +108,7 @@ public:
         db->close_table(table);
         table = nullptr;
 
-        return db->create_table({}, "table", &table);
+        return db->create_table({}, "table", table);
     }
 
     auto reopen_db() -> Status override
@@ -133,7 +134,7 @@ TEST_F(TableTests, TablesAreRegistered)
 TEST_F(TableTests, TablesMustBeUnique)
 {
     Table *same;
-    ASSERT_TRUE(db->create_table({}, "table", &same).is_invalid_argument());
+    ASSERT_TRUE(db->create_table({}, "table", same).is_invalid_argument());
 }
 
 TEST_F(TableTests, VacuumDroppedTable)
@@ -175,8 +176,8 @@ TEST_F(TableTests, TableCannotBeOpenedTwice)
 {
     Table *table_1, *table_2;
     TableOptions table_options {AccessMode::kReadOnly};
-    ASSERT_OK(db->create_table(table_options, "t", &table_1));
-    ASSERT_FALSE(db->create_table(table_options, "t", &table_2).is_ok());
+    ASSERT_OK(db->create_table(table_options, "t", table_1));
+    ASSERT_FALSE(db->create_table(table_options, "t", table_2).is_ok());
     db->close_table(table_1);
     table_1 = nullptr;
 }
@@ -191,7 +192,7 @@ public:
         TableTests::SetUp();
         table_1 = table;
 
-        ASSERT_OK(db->create_table({}, "table_2", &table_2));
+        ASSERT_OK(db->create_table({}, "table_2", table_2));
     }
 
     auto TearDown() -> void override
@@ -209,7 +210,7 @@ public:
         db->close_table(table_2);
         table_2 = nullptr;
 
-        return db->create_table({}, "table_2", &table_2);
+        return db->create_table({}, "table_2", table_2);
     }
 
     auto reopen_db() -> Status override
@@ -225,20 +226,20 @@ public:
 
 TEST_F(TwoTableTests, TablesHaveIndependentKeys)
 {
-    ASSERT_OK(db->put(table_1, "key", "1"));
-    ASSERT_OK(db->put(table_2, "key", "2"));
+    ASSERT_OK(db->put(*table_1, "key", "1"));
+    ASSERT_OK(db->put(*table_2, "key", "2"));
 
     std::string value;
-    ASSERT_OK(db->get(table_1, "key", &value));
+    ASSERT_OK(db->get(*table_1, "key", &value));
     ASSERT_EQ(value, "1");
-    ASSERT_OK(db->get(table_2, "key", &value));
+    ASSERT_OK(db->get(*table_2, "key", &value));
     ASSERT_EQ(value, "2");
 }
 
 TEST_F(TwoTableTests, DropTable)
 {
     ASSERT_OK(db->put(
-        table_2,
+        *table_2,
         std::string(10'000, 'A'),
         std::string(10'000, 'Z')));
 
@@ -260,7 +261,7 @@ TEST_F(TwoTableTests, TablesCreatedBeforeCheckpointAreRemembered)
     reopen_db();
 
     std::vector<std::string> tables;
-    ASSERT_OK(db->list_tables(&tables));
+    ASSERT_OK(db->list_tables(tables));
     ASSERT_EQ(tables.size(), 2);
     ASSERT_EQ(tables[0], "table");
     ASSERT_EQ(tables[1], "table_2");
@@ -271,7 +272,7 @@ TEST_F(TwoTableTests, TablesCreatedAfterCheckpointAreForgotten)
     reopen_db();
 
     std::vector<std::string> tables;
-    ASSERT_OK(db->list_tables(&tables));
+    ASSERT_OK(db->list_tables(tables));
     ASSERT_TRUE(tables.empty());
 }
 
@@ -282,7 +283,7 @@ TEST_F(TwoTableTests, FirstAvailableTableIdIsUsed)
     table = table_1 = nullptr;
 
     ASSERT_EQ(tables.get(Id {3}), nullptr);
-    ASSERT_OK(db->create_table({}, "\xAB\xCD\xEF", &table));
+    ASSERT_OK(db->create_table({}, "\xAB\xCD\xEF", table));
 
     ASSERT_NE(tables.get(Id {3}), nullptr) << "first table ID was not reused";
 }
@@ -290,7 +291,7 @@ TEST_F(TwoTableTests, FirstAvailableTableIdIsUsed)
 TEST_F(TwoTableTests, FindExistingTables)
 {
     std::vector<std::string> table_names;
-    ASSERT_OK(db->list_tables(&table_names));
+    ASSERT_OK(db->list_tables(table_names));
 
     // Table names should be in order, since they came from a sequential scan.
     ASSERT_EQ(table_names.size(), 2);
@@ -299,13 +300,13 @@ TEST_F(TwoTableTests, FindExistingTables)
 
     ASSERT_OK(db->drop_table(table));
     table = table_1 = nullptr;
-    ASSERT_OK(db->list_tables(&table_names));
+    ASSERT_OK(db->list_tables(table_names));
     ASSERT_EQ(table_names.size(), 1);
     ASSERT_EQ(table_names[0], "table_2");
 
     ASSERT_OK(db->drop_table(table_2));
     table_2 = nullptr;
-    ASSERT_OK(db->list_tables(&table_names));
+    ASSERT_OK(db->list_tables(table_names));
     ASSERT_TRUE(table_names.empty());
 }
 

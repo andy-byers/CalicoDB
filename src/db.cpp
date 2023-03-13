@@ -1,8 +1,8 @@
 // Copyright (c) 2022, The CalicoDB Authors. All rights reserved.
 // This source code is licensed under the MIT License, which can be found in
-// LICENSE.md. See AUTHORS.md for contributor names.
+// LICENSE.md. See AUTHORS.md for a list of contributor names.
 
-#include "calicodb/calicodb.h"
+#include "calicodb/db.h"
 #include "db_impl.h"
 #include "env_posix.h"
 #include "utils.h"
@@ -10,7 +10,7 @@
 namespace calicodb
 {
 
-auto DB::open(const Options &options, const std::string &filename, DB **db) -> Status
+auto DB::open(const Options &options, const std::string &filename, DB *&db) -> Status
 {
     if (filename.empty()) {
         return Status::invalid_argument("path is empty");
@@ -27,7 +27,7 @@ auto DB::open(const Options &options, const std::string &filename, DB **db) -> S
     }
     if (sanitized.info_log == nullptr) {
         const auto log_filename = clean_filename + kDefaultLogSuffix;
-        CDB_TRY(sanitized.env->new_info_logger(log_filename, &sanitized.info_log));
+        CDB_TRY(sanitized.env->new_info_logger(log_filename, sanitized.info_log));
     }
 
     auto *ptr = new DBImpl {options, sanitized, clean_filename};
@@ -37,7 +37,7 @@ auto DB::open(const Options &options, const std::string &filename, DB **db) -> S
         return s;
     }
 
-    *db = ptr;
+    db = ptr;
     return Status::ok();
 }
 
@@ -53,22 +53,22 @@ auto DB::destroy(const Options &options, const std::string &filename) -> Status
 
 auto DB::new_cursor() const -> Cursor *
 {
-    return new_cursor(default_table());
+    return new_cursor(*default_table());
 }
 
 auto DB::get(const Slice &key, std::string *value) const -> Status
 {
-    return get(default_table(), key, value);
+    return get(*default_table(), key, value);
 }
 
 auto DB::put(const Slice &key, const Slice &value) -> Status
 {
-    return put(default_table(), key, value);
+    return put(*default_table(), key, value);
 }
 
 auto DB::erase(const Slice &key) -> Status
 {
-    return erase(default_table(), key);
+    return erase(*default_table(), key);
 }
 
 } // namespace calicodb

@@ -1,6 +1,6 @@
 // Copyright (c) 2022, The CalicoDB Authors. All rights reserved.
 // This source code is licensed under the MIT License, which can be found in
-// LICENSE.md. See AUTHORS.md for contributor names.
+// LICENSE.md. See AUTHORS.md for a list of contributor names.
 
 #ifndef CALICODB_ENV_POSIX_H
 #define CALICODB_ENV_POSIX_H
@@ -27,7 +27,7 @@ public:
     }
 
     ~PosixReader() override;
-    [[nodiscard]] auto read(char *out, std::size_t *size, std::size_t offset) -> Status override;
+    [[nodiscard]] auto read(std::size_t offset, std::size_t size, char *scratch, Slice *out) -> Status override;
 
 private:
     std::string m_path;
@@ -45,8 +45,8 @@ public:
     }
 
     ~PosixEditor() override;
-    [[nodiscard]] auto read(char *out, std::size_t *size, std::size_t offset) -> Status override;
-    [[nodiscard]] auto write(Slice in, std::size_t size) -> Status override;
+    [[nodiscard]] auto read(std::size_t offset, std::size_t size, char *scratch, Slice *out) -> Status override;
+    [[nodiscard]] auto write(std::size_t offset, const Slice &in) -> Status override;
     [[nodiscard]] auto sync() -> Status override;
 
 private:
@@ -65,7 +65,7 @@ public:
     }
 
     ~PosixLogger() override;
-    [[nodiscard]] auto write(Slice in) -> Status override;
+    [[nodiscard]] auto write(const Slice &in) -> Status override;
     [[nodiscard]] auto sync() -> Status override;
 
 private:
@@ -99,16 +99,16 @@ class EnvPosix : public Env
 public:
     EnvPosix() = default;
     ~EnvPosix() override = default;
-    [[nodiscard]] auto get_children(const std::string &path, std::vector<std::string> *out) const -> Status override;
-    [[nodiscard]] auto new_reader(const std::string &path, Reader **out) -> Status override;
-    [[nodiscard]] auto new_editor(const std::string &path, Editor **out) -> Status override;
-    [[nodiscard]] auto new_logger(const std::string &path, Logger **out) -> Status override;
-    [[nodiscard]] auto new_info_logger(const std::string &path, InfoLogger **out) -> Status override;
+    [[nodiscard]] auto get_children(const std::string &path, std::vector<std::string> &out) const -> Status override;
+    [[nodiscard]] auto new_reader(const std::string &path, Reader *&out) -> Status override;
+    [[nodiscard]] auto new_editor(const std::string &path, Editor *&out) -> Status override;
+    [[nodiscard]] auto new_logger(const std::string &path, Logger *&out) -> Status override;
+    [[nodiscard]] auto new_info_logger(const std::string &path, InfoLogger *&out) -> Status override;
     [[nodiscard]] auto rename_file(const std::string &old_path, const std::string &new_path) -> Status override;
     [[nodiscard]] auto remove_file(const std::string &path) -> Status override;
     [[nodiscard]] auto resize_file(const std::string &path, std::size_t size) -> Status override;
     [[nodiscard]] auto file_exists(const std::string &path) const -> Status override;
-    [[nodiscard]] auto file_size(const std::string &path, std::size_t *out) const -> Status override;
+    [[nodiscard]] auto file_size(const std::string &path, std::size_t &out) const -> Status override;
 };
 
 } // namespace calicodb

@@ -1,6 +1,6 @@
 // Copyright (c) 2022, The CalicoDB Authors. All rights reserved.
 // This source code is licensed under the MIT License, which can be found in
-// LICENSE.md. See AUTHORS.md for contributor names.
+// LICENSE.md. See AUTHORS.md for a list of contributor names.
 
 #include "frames.h"
 #include "calicodb/env.h"
@@ -141,17 +141,17 @@ auto FrameManager::read_page_from_file(Id page_id, char *out) const -> Status
         return Status::not_found("end of file");
     }
 
-    auto read_size = m_page_size;
-    CDB_TRY(m_file->read(out, &read_size, offset));
-    m_bytes_read += read_size;
+    Slice slice;
+    CDB_TRY(m_file->read(offset, m_page_size, out, &slice));
+    m_bytes_read += slice.size();
 
     // We should always read exactly what we requested, unless we are allocating a page during recovery.
-    if (read_size == m_page_size) {
+    if (slice.size() == m_page_size) {
         return Status::ok();
     }
 
     // In that case, we will hit EOF here.
-    if (read_size == 0) {
+    if (slice.is_empty()) {
         return Status::not_found("end of file");
     }
 
@@ -161,7 +161,7 @@ auto FrameManager::read_page_from_file(Id page_id, char *out) const -> Status
 auto FrameManager::write_page_to_file(Id pid, const char *in) const -> Status
 {
     m_bytes_written += m_page_size;
-    return m_file->write({in, m_page_size}, pid.as_index() * m_page_size);
+    return m_file->write(pid.as_index() * m_page_size, {in, m_page_size});
 }
 
 auto FrameManager::load_state(const FileHeader &header) -> void

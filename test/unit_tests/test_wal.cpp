@@ -1,6 +1,6 @@
 // Copyright (c) 2022, The CalicoDB Authors. All rights reserved.
 // This source code is licensed under the MIT License, which can be found in
-// LICENSE.md. See AUTHORS.md for contributor names.
+// LICENSE.md. See AUTHORS.md for a list of contributor names.
 
 #include "calicodb/env.h"
 #include "calicodb/slice.h"
@@ -300,13 +300,13 @@ public:
 
     [[nodiscard]] auto make_reader(Id id) -> WalReader
     {
-        EXPECT_OK(env->new_reader(encode_segment_name(kWalPrefix, id), &m_reader_file));
+        EXPECT_OK(env->new_reader(encode_segment_name(kWalPrefix, id), m_reader_file));
         return WalReader {*m_reader_file, m_reader_tail};
     }
 
     [[nodiscard]] auto make_writer(Id id) -> WalWriter
     {
-        EXPECT_OK(env->new_logger(encode_segment_name(kWalPrefix, id), &m_writer_file));
+        EXPECT_OK(env->new_logger(encode_segment_name(kWalPrefix, id), m_writer_file));
         return WalWriter {*m_writer_file, m_writer_tail};
     }
 
@@ -403,8 +403,8 @@ TEST_F(WalComponentTests, ReaderReportsMismatchedCrc)
     ASSERT_OK(writer.flush());
 
     Editor *editor;
-    ASSERT_OK(env->new_editor(encode_segment_name(kWalPrefix, Id::root()), &editor));
-    ASSERT_OK(editor->write("TEST", WalRecordHeader::kSize + sizeof(Lsn)));
+    ASSERT_OK(env->new_editor(encode_segment_name(kWalPrefix, Id::root()), editor));
+    ASSERT_OK(editor->write(WalRecordHeader::kSize + sizeof(Lsn), "TEST"));
     delete editor;
 
     std::string buffer;
@@ -415,7 +415,7 @@ TEST_F(WalComponentTests, ReaderReportsMismatchedCrc)
 TEST_F(WalComponentTests, ReaderReportsEmptyFile)
 {
     Editor *editor;
-    ASSERT_OK(env->new_editor(encode_segment_name(kWalPrefix, Id::root()), &editor));
+    ASSERT_OK(env->new_editor(encode_segment_name(kWalPrefix, Id::root()), editor));
     delete editor;
 
     std::string buffer;
@@ -426,8 +426,8 @@ TEST_F(WalComponentTests, ReaderReportsEmptyFile)
 TEST_F(WalComponentTests, ReaderReportsIncompleteBlock)
 {
     Editor *editor;
-    ASSERT_OK(env->new_editor(encode_segment_name(kWalPrefix, Id::root()), &editor));
-    ASSERT_OK(editor->write("\x01\x02\x03", 0));
+    ASSERT_OK(env->new_editor(encode_segment_name(kWalPrefix, Id::root()), editor));
+    ASSERT_OK(editor->write(0, "\x01\x02\x03"));
     delete editor;
 
     std::string buffer(wal_scratch_size(kPageSize), '\0');
@@ -448,8 +448,8 @@ TEST_F(WalComponentTests, ReaderReportsInvalidSize)
     write_wal_record_header(buffer.data(), header);
 
     Editor *editor;
-    ASSERT_OK(env->new_editor(encode_segment_name(kWalPrefix, Id::root()), &editor));
-    ASSERT_OK(editor->write(buffer, 0));
+    ASSERT_OK(env->new_editor(encode_segment_name(kWalPrefix, Id::root()), editor));
+    ASSERT_OK(editor->write(0, buffer));
     delete editor;
 
     auto reader = make_reader(Id::root());
@@ -482,7 +482,7 @@ TEST_F(WalComponentTests, FailureToReadFirstLsn)
 
     // File exists, but is empty.
     Logger *logger;
-    ASSERT_OK(env->new_logger(encode_segment_name(kWalPrefix, Id::root()), &logger));
+    ASSERT_OK(env->new_logger(encode_segment_name(kWalPrefix, Id::root()), logger));
     ASSERT_TRUE(read_first_lsn(*env, kWalPrefix, Id::root(), set, first_lsn).is_corruption());
 
     // File is too small to read the LSN.
@@ -574,7 +574,7 @@ public:
     auto read_segment(Id segment_id, std::vector<std::string> *out) -> Status
     {
         Reader *temp;
-        EXPECT_OK(env->new_reader(encode_segment_name(kWalPrefix, segment_id), &temp));
+        EXPECT_OK(env->new_reader(encode_segment_name(kWalPrefix, segment_id), temp));
 
         std::unique_ptr<Reader> file {temp};
         WalReader reader {*file, tail_buffer};

@@ -1,6 +1,6 @@
 // Copyright (c) 2022, The CalicoDB Authors. All rights reserved.
 // This source code is licensed under the MIT License, which can be found in
-// LICENSE.md. See AUTHORS.md for contributor names.
+// LICENSE.md. See AUTHORS.md for a list of contributor names.
 
 #ifndef CALICODB_TEST_UNIT_TESTS_H
 #define CALICODB_TEST_UNIT_TESTS_H
@@ -318,15 +318,15 @@ auto erase_one(T &t, const std::string &key) -> bool
 inline auto write_file(Env &env, const std::string &path, Slice in) -> void
 {
     Editor *file;
-    ASSERT_TRUE(env.new_editor(path, &file).is_ok());
-    ASSERT_TRUE(file->write(in, 0).is_ok());
+    ASSERT_TRUE(env.new_editor(path, file).is_ok());
+    ASSERT_TRUE(file->write(0, in).is_ok());
     delete file;
 }
 
 inline auto append_file(Env &env, const std::string &path, Slice in) -> void
 {
     Logger *file;
-    ASSERT_TRUE(env.new_logger(path, &file).is_ok());
+    ASSERT_TRUE(env.new_logger(path, file).is_ok());
     ASSERT_TRUE(file->write(in).is_ok());
     delete file;
 }
@@ -337,14 +337,13 @@ inline auto read_file(Env &env, const std::string &path) -> std::string
     std::string out;
     std::size_t size;
 
-    EXPECT_TRUE(env.file_size(path, &size).is_ok());
-    EXPECT_TRUE(env.new_reader(path, &file).is_ok());
+    EXPECT_TRUE(env.file_size(path, size).is_ok());
+    EXPECT_TRUE(env.new_reader(path, file).is_ok());
     out.resize(size);
 
-    Span temp {out};
-    auto read_size = temp.size();
-    EXPECT_TRUE(file->read(temp.data(), &read_size, 0).is_ok());
-    EXPECT_EQ(read_size, size);
+    Slice slice;
+    EXPECT_TRUE(file->read(0, size, out.data(), &slice).is_ok());
+    EXPECT_EQ(slice.size(), size);
     delete file;
     return out;
 }

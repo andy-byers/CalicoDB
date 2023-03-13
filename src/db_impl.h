@@ -1,12 +1,12 @@
 // Copyright (c) 2022, The CalicoDB Authors. All rights reserved.
 // This source code is licensed under the MIT License, which can be found in
-// LICENSE.md. See AUTHORS.md for contributor names.
+// LICENSE.md. See AUTHORS.md for a list of contributor names.
 
 #ifndef CALICODB_DB_IMPL_H
 #define CALICODB_DB_IMPL_H
 
 #include "calicodb/db.h"
-#include "calicodb/options.h"
+#include "calicodb/table.h"
 
 #include "header.h"
 #include "pager.h"
@@ -91,26 +91,26 @@ public:
 
     [[nodiscard]] auto get_property(const Slice &name, std::string *out) const -> bool override;
     [[nodiscard]] auto default_table() const -> Table * override;
-    [[nodiscard]] auto create_table(const TableOptions &options, const std::string &name, Table **out) -> Status override;
-    [[nodiscard]] auto drop_table(Table *table) -> Status override;
-    [[nodiscard]] auto list_tables(std::vector<std::string> *out) const -> Status override;
-    auto close_table(Table *table) -> void override;
+    [[nodiscard]] auto create_table(const TableOptions &options, const std::string &name, Table *&out) -> Status override;
+    [[nodiscard]] auto list_tables(std::vector<std::string> &out) const -> Status override;
+    [[nodiscard]] auto drop_table(Table *&table) -> Status override;
+    auto close_table(Table *&table) -> void override;
 
     [[nodiscard]] auto checkpoint() -> Status override;
     [[nodiscard]] auto status() const -> Status override;
     [[nodiscard]] auto vacuum() -> Status override;
 
     using DB::new_cursor;
-    [[nodiscard]] auto new_cursor(const Table *table) const -> Cursor * override;
+    [[nodiscard]] auto new_cursor(const Table &table) const -> Cursor * override;
 
     using DB::get;
-    [[nodiscard]] auto get(const Table *table, const Slice &key, std::string *value) const -> Status override;
+    [[nodiscard]] auto get(const Table &table, const Slice &key, std::string *value) const -> Status override;
 
     using DB::put;
-    [[nodiscard]] auto put(Table *table, const Slice &key, const Slice &value) -> Status override;
+    [[nodiscard]] auto put(Table &table, const Slice &key, const Slice &value) -> Status override;
 
     using DB::erase;
-    [[nodiscard]] auto erase(Table *table, const Slice &key) -> Status override;
+    [[nodiscard]] auto erase(Table &table, const Slice &key) -> Status override;
 
     [[nodiscard]] auto TEST_wal() const -> const WriteAheadLog &;
     [[nodiscard]] auto TEST_pager() const -> const Pager &;
@@ -123,11 +123,11 @@ private:
     [[nodiscard]] auto do_checkpoint() -> Status;
     [[nodiscard]] auto load_file_header() -> Status;
     [[nodiscard]] auto do_vacuum() -> Status;
-    [[nodiscard]] auto open_wal_reader(Id segment, std::unique_ptr<Reader> *out) -> Status;
+    [[nodiscard]] auto open_wal_reader(Id segment, std::unique_ptr<Reader> &out) -> Status;
     [[nodiscard]] auto ensure_consistency() -> Status;
     [[nodiscard]] auto recovery_phase_1() -> Status;
     [[nodiscard]] auto recovery_phase_2() -> Status;
-    [[nodiscard]] auto construct_new_table(const Slice &name, LogicalPageId *root_id) -> Status;
+    [[nodiscard]] auto construct_new_table(const Slice &name, LogicalPageId &root_id) -> Status;
 
     std::string m_reader_data;
     std::string m_reader_tail;
@@ -148,7 +148,7 @@ private:
     bool m_owns_info_log {};
 };
 
-auto setup(const std::string &, Env &, const Options &, FileHeader *state) -> Status;
+auto setup(const std::string &, Env &, const Options &, FileHeader &state) -> Status;
 
 } // namespace calicodb
 
