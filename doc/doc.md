@@ -44,7 +44,7 @@ calicodb::Slice s1 {str.c_str()};
 calicodb::Slice s2 {str};
 calicodb::Slice s3 {str.data(), str.size()};
 
-// Slices can be converted back to owned strings using Slice::to_string().
+// A slice can be converted back to a std::string using Slice::to_string().
 std::cout << s1.to_string() << '\n';
 
 // Slices have methods for modifying the size and pointer position. These methods do not change the underlying data, 
@@ -97,6 +97,7 @@ Errors returned by methods that modify tables are fatal and the database will re
 The next time that the database is opened, recovery will be run to undo any changes that occurred after the last checkpoint (see [Checkpoints](#checkpoints)).
 The database will always keep 1 table open, called the default table.
 Additional tables are managed using methods on the `DB` object (see [Tables](#tables)).
+Note that the default table is named "default", making this a reserved table name.
 
 ```C++
 // Insert some key-value pairs into the default table.
@@ -123,6 +124,8 @@ if (s.is_ok()) {
     // Record was erased.
 } else if (s.is_not_found()) {
     // Key does not exist.
+} else {
+    // An error occurred.
 }
 ```
 
@@ -209,7 +212,7 @@ if (s.is_ok()) {
 }
 
 // Now, "table_1" can be passed as the first parameter to DB methods that access or modify data. Those calls
-// will be applied to the table represented by "table_1", rather than the default table.
+// will be directed to the table represented by "table_1", rather than the default table.
 s = db->put(table_1, "key", "value");
 assert(s.is_ok());
 
@@ -226,6 +229,12 @@ assert(s.is_ok());
 // must be careful not to close or drop a table handle more than once (unless it is first set to nullptr).
 s = db->drop_table(table_2);
 assert(s.is_ok());
+
+std::vector<std::string> tables;
+s = db->list_tables(&tables);
+if (s.is_ok()) {
+    // "tables" contains the name of each table, in unspecified order. The default table is not included.
+}
 ```
 
 ### Checkpoints
@@ -263,7 +272,7 @@ exists = db->get_property("calicodb.stats", prop);
 ```
 
 ### Closing a database 
-To erase the database, just `delete` the handle.
+To close the database, just `delete` the handle.
 During close, the database is made consistent and the whole WAL is removed.
 If an instance leaves any WAL segments behind after closing, then something has gone wrong.
 CalicoDB will attempt recovery on the next startup.

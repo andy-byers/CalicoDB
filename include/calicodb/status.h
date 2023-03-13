@@ -1,3 +1,7 @@
+// Copyright (c) 2022, The CalicoDB Authors. All rights reserved.
+// This source code is licensed under the MIT License, which can be found in
+// LICENSE.md. See AUTHORS.md for contributor names.
+
 #ifndef CALICODB_STATUS_H
 #define CALICODB_STATUS_H
 
@@ -13,40 +17,33 @@ class Status final
 public:
     explicit Status() = default;
 
-    /*
-     * Create/check for an OK status.
-     */
+    // Create a status object in an OK state.
     static auto ok() -> Status
     {
         return Status {};
     }
 
+    // Determine if a status is OK.
     [[nodiscard]] auto is_ok() const -> bool
     {
         return m_data == nullptr;
     }
 
-    /*
-     * Create a non-OK status with an error message.
-     */
+    // Create a non-OK status with an error message.
     [[nodiscard]] static auto invalid_argument(const Slice &what) -> Status;
     [[nodiscard]] static auto system_error(const Slice &what) -> Status;
     [[nodiscard]] static auto logic_error(const Slice &what) -> Status;
     [[nodiscard]] static auto corruption(const Slice &what) -> Status;
     [[nodiscard]] static auto not_found(const Slice &what) -> Status;
 
-    /*
-     * Check error status type.
-     */
+    // Check error status type.
     [[nodiscard]] auto is_invalid_argument() const -> bool;
     [[nodiscard]] auto is_system_error() const -> bool;
     [[nodiscard]] auto is_logic_error() const -> bool;
     [[nodiscard]] auto is_corruption() const -> bool;
     [[nodiscard]] auto is_not_found() const -> bool;
 
-    /*
-     * Convert the status to a printable string.
-     */
+    // Convert the status to a printable string.
     [[nodiscard]] auto to_string() const -> std::string;
 
     // Status can be copied and moved.
@@ -63,7 +60,6 @@ private:
     std::unique_ptr<char[]> m_data;
 };
 
-// Status object should be the size of a pointer.
 static_assert(sizeof(Status) == sizeof(void *));
 
 } // namespace calicodb

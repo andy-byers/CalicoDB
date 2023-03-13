@@ -1,3 +1,6 @@
+// Copyright (c) 2022, The CalicoDB Authors. All rights reserved.
+// This source code is licensed under the MIT License, which can be found in
+// LICENSE.md. See AUTHORS.md for contributor names.
 
 #include "frames.h"
 #include "header.h"
@@ -615,7 +618,7 @@ public:
         auto page = allocate_write(message);
         const auto id = page.id();
         pager->release(std::move(page));
-        EXPECT_OK(status);
+        EXPECT_OK(state.status);
         return id;
     }
 
@@ -632,7 +635,7 @@ public:
     {
         auto page = acquire_write(id, message);
         pager->release(std::move(page));
-        EXPECT_OK(status);
+        EXPECT_OK(state.status);
     }
 
     [[nodiscard]] auto acquire_read_release(Id id, std::size_t size) const
@@ -641,7 +644,7 @@ public:
         EXPECT_OK(pager->acquire(id, &page));
         auto message = read_from_page(page, size);
         pager->release(std::move(page));
-        EXPECT_OK(status);
+        EXPECT_OK(state.status);
         return message;
     }
 };
@@ -651,7 +654,7 @@ TEST_F(PagerTests, NewPagerIsSetUpCorrectly)
     ASSERT_EQ(pager->page_count(), 0);
     ASSERT_EQ(pager->bytes_written(), 0);
     ASSERT_EQ(pager->recovery_lsn(), Id::null());
-    EXPECT_OK(status);
+    EXPECT_OK(state.status);
 }
 
 TEST_F(PagerTests, AllocationInceasesPageCount)

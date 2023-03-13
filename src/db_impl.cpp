@@ -1,3 +1,6 @@
+// Copyright (c) 2022, The CalicoDB Authors. All rights reserved.
+// This source code is licensed under the MIT License, which can be found in
+// LICENSE.md. See AUTHORS.md for contributor names.
 
 #include "db_impl.h"
 #include "calicodb/env.h"
@@ -122,10 +125,10 @@ auto DBImpl::open(const Options &sanitized) -> Status
     CDB_TRY(setup(m_filename, *m_env, sanitized, &state));
     const auto page_size = state.page_size;
 
-    m_commit_lsn = state.commit_lsn;
+    m_state.commit_lsn = state.commit_lsn;
     m_state.record_count = state.record_count;
-    m_freelist_head = state.freelist_head;
-    m_max_page_id.value = state.page_count;
+    m_state.freelist_head = state.freelist_head;
+    m_state.max_page_id.value = state.page_count;
 
     CDB_TRY(WriteAheadLog::open(
         {
@@ -141,10 +144,7 @@ auto DBImpl::open(const Options &sanitized) -> Status
             m_env,
             wal,
             m_info_log,
-            &m_commit_lsn,
-            &m_max_page_id,
-            &m_state.status,
-            &m_is_running,
+            &m_state,
             sanitized.cache_size / page_size,
             page_size,
         },
@@ -156,7 +156,7 @@ auto DBImpl::open(const Options &sanitized) -> Status
 
         // Create the root tree.
         Id root_id;
-        CDB_TRY(Tree::create(*pager, Id::root(), m_freelist_head, &root_id));
+        CDB_TRY(Tree::create(*pager, Id::root(), m_state.freelist_head, &root_id));
         CDB_EXPECT_TRUE(root_id.is_root());
     }
 
@@ -195,7 +195,7 @@ auto DBImpl::open(const Options &sanitized) -> Status
     m_info_log->logv("wal flushed lsn is %llu", wal->flushed_lsn().value);
 
     CDB_TRY(m_state.status);
-    m_is_running = true;
+    m_state.is_running = true;
     return Status::ok();
 }
 
@@ -213,11 +213,11 @@ DBImpl::DBImpl(const Options &options, const Options &sanitized, std::string fil
 
 DBImpl::~DBImpl()
 {
-    if (m_is_running && m_state.status.is_ok()) {
+    if (m_state.is_running && m_state.status.is_ok()) {
         if (const auto s = wal->flush(); !s.is_ok()) {
             m_info_log->logv("failed to flush wal: %s", s.to_string().data());
         }
-        if (const auto s = pager->flush(m_commit_lsn); !s.is_ok()) {
+        if (const auto s = pager->flush(m_state.commit_lsn); !s.is_ok()) {
             m_info_log->logv("failed to flush pager: %s", s.to_string().data());
         }
         if (const auto s = wal->close(); !s.is_ok()) {
@@ -241,11 +241,6 @@ DBImpl::~DBImpl()
     delete wal;
 }
 
-auto DBImpl::record_count() const -> std::size_t
-{
-    return m_state.record_count;
-}
-
 auto DBImpl::repair(const Options &options, const std::string &filename) -> Status
 {
     (void)filename;
@@ -258,14 +253,9 @@ auto DBImpl::repair(const Options &options, const std::string &filename) -> Stat
 
 auto DBImpl::destroy(const Options &options, const std::string &filename) -> Status
 {
-    bool owns_env {};
-    Env *env;
-
-    if (options.env) {
-        env = options.env;
-    } else {
+    auto *env = options.env;
+    if (env == nullptr) {
         env = new EnvPosix;
-        owns_env = true;
     }
 
     const auto [dir, base] = split_path(filename);
@@ -319,7 +309,7 @@ auto DBImpl::destroy(const Options &options, const std::string &filename) -> Sta
     }
 
     delete reader;
-    if (owns_env) {
+    if (options.env == nullptr) {
         delete env;
     }
     return s;
@@ -386,7 +376,6 @@ auto DBImpl::put(Table *table, const Slice &key, const Slice &value) -> Status
     auto s = state->tree->put(key, value, &record_exists);
     if (s.is_ok()) {
         m_state.record_count += !record_exists;
-        m_state.bytes_written += key.size() + value.size();
         ++m_state.batch_size;
     } else {
         SET_STATUS(s);
@@ -434,7 +423,7 @@ auto DBImpl::do_vacuum() -> Status
     auto *tree = state->tree;
 
     const auto original = target;
-    for (;; target.value--) {
+    for (;; --target.value) {
         bool vacuumed;
         CDB_TRY(tree->vacuum_one(target, m_tables, &vacuumed));
         if (!vacuumed) {
@@ -458,16 +447,31 @@ auto DBImpl::do_vacuum() -> Status
 
 auto DBImpl::ensure_consistency() -> Status
 {
-    m_is_running = false;
+    m_state.is_running = false;
     CDB_TRY(recovery_phase_1());
     CDB_TRY(recovery_phase_2());
-    m_is_running = true;
+    m_state.is_running = true;
     return load_file_header();
+}
+
+auto DBImpl::TEST_wal() const -> const WriteAheadLog &
+{
+    return *wal;
+}
+
+auto DBImpl::TEST_pager() const -> const Pager &
+{
+    return *pager;
 }
 
 auto DBImpl::TEST_tables() const -> const TableSet &
 {
     return m_tables;
+}
+
+auto DBImpl::TEST_state() const -> DBState
+{
+    return m_state;
 }
 
 auto DBImpl::TEST_validate() const -> void
@@ -534,7 +538,6 @@ auto setup(const std::string &path, Env &env, const Options &options, FileHeader
 
     } else if (s.is_not_found()) {
         header->page_size = static_cast<std::uint16_t>(options.page_size);
-        header->header_crc = crc32c::Mask(header->compute_crc());
 
     } else {
         return s;
@@ -562,7 +565,7 @@ auto DBImpl::checkpoint() -> Status
             SET_STATUS(s);
             return s;
         }
-        m_max_page_id.value = pager->page_count();
+        m_state.max_page_id.value = pager->page_count();
     }
     return Status::ok();
 }
@@ -576,10 +579,10 @@ auto DBImpl::do_checkpoint() -> Status
     FileHeader header;
     header.read(db_root.data());
     pager->save_state(header);
-    header.freelist_head = m_freelist_head;
+    header.freelist_head = m_state.freelist_head;
     header.magic_code = FileHeader::kMagicCode;
     header.commit_lsn = wal->current_lsn();
-    m_commit_lsn = wal->current_lsn();
+    m_state.commit_lsn = wal->current_lsn();
     header.record_count = m_state.record_count;
     header.header_crc = crc32c::Mask(header.compute_crc());
     header.write(db_root.span(0, FileHeader::kSize).data());
@@ -603,7 +606,7 @@ auto DBImpl::load_file_header() -> Status
     }
 
     m_state.record_count = header.record_count;
-    m_freelist_head = header.freelist_head;
+    m_state.freelist_head = header.freelist_head;
     pager->load_state(header);
 
     pager->release(std::move(root));
@@ -623,7 +626,9 @@ auto DBImpl::list_tables(std::vector<std::string> *out) const -> Status
     auto *cursor = new_cursor(m_root);
     cursor->seek_first();
     while (cursor->is_valid()) {
-        out->emplace_back(cursor->key().to_string());
+        if (cursor->key() != kDefaultTableName) {
+            out->emplace_back(cursor->key().to_string());
+        }
         cursor->next();
     }
     auto s = cursor->status();
@@ -662,7 +667,7 @@ auto DBImpl::create_table(const TableOptions &options, const std::string &name, 
     if (state->open) {
         return Status::invalid_argument("table is already open");
     }
-    state->tree = new Tree {*pager, root_id.page_id, m_freelist_head};
+    state->tree = new Tree {*pager, root_id.page_id, m_state.freelist_head};
     state->write = options.mode == AccessMode::kReadWrite;
     state->open = true;
     *out = new TableImpl {options, name, root_id.table_id};
@@ -729,7 +734,7 @@ auto DBImpl::construct_new_table(const Slice &name, LogicalPageId *root_id) -> S
 
     // Set the table ID manually, let the tree fill in the root page ID.
     root_id->table_id = table_id;
-    CDB_TRY(Tree::create(*pager, table_id, m_freelist_head, &root_id->page_id));
+    CDB_TRY(Tree::create(*pager, table_id, m_state.freelist_head, &root_id->page_id));
 
     char payload[LogicalPageId::kSize];
     encode_logical_id(*root_id, payload);
@@ -804,7 +809,7 @@ auto DBImpl::recovery_phase_1() -> Status
 
     std::unique_ptr<Reader> file;
     auto segment = set.first();
-    auto commit_lsn = m_commit_lsn;
+    auto commit_lsn = m_state.commit_lsn;
     auto commit_segment = segment;
     Lsn last_lsn;
 
@@ -813,7 +818,7 @@ auto DBImpl::recovery_phase_1() -> Status
         if (s.is_corruption()) {
             // Allow corruption/incomplete records on the last segment, past the
             // most-recent successful commit.
-            if (segment == set.last() && lsn >= m_commit_lsn) {
+            if (segment == set.last() && lsn >= m_state.commit_lsn) {
                 return Status::ok();
             }
         }
@@ -848,7 +853,7 @@ auto DBImpl::recovery_phase_1() -> Status
         if (std::holds_alternative<ImageDescriptor>(decoded)) {
             const auto image = std::get<ImageDescriptor>(decoded);
             return with_page(*pager, image, [this, &image](auto &page) {
-                if (image.lsn < m_commit_lsn) {
+                if (image.lsn < m_state.commit_lsn) {
                     return;
                 }
                 const auto page_lsn = read_page_lsn(page);
@@ -907,14 +912,14 @@ auto DBImpl::recovery_phase_1() -> Status
     }
 
     if (last_lsn == commit_lsn) {
-        if (m_commit_lsn <= commit_lsn) {
-            m_commit_lsn = commit_lsn;
+        if (m_state.commit_lsn <= commit_lsn) {
+            m_state.commit_lsn = commit_lsn;
             return Status::ok();
         } else {
             return Status::corruption("missing commit record");
         }
     }
-    m_commit_lsn = commit_lsn;
+    m_state.commit_lsn = commit_lsn;
 
     /* Roll backward, reverting updates until we reach the most-recent commit. We
      * are able to read the log forward, since the full images are disjoint.
@@ -946,7 +951,7 @@ auto DBImpl::recovery_phase_2() -> Status
     //    const auto lsn = read_page_lsn(page);
     //    pager->release(std::move(page));
     //
-    //    if (lsn > *m_commit_lsn) {
+    //    if (lsn > *m_state.commit_lsn) {
     //        return Status::corruption("missing wal updates");
     //    }
     //}
@@ -960,9 +965,9 @@ auto DBImpl::recovery_phase_2() -> Status
     }
     set.remove_after(Id::null());
 
-    wal->m_last_lsn = m_commit_lsn;
-    wal->m_flushed_lsn = m_commit_lsn;
-    pager->m_recovery_lsn = m_commit_lsn;
+    wal->m_last_lsn = m_state.commit_lsn;
+    wal->m_flushed_lsn = m_state.commit_lsn;
+    pager->m_recovery_lsn = m_state.commit_lsn;
 
     // Make sure the file size matches the header page count, which should be
     // correct if we made it this far.

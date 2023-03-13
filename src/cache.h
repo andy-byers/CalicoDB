@@ -1,3 +1,7 @@
+// Copyright (c) 2022, The CalicoDB Authors. All rights reserved.
+// This source code is licensed under the MIT License, which can be found in
+// LICENSE.md. See AUTHORS.md for contributor names.
+
 #ifndef CALICODB_CACHE_H
 #define CALICODB_CACHE_H
 
@@ -9,24 +13,23 @@
 namespace calicodb
 {
 
-/*
- * Implements the simplified 2Q replacement policy described in
- *     https://arpitbhayani.me/blogs/2q-cache
- *
- * Uses a single std::list-std::unordered_map combination, along with an iterator into
- * the std::list, to represent the two caches. Stores an extra boolean per entry to
- * indicate "hot" status, and inserts new elements at the iterator, which marks
- * std::end(<hot_queue>)/std::begin(<warm_queue>).
- *
- * Iteration order using begin() and end() members reflects the order of importance.
- * That is, if the cache is not empty, *begin() refers to the most-recently-used hot
- * element, and *std::prev(end()) refers to the element that would be evicted in a
- * call to evict(). Also note that the warm queue will be emptied before any
- * elements are evicted from the hot queue.
- *
- * Note that put() has the ability to change the value of an element. This shouldn't
- * ever happen when using this cache as a page cache.
- */
+// Implements the simplified 2Q replacement policy described in
+//     https://arpitbhayani.me/blogs/2q-cache
+//
+// Uses a single std::list-std::unordered_map combination, along with an iterator into
+// the std::list, to represent the two caches. Stores an extra boolean per entry to
+// indicate "hot" status, and inserts new elements at the iterator, which marks
+// std::end(<hot_queue>)/std::begin(<warm_queue>).
+//
+// Iteration order using begin() and end() members reflects the order of importance.
+// That is, if the cache is not empty, *begin() refers to the most-recently-used hot
+// element, and *std::prev(end()) refers to the element that would be evicted in a
+// call to evict(). Also note that the warm queue will be emptied before any
+// elements are evicted from the hot queue.
+//
+// Note that put() has the ability to change the value of an element. This shouldn't
+// ever happen when using this cache as a page cache.
+//
 template <
     class K,
     class V,

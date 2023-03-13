@@ -1,3 +1,7 @@
+// Copyright (c) 2022, The CalicoDB Authors. All rights reserved.
+// This source code is licensed under the MIT License, which can be found in
+// LICENSE.md. See AUTHORS.md for contributor names.
+
 #ifndef CALICODB_PAGER_H
 #define CALICODB_PAGER_H
 
@@ -26,10 +30,7 @@ public:
         Env *env {};
         WriteAheadLog *wal {};
         InfoLogger *info_log {};
-        Lsn *commit_lsn {};
-        Id *max_page_id {};
-        Status *status {};
-        bool *is_running {};
+        DBState *state {};
         std::size_t frame_count {};
         std::size_t page_size {};
     };
@@ -40,6 +41,7 @@ public:
     [[nodiscard]] auto page_count() const -> std::size_t;
     [[nodiscard]] auto page_size() const -> std::size_t;
     [[nodiscard]] auto recovery_lsn() -> Id;
+    [[nodiscard]] auto bytes_read() const -> std::size_t;
     [[nodiscard]] auto bytes_written() const -> std::size_t;
     [[nodiscard]] auto truncate(std::size_t page_count) -> Status;
     [[nodiscard]] auto flush(Lsn target_lsn = Lsn::null()) -> Status;
@@ -56,7 +58,6 @@ private:
     [[nodiscard]] auto pin_frame(Id pid) -> Status;
     [[nodiscard]] auto do_pin_frame(Id pid) -> Status;
     [[nodiscard]] auto make_frame_available() -> bool;
-    auto watch_page(Page &page, PageCache::Entry &entry, int important) -> void;
     auto clean_page(PageCache::Entry &entry) -> PageList::Iterator;
 
     std::string m_filename;
@@ -64,13 +65,10 @@ private:
     PageList m_dirty;
     PageCache m_cache;
     Lsn m_recovery_lsn;
-    bool *m_is_running {};
-    Status *m_status {};
     WriteAheadLog *m_wal {};
     Env *m_env {};
     InfoLogger *m_info_log {};
-    Lsn *m_commit_lsn {};
-    Id *m_max_page_id {};
+    DBState *m_state {};
 };
 
 } // namespace calicodb

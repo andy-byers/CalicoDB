@@ -1,3 +1,7 @@
+// Copyright (c) 2022, The CalicoDB Authors. All rights reserved.
+// This source code is licensed under the MIT License, which can be found in
+// LICENSE.md. See AUTHORS.md for contributor names.
+
 #include "calicodb/env.h"
 #include "calicodb/slice.h"
 #include "crc.h"
@@ -161,7 +165,7 @@ TEST_F(WalPayloadTests, VacuumPayloadEncoding)
 [[nodiscard]] auto get_ids(const WalSet &c)
 {
     std::vector<Id> ids;
-    for (Id id; ; ) {
+    for (Id id;;) {
         id = c.id_after(id);
         if (id.is_null()) {
             break;
@@ -441,7 +445,7 @@ TEST_F(WalComponentTests, ReaderReportsInvalidSize)
     header.type = kFullRecord;
     header.size = -1;
     std::string buffer(WalRecordHeader::kSize, '\0');
-    write_wal_record_header(buffer, header);
+    write_wal_record_header(buffer.data(), header);
 
     Editor *editor;
     ASSERT_OK(env->new_editor(encode_segment_name(kWalPrefix, Id::root()), &editor));
@@ -575,7 +579,7 @@ public:
         std::unique_ptr<Reader> file {temp};
         WalReader reader {*file, tail_buffer};
 
-        for (; ; ) {
+        for (;;) {
             Span payload {payload_buffer};
             auto s = reader.read(payload);
 

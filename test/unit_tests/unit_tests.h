@@ -1,3 +1,7 @@
+// Copyright (c) 2022, The CalicoDB Authors. All rights reserved.
+// This source code is licensed under the MIT License, which can be found in
+// LICENSE.md. See AUTHORS.md for contributor names.
+
 #ifndef CALICODB_TEST_UNIT_TESTS_H
 #define CALICODB_TEST_UNIT_TESTS_H
 
@@ -16,6 +20,26 @@
 
 namespace calicodb
 {
+
+[[nodiscard]] static auto db_impl(const DB *db) -> const DBImpl *
+{
+    return reinterpret_cast<const DBImpl *>(db);
+}
+
+[[nodiscard]] static auto db_impl(DB *db) -> DBImpl *
+{
+    return reinterpret_cast<DBImpl *>(db);
+}
+
+[[nodiscard]] static auto table_impl(const Table *table) -> const TableImpl *
+{
+    return reinterpret_cast<const TableImpl *>(table);
+}
+
+[[nodiscard]] static auto table_impl(Table *table) -> TableImpl *
+{
+    return reinterpret_cast<TableImpl *>(table);
+}
 
 #define CLEAR_INTERCEPTORS()                                                 \
     do {                                                                     \
@@ -133,7 +157,6 @@ public:
         return Status::ok();
     }
 
-
     [[nodiscard]] auto log_vacuum(bool, Lsn *) -> Status override
     {
         return Status::ok();
@@ -166,10 +189,7 @@ public:
                                   env.get(),
                                   &wal,
                                   nullptr,
-                                  &commit_lsn,
-                                  &max_page_id,
-                                  &status,
-                                  &in_txn,
+                                  &state,
                                   kFrameCount,
                                   kPageSize,
                               },
@@ -177,16 +197,13 @@ public:
         pager.reset(temp);
     }
 
+    DBState state;
     TableSet tables;
-    Status status;
-    bool in_txn {};
     DisabledWriteAheadLog wal;
     std::string scratch;
     std::string collect_scratch;
     std::unique_ptr<Pager> pager;
     tools::RandomGenerator random {1'024 * 1'024 * 8};
-    Lsn commit_lsn;
-    Id max_page_id;
 };
 
 inline auto expect_ok(const Status &s) -> void

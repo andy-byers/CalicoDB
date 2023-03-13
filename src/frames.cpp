@@ -1,3 +1,7 @@
+// Copyright (c) 2022, The CalicoDB Authors. All rights reserved.
+// This source code is licensed under the MIT License, which can be found in
+// LICENSE.md. See AUTHORS.md for contributor names.
+
 #include "frames.h"
 #include "calicodb/env.h"
 #include "encoding.h"
@@ -139,6 +143,7 @@ auto FrameManager::read_page_from_file(Id page_id, char *out) const -> Status
 
     auto read_size = m_page_size;
     CDB_TRY(m_file->read(out, &read_size, offset));
+    m_bytes_read += read_size;
 
     // We should always read exactly what we requested, unless we are allocating a page during recovery.
     if (read_size == m_page_size) {
@@ -155,6 +160,7 @@ auto FrameManager::read_page_from_file(Id page_id, char *out) const -> Status
 
 auto FrameManager::write_page_to_file(Id pid, const char *in) const -> Status
 {
+    m_bytes_written += m_page_size;
     return m_file->write({in, m_page_size}, pid.as_index() * m_page_size);
 }
 

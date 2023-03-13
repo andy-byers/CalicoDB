@@ -1,3 +1,7 @@
+// Copyright (c) 2022, The CalicoDB Authors. All rights reserved.
+// This source code is licensed under the MIT License, which can be found in
+// LICENSE.md. See AUTHORS.md for contributor names.
+
 #ifndef CALICODB_WAL_RECORD_H
 #define CALICODB_WAL_RECORD_H
 
@@ -61,7 +65,7 @@ struct WalPayloadHeader {
 };
 
 // Routines for working with WAL records.
-auto write_wal_record_header(Span out, const WalRecordHeader &header) -> void;
+auto write_wal_record_header(char *out, const WalRecordHeader &header) -> void;
 [[nodiscard]] auto read_wal_record_header(Slice in) -> WalRecordHeader;
 [[nodiscard]] auto split_record(WalRecordHeader &lhs, const Slice &payload, std::size_t available_size) -> WalRecordHeader;
 [[nodiscard]] auto merge_records_left(WalRecordHeader &lhs, const WalRecordHeader &rhs) -> Status;

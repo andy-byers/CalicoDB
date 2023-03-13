@@ -1,3 +1,7 @@
+// Copyright (c) 2022, The CalicoDB Authors. All rights reserved.
+// This source code is licensed under the MIT License, which can be found in
+// LICENSE.md. See AUTHORS.md for contributor names.
+
 #include "wal_record.h"
 #include "encoding.h"
 #include "page.h"
@@ -5,13 +9,12 @@
 namespace calicodb
 {
 
-auto write_wal_record_header(Span out, const WalRecordHeader &header) -> void
+auto write_wal_record_header(char *out, const WalRecordHeader &header) -> void
 {
-    out[0] = header.type;
-    out.advance();
+    *out++ = header.type;
 
     put_u16(out, header.size);
-    out.advance(sizeof(std::uint16_t));
+    out += sizeof(std::uint16_t);
 
     put_u32(out, header.crc);
 }

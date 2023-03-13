@@ -1,3 +1,7 @@
+// Copyright (c) 2022, The CalicoDB Authors. All rights reserved.
+// This source code is licensed under the MIT License, which can be found in
+// LICENSE.md. See AUTHORS.md for contributor names.
+
 #include "tree.h"
 #include "db_impl.h"
 #include "logging.h"
@@ -137,28 +141,6 @@ auto write_next_id(Page &page, Id next_id) -> void
     put_u64(page.span(page_offset(page) + kPageHeaderSize, sizeof(Id)), next_id.value);
 }
 
-static auto internal_cell_size(const NodeMeta &meta, const char *data) -> std::size_t
-{
-    std::uint64_t key_size;
-    const auto *ptr = decode_varint(data + sizeof(Id), key_size);
-    const auto local_size = compute_local_size(key_size, 0, meta.min_local, meta.max_local);
-    const auto extra_size = (local_size < key_size) * sizeof(Id);
-    const auto header_size = static_cast<std::size_t>(ptr - data);
-    return header_size + local_size + extra_size;
-}
-
-static auto external_cell_size(const NodeMeta &meta, const char *data) -> std::size_t
-{
-    std::uint64_t key_size, value_size;
-    const auto *ptr = data;
-    ptr = decode_varint(ptr, value_size);
-    ptr = decode_varint(ptr, key_size);
-    const auto local_size = compute_local_size(key_size, value_size, meta.min_local, meta.max_local);
-    const auto extra_size = (local_size < key_size + value_size) * sizeof(Id);
-    const auto header_size = static_cast<std::size_t>(ptr - data);
-    return header_size + local_size + extra_size;
-}
-
 static auto parse_external_cell(const NodeMeta &meta, char *data) -> Cell
 {
     std::uint64_t key_size, value_size;
@@ -211,11 +193,9 @@ static constexpr auto create_meta_lookup() -> std::array<NodeMeta[2], sizeof_met
         const auto page_size = kMinPageSize << i;
         lookup[i][0].min_local = compute_min_local(page_size);
         lookup[i][0].max_local = compute_max_local(page_size);
-        lookup[i][0].cell_size = internal_cell_size;
         lookup[i][0].parse_cell = parse_internal_cell;
         lookup[i][1].min_local = compute_min_local(page_size);
         lookup[i][1].max_local = compute_max_local(page_size);
-        lookup[i][1].cell_size = external_cell_size;
         lookup[i][1].parse_cell = parse_external_cell;
     }
     return lookup;
@@ -232,9 +212,14 @@ static constexpr auto lookup_meta(std::size_t page_size, bool is_external) -> co
     return &kMetaLookup[index][is_external];
 }
 
-[[nodiscard]] static auto cell_size_direct(const Node &node, std::size_t offset) -> std::size_t
+static auto read_cell_at(Node &node, std::size_t offset) -> Cell
 {
-    return node.meta->cell_size(*node.meta, node.page.data() + offset);
+    return node.meta->parse_cell(*node.meta, node.page.data() + offset);
+}
+
+auto read_cell(Node &node, std::size_t index) -> Cell
+{
+    return read_cell_at(node, node.get_slot(index));
 }
 
 class BlockAllocator
@@ -378,7 +363,7 @@ auto BlockAllocator::defragment(std::optional<PageSize> skip) -> void
             continue;
         }
         const auto offset = m_node->get_slot(index);
-        const auto size = cell_size_direct(*m_node, offset);
+        const auto size = read_cell_at(*m_node, offset).size;
 
         end -= PageSize(size);
         std::memcpy(m_node->scratch + end, ptr + offset, size);
@@ -458,16 +443,6 @@ static auto free_block(Node &node, PageSize index, PageSize size) -> void
     node.remove_slot(index);
 }
 
-static auto read_cell_at(Node &node, std::size_t offset) -> Cell
-{
-    return node.meta->parse_cell(*node.meta, node.page.data() + offset);
-}
-
-auto read_cell(Node &node, std::size_t index) -> Cell
-{
-    return read_cell_at(node, node.get_slot(index));
-}
-
 auto write_cell(Node &node, std::size_t index, const Cell &cell) -> std::size_t
 {
     if (const auto offset = allocate_block(node, static_cast<PageSize>(index), static_cast<PageSize>(cell.size))) {
@@ -488,7 +463,7 @@ static auto erase_cell(Node &node, std::size_t index, std::size_t size_hint) -> 
 
 auto erase_cell(Node &node, std::size_t index) -> void
 {
-    erase_cell(node, index, cell_size_direct(node, node.get_slot(index)));
+    erase_cell(node, index, read_cell(node, index).size);
 }
 
 static auto emplace_cell(char *out, std::size_t key_size, std::size_t value_size, const Slice &local_key, const Slice &local_value, Id overflow_id) -> char *
@@ -1058,118 +1033,84 @@ auto Tree::resolve_underflow(Node node, const Slice &anchor) -> Status
     return Status::ok();
 }
 
-auto Tree::internal_merge_left(Node &left, Node &right, Node &parent, std::size_t index) -> Status
-{
-    CDB_EXPECT_TRUE(is_underflowing(left));
-    CDB_EXPECT_FALSE(left.header.is_external);
-    CDB_EXPECT_FALSE(right.header.is_external);
-    CDB_EXPECT_FALSE(parent.header.is_external);
-
-    auto separator = read_cell(parent, index);
-    write_cell(left, left.header.cell_count, separator);
-    write_child_id(left, left.header.cell_count - 1, left.header.next_id);
-    CDB_TRY(fix_parent_id(left.header.next_id, left.page.id(), PointerMap::kTreeNode));
-    CDB_TRY(maybe_fix_overflow_chain(separator, left.page.id()));
-    erase_cell(parent, index, separator.size);
-
-    while (right.header.cell_count) {
-        CDB_TRY(transfer_left(left, right));
-    }
-    left.header.next_id = right.header.next_id;
-    write_child_id(parent, index, left.page.id());
-    return Status::ok();
-}
-
-auto Tree::external_merge_left(Node &left, Node &right, Node &parent, std::size_t index) -> Status
-{
-    CDB_EXPECT_TRUE(is_underflowing(left));
-    CDB_EXPECT_TRUE(left.header.is_external);
-    CDB_EXPECT_TRUE(right.header.is_external);
-    CDB_EXPECT_FALSE(parent.header.is_external);
-
-    left.header.next_id = right.header.next_id;
-    CDB_TRY(remove_cell(parent, index));
-
-    while (right.header.cell_count) {
-        CDB_TRY(transfer_left(left, right));
-    }
-    write_child_id(parent, index, left.page.id());
-
-    if (!right.header.next_id.is_null()) {
-        Node right_sibling;
-        CDB_TRY(acquire(&right_sibling, right.header.next_id, true));
-        right_sibling.header.prev_id = left.page.id();
-        release(std::move(right_sibling));
-    }
-    return Status::ok();
-}
-
 auto Tree::merge_left(Node &left, Node right, Node &parent, std::size_t index) -> Status
 {
+    CDB_EXPECT_FALSE(parent.header.is_external);
+    CDB_EXPECT_TRUE(is_underflowing(left));
     if (left.header.is_external) {
-        CDB_TRY(external_merge_left(left, right, parent, index));
+        CDB_EXPECT_TRUE(right.header.is_external);
+        left.header.next_id = right.header.next_id;
+        CDB_TRY(remove_cell(parent, index));
+
+        while (right.header.cell_count) {
+            CDB_TRY(transfer_left(left, right));
+        }
+        write_child_id(parent, index, left.page.id());
+
+        if (!right.header.next_id.is_null()) {
+            Node right_sibling;
+            CDB_TRY(acquire(&right_sibling, right.header.next_id, true));
+            right_sibling.header.prev_id = left.page.id();
+            release(std::move(right_sibling));
+        }
     } else {
-        CDB_TRY(internal_merge_left(left, right, parent, index));
+        CDB_EXPECT_FALSE(right.header.is_external);
+        auto separator = read_cell(parent, index);
+        write_cell(left, left.header.cell_count, separator);
+        write_child_id(left, left.header.cell_count - 1, left.header.next_id);
+        CDB_TRY(fix_parent_id(left.header.next_id, left.page.id(), PointerMap::kTreeNode));
+        CDB_TRY(maybe_fix_overflow_chain(separator, left.page.id()));
+        erase_cell(parent, index, separator.size);
+
+        while (right.header.cell_count) {
+            CDB_TRY(transfer_left(left, right));
+        }
+        left.header.next_id = right.header.next_id;
+        write_child_id(parent, index, left.page.id());
     }
     CDB_TRY(fix_links(left));
     return destroy(std::move(right));
 }
 
-auto Tree::internal_merge_right(Node &left, Node &right, Node &parent, std::size_t index) -> Status
-{
-    CDB_EXPECT_TRUE(is_underflowing(right));
-    CDB_EXPECT_FALSE(left.header.is_external);
-    CDB_EXPECT_FALSE(right.header.is_external);
-    CDB_EXPECT_FALSE(parent.header.is_external);
-
-    auto separator = read_cell(parent, index);
-    write_cell(left, left.header.cell_count, separator);
-    write_child_id(left, left.header.cell_count - 1, left.header.next_id);
-    CDB_TRY(fix_parent_id(left.header.next_id, left.page.id(), PointerMap::kTreeNode));
-    CDB_TRY(maybe_fix_overflow_chain(separator, left.page.id()));
-    left.header.next_id = right.header.next_id;
-
-    CDB_EXPECT_EQ(read_child_id(parent, index + 1), right.page.id());
-    write_child_id(parent, index + 1, left.page.id());
-    erase_cell(parent, index, separator.size);
-
-    // Transfer the rest of the cells. left shouldn't overflow.
-    while (right.header.cell_count) {
-        CDB_TRY(transfer_left(left, right));
-    }
-    return Status::ok();
-}
-
-auto Tree::external_merge_right(Node &left, Node &right, Node &parent, std::size_t index) -> Status
-{
-    CDB_EXPECT_TRUE(is_underflowing(right));
-    CDB_EXPECT_TRUE(left.header.is_external);
-    CDB_EXPECT_TRUE(right.header.is_external);
-    CDB_EXPECT_FALSE(parent.header.is_external);
-
-    left.header.next_id = right.header.next_id;
-    CDB_EXPECT_EQ(read_child_id(parent, index + 1), right.page.id());
-    write_child_id(parent, index + 1, left.page.id());
-    CDB_TRY(remove_cell(parent, index));
-
-    while (right.header.cell_count) {
-        CDB_TRY(transfer_left(left, right));
-    }
-    if (!right.header.next_id.is_null()) {
-        Node right_sibling;
-        CDB_TRY(acquire(&right_sibling, right.header.next_id, true));
-        right_sibling.header.prev_id = left.page.id();
-        release(std::move(right_sibling));
-    }
-    return Status::ok();
-}
-
 auto Tree::merge_right(Node &left, Node right, Node &parent, std::size_t index) -> Status
 {
+    CDB_EXPECT_FALSE(parent.header.is_external);
+    CDB_EXPECT_TRUE(is_underflowing(right));
     if (left.header.is_external) {
-        CDB_TRY(external_merge_right(left, right, parent, index));
+        CDB_EXPECT_TRUE(right.header.is_external);
+
+        left.header.next_id = right.header.next_id;
+        CDB_EXPECT_EQ(read_child_id(parent, index + 1), right.page.id());
+        write_child_id(parent, index + 1, left.page.id());
+        CDB_TRY(remove_cell(parent, index));
+
+        while (right.header.cell_count) {
+            CDB_TRY(transfer_left(left, right));
+        }
+        if (!right.header.next_id.is_null()) {
+            Node right_sibling;
+            CDB_TRY(acquire(&right_sibling, right.header.next_id, true));
+            right_sibling.header.prev_id = left.page.id();
+            release(std::move(right_sibling));
+        }
     } else {
-        CDB_TRY(internal_merge_right(left, right, parent, index));
+        CDB_EXPECT_FALSE(right.header.is_external);
+
+        auto separator = read_cell(parent, index);
+        write_cell(left, left.header.cell_count, separator);
+        write_child_id(left, left.header.cell_count - 1, left.header.next_id);
+        CDB_TRY(fix_parent_id(left.header.next_id, left.page.id(), PointerMap::kTreeNode));
+        CDB_TRY(maybe_fix_overflow_chain(separator, left.page.id()));
+        left.header.next_id = right.header.next_id;
+
+        CDB_EXPECT_EQ(read_child_id(parent, index + 1), right.page.id());
+        write_child_id(parent, index + 1, left.page.id());
+        erase_cell(parent, index, separator.size);
+
+        // Transfer the rest of the cells. left shouldn't overflow.
+        while (right.header.cell_count) {
+            CDB_TRY(transfer_left(left, right));
+        }
     }
     CDB_TRY(fix_links(left));
     return destroy(std::move(right));
@@ -1251,121 +1192,91 @@ auto Tree::fix_root(Node root) -> Status
 
 auto Tree::rotate_left(Node &parent, Node &left, Node &right, std::size_t index) -> Status
 {
+    CDB_EXPECT_FALSE(parent.header.is_external);
+    CDB_EXPECT_GT(parent.header.cell_count, 0);
+    CDB_EXPECT_GT(right.header.cell_count, 1);
     if (left.header.is_external) {
-        return external_rotate_left(parent, left, right, index);
+        CDB_EXPECT_TRUE(right.header.is_external);
+
+        auto lowest = read_cell(right, 0);
+        CDB_TRY(insert_cell(left, left.header.cell_count, lowest));
+        CDB_EXPECT_FALSE(is_overflowing(left));
+        erase_cell(right, 0);
+
+        auto separator = read_cell(right, 0);
+        CDB_TRY(PayloadManager::promote(*m_pager, m_freelist, cell_scratch(), separator, parent.page.id()));
+        write_child_id(separator, left.page.id());
+
+        CDB_TRY(remove_cell(parent, index));
+        return insert_cell(parent, index, separator);
     } else {
-        return internal_rotate_left(parent, left, right, index);
+        CDB_EXPECT_FALSE(right.header.is_external);
+
+        Node child;
+        CDB_TRY(acquire(&child, read_child_id(right, 0), true));
+        const auto saved_id = left.header.next_id;
+        left.header.next_id = child.page.id();
+        CDB_TRY(fix_parent_id(child.page.id(), left.page.id(), PointerMap::kTreeNode));
+        release(std::move(child));
+
+        const auto separator = read_cell(parent, index);
+        CDB_TRY(insert_cell(left, left.header.cell_count, separator));
+        CDB_EXPECT_FALSE(is_overflowing(left));
+        write_child_id(left, left.header.cell_count - 1, saved_id);
+        erase_cell(parent, index, separator.size);
+
+        auto lowest = read_cell(right, 0);
+        detach_cell(lowest, cell_scratch());
+        erase_cell(right, 0);
+        write_child_id(lowest, left.page.id());
+        return insert_cell(parent, index, lowest);
     }
-}
-
-auto Tree::external_rotate_left(Node &parent, Node &left, Node &right, std::size_t index) -> Status
-{
-    CDB_EXPECT_TRUE(left.header.is_external);
-    CDB_EXPECT_TRUE(right.header.is_external);
-    CDB_EXPECT_FALSE(parent.header.is_external);
-    CDB_EXPECT_GT(parent.header.cell_count, 0);
-    CDB_EXPECT_GT(right.header.cell_count, 1);
-
-    auto lowest = read_cell(right, 0);
-    CDB_TRY(insert_cell(left, left.header.cell_count, lowest));
-    CDB_EXPECT_FALSE(is_overflowing(left));
-    erase_cell(right, 0);
-
-    auto separator = read_cell(right, 0);
-    CDB_TRY(PayloadManager::promote(*m_pager, m_freelist, cell_scratch(), separator, parent.page.id()));
-    write_child_id(separator, left.page.id());
-
-    CDB_TRY(remove_cell(parent, index));
-    return insert_cell(parent, index, separator);
-}
-
-auto Tree::internal_rotate_left(Node &parent, Node &left, Node &right, std::size_t index) -> Status
-{
-    CDB_EXPECT_FALSE(parent.header.is_external);
-    CDB_EXPECT_FALSE(left.header.is_external);
-    CDB_EXPECT_FALSE(right.header.is_external);
-    CDB_EXPECT_GT(parent.header.cell_count, 0);
-    CDB_EXPECT_GT(right.header.cell_count, 1);
-
-    Node child;
-    CDB_TRY(acquire(&child, read_child_id(right, 0), true));
-    const auto saved_id = left.header.next_id;
-    left.header.next_id = child.page.id();
-    CDB_TRY(fix_parent_id(child.page.id(), left.page.id(), PointerMap::kTreeNode));
-    release(std::move(child));
-
-    const auto separator = read_cell(parent, index);
-    CDB_TRY(insert_cell(left, left.header.cell_count, separator));
-    CDB_EXPECT_FALSE(is_overflowing(left));
-    write_child_id(left, left.header.cell_count - 1, saved_id);
-    erase_cell(parent, index, separator.size);
-
-    auto lowest = read_cell(right, 0);
-    detach_cell(lowest, cell_scratch());
-    erase_cell(right, 0);
-    write_child_id(lowest, left.page.id());
-    return insert_cell(parent, index, lowest);
 }
 
 auto Tree::rotate_right(Node &parent, Node &left, Node &right, std::size_t index) -> Status
 {
+    CDB_EXPECT_FALSE(parent.header.is_external);
+    CDB_EXPECT_GT(parent.header.cell_count, 0);
+    CDB_EXPECT_GT(left.header.cell_count, 1);
+
     if (left.header.is_external) {
-        return external_rotate_right(parent, left, right, index);
+        CDB_EXPECT_TRUE(right.header.is_external);
+
+        auto highest = read_cell(left, left.header.cell_count - 1);
+        CDB_TRY(insert_cell(right, 0, highest));
+        CDB_EXPECT_FALSE(is_overflowing(right));
+
+        auto separator = highest;
+        CDB_TRY(PayloadManager::promote(*m_pager, m_freelist, cell_scratch(), separator, parent.page.id()));
+        write_child_id(separator, left.page.id());
+
+        // Don't erase the cell until it has been detached.
+        erase_cell(left, left.header.cell_count - 1);
+
+        CDB_TRY(remove_cell(parent, index));
+        CDB_TRY(insert_cell(parent, index, separator));
     } else {
-        return internal_rotate_right(parent, left, right, index);
+        CDB_EXPECT_FALSE(right.header.is_external);
+
+        Node child;
+        CDB_TRY(acquire(&child, left.header.next_id, true));
+        const auto child_id = child.page.id();
+        CDB_TRY(fix_parent_id(child.page.id(), right.page.id(), PointerMap::kTreeNode));
+        left.header.next_id = read_child_id(left, left.header.cell_count - 1);
+        release(std::move(child));
+
+        auto separator = read_cell(parent, index);
+        CDB_TRY(insert_cell(right, 0, separator));
+        CDB_EXPECT_FALSE(is_overflowing(right));
+        write_child_id(right, 0, child_id);
+        erase_cell(parent, index, separator.size);
+
+        auto highest = read_cell(left, left.header.cell_count - 1);
+        detach_cell(highest, cell_scratch());
+        write_child_id(highest, left.page.id());
+        erase_cell(left, left.header.cell_count - 1, highest.size);
+        CDB_TRY(insert_cell(parent, index, highest));
     }
-}
-
-auto Tree::external_rotate_right(Node &parent, Node &left, Node &right, std::size_t index) -> Status
-{
-    CDB_EXPECT_TRUE(left.header.is_external);
-    CDB_EXPECT_TRUE(right.header.is_external);
-    CDB_EXPECT_FALSE(parent.header.is_external);
-    CDB_EXPECT_GT(parent.header.cell_count, 0);
-    CDB_EXPECT_GT(left.header.cell_count, 1);
-
-    auto highest = read_cell(left, left.header.cell_count - 1);
-    CDB_TRY(insert_cell(right, 0, highest));
-    CDB_EXPECT_FALSE(is_overflowing(right));
-
-    auto separator = highest;
-    CDB_TRY(PayloadManager::promote(*m_pager, m_freelist, cell_scratch(), separator, parent.page.id()));
-    write_child_id(separator, left.page.id());
-
-    // Don't erase the cell until it has been detached.
-    erase_cell(left, left.header.cell_count - 1);
-
-    CDB_TRY(remove_cell(parent, index));
-    CDB_TRY(insert_cell(parent, index, separator));
-    return Status::ok();
-}
-
-auto Tree::internal_rotate_right(Node &parent, Node &left, Node &right, std::size_t index) -> Status
-{
-    CDB_EXPECT_FALSE(parent.header.is_external);
-    CDB_EXPECT_FALSE(left.header.is_external);
-    CDB_EXPECT_FALSE(right.header.is_external);
-    CDB_EXPECT_GT(parent.header.cell_count, 0);
-    CDB_EXPECT_GT(left.header.cell_count, 1);
-
-    Node child;
-    CDB_TRY(acquire(&child, left.header.next_id, true));
-    const auto child_id = child.page.id();
-    CDB_TRY(fix_parent_id(child.page.id(), right.page.id(), PointerMap::kTreeNode));
-    left.header.next_id = read_child_id(left, left.header.cell_count - 1);
-    release(std::move(child));
-
-    auto separator = read_cell(parent, index);
-    CDB_TRY(insert_cell(right, 0, separator));
-    CDB_EXPECT_FALSE(is_overflowing(right));
-    write_child_id(right, 0, child_id);
-    erase_cell(parent, index, separator.size);
-
-    auto highest = read_cell(left, left.header.cell_count - 1);
-    detach_cell(highest, cell_scratch());
-    write_child_id(highest, left.page.id());
-    erase_cell(left, left.header.cell_count - 1, highest.size);
-    CDB_TRY(insert_cell(parent, index, highest));
     return Status::ok();
 }
 

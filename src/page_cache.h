@@ -1,6 +1,6 @@
-/*
- * Very loosely based off of https://medium.com/@koushikmohan/an-analysis-of-2q-cache-replacement-algorithms-21acceae672a
- */
+// Copyright (c) 2022, The CalicoDB Authors. All rights reserved.
+// This source code is licensed under the MIT License, which can be found in
+// LICENSE.md. See AUTHORS.md for contributor names.
 
 #ifndef CALICODB_PAGE_CACHE_H
 #define CALICODB_PAGE_CACHE_H

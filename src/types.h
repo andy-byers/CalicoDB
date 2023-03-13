@@ -1,3 +1,7 @@
+// Copyright (c) 2022, The CalicoDB Authors. All rights reserved.
+// This source code is licensed under the MIT License, which can be found in
+// LICENSE.md. See AUTHORS.md for contributor names.
+
 #ifndef CALICODB_TYPES_H
 #define CALICODB_TYPES_H
 
@@ -14,7 +18,10 @@ struct DBState {
     Status status;
     std::size_t batch_size {};
     std::size_t record_count {};
-    std::size_t bytes_written {};
+    Lsn commit_lsn;
+    Id freelist_head;
+    Id max_page_id;
+    bool is_running {};
 };
 
 class AlignedBuffer

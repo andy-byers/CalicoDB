@@ -1,3 +1,7 @@
+// Copyright (c) 2022, The CalicoDB Authors. All rights reserved.
+// This source code is licensed under the MIT License, which can be found in
+// LICENSE.md. See AUTHORS.md for contributor names.
+
 #ifndef CALICODB_TREE_H
 #define CALICODB_TREE_H
 
@@ -39,10 +43,8 @@ struct Cell {
 };
 
 struct NodeMeta {
-    using CellSize = std::size_t (*)(const NodeMeta &, const char *);
     using ParseCell = Cell (*)(const NodeMeta &, char *);
 
-    CellSize cell_size {};
     ParseCell parse_cell {};
     std::size_t min_local {};
     std::size_t max_local {};
@@ -222,14 +224,6 @@ private:
     [[nodiscard]] auto rotate_left(Node &parent, Node &left, Node &right, std::size_t index) -> Status;
     [[nodiscard]] auto rotate_right(Node &parent, Node &left, Node &right, std::size_t index) -> Status;
     [[nodiscard]] auto transfer_left(Node &left, Node &right) -> Status;
-    [[nodiscard]] auto internal_merge_left(Node &left, Node &right, Node &parent, std::size_t index) -> Status;
-    [[nodiscard]] auto external_merge_left(Node &left, Node &right, Node &parent, std::size_t index) -> Status;
-    [[nodiscard]] auto internal_merge_right(Node &left, Node &right, Node &parent, std::size_t index) -> Status;
-    [[nodiscard]] auto external_merge_right(Node &left, Node &right, Node &parent, std::size_t index) -> Status;
-    [[nodiscard]] auto external_rotate_left(Node &parent, Node &left, Node &right, std::size_t index) -> Status;
-    [[nodiscard]] auto internal_rotate_left(Node &parent, Node &left, Node &right, std::size_t index) -> Status;
-    [[nodiscard]] auto external_rotate_right(Node &parent, Node &left, Node &right, std::size_t index) -> Status;
-    [[nodiscard]] auto internal_rotate_right(Node &parent, Node &left, Node &right, std::size_t index) -> Status;
 
     [[nodiscard]] auto find_highest(Node *node) const -> Status;
     [[nodiscard]] auto find_lowest(Node *node) const -> Status;

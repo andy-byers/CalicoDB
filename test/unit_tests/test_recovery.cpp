@@ -1,6 +1,9 @@
-/*
- * Recovery tests (harness is modified from LevelDB).
- */
+// Copyright (c) 2022, The CalicoDB Authors. All rights reserved.
+// This source code is licensed under the MIT License, which can be found in
+// LICENSE.md. See AUTHORS.md for contributor names.
+//
+// Recovery tests (harness is modified from LevelDB).
+
 #include "calicodb/calicodb.h"
 #include "tools.h"
 #include "unit_tests.h"
@@ -17,7 +20,7 @@ public:
     static constexpr auto kFilename = "./test";
     static constexpr auto kWalPrefix = "./wal-";
     static constexpr auto kPageSize = kMinPageSize;
-    static constexpr  std::size_t kFrameCount {16};
+    static constexpr std::size_t kFrameCount {16};
 
     WalPagerInteractionTests()
         : scratch(kPageSize, '\x00'),
@@ -45,10 +48,7 @@ public:
             env.get(),
             wal,
             nullptr,
-            &commit_lsn,
-            &max_page_id,
-            &status,
-            &is_running,
+            &state,
             kFrameCount,
             kPageSize,
         };
@@ -67,7 +67,7 @@ public:
         std::unique_ptr<Reader> file {temp};
         WalReader reader {*file, tail_buffer};
 
-        for (; ; ) {
+        for (;;) {
             Span payload {payload_buffer};
             auto s = reader.read(payload);
 
@@ -82,11 +82,8 @@ public:
         return Status::ok();
     }
 
+    DBState state;
     std::string log_scratch;
-    Status status;
-    bool is_running {true};
-    Lsn commit_lsn;
-    Id max_page_id;
     std::string scratch;
     std::string collect_scratch;
     std::string payload_buffer;
@@ -118,16 +115,11 @@ public:
         close();
     }
 
-    auto impl() const -> DBImpl *
-    {
-        return reinterpret_cast<DBImpl *>(db);
-    }
-
     void close()
     {
         delete table;
         table = nullptr;
-        
+
         delete db;
         db = nullptr;
     }
@@ -332,7 +324,7 @@ TEST_F(RecoveryTests, VacuumRecovery)
         ASSERT_OK(db->get(key, &result));
         ASSERT_EQ(result, value);
     }
-    reinterpret_cast<const DBImpl *>(db)->TEST_validate();
+    db_impl(db)->TEST_validate();
 }
 
 TEST_F(RecoveryTests, SanityCheck)

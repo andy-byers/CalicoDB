@@ -1,3 +1,6 @@
+// Copyright (c) 2022, The CalicoDB Authors. All rights reserved.
+// This source code is licensed under the MIT License, which can be found in
+// LICENSE.md. See AUTHORS.md for contributor names.
 
 #ifndef CALICODB_TOOLS_H
 #define CALICODB_TOOLS_H
@@ -370,50 +373,9 @@ struct DatabaseCounts {
     return counts;
 }
 
-struct DatabaseStats {
-    double cache_hit_ratio {};
-    std::size_t data_throughput {};
-    std::size_t pager_throughput {};
-    std::size_t wal_throughput {};
-};
-
-[[nodiscard]] inline auto parse_db_stats(std::string prop) -> DatabaseStats
-{
-    DatabaseStats stats;
-
-    CHECK_EQ(prop.find("cache_hit_ratio:"), 0);
-    prop = prop.substr(16);
-    auto pos = prop.find(',');
-    CHECK_TRUE(pos != std::string::npos);
-    stats.cache_hit_ratio = std::stod(prop.substr(0, pos));
-    prop = prop.substr(pos);
-
-    CHECK_EQ(prop.find(",data_throughput:"), 0);
-    prop = prop.substr(17);
-    pos = prop.find(',');
-    CHECK_TRUE(pos != std::string::npos);
-    stats.data_throughput = std::stoi(prop.substr(0, pos));
-    prop = prop.substr(pos);
-
-    CHECK_EQ(prop.find(",pager_throughput:"), 0);
-    prop = prop.substr(18);
-    pos = prop.find(',');
-    CHECK_TRUE(pos != std::string::npos);
-    stats.pager_throughput = std::stoi(prop.substr(0, pos));
-    prop = prop.substr(pos);
-
-    CHECK_EQ(prop.find(",wal_throughput:"), 0);
-    prop = prop.substr(16);
-    pos = prop.find(',');
-    CHECK_EQ(pos, std::string::npos);
-    stats.wal_throughput = std::stoi(prop);
-
-    return stats;
-}
-
 auto print_references(Pager &pager) -> void;
 auto print_wals(Env &env, std::size_t page_size, const std::string &prefix) -> void;
 
-} // namespace calicodb::Tools
+} // namespace calicodb::tools
 
 #endif // CALICODB_TOOLS_H
