@@ -320,9 +320,8 @@ public:
 
     [[nodiscard]] static auto wal_read_with_status(WalReader &reader, std::string &out, Lsn *lsn = nullptr) -> Status
     {
-        out.resize(wal_scratch_size(kPageSize));
-        Slice buffer;
-        CDB_TRY(reader.read(out, buffer));
+        CDB_TRY(reader.read(out));
+        Slice buffer {out};
         if (lsn != nullptr) {
             *lsn = extract_payload_lsn(buffer);
         }
@@ -378,6 +377,20 @@ TEST_F(WalComponentTests, HandlesRecordsWithinBlock)
     auto reader = make_reader(Id::root());
     ASSERT_EQ(wal_read(reader), "hello");
     ASSERT_EQ(wal_read(reader), "world");
+    assert_reader_is_done(reader);
+}
+
+TEST_F(WalComponentTests, FragmentedRecord)
+{
+    tools::RandomGenerator random;
+    const auto payload = random.Generate(wal_scratch_size(kPageSize) - sizeof(Lsn));
+
+    auto writer = make_writer(Id::root());
+    ASSERT_OK(wal_write(writer, Lsn {1}, payload));
+    ASSERT_OK(writer.flush());
+
+    auto reader = make_reader(Id::root());
+    ASSERT_EQ(wal_read(reader), payload);
     assert_reader_is_done(reader);
 }
 
@@ -437,14 +450,12 @@ TEST_F(WalComponentTests, ReaderReportsIncompleteBlock)
 TEST_F(WalComponentTests, ReaderReportsInvalidSize)
 {
     auto writer = make_writer(Id::root());
-    ASSERT_OK(wal_write(writer, Lsn {1}, "./test"));
+    ASSERT_OK(wal_write(writer, Lsn {1}, "test"));
     ASSERT_OK(writer.flush());
 
-    WalRecordHeader header;
-    header.type = kFullRecord;
-    header.size = -1;
     std::string buffer(WalRecordHeader::kSize, '\0');
-    write_wal_record_header(buffer.data(), header);
+    buffer[0] = kFullRecord;
+    put_u16(buffer.data() + 1, -1);
 
     Editor *editor;
     ASSERT_OK(env->new_editor(encode_segment_name(kWalPrefix, Id::root()), editor));
@@ -526,6 +537,26 @@ TEST_F(WalComponentTests, HandlesRecordsAcrossSparseBlocks)
     assert_reader_is_done(reader);
 }
 
+TEST_F(WalComponentTests, HandlesLargeRecords)
+{
+    const auto block_size = wal_block_size(kPageSize);
+    tools::RandomGenerator random {block_size * 20};
+    std::vector<std::string> payloads;
+
+    auto writer = make_writer(Id::root());
+    for (std::size_t i {}; i < 10; ++i) {
+        const auto payload_size = random.Next(block_size, block_size * 5);
+        payloads.emplace_back(random.Generate(payload_size).to_string());
+        ASSERT_OK(wal_write(writer, Lsn {i + 1}, payloads.back()));
+    }
+    ASSERT_OK(writer.flush());
+    auto reader = make_reader(Id::root());
+    for (const auto &payload : payloads) {
+        ASSERT_EQ(wal_read(reader), payload);
+    }
+    assert_reader_is_done(reader);
+}
+
 TEST_F(WalComponentTests, Corruption)
 {
     // Don't flush the writer, so it leaves a partial record in the WAL.
@@ -567,7 +598,6 @@ public:
         wal.reset(temp);
 
         tail_buffer.resize(wal_block_size(kPageSize));
-        payload_buffer.resize(wal_scratch_size(kPageSize));
     }
 
     auto read_segment(Id segment_id, std::vector<std::string> *out) -> Status
@@ -579,11 +609,11 @@ public:
         WalReader reader {*file, tail_buffer};
 
         for (;;) {
-            Slice payload;
-            auto s = reader.read(payload_buffer, payload);
+            std::string payload;
+            auto s = reader.read(payload);
 
             if (s.is_ok()) {
-                out->emplace_back(payload.to_string());
+                out->emplace_back(payload);
             } else if (s.is_not_found()) {
                 break;
             } else {
@@ -593,7 +623,6 @@ public:
         return Status::ok();
     }
 
-    std::string payload_buffer;
     std::string tail_buffer;
     std::unique_ptr<WriteAheadLog> wal;
     tools::RandomGenerator random;

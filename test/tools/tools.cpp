@@ -406,8 +406,8 @@ auto print_wals(Env &env, std::size_t page_size, const std::string &prefix) -> v
             WalReader reader {*file, tail_buffer};
             std::cerr << "Start of segment " << name << '\n';
             for (;;) {
-                Slice payload;
-                auto s = reader.read(data_buffer, payload);
+                auto s = reader.read(data_buffer);
+                Slice payload {data_buffer};
                 if (s.is_not_found()) {
                     std::cerr << "End of segment\n";
                     break;

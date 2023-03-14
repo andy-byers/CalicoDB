@@ -184,7 +184,6 @@ class Tree
 public:
     explicit Tree(Pager &pager, Id root_id, Id &freelist_head);
     [[nodiscard]] static auto create(Pager &pager, Id table_id, Id &freelist_head, Id *out) -> Status;
-    [[nodiscard]] auto root(Node &out) const -> Status;
     [[nodiscard]] auto put(const Slice &key, const Slice &value, bool *exists = nullptr) -> Status;
     [[nodiscard]] auto get(const Slice &key, std::string *value) const -> Status;
     [[nodiscard]] auto erase(const Slice &key) -> Status;

@@ -161,27 +161,27 @@ auto DBImpl::open(const Options &sanitized) -> Status
             m_env,
             page_size,
         },
-        &wal));
+        &m_wal));
 
     CDB_TRY(Pager::open(
         {
             m_filename,
             m_env,
-            wal,
+            m_wal,
             m_info_log,
             &m_state,
             sanitized.cache_size / page_size,
             page_size,
         },
-        &pager));
-    pager->load_state(state);
+        &m_pager));
+    m_pager->load_state(state);
 
     if (!db_exists) {
         m_info_log->logv("setting up a new database");
 
         // Create the root tree.
         Id root_id;
-        CDB_TRY(Tree::create(*pager, Id::root(), m_state.freelist_head, &root_id));
+        CDB_TRY(Tree::create(*m_pager, Id::root(), m_state.freelist_head, &root_id));
         CDB_EXPECT_TRUE(root_id.is_root());
     }
 
@@ -207,18 +207,18 @@ auto DBImpl::open(const Options &sanitized) -> Status
     } else {
         // Write the initial file header.
         Page db_root;
-        CDB_TRY(pager->acquire(Id::root(), &db_root));
-        pager->upgrade(db_root);
-        state.page_count = pager->page_count();
+        CDB_TRY(m_pager->acquire(Id::root(), &db_root));
+        m_pager->upgrade(db_root);
+        state.page_count = m_pager->page_count();
         state.header_crc = crc32c::Mask(state.compute_crc());
         state.write(db_root.mutate(0, FileHeader::kSize));
-        pager->release(std::move(db_root));
-        CDB_TRY(pager->flush());
+        m_pager->release(std::move(db_root));
+        CDB_TRY(m_pager->flush());
     }
-    CDB_TRY(wal->start_writing());
+    CDB_TRY(m_wal->start_writing());
 
-    m_info_log->logv("pager recovery lsn is %llu", pager->recovery_lsn().value);
-    m_info_log->logv("wal flushed lsn is %llu", wal->flushed_lsn().value);
+    m_info_log->logv("pager recovery lsn is %llu", m_pager->recovery_lsn().value);
+    m_info_log->logv("wal flushed lsn is %llu", m_wal->flushed_lsn().value);
 
     CDB_TRY(m_state.status);
     m_state.is_running = true;
@@ -226,9 +226,7 @@ auto DBImpl::open(const Options &sanitized) -> Status
 }
 
 DBImpl::DBImpl(const Options &options, const Options &sanitized, std::string filename)
-    : m_reader_data(wal_scratch_size(options.page_size), '\0'),
-      m_reader_tail(wal_block_size(options.page_size), '\0'),
-      m_filename {std::move(filename)},
+    : m_filename {std::move(filename)},
       m_wal_prefix {sanitized.wal_prefix},
       m_env {sanitized.env},
       m_info_log {sanitized.info_log},
@@ -240,13 +238,13 @@ DBImpl::DBImpl(const Options &options, const Options &sanitized, std::string fil
 DBImpl::~DBImpl()
 {
     if (m_state.is_running && m_state.status.is_ok()) {
-        if (const auto s = wal->flush(); !s.is_ok()) {
+        if (const auto s = m_wal->flush(); !s.is_ok()) {
             m_info_log->logv("failed to flush wal: %s", s.to_string().data());
         }
-        if (const auto s = pager->flush(m_state.commit_lsn); !s.is_ok()) {
+        if (const auto s = m_pager->flush(m_state.commit_lsn); !s.is_ok()) {
             m_info_log->logv("failed to flush pager: %s", s.to_string().data());
         }
-        if (const auto s = wal->close(); !s.is_ok()) {
+        if (const auto s = m_wal->close(); !s.is_ok()) {
             m_info_log->logv("failed to close wal: %s", s.to_string().data());
         }
         if (const auto s = ensure_consistency(); !s.is_ok()) {
@@ -263,8 +261,8 @@ DBImpl::~DBImpl()
 
     delete m_default;
     delete m_root;
-    delete pager;
-    delete wal;
+    delete m_pager;
+    delete m_wal;
 }
 
 auto DBImpl::repair(const Options &options, const std::string &filename) -> Status
@@ -444,7 +442,7 @@ auto DBImpl::vacuum() -> Status
 
 auto DBImpl::do_vacuum() -> Status
 {
-    Id target {pager->page_count()};
+    Id target {m_pager->page_count()};
     if (target.is_root()) {
         return Status::ok();
     }
@@ -459,7 +457,7 @@ auto DBImpl::do_vacuum() -> Status
             break;
         }
     }
-    if (target.value == pager->page_count()) {
+    if (target.value == m_pager->page_count()) {
         // No pages available to vacuum: database is minimally sized.
         return Status::ok();
     }
@@ -467,11 +465,11 @@ auto DBImpl::do_vacuum() -> Status
     // be able to reapply the whole vacuum operation if the truncation fails.
     // The recovery routine should truncate the file to match the header page
     // count if necessary.
-    CDB_TRY(wal->flush());
-    CDB_TRY(pager->truncate(target.value));
+    CDB_TRY(m_wal->flush());
+    CDB_TRY(m_pager->truncate(target.value));
 
     m_info_log->logv("vacuumed %llu pages", original.value - target.value);
-    return pager->flush();
+    return m_pager->flush();
 }
 
 auto DBImpl::ensure_consistency() -> Status
@@ -485,12 +483,12 @@ auto DBImpl::ensure_consistency() -> Status
 
 auto DBImpl::TEST_wal() const -> const WriteAheadLog &
 {
-    return *wal;
+    return *m_wal;
 }
 
 auto DBImpl::TEST_pager() const -> const Pager &
 {
-    return *pager;
+    return *m_pager;
 }
 
 auto DBImpl::TEST_tables() const -> const TableSet &
@@ -518,7 +516,7 @@ auto DBImpl::checkpoint() -> Status
 
     if (m_state.batch_size > 0) {
         m_state.batch_size = 0;
-        m_state.max_page_id = Id {pager->page_count()};
+        m_state.max_page_id = Id {m_pager->page_count()};
         if (auto s = do_checkpoint(); !s.is_ok()) {
             SET_STATUS(s);
             return s;
@@ -530,28 +528,28 @@ auto DBImpl::checkpoint() -> Status
 auto DBImpl::do_checkpoint() -> Status
 {
     Page db_root;
-    CDB_TRY(pager->acquire(Id::root(), &db_root));
-    pager->upgrade(db_root);
+    CDB_TRY(m_pager->acquire(Id::root(), &db_root));
+    m_pager->upgrade(db_root);
 
     FileHeader header;
     header.read(db_root.data());
-    pager->save_state(header);
+    m_pager->save_state(header);
     header.freelist_head = m_state.freelist_head;
     header.magic_code = FileHeader::kMagicCode;
-    header.commit_lsn = wal->current_lsn();
-    m_state.commit_lsn = wal->current_lsn();
+    header.commit_lsn = m_wal->current_lsn();
+    m_state.commit_lsn = m_wal->current_lsn();
     header.record_count = m_state.record_count;
     header.header_crc = crc32c::Mask(header.compute_crc());
     header.write(db_root.mutate(0, FileHeader::kSize));
-    pager->release(std::move(db_root));
+    m_pager->release(std::move(db_root));
 
-    return wal->flush();
+    return m_wal->flush();
 }
 
 auto DBImpl::load_file_header() -> Status
 {
     Page root;
-    CDB_TRY(pager->acquire(Id::root(), &root));
+    CDB_TRY(m_pager->acquire(Id::root(), &root));
 
     FileHeader header;
     header.read(root.data());
@@ -566,9 +564,9 @@ auto DBImpl::load_file_header() -> Status
     m_state.max_page_id.value = header.page_count;
     m_state.record_count = header.record_count;
     m_state.freelist_head = header.freelist_head;
-    pager->load_state(header);
+    m_pager->load_state(header);
 
-    pager->release(std::move(root));
+    m_pager->release(std::move(root));
     return Status::ok();
 }
 
@@ -626,7 +624,7 @@ auto DBImpl::create_table(const TableOptions &options, const std::string &name, 
     if (state->open) {
         return Status::invalid_argument("table is already open");
     }
-    state->tree = new Tree {*pager, root_id.page_id, m_state.freelist_head};
+    state->tree = new Tree {*m_pager, root_id.page_id, m_state.freelist_head};
     state->write = options.mode == AccessMode::kReadWrite;
     state->open = true;
     out = new TableImpl {options, name, root_id.table_id};
@@ -693,7 +691,7 @@ auto DBImpl::construct_new_table(const Slice &name, LogicalPageId &root_id) -> S
 
     // Set the table ID manually, let the tree fill in the root page ID.
     root_id.table_id = table_id;
-    CDB_TRY(Tree::create(*pager, table_id, m_state.freelist_head, &root_id.page_id));
+    CDB_TRY(Tree::create(*m_pager, table_id, m_state.freelist_head, &root_id.page_id));
 
     char payload[LogicalPageId::kSize];
     encode_logical_id(root_id, payload);
@@ -760,12 +758,13 @@ static auto is_commit(const DeltaDescriptor &deltas)
 
 auto DBImpl::recovery_phase_1() -> Status
 {
-    const auto &set = wal->m_set;
+    const auto &set = m_wal->m_set;
 
     if (set.is_empty()) {
         return Status::ok();
     }
 
+    std::string tail(wal_block_size(m_pager->page_size()), '\0');
     std::unique_ptr<Reader> file;
     auto segment = set.first();
     auto commit_lsn = m_state.commit_lsn;
@@ -794,9 +793,9 @@ auto DBImpl::recovery_phase_1() -> Status
             }
             // WARNING: Applying these updates can cause the in-memory file header variables to be incorrect. This
             // must be fixed by the caller after this method returns.
-            return with_page(*pager, deltas, [this, &deltas](auto &page) {
+            return with_page(*m_pager, deltas, [this, &deltas](auto &page) {
                 if (read_page_lsn(page) < deltas.lsn) {
-                    pager->upgrade(page);
+                    m_pager->upgrade(page);
                     apply_redo(page, deltas);
                 }
             });
@@ -811,13 +810,13 @@ auto DBImpl::recovery_phase_1() -> Status
         const auto decoded = decode_payload(payload);
         if (std::holds_alternative<ImageDescriptor>(decoded)) {
             const auto image = std::get<ImageDescriptor>(decoded);
-            return with_page(*pager, image, [this, &image](auto &page) {
+            return with_page(*m_pager, image, [this, &image](auto &page) {
                 if (image.lsn < m_state.commit_lsn) {
                     return;
                 }
                 const auto page_lsn = read_page_lsn(page);
                 if (page_lsn.is_null() || page_lsn > image.lsn) {
-                    pager->upgrade(page);
+                    m_pager->upgrade(page);
                     apply_undo(page, image);
                 }
             });
@@ -830,11 +829,12 @@ auto DBImpl::recovery_phase_1() -> Status
 
     const auto roll = [&](const auto &action) {
         CDB_TRY(open_wal_reader(segment, file));
-        WalReader reader {*file, m_reader_tail};
+        WalReader reader {*file, tail};
 
         for (;;) {
-            Slice payload;
-            auto s = reader.read(m_reader_data, payload);
+            std::string reader_data;
+            auto s = reader.read(reader_data);
+            Slice payload {reader_data};
 
             if (s.is_not_found()) {
                 break;
@@ -891,14 +891,14 @@ auto DBImpl::recovery_phase_1() -> Status
 
 auto DBImpl::recovery_phase_2() -> Status
 {
-    auto &set = wal->m_set;
+    auto &set = m_wal->m_set;
     // Pager needs the updated state to determine the page count.
     Page page;
-    CDB_TRY(pager->acquire(Id::root(), &page));
+    CDB_TRY(m_pager->acquire(Id::root(), &page));
     FileHeader header;
     header.read(page.data());
-    pager->load_state(header);
-    pager->release(std::move(page));
+    m_pager->load_state(header);
+    m_pager->release(std::move(page));
 
     // TODO: This is too expensive for large databases. Look into a WAL index?
     // Make sure we aren't missing any WAL records.
@@ -915,20 +915,20 @@ auto DBImpl::recovery_phase_2() -> Status
 
     // Make sure all changes have made it to disk, then remove WAL segments from
     // the right.
-    CDB_TRY(pager->flush());
+    CDB_TRY(m_pager->flush());
     for (auto id = set.last(); !id.is_null(); id = set.id_before(id)) {
-        CDB_TRY(m_env->remove_file(encode_segment_name(wal->m_prefix, id)));
+        CDB_TRY(m_env->remove_file(encode_segment_name(m_wal->m_prefix, id)));
     }
     set.remove_after(Id::null());
 
-    wal->m_last_lsn = m_state.commit_lsn;
-    wal->m_flushed_lsn = m_state.commit_lsn;
-    pager->m_recovery_lsn = m_state.commit_lsn;
+    m_wal->m_last_lsn = m_state.commit_lsn;
+    m_wal->m_flushed_lsn = m_state.commit_lsn;
+    m_pager->m_recovery_lsn = m_state.commit_lsn;
 
     // Make sure the file size matches the header page count, which should be
     // correct if we made it this far.
-    CDB_TRY(pager->truncate(pager->page_count()));
-    return pager->sync();
+    CDB_TRY(m_pager->truncate(m_pager->page_count()));
+    return m_pager->sync();
 }
 
 auto DBImpl::open_wal_reader(Id segment, std::unique_ptr<Reader> &out) -> Status

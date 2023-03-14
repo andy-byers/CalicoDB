@@ -20,7 +20,7 @@ class WalReader
 
 public:
     explicit WalReader(Reader &file, std::string &tail);
-    [[nodiscard]] auto read(std::string &scratch, Slice &out) -> Status;
+    [[nodiscard]] auto read(std::string &out) -> Status;
 };
 
 } // namespace calicodb

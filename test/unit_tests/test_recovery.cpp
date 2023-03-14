@@ -68,8 +68,8 @@ public:
         WalReader reader {*file, tail_buffer};
 
         for (;;) {
-            Slice payload;
-            auto s = reader.read(payload_buffer, payload);
+            auto s = reader.read(payload_buffer);
+            Slice payload {payload_buffer};
 
             if (s.is_ok()) {
                 out->emplace_back(decode_payload(payload));

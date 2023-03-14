@@ -19,27 +19,31 @@ namespace calicodb
 struct LogicalPageId;
 
 enum WalPayloadType : char {
-    kCommitPayload = '\xC0',
-    kDeltaPayload = '\xD0',
-    kImagePayload = '\xE0',
-    kVacuumPayload = '\xF0',
+    kCommitPayload,
+    kDeltaPayload,
+    kImagePayload,
+    kVacuumPayload,
+    kMaxPayloadType,
 };
 
 enum WalRecordType : char {
-    kNoRecord = '\x00',
-    kFullRecord = '\xA4',
-    kFirstRecord = '\xB3',
-    kMiddleRecord = '\xC2',
-    kLastRecord = '\xD1',
+    kNoRecord,
+    kFullRecord,
+    kFirstRecord,
+    kMiddleRecord,
+    kLastRecord,
+    kMaxRecordType,
 };
 
 // WAL record format (based off RocksDB):
-//
 //      Offset  Size  Field
 //     ---------------------------
 //      0       1     Type
 //      1       2     Size
 //      3       4     CRC
+//
+// The CRC field contains the CRC of the type byte, as well as the payload
+// fragment that follows the header.
 struct WalRecordHeader {
     static constexpr std::size_t kSize {7};
 
@@ -61,9 +65,7 @@ struct WalPayloadHeader {
 };
 
 // Routines for working with WAL records.
-auto write_wal_record_header(char *out, const WalRecordHeader &header) -> void;
 [[nodiscard]] auto read_wal_record_header(Slice in) -> WalRecordHeader;
-[[nodiscard]] auto split_record(WalRecordHeader &lhs, const Slice &payload, std::size_t available_size) -> WalRecordHeader;
 [[nodiscard]] auto merge_records_left(WalRecordHeader &lhs, const WalRecordHeader &rhs) -> Status;
 
 // Delta payload format:

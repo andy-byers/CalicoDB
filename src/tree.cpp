@@ -1295,11 +1295,6 @@ auto Tree::cell_scratch() -> char *
     return m_cell_scratch.data() + sizeof(Id) - 1;
 }
 
-auto Tree::root(Node &out) const -> Status
-{
-    return acquire(m_root_id, false, out);
-}
-
 auto Tree::get(const Slice &key, std::string *value) const -> Status
 {
     SearchResult slot;
