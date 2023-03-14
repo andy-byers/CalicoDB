@@ -51,7 +51,7 @@ public:
     //
     // The caller is responsible for deleting the handle when it is no longer needed.
     // All objects allocated by the DB must be destroyed before the DB itself is
-    // destroyed.
+    // destroyed. On failure, "db" is set to nullptr.
     [[nodiscard]] static auto open(const Options &options, const std::string &filename, DB *&db) -> Status;
 
     // Attempt to fix a database that cannot be opened due to corruption.
@@ -70,9 +70,13 @@ public:
     auto operator=(const DB &) -> void = delete;
 
     // Get a human-readable string describing the given property.
+    //
+    // The "out" parameter is optional.
     [[nodiscard]] virtual auto get_property(const Slice &name, std::string *out) const -> bool = 0;
 
     // Get a handle to the default table.
+    //
+    // The default table is always open, and its handle is managed by the DB.
     [[nodiscard]] virtual auto default_table() const -> Table * = 0;
 
     // Get a status object describing the error state.
@@ -92,7 +96,7 @@ public:
     // Perform defragmentation and shrink the database file.
     //
     // This operation can be run at any time, however, it is a NOOP if not enough
-    // records have been erased.
+    // records have been erased to cause database pages to become empty.
     [[nodiscard]] virtual auto vacuum() -> Status = 0;
 
     // List the name of each table created by this database, excluding the default table.

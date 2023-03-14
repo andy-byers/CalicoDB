@@ -11,326 +11,200 @@ namespace calicodb
 
 static constexpr std::size_t kInitialRecordCount {100};
 
-// class NodeSlotTests
-//     : public TestWithPager,
-//       public testing::Test
-//{
-// };
-//
-// TEST_F(NodeSlotTests, SlotsAreConsistent)
-//{
-//     std::string backing(0x200, '\x00');
-//     std::string scratch(0x200, '\x00');
-//
-//     Id freelist_head;
-//     Freelist freelist {*pager, &freelist_head};
-//
-//     Node node;
-//     ASSERT_OK(NodeManager::allocate(*pager, freelist, node, scratch.data(), true));
-//
-//     node.insert_slot(0, 2);
-//     node.insert_slot(1, 4);
-//     node.insert_slot(1, 3);
-//     node.insert_slot(0, 1);
-//
-//     node.set_slot(0, node.get_slot(0) + 1);
-//     node.set_slot(1, node.get_slot(1) + 1);
-//     node.set_slot(2, node.get_slot(2) + 1);
-//     node.set_slot(3, node.get_slot(3) + 1);
-//
-//     ASSERT_EQ(node.get_slot(0), 2);
-//     ASSERT_EQ(node.get_slot(1), 3);
-//     ASSERT_EQ(node.get_slot(2), 4);
-//     ASSERT_EQ(node.get_slot(3), 5);
-//
-//     node.remove_slot(0);
-//     ASSERT_EQ(node.get_slot(0), 3);
-//     node.remove_slot(0);
-//     ASSERT_EQ(node.get_slot(0), 4);
-//     node.remove_slot(0);
-//     ASSERT_EQ(node.get_slot(0), 5);
-//     node.remove_slot(0);
-// }
-//
-// class ComponentTests
-//     : public TestWithPager,
-//       public testing::Test
-//{
-// public:
-//     ~ComponentTests() override = default;
-//
-//     auto SetUp() -> void override
-//     {
-//         collect_scratch.resize(kPageSize);
-//         cell_scratch.resize(kPageSize);
-//         node_scratch.resize(kPageSize);
-//         freelist = std::make_unique<Freelist>(*pager, &freelist_head);
-//
-//         Node root;
-//         ASSERT_OK(NodeManager::allocate(*pager, *freelist, &root, node_scratch, true));
-//         NodeManager::release(*pager, std::move(root));
-//     }
-//
-//     auto acquire_node(Id page_id, bool writable = false)
-//     {
-//         Node node;
-//         EXPECT_OK(NodeManager::acquire(*pager, page_id, node, node_scratch, writable));
-//         return node;
-//     }
-//
-//     auto release_node(Node node) const
-//     {
-//         pager->release(std::move(node).take());
-//     }
-//
-//     Id freelist_head;
-//     std::unique_ptr<Freelist> freelist;
-//     std::string node_scratch;
-//     std::string cell_scratch;
-// };
-//
-// TEST_F(ComponentTests, CollectsPayload)
-//{
-//     auto root = acquire_node(Id::root(), true);
-//     ASSERT_OK(PayloadManager::emplace(*pager, *freelist, collect_scratch.data(), root, "hello", "world", 0));
-//     const auto cell = read_cell(root, 0);
-//     Slice slice;
-//     ASSERT_OK(PayloadManager::collect_key(*pager, scratch, cell, &slice));
-//     ASSERT_EQ(slice, "hello");
-//     ASSERT_OK(PayloadManager::collect_value(*pager, scratch, cell, &slice));
-//     ASSERT_EQ(slice, "world");
-//     root.TEST_validate();
-//     release_node(std::move(root));
-// }
-//
-// TEST_F(ComponentTests, CollectsPayloadWithOverflowValue)
-//{
-//     auto root = acquire_node(Id::root(), true);
-//     const auto value = random.Generate(kPageSize * 100).to_string();
-//     ASSERT_OK(PayloadManager::emplace(collect_scratch.data(), root, "hello", value, 0));
-//     const auto cell = read_cell(root, 0);
-//     Slice slice;
-//     ASSERT_OK(PayloadManager::collect_key(*pager, scratch, cell, &slice));
-//     ASSERT_EQ(slice, "hello");
-//     ASSERT_OK(PayloadManager::collect_value(*pager, scratch, cell, &slice));
-//     ASSERT_EQ(slice, value);
-//     root.TEST_validate();
-//     release_node(std::move(root));
-// }
-//
-// TEST_F(ComponentTests, CollectsPayloadWithOverflowKey)
-//{
-//     auto root = acquire_node(Id::root(), true);
-//     const auto key = random.Generate(kPageSize * 100).to_string();
-//     ASSERT_OK(PayloadManager::emplace(collect_scratch.data(), root, key, "world", 0));
-//     const auto cell = read_cell(root, 0);
-//     Slice slice;
-//     ASSERT_OK(PayloadManager::collect_key(*pager, scratch, cell, &slice));
-//     ASSERT_EQ(slice, key);
-//     ASSERT_OK(PayloadManager::collect_value(*pager, scratch, cell, &slice));
-//     ASSERT_EQ(slice, "world");
-//     root.TEST_validate();
-//     release_node(std::move(root));
-// }
-//
-// TEST_F(ComponentTests, CollectsPayloadWithOverflowKeyValue)
-//{
-//     auto root = acquire_node(Id::root(), true);
-//     const auto key = random.Generate(kPageSize * 100).to_string();
-//     const auto value = random.Generate(kPageSize * 100).to_string();
-//     ASSERT_OK(PayloadManager::emplace(collect_scratch.data(), root, key, value, 0));
-//     const auto cell = read_cell(root, 0);
-//     Slice slice;
-//     ASSERT_OK(PayloadManager::collect_key(*pager, scratch, cell, &slice));
-//     ASSERT_EQ(slice, key);
-//     ASSERT_OK(PayloadManager::collect_value(*pager, scratch, cell, &slice));
-//     ASSERT_EQ(slice, value);
-//     root.TEST_validate();
-//     release_node(std::move(root));
-// }
-//
-// TEST_F(ComponentTests, CollectsMultiple)
-//{
-//     std::vector<std::string> data;
-//     auto root = acquire_node(Id::root(), true);
-//     for (std::size_t i {}; i < 3; ++i) {
-//         const auto key = random.Generate(kPageSize * 10);
-//         const auto value = random.Generate(kPageSize * 10);
-//         ASSERT_OK(PayloadManager::emplace(collect_scratch.data(), root, key, value, i));
-//         data.emplace_back(key.to_string());
-//         data.emplace_back(value.to_string());
-//     }
-//     for (std::size_t i {}; i < 3; ++i) {
-//         const auto &key = data[2 * i];
-//         const auto &value = data[2 * i + 1];
-//         const auto cell = read_cell(root, i);
-//         Slice slice;
-//         ASSERT_OK(PayloadManager::collect_key(*pager, scratch, cell, &slice));
-//         ASSERT_EQ(slice, key);
-//         ASSERT_OK(PayloadManager::collect_value(*pager, scratch, cell, &slice));
-//         ASSERT_EQ(slice, value);
-//     }
-//     root.TEST_validate();
-//     release_node(std::move(root));
-// }
-//
-// TEST_F(ComponentTests, PromotesCell)
-//{
-//     auto root = acquire_node(Id::root(), true);
-//     const auto key = random.Generate(kPageSize * 100).to_string();
-//     const auto value = random.Generate(kPageSize * 100).to_string();
-//     std::string emplace_scratch(kPageSize, '\0');
-//     ASSERT_OK(PayloadManager::emplace(*pager, *freelist, emplace_scratch.data() + 10, root, key, value, 0));
-//     auto cell = read_cell(root, 0);
-//     ASSERT_OK(PayloadManager::promote(*pager, *freelist, emplace_scratch.data() + 10, cell, Id::root()));
-//     // Needs to consult overflow pages for the key.
-//     Slice slice;
-//     ASSERT_OK(PayloadManager::collect_key(*pager, collect_scratch, cell, slice));
-//     ASSERT_EQ(slice, key);
-//     root.TEST_validate();
-//     release_node(std::move(root));
-// }
-//
-// TEST_F(ComponentTests, PromotedCellSize)
-//{
-//     auto root = acquire_node(Id::root(), true);
-//     const auto key = random.Generate(kPageSize * 100).to_string();
-//     const auto value = random.Generate(kPageSize * 100).to_string();
-//     std::string emplace_scratch(kPageSize, '\0');
-//     ASSERT_OK(PayloadManager::emplace(*pager, *freelist, nullptr, root, key, value, 0));
-//     auto cell = read_cell(root, 0);
-//     ASSERT_OK(PayloadManager::promote(*pager, *freelist, emplace_scratch.data() + 20, cell, Id::root()));
-//     erase_cell(root, 0);
-//
-//     root.header.is_external = false;
-//     root.meta = &meta(false);
-//     write_cell(root, 0, cell);
-//     cell = read_cell(root, 0);
-//
-//     // Needs to consult overflow pages for the key.
-//     Slice slice;
-//     ASSERT_OK(PayloadManager::collect_key(collect_scratch, cell, slice));
-//     ASSERT_EQ(slice, key);
-//     root.TEST_validate();
-//     release_node(std::move(root));
-// }
-//
-// static auto run_promotion_test(ComponentTests &test, std::size_t key_size, std::size_t value_size)
-//{
-//     auto root = test.acquire_node(Id::root(), true);
-//     const auto key = test.random.Generate(key_size).to_string();
-//     const auto value = test.random.Generate(value_size).to_string();
-//     std::string emplace_scratch(test.kPageSize, '\0');
-//     ASSERT_OK(test.PayloadManager::emplace(emplace_scratch.data() + 10, root, key, value, 0));
-//     auto external_cell = read_cell(root, 0);
-//     ASSERT_EQ(external_cell.size, varint_length(key.size()) + varint_length(value.size()) + external_cell.local_size + external_cell.has_remote * 8);
-//     auto internal_cell = external_cell;
-//     ASSERT_OK(test.PayloadManager::promote(emplace_scratch.data() + 10, internal_cell, Id::root()));
-//     ASSERT_EQ(internal_cell.size, sizeof(Id) + varint_length(key.size()) + internal_cell.local_size + internal_cell.has_remote * 8);
-//     test.release_node(std::move(root));
-// }
-//
-// TEST_F(ComponentTests, CellIsPromoted)
-//{
-//     run_promotion_test(*this, 10, 10);
-// }
-//
-// TEST_F(ComponentTests, PromotionCopiesOverflowKey)
-//{
-//     run_promotion_test(*this, kPageSize, 10);
-//     PointerMap::Entry old_head;
-//     ASSERT_OK(PointerMap::read_entry(*pager, Id {3}, old_head));
-//     ASSERT_EQ(old_head.type, PointerMap::kOverflowHead);
-//     ASSERT_EQ(old_head.back_ptr, Id::root());
-//
-//     // Copy of the overflow key.
-//     PointerMap::Entry new_head;
-//     ASSERT_OK(PointerMap::read_entry(*pager, Id {4}, new_head));
-//     ASSERT_EQ(new_head.type, PointerMap::kOverflowHead);
-//     ASSERT_EQ(new_head.back_ptr, Id::root());
-// }
-//
-// TEST_F(ComponentTests, PromotionIgnoresOverflowValue)
-//{
-//     run_promotion_test(*this, 10, kPageSize);
-//     PointerMap::Entry old_head;
-//     ASSERT_OK(PointerMap::read_entry(*pager, Id {3}, old_head));
-//     ASSERT_EQ(old_head.type, PointerMap::kOverflowHead);
-//     ASSERT_EQ(old_head.back_ptr, Id::root());
-//
-//     // No overflow key, so the chain didn't need to be copied.
-//     PointerMap::Entry nothing;
-//     ASSERT_OK(PointerMap::read_entry(*pager, Id {4}, nothing));
-//     ASSERT_EQ(nothing.back_ptr, Id::null());
-// }
-//
-// TEST_F(ComponentTests, PromotionCopiesOverflowKeyButIgnoresOverflowValue)
-//{
-//     run_promotion_test(*this, kPageSize, kPageSize);
-//     PointerMap::Entry old_head;
-//     ASSERT_OK(PointerMap::read_entry(*pager, Id {3}, old_head));
-//     ASSERT_EQ(old_head.type, PointerMap::kOverflowHead);
-//     ASSERT_EQ(old_head.back_ptr, Id::root());
-//
-//     // 1 overflow page needed for the key, and 1 for the value.
-//     PointerMap::Entry new_head;
-//     ASSERT_OK(PointerMap::read_entry(*pager, Id {5}, new_head));
-//     ASSERT_EQ(new_head.type, PointerMap::kOverflowHead);
-//     ASSERT_EQ(new_head.back_ptr, Id::root());
-// }
-//
-// TEST_F(ComponentTests, NodeIterator)
-//{
-//     for (std::size_t i {}; i < 4; ++i) {
-//         auto root = acquire_node(Id::root(), true);
-//         const auto key = tools::integral_key<2>((i + 1) * 2);
-//         ASSERT_OK(PayloadManager::emplace(nullptr, root, key, "", i));
-//         release_node(std::move(root));
-//     }
-//     auto root = acquire_node(Id::root(), true);
-//     std::string lhs_key, rhs_key;
-//     NodeIterator itr {root, {
-//                                 overflow.get(),
-//                                 &lhs_key,
-//                                 &rhs_key,
-//                             }};
-//     bool exact;
-//     for (std::size_t i : {1, 6, 3, 2, 8, 4, 5, 7}) {
-//         ASSERT_OK(itr.seek(tools::integral_key<2>(i), &exact));
-//         ASSERT_EQ(exact, i % 2 == 0);
-//     }
-//     ASSERT_OK(itr.seek(tools::integral_key<2>(10), &exact));
-//     ASSERT_FALSE(exact);
-//     release_node(std::move(root));
-// }
-//
-// TEST_F(ComponentTests, NodeIteratorHandlesOverflowKeys)
-//{
-//     std::vector<std::string> keys;
-//     for (std::size_t i {}; i < 3; ++i) {
-//         auto root = acquire_node(Id::root(), true);
-//         auto key = random.Generate(kPageSize).to_string();
-//         const auto value = random.Generate(kPageSize).to_string();
-//         key[0] = static_cast<char>(i);
-//         ASSERT_OK(PayloadManager::emplace(nullptr, root, key, value, i));
-//         ASSERT_FALSE(root.overflow.has_value());
-//         release_node(std::move(root));
-//         keys.emplace_back(key);
-//     }
-//     auto root = acquire_node(Id::root(), true);
-//     std::string lhs_key, rhs_key;
-//     NodeIterator itr {root, {
-//                                 overflow.get(),
-//                                 &lhs_key,
-//                                 &rhs_key,
-//                             }};
-//     std::size_t i {};
-//     for (const auto &key : keys) {
-//         ASSERT_OK(itr.seek(key));
-//         ASSERT_EQ(itr.index(), i++);
-//     }
-//     release_node(std::move(root));
-// }
+class NodeSlotTests
+    : public TestWithPager,
+      public testing::Test
+{
+};
+
+TEST_F(NodeSlotTests, SlotsAreConsistent)
+{
+    std::string backing(0x200, '\x00');
+    std::string scratch(0x200, '\x00');
+
+    Id freelist_head;
+    Freelist freelist {*pager, freelist_head};
+
+    Node node;
+    ASSERT_OK(NodeManager::allocate(*pager, freelist, node, scratch, true));
+
+    node.insert_slot(0, 2);
+    node.insert_slot(1, 4);
+    node.insert_slot(1, 3);
+    node.insert_slot(0, 1);
+
+    node.set_slot(0, node.get_slot(0) + 1);
+    node.set_slot(1, node.get_slot(1) + 1);
+    node.set_slot(2, node.get_slot(2) + 1);
+    node.set_slot(3, node.get_slot(3) + 1);
+
+    ASSERT_EQ(node.get_slot(0), 2);
+    ASSERT_EQ(node.get_slot(1), 3);
+    ASSERT_EQ(node.get_slot(2), 4);
+    ASSERT_EQ(node.get_slot(3), 5);
+
+    node.remove_slot(0);
+    ASSERT_EQ(node.get_slot(0), 3);
+    node.remove_slot(0);
+    ASSERT_EQ(node.get_slot(0), 4);
+    node.remove_slot(0);
+    ASSERT_EQ(node.get_slot(0), 5);
+    node.remove_slot(0);
+}
+
+class ComponentTests
+    : public TestWithPager,
+      public testing::Test
+{
+public:
+    ~ComponentTests() override = default;
+
+    auto SetUp() -> void override
+    {
+        collect_scratch.resize(kPageSize);
+        cell_scratch.resize(kPageSize);
+        node_scratch.resize(kPageSize);
+        freelist = std::make_unique<Freelist>(*pager, freelist_head);
+
+        Node root;
+        ASSERT_OK(NodeManager::allocate(*pager, *freelist, root, node_scratch, true));
+        NodeManager::release(*pager, std::move(root));
+    }
+
+    auto acquire_node(Id page_id, bool writable = false)
+    {
+        Node node;
+        EXPECT_OK(NodeManager::acquire(*pager, page_id, node, node_scratch, writable));
+        return node;
+    }
+
+    auto release_node(Node node) const
+    {
+        pager->release(std::move(node).take());
+    }
+
+    Id freelist_head;
+    std::unique_ptr<Freelist> freelist;
+    std::string node_scratch;
+    std::string cell_scratch;
+};
+
+TEST_F(ComponentTests, CollectsPayload)
+{
+    auto root = acquire_node(Id::root(), true);
+    ASSERT_OK(PayloadManager::emplace(*pager, *freelist, collect_scratch.data(), root, "hello", "world", 0));
+    const auto cell = read_cell(root, 0);
+    Slice slice;
+    ASSERT_OK(PayloadManager::collect_key(*pager, scratch, cell, &slice));
+    ASSERT_EQ(slice, "hello");
+    ASSERT_OK(PayloadManager::collect_value(*pager, scratch, cell, &slice));
+    ASSERT_EQ(slice, "world");
+    root.TEST_validate();
+    release_node(std::move(root));
+}
+
+TEST_F(ComponentTests, CollectsPayloadWithOverflow)
+{
+    auto root = acquire_node(Id::root(), true);
+    const auto key = random.Generate(kPageSize * 100).to_string();
+    const auto value = random.Generate(kPageSize * 100).to_string();
+    ASSERT_OK(PayloadManager::emplace(*pager, *freelist, collect_scratch.data(), root, key, value, 0));
+    const auto cell = read_cell(root, 0);
+    Slice slice;
+    ASSERT_OK(PayloadManager::collect_key(*pager, scratch, cell, &slice));
+    ASSERT_EQ(slice, key);
+    ASSERT_OK(PayloadManager::collect_value(*pager, scratch, cell, &slice));
+    ASSERT_EQ(slice, value);
+    root.TEST_validate();
+    release_node(std::move(root));
+}
+
+TEST_F(ComponentTests, PromotedCellHasCorrectSize)
+{
+    auto root = acquire_node(Id::root(), true);
+    const auto key = random.Generate(kPageSize * 100).to_string();
+    const auto value = random.Generate(kPageSize * 100).to_string();
+    std::string emplace_scratch(kPageSize, '\0');
+    ASSERT_OK(PayloadManager::emplace(*pager, *freelist, nullptr, root, key, value, 0));
+    auto cell = read_cell(root, 0);
+    ASSERT_OK(PayloadManager::promote(*pager, *freelist, emplace_scratch.data() + 20, cell, Id::root()));
+    release_node(std::move(root));
+
+    Node internal;
+    ASSERT_OK(NodeManager::allocate(*pager, *freelist, internal, node_scratch, false));
+    write_cell(internal, 0, cell);
+    cell = read_cell(internal, 0);
+
+    // Needs to consult overflow pages for the key.
+    Slice slice;
+    ASSERT_OK(PayloadManager::collect_key(*pager, collect_scratch, cell, &slice));
+    ASSERT_EQ(slice, key);
+    internal.TEST_validate();
+    release_node(std::move(internal));
+}
+
+static auto run_promotion_test(ComponentTests &test, std::size_t key_size, std::size_t value_size)
+{
+    auto root = test.acquire_node(Id::root(), true);
+    const auto key = test.random.Generate(key_size).to_string();
+    const auto value = test.random.Generate(value_size).to_string();
+    std::string emplace_scratch(test.kPageSize, '\0');
+    ASSERT_OK(PayloadManager::emplace(*test.pager, *test.freelist, emplace_scratch.data() + 10, root, key, value, 0));
+    auto external_cell = read_cell(root, 0);
+    ASSERT_EQ(external_cell.size, varint_length(key.size()) + varint_length(value.size()) + external_cell.local_size + external_cell.has_remote * 8);
+    auto internal_cell = external_cell;
+    ASSERT_OK(PayloadManager::promote(*test.pager, *test.freelist, emplace_scratch.data() + 10, internal_cell, Id::root()));
+    ASSERT_EQ(internal_cell.size, sizeof(Id) + varint_length(key.size()) + internal_cell.local_size + internal_cell.has_remote * 8);
+    test.release_node(std::move(root));
+}
+
+TEST_F(ComponentTests, CellIsPromoted)
+{
+    run_promotion_test(*this, 10, 10);
+}
+
+TEST_F(ComponentTests, PromotionCopiesOverflowKeyButIgnoresOverflowValue)
+{
+    run_promotion_test(*this, kPageSize, kPageSize);
+    PointerMap::Entry old_head;
+    ASSERT_OK(PointerMap::read_entry(*pager, Id {3}, old_head));
+    ASSERT_EQ(old_head.type, PointerMap::kOverflowHead);
+    ASSERT_EQ(old_head.back_ptr, Id::root());
+
+    // 1 overflow page needed for the key, and 1 for the value.
+    PointerMap::Entry new_head;
+    ASSERT_OK(PointerMap::read_entry(*pager, Id {5}, new_head));
+    ASSERT_EQ(new_head.type, PointerMap::kOverflowHead);
+    ASSERT_EQ(new_head.back_ptr, Id::root());
+}
+
+TEST_F(ComponentTests, NodeIteratorHandlesOverflowKeys)
+{
+    std::vector<std::string> keys;
+    for (std::size_t i {}; i < 3; ++i) {
+        auto root = acquire_node(Id::root(), true);
+        auto key = random.Generate(kPageSize).to_string();
+        const auto value = random.Generate(kPageSize).to_string();
+        key[0] = static_cast<char>(i);
+        ASSERT_OK(PayloadManager::emplace(*pager, *freelist, nullptr, root, key, value, i));
+        ASSERT_FALSE(root.overflow.has_value());
+        release_node(std::move(root));
+        keys.emplace_back(key);
+    }
+    auto root = acquire_node(Id::root(), true);
+    std::string lhs_key, rhs_key;
+    NodeIterator itr {root, {
+                                pager.get(),
+                                &lhs_key,
+                                &rhs_key,
+                            }};
+    std::size_t i {};
+    for (const auto &key : keys) {
+        ASSERT_OK(itr.seek(key));
+        ASSERT_EQ(itr.index(), i++);
+    }
+    release_node(std::move(root));
+}
 
 class NodeTests
     : public TestWithPager,
@@ -1033,7 +907,7 @@ TEST_P(PointerMapTests, ReadsAndWritesEntries)
 {
     std::string buffer(pager->page_size(), '\0');
     Page map_page;
-    map_page.TEST_populate(Id {2}, buffer, true);
+    map_page.TEST_populate(Id {2}, buffer.data(), buffer.size(), true);
 
     ASSERT_OK(PointerMap::write_entry(*pager, Id {3}, PointerMap::Entry {Id {33}, PointerMap::kTreeNode}));
     ASSERT_OK(PointerMap::write_entry(*pager, Id {4}, PointerMap::Entry {Id {44}, PointerMap::kFreelistLink}));

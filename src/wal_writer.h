@@ -13,8 +13,8 @@ namespace calicodb
 class WalWriter
 {
 public:
-    WalWriter(Logger &file, Span tail)
-        : m_tail {tail},
+    WalWriter(Logger &file, std::string &tail)
+        : m_tail {&tail},
           m_file {&file}
     {
     }
@@ -33,7 +33,7 @@ public:
     [[nodiscard]] auto flushed_lsn() const -> Lsn;
 
 private:
-    Span m_tail;
+    std::string *m_tail {};
     Lsn m_flushed_lsn;
     Logger *m_file {};
     Lsn m_last_lsn {};

@@ -148,7 +148,7 @@ private:
     bool m_owns_info_log {};
 };
 
-auto setup(const std::string &, Env &, const Options &, FileHeader &state) -> Status;
+auto setup_db(const std::string &, Env &, const Options &, FileHeader &state) -> Status;
 
 } // namespace calicodb
 

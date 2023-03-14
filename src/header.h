@@ -5,7 +5,7 @@
 #ifndef CALICODB_HEADER_H
 #define CALICODB_HEADER_H
 
-#include "types.h"
+#include "utils.h"
 
 namespace calicodb
 {

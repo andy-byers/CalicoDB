@@ -8,7 +8,6 @@
 #include "header.h"
 #include "logging.h"
 #include "page.h"
-#include "types.h"
 #include "wal.h"
 #include <limits>
 

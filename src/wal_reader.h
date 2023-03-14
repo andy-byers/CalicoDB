@@ -13,14 +13,14 @@ namespace calicodb
 // Construct for iterating over a WAL segment.
 class WalReader
 {
-    Span m_tail;
+    std::string *m_tail {};
     Reader *m_file {};
     std::size_t m_offset {};
     std::size_t m_block {};
 
 public:
-    explicit WalReader(Reader &file, Span tail);
-    [[nodiscard]] auto read(Span &payload) -> Status;
+    explicit WalReader(Reader &file, std::string &tail);
+    [[nodiscard]] auto read(std::string &scratch, Slice &out) -> Status;
 };
 
 } // namespace calicodb

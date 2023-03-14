@@ -584,7 +584,7 @@ auto write_to_page(Page &page, const std::string &message) -> void
 {
     const auto offset = page_offset(page) + sizeof(Lsn);
     EXPECT_LE(offset + message.size(), page.size());
-    std::memcpy(page.span(offset, message.size()).data(), message.data(), message.size());
+    std::memcpy(page.mutate(offset, message.size()), message.data(), message.size());
 }
 
 [[nodiscard]] auto read_from_page(const Page &page, std::size_t size) -> std::string

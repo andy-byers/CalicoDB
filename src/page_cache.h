@@ -7,7 +7,6 @@
 
 #include "cache.h"
 #include "frames.h"
-#include "types.h"
 
 namespace calicodb
 {

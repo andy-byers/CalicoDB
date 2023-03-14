@@ -9,7 +9,6 @@
 #include "delta.h"
 #include "encoding.h"
 #include "header.h"
-#include "types.h"
 #include <algorithm>
 #include <map>
 #include <variant>

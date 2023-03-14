@@ -85,21 +85,21 @@ TEST_F(WalRecordMergeTests, MergingInvalidTypesIndicatesCorruption)
 class WalRecordGenerator
 {
 public:
-    [[nodiscard]] auto setup_deltas(Span image) -> std::vector<PageDelta>
+    [[nodiscard]] auto setup_deltas(char *image, std::size_t image_size) -> std::vector<PageDelta>
     {
         static constexpr std::size_t MAX_WIDTH {30};
         static constexpr std::size_t MAX_SPREAD {20};
         std::vector<PageDelta> deltas;
 
-        for (auto offset = random.Next<std::size_t>(image.size() / 10); offset < image.size();) {
-            const auto rest = image.size() - offset;
+        for (auto offset = random.Next<std::size_t>(image_size / 10); offset < image_size;) {
+            const auto rest = image_size - offset;
             const auto size = random.Next<std::size_t>(1, std::min(rest, MAX_WIDTH));
             deltas.emplace_back(PageDelta {offset, size});
             offset += size + random.Next<std::size_t>(1, MAX_SPREAD);
         }
         for (const auto &[offset, size] : deltas) {
             const auto replacement = random.Generate(size);
-            std::memcpy(image.data() + offset, replacement.data(), size);
+            std::memcpy(image + offset, replacement.data(), size);
         }
         return deltas;
     }
@@ -127,7 +127,7 @@ public:
 TEST_F(WalPayloadTests, ImagePayloadEncoding)
 {
     const auto payload_in = encode_image_payload(Lsn {123}, Id {456}, image, scratch.data());
-    const auto payload_out = decode_payload(Span {scratch}.truncate(payload_in.size()));
+    const auto payload_out = decode_payload(Slice {scratch}.truncate(payload_in.size()));
     ASSERT_TRUE(std::holds_alternative<ImageDescriptor>(payload_out));
     const auto descriptor = std::get<ImageDescriptor>(payload_out);
     ASSERT_EQ(descriptor.lsn.value, 123);
@@ -138,9 +138,9 @@ TEST_F(WalPayloadTests, ImagePayloadEncoding)
 TEST_F(WalPayloadTests, DeltaPayloadEncoding)
 {
     WalRecordGenerator generator;
-    auto deltas = generator.setup_deltas(image);
+    auto deltas = generator.setup_deltas(image.data(), image.size());
     const auto payload_in = encode_deltas_payload(Lsn {123}, Id {456}, image, deltas, scratch.data());
-    const auto payload_out = decode_payload(Span {scratch}.truncate(payload_in.size()));
+    const auto payload_out = decode_payload(Slice {scratch}.truncate(payload_in.size()));
     ASSERT_TRUE(std::holds_alternative<DeltaDescriptor>(payload_out));
     const auto descriptor = std::get<DeltaDescriptor>(payload_out);
     ASSERT_EQ(descriptor.lsn.value, 123);
@@ -155,7 +155,7 @@ TEST_F(WalPayloadTests, VacuumPayloadEncoding)
 {
     WalRecordGenerator generator;
     const auto payload_in = encode_vacuum_payload(Lsn {123}, true, scratch.data());
-    const auto payload_out = decode_payload(Span {scratch}.truncate(payload_in.size()));
+    const auto payload_out = decode_payload(Slice {scratch}.truncate(payload_in.size()));
     ASSERT_TRUE(std::holds_alternative<VacuumDescriptor>(payload_out));
     const auto descriptor = std::get<VacuumDescriptor>(payload_out);
     ASSERT_EQ(descriptor.lsn.value, 123);
@@ -321,9 +321,8 @@ public:
     [[nodiscard]] static auto wal_read_with_status(WalReader &reader, std::string &out, Lsn *lsn = nullptr) -> Status
     {
         out.resize(wal_scratch_size(kPageSize));
-        Span buffer {out};
-
-        CDB_TRY(reader.read(buffer));
+        Slice buffer;
+        CDB_TRY(reader.read(out, buffer));
         if (lsn != nullptr) {
             *lsn = extract_payload_lsn(buffer);
         }
@@ -580,8 +579,8 @@ public:
         WalReader reader {*file, tail_buffer};
 
         for (;;) {
-            Span payload {payload_buffer};
-            auto s = reader.read(payload);
+            Slice payload;
+            auto s = reader.read(payload_buffer, payload);
 
             if (s.is_ok()) {
                 out->emplace_back(payload.to_string());

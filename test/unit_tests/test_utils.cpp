@@ -10,7 +10,6 @@
 #include "crc.h"
 #include "encoding.h"
 #include "logging.h"
-#include "types.h"
 #include "unit_tests.h"
 #include "utils.h"
 
@@ -162,47 +161,20 @@ TEST_F(SliceTests, WithCppString)
 {
     // Construct from and compare with C++ strings.
     std::string s {"123"};
-    Span b1 {s};
     Slice bv1 {s};
-    ASSERT_TRUE(b1 == s); // Uses an implicit conversion.
-    ASSERT_TRUE(bv1 == s);
+    ASSERT_TRUE(bv1 == s); // Uses an implicit conversion.
 }
 
 TEST_F(SliceTests, WithCString)
 {
     // Construct from and compare with C-style strings.
     char a[4] {"123"}; // Null-terminated
-    Span b1 {a};
     Slice bv1 {a};
-    ASSERT_TRUE(b1 == a);
     ASSERT_TRUE(bv1 == a);
 
     const char *s {"123"};
     Slice bv2 {s};
     ASSERT_TRUE(bv2 == s);
-}
-
-TEST_F(SliceTests, Conversions)
-{
-    std::string data {"abc"};
-    Span b {data};
-    Slice bv {b};
-    ASSERT_TRUE(b == bv);
-    [](Slice) {}(b);
-}
-
-static constexpr auto constexpr_test_write(Span b, Slice answer)
-{
-    CDB_EXPECT_EQ(b.size(), answer.size());
-    for (std::size_t i {}; i < b.size(); ++i)
-        b[i] = answer[i];
-
-    (void)b.starts_with(answer);
-    (void)b.data();
-    (void)b.range(0, 0);
-    (void)b.is_empty();
-    b.advance(0);
-    b.truncate(b.size());
 }
 
 static constexpr auto constexpr_test_read(Slice bv, Slice answer)
@@ -222,24 +194,6 @@ TEST_F(SliceTests, ConstantExpressions)
 {
     static constexpr Slice bv {"42"};
     constexpr_test_read(bv, "42");
-
-    char a[] {"42"};
-    Span b {a};
-    constexpr_test_write(b, "ab");
-    constexpr_test_read(b, "ab");
-}
-
-TEST_F(SliceTests, SubRangesHaveProperType)
-{
-    Slice bv1 {"42"};
-    auto bv2 = bv1.range(0);
-    // NOTE: Extra parenthesis seem to be necessary. ASSERT_*() and EXPECT_*() don't like angle brackets.
-    ASSERT_TRUE((std::is_same_v<Slice, decltype(bv2)>));
-
-    auto s = bv1.to_string();
-    Span b1 {s};
-    auto b2 = b1.range(0);
-    ASSERT_TRUE((std::is_same_v<Span, decltype(b2)>));
 }
 
 TEST(UtilsTest, ZeroIsNotAPowerOfTwo)
@@ -292,7 +246,7 @@ TEST(NonPrintableSliceTests, Conversions)
 {
     // We need to pass in the size, since the first character is '\0'. Otherwise, the length will be 0.
     std::string u {"\x00\x01", 2};
-    const Span s {u};
+    const Slice s {u};
     ASSERT_EQ(s.size(), 2);
     ASSERT_EQ(s[0], '\x00');
     ASSERT_EQ(s[1], '\x01');
@@ -304,16 +258,6 @@ TEST(NonPrintableSliceTests, CStyleStringLengths)
     const char b[] {'4', '2', '\x00'};
     ASSERT_EQ(Slice {a}.size(), 2);
     ASSERT_EQ(Slice {b}.size(), 2);
-}
-
-TEST(NonPrintableSliceTests, ModifyCharArray)
-{
-    char data[] {'a', 'b', '\x00'};
-    Span bytes {data};
-    bytes[0] = '4';
-    bytes.advance();
-    bytes[0] = '2';
-    ASSERT_TRUE(Slice {data} == "42");
 }
 
 TEST(NonPrintableSliceTests, NullByteInMiddleOfLiteralGivesIncorrectLength)

@@ -5,12 +5,8 @@
 #ifndef CALICODB_FRAMES_H
 #define CALICODB_FRAMES_H
 
-#include "calicodb/status.h"
-#include "types.h"
+#include "utils.h"
 #include <list>
-#include <memory>
-#include <optional>
-#include <utility>
 #include <vector>
 
 namespace calicodb
@@ -34,6 +30,42 @@ struct Frame {
     Id page_id;
     std::size_t ref_count {};
     bool write {};
+};
+
+class AlignedBuffer
+{
+public:
+    AlignedBuffer(std::size_t size, std::size_t alignment)
+        : m_data {
+              new (std::align_val_t {alignment}, std::nothrow) char[size](),
+              Deleter {std::align_val_t {alignment}},
+          }
+    {
+        CDB_EXPECT_TRUE(is_power_of_two(alignment));
+        CDB_EXPECT_EQ(size % alignment, 0);
+    }
+
+    [[nodiscard]] auto get() -> char *
+    {
+        return m_data.get();
+    }
+
+    [[nodiscard]] auto get() const -> const char *
+    {
+        return m_data.get();
+    }
+
+private:
+    struct Deleter {
+        auto operator()(char *ptr) const -> void
+        {
+            operator delete[](ptr, alignment);
+        }
+
+        std::align_val_t alignment;
+    };
+
+    std::unique_ptr<char[], Deleter> m_data;
 };
 
 class FrameManager final

@@ -105,6 +105,37 @@ static auto encode_logical_id(LogicalPageId id, char *out) -> void
     return Status::ok();
 }
 
+auto setup_db(const std::string &path, Env &env, const Options &options, FileHeader &header) -> Status
+{
+    CDB_EXPECT_GE(options.page_size, kMinPageSize);
+    CDB_EXPECT_LE(options.page_size, kMaxPageSize);
+    CDB_EXPECT_TRUE(is_power_of_two(options.page_size));
+    CDB_EXPECT_GE(options.cache_size, options.page_size * kMinFrameCount);
+
+    Reader *reader;
+    if (auto s = env.new_reader(path, reader); s.is_ok()) {
+        char buffer[FileHeader::kSize];
+        s = reader->read(0, sizeof(buffer), buffer, nullptr);
+        delete reader;
+
+        if (s.is_io_error()) {
+            return s;
+        }
+        header.read(buffer);
+        if (header.magic_code != FileHeader::kMagicCode) {
+            return Status::invalid_argument("file is not a CalicoDB database");
+        }
+        if (crc32c::Unmask(header.header_crc) != header.compute_crc()) {
+            return Status::corruption("database is corrupted");
+        }
+    } else if (s.is_not_found()) {
+        header.page_size = static_cast<std::uint16_t>(options.page_size);
+    } else {
+        return s;
+    }
+    return Status::ok();
+}
+
 auto DBImpl::open(const Options &sanitized) -> Status
 {
     const auto db_exists = m_env->file_exists(m_filename);
@@ -116,7 +147,7 @@ auto DBImpl::open(const Options &sanitized) -> Status
         return Status::invalid_argument("database does not exist");
     }
     FileHeader state;
-    CDB_TRY(setup(m_filename, *m_env, sanitized, state));
+    CDB_TRY(setup_db(m_filename, *m_env, sanitized, state));
     const auto page_size = state.page_size;
 
     m_state.commit_lsn = state.commit_lsn;
@@ -180,7 +211,7 @@ auto DBImpl::open(const Options &sanitized) -> Status
         pager->upgrade(db_root);
         state.page_count = pager->page_count();
         state.header_crc = crc32c::Mask(state.compute_crc());
-        state.write(db_root.span(0, FileHeader::kSize).data());
+        state.write(db_root.mutate(0, FileHeader::kSize));
         pager->release(std::move(db_root));
         CDB_TRY(pager->flush());
     }
@@ -342,6 +373,7 @@ auto DBImpl::get_property(const Slice &name, std::string *out) const -> bool
 auto DBImpl::new_cursor(const Table &table) const -> Cursor *
 {
     const auto *state = m_tables.get(get_table_id(table));
+    CDB_EXPECT_NE(state, nullptr);
     auto *cursor = CursorInternal::make_cursor(*state->tree);
     if (!m_state.status.is_ok()) {
         CursorInternal::invalidate(*cursor, m_state.status);
@@ -353,6 +385,7 @@ auto DBImpl::get(const Table &table, const Slice &key, std::string *value) const
 {
     CDB_TRY(m_state.status);
     const auto *state = m_tables.get(get_table_id(table));
+    CDB_EXPECT_NE(state, nullptr);
     return state->tree->get(key, value);
 }
 
@@ -360,6 +393,7 @@ auto DBImpl::put(Table &table, const Slice &key, const Slice &value) -> Status
 {
     CDB_TRY(m_state.status);
     auto *state = m_tables.get(get_table_id(table));
+    CDB_EXPECT_NE(state, nullptr);
 
     if (!state->write) {
         return Status::invalid_argument("table is not writable");
@@ -383,6 +417,7 @@ auto DBImpl::erase(Table &table, const Slice &key) -> Status
 {
     CDB_TRY(m_state.status);
     auto *state = m_tables.get(get_table_id(table));
+    CDB_EXPECT_NE(state, nullptr);
 
     if (!state->write) {
         return Status::invalid_argument("table is not writable");
@@ -477,37 +512,6 @@ auto DBImpl::TEST_validate() const -> void
     }
 }
 
-auto setup(const std::string &path, Env &env, const Options &options, FileHeader &header) -> Status
-{
-    CDB_EXPECT_GE(options.page_size, kMinPageSize);
-    CDB_EXPECT_LE(options.page_size, kMaxPageSize);
-    CDB_EXPECT_TRUE(is_power_of_two(options.page_size));
-    CDB_EXPECT_GE(options.cache_size, options.page_size * kMinFrameCount);
-
-    Reader *reader;
-    if (auto s = env.new_reader(path, reader); s.is_ok()) {
-        char buffer[FileHeader::kSize];
-        s = reader->read(0, sizeof(buffer), buffer, nullptr);
-        delete reader;
-
-        if (s.is_io_error()) {
-            return s;
-        }
-        header.read(buffer);
-        if (header.magic_code != FileHeader::kMagicCode) {
-            return Status::invalid_argument("file is not a CalicoDB database");
-        }
-        if (crc32c::Unmask(header.header_crc) != header.compute_crc()) {
-            return Status::corruption("database is corrupted");
-        }
-    } else if (s.is_not_found()) {
-        header.page_size = static_cast<std::uint16_t>(options.page_size);
-    } else {
-        return s;
-    }
-    return Status::ok();
-}
-
 auto DBImpl::checkpoint() -> Status
 {
     CDB_TRY(m_state.status);
@@ -538,7 +542,7 @@ auto DBImpl::do_checkpoint() -> Status
     m_state.commit_lsn = wal->current_lsn();
     header.record_count = m_state.record_count;
     header.header_crc = crc32c::Mask(header.compute_crc());
-    header.write(db_root.span(0, FileHeader::kSize).data());
+    header.write(db_root.mutate(0, FileHeader::kSize));
     pager->release(std::move(db_root));
 
     return wal->flush();
@@ -557,7 +561,9 @@ auto DBImpl::load_file_header() -> Status
         m_info_log->logv("file header crc mismatch (expected %u but computed %u)", expected_crc, computed_crc);
         return Status::corruption("crc mismatch");
     }
-
+    // These values should be the same, provided that the WAL contents were correct.
+    CDB_EXPECT_EQ(m_state.commit_lsn, header.commit_lsn);
+    m_state.max_page_id.value = header.page_count;
     m_state.record_count = header.record_count;
     m_state.freelist_head = header.freelist_head;
     pager->load_state(header);
@@ -827,8 +833,8 @@ auto DBImpl::recovery_phase_1() -> Status
         WalReader reader {*file, m_reader_tail};
 
         for (;;) {
-            Span payload {m_reader_data};
-            auto s = reader.read(payload);
+            Slice payload;
+            auto s = reader.read(m_reader_data, payload);
 
             if (s.is_not_found()) {
                 break;

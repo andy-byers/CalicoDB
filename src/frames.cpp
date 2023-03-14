@@ -63,7 +63,8 @@ auto FrameManager::ref(std::size_t index, Page &out) -> void
     CDB_EXPECT_LT(index, m_frames.size());
     m_frames[index].ref();
     out.m_id = m_frames[index].page_id;
-    out.m_span = Span {m_frames[index].data, m_page_size};
+    out.m_data = m_frames[index].data;
+    out.m_size = m_page_size;
     out.m_write = false;
 }
 
