@@ -395,8 +395,7 @@ static auto setup_node(Node &node) -> void
         node.header.cell_start = static_cast<PageSize>(node.page.size());
     }
 
-    const auto after_header = node_header_offset(node) + NodeHeader::kSize;
-    const auto bottom = after_header + node.header.cell_count * sizeof(PageSize);
+    const auto bottom = cell_area_offset(node);
     const auto top = node.header.cell_start;
 
     CDB_EXPECT_GE(top, bottom);

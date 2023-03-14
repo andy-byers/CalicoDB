@@ -236,12 +236,9 @@ auto EnvPosix::remove_file(const std::string &path) -> Status
     return file_remove(path);
 }
 
-auto EnvPosix::file_exists(const std::string &path) const -> Status
+auto EnvPosix::file_exists(const std::string &path) const -> bool
 {
-    if (struct stat st; stat(path.c_str(), &st)) {
-        return Status::not_found("not found");
-    }
-    return Status::ok();
+    return access(path.c_str(), F_OK) == 0;
 }
 
 auto EnvPosix::file_size(const std::string &path, std::size_t &out) const -> Status

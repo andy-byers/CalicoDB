@@ -85,7 +85,7 @@ public:
     [[nodiscard]] virtual auto new_info_logger(const std::string &path, InfoLogger *&out) -> Status = 0;
     [[nodiscard]] virtual auto get_children(const std::string &path, std::vector<std::string> &out) const -> Status = 0;
     [[nodiscard]] virtual auto rename_file(const std::string &old_path, const std::string &new_path) -> Status = 0;
-    [[nodiscard]] virtual auto file_exists(const std::string &path) const -> Status = 0;
+    [[nodiscard]] virtual auto file_exists(const std::string &path) const -> bool = 0;
     [[nodiscard]] virtual auto resize_file(const std::string &path, std::size_t size) -> Status = 0;
     [[nodiscard]] virtual auto file_size(const std::string &path, std::size_t &out) const -> Status = 0;
     [[nodiscard]] virtual auto remove_file(const std::string &path) -> Status = 0;

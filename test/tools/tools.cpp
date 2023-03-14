@@ -172,14 +172,12 @@ auto FakeEnv::file_size(const std::string &path, std::size_t &out) const -> Stat
     return Status::ok();
 }
 
-auto FakeEnv::file_exists(const std::string &path) const -> Status
+auto FakeEnv::file_exists(const std::string &path) const -> bool
 {
     if (const auto &itr = m_memory.find(path); itr != end(m_memory)) {
-        if (itr->second.created) {
-            return Status::ok();
-        }
+        return itr->second.created;
     }
-    return Status::not_found("file does not exist");
+    return false;
 }
 
 auto FakeEnv::get_children(const std::string &path, std::vector<std::string> &out) const -> Status
@@ -317,7 +315,7 @@ auto FaultInjectionEnv::file_size(const std::string &path, std::size_t &out) con
     return FakeEnv::file_size(path, out);
 }
 
-auto FaultInjectionEnv::file_exists(const std::string &path) const -> Status
+auto FaultInjectionEnv::file_exists(const std::string &path) const -> bool
 {
     //    TRY_INTERCEPT_FROM(*this, Interceptor::Exists, path);
     return FakeEnv::file_exists(path);

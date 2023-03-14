@@ -51,6 +51,7 @@ inline constexpr auto expect(bool cond, const char *repr, const char *file, int 
 static constexpr std::size_t kMinPageSize {0x200};
 static constexpr std::size_t kMaxPageSize {0x8000};
 static constexpr std::size_t kMinFrameCount {16};
+static constexpr std::size_t kMaxCacheSize {1 << 30};
 static constexpr auto kDefaultWalSuffix = "-wal-";
 static constexpr auto kDefaultLogSuffix = "-log";
 

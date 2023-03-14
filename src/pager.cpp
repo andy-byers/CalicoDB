@@ -29,6 +29,8 @@ auto Pager::open(const Parameters &param, Pager **out) -> Status
     CDB_EXPECT_TRUE(is_power_of_two(param.page_size));
     CDB_EXPECT_GE(param.page_size, kMinPageSize);
     CDB_EXPECT_LE(param.page_size, kMaxPageSize);
+    CDB_EXPECT_GE(param.frame_count, kMinFrameCount);
+    CDB_EXPECT_LE(param.page_size * param.frame_count, kMaxCacheSize);
 
     Editor *file;
     CDB_TRY(param.env->new_editor(param.filename, file));
@@ -299,11 +301,7 @@ auto Pager::upgrade(Page &page, int important) -> void
             auto s = m_wal->log_image(page.id(), image, nullptr);
 
             if (s.is_ok()) {
-                auto limit = m_recovery_lsn;
-                if (limit > m_state->commit_lsn) { // TODO: Prevent the recovery LSN from getting larger than any of these values.
-                    limit = m_state->commit_lsn;
-                }
-                s = m_wal->cleanup(limit);
+                s = m_wal->cleanup(std::min(m_recovery_lsn, m_state->commit_lsn));
             }
             if (!s.is_ok()) {
                 SET_STATUS(s);

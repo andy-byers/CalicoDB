@@ -43,9 +43,7 @@ public:
     {
         state.PauseTiming();
         const auto key = calicodb::tools::integral_key<kKeyLength>(
-            state.range(0) == kSequential
-                ? m_counter++ % kNumRecords
-                : m_random.Next(kNumRecords - 1));
+            state.range(0) == kSequential ? m_counter++ % kNumRecords : m_random.Next(kNumRecords - 1));
         state.ResumeTiming();
 
         std::string value;

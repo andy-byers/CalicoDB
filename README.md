@@ -14,7 +14,6 @@ It exposes a small API that allows storage and retrieval of arbitrary byte seque
 
 + [Features](#features)
 + [Caveats](#caveats)
-+ [Goals](#goals)
 + [Documentation](#documentation)
 + [Dependencies](#dependencies)
 + [Performance](#performance)

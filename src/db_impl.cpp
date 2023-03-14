@@ -107,20 +107,14 @@ static auto encode_logical_id(LogicalPageId id, char *out) -> void
 
 auto DBImpl::open(const Options &sanitized) -> Status
 {
-    bool db_exists {};
-    if (auto s = m_env->file_exists(m_filename); s.is_not_found()) {
-        if (!sanitized.create_if_missing) {
-            return Status::invalid_argument("database does not exist");
-        }
-    } else if (s.is_ok()) {
+    const auto db_exists = m_env->file_exists(m_filename);
+    if (db_exists) {
         if (sanitized.error_if_exists) {
             return Status::invalid_argument("database already exists");
         }
-        db_exists = true;
-    } else {
-        return s;
+    } else if (!sanitized.create_if_missing) {
+        return Status::invalid_argument("database does not exist");
     }
-
     FileHeader state;
     CDB_TRY(setup(m_filename, *m_env, sanitized, state));
     const auto page_size = state.page_size;
@@ -178,6 +172,7 @@ auto DBImpl::open(const Options &sanitized) -> Status
         m_info_log->logv("ensuring consistency of an existing database");
         // This should be a no-op if the database closed normally last time.
         CDB_TRY(ensure_consistency());
+        CDB_TRY(load_file_header());
     } else {
         // Write the initial file header.
         Page db_root;
@@ -450,7 +445,7 @@ auto DBImpl::ensure_consistency() -> Status
     CDB_TRY(recovery_phase_1());
     CDB_TRY(recovery_phase_2());
     m_state.is_running = true;
-    return load_file_header();
+    return Status::ok();
 }
 
 auto DBImpl::TEST_wal() const -> const WriteAheadLog &
@@ -475,8 +470,8 @@ auto DBImpl::TEST_state() const -> DBState
 
 auto DBImpl::TEST_validate() const -> void
 {
-    for (const auto &state : m_tables) {
-        if (state && state->open) {
+    for (const auto *state : m_tables) {
+        if (state != nullptr && state->open) {
             state->tree->TEST_validate();
         }
     }
@@ -489,50 +484,26 @@ auto setup(const std::string &path, Env &env, const Options &options, FileHeader
     CDB_EXPECT_TRUE(is_power_of_two(options.page_size));
     CDB_EXPECT_GE(options.cache_size, options.page_size * kMinFrameCount);
 
-    std::unique_ptr<Reader> reader;
-    Reader *reader_temp;
-
-    if (auto s = env.new_reader(path, reader_temp); s.is_ok()) {
-        reader.reset(reader_temp);
-        std::size_t file_size {};
-        CDB_TRY(env.file_size(path, file_size));
-
-        Slice slice;
+    Reader *reader;
+    if (auto s = env.new_reader(path, reader); s.is_ok()) {
         char buffer[FileHeader::kSize];
-        CDB_TRY(reader->read(0, sizeof(buffer), buffer, &slice));
-        if (slice.size() != sizeof(buffer)) {
-            return Status::invalid_argument("file is too small to be a CalicoDB database");
+        s = reader->read(0, sizeof(buffer), buffer, nullptr);
+        delete reader;
+
+        if (s.is_io_error()) {
+            return s;
         }
         header.read(buffer);
-
         if (header.magic_code != FileHeader::kMagicCode) {
             return Status::invalid_argument("file is not a CalicoDB database");
         }
         if (crc32c::Unmask(header.header_crc) != header.compute_crc()) {
-            return Status::corruption("header is corrupted");
+            return Status::corruption("database is corrupted");
         }
-        if (header.page_size == 0) {
-            return Status::corruption("header indicates a page size of 0");
-        }
-        if (file_size % header.page_size) {
-            return Status::corruption("database size is invalid");
-        }
-
     } else if (s.is_not_found()) {
         header.page_size = static_cast<std::uint16_t>(options.page_size);
-
     } else {
         return s;
-    }
-
-    if (header.page_size < kMinPageSize) {
-        return Status::corruption("header page size is too small");
-    }
-    if (header.page_size > kMaxPageSize) {
-        return Status::corruption("header page size is too large");
-    }
-    if (!is_power_of_two(header.page_size)) {
-        return Status::corruption("header page size is not a power of 2");
     }
     return Status::ok();
 }

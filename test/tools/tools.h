@@ -74,7 +74,7 @@ public:
     [[nodiscard]] auto new_logger(const std::string &path, Logger *&out) -> Status override;
     [[nodiscard]] auto get_children(const std::string &path, std::vector<std::string> &out) const -> Status override;
     [[nodiscard]] auto rename_file(const std::string &old_path, const std::string &new_path) -> Status override;
-    [[nodiscard]] auto file_exists(const std::string &path) const -> Status override;
+    [[nodiscard]] auto file_exists(const std::string &path) const -> bool override;
     [[nodiscard]] auto resize_file(const std::string &path, std::size_t size) -> Status override;
     [[nodiscard]] auto file_size(const std::string &path, std::size_t &out) const -> Status override;
     [[nodiscard]] auto remove_file(const std::string &path) -> Status override;
@@ -218,7 +218,7 @@ public:
     [[nodiscard]] auto new_logger(const std::string &path, Logger *&out) -> Status override;
     [[nodiscard]] auto get_children(const std::string &path, std::vector<std::string> &out) const -> Status override;
     [[nodiscard]] auto rename_file(const std::string &old_path, const std::string &new_path) -> Status override;
-    [[nodiscard]] auto file_exists(const std::string &path) const -> Status override;
+    [[nodiscard]] auto file_exists(const std::string &path) const -> bool override;
     [[nodiscard]] auto resize_file(const std::string &path, std::size_t size) -> Status override;
     [[nodiscard]] auto file_size(const std::string &path, std::size_t &out) const -> Status override;
     [[nodiscard]] auto remove_file(const std::string &path) -> Status override;

@@ -25,13 +25,12 @@ auto DB::open(const Options &options, const std::string &filename, DB *&db) -> S
 {
     const auto [dir, base] = split_path(filename);
     const auto clean_filename = join_paths(dir, base);
-    const Options defaults;
 
     auto sanitized = options;
     clip_to_range(sanitized.page_size, kMinPageSize, kMaxPageSize);
-    clip_to_range(sanitized.cache_size, sanitized.page_size * kMinFrameCount, 1UL << 30);
+    clip_to_range(sanitized.cache_size, sanitized.page_size * kMinFrameCount, kMaxCacheSize);
     if (!is_power_of_two(sanitized.page_size)) {
-        sanitized.page_size = defaults.page_size;
+        sanitized.page_size = Options {}.page_size;
     }
     if (sanitized.wal_prefix.empty()) {
         sanitized.wal_prefix = clean_filename + kDefaultWalSuffix;
