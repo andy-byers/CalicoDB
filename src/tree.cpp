@@ -395,8 +395,7 @@ static auto setup_node(Node &node) -> void
         node.header.cell_start = static_cast<PageSize>(node.page.size());
     }
 
-    const auto after_header = node_header_offset(node) + NodeHeader::kSize;
-    const auto bottom = after_header + node.header.cell_count * sizeof(PageSize);
+    const auto bottom = cell_area_offset(node);
     const auto top = node.header.cell_start;
 
     CDB_EXPECT_GE(top, bottom);
@@ -901,15 +900,14 @@ auto Tree::split_non_root(Node right, Node &out) -> Status
             out);
     }
 
-    /* Fix the overflow. The overflow cell should fit in either "left" or "right". This routine
-     * works by transferring cells, one-by-one, from "right" to "left", and trying to insert the
-     * overflow cell. Where the overflow cell is written depends on how many cells we have already
-     * transferred. If "overflow_index" is 0, we definitely have enough room in "left". Otherwise,
-     * we transfer a cell and try to write the overflow cell to "right". If this isn't possible,
-     * then the left node must have enough room, since the maximum cell size is limited to roughly
-     * 1/4 of a page. If "right" is more than 3/4 full, then "left" must be less than 1/4 full, so
-     * it must be able to accept the overflow cell without overflowing.
-     */
+    // Fix the overflow. The overflow cell should fit in either "left" or "right". This routine
+    // works by transferring cells, one-by-one, from "right" to "left", and trying to insert the
+    // overflow cell. Where the overflow cell is written depends on how many cells we have already
+    // transferred. If "overflow_index" is 0, we definitely have enough room in "left". Otherwise,
+    // we transfer a cell and try to write the overflow cell to "right". If this isn't possible,
+    // then the left node must have enough room, since the maximum cell size is limited to roughly
+    // 1/4 of a page. If "right" is more than 3/4 full, then "left" must be less than 1/4 full, so
+    // it must be able to accept the overflow cell without overflowing.
     for (std::size_t i {}, n = header.cell_count; i < n; ++i) {
         if (i == overflow_index) {
             CDB_TRY(insert_cell(left, left.header.cell_count, overflow));
@@ -1589,7 +1587,7 @@ auto Freelist::pop(Page &page) -> Status
         }
         return Status::ok();
     }
-    return Status::logic_error("free list is empty");
+    return Status::not_supported("free list is empty");
 }
 
 auto Freelist::push(Page page) -> Status
@@ -1784,7 +1782,7 @@ auto OverflowList::write(Pager &pager, Freelist &freelist, Id &out, const Slice 
     while (!a.is_empty()) {
         Page page;
         auto s = freelist.pop(page);
-        if (s.is_logic_error()) {
+        if (s.is_not_supported()) {
             s = pager.allocate(&page);
             if (s.is_ok() && PointerMap::lookup(pager, page.id()) == page.id()) {
                 pager.release(std::move(page));

@@ -394,7 +394,7 @@ TEST(IdTests, IdentifiersAreOrderable)
 TEST(StatusTests, OkStatusMessage)
 {
     auto s = Status::ok();
-    ASSERT_EQ(s.to_string(), "ok");
+    ASSERT_EQ(s.to_string(), "OK");
 }
 
 TEST(StatusTests, NonOkStatusSavesMessage)
@@ -425,8 +425,8 @@ TEST(StatusTests, StatusCanBeReassigned)
     ASSERT_TRUE(s.is_invalid_argument());
     ASSERT_EQ(s.to_string(), "invalid argument");
 
-    s = Status::logic_error("logic error");
-    ASSERT_TRUE(s.is_logic_error());
+    s = Status::not_supported("logic error");
+    ASSERT_TRUE(s.is_not_supported());
     ASSERT_EQ(s.to_string(), "logic error");
 
     s = Status::ok();
@@ -436,8 +436,8 @@ TEST(StatusTests, StatusCanBeReassigned)
 TEST(StatusTests, StatusCodesAreCorrect)
 {
     ASSERT_TRUE(Status::invalid_argument("invalid argument").is_invalid_argument());
-    ASSERT_TRUE(Status::system_error("system error").is_system_error());
-    ASSERT_TRUE(Status::logic_error("logic error").is_logic_error());
+    ASSERT_TRUE(Status::io_error("system error").is_io_error());
+    ASSERT_TRUE(Status::not_supported("logic error").is_not_supported());
     ASSERT_TRUE(Status::corruption("corruption").is_corruption());
     ASSERT_TRUE(Status::not_found("not found").is_not_found());
     ASSERT_TRUE(Status::ok().is_ok());
@@ -449,8 +449,8 @@ TEST(StatusTests, OkStatusCanBeCopied)
     const auto dst = src;
     ASSERT_TRUE(src.is_ok());
     ASSERT_TRUE(dst.is_ok());
-    ASSERT_EQ(src.to_string(), "ok");
-    ASSERT_EQ(dst.to_string(), "ok");
+    ASSERT_EQ(src.to_string(), "OK");
+    ASSERT_EQ(dst.to_string(), "OK");
 }
 
 TEST(StatusTests, NonOkStatusCanBeCopied)
@@ -469,8 +469,8 @@ TEST(StatusTests, OkStatusCanBeMoved)
     const auto dst = std::move(src);
     ASSERT_TRUE(src.is_ok());
     ASSERT_TRUE(dst.is_ok());
-    ASSERT_EQ(src.to_string(), "ok");
-    ASSERT_EQ(dst.to_string(), "ok");
+    ASSERT_EQ(src.to_string(), "OK");
+    ASSERT_EQ(dst.to_string(), "OK");
 }
 
 TEST(StatusTests, NonOkStatusCanBeMoved)
@@ -479,13 +479,13 @@ TEST(StatusTests, NonOkStatusCanBeMoved)
     const auto dst = std::move(src);
     ASSERT_TRUE(src.is_ok());
     ASSERT_TRUE(dst.is_invalid_argument());
-    ASSERT_EQ(src.to_string(), "ok");
+    ASSERT_EQ(src.to_string(), "OK");
     ASSERT_EQ(dst.to_string(), "status message");
 }
 
 TEST(StatusTests, MessageIsNullTerminated)
 {
-    auto s = Status::system_error("hello");
+    auto s = Status::io_error("hello");
     const auto msg = s.to_string();
     ASSERT_EQ(msg, "hello");
     ASSERT_EQ(msg.size(), 5);
@@ -496,12 +496,12 @@ TEST(StatusTests, MessageIsNullTerminated)
 
 TEST(StatusTests, ExpectedStatusNames)
 {
-    ASSERT_EQ(get_status_name(Status::ok()), std::string {"ok"});
+    ASSERT_EQ(get_status_name(Status::ok()), std::string {"OK"});
     ASSERT_EQ(get_status_name(Status::not_found("")), std::string {"not found"});
     ASSERT_EQ(get_status_name(Status::invalid_argument("")), std::string {"invalid argument"});
     ASSERT_EQ(get_status_name(Status::corruption("")), std::string {"corruption"});
-    ASSERT_EQ(get_status_name(Status::logic_error("")), std::string {"logic error"});
-    ASSERT_EQ(get_status_name(Status::system_error("")), std::string {"system error"});
+    ASSERT_EQ(get_status_name(Status::not_supported("")), std::string {"not supported"});
+    ASSERT_EQ(get_status_name(Status::io_error("")), std::string {"I/O error"});
 }
 
 TEST(MiscTests, StringsUsesSizeParameterForComparisons)

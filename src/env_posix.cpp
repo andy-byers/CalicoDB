@@ -17,15 +17,10 @@ static constexpr int kFilePermissions {0644}; // -rw-r--r--
 
 [[nodiscard]] static auto to_status(int code) -> Status
 {
-    switch (code) {
-        case ENOENT:
-            return Status::not_found(strerror(code));
-        case EINVAL:
-            return Status::invalid_argument(strerror(code));
-        case EEXIST:
-            return Status::logic_error(strerror(code));
-        default:
-            return Status::system_error(strerror(code));
+    if (code == ENOENT) {
+        return Status::not_found(strerror(code));
+    } else {
+        return Status::io_error(strerror(code));
     }
 }
 
@@ -241,12 +236,9 @@ auto EnvPosix::remove_file(const std::string &path) -> Status
     return file_remove(path);
 }
 
-auto EnvPosix::file_exists(const std::string &path) const -> Status
+auto EnvPosix::file_exists(const std::string &path) const -> bool
 {
-    if (struct stat st; stat(path.c_str(), &st)) {
-        return Status::not_found("not found");
-    }
-    return Status::ok();
+    return access(path.c_str(), F_OK) == 0;
 }
 
 auto EnvPosix::file_size(const std::string &path, std::size_t &out) const -> Status

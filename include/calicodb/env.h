@@ -5,16 +5,13 @@
 #ifndef CALICODB_ENV_H
 #define CALICODB_ENV_H
 
-#include <string>
+#include "status.h"
 #include <vector>
 
 namespace calicodb
 {
 
-class Slice;
-class Status;
-
-// Representation of a read-only random-access file.
+// Construct that provides read-only random access to a file.
 class Reader
 {
 public:
@@ -28,7 +25,7 @@ public:
     [[nodiscard]] virtual auto read(std::size_t offset, std::size_t size, char *scratch, Slice *out) -> Status = 0;
 };
 
-// Representation of a random-access file.
+// Construct that provides random access to a file.
 class Editor
 {
 public:
@@ -48,7 +45,7 @@ public:
     [[nodiscard]] virtual auto sync() -> Status = 0;
 };
 
-// Representation of a write-only append-only file.
+// Construct that appends to a file.
 class Logger
 {
 public:
@@ -88,7 +85,7 @@ public:
     [[nodiscard]] virtual auto new_info_logger(const std::string &path, InfoLogger *&out) -> Status = 0;
     [[nodiscard]] virtual auto get_children(const std::string &path, std::vector<std::string> &out) const -> Status = 0;
     [[nodiscard]] virtual auto rename_file(const std::string &old_path, const std::string &new_path) -> Status = 0;
-    [[nodiscard]] virtual auto file_exists(const std::string &path) const -> Status = 0;
+    [[nodiscard]] virtual auto file_exists(const std::string &path) const -> bool = 0;
     [[nodiscard]] virtual auto resize_file(const std::string &path, std::size_t size) -> Status = 0;
     [[nodiscard]] virtual auto file_size(const std::string &path, std::size_t &out) const -> Status = 0;
     [[nodiscard]] virtual auto remove_file(const std::string &path) -> Status = 0;

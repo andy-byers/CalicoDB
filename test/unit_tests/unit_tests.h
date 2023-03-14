@@ -147,7 +147,7 @@ public:
         return 0;
     }
 
-    [[nodiscard]] auto log_delta(Id, const Slice &, const ChangeBuffer &, Lsn *) -> Status override
+    [[nodiscard]] auto log_delta(Id, const Slice &, const std::vector<PageDelta> &, Lsn *) -> Status override
     {
         return Status::ok();
     }
@@ -216,12 +216,12 @@ inline auto expect_ok(const Status &s) -> void
 
 [[nodiscard]] inline auto special_error()
 {
-    return Status::system_error("42");
+    return Status::io_error("42");
 }
 
 inline auto assert_special_error(const Status &s)
 {
-    if (!s.is_system_error() || s.to_string() != special_error().to_string()) {
+    if (!s.is_io_error() || s.to_string() != special_error().to_string()) {
         std::fprintf(stderr, "error: unexpected %s status: %s", get_status_name(s), s.is_ok() ? "NULL" : s.to_string().data());
         std::abort();
     }

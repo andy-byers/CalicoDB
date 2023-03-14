@@ -107,20 +107,14 @@ static auto encode_logical_id(LogicalPageId id, char *out) -> void
 
 auto DBImpl::open(const Options &sanitized) -> Status
 {
-    bool db_exists {};
-    if (auto s = m_env->file_exists(m_filename); s.is_not_found()) {
-        if (!sanitized.create_if_missing) {
-            return Status::invalid_argument("database does not exist");
-        }
-    } else if (s.is_ok()) {
+    const auto db_exists = m_env->file_exists(m_filename);
+    if (db_exists) {
         if (sanitized.error_if_exists) {
             return Status::invalid_argument("database already exists");
         }
-        db_exists = true;
-    } else {
-        return s;
+    } else if (!sanitized.create_if_missing) {
+        return Status::invalid_argument("database does not exist");
     }
-
     FileHeader state;
     CDB_TRY(setup(m_filename, *m_env, sanitized, state));
     const auto page_size = state.page_size;
@@ -178,6 +172,7 @@ auto DBImpl::open(const Options &sanitized) -> Status
         m_info_log->logv("ensuring consistency of an existing database");
         // This should be a no-op if the database closed normally last time.
         CDB_TRY(ensure_consistency());
+        CDB_TRY(load_file_header());
     } else {
         // Write the initial file header.
         Page db_root;
@@ -245,10 +240,10 @@ auto DBImpl::repair(const Options &options, const std::string &filename) -> Stat
 {
     (void)filename;
     (void)options;
-    return Status::logic_error("<NOT IMPLEMENTED>"); // TODO: repair() operation attempts to fix a
-                                                     // database that could not be opened due to
-                                                     // corruption that couldn't/shouldn't be rolled
-                                                     // back.
+    return Status::not_supported("<NOT IMPLEMENTED>"); // TODO: repair() operation attempts to fix a
+                                                       // database that could not be opened due to
+                                                       // corruption that couldn't/shouldn't be rolled
+                                                       // back.
 }
 
 auto DBImpl::destroy(const Options &options, const std::string &filename) -> Status
@@ -367,7 +362,7 @@ auto DBImpl::put(Table &table, const Slice &key, const Slice &value) -> Status
     auto *state = m_tables.get(get_table_id(table));
 
     if (!state->write) {
-        return Status::logic_error("table is not writable");
+        return Status::invalid_argument("table is not writable");
     }
     if (key.is_empty()) {
         return Status::invalid_argument("key is empty");
@@ -390,7 +385,7 @@ auto DBImpl::erase(Table &table, const Slice &key) -> Status
     auto *state = m_tables.get(get_table_id(table));
 
     if (!state->write) {
-        return Status::logic_error("table is not writable");
+        return Status::invalid_argument("table is not writable");
     }
 
     auto s = state->tree->erase(key);
@@ -450,7 +445,7 @@ auto DBImpl::ensure_consistency() -> Status
     CDB_TRY(recovery_phase_1());
     CDB_TRY(recovery_phase_2());
     m_state.is_running = true;
-    return load_file_header();
+    return Status::ok();
 }
 
 auto DBImpl::TEST_wal() const -> const WriteAheadLog &
@@ -475,8 +470,8 @@ auto DBImpl::TEST_state() const -> DBState
 
 auto DBImpl::TEST_validate() const -> void
 {
-    for (const auto &state : m_tables) {
-        if (state && state->open) {
+    for (const auto *state : m_tables) {
+        if (state != nullptr && state->open) {
             state->tree->TEST_validate();
         }
     }
@@ -484,72 +479,31 @@ auto DBImpl::TEST_validate() const -> void
 
 auto setup(const std::string &path, Env &env, const Options &options, FileHeader &header) -> Status
 {
-    static constexpr std::size_t kMinFrameCount {16};
+    CDB_EXPECT_GE(options.page_size, kMinPageSize);
+    CDB_EXPECT_LE(options.page_size, kMaxPageSize);
+    CDB_EXPECT_TRUE(is_power_of_two(options.page_size));
+    CDB_EXPECT_GE(options.cache_size, options.page_size * kMinFrameCount);
 
-    if (options.page_size < kMinPageSize) {
-        return Status::invalid_argument("page size is too small");
-    }
-
-    if (options.page_size > kMaxPageSize) {
-        return Status::invalid_argument("page size is too large");
-    }
-
-    if (!is_power_of_two(options.page_size)) {
-        return Status::invalid_argument("page size is not a power of 2");
-    }
-
-    if (options.cache_size < options.page_size * kMinFrameCount) {
-        return Status::invalid_argument("page cache is too small");
-    }
-
-    std::unique_ptr<Reader> reader;
-    Reader *reader_temp;
-
-    if (auto s = env.new_reader(path, reader_temp); s.is_ok()) {
-        reader.reset(reader_temp);
-        std::size_t file_size {};
-        CDB_TRY(env.file_size(path, file_size));
-
-        if (file_size < FileHeader::kSize) {
-            return Status::invalid_argument("file is not a database");
-        }
-
-        Slice slice;
+    Reader *reader;
+    if (auto s = env.new_reader(path, reader); s.is_ok()) {
         char buffer[FileHeader::kSize];
-        CDB_TRY(reader->read(0, sizeof(buffer), buffer, &slice));
-        if (slice.size() != sizeof(buffer)) {
-            return Status::system_error("incomplete read of file header");
+        s = reader->read(0, sizeof(buffer), buffer, nullptr);
+        delete reader;
+
+        if (s.is_io_error()) {
+            return s;
         }
         header.read(buffer);
-
         if (header.magic_code != FileHeader::kMagicCode) {
-            return Status::invalid_argument("file is not a database");
+            return Status::invalid_argument("file is not a CalicoDB database");
         }
         if (crc32c::Unmask(header.header_crc) != header.compute_crc()) {
-            return Status::corruption("file header is corrupted");
+            return Status::corruption("database is corrupted");
         }
-        if (header.page_size == 0) {
-            return Status::corruption("header indicates a page size of 0");
-        }
-        if (file_size % header.page_size) {
-            return Status::corruption("database size is invalid");
-        }
-
     } else if (s.is_not_found()) {
         header.page_size = static_cast<std::uint16_t>(options.page_size);
-
     } else {
         return s;
-    }
-
-    if (header.page_size < kMinPageSize) {
-        return Status::corruption("header page size is too small");
-    }
-    if (header.page_size > kMaxPageSize) {
-        return Status::corruption("header page size is too large");
-    }
-    if (!is_power_of_two(header.page_size)) {
-        return Status::corruption("header page size is not a power of 2");
     }
     return Status::ok();
 }
@@ -560,11 +514,11 @@ auto DBImpl::checkpoint() -> Status
 
     if (m_state.batch_size > 0) {
         m_state.batch_size = 0;
+        m_state.max_page_id = Id {pager->page_count()};
         if (auto s = do_checkpoint(); !s.is_ok()) {
             SET_STATUS(s);
             return s;
         }
-        m_state.max_page_id.value = pager->page_count();
     }
     return Status::ok();
 }
@@ -756,7 +710,7 @@ auto DBImpl::remove_empty_table(const std::string &name, TableState &state) -> S
     Node root;
     CDB_TRY(tree->acquire(root_id.page_id, false, root));
     if (root.header.cell_count != 0) {
-        return Status::logic_error("table could not be emptied");
+        return Status::io_error("table could not be emptied");
     }
     auto *root_state = m_tables.get(Id::root());
     CDB_TRY(root_state->tree->erase(name));
@@ -895,9 +849,8 @@ auto DBImpl::recovery_phase_1() -> Status
         return Status::ok();
     };
 
-    /* Roll forward, applying missing updates until we reach the end. The final
-     * segment may contain a partial/corrupted record.
-     */
+    // Roll forward, applying missing updates until we reach the end. The final
+    // segment may contain a partial/corrupted record.
     for (;; segment = set.id_after(segment)) {
         CDB_TRY(roll(redo));
         if (segment == set.last()) {
@@ -920,10 +873,9 @@ auto DBImpl::recovery_phase_1() -> Status
     }
     m_state.commit_lsn = commit_lsn;
 
-    /* Roll backward, reverting updates until we reach the most-recent commit. We
-     * are able to read the log forward, since the full images are disjoint.
-     * Again, the last segment we read may contain a partial/corrupted record.
-     */
+    // Roll backward, reverting updates until we reach the most-recent commit. We
+    // are able to read the log forward, since the full images are disjoint.
+    // Again, the last segment we read may contain a partial/corrupted record.
     segment = commit_segment;
     for (; !segment.is_null(); segment = set.id_after(segment)) {
         CDB_TRY(roll(undo));
@@ -955,9 +907,8 @@ auto DBImpl::recovery_phase_2() -> Status
     //    }
     //}
 
-    /* Make sure all changes have made it to disk, then remove WAL segments from
-     * the right.
-     */
+    // Make sure all changes have made it to disk, then remove WAL segments from
+    // the right.
     CDB_TRY(pager->flush());
     for (auto id = set.last(); !id.is_null(); id = set.id_before(id)) {
         CDB_TRY(m_env->remove_file(encode_segment_name(wal->m_prefix, id)));

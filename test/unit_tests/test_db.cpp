@@ -24,30 +24,6 @@ class SetupTests
 {
 };
 
-TEST_F(SetupTests, ReportsInvalidPageSizes)
-{
-    FileHeader header;
-    Options options;
-
-    options.page_size = kMinPageSize / 2;
-    ASSERT_TRUE(setup("./test", *env, options, header).is_invalid_argument());
-
-    options.page_size = kMaxPageSize * 2;
-    ASSERT_TRUE(setup("./test", *env, options, header).is_invalid_argument());
-
-    options.page_size = kMinPageSize + 1;
-    ASSERT_TRUE(setup("./test", *env, options, header).is_invalid_argument());
-}
-
-TEST_F(SetupTests, ReportsInvalidCacheSize)
-{
-    FileHeader header;
-    Options options;
-
-    options.cache_size = 1;
-    ASSERT_TRUE(setup("./test", *env, options, header).is_invalid_argument());
-}
-
 TEST_F(SetupTests, ReportsInvalidFileHeader)
 {
     FileHeader header;
@@ -102,13 +78,13 @@ TEST(BasicDestructionTests, OnlyDeletesCalicoDatabases)
 
     // "./test" does not exist.
     ASSERT_TRUE(DB::destroy(options, "./test").is_not_found());
-    ASSERT_TRUE(options.env->file_exists("./test").is_not_found());
+    ASSERT_FALSE(options.env->file_exists("./test"));
 
     // File is too small to read the header.
     Editor *editor;
     ASSERT_OK(options.env->new_editor("./test", editor));
     ASSERT_TRUE(DB::destroy(options, "./test").is_invalid_argument());
-    ASSERT_OK(options.env->file_exists("./test"));
+    ASSERT_TRUE(options.env->file_exists("./test"));
 
     // Header magic code is incorrect.
     char buffer[FileHeader::kSize];
@@ -147,8 +123,8 @@ TEST(BasicDestructionTests, OnlyDeletesCalicoWals)
     delete editor;
 
     ASSERT_OK(DB::destroy(options, "./test"));
-    ASSERT_OK(options.env->file_exists("./wal_1"));
-    ASSERT_TRUE(options.env->file_exists("./wal-1").is_not_found());
+    ASSERT_TRUE(options.env->file_exists("./wal_1"));
+    ASSERT_FALSE(options.env->file_exists("./wal-1"));
 
     delete options.env;
 }
@@ -181,7 +157,7 @@ TEST_F(BasicDatabaseTests, OpensAndCloses)
         ASSERT_OK(DB::open(options, kFilename, db));
         delete db;
     }
-    ASSERT_TRUE(env->file_exists(kFilename).is_ok());
+    ASSERT_TRUE(env->file_exists(kFilename));
 }
 
 TEST_F(BasicDatabaseTests, StatsAreTracked)
@@ -218,9 +194,9 @@ TEST_F(BasicDatabaseTests, IsDestroyed)
     ASSERT_OK(DB::open(options, kFilename, db));
     delete db;
 
-    ASSERT_TRUE(env->file_exists(kFilename).is_ok());
+    ASSERT_TRUE(env->file_exists(kFilename));
     ASSERT_OK(DB::destroy(options, kFilename));
-    ASSERT_TRUE(env->file_exists(kFilename).is_not_found());
+    ASSERT_FALSE(env->file_exists(kFilename));
 }
 
 static auto insert_random_groups(DB &db, std::size_t num_groups, std::size_t group_size)

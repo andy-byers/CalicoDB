@@ -48,7 +48,7 @@ struct LogicalPageId {
 
 class Page
 {
-    ChangeBuffer m_deltas;
+    std::vector<PageDelta> m_deltas;
     Id m_id;
     Span m_span;
     bool m_write {};
@@ -102,14 +102,14 @@ public:
         return m_span.size();
     }
 
-    [[nodiscard]] auto deltas() -> const ChangeBuffer &
+    [[nodiscard]] auto deltas() -> const std::vector<PageDelta> &
     {
         CDB_EXPECT_TRUE(m_write);
         compress_deltas(m_deltas);
         return m_deltas;
     }
 
-    auto TEST_populate(Id page_id, Span buffer, bool write, const ChangeBuffer &deltas = {}) -> void
+    auto TEST_populate(Id page_id, Span buffer, bool write, const std::vector<PageDelta> &deltas = {}) -> void
     {
         m_id = page_id;
         m_span = buffer;

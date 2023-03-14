@@ -28,7 +28,7 @@ public:
     {
         m_options.page_size = 0x2000;
         m_options.cache_size = 4'194'304;
-        CHECK_OK(calicodb::DB::open(m_options, kFilename, &m_db));
+        CHECK_OK(calicodb::DB::open(m_options, kFilename, m_db));
     }
 
     ~Benchmark()
@@ -43,9 +43,7 @@ public:
     {
         state.PauseTiming();
         const auto key = calicodb::tools::integral_key<kKeyLength>(
-            state.range(0) == kSequential
-                ? m_counter++ % kNumRecords
-                : m_random.Next(kNumRecords - 1));
+            state.range(0) == kSequential ? m_counter++ % kNumRecords : m_random.Next(kNumRecords - 1));
         state.ResumeTiming();
 
         std::string value;
