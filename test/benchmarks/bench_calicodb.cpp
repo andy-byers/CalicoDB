@@ -4,7 +4,6 @@
 
 #include "tools.h"
 #include <benchmark/benchmark.h>
-#include <calicodb/db.h>
 
 enum AccessType : int64_t {
     kSequential,
@@ -26,7 +25,7 @@ public:
     explicit Benchmark(const Parameters &param = {.value_length = 100})
         : m_param {param}
     {
-        m_options.page_size = 0x2000;
+        m_options.page_size = 0x4000;
         m_options.cache_size = 4'194'304;
         CHECK_OK(calicodb::DB::open(m_options, kFilename, m_db));
     }
