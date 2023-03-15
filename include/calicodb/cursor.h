@@ -18,13 +18,15 @@ namespace calicodb
 class Cursor
 {
 public:
-    explicit Cursor() = default;
-    virtual ~Cursor() = default;
+    explicit Cursor();
+    virtual ~Cursor();
 
     // Check if the cursor is valid, that is, positioned on a record.
     //
     // This method must return true before key(), value(), next(), or previous() is
-    // called. Otherwise, the result is unspecified.
+    // called. Those calls will result in unspecified behavior if the cursor is not
+    // valid. Modifying the table this cursor was created from also causes
+    // invalidation.
     [[nodiscard]] virtual auto is_valid() const -> bool = 0;
 
     // Check the status associated with this cursor.

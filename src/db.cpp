@@ -54,6 +54,9 @@ auto DB::open(const Options &options, const std::string &filename, DB *&db) -> S
     return s;
 }
 
+DB::DB() = default;
+DB::~DB() = default;
+
 auto DB::repair(const Options &options, const std::string &filename) -> Status
 {
     return DBImpl::repair(options, filename);

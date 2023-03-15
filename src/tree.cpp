@@ -939,7 +939,12 @@ auto Tree::split_non_root(Node right, Node &out) -> Status
         }
         right.header.prev_id = left.page.id();
         left.header.next_id = right.page.id();
-        CDB_TRY(PayloadManager::promote(*m_pager, m_freelist, nullptr, separator, parent_id));
+        CDB_TRY(PayloadManager::promote(
+            *m_pager,
+            m_freelist,
+            nullptr,
+            separator,
+            parent_id));
     } else {
         left.header.next_id = read_child_id(separator);
         CDB_TRY(fix_parent_id(left.header.next_id, left.page.id(), PointerMap::kTreeNode));
@@ -980,7 +985,12 @@ auto Tree::split_non_root_fast(Node parent, Node left, Node right, const Cell &o
         left.header.next_id = right.page.id();
 
         separator = read_cell(right, 0);
-        CDB_TRY(PayloadManager::promote(*m_pager, m_freelist, cell_scratch(), separator, parent.page.id()));
+        CDB_TRY(PayloadManager::promote(
+            *m_pager,
+            m_freelist,
+            cell_scratch(),
+            separator,
+            parent.page.id()));
     } else {
         separator = read_cell(left, header.cell_count - 1);
         detach_cell(separator, cell_scratch());
@@ -1204,7 +1214,12 @@ auto Tree::rotate_left(Node &parent, Node &left, Node &right, std::size_t index)
         erase_cell(right, 0);
 
         auto separator = read_cell(right, 0);
-        CDB_TRY(PayloadManager::promote(*m_pager, m_freelist, cell_scratch(), separator, parent.page.id()));
+        CDB_TRY(PayloadManager::promote(
+            *m_pager,
+            m_freelist,
+            cell_scratch(),
+            separator,
+            parent.page.id()));
         write_child_id(separator, left.page.id());
 
         CDB_TRY(remove_cell(parent, index));
@@ -1247,7 +1262,12 @@ auto Tree::rotate_right(Node &parent, Node &left, Node &right, std::size_t index
         CDB_EXPECT_FALSE(is_overflowing(right));
 
         auto separator = highest;
-        CDB_TRY(PayloadManager::promote(*m_pager, m_freelist, cell_scratch(), separator, parent.page.id()));
+        CDB_TRY(PayloadManager::promote(
+            *m_pager,
+            m_freelist,
+            cell_scratch(),
+            separator,
+            parent.page.id()));
         write_child_id(separator, left.page.id());
 
         // Don't erase the cell until it has been detached.
@@ -1389,7 +1409,7 @@ auto Tree::vacuum_step(Page &free, TableSet &tables, Id last_id) -> Status
 
     const auto fix_basic_link = [&entry, &free, this]() -> Status {
         Page parent;
-        CDB_TRY(m_pager->acquire(entry.back_ptr, &parent));
+        CDB_TRY(m_pager->acquire(entry.back_ptr, parent));
         m_pager->upgrade(parent);
         write_next_id(parent, free.id());
         m_pager->release(std::move(parent));
@@ -1407,7 +1427,7 @@ auto Tree::vacuum_step(Page &free, TableSet &tables, Id last_id) -> Status
                 CDB_EXPECT_FALSE(entry.back_ptr.is_null());
                 CDB_TRY(fix_basic_link());
                 Page last;
-                CDB_TRY(m_pager->acquire(last_id, &last));
+                CDB_TRY(m_pager->acquire(last_id, last));
                 if (const auto next_id = read_next_id(last); !next_id.is_null()) {
                     CDB_TRY(fix_parent_id(next_id, free.id(), PointerMap::kFreelistLink));
                 }
@@ -1499,7 +1519,7 @@ auto Tree::vacuum_step(Page &free, TableSet &tables, Id last_id) -> Status
     CDB_TRY(PointerMap::write_entry(*m_pager, last_id, {}));
     CDB_TRY(PointerMap::write_entry(*m_pager, free.id(), entry));
     Page last;
-    CDB_TRY(m_pager->acquire(last_id, &last));
+    CDB_TRY(m_pager->acquire(last_id, last));
     // We need to upgrade the last node, even though we aren't writing to it. This causes a full image to be written,
     // which we will need if we crash during vacuum and need to roll back.
     m_pager->upgrade(last);
@@ -1567,7 +1587,7 @@ Freelist::Freelist(Pager &pager, Id &head)
 auto Freelist::pop(Page &page) -> Status
 {
     if (!m_head->is_null()) {
-        CDB_TRY(m_pager->acquire(*m_head, &page));
+        CDB_TRY(m_pager->acquire(*m_head, page));
         m_pager->upgrade(page, kLinkContentOffset);
         *m_head = read_next_id(page);
 
@@ -1634,7 +1654,7 @@ auto PointerMap::read_entry(Pager &pager, Id pid, Entry &out) -> Status
     CDB_EXPECT_LE(offset + kEntrySize, pager.page_size());
 
     Page map;
-    CDB_TRY(pager.acquire(mid, &map));
+    CDB_TRY(pager.acquire(mid, map));
     out = decode_entry(map.data() + offset);
     pager.release(std::move(map));
     return Status::ok();
@@ -1650,7 +1670,7 @@ auto PointerMap::write_entry(Pager &pager, Id pid, Entry entry) -> Status
     CDB_EXPECT_LE(offset + kEntrySize, pager.page_size());
 
     Page map;
-    CDB_TRY(pager.acquire(mid, &map));
+    CDB_TRY(pager.acquire(mid, map));
     const auto [back_ptr, type] = decode_entry(map.data() + offset);
     if (entry.back_ptr != back_ptr || entry.type != type) {
         if (!map.is_writable()) {
@@ -1681,13 +1701,13 @@ auto NodeManager::allocate(Pager &pager, Freelist &freelist, Node &out, std::str
 {
     const auto fetch_unused_page = [&freelist, &pager](Page &page) {
         if (freelist.is_empty()) {
-            CDB_TRY(pager.allocate(&page));
+            CDB_TRY(pager.allocate(page));
             // Since this is a fresh page from the end of the file, it could be a pointer map page. If so,
             // it is already blank, so just skip it and allocate another. It'll get filled in as the pages
             // following it are used.
             if (PointerMap::lookup(pager, page.id()) == page.id()) {
                 pager.release(std::move(page));
-                CDB_TRY(pager.allocate(&page));
+                CDB_TRY(pager.allocate(page));
             }
             return Status::ok();
         } else {
@@ -1705,7 +1725,7 @@ auto NodeManager::allocate(Pager &pager, Freelist &freelist, Node &out, std::str
 
 auto NodeManager::acquire(Pager &pager, Id page_id, Node &out, std::string &scratch, bool upgrade) -> Status
 {
-    CDB_TRY(pager.acquire(page_id, &out.page));
+    CDB_TRY(pager.acquire(page_id, out.page));
     out.scratch = scratch.data();
     out.header.read(out.page.data() + node_header_offset(out));
     setup_node(out);
@@ -1740,7 +1760,7 @@ auto OverflowList::read(Pager &pager, Id head_id, std::size_t offset, std::size_
 {
     while (payload_size != 0) {
         Page page;
-        CDB_TRY(pager.acquire(head_id, &page));
+        CDB_TRY(pager.acquire(head_id, page));
         auto content = get_readable_content(page, page.size());
 
         if (offset) {
@@ -1776,10 +1796,10 @@ auto OverflowList::write(Pager &pager, Freelist &freelist, Id &out, const Slice 
         Page page;
         auto s = freelist.pop(page);
         if (s.is_not_supported()) {
-            s = pager.allocate(&page);
+            s = pager.allocate(page);
             if (s.is_ok() && PointerMap::lookup(pager, page.id()) == page.id()) {
                 pager.release(std::move(page));
-                s = pager.allocate(&page);
+                s = pager.allocate(page);
             }
         }
         CDB_TRY(s);
@@ -1834,7 +1854,7 @@ auto OverflowList::erase(Pager &pager, Freelist &freelist, Id head_id) -> Status
 {
     while (!head_id.is_null()) {
         Page page;
-        CDB_TRY(pager.acquire(head_id, &page));
+        CDB_TRY(pager.acquire(head_id, page));
         head_id = read_next_id(page);
         pager.upgrade(page);
         CDB_TRY(freelist.push(std::move(page)));
@@ -2112,7 +2132,7 @@ class TreeValidator
             if (next_id.is_null()) {
                 break;
             }
-            CHECK_OK(pager.acquire(next_id, &page));
+            CHECK_OK(pager.acquire(next_id, page));
         }
     }
 
@@ -2199,7 +2219,7 @@ public:
         }
         CHECK_TRUE(!head.is_null());
         Page page;
-        CHECK_OK(pager.acquire(head, &page));
+        CHECK_OK(pager.acquire(head, page));
 
         Id parent_id;
         traverse_chain(pager, std::move(page), [&](const auto &link) {
@@ -2252,7 +2272,7 @@ public:
             if (cell.has_remote) {
                 const auto overflow_id = read_overflow_id(cell);
                 Page head;
-                CHECK_OK(tree.m_pager->acquire(overflow_id, &head));
+                CHECK_OK(tree.m_pager->acquire(overflow_id, head));
                 traverse_chain(*tree.m_pager, std::move(head), [&](auto &page) {
                     CHECK_TRUE(requested > accumulated);
                     const auto size_limit = std::min(page.size(), requested - accumulated);
@@ -2347,6 +2367,9 @@ auto Tree::TEST_validate() -> void
 {
     return Status::not_found("cursor is invalid");
 }
+
+Cursor::Cursor() = default;
+Cursor::~Cursor() = default;
 
 auto CursorImpl::is_valid() const -> bool
 {

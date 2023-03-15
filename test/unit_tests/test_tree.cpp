@@ -931,7 +931,7 @@ TEST_P(PointerMapTests, PointerMapCanFitAllPointers)
     // PointerMap::find_map() expects the given pointer map page to be allocated already.
     for (std::size_t i {}; i < map_size() * 2; ++i) {
         Page page;
-        ASSERT_OK(pager->allocate(&page));
+        ASSERT_OK(pager->allocate(page));
         pager->release(std::move(page));
     }
 
@@ -1153,7 +1153,7 @@ TEST_P(VacuumTests, OverflowChainIsNullTerminated)
         // NodeManager::allocate() accounts for the first pointer map page on page 2.
         auto node_3 = allocate_node(true);
         Page page_4;
-        ASSERT_OK(pager->allocate(&page_4));
+        ASSERT_OK(pager->allocate(page_4));
         ASSERT_EQ(page_4.id().value, 4);
         write_next_id(node_3.page, Id {123});
         write_next_id(page_4, Id {123});
@@ -1165,8 +1165,8 @@ TEST_P(VacuumTests, OverflowChainIsNullTerminated)
 
     Page page_3;
     Page page_4;
-    ASSERT_OK(pager->acquire(Id {3}, &page_3));
-    ASSERT_OK(pager->acquire(Id {4}, &page_4));
+    ASSERT_OK(pager->acquire(Id {3}, page_3));
+    ASSERT_OK(pager->acquire(Id {4}, page_4));
     ASSERT_EQ(read_next_id(page_3), Id {4});
     ASSERT_EQ(read_next_id(page_4), Id::null());
     pager->release(std::move(page_3));
@@ -1261,7 +1261,7 @@ TEST_P(VacuumTests, VacuumsFreelistInReverseOrder)
     ASSERT_EQ(entry.type, PointerMap::kFreelistLink);
     {
         Page page;
-        ASSERT_OK(pager->acquire(Id {4}, &page));
+        ASSERT_OK(pager->acquire(Id {4}, page));
         ASSERT_EQ(read_next_id(page), Id {3});
         pager->release(std::move(page));
     }

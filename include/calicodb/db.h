@@ -19,10 +19,11 @@ struct TableOptions;
 
 struct Options {
     // Size of a database page in bytes. This is the basic unit of I/O for the
-    // database file. Data is read/written in page-sized chunks.
-    std::size_t page_size {0x2000};
+    // database file. Data is read/written in page-sized chunks. Must be a power-
+    // of-two between 512 and 32768, inclusive.
+    std::size_t page_size {16'384}; // 16 KB
 
-    // Size of the page cache in bytes.
+    // Size of the page cache in bytes. Must be at least 16 pages (see above).
     std::size_t cache_size {4'194'304}; // 4 MB
 
     // Alternate prefix to use for WAL segment files. Defaults to "dbname-wal-",
@@ -30,10 +31,11 @@ struct Options {
     std::string wal_prefix;
 
     // Custom destination for info log messages. Defaults to writing to a file
-    // called "dbname-log", where "dbname" is the name of the database.
+    // called "dbname-log", where "dbname" is the name of the database. See env.h
+    // for details.
     InfoLogger *info_log {};
 
-    // Custom storage environment.
+    // Custom storage environment. See env.h for details.
     Env *env {};
 
     // If true, create the database if it is missing.
@@ -62,8 +64,8 @@ public:
     // Remove all files associated with a given database.
     [[nodiscard]] static auto destroy(const Options &options, const std::string &filename) -> Status;
 
-    explicit DB() = default;
-    virtual ~DB() = default;
+    explicit DB();
+    virtual ~DB();
 
     // Prevent copies.
     DB(const DB &) = delete;
@@ -89,8 +91,10 @@ public:
     // Run a checkpoint operation, which updates the logical contents of the
     // database to include all changes made since the last checkpoint.
     //
-    // This operation affects all tables that have pending updates, as well as
-    // creation and dropping of tables.
+    // This operation affects all tables that have pending updates, as well as creation
+    // and dropping of tables. Synchronizes both the WAL and the database file with the
+    // underlying filesystem, and ensures that the WAL contains the necessary information
+    // to recover from a crash.
     [[nodiscard]] virtual auto checkpoint() -> Status = 0;
 
     // Perform defragmentation and shrink the database file.

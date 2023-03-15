@@ -24,6 +24,8 @@ static auto get_table_id(const Table &table) -> Id
     return reinterpret_cast<const TableImpl &>(table).id();
 }
 
+Table::~Table() = default;
+
 TableImpl::TableImpl(const TableOptions &options, std::string name, Id table_id)
     : m_options {options},
       m_name {std::move(name)},
@@ -207,7 +209,7 @@ auto DBImpl::open(const Options &sanitized) -> Status
     } else {
         // Write the initial file header.
         Page db_root;
-        CDB_TRY(m_pager->acquire(Id::root(), &db_root));
+        CDB_TRY(m_pager->acquire(Id::root(), db_root));
         m_pager->upgrade(db_root);
         state.page_count = m_pager->page_count();
         state.header_crc = crc32c::Mask(state.compute_crc());
@@ -527,8 +529,10 @@ auto DBImpl::checkpoint() -> Status
 
 auto DBImpl::do_checkpoint() -> Status
 {
+    CDB_TRY(m_pager->sync());
+
     Page db_root;
-    CDB_TRY(m_pager->acquire(Id::root(), &db_root));
+    CDB_TRY(m_pager->acquire(Id::root(), db_root));
     m_pager->upgrade(db_root);
 
     FileHeader header;
@@ -549,7 +553,7 @@ auto DBImpl::do_checkpoint() -> Status
 auto DBImpl::load_file_header() -> Status
 {
     Page root;
-    CDB_TRY(m_pager->acquire(Id::root(), &root));
+    CDB_TRY(m_pager->acquire(Id::root(), root));
 
     FileHeader header;
     header.read(root.data());
@@ -743,7 +747,7 @@ template <class Descriptor, class Callback>
 static auto with_page(Pager &pager, const Descriptor &descriptor, const Callback &callback)
 {
     Page page;
-    CDB_TRY(pager.acquire(descriptor.page_id, &page));
+    CDB_TRY(pager.acquire(descriptor.page_id, page));
 
     callback(page);
     pager.release(std::move(page));
@@ -894,7 +898,7 @@ auto DBImpl::recovery_phase_2() -> Status
     auto &set = m_wal->m_set;
     // Pager needs the updated state to determine the page count.
     Page page;
-    CDB_TRY(m_pager->acquire(Id::root(), &page));
+    CDB_TRY(m_pager->acquire(Id::root(), page));
     FileHeader header;
     header.read(page.data());
     m_pager->load_state(header);
