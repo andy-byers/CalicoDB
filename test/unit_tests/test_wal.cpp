@@ -85,21 +85,21 @@ TEST_F(WalRecordMergeTests, MergingInvalidTypesIndicatesCorruption)
 class WalRecordGenerator
 {
 public:
-    [[nodiscard]] auto setup_deltas(Span image) -> std::vector<PageDelta>
+    [[nodiscard]] auto setup_deltas(char *image, std::size_t image_size) -> std::vector<PageDelta>
     {
         static constexpr std::size_t MAX_WIDTH {30};
         static constexpr std::size_t MAX_SPREAD {20};
         std::vector<PageDelta> deltas;
 
-        for (auto offset = random.Next<std::size_t>(image.size() / 10); offset < image.size();) {
-            const auto rest = image.size() - offset;
+        for (auto offset = random.Next<std::size_t>(image_size / 10); offset < image_size;) {
+            const auto rest = image_size - offset;
             const auto size = random.Next<std::size_t>(1, std::min(rest, MAX_WIDTH));
             deltas.emplace_back(PageDelta {offset, size});
             offset += size + random.Next<std::size_t>(1, MAX_SPREAD);
         }
         for (const auto &[offset, size] : deltas) {
             const auto replacement = random.Generate(size);
-            std::memcpy(image.data() + offset, replacement.data(), size);
+            std::memcpy(image + offset, replacement.data(), size);
         }
         return deltas;
     }
@@ -127,7 +127,7 @@ public:
 TEST_F(WalPayloadTests, ImagePayloadEncoding)
 {
     const auto payload_in = encode_image_payload(Lsn {123}, Id {456}, image, scratch.data());
-    const auto payload_out = decode_payload(Span {scratch}.truncate(payload_in.size()));
+    const auto payload_out = decode_payload(Slice {scratch}.truncate(payload_in.size()));
     ASSERT_TRUE(std::holds_alternative<ImageDescriptor>(payload_out));
     const auto descriptor = std::get<ImageDescriptor>(payload_out);
     ASSERT_EQ(descriptor.lsn.value, 123);
@@ -138,9 +138,9 @@ TEST_F(WalPayloadTests, ImagePayloadEncoding)
 TEST_F(WalPayloadTests, DeltaPayloadEncoding)
 {
     WalRecordGenerator generator;
-    auto deltas = generator.setup_deltas(image);
+    auto deltas = generator.setup_deltas(image.data(), image.size());
     const auto payload_in = encode_deltas_payload(Lsn {123}, Id {456}, image, deltas, scratch.data());
-    const auto payload_out = decode_payload(Span {scratch}.truncate(payload_in.size()));
+    const auto payload_out = decode_payload(Slice {scratch}.truncate(payload_in.size()));
     ASSERT_TRUE(std::holds_alternative<DeltaDescriptor>(payload_out));
     const auto descriptor = std::get<DeltaDescriptor>(payload_out);
     ASSERT_EQ(descriptor.lsn.value, 123);
@@ -155,7 +155,7 @@ TEST_F(WalPayloadTests, VacuumPayloadEncoding)
 {
     WalRecordGenerator generator;
     const auto payload_in = encode_vacuum_payload(Lsn {123}, true, scratch.data());
-    const auto payload_out = decode_payload(Span {scratch}.truncate(payload_in.size()));
+    const auto payload_out = decode_payload(Slice {scratch}.truncate(payload_in.size()));
     ASSERT_TRUE(std::holds_alternative<VacuumDescriptor>(payload_out));
     const auto descriptor = std::get<VacuumDescriptor>(payload_out);
     ASSERT_EQ(descriptor.lsn.value, 123);
@@ -320,10 +320,8 @@ public:
 
     [[nodiscard]] static auto wal_read_with_status(WalReader &reader, std::string &out, Lsn *lsn = nullptr) -> Status
     {
-        out.resize(wal_scratch_size(kPageSize));
-        Span buffer {out};
-
-        CDB_TRY(reader.read(buffer));
+        CDB_TRY(reader.read(out));
+        Slice buffer {out};
         if (lsn != nullptr) {
             *lsn = extract_payload_lsn(buffer);
         }
@@ -379,6 +377,20 @@ TEST_F(WalComponentTests, HandlesRecordsWithinBlock)
     auto reader = make_reader(Id::root());
     ASSERT_EQ(wal_read(reader), "hello");
     ASSERT_EQ(wal_read(reader), "world");
+    assert_reader_is_done(reader);
+}
+
+TEST_F(WalComponentTests, FragmentedRecord)
+{
+    tools::RandomGenerator random;
+    const auto payload = random.Generate(wal_scratch_size(kPageSize) - sizeof(Lsn));
+
+    auto writer = make_writer(Id::root());
+    ASSERT_OK(wal_write(writer, Lsn {1}, payload));
+    ASSERT_OK(writer.flush());
+
+    auto reader = make_reader(Id::root());
+    ASSERT_EQ(wal_read(reader), payload);
     assert_reader_is_done(reader);
 }
 
@@ -438,14 +450,12 @@ TEST_F(WalComponentTests, ReaderReportsIncompleteBlock)
 TEST_F(WalComponentTests, ReaderReportsInvalidSize)
 {
     auto writer = make_writer(Id::root());
-    ASSERT_OK(wal_write(writer, Lsn {1}, "./test"));
+    ASSERT_OK(wal_write(writer, Lsn {1}, "test"));
     ASSERT_OK(writer.flush());
 
-    WalRecordHeader header;
-    header.type = kFullRecord;
-    header.size = -1;
     std::string buffer(WalRecordHeader::kSize, '\0');
-    write_wal_record_header(buffer.data(), header);
+    buffer[0] = kFullRecord;
+    put_u16(buffer.data() + 1, -1);
 
     Editor *editor;
     ASSERT_OK(env->new_editor(encode_segment_name(kWalPrefix, Id::root()), editor));
@@ -527,6 +537,26 @@ TEST_F(WalComponentTests, HandlesRecordsAcrossSparseBlocks)
     assert_reader_is_done(reader);
 }
 
+TEST_F(WalComponentTests, HandlesLargeRecords)
+{
+    const auto block_size = wal_block_size(kPageSize);
+    tools::RandomGenerator random {block_size * 20};
+    std::vector<std::string> payloads;
+
+    auto writer = make_writer(Id::root());
+    for (std::size_t i {}; i < 10; ++i) {
+        const auto payload_size = random.Next(block_size, block_size * 5);
+        payloads.emplace_back(random.Generate(payload_size).to_string());
+        ASSERT_OK(wal_write(writer, Lsn {i + 1}, payloads.back()));
+    }
+    ASSERT_OK(writer.flush());
+    auto reader = make_reader(Id::root());
+    for (const auto &payload : payloads) {
+        ASSERT_EQ(wal_read(reader), payload);
+    }
+    assert_reader_is_done(reader);
+}
+
 TEST_F(WalComponentTests, Corruption)
 {
     // Don't flush the writer, so it leaves a partial record in the WAL.
@@ -568,7 +598,6 @@ public:
         wal.reset(temp);
 
         tail_buffer.resize(wal_block_size(kPageSize));
-        payload_buffer.resize(wal_scratch_size(kPageSize));
     }
 
     auto read_segment(Id segment_id, std::vector<std::string> *out) -> Status
@@ -580,11 +609,11 @@ public:
         WalReader reader {*file, tail_buffer};
 
         for (;;) {
-            Span payload {payload_buffer};
+            std::string payload;
             auto s = reader.read(payload);
 
             if (s.is_ok()) {
-                out->emplace_back(payload.to_string());
+                out->emplace_back(payload);
             } else if (s.is_not_found()) {
                 break;
             } else {
@@ -594,7 +623,6 @@ public:
         return Status::ok();
     }
 
-    std::string payload_buffer;
     std::string tail_buffer;
     std::unique_ptr<WriteAheadLog> wal;
     tools::RandomGenerator random;

@@ -8,7 +8,6 @@
 #include "delta.h"
 #include "encoding.h"
 #include "header.h"
-#include "types.h"
 
 namespace calicodb
 {
@@ -50,7 +49,8 @@ class Page
 {
     std::vector<PageDelta> m_deltas;
     Id m_id;
-    Span m_span;
+    std::size_t m_size {};
+    char *m_data {};
     bool m_write {};
 
 public:
@@ -72,34 +72,34 @@ public:
 
     [[nodiscard]] auto view(std::size_t offset) const -> Slice
     {
-        return m_span.range(offset);
+        return Slice {m_data, m_size}.advance(offset);
     }
 
     [[nodiscard]] auto view(std::size_t offset, std::size_t size) const -> Slice
     {
-        return m_span.range(offset, size);
+        return Slice {m_data, m_size}.range(offset, size);
     }
 
-    [[nodiscard]] auto span(std::size_t offset, std::size_t size) -> Span
+    auto mutate(std::size_t offset, std::size_t size) -> char *
     {
         CDB_EXPECT_TRUE(m_write);
         insert_delta(m_deltas, PageDelta {offset, size});
-        return m_span.range(offset, size);
+        return m_data + offset;
     }
 
     [[nodiscard]] auto data() const -> const char *
     {
-        return m_span.data();
+        return m_data;
     }
 
     [[nodiscard]] auto data() -> char *
     {
-        return m_span.data();
+        return m_data;
     }
 
     [[nodiscard]] auto size() const -> std::size_t
     {
-        return m_span.size();
+        return m_size;
     }
 
     [[nodiscard]] auto deltas() -> const std::vector<PageDelta> &
@@ -109,10 +109,11 @@ public:
         return m_deltas;
     }
 
-    auto TEST_populate(Id page_id, Span buffer, bool write, const std::vector<PageDelta> &deltas = {}) -> void
+    auto TEST_populate(Id page_id, char *data, std::size_t size, bool write, const std::vector<PageDelta> &deltas = {}) -> void
     {
         m_id = page_id;
-        m_span = buffer;
+        m_data = data;
+        m_size = size;
         m_write = write;
         m_deltas = deltas;
     }
@@ -136,7 +137,7 @@ public:
 
 inline auto write_page_lsn(Page &page, Lsn lsn) -> void
 {
-    put_u64(page.span(page_offset(page), sizeof(Lsn)), lsn.value);
+    put_u64(page.mutate(page_offset(page), sizeof(Lsn)), lsn.value);
 }
 
 } // namespace calicodb

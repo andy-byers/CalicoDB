@@ -36,7 +36,7 @@ TEST_F(SetupTests, ReportsInvalidFileHeader)
     ASSERT_OK(logger->write(Slice {payload, sizeof(payload)}));
     delete logger;
 
-    ASSERT_TRUE(setup("./test", *env, options, header).is_corruption());
+    ASSERT_TRUE(setup_db("./test", *env, options, header).is_corruption());
 }
 
 TEST(LeakTests, DestroysOwnObjects)

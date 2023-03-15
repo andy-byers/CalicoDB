@@ -13,11 +13,7 @@ namespace calicodb
 class WalWriter
 {
 public:
-    WalWriter(Logger &file, Span tail)
-        : m_tail {tail},
-          m_file {&file}
-    {
-    }
+    explicit WalWriter(Logger &file, std::string &tail);
 
     [[nodiscard]] auto block_count() const -> std::size_t
     {
@@ -33,7 +29,8 @@ public:
     [[nodiscard]] auto flushed_lsn() const -> Lsn;
 
 private:
-    Span m_tail;
+    std::uint32_t m_type_crc[kMaxRecordType + 1] {};
+    std::string *m_tail {};
     Lsn m_flushed_lsn;
     Logger *m_file {};
     Lsn m_last_lsn {};

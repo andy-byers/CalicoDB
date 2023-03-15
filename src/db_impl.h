@@ -129,9 +129,6 @@ private:
     [[nodiscard]] auto recovery_phase_2() -> Status;
     [[nodiscard]] auto construct_new_table(const Slice &name, LogicalPageId &root_id) -> Status;
 
-    std::string m_reader_data;
-    std::string m_reader_tail;
-
     TableSet m_tables;
     Table *m_default {};
     Table *m_root {};
@@ -142,13 +139,13 @@ private:
     std::string m_wal_prefix;
     Env *m_env {};
     InfoLogger *m_info_log {};
-    WriteAheadLog *wal {};
-    Pager *pager {};
+    WriteAheadLog *m_wal {};
+    Pager *m_pager {};
     bool m_owns_env {};
     bool m_owns_info_log {};
 };
 
-auto setup(const std::string &, Env &, const Options &, FileHeader &state) -> Status;
+auto setup_db(const std::string &, Env &, const Options &, FileHeader &state) -> Status;
 
 } // namespace calicodb
 

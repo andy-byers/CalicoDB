@@ -4,7 +4,6 @@
 
 #include "calicodb/env.h"
 #include "tools.h"
-#include "types.h"
 #include "unit_tests.h"
 #include "utils.h"
 #include <filesystem>
@@ -120,25 +119,23 @@ template <class Reader>
     static constexpr std::size_t num_chunks {20};
     EXPECT_GT(size, num_chunks) << "File is too small for this test";
     std::string backing(size, '\x00');
-    Span out {backing};
+    auto *out_data = backing.data();
     std::size_t counter {};
 
-    while (!out.is_empty()) {
-        const auto chunk_size = std::min(out.size(), random.Next<std::size_t>(size / num_chunks));
+    while (counter < size) {
+        const auto chunk_size = std::min(size - counter, random.Next<std::size_t>(size / num_chunks));
         Slice slice;
-        auto chunk = out.range(0, chunk_size);
-        const auto s = reader.read(counter, chunk_size, chunk.data(), &slice);
+        const auto s = reader.read(counter, chunk_size, out_data, &slice);
 
         if (slice.size() != chunk_size) {
             return backing;
         }
 
         EXPECT_TRUE(s.is_ok()) << "Error: " << s.to_string().data();
-        EXPECT_EQ(chunk.size(), chunk_size);
-        out.advance(chunk_size);
+        EXPECT_EQ(chunk_size, chunk_size);
+        out_data += chunk_size;
         counter += chunk_size;
     }
-    EXPECT_TRUE(out.is_empty());
     return backing;
 }
 

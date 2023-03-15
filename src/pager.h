@@ -46,8 +46,8 @@ public:
     [[nodiscard]] auto truncate(std::size_t page_count) -> Status;
     [[nodiscard]] auto flush(Lsn target_lsn = Lsn::null()) -> Status;
     [[nodiscard]] auto sync() -> Status;
-    [[nodiscard]] auto allocate(Page *page) -> Status;
-    [[nodiscard]] auto acquire(Id page_id, Page *page) -> Status;
+    [[nodiscard]] auto allocate(Page &page) -> Status;
+    [[nodiscard]] auto acquire(Id page_id, Page &page) -> Status;
     auto upgrade(Page &page, int important = -1) -> void;
     auto release(Page page) -> void;
     auto save_state(FileHeader &header) -> void;

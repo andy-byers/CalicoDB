@@ -8,7 +8,6 @@
 #include "header.h"
 #include "logging.h"
 #include "page.h"
-#include "types.h"
 #include "wal.h"
 #include <limits>
 
@@ -217,34 +216,34 @@ auto Pager::make_frame_available() -> bool
     return true;
 }
 
-auto Pager::allocate(Page *page) -> Status
+auto Pager::allocate(Page &page) -> Status
 {
     CDB_TRY(acquire(Id::from_index(m_frames.page_count()), page));
-    if (page->id() > m_state->max_page_id) {
-        upgrade(*page, 0);
+    if (page.id() > m_state->max_page_id) {
+        upgrade(page, 0);
     } else {
         // This page already has its full contents in the WAL. This page must have
         // been vacuumed since the last checkpoint.
-        auto itr = m_cache.get(page->id());
+        auto itr = m_cache.get(page.id());
         CDB_EXPECT_NE(itr, m_cache.end());
-        m_frames.upgrade(itr->value.index, *page);
-        itr->value.token = m_dirty.insert(page->id(), Lsn::null());
+        m_frames.upgrade(itr->value.index, page);
+        itr->value.token = m_dirty.insert(page.id(), Lsn::null());
     }
     ++m_state->max_page_id.value;
     return Status::ok();
 }
 
-auto Pager::acquire(Id page_id, Page *page) -> Status
+auto Pager::acquire(Id page_id, Page &page) -> Status
 {
     CDB_EXPECT_FALSE(page_id.is_null());
 
     const auto do_acquire = [&](auto &entry) {
-        m_frames.ref(entry.index, *page);
+        m_frames.ref(entry.index, page);
 
         // Write back pages that are too old. This is so that old WAL segments can be removed.
         if (m_state->is_running && entry.token) {
             const auto should_write = (*entry.token)->record_lsn <= m_state->commit_lsn &&
-                                      read_page_lsn(*page) <= m_wal->flushed_lsn();
+                                      read_page_lsn(page) <= m_wal->flushed_lsn();
             if (should_write) {
                 auto s = m_frames.write_back(entry.index);
 

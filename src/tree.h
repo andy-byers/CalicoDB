@@ -165,13 +165,14 @@ struct NodeManager {
 };
 
 struct OverflowList {
-    [[nodiscard]] static auto read(Pager &pager, Span out, Id head_id, std::size_t offset = 0) -> Status;
+    [[nodiscard]] static auto read(Pager &pager, Id head_id, std::size_t offset, std::size_t size, char *scratch) -> Status;
     [[nodiscard]] static auto write(Pager &pager, Freelist &freelist, Id &out, const Slice &first, const Slice &second = {}) -> Status;
-    [[nodiscard]] static auto copy(Pager &pager, Freelist &freelist, Id &out, Id overflow_id, std::size_t size) -> Status;
+    [[nodiscard]] static auto copy(Pager &pager, Freelist &freelist, Id overflow_id, std::size_t size, Id &out) -> Status;
     [[nodiscard]] static auto erase(Pager &pager, Freelist &freelist, Id head_id) -> Status;
 };
 
 struct PayloadManager {
+
     [[nodiscard]] static auto emplace(Pager &pager, Freelist &freelist, char *scratch, Node &node, const Slice &key, const Slice &value, std::size_t index) -> Status;
     [[nodiscard]] static auto promote(Pager &pager, Freelist &freelist, char *scratch, Cell &cell, Id parent_id) -> Status;
     [[nodiscard]] static auto collect_key(Pager &pager, std::string &scratch, const Cell &cell, Slice *key) -> Status;
@@ -183,7 +184,6 @@ class Tree
 public:
     explicit Tree(Pager &pager, Id root_id, Id &freelist_head);
     [[nodiscard]] static auto create(Pager &pager, Id table_id, Id &freelist_head, Id *out) -> Status;
-    [[nodiscard]] auto root(Node &out) const -> Status;
     [[nodiscard]] auto put(const Slice &key, const Slice &value, bool *exists = nullptr) -> Status;
     [[nodiscard]] auto get(const Slice &key, std::string *value) const -> Status;
     [[nodiscard]] auto erase(const Slice &key) -> Status;

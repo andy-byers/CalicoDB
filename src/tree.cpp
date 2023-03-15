@@ -85,7 +85,7 @@ static auto read_child_id_at(const Node &node, std::size_t offset) -> Id
 
 static auto write_child_id_at(Node &node, std::size_t offset, Id child_id) -> void
 {
-    put_u64(node.page.span(offset, sizeof(Id)), child_id.value);
+    put_u64(node.page.mutate(offset, sizeof(Id)), child_id.value);
 }
 
 static auto read_child_id(const Node &node, std::size_t index) -> Id
@@ -138,7 +138,7 @@ static auto write_child_id(Cell &cell, Id child_id) -> void
 
 auto write_next_id(Page &page, Id next_id) -> void
 {
-    put_u64(page.span(page_offset(page) + kPageHeaderSize, sizeof(Id)), next_id.value);
+    put_u64(page.mutate(page_offset(page) + kPageHeaderSize, sizeof(Id)), next_id.value);
 }
 
 static auto parse_external_cell(const NodeMeta &meta, char *data) -> Cell
@@ -239,14 +239,14 @@ class BlockAllocator
     auto set_next_pointer(std::size_t offset, PageSize value) -> void
     {
         CDB_EXPECT_LT(value, m_node->page.size());
-        return put_u16(m_node->page.span(offset, sizeof(PageSize)), value);
+        return put_u16(m_node->page.mutate(offset, sizeof(PageSize)), value);
     }
 
     auto set_block_size(std::size_t offset, PageSize value) -> void
     {
         CDB_EXPECT_GE(value, 4);
         CDB_EXPECT_LT(value, m_node->page.size());
-        return put_u16(m_node->page.span(offset + sizeof(PageSize), sizeof(PageSize)), value);
+        return put_u16(m_node->page.mutate(offset + sizeof(PageSize), sizeof(PageSize)), value);
     }
 
     [[nodiscard]] auto allocate_from_free_list(PageSize needed_size) -> PageSize;
@@ -377,7 +377,7 @@ auto BlockAllocator::defragment(std::optional<PageSize> skip) -> void
     }
     const auto offset = cell_area_offset(*m_node);
     const auto size = m_node->page.size() - offset;
-    std::memcpy(m_node->page.span(offset, size).data(), m_node->scratch + offset, size);
+    std::memcpy(m_node->page.mutate(offset, size), m_node->scratch + offset, size);
 
     header.cell_start = end;
     header.frag_count = 0;
@@ -431,7 +431,7 @@ static auto allocate_block(Node &node, PageSize index, PageSize size) -> std::si
     node.set_slot(index, offset);
 
     // Signal that there will be a change here, but don't write anything yet.
-    (void)node.page.span(offset, size);
+    (void)node.page.mutate(offset, size);
     return offset;
 }
 
@@ -445,8 +445,7 @@ static auto free_block(Node &node, PageSize index, PageSize size) -> void
 auto write_cell(Node &node, std::size_t index, const Cell &cell) -> std::size_t
 {
     if (const auto offset = allocate_block(node, static_cast<PageSize>(index), static_cast<PageSize>(cell.size))) {
-        auto memory = node.page.span(offset, cell.size);
-        std::memcpy(memory.data(), cell.ptr, cell.size);
+        std::memcpy(node.page.mutate(offset, cell.size), cell.ptr, cell.size);
         return offset;
     }
     node.overflow_index = PageSize(index);
@@ -498,7 +497,7 @@ auto Node::get_slot(std::size_t index) const -> std::size_t
 auto Node::set_slot(std::size_t index, std::size_t pointer) -> void
 {
     CDB_EXPECT_LT(index, header.cell_count);
-    return put_u16(page.span(slots_offset + index * sizeof(PageSize), sizeof(PageSize)), static_cast<PageSize>(pointer));
+    return put_u16(page.mutate(slots_offset + index * sizeof(PageSize), sizeof(PageSize)), static_cast<PageSize>(pointer));
 }
 
 auto Node::insert_slot(std::size_t index, std::size_t pointer) -> void
@@ -534,8 +533,7 @@ auto Node::remove_slot(std::size_t index) -> void
 auto Node::take() && -> Page
 {
     if (page.is_writable()) {
-        auto span = page.span(node_header_offset(*this), NodeHeader::kSize);
-        header.write(span.data());
+        header.write(page.mutate(node_header_offset(*this), NodeHeader::kSize));
     }
     return std::move(page);
 }
@@ -550,12 +548,14 @@ static auto merge_root(Node &root, Node &child) -> void
 
     // Copy the cell content area.
     CDB_EXPECT_GE(header.cell_start, cell_slots_offset(root));
-    auto memory = root.page.span(header.cell_start, child.page.size() - header.cell_start);
-    std::memcpy(memory.data(), child.page.data() + header.cell_start, memory.size());
+    auto memory_size = child.page.size() - header.cell_start;
+    auto memory = root.page.mutate(header.cell_start, memory_size);
+    std::memcpy(memory, child.page.data() + header.cell_start, memory_size);
 
     // Copy the header and cell pointers.
-    memory = root.page.span(cell_slots_offset(root), header.cell_count * sizeof(PageSize));
-    std::memcpy(memory.data(), child.page.data() + cell_slots_offset(child), memory.size());
+    memory_size = header.cell_count * sizeof(PageSize);
+    memory = root.page.mutate(cell_slots_offset(root), memory_size);
+    std::memcpy(memory, child.page.data() + cell_slots_offset(child), memory_size);
     root.header = header;
     root.meta = child.meta;
 }
@@ -608,12 +608,12 @@ auto NodeIterator::fetch_key(std::string &buffer, const Cell &cell, Slice &out) 
     if (buffer.size() < cell.key_size) {
         buffer.resize(cell.key_size);
     }
-    Span key {buffer.data(), cell.key_size};
-    std::memcpy(key.data(), cell.key, cell.local_size);
-    key.advance(cell.local_size);
+    std::memcpy(buffer.data(), cell.key, cell.local_size);
 
-    CDB_TRY(OverflowList::read(*m_pager, key, read_overflow_id(cell)));
-    out = Slice {buffer}.truncate(cell.key_size);
+    auto *remote = buffer.data() + cell.local_size;
+    CDB_TRY(OverflowList::read(*m_pager, read_overflow_id(cell), 0, cell.key_size - cell.local_size, remote));
+
+    out = Slice {buffer.data(), cell.key_size};
     return Status::ok();
 }
 
@@ -832,12 +832,14 @@ auto Tree::split_root(Node root, Node &out) -> Status
 
     // Copy the cell content area.
     const auto after_root_headers = cell_area_offset(root);
-    auto data = child.page.span(after_root_headers, root.page.size() - after_root_headers);
-    std::memcpy(data.data(), root.page.data() + after_root_headers, data.size());
+    auto memory_size = root.page.size() - after_root_headers;
+    auto memory = child.page.mutate(after_root_headers, memory_size);
+    std::memcpy(memory, root.page.data() + after_root_headers, memory_size);
 
     // Copy the header and cell pointers. Doesn't copy the page LSN.
-    data = child.page.span(cell_slots_offset(child), root.header.cell_count * sizeof(PageSize));
-    std::memcpy(data.data(), root.page.data() + cell_slots_offset(root), data.size());
+    memory_size = root.header.cell_count * sizeof(PageSize);
+    memory = child.page.mutate(cell_slots_offset(child), memory_size);
+    std::memcpy(memory, root.page.data() + cell_slots_offset(root), memory_size);
     child.header = root.header;
 
     CDB_EXPECT_TRUE(is_overflowing(root));
@@ -937,7 +939,12 @@ auto Tree::split_non_root(Node right, Node &out) -> Status
         }
         right.header.prev_id = left.page.id();
         left.header.next_id = right.page.id();
-        CDB_TRY(PayloadManager::promote(*m_pager, m_freelist, nullptr, separator, parent_id));
+        CDB_TRY(PayloadManager::promote(
+            *m_pager,
+            m_freelist,
+            nullptr,
+            separator,
+            parent_id));
     } else {
         left.header.next_id = read_child_id(separator);
         CDB_TRY(fix_parent_id(left.header.next_id, left.page.id(), PointerMap::kTreeNode));
@@ -978,7 +985,12 @@ auto Tree::split_non_root_fast(Node parent, Node left, Node right, const Cell &o
         left.header.next_id = right.page.id();
 
         separator = read_cell(right, 0);
-        CDB_TRY(PayloadManager::promote(*m_pager, m_freelist, cell_scratch(), separator, parent.page.id()));
+        CDB_TRY(PayloadManager::promote(
+            *m_pager,
+            m_freelist,
+            cell_scratch(),
+            separator,
+            parent.page.id()));
     } else {
         separator = read_cell(left, header.cell_count - 1);
         detach_cell(separator, cell_scratch());
@@ -1202,7 +1214,12 @@ auto Tree::rotate_left(Node &parent, Node &left, Node &right, std::size_t index)
         erase_cell(right, 0);
 
         auto separator = read_cell(right, 0);
-        CDB_TRY(PayloadManager::promote(*m_pager, m_freelist, cell_scratch(), separator, parent.page.id()));
+        CDB_TRY(PayloadManager::promote(
+            *m_pager,
+            m_freelist,
+            cell_scratch(),
+            separator,
+            parent.page.id()));
         write_child_id(separator, left.page.id());
 
         CDB_TRY(remove_cell(parent, index));
@@ -1245,7 +1262,12 @@ auto Tree::rotate_right(Node &parent, Node &left, Node &right, std::size_t index
         CDB_EXPECT_FALSE(is_overflowing(right));
 
         auto separator = highest;
-        CDB_TRY(PayloadManager::promote(*m_pager, m_freelist, cell_scratch(), separator, parent.page.id()));
+        CDB_TRY(PayloadManager::promote(
+            *m_pager,
+            m_freelist,
+            cell_scratch(),
+            separator,
+            parent.page.id()));
         write_child_id(separator, left.page.id());
 
         // Don't erase the cell until it has been detached.
@@ -1291,11 +1313,6 @@ auto Tree::cell_scratch() -> char *
 {
     // Leave space for a child ID (maximum difference between the size of a varint and an Id).
     return m_cell_scratch.data() + sizeof(Id) - 1;
-}
-
-auto Tree::root(Node &out) const -> Status
-{
-    return acquire(m_root_id, false, out);
 }
 
 auto Tree::get(const Slice &key, std::string *value) const -> Status
@@ -1392,7 +1409,7 @@ auto Tree::vacuum_step(Page &free, TableSet &tables, Id last_id) -> Status
 
     const auto fix_basic_link = [&entry, &free, this]() -> Status {
         Page parent;
-        CDB_TRY(m_pager->acquire(entry.back_ptr, &parent));
+        CDB_TRY(m_pager->acquire(entry.back_ptr, parent));
         m_pager->upgrade(parent);
         write_next_id(parent, free.id());
         m_pager->release(std::move(parent));
@@ -1410,7 +1427,7 @@ auto Tree::vacuum_step(Page &free, TableSet &tables, Id last_id) -> Status
                 CDB_EXPECT_FALSE(entry.back_ptr.is_null());
                 CDB_TRY(fix_basic_link());
                 Page last;
-                CDB_TRY(m_pager->acquire(last_id, &last));
+                CDB_TRY(m_pager->acquire(last_id, last));
                 if (const auto next_id = read_next_id(last); !next_id.is_null()) {
                     CDB_TRY(fix_parent_id(next_id, free.id(), PointerMap::kFreelistLink));
                 }
@@ -1502,7 +1519,7 @@ auto Tree::vacuum_step(Page &free, TableSet &tables, Id last_id) -> Status
     CDB_TRY(PointerMap::write_entry(*m_pager, last_id, {}));
     CDB_TRY(PointerMap::write_entry(*m_pager, free.id(), entry));
     Page last;
-    CDB_TRY(m_pager->acquire(last_id, &last));
+    CDB_TRY(m_pager->acquire(last_id, last));
     // We need to upgrade the last node, even though we aren't writing to it. This causes a full image to be written,
     // which we will need if we crash during vacuum and need to roll back.
     m_pager->upgrade(last);
@@ -1517,7 +1534,7 @@ auto Tree::vacuum_step(Page &free, TableSet &tables, Id last_id) -> Status
             CDB_TRY(PointerMap::write_entry(*m_pager, next_id, next_entry));
         }
     }
-    std::memcpy(free.span(sizeof(Lsn), free.size() - sizeof(Lsn)).data(),
+    std::memcpy(free.mutate(sizeof(Lsn), free.size() - sizeof(Lsn)),
                 last.data() + sizeof(Lsn), last.size() - sizeof(Lsn));
     m_pager->release(std::move(last));
     return Status::ok();
@@ -1556,11 +1573,6 @@ static constexpr auto kLinkContentOffset = kLinkHeaderOffset + sizeof(Id);
     return page.view(kLinkContentOffset, std::min(size_limit, page.size() - kLinkContentOffset));
 }
 
-[[nodiscard]] static auto get_writable_content(Page &page, std::size_t size_limit) -> Span
-{
-    return page.span(kLinkContentOffset, std::min(size_limit, page.size() - kLinkContentOffset));
-}
-
 Freelist::Freelist(Pager &pager, Id &head)
     : m_pager {&pager},
       m_head {&head}
@@ -1575,7 +1587,7 @@ Freelist::Freelist(Pager &pager, Id &head)
 auto Freelist::pop(Page &page) -> Status
 {
     if (!m_head->is_null()) {
-        CDB_TRY(m_pager->acquire(*m_head, &page));
+        CDB_TRY(m_pager->acquire(*m_head, page));
         m_pager->upgrade(page, kLinkContentOffset);
         *m_head = read_next_id(page);
 
@@ -1642,7 +1654,7 @@ auto PointerMap::read_entry(Pager &pager, Id pid, Entry &out) -> Status
     CDB_EXPECT_LE(offset + kEntrySize, pager.page_size());
 
     Page map;
-    CDB_TRY(pager.acquire(mid, &map));
+    CDB_TRY(pager.acquire(mid, map));
     out = decode_entry(map.data() + offset);
     pager.release(std::move(map));
     return Status::ok();
@@ -1658,13 +1670,13 @@ auto PointerMap::write_entry(Pager &pager, Id pid, Entry entry) -> Status
     CDB_EXPECT_LE(offset + kEntrySize, pager.page_size());
 
     Page map;
-    CDB_TRY(pager.acquire(mid, &map));
+    CDB_TRY(pager.acquire(mid, map));
     const auto [back_ptr, type] = decode_entry(map.data() + offset);
     if (entry.back_ptr != back_ptr || entry.type != type) {
         if (!map.is_writable()) {
             pager.upgrade(map);
         }
-        auto data = map.span(offset, kEntrySize).data();
+        auto data = map.mutate(offset, kEntrySize);
         *data++ = entry.type;
         put_u64(data, entry.back_ptr.value);
     }
@@ -1689,13 +1701,13 @@ auto NodeManager::allocate(Pager &pager, Freelist &freelist, Node &out, std::str
 {
     const auto fetch_unused_page = [&freelist, &pager](Page &page) {
         if (freelist.is_empty()) {
-            CDB_TRY(pager.allocate(&page));
+            CDB_TRY(pager.allocate(page));
             // Since this is a fresh page from the end of the file, it could be a pointer map page. If so,
             // it is already blank, so just skip it and allocate another. It'll get filled in as the pages
             // following it are used.
             if (PointerMap::lookup(pager, page.id()) == page.id()) {
                 pager.release(std::move(page));
-                CDB_TRY(pager.allocate(&page));
+                CDB_TRY(pager.allocate(page));
             }
             return Status::ok();
         } else {
@@ -1713,7 +1725,7 @@ auto NodeManager::allocate(Pager &pager, Freelist &freelist, Node &out, std::str
 
 auto NodeManager::acquire(Pager &pager, Id page_id, Node &out, std::string &scratch, bool upgrade) -> Status
 {
-    CDB_TRY(pager.acquire(page_id, &out.page));
+    CDB_TRY(pager.acquire(page_id, out.page));
     out.scratch = scratch.data();
     out.header.read(out.page.data() + node_header_offset(out));
     setup_node(out);
@@ -1744,11 +1756,11 @@ auto NodeManager::destroy(Freelist &freelist, Node node) -> Status
     return freelist.push(std::move(node).take());
 }
 
-auto OverflowList::read(Pager &pager, Span out, Id head_id, std::size_t offset) -> Status
+auto OverflowList::read(Pager &pager, Id head_id, std::size_t offset, std::size_t payload_size, char *buffer) -> Status
 {
-    while (!out.is_empty()) {
+    while (payload_size != 0) {
         Page page;
-        CDB_TRY(pager.acquire(head_id, &page));
+        CDB_TRY(pager.acquire(head_id, page));
         auto content = get_readable_content(page, page.size());
 
         if (offset) {
@@ -1757,9 +1769,10 @@ auto OverflowList::read(Pager &pager, Span out, Id head_id, std::size_t offset) 
             offset -= max;
         }
         if (!content.is_empty()) {
-            const auto size = std::min(out.size(), content.size());
-            std::memcpy(out.data(), content.data(), size);
-            out.advance(size);
+            const auto size = std::min(payload_size, content.size());
+            std::memcpy(buffer, content.data(), size);
+            payload_size -= size;
+            buffer += size;
         }
         head_id = read_next_id(page);
         pager.release(std::move(page));
@@ -1783,17 +1796,18 @@ auto OverflowList::write(Pager &pager, Freelist &freelist, Id &out, const Slice 
         Page page;
         auto s = freelist.pop(page);
         if (s.is_not_supported()) {
-            s = pager.allocate(&page);
+            s = pager.allocate(page);
             if (s.is_ok() && PointerMap::lookup(pager, page.id()) == page.id()) {
                 pager.release(std::move(page));
-                s = pager.allocate(&page);
+                s = pager.allocate(page);
             }
         }
         CDB_TRY(s);
 
-        auto content = get_writable_content(page, a.size() + second.size());
-        auto limit = std::min(a.size(), content.size());
-        std::memcpy(content.data(), a.data(), limit);
+        auto content_size = std::min(a.size() + second.size(), page.size() - kLinkContentOffset);
+        auto content_data = page.mutate(kLinkContentOffset, content_size);
+        auto limit = std::min(a.size(), content_size);
+        std::memcpy(content_data, a.data(), limit);
         a.advance(limit);
 
         if (a.is_empty()) {
@@ -1801,9 +1815,10 @@ auto OverflowList::write(Pager &pager, Freelist &freelist, Id &out, const Slice 
             b.clear();
 
             if (!a.is_empty()) {
-                content.advance(limit);
-                limit = std::min(a.size(), content.size());
-                std::memcpy(content.data(), a.data(), limit);
+                content_data += limit;
+                content_size -= limit;
+                limit = std::min(a.size(), content_size);
+                std::memcpy(content_data, a.data(), limit);
                 a.advance(limit);
             }
         }
@@ -1826,12 +1841,12 @@ auto OverflowList::write(Pager &pager, Freelist &freelist, Id &out, const Slice 
     return Status::ok();
 }
 
-auto OverflowList::copy(Pager &pager, Freelist &freelist, Id &out, Id overflow_id, std::size_t size) -> Status
+auto OverflowList::copy(Pager &pager, Freelist &freelist, Id overflow_id, std::size_t size, Id &out) -> Status
 {
     std::string scratch; // TODO: Copy page-by-page: no scratch is necessary.
     scratch.resize(size);
 
-    CDB_TRY(read(pager, scratch, overflow_id));
+    CDB_TRY(read(pager, overflow_id, 0, size, scratch.data()));
     return write(pager, freelist, out, scratch);
 }
 
@@ -1839,7 +1854,7 @@ auto OverflowList::erase(Pager &pager, Freelist &freelist, Id head_id) -> Status
 {
     while (!head_id.is_null()) {
         Page page;
-        CDB_TRY(pager.acquire(head_id, &page));
+        CDB_TRY(pager.acquire(head_id, page));
         head_id = read_next_id(page);
         pager.upgrade(page);
         CDB_TRY(freelist.push(std::move(page)));
@@ -1905,7 +1920,7 @@ auto PayloadManager::promote(Pager &pager, Freelist &freelist, char *scratch, Ce
     if (cell.key_size > cell.local_size) {
         // Part of the key is on an overflow page. No value is stored locally in this case, so the local size computation is still correct.
         Id overflow_id;
-        CDB_TRY(OverflowList::copy(pager, freelist, overflow_id, read_overflow_id(cell), cell.key_size - cell.local_size));
+        CDB_TRY(OverflowList::copy(pager, freelist, read_overflow_id(cell), cell.key_size - cell.local_size, overflow_id));
         PointerMap::Entry entry {parent_id, PointerMap::kOverflowHead};
         CDB_TRY(PointerMap::write_entry(pager, overflow_id, entry));
         write_overflow_id(cell, overflow_id);
@@ -1922,15 +1937,22 @@ auto PayloadManager::collect_key(Pager &pager, std::string &result, const Cell &
     }
     if (!cell.has_remote || cell.key_size <= cell.local_size) {
         std::memcpy(result.data(), cell.key, cell.key_size);
-        *key = Slice {result.data(), cell.key_size};
+        if (key != nullptr) {
+            *key = Slice {result.data(), cell.key_size};
+        }
         return Status::ok();
     }
-    Span span {result};
-    span.truncate(cell.key_size);
-    std::memcpy(span.data(), cell.key, cell.local_size);
+    std::memcpy(result.data(), cell.key, cell.local_size);
 
-    CDB_TRY(OverflowList::read(pager, span.range(cell.local_size), read_overflow_id(cell)));
-    *key = span.range(0, cell.key_size);
+    CDB_TRY(OverflowList::read(
+        pager,
+        read_overflow_id(cell),
+        0,
+        cell.key_size - cell.local_size,
+        result.data() + cell.local_size));
+    if (key != nullptr) {
+        *key = Slice {result}.truncate(cell.key_size);
+    }
     return Status::ok();
 }
 
@@ -1952,16 +1974,18 @@ auto PayloadManager::collect_value(Pager &pager, std::string &result, const Cell
     if (cell.key_size > cell.local_size) {
         remote_key_size = cell.key_size - cell.local_size;
     }
-    Span span {result};
-    span.truncate(value_size);
-
+    std::size_t local_value_size {};
     if (remote_key_size == 0) {
-        const auto local_value_size = cell.local_size - cell.key_size;
-        std::memcpy(span.data(), cell.key + cell.key_size, local_value_size);
-        span.advance(local_value_size);
+        local_value_size = cell.local_size - cell.key_size;
+        std::memcpy(result.data(), cell.key + cell.key_size, local_value_size);
     }
 
-    CDB_TRY(OverflowList::read(pager, span, read_overflow_id(cell), remote_key_size));
+    CDB_TRY(OverflowList::read(
+        pager,
+        read_overflow_id(cell),
+        remote_key_size,
+        value_size - local_value_size,
+        result.data() + local_value_size));
     if (value != nullptr) {
         *value = Slice {result}.truncate(value_size);
     }
@@ -2108,7 +2132,7 @@ class TreeValidator
             if (next_id.is_null()) {
                 break;
             }
-            CHECK_OK(pager.acquire(next_id, &page));
+            CHECK_OK(pager.acquire(next_id, page));
         }
     }
 
@@ -2195,7 +2219,7 @@ public:
         }
         CHECK_TRUE(!head.is_null());
         Page page;
-        CHECK_OK(pager.acquire(head, &page));
+        CHECK_OK(pager.acquire(head, page));
 
         Id parent_id;
         traverse_chain(pager, std::move(page), [&](const auto &link) {
@@ -2248,7 +2272,7 @@ public:
             if (cell.has_remote) {
                 const auto overflow_id = read_overflow_id(cell);
                 Page head;
-                CHECK_OK(tree.m_pager->acquire(overflow_id, &head));
+                CHECK_OK(tree.m_pager->acquire(overflow_id, head));
                 traverse_chain(*tree.m_pager, std::move(head), [&](auto &page) {
                     CHECK_TRUE(requested > accumulated);
                     const auto size_limit = std::min(page.size(), requested - accumulated);
@@ -2343,6 +2367,9 @@ auto Tree::TEST_validate() -> void
 {
     return Status::not_found("cursor is invalid");
 }
+
+Cursor::Cursor() = default;
+Cursor::~Cursor() = default;
 
 auto CursorImpl::is_valid() const -> bool
 {

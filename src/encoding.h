@@ -5,8 +5,7 @@
 #ifndef CALICODB_ENCODING_H
 #define CALICODB_ENCODING_H
 
-#include "calicodb/slice.h"
-#include "types.h"
+#include "utils.h"
 
 namespace calicodb
 {
@@ -61,11 +60,6 @@ inline auto put_u16(char *out, std::uint16_t value) noexcept -> void
     dst[1] = static_cast<std::uint8_t>(value >> 8);
 }
 
-inline auto put_u16(Span out, std::uint16_t value) noexcept -> void
-{
-    put_u16(out.data(), value);
-}
-
 inline auto put_u32(char *out, std::uint32_t value) noexcept -> void
 {
     auto *dst = reinterpret_cast<std::uint8_t *>(out);
@@ -73,11 +67,6 @@ inline auto put_u32(char *out, std::uint32_t value) noexcept -> void
     dst[1] = static_cast<std::uint8_t>(value >> 8);
     dst[2] = static_cast<std::uint8_t>(value >> 16);
     dst[3] = static_cast<std::uint8_t>(value >> 24);
-}
-
-inline auto put_u32(Span out, std::uint32_t value) noexcept -> void
-{
-    put_u32(out.data(), value);
 }
 
 inline auto put_u64(char *out, std::uint64_t value) noexcept -> void
@@ -91,11 +80,6 @@ inline auto put_u64(char *out, std::uint64_t value) noexcept -> void
     dst[5] = static_cast<std::uint8_t>(value >> 40);
     dst[6] = static_cast<std::uint8_t>(value >> 48);
     dst[7] = static_cast<std::uint8_t>(value >> 56);
-}
-
-inline auto put_u64(Span out, std::uint64_t value) noexcept -> void
-{
-    put_u64(out.data(), value);
 }
 
 static constexpr std::size_t kVarintMaxLength {10};

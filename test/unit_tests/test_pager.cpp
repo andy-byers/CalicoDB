@@ -584,7 +584,7 @@ auto write_to_page(Page &page, const std::string &message) -> void
 {
     const auto offset = page_offset(page) + sizeof(Lsn);
     EXPECT_LE(offset + message.size(), page.size());
-    std::memcpy(page.span(offset, message.size()).data(), message.data(), message.size());
+    std::memcpy(page.mutate(offset, message.size()), message.data(), message.size());
 }
 
 [[nodiscard]] auto read_from_page(const Page &page, std::size_t size) -> std::string
@@ -608,7 +608,7 @@ public:
     [[nodiscard]] auto allocate_write(const std::string &message) const
     {
         Page page;
-        EXPECT_OK(pager->allocate(&page));
+        EXPECT_OK(pager->allocate(page));
         write_to_page(page, message);
         return page;
     }
@@ -625,7 +625,7 @@ public:
     [[nodiscard]] auto acquire_write(Id id, const std::string &message) const
     {
         Page page;
-        EXPECT_OK(pager->acquire(id, &page));
+        EXPECT_OK(pager->acquire(id, page));
         pager->upgrade(page);
         write_to_page(page, message);
         return page;
@@ -641,7 +641,7 @@ public:
     [[nodiscard]] auto acquire_read_release(Id id, std::size_t size) const
     {
         Page page;
-        EXPECT_OK(pager->acquire(id, &page));
+        EXPECT_OK(pager->acquire(id, page));
         auto message = read_from_page(page, size);
         pager->release(std::move(page));
         EXPECT_OK(state.status);
@@ -677,7 +677,7 @@ TEST_F(PagerTests, AcquireReturnsCorrectPage)
 {
     const auto id = allocate_write_release(test_message);
     Page page;
-    ASSERT_OK(pager->acquire(id, &page));
+    ASSERT_OK(pager->acquire(id, page));
     ASSERT_EQ(id, page.id());
     ASSERT_EQ(id, Id::root());
     pager->release(std::move(page));
@@ -688,8 +688,8 @@ TEST_F(PagerTests, MultipleReaders)
     const auto id = allocate_write_release(test_message);
     Page page_a;
     Page page_b;
-    ASSERT_OK(pager->acquire(id, &page_a));
-    ASSERT_OK(pager->acquire(id, &page_b));
+    ASSERT_OK(pager->acquire(id, page_a));
+    ASSERT_OK(pager->acquire(id, page_b));
     pager->release(std::move(page_a));
     pager->release(std::move(page_b));
 }

@@ -5,7 +5,6 @@
 #include "tools.h"
 #include "env_posix.h"
 #include "logging.h"
-#include "types.h"
 #include "wal_reader.h"
 #include <algorithm>
 #include <iomanip>
@@ -407,8 +406,8 @@ auto print_wals(Env &env, std::size_t page_size, const std::string &prefix) -> v
             WalReader reader {*file, tail_buffer};
             std::cerr << "Start of segment " << name << '\n';
             for (;;) {
-                Span payload {data_buffer};
-                auto s = reader.read(payload);
+                auto s = reader.read(data_buffer);
+                Slice payload {data_buffer};
                 if (s.is_not_found()) {
                     std::cerr << "End of segment\n";
                     break;

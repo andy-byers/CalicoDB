@@ -9,16 +9,6 @@
 namespace calicodb
 {
 
-auto write_wal_record_header(char *out, const WalRecordHeader &header) -> void
-{
-    *out++ = header.type;
-
-    put_u16(out, header.size);
-    out += sizeof(std::uint16_t);
-
-    put_u32(out, header.crc);
-}
-
 auto read_wal_record_header(Slice in) -> WalRecordHeader
 {
     WalRecordHeader header;
@@ -30,26 +20,6 @@ auto read_wal_record_header(Slice in) -> WalRecordHeader
 
     header.crc = get_u32(in);
     return header;
-}
-
-auto split_record(WalRecordHeader &lhs, const Slice &payload, std::size_t available_size) -> WalRecordHeader
-{
-    CDB_EXPECT_NE(lhs.type, kFirstRecord);
-    CDB_EXPECT_EQ(lhs.size, payload.size());
-    CDB_EXPECT_LT(available_size, WalRecordHeader::kSize + payload.size()); // Only call this if we actually need a split.
-    auto rhs = lhs;
-
-    lhs.size = static_cast<std::uint16_t>(available_size - WalRecordHeader::kSize);
-    rhs.size = static_cast<std::uint16_t>(payload.size() - lhs.size);
-    rhs.type = kLastRecord;
-
-    if (lhs.type == kFullRecord) {
-        lhs.type = kFirstRecord;
-    } else {
-        CDB_EXPECT_EQ(lhs.type, kLastRecord);
-        lhs.type = kMiddleRecord;
-    }
-    return rhs;
 }
 
 auto merge_records_left(WalRecordHeader &lhs, const WalRecordHeader &rhs) -> Status
@@ -70,9 +40,6 @@ auto merge_records_left(WalRecordHeader &lhs, const WalRecordHeader &rhs) -> Sta
     } else {
         if (lhs.type != kFirstRecord) {
             return Status::corruption("left record has invalid type");
-        }
-        if (lhs.crc != rhs.crc) {
-            return Status::corruption("fragment crc mismatch");
         }
         if (rhs.type == kLastRecord) {
             lhs.type = kFullRecord;

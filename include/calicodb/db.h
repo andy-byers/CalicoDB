@@ -19,10 +19,11 @@ struct TableOptions;
 
 struct Options {
     // Size of a database page in bytes. This is the basic unit of I/O for the
-    // database file. Data is read/written in page-sized chunks.
-    std::size_t page_size {0x2000};
+    // database file. Data is read/written in page-sized chunks. Must be a power-
+    // of-two between 512 and 32768, inclusive.
+    std::size_t page_size {16'384}; // 16 KB
 
-    // Size of the page cache in bytes.
+    // Size of the page cache in bytes. Must be at least 16 pages (see above).
     std::size_t cache_size {4'194'304}; // 4 MB
 
     // Alternate prefix to use for WAL segment files. Defaults to "dbname-wal-",
@@ -30,10 +31,11 @@ struct Options {
     std::string wal_prefix;
 
     // Custom destination for info log messages. Defaults to writing to a file
-    // called "dbname-log", where "dbname" is the name of the database.
+    // called "dbname-log", where "dbname" is the name of the database. See env.h
+    // for details.
     InfoLogger *info_log {};
 
-    // Custom storage environment.
+    // Custom storage environment. See env.h for details.
     Env *env {};
 
     // If true, create the database if it is missing.
@@ -51,7 +53,7 @@ public:
     //
     // The caller is responsible for deleting the handle when it is no longer needed.
     // All objects allocated by the DB must be destroyed before the DB itself is
-    // destroyed.
+    // destroyed. On failure, "db" is set to nullptr.
     [[nodiscard]] static auto open(const Options &options, const std::string &filename, DB *&db) -> Status;
 
     // Attempt to fix a database that cannot be opened due to corruption.
@@ -62,17 +64,21 @@ public:
     // Remove all files associated with a given database.
     [[nodiscard]] static auto destroy(const Options &options, const std::string &filename) -> Status;
 
-    explicit DB() = default;
-    virtual ~DB() = default;
+    explicit DB();
+    virtual ~DB();
 
     // Prevent copies.
     DB(const DB &) = delete;
     auto operator=(const DB &) -> void = delete;
 
     // Get a human-readable string describing the given property.
+    //
+    // The "out" parameter is optional.
     [[nodiscard]] virtual auto get_property(const Slice &name, std::string *out) const -> bool = 0;
 
     // Get a handle to the default table.
+    //
+    // The default table is always open, and its handle is managed by the DB.
     [[nodiscard]] virtual auto default_table() const -> Table * = 0;
 
     // Get a status object describing the error state.
@@ -85,14 +91,16 @@ public:
     // Run a checkpoint operation, which updates the logical contents of the
     // database to include all changes made since the last checkpoint.
     //
-    // This operation affects all tables that have pending updates, as well as
-    // creation and dropping of tables.
+    // This operation affects all tables that have pending updates, as well as creation
+    // and dropping of tables. Synchronizes both the WAL and the database file with the
+    // underlying filesystem, and ensures that the WAL contains the necessary information
+    // to recover from a crash.
     [[nodiscard]] virtual auto checkpoint() -> Status = 0;
 
     // Perform defragmentation and shrink the database file.
     //
     // This operation can be run at any time, however, it is a NOOP if not enough
-    // records have been erased.
+    // records have been erased to cause database pages to become empty.
     [[nodiscard]] virtual auto vacuum() -> Status = 0;
 
     // List the name of each table created by this database, excluding the default table.

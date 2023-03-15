@@ -4,57 +4,62 @@
 
 #include "wal_writer.h"
 #include "crc.h"
-#include "types.h"
 
 namespace calicodb
 {
+
+WalWriter::WalWriter(Logger &file, std::string &tail)
+    : m_tail {&tail},
+      m_file {&file}
+{
+    for (std::size_t i {}; i <= kMaxRecordType; ++i) {
+        const auto type = static_cast<char>(i);
+        m_type_crc[i] = crc32c::Value(&type, 1);
+    }
+}
 
 auto WalWriter::write(Lsn lsn, const Slice &payload) -> Status
 {
     CDB_EXPECT_FALSE(payload.is_empty());
     CDB_EXPECT_FALSE(lsn.is_null());
-    auto data = payload;
+    auto rest = payload;
 
-    WalRecordHeader lhs;
-    lhs.type = kFullRecord;
-    lhs.size = static_cast<std::uint16_t>(data.size());
-    lhs.crc = crc32c::Value(data.data(), data.size());
-    lhs.crc = crc32c::Mask(lhs.crc);
-
-    while (!data.is_empty()) {
-        auto rest = m_tail;
-        // Note that this modifies rest to point to [<m_offset>, <end>) in the tail buffer.
-        const auto space_remaining = rest.advance(m_offset).size();
-        const auto needs_split = space_remaining < WalRecordHeader::kSize + data.size();
-
-        if (space_remaining <= WalRecordHeader::kSize) {
-            CDB_EXPECT_LE(m_tail.size() - m_offset, WalRecordHeader::kSize);
+    while (!rest.is_empty()) {
+        if (m_offset + WalRecordHeader::kSize >= m_tail->size()) {
+            // Clear the rest of the tail buffer and append it to the log.
             CDB_TRY(flush());
-            continue;
         }
-        WalRecordHeader rhs;
+        // There should always be enough room to write the header and 1 payload byte.
+        CDB_EXPECT_LT(m_offset + WalRecordHeader::kSize, m_tail->size());
+        const auto space_for_payload = m_tail->size() - m_offset - WalRecordHeader::kSize;
+        const auto fragment_length = std::min(rest.size(), space_for_payload);
+        CDB_EXPECT_NE(fragment_length, 0);
 
-        if (needs_split) {
-            rhs = split_record(lhs, data, space_remaining);
-        }
-
-        // We must have room for the whole header and at least 1 payload byte.
-        write_wal_record_header(rest.data(), lhs);
-        rest.advance(WalRecordHeader::kSize);
-        std::memcpy(rest.data(), data.data(), lhs.size);
-
-        m_offset += WalRecordHeader::kSize + lhs.size;
-        data.advance(lhs.size);
-        rest.advance(lhs.size);
-
-        if (needs_split) {
-            lhs = rhs;
+        WalRecordType type;
+        const auto begin = rest.size() == payload.size();
+        const auto end = rest.size() == fragment_length;
+        if (begin && end) {
+            type = kFullRecord;
+        } else if (begin) {
+            type = kFirstRecord;
+        } else if (end) {
+            type = kLastRecord;
         } else {
-            CDB_EXPECT_TRUE(data.is_empty());
-            // Record is fully in the tail buffer and maybe partially on disk. Next time we flush, this record is guaranteed
-            // to be all the way on disk.
-            m_last_lsn = lsn;
+            type = kMiddleRecord;
         }
+        char header[WalRecordHeader::kSize];
+        *header = type;
+        put_u16(header + 1, static_cast<std::uint16_t>(fragment_length));
+        put_u32(header + 3, crc32c::Mask(crc32c::Extend(m_type_crc[type], rest.data(), fragment_length)));
+
+        std::memcpy(m_tail->data() + m_offset, header, sizeof(header));
+        m_offset += sizeof(header);
+
+        std::memcpy(m_tail->data() + m_offset, rest.data(), fragment_length);
+        m_offset += fragment_length;
+
+        rest.advance(fragment_length);
+        m_last_lsn = lsn;
     }
     return Status::ok();
 }
@@ -67,9 +72,9 @@ auto WalWriter::flush() -> Status
     }
 
     // Clear unused bytes at the end of the tail buffer.
-    std::memset(m_tail.data() + m_offset, 0, m_tail.size() - m_offset);
+    std::memset(m_tail->data() + m_offset, 0, m_tail->size() - m_offset);
 
-    auto s = m_file->write(m_tail);
+    auto s = m_file->write(*m_tail);
     if (s.is_ok()) {
         m_flushed_lsn = m_last_lsn;
         m_offset = 0;

@@ -156,6 +156,16 @@ inline auto operator!=(Id lhs, Id rhs) -> bool
 
 using Lsn = Id;
 
+struct DBState {
+    Status status;
+    std::size_t batch_size {};
+    std::size_t record_count {};
+    Lsn commit_lsn;
+    Id freelist_head;
+    Id max_page_id;
+    bool is_running {};
+};
+
 } // namespace calicodb
 
 #endif // CALICODB_UTILS_H

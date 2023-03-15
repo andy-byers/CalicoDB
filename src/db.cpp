@@ -43,16 +43,19 @@ auto DB::open(const Options &options, const std::string &filename, DB *&db) -> S
         CDB_TRY(sanitized.env->new_info_logger(log_filename, sanitized.info_log));
     }
 
-    auto *ptr = new DBImpl {options, sanitized, clean_filename};
-    auto s = ptr->open(sanitized);
-    if (!s.is_ok()) {
-        delete ptr;
-        return s;
-    }
+    auto *impl = new DBImpl {options, sanitized, clean_filename};
+    auto s = impl->open(sanitized);
 
-    db = ptr;
-    return Status::ok();
+    if (!s.is_ok()) {
+        delete impl;
+        impl = nullptr;
+    }
+    db = impl;
+    return s;
 }
+
+DB::DB() = default;
+DB::~DB() = default;
 
 auto DB::repair(const Options &options, const std::string &filename) -> Status
 {

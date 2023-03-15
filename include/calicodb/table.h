@@ -27,7 +27,7 @@ struct TableOptions {
 class Table
 {
 public:
-    virtual ~Table() = default;
+    virtual ~Table();
 
     // Get the name used to identify this table.
     [[nodiscard]] virtual auto name() const -> const std::string & = 0;
