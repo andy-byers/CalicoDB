@@ -11,21 +11,21 @@
 #include <cstdlib>
 
 #if NDEBUG
-#define CDB_EXPECT_(expr, file, line)
+#define CALICODB_EXPECT_(expr, file, line)
 #else
-#define CDB_EXPECT_(expr, file, line) impl::expect(expr, #expr, file, line)
+#define CALICODB_EXPECT_(expr, file, line) impl::expect(expr, #expr, file, line)
 #endif // NDEBUG
 
-#define CDB_EXPECT_TRUE(expr) CDB_EXPECT_(expr, __FILE__, __LINE__)
-#define CDB_EXPECT_FALSE(expr) CDB_EXPECT_TRUE(!(expr))
-#define CDB_EXPECT_EQ(lhs, rhs) CDB_EXPECT_TRUE((lhs) == (rhs))
-#define CDB_EXPECT_NE(lhs, rhs) CDB_EXPECT_TRUE((lhs) != (rhs))
-#define CDB_EXPECT_LT(lhs, rhs) CDB_EXPECT_TRUE((lhs) < (rhs))
-#define CDB_EXPECT_LE(lhs, rhs) CDB_EXPECT_TRUE((lhs) <= (rhs))
-#define CDB_EXPECT_GT(lhs, rhs) CDB_EXPECT_TRUE((lhs) > (rhs))
-#define CDB_EXPECT_GE(lhs, rhs) CDB_EXPECT_TRUE((lhs) >= (rhs))
+#define CALICODB_EXPECT_TRUE(expr) CALICODB_EXPECT_(expr, __FILE__, __LINE__)
+#define CALICODB_EXPECT_FALSE(expr) CALICODB_EXPECT_TRUE(!(expr))
+#define CALICODB_EXPECT_EQ(lhs, rhs) CALICODB_EXPECT_TRUE((lhs) == (rhs))
+#define CALICODB_EXPECT_NE(lhs, rhs) CALICODB_EXPECT_TRUE((lhs) != (rhs))
+#define CALICODB_EXPECT_LT(lhs, rhs) CALICODB_EXPECT_TRUE((lhs) < (rhs))
+#define CALICODB_EXPECT_LE(lhs, rhs) CALICODB_EXPECT_TRUE((lhs) <= (rhs))
+#define CALICODB_EXPECT_GT(lhs, rhs) CALICODB_EXPECT_TRUE((lhs) > (rhs))
+#define CALICODB_EXPECT_GE(lhs, rhs) CALICODB_EXPECT_TRUE((lhs) >= (rhs))
 
-#define CDB_TRY(expr)                                          \
+#define CALICODB_TRY(expr)                                     \
     do {                                                       \
         if (auto __cdb_try_s = (expr); !__cdb_try_s.is_ok()) { \
             return __cdb_try_s;                                \
@@ -75,7 +75,7 @@ constexpr auto is_power_of_two(T v) noexcept -> bool
     } else if (s.is_invalid_argument()) {
         return "invalid argument";
     }
-    CDB_EXPECT_TRUE(s.is_ok());
+    CALICODB_EXPECT_TRUE(s.is_ok());
     return "OK";
 }
 
@@ -117,7 +117,7 @@ struct Id {
 
     [[nodiscard]] constexpr auto as_index() const noexcept -> std::uint64_t
     {
-        CDB_EXPECT_NE(value, null().value);
+        CALICODB_EXPECT_NE(value, null().value);
         return value - 1;
     }
 

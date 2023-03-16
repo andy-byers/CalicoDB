@@ -25,6 +25,7 @@ public:
     explicit Benchmark(const Parameters &param = {.value_length = 100})
         : m_param {param}
     {
+        m_options.env = calicodb::Env::default_env();
         m_options.page_size = 0x4000;
         m_options.cache_size = 4'194'304;
         CHECK_OK(calicodb::DB::open(m_options, kFilename, m_db));
@@ -36,6 +37,8 @@ public:
         delete m_db;
 
         CHECK_OK(calicodb::DB::destroy(m_options, kFilename));
+
+        delete m_options.env;
     }
 
     auto read(benchmark::State &state) -> void
@@ -99,7 +102,7 @@ public:
         use_cursor();
     }
 
-    auto setup_for_reads() -> void
+    auto add_initial_records() -> void
     {
         for (std::size_t i {}; i < kNumRecords; ++i) {
             CHECK_OK(m_db->put(
@@ -129,33 +132,45 @@ private:
     calicodb::DB *m_db {};
 };
 
-static auto BM_Writes(benchmark::State &state) -> void
+static auto BM_Write(benchmark::State &state) -> void
 {
     Benchmark bench;
     for (auto _ : state) {
         bench.write(state);
     }
 }
-BENCHMARK(BM_Writes)
+BENCHMARK(BM_Write)
     ->Arg(kSequential)
     ->Arg(kRandom);
 
-static auto BM_Reads(benchmark::State &state) -> void
+static auto BM_Overwrite(benchmark::State &state) -> void
 {
     Benchmark bench;
-    bench.setup_for_reads();
+    bench.add_initial_records();
+    for (auto _ : state) {
+        bench.write(state);
+    }
+}
+BENCHMARK(BM_Overwrite)
+    ->Arg(kSequential)
+    ->Arg(kRandom);
+
+static auto BM_Read(benchmark::State &state) -> void
+{
+    Benchmark bench;
+    bench.add_initial_records();
     for (auto _ : state) {
         bench.read(state);
     }
 }
-BENCHMARK(BM_Reads)
+BENCHMARK(BM_Read)
     ->Arg(kSequential)
     ->Arg(kRandom);
 
 static auto BM_IterateForward(benchmark::State &state) -> void
 {
     Benchmark bench;
-    bench.setup_for_reads();
+    bench.add_initial_records();
     for (auto _ : state) {
         bench.step_forward(state);
     }
@@ -165,7 +180,7 @@ BENCHMARK(BM_IterateForward);
 static auto BM_IterateBackward(benchmark::State &state) -> void
 {
     Benchmark bench;
-    bench.setup_for_reads();
+    bench.add_initial_records();
     for (auto _ : state) {
         bench.step_backward(state);
     }
@@ -175,7 +190,7 @@ BENCHMARK(BM_IterateBackward);
 static auto BM_Seek(benchmark::State &state) -> void
 {
     Benchmark bench;
-    bench.setup_for_reads();
+    bench.add_initial_records();
     for (auto _ : state) {
         bench.seek(state);
     }
@@ -184,26 +199,26 @@ BENCHMARK(BM_Seek)
     ->Arg(kSequential)
     ->Arg(kRandom);
 
-static auto BM_Writes100K(benchmark::State &state) -> void
+static auto BM_Write100K(benchmark::State &state) -> void
 {
     Benchmark bench {{.value_length = 100'000}};
     for (auto _ : state) {
         bench.write(state);
     }
 }
-BENCHMARK(BM_Writes100K)
+BENCHMARK(BM_Write100K)
     ->Arg(kSequential)
     ->Arg(kRandom);
 
-static auto BM_Reads100K(benchmark::State &state) -> void
+static auto BM_Read100K(benchmark::State &state) -> void
 {
     Benchmark bench {{.value_length = 100'000}};
-    bench.setup_for_reads();
+    bench.add_initial_records();
     for (auto _ : state) {
         bench.read(state);
     }
 }
-BENCHMARK(BM_Reads100K)
+BENCHMARK(BM_Read100K)
     ->Arg(kSequential)
     ->Arg(kRandom);
 

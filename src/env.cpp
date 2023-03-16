@@ -8,6 +8,14 @@
 namespace calicodb
 {
 
+Editor::~Editor() = default;
+
+InfoLogger::~InfoLogger() = default;
+
+Logger::~Logger() = default;
+
+Reader::~Reader() = default;
+
 Env::~Env() = default;
 
 auto Env::default_env() -> Env *

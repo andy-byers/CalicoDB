@@ -11,7 +11,7 @@ namespace calicodb
 [[nodiscard]] static auto read_tail(Reader &file, std::size_t number, std::string &tail) -> Status
 {
     Slice slice;
-    CDB_TRY(file.read(number * tail.size(), tail.size(), tail.data(), &slice));
+    CALICODB_TRY(file.read(number * tail.size(), tail.size(), tail.data(), &slice));
 
     if (slice.is_empty()) {
         return Status::not_found("end of file");
@@ -30,7 +30,7 @@ WalReader::WalReader(Reader &file, std::string &tail)
 auto WalReader::read(std::string &out) -> Status
 {
     if (m_offset + m_block == 0) {
-        CDB_TRY(read_tail(*m_file, 0, *m_tail));
+        CALICODB_TRY(read_tail(*m_file, 0, *m_tail));
     }
     WalRecordHeader header;
     std::size_t end {};
@@ -53,7 +53,7 @@ auto WalReader::read(std::string &out) -> Status
                 return Status::corruption("crc mismatch");
             }
 
-            CDB_TRY(merge_records_left(header, temp));
+            CALICODB_TRY(merge_records_left(header, temp));
             out.resize(end + temp.size);
             std::memcpy(out.data() + end, rest.data(), temp.size);
             m_offset += WalRecordHeader::kSize + temp.size;

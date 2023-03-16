@@ -680,6 +680,25 @@ TEST_P(TreeSanityChecks, Erase)
     }
 }
 
+TEST_P(TreeSanityChecks, SmallRecords)
+{
+    std::unordered_map<std::string, std::string> records;
+    for (std::size_t iteration {}; iteration < 3; ++iteration) {
+        for (std::size_t i {}; i < kInitialRecordCount * 100; ++i) {
+            const auto key = tools::integral_key<6>(i);
+            ASSERT_OK(tree->put(key, ""));
+            records[key] = "";
+        }
+
+        std::size_t i {};
+        for (const auto &[key, value] : records) {
+            ASSERT_OK(tree->erase(key));
+        }
+        tree->TEST_validate();
+        records.clear();
+    }
+}
+
 // "extra" parameter bits:
 //     0b01: Use overflowing values
 //     0b10: Use overflowing keys

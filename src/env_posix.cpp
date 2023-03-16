@@ -137,7 +137,7 @@ PosixReader::~PosixReader()
 
 auto PosixReader::read(std::size_t offset, std::size_t size, char *scratch, Slice *out) -> Status
 {
-    CDB_TRY(file_seek(m_file, static_cast<long>(offset), SEEK_SET, nullptr));
+    CALICODB_TRY(file_seek(m_file, static_cast<long>(offset), SEEK_SET, nullptr));
     return file_read(m_file, size, scratch, out);
 }
 
@@ -148,13 +148,13 @@ PosixEditor::~PosixEditor()
 
 auto PosixEditor::read(std::size_t offset, std::size_t size, char *scratch, Slice *out) -> Status
 {
-    CDB_TRY(file_seek(m_file, static_cast<long>(offset), SEEK_SET, nullptr));
+    CALICODB_TRY(file_seek(m_file, static_cast<long>(offset), SEEK_SET, nullptr));
     return file_read(m_file, size, scratch, out);
 }
 
 auto PosixEditor::write(std::size_t offset, const Slice &in) -> Status
 {
-    CDB_TRY(file_seek(m_file, static_cast<long>(offset), SEEK_SET, nullptr));
+    CALICODB_TRY(file_seek(m_file, static_cast<long>(offset), SEEK_SET, nullptr));
     return file_write(m_file, in);
 }
 
@@ -211,7 +211,7 @@ auto PosixInfoLogger::logv(const char *fmt, ...) -> void
             ++length;
         }
 
-        CDB_EXPECT_LE(length, m_buffer.size());
+        CALICODB_EXPECT_LE(length, m_buffer.size());
         file_write(m_file, Slice {m_buffer.data(), length});
         break;
     }
@@ -277,7 +277,7 @@ auto EnvPosix::get_children(const std::string &path, std::vector<std::string> &o
 auto EnvPosix::new_reader(const std::string &path, Reader *&out) -> Status
 {
     int file;
-    CDB_TRY(file_open(path, O_RDONLY, kFilePermissions, file));
+    CALICODB_TRY(file_open(path, O_RDONLY, kFilePermissions, file));
     out = new PosixReader {path, file};
     return Status::ok();
 }
@@ -285,7 +285,7 @@ auto EnvPosix::new_reader(const std::string &path, Reader *&out) -> Status
 auto EnvPosix::new_editor(const std::string &path, Editor *&out) -> Status
 {
     int file;
-    CDB_TRY(file_open(path, O_CREAT | O_RDWR, kFilePermissions, file));
+    CALICODB_TRY(file_open(path, O_CREAT | O_RDWR, kFilePermissions, file));
     out = new PosixEditor {path, file};
     return Status::ok();
 }
@@ -293,7 +293,7 @@ auto EnvPosix::new_editor(const std::string &path, Editor *&out) -> Status
 auto EnvPosix::new_logger(const std::string &path, Logger *&out) -> Status
 {
     int file;
-    CDB_TRY(file_open(path, O_CREAT | O_WRONLY | O_APPEND, kFilePermissions, file));
+    CALICODB_TRY(file_open(path, O_CREAT | O_WRONLY | O_APPEND, kFilePermissions, file));
     out = new PosixLogger {path, file};
     return Status::ok();
 }
@@ -301,7 +301,7 @@ auto EnvPosix::new_logger(const std::string &path, Logger *&out) -> Status
 auto EnvPosix::new_info_logger(const std::string &path, InfoLogger *&out) -> Status
 {
     int file;
-    CDB_TRY(file_open(path, O_CREAT | O_WRONLY | O_APPEND, kFilePermissions, file));
+    CALICODB_TRY(file_open(path, O_CREAT | O_WRONLY | O_APPEND, kFilePermissions, file));
     out = new PosixInfoLogger {path, file};
     return Status::ok();
 }

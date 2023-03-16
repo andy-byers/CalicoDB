@@ -22,18 +22,13 @@ public:
 
     // NOTE: If either of these methods return a non-OK status, the state of this object is unspecified, except for the block
     //       count, which remains valid.
-    [[nodiscard]] auto write(Lsn lsn, const Slice &payload) -> Status;
+    [[nodiscard]] auto write(const Slice &payload) -> Status;
     [[nodiscard]] auto flush() -> Status;
 
-    // NOTE: Only valid if the writer has flushed.
-    [[nodiscard]] auto flushed_lsn() const -> Lsn;
-
 private:
-    std::uint32_t m_type_crc[kMaxRecordType + 1] {};
+    std::uint32_t m_type_crc[kNumRecordTypes + 1] {};
     std::string *m_tail {};
-    Lsn m_flushed_lsn;
     Logger *m_file {};
-    Lsn m_last_lsn {};
     std::size_t m_block {};
     std::size_t m_offset {};
 };

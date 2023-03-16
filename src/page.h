@@ -82,7 +82,7 @@ public:
 
     auto mutate(std::size_t offset, std::size_t size) -> char *
     {
-        CDB_EXPECT_TRUE(m_write);
+        CALICODB_EXPECT_TRUE(m_write);
         insert_delta(m_deltas, PageDelta {offset, size});
         return m_data + offset;
     }
@@ -104,7 +104,7 @@ public:
 
     [[nodiscard]] auto deltas() -> const std::vector<PageDelta> &
     {
-        CDB_EXPECT_TRUE(m_write);
+        CALICODB_EXPECT_TRUE(m_write);
         compress_deltas(m_deltas);
         return m_deltas;
     }

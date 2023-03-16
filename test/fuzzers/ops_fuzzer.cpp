@@ -52,11 +52,11 @@ auto OpsFuzzer::step(const std::uint8_t *&data, std::size_t &size) -> Status
             if (s.is_not_found()) {
                 s = Status::ok();
             }
-            CDB_TRY(s);
+            CALICODB_TRY(s);
             break;
         case kPut:
             key = extract_fuzzer_key(data, size);
-            CDB_TRY(m_db->put(key, extract_fuzzer_value(data, size)));
+            CALICODB_TRY(m_db->put(key, extract_fuzzer_value(data, size)));
             break;
         case kErase:
             key = extract_fuzzer_key(data, size);
@@ -68,7 +68,7 @@ auto OpsFuzzer::step(const std::uint8_t *&data, std::size_t &size) -> Status
                     s = Status::ok();
                 }
             }
-            CDB_TRY(s);
+            CALICODB_TRY(s);
             break;
         case kSeekIter:
             key = extract_fuzzer_key(data, size);
@@ -97,13 +97,13 @@ auto OpsFuzzer::step(const std::uint8_t *&data, std::size_t &size) -> Status
             }
             break;
         case kVacuum:
-            CDB_TRY(m_db->vacuum());
+            CALICODB_TRY(m_db->vacuum());
             break;
         case kCheckpoint:
-            CDB_TRY(m_db->checkpoint());
+            CALICODB_TRY(m_db->checkpoint());
             break;
         default: // kReopen
-            CDB_TRY(reopen());
+            CALICODB_TRY(reopen());
     }
     return m_db->status();
 }

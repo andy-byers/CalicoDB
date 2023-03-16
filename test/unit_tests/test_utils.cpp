@@ -19,7 +19,7 @@ namespace calicodb
 #if not NDEBUG
 TEST(TestUtils, ExpectationDeathTest)
 {
-    ASSERT_DEATH(CDB_EXPECT_TRUE(false), kExpectationMatcher);
+    ASSERT_DEATH(CALICODB_EXPECT_TRUE(false), kExpectationMatcher);
 }
 #endif // not NDEBUG
 
@@ -180,7 +180,7 @@ TEST_F(SliceTests, WithCString)
 static constexpr auto constexpr_test_read(Slice bv, Slice answer)
 {
     for (std::size_t i {}; i < bv.size(); ++i)
-        CDB_EXPECT_EQ(bv[i], answer[i]);
+        CALICODB_EXPECT_EQ(bv[i], answer[i]);
 
     (void)bv.starts_with(answer);
     (void)bv.data();
@@ -287,8 +287,8 @@ auto run_equality_comparisons()
     T x {1};
     T y {2};
 
-    CDB_EXPECT_TRUE(x == x);
-    CDB_EXPECT_TRUE(x != y);
+    CALICODB_EXPECT_TRUE(x == x);
+    CALICODB_EXPECT_TRUE(x != y);
     ASSERT_EQ(x, x);
     ASSERT_NE(x, y);
 }
@@ -299,10 +299,10 @@ auto run_ordering_comparisons()
     T x {1};
     T y {2};
 
-    CDB_EXPECT_TRUE(x < y);
-    CDB_EXPECT_TRUE(x <= x and x <= y);
-    CDB_EXPECT_TRUE(y > x);
-    CDB_EXPECT_TRUE(y >= y and y >= x);
+    CALICODB_EXPECT_TRUE(x < y);
+    CALICODB_EXPECT_TRUE(x <= x and x <= y);
+    CALICODB_EXPECT_TRUE(y > x);
+    CALICODB_EXPECT_TRUE(y >= y and y >= x);
     ASSERT_LT(x, y);
     ASSERT_LE(x, x);
     ASSERT_LE(x, y);

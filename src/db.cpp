@@ -40,7 +40,7 @@ auto DB::open(const Options &options, const std::string &filename, DB *&db) -> S
     }
     if (sanitized.info_log == nullptr) {
         const auto log_filename = clean_filename + kDefaultLogSuffix;
-        CDB_TRY(sanitized.env->new_info_logger(log_filename, sanitized.info_log));
+        CALICODB_TRY(sanitized.env->new_info_logger(log_filename, sanitized.info_log));
     }
 
     auto *impl = new DBImpl {options, sanitized, clean_filename};

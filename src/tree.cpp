@@ -21,7 +21,7 @@ static constexpr auto kMaxCellHeaderSize =
 
 inline constexpr auto compute_min_local(std::size_t page_size) -> std::size_t
 {
-    CDB_EXPECT_TRUE(is_power_of_two(page_size));
+    CALICODB_EXPECT_TRUE(is_power_of_two(page_size));
     // NOTE: This computation was adapted from a similar one in SQLite3.
     return (page_size - kPageHeaderSize - NodeHeader::kSize) * 32 / 256 -
            kMaxCellHeaderSize - sizeof(PageSize);
@@ -29,7 +29,7 @@ inline constexpr auto compute_min_local(std::size_t page_size) -> std::size_t
 
 inline constexpr auto compute_max_local(std::size_t page_size) -> std::size_t
 {
-    CDB_EXPECT_TRUE(is_power_of_two(page_size));
+    CALICODB_EXPECT_TRUE(is_power_of_two(page_size));
     // NOTE: This computation was adapted from a similar one in SQLite3.
     return (page_size - kPageHeaderSize - NodeHeader::kSize) * 64 / 256 -
            kMaxCellHeaderSize - sizeof(PageSize);
@@ -91,8 +91,8 @@ static auto write_child_id_at(Node &node, std::size_t offset, Id child_id) -> vo
 static auto read_child_id(const Node &node, std::size_t index) -> Id
 {
     const auto &header = node.header;
-    CDB_EXPECT_LE(index, header.cell_count);
-    CDB_EXPECT_FALSE(header.is_external);
+    CALICODB_EXPECT_LE(index, header.cell_count);
+    CALICODB_EXPECT_FALSE(header.is_external);
     if (index == header.cell_count) {
         return header.next_id;
     }
@@ -117,8 +117,8 @@ static auto write_overflow_id(Cell &cell, Id overflow_id) -> void
 static auto write_child_id(Node &node, std::size_t index, Id child_id) -> void
 {
     auto &header = node.header;
-    CDB_EXPECT_LE(index, header.cell_count);
-    CDB_EXPECT_FALSE(header.is_external);
+    CALICODB_EXPECT_LE(index, header.cell_count);
+    CALICODB_EXPECT_FALSE(header.is_external);
     if (index == header.cell_count) {
         header.next_id = child_id;
     } else {
@@ -238,14 +238,14 @@ class BlockAllocator
 
     auto set_next_pointer(std::size_t offset, PageSize value) -> void
     {
-        CDB_EXPECT_LT(value, m_node->page.size());
+        CALICODB_EXPECT_LT(value, m_node->page.size());
         return put_u16(m_node->page.mutate(offset, sizeof(PageSize)), value);
     }
 
     auto set_block_size(std::size_t offset, PageSize value) -> void
     {
-        CDB_EXPECT_GE(value, 4);
-        CDB_EXPECT_LT(value, m_node->page.size());
+        CALICODB_EXPECT_GE(value, 4);
+        CALICODB_EXPECT_LT(value, m_node->page.size());
         return put_u16(m_node->page.mutate(offset + sizeof(PageSize), sizeof(PageSize)), value);
     }
 
@@ -291,9 +291,9 @@ auto BlockAllocator::allocate_from_gap(PageSize needed_size) -> PageSize
 
 auto BlockAllocator::take_free_space(PageSize ptr0, PageSize ptr1, PageSize needed_size) -> PageSize
 {
-    CDB_EXPECT_LT(ptr0, m_node->page.size());
-    CDB_EXPECT_LT(ptr1, m_node->page.size());
-    CDB_EXPECT_LT(needed_size, m_node->page.size());
+    CALICODB_EXPECT_LT(ptr0, m_node->page.size());
+    CALICODB_EXPECT_LT(ptr1, m_node->page.size());
+    CALICODB_EXPECT_LT(needed_size, m_node->page.size());
 
     const auto is_first = !ptr0;
     const auto ptr2 = get_next_pointer(ptr1);
@@ -301,9 +301,9 @@ auto BlockAllocator::take_free_space(PageSize ptr0, PageSize ptr1, PageSize need
     auto &header = m_node->header;
 
     // Caller should make sure it isn't possible to overflow this byte.
-    CDB_EXPECT_LE(header.frag_count + 3, 0xFF);
+    CALICODB_EXPECT_LE(header.frag_count + 3, 0xFF);
 
-    CDB_EXPECT_GE(free_size, needed_size);
+    CALICODB_EXPECT_GE(free_size, needed_size);
     const auto diff = static_cast<PageSize>(free_size - needed_size);
 
     if (diff < 4) {
@@ -317,14 +317,14 @@ auto BlockAllocator::take_free_space(PageSize ptr0, PageSize ptr1, PageSize need
     } else {
         set_block_size(ptr1, diff);
     }
-    CDB_EXPECT_GE(header.free_total, needed_size);
+    CALICODB_EXPECT_GE(header.free_total, needed_size);
     header.free_total -= needed_size;
     return ptr1 + diff;
 }
 
 auto BlockAllocator::allocate(PageSize needed_size) -> PageSize
 {
-    CDB_EXPECT_LT(needed_size, m_node->page.size());
+    CALICODB_EXPECT_LT(needed_size, m_node->page.size());
 
     if (const auto offset = allocate_from_gap(needed_size)) {
         return offset;
@@ -334,10 +334,10 @@ auto BlockAllocator::allocate(PageSize needed_size) -> PageSize
 
 auto BlockAllocator::free(PageSize ptr, PageSize size) -> void
 {
-    CDB_EXPECT_GE(ptr, cell_area_offset(*m_node));
-    CDB_EXPECT_LE(ptr + size, m_node->page.size());
+    CALICODB_EXPECT_GE(ptr, cell_area_offset(*m_node));
+    CALICODB_EXPECT_LE(ptr + size, m_node->page.size());
     auto &header = m_node->header;
-    CDB_EXPECT_LE(header.frag_count + 3, 0xFF);
+    CALICODB_EXPECT_LE(header.frag_count + 3, 0xFF);
 
     if (size < 4) {
         header.frag_count = static_cast<std::uint8_t>(header.frag_count + size);
@@ -398,13 +398,13 @@ static auto setup_node(Node &node) -> void
     const auto bottom = cell_area_offset(node);
     const auto top = node.header.cell_start;
 
-    CDB_EXPECT_GE(top, bottom);
+    CALICODB_EXPECT_GE(top, bottom);
     node.gap_size = static_cast<PageSize>(top - bottom);
 }
 
 static auto allocate_block(Node &node, PageSize index, PageSize size) -> std::size_t
 {
-    CDB_EXPECT_LE(index, node.header.cell_count);
+    CALICODB_EXPECT_LE(index, node.header.cell_count);
 
     if (size + sizeof(PageSize) > usable_space(node)) {
         node.overflow_index = index;
@@ -427,7 +427,7 @@ static auto allocate_block(Node &node, PageSize index, PageSize size) -> std::si
     }
     // We already made sure we had enough room to fulfill the request. If we had to defragment, the call
     // to allocate() following defragmentation should succeed.
-    CDB_EXPECT_NE(offset, 0);
+    CALICODB_EXPECT_NE(offset, 0);
     node.set_slot(index, offset);
 
     // Signal that there will be a change here, but don't write anything yet.
@@ -455,7 +455,7 @@ auto write_cell(Node &node, std::size_t index, const Cell &cell) -> std::size_t
 
 static auto erase_cell(Node &node, std::size_t index, std::size_t size_hint) -> void
 {
-    CDB_EXPECT_LT(index, node.header.cell_count);
+    CALICODB_EXPECT_LT(index, node.header.cell_count);
     free_block(node, PageSize(index), PageSize(size_hint));
 }
 
@@ -490,20 +490,20 @@ auto manual_defragment(Node &node) -> void
 
 auto Node::get_slot(std::size_t index) const -> std::size_t
 {
-    CDB_EXPECT_LT(index, header.cell_count);
+    CALICODB_EXPECT_LT(index, header.cell_count);
     return get_u16(page.data() + slots_offset + index * sizeof(PageSize));
 }
 
 auto Node::set_slot(std::size_t index, std::size_t pointer) -> void
 {
-    CDB_EXPECT_LT(index, header.cell_count);
+    CALICODB_EXPECT_LT(index, header.cell_count);
     return put_u16(page.mutate(slots_offset + index * sizeof(PageSize), sizeof(PageSize)), static_cast<PageSize>(pointer));
 }
 
 auto Node::insert_slot(std::size_t index, std::size_t pointer) -> void
 {
-    CDB_EXPECT_LE(index, header.cell_count);
-    CDB_EXPECT_GE(gap_size, sizeof(PageSize));
+    CALICODB_EXPECT_LE(index, header.cell_count);
+    CALICODB_EXPECT_GE(gap_size, sizeof(PageSize));
     const auto offset = slots_offset + index * sizeof(PageSize);
     const auto size = (header.cell_count - index) * sizeof(PageSize);
     auto *data = page.data() + offset;
@@ -518,7 +518,7 @@ auto Node::insert_slot(std::size_t index, std::size_t pointer) -> void
 
 auto Node::remove_slot(std::size_t index) -> void
 {
-    CDB_EXPECT_LT(index, header.cell_count);
+    CALICODB_EXPECT_LT(index, header.cell_count);
     const auto offset = slots_offset + index * sizeof(PageSize);
     const auto size = (header.cell_count - index) * sizeof(PageSize);
     auto *data = page.data() + offset;
@@ -540,14 +540,14 @@ auto Node::take() && -> Page
 
 static auto merge_root(Node &root, Node &child) -> void
 {
-    CDB_EXPECT_EQ(root.header.next_id, child.page.id());
+    CALICODB_EXPECT_EQ(root.header.next_id, child.page.id());
     const auto &header = child.header;
     if (header.free_total) {
         manual_defragment(child);
     }
 
     // Copy the cell content area.
-    CDB_EXPECT_GE(header.cell_start, cell_slots_offset(root));
+    CALICODB_EXPECT_GE(header.cell_start, cell_slots_offset(root));
     auto memory_size = child.page.size() - header.cell_start;
     auto memory = root.page.mutate(header.cell_start, memory_size);
     std::memcpy(memory, child.page.data() + header.cell_start, memory_size);
@@ -592,9 +592,9 @@ NodeIterator::NodeIterator(Node &node, const Parameters &param)
       m_rhs_key {param.rhs_key},
       m_node {&node}
 {
-    CDB_EXPECT_NE(m_pager, nullptr);
-    CDB_EXPECT_NE(m_lhs_key, nullptr);
-    CDB_EXPECT_NE(m_rhs_key, nullptr);
+    CALICODB_EXPECT_NE(m_pager, nullptr);
+    CALICODB_EXPECT_NE(m_lhs_key, nullptr);
+    CALICODB_EXPECT_NE(m_rhs_key, nullptr);
 }
 
 // NOTE: "buffer" is only used if the key is fragmented.
@@ -611,7 +611,7 @@ auto NodeIterator::fetch_key(std::string &buffer, const Cell &cell, Slice &out) 
     std::memcpy(buffer.data(), cell.key, cell.local_size);
 
     auto *remote = buffer.data() + cell.local_size;
-    CDB_TRY(OverflowList::read(*m_pager, read_overflow_id(cell), 0, cell.key_size - cell.local_size, remote));
+    CALICODB_TRY(OverflowList::read(*m_pager, read_overflow_id(cell), 0, cell.key_size - cell.local_size, remote));
 
     out = Slice {buffer.data(), cell.key_size};
     return Status::ok();
@@ -649,7 +649,7 @@ auto NodeIterator::seek(const Cell &cell, bool *found) -> Status
         return seek({cell.key, cell.key_size});
     }
     Slice key;
-    CDB_TRY(fetch_key(*m_rhs_key, cell, key));
+    CALICODB_TRY(fetch_key(*m_rhs_key, cell, key));
     return seek(key, found);
 }
 
@@ -668,17 +668,17 @@ auto Tree::create(Pager &pager, Id table_id, Id &freelist_head, Id *out) -> Stat
     Node node;
     std::string scratch;
     Freelist freelist {pager, freelist_head};
-    CDB_TRY(NodeManager::allocate(pager, freelist, node, scratch, true));
+    CALICODB_TRY(NodeManager::allocate(pager, freelist, node, scratch, true));
     const auto root_id = node.page.id();
     NodeManager::release(pager, std::move(node));
 
     if (!table_id.is_root()) {
-        CDB_EXPECT_FALSE(root_id.is_root());
+        CALICODB_EXPECT_FALSE(root_id.is_root());
         // If the page is a root page other than the database root, the back pointer field is used
         // to store the table ID. This lets the vacuum routine quickly locate open tables so their
         // in-memory root variables can be updated.
         PointerMap::Entry entry {table_id, PointerMap::kTreeRoot};
-        CDB_TRY(PointerMap::write_entry(pager, root_id, entry));
+        CALICODB_TRY(PointerMap::write_entry(pager, root_id, entry));
     }
     if (out != nullptr) {
         *out = root_id;
@@ -699,7 +699,7 @@ auto Tree::node_iterator(Node &node) const -> NodeIterator
 auto Tree::find_external(const Slice &key, SearchResult &out) const -> Status
 {
     Node root;
-    CDB_TRY(acquire(m_root_id, false, root));
+    CALICODB_TRY(acquire(m_root_id, false, root));
     return find_external(key, std::move(root), out);
 }
 
@@ -708,7 +708,7 @@ auto Tree::find_external(const Slice &key, Node node, SearchResult &out) const -
     for (;;) {
         bool exact;
         auto itr = node_iterator(node);
-        CDB_TRY(itr.seek(key, &exact));
+        CALICODB_TRY(itr.seek(key, &exact));
 
         if (node.header.is_external) {
             out.node = std::move(node);
@@ -717,16 +717,16 @@ auto Tree::find_external(const Slice &key, Node node, SearchResult &out) const -
             return Status::ok();
         }
         const auto next_id = read_child_id(node, itr.index() + exact);
-        CDB_EXPECT_NE(next_id, node.page.id()); // Infinite loop.
+        CALICODB_EXPECT_NE(next_id, node.page.id()); // Infinite loop.
         release(std::move(node));
-        CDB_TRY(acquire(next_id, false, node));
+        CALICODB_TRY(acquire(next_id, false, node));
     }
 }
 
 auto Tree::find_parent_id(Id pid, Id &out) const -> Status
 {
     PointerMap::Entry entry;
-    CDB_TRY(PointerMap::read_entry(*m_pager, pid, entry));
+    CALICODB_TRY(PointerMap::read_entry(*m_pager, pid, entry));
     out = entry.back_ptr;
     return Status::ok();
 }
@@ -749,7 +749,7 @@ auto Tree::insert_cell(Node &node, std::size_t index, const Cell &cell) -> Statu
 {
     write_cell(node, index, cell);
     if (!node.header.is_external) {
-        CDB_TRY(fix_parent_id(read_child_id(cell), node.page.id(), PointerMap::kTreeNode));
+        CALICODB_TRY(fix_parent_id(read_child_id(cell), node.page.id(), PointerMap::kTreeNode));
     }
     return maybe_fix_overflow_chain(cell, node.page.id());
 }
@@ -758,7 +758,7 @@ auto Tree::remove_cell(Node &node, std::size_t index) -> Status
 {
     const auto cell = read_cell(node, index);
     if (cell.has_remote) {
-        CDB_TRY(OverflowList::erase(*m_pager, m_freelist, read_overflow_id(cell)));
+        CALICODB_TRY(OverflowList::erase(*m_pager, m_freelist, read_overflow_id(cell)));
     }
     erase_cell(node, index, cell.size);
     return Status::ok();
@@ -768,18 +768,18 @@ auto Tree::fix_links(Node &node) -> Status
 {
     for (std::size_t index {}; index < node.header.cell_count; ++index) {
         const auto cell = read_cell(node, index);
-        CDB_TRY(maybe_fix_overflow_chain(cell, node.page.id()));
+        CALICODB_TRY(maybe_fix_overflow_chain(cell, node.page.id()));
         if (!node.header.is_external) {
-            CDB_TRY(fix_parent_id(read_child_id(cell), node.page.id(), PointerMap::kTreeNode));
+            CALICODB_TRY(fix_parent_id(read_child_id(cell), node.page.id(), PointerMap::kTreeNode));
         }
     }
     if (!node.header.is_external) {
-        CDB_TRY(fix_parent_id(node.header.next_id, node.page.id(), PointerMap::kTreeNode));
+        CALICODB_TRY(fix_parent_id(node.header.next_id, node.page.id(), PointerMap::kTreeNode));
     }
     if (node.overflow) {
-        CDB_TRY(maybe_fix_overflow_chain(*node.overflow, node.page.id()));
+        CALICODB_TRY(maybe_fix_overflow_chain(*node.overflow, node.page.id()));
         if (!node.header.is_external) {
-            CDB_TRY(fix_parent_id(read_child_id(*node.overflow), node.page.id(), PointerMap::kTreeNode));
+            CALICODB_TRY(fix_parent_id(read_child_id(*node.overflow), node.page.id(), PointerMap::kTreeNode));
         }
     }
     return Status::ok();
@@ -815,9 +815,9 @@ auto Tree::resolve_overflow(Node node) -> Status
     Node next;
     while (is_overflowing(node)) {
         if (node.page.id() == m_root_id) {
-            CDB_TRY(split_root(std::move(node), next));
+            CALICODB_TRY(split_root(std::move(node), next));
         } else {
-            CDB_TRY(split_non_root(std::move(node), next));
+            CALICODB_TRY(split_non_root(std::move(node), next));
         }
         node = std::move(next);
     }
@@ -828,7 +828,7 @@ auto Tree::resolve_overflow(Node node) -> Status
 auto Tree::split_root(Node root, Node &out) -> Status
 {
     Node child;
-    CDB_TRY(allocate(root.header.is_external, child));
+    CALICODB_TRY(allocate(root.header.is_external, child));
 
     // Copy the cell content area.
     const auto after_root_headers = cell_area_offset(root);
@@ -842,7 +842,7 @@ auto Tree::split_root(Node root, Node &out) -> Status
     std::memcpy(memory, root.page.data() + cell_slots_offset(root), memory_size);
     child.header = root.header;
 
-    CDB_EXPECT_TRUE(is_overflowing(root));
+    CALICODB_EXPECT_TRUE(is_overflowing(root));
     std::swap(child.overflow, root.overflow);
     child.overflow_index = root.overflow_index;
     child.gap_size = root.gap_size;
@@ -855,37 +855,37 @@ auto Tree::split_root(Node root, Node &out) -> Status
     root.header.next_id = child.page.id();
     setup_node(root);
 
-    CDB_TRY(fix_parent_id(child.page.id(), root.page.id(), PointerMap::kTreeNode));
+    CALICODB_TRY(fix_parent_id(child.page.id(), root.page.id(), PointerMap::kTreeNode));
     release(std::move(root));
 
-    CDB_TRY(fix_links(child));
+    CALICODB_TRY(fix_links(child));
     out = std::move(child);
     return Status::ok();
 }
 
 auto Tree::transfer_left(Node &left, Node &right) -> Status
 {
-    CDB_EXPECT_EQ(left.header.is_external, right.header.is_external);
+    CALICODB_EXPECT_EQ(left.header.is_external, right.header.is_external);
     const auto cell = read_cell(right, 0);
-    CDB_TRY(insert_cell(left, left.header.cell_count, cell));
-    CDB_EXPECT_FALSE(is_overflowing(left));
+    CALICODB_TRY(insert_cell(left, left.header.cell_count, cell));
+    CALICODB_EXPECT_FALSE(is_overflowing(left));
     erase_cell(right, 0, cell.size);
     return Status::ok();
 }
 
 auto Tree::split_non_root(Node right, Node &out) -> Status
 {
-    CDB_EXPECT_NE(right.page.id(), m_root_id);
-    CDB_EXPECT_TRUE(is_overflowing(right));
+    CALICODB_EXPECT_NE(right.page.id(), m_root_id);
+    CALICODB_EXPECT_TRUE(is_overflowing(right));
     const auto &header = right.header;
 
     Id parent_id;
-    CDB_TRY(find_parent_id(right.page.id(), parent_id));
-    CDB_EXPECT_FALSE(parent_id.is_null());
+    CALICODB_TRY(find_parent_id(right.page.id(), parent_id));
+    CALICODB_EXPECT_FALSE(parent_id.is_null());
 
     Node parent, left;
-    CDB_TRY(acquire(parent_id, true, parent));
-    CDB_TRY(allocate(header.is_external, left));
+    CALICODB_TRY(acquire(parent_id, true, parent));
+    CALICODB_TRY(allocate(header.is_external, left));
 
     const auto overflow_index = right.overflow_index;
     auto overflow = *right.overflow;
@@ -912,19 +912,19 @@ auto Tree::split_non_root(Node right, Node &out) -> Status
     // it must be able to accept the overflow cell without overflowing.
     for (std::size_t i {}, n = header.cell_count; i < n; ++i) {
         if (i == overflow_index) {
-            CDB_TRY(insert_cell(left, left.header.cell_count, overflow));
+            CALICODB_TRY(insert_cell(left, left.header.cell_count, overflow));
             break;
         }
-        CDB_TRY(transfer_left(left, right));
+        CALICODB_TRY(transfer_left(left, right));
 
         if (usable_space(right) >= overflow.size + 2) {
-            CDB_TRY(insert_cell(right, overflow_index - i - 1, overflow));
+            CALICODB_TRY(insert_cell(right, overflow_index - i - 1, overflow));
             break;
         }
-        CDB_EXPECT_NE(i + 1, n);
+        CALICODB_EXPECT_NE(i + 1, n);
     }
-    CDB_EXPECT_FALSE(is_overflowing(left));
-    CDB_EXPECT_FALSE(is_overflowing(right));
+    CALICODB_EXPECT_FALSE(is_overflowing(left));
+    CALICODB_EXPECT_FALSE(is_overflowing(right));
 
     auto separator = read_cell(right, 0);
     detach_cell(separator, cell_scratch());
@@ -932,14 +932,14 @@ auto Tree::split_non_root(Node right, Node &out) -> Status
     if (header.is_external) {
         if (!header.prev_id.is_null()) {
             Node left_sibling;
-            CDB_TRY(acquire(header.prev_id, true, left_sibling));
+            CALICODB_TRY(acquire(header.prev_id, true, left_sibling));
             left_sibling.header.next_id = left.page.id();
             left.header.prev_id = left_sibling.page.id();
             release(std::move(left_sibling));
         }
         right.header.prev_id = left.page.id();
         left.header.next_id = right.page.id();
-        CDB_TRY(PayloadManager::promote(
+        CALICODB_TRY(PayloadManager::promote(
             *m_pager,
             m_freelist,
             nullptr,
@@ -947,16 +947,16 @@ auto Tree::split_non_root(Node right, Node &out) -> Status
             parent_id));
     } else {
         left.header.next_id = read_child_id(separator);
-        CDB_TRY(fix_parent_id(left.header.next_id, left.page.id(), PointerMap::kTreeNode));
+        CALICODB_TRY(fix_parent_id(left.header.next_id, left.page.id(), PointerMap::kTreeNode));
         erase_cell(right, 0);
     }
 
     auto itr = node_iterator(parent);
-    CDB_TRY(itr.seek(separator));
+    CALICODB_TRY(itr.seek(separator));
 
     // Post the separator into the parent node. This call will fix the sibling's parent pointer.
     write_child_id(separator, left.page.id());
-    CDB_TRY(insert_cell(parent, itr.index(), separator));
+    CALICODB_TRY(insert_cell(parent, itr.index(), separator));
 
     release(std::move(left));
     release(std::move(right));
@@ -967,16 +967,16 @@ auto Tree::split_non_root(Node right, Node &out) -> Status
 auto Tree::split_non_root_fast(Node parent, Node left, Node right, const Cell &overflow, Node &out) -> Status
 {
     const auto &header = left.header;
-    CDB_TRY(insert_cell(right, 0, overflow));
+    CALICODB_TRY(insert_cell(right, 0, overflow));
 
-    CDB_EXPECT_FALSE(is_overflowing(left));
-    CDB_EXPECT_FALSE(is_overflowing(right));
+    CALICODB_EXPECT_FALSE(is_overflowing(left));
+    CALICODB_EXPECT_FALSE(is_overflowing(right));
 
     Cell separator;
     if (header.is_external) {
         if (!header.next_id.is_null()) {
             Node right_sibling;
-            CDB_TRY(acquire(header.next_id, true, right_sibling));
+            CALICODB_TRY(acquire(header.next_id, true, right_sibling));
             right_sibling.header.prev_id = right.page.id();
             right.header.next_id = right_sibling.page.id();
             release(std::move(right_sibling));
@@ -985,7 +985,7 @@ auto Tree::split_non_root_fast(Node parent, Node left, Node right, const Cell &o
         left.header.next_id = right.page.id();
 
         separator = read_cell(right, 0);
-        CDB_TRY(PayloadManager::promote(
+        CALICODB_TRY(PayloadManager::promote(
             *m_pager,
             m_freelist,
             cell_scratch(),
@@ -998,20 +998,20 @@ auto Tree::split_non_root_fast(Node parent, Node left, Node right, const Cell &o
 
         right.header.next_id = left.header.next_id;
         left.header.next_id = read_child_id(separator);
-        CDB_TRY(fix_parent_id(right.header.next_id, right.page.id(), PointerMap::kTreeNode));
-        CDB_TRY(fix_parent_id(left.header.next_id, left.page.id(), PointerMap::kTreeNode));
+        CALICODB_TRY(fix_parent_id(right.header.next_id, right.page.id(), PointerMap::kTreeNode));
+        CALICODB_TRY(fix_parent_id(left.header.next_id, left.page.id(), PointerMap::kTreeNode));
     }
 
     auto itr = node_iterator(parent);
-    CDB_TRY(itr.seek(separator));
+    CALICODB_TRY(itr.seek(separator));
 
     // Post the separator into the parent node. This call will fix the sibling's parent pointer.
     write_child_id(separator, left.page.id());
-    CDB_TRY(insert_cell(parent, itr.index(), separator));
+    CALICODB_TRY(insert_cell(parent, itr.index(), separator));
 
     const auto offset = !is_overflowing(parent);
     write_child_id(parent, itr.index() + offset, right.page.id());
-    CDB_TRY(fix_parent_id(right.page.id(), parent.page.id(), PointerMap::kTreeNode));
+    CALICODB_TRY(fix_parent_id(right.page.id(), parent.page.id(), PointerMap::kTreeNode));
 
     release(std::move(left));
     release(std::move(right));
@@ -1026,17 +1026,17 @@ auto Tree::resolve_underflow(Node node, const Slice &anchor) -> Status
             return fix_root(std::move(node));
         }
         Id parent_id;
-        CDB_TRY(find_parent_id(node.page.id(), parent_id));
-        CDB_EXPECT_FALSE(parent_id.is_null());
+        CALICODB_TRY(find_parent_id(node.page.id(), parent_id));
+        CALICODB_EXPECT_FALSE(parent_id.is_null());
 
         Node parent;
-        CDB_TRY(acquire(parent_id, true, parent));
+        CALICODB_TRY(acquire(parent_id, true, parent));
         // NOTE: Searching for the anchor key from the node we took from should always give us the correct index
         //       due to the B+-tree ordering rules.
         bool exact;
         auto itr = node_iterator(parent);
-        CDB_TRY(itr.seek(anchor, &exact));
-        CDB_TRY(fix_non_root(std::move(node), parent, itr.index() + exact));
+        CALICODB_TRY(itr.seek(anchor, &exact));
+        CALICODB_TRY(fix_non_root(std::move(node), parent, itr.index() + exact));
         node = std::move(parent);
     }
     release(std::move(node));
@@ -1045,136 +1045,136 @@ auto Tree::resolve_underflow(Node node, const Slice &anchor) -> Status
 
 auto Tree::merge_left(Node &left, Node right, Node &parent, std::size_t index) -> Status
 {
-    CDB_EXPECT_FALSE(parent.header.is_external);
-    CDB_EXPECT_TRUE(is_underflowing(left));
+    CALICODB_EXPECT_FALSE(parent.header.is_external);
+    CALICODB_EXPECT_TRUE(is_underflowing(left));
     if (left.header.is_external) {
-        CDB_EXPECT_TRUE(right.header.is_external);
+        CALICODB_EXPECT_TRUE(right.header.is_external);
         left.header.next_id = right.header.next_id;
-        CDB_TRY(remove_cell(parent, index));
+        CALICODB_TRY(remove_cell(parent, index));
 
         while (right.header.cell_count) {
-            CDB_TRY(transfer_left(left, right));
+            CALICODB_TRY(transfer_left(left, right));
         }
         write_child_id(parent, index, left.page.id());
 
         if (!right.header.next_id.is_null()) {
             Node right_sibling;
-            CDB_TRY(acquire(right.header.next_id, true, right_sibling));
+            CALICODB_TRY(acquire(right.header.next_id, true, right_sibling));
             right_sibling.header.prev_id = left.page.id();
             release(std::move(right_sibling));
         }
     } else {
-        CDB_EXPECT_FALSE(right.header.is_external);
+        CALICODB_EXPECT_FALSE(right.header.is_external);
         auto separator = read_cell(parent, index);
         write_cell(left, left.header.cell_count, separator);
         write_child_id(left, left.header.cell_count - 1, left.header.next_id);
-        CDB_TRY(fix_parent_id(left.header.next_id, left.page.id(), PointerMap::kTreeNode));
-        CDB_TRY(maybe_fix_overflow_chain(separator, left.page.id()));
+        CALICODB_TRY(fix_parent_id(left.header.next_id, left.page.id(), PointerMap::kTreeNode));
+        CALICODB_TRY(maybe_fix_overflow_chain(separator, left.page.id()));
         erase_cell(parent, index, separator.size);
 
         while (right.header.cell_count) {
-            CDB_TRY(transfer_left(left, right));
+            CALICODB_TRY(transfer_left(left, right));
         }
         left.header.next_id = right.header.next_id;
         write_child_id(parent, index, left.page.id());
     }
-    CDB_TRY(fix_links(left));
+    CALICODB_TRY(fix_links(left));
     return destroy(std::move(right));
 }
 
 auto Tree::merge_right(Node &left, Node right, Node &parent, std::size_t index) -> Status
 {
-    CDB_EXPECT_FALSE(parent.header.is_external);
-    CDB_EXPECT_TRUE(is_underflowing(right));
+    CALICODB_EXPECT_FALSE(parent.header.is_external);
+    CALICODB_EXPECT_TRUE(is_underflowing(right));
     if (left.header.is_external) {
-        CDB_EXPECT_TRUE(right.header.is_external);
+        CALICODB_EXPECT_TRUE(right.header.is_external);
 
         left.header.next_id = right.header.next_id;
-        CDB_EXPECT_EQ(read_child_id(parent, index + 1), right.page.id());
+        CALICODB_EXPECT_EQ(read_child_id(parent, index + 1), right.page.id());
         write_child_id(parent, index + 1, left.page.id());
-        CDB_TRY(remove_cell(parent, index));
+        CALICODB_TRY(remove_cell(parent, index));
 
         while (right.header.cell_count) {
-            CDB_TRY(transfer_left(left, right));
+            CALICODB_TRY(transfer_left(left, right));
         }
         if (!right.header.next_id.is_null()) {
             Node right_sibling;
-            CDB_TRY(acquire(right.header.next_id, true, right_sibling));
+            CALICODB_TRY(acquire(right.header.next_id, true, right_sibling));
             right_sibling.header.prev_id = left.page.id();
             release(std::move(right_sibling));
         }
     } else {
-        CDB_EXPECT_FALSE(right.header.is_external);
+        CALICODB_EXPECT_FALSE(right.header.is_external);
 
         auto separator = read_cell(parent, index);
         write_cell(left, left.header.cell_count, separator);
         write_child_id(left, left.header.cell_count - 1, left.header.next_id);
-        CDB_TRY(fix_parent_id(left.header.next_id, left.page.id(), PointerMap::kTreeNode));
-        CDB_TRY(maybe_fix_overflow_chain(separator, left.page.id()));
+        CALICODB_TRY(fix_parent_id(left.header.next_id, left.page.id(), PointerMap::kTreeNode));
+        CALICODB_TRY(maybe_fix_overflow_chain(separator, left.page.id()));
         left.header.next_id = right.header.next_id;
 
-        CDB_EXPECT_EQ(read_child_id(parent, index + 1), right.page.id());
+        CALICODB_EXPECT_EQ(read_child_id(parent, index + 1), right.page.id());
         write_child_id(parent, index + 1, left.page.id());
         erase_cell(parent, index, separator.size);
 
         // Transfer the rest of the cells. left shouldn't overflow.
         while (right.header.cell_count) {
-            CDB_TRY(transfer_left(left, right));
+            CALICODB_TRY(transfer_left(left, right));
         }
     }
-    CDB_TRY(fix_links(left));
+    CALICODB_TRY(fix_links(left));
     return destroy(std::move(right));
 }
 
 auto Tree::fix_non_root(Node node, Node &parent, std::size_t index) -> Status
 {
-    CDB_EXPECT_NE(node.page.id(), m_root_id);
-    CDB_EXPECT_TRUE(is_underflowing(node));
-    CDB_EXPECT_FALSE(is_overflowing(parent));
+    CALICODB_EXPECT_NE(node.page.id(), m_root_id);
+    CALICODB_EXPECT_TRUE(is_underflowing(node));
+    CALICODB_EXPECT_FALSE(is_overflowing(parent));
 
     if (index > 0) {
         Node left;
-        CDB_TRY(acquire(read_child_id(parent, index - 1), true, left));
+        CALICODB_TRY(acquire(read_child_id(parent, index - 1), true, left));
         if (left.header.cell_count == 1) {
-            CDB_TRY(merge_right(left, std::move(node), parent, index - 1));
+            CALICODB_TRY(merge_right(left, std::move(node), parent, index - 1));
             release(std::move(left));
-            CDB_EXPECT_FALSE(is_overflowing(parent));
+            CALICODB_EXPECT_FALSE(is_overflowing(parent));
             return Status::ok();
         }
-        CDB_TRY(rotate_right(parent, left, node, index - 1));
+        CALICODB_TRY(rotate_right(parent, left, node, index - 1));
         release(std::move(left));
     } else {
         Node right;
-        CDB_TRY(acquire(read_child_id(parent, index + 1), true, right));
+        CALICODB_TRY(acquire(read_child_id(parent, index + 1), true, right));
         if (right.header.cell_count == 1) {
-            CDB_TRY(merge_left(node, std::move(right), parent, index));
+            CALICODB_TRY(merge_left(node, std::move(right), parent, index));
             release(std::move(node));
-            CDB_EXPECT_FALSE(is_overflowing(parent));
+            CALICODB_EXPECT_FALSE(is_overflowing(parent));
             return Status::ok();
         }
-        CDB_TRY(rotate_left(parent, node, right, index));
+        CALICODB_TRY(rotate_left(parent, node, right, index));
         release(std::move(right));
     }
 
-    CDB_EXPECT_FALSE(is_overflowing(node));
+    CALICODB_EXPECT_FALSE(is_overflowing(node));
     release(std::move(node));
 
     if (is_overflowing(parent)) {
         const auto saved_id = parent.page.id();
-        CDB_TRY(resolve_overflow(std::move(parent)));
-        CDB_TRY(acquire(saved_id, true, parent));
+        CALICODB_TRY(resolve_overflow(std::move(parent)));
+        CALICODB_TRY(acquire(saved_id, true, parent));
     }
     return Status::ok();
 }
 
 auto Tree::fix_root(Node root) -> Status
 {
-    CDB_EXPECT_EQ(root.page.id(), m_root_id);
+    CALICODB_EXPECT_EQ(root.page.id(), m_root_id);
 
     // If the root is external here, the whole tree must be empty.
     if (!root.header.is_external) {
         Node child;
-        CDB_TRY(acquire(root.header.next_id, true, child));
+        CALICODB_TRY(acquire(root.header.next_id, true, child));
 
         // We don't have enough room to transfer the child contents into the root, due to the space occupied by
         // the file header. In this case, we'll just split the child and insert the median cell into the root.
@@ -1187,14 +1187,14 @@ auto Tree::fix_root(Node root) -> Status
             erase_cell(child, child.overflow_index);
             release(std::move(root));
             Node parent;
-            CDB_TRY(split_non_root(std::move(child), parent));
+            CALICODB_TRY(split_non_root(std::move(child), parent));
             release(std::move(parent));
-            CDB_TRY(acquire(m_root_id, true, root));
+            CALICODB_TRY(acquire(m_root_id, true, root));
         } else {
             merge_root(root, child);
-            CDB_TRY(destroy(std::move(child)));
+            CALICODB_TRY(destroy(std::move(child)));
         }
-        CDB_TRY(fix_links(root));
+        CALICODB_TRY(fix_links(root));
     }
     release(std::move(root));
     return Status::ok();
@@ -1202,19 +1202,19 @@ auto Tree::fix_root(Node root) -> Status
 
 auto Tree::rotate_left(Node &parent, Node &left, Node &right, std::size_t index) -> Status
 {
-    CDB_EXPECT_FALSE(parent.header.is_external);
-    CDB_EXPECT_GT(parent.header.cell_count, 0);
-    CDB_EXPECT_GT(right.header.cell_count, 1);
+    CALICODB_EXPECT_FALSE(parent.header.is_external);
+    CALICODB_EXPECT_GT(parent.header.cell_count, 0);
+    CALICODB_EXPECT_GT(right.header.cell_count, 1);
     if (left.header.is_external) {
-        CDB_EXPECT_TRUE(right.header.is_external);
+        CALICODB_EXPECT_TRUE(right.header.is_external);
 
         auto lowest = read_cell(right, 0);
-        CDB_TRY(insert_cell(left, left.header.cell_count, lowest));
-        CDB_EXPECT_FALSE(is_overflowing(left));
+        CALICODB_TRY(insert_cell(left, left.header.cell_count, lowest));
+        CALICODB_EXPECT_FALSE(is_overflowing(left));
         erase_cell(right, 0);
 
         auto separator = read_cell(right, 0);
-        CDB_TRY(PayloadManager::promote(
+        CALICODB_TRY(PayloadManager::promote(
             *m_pager,
             m_freelist,
             cell_scratch(),
@@ -1222,21 +1222,21 @@ auto Tree::rotate_left(Node &parent, Node &left, Node &right, std::size_t index)
             parent.page.id()));
         write_child_id(separator, left.page.id());
 
-        CDB_TRY(remove_cell(parent, index));
+        CALICODB_TRY(remove_cell(parent, index));
         return insert_cell(parent, index, separator);
     } else {
-        CDB_EXPECT_FALSE(right.header.is_external);
+        CALICODB_EXPECT_FALSE(right.header.is_external);
 
         Node child;
-        CDB_TRY(acquire(read_child_id(right, 0), true, child));
+        CALICODB_TRY(acquire(read_child_id(right, 0), true, child));
         const auto saved_id = left.header.next_id;
         left.header.next_id = child.page.id();
-        CDB_TRY(fix_parent_id(child.page.id(), left.page.id(), PointerMap::kTreeNode));
+        CALICODB_TRY(fix_parent_id(child.page.id(), left.page.id(), PointerMap::kTreeNode));
         release(std::move(child));
 
         const auto separator = read_cell(parent, index);
-        CDB_TRY(insert_cell(left, left.header.cell_count, separator));
-        CDB_EXPECT_FALSE(is_overflowing(left));
+        CALICODB_TRY(insert_cell(left, left.header.cell_count, separator));
+        CALICODB_EXPECT_FALSE(is_overflowing(left));
         write_child_id(left, left.header.cell_count - 1, saved_id);
         erase_cell(parent, index, separator.size);
 
@@ -1250,19 +1250,19 @@ auto Tree::rotate_left(Node &parent, Node &left, Node &right, std::size_t index)
 
 auto Tree::rotate_right(Node &parent, Node &left, Node &right, std::size_t index) -> Status
 {
-    CDB_EXPECT_FALSE(parent.header.is_external);
-    CDB_EXPECT_GT(parent.header.cell_count, 0);
-    CDB_EXPECT_GT(left.header.cell_count, 1);
+    CALICODB_EXPECT_FALSE(parent.header.is_external);
+    CALICODB_EXPECT_GT(parent.header.cell_count, 0);
+    CALICODB_EXPECT_GT(left.header.cell_count, 1);
 
     if (left.header.is_external) {
-        CDB_EXPECT_TRUE(right.header.is_external);
+        CALICODB_EXPECT_TRUE(right.header.is_external);
 
         auto highest = read_cell(left, left.header.cell_count - 1);
-        CDB_TRY(insert_cell(right, 0, highest));
-        CDB_EXPECT_FALSE(is_overflowing(right));
+        CALICODB_TRY(insert_cell(right, 0, highest));
+        CALICODB_EXPECT_FALSE(is_overflowing(right));
 
         auto separator = highest;
-        CDB_TRY(PayloadManager::promote(
+        CALICODB_TRY(PayloadManager::promote(
             *m_pager,
             m_freelist,
             cell_scratch(),
@@ -1273,21 +1273,21 @@ auto Tree::rotate_right(Node &parent, Node &left, Node &right, std::size_t index
         // Don't erase the cell until it has been detached.
         erase_cell(left, left.header.cell_count - 1);
 
-        CDB_TRY(remove_cell(parent, index));
-        CDB_TRY(insert_cell(parent, index, separator));
+        CALICODB_TRY(remove_cell(parent, index));
+        CALICODB_TRY(insert_cell(parent, index, separator));
     } else {
-        CDB_EXPECT_FALSE(right.header.is_external);
+        CALICODB_EXPECT_FALSE(right.header.is_external);
 
         Node child;
-        CDB_TRY(acquire(left.header.next_id, true, child));
+        CALICODB_TRY(acquire(left.header.next_id, true, child));
         const auto child_id = child.page.id();
-        CDB_TRY(fix_parent_id(child.page.id(), right.page.id(), PointerMap::kTreeNode));
+        CALICODB_TRY(fix_parent_id(child.page.id(), right.page.id(), PointerMap::kTreeNode));
         left.header.next_id = read_child_id(left, left.header.cell_count - 1);
         release(std::move(child));
 
         auto separator = read_cell(parent, index);
-        CDB_TRY(insert_cell(right, 0, separator));
-        CDB_EXPECT_FALSE(is_overflowing(right));
+        CALICODB_TRY(insert_cell(right, 0, separator));
+        CALICODB_EXPECT_FALSE(is_overflowing(right));
         write_child_id(right, 0, child_id);
         erase_cell(parent, index, separator.size);
 
@@ -1295,7 +1295,7 @@ auto Tree::rotate_right(Node &parent, Node &left, Node &right, std::size_t index
         detach_cell(highest, cell_scratch());
         write_child_id(highest, left.page.id());
         erase_cell(left, left.header.cell_count - 1, highest.size);
-        CDB_TRY(insert_cell(parent, index, highest));
+        CALICODB_TRY(insert_cell(parent, index, highest));
     }
     return Status::ok();
 }
@@ -1318,7 +1318,7 @@ auto Tree::cell_scratch() -> char *
 auto Tree::get(const Slice &key, std::string *value) const -> Status
 {
     SearchResult slot;
-    CDB_TRY(find_external(key, slot));
+    CALICODB_TRY(find_external(key, slot));
     auto [node, index, exact] = std::move(slot);
 
     if (!exact) {
@@ -1329,7 +1329,7 @@ auto Tree::get(const Slice &key, std::string *value) const -> Status
     if (value != nullptr) {
         const auto cell = read_cell(node, index);
         Slice slice;
-        CDB_TRY(PayloadManager::collect_value(*m_pager, *value, cell, &slice));
+        CALICODB_TRY(PayloadManager::collect_value(*m_pager, *value, cell, &slice));
         value->resize(slice.size());
     }
     release(std::move(node));
@@ -1338,19 +1338,19 @@ auto Tree::get(const Slice &key, std::string *value) const -> Status
 
 auto Tree::put(const Slice &key, const Slice &value, bool *exists) -> Status
 {
-    CDB_EXPECT_FALSE(key.is_empty());
+    CALICODB_EXPECT_FALSE(key.is_empty());
 
     SearchResult slot;
-    CDB_TRY(find_external(key, slot));
+    CALICODB_TRY(find_external(key, slot));
     auto [node, index, exact] = std::move(slot);
     upgrade(node);
 
     if (exact) {
-        CDB_TRY(remove_cell(node, index));
+        CALICODB_TRY(remove_cell(node, index));
     }
 
-    CDB_TRY(PayloadManager::emplace(*m_pager, m_freelist, cell_scratch(), node, key, value, index));
-    CDB_TRY(resolve_overflow(std::move(node)));
+    CALICODB_TRY(PayloadManager::emplace(*m_pager, m_freelist, cell_scratch(), node, key, value, index));
+    CALICODB_TRY(resolve_overflow(std::move(node)));
     if (exists != nullptr) {
         *exists = exact;
     }
@@ -1362,16 +1362,16 @@ auto Tree::erase(const Slice &key) -> Status
     Tree internal {*this};
     SearchResult slot;
 
-    CDB_TRY(internal.find_external(key, slot));
+    CALICODB_TRY(internal.find_external(key, slot));
     auto [node, index, exact] = std::move(slot);
 
     if (exact) {
         Slice anchor;
         const auto cell = read_cell(node, index);
-        CDB_TRY(PayloadManager::collect_key(*m_pager, m_anchor, cell, &anchor));
+        CALICODB_TRY(PayloadManager::collect_key(*m_pager, m_anchor, cell, &anchor));
 
         internal.upgrade(node);
-        CDB_TRY(internal.remove_cell(node, index));
+        CALICODB_TRY(internal.remove_cell(node, index));
         return internal.resolve_underflow(std::move(node), anchor);
     }
     internal.release(std::move(node));
@@ -1380,36 +1380,36 @@ auto Tree::erase(const Slice &key) -> Status
 
 auto Tree::find_lowest(Node &out) const -> Status
 {
-    CDB_TRY(acquire(m_root_id, false, out));
+    CALICODB_TRY(acquire(m_root_id, false, out));
     while (!out.header.is_external) {
         const auto next_id = read_child_id(out, 0);
         release(std::move(out));
-        CDB_TRY(acquire(next_id, false, out));
+        CALICODB_TRY(acquire(next_id, false, out));
     }
     return Status::ok();
 }
 
 auto Tree::find_highest(Node &out) const -> Status
 {
-    CDB_TRY(acquire(m_root_id, false, out));
+    CALICODB_TRY(acquire(m_root_id, false, out));
     while (!out.header.is_external) {
         const auto next_id = out.header.next_id;
         release(std::move(out));
-        CDB_TRY(acquire(next_id, false, out));
+        CALICODB_TRY(acquire(next_id, false, out));
     }
     return Status::ok();
 }
 
 auto Tree::vacuum_step(Page &free, TableSet &tables, Id last_id) -> Status
 {
-    CDB_EXPECT_NE(free.id(), last_id);
+    CALICODB_EXPECT_NE(free.id(), last_id);
 
     PointerMap::Entry entry;
-    CDB_TRY(PointerMap::read_entry(*m_pager, last_id, entry));
+    CALICODB_TRY(PointerMap::read_entry(*m_pager, last_id, entry));
 
     const auto fix_basic_link = [&entry, &free, this]() -> Status {
         Page parent;
-        CDB_TRY(m_pager->acquire(entry.back_ptr, parent));
+        CALICODB_TRY(m_pager->acquire(entry.back_ptr, parent));
         m_pager->upgrade(parent);
         write_next_id(parent, free.id());
         m_pager->release(std::move(parent));
@@ -1424,12 +1424,12 @@ auto Tree::vacuum_step(Page &free, TableSet &tables, Id last_id) -> Status
                 *m_freelist.m_head = free.id();
             } else {
                 // Back pointer points to another freelist page.
-                CDB_EXPECT_FALSE(entry.back_ptr.is_null());
-                CDB_TRY(fix_basic_link());
+                CALICODB_EXPECT_FALSE(entry.back_ptr.is_null());
+                CALICODB_TRY(fix_basic_link());
                 Page last;
-                CDB_TRY(m_pager->acquire(last_id, last));
+                CALICODB_TRY(m_pager->acquire(last_id, last));
                 if (const auto next_id = read_next_id(last); !next_id.is_null()) {
-                    CDB_TRY(fix_parent_id(next_id, free.id(), PointerMap::kFreelistLink));
+                    CALICODB_TRY(fix_parent_id(next_id, free.id(), PointerMap::kFreelistLink));
                 }
                 m_pager->release(std::move(last));
             }
@@ -1437,14 +1437,14 @@ auto Tree::vacuum_step(Page &free, TableSet &tables, Id last_id) -> Status
         }
         case PointerMap::kOverflowLink: {
             // Back pointer points to another overflow chain link, or the head of the chain.
-            CDB_TRY(fix_basic_link());
+            CALICODB_TRY(fix_basic_link());
             break;
         }
         case PointerMap::kOverflowHead: {
             // Back pointer points to the node that the overflow chain is rooted in. Search through that nodes cells
             // for the target overflowing cell.
             Node parent;
-            CDB_TRY(acquire(entry.back_ptr, true, parent));
+            CALICODB_TRY(acquire(entry.back_ptr, true, parent));
             bool found {};
             for (std::size_t i {}; i < parent.header.cell_count; ++i) {
                 auto cell = read_cell(parent, i);
@@ -1454,7 +1454,7 @@ auto Tree::vacuum_step(Page &free, TableSet &tables, Id last_id) -> Status
                     break;
                 }
             }
-            CDB_EXPECT_TRUE(found);
+            CALICODB_EXPECT_TRUE(found);
             release(std::move(parent));
             break;
         }
@@ -1474,8 +1474,8 @@ auto Tree::vacuum_step(Page &free, TableSet &tables, Id last_id) -> Status
                 // Back pointer points to another node, i.e. this is not a root. Search through the
                 // parent for the target child pointer and overwrite it with the new page ID.
                 Node parent;
-                CDB_TRY(acquire(entry.back_ptr, true, parent));
-                CDB_EXPECT_FALSE(parent.header.is_external);
+                CALICODB_TRY(acquire(entry.back_ptr, true, parent));
+                CALICODB_EXPECT_FALSE(parent.header.is_external);
                 bool found {};
                 for (std::size_t i {}; !found && i <= parent.header.cell_count; ++i) {
                     const auto child_id = read_child_id(parent, i);
@@ -1484,31 +1484,31 @@ auto Tree::vacuum_step(Page &free, TableSet &tables, Id last_id) -> Status
                         write_child_id(parent, i, free.id());
                     }
                 }
-                CDB_EXPECT_TRUE(found);
+                CALICODB_EXPECT_TRUE(found);
                 release(std::move(parent));
             }
             // Update references.
             Node last;
-            CDB_TRY(acquire(last_id, true, last));
+            CALICODB_TRY(acquire(last_id, true, last));
             for (std::size_t i {}; i < last.header.cell_count; ++i) {
                 const auto cell = read_cell(last, i);
-                CDB_TRY(maybe_fix_overflow_chain(cell, free.id()));
+                CALICODB_TRY(maybe_fix_overflow_chain(cell, free.id()));
                 if (!last.header.is_external) {
-                    CDB_TRY(fix_parent_id(read_child_id(last, i), free.id(), PointerMap::kTreeNode));
+                    CALICODB_TRY(fix_parent_id(read_child_id(last, i), free.id(), PointerMap::kTreeNode));
                 }
             }
             if (!last.header.is_external) {
-                CDB_TRY(fix_parent_id(last.header.next_id, free.id(), PointerMap::kTreeNode));
+                CALICODB_TRY(fix_parent_id(last.header.next_id, free.id(), PointerMap::kTreeNode));
             } else {
                 if (!last.header.prev_id.is_null()) {
                     Node prev;
-                    CDB_TRY(acquire(last.header.prev_id, true, prev));
+                    CALICODB_TRY(acquire(last.header.prev_id, true, prev));
                     prev.header.next_id = free.id();
                     release(std::move(prev));
                 }
                 if (!last.header.next_id.is_null()) {
                     Node next;
-                    CDB_TRY(acquire(last.header.next_id, true, next));
+                    CALICODB_TRY(acquire(last.header.next_id, true, next));
                     next.header.prev_id = free.id();
                     release(std::move(next));
                 }
@@ -1516,10 +1516,10 @@ auto Tree::vacuum_step(Page &free, TableSet &tables, Id last_id) -> Status
             release(std::move(last));
         }
     }
-    CDB_TRY(PointerMap::write_entry(*m_pager, last_id, {}));
-    CDB_TRY(PointerMap::write_entry(*m_pager, free.id(), entry));
+    CALICODB_TRY(PointerMap::write_entry(*m_pager, last_id, {}));
+    CALICODB_TRY(PointerMap::write_entry(*m_pager, free.id(), entry));
     Page last;
-    CDB_TRY(m_pager->acquire(last_id, last));
+    CALICODB_TRY(m_pager->acquire(last_id, last));
     // We need to upgrade the last node, even though we aren't writing to it. This causes a full image to be written,
     // which we will need if we crash during vacuum and need to roll back.
     m_pager->upgrade(last);
@@ -1529,9 +1529,9 @@ auto Tree::vacuum_step(Page &free, TableSet &tables, Id last_id) -> Status
     if (is_link) {
         if (const auto next_id = read_next_id(last); !next_id.is_null()) {
             PointerMap::Entry next_entry;
-            CDB_TRY(PointerMap::read_entry(*m_pager, next_id, next_entry));
+            CALICODB_TRY(PointerMap::read_entry(*m_pager, next_id, next_entry));
             next_entry.back_ptr = free.id();
-            CDB_TRY(PointerMap::write_entry(*m_pager, next_id, next_entry));
+            CALICODB_TRY(PointerMap::write_entry(*m_pager, next_id, next_entry));
         }
     }
     std::memcpy(free.mutate(sizeof(Lsn), free.size() - sizeof(Lsn)),
@@ -1553,12 +1553,12 @@ auto Tree::vacuum_one(Id target, TableSet &tables, bool *success) -> Status
 
     // Swap the head of the freelist with the last page in the file.
     Page head;
-    CDB_TRY(m_freelist.pop(head));
+    CALICODB_TRY(m_freelist.pop(head));
     if (target != head.id()) {
         // Swap the last page with the freelist head.
-        CDB_TRY(vacuum_step(head, tables, target));
+        CALICODB_TRY(vacuum_step(head, tables, target));
     } else {
-        CDB_TRY(fix_parent_id(target, Id::null(), {}));
+        CALICODB_TRY(fix_parent_id(target, Id::null(), {}));
     }
     m_pager->release(std::move(head));
     *success = true;
@@ -1587,7 +1587,7 @@ Freelist::Freelist(Pager &pager, Id &head)
 auto Freelist::pop(Page &page) -> Status
 {
     if (!m_head->is_null()) {
-        CDB_TRY(m_pager->acquire(*m_head, page));
+        CALICODB_TRY(m_pager->acquire(*m_head, page));
         m_pager->upgrade(page, kLinkContentOffset);
         *m_head = read_next_id(page);
 
@@ -1595,7 +1595,7 @@ auto Freelist::pop(Page &page) -> Status
             // Only clear the back pointer for the new freelist head. Callers must make sure to update the returned
             // node's back pointer at some point.
             const PointerMap::Entry entry {Id::null(), PointerMap::kFreelistLink};
-            CDB_TRY(PointerMap::write_entry(*m_pager, *m_head, entry));
+            CALICODB_TRY(PointerMap::write_entry(*m_pager, *m_head, entry));
         }
         return Status::ok();
     }
@@ -1604,17 +1604,17 @@ auto Freelist::pop(Page &page) -> Status
 
 auto Freelist::push(Page page) -> Status
 {
-    CDB_EXPECT_FALSE(page.id().is_root());
+    CALICODB_EXPECT_FALSE(page.id().is_root());
     write_next_id(page, *m_head);
 
     // Write the parent of the old head, if it exists.
     PointerMap::Entry entry {page.id(), PointerMap::kFreelistLink};
     if (!m_head->is_null()) {
-        CDB_TRY(PointerMap::write_entry(*m_pager, *m_head, entry));
+        CALICODB_TRY(PointerMap::write_entry(*m_pager, *m_head, entry));
     }
     // Clear the parent of the new head.
     entry.back_ptr = Id::null();
-    CDB_TRY(PointerMap::write_entry(*m_pager, page.id(), entry));
+    CALICODB_TRY(PointerMap::write_entry(*m_pager, page.id(), entry));
 
     *m_head = page.id();
     m_pager->release(std::move(page));
@@ -1630,7 +1630,7 @@ static constexpr auto kEntrySize =
 
 static auto entry_offset(Id map_id, Id pid) -> std::size_t
 {
-    CDB_EXPECT_GT(pid, map_id);
+    CALICODB_EXPECT_GT(pid, map_id);
 
     // Account for the page LSN.
     return sizeof(Lsn) + (pid.value - map_id.value - 1) * kEntrySize;
@@ -1647,14 +1647,14 @@ static auto decode_entry(const char *data) -> PointerMap::Entry
 auto PointerMap::read_entry(Pager &pager, Id pid, Entry &out) -> Status
 {
     const auto mid = lookup(pager, pid);
-    CDB_EXPECT_GE(mid, kFirstMapId);
-    CDB_EXPECT_NE(mid, pid);
+    CALICODB_EXPECT_GE(mid, kFirstMapId);
+    CALICODB_EXPECT_NE(mid, pid);
 
     const auto offset = entry_offset(mid, pid);
-    CDB_EXPECT_LE(offset + kEntrySize, pager.page_size());
+    CALICODB_EXPECT_LE(offset + kEntrySize, pager.page_size());
 
     Page map;
-    CDB_TRY(pager.acquire(mid, map));
+    CALICODB_TRY(pager.acquire(mid, map));
     out = decode_entry(map.data() + offset);
     pager.release(std::move(map));
     return Status::ok();
@@ -1663,14 +1663,14 @@ auto PointerMap::read_entry(Pager &pager, Id pid, Entry &out) -> Status
 auto PointerMap::write_entry(Pager &pager, Id pid, Entry entry) -> Status
 {
     const auto mid = lookup(pager, pid);
-    CDB_EXPECT_GE(mid, kFirstMapId);
-    CDB_EXPECT_NE(mid, pid);
+    CALICODB_EXPECT_GE(mid, kFirstMapId);
+    CALICODB_EXPECT_NE(mid, pid);
 
     const auto offset = entry_offset(mid, pid);
-    CDB_EXPECT_LE(offset + kEntrySize, pager.page_size());
+    CALICODB_EXPECT_LE(offset + kEntrySize, pager.page_size());
 
     Page map;
-    CDB_TRY(pager.acquire(mid, map));
+    CALICODB_TRY(pager.acquire(mid, map));
     const auto [back_ptr, type] = decode_entry(map.data() + offset);
     if (entry.back_ptr != back_ptr || entry.type != type) {
         if (!map.is_writable()) {
@@ -1701,21 +1701,21 @@ auto NodeManager::allocate(Pager &pager, Freelist &freelist, Node &out, std::str
 {
     const auto fetch_unused_page = [&freelist, &pager](Page &page) {
         if (freelist.is_empty()) {
-            CDB_TRY(pager.allocate(page));
+            CALICODB_TRY(pager.allocate(page));
             // Since this is a fresh page from the end of the file, it could be a pointer map page. If so,
             // it is already blank, so just skip it and allocate another. It'll get filled in as the pages
             // following it are used.
             if (PointerMap::lookup(pager, page.id()) == page.id()) {
                 pager.release(std::move(page));
-                CDB_TRY(pager.allocate(page));
+                CALICODB_TRY(pager.allocate(page));
             }
             return Status::ok();
         } else {
             return freelist.pop(page);
         }
     };
-    CDB_TRY(fetch_unused_page(out.page));
-    CDB_EXPECT_NE(PointerMap::lookup(pager, out.page.id()), out.page.id());
+    CALICODB_TRY(fetch_unused_page(out.page));
+    CALICODB_EXPECT_NE(PointerMap::lookup(pager, out.page.id()), out.page.id());
 
     out.header.is_external = is_external;
     out.scratch = scratch.data();
@@ -1725,7 +1725,7 @@ auto NodeManager::allocate(Pager &pager, Freelist &freelist, Node &out, std::str
 
 auto NodeManager::acquire(Pager &pager, Id page_id, Node &out, std::string &scratch, bool upgrade) -> Status
 {
-    CDB_TRY(pager.acquire(page_id, out.page));
+    CALICODB_TRY(pager.acquire(page_id, out.page));
     out.scratch = scratch.data();
     out.header.read(out.page.data() + node_header_offset(out));
     setup_node(out);
@@ -1760,7 +1760,7 @@ auto OverflowList::read(Pager &pager, Id head_id, std::size_t offset, std::size_
 {
     while (payload_size != 0) {
         Page page;
-        CDB_TRY(pager.acquire(head_id, page));
+        CALICODB_TRY(pager.acquire(head_id, page));
         auto content = get_readable_content(page, page.size());
 
         if (offset) {
@@ -1802,7 +1802,7 @@ auto OverflowList::write(Pager &pager, Freelist &freelist, Id &out, const Slice 
                 s = pager.allocate(page);
             }
         }
-        CDB_TRY(s);
+        CALICODB_TRY(s);
 
         auto content_size = std::min(a.size() + second.size(), page.size() - kLinkContentOffset);
         auto content_data = page.mutate(kLinkContentOffset, content_size);
@@ -1825,7 +1825,7 @@ auto OverflowList::write(Pager &pager, Freelist &freelist, Id &out, const Slice 
         if (prev) {
             write_next_id(*prev, page.id());
             const PointerMap::Entry entry {prev->id(), PointerMap::kOverflowLink};
-            CDB_TRY(PointerMap::write_entry(pager, page.id(), entry));
+            CALICODB_TRY(PointerMap::write_entry(pager, page.id(), entry));
             pager.release(std::move(*prev));
         } else {
             head = page.id();
@@ -1846,7 +1846,7 @@ auto OverflowList::copy(Pager &pager, Freelist &freelist, Id overflow_id, std::s
     std::string scratch; // TODO: Copy page-by-page: no scratch is necessary.
     scratch.resize(size);
 
-    CDB_TRY(read(pager, overflow_id, 0, size, scratch.data()));
+    CALICODB_TRY(read(pager, overflow_id, 0, size, scratch.data()));
     return write(pager, freelist, out, scratch);
 }
 
@@ -1854,17 +1854,17 @@ auto OverflowList::erase(Pager &pager, Freelist &freelist, Id head_id) -> Status
 {
     while (!head_id.is_null()) {
         Page page;
-        CDB_TRY(pager.acquire(head_id, page));
+        CALICODB_TRY(pager.acquire(head_id, page));
         head_id = read_next_id(page);
         pager.upgrade(page);
-        CDB_TRY(freelist.push(std::move(page)));
+        CALICODB_TRY(freelist.push(std::move(page)));
     }
     return Status::ok();
 }
 
 auto PayloadManager::emplace(Pager &pager, Freelist &freelist, char *scratch, Node &node, const Slice &key, const Slice &value, std::size_t index) -> Status
 {
-    CDB_EXPECT_TRUE(node.header.is_external);
+    CALICODB_EXPECT_TRUE(node.header.is_external);
 
     auto k = key.size();
     auto v = value.size();
@@ -1878,14 +1878,14 @@ auto PayloadManager::emplace(Pager &pager, Freelist &freelist, char *scratch, No
         v = local_size - k;
     }
 
-    CDB_EXPECT_EQ(k + v, local_size);
+    CALICODB_EXPECT_EQ(k + v, local_size);
     auto total_size = local_size + varint_length(key.size()) + varint_length(value.size());
 
     Id overflow_id;
     if (has_remote) {
-        CDB_TRY(OverflowList::write(pager, freelist, overflow_id, key.range(k), value.range(v)));
+        CALICODB_TRY(OverflowList::write(pager, freelist, overflow_id, key.range(k), value.range(v)));
         PointerMap::Entry entry {node.page.id(), PointerMap::kOverflowHead};
-        CDB_TRY(PointerMap::write_entry(pager, overflow_id, entry));
+        CALICODB_TRY(PointerMap::write_entry(pager, overflow_id, entry));
         total_size += sizeof(overflow_id);
     }
 
@@ -1920,9 +1920,9 @@ auto PayloadManager::promote(Pager &pager, Freelist &freelist, char *scratch, Ce
     if (cell.key_size > cell.local_size) {
         // Part of the key is on an overflow page. No value is stored locally in this case, so the local size computation is still correct.
         Id overflow_id;
-        CDB_TRY(OverflowList::copy(pager, freelist, read_overflow_id(cell), cell.key_size - cell.local_size, overflow_id));
+        CALICODB_TRY(OverflowList::copy(pager, freelist, read_overflow_id(cell), cell.key_size - cell.local_size, overflow_id));
         PointerMap::Entry entry {parent_id, PointerMap::kOverflowHead};
-        CDB_TRY(PointerMap::write_entry(pager, overflow_id, entry));
+        CALICODB_TRY(PointerMap::write_entry(pager, overflow_id, entry));
         write_overflow_id(cell, overflow_id);
         cell.size += sizeof(Id);
         cell.has_remote = true;
@@ -1944,7 +1944,7 @@ auto PayloadManager::collect_key(Pager &pager, std::string &result, const Cell &
     }
     std::memcpy(result.data(), cell.key, cell.local_size);
 
-    CDB_TRY(OverflowList::read(
+    CALICODB_TRY(OverflowList::read(
         pager,
         read_overflow_id(cell),
         0,
@@ -1980,7 +1980,7 @@ auto PayloadManager::collect_value(Pager &pager, std::string &result, const Cell
         std::memcpy(result.data(), cell.key + cell.key_size, local_value_size);
     }
 
-    CDB_TRY(OverflowList::read(
+    CALICODB_TRY(OverflowList::read(
         pager,
         read_overflow_id(cell),
         remote_key_size,
@@ -2383,11 +2383,11 @@ auto CursorImpl::status() const -> Status
 
 auto CursorImpl::fetch_payload() -> Status
 {
-    CDB_EXPECT_EQ(m_key_size, 0);
-    CDB_EXPECT_EQ(m_value_size, 0);
+    CALICODB_EXPECT_EQ(m_key_size, 0);
+    CALICODB_EXPECT_EQ(m_value_size, 0);
 
     Node node;
-    CDB_TRY(m_tree->acquire(m_loc.pid, false, node));
+    CALICODB_TRY(m_tree->acquire(m_loc.pid, false, node));
 
     Slice key, value;
     auto cell = read_cell(node, m_loc.index);
@@ -2403,13 +2403,13 @@ auto CursorImpl::fetch_payload() -> Status
 
 auto CursorImpl::key() const -> Slice
 {
-    CDB_EXPECT_TRUE(is_valid());
+    CALICODB_EXPECT_TRUE(is_valid());
     return Slice {m_key}.truncate(m_key_size);
 }
 
 auto CursorImpl::value() const -> Slice
 {
-    CDB_EXPECT_TRUE(is_valid());
+    CALICODB_EXPECT_TRUE(is_valid());
     return Slice {m_value}.truncate(m_value_size);
 }
 
@@ -2453,7 +2453,7 @@ auto CursorImpl::seek_last() -> void
 
 auto CursorImpl::next() -> void
 {
-    CDB_EXPECT_TRUE(is_valid());
+    CALICODB_EXPECT_TRUE(is_valid());
     m_key_size = 0;
     m_value_size = 0;
 
@@ -2484,7 +2484,7 @@ auto CursorImpl::next() -> void
 
 auto CursorImpl::previous() -> void
 {
-    CDB_EXPECT_TRUE(is_valid());
+    CALICODB_EXPECT_TRUE(is_valid());
     m_key_size = 0;
     m_value_size = 0;
 
@@ -2517,7 +2517,7 @@ auto CursorImpl::previous() -> void
 auto CursorImpl::seek_to(Node node, std::size_t index) -> void
 {
     const auto &header = node.header;
-    CDB_EXPECT_TRUE(header.is_external);
+    CALICODB_EXPECT_TRUE(header.is_external);
 
     if (header.cell_count && index < header.cell_count) {
         m_loc.index = static_cast<PageSize>(index);
@@ -2553,7 +2553,7 @@ auto CursorInternal::make_cursor(Tree &tree) -> Cursor *
 
 auto CursorInternal::invalidate(const Cursor &cursor, Status status) -> void
 {
-    CDB_EXPECT_FALSE(status.is_ok());
+    CALICODB_EXPECT_FALSE(status.is_ok());
     reinterpret_cast<const CursorImpl &>(cursor).m_status = std::move(status);
 }
 

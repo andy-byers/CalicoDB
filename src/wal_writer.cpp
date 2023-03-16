@@ -12,28 +12,27 @@ WalWriter::WalWriter(Logger &file, std::string &tail)
     : m_tail {&tail},
       m_file {&file}
 {
-    for (std::size_t i {}; i <= kMaxRecordType; ++i) {
+    for (std::size_t i {}; i <= kNumRecordTypes; ++i) {
         const auto type = static_cast<char>(i);
         m_type_crc[i] = crc32c::Value(&type, 1);
     }
 }
 
-auto WalWriter::write(Lsn lsn, const Slice &payload) -> Status
+auto WalWriter::write(const Slice &payload) -> Status
 {
-    CDB_EXPECT_FALSE(payload.is_empty());
-    CDB_EXPECT_FALSE(lsn.is_null());
+    CALICODB_EXPECT_FALSE(payload.is_empty());
     auto rest = payload;
 
     while (!rest.is_empty()) {
         if (m_offset + WalRecordHeader::kSize >= m_tail->size()) {
             // Clear the rest of the tail buffer and append it to the log.
-            CDB_TRY(flush());
+            CALICODB_TRY(flush());
         }
         // There should always be enough room to write the header and 1 payload byte.
-        CDB_EXPECT_LT(m_offset + WalRecordHeader::kSize, m_tail->size());
+        CALICODB_EXPECT_LT(m_offset + WalRecordHeader::kSize, m_tail->size());
         const auto space_for_payload = m_tail->size() - m_offset - WalRecordHeader::kSize;
         const auto fragment_length = std::min(rest.size(), space_for_payload);
-        CDB_EXPECT_NE(fragment_length, 0);
+        CALICODB_EXPECT_NE(fragment_length, 0);
 
         WalRecordType type;
         const auto begin = rest.size() == payload.size();
@@ -59,7 +58,6 @@ auto WalWriter::write(Lsn lsn, const Slice &payload) -> Status
         m_offset += fragment_length;
 
         rest.advance(fragment_length);
-        m_last_lsn = lsn;
     }
     return Status::ok();
 }
@@ -76,16 +74,10 @@ auto WalWriter::flush() -> Status
 
     auto s = m_file->write(*m_tail);
     if (s.is_ok()) {
-        m_flushed_lsn = m_last_lsn;
         m_offset = 0;
         ++m_block;
     }
     return s;
-}
-
-auto WalWriter::flushed_lsn() const -> Lsn
-{
-    return m_flushed_lsn;
 }
 
 } // namespace calicodb

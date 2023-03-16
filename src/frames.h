@@ -41,8 +41,8 @@ public:
               Deleter {std::align_val_t {alignment}},
           }
     {
-        CDB_EXPECT_TRUE(is_power_of_two(alignment));
-        CDB_EXPECT_EQ(size % alignment, 0);
+        CALICODB_EXPECT_TRUE(is_power_of_two(alignment));
+        CALICODB_EXPECT_EQ(size % alignment, 0);
     }
 
     [[nodiscard]] auto get() -> char *
@@ -108,7 +108,7 @@ public:
 
     [[nodiscard]] auto get_frame(std::size_t index) const -> const Frame &
     {
-        CDB_EXPECT_LT(index, m_frames.size());
+        CALICODB_EXPECT_LT(index, m_frames.size());
         return m_frames[index];
     }
 

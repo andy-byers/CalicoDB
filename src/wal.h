@@ -43,15 +43,17 @@ public:
 
 private:
     explicit WriteAheadLog(const Parameters &param);
+    [[nodiscard]] auto next_segment_id() const -> Id;
     [[nodiscard]] auto close_writer() -> Status;
     [[nodiscard]] auto open_writer() -> Status;
     [[nodiscard]] auto log(const Slice &payload) -> Status;
 
     static constexpr std::size_t kSegmentCutoff {32};
 
-    mutable Lsn m_flushed_lsn;
+    std::map<Id, Lsn> m_segments;
+
+    Lsn m_flushed_lsn;
     Lsn m_last_lsn;
-    WalSet m_set;
     std::string m_prefix;
 
     Env *m_env {};
