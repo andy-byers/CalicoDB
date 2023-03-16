@@ -506,8 +506,8 @@ public:
         delete target();
     }
 
-    [[nodiscard]] auto new_editor(const std::string &filename, Editor *& out) -> Status;
-    [[nodiscard]] auto new_logger(const std::string &filename, Logger *& out) -> Status;
+    [[nodiscard]] auto new_editor(const std::string &filename, Editor *& out) -> Status override;
+    [[nodiscard]] auto new_logger(const std::string &filename, Logger *& out) -> Status override;
     
     auto register_database_contents(std::string database_contents) -> void
     {
