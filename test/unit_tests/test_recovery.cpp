@@ -650,11 +650,7 @@ public:
         const auto logs = get_logs();
         if (!logs.empty()) {
             const auto segment_name = encode_segment_name(kWalPrefix, logs.back());
-            const auto sync_size = env->wal_sync_size();
-            std::size_t file_size;
-            ASSERT_OK(env->file_size(segment_name, file_size));
-            std::cerr << segment_name << ": truncate to " << sync_size << '/' << file_size << '\n';
-            ASSERT_OK(env->resize_file(segment_name, sync_size));
+            ASSERT_OK(env->resize_file(segment_name, env->wal_sync_size()));
         }
     }
 
