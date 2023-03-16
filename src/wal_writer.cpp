@@ -12,16 +12,15 @@ WalWriter::WalWriter(Logger &file, std::string &tail)
     : m_tail {&tail},
       m_file {&file}
 {
-    for (std::size_t i {}; i <= kMaxRecordType; ++i) {
+    for (std::size_t i {}; i <= kNumRecordTypes; ++i) {
         const auto type = static_cast<char>(i);
         m_type_crc[i] = crc32c::Value(&type, 1);
     }
 }
 
-auto WalWriter::write(Lsn lsn, const Slice &payload) -> Status
+auto WalWriter::write(const Slice &payload) -> Status
 {
     CALICODB_EXPECT_FALSE(payload.is_empty());
-    CALICODB_EXPECT_FALSE(lsn.is_null());
     auto rest = payload;
 
     while (!rest.is_empty()) {
@@ -59,7 +58,6 @@ auto WalWriter::write(Lsn lsn, const Slice &payload) -> Status
         m_offset += fragment_length;
 
         rest.advance(fragment_length);
-        m_last_lsn = lsn;
     }
     return Status::ok();
 }
@@ -76,19 +74,10 @@ auto WalWriter::flush() -> Status
 
     auto s = m_file->write(*m_tail);
     if (s.is_ok()) {
-        s = m_file->sync();
-        if (s.is_ok()) {
-            m_flushed_lsn = m_last_lsn;
-            m_offset = 0;
-            ++m_block;
-        }
+        m_offset = 0;
+        ++m_block;
     }
     return s;
-}
-
-auto WalWriter::flushed_lsn() const -> Lsn
-{
-    return m_flushed_lsn;
 }
 
 } // namespace calicodb

@@ -82,33 +82,37 @@ auto Pager::page_size() const -> std::size_t
 
 auto Pager::pin_frame(Id pid) -> Status
 {
-    if (auto s = do_pin_frame(pid); s.is_not_found()) {
-        m_info_log->logv("failed to pin frame: %s", s.to_string().data());
+    bool pinned;
+    // This first do_pin_frame() can fail if the WAL needs to be flushed.
+    auto s = do_pin_frame(pid, &pinned);
+    if (s.is_ok() && !pinned) {
         CALICODB_TRY(m_wal->flush());
-        return do_pin_frame(pid);
-    } else {
-        return s;
+        // This one should only fail due to an actual error.
+        return do_pin_frame(pid, nullptr);
     }
+    return s;
 }
 
-auto Pager::do_pin_frame(Id pid) -> Status
+auto Pager::do_pin_frame(Id page_id, bool *pinned) -> Status
 {
-    CALICODB_EXPECT_FALSE(m_cache.contains(pid));
+    CALICODB_EXPECT_FALSE(m_cache.contains(page_id));
+    if (pinned != nullptr) {
+        *pinned = false;
+    }
 
     if (!m_frames.available()) {
         if (!make_frame_available()) {
-            CALICODB_TRY(m_state->status);
-            m_info_log->logv("out of frames: flushing wal");
-            CALICODB_TRY(m_wal->flush());
-            return Status::not_found("out of frames");
+            return m_state->status;
         }
     }
 
-    std::size_t fid;
-    CALICODB_TRY(m_frames.pin(pid, fid));
-
+    std::size_t frame_index;
+    CALICODB_TRY(m_frames.pin(page_id, frame_index));
+    if (pinned != nullptr) {
+        *pinned = true;
+    }
     // Associate the page ID with the frame index we got from the framer.
-    m_cache.put(pid, {fid});
+    m_cache.put(page_id, {frame_index});
     return Status::ok();
 }
 
@@ -120,9 +124,14 @@ auto Pager::clean_page(PageCache::Entry &entry) -> DirtyTable::Iterator
     return m_dirty.remove(token);
 }
 
-auto Pager::sync() -> Status
+auto Pager::checkpoint() -> Status
 {
-    return m_frames.sync();
+    CALICODB_TRY(m_frames.sync());
+
+    // Oldest LSN still needed for a cached page. fsync() was just called, so everything
+    // before this should be on disk.
+    m_recovery_lsn = m_dirty.recovery_lsn();
+    return Status::ok();
 }
 
 auto Pager::flush(Lsn target_lsn) -> Status
@@ -161,7 +170,7 @@ auto Pager::flush(Lsn target_lsn) -> Status
 
 auto Pager::recovery_lsn() const -> Lsn
 {
-    return m_dirty.recovery_lsn();
+    return m_recovery_lsn;
 }
 
 auto Pager::make_frame_available() -> bool
@@ -291,8 +300,7 @@ auto Pager::upgrade(Page &page, int important) -> void
             auto s = m_wal->log_image(page.id(), image, nullptr);
 
             if (s.is_ok()) {
-                const auto recovery_lsn = m_dirty.recovery_lsn();
-                s = m_wal->cleanup(std::min(recovery_lsn, m_state->commit_lsn));
+                s = m_wal->cleanup(m_recovery_lsn);
             }
             if (!s.is_ok()) {
                 SET_STATUS(s);

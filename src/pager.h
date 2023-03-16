@@ -45,7 +45,7 @@ public:
     [[nodiscard]] auto bytes_written() const -> std::size_t;
     [[nodiscard]] auto truncate(std::size_t page_count) -> Status;
     [[nodiscard]] auto flush(Lsn target_lsn = Lsn::null()) -> Status;
-    [[nodiscard]] auto sync() -> Status;
+    [[nodiscard]] auto checkpoint() -> Status;
     [[nodiscard]] auto allocate(Page &page) -> Status;
     [[nodiscard]] auto acquire(Id page_id, Page &page) -> Status;
     auto upgrade(Page &page, int important = -1) -> void;
@@ -56,7 +56,7 @@ public:
 private:
     explicit Pager(const Parameters &param, Editor &file, AlignedBuffer buffer);
     [[nodiscard]] auto pin_frame(Id pid) -> Status;
-    [[nodiscard]] auto do_pin_frame(Id pid) -> Status;
+    [[nodiscard]] auto do_pin_frame(Id pid, bool *pinned) -> Status;
     [[nodiscard]] auto make_frame_available() -> bool;
     auto clean_page(PageCache::Entry &entry) -> DirtyTable::Iterator;
 
@@ -68,6 +68,7 @@ private:
     Env *m_env {};
     InfoLogger *m_info_log {};
     DBState *m_state {};
+    Lsn m_recovery_lsn;
 };
 
 } // namespace calicodb

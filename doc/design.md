@@ -29,7 +29,6 @@ It is used to store a name-to-root mapping for the other trees, if any exist.
 Additional trees will be rooted on pages after the second database page, which is always a pointer map page (see [Pointer Map](#pointer-map)).
 Trees are of variable order, so splits are performed when nodes (pages that are part of a tree) have run out of physical space.
 The implementation is pretty straightforward: we basically do as little as possible to make sure that the tree ordering remains correct.
-This results in a less-balanced tree, but seems to be good for write performance.
 
 #### Fixing Overflows
 As previously mentioned, tree nodes are split when they run out of room.
@@ -76,8 +75,10 @@ The `page_lsn` (per page) is the LSN of the last WAL record generated for a give
 This is the value that is compared with the WAL's `flushed_lsn` to make sure the page is safe to write out.
 The `record_lsn` (also per page) is the last `page_lsn` value that we already have on disk.
 It is saved (in-memory only) when the page is first read into memory, and each time the page is written back.
-Then, the lowest `record_lsn` is tracked in the pager's `recovery_lsn`.
 The `recovery_lsn` represents the oldest WAL record that we still need.
-It is reported back to the WAL intermittently so that obsolete segment files can be removed.
+Each time the database file is synchronized, the `recovery_lsn` is updated to match the oldest `record_lsn` for a dirty cached page.
+Every change before this point must be safely on disk.
+Intermittently, the `recovery_lsn` is checked against the WAL segments to determine if any can be removed.
 Finally, the `checkpoint_lsn` is the LSN of the most-recent commit record (the special delta record mentioned in [WAL](#wal)).
 This value is saved in the database file header and is used to determine how the logical contents of the database should look.
+The database must ensure that there is always enough information in the WAL to revert to the most-recent checkpoint.

@@ -115,7 +115,7 @@ public:
     [[nodiscard]] auto TEST_wal() const -> const WriteAheadLog &;
     [[nodiscard]] auto TEST_pager() const -> const Pager &;
     [[nodiscard]] auto TEST_tables() const -> const TableSet &;
-    [[nodiscard]] auto TEST_state() const -> DBState;
+    [[nodiscard]] auto TEST_state() const -> const DBState &;
     auto TEST_validate() const -> void;
 
 private:

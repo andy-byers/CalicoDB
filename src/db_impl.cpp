@@ -24,6 +24,11 @@ static auto get_table_id(const Table &table) -> Id
     return reinterpret_cast<const TableImpl &>(table).id();
 }
 
+static auto check_header_crc(const FileHeader &header) -> bool
+{
+    return crc32c::Unmask(header.header_crc) == header.compute_crc();
+}
+
 Table::~Table() = default;
 
 TableImpl::TableImpl(const TableOptions &options, std::string name, Id table_id)
@@ -127,7 +132,7 @@ auto setup_db(const std::string &path, Env &env, const Options &options, FileHea
         if (header.magic_code != FileHeader::kMagicCode) {
             return Status::invalid_argument("file is not a CalicoDB database");
         }
-        if (crc32c::Unmask(header.header_crc) != header.compute_crc()) {
+        if (!check_header_crc(header)) {
             return Status::corruption("database is corrupted");
         }
     } else if (s.is_not_found()) {
@@ -216,6 +221,7 @@ auto DBImpl::open(const Options &sanitized) -> Status
         state.write(db_root.mutate(0, FileHeader::kSize));
         m_pager->release(std::move(db_root));
         CALICODB_TRY(m_pager->flush());
+        CALICODB_TRY(m_pager->checkpoint());
     }
     CALICODB_TRY(m_wal->start_writing());
 
@@ -498,7 +504,7 @@ auto DBImpl::TEST_tables() const -> const TableSet &
     return m_tables;
 }
 
-auto DBImpl::TEST_state() const -> DBState
+auto DBImpl::TEST_state() const -> const DBState &
 {
     return m_state;
 }
@@ -529,7 +535,7 @@ auto DBImpl::checkpoint() -> Status
 
 auto DBImpl::do_checkpoint() -> Status
 {
-    CALICODB_TRY(m_pager->sync());
+    CALICODB_TRY(m_pager->checkpoint());
 
     Page db_root;
     CALICODB_TRY(m_pager->acquire(Id::root(), db_root));
@@ -557,10 +563,9 @@ auto DBImpl::load_file_header() -> Status
 
     FileHeader header;
     header.read(root.data());
-    const auto expected_crc = crc32c::Unmask(header.header_crc);
-    const auto computed_crc = header.compute_crc();
-    if (expected_crc != computed_crc) {
-        m_info_log->logv("file header crc mismatch (expected %u but computed %u)", expected_crc, computed_crc);
+    if (!check_header_crc(header)) {
+        m_info_log->logv("file header crc mismatch (expected %u but computed %u)",
+                         crc32c::Unmask(header.header_crc), header.compute_crc());
         return Status::corruption("crc mismatch");
     }
     // These values should be the same, provided that the WAL contents were correct.
@@ -762,25 +767,25 @@ static auto is_commit(const DeltaDescriptor &deltas)
 
 auto DBImpl::recovery_phase_1() -> Status
 {
-    const auto &set = m_wal->m_set;
+    const auto &set = m_wal->m_segments;
 
-    if (set.is_empty()) {
+    if (set.empty()) {
         return Status::ok();
     }
 
     std::string tail(wal_block_size(m_pager->page_size()), '\0');
     std::unique_ptr<Reader> file;
-    auto segment = set.first();
+    auto itr = begin(set);
     auto commit_lsn = m_state.commit_lsn;
-    auto commit_segment = segment;
+    auto commit_itr = itr;
     Lsn last_lsn;
 
-    const auto translate_status = [&segment, &set, this](auto s, Lsn lsn) {
+    const auto translate_status = [&itr, &set, this](auto s, Lsn lsn) {
         CALICODB_EXPECT_FALSE(s.is_ok());
         if (s.is_corruption()) {
             // Allow corruption/incomplete records on the last segment, past the
             // most-recent successful commit.
-            if (segment == set.last() && lsn >= m_state.commit_lsn) {
+            if (itr == prev(end(set)) && lsn >= m_state.commit_lsn) {
                 return Status::ok();
             }
         }
@@ -793,7 +798,7 @@ auto DBImpl::recovery_phase_1() -> Status
             const auto deltas = std::get<DeltaDescriptor>(decoded);
             if (is_commit(deltas)) {
                 commit_lsn = deltas.lsn;
-                commit_segment = segment;
+                commit_itr = itr;
             }
             // WARNING: Applying these updates can cause the in-memory file header variables to be incorrect. This
             // must be fixed by the caller after this method returns.
@@ -832,7 +837,7 @@ auto DBImpl::recovery_phase_1() -> Status
     };
 
     const auto roll = [&](const auto &action) {
-        CALICODB_TRY(open_wal_reader(segment, file));
+        CALICODB_TRY(open_wal_reader(itr->first, file));
         WalReader reader {*file, tail};
 
         for (;;) {
@@ -861,15 +866,12 @@ auto DBImpl::recovery_phase_1() -> Status
 
     // Roll forward, applying missing updates until we reach the end. The final
     // segment may contain a partial/corrupted record.
-    for (;; segment = set.id_after(segment)) {
+    for (; itr != end(set); ++itr) {
         CALICODB_TRY(roll(redo));
-        if (segment == set.last()) {
-            break;
-        }
     }
 
     // Didn't make it to the end of the WAL.
-    if (segment != set.last()) {
+    if (itr != end(set)) {
         return Status::corruption("wal could not be read to the end");
     }
 
@@ -886,8 +888,8 @@ auto DBImpl::recovery_phase_1() -> Status
     // Roll backward, reverting updates until we reach the most-recent commit. We
     // are able to read the log forward, since the full images are disjoint.
     // Again, the last segment we read may contain a partial/corrupted record.
-    segment = commit_segment;
-    for (; !segment.is_null(); segment = set.id_after(segment)) {
+    itr = commit_itr;
+    for (; itr != end(set); ++itr) {
         CALICODB_TRY(roll(undo));
     }
     return Status::ok();
@@ -895,35 +897,17 @@ auto DBImpl::recovery_phase_1() -> Status
 
 auto DBImpl::recovery_phase_2() -> Status
 {
-    auto &set = m_wal->m_set;
+    auto &set = m_wal->m_segments;
     // Pager needs the updated state to determine the page count.
-    Page page;
-    CALICODB_TRY(m_pager->acquire(Id::root(), page));
-    FileHeader header;
-    header.read(page.data());
-    m_pager->load_state(header);
-    m_pager->release(std::move(page));
-
-    // TODO: This is too expensive for large databases. Look into a WAL index?
-    // Make sure we aren't missing any WAL records.
-    // for (auto id = Id::root(); id.value <= pager->page_count(); id.value++)
-    // {
-    //    Calico_Try(pager->acquire(Id::root(), page));
-    //    const auto lsn = read_page_lsn(page);
-    //    pager->release(std::move(page));
-    //
-    //    if (lsn > *m_state.commit_lsn) {
-    //        return Status::corruption("missing wal updates");
-    //    }
-    //}
+    CALICODB_TRY(load_file_header());
 
     // Make sure all changes have made it to disk, then remove WAL segments from
     // the right.
     CALICODB_TRY(m_pager->flush());
-    for (auto id = set.last(); !id.is_null(); id = set.id_before(id)) {
-        CALICODB_TRY(m_env->remove_file(encode_segment_name(m_wal->m_prefix, id)));
+    for (auto itr = rbegin(set); itr != rend(set); ++itr) {
+        CALICODB_TRY(m_env->remove_file(encode_segment_name(m_wal->m_prefix, itr->first)));
     }
-    set.remove_after(Id::null());
+    set.clear();
 
     m_wal->m_last_lsn = m_state.commit_lsn;
     m_wal->m_flushed_lsn = m_state.commit_lsn;
@@ -931,7 +915,7 @@ auto DBImpl::recovery_phase_2() -> Status
     // Make sure the file size matches the header page count, which should be
     // correct if we made it this far.
     CALICODB_TRY(m_pager->truncate(m_pager->page_count()));
-    return m_pager->sync();
+    return m_pager->checkpoint();
 }
 
 auto DBImpl::open_wal_reader(Id segment, std::unique_ptr<Reader> &out) -> Status

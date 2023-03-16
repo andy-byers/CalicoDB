@@ -23,7 +23,7 @@ enum WalPayloadType : char {
     kDeltaPayload,
     kImagePayload,
     kVacuumPayload,
-    kMaxPayloadType,
+    kNumPayloadTypes,
 };
 
 enum WalRecordType : char {
@@ -32,7 +32,7 @@ enum WalRecordType : char {
     kFirstRecord,
     kMiddleRecord,
     kLastRecord,
-    kMaxRecordType,
+    kNumRecordTypes,
 };
 
 // WAL record format (based off RocksDB):
@@ -140,89 +140,6 @@ using PayloadDescriptor = std::variant<
 [[nodiscard]] auto encode_image_payload(Lsn lsn, Id page_id, const Slice &image, char *buffer) -> Slice;
 [[nodiscard]] auto encode_vacuum_payload(Lsn lsn, bool is_start, char *buffer) -> Slice;
 
-// Stores a collection of WAL segment descriptors and caches their first LSNs.
-class WalSet final
-{
-public:
-    auto add_segment(Id id) -> void
-    {
-        m_segments.emplace(id, Lsn::null());
-    }
-
-    [[nodiscard]] auto first_lsn(Id id) const -> Lsn
-    {
-        const auto itr = m_segments.find(id);
-        if (itr == end(m_segments)) {
-            return Lsn::null();
-        }
-
-        return itr->second;
-    }
-
-    auto set_first_lsn(Id id, Lsn lsn) -> void
-    {
-        auto itr = m_segments.find(id);
-        CALICODB_EXPECT_NE(itr, end(m_segments));
-        itr->second = lsn;
-    }
-
-    [[nodiscard]] auto is_empty() const -> bool
-    {
-        return m_segments.empty();
-    }
-
-    [[nodiscard]] auto size() const -> std::size_t
-    {
-        return m_segments.size();
-    }
-
-    [[nodiscard]] auto first() const -> Id
-    {
-        return m_segments.empty() ? Id::null() : cbegin(m_segments)->first;
-    }
-
-    [[nodiscard]] auto last() const -> Id
-    {
-        return m_segments.empty() ? Id::null() : crbegin(m_segments)->first;
-    }
-
-    [[nodiscard]] auto id_before(Id id) const -> Id
-    {
-        if (m_segments.empty()) {
-            return Id::null();
-        }
-
-        auto itr = m_segments.lower_bound(id);
-        if (itr == cbegin(m_segments)) {
-            return Id::null();
-        }
-        return prev(itr)->first;
-    }
-
-    [[nodiscard]] auto id_after(Id id) const -> Id
-    {
-        auto itr = m_segments.upper_bound(id);
-        return itr != cend(m_segments) ? itr->first : Id::null();
-    }
-
-    auto remove_before(Id id) -> void
-    {
-        // Removes segments in [<begin>, page_id).
-        auto itr = m_segments.lower_bound(id);
-        m_segments.erase(cbegin(m_segments), itr);
-    }
-
-    auto remove_after(Id id) -> void
-    {
-        // Removes segments in (page_id, <end>).
-        auto itr = m_segments.upper_bound(id);
-        m_segments.erase(itr, cend(m_segments));
-    }
-
-private:
-    std::map<Id, Lsn> m_segments;
-};
-
 static constexpr std::size_t kWalBlockScale {4};
 
 [[nodiscard]] inline constexpr auto wal_block_size(std::size_t page_size) -> std::size_t
@@ -259,15 +176,15 @@ static constexpr std::size_t kWalBlockScale {4};
     return prefix.to_string() + std::to_string(id.value);
 }
 
-[[nodiscard]] inline auto read_first_lsn(Env &env, const std::string &prefix, Id id, WalSet &set, Id &out) -> Status
+template<class Itr>
+[[nodiscard]] inline auto cache_first_lsn(Env &env, const std::string &prefix, Itr &itr) -> Status
 {
-    if (auto lsn = set.first_lsn(id); !lsn.is_null()) {
-        out = lsn;
+    if (auto lsn = itr->second; !lsn.is_null()) {
         return Status::ok();
     }
 
     Reader *temp;
-    CALICODB_TRY(env.new_reader(encode_segment_name(prefix, id), temp));
+    CALICODB_TRY(env.new_reader(encode_segment_name(prefix, itr->first), temp));
 
     char buffer[sizeof(Lsn)];
     std::unique_ptr<Reader> file {temp};
@@ -288,8 +205,7 @@ static constexpr std::size_t kWalBlockScale {4};
         return Status::corruption("lsn is null");
     }
 
-    set.set_first_lsn(id, lsn);
-    out = lsn;
+    itr->second = lsn;
     return Status::ok();
 }
 

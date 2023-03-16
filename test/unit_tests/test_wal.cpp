@@ -162,114 +162,6 @@ TEST_F(WalPayloadTests, VacuumPayloadEncoding)
     ASSERT_TRUE(descriptor.is_start);
 }
 
-[[nodiscard]] auto get_ids(const WalSet &c)
-{
-    std::vector<Id> ids;
-    for (Id id;;) {
-        id = c.id_after(id);
-        if (id.is_null()) {
-            break;
-        }
-        ids.emplace_back(id);
-    }
-    return ids;
-}
-
-class WalSetTests : public testing::Test
-{
-public:
-    auto add_segments(std::size_t n)
-    {
-        for (std::size_t i {}; i < n; ++i) {
-            auto id = Id::from_index(i);
-            set.add_segment(id);
-        }
-        ASSERT_EQ(set.last(), Id::from_index(n - 1));
-    }
-
-    WalSet set;
-};
-
-TEST_F(WalSetTests, NullMarksEnd)
-{
-    ASSERT_TRUE(set.id_before(Id::null()).is_null());
-    ASSERT_TRUE(set.id_after(Id::null()).is_null());
-}
-
-TEST_F(WalSetTests, NewCollectionState)
-{
-    ASSERT_TRUE(set.last().is_null());
-}
-
-TEST_F(WalSetTests, AddSegment)
-{
-    set.add_segment(Id {1});
-    ASSERT_EQ(set.last().value, 1);
-}
-
-TEST_F(WalSetTests, RecordsMostRecentId)
-{
-    add_segments(20);
-    ASSERT_EQ(set.last(), Id::from_index(19));
-}
-
-template <class Itr>
-[[nodiscard]] auto contains_n_consecutive_segments(const Itr &begin, const Itr &end, Id id, std::size_t n)
-{
-    return std::distance(begin, end) == std::ptrdiff_t(n) && std::all_of(begin, end, [&id](auto current) {
-               return current.value == id.value++;
-           });
-}
-
-TEST_F(WalSetTests, RecordsSegmentInfoCorrectly)
-{
-    add_segments(20);
-
-    const auto ids = get_ids(set);
-    ASSERT_EQ(ids.size(), 20);
-
-    const auto result = get_ids(set);
-    ASSERT_TRUE(contains_n_consecutive_segments(cbegin(result), cend(result), Id {1}, 20));
-}
-
-TEST_F(WalSetTests, RemovesAllSegmentsFromLeft)
-{
-    add_segments(20);
-    // Id::from_index(20) is one past the end.
-    set.remove_before(Id::from_index(20));
-
-    const auto ids = get_ids(set);
-    ASSERT_TRUE(ids.empty());
-}
-
-TEST_F(WalSetTests, RemovesAllSegmentsFromRight)
-{
-    add_segments(20);
-    // Id::null() is one before the beginning.
-    set.remove_after(Id::null());
-
-    const auto ids = get_ids(set);
-    ASSERT_TRUE(ids.empty());
-}
-
-TEST_F(WalSetTests, RemovesSomeSegmentsFromLeft)
-{
-    add_segments(20);
-    set.remove_before(Id::from_index(10));
-
-    const auto ids = get_ids(set);
-    ASSERT_TRUE(contains_n_consecutive_segments(cbegin(ids), cend(ids), Id::from_index(10), 10));
-}
-
-TEST_F(WalSetTests, RemovesSomeSegmentsFromRight)
-{
-    add_segments(20);
-    set.remove_after(Id::from_index(9));
-
-    const auto ids = get_ids(set);
-    ASSERT_TRUE(contains_n_consecutive_segments(cbegin(ids), cend(ids), Id::from_index(0), 10));
-}
-
 class WalComponentTests
     : public InMemoryTest,
       public testing::Test
@@ -315,7 +207,7 @@ public:
         std::string buffer(sizeof(lsn), '\0');
         put_u64(buffer.data(), lsn.value);
         buffer.append(data.to_string());
-        return writer.write(lsn, buffer);
+        return writer.write(buffer);
     }
 
     [[nodiscard]] static auto wal_read_with_status(WalReader &reader, std::string &out, Lsn *lsn = nullptr) -> Status
@@ -347,12 +239,9 @@ private:
 TEST_F(WalComponentTests, ManualFlush)
 {
     auto writer = make_writer(Id::root());
-    ASSERT_EQ(writer.flushed_lsn(), Lsn::null());
     ASSERT_OK(wal_write(writer, Lsn {1}, "hello"));
     ASSERT_OK(wal_write(writer, Lsn {2}, "world"));
-    ASSERT_EQ(writer.flushed_lsn(), Lsn::null());
     ASSERT_OK(writer.flush());
-    ASSERT_EQ(writer.flushed_lsn(), Lsn {2});
 }
 
 TEST_F(WalComponentTests, AutomaticFlush)
@@ -363,8 +252,6 @@ TEST_F(WalComponentTests, AutomaticFlush)
     for (; lsn.value < kPageSize * 5; ++lsn.value) {
         ASSERT_OK(wal_write(writer, lsn, "=^.^="));
     }
-    ASSERT_GT(writer.flushed_lsn(), Lsn::null());
-    ASSERT_LE(writer.flushed_lsn(), lsn);
 }
 
 TEST_F(WalComponentTests, HandlesRecordsWithinBlock)
@@ -472,52 +359,52 @@ TEST_F(WalComponentTests, ReadsFirstLsn)
     ASSERT_OK(wal_write(writer, Lsn {42}, "./test"));
     ASSERT_OK(writer.flush());
 
-    WalSet set;
-    set.add_segment(Id::root());
+    std::map<Id, Lsn> set;
+    set.insert({Id::root(), Lsn::null()});
+    auto itr = begin(set);
 
-    Lsn first_lsn;
-    ASSERT_OK(read_first_lsn(*env, kWalPrefix, Id::root(), set, first_lsn));
-    ASSERT_EQ(first_lsn, Lsn {42});
-    ASSERT_EQ(set.first_lsn(Id::root()), Lsn {42});
+    ASSERT_OK(cache_first_lsn(*env, kWalPrefix, itr));
+    ASSERT_EQ(itr->second, Lsn {42});
 }
 
 TEST_F(WalComponentTests, FailureToReadFirstLsn)
 {
-    WalSet set;
-    set.add_segment(Id::root());
+    std::map<Id, Lsn> set;
+    set.insert({Id::root(), Lsn::null()});
+    auto itr = begin(set);
 
     // File does not exist in env, so the reader can't be opened.
     Lsn first_lsn;
-    ASSERT_TRUE(read_first_lsn(*env, kWalPrefix, Id::root(), set, first_lsn).is_not_found());
+    ASSERT_TRUE(cache_first_lsn(*env, kWalPrefix, itr).is_not_found());
 
     // File exists, but is empty.
     Logger *logger;
     ASSERT_OK(env->new_logger(encode_segment_name(kWalPrefix, Id::root()), logger));
-    ASSERT_TRUE(read_first_lsn(*env, kWalPrefix, Id::root(), set, first_lsn).is_corruption());
+    ASSERT_TRUE(cache_first_lsn(*env, kWalPrefix, itr).is_corruption());
 
     // File is too small to read the LSN.
     std::string buffer(WalRecordHeader::kSize + 3, '\0');
     ASSERT_OK(logger->write(buffer));
-    ASSERT_TRUE(read_first_lsn(*env, kWalPrefix, Id::root(), set, first_lsn).is_corruption());
+    ASSERT_TRUE(cache_first_lsn(*env, kWalPrefix, itr).is_corruption());
 
     // LSN is NULL.
     buffer.resize(wal_block_size(kPageSize) - buffer.size());
     ASSERT_OK(logger->write(buffer));
-    ASSERT_TRUE(read_first_lsn(*env, kWalPrefix, Id::root(), set, first_lsn).is_corruption());
+    ASSERT_TRUE(cache_first_lsn(*env, kWalPrefix, itr).is_corruption());
 
     delete logger;
 }
 
 TEST_F(WalComponentTests, PrefersToGetLsnFromCache)
 {
-    WalSet set;
-    set.add_segment(Id::root());
-    set.set_first_lsn(Id::root(), Lsn {42});
+    std::map<Id, Lsn> set;
+    set.insert({Id::root(), Lsn::null()});
+    auto itr = begin(set);
+    itr->second = Lsn {42};
 
     // File doesn't exist, but the LSN is cached.
-    Lsn first_lsn;
-    ASSERT_OK(read_first_lsn(*env, kWalPrefix, Id::root(), set, first_lsn));
-    ASSERT_EQ(first_lsn, Lsn {42});
+    ASSERT_OK(cache_first_lsn(*env, kWalPrefix, itr));
+    ASSERT_EQ(itr->second, Lsn {42});
 }
 
 TEST_F(WalComponentTests, HandlesRecordsAcrossSparseBlocks)
@@ -564,8 +451,6 @@ TEST_F(WalComponentTests, Corruption)
     for (std::size_t i {1}; i < kPageSize * 2; ++i) {
         ASSERT_OK(wal_write(writer, Lsn {i}, tools::integral_key(i)));
     }
-    ASSERT_LT(writer.flushed_lsn(), Lsn {kPageSize * 2 - 1});
-
     auto reader = make_reader(Id::root());
     for (std::size_t i {1}; i < kPageSize * 2; ++i) {
         std::string data;

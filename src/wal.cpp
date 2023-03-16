@@ -44,7 +44,7 @@ auto WriteAheadLog::open(const Parameters &param, WriteAheadLog **out) -> Status
 
     // Keep track of the segment files.
     for (const auto &id : segments) {
-        wal->m_set.add_segment(id);
+        wal->m_segments.insert({id, Lsn::null()});
     }
     *out = wal;
     return Status::ok();
@@ -66,12 +66,6 @@ auto WriteAheadLog::start_writing() -> Status
 
 auto WriteAheadLog::flushed_lsn() const -> Lsn
 {
-    if (m_writer) {
-        const auto lsn = m_writer->flushed_lsn();
-        if (!lsn.is_null()) {
-            m_flushed_lsn = lsn;
-        }
-    }
     return m_flushed_lsn;
 }
 
@@ -87,8 +81,8 @@ auto WriteAheadLog::log(const Slice &payload) -> Status
     }
     m_bytes_written += payload.size();
 
-    CALICODB_TRY(m_writer->write(m_last_lsn, payload));
-    if (m_writer->block_count() >= kSegmentCutoff << m_set.size()) {
+    CALICODB_TRY(m_writer->write(payload));
+    if (m_writer->block_count() >= kSegmentCutoff << m_segments.size()) {
         CALICODB_TRY(close_writer());
         return open_writer();
     }
@@ -130,42 +124,42 @@ auto WriteAheadLog::flush() -> Status
     if (m_writer == nullptr) {
         return Status::ok();
     }
-    return m_writer->flush();
+    CALICODB_TRY(m_writer->flush());
+    CALICODB_TRY(m_file->sync());
+
+    // Only update the "flushed LSN" when the file has been synchronized. The
+    // writer will need to flush intermittently to make more room in the tail
+    // buffer, but no fsync() calls are issued until this method.
+    m_flushed_lsn = m_last_lsn;
+    return Status::ok();
 }
 
 auto WriteAheadLog::cleanup(Lsn recovery_lsn) -> Status
 {
-    if (m_set.size() <= 1) {
-        return Status::ok();
-    }
-    for (;;) {
-        const auto id = m_set.first();
-        if (id.is_null()) {
+    for (auto prev = begin(m_segments);;) {
+        if (prev == end(m_segments)) {
             return Status::ok();
         }
-        const auto next_id = m_set.id_after(id);
-        if (next_id.is_null()) {
+        auto next = prev;
+        if (++next == end(m_segments)) {
             return Status::ok();
         }
-
-        Lsn lsn;
-        auto s = read_first_lsn(*m_env, m_prefix, next_id, m_set, lsn);
+        auto s = cache_first_lsn(*m_env, m_prefix, next);
         if (!s.is_ok() && !s.is_not_found()) {
             return s;
         }
 
-        if (lsn > recovery_lsn) {
+        if (next->second > recovery_lsn) {
             return Status::ok();
         }
-        CALICODB_TRY(m_env->remove_file(encode_segment_name(m_prefix, id)));
-        m_set.remove_before(next_id);
+        CALICODB_TRY(m_env->remove_file(encode_segment_name(m_prefix, prev->first)));
+        prev = m_segments.erase(prev);
     }
 }
 
 auto WriteAheadLog::close_writer() -> Status
 {
-    CALICODB_TRY(m_writer->flush());
-    m_flushed_lsn = m_writer->flushed_lsn();
+    CALICODB_TRY(flush());
     const auto written = m_writer->block_count() != 0;
 
     delete m_file;
@@ -173,11 +167,9 @@ auto WriteAheadLog::close_writer() -> Status
     m_file = nullptr;
     m_writer = nullptr;
 
-    auto id = m_set.last();
-    ++id.value;
-
+    const auto id = next_segment_id();
     if (written) {
-        m_set.add_segment(id);
+        m_segments.insert({id, Lsn::null()});
     } else {
         CALICODB_TRY(m_env->remove_file(encode_segment_name(m_prefix, id)));
     }
@@ -186,14 +178,21 @@ auto WriteAheadLog::close_writer() -> Status
 
 auto WriteAheadLog::open_writer() -> Status
 {
-    // Writer is always opened on a new segment file.
-    auto id = m_set.last();
-    ++id.value;
-
-    // TODO: Should we fsync() the containing directory here? This is a new file.
+    const auto id = next_segment_id();
     CALICODB_TRY(m_env->new_logger(encode_segment_name(m_prefix, id), m_file));
     m_writer = new WalWriter {*m_file, m_tail_buffer};
     return Status::ok();
+}
+
+auto WriteAheadLog::next_segment_id() const -> Id
+{
+    auto id = Id::null();
+    auto itr = rbegin(m_segments);
+    if (itr != rend(m_segments)) {
+        id = itr->first;
+    }
+    ++id.value;
+    return id;
 }
 
 } // namespace calicodb
