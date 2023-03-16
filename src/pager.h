@@ -40,7 +40,7 @@ public:
     [[nodiscard]] static auto open(const Parameters &param, Pager **out) -> Status;
     [[nodiscard]] auto page_count() const -> std::size_t;
     [[nodiscard]] auto page_size() const -> std::size_t;
-    [[nodiscard]] auto recovery_lsn() -> Id;
+    [[nodiscard]] auto recovery_lsn() const -> Lsn;
     [[nodiscard]] auto bytes_read() const -> std::size_t;
     [[nodiscard]] auto bytes_written() const -> std::size_t;
     [[nodiscard]] auto truncate(std::size_t page_count) -> Status;
@@ -58,13 +58,12 @@ private:
     [[nodiscard]] auto pin_frame(Id pid) -> Status;
     [[nodiscard]] auto do_pin_frame(Id pid) -> Status;
     [[nodiscard]] auto make_frame_available() -> bool;
-    auto clean_page(PageCache::Entry &entry) -> PageList::Iterator;
+    auto clean_page(PageCache::Entry &entry) -> DirtyTable::Iterator;
 
     std::string m_filename;
     FrameManager m_frames;
-    PageList m_dirty;
+    DirtyTable m_dirty;
     PageCache m_cache;
-    Lsn m_recovery_lsn;
     WriteAheadLog *m_wal {};
     Env *m_env {};
     InfoLogger *m_info_log {};

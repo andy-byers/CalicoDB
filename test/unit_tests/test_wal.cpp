@@ -320,7 +320,7 @@ public:
 
     [[nodiscard]] static auto wal_read_with_status(WalReader &reader, std::string &out, Lsn *lsn = nullptr) -> Status
     {
-        CDB_TRY(reader.read(out));
+        CALICODB_TRY(reader.read(out));
         Slice buffer {out};
         if (lsn != nullptr) {
             *lsn = extract_payload_lsn(buffer);

@@ -7,71 +7,91 @@
 
 #include "cache.h"
 #include "frames.h"
+#include <map>
 
 namespace calicodb
 {
 
-class PageList final
+// Manages the set of pages that are dirty.
+//
+// When a page is written to, it should be added to this table, along with the
+// current page LSN. The oldest LSN in this table marks the oldest WAL record
+// that we still need.
+class DirtyTable final
 {
 public:
-    struct Entry {
-        Id pid;
-        Lsn record_lsn;
-    };
+    using Iterator = std::multimap<Lsn, Id, Lsn::Hash>::iterator;
+    using ConstIterator = std::multimap<Lsn, Id, Lsn::Hash>::const_iterator;
 
-    using Iterator = std::list<Entry>::iterator;
-    using ConstIterator = std::list<Entry>::const_iterator;
-
-    PageList() = default;
-    ~PageList() = default;
+    DirtyTable() = default;
+    ~DirtyTable() = default;
 
     [[nodiscard]] auto size() const -> std::size_t
     {
-        return m_list.size();
+        return m_dirty.size();
     }
 
     [[nodiscard]] auto begin() -> Iterator
     {
         using std::begin;
-        return begin(m_list);
+        return begin(m_dirty);
     }
 
     [[nodiscard]] auto begin() const -> ConstIterator
     {
         using std::begin;
-        return begin(m_list);
+        return begin(m_dirty);
     }
 
     [[nodiscard]] auto end() -> Iterator
     {
         using std::end;
-        return end(m_list);
+        return end(m_dirty);
     }
 
     [[nodiscard]] auto end() const -> ConstIterator
     {
         using std::end;
-        return end(m_list);
+        return end(m_dirty);
     }
 
-    [[nodiscard]] auto insert(const Id &pid, const Lsn &record_lsn) -> Iterator
+    [[nodiscard]] auto insert(const Id &page_id, const Lsn &record_lsn) -> Iterator
     {
-        return m_list.emplace(cend(m_list), Entry {pid, record_lsn});
+        // Use find() to get the insert() overload that returns an iterator, and to
+        // assert that non-NULL LSNs are unique. The "record_lsn" is NULL when the
+        // page has never been written to.
+        auto itr = m_dirty.find(record_lsn);
+        CALICODB_EXPECT_TRUE(record_lsn.is_null() || itr == end());
+        return m_dirty.insert(itr, {record_lsn, page_id});
     }
 
     auto remove(Iterator itr) -> Iterator
     {
-        return m_list.erase(itr);
+        return m_dirty.erase(itr);
+    }
+
+    // Find the oldest non-NULL LSN currently in the table.
+    [[nodiscard]] auto recovery_lsn() const -> Lsn
+    {
+        auto itr = m_dirty.lower_bound(Lsn::root());
+        if (itr == end()) {
+            return Lsn::null();
+        }
+        return itr->first;
     }
 
 private:
-    std::list<Entry> m_list;
+    std::multimap<Lsn, Id> m_dirty;
 };
 
+// Mapping from page IDs to frame indices.
+//
+// If the page is made dirty, the cache entry should be updated to contain the
+// iterator returned by DirtyTable::insert().
 class PageCache final
 {
 public:
-    using Token = std::optional<PageList::Iterator>;
+    using Token = std::optional<DirtyTable::Iterator>;
 
     struct Entry {
         std::size_t index;
@@ -142,13 +162,13 @@ public:
 
     auto put(Id pid, Entry entry) -> void
     {
-        CDB_EXPECT_FALSE(m_cache.contains(pid));
+        CALICODB_EXPECT_FALSE(m_cache.contains(pid));
         m_cache.put(pid, entry);
     }
 
     auto erase(Id pid) -> void
     {
-        CDB_EXPECT_TRUE(m_cache.contains(pid));
+        CALICODB_EXPECT_TRUE(m_cache.contains(pid));
         m_cache.erase(pid);
     }
 

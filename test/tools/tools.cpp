@@ -202,7 +202,7 @@ auto FaultInjectionEnv::try_intercept_syscall(Interceptor::Type type, const std:
     Slice filename {path};
     for (const auto &interceptor : m_interceptors) {
         if (interceptor.type == type && filename.starts_with(interceptor.prefix)) {
-            CDB_TRY(interceptor());
+            CALICODB_TRY(interceptor());
         }
     }
     return Status::ok();
@@ -259,7 +259,7 @@ auto FaultInjectionEnv::new_reader(const std::string &path, Reader *&out) -> Sta
 {
     TRY_INTERCEPT_FROM(*this, Interceptor::kOpen, path);
     FakeReader *reader;
-    CDB_TRY(FakeEnv::new_reader(path, reinterpret_cast<Reader *&>(reader)));
+    CALICODB_TRY(FakeEnv::new_reader(path, reinterpret_cast<Reader *&>(reader)));
     out = new FaultInjectionReader {*reader};
     delete reader;
     return Status::ok();
@@ -269,7 +269,7 @@ auto FaultInjectionEnv::new_editor(const std::string &path, Editor *&out) -> Sta
 {
     TRY_INTERCEPT_FROM(*this, Interceptor::kOpen, path);
     FakeEditor *editor;
-    CDB_TRY(FakeEnv::new_editor(path, reinterpret_cast<Editor *&>(editor)));
+    CALICODB_TRY(FakeEnv::new_editor(path, reinterpret_cast<Editor *&>(editor)));
     out = new FaultInjectionEditor {*editor};
     delete editor;
     return Status::ok();
@@ -279,7 +279,7 @@ auto FaultInjectionEnv::new_logger(const std::string &path, Logger *&out) -> Sta
 {
     TRY_INTERCEPT_FROM(*this, Interceptor::kOpen, path);
     FakeLogger *logger;
-    CDB_TRY(FakeEnv::new_logger(path, reinterpret_cast<Logger *&>(logger)));
+    CALICODB_TRY(FakeEnv::new_logger(path, reinterpret_cast<Logger *&>(logger)));
     out = new FaultInjectionLogger {*logger};
     delete logger;
     return Status::ok();
@@ -345,7 +345,7 @@ auto RandomGenerator::Generate(std::size_t len) const -> Slice
 {
     if (m_pos + len > m_data.size()) {
         m_pos = 0;
-        CDB_EXPECT_LT(len, m_data.size());
+        CALICODB_EXPECT_LT(len, m_data.size());
     }
     m_pos += len;
     return {m_data.data() + m_pos - len, static_cast<std::size_t>(len)};

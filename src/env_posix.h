@@ -23,7 +23,7 @@ public:
         : m_path {std::move(path)},
           m_file {file}
     {
-        CDB_EXPECT_GE(file, 0);
+        CALICODB_EXPECT_GE(file, 0);
     }
 
     ~PosixReader() override;
@@ -41,7 +41,7 @@ public:
         : m_path {std::move(path)},
           m_file {file}
     {
-        CDB_EXPECT_GE(file, 0);
+        CALICODB_EXPECT_GE(file, 0);
     }
 
     ~PosixEditor() override;
@@ -61,7 +61,7 @@ public:
         : m_path {std::move(path)},
           m_file {file}
     {
-        CDB_EXPECT_GE(file, 0);
+        CALICODB_EXPECT_GE(file, 0);
     }
 
     ~PosixLogger() override;
@@ -81,7 +81,7 @@ public:
           m_path {std::move(path)},
           m_file {file}
     {
-        CDB_EXPECT_GE(file, 0);
+        CALICODB_EXPECT_GE(file, 0);
     }
 
     ~PosixInfoLogger() override;

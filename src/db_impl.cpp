@@ -109,10 +109,10 @@ static auto encode_logical_id(LogicalPageId id, char *out) -> void
 
 auto setup_db(const std::string &path, Env &env, const Options &options, FileHeader &header) -> Status
 {
-    CDB_EXPECT_GE(options.page_size, kMinPageSize);
-    CDB_EXPECT_LE(options.page_size, kMaxPageSize);
-    CDB_EXPECT_TRUE(is_power_of_two(options.page_size));
-    CDB_EXPECT_GE(options.cache_size, options.page_size * kMinFrameCount);
+    CALICODB_EXPECT_GE(options.page_size, kMinPageSize);
+    CALICODB_EXPECT_LE(options.page_size, kMaxPageSize);
+    CALICODB_EXPECT_TRUE(is_power_of_two(options.page_size));
+    CALICODB_EXPECT_GE(options.cache_size, options.page_size * kMinFrameCount);
 
     Reader *reader;
     if (auto s = env.new_reader(path, reader); s.is_ok()) {
@@ -149,7 +149,7 @@ auto DBImpl::open(const Options &sanitized) -> Status
         return Status::invalid_argument("database does not exist");
     }
     FileHeader state;
-    CDB_TRY(setup_db(m_filename, *m_env, sanitized, state));
+    CALICODB_TRY(setup_db(m_filename, *m_env, sanitized, state));
     const auto page_size = state.page_size;
 
     m_state.commit_lsn = state.commit_lsn;
@@ -157,7 +157,7 @@ auto DBImpl::open(const Options &sanitized) -> Status
     m_state.freelist_head = state.freelist_head;
     m_state.max_page_id.value = state.page_count;
 
-    CDB_TRY(WriteAheadLog::open(
+    CALICODB_TRY(WriteAheadLog::open(
         {
             m_wal_prefix,
             m_env,
@@ -165,7 +165,7 @@ auto DBImpl::open(const Options &sanitized) -> Status
         },
         &m_wal));
 
-    CDB_TRY(Pager::open(
+    CALICODB_TRY(Pager::open(
         {
             m_filename,
             m_env,
@@ -183,19 +183,19 @@ auto DBImpl::open(const Options &sanitized) -> Status
 
         // Create the root tree.
         Id root_id;
-        CDB_TRY(Tree::create(*m_pager, Id::root(), m_state.freelist_head, &root_id));
-        CDB_EXPECT_TRUE(root_id.is_root());
+        CALICODB_TRY(Tree::create(*m_pager, Id::root(), m_state.freelist_head, &root_id));
+        CALICODB_EXPECT_TRUE(root_id.is_root());
     }
 
     // Create the root and default table handles.
-    CDB_TRY(create_table({}, kRootTableName, m_root));
-    CDB_TRY(create_table({}, kDefaultTableName, m_default));
+    CALICODB_TRY(create_table({}, kRootTableName, m_root));
+    CALICODB_TRY(create_table({}, kDefaultTableName, m_default));
 
     auto *cursor = new_cursor(*m_root);
     cursor->seek_first();
     while (cursor->is_valid()) {
         LogicalPageId root_id;
-        CDB_TRY(decode_logical_id(cursor->value(), &root_id));
+        CALICODB_TRY(decode_logical_id(cursor->value(), &root_id));
         m_tables.add(root_id);
         cursor->next();
     }
@@ -204,25 +204,25 @@ auto DBImpl::open(const Options &sanitized) -> Status
     if (db_exists) {
         m_info_log->logv("ensuring consistency of an existing database");
         // This should be a no-op if the database closed normally last time.
-        CDB_TRY(ensure_consistency());
-        CDB_TRY(load_file_header());
+        CALICODB_TRY(ensure_consistency());
+        CALICODB_TRY(load_file_header());
     } else {
         // Write the initial file header.
         Page db_root;
-        CDB_TRY(m_pager->acquire(Id::root(), db_root));
+        CALICODB_TRY(m_pager->acquire(Id::root(), db_root));
         m_pager->upgrade(db_root);
         state.page_count = m_pager->page_count();
         state.header_crc = crc32c::Mask(state.compute_crc());
         state.write(db_root.mutate(0, FileHeader::kSize));
         m_pager->release(std::move(db_root));
-        CDB_TRY(m_pager->flush());
+        CALICODB_TRY(m_pager->flush());
     }
-    CDB_TRY(m_wal->start_writing());
+    CALICODB_TRY(m_wal->start_writing());
 
     m_info_log->logv("pager recovery lsn is %llu", m_pager->recovery_lsn().value);
     m_info_log->logv("wal flushed lsn is %llu", m_wal->flushed_lsn().value);
 
-    CDB_TRY(m_state.status);
+    CALICODB_TRY(m_state.status);
     m_state.is_running = true;
     return Status::ok();
 }
@@ -373,7 +373,7 @@ auto DBImpl::get_property(const Slice &name, std::string *out) const -> bool
 auto DBImpl::new_cursor(const Table &table) const -> Cursor *
 {
     const auto *state = m_tables.get(get_table_id(table));
-    CDB_EXPECT_NE(state, nullptr);
+    CALICODB_EXPECT_NE(state, nullptr);
     auto *cursor = CursorInternal::make_cursor(*state->tree);
     if (!m_state.status.is_ok()) {
         CursorInternal::invalidate(*cursor, m_state.status);
@@ -383,17 +383,17 @@ auto DBImpl::new_cursor(const Table &table) const -> Cursor *
 
 auto DBImpl::get(const Table &table, const Slice &key, std::string *value) const -> Status
 {
-    CDB_TRY(m_state.status);
+    CALICODB_TRY(m_state.status);
     const auto *state = m_tables.get(get_table_id(table));
-    CDB_EXPECT_NE(state, nullptr);
+    CALICODB_EXPECT_NE(state, nullptr);
     return state->tree->get(key, value);
 }
 
 auto DBImpl::put(Table &table, const Slice &key, const Slice &value) -> Status
 {
-    CDB_TRY(m_state.status);
+    CALICODB_TRY(m_state.status);
     auto *state = m_tables.get(get_table_id(table));
-    CDB_EXPECT_NE(state, nullptr);
+    CALICODB_EXPECT_NE(state, nullptr);
 
     if (!state->write) {
         return Status::invalid_argument("table is not writable");
@@ -415,9 +415,9 @@ auto DBImpl::put(Table &table, const Slice &key, const Slice &value) -> Status
 
 auto DBImpl::erase(Table &table, const Slice &key) -> Status
 {
-    CDB_TRY(m_state.status);
+    CALICODB_TRY(m_state.status);
     auto *state = m_tables.get(get_table_id(table));
-    CDB_EXPECT_NE(state, nullptr);
+    CALICODB_EXPECT_NE(state, nullptr);
 
     if (!state->write) {
         return Status::invalid_argument("table is not writable");
@@ -435,7 +435,7 @@ auto DBImpl::erase(Table &table, const Slice &key) -> Status
 
 auto DBImpl::vacuum() -> Status
 {
-    CDB_TRY(m_state.status);
+    CALICODB_TRY(m_state.status);
     if (auto s = do_vacuum(); !s.is_ok()) {
         SET_STATUS(s);
     }
@@ -454,7 +454,7 @@ auto DBImpl::do_vacuum() -> Status
     const auto original = target;
     for (;; --target.value) {
         bool vacuumed;
-        CDB_TRY(tree->vacuum_one(target, m_tables, &vacuumed));
+        CALICODB_TRY(tree->vacuum_one(target, m_tables, &vacuumed));
         if (!vacuumed) {
             break;
         }
@@ -467,8 +467,8 @@ auto DBImpl::do_vacuum() -> Status
     // be able to reapply the whole vacuum operation if the truncation fails.
     // The recovery routine should truncate the file to match the header page
     // count if necessary.
-    CDB_TRY(m_wal->flush());
-    CDB_TRY(m_pager->truncate(target.value));
+    CALICODB_TRY(m_wal->flush());
+    CALICODB_TRY(m_pager->truncate(target.value));
 
     m_info_log->logv("vacuumed %llu pages", original.value - target.value);
     return m_pager->flush();
@@ -477,8 +477,8 @@ auto DBImpl::do_vacuum() -> Status
 auto DBImpl::ensure_consistency() -> Status
 {
     m_state.is_running = false;
-    CDB_TRY(recovery_phase_1());
-    CDB_TRY(recovery_phase_2());
+    CALICODB_TRY(recovery_phase_1());
+    CALICODB_TRY(recovery_phase_2());
     m_state.is_running = true;
     return Status::ok();
 }
@@ -514,7 +514,7 @@ auto DBImpl::TEST_validate() const -> void
 
 auto DBImpl::checkpoint() -> Status
 {
-    CDB_TRY(m_state.status);
+    CALICODB_TRY(m_state.status);
 
     if (m_state.batch_size > 0) {
         m_state.batch_size = 0;
@@ -529,10 +529,10 @@ auto DBImpl::checkpoint() -> Status
 
 auto DBImpl::do_checkpoint() -> Status
 {
-    CDB_TRY(m_pager->sync());
+    CALICODB_TRY(m_pager->sync());
 
     Page db_root;
-    CDB_TRY(m_pager->acquire(Id::root(), db_root));
+    CALICODB_TRY(m_pager->acquire(Id::root(), db_root));
     m_pager->upgrade(db_root);
 
     FileHeader header;
@@ -553,7 +553,7 @@ auto DBImpl::do_checkpoint() -> Status
 auto DBImpl::load_file_header() -> Status
 {
     Page root;
-    CDB_TRY(m_pager->acquire(Id::root(), root));
+    CALICODB_TRY(m_pager->acquire(Id::root(), root));
 
     FileHeader header;
     header.read(root.data());
@@ -564,7 +564,7 @@ auto DBImpl::load_file_header() -> Status
         return Status::corruption("crc mismatch");
     }
     // These values should be the same, provided that the WAL contents were correct.
-    CDB_EXPECT_EQ(m_state.commit_lsn, header.commit_lsn);
+    CALICODB_EXPECT_EQ(m_state.commit_lsn, header.commit_lsn);
     m_state.max_page_id.value = header.page_count;
     m_state.record_count = header.record_count;
     m_state.freelist_head = header.freelist_head;
@@ -581,7 +581,7 @@ auto DBImpl::default_table() const -> Table *
 
 auto DBImpl::list_tables(std::vector<std::string> &out) const -> Status
 {
-    CDB_TRY(m_state.status);
+    CALICODB_TRY(m_state.status);
     out.clear();
 
     auto *cursor = new_cursor(*m_root);
@@ -610,7 +610,7 @@ auto DBImpl::create_table(const TableOptions &options, const std::string &name, 
         const auto *state = m_tables.get(Id::root());
         s = state->tree->get(name, &value);
         if (s.is_ok()) {
-            CDB_TRY(decode_logical_id(value, &root_id));
+            CALICODB_TRY(decode_logical_id(value, &root_id));
         } else if (s.is_not_found()) {
             s = construct_new_table(name, root_id);
         }
@@ -623,7 +623,7 @@ auto DBImpl::create_table(const TableOptions &options, const std::string &name, 
 
     m_tables.add(root_id);
     auto *state = m_tables.get(root_id.table_id);
-    CDB_EXPECT_NE(state, nullptr);
+    CALICODB_EXPECT_NE(state, nullptr);
 
     if (state->open) {
         return Status::invalid_argument("table is already open");
@@ -642,7 +642,7 @@ auto DBImpl::close_table(Table *&table) -> void
         return;
     }
     auto *state = m_tables.get(get_table_id(*table));
-    CDB_EXPECT_NE(state, nullptr);
+    CALICODB_EXPECT_NE(state, nullptr);
 
     delete state->tree;
     state->tree = nullptr;
@@ -695,7 +695,7 @@ auto DBImpl::construct_new_table(const Slice &name, LogicalPageId &root_id) -> S
 
     // Set the table ID manually, let the tree fill in the root page ID.
     root_id.table_id = table_id;
-    CDB_TRY(Tree::create(*m_pager, table_id, m_state.freelist_head, &root_id.page_id));
+    CALICODB_TRY(Tree::create(*m_pager, table_id, m_state.freelist_head, &root_id.page_id));
 
     char payload[LogicalPageId::kSize];
     encode_logical_id(root_id, payload);
@@ -703,7 +703,7 @@ auto DBImpl::construct_new_table(const Slice &name, LogicalPageId &root_id) -> S
     // Write an entry for the new table in the root table. This will not increase the
     // record count for the database.
     auto *db_root = m_tables.get(Id::root());
-    CDB_TRY(db_root->tree->put(name, Slice {payload, LogicalPageId::kSize}));
+    CALICODB_TRY(db_root->tree->put(name, Slice {payload, LogicalPageId::kSize}));
     ++m_state.batch_size;
     return Status::ok();
 }
@@ -716,14 +716,14 @@ auto DBImpl::remove_empty_table(const std::string &name, TableState &state) -> S
     }
 
     Node root;
-    CDB_TRY(tree->acquire(root_id.page_id, false, root));
+    CALICODB_TRY(tree->acquire(root_id.page_id, false, root));
     if (root.header.cell_count != 0) {
         return Status::io_error("table could not be emptied");
     }
     auto *root_state = m_tables.get(Id::root());
-    CDB_TRY(root_state->tree->erase(name));
+    CALICODB_TRY(root_state->tree->erase(name));
     tree->upgrade(root);
-    CDB_TRY(tree->destroy(std::move(root)));
+    CALICODB_TRY(tree->destroy(std::move(root)));
     return Status::ok();
 }
 
@@ -747,7 +747,7 @@ template <class Descriptor, class Callback>
 static auto with_page(Pager &pager, const Descriptor &descriptor, const Callback &callback)
 {
     Page page;
-    CDB_TRY(pager.acquire(descriptor.page_id, page));
+    CALICODB_TRY(pager.acquire(descriptor.page_id, page));
 
     callback(page);
     pager.release(std::move(page));
@@ -776,7 +776,7 @@ auto DBImpl::recovery_phase_1() -> Status
     Lsn last_lsn;
 
     const auto translate_status = [&segment, &set, this](auto s, Lsn lsn) {
-        CDB_EXPECT_FALSE(s.is_ok());
+        CALICODB_EXPECT_FALSE(s.is_ok());
         if (s.is_corruption()) {
             // Allow corruption/incomplete records on the last segment, past the
             // most-recent successful commit.
@@ -804,7 +804,7 @@ auto DBImpl::recovery_phase_1() -> Status
                 }
             });
         } else if (std::holds_alternative<std::monostate>(decoded)) {
-            CDB_TRY(translate_status(Status::corruption("wal is corrupted"), last_lsn));
+            CALICODB_TRY(translate_status(Status::corruption("wal is corrupted"), last_lsn));
             return Status::not_found("finished");
         }
         return Status::ok();
@@ -825,14 +825,14 @@ auto DBImpl::recovery_phase_1() -> Status
                 }
             });
         } else if (std::holds_alternative<std::monostate>(decoded)) {
-            CDB_TRY(translate_status(Status::corruption("wal is corrupted"), last_lsn));
+            CALICODB_TRY(translate_status(Status::corruption("wal is corrupted"), last_lsn));
             return Status::not_found("finished");
         }
         return Status::ok();
     };
 
     const auto roll = [&](const auto &action) {
-        CDB_TRY(open_wal_reader(segment, file));
+        CALICODB_TRY(open_wal_reader(segment, file));
         WalReader reader {*file, tail};
 
         for (;;) {
@@ -843,7 +843,7 @@ auto DBImpl::recovery_phase_1() -> Status
             if (s.is_not_found()) {
                 break;
             } else if (!s.is_ok()) {
-                CDB_TRY(translate_status(s, last_lsn));
+                CALICODB_TRY(translate_status(s, last_lsn));
                 return Status::ok();
             }
 
@@ -862,7 +862,7 @@ auto DBImpl::recovery_phase_1() -> Status
     // Roll forward, applying missing updates until we reach the end. The final
     // segment may contain a partial/corrupted record.
     for (;; segment = set.id_after(segment)) {
-        CDB_TRY(roll(redo));
+        CALICODB_TRY(roll(redo));
         if (segment == set.last()) {
             break;
         }
@@ -888,7 +888,7 @@ auto DBImpl::recovery_phase_1() -> Status
     // Again, the last segment we read may contain a partial/corrupted record.
     segment = commit_segment;
     for (; !segment.is_null(); segment = set.id_after(segment)) {
-        CDB_TRY(roll(undo));
+        CALICODB_TRY(roll(undo));
     }
     return Status::ok();
 }
@@ -898,7 +898,7 @@ auto DBImpl::recovery_phase_2() -> Status
     auto &set = m_wal->m_set;
     // Pager needs the updated state to determine the page count.
     Page page;
-    CDB_TRY(m_pager->acquire(Id::root(), page));
+    CALICODB_TRY(m_pager->acquire(Id::root(), page));
     FileHeader header;
     header.read(page.data());
     m_pager->load_state(header);
@@ -919,19 +919,18 @@ auto DBImpl::recovery_phase_2() -> Status
 
     // Make sure all changes have made it to disk, then remove WAL segments from
     // the right.
-    CDB_TRY(m_pager->flush());
+    CALICODB_TRY(m_pager->flush());
     for (auto id = set.last(); !id.is_null(); id = set.id_before(id)) {
-        CDB_TRY(m_env->remove_file(encode_segment_name(m_wal->m_prefix, id)));
+        CALICODB_TRY(m_env->remove_file(encode_segment_name(m_wal->m_prefix, id)));
     }
     set.remove_after(Id::null());
 
     m_wal->m_last_lsn = m_state.commit_lsn;
     m_wal->m_flushed_lsn = m_state.commit_lsn;
-    m_pager->m_recovery_lsn = m_state.commit_lsn;
 
     // Make sure the file size matches the header page count, which should be
     // correct if we made it this far.
-    CDB_TRY(m_pager->truncate(m_pager->page_count()));
+    CALICODB_TRY(m_pager->truncate(m_pager->page_count()));
     return m_pager->sync();
 }
 
@@ -939,7 +938,7 @@ auto DBImpl::open_wal_reader(Id segment, std::unique_ptr<Reader> &out) -> Status
 {
     Reader *file;
     const auto name = encode_segment_name(m_wal_prefix, segment);
-    CDB_TRY(m_env->new_reader(name, file));
+    CALICODB_TRY(m_env->new_reader(name, file));
     out.reset(file);
     return Status::ok();
 }

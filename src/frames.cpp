@@ -23,19 +23,19 @@ auto Frame::lsn() const -> Lsn
 
 auto Frame::ref() -> void
 {
-    CDB_EXPECT_FALSE(write);
+    CALICODB_EXPECT_FALSE(write);
     ++ref_count;
 }
 
 auto Frame::upgrade() -> void
 {
-    CDB_EXPECT_FALSE(write);
+    CALICODB_EXPECT_FALSE(write);
     write = true;
 }
 
 auto Frame::unref() -> void
 {
-    CDB_EXPECT_GT(ref_count, 0);
+    CALICODB_EXPECT_GT(ref_count, 0);
     write = false;
     --ref_count;
 }
@@ -46,7 +46,7 @@ FrameManager::FrameManager(Editor &file, AlignedBuffer buffer, std::size_t page_
       m_page_size {page_size}
 {
     // The buffer should be aligned to the page size.
-    CDB_EXPECT_EQ(reinterpret_cast<std::uintptr_t>(m_buffer.get()) % page_size, 0);
+    CALICODB_EXPECT_EQ(reinterpret_cast<std::uintptr_t>(m_buffer.get()) % page_size, 0);
 
     while (m_frames.size() < frame_count) {
         m_frames.emplace_back(m_buffer.get() + m_frames.size() * page_size);
@@ -60,7 +60,7 @@ FrameManager::FrameManager(Editor &file, AlignedBuffer buffer, std::size_t page_
 auto FrameManager::ref(std::size_t index, Page &out) -> void
 {
     ++m_ref_sum;
-    CDB_EXPECT_LT(index, m_frames.size());
+    CALICODB_EXPECT_LT(index, m_frames.size());
     m_frames[index].ref();
     out.m_id = m_frames[index].page_id;
     out.m_data = m_frames[index].data;
@@ -70,32 +70,32 @@ auto FrameManager::ref(std::size_t index, Page &out) -> void
 
 auto FrameManager::unref(std::size_t index, Page) -> void
 {
-    CDB_EXPECT_LT(index, m_frames.size());
+    CALICODB_EXPECT_LT(index, m_frames.size());
     m_frames[index].unref();
     --m_ref_sum;
 }
 
 auto FrameManager::upgrade(std::size_t index, Page &page) -> void
 {
-    CDB_EXPECT_LT(index, m_frames.size());
-    CDB_EXPECT_FALSE(m_frames[index].write);
-    CDB_EXPECT_FALSE(page.is_writable());
+    CALICODB_EXPECT_LT(index, m_frames.size());
+    CALICODB_EXPECT_FALSE(m_frames[index].write);
+    CALICODB_EXPECT_FALSE(page.is_writable());
     m_frames[index].upgrade();
     page.m_write = true;
 }
 
 auto FrameManager::pin(Id page_id, std::size_t &index) -> Status
 {
-    CDB_EXPECT_FALSE(page_id.is_null());
+    CALICODB_EXPECT_FALSE(page_id.is_null());
 
     if (m_available.empty()) {
         return Status::not_found("out of frames");
     }
 
     index = m_available.back();
-    CDB_EXPECT_LT(index, m_frames.size());
+    CALICODB_EXPECT_LT(index, m_frames.size());
     auto &frame = m_frames[index];
-    CDB_EXPECT_EQ(frame.ref_count, 0);
+    CALICODB_EXPECT_EQ(frame.ref_count, 0);
 
     auto s = read_page_from_file(page_id, frame.data);
     if (s.is_not_found()) {
@@ -112,8 +112,8 @@ auto FrameManager::pin(Id page_id, std::size_t &index) -> Status
 
 auto FrameManager::unpin(std::size_t index) -> void
 {
-    CDB_EXPECT_LT(index, m_frames.size());
-    CDB_EXPECT_EQ(m_frames[index].ref_count, 0);
+    CALICODB_EXPECT_LT(index, m_frames.size());
+    CALICODB_EXPECT_EQ(m_frames[index].ref_count, 0);
     m_frames[index].page_id = Id::null();
     m_available.emplace_back(index);
 }
@@ -121,7 +121,7 @@ auto FrameManager::unpin(std::size_t index) -> void
 auto FrameManager::write_back(std::size_t index) -> Status
 {
     auto &frame = get_frame(index);
-    CDB_EXPECT_LE(frame.ref_count, 1);
+    CALICODB_EXPECT_LE(frame.ref_count, 1);
 
     m_bytes_written += m_page_size;
     return write_page_to_file(frame.page_id, frame.data);
@@ -143,7 +143,7 @@ auto FrameManager::read_page_from_file(Id page_id, char *out) const -> Status
     }
 
     Slice slice;
-    CDB_TRY(m_file->read(offset, m_page_size, out, &slice));
+    CALICODB_TRY(m_file->read(offset, m_page_size, out, &slice));
     m_bytes_read += slice.size();
 
     // We should always read exactly what we requested, unless we are allocating a page during recovery.

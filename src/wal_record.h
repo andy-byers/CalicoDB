@@ -162,7 +162,7 @@ public:
     auto set_first_lsn(Id id, Lsn lsn) -> void
     {
         auto itr = m_segments.find(id);
-        CDB_EXPECT_NE(itr, end(m_segments));
+        CALICODB_EXPECT_NE(itr, end(m_segments));
         itr->second = lsn;
     }
 
@@ -267,7 +267,7 @@ static constexpr std::size_t kWalBlockScale {4};
     }
 
     Reader *temp;
-    CDB_TRY(env.new_reader(encode_segment_name(prefix, id), temp));
+    CALICODB_TRY(env.new_reader(encode_segment_name(prefix, id), temp));
 
     char buffer[sizeof(Lsn)];
     std::unique_ptr<Reader> file {temp};
@@ -275,7 +275,7 @@ static constexpr std::size_t kWalBlockScale {4};
     // Read the first LSN. If it exists, it will always be at the same location: right after the first
     // record header, which is written at offset 0.
     Slice slice;
-    CDB_TRY(file->read(WalRecordHeader::kSize, sizeof(buffer), buffer, &slice));
+    CALICODB_TRY(file->read(WalRecordHeader::kSize, sizeof(buffer), buffer, &slice));
 
     if (slice.is_empty()) {
         return Status::corruption("segment is empty");

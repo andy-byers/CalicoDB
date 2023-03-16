@@ -32,7 +32,7 @@ auto RecordGenerator::generate(tools::RandomGenerator &random, std::size_t num_r
         auto key = random.Generate(ks).to_string();
         if (is_sequential) {
             if (set.find(key) != end(set)) {
-                CDB_EXPECT_LT(num_collisions, num_records);
+                CALICODB_EXPECT_LT(num_collisions, num_records);
                 num_collisions++;
                 continue;
             }

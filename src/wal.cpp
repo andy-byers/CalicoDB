@@ -16,7 +16,7 @@ WriteAheadLog::WriteAheadLog(const Parameters &param)
       m_data_buffer(wal_scratch_size(param.page_size), '\x00'),
       m_tail_buffer(wal_block_size(param.page_size), '\x00')
 {
-    CDB_EXPECT_NE(m_env, nullptr);
+    CALICODB_EXPECT_NE(m_env, nullptr);
 }
 
 WriteAheadLog::~WriteAheadLog()
@@ -29,7 +29,7 @@ auto WriteAheadLog::open(const Parameters &param, WriteAheadLog **out) -> Status
 {
     const auto [dir, base] = split_path(param.prefix);
     std::vector<std::string> possible_segments;
-    CDB_TRY(param.env->get_children(dir, possible_segments));
+    CALICODB_TRY(param.env->get_children(dir, possible_segments));
 
     std::vector<Id> segments;
     for (auto &name : possible_segments) {
@@ -60,7 +60,7 @@ auto WriteAheadLog::close() -> Status
 
 auto WriteAheadLog::start_writing() -> Status
 {
-    CDB_EXPECT_EQ(m_writer, nullptr);
+    CALICODB_EXPECT_EQ(m_writer, nullptr);
     return open_writer();
 }
 
@@ -87,9 +87,9 @@ auto WriteAheadLog::log(const Slice &payload) -> Status
     }
     m_bytes_written += payload.size();
 
-    CDB_TRY(m_writer->write(m_last_lsn, payload));
+    CALICODB_TRY(m_writer->write(m_last_lsn, payload));
     if (m_writer->block_count() >= kSegmentCutoff << m_set.size()) {
-        CDB_TRY(close_writer());
+        CALICODB_TRY(close_writer());
         return open_writer();
     }
     return Status::ok();
@@ -130,8 +130,7 @@ auto WriteAheadLog::flush() -> Status
     if (m_writer == nullptr) {
         return Status::ok();
     }
-    CDB_TRY(m_writer->flush());
-    return m_file->sync();
+    return m_writer->flush();
 }
 
 auto WriteAheadLog::cleanup(Lsn recovery_lsn) -> Status
@@ -158,15 +157,14 @@ auto WriteAheadLog::cleanup(Lsn recovery_lsn) -> Status
         if (lsn > recovery_lsn) {
             return Status::ok();
         }
-        CDB_TRY(m_env->remove_file(encode_segment_name(m_prefix, id)));
+        CALICODB_TRY(m_env->remove_file(encode_segment_name(m_prefix, id)));
         m_set.remove_before(next_id);
     }
 }
 
 auto WriteAheadLog::close_writer() -> Status
 {
-    CDB_TRY(m_writer->flush());
-    CDB_TRY(m_file->sync());
+    CALICODB_TRY(m_writer->flush());
     m_flushed_lsn = m_writer->flushed_lsn();
     const auto written = m_writer->block_count() != 0;
 
@@ -181,7 +179,7 @@ auto WriteAheadLog::close_writer() -> Status
     if (written) {
         m_set.add_segment(id);
     } else {
-        CDB_TRY(m_env->remove_file(encode_segment_name(m_prefix, id)));
+        CALICODB_TRY(m_env->remove_file(encode_segment_name(m_prefix, id)));
     }
     return Status::ok();
 }
@@ -193,7 +191,7 @@ auto WriteAheadLog::open_writer() -> Status
     ++id.value;
 
     // TODO: Should we fsync() the containing directory here? This is a new file.
-    CDB_TRY(m_env->new_logger(encode_segment_name(m_prefix, id), m_file));
+    CALICODB_TRY(m_env->new_logger(encode_segment_name(m_prefix, id), m_file));
     m_writer = new WalWriter {*m_file, m_tail_buffer};
     return Status::ok();
 }

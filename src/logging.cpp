@@ -87,7 +87,7 @@ auto consume_decimal_number(Slice *in, std::uint64_t *val) -> bool
     }
 
     *val = value;
-    CDB_EXPECT_GE(current, start);
+    CALICODB_EXPECT_GE(current, start);
     const auto digits_consumed = static_cast<std::size_t>(current - start);
     in->advance(digits_consumed);
     return digits_consumed != 0;

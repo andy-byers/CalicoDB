@@ -55,7 +55,7 @@ static auto decode_vacuum_payload(const Slice &in) -> VacuumDescriptor
     auto data = in.data();
 
     // Payload type (1 B)
-    CDB_EXPECT_EQ(WalPayloadType {*data}, WalPayloadType::kVacuumPayload);
+    CALICODB_EXPECT_EQ(WalPayloadType {*data}, WalPayloadType::kVacuumPayload);
     ++data;
 
     // LSN (8 B)
@@ -73,7 +73,7 @@ static auto decode_deltas_payload(const Slice &in) -> DeltaDescriptor
     auto data = in.data();
 
     // Payload type (1 B)
-    CDB_EXPECT_EQ(WalPayloadType {*data}, WalPayloadType::kDeltaPayload);
+    CALICODB_EXPECT_EQ(WalPayloadType {*data}, WalPayloadType::kDeltaPayload);
     ++data;
 
     // LSN (8 B)
@@ -110,7 +110,7 @@ static auto decode_full_image_payload(const Slice &in) -> ImageDescriptor
     auto data = in.data();
 
     // Payload type (1 B)
-    CDB_EXPECT_EQ(WalPayloadType {*data}, WalPayloadType::kImagePayload);
+    CALICODB_EXPECT_EQ(WalPayloadType {*data}, WalPayloadType::kImagePayload);
     ++data;
 
     // LSN (8 B)

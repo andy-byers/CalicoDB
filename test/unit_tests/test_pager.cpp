@@ -238,6 +238,36 @@ TEST_F(CacheTests, IterationRespectsReplacementPolicy)
     ASSERT_EQ(ritr, rend(target));
 }
 
+TEST_F(CacheTests, ColdElementsAreEvictedFirst)
+{
+    Cache<int, int> cache;
+
+    cache.put(5, 5);
+    cache.put(4, 4);
+    cache.put(3, 3);
+    cache.put(2, 2);
+    cache.put(1, 1);
+    ASSERT_EQ(cache.get(3)->value, 3);
+    ASSERT_EQ(cache.get(2)->value, 2);
+    ASSERT_EQ(cache.get(1)->value, 1);
+
+    // Elements are not "hot", so they are evicted first.
+    ASSERT_GT(cache.evict()->value, 3);
+    ASSERT_GT(cache.evict()->value, 3);
+    cache.put(10, 10);
+    cache.put(11, 11);
+    cache.put(12, 12);
+    ASSERT_EQ(cache.get(10)->value, 10); // Make 10 hot.
+    ASSERT_GT(cache.evict()->value, 10);
+    ASSERT_GT(cache.evict()->value, 10);
+
+    // Only "hot" elements left.
+    ASSERT_LE(cache.evict()->value, 3);
+    ASSERT_LE(cache.evict()->value, 3);
+    ASSERT_LE(cache.evict()->value, 3);
+    ASSERT_EQ(cache.evict()->value, 10);
+}
+
 TEST_F(CacheTests, QueryDoesNotPromoteElements)
 {
     Cache<int, int> cache;
@@ -726,7 +756,7 @@ TEST_F(PagerTests, RootDataPersistsInEnv)
     std::vector<std::string> id_strs;
     std::transform(cbegin(id_ints), cend(id_ints), back_inserter(id_strs), [](auto id) {
         auto result = std::to_string(id);
-        CDB_EXPECT_LE(result.size(), 6);
+        CALICODB_EXPECT_LE(result.size(), 6);
         return std::string(6 - result.size(), '0') + result;
     });
     return id_strs;

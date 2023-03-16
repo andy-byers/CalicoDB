@@ -11,7 +11,7 @@ namespace calicodb
 
 static auto can_merge_ordered_deltas(const PageDelta &lhs, const PageDelta &rhs) -> bool
 {
-    CDB_EXPECT_LE(lhs.offset, rhs.offset);
+    CALICODB_EXPECT_LE(lhs.offset, rhs.offset);
     return rhs.offset <= lhs.offset + lhs.size;
 }
 
