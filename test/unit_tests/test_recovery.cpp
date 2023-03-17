@@ -692,10 +692,15 @@ TEST_P(DataLossTests, RecoversLastCheckpoint)
         if (i % kCheckpointInterval == 0) {
             ASSERT_OK(db->checkpoint());
         }
-        ASSERT_OK(db->put(tools::integral_key(i), "value"));
+        ASSERT_OK(db->put(tools::integral_key(i), tools::integral_key(i)));
     }
     open();
 
+    for (std::size_t i {}; i < kCheckpointInterval * 9; ++i) {
+        std::string value;
+        ASSERT_OK(db->get(tools::integral_key(i), &value));
+        ASSERT_EQ(value, tools::integral_key(i));
+    }
     ASSERT_EQ(db_impl(db)->TEST_state().record_count, kCheckpointInterval * 9);
 }
 
