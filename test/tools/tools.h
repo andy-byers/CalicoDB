@@ -68,23 +68,24 @@ public:
     [[nodiscard]] virtual auto clone() const -> Env *;
 
     ~FakeEnv() override = default;
-    [[nodiscard]] auto new_info_logger(const std::string &path, InfoLogger *&out) -> Status override;
-    [[nodiscard]] auto new_reader(const std::string &path, Reader *&out) -> Status override;
-    [[nodiscard]] auto new_editor(const std::string &path, Editor *&out) -> Status override;
-    [[nodiscard]] auto new_logger(const std::string &path, Logger *&out) -> Status override;
-    [[nodiscard]] auto get_children(const std::string &path, std::vector<std::string> &out) const -> Status override;
-    [[nodiscard]] auto rename_file(const std::string &old_path, const std::string &new_path) -> Status override;
-    [[nodiscard]] auto file_exists(const std::string &path) const -> bool override;
-    [[nodiscard]] auto resize_file(const std::string &path, std::size_t size) -> Status override;
-    [[nodiscard]] auto file_size(const std::string &path, std::size_t &out) const -> Status override;
-    [[nodiscard]] auto remove_file(const std::string &path) -> Status override;
+    [[nodiscard]] auto new_info_logger(const std::string &filename, InfoLogger *&out) -> Status override;
+    [[nodiscard]] auto new_reader(const std::string &filename, Reader *&out) -> Status override;
+    [[nodiscard]] auto new_editor(const std::string &filename, Editor *&out) -> Status override;
+    [[nodiscard]] auto new_logger(const std::string &filename, Logger *&out) -> Status override;
+    [[nodiscard]] auto get_children(const std::string &dirname, std::vector<std::string> &out) const -> Status override;
+    [[nodiscard]] auto rename_file(const std::string &old_filename, const std::string &new_filename) -> Status override;
+    [[nodiscard]] auto file_exists(const std::string &filename) const -> bool override;
+    [[nodiscard]] auto resize_file(const std::string &filename, std::size_t size) -> Status override;
+    [[nodiscard]] auto file_size(const std::string &filename, std::size_t &out) const -> Status override;
+    [[nodiscard]] auto remove_file(const std::string &filename) -> Status override;
+    [[nodiscard]] auto sync_directory(const std::string &dirname) -> Status override { return Status::ok(); }
 
 protected:
     friend class FakeEditor;
     friend class FakeReader;
     friend class FakeLogger;
 
-    [[nodiscard]] auto get_memory(const std::string &path) const -> Memory &;
+    [[nodiscard]] auto get_memory(const std::string &filename) const -> Memory &;
     [[nodiscard]] auto read_file_at(const Memory &mem, std::size_t offset, std::size_t size, char *scratch, Slice *out) -> Status;
     [[nodiscard]] auto write_file_at(Memory &mem, std::size_t offset, const Slice &in) -> Status;
 
@@ -94,10 +95,10 @@ protected:
 class FakeReader : public Reader
 {
 public:
-    FakeReader(std::string path, FakeEnv &parent, FakeEnv::Memory &mem)
+    FakeReader(std::string filename, FakeEnv &parent, FakeEnv::Memory &mem)
         : m_mem {&mem},
           m_parent {&parent},
-          m_path {std::move(path)}
+          m_filename {std::move(filename)}
     {
     }
 
@@ -109,16 +110,16 @@ protected:
 
     FakeEnv::Memory *m_mem {};
     FakeEnv *m_parent {};
-    std::string m_path;
+    std::string m_filename;
 };
 
 class FakeEditor : public Editor
 {
 public:
-    FakeEditor(std::string path, FakeEnv &parent, FakeEnv::Memory &mem)
+    FakeEditor(std::string filename, FakeEnv &parent, FakeEnv::Memory &mem)
         : m_mem {&mem},
           m_parent {&parent},
-          m_path {std::move(path)}
+          m_filename {std::move(filename)}
     {
     }
 
@@ -132,16 +133,16 @@ protected:
 
     FakeEnv::Memory *m_mem {};
     FakeEnv *m_parent {};
-    std::string m_path;
+    std::string m_filename;
 };
 
 class FakeLogger : public Logger
 {
 public:
-    FakeLogger(std::string path, FakeEnv &parent, FakeEnv::Memory &mem)
+    FakeLogger(std::string filename, FakeEnv &parent, FakeEnv::Memory &mem)
         : m_mem {&mem},
           m_parent {&parent},
-          m_path {std::move(path)}
+          m_filename {std::move(filename)}
     {
     }
 
@@ -154,7 +155,7 @@ protected:
 
     FakeEnv::Memory *m_mem {};
     FakeEnv *m_parent {};
-    std::string m_path;
+    std::string m_filename;
 };
 
 class FakeInfoLogger : public InfoLogger
@@ -204,7 +205,7 @@ class FaultInjectionEnv : public FakeEnv
     friend class FaultInjectionReader;
     friend class FaultInjectionLogger;
 
-    [[nodiscard]] auto try_intercept_syscall(Interceptor::Type type, const std::string &path) -> Status;
+    [[nodiscard]] auto try_intercept_syscall(Interceptor::Type type, const std::string &filename) -> Status;
 
 public:
     [[nodiscard]] auto clone() const -> Env * override;
@@ -212,16 +213,17 @@ public:
     virtual auto clear_interceptors() -> void;
 
     ~FaultInjectionEnv() override = default;
-    [[nodiscard]] auto new_info_logger(const std::string &path, InfoLogger *&out) -> Status override;
-    [[nodiscard]] auto new_reader(const std::string &path, Reader *&out) -> Status override;
-    [[nodiscard]] auto new_editor(const std::string &path, Editor *&out) -> Status override;
-    [[nodiscard]] auto new_logger(const std::string &path, Logger *&out) -> Status override;
-    [[nodiscard]] auto get_children(const std::string &path, std::vector<std::string> &out) const -> Status override;
-    [[nodiscard]] auto rename_file(const std::string &old_path, const std::string &new_path) -> Status override;
-    [[nodiscard]] auto file_exists(const std::string &path) const -> bool override;
-    [[nodiscard]] auto resize_file(const std::string &path, std::size_t size) -> Status override;
-    [[nodiscard]] auto file_size(const std::string &path, std::size_t &out) const -> Status override;
-    [[nodiscard]] auto remove_file(const std::string &path) -> Status override;
+    [[nodiscard]] auto new_info_logger(const std::string &filename, InfoLogger *&out) -> Status override;
+    [[nodiscard]] auto new_reader(const std::string &filename, Reader *&out) -> Status override;
+    [[nodiscard]] auto new_editor(const std::string &filename, Editor *&out) -> Status override;
+    [[nodiscard]] auto new_logger(const std::string &filename, Logger *&out) -> Status override;
+    [[nodiscard]] auto get_children(const std::string &dirname, std::vector<std::string> &out) const -> Status override;
+    [[nodiscard]] auto rename_file(const std::string &old_filename, const std::string &new_filename) -> Status override;
+    [[nodiscard]] auto file_exists(const std::string &filename) const -> bool override;
+    [[nodiscard]] auto resize_file(const std::string &filename, std::size_t size) -> Status override;
+    [[nodiscard]] auto file_size(const std::string &filename, std::size_t &out) const -> Status override;
+    [[nodiscard]] auto remove_file(const std::string &filename) -> Status override;
+    [[nodiscard]] auto sync_directory(const std::string &dirname) -> Status override { return Status::ok(); }
 };
 
 class FaultInjectionReader : public FakeReader

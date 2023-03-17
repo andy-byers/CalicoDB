@@ -9,14 +9,14 @@
 #include "unit_tests.h"
 #include "wal_reader.h"
 
- namespace calicodb
+namespace calicodb
 {
 
- class WalPagerInteractionTests
+class WalPagerInteractionTests
     : public InMemoryTest,
       public testing::Test
 {
- public:
+public:
     static constexpr auto kFilename = "./test";
     static constexpr auto kWalPrefix = "./wal-";
     static constexpr auto kPageSize = kMinPageSize;
@@ -94,10 +94,10 @@
     tools::RandomGenerator random {1'024 * 1'024 * 8};
 };
 
-template<class EnvType = tools::FaultInjectionEnv>
- class RecoveryTestHarness
+template <class EnvType = tools::FaultInjectionEnv>
+class RecoveryTestHarness
 {
- public:
+public:
     static constexpr auto kFilename = "./test";
     static constexpr auto kWalPrefix = "./wal-";
 
@@ -192,13 +192,13 @@ template<class EnvType = tools::FaultInjectionEnv>
     DB *db {};
 };
 
- class RecoveryTests
+class RecoveryTests
     : public RecoveryTestHarness<>,
       public testing::Test
 {
 };
 
- TEST_F(RecoveryTests, NormalShutdown)
+TEST_F(RecoveryTests, NormalShutdown)
 {
     ASSERT_EQ(num_logs(), 1);
 
@@ -211,7 +211,7 @@ template<class EnvType = tools::FaultInjectionEnv>
     ASSERT_EQ(num_logs(), 0);
 }
 
- TEST_F(RecoveryTests, OnlyCommittedUpdatesArePersisted)
+TEST_F(RecoveryTests, OnlyCommittedUpdatesArePersisted)
 {
     ASSERT_OK(put("a", "1"));
     ASSERT_OK(put("b", "2"));
@@ -228,7 +228,7 @@ template<class EnvType = tools::FaultInjectionEnv>
     ASSERT_EQ(get("d"), "NOT_FOUND");
 }
 
- TEST_F(RecoveryTests, PacksMultipleTransactionsIntoSegment)
+TEST_F(RecoveryTests, PacksMultipleTransactionsIntoSegment)
 {
     ASSERT_OK(put("a", "1"));
     ASSERT_OK(db->checkpoint());
@@ -245,7 +245,7 @@ template<class EnvType = tools::FaultInjectionEnv>
     ASSERT_EQ(get("c"), "3");
 }
 
- TEST_F(RecoveryTests, RevertsNthTransaction)
+TEST_F(RecoveryTests, RevertsNthTransaction)
 {
     ASSERT_OK(put("a", "1"));
     ASSERT_OK(db->checkpoint());
@@ -259,7 +259,7 @@ template<class EnvType = tools::FaultInjectionEnv>
     ASSERT_EQ(get("c"), "NOT_FOUND");
 }
 
- TEST_F(RecoveryTests, VacuumRecovery)
+TEST_F(RecoveryTests, VacuumRecovery)
 {
     std::vector<Record> committed;
     for (std::size_t i {}; i < 1'000; ++i) {
@@ -307,7 +307,7 @@ template<class EnvType = tools::FaultInjectionEnv>
     db_impl(db)->TEST_validate();
 }
 
- TEST_F(RecoveryTests, SanityCheck)
+TEST_F(RecoveryTests, SanityCheck)
 {
     std::map<std::string, std::string> map;
     const std::size_t N {100};
@@ -347,11 +347,11 @@ template<class EnvType = tools::FaultInjectionEnv>
     }
 }
 
- class RecoverySanityCheck
+class RecoverySanityCheck
     : public RecoveryTestHarness<>,
       public testing::TestWithParam<std::tuple<std::string, tools::Interceptor::Type, int>>
 {
- public:
+public:
     RecoverySanityCheck()
         : interceptor_prefix {std::get<0>(GetParam())}
     {
@@ -401,7 +401,7 @@ template<class EnvType = tools::FaultInjectionEnv>
     std::map<std::string, std::string> map;
 };
 
- TEST_P(RecoverySanityCheck, FailureWhileRunning)
+TEST_P(RecoverySanityCheck, FailureWhileRunning)
 {
     for (const auto &[k, v] : map) {
         auto s = db->erase(k);
@@ -472,10 +472,10 @@ public:
     }
 };
 
- TEST_P(OpenErrorTests, FailureDuringOpen)
+TEST_P(OpenErrorTests, FailureDuringOpen)
 {
-     assert_special_error(open_with_status());
-     validate();
+    assert_special_error(open_with_status());
+    validate();
 }
 
 INSTANTIATE_TEST_SUITE_P(
@@ -492,117 +492,123 @@ INSTANTIATE_TEST_SUITE_P(
         std::make_tuple("./wal-", tools::Interceptor::kOpen, 1),
         std::make_tuple("./wal-", tools::Interceptor::kOpen, 5)));
 
-class DataLossEnv : public EnvWrapper {
+class DataLossEnv : public EnvWrapper
+{
     std::string m_database_contents;
     std::size_t m_wal_sync_size {};
 
 public:
     explicit DataLossEnv()
         : EnvWrapper {*new tools::FakeEnv}
-    {}
+    {
+    }
 
     ~DataLossEnv() override
     {
         delete target();
     }
 
-    [[nodiscard]] auto new_editor(const std::string &filename, Editor *& out) -> Status override;
-    [[nodiscard]] auto new_logger(const std::string &filename, Logger *& out) -> Status override;
-    
+    [[nodiscard]] auto new_editor(const std::string &filename, Editor *&out) -> Status override;
+    [[nodiscard]] auto new_logger(const std::string &filename, Logger *&out) -> Status override;
+
     auto register_database_contents(std::string database_contents) -> void
     {
         m_database_contents = std::move(database_contents);
     }
-    
+
     auto register_wal_sync_size(std::size_t wal_sync_size) -> void
     {
         m_wal_sync_size = wal_sync_size;
     }
-    
+
     [[nodiscard]] auto database_contents() const -> std::string
     {
         return m_database_contents;
     }
-    
+
     [[nodiscard]] auto wal_sync_size() const -> std::size_t
     {
         return m_wal_sync_size;
     }
 };
 
-class DataLossEditor : public Editor {
+class DataLossEditor : public Editor
+{
     std::string m_filename;
     DataLossEnv *m_env {};
     Editor *m_file {};
-    
+
 public:
     explicit DataLossEditor(std::string filename, Editor &file, DataLossEnv &env)
         : m_filename {std::move(filename)},
           m_env {&env},
           m_file {&file}
-    {}
-    
+    {
+    }
+
     ~DataLossEditor() override
     {
         delete m_file;
     }
-    
+
     [[nodiscard]] auto read(std::size_t offset, std::size_t size, char *scratch, Slice *out) -> Status override
     {
         return m_file->read(offset, size, scratch, out);
     }
-    
+
     [[nodiscard]] auto write(std::size_t offset, const Slice &in) -> Status override
     {
         return m_file->write(offset, in);
     }
-    
+
     [[nodiscard]] auto sync() -> Status override
     {
         CALICODB_TRY(m_file->sync());
-        
+
         std::uint64_t file_size;
         EXPECT_OK(m_env->file_size(m_filename, file_size));
-        
+
         Slice slice;
         std::string contents(file_size, '\0');
         EXPECT_OK(m_file->read(0, file_size, contents.data(), &slice));
         EXPECT_EQ(slice.size(), file_size);
-        
+
         m_env->register_database_contents(std::move(contents));
         return Status::ok();
     }
 };
 
-class DataLossLogger : public Logger {
+class DataLossLogger : public Logger
+{
     std::string m_filename;
     DataLossEnv *m_env {};
     Logger *m_file {};
-    
+
 public:
     explicit DataLossLogger(std::string filename, Logger &file, DataLossEnv &env)
         : m_filename {std::move(filename)},
           m_env {&env},
           m_file {&file}
-    {}
-    
+    {
+    }
+
     ~DataLossLogger() override
     {
         delete m_file;
     }
-    
+
     [[nodiscard]] auto write(const Slice &in) -> Status override
     {
         return m_file->write(in);
     }
-    
+
     [[nodiscard]] auto sync() -> Status override
     {
         CALICODB_TRY(m_file->sync());
-        
+
         std::uint64_t file_size;
         EXPECT_OK(m_env->file_size(m_filename, file_size));
-        
+
         m_env->register_wal_sync_size(file_size);
         return Status::ok();
     }
@@ -623,8 +629,8 @@ auto DataLossEnv::new_logger(const std::string &filename, Logger *&out) -> Statu
 }
 
 class DataLossTests
-    : public RecoveryTestHarness<DataLossEnv>
-    , public testing::TestWithParam<std::size_t>
+    : public RecoveryTestHarness<DataLossEnv>,
+      public testing::TestWithParam<std::size_t>
 {
 public:
     const std::size_t kCheckpointInterval = GetParam();
@@ -633,7 +639,7 @@ public:
 
     auto close() -> void override
     {
-        // Hack to force an error to occur. The DB won't attempt to recover on close() 
+        // Hack to force an error to occur. The DB won't attempt to recover on close()
         // in this case. It will have to wait until open().
         const_cast<DBState &>(db_impl(db)->TEST_state()).status = special_error();
 

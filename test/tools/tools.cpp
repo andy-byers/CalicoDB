@@ -13,11 +13,11 @@
 namespace calicodb::tools
 {
 
-#define TRY_INTERCEPT_FROM(source, type, path)                                                     \
-    do {                                                                                           \
-        if (auto intercept_s = (source).try_intercept_syscall(type, path); !intercept_s.is_ok()) { \
-            return intercept_s;                                                                    \
-        }                                                                                          \
+#define TRY_INTERCEPT_FROM(source, type, filename)                                                     \
+    do {                                                                                               \
+        if (auto intercept_s = (source).try_intercept_syscall(type, filename); !intercept_s.is_ok()) { \
+            return intercept_s;                                                                        \
+        }                                                                                              \
     } while (0)
 
 namespace fs = std::filesystem;
@@ -74,44 +74,44 @@ auto FakeLogger::sync() -> Status
     return Status::ok();
 }
 
-auto FakeEnv::get_memory(const std::string &path) const -> Memory &
+auto FakeEnv::get_memory(const std::string &filename) const -> Memory &
 {
-    auto itr = m_memory.find(path);
+    auto itr = m_memory.find(filename);
     if (itr == end(m_memory)) {
-        itr = m_memory.insert(itr, {path, {}});
+        itr = m_memory.insert(itr, {filename, {}});
     }
     return itr->second;
 }
 
-auto FakeEnv::new_reader(const std::string &path, Reader *&out) -> Status
+auto FakeEnv::new_reader(const std::string &filename, Reader *&out) -> Status
 {
-    auto &mem = get_memory(path);
+    auto &mem = get_memory(filename);
     if (mem.created) {
-        out = new FakeReader {path, *this, mem};
+        out = new FakeReader {filename, *this, mem};
         return Status::ok();
     }
     return Status::not_found("cannot open file");
 }
 
-auto FakeEnv::new_editor(const std::string &path, Editor *&out) -> Status
+auto FakeEnv::new_editor(const std::string &filename, Editor *&out) -> Status
 {
-    auto &mem = get_memory(path);
+    auto &mem = get_memory(filename);
     if (!mem.created) {
         mem.buffer.clear();
         mem.created = true;
     }
-    out = new FakeEditor {path, *this, mem};
+    out = new FakeEditor {filename, *this, mem};
     return Status::ok();
 }
 
-auto FakeEnv::new_logger(const std::string &path, Logger *&out) -> Status
+auto FakeEnv::new_logger(const std::string &filename, Logger *&out) -> Status
 {
-    auto &mem = get_memory(path);
+    auto &mem = get_memory(filename);
     if (!mem.created) {
         mem.buffer.clear();
         mem.created = true;
     }
-    out = new FakeLogger {path, *this, mem};
+    out = new FakeLogger {filename, *this, mem};
     return Status::ok();
 }
 
@@ -121,10 +121,10 @@ auto FakeEnv::new_info_logger(const std::string &, InfoLogger *&out) -> Status
     return Status::ok();
 }
 
-auto FakeEnv::remove_file(const std::string &path) -> Status
+auto FakeEnv::remove_file(const std::string &filename) -> Status
 {
-    auto &mem = get_memory(path);
-    auto itr = m_memory.find(path);
+    auto &mem = get_memory(filename);
+    auto itr = m_memory.find(filename);
     if (itr == end(m_memory)) {
         return Status::not_found("cannot remove file");
     }
@@ -135,9 +135,9 @@ auto FakeEnv::remove_file(const std::string &path) -> Status
     return Status::ok();
 }
 
-auto FakeEnv::resize_file(const std::string &path, std::size_t size) -> Status
+auto FakeEnv::resize_file(const std::string &filename, std::size_t size) -> Status
 {
-    auto itr = m_memory.find(path);
+    auto itr = m_memory.find(filename);
     if (itr == end(m_memory)) {
         return Status::io_error("cannot resize file");
     }
@@ -145,25 +145,25 @@ auto FakeEnv::resize_file(const std::string &path, std::size_t size) -> Status
     return Status::ok();
 }
 
-auto FakeEnv::rename_file(const std::string &old_path, const std::string &new_path) -> Status
+auto FakeEnv::rename_file(const std::string &old_filename, const std::string &new_filename) -> Status
 {
-    if (new_path.empty()) {
+    if (new_filename.empty()) {
         return Status::invalid_argument("name has zero length");
     }
 
-    auto node = m_memory.extract(old_path);
+    auto node = m_memory.extract(old_filename);
     if (node.empty()) {
         return Status::not_found("file does not exist");
     }
 
-    node.key() = new_path;
+    node.key() = new_filename;
     m_memory.insert(std::move(node));
     return Status::ok();
 }
 
-auto FakeEnv::file_size(const std::string &path, std::size_t &out) const -> Status
+auto FakeEnv::file_size(const std::string &filename, std::size_t &out) const -> Status
 {
-    auto itr = m_memory.find(path);
+    auto itr = m_memory.find(filename);
     if (itr == cend(m_memory)) {
         return Status::not_found("file does not exist");
     }
@@ -171,17 +171,17 @@ auto FakeEnv::file_size(const std::string &path, std::size_t &out) const -> Stat
     return Status::ok();
 }
 
-auto FakeEnv::file_exists(const std::string &path) const -> bool
+auto FakeEnv::file_exists(const std::string &filename) const -> bool
 {
-    if (const auto &itr = m_memory.find(path); itr != end(m_memory)) {
+    if (const auto &itr = m_memory.find(filename); itr != end(m_memory)) {
         return itr->second.created;
     }
     return false;
 }
 
-auto FakeEnv::get_children(const std::string &path, std::vector<std::string> &out) const -> Status
+auto FakeEnv::get_children(const std::string &dirname, std::vector<std::string> &out) const -> Status
 {
-    auto prefix = path.back() == '/' ? path : path + '/';
+    auto prefix = dirname.back() == '/' ? dirname : dirname + '/';
     for (const auto &[filename, mem] : m_memory) {
         if (mem.created && Slice {filename}.starts_with(prefix)) {
             out.emplace_back(filename.substr(prefix.size()));
@@ -197,11 +197,10 @@ auto FakeEnv::clone() const -> Env *
     return env;
 }
 
-auto FaultInjectionEnv::try_intercept_syscall(Interceptor::Type type, const std::string &path) -> Status
+auto FaultInjectionEnv::try_intercept_syscall(Interceptor::Type type, const std::string &filename) -> Status
 {
-    Slice filename {path};
     for (const auto &interceptor : m_interceptors) {
-        if (interceptor.type == type && filename.starts_with(interceptor.prefix)) {
+        if (interceptor.type == type && filename.find(interceptor.prefix) == 0) {
             CALICODB_TRY(interceptor());
         }
     }
@@ -219,67 +218,65 @@ auto FaultInjectionEnv::clear_interceptors() -> void
 
 auto FaultInjectionReader::read(std::size_t offset, std::size_t size, char *scratch, Slice *out) -> Status
 {
-    {
-        TRY_INTERCEPT_FROM(reinterpret_cast<FaultInjectionEnv &>(*m_parent), Interceptor::kRead, m_path);
-    }
+    TRY_INTERCEPT_FROM(reinterpret_cast<FaultInjectionEnv &>(*m_parent), Interceptor::kRead, m_filename);
     return FakeReader::read(offset, size, scratch, out);
 }
 
 auto FaultInjectionEditor::read(std::size_t offset, std::size_t size, char *scratch, Slice *out) -> Status
 {
-    TRY_INTERCEPT_FROM(reinterpret_cast<FaultInjectionEnv &>(*m_parent), Interceptor::kRead, m_path);
+    TRY_INTERCEPT_FROM(reinterpret_cast<FaultInjectionEnv &>(*m_parent), Interceptor::kRead, m_filename);
     return FakeEditor::read(offset, size, scratch, out);
 }
 
 auto FaultInjectionEditor::write(std::size_t offset, const Slice &in) -> Status
 {
-    TRY_INTERCEPT_FROM(reinterpret_cast<FaultInjectionEnv &>(*m_parent), Interceptor::kWrite, m_path);
+    TRY_INTERCEPT_FROM(reinterpret_cast<FaultInjectionEnv &>(*m_parent), Interceptor::kWrite, m_filename);
     return FakeEditor::write(offset, in);
 }
 
 auto FaultInjectionEditor::sync() -> Status
 {
-    TRY_INTERCEPT_FROM(reinterpret_cast<FaultInjectionEnv &>(*m_parent), Interceptor::kSync, m_path);
+    TRY_INTERCEPT_FROM(reinterpret_cast<FaultInjectionEnv &>(*m_parent), Interceptor::kSync, m_filename);
     return FakeEditor::sync();
 }
 
 auto FaultInjectionLogger::write(const Slice &in) -> Status
 {
-    TRY_INTERCEPT_FROM(reinterpret_cast<FaultInjectionEnv &>(*m_parent), Interceptor::kWrite, m_path);
+    TRY_INTERCEPT_FROM(reinterpret_cast<FaultInjectionEnv &>(*m_parent), Interceptor::kWrite, m_filename);
     return FakeLogger::write(in);
 }
 
 auto FaultInjectionLogger::sync() -> Status
 {
-    TRY_INTERCEPT_FROM(reinterpret_cast<FaultInjectionEnv &>(*m_parent), Interceptor::kSync, m_path);
+    TRY_INTERCEPT_FROM(reinterpret_cast<FaultInjectionEnv &>(*m_parent), Interceptor::kSync, m_filename);
     return FakeLogger::sync();
 }
 
-auto FaultInjectionEnv::new_reader(const std::string &path, Reader *&out) -> Status
+auto FaultInjectionEnv::new_reader(const std::string &filename, Reader *&out) -> Status
 {
-    TRY_INTERCEPT_FROM(*this, Interceptor::kOpen, path);
+    TRY_INTERCEPT_FROM(*this, Interceptor::kOpen, filename);
     FakeReader *reader;
-    CALICODB_TRY(FakeEnv::new_reader(path, reinterpret_cast<Reader *&>(reader)));
+    CALICODB_TRY(FakeEnv::new_reader(filename, reinterpret_cast<Reader *&>(reader)));
     out = new FaultInjectionReader {*reader};
     delete reader;
     return Status::ok();
 }
 
-auto FaultInjectionEnv::new_editor(const std::string &path, Editor *&out) -> Status
+auto FaultInjectionEnv::new_editor(const std::string &filename, Editor *&out) -> Status
 {
-    TRY_INTERCEPT_FROM(*this, Interceptor::kOpen, path);
+    TRY_INTERCEPT_FROM(*this, Interceptor::kOpen, filename);
     FakeEditor *editor;
-    CALICODB_TRY(FakeEnv::new_editor(path, reinterpret_cast<Editor *&>(editor)));
+    CALICODB_TRY(FakeEnv::new_editor(filename, reinterpret_cast<Editor *&>(editor)));
     out = new FaultInjectionEditor {*editor};
     delete editor;
     return Status::ok();
 }
 
-auto FaultInjectionEnv::new_logger(const std::string &path, Logger *&out) -> Status
+auto FaultInjectionEnv::new_logger(const std::string &filename, Logger *&out) -> Status
 {
-    TRY_INTERCEPT_FROM(*this, Interceptor::kOpen, path);
+    TRY_INTERCEPT_FROM(*this, Interceptor::kOpen, filename);
     FakeLogger *logger;
-    CALICODB_TRY(FakeEnv::new_logger(path, reinterpret_cast<Logger *&>(logger)));
+    CALICODB_TRY(FakeEnv::new_logger(filename, reinterpret_cast<Logger *&>(logger)));
     out = new FaultInjectionLogger {*logger};
     delete logger;
     return Status::ok();
@@ -291,38 +288,36 @@ auto FaultInjectionEnv::new_info_logger(const std::string &, InfoLogger *&out) -
     return Status::ok();
 }
 
-auto FaultInjectionEnv::remove_file(const std::string &path) -> Status
+auto FaultInjectionEnv::remove_file(const std::string &filename) -> Status
 {
-    TRY_INTERCEPT_FROM(*this, Interceptor::kUnlink, path);
-    return FakeEnv::remove_file(path);
+    TRY_INTERCEPT_FROM(*this, Interceptor::kUnlink, filename);
+    return FakeEnv::remove_file(filename);
 }
 
-auto FaultInjectionEnv::resize_file(const std::string &path, std::size_t size) -> Status
+auto FaultInjectionEnv::resize_file(const std::string &filename, std::size_t size) -> Status
 {
-    return FakeEnv::resize_file(path, size);
+    return FakeEnv::resize_file(filename, size);
 }
 
-auto FaultInjectionEnv::rename_file(const std::string &old_path, const std::string &new_path) -> Status
+auto FaultInjectionEnv::rename_file(const std::string &old_filename, const std::string &new_filename) -> Status
 {
-    TRY_INTERCEPT_FROM(*this, Interceptor::kRename, old_path);
-    return FakeEnv::rename_file(old_path, new_path);
+    TRY_INTERCEPT_FROM(*this, Interceptor::kRename, old_filename);
+    return FakeEnv::rename_file(old_filename, new_filename);
 }
 
-auto FaultInjectionEnv::file_size(const std::string &path, std::size_t &out) const -> Status
+auto FaultInjectionEnv::file_size(const std::string &filename, std::size_t &out) const -> Status
 {
-    //    TRY_INTERCEPT_FROM(*this, Interceptor::FileSize, path);
-    return FakeEnv::file_size(path, out);
+    return FakeEnv::file_size(filename, out);
 }
 
-auto FaultInjectionEnv::file_exists(const std::string &path) const -> bool
+auto FaultInjectionEnv::file_exists(const std::string &filename) const -> bool
 {
-    //    TRY_INTERCEPT_FROM(*this, Interceptor::Exists, path);
-    return FakeEnv::file_exists(path);
+    return FakeEnv::file_exists(filename);
 }
 
-auto FaultInjectionEnv::get_children(const std::string &dir_path, std::vector<std::string> &out) const -> Status
+auto FaultInjectionEnv::get_children(const std::string &dirname, std::vector<std::string> &out) const -> Status
 {
-    return FakeEnv::get_children(dir_path, out);
+    return FakeEnv::get_children(dirname, out);
 }
 
 auto FaultInjectionEnv::clone() const -> Env *

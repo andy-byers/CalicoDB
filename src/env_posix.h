@@ -19,8 +19,8 @@ namespace calicodb
 class PosixReader : public Reader
 {
 public:
-    explicit PosixReader(std::string path, int file)
-        : m_path {std::move(path)},
+    explicit PosixReader(std::string filename, int file)
+        : m_filename {std::move(filename)},
           m_file {file}
     {
         CALICODB_EXPECT_GE(file, 0);
@@ -30,15 +30,15 @@ public:
     [[nodiscard]] auto read(std::size_t offset, std::size_t size, char *scratch, Slice *out) -> Status override;
 
 private:
-    std::string m_path;
+    std::string m_filename;
     int m_file {};
 };
 
 class PosixEditor : public Editor
 {
 public:
-    explicit PosixEditor(std::string path, int file)
-        : m_path {std::move(path)},
+    explicit PosixEditor(std::string filename, int file)
+        : m_filename {std::move(filename)},
           m_file {file}
     {
         CALICODB_EXPECT_GE(file, 0);
@@ -50,15 +50,15 @@ public:
     [[nodiscard]] auto sync() -> Status override;
 
 private:
-    std::string m_path;
+    std::string m_filename;
     int m_file {};
 };
 
 class PosixLogger : public Logger
 {
 public:
-    explicit PosixLogger(std::string path, int file)
-        : m_path {std::move(path)},
+    explicit PosixLogger(std::string filename, int file)
+        : m_filename {std::move(filename)},
           m_file {file}
     {
         CALICODB_EXPECT_GE(file, 0);
@@ -69,16 +69,16 @@ public:
     [[nodiscard]] auto sync() -> Status override;
 
 private:
-    std::string m_path;
+    std::string m_filename;
     int m_file {};
 };
 
 class PosixInfoLogger : public InfoLogger
 {
 public:
-    explicit PosixInfoLogger(std::string path, int file)
+    explicit PosixInfoLogger(std::string filename, int file)
         : m_buffer(kBufferSize, '\0'),
-          m_path {std::move(path)},
+          m_filename {std::move(filename)},
           m_file {file}
     {
         CALICODB_EXPECT_GE(file, 0);
@@ -90,7 +90,7 @@ public:
 private:
     static constexpr std::size_t kBufferSize {512};
     std::string m_buffer;
-    std::string m_path;
+    std::string m_filename;
     int m_file {};
 };
 
@@ -99,16 +99,17 @@ class EnvPosix : public Env
 public:
     EnvPosix() = default;
     ~EnvPosix() override = default;
-    [[nodiscard]] auto get_children(const std::string &path, std::vector<std::string> &out) const -> Status override;
-    [[nodiscard]] auto new_reader(const std::string &path, Reader *&out) -> Status override;
-    [[nodiscard]] auto new_editor(const std::string &path, Editor *&out) -> Status override;
-    [[nodiscard]] auto new_logger(const std::string &path, Logger *&out) -> Status override;
-    [[nodiscard]] auto new_info_logger(const std::string &path, InfoLogger *&out) -> Status override;
-    [[nodiscard]] auto rename_file(const std::string &old_path, const std::string &new_path) -> Status override;
-    [[nodiscard]] auto remove_file(const std::string &path) -> Status override;
-    [[nodiscard]] auto resize_file(const std::string &path, std::size_t size) -> Status override;
-    [[nodiscard]] auto file_exists(const std::string &path) const -> bool override;
-    [[nodiscard]] auto file_size(const std::string &path, std::size_t &out) const -> Status override;
+    [[nodiscard]] auto get_children(const std::string &dirname, std::vector<std::string> &out) const -> Status override;
+    [[nodiscard]] auto new_reader(const std::string &filename, Reader *&out) -> Status override;
+    [[nodiscard]] auto new_editor(const std::string &filename, Editor *&out) -> Status override;
+    [[nodiscard]] auto new_logger(const std::string &filename, Logger *&out) -> Status override;
+    [[nodiscard]] auto new_info_logger(const std::string &filename, InfoLogger *&out) -> Status override;
+    [[nodiscard]] auto rename_file(const std::string &old_filename, const std::string &new_filename) -> Status override;
+    [[nodiscard]] auto remove_file(const std::string &filename) -> Status override;
+    [[nodiscard]] auto resize_file(const std::string &filename, std::size_t size) -> Status override;
+    [[nodiscard]] auto file_exists(const std::string &filename) const -> bool override;
+    [[nodiscard]] auto file_size(const std::string &filename, std::size_t &out) const -> Status override;
+    [[nodiscard]] auto sync_directory(const std::string &dirname) -> Status override;
 };
 
 } // namespace calicodb

@@ -23,6 +23,7 @@ WriteAheadLog::~WriteAheadLog()
 {
     delete m_writer;
     delete m_file;
+    delete m_dir;
 }
 
 auto WriteAheadLog::open(const Parameters &param, WriteAheadLog **out) -> Status
@@ -41,7 +42,6 @@ auto WriteAheadLog::open(const Parameters &param, WriteAheadLog **out) -> Status
     std::sort(begin(segments), end(segments));
 
     auto *wal = new WriteAheadLog {param};
-
     // Keep track of the segment files.
     for (const auto &id : segments) {
         wal->m_segments.insert({id, Lsn::null()});
@@ -181,7 +181,7 @@ auto WriteAheadLog::open_writer() -> Status
     const auto id = next_segment_id();
     CALICODB_TRY(m_env->new_logger(encode_segment_name(m_prefix, id), m_file));
     m_writer = new WalWriter {*m_file, m_tail_buffer};
-    return Status::ok();
+    return m_env->sync_directory(split_path(m_prefix).first);
 }
 
 auto WriteAheadLog::next_segment_id() const -> Id

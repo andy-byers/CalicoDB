@@ -185,6 +185,7 @@ auto DBImpl::open(const Options &sanitized) -> Status
 
     if (!db_exists) {
         m_info_log->logv("setting up a new database");
+        CALICODB_TRY(m_env->sync_directory(m_filename));
 
         // Create the root tree.
         Id root_id;

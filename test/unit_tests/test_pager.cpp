@@ -23,8 +23,9 @@ public:
     [[nodiscard]] auto build_deltas(const std::vector<PageDelta> &unordered) const
     {
         std::vector<PageDelta> deltas;
-        for (const auto &delta : unordered)
+        for (const auto &delta : unordered) {
             insert_delta(deltas, delta);
+        }
         compress_deltas(deltas);
         return deltas;
     }
@@ -65,63 +66,71 @@ TEST_F(DeltaCompressionTest, DeltasAreOrdered)
 {
     const auto deltas = build_deltas({
         {20, 2},
-        {60, 6},
-        {50, 5},
         {10, 1},
-        {90, 9},
-        {70, 7},
-        {40, 4},
-        {80, 8},
         {30, 3},
     });
 
-    std::size_t i {1};
-    ASSERT_TRUE(std::all_of(cbegin(deltas), cend(deltas), [&i](const auto &delta) {
-        const auto j = std::exchange(i, i + 1);
-        return delta.offset == 10 * j && delta.size == j;
-    }));
-    ASSERT_EQ(deltas.size(), 9);
+    ASSERT_EQ(deltas.size(), 3);
+    for (std::size_t i {}; i < deltas.size(); ++i) {
+        ASSERT_EQ(deltas[i].offset, (i + 1) * 10);
+        ASSERT_EQ(deltas[i].size, i + 1);
+    }
 }
 
 TEST_F(DeltaCompressionTest, DeltasAreNotRepeated)
 {
     const auto deltas = build_deltas({
         {20, 2},
-        {50, 5},
-        {40, 4},
         {10, 1},
         {20, 2},
-        {30, 3},
-        {50, 5},
-        {40, 4},
-        {30, 3},
         {10, 1},
     });
 
-    std::size_t i {1};
-    ASSERT_TRUE(std::all_of(cbegin(deltas), cend(deltas), [&i](const auto &delta) {
-        const auto j = std::exchange(i, i + 1);
-        return delta.offset == 10 * j && delta.size == j;
-    }));
-    ASSERT_EQ(deltas.size(), 5);
+    ASSERT_EQ(deltas.size(), 2);
+    for (std::size_t i {}; i < deltas.size(); ++i) {
+        ASSERT_EQ(deltas[i].offset, (i + 1) * 10);
+        ASSERT_EQ(deltas[i].size, i + 1);
+    }
+}
+
+TEST_F(DeltaCompressionTest, ConnectedDeltasAreMerged)
+{
+    const auto deltas = build_deltas({
+        {0, 1},
+        {1, 2},
+        {3, 1},
+    });
+
+    ASSERT_EQ(deltas.size(), 1);
+    ASSERT_EQ(deltas[0].offset, 0);
+    ASSERT_EQ(deltas[0].size, 4);
 }
 
 TEST_F(DeltaCompressionTest, OverlappingDeltasAreMerged)
 {
-    auto deltas = build_deltas({
+    std::vector<PageDelta> deltas {
         {0, 10},
         {20, 10},
         {40, 10},
-    });
+    };
 
+    // Overlaps the first delta by 5.
     insert_delta(deltas, {5, 10});
+
+    // Joins the second and third original deltas.
     insert_delta(deltas, {30, 10});
+
+    // New last delta.
+    insert_delta(deltas, {60, 10});
+
+    // Overlaps the last delta by 5 and joins it to the other group.
+    insert_delta(deltas, {50, 15});
     compress_deltas(deltas);
 
     ASSERT_EQ(deltas.size(), 2);
     ASSERT_EQ(deltas[0].size, 15);
     ASSERT_EQ(deltas[0].offset, 0);
-    ASSERT_EQ(deltas[1].size, 30);
+    ASSERT_EQ(deltas[1].size, 50);
     ASSERT_EQ(deltas[1].offset, 20);
 }
 
