@@ -530,10 +530,26 @@ auto Node::remove_slot(std::size_t index) -> void
     --header.cell_count;
 }
 
+static auto write_node_header_diff(Node &node) -> void
+{
+    const auto &header = node.header;
+    auto offset = node_header_offset(node);
+    auto &page = node.page;
+
+    char buffer[NodeHeader::kSize];
+    header.write(buffer);
+
+    for (std::size_t i {}; i < sizeof(buffer); ++i) {
+        if (page.data()[offset + i] != buffer[i]) {
+            page.mutate(offset + i, 1)[0] = buffer[i];
+        }
+    }
+}
+
 auto Node::take() && -> Page
 {
     if (page.is_writable()) {
-        header.write(page.mutate(node_header_offset(*this), NodeHeader::kSize));
+        write_node_header_diff(*this);
     }
     return std::move(page);
 }
@@ -1753,7 +1769,7 @@ auto NodeManager::release(Pager &pager, Node node) -> void
 
 auto NodeManager::destroy(Freelist &freelist, Node node) -> Status
 {
-    return freelist.push(std::move(node).take());
+    return freelist.push(std::move(node.page));
 }
 
 auto OverflowList::read(Pager &pager, Id head_id, std::size_t offset, std::size_t payload_size, char *buffer) -> Status

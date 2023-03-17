@@ -55,6 +55,7 @@ private:
     Lsn m_flushed_lsn;
     Lsn m_last_lsn;
     std::string m_prefix;
+    std::string m_dirname;
 
     Env *m_env {};
     std::string m_data_buffer;
@@ -63,6 +64,7 @@ private:
 
     WalWriter *m_writer {};
     Logger *m_file {};
+    Reader *m_dir {};
 };
 
 } // namespace calicodb

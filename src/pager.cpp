@@ -111,7 +111,6 @@ auto Pager::do_pin_frame(Id page_id, bool *pinned) -> Status
     if (pinned != nullptr) {
         *pinned = true;
     }
-    // Associate the page ID with the frame index we got from the framer.
     m_cache.put(page_id, {frame_index});
     return Status::ok();
 }

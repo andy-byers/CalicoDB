@@ -36,6 +36,7 @@ public:
     [[nodiscard]] virtual auto resize_file(const std::string &path, std::size_t size) -> Status = 0;
     [[nodiscard]] virtual auto file_size(const std::string &path, std::size_t &out) const -> Status = 0;
     [[nodiscard]] virtual auto remove_file(const std::string &path) -> Status = 0;
+    [[nodiscard]] virtual auto sync_directory(const std::string &dirname) -> Status = 0;
 };
 
 // Construct that provides read-only random access to a file.
@@ -103,16 +104,17 @@ public:
     [[nodiscard]] auto target() -> Env *;
 
     ~EnvWrapper() override;
-    [[nodiscard]] auto new_reader(const std::string &path, Reader *&out) -> Status override;
-    [[nodiscard]] auto new_editor(const std::string &path, Editor *&out) -> Status override;
-    [[nodiscard]] auto new_logger(const std::string &path, Logger *&out) -> Status override;
-    [[nodiscard]] auto new_info_logger(const std::string &path, InfoLogger *&out) -> Status override;
-    [[nodiscard]] auto get_children(const std::string &path, std::vector<std::string> &out) const -> Status override;
-    [[nodiscard]] auto rename_file(const std::string &old_path, const std::string &new_path) -> Status override;
-    [[nodiscard]] auto file_exists(const std::string &path) const -> bool override;
-    [[nodiscard]] auto resize_file(const std::string &path, std::size_t size) -> Status override;
-    [[nodiscard]] auto file_size(const std::string &path, std::size_t &out) const -> Status override;
-    [[nodiscard]] auto remove_file(const std::string &path) -> Status override;
+    [[nodiscard]] auto new_reader(const std::string &filename, Reader *&out) -> Status override;
+    [[nodiscard]] auto new_editor(const std::string &filename, Editor *&out) -> Status override;
+    [[nodiscard]] auto new_logger(const std::string &filename, Logger *&out) -> Status override;
+    [[nodiscard]] auto new_info_logger(const std::string &filename, InfoLogger *&out) -> Status override;
+    [[nodiscard]] auto get_children(const std::string &dirname, std::vector<std::string> &out) const -> Status override;
+    [[nodiscard]] auto rename_file(const std::string &old_filename, const std::string &new_filename) -> Status override;
+    [[nodiscard]] auto file_exists(const std::string &filename) const -> bool override;
+    [[nodiscard]] auto resize_file(const std::string &filename, std::size_t size) -> Status override;
+    [[nodiscard]] auto file_size(const std::string &filename, std::size_t &out) const -> Status override;
+    [[nodiscard]] auto remove_file(const std::string &filename) -> Status override;
+    [[nodiscard]] auto sync_directory(const std::string &dirname) -> Status override;
 
 private:
     Env *m_target;

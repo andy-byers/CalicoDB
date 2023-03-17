@@ -176,7 +176,7 @@ static constexpr std::size_t kWalBlockScale {4};
     return prefix.to_string() + std::to_string(id.value);
 }
 
-template<class Itr>
+template <class Itr>
 [[nodiscard]] inline auto cache_first_lsn(Env &env, const std::string &prefix, Itr &itr) -> Status
 {
     if (auto lsn = itr->second; !lsn.is_null()) {

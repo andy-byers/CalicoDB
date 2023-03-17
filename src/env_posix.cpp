@@ -31,7 +31,7 @@ static constexpr int kFilePermissions {0644}; // -rw-r--r--
     return to_status(code);
 }
 
-static auto file_open(const std::string &name, int mode, int permissions, int &out) -> Status
+[[nodiscard]] static auto file_open(const std::string &name, int mode, int permissions, int &out) -> Status
 {
     if (const auto fd = open(name.c_str(), mode, permissions); fd >= 0) {
         out = fd;
@@ -41,15 +41,7 @@ static auto file_open(const std::string &name, int mode, int permissions, int &o
     return errno_to_status();
 }
 
-static auto file_close(int fd) -> Status
-{
-    if (close(fd)) {
-        return errno_to_status();
-    }
-    return Status::ok();
-}
-
-static auto file_read(int file, std::size_t size, char *scratch, Slice *out) -> Status
+[[nodiscard]] static auto file_read(int file, std::size_t size, char *scratch, Slice *out) -> Status
 {
     for (;;) {
         const auto n = read(file, scratch, size);
@@ -67,7 +59,7 @@ static auto file_read(int file, std::size_t size, char *scratch, Slice *out) -> 
     return Status::ok();
 }
 
-static auto file_write(int file, Slice in) -> Status
+[[nodiscard]] static auto file_write(int file, Slice in) -> Status
 {
     while (!in.is_empty()) {
         if (const auto n = write(file, in.data(), in.size()); n >= 0) {
@@ -79,7 +71,7 @@ static auto file_write(int file, Slice in) -> Status
     return Status::ok();
 }
 
-static auto file_sync(int fd) -> Status
+[[nodiscard]] static auto file_sync(int fd) -> Status
 {
     if (fsync(fd)) {
         return errno_to_status();
@@ -87,7 +79,7 @@ static auto file_sync(int fd) -> Status
     return Status::ok();
 }
 
-auto file_seek(int fd, long offset, int whence, std::size_t *out) -> Status
+[[nodiscard]] static auto file_seek(int fd, long offset, int whence, std::size_t *out) -> Status
 {
     if (const auto position = lseek(fd, offset, whence); position != -1) {
         if (out) {
@@ -98,33 +90,17 @@ auto file_seek(int fd, long offset, int whence, std::size_t *out) -> Status
     return errno_to_status();
 }
 
-auto file_remove(const std::string &path) -> Status
+[[nodiscard]] static auto file_remove(const std::string &filename) -> Status
 {
-    if (unlink(path.c_str())) {
+    if (unlink(filename.c_str())) {
         return errno_to_status();
     }
     return Status::ok();
 }
 
-auto file_resize(const std::string &path, std::size_t size) -> Status
+[[nodiscard]] static auto file_resize(const std::string &filename, std::size_t size) -> Status
 {
-    if (truncate(path.c_str(), static_cast<off_t>(size))) {
-        return errno_to_status();
-    }
-    return Status::ok();
-}
-
-auto dir_create(const std::string &path, mode_t permissions) -> Status
-{
-    if (mkdir(path.c_str(), permissions)) {
-        return errno_to_status();
-    }
-    return Status::ok();
-}
-
-auto dir_remove(const std::string &path) -> Status
-{
-    if (rmdir(path.c_str())) {
+    if (truncate(filename.c_str(), static_cast<off_t>(size))) {
         return errno_to_status();
     }
     return Status::ok();
@@ -132,7 +108,7 @@ auto dir_remove(const std::string &path) -> Status
 
 PosixReader::~PosixReader()
 {
-    (void)file_close(m_file);
+    close(m_file);
 }
 
 auto PosixReader::read(std::size_t offset, std::size_t size, char *scratch, Slice *out) -> Status
@@ -143,7 +119,7 @@ auto PosixReader::read(std::size_t offset, std::size_t size, char *scratch, Slic
 
 PosixEditor::~PosixEditor()
 {
-    (void)file_close(m_file);
+    close(m_file);
 }
 
 auto PosixEditor::read(std::size_t offset, std::size_t size, char *scratch, Slice *out) -> Status
@@ -165,7 +141,7 @@ auto PosixEditor::sync() -> Status
 
 PosixLogger::~PosixLogger()
 {
-    (void)file_close(m_file);
+    close(m_file);
 }
 
 auto PosixLogger::write(const Slice &in) -> Status
@@ -180,7 +156,7 @@ auto PosixLogger::sync() -> Status
 
 PosixInfoLogger::~PosixInfoLogger()
 {
-    (void)file_close(m_file);
+    close(m_file);
 }
 
 // Based off LevelDB.
@@ -212,7 +188,7 @@ auto PosixInfoLogger::logv(const char *fmt, ...) -> void
         }
 
         CALICODB_EXPECT_LE(length, m_buffer.size());
-        file_write(m_file, Slice {m_buffer.data(), length});
+        (void)file_write(m_file, Slice {m_buffer.data(), length});
         break;
     }
     m_buffer.resize(kBufferSize);
@@ -251,15 +227,14 @@ auto EnvPosix::file_size(const std::string &path, std::size_t &out) const -> Sta
     return Status::ok();
 }
 
-auto EnvPosix::get_children(const std::string &path, std::vector<std::string> &out) const -> Status
+auto EnvPosix::get_children(const std::string &dirname, std::vector<std::string> &out) const -> Status
 {
     const auto skip = [](const auto *s) {
         return !std::strcmp(s, ".") || !std::strcmp(s, "..");
     };
 
     out.clear();
-    const auto [dir_path, base_path] = split_path(path);
-    auto *dir = opendir(dir_path.c_str());
+    auto *dir = opendir(dirname.c_str());
     if (dir == nullptr) {
         return errno_to_status();
     }
@@ -274,35 +249,44 @@ auto EnvPosix::get_children(const std::string &path, std::vector<std::string> &o
     return Status::ok();
 }
 
-auto EnvPosix::new_reader(const std::string &path, Reader *&out) -> Status
+auto EnvPosix::sync_directory(const std::string &dirname) -> Status
+{
+    int dir;
+    CALICODB_TRY(file_open(dirname, O_RDONLY, kFilePermissions, dir));
+    auto s = file_sync(dir);
+    close(dir);
+    return s;
+}
+
+auto EnvPosix::new_reader(const std::string &filename, Reader *&out) -> Status
 {
     int file;
-    CALICODB_TRY(file_open(path, O_RDONLY, kFilePermissions, file));
-    out = new PosixReader {path, file};
+    CALICODB_TRY(file_open(filename, O_RDONLY, kFilePermissions, file));
+    out = new PosixReader {filename, file};
     return Status::ok();
 }
 
-auto EnvPosix::new_editor(const std::string &path, Editor *&out) -> Status
+auto EnvPosix::new_editor(const std::string &filename, Editor *&out) -> Status
 {
     int file;
-    CALICODB_TRY(file_open(path, O_CREAT | O_RDWR, kFilePermissions, file));
-    out = new PosixEditor {path, file};
+    CALICODB_TRY(file_open(filename, O_CREAT | O_RDWR, kFilePermissions, file));
+    out = new PosixEditor {filename, file};
     return Status::ok();
 }
 
-auto EnvPosix::new_logger(const std::string &path, Logger *&out) -> Status
+auto EnvPosix::new_logger(const std::string &filename, Logger *&out) -> Status
 {
     int file;
-    CALICODB_TRY(file_open(path, O_CREAT | O_WRONLY | O_APPEND, kFilePermissions, file));
-    out = new PosixLogger {path, file};
+    CALICODB_TRY(file_open(filename, O_CREAT | O_WRONLY | O_APPEND, kFilePermissions, file));
+    out = new PosixLogger {filename, file};
     return Status::ok();
 }
 
-auto EnvPosix::new_info_logger(const std::string &path, InfoLogger *&out) -> Status
+auto EnvPosix::new_info_logger(const std::string &filename, InfoLogger *&out) -> Status
 {
     int file;
-    CALICODB_TRY(file_open(path, O_CREAT | O_WRONLY | O_APPEND, kFilePermissions, file));
-    out = new PosixInfoLogger {path, file};
+    CALICODB_TRY(file_open(filename, O_CREAT | O_WRONLY | O_APPEND, kFilePermissions, file));
+    out = new PosixInfoLogger {filename, file};
     return Status::ok();
 }
 
