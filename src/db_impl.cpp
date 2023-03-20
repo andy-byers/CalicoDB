@@ -77,13 +77,13 @@ auto TableSet::get(Id table_id) -> TableState *
 auto TableSet::add(const LogicalPageId &root_id) -> void
 {
     const auto index = root_id.table_id.as_index();
-    while (index >= m_tables.size()) {
-        m_tables.emplace_back(nullptr);
+    if (m_tables.size() <= index) {
+        m_tables.resize(index + 1);
     }
-    if (m_tables[index] == nullptr) {
-        m_tables[index] = new TableState;
-        m_tables[index]->root_id = root_id;
-    }
+    // Table slot must not be occupied.
+    CALICODB_EXPECT_TRUE(m_tables[index] == nullptr);
+    m_tables[index] = new TableState;
+    m_tables[index]->root_id = root_id;
 }
 
 auto TableSet::erase(Id table_id) -> void
@@ -92,8 +92,8 @@ auto TableSet::erase(Id table_id) -> void
     if (m_tables[index] != nullptr) {
         delete m_tables[index]->tree;
         delete m_tables[index];
+        m_tables[index] = nullptr;
     }
-    m_tables[index] = nullptr;
 }
 
 static auto encode_logical_id(LogicalPageId id, char *out) -> void
@@ -202,7 +202,9 @@ auto DBImpl::open(const Options &sanitized) -> Status
     while (cursor->is_valid()) {
         LogicalPageId root_id;
         CALICODB_TRY(decode_logical_id(cursor->value(), &root_id));
-        m_tables.add(root_id);
+        if (m_tables.get(root_id.table_id) == nullptr) {
+            m_tables.add(root_id);
+        }
         cursor->next();
     }
     delete cursor;
@@ -247,7 +249,7 @@ DBImpl::DBImpl(const Options &options, const Options &sanitized, std::string fil
 DBImpl::~DBImpl()
 {
     if (m_state.is_running && m_state.status.is_ok()) {
-        if (const auto s = m_wal->flush(); !s.is_ok()) {
+        if (const auto s = m_wal->synchronize(true); !s.is_ok()) {
             m_info_log->logv("failed to flush wal: %s", s.to_string().data());
         }
         if (const auto s = m_pager->flush(m_state.commit_lsn); !s.is_ok()) {
@@ -474,7 +476,7 @@ auto DBImpl::do_vacuum() -> Status
     // be able to reapply the whole vacuum operation if the truncation fails.
     // The recovery routine should truncate the file to match the header page
     // count if necessary.
-    CALICODB_TRY(m_wal->flush());
+    CALICODB_TRY(m_wal->synchronize(true));
     CALICODB_TRY(m_pager->truncate(target.value));
 
     m_info_log->logv("vacuumed %llu pages", original.value - target.value);
@@ -544,7 +546,7 @@ auto DBImpl::do_checkpoint() -> Status
 
     FileHeader header;
     header.read(db_root.data());
-    m_pager->save_state(header);
+    header.page_count = m_pager->page_count();
     header.freelist_head = m_state.freelist_head;
     header.magic_code = FileHeader::kMagicCode;
     header.commit_lsn = m_wal->current_lsn();
@@ -554,7 +556,7 @@ auto DBImpl::do_checkpoint() -> Status
     header.write(db_root.mutate(0, FileHeader::kSize));
     m_pager->release(std::move(db_root));
 
-    return m_wal->flush();
+    return m_wal->synchronize(true);
 }
 
 auto DBImpl::load_file_header() -> Status
@@ -611,6 +613,9 @@ auto DBImpl::create_table(const TableOptions &options, const std::string &name, 
     Status s;
 
     if (name == kRootTableName) {
+        // Root table should be closed, i.e. we should be in open(). Attempting to open the
+        // root table again will result in undefined behavior.
+        CALICODB_EXPECT_EQ(m_tables.get(Id::root()), nullptr);
         root_id = LogicalPageId::root();
     } else {
         const auto *state = m_tables.get(Id::root());
@@ -627,8 +632,11 @@ auto DBImpl::create_table(const TableOptions &options, const std::string &name, 
         return s;
     }
 
-    m_tables.add(root_id);
     auto *state = m_tables.get(root_id.table_id);
+    if (state == nullptr) {
+        m_tables.add(root_id);
+        state = m_tables.get(root_id.table_id);
+    }
     CALICODB_EXPECT_NE(state, nullptr);
 
     if (state->open) {

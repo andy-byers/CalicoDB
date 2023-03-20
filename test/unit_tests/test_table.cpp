@@ -44,11 +44,17 @@ public:
     DB *db {};
 };
 
-TEST_F(DefaultTableTests, SpecialTableBehavior)
+#ifndef NDEBUG
+TEST_F(DefaultTableTests, OpenRootTableDeathTest)
 {
     Table *table;
+    ASSERT_DEATH((void)db->create_table({}, "calicodb.root", table), "expect") << "not allowed to create root table";
+}
+#endif // NDEBUG
+
+TEST_F(DefaultTableTests, SpecialTableBehavior)
+{
     auto *default_table = db->default_table();
-    ASSERT_TRUE(db->create_table({}, "calicodb_root", table).is_invalid_argument()) << "not allowed to create root table";
     ASSERT_TRUE(db->drop_table(default_table).is_invalid_argument()) << "not allowed to drop default table";
 }
 

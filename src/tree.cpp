@@ -1723,7 +1723,7 @@ auto NodeManager::allocate(Pager &pager, Freelist &freelist, Node &out, std::str
             // following it are used.
             if (PointerMap::lookup(pager, page.id()) == page.id()) {
                 pager.release(std::move(page));
-                CALICODB_TRY(pager.allocate(page));
+                return pager.allocate(page);
             }
             return Status::ok();
         } else {
@@ -1739,16 +1739,18 @@ auto NodeManager::allocate(Pager &pager, Freelist &freelist, Node &out, std::str
     return Status::ok();
 }
 
-auto NodeManager::acquire(Pager &pager, Id page_id, Node &out, std::string &scratch, bool upgrade) -> Status
+auto NodeManager::acquire(Pager &pager, Id page_id, Node &out, std::string &scratch, bool upgrade_node) -> Status
 {
-    CALICODB_TRY(pager.acquire(page_id, out.page));
-    out.scratch = scratch.data();
-    out.header.read(out.page.data() + node_header_offset(out));
-    setup_node(out);
-    if (upgrade) {
-        pager.upgrade(out.page);
+    auto s = pager.acquire(page_id, out.page);
+    if (s.is_ok()) {
+        out.scratch = scratch.data();
+        out.header.read(out.page.data() + node_header_offset(out));
+        setup_node(out);
+        if (upgrade_node) {
+            upgrade(pager, out);
+        }
     }
-    return Status::ok();
+    return s;
 }
 
 auto NodeManager::upgrade(Pager &pager, Node &node) -> void

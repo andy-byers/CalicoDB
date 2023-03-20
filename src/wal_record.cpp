@@ -104,7 +104,7 @@ static auto decode_deltas_payload(const Slice &in) -> DeltaDescriptor
     return info;
 }
 
-static auto decode_full_image_payload(const Slice &in) -> ImageDescriptor
+static auto decode_image_payload(const Slice &in) -> ImageDescriptor
 {
     ImageDescriptor info;
     auto data = in.data();
@@ -131,7 +131,7 @@ auto decode_payload(const Slice &in) -> PayloadDescriptor
         case WalPayloadType::kDeltaPayload:
             return decode_deltas_payload(in);
         case WalPayloadType::kImagePayload:
-            return decode_full_image_payload(in);
+            return decode_image_payload(in);
         case WalPayloadType::kVacuumPayload:
             return decode_vacuum_payload(in);
         default:

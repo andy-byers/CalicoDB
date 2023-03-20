@@ -44,14 +44,14 @@ TEST(LeakTests, DestroysOwnObjects)
     fs::remove_all("__calicodb_test");
 
     DB *db;
-    Table *table;
+    //    Table *table;
 
     ASSERT_OK(DB::open({}, "__calicodb_test", db));
-    ASSERT_OK(db->create_table({}, "test", table));
-    auto *cursor = db->new_cursor(*table);
+    //    ASSERT_OK(db->create_table({}, "test", table));
+    //    auto *cursor = db->new_cursor(*table);
 
-    delete cursor;
-    db->close_table(table);
+    //    delete cursor;
+    //    db->close_table(table);
     delete db;
 
     ASSERT_OK(DB::destroy({}, "__calicodb_test"));

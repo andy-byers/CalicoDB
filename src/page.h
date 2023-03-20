@@ -55,7 +55,6 @@ class Page
 
 public:
     friend class FrameManager;
-    friend class Pager;
     friend struct Node;
 
     explicit Page() = default;
@@ -102,9 +101,13 @@ public:
         return m_size;
     }
 
+    [[nodiscard]] auto has_changes() const -> bool
+    {
+        return !m_deltas.empty();
+    }
+
     [[nodiscard]] auto deltas() -> const std::vector<PageDelta> &
     {
-        CALICODB_EXPECT_TRUE(m_write);
         compress_deltas(m_deltas);
         return m_deltas;
     }
@@ -138,6 +141,22 @@ public:
 inline auto write_page_lsn(Page &page, Lsn lsn) -> void
 {
     put_u64(page.mutate(page_offset(page), sizeof(Lsn)), lsn.value);
+}
+
+// TODO: These make more sense and can be used for frames as well.
+[[nodiscard]] inline auto page_offset(Id page_id) -> std::size_t
+{
+    return FileHeader::kSize * page_id.is_root();
+}
+
+[[nodiscard]] inline auto read_page_lsn(Id page_id, const char *data) -> Lsn
+{
+    return Lsn {get_u64(data + page_offset(page_id))};
+}
+
+inline auto write_page_lsn(Id page_id, Lsn lsn, char *data) -> void
+{
+    put_u64(data + page_offset(page_id), lsn.value);
 }
 
 } // namespace calicodb

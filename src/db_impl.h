@@ -26,8 +26,8 @@ class TableImpl;
 class WriteAheadLog;
 struct TableState;
 
-static constexpr auto kRootTableName = "calicodb_root";
-static constexpr auto kDefaultTableName = "default";
+static constexpr auto kRootTableName = "calicodb.root";
+static constexpr auto kDefaultTableName = "calicodb.default";
 
 struct TableState {
     LogicalPageId root_id;

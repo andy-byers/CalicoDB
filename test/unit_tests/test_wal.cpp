@@ -532,7 +532,7 @@ TEST_F(WalTests, UnderstandsImageRecords)
     const auto image = random.Generate(kPageSize);
     ASSERT_OK(wal->log_image(Id {10}, "", nullptr));
     ASSERT_OK(wal->log_image(Id {20}, image, nullptr));
-    ASSERT_OK(wal->flush());
+    ASSERT_OK(wal->synchronize(true));
 
     std::vector<std::string> payloads;
     ASSERT_OK(read_segment(Id {1}, &payloads));
@@ -564,7 +564,7 @@ TEST_F(WalTests, UnderstandsDeltaRecords)
         {300, 30},
     };
     ASSERT_OK(wal->log_delta(Id {12}, image, delta, nullptr));
-    ASSERT_OK(wal->flush());
+    ASSERT_OK(wal->synchronize(true));
 
     std::vector<std::string> payloads;
     ASSERT_OK(read_segment(Id {1}, &payloads));
@@ -588,7 +588,7 @@ TEST_F(WalTests, UnderstandsVacuumRecords)
     ASSERT_EQ(wal->bytes_written(), 0);
     ASSERT_OK(wal->log_vacuum(true, nullptr));
     ASSERT_OK(wal->log_vacuum(false, nullptr));
-    ASSERT_OK(wal->flush());
+    ASSERT_OK(wal->synchronize(true));
 
     std::vector<std::string> payloads;
     ASSERT_OK(read_segment(Id {1}, &payloads));

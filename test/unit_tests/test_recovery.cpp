@@ -31,6 +31,7 @@ public:
     ~WalPagerInteractionTests() override
     {
         delete wal;
+        delete pager;
     }
 
     auto SetUp() -> void override
@@ -54,32 +55,10 @@ public:
         };
         ASSERT_OK(Pager::open(pager_param, &pager));
         ASSERT_OK(wal->start_writing());
+        state.is_running = true;
 
         tail_buffer.resize(wal_block_size(kPageSize));
         payload_buffer.resize(wal_scratch_size(kPageSize));
-    }
-
-    auto read_segment(Id segment_id, std::vector<PayloadDescriptor> *out) -> Status
-    {
-        Reader *temp;
-        EXPECT_OK(env->new_reader(encode_segment_name(kWalPrefix, segment_id), temp));
-
-        std::unique_ptr<Reader> file {temp};
-        WalReader reader {*file, tail_buffer};
-
-        for (;;) {
-            auto s = reader.read(payload_buffer);
-            Slice payload {payload_buffer};
-
-            if (s.is_ok()) {
-                out->emplace_back(decode_payload(payload));
-            } else if (s.is_not_found()) {
-                break;
-            } else {
-                return s;
-            }
-        }
-        return Status::ok();
     }
 
     DBState state;
@@ -93,6 +72,78 @@ public:
     TableSet tables;
     tools::RandomGenerator random {1'024 * 1'024 * 8};
 };
+
+TEST_F(WalPagerInteractionTests, GeneratesAppropriateWALRecords)
+{
+    auto lsn_value = wal->current_lsn().value;
+    Page page;
+
+    // Image and delta records.
+    ASSERT_OK(pager->allocate(page));
+    ASSERT_EQ(wal->current_lsn().value, ++lsn_value);
+    (void)page.mutate(page.size() - 1, 1);
+    pager->release(std::move(page));
+    ASSERT_EQ(wal->current_lsn().value, ++lsn_value);
+
+    // Page was not "upgraded", so no WAL records should be written.
+    ASSERT_OK(pager->acquire(Id::root(), page));
+    pager->release(std::move(page));
+    ASSERT_EQ(wal->current_lsn().value, lsn_value);
+
+    // Upgrading a page that already has an image should not cause another to be
+    // written, but only if there are no deltas.
+    ASSERT_OK(pager->acquire(Id::root(), page));
+    pager->upgrade(page);
+    pager->release(std::move(page));
+    ASSERT_EQ(wal->current_lsn().value, lsn_value);
+
+    // This page already exists and has an image in the WAL. Only a
+    // delta record should be written.
+    ASSERT_OK(pager->acquire(Id::root(), page));
+    pager->upgrade(page);
+    (void)page.mutate(page.size() - 1, 1);
+    pager->release(std::move(page));
+    ASSERT_EQ(wal->current_lsn().value, ++lsn_value);
+}
+
+TEST_F(WalPagerInteractionTests, AllocateTruncatedPages)
+{
+    for (std::size_t i {}; i < 5; ++i) {
+        Page page;
+        ASSERT_OK(pager->allocate(page));
+        pager->release(std::move(page));
+    }
+
+    // After this (until the next checkpoint), the pager must not write image records for
+    // pages after the root. Given the current logic, this would cause duplicate images
+    // within a transaction, which would need to be handled as a special case.
+    ASSERT_OK(pager->truncate(1));
+    auto current_lsn_value = wal->current_lsn().value;
+
+    Page page;
+    ASSERT_OK(pager->allocate(page));
+    // A normal page would have had an image record written during allocate().
+    ASSERT_EQ(wal->current_lsn().value, current_lsn_value);
+    // Delta records are still written.
+    (void)page.mutate(page.size() - 1, 1);
+    pager->release(std::move(page));
+    ASSERT_EQ(wal->current_lsn().value, ++current_lsn_value);
+
+    // If the page isn't updated, no delta is written.
+    ASSERT_OK(pager->allocate(page));
+    pager->release(std::move(page));
+    ASSERT_EQ(wal->current_lsn().value, current_lsn_value);
+
+    // Reset the "max_page_id" field. Images should be written for all updated pages now.
+    ASSERT_OK(pager->checkpoint());
+
+    // Normal page.
+    ASSERT_OK(pager->allocate(page));
+    ASSERT_EQ(wal->current_lsn().value, ++current_lsn_value);
+    (void)page.mutate(page.size() - 1, 1);
+    pager->release(std::move(page));
+    ASSERT_EQ(wal->current_lsn().value, ++current_lsn_value);
+}
 
 template <class EnvType = tools::FaultInjectionEnv>
 class RecoveryTestHarness

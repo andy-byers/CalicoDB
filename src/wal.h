@@ -28,9 +28,11 @@ public:
     [[nodiscard]] static auto open(const Parameters &param, WriteAheadLog **out) -> Status;
     [[nodiscard]] virtual auto close() -> Status;
     [[nodiscard]] virtual auto flushed_lsn() const -> Lsn;
+    [[nodiscard]] virtual auto written_lsn() const -> Lsn;
     [[nodiscard]] virtual auto current_lsn() const -> Lsn;
+    [[nodiscard]] virtual auto find_obsolete_lsn(Lsn &out) -> Status;
     [[nodiscard]] virtual auto start_writing() -> Status;
-    [[nodiscard]] virtual auto flush() -> Status;
+    [[nodiscard]] virtual auto synchronize(bool flush) -> Status;
     [[nodiscard]] virtual auto cleanup(Lsn recovery_lsn) -> Status;
     [[nodiscard]] virtual auto log_vacuum(bool is_start, Lsn *out) -> Status;
     [[nodiscard]] virtual auto log_delta(Id page_id, const Slice &image, const std::vector<PageDelta> &delta, Lsn *out) -> Status;
@@ -47,12 +49,14 @@ private:
     [[nodiscard]] auto close_writer() -> Status;
     [[nodiscard]] auto open_writer() -> Status;
     [[nodiscard]] auto log(const Slice &payload) -> Status;
+    auto advance_lsn(Lsn *out) -> void;
 
     static constexpr std::size_t kSegmentCutoff {32};
 
     std::map<Id, Lsn> m_segments;
 
     Lsn m_flushed_lsn;
+    Lsn m_written_lsn;
     Lsn m_last_lsn;
     std::string m_prefix;
     std::string m_dirname;

@@ -162,7 +162,7 @@ public:
         return Status::ok();
     }
 
-    auto flush() -> Status override
+    auto synchronize(bool flush) -> Status override
     {
         return Status::ok();
     }

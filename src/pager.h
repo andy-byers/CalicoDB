@@ -5,12 +5,9 @@
 #ifndef CALICODB_PAGER_H
 #define CALICODB_PAGER_H
 
-#include <unordered_set>
-
-#include "page_cache.h"
-#include "pager.h"
-
+#include "frames.h"
 #include "wal_record.h"
+#include <unordered_set>
 
 namespace calicodb
 {
@@ -20,7 +17,7 @@ class FrameManager;
 class WriteAheadLog;
 class TableSet;
 
-class Pager
+class Pager final
 {
 public:
     friend class DBImpl;
@@ -35,8 +32,6 @@ public:
         std::size_t page_size {};
     };
 
-    ~Pager() = default;
-
     [[nodiscard]] static auto open(const Parameters &param, Pager **out) -> Status;
     [[nodiscard]] auto page_count() const -> std::size_t;
     [[nodiscard]] auto page_size() const -> std::size_t;
@@ -50,15 +45,12 @@ public:
     [[nodiscard]] auto acquire(Id page_id, Page &page) -> Status;
     auto upgrade(Page &page, int important = -1) -> void;
     auto release(Page page) -> void;
-    auto save_state(FileHeader &header) -> void;
     auto load_state(const FileHeader &header) -> void;
 
 private:
     explicit Pager(const Parameters &param, Editor &file, AlignedBuffer buffer);
-    [[nodiscard]] auto pin_frame(Id pid) -> Status;
-    [[nodiscard]] auto do_pin_frame(Id pid, bool *pinned) -> Status;
-    [[nodiscard]] auto make_frame_available() -> bool;
-    auto clean_page(PageCache::Entry &entry) -> DirtyTable::Iterator;
+    auto clean_page(CacheEntry &entry) -> DirtyTable::Iterator;
+    auto make_frame_available() -> void;
 
     std::string m_filename;
     FrameManager m_frames;
@@ -69,6 +61,7 @@ private:
     InfoLogger *m_info_log {};
     DBState *m_state {};
     Lsn m_recovery_lsn;
+    std::size_t m_page_count {};
 };
 
 } // namespace calicodb
