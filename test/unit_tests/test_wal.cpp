@@ -91,11 +91,11 @@ public:
         static constexpr std::size_t MAX_SPREAD {20};
         std::vector<PageDelta> deltas;
 
-        for (auto offset = random.Next<std::size_t>(image_size / 10); offset < image_size;) {
+        for (auto offset = random.Next(image_size / 10); offset < image_size;) {
             const auto rest = image_size - offset;
-            const auto size = random.Next<std::size_t>(1, std::min(rest, MAX_WIDTH));
+            const auto size = random.Next(1, std::min(rest, MAX_WIDTH));
             deltas.emplace_back(PageDelta {offset, size});
-            offset += size + random.Next<std::size_t>(1, MAX_SPREAD);
+            offset += size + random.Next(1, MAX_SPREAD);
         }
         for (const auto &[offset, size] : deltas) {
             const auto replacement = random.Generate(size);
@@ -204,15 +204,18 @@ public:
 
     [[nodiscard]] static auto wal_write(WalWriter &writer, Lsn lsn, const Slice &data) -> Status
     {
-        std::string buffer(sizeof(lsn), '\0');
-        put_u64(buffer.data(), lsn.value);
+        std::string buffer(1 + sizeof(lsn), '\0');
+        buffer[0] = kImagePayload; // Payload type is the first byte.
+        put_u64(buffer.data() + 1, lsn.value);
         buffer.append(data.to_string());
         return writer.write(buffer);
     }
 
     [[nodiscard]] static auto wal_read_with_status(WalReader &reader, std::string &out, Lsn *lsn = nullptr) -> Status
     {
-        CALICODB_TRY(reader.read(out));
+        std::string record(wal_scratch_size(kPageSize), '\0');
+        CALICODB_TRY(reader.read(record));
+        out = record.substr(1);
         Slice buffer {out};
         if (lsn != nullptr) {
             *lsn = extract_payload_lsn(buffer);
@@ -380,17 +383,18 @@ TEST_F(WalComponentTests, FailureToReadFirstLsn)
     // File exists, but is empty.
     Logger *logger;
     ASSERT_OK(env->new_logger(encode_segment_name(kWalPrefix, Id::root()), logger));
-    ASSERT_TRUE(cache_first_lsn(*env, kWalPrefix, itr).is_corruption());
+    ASSERT_TRUE(cache_first_lsn(*env, kWalPrefix, itr).is_not_found());
 
     // File is too small to read the LSN.
     std::string buffer(WalRecordHeader::kSize + 3, '\0');
     ASSERT_OK(logger->write(buffer));
-    ASSERT_TRUE(cache_first_lsn(*env, kWalPrefix, itr).is_corruption());
+    ASSERT_TRUE(cache_first_lsn(*env, kWalPrefix, itr).is_not_found());
 
     // LSN is NULL.
     buffer.resize(wal_block_size(kPageSize) - buffer.size());
     ASSERT_OK(logger->write(buffer));
-    ASSERT_TRUE(cache_first_lsn(*env, kWalPrefix, itr).is_corruption());
+    ASSERT_OK(cache_first_lsn(*env, kWalPrefix, itr));
+    ASSERT_TRUE(itr->second.is_null());
 
     delete logger;
 }
@@ -455,7 +459,7 @@ TEST_F(WalComponentTests, Corruption)
     for (std::size_t i {1}; i < kPageSize * 2; ++i) {
         std::string data;
         auto s = wal_read_with_status(reader, data);
-        if (s.is_corruption()) {
+        if (s.is_not_found()) {
             break;
         }
         ASSERT_OK(s);
@@ -508,10 +512,50 @@ public:
         return Status::ok();
     }
 
+    [[nodiscard]] auto get_logs() const -> std::vector<Id>
+    {
+        std::vector<std::string> filenames;
+        EXPECT_OK(env->get_children(".", filenames));
+        std::vector<Id> result;
+        for (const auto &name : filenames) {
+            if (name.find("wal-") == 0) {
+                result.push_back(decode_segment_name("wal-", name));
+            }
+        }
+        std::sort(begin(result), end(result));
+        return result;
+    }
+
+    [[nodiscard]] auto get_first_lsns(const std::vector<Id> &ids) const -> std::vector<Lsn>
+    {
+        std::vector<Lsn> result;
+        std::map<Id, Lsn> temp;
+
+        for (const auto &id : ids) {
+            auto [itr, _] = temp.insert({id, Lsn::null()});
+            const auto s = cache_first_lsn(*env, kWalPrefix, itr);
+            if (s.is_ok()) {
+                result.emplace_back(itr->second);
+            } else {
+                result.emplace_back(Lsn::null());
+            }
+        }
+        return result;
+    }
+
     std::string tail_buffer;
     std::unique_ptr<WriteAheadLog> wal;
     tools::RandomGenerator random;
 };
+
+TEST_F(WalTests, EmptySegmentsAreRemoved)
+{
+    ASSERT_EQ(get_logs().size(), 0);
+    ASSERT_OK(wal->start_writing());
+    ASSERT_EQ(get_logs().size(), 1);
+    ASSERT_OK(wal->close());
+    ASSERT_EQ(get_logs().size(), 0);
+}
 
 TEST_F(WalTests, SequenceNumbersAreMonotonicallyIncreasing)
 {
@@ -605,6 +649,41 @@ TEST_F(WalTests, UnderstandsVacuumRecords)
     descriptor = std::get<VacuumDescriptor>(payload);
     ASSERT_EQ(descriptor.lsn, Lsn {2});
     ASSERT_FALSE(descriptor.is_start);
+}
+
+TEST_F(WalTests, CleanupObsoleteSegments)
+{
+    ASSERT_OK(wal->start_writing());
+    auto logs = get_logs();
+    for (std::size_t i {}; logs.size() < 5; ++i) {
+        const auto image = random.Generate(kPageSize);
+        ASSERT_OK(wal->log_image(Id {i + 1}, image, nullptr));
+        logs = get_logs();
+    }
+    ASSERT_OK(wal->synchronize(true));
+
+    const auto lsns = get_first_lsns(logs);
+    ASSERT_EQ(logs.size(), lsns.size());
+
+    // NOOP.
+    ASSERT_OK(wal->cleanup(lsns[0]));
+    ASSERT_EQ(logs.size(), get_logs().size());
+
+    // NOOP. LSN of the last record in the first segment passed.
+    ASSERT_OK(wal->cleanup(Lsn {lsns[1].value - 1}));
+    ASSERT_EQ(get_logs().size(), logs.size());
+
+    // Remove 1 segment.
+    ASSERT_OK(wal->cleanup(lsns[1]));
+    ASSERT_EQ(get_logs().size(), logs.size() - 1);
+
+    // Cleanup routine will never remove the last segment (the writer is on a new segment
+    // so there are technically 2).
+    ASSERT_OK(wal->cleanup(Lsn {std::numeric_limits<std::uint64_t>::max()}));
+    ASSERT_EQ(get_logs().size(), 2);
+    ASSERT_OK(wal->close());
+    wal.reset();
+    ASSERT_EQ(get_logs().size(), 1) << "empty segment was not removed";
 }
 
 } // namespace calicodb

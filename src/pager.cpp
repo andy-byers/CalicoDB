@@ -89,11 +89,10 @@ auto Pager::checkpoint() -> Status
     Lsn obsolete_lsn;
     CALICODB_TRY(m_wal->find_obsolete_lsn(obsolete_lsn));
     if (!obsolete_lsn.is_null()) {
-        // Flush dirty pages that are on
+        // Flush dirty pages that are on old WAL segments.
         CALICODB_TRY(flush(obsolete_lsn));
     }
     CALICODB_TRY(m_frames.sync());
-    m_state->max_page_id.value = m_page_count;
 
     // Oldest LSN still needed for a cached page. fsync() was just called, so everything
     // before this should be on disk.
@@ -108,7 +107,6 @@ auto Pager::flush(Lsn target_lsn) -> Status
         target_lsn = kMaxId;
     }
 
-    auto largest = Id::null();
     for (auto itr = m_dirty.begin(); itr != m_dirty.end();) {
         const auto [record_lsn, page_id] = *itr;
         auto *entry = m_cache.query(page_id);
@@ -116,9 +114,6 @@ auto Pager::flush(Lsn target_lsn) -> Status
         const auto &frame = m_frames.get_frame(entry->index);
         const auto page_lsn = read_page_lsn(page_id, frame.data);
 
-        if (largest < page_lsn) {
-            largest = page_lsn;
-        }
         if (record_lsn > target_lsn) {
             break;
         }
@@ -167,17 +162,7 @@ auto Pager::make_frame_available() -> void
 auto Pager::allocate(Page &page) -> Status
 {
     CALICODB_TRY(acquire(Id::from_index(m_page_count), page));
-    if (page.id() > m_state->max_page_id) {
-        ++m_state->max_page_id.value;
-        upgrade(page, 0);
-    } else {
-        // This page already has its full contents in the WAL. This page must have
-        // been vacuumed since the last checkpoint.
-        auto *entry = m_cache.query(page.id());
-        CALICODB_EXPECT_NE(entry, nullptr);
-        m_frames.upgrade(page);
-        entry->token = m_dirty.insert(page.id(), read_page_lsn(page));
-    }
+    upgrade(page, 0);
     ++m_page_count;
     return Status::ok();
 }
@@ -203,13 +188,13 @@ auto Pager::acquire(Id page_id, Page &page) -> Status
 auto Pager::upgrade(Page &page, int important) -> void
 {
     CALICODB_EXPECT_LE(important, static_cast<int>(page.size()));
-    const auto lsn = read_page_lsn(page);
+    const auto page_lsn = read_page_lsn(page);
     auto *entry = m_cache.query(page.id());
     CALICODB_EXPECT_NE(entry, nullptr);
 
-    // The "important" parameter should be used when we don't need to track the before contents of the whole
-    // page. For example, when allocating a page from the freelist, we only care about the page LSN stored in
-    // the first 8 bytes; the rest is junk.
+    // The "important" parameter should be used when we don't need to track the before contents of
+    // the whole page. For example, when allocating a page from the freelist, we only care about
+    // the page LSN stored in the first 8 bytes; the rest is junk.
     auto watch_size = page.size();
     if (important >= 0) {
         watch_size = static_cast<std::size_t>(important);
@@ -217,21 +202,16 @@ auto Pager::upgrade(Page &page, int important) -> void
 
     // Make sure this page is in the dirty list. This is one place where the "record LSN" is set.
     if (!entry->token.has_value()) {
-        entry->token = m_dirty.insert(page.id(), lsn);
+        entry->token = m_dirty.insert(page.id(), page_lsn);
     }
     m_frames.upgrade(page);
 
-    // We only write a full image if the WAL does not already contain one for this page. If the
-    // page was modified during this transaction, then we already have one written.
-    if (m_state->is_running) {
-        if (lsn <= m_state->commit_lsn) {
-            Lsn image_lsn;
-            const auto image = page.view(0, watch_size);
-            const auto s = m_wal->log_image(page.id(), image, &image_lsn);
-
-            if (!s.is_ok()) {
-                SET_STATUS(s);
-            }
+    // Skip writing an image record if there is definitely one for this page during this transaction.
+    if (m_state->is_running && page_lsn <= m_state->commit_lsn) {
+        const auto image = page.view(0, watch_size);
+        const auto s = m_wal->log_image(page.id(), image, nullptr);
+        if (!s.is_ok()) {
+            SET_STATUS(s);
         }
     }
 }
@@ -259,13 +239,14 @@ auto Pager::truncate(std::size_t page_count) -> Status
     CALICODB_EXPECT_GT(page_count, 0);
     CALICODB_TRY(m_env->resize_file(m_filename, page_count * m_frames.page_size()));
 
-    for (Id id {page_count}; id.value <= m_page_count; ++id.value) {
+    // Discard cached pages that are out-of-range.
+    for (Id id {page_count + 1}; id.value <= m_page_count; ++id.value) {
         auto *entry = m_cache.query(id);
         if (entry != nullptr) {
-            m_frames.unpin(*entry);
-            if (entry->token) {
+            if (entry->token.has_value()) {
                 m_dirty.remove(*entry->token);
             }
+            m_frames.unpin(*entry);
             m_cache.erase(id);
         }
     }

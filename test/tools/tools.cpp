@@ -296,6 +296,7 @@ auto FaultInjectionEnv::remove_file(const std::string &filename) -> Status
 
 auto FaultInjectionEnv::resize_file(const std::string &filename, std::size_t size) -> Status
 {
+    TRY_INTERCEPT_FROM(*this, Interceptor::kResize, filename);
     return FakeEnv::resize_file(filename, size);
 }
 
@@ -355,32 +356,33 @@ auto print_references(Pager &pager) -> void
             continue;
         }
         if (page_id.is_root()) {
-            std::cerr << "node -> NULL\n";
+            std::cerr << "NULL <- node -> ...\n";
             continue;
         }
         PointerMap::Entry entry;
         CHECK_OK(PointerMap::read_entry(pager, page_id, entry));
+
+        Page page;
+        CHECK_OK(pager.acquire(page_id, page));
+
         switch (entry.type) {
             case PointerMap::kTreeNode:
-                std::cerr << "node";
+                std::cerr << entry.back_ptr.value << " -> node -> ...\n";
                 break;
             case PointerMap::kTreeRoot:
+                std::cerr << "1 -> root for table " << entry.back_ptr.value << " -> ...\n";
                 break;
             case PointerMap::kFreelistLink:
-                std::cerr << "freelist link";
+                std::cerr << entry.back_ptr.value << " -> freelist link -> " << get_u64(page.data() + 8) << '\n';
                 break;
             case PointerMap::kOverflowHead:
-                std::cerr << "overflow head";
+                std::cerr << entry.back_ptr.value << " -> overflow head -> " << get_u64(page.data() + 8) << '\n';
                 break;
             case PointerMap::kOverflowLink:
-                std::cerr << "overflow link";
+                std::cerr << entry.back_ptr.value << " -> overflow link -> " << get_u64(page.data() + 8) << '\n';
                 break;
         }
-        if (entry.type == PointerMap::kTreeRoot) {
-            std::cerr << "root for table " << entry.back_ptr.value << '\n';
-        } else {
-            std::cerr << " -> " << entry.back_ptr.value << '\n';
-        }
+        pager.release(std::move(page));
     }
 }
 
@@ -435,5 +437,62 @@ auto print_wals(Env &env, std::size_t page_size, const std::string &prefix) -> v
 }
 
 #undef TRY_INTERCEPT_FROM
+
+auto read_file_to_string(Env &env, const std::string &filename) -> std::string
+{
+    std::size_t file_size;
+    CHECK_OK(env.file_size(filename, file_size));
+
+    std::string buffer(file_size, '\0');
+
+    Reader *file;
+    CHECK_OK(env.new_reader(filename, file));
+
+    Slice slice;
+    CHECK_OK(file->read(0, file_size, buffer.data(), &slice));
+    CHECK_EQ(slice.size(), file_size);
+
+    delete file;
+    return buffer;
+}
+
+auto fill_db(DB &db, RandomGenerator &random, std::size_t num_records) -> std::map<std::string, std::string>
+{
+    return fill_db(db, *db.default_table(), random, num_records);
+}
+
+auto fill_db(DB &db, Table &table, RandomGenerator &random, std::size_t num_records) -> std::map<std::string, std::string>
+{
+    const auto base_db_size = reinterpret_cast<const DBImpl &>(db).TEST_state().record_count;
+    std::map<std::string, std::string> records;
+
+    for (; ; ) {
+        const auto db_size = reinterpret_cast<const DBImpl &>(db).TEST_state().record_count;
+        if (db_size >= base_db_size + num_records) {
+            break;
+        }
+        const auto ksize = random.Next(8, 16);
+        const auto vsize = random.Next(100);
+        const auto k = random.Generate(ksize);
+        const auto v = random.Generate(vsize);
+        CHECK_OK(db.put(table, k, v));
+        records[k.to_string()] = v.to_string();
+    }
+    return records;
+}
+
+auto expect_db_contains(const DB &db, const std::map<std::string, std::string> &map) -> void
+{
+    return expect_db_contains(db, *db.default_table(), map);
+}
+
+auto expect_db_contains(const DB &db, const Table &table, const std::map<std::string, std::string> &map) -> void
+{
+    for (const auto &[key, value] : map) {
+        std::string result;
+        CHECK_OK(db.get(table, key, &result));
+        CHECK_EQ(result, value);
+    }
+}
 
 } // namespace calicodb::tools

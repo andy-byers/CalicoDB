@@ -26,9 +26,9 @@ TEST(TestUtils, ExpectationDeathTest)
 TEST(TestUtils, EncodingIsConsistent)
 {
     tools::RandomGenerator random;
-    const auto u16 = random.Next<std::uint16_t>(std::uint16_t(-1));
-    const auto u32 = random.Next<std::uint32_t>(std::uint32_t(-1));
-    const auto u64 = random.Next<std::uint64_t>(std::uint64_t(-1));
+    const auto u16 = std::uint16_t(-1);
+    const auto u32 = std::uint32_t(-2);
+    const auto u64 = std::uint64_t(-3);
     std::string buffer(sizeof(u16) + sizeof(u32) + sizeof(u64) + 1, '\x00');
 
     auto dst = buffer.data();

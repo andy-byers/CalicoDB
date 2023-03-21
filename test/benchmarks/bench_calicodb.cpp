@@ -187,7 +187,7 @@ private:
             n %= kNumRecords;
         }
         return calicodb::tools::integral_key<kKeyLength>(
-            is_sequential ? n : m_random.Next<std::size_t>(m));
+            is_sequential ? n : m_random.Next(m));
     }
 
     Parameters m_param;

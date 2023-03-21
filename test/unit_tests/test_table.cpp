@@ -213,6 +213,7 @@ public:
         if (auto s = TableTests::reopen_tables(); !s.is_ok()) {
             return s;
         }
+        table_1 = table;
         db->close_table(table_2);
         table_2 = nullptr;
 
@@ -314,6 +315,30 @@ TEST_F(TwoTableTests, FindExistingTables)
     table_2 = nullptr;
     ASSERT_OK(db->list_tables(table_names));
     ASSERT_TRUE(table_names.empty());
+}
+
+TEST_F(TwoTableTests, Vacuum)
+{
+    for (std::size_t i {1}; i < 5; ++i) {
+        tools::RandomGenerator random;
+        const auto records_1 = tools::fill_db(*db, *table_1, random, 1'000 * i);
+        const auto records_2 = tools::fill_db(*db, *table_2, random, 2'000 * i);
+        ASSERT_OK(db->checkpoint());
+
+        for (const auto &[key, _] : records_1) {
+            ASSERT_OK(db->erase(*table_1, key));
+        }
+        for (const auto &[key, _] : records_2) {
+            ASSERT_OK(db->erase(*table_2, key));
+        }
+        ASSERT_OK(db->vacuum());
+
+        reopen_db();
+        reopen_tables();
+
+        tools::expect_db_contains(*db, *table_1, records_1);
+        tools::expect_db_contains(*db, *table_2, records_2);
+    }
 }
 
 } // namespace calicodb

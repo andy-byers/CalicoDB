@@ -57,13 +57,6 @@ struct WalRecordHeader {
     std::uint32_t crc {};
 };
 
-// Header fields associated with each payload.
-struct WalPayloadHeader {
-    static constexpr std::size_t kSize {8};
-
-    Lsn lsn;
-};
-
 // Routines for working with WAL records.
 [[nodiscard]] auto read_wal_record_header(Slice in) -> WalRecordHeader;
 [[nodiscard]] auto merge_records_left(WalRecordHeader &lhs, const WalRecordHeader &rhs) -> Status;
@@ -185,27 +178,17 @@ template <class Itr>
 
     Reader *temp;
     CALICODB_TRY(env.new_reader(encode_segment_name(prefix, itr->first), temp));
-
-    char buffer[sizeof(Lsn)];
     std::unique_ptr<Reader> file {temp};
 
-    // Read the first LSN. If it exists, it will always be at the same location: right after the first
-    // record header, which is written at offset 0.
     Slice slice;
-    CALICODB_TRY(file->read(WalRecordHeader::kSize, sizeof(buffer), buffer, &slice));
+    char buffer[sizeof(Lsn)];
+    CALICODB_TRY(file->read(WalRecordHeader::kSize + 1, sizeof(buffer), buffer, &slice));
 
-    if (slice.is_empty()) {
-        return Status::corruption("segment is empty");
+    itr->second = Lsn::null();
+    if (slice.size() != sizeof(buffer)) {
+        return Status::not_found("unable to read first LSN");
     }
-    if (slice.size() != WalPayloadHeader::kSize) {
-        return Status::corruption("incomplete block");
-    }
-    const Lsn lsn {get_u64(slice)};
-    if (lsn.is_null()) {
-        return Status::corruption("lsn is null");
-    }
-
-    itr->second = lsn;
+    itr->second.value = get_u64(slice);
     return Status::ok();
 }
 

@@ -83,7 +83,7 @@ auto WriteAheadLog::find_obsolete_lsn(Lsn &out) -> Status
 {
     out = Lsn::null();
     if (m_segments.size() > 1) {
-        auto segment = --end(m_segments);
+        auto segment = rbegin(m_segments);
         CALICODB_TRY(cache_first_lsn(*m_env, m_prefix, segment));
         CALICODB_EXPECT_FALSE(segment->second.is_null());
         out.value = segment->second.value - 1;
@@ -166,11 +166,7 @@ auto WriteAheadLog::cleanup(Lsn recovery_lsn) -> Status
         if (++next == end(m_segments)) {
             return Status::ok();
         }
-        auto s = cache_first_lsn(*m_env, m_prefix, next);
-        if (!s.is_ok() && !s.is_not_found()) {
-            return s;
-        }
-
+        CALICODB_TRY(cache_first_lsn(*m_env, m_prefix, next));
         if (next->second > recovery_lsn) {
             return Status::ok();
         }

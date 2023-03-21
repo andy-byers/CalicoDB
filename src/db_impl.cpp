@@ -250,16 +250,16 @@ DBImpl::~DBImpl()
 {
     if (m_state.is_running && m_state.status.is_ok()) {
         if (const auto s = m_wal->synchronize(true); !s.is_ok()) {
-            m_info_log->logv("failed to flush wal: %s", s.to_string().data());
+            m_info_log->logv("failed to flush wal: %s", s.to_string().c_str());
         }
         if (const auto s = m_pager->flush(m_state.commit_lsn); !s.is_ok()) {
-            m_info_log->logv("failed to flush pager: %s", s.to_string().data());
+            m_info_log->logv("failed to flush pager: %s", s.to_string().c_str());
         }
         if (const auto s = m_wal->close(); !s.is_ok()) {
-            m_info_log->logv("failed to close wal: %s", s.to_string().data());
+            m_info_log->logv("failed to close wal: %s", s.to_string().c_str());
         }
         if (const auto s = ensure_consistency(); !s.is_ok()) {
-            m_info_log->logv("failed to ensure consistency: %s", s.to_string().data());
+            m_info_log->logv("failed to ensure consistency: %s", s.to_string().c_str());
         }
     }
 
@@ -485,6 +485,7 @@ auto DBImpl::do_vacuum() -> Status
 
 auto DBImpl::ensure_consistency() -> Status
 {
+    CALICODB_TRY(m_state.status);
     m_state.is_running = false;
     CALICODB_TRY(recovery_phase_1());
     CALICODB_TRY(recovery_phase_2());
@@ -538,8 +539,6 @@ auto DBImpl::checkpoint() -> Status
 
 auto DBImpl::do_checkpoint() -> Status
 {
-    CALICODB_TRY(m_pager->checkpoint());
-
     Page db_root;
     CALICODB_TRY(m_pager->acquire(Id::root(), db_root));
     m_pager->upgrade(db_root);
@@ -556,7 +555,16 @@ auto DBImpl::do_checkpoint() -> Status
     header.write(db_root.mutate(0, FileHeader::kSize));
     m_pager->release(std::move(db_root));
 
-    return m_wal->synchronize(true);
+    // If this call succeeds, the checkpoint should persist. This method should not
+    // return a non-OK status past this point.
+    CALICODB_TRY(m_wal->synchronize(true));
+
+    // This call just performs some cleanup.
+    auto s = m_pager->checkpoint();
+    if (!s.is_ok()) {
+        SET_STATUS(s);
+    }
+    return Status::ok();
 }
 
 auto DBImpl::load_file_header() -> Status
@@ -782,6 +790,10 @@ auto DBImpl::recovery_phase_1() -> Status
         return Status::ok();
     }
 
+    // It can be difficult to determine if there is already an image record for a given page
+    // in the WAL, due to the way the vacuum operation works. This set is used to ignore
+    // duplicate image records within each transaction.
+    std::unordered_set<Id, Id::Hash> duplicates;
     std::string tail(wal_block_size(m_pager->page_size()), '\0');
     std::unique_ptr<Reader> file;
     auto itr = begin(set);
@@ -825,11 +837,18 @@ auto DBImpl::recovery_phase_1() -> Status
     };
 
     const auto undo = [&](const auto &payload) {
+        if (last_lsn <= m_state.commit_lsn) {
+            return Status::ok();
+        }
         const auto decoded = decode_payload(payload);
-        if (std::holds_alternative<ImageDescriptor>(decoded)) {
+        if (std::holds_alternative<DeltaDescriptor>(decoded)) {
+            if (is_commit(std::get<DeltaDescriptor>(decoded))) {
+                duplicates.clear();
+            }
+        } else if (std::holds_alternative<ImageDescriptor>(decoded)) {
             const auto image = std::get<ImageDescriptor>(decoded);
-            return with_page(*m_pager, image, [this, &image](auto &page) {
-                if (image.lsn < m_state.commit_lsn) {
+            return with_page(*m_pager, image, [&](auto &page) {
+                if (!duplicates.insert(image.page_id).second) {
                     return;
                 }
                 const auto page_lsn = read_page_lsn(page);
@@ -862,8 +881,8 @@ auto DBImpl::recovery_phase_1() -> Status
             }
 
             last_lsn = extract_payload_lsn(payload);
-
             s = action(payload);
+
             if (s.is_not_found()) {
                 break;
             } else if (!s.is_ok()) {
@@ -910,6 +929,9 @@ auto DBImpl::recovery_phase_2() -> Status
     // Pager needs the updated state to determine the page count.
     CALICODB_TRY(load_file_header());
 
+    m_wal->m_last_lsn = m_state.commit_lsn;
+    m_wal->m_flushed_lsn = m_state.commit_lsn;
+
     // Make sure all changes have made it to disk, then remove WAL segments from
     // the right.
     CALICODB_TRY(m_pager->flush());
@@ -917,9 +939,6 @@ auto DBImpl::recovery_phase_2() -> Status
         CALICODB_TRY(m_env->remove_file(encode_segment_name(m_wal->m_prefix, itr->first)));
     }
     set.clear();
-
-    m_wal->m_last_lsn = m_state.commit_lsn;
-    m_wal->m_flushed_lsn = m_state.commit_lsn;
 
     // Make sure the file size matches the header page count, which should be
     // correct if we made it this far.

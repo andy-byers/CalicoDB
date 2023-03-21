@@ -32,8 +32,8 @@ public:
     [[nodiscard]] auto insert_random_delta(std::vector<PageDelta> &deltas) const
     {
         static constexpr std::size_t MIN_DELTA_SIZE {1};
-        const auto offset = random.Next<std::size_t>(kPageSize - MIN_DELTA_SIZE);
-        const auto size = random.Next<std::size_t>(kPageSize - offset);
+        const auto offset = random.Next(kPageSize - MIN_DELTA_SIZE);
+        const auto size = random.Next(kPageSize - offset);
         insert_delta(deltas, {offset, size});
     }
 
@@ -139,8 +139,8 @@ TEST_F(DeltaCompressionTest, SanityCheck)
     static constexpr std::size_t MAX_DELTA_SIZE {10};
     std::vector<PageDelta> deltas;
     for (std::size_t i {}; i < NUM_INSERTS; ++i) {
-        const auto offset = random.Next<std::size_t>(kPageSize - MAX_DELTA_SIZE);
-        const auto size = random.Next<std::size_t>(1, MAX_DELTA_SIZE);
+        const auto offset = random.Next(kPageSize - MAX_DELTA_SIZE);
+        const auto size = random.Next(1, MAX_DELTA_SIZE);
         insert_delta(deltas, PageDelta {offset, size});
     }
     compress_deltas(deltas);

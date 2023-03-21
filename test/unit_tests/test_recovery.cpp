@@ -114,27 +114,24 @@ TEST_F(WalPagerInteractionTests, AllocateTruncatedPages)
         pager->release(std::move(page));
     }
 
-    // After this (until the next checkpoint), the pager must not write image records for
-    // pages after the root. Given the current logic, this would cause duplicate images
-    // within a transaction, which would need to be handled as a special case.
+    // The recovery routine handles duplicate images. It will only apply the first one
+    // for a given page in a given transaction.
     ASSERT_OK(pager->truncate(1));
     auto current_lsn_value = wal->current_lsn().value;
 
     Page page;
     ASSERT_OK(pager->allocate(page));
-    // A normal page would have had an image record written during allocate().
-    ASSERT_EQ(wal->current_lsn().value, current_lsn_value);
-    // Delta records are still written.
+    ASSERT_EQ(wal->current_lsn().value, ++current_lsn_value);
     (void)page.mutate(page.size() - 1, 1);
     pager->release(std::move(page));
     ASSERT_EQ(wal->current_lsn().value, ++current_lsn_value);
 
     // If the page isn't updated, no delta is written.
     ASSERT_OK(pager->allocate(page));
+    ASSERT_EQ(wal->current_lsn().value, ++current_lsn_value);
     pager->release(std::move(page));
     ASSERT_EQ(wal->current_lsn().value, current_lsn_value);
 
-    // Reset the "max_page_id" field. Images should be written for all updated pages now.
     ASSERT_OK(pager->checkpoint());
 
     // Normal page.
@@ -409,7 +406,7 @@ public:
         open();
 
         tools::RandomGenerator random {1'024 * 1'024 * 8};
-        const std::size_t N {10'000};
+        const std::size_t N {250'000};
 
         for (std::size_t i {}; i < N; ++i) {
             const auto k = random.Generate(db_options.page_size * 2);
@@ -517,6 +514,7 @@ public:
         const auto saved_count = interceptor_count;
         interceptor_count = 0;
 
+        // Should fail on the first syscall given by "std::get<1>(GetParam())".
         close();
 
         interceptor_count = saved_count;
@@ -765,6 +763,7 @@ TEST_P(DataLossTests, LongTransaction)
     for (std::size_t i {}; i < kCheckpointInterval * 10; ++i) {
         ASSERT_OK(db->erase(tools::integral_key(i)));
     }
+    ASSERT_OK(db->vacuum());
 
     open();
 
