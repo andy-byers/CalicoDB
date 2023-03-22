@@ -377,8 +377,8 @@ auto print_references(Pager &pager) -> void;
 auto print_wals(Env &env, std::size_t page_size, const std::string &prefix) -> void;
 
 auto read_file_to_string(Env &env, const std::string &filename) -> std::string;
-auto fill_db(DB &db, RandomGenerator &random, std::size_t num_records) -> std::map<std::string, std::string>;
-auto fill_db(DB &db, Table &table, RandomGenerator &random, std::size_t num_records) -> std::map<std::string, std::string>;
+auto fill_db(DB &db, RandomGenerator &random, std::size_t num_records, std::size_t max_payload_size = 100) -> std::map<std::string, std::string>;
+auto fill_db(DB &db, Table &table, RandomGenerator &random, std::size_t num_records, std::size_t max_payload_size = 100) -> std::map<std::string, std::string>;
 auto expect_db_contains(const DB &db, const std::map<std::string, std::string> &map) -> void;
 auto expect_db_contains(const DB &db, const Table &table, const std::map<std::string, std::string> &map) -> void;
 

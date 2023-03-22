@@ -63,10 +63,11 @@ static auto cell_area_offset(const Node &node)
     return cell_slots_offset(node) + node.header.cell_count * kPointerSize;
 }
 
+// TODO: May want to cache the total number of free block bytes.
 static auto usable_space(const Node &node) -> std::size_t
 {
-    // TODO: May need to cache this result, freelist could be long. Compute once when node is constructed.
-    return node.gap_size + BlockAllocator::accumulate_free_bytes(node);
+    // Number of bytes not occupied by cells or cell pointers.
+    return node.gap_size + node.header.frag_count + BlockAllocator::accumulate_free_bytes(node);
 }
 
 static auto detach_cell(Cell &cell, char *backing) -> void
@@ -233,13 +234,13 @@ auto read_cell(Node &node, std::size_t index) -> Cell
     return get_u16(node.page.data() + offset + kPointerSize);
 }
 
-static auto set_next_pointer(Node &node, std::size_t offset, unsigned value) -> void
+static auto set_next_pointer(Node &node, std::size_t offset, std::size_t value) -> void
 {
     CALICODB_EXPECT_LT(value, node.page.size());
     return put_u16(node.page.mutate(offset, kPointerSize), static_cast<std::uint16_t>(value));
 }
 
-static auto set_block_size(Node &node, std::size_t offset, unsigned value) -> void
+static auto set_block_size(Node &node, std::size_t offset, std::size_t value) -> void
 {
     CALICODB_EXPECT_GE(value, 4);
     CALICODB_EXPECT_LT(value, node.page.size());
@@ -247,7 +248,7 @@ static auto set_block_size(Node &node, std::size_t offset, unsigned value) -> vo
 }
 
 
-static auto take_free_space(Node &node, unsigned ptr0, unsigned ptr1, unsigned needed_size) -> unsigned
+static auto take_free_space(Node &node, std::size_t ptr0, std::size_t ptr1, std::size_t needed_size) -> std::size_t
 {
     CALICODB_EXPECT_LT(ptr0, node.page.size());
     CALICODB_EXPECT_LT(ptr1, node.page.size());
@@ -273,7 +274,7 @@ static auto take_free_space(Node &node, unsigned ptr0, unsigned ptr1, unsigned n
     return ptr1 + diff;
 }
 
-static auto allocate_from_free_list(Node &node, unsigned needed_size) -> unsigned
+static auto allocate_from_free_list(Node &node, std::size_t needed_size) -> std::size_t
 {
     unsigned prev_ptr {};
     auto curr_ptr = node.header.free_start;
@@ -288,11 +289,11 @@ static auto allocate_from_free_list(Node &node, unsigned needed_size) -> unsigne
     return 0;
 }
 
-static auto allocate_from_gap(Node &node, unsigned needed_size) -> unsigned
+static auto allocate_from_gap(Node &node, std::size_t needed_size) -> std::size_t
 {
     if (node.gap_size >= needed_size) {
-        node.gap_size -= needed_size;
-        node.header.cell_start -= needed_size;
+        node.gap_size -= static_cast<unsigned>(needed_size);
+        node.header.cell_start -= static_cast<unsigned>(needed_size);
         return node.header.cell_start;
     }
     return 0;
@@ -300,7 +301,7 @@ static auto allocate_from_gap(Node &node, unsigned needed_size) -> unsigned
 
 auto BlockAllocator::accumulate_free_bytes(const Node &node) -> std::size_t
 {
-    std::size_t total {};
+    unsigned total {};
     for (auto ptr = node.header.free_start; ptr != 0; ) {
         total += get_block_size(node, ptr);
         ptr = get_next_pointer(node, ptr);
@@ -308,7 +309,7 @@ auto BlockAllocator::accumulate_free_bytes(const Node &node) -> std::size_t
     return total;
 }
 
-auto BlockAllocator::allocate(Node &node, unsigned needed_size) -> unsigned
+auto BlockAllocator::allocate(Node &node, std::size_t needed_size) -> std::size_t
 {
     CALICODB_EXPECT_LT(needed_size, node.page.size());
 
@@ -318,19 +319,20 @@ auto BlockAllocator::allocate(Node &node, unsigned needed_size) -> unsigned
     return allocate_from_free_list(node, needed_size);
 }
 
-auto BlockAllocator::release(Node &node, unsigned block_start, unsigned block_size) -> void
+auto BlockAllocator::release(Node &node, std::size_t block_start, std::size_t block_size) -> void
 {
     auto &header = node.header;
 
-    // Largest possible fragment that can be reclaimed in this process.
-    // Based on the fact that external cells must be at least 3 bytes.
+    // Largest possible fragment that can be reclaimed in this process. Based on
+    // the fact that external cells must be at least 3 bytes. Internal cells are
+    // always larger than fragments.
     const std::size_t fragment_cutoff = 2 + !header.is_external;
     CALICODB_EXPECT_NE(block_size, 0);
 
-    // Blocks of less than 4 bytes are too small to hold the free block
-    // header, so they must become fragment bytes.
+    // Blocks of less than 4 bytes are too small to hold the free block header,
+    // so they must become fragment bytes.
     if (block_size < 4) {
-        header.frag_count += block_size;
+        header.frag_count += static_cast<unsigned>(block_size);
         return;
     }
     // The free block list is sorted by start position. Find where the
@@ -349,14 +351,14 @@ auto BlockAllocator::release(Node &node, unsigned block_start, unsigned block_si
             const auto diff = block_start - before_end;
             block_start = prev;
             block_size += get_block_size(node, prev) + diff;
-            header.frag_count -= diff;
+            header.frag_count -= static_cast<unsigned>(diff);
         }
     }
     if (block_start != prev) {
         // There was no left merge. Point the "before" pointer to where the new free
         // block will be inserted.
         if (prev == 0) {
-            header.free_start = block_start;
+            header.free_start = static_cast<unsigned>(block_start);
         } else {
             set_next_pointer(node, prev, block_start);
         }
@@ -368,7 +370,7 @@ auto BlockAllocator::release(Node &node, unsigned block_start, unsigned block_si
         if (current_end + fragment_cutoff >= next) {
             const auto diff = next - current_end;
             block_size += get_block_size(node, next) + diff;
-            header.frag_count -= diff;
+            header.frag_count -= static_cast<unsigned>(diff);
             next = get_next_pointer(node, next);
         }
     }
@@ -420,17 +422,17 @@ static auto setup_node(Node &node) -> void
     node.slots_offset = static_cast<unsigned>(cell_slots_offset(node));
 
     if (node.header.cell_start == 0) {
-        node.header.cell_start = static_cast<PageSize>(node.page.size());
+        node.header.cell_start = static_cast<unsigned>(node.page.size());
     }
 
     const auto bottom = cell_area_offset(node);
     const auto top = node.header.cell_start;
 
     CALICODB_EXPECT_GE(top, bottom);
-    node.gap_size = static_cast<PageSize>(top - bottom);
+    node.gap_size = static_cast<unsigned>(top - bottom);
 }
 
-static auto allocate_block(Node &node, PageSize index, PageSize size) -> std::size_t
+static auto allocate_block(Node &node, unsigned index, unsigned size) -> std::size_t
 {
     CALICODB_EXPECT_LE(index, node.header.cell_count);
 
@@ -448,7 +450,7 @@ static auto allocate_block(Node &node, PageSize index, PageSize size) -> std::si
 
     auto offset = BlockAllocator::allocate(node, size);
     if (offset == 0) {
-        BlockAllocator::defragment(node, index);
+        BlockAllocator::defragment(node, static_cast<int>(index));
         offset = BlockAllocator::allocate(node, size);
     }
     // We already made sure we had enough room to fulfill the request. If we had to defragment, the call
@@ -461,19 +463,19 @@ static auto allocate_block(Node &node, PageSize index, PageSize size) -> std::si
     return offset;
 }
 
-static auto free_block(Node &node, PageSize index, PageSize size) -> void
+static auto free_block(Node &node, unsigned index, unsigned size) -> void
 {
-    BlockAllocator::release(node, static_cast<PageSize>(node.get_slot(index)), size);
+    BlockAllocator::release(node, static_cast<unsigned>(node.get_slot(index)), size);
     node.remove_slot(index);
 }
 
 auto write_cell(Node &node, std::size_t index, const Cell &cell) -> std::size_t
 {
-    if (const auto offset = allocate_block(node, static_cast<PageSize>(index), static_cast<PageSize>(cell.size))) {
+    if (const auto offset = allocate_block(node, static_cast<unsigned>(index), static_cast<unsigned>(cell.size))) {
         std::memcpy(node.page.mutate(offset, cell.size), cell.ptr, cell.size);
         return offset;
     }
-    node.overflow_index = PageSize(index);
+    node.overflow_index = static_cast<unsigned>(index);
     node.overflow = cell;
     return 0;
 }
@@ -516,7 +518,7 @@ auto Node::get_slot(std::size_t index) const -> std::size_t
 auto Node::set_slot(std::size_t index, std::size_t pointer) -> void
 {
     CALICODB_EXPECT_LT(index, header.cell_count);
-    return put_u16(page.mutate(slots_offset + index * kPointerSize, kPointerSize), static_cast<PageSize>(pointer));
+    return put_u16(page.mutate(slots_offset + index * kPointerSize, kPointerSize), static_cast<std::uint16_t>(pointer));
 }
 
 auto Node::insert_slot(std::size_t index, std::size_t pointer) -> void
@@ -528,10 +530,10 @@ auto Node::insert_slot(std::size_t index, std::size_t pointer) -> void
     auto *data = page.data() + offset;
 
     std::memmove(data + kPointerSize, data, size);
-    put_u16(data, static_cast<PageSize>(pointer));
+    put_u16(data, static_cast<std::uint16_t>(pointer));
 
     insert_delta(page.m_deltas, {offset, size + kPointerSize});
-    gap_size -= static_cast<PageSize>(kPointerSize);
+    gap_size -= static_cast<unsigned>(kPointerSize);
     ++header.cell_count;
 }
 
@@ -762,18 +764,18 @@ auto Tree::find_external(const Slice &key, Node node, SearchResult &out) const -
     }
 }
 
-auto Tree::find_parent_id(Id pid, Id &out) const -> Status
+auto Tree::find_parent_id(Id page_id, Id &out) const -> Status
 {
     PointerMap::Entry entry;
-    CALICODB_TRY(PointerMap::read_entry(*m_pager, pid, entry));
+    CALICODB_TRY(PointerMap::read_entry(*m_pager, page_id, entry));
     out = entry.back_ptr;
     return Status::ok();
 }
 
-auto Tree::fix_parent_id(Id pid, Id parent_id, PointerMap::Type type) -> Status
+auto Tree::fix_parent_id(Id page_id, Id parent_id, PointerMap::Type type) -> Status
 {
     PointerMap::Entry entry {parent_id, type};
-    return PointerMap::write_entry(*m_pager, pid, entry);
+    return PointerMap::write_entry(*m_pager, page_id, entry);
 }
 
 auto Tree::maybe_fix_overflow_chain(const Cell &cell, Id parent_id) -> Status
@@ -1666,12 +1668,12 @@ static constexpr auto kEntrySize =
     sizeof(char) + // Type
     sizeof(Id);    // Back pointer
 
-static auto entry_offset(Id map_id, Id pid) -> std::size_t
+static auto entry_offset(Id map_id, Id page_id) -> std::size_t
 {
-    CALICODB_EXPECT_GT(pid, map_id);
+    CALICODB_EXPECT_GT(page_id, map_id);
 
     // Account for the page LSN.
-    return sizeof(Lsn) + (pid.value - map_id.value - 1) * kEntrySize;
+    return sizeof(Lsn) + (page_id.value - map_id.value - 1) * kEntrySize;
 }
 
 static auto decode_entry(const char *data) -> PointerMap::Entry
@@ -1682,13 +1684,13 @@ static auto decode_entry(const char *data) -> PointerMap::Entry
     return entry;
 }
 
-auto PointerMap::read_entry(Pager &pager, Id pid, Entry &out) -> Status
+auto PointerMap::read_entry(Pager &pager, Id page_id, Entry &out) -> Status
 {
-    const auto mid = lookup(pager, pid);
+    const auto mid = lookup(pager, page_id);
     CALICODB_EXPECT_GE(mid, kFirstMapId);
-    CALICODB_EXPECT_NE(mid, pid);
+    CALICODB_EXPECT_NE(mid, page_id);
 
-    const auto offset = entry_offset(mid, pid);
+    const auto offset = entry_offset(mid, page_id);
     CALICODB_EXPECT_LE(offset + kEntrySize, pager.page_size());
 
     Page map;
@@ -1698,13 +1700,13 @@ auto PointerMap::read_entry(Pager &pager, Id pid, Entry &out) -> Status
     return Status::ok();
 }
 
-auto PointerMap::write_entry(Pager &pager, Id pid, Entry entry) -> Status
+auto PointerMap::write_entry(Pager &pager, Id page_id, Entry entry) -> Status
 {
-    const auto mid = lookup(pager, pid);
+    const auto mid = lookup(pager, page_id);
     CALICODB_EXPECT_GE(mid, kFirstMapId);
-    CALICODB_EXPECT_NE(mid, pid);
+    CALICODB_EXPECT_NE(mid, page_id);
 
-    const auto offset = entry_offset(mid, pid);
+    const auto offset = entry_offset(mid, page_id);
     CALICODB_EXPECT_LE(offset + kEntrySize, pager.page_size());
 
     Page map;
@@ -1722,16 +1724,16 @@ auto PointerMap::write_entry(Pager &pager, Id pid, Entry entry) -> Status
     return Status::ok();
 }
 
-auto PointerMap::lookup(const Pager &pager, Id pid) -> Id
+auto PointerMap::lookup(const Pager &pager, Id page_id) -> Id
 {
-    // Root page (1) has no parents, and page 2 is the first pointer map page. If "pid" is a pointer map
-    // page, "pid" will be returned.
-    if (pid < kFirstMapId) {
+    // Root page (1) has no parents, and page 2 is the first pointer map page. If "page_id" is a pointer map
+    // page, "page_id" will be returned.
+    if (page_id < kFirstMapId) {
         return Id::null();
     }
     const auto usable_size = pager.page_size() - sizeof(Lsn);
     const auto inc = usable_size / kEntrySize + 1;
-    const auto idx = (pid.value - kFirstMapId.value) / inc;
+    const auto idx = (page_id.value - kFirstMapId.value) / inc;
     return {idx * inc + kFirstMapId.value};
 }
 
@@ -1927,7 +1929,7 @@ auto PayloadManager::emplace(Pager &pager, Freelist &freelist, char *scratch, No
         ::calicodb::emplace_cell(out, key.size(), value.size(), key.range(0, k), value.range(0, v), overflow_id);
     };
 
-    if (const auto offset = allocate_block(node, static_cast<PageSize>(index), static_cast<PageSize>(total_size))) {
+    if (const auto offset = allocate_block(node, static_cast<unsigned>(index), static_cast<unsigned>(total_size))) {
         // Write directly into the node.
         emplace(node.page.data() + offset);
     } else {
@@ -2088,7 +2090,7 @@ auto Node::TEST_validate() -> void
         std::sort(begin(offsets), end(offsets));
         CALICODB_EXPECT_EQ(offsets, offsets_copy);
     }
-    // Cell bodies. Also makes sure the cells are in order.
+    // Cell bodies. Also makes sure the cells are in order where possible.
     for (std::size_t n {}; n < header.cell_count; ++n) {
         const auto lhs_ptr = get_slot(n);
         const auto lhs_cell = read_cell_at(*this, lhs_ptr);
@@ -2390,6 +2392,7 @@ auto Node::TEST_validate() -> void
 
 auto Tree::TEST_to_string() -> std::string
 {
+    return "";
 }
 
 auto Tree::TEST_validate() -> void
@@ -2422,7 +2425,7 @@ auto CursorImpl::fetch_payload() -> Status
     CALICODB_EXPECT_EQ(m_value_size, 0);
 
     Node node;
-    CALICODB_TRY(m_tree->acquire(m_loc.pid, false, node));
+    CALICODB_TRY(m_tree->acquire(m_loc.page_id, false, node));
 
     Slice key, value;
     auto cell = read_cell(node, m_loc.index);
@@ -2493,7 +2496,7 @@ auto CursorImpl::next() -> void
     m_value_size = 0;
 
     Node node;
-    auto s = m_tree->acquire(m_loc.pid, false, node);
+    auto s = m_tree->acquire(m_loc.page_id, false, node);
     if (!s.is_ok()) {
         m_status = s;
         return;
@@ -2524,7 +2527,7 @@ auto CursorImpl::previous() -> void
     m_value_size = 0;
 
     Node node;
-    auto s = m_tree->acquire(m_loc.pid, false, node);
+    auto s = m_tree->acquire(m_loc.page_id, false, node);
     if (!s.is_ok()) {
         m_status = s;
         return;
@@ -2557,7 +2560,7 @@ auto CursorImpl::seek_to(Node node, std::size_t index) -> void
     if (header.cell_count && index < header.cell_count) {
         m_loc.index = static_cast<unsigned>(index);
         m_loc.count = header.cell_count;
-        m_loc.pid = node.page.id();
+        m_loc.page_id = node.page.id();
         m_status = fetch_payload();
     } else {
         m_status = default_cursor_status();

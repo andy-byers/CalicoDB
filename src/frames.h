@@ -5,6 +5,7 @@
 #ifndef CALICODB_FRAMES_H
 #define CALICODB_FRAMES_H
 
+#include "delta.h"
 #include "utils.h"
 #include <list>
 #include <map>

@@ -321,10 +321,10 @@ class MultiTableVacuumRunner : public InMemoryTest {
 public:
     const std::size_t kRecordCount {1'000};
 
-    explicit MultiTableVacuumRunner(std::size_t num_tables, const Options &options = {})
-        : m_options {options}
+    explicit MultiTableVacuumRunner(std::size_t num_tables)
     {
-        m_options = options;
+        m_options.page_size = kMinPageSize;
+        m_options.cache_size = kMinPageSize * 16;
         m_options.env = env.get();
         initialize(num_tables, m_options);
     }
@@ -364,8 +364,8 @@ public:
         ASSERT_OK(m_db->vacuum());
         db_impl(m_db)->TEST_validate();
 
-        const auto &tab = db_impl(m_db)->TEST_tables();
-        std::cerr << tab.get(Id {3})->tree->TEST_to_string() << "\n\n";
+        auto tab = db_impl(m_db)->TEST_tables();
+        std::cerr << tab.get(Id {2})->tree->TEST_to_string() << "\n\n";
 
         for (std::size_t i {}; i < m_tables.size(); ++i) {
             tools::expect_db_contains(*m_db, *m_tables[i], m_records[i]);
@@ -378,6 +378,10 @@ public:
         // Make sure all of this stuff can be reverted with the WAL and that the
         // default table isn't messed up.
         ASSERT_OK(DB::open(m_options, kFilename, m_db));
+
+        tab = db_impl(m_db)->TEST_tables();
+        std::cerr << tab.get(Id {2})->tree->TEST_to_string() << "\n\n";
+
         tools::expect_db_contains(*m_db, m_committed);
 
         delete m_db;
@@ -416,7 +420,8 @@ private:
     Options m_options;
     DB *m_db {};
 };
-//
+
+// TODO: Doesn't work!
 //class MultiTableVacuumTests
 //    : public MultiTableVacuumRunner,
 //      public testing::TestWithParam<std::size_t>
@@ -461,35 +466,10 @@ private:
 //    run();
 //}
 //
-////TEST_P(MultiTableVacuumTests, SanityCheck)
-////{
-////    for (std::size_t i {1}; i < 5; ++i) {
-////        tools::RandomGenerator random;
-////        const auto records_1 = tools::fill_db(*db, *table_1, random, 1 * i);
-////        const auto records_2 = tools::fill_db(*db, *table_2, random, 2 * i);
-////        ASSERT_OK(db->checkpoint());
-////
-////        for (const auto &[key, _] : records_1) {
-////            ASSERT_OK(db->erase(*table_1, key));
-////        }
-////        for (const auto &[key, _] : records_2) {
-////            ASSERT_OK(db->erase(*table_2, key));
-////        }
-////        ASSERT_OK(db->vacuum());
-////        db_impl(db)->TEST_validate();
-////
-////        reopen_db();
-////        reopen_tables();
-////
-////        tools::expect_db_contains(*db, *table_1, records_1);
-////        tools::expect_db_contains(*db, *table_2, records_2);
-////    }
-////}
-//
 //INSTANTIATE_TEST_SUITE_P(
 //    MultiTableVacuumTests,
 //    MultiTableVacuumTests,
 //    ::testing::Values(0, 1, 2, 5, 10));
-//
+
 
 } // namespace calicodb

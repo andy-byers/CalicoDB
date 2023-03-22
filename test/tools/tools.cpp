@@ -456,13 +456,14 @@ auto read_file_to_string(Env &env, const std::string &filename) -> std::string
     return buffer;
 }
 
-auto fill_db(DB &db, RandomGenerator &random, std::size_t num_records) -> std::map<std::string, std::string>
+auto fill_db(DB &db, RandomGenerator &random, std::size_t num_records, std::size_t max_payload_size) -> std::map<std::string, std::string>
 {
-    return fill_db(db, *db.default_table(), random, num_records);
+    return fill_db(db, *db.default_table(), random, num_records, max_payload_size);
 }
 
-auto fill_db(DB &db, Table &table, RandomGenerator &random, std::size_t num_records) -> std::map<std::string, std::string>
+auto fill_db(DB &db, Table &table, RandomGenerator &random, std::size_t num_records, std::size_t max_payload_size) -> std::map<std::string, std::string>
 {
+    CHECK_TRUE(max_payload_size > 0);
     const auto base_db_size = reinterpret_cast<const DBImpl &>(db).TEST_state().record_count;
     std::map<std::string, std::string> records;
 
@@ -471,8 +472,8 @@ auto fill_db(DB &db, Table &table, RandomGenerator &random, std::size_t num_reco
         if (db_size >= base_db_size + num_records) {
             break;
         }
-        const auto ksize = random.Next(8, 16);
-        const auto vsize = random.Next(100);
+        const auto ksize = random.Next(1, max_payload_size);
+        const auto vsize = random.Next(max_payload_size - ksize);
         const auto k = random.Generate(ksize);
         const auto v = random.Generate(vsize);
         CHECK_OK(db.put(table, k, v));
