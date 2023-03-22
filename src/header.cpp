@@ -80,13 +80,13 @@ auto NodeHeader::read(const char *data) -> void
     data += sizeof(Id);
 
     cell_count = get_u16(data);
-    data += sizeof(PageSize);
+    data += sizeof(std::uint16_t);
 
     cell_start = get_u16(data);
-    data += sizeof(PageSize);
+    data += sizeof(std::uint16_t);
 
     free_start = get_u16(data);
-    data += sizeof(PageSize);
+    data += sizeof(std::uint16_t);
 
     frag_count = static_cast<std::uint8_t>(*data);
 }
@@ -102,13 +102,13 @@ auto NodeHeader::write(char *data) const -> void
     data += sizeof(Id);
 
     put_u16(data, static_cast<std::uint16_t>(cell_count));
-    data += sizeof(PageSize);
+    data += sizeof(std::uint16_t);
 
     put_u16(data, static_cast<std::uint16_t>(cell_start));
-    data += sizeof(PageSize);
+    data += sizeof(std::uint16_t);
 
     put_u16(data, static_cast<std::uint16_t>(free_start));
-    data += sizeof(PageSize);
+    data += sizeof(std::uint16_t);
 
     *data = static_cast<char>(frag_count);
 }

@@ -14,6 +14,72 @@
 namespace calicodb
 {
 
+class DeltaBufferTests : public testing::Test
+{
+public:
+    static constexpr std::size_t kBufferSize {10};
+    DeltaBuffer buffer {kBufferSize};
+};
+
+TEST_F(DeltaBufferTests, RemembersOccupation)
+{
+    buffer.occupy(Slice {"0123456789", 10});
+    ASSERT_TRUE(buffer.is_occupied());
+
+    const auto delta = buffer.collect_and_vacate(Slice {"..........", 10});
+    ASSERT_FALSE(buffer.is_occupied());
+    ASSERT_EQ(delta.size(), 1);
+    ASSERT_EQ(delta[0].offset, 0);
+    ASSERT_EQ(delta[0].size, 10);
+}
+
+TEST_F(DeltaBufferTests, ReturnsMinimalDeltas)
+{
+    const char *pages[] {
+        ".1..4...89",
+        "0.2..5...9",
+        "01.3..6...",
+    };
+
+    for (std::size_t i {}; i < 3; ++i) {
+        buffer.occupy(Slice {"0123456789", 10});
+        const auto deltas = buffer.collect_and_vacate(Slice {pages[i], 10});
+        ASSERT_EQ(deltas.size(), 3);
+        ASSERT_EQ(deltas[0].offset, i);
+        ASSERT_EQ(deltas[0].size, 1);
+        ASSERT_EQ(deltas[1].offset, i + 2);
+        ASSERT_EQ(deltas[1].size, 2);
+        ASSERT_EQ(deltas[2].offset, i + 5);
+        ASSERT_EQ(deltas[2].size, 3);
+    }
+}
+
+TEST_F(DeltaBufferTests, FuzzFactor)
+{
+    buffer.occupy(Slice {"0123456789", 10});
+    const auto deltas = buffer.collect_and_vacate(Slice {".12.456.89", 10}, 2);
+    ASSERT_EQ(deltas.size(), 2);
+    ASSERT_EQ(deltas[0].offset, 0);
+    ASSERT_EQ(deltas[0].size, 4);
+    ASSERT_EQ(deltas[1].offset, 7);
+    ASSERT_EQ(deltas[1].size, 1);
+}
+
+#ifndef NDEBUG
+TEST_F(DeltaBufferTests, DeltaBufferDeathTests)
+{
+    ASSERT_DEATH(buffer.occupy(Slice {"hello", 5}), "expect");
+    ASSERT_DEATH((void)buffer.collect_and_vacate(Slice {"hello", 5}), "expect");
+
+    buffer.occupy(Slice {"1234567890", 10});
+    ASSERT_DEATH(buffer.occupy(Slice {"1234567890", 10}), "expect");
+
+    (void)buffer.collect_and_vacate(Slice {"1234567890", 10});
+    ASSERT_DEATH((void)buffer.collect_and_vacate(Slice {"1234567890", 10}), "expect");
+
+}
+#endif // NDEBUG
+
 class DeltaCompressionTest : public testing::Test
 {
 public:
@@ -258,7 +324,7 @@ auto write_to_page(Page &page, const std::string &message) -> void
 {
     const auto offset = page_offset(page) + sizeof(Lsn);
     EXPECT_LE(offset + message.size(), page.size());
-    std::memcpy(page.mutate(offset, message.size()), message.data(), message.size());
+    std::memcpy(page.data(offset), message.data(), message.size());
 }
 
 [[nodiscard]] auto read_from_page(const Page &page, std::size_t size) -> std::string

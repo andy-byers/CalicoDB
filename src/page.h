@@ -14,8 +14,6 @@
 namespace calicodb
 {
 
-using PageSize = std::uint16_t;
-
 struct LogicalPageId {
     [[nodiscard]] static auto with_page(Id pid) -> LogicalPageId
     {
@@ -49,8 +47,8 @@ struct LogicalPageId {
 
 class Page
 {
-    std::vector<PageDelta> m_deltas;
     Id m_id;
+    std::size_t m_delta_index {};
     std::size_t m_size {};
     CacheEntry *m_entry {};
     char *m_data {};
@@ -92,10 +90,9 @@ public:
         return Slice {m_data, m_size}.range(offset, size);
     }
 
-    auto mutate(std::size_t offset, std::size_t size) -> char *
+    auto data(std::size_t offset) -> char *
     {
         CALICODB_EXPECT_TRUE(m_write);
-        insert_delta(m_deltas, PageDelta {offset, size});
         return m_data + offset;
     }
 
@@ -114,24 +111,12 @@ public:
         return m_size;
     }
 
-    [[nodiscard]] auto has_changes() const -> bool
-    {
-        return !m_deltas.empty();
-    }
-
-    [[nodiscard]] auto deltas() -> const std::vector<PageDelta> &
-    {
-        compress_deltas(m_deltas);
-        return m_deltas;
-    }
-
-    auto TEST_populate(Id page_id, char *data, std::size_t size, bool write, const std::vector<PageDelta> &deltas = {}) -> void
+    auto TEST_populate(Id page_id, char *data, std::size_t size, bool write) -> void
     {
         m_id = page_id;
         m_data = data;
         m_size = size;
         m_write = write;
-        m_deltas = deltas;
     }
 
     // Disable copies but allow moves.
@@ -153,7 +138,7 @@ public:
 
 inline auto write_page_lsn(Page &page, Lsn lsn) -> void
 {
-    put_u64(page.mutate(page_offset(page), sizeof(Lsn)), lsn.value);
+    put_u64(page.data(page_offset(page)), lsn.value);
 }
 
 // TODO: These make more sense and can be used for frames as well.

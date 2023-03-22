@@ -137,12 +137,13 @@ static constexpr std::size_t kWalBlockScale {4};
 
 [[nodiscard]] inline constexpr auto wal_block_size(std::size_t page_size) -> std::size_t
 {
-    return std::min(kMaxPageSize, page_size * kWalBlockScale);
+    return std::min(kMaxPageSize * 2, page_size * kWalBlockScale);
 }
 
 [[nodiscard]] inline constexpr auto wal_scratch_size(std::size_t page_size) -> std::size_t
 {
-    return page_size + DeltaDescriptor::kFixedSize + sizeof(PageDelta);
+    // TODO: This is just a guess. It should be pretty conservative.
+    return page_size * 4;
 }
 
 [[nodiscard]] inline auto decode_segment_name(const Slice &prefix, const Slice &path) -> Id

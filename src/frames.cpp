@@ -11,6 +11,57 @@
 namespace calicodb
 {
 
+DeltaBuffer::DeltaBuffer(std::size_t size)
+    : m_buffer(size, '\0')
+{
+}
+
+auto DeltaBuffer::is_occupied() const -> bool
+{
+    return m_occupied;
+}
+
+auto DeltaBuffer::occupy(const Slice &page) -> void
+{
+    CALICODB_EXPECT_FALSE(m_occupied);
+    CALICODB_EXPECT_EQ(page.size(), m_buffer.size());
+    std::memcpy(m_buffer.data(), page.data(), m_buffer.size());
+    m_occupied = true;
+}
+
+auto DeltaBuffer::collect_and_vacate(const Slice &page, std::size_t fuzz) -> std::vector<PageDelta>
+{
+    CALICODB_EXPECT_TRUE(m_occupied);
+    CALICODB_EXPECT_EQ(page.size(), m_buffer.size());
+    std::vector<PageDelta> deltas;
+    PageDelta d;
+
+    const auto maybe_push_or_merge = [&D = deltas, &d, fuzz] {
+        if (d.size > 0) {
+            if (D.empty() || D.back().offset + D.back().size + fuzz < d.offset) {
+                D.emplace_back(d);
+            } else {
+                D.back().size = d.offset + d.size - D.back().offset;
+            }
+        }
+    };
+
+    m_occupied = false;
+    for (std::size_t i {}; i < page.size(); ++i) {
+        if (page.data()[i] == m_buffer[i]) {
+            maybe_push_or_merge();
+            d.size = 0;
+        } else {
+            if (d.size == 0) {
+                d.offset = i;
+            }
+            ++d.size;
+        }
+    }
+    maybe_push_or_merge();
+    return deltas;
+}
+
 AlignedBuffer::AlignedBuffer(std::size_t size, std::size_t alignment)
     : m_data {
           new (std::align_val_t {alignment}) char[size](),
@@ -154,6 +205,20 @@ auto FrameManager::upgrade(Page &page) -> void
 {
     CALICODB_EXPECT_FALSE(page.is_writable());
     page.m_write = true;
+
+    std::size_t delta_index {};
+    for (std::size_t i {}; i <= m_deltas.size(); ++i) {
+        if (i == m_deltas.size()) {
+            m_deltas.emplace_back(m_page_size);
+        }
+        if (!m_deltas[i].is_occupied()) {
+            delta_index = i;
+            break;
+        }
+    }
+
+    page.m_delta_index = delta_index;
+    m_deltas[delta_index].occupy(page.view(0));
 }
 
 auto FrameManager::pin(Id page_id, CacheEntry &entry) -> Status
@@ -204,6 +269,13 @@ auto FrameManager::unref(CacheEntry &entry) -> void
 
     --m_refsum;
     --entry.refcount;
+}
+
+auto FrameManager::collect_deltas(const Page &page) -> std::vector<PageDelta>
+{
+    static constexpr std::size_t kFuzz {8};
+    CALICODB_EXPECT_TRUE(m_deltas[page.m_delta_index].is_occupied());
+    return m_deltas[page.m_delta_index].collect_and_vacate(page.view(0), kFuzz);
 }
 
 auto FrameManager::write_back(std::size_t index) -> Status

@@ -1136,11 +1136,11 @@ protected:
         ApiTests::SetUp();
 
         tools::RandomGenerator random;
-        checkpoints[false] = tools::fill_db(*db, random, 1'000);
+        checkpoints[false] = tools::fill_db(*db, random, 5'000);
 
         ASSERT_OK(db->checkpoint());
 
-        checkpoints[true] = tools::fill_db(*db, random, 1'234);
+        checkpoints[true] = tools::fill_db(*db, random, 5'678);
         for (const auto &record: checkpoints[false]) {
             checkpoints[true].insert(record);
         }
@@ -1187,7 +1187,7 @@ TEST_F(CommitFailureTests, DataFlushFailure)
 
 TEST_F(CommitFailureTests, DataFlushFailureAfterSomeSuccess)
 {
-    auto count = 5;
+    auto count = 2;
     COUNTING_INTERCEPTOR(kFilename, tools::Interceptor::kWrite, count);
     run_test(true);
 }

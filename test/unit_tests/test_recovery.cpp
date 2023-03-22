@@ -81,7 +81,7 @@ TEST_F(WalPagerInteractionTests, GeneratesAppropriateWALRecords)
     // Image and delta records.
     ASSERT_OK(pager->allocate(page));
     ASSERT_EQ(wal->current_lsn().value, ++lsn_value);
-    (void)page.mutate(page.size() - 1, 1);
+    (void)page.data(page.size() - 1);
     pager->release(std::move(page));
     ASSERT_EQ(wal->current_lsn().value, ++lsn_value);
 
@@ -101,7 +101,7 @@ TEST_F(WalPagerInteractionTests, GeneratesAppropriateWALRecords)
     // delta record should be written.
     ASSERT_OK(pager->acquire(Id::root(), page));
     pager->upgrade(page);
-    (void)page.mutate(page.size() - 1, 1);
+    (void)page.data(page.size() - 1);
     pager->release(std::move(page));
     ASSERT_EQ(wal->current_lsn().value, ++lsn_value);
 }
@@ -122,11 +122,12 @@ TEST_F(WalPagerInteractionTests, AllocateTruncatedPages)
     Page page;
     ASSERT_OK(pager->allocate(page));
     ASSERT_EQ(wal->current_lsn().value, ++current_lsn_value);
-    (void)page.mutate(page.size() - 1, 1);
+    page.data(page.size() - 1)[0]++;
     pager->release(std::move(page));
     ASSERT_EQ(wal->current_lsn().value, ++current_lsn_value);
 
-    // If the page isn't updated, no delta is written.
+    // If the page isn't updated by the user, a delta must still be written due to the
+    // page LSN update.
     ASSERT_OK(pager->allocate(page));
     ASSERT_EQ(wal->current_lsn().value, ++current_lsn_value);
     pager->release(std::move(page));
@@ -137,7 +138,7 @@ TEST_F(WalPagerInteractionTests, AllocateTruncatedPages)
     // Normal page.
     ASSERT_OK(pager->allocate(page));
     ASSERT_EQ(wal->current_lsn().value, ++current_lsn_value);
-    (void)page.mutate(page.size() - 1, 1);
+    page.data(page.size() - 1)[0]++;
     pager->release(std::move(page));
     ASSERT_EQ(wal->current_lsn().value, ++current_lsn_value);
 }
