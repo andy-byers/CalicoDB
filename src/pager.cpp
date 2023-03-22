@@ -189,8 +189,6 @@ auto Pager::upgrade(Page &page, int important) -> void
 {
     CALICODB_EXPECT_LE(important, static_cast<int>(page.size()));
     const auto page_lsn = read_page_lsn(page);
-    auto *entry = m_cache.query(page.id());
-    CALICODB_EXPECT_NE(entry, nullptr);
 
     // The "important" parameter should be used when we don't need to track the before contents of
     // the whole page. For example, when allocating a page from the freelist, we only care about
@@ -201,8 +199,8 @@ auto Pager::upgrade(Page &page, int important) -> void
     }
 
     // Make sure this page is in the dirty list. This is one place where the "record LSN" is set.
-    if (!entry->token.has_value()) {
-        entry->token = m_dirty.insert(page.id(), page_lsn);
+    if (!page.entry()->token.has_value()) {
+        page.entry()->token = m_dirty.insert(page.id(), page_lsn);
     }
     m_frames.upgrade(page);
 
@@ -218,10 +216,8 @@ auto Pager::upgrade(Page &page, int important) -> void
 
 auto Pager::release(Page page) -> void
 {
-    auto *entry = m_cache.query(page.id());
-    CALICODB_EXPECT_NE(entry, nullptr);
-    CALICODB_EXPECT_NE(entry->refcount, 0);
-    m_frames.unref(*entry);
+    CALICODB_EXPECT_NE(page.entry()->refcount, 0);
+    m_frames.unref(*page.entry());
 
     if (m_state->is_running && page.has_changes()) {
         CALICODB_EXPECT_TRUE(page.is_writable());
@@ -239,7 +235,7 @@ auto Pager::truncate(std::size_t page_count) -> Status
     CALICODB_EXPECT_GT(page_count, 0);
     CALICODB_TRY(m_env->resize_file(m_filename, page_count * m_frames.page_size()));
 
-    // Discard cached pages that are out-of-range.
+    // Discard out-of-range cached pages.
     for (Id id {page_count + 1}; id.value <= m_page_count; ++id.value) {
         auto *entry = m_cache.query(id);
         if (entry != nullptr) {

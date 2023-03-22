@@ -12,9 +12,9 @@ namespace calicodb
 
 WriteAheadLog::WriteAheadLog(const Parameters &param)
     : m_prefix {param.prefix},
-      m_env {param.env},
       m_data_buffer(wal_scratch_size(param.page_size), '\x00'),
-      m_tail_buffer(wal_block_size(param.page_size), '\x00')
+      m_tail_buffer(wal_block_size(param.page_size), '\x00'),
+      m_env {param.env}
 {
     CALICODB_EXPECT_NE(m_env, nullptr);
 }
@@ -179,23 +179,22 @@ auto WriteAheadLog::close_writer() -> Status
 {
     CALICODB_TRY(synchronize(true));
 
+    // Attempt to cache the first LSN written to the segment.
     const auto id = next_segment_id();
-    const auto segment_name = encode_segment_name(m_prefix, id);
+    auto [itr, _] = m_segments.insert({id, Lsn::null()});
+    auto s = cache_first_lsn(*m_env, m_prefix, itr);
 
-    std::size_t file_size;
-    CALICODB_TRY(m_env->file_size(segment_name, file_size));
+    if (s.is_not_found()) {
+        // Segment was never written to.
+        s = m_env->remove_file(encode_segment_name(m_prefix, id));
+        m_segments.erase(id);
+    }
 
     delete m_file;
     delete m_writer;
     m_file = nullptr;
     m_writer = nullptr;
-
-    if (file_size != 0) {
-        m_segments.insert({id, Lsn::null()});
-    } else {
-        CALICODB_TRY(m_env->remove_file(segment_name));
-    }
-    return Status::ok();
+    return s;
 }
 
 auto WriteAheadLog::open_writer() -> Status

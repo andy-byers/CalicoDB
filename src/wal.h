@@ -53,19 +53,32 @@ private:
 
     static constexpr std::size_t kSegmentCutoff {32};
 
+    // Maps each completed segment to the first LSN written to it.
     std::map<Id, Lsn> m_segments;
 
-    Lsn m_flushed_lsn;
+    // Last LSN written to disk. Always greater than or equal to the "flushed LSN".
     Lsn m_written_lsn;
+
+    // Last LSN that is definitely on disk. The file must be fsync()'d before
+    // this value can be increased to match the "written LSN".
+    Lsn m_flushed_lsn;
+
+    // Last LSN written to the tail buffer. Always greater than or equal to the
+    // "written LSN".
     Lsn m_last_lsn;
+
+    // Prefix used for WAL segments.
     std::string m_prefix;
+
+    // Directory containing the WAL segments (must be a prefix of "m_prefix"). Used to
+    // fsync() the directory when a new segment is created.
     std::string m_dirname;
 
-    Env *m_env {};
     std::string m_data_buffer;
     std::string m_tail_buffer;
     std::size_t m_bytes_written {};
 
+    Env *m_env {};
     WalWriter *m_writer {};
     Logger *m_file {};
     Reader *m_dir {};

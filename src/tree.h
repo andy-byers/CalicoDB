@@ -14,6 +14,36 @@ namespace calicodb
 
 class Pager;
 class TableSet;
+struct Node;
+
+// Maintains a list of available memory regions within a node.
+//
+// List entries take the form (offset, size), where "offset" and "size" are
+// 16-bit unsigned integers. The entries are kept sorted by the "offset" field,
+// and adjacent regions are merged if possible.
+class BlockAllocatorV2 {
+    [[nodiscard]] static auto get_next_pointer(const Node &node, std::size_t offset) -> PageSize;
+    [[nodiscard]] static auto get_block_size(const Node &node, std::size_t offset) -> PageSize;
+    [[nodiscard]] static auto allocate_from_free_list(Node &node, PageSize needed_size) -> PageSize;
+    [[nodiscard]] static auto allocate_from_gap(Node &node, PageSize needed_size) -> PageSize;
+    [[nodiscard]] static auto take_free_space(Node &node, PageSize ptr0, PageSize ptr1, PageSize needed_size) -> PageSize;
+    static auto set_next_pointer(Node &node, std::size_t offset, PageSize value) -> void;
+    static auto set_block_size(Node &node, std::size_t offset, PageSize value) -> void;
+
+public:
+    static auto accumulate_free_bytes(const Node &node) -> std::size_t;
+
+    // Allocate "needed_size" bytes of contiguous memory in "node" and return the
+    // offset of the first byte, relative to the start of the page.
+    static auto allocate(Node &node, std::uint16_t needed_size) -> std::uint16_t;
+
+    // Free "block_size" bytes of contiguous memory in "node" starting at
+    // "block_start".
+    static auto release(Node &node, std::uint16_t block_start, std::uint16_t block_size) -> void;
+
+    // Merge all free blocks and fragment bytes into the gap space.
+    static auto defragment(Node &node, int skip = -1) -> void;
+};
 
 // Internal Cell Format:
 //     Size    Name

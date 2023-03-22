@@ -189,6 +189,7 @@ auto FrameManager::ref(CacheEntry &entry, Page &page) -> Status
     ++m_refsum;
     ++entry.refcount;
     page.m_id = entry.page_id;
+    page.m_entry = &entry;
     page.m_data = m_frames[entry.index].data;
     page.m_size = m_page_size;
     page.m_write = false;

@@ -112,15 +112,14 @@ static auto encode_logical_id(LogicalPageId id, char *out) -> void
     return Status::ok();
 }
 
-auto setup_db(const std::string &path, Env &env, const Options &options, FileHeader &header) -> Status
+auto setup_db(const std::string &filename, Env &env, Options &options, FileHeader &header) -> Status
 {
     CALICODB_EXPECT_GE(options.page_size, kMinPageSize);
     CALICODB_EXPECT_LE(options.page_size, kMaxPageSize);
     CALICODB_EXPECT_TRUE(is_power_of_two(options.page_size));
-    CALICODB_EXPECT_GE(options.cache_size, options.page_size * kMinFrameCount);
 
     Reader *reader;
-    if (auto s = env.new_reader(path, reader); s.is_ok()) {
+    if (auto s = env.new_reader(filename, reader); s.is_ok()) {
         char buffer[FileHeader::kSize];
         s = reader->read(0, sizeof(buffer), buffer, nullptr);
         delete reader;
@@ -140,10 +139,13 @@ auto setup_db(const std::string &path, Env &env, const Options &options, FileHea
     } else {
         return s;
     }
+    if (options.cache_size < kMinFrameCount * header.page_size) {
+        options.cache_size = kMinFrameCount * header.page_size;
+    }
     return Status::ok();
 }
 
-auto DBImpl::open(const Options &sanitized) -> Status
+auto DBImpl::open(Options sanitized) -> Status
 {
     const auto db_exists = m_env->file_exists(m_filename);
     if (db_exists) {
@@ -453,10 +455,11 @@ auto DBImpl::vacuum() -> Status
 
 auto DBImpl::do_vacuum() -> Status
 {
+    std::vector<std::string> table_names;
+    std::vector<LogicalPageId> table_roots;
+    CALICODB_TRY(get_table_info(table_names, &table_roots));
+
     Id target {m_pager->page_count()};
-    if (target.is_root()) {
-        return Status::ok();
-    }
     auto *state = m_tables.get(Id::root());
     auto *tree = state->tree;
 
@@ -471,6 +474,15 @@ auto DBImpl::do_vacuum() -> Status
     if (target.value == m_pager->page_count()) {
         // No pages available to vacuum: database is minimally sized.
         return Status::ok();
+    }
+
+    // Update root locations in the name-to-root mapping.
+    char logical_id[LogicalPageId::kSize];
+    for (std::size_t i {}; i < table_names.size(); ++i) {
+        const auto *root = m_tables.get(table_roots[i].table_id);
+        CALICODB_EXPECT_NE(root, nullptr);
+        encode_logical_id(root->root_id, logical_id);
+        CALICODB_TRY(put(*m_root, table_names[i], logical_id));
     }
     // Make sure the vacuum updates are in the WAL. If this succeeds, we should
     // be able to reapply the whole vacuum operation if the truncation fails.
@@ -595,16 +607,23 @@ auto DBImpl::default_table() const -> Table *
     return m_default;
 }
 
-auto DBImpl::list_tables(std::vector<std::string> &out) const -> Status
+auto DBImpl::get_table_info(std::vector<std::string> &names, std::vector<LogicalPageId> *roots) const -> Status
 {
-    CALICODB_TRY(m_state.status);
-    out.clear();
+    names.clear();
+    if (roots != nullptr) {
+        roots->clear();
+    }
 
     auto *cursor = new_cursor(*m_root);
     cursor->seek_first();
     while (cursor->is_valid()) {
         if (cursor->key() != kDefaultTableName) {
-            out.emplace_back(cursor->key().to_string());
+            names.emplace_back(cursor->key().to_string());
+            if (roots != nullptr) {
+                LogicalPageId root;
+                CALICODB_TRY(decode_logical_id(cursor->value(), &root));
+                roots->emplace_back(root);
+            }
         }
         cursor->next();
     }
@@ -612,6 +631,12 @@ auto DBImpl::list_tables(std::vector<std::string> &out) const -> Status
     delete cursor;
 
     return s.is_not_found() ? Status::ok() : s;
+}
+
+auto DBImpl::list_tables(std::vector<std::string> &out) const -> Status
+{
+    CALICODB_TRY(m_state.status);
+    return get_table_info(out, nullptr);
 }
 
 auto DBImpl::create_table(const TableOptions &options, const std::string &name, Table *&out) -> Status

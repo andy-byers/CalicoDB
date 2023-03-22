@@ -151,6 +151,30 @@ public:
     Options options;
 };
 
+TEST_F(BasicDatabaseTests, ClampsBadOptionValues)
+{
+    const auto open_and_check = [this] {
+        DB *db;
+        ASSERT_OK(DB::open(options, kFilename, db));
+        ASSERT_TRUE(db->status().is_ok());
+        delete db;
+        ASSERT_OK(DB::destroy(options, kFilename));
+    };
+
+    options.page_size = kMinPageSize / 2;
+    open_and_check();
+    options.page_size = kMaxPageSize * 2;
+    open_and_check();
+    options.page_size = kMinPageSize + 1;
+    open_and_check();
+
+    options.page_size = kMinPageSize;
+    options.cache_size = options.page_size;
+    open_and_check();
+    options.cache_size = 1 << 31;
+    open_and_check();
+}
+
 TEST_F(BasicDatabaseTests, OpensAndCloses)
 {
     DB *db;
@@ -596,7 +620,7 @@ protected:
         env = std::make_unique<tools::FaultInjectionEnv>();
         db = std::make_unique<TestDatabase>(*env);
 
-        committed = add_records(*db, 10'000);
+        committed = add_records(*db, 25'000);
         EXPECT_OK(db->db->checkpoint());
     }
     ~DbErrorTests() override = default;
@@ -750,6 +774,15 @@ class DbFatalErrorTests : public DbErrorTests
 {
 protected:
     ~DbFatalErrorTests() override = default;
+
+    auto SetUp() -> void override
+    {
+        tools::RandomGenerator random;
+        for (const auto &[k, v] : tools::fill_db(*db->db, random, 1'000)) {
+            ASSERT_OK(db->db->erase(k));
+        }
+        DbErrorTests::SetUp();
+    }
 };
 
 TEST_P(DbFatalErrorTests, ErrorsDuringModificationsAreFatal)
@@ -797,12 +830,6 @@ TEST_P(DbFatalErrorTests, RecoversFromVacuumFailure)
 
     env->clear_interceptors();
     ASSERT_OK(DB::open(db->options, "./test", db->db));
-
-//    auto f = tools::read_file_to_string(*db->options.env, "./test");
-//    std::cerr << "page " << 1350 << ":\n";
-//    std::cerr << escape_string(f.substr(1350*db->options.page_size, db->options.page_size)) << '\n';
-    tools::print_references(const_cast<Pager &>(reinterpret_cast<const DBImpl *>(db->db)->TEST_pager()));
-
     tools::validate_db(*db->db);
 
     for (const auto &[key, value] : committed) {
@@ -823,16 +850,13 @@ INSTANTIATE_TEST_SUITE_P(
     ::testing::Values(
         ErrorWrapper {"./test", tools::Interceptor::kRead, 0},
         ErrorWrapper {"./test", tools::Interceptor::kRead, 1},
-        ErrorWrapper {"./test", tools::Interceptor::kRead, 10},
-        ErrorWrapper {"./test", tools::Interceptor::kRead, 100},
+        ErrorWrapper {"./test", tools::Interceptor::kRead, 50},
         ErrorWrapper {"./test", tools::Interceptor::kWrite, 0},
         ErrorWrapper {"./test", tools::Interceptor::kWrite, 1},
-        ErrorWrapper {"./test", tools::Interceptor::kWrite, 10},
-        ErrorWrapper {"./test", tools::Interceptor::kWrite, 100},
+        ErrorWrapper {"./test", tools::Interceptor::kWrite, 50},
         ErrorWrapper {"./wal", tools::Interceptor::kWrite, 0},
         ErrorWrapper {"./wal", tools::Interceptor::kWrite, 1},
-        ErrorWrapper {"./wal", tools::Interceptor::kWrite, 10},
-        ErrorWrapper {"./wal", tools::Interceptor::kWrite, 100}));
+        ErrorWrapper {"./wal", tools::Interceptor::kWrite, 50}));
 
 class DbOpenTests
     : public OnDiskTest,

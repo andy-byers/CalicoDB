@@ -317,28 +317,179 @@ TEST_F(TwoTableTests, FindExistingTables)
     ASSERT_TRUE(table_names.empty());
 }
 
-TEST_F(TwoTableTests, Vacuum)
-{
-    for (std::size_t i {1}; i < 5; ++i) {
-        tools::RandomGenerator random;
-        const auto records_1 = tools::fill_db(*db, *table_1, random, 1'000 * i);
-        const auto records_2 = tools::fill_db(*db, *table_2, random, 2'000 * i);
-        ASSERT_OK(db->checkpoint());
+class MultiTableVacuumRunner : public InMemoryTest {
+public:
+    const std::size_t kRecordCount {1'000};
 
-        for (const auto &[key, _] : records_1) {
-            ASSERT_OK(db->erase(*table_1, key));
-        }
-        for (const auto &[key, _] : records_2) {
-            ASSERT_OK(db->erase(*table_2, key));
-        }
-        ASSERT_OK(db->vacuum());
-
-        reopen_db();
-        reopen_tables();
-
-        tools::expect_db_contains(*db, *table_1, records_1);
-        tools::expect_db_contains(*db, *table_2, records_2);
+    explicit MultiTableVacuumRunner(std::size_t num_tables, const Options &options = {})
+        : m_options {options}
+    {
+        m_options = options;
+        m_options.env = env.get();
+        initialize(num_tables, m_options);
     }
-}
+
+    ~MultiTableVacuumRunner() override
+    {
+        for (const auto *table : m_tables) {
+            delete table;
+        }
+        delete m_db;
+    }
+
+    auto fill_user_tables(std::size_t n, std::size_t step) -> void
+    {
+        for (std::size_t i {}; i + step <= n; i += step) {
+            for (std::size_t j {}; j < m_tables.size(); ++j) {
+                const auto records = tools::fill_db(*m_db, *m_tables[j], m_random, step);
+                m_records[j].insert(begin(records), end(records));
+            }
+        }
+    }
+
+    auto erase_from_user_tables(std::size_t n) -> void
+    {
+        for (std::size_t i {}; i < n; ++i) {
+            for (std::size_t j {}; j < m_tables.size(); ++j) {
+                const auto itr = begin(m_records[j]);
+                CALICODB_EXPECT_NE(itr, end(m_records[j]));
+                ASSERT_OK(m_db->erase(*m_tables[j], itr->first));
+                m_records[j].erase(itr);
+            }
+        }
+    }
+
+    auto run() -> void
+    {
+        ASSERT_OK(m_db->vacuum());
+        db_impl(m_db)->TEST_validate();
+
+        const auto &tab = db_impl(m_db)->TEST_tables();
+        std::cerr << tab.get(Id {3})->tree->TEST_to_string() << "\n\n";
+
+        for (std::size_t i {}; i < m_tables.size(); ++i) {
+            tools::expect_db_contains(*m_db, *m_tables[i], m_records[i]);
+            delete m_tables[i];
+        }
+        m_tables.clear();
+        delete m_db;
+        m_db = nullptr;
+
+        // Make sure all of this stuff can be reverted with the WAL and that the
+        // default table isn't messed up.
+        ASSERT_OK(DB::open(m_options, kFilename, m_db));
+        tools::expect_db_contains(*m_db, m_committed);
+
+        delete m_db;
+        m_db = nullptr;
+    }
+
+private:
+    auto initialize(std::size_t num_tables, const Options &options) -> void
+    {
+        ASSERT_OK(DB::open(options, kFilename, m_db));
+
+        // Create some pages before the 2 user tables.
+        m_committed = tools::fill_db(*m_db, m_random, kRecordCount);
+        ASSERT_OK(m_db->checkpoint());
+
+        for (std::size_t i {}; i < num_tables; ++i) {
+            m_tables.emplace_back();
+            m_records.emplace_back();
+            const auto name = "table_" + tools::integral_key(i);
+            ASSERT_OK(m_db->create_table({}, name, m_tables.back()));
+        }
+
+        // Move the filler pages from the default table to the freelist.
+        auto itr = begin(m_committed);
+        for (int i {}; i < kRecordCount / 2; ++i, ++itr) {
+            ASSERT_OK(m_db->erase(itr->first));
+        }
+    }
+
+    using Map = std::map<std::string, std::string>;
+
+    tools::RandomGenerator m_random;
+    std::vector<Table *> m_tables;
+    std::vector<Map> m_records;
+    Map m_committed;
+    Options m_options;
+    DB *m_db {};
+};
+//
+//class MultiTableVacuumTests
+//    : public MultiTableVacuumRunner,
+//      public testing::TestWithParam<std::size_t>
+//{
+//public:
+//    explicit MultiTableVacuumTests()
+//        : MultiTableVacuumRunner {GetParam()}
+//    {
+//    }
+//
+//    ~MultiTableVacuumTests() override = default;
+//};
+//
+//TEST_P(MultiTableVacuumTests, EmptyTables)
+//{
+//    run();
+//}
+//
+//TEST_P(MultiTableVacuumTests, FilledTables)
+//{
+//    fill_user_tables(kRecordCount, kRecordCount / 2);
+//    run();
+//}
+//
+//TEST_P(MultiTableVacuumTests, FilledTablesWithInterleavedPages)
+//{
+//    fill_user_tables(kRecordCount, 10);
+//    run();
+//}
+//
+//TEST_P(MultiTableVacuumTests, PartiallyFilledTables)
+//{
+//    fill_user_tables(kRecordCount, kRecordCount / 2);
+//    erase_from_user_tables(kRecordCount / 2);
+//    run();
+//}
+//
+//TEST_P(MultiTableVacuumTests, PartiallyFilledTablesWithInterleavedPages)
+//{
+//    fill_user_tables(kRecordCount, 10);
+//    erase_from_user_tables(kRecordCount / 2);
+//    run();
+//}
+//
+////TEST_P(MultiTableVacuumTests, SanityCheck)
+////{
+////    for (std::size_t i {1}; i < 5; ++i) {
+////        tools::RandomGenerator random;
+////        const auto records_1 = tools::fill_db(*db, *table_1, random, 1 * i);
+////        const auto records_2 = tools::fill_db(*db, *table_2, random, 2 * i);
+////        ASSERT_OK(db->checkpoint());
+////
+////        for (const auto &[key, _] : records_1) {
+////            ASSERT_OK(db->erase(*table_1, key));
+////        }
+////        for (const auto &[key, _] : records_2) {
+////            ASSERT_OK(db->erase(*table_2, key));
+////        }
+////        ASSERT_OK(db->vacuum());
+////        db_impl(db)->TEST_validate();
+////
+////        reopen_db();
+////        reopen_tables();
+////
+////        tools::expect_db_contains(*db, *table_1, records_1);
+////        tools::expect_db_contains(*db, *table_2, records_2);
+////    }
+////}
+//
+//INSTANTIATE_TEST_SUITE_P(
+//    MultiTableVacuumTests,
+//    MultiTableVacuumTests,
+//    ::testing::Values(0, 1, 2, 5, 10));
+//
 
 } // namespace calicodb

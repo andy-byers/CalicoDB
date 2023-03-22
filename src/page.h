@@ -5,9 +5,11 @@
 #ifndef CALICODB_PAGE_H
 #define CALICODB_PAGE_H
 
-#include "delta.h"
 #include "encoding.h"
+#include "frames.h"
 #include "header.h"
+#include "delta.h"
+#include "utils.h"
 
 namespace calicodb
 {
@@ -50,6 +52,7 @@ class Page
     std::vector<PageDelta> m_deltas;
     Id m_id;
     std::size_t m_size {};
+    CacheEntry *m_entry {};
     char *m_data {};
     bool m_write {};
 
@@ -67,6 +70,16 @@ public:
     [[nodiscard]] auto id() const -> Id
     {
         return m_id;
+    }
+
+    [[nodiscard]] auto entry() const -> const CacheEntry *
+    {
+        return m_entry;
+    }
+
+    [[nodiscard]] auto entry() -> CacheEntry *
+    {
+        return m_entry;
     }
 
     [[nodiscard]] auto view(std::size_t offset) const -> Slice

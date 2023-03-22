@@ -28,7 +28,7 @@ auto DB::open(const Options &options, const std::string &filename, DB *&db) -> S
 
     auto sanitized = options;
     clip_to_range(sanitized.page_size, kMinPageSize, kMaxPageSize);
-    clip_to_range(sanitized.cache_size, sanitized.page_size * kMinFrameCount, kMaxCacheSize);
+    clip_to_range(sanitized.cache_size, {}, kMaxCacheSize);
     if (!is_power_of_two(sanitized.page_size)) {
         sanitized.page_size = Options {}.page_size;
     }

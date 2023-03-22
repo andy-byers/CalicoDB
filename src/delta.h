@@ -17,7 +17,7 @@ struct PageDelta {
 };
 
 // Join overlapping deltas in a sorted (by offset) vector. Makes sure that delta WAL records are minimally sized.
-auto compress_deltas(std::vector<PageDelta> &deltas) -> std::size_t;
+auto compress_deltas(std::vector<PageDelta> &deltas) -> void;
 
 // Insert a delta into a sorted vector, possibly joining it with the first overlapping delta. Only resolves
 // the first overlap it encounters, so some edge cases will be missed (delta that overlaps multiple other

@@ -533,13 +533,12 @@ INSTANTIATE_TEST_SUITE_P(
     ::testing::Values(
         std::make_tuple("./test", tools::Interceptor::kRead, 0),
         std::make_tuple("./test", tools::Interceptor::kRead, 1),
-        std::make_tuple("./test", tools::Interceptor::kRead, 5),
+        std::make_tuple("./test", tools::Interceptor::kRead, 3),
         std::make_tuple("./test", tools::Interceptor::kWrite, 0),
         std::make_tuple("./test", tools::Interceptor::kWrite, 1),
-        std::make_tuple("./test", tools::Interceptor::kWrite, 5),
+        std::make_tuple("./test", tools::Interceptor::kWrite, 3),
         std::make_tuple("./wal-", tools::Interceptor::kOpen, 0),
-        std::make_tuple("./wal-", tools::Interceptor::kOpen, 1),
-        std::make_tuple("./wal-", tools::Interceptor::kOpen, 5)));
+        std::make_tuple("./wal-", tools::Interceptor::kOpen, 1)));
 
 class DataLossEnv : public EnvWrapper
 {

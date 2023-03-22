@@ -77,7 +77,7 @@ struct NodeHeader {
     std::uint16_t cell_start {};
     std::uint16_t free_start {};
     std::uint16_t free_total {};
-    std::uint8_t frag_count {};
+    std::uint16_t frag_count {};
     bool is_external {true};
 };
 
