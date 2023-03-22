@@ -97,7 +97,7 @@ Errors returned by methods that modify tables are fatal and the database will re
 The next time that the database is opened, recovery will be run to undo any changes that occurred after the last checkpoint (see [Checkpoints](#checkpoints)).
 The database will always keep 1 table open, called the default table.
 Additional tables are managed using methods on the `DB` object (see [Tables](#tables)).
-Note that the default table is named "default", making this a reserved table name.
+When naming tables, note that the prefix "calicodb." is reserved for internal use.
 
 ```C++
 // Insert some key-value pairs into the default table.
@@ -132,10 +132,9 @@ if (s.is_ok()) {
 ### Querying a database
 
 ```C++
-// Query a value by key. This example uses the same table from the last section.
-// Note that the "value" parameter is a pointer, indicating that it is optional.
-// If omitted, the DB will check if the key "lilly" exists, without attempting
-// to determine its value.
+// Query a value by key. Note that the "value" parameter is a pointer, indicating 
+// that it is optional. If omitted, the DB will check if the key "lilly" exists, 
+// without attempting to determine its value.
 std::string value;
 calicodb::Status s = db->get("lilly", &value);
 if (s.is_ok()) {
@@ -147,7 +146,7 @@ if (s.is_ok()) {
 }
 
 // Allocate a cursor. The cursor will only view records from the table it was
-// created by. Modifications to the table will invalidate the cursor, including
+// created on. Modifications to the table will invalidate the cursor, including
 // calls to DB::vacuum(). Cursors are invalid upon creation. They must have
 // either seek(), seek_first(), or seek_last() called before is_valid() will
 // return true.
@@ -268,7 +267,7 @@ if (s.is_ok()) {
 ```C++
 // Database properties are made available as strings.
 std::string prop;
-bool exists = db->get_property("calicodb.tables", &prop);
+bool exists = db->get_property("calicodb.stats", &prop);
 
 // Passing nullptr for the property value causes get_property() to perform a simple existence check, 
 // without attempting to populate the property value string.
@@ -311,7 +310,5 @@ if (s.is_ok()) {
 4. https://github.com/facebook/rocksdb/wiki/Write-Ahead-Log
     + Explanation of RocksDB's WAL
     + The idea to have multiple different record types and to use a "tail" buffer are from this document
-5. https://arpitbhayani.me/blogs/2q-cache
-    + Description of the 2Q cache replacement policy
-6. https://stablecog.com/
+5. https://stablecog.com/
     + Used to generate the original calico cat image, which was then further modified to produce [mascot.png](mascot.png)

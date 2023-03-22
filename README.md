@@ -1,10 +1,16 @@
 # CalicoDB
 
-> **Warning**: This library is not quite stable, nor is it code reviewed. 
+> **Warning**: This library has not been code reviewed, and I'm not an expert database developer. 
 > Please don't use it for anything serious!
+> I'm open to comments/criticism/pull requests though, as I want to make CalicoDB a useful library!
+
+> **Note (03/22)**: I've made some pretty big changes internally, and I think I'm content with CalicoDB's design now.
+> I'll be using the `develop` branch to work on tests and fix bugs.
+> -Andy
 
 CalicoDB is an embedded key-value database written in C++17.
 It exposes a small API that allows storage and retrieval of arbitrary byte sequences.
+CalicoDB runs in a single thread and uses a B<sup>+</sup>-tree backend, making it optimal for read-heavy embedded applications.
 
 ![CI status badge](https://github.com/andy-byers/CalicoDB/actions/workflows/actions.yml/badge.svg)
 
@@ -40,7 +46,7 @@ The unit tests depend on `@google/googletest`, and the benchmarks depend on `@go
 Both are downloaded using CMake's FetchContent API.
 
 ## Performance
-CalicoDB is optimized for read-heavy workloads with intermittent batches of sequential writes.
+CalicoDB is optimized for read-heavy workloads with batches of sequential writes.
 Performance benchmarks can be found [here](./test/benchmarks).
 
 ## TODO

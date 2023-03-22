@@ -2068,6 +2068,11 @@ auto Node::TEST_validate() -> void
     // Header(s) and cell pointers.
     {
         account(0, cell_area_offset(*this));
+
+        // Make sure the header fields are not obviously wrong.
+        CALICODB_EXPECT_LT(header.frag_count, static_cast<std::uint8_t>(-1) * 2);
+        CALICODB_EXPECT_LT(header.cell_count, static_cast<std::uint16_t>(-1));
+        CALICODB_EXPECT_LT(header.free_start, static_cast<std::uint16_t>(-1));
     }
     // Gap space.
     {
