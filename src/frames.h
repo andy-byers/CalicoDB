@@ -22,17 +22,6 @@ class Pager;
 class Editor;
 class Env;
 
-class DeltaBuffer {
-    std::string m_buffer;
-    bool m_occupied {};
-
-public:
-    explicit DeltaBuffer(std::size_t size);
-    [[nodiscard]] auto is_occupied() const -> bool;
-    [[nodiscard]] auto collect_and_vacate(const Slice &page, std::size_t fuzz = 0) -> std::vector<PageDelta>;
-    auto occupy(const Slice &page) -> void;
-};
-
 // Manages the set of dirty pages.
 //
 // When a page is first made dirty, it should be added to this table along
@@ -160,7 +149,6 @@ public:
     [[nodiscard]] auto sync() -> Status;
     [[nodiscard]] auto pin(Id page_id, CacheEntry &entry) -> Status;
     [[nodiscard]] auto ref(CacheEntry &entry, Page &out) -> Status;
-    [[nodiscard]] auto collect_deltas(const Page &page) -> std::vector<PageDelta>;
     auto unpin(CacheEntry &entry) -> void;
     auto unref(CacheEntry &entry) -> void;
     auto upgrade(Page &page) -> void;
@@ -201,7 +189,6 @@ private:
 
     AlignedBuffer m_buffer;
     std::vector<Frame> m_frames;
-    std::vector<DeltaBuffer> m_deltas;
     std::list<std::size_t> m_unpinned;
     std::unique_ptr<Editor> m_file;
     std::size_t m_page_size {};

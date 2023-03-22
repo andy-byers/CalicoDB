@@ -223,7 +223,7 @@ auto DBImpl::open(Options sanitized) -> Status
         m_pager->upgrade(db_root);
         state.page_count = m_pager->page_count();
         state.header_crc = crc32c::Mask(state.compute_crc());
-        state.write(db_root.data(0));
+        state.write(db_root.mutate(0, FileHeader::kSize));
         m_pager->release(std::move(db_root));
         CALICODB_TRY(m_pager->flush());
         CALICODB_TRY(m_pager->checkpoint());
@@ -564,14 +564,8 @@ auto DBImpl::do_checkpoint() -> Status
     m_state.commit_lsn = m_wal->current_lsn();
     header.record_count = m_state.record_count;
     header.header_crc = crc32c::Mask(header.compute_crc());
-    header.write(db_root.data(0));
-
-    // We will not write a delta record for the root page when it is released. This commit
-    // record covers everything that changed on the root (just the file header and page LSN).
-    const PageDelta commit_delta {0, FileHeader::kSize + sizeof(Lsn)};
-    CALICODB_TRY(m_wal->log_delta(
-        Id::root(), db_root.view(0), {commit_delta}, nullptr));
-    m_pager->release(std::move(db_root), true);
+    header.write(db_root.mutate(0, FileHeader::kSize));
+    m_pager->release(std::move(db_root));
 
     // If this call succeeds, the checkpoint should persist. This method should not
     // return a non-OK status past this point.

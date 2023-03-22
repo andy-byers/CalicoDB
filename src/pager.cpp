@@ -214,21 +214,18 @@ auto Pager::upgrade(Page &page, int important) -> void
     }
 }
 
-auto Pager::release(Page page, bool discard) -> void
+auto Pager::release(Page page) -> void
 {
     CALICODB_EXPECT_NE(page.entry()->refcount, 0);
     m_frames.unref(*page.entry());
 
-    if (m_state->is_running && page.is_writable()) {
+    if (m_state->is_running && page.has_changes()) {
+        CALICODB_EXPECT_TRUE(page.is_writable());
         write_page_lsn(page, m_wal->current_lsn());
-        auto deltas = m_frames.collect_deltas(page);
-//        deltas = page.deltas();//{PageDelta {0, page.size()}};
-        if (!discard) {
-            auto s = m_wal->log_delta(
-                page.id(), page.view(0), deltas, nullptr);
-            if (!s.is_ok()) {
-                SET_STATUS(s);
-            }
+        auto s = m_wal->log_delta(
+            page.id(), page.view(0), page.deltas(), nullptr);
+        if (!s.is_ok()) {
+            SET_STATUS(s);
         }
     }
 }

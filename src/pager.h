@@ -44,7 +44,7 @@ public:
     [[nodiscard]] auto allocate(Page &page) -> Status;
     [[nodiscard]] auto acquire(Id page_id, Page &page) -> Status;
     auto upgrade(Page &page, int important = -1) -> void;
-    auto release(Page page, bool discard = false) -> void;
+    auto release(Page page) -> void;
     auto load_state(const FileHeader &header) -> void;
 
 private:
