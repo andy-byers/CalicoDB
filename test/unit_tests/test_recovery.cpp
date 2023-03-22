@@ -613,7 +613,7 @@ public:
     {
         CALICODB_TRY(m_file->sync());
 
-        std::uint64_t file_size;
+        std::size_t file_size;
         EXPECT_OK(m_env->file_size(m_filename, file_size));
 
         Slice slice;
@@ -654,7 +654,7 @@ public:
     {
         CALICODB_TRY(m_file->sync());
 
-        std::uint64_t file_size;
+        std::size_t file_size;
         EXPECT_OK(m_env->file_size(m_filename, file_size));
 
         m_env->register_wal_sync_size(file_size);

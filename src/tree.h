@@ -22,14 +22,6 @@ struct Node;
 // 16-bit unsigned integers. The entries are kept sorted by the "offset" field,
 // and adjacent regions are merged if possible.
 class BlockAllocatorV2 {
-    [[nodiscard]] static auto get_next_pointer(const Node &node, std::size_t offset) -> PageSize;
-    [[nodiscard]] static auto get_block_size(const Node &node, std::size_t offset) -> PageSize;
-    [[nodiscard]] static auto allocate_from_free_list(Node &node, PageSize needed_size) -> PageSize;
-    [[nodiscard]] static auto allocate_from_gap(Node &node, PageSize needed_size) -> PageSize;
-    [[nodiscard]] static auto take_free_space(Node &node, PageSize ptr0, PageSize ptr1, PageSize needed_size) -> PageSize;
-    static auto set_next_pointer(Node &node, std::size_t offset, PageSize value) -> void;
-    static auto set_block_size(Node &node, std::size_t offset, PageSize value) -> void;
-
 public:
     static auto accumulate_free_bytes(const Node &node) -> std::size_t;
 
@@ -103,8 +95,6 @@ struct Node {
     PageSize slots_offset {};
     PageSize gap_size {};
 };
-
-auto manual_defragment(Node &node) -> void;
 
 // Read a cell from the node at the specified index or offset. The node must remain alive for as long as the cell.
 [[nodiscard]] auto read_cell(Node &node, std::size_t index) -> Cell;

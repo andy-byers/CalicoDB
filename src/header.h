@@ -64,10 +64,9 @@ static constexpr auto kPageHeaderSize = sizeof(Lsn);
 //     17      2     cell_count
 //     19      2     cell_start
 //     21      2     free_start
-//     23      2     free_total
-//     25      1     frag_count
+//     23      1     frag_count
 struct NodeHeader {
-    static constexpr std::size_t kSize {26};
+    static constexpr std::size_t kSize {24};
     auto read(const char *data) -> void;
     auto write(char *data) const -> void;
 
@@ -76,7 +75,6 @@ struct NodeHeader {
     std::uint16_t cell_count {};
     std::uint16_t cell_start {};
     std::uint16_t free_start {};
-    std::uint16_t free_total {};
     std::uint16_t frag_count {};
     bool is_external {true};
 };

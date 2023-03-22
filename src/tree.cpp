@@ -64,7 +64,7 @@ static auto cell_area_offset(const Node &node)
 static auto usable_space(const Node &node) -> std::size_t
 {
     // TODO: May need to cache this result, freelist could be long. Compute once when node is constructed.
-    return node.gap_size + BlockAllocatorV2::accumulate_free_bytes(node);// node.header.free_total;
+    return node.gap_size + BlockAllocatorV2::accumulate_free_bytes(node);
 }
 
 static auto detach_cell(Cell &cell, char *backing) -> void
@@ -153,7 +153,6 @@ static auto parse_external_cell(const NodeMeta &meta, char *data) -> Cell
     Cell cell;
     cell.ptr = data;
     cell.key = data + header_size;
-
     cell.key_size = key_size;
     cell.local_size = compute_local_size(key_size, value_size, meta.min_local, meta.max_local);
     cell.has_remote = cell.local_size < key_size + value_size;
@@ -170,7 +169,6 @@ static auto parse_internal_cell(const NodeMeta &meta, char *data) -> Cell
     Cell cell;
     cell.ptr = data;
     cell.key = data + header_size;
-
     cell.key_size = key_size;
     cell.local_size = compute_local_size(key_size, 0, meta.min_local, meta.max_local);
     cell.has_remote = cell.local_size < key_size;
@@ -223,70 +221,31 @@ auto read_cell(Node &node, std::size_t index) -> Cell
     return read_cell_at(node, node.get_slot(index));
 }
 
-[[nodiscard]] auto BlockAllocatorV2::get_next_pointer(const Node &node, std::size_t offset) -> PageSize
+[[nodiscard]] static auto get_next_pointer(const Node &node, std::size_t offset) -> PageSize
 {
     return get_u16(node.page.data() + offset);
 }
 
-[[nodiscard]] auto BlockAllocatorV2::get_block_size(const Node &node, std::size_t offset) -> PageSize
+[[nodiscard]] static auto get_block_size(const Node &node, std::size_t offset) -> PageSize
 {
     return get_u16(node.page.data() + offset + sizeof(PageSize));
 }
 
-auto BlockAllocatorV2::set_next_pointer(Node &node, std::size_t offset, PageSize value) -> void
+static auto set_next_pointer(Node &node, std::size_t offset, PageSize value) -> void
 {
     CALICODB_EXPECT_LT(value, node.page.size());
     return put_u16(node.page.mutate(offset, sizeof(PageSize)), value);
 }
 
-auto BlockAllocatorV2::set_block_size(Node &node, std::size_t offset, PageSize value) -> void
+static auto set_block_size(Node &node, std::size_t offset, PageSize value) -> void
 {
     CALICODB_EXPECT_GE(value, 4);
     CALICODB_EXPECT_LT(value, node.page.size());
     return put_u16(node.page.mutate(offset + sizeof(PageSize), sizeof(PageSize)), value);
 }
 
-auto BlockAllocatorV2::accumulate_free_bytes(const Node &node) -> std::size_t
-{
-    std::size_t total {};
-    for (auto ptr = node.header.free_start; ptr != 0; ) {
-        const auto np = get_next_pointer(node, ptr);
-        const auto bs = get_block_size(node, ptr);
-        std::fprintf(stderr,"%d: next = %d, size = %d\n", ptr - 512 + 40, np ? np - 512 + 40 : 0, bs);
 
-        total += get_block_size(node, ptr);
-        ptr = get_next_pointer(node, ptr);
-    }
-    std::fputc('\n', stderr);
-    return total;
-}
-
-auto BlockAllocatorV2::allocate_from_free_list(Node &node, PageSize needed_size) -> PageSize
-{
-    PageSize prev_ptr {};
-    auto curr_ptr = node.header.free_start;
-
-    while (curr_ptr) {
-        if (needed_size <= get_block_size(node, curr_ptr)) {
-            return take_free_space(node, prev_ptr, curr_ptr, needed_size);
-        }
-        prev_ptr = curr_ptr;
-        curr_ptr = get_next_pointer(node, curr_ptr);
-    }
-    return 0;
-}
-
-auto BlockAllocatorV2::allocate_from_gap(Node &node, PageSize needed_size) -> PageSize
-{
-    if (node.gap_size >= needed_size) {
-        node.gap_size -= needed_size;
-        node.header.cell_start -= needed_size;
-        return node.header.cell_start;
-    }
-    return 0;
-}
-
-auto BlockAllocatorV2::take_free_space(Node &node, PageSize ptr0, PageSize ptr1, PageSize needed_size) -> PageSize
+static auto take_free_space(Node &node, PageSize ptr0, PageSize ptr1, PageSize needed_size) -> PageSize
 {
     CALICODB_EXPECT_LT(ptr0, node.page.size());
     CALICODB_EXPECT_LT(ptr1, node.page.size());
@@ -310,6 +269,41 @@ auto BlockAllocatorV2::take_free_space(Node &node, PageSize ptr0, PageSize ptr1,
         set_block_size(node, ptr1, diff);
     }
     return ptr1 + diff;
+}
+
+static auto allocate_from_free_list(Node &node, PageSize needed_size) -> PageSize
+{
+    PageSize prev_ptr {};
+    auto curr_ptr = node.header.free_start;
+
+    while (curr_ptr) {
+        if (needed_size <= get_block_size(node, curr_ptr)) {
+            return take_free_space(node, prev_ptr, curr_ptr, needed_size);
+        }
+        prev_ptr = curr_ptr;
+        curr_ptr = get_next_pointer(node, curr_ptr);
+    }
+    return 0;
+}
+
+static auto allocate_from_gap(Node &node, PageSize needed_size) -> PageSize
+{
+    if (node.gap_size >= needed_size) {
+        node.gap_size -= needed_size;
+        node.header.cell_start -= needed_size;
+        return node.header.cell_start;
+    }
+    return 0;
+}
+
+auto BlockAllocatorV2::accumulate_free_bytes(const Node &node) -> std::size_t
+{
+    std::size_t total {};
+    for (auto ptr = node.header.free_start; ptr != 0; ) {
+        total += get_block_size(node, ptr);
+        ptr = get_next_pointer(node, ptr);
+    }
+    return total;
 }
 
 auto BlockAllocatorV2::allocate(Node &node, PageSize needed_size) -> PageSize
@@ -415,168 +409,7 @@ auto BlockAllocatorV2::defragment(Node &node, int skip) -> void
     header.cell_start = end;
     header.frag_count = 0;
     header.free_start = 0;
-    header.free_total = 0;
     node.gap_size = static_cast<PageSize>(end - cell_area_offset(node));
-}
-
-class BlockAllocator
-{
-    Node *m_node {};
-
-    [[nodiscard]] auto get_next_pointer(std::size_t offset) -> PageSize
-    {
-        return get_u16(m_node->page.data() + offset);
-    }
-
-    [[nodiscard]] auto get_block_size(std::size_t offset) -> PageSize
-    {
-        return get_u16(m_node->page.data() + offset + sizeof(PageSize));
-    }
-
-    auto set_next_pointer(std::size_t offset, PageSize value) -> void
-    {
-        CALICODB_EXPECT_LT(value, m_node->page.size());
-        return put_u16(m_node->page.mutate(offset, sizeof(PageSize)), value);
-    }
-
-    auto set_block_size(std::size_t offset, PageSize value) -> void
-    {
-        CALICODB_EXPECT_GE(value, 4);
-        CALICODB_EXPECT_LT(value, m_node->page.size());
-        return put_u16(m_node->page.mutate(offset + sizeof(PageSize), sizeof(PageSize)), value);
-    }
-
-    [[nodiscard]] auto allocate_from_free_list(PageSize needed_size) -> PageSize;
-    [[nodiscard]] auto allocate_from_gap(PageSize needed_size) -> PageSize;
-    [[nodiscard]] auto take_free_space(PageSize ptr0, PageSize ptr1, PageSize needed_size) -> PageSize;
-
-public:
-    explicit BlockAllocator(Node &node)
-        : m_node {&node}
-    {
-    }
-
-    [[nodiscard]] auto allocate(PageSize needed_size) -> PageSize;
-    auto free(PageSize ptr, PageSize size) -> void;
-    auto defragment(std::optional<PageSize> skip = std::nullopt) -> void;
-};
-
-auto BlockAllocator::allocate_from_free_list(PageSize needed_size) -> PageSize
-{
-    PageSize prev_ptr {};
-    PageSize curr_ptr {m_node->header.free_start};
-
-    while (curr_ptr) {
-        if (needed_size <= get_block_size(curr_ptr)) {
-            return take_free_space(prev_ptr, curr_ptr, needed_size);
-        }
-        prev_ptr = curr_ptr;
-        curr_ptr = get_next_pointer(curr_ptr);
-    }
-    return 0;
-}
-
-auto BlockAllocator::allocate_from_gap(PageSize needed_size) -> PageSize
-{
-    if (m_node->gap_size >= needed_size) {
-        m_node->gap_size -= needed_size;
-        m_node->header.cell_start -= needed_size;
-        return m_node->header.cell_start;
-    }
-    return 0;
-}
-
-auto BlockAllocator::take_free_space(PageSize ptr0, PageSize ptr1, PageSize needed_size) -> PageSize
-{
-    CALICODB_EXPECT_LT(ptr0, m_node->page.size());
-    CALICODB_EXPECT_LT(ptr1, m_node->page.size());
-    CALICODB_EXPECT_LT(needed_size, m_node->page.size());
-
-    const auto is_first = !ptr0;
-    const auto ptr2 = get_next_pointer(ptr1);
-    const auto free_size = get_block_size(ptr1);
-    auto &header = m_node->header;
-
-    CALICODB_EXPECT_GE(free_size, needed_size);
-    const auto diff = static_cast<PageSize>(free_size - needed_size);
-
-    if (diff < 4) {
-        header.frag_count = static_cast<std::uint8_t>(header.frag_count + diff);
-
-        if (is_first) {
-            header.free_start = static_cast<PageSize>(ptr2);
-        } else {
-            set_next_pointer(ptr0, ptr2);
-        }
-    } else {
-        set_block_size(ptr1, diff);
-    }
-//    CALICODB_EXPECT_GE(header.free_total, needed_size);
-//    header.free_total -= needed_size;
-    return ptr1 + diff;
-}
-
-auto BlockAllocator::allocate(PageSize needed_size) -> PageSize
-{
-    CALICODB_EXPECT_LT(needed_size, m_node->page.size());
-
-    if (const auto offset = allocate_from_gap(needed_size)) {
-        return offset;
-    }
-    return allocate_from_free_list(needed_size);
-}
-
-auto BlockAllocator::free(PageSize ptr, PageSize size) -> void
-{
-    CALICODB_EXPECT_GE(ptr, cell_area_offset(*m_node));
-    CALICODB_EXPECT_LE(ptr + size, m_node->page.size());
-    auto &header = m_node->header;
-
-    if (size < 4) {
-        header.frag_count = static_cast<std::uint8_t>(header.frag_count + size);
-    } else {
-        set_next_pointer(ptr, header.free_start);
-        set_block_size(ptr, size);
-        header.free_start = ptr;
-    }
-    header.free_total += size;
-}
-
-auto BlockAllocator::defragment(std::optional<PageSize> skip) -> void
-{
-    auto &header = m_node->header;
-    const auto n = header.cell_count;
-    const auto to_skip = skip.has_value() ? *skip : n;
-    auto end = static_cast<PageSize>(m_node->page.size());
-    auto ptr = m_node->page.data();
-    std::vector<PageSize> ptrs(n);
-
-    for (std::size_t index {}; index < n; ++index) {
-        if (index == to_skip) {
-            continue;
-        }
-        const auto offset = m_node->get_slot(index);
-        const auto size = read_cell_at(*m_node, offset).size;
-
-        end -= PageSize(size);
-        std::memcpy(m_node->scratch + end, ptr + offset, size);
-        ptrs[index] = end;
-    }
-    for (std::size_t index {}; index < n; ++index) {
-        if (index == to_skip) {
-            continue;
-        }
-        m_node->set_slot(index, ptrs[index]);
-    }
-    const auto offset = cell_area_offset(*m_node);
-    const auto size = m_node->page.size() - offset;
-    std::memcpy(m_node->page.mutate(offset, size), m_node->scratch + offset, size);
-
-    header.cell_start = end;
-    header.frag_count = 0;
-    header.free_start = 0;
-    header.free_total = 0;
-    m_node->gap_size = static_cast<PageSize>(end - cell_area_offset(*m_node));
 }
 
 static auto setup_node(Node &node) -> void
@@ -604,19 +437,17 @@ static auto allocate_block(Node &node, PageSize index, PageSize size) -> std::si
         return 0;
     }
 
-    BlockAllocator alloc {node};
-
     // We don't have room to insert the cell pointer.
     if (node.gap_size < sizeof(PageSize)) {
-        alloc.defragment(std::nullopt);
+        BlockAllocatorV2::defragment(node);
     }
     // Insert a dummy cell pointer to save the slot.
     node.insert_slot(index, node.page.size() - 1);
 
-    auto offset = alloc.allocate(size);
+    auto offset = BlockAllocatorV2::allocate(node, size);
     if (offset == 0) {
-        alloc.defragment(index);
-        offset = alloc.allocate(size);
+        BlockAllocatorV2::defragment(node, index);
+        offset = BlockAllocatorV2::allocate(node, size);
     }
     // We already made sure we had enough room to fulfill the request. If we had to defragment, the call
     // to allocate() following defragmentation should succeed.
@@ -630,8 +461,6 @@ static auto allocate_block(Node &node, PageSize index, PageSize size) -> std::si
 
 static auto free_block(Node &node, PageSize index, PageSize size) -> void
 {
-//    BlockAllocatorV2::release(node, PageSize(node.get_slot(index)), size);
-//    BlockAllocator alloc {node};
     BlockAllocatorV2::release(node, static_cast<PageSize>(node.get_slot(index)), size);
     node.remove_slot(index);
 }
@@ -674,12 +503,6 @@ static auto emplace_cell(char *out, std::size_t key_size, std::size_t value_size
         out += sizeof(overflow_id);
     }
     return out;
-}
-
-auto manual_defragment(Node &node) -> void
-{
-    BlockAllocator alloc {node};
-    alloc.defragment();
 }
 
 auto Node::get_slot(std::size_t index) const -> std::size_t
@@ -745,7 +568,7 @@ auto Node::take() && -> Page
     if (page.is_writable()) {
         if (header.frag_count > 0xFF) {
             // Fragment count overflow.
-            manual_defragment(*this);
+            BlockAllocatorV2::defragment(*this);
         }
         write_node_header_diff(*this);
     }
@@ -756,8 +579,8 @@ static auto merge_root(Node &root, Node &child) -> void
 {
     CALICODB_EXPECT_EQ(root.header.next_id, child.page.id());
     const auto &header = child.header;
-    if (header.free_total) {
-        manual_defragment(child);
+    if (header.free_start) {
+        BlockAllocatorV2::defragment(child);
     }
 
     // Copy the cell content area.
@@ -2250,16 +2073,18 @@ auto Node::TEST_validate() -> void
     }
     // Free list blocks.
     {
+        std::vector<unsigned> offsets;
         PageSize i {header.free_start};
         const char *data = page.data();
-//        std::size_t free_total {};
         while (i) {
             const auto size = get_u16(data + i + sizeof(PageSize));
             account(i, size);
+            offsets.emplace_back(i);
             i = get_u16(data + i);
-//            free_total += size;
         }
-//        CHECK_EQ(free_total + header.frag_count, header.free_total);
+        const auto offsets_copy = offsets;
+        std::sort(begin(offsets), end(offsets));
+        CALICODB_EXPECT_EQ(offsets, offsets_copy);
     }
     // Cell bodies. Also makes sure the cells are in order.
     for (std::size_t n {}; n < header.cell_count; ++n) {

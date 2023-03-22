@@ -88,9 +88,6 @@ auto NodeHeader::read(const char *data) -> void
     free_start = get_u16(data);
     data += sizeof(PageSize);
 
-    free_total = get_u16(data);
-    data += sizeof(PageSize);
-
     frag_count = static_cast<std::uint8_t>(*data);
 }
 
@@ -111,9 +108,6 @@ auto NodeHeader::write(char *data) const -> void
     data += sizeof(PageSize);
 
     put_u16(data, free_start);
-    data += sizeof(PageSize);
-
-    put_u16(data, free_total);
     data += sizeof(PageSize);
 
     *data = static_cast<char>(frag_count);

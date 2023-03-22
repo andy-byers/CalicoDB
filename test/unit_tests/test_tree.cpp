@@ -517,11 +517,9 @@ TEST_F(NodeTests, Defragmentation)
     erase_record(node, "b");
     erase_record(node, "d");
 
-    ASSERT_NE(node.header.free_total, 0);
     ASSERT_NE(node.header.frag_count, 0);
     ASSERT_NE(node.header.free_start, 0);
-    manual_defragment(node);
-    ASSERT_EQ(node.header.free_total, 0);
+    BlockAllocatorV2::defragment(node);
     ASSERT_EQ(node.header.frag_count, 0);
     ASSERT_EQ(node.header.free_start, 0);
 
