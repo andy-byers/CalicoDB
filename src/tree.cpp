@@ -250,21 +250,21 @@ auto BlockAllocatorV2::accumulate_free_bytes(const Node &node) -> std::size_t
 {
     std::size_t total {};
     for (auto ptr = node.header.free_start; ptr != 0; ) {
-//        const auto np = get_next_pointer(node, ptr);
-//        const auto bs = get_block_size(node, ptr);
-//        std::fprintf(stderr,"%d: next = %d, size = %d\n", ptr - 512 + 40, np ? np - 512 + 40 : 0, bs);
+        const auto np = get_next_pointer(node, ptr);
+        const auto bs = get_block_size(node, ptr);
+        std::fprintf(stderr,"%d: next = %d, size = %d\n", ptr - 512 + 40, np ? np - 512 + 40 : 0, bs);
 
         total += get_block_size(node, ptr);
         ptr = get_next_pointer(node, ptr);
     }
-//    std::fputc('\n', stderr);
+    std::fputc('\n', stderr);
     return total;
 }
 
 auto BlockAllocatorV2::allocate_from_free_list(Node &node, PageSize needed_size) -> PageSize
 {
     PageSize prev_ptr {};
-    PageSize curr_ptr {node.header.free_start};
+    auto curr_ptr = node.header.free_start;
 
     while (curr_ptr) {
         if (needed_size <= get_block_size(node, curr_ptr)) {
@@ -325,10 +325,9 @@ auto BlockAllocatorV2::allocate(Node &node, PageSize needed_size) -> PageSize
 auto BlockAllocatorV2::release(Node &node, std::uint16_t block_start, std::uint16_t block_size) -> void
 {
     auto &header = node.header;
-    auto &page = node.page;
+
     // Largest possible fragment that can be reclaimed in this process.
-    // Fragments are 3 bytes at most, but (external) cells are at least
-    // 3 bytes.
+    // Based on the fact that external cells must be at least 3 bytes.
     const std::size_t fragment_cutoff = 2 + !header.is_external;
     CALICODB_EXPECT_NE(block_size, 0);
 
@@ -347,42 +346,40 @@ auto BlockAllocatorV2::release(Node &node, std::uint16_t block_start, std::uint1
         next = get_next_pointer(node, next);
     }
 
-    // Insert the new block.
-    set_next_pointer(node, block_start, next);
-    set_block_size(node, block_start, block_size);
     if (prev != 0) {
-        set_next_pointer(node, prev, block_start);
-    } else {
-        header.free_start = block_start;
+        // Merge with the predecessor block.
+        const auto before_end = PageSize(prev + get_block_size(node, prev));
+        if (before_end + fragment_cutoff >= block_start) {
+            const auto diff = block_start - before_end;
+            block_start = prev;
+            block_size += PageSize(get_block_size(node, prev) + diff);
+            header.frag_count = PageSize(header.frag_count - diff);
+        }
     }
+    if (block_start != prev) {
+        // There was no left merge. Point the "before" pointer to where the new free
+        // block will be inserted.
+        if (prev == 0) {
+            header.free_start = block_start;
+        } else {
+            set_next_pointer(node, prev, block_start);
+        }
+    }
+
     if (next != 0) {
-        // Merge with the "after" block.
-        const auto block_end = PageSize(block_start + block_size);
-        if (block_end + fragment_cutoff >= next) {
-            const auto diff = next - block_end;
+        // Merge with the successor block.
+        const auto current_end = PageSize(block_start + block_size);
+        if (current_end + fragment_cutoff >= next) {
+            const auto diff = next - current_end;
             block_size += PageSize(get_block_size(node, next) + diff);
             header.frag_count = PageSize(header.frag_count - diff);
             next = get_next_pointer(node, next);
-            set_next_pointer(node, block_start, next);
-            set_block_size(node, block_start, block_size);
         }
     }
-    if (prev != 0) {
-        // Attempt to merge with the "before" block. If there was already a merge with the
-        // "after" block, this will connect "before" to "after" via the current free block.
-        const auto before_end = PageSize(prev + get_u16(page.data() + prev + 2));
-        if (before_end + fragment_cutoff >= block_start) {
-            const auto diff = block_start - before_end;
-            const auto prev_size = get_block_size(node, prev);
-            set_next_pointer(node, prev, next);
-            set_block_size(node, prev, PageSize(prev_size + block_size + diff));
-            header.frag_count = PageSize(header.frag_count - diff);
-        }
-    }
-    if (header.free_start == 0) {
-        // The whole list was empty.
-        header.free_start = block_start;
-    }
+    // If there was a left merge, this will set the next pointer and block size of
+    // the free block at "prev".
+    set_next_pointer(node, block_start, next);
+    set_block_size(node, block_start, block_size);
 }
 
 auto BlockAllocatorV2::defragment(Node &node, int skip) -> void
@@ -514,8 +511,8 @@ auto BlockAllocator::take_free_space(PageSize ptr0, PageSize ptr1, PageSize need
     } else {
         set_block_size(ptr1, diff);
     }
-    CALICODB_EXPECT_GE(header.free_total, needed_size);
-    header.free_total -= needed_size;
+//    CALICODB_EXPECT_GE(header.free_total, needed_size);
+//    header.free_total -= needed_size;
     return ptr1 + diff;
 }
 
@@ -634,8 +631,8 @@ static auto allocate_block(Node &node, PageSize index, PageSize size) -> std::si
 static auto free_block(Node &node, PageSize index, PageSize size) -> void
 {
 //    BlockAllocatorV2::release(node, PageSize(node.get_slot(index)), size);
-    BlockAllocator alloc {node};
-    alloc.free(static_cast<PageSize>(node.get_slot(index)), size);
+//    BlockAllocator alloc {node};
+    BlockAllocatorV2::release(node, static_cast<PageSize>(node.get_slot(index)), size);
     node.remove_slot(index);
 }
 
@@ -2255,14 +2252,14 @@ auto Node::TEST_validate() -> void
     {
         PageSize i {header.free_start};
         const char *data = page.data();
-        std::size_t free_total {};
+//        std::size_t free_total {};
         while (i) {
             const auto size = get_u16(data + i + sizeof(PageSize));
             account(i, size);
             i = get_u16(data + i);
-            free_total += size;
+//            free_total += size;
         }
-        CHECK_EQ(free_total + header.frag_count, header.free_total);
+//        CHECK_EQ(free_total + header.frag_count, header.free_total);
     }
     // Cell bodies. Also makes sure the cells are in order.
     for (std::size_t n {}; n < header.cell_count; ++n) {
