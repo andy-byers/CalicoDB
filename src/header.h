@@ -46,7 +46,7 @@ struct FileHeader {
     std::uint64_t record_count {};
     Id freelist_head;
     Lsn commit_lsn;
-    std::uint16_t page_size {};
+    unsigned page_size {};
 };
 
 // Page Header Format:
@@ -72,10 +72,10 @@ struct NodeHeader {
 
     Id next_id;
     Id prev_id;
-    std::uint16_t cell_count {};
-    std::uint16_t cell_start {};
-    std::uint16_t free_start {};
-    std::uint16_t frag_count {};
+    unsigned cell_count {};
+    unsigned cell_start {};
+    unsigned free_start {};
+    unsigned frag_count {};
     bool is_external {true};
 };
 

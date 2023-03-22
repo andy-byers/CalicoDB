@@ -30,7 +30,7 @@ static auto write_file_header(char *data, const FileHeader &header) -> void
     put_u64(data, header.commit_lsn.value);
     data += sizeof(Lsn);
 
-    put_u16(data, header.page_size);
+    put_u16(data, static_cast<std::uint16_t>(header.page_size));
 }
 
 auto FileHeader::read(const char *data) -> void
@@ -101,13 +101,13 @@ auto NodeHeader::write(char *data) const -> void
     put_u64(data, prev_id.value);
     data += sizeof(Id);
 
-    put_u16(data, cell_count);
+    put_u16(data, static_cast<std::uint16_t>(cell_count));
     data += sizeof(PageSize);
 
-    put_u16(data, cell_start);
+    put_u16(data, static_cast<std::uint16_t>(cell_start));
     data += sizeof(PageSize);
 
-    put_u16(data, free_start);
+    put_u16(data, static_cast<std::uint16_t>(free_start));
     data += sizeof(PageSize);
 
     *data = static_cast<char>(frag_count);

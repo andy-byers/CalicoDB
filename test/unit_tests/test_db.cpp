@@ -856,7 +856,7 @@ INSTANTIATE_TEST_SUITE_P(
         ErrorWrapper {"./test", tools::Interceptor::kWrite, 50},
         ErrorWrapper {"./wal", tools::Interceptor::kWrite, 0},
         ErrorWrapper {"./wal", tools::Interceptor::kWrite, 1},
-        ErrorWrapper {"./wal", tools::Interceptor::kWrite, 50}));
+        ErrorWrapper {"./wal", tools::Interceptor::kWrite, 10}));
 
 class DbOpenTests
     : public OnDiskTest,

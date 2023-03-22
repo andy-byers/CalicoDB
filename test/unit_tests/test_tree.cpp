@@ -302,33 +302,33 @@ TEST_F(BlockAllocatorTests, MergesAdjacentBlocks)
     reserve_for_test(40);
 
     // ..........#####...............#####.....
-    BlockAllocatorV2::release(node, base + 10, 5);
-    BlockAllocatorV2::release(node, base + 30, 5);
-    ASSERT_EQ(BlockAllocatorV2::accumulate_free_bytes(node), 10);
+    BlockAllocator::release(node, base + 10, 5);
+    BlockAllocator::release(node, base + 30, 5);
+    ASSERT_EQ(BlockAllocator::accumulate_free_bytes(node), 10);
 
     // .....##########...............#####.....
-    BlockAllocatorV2::release(node, base + 5, 5);
-    ASSERT_EQ(BlockAllocatorV2::accumulate_free_bytes(node), 15);
+    BlockAllocator::release(node, base + 5, 5);
+    ASSERT_EQ(BlockAllocator::accumulate_free_bytes(node), 15);
 
     // .....##########...............##########
-    BlockAllocatorV2::release(node, base + 35, 5);
-    ASSERT_EQ(BlockAllocatorV2::accumulate_free_bytes(node), 20);
+    BlockAllocator::release(node, base + 35, 5);
+    ASSERT_EQ(BlockAllocator::accumulate_free_bytes(node), 20);
 
     // .....###############..........##########
-    BlockAllocatorV2::release(node, base + 15, 5);
-    ASSERT_EQ(BlockAllocatorV2::accumulate_free_bytes(node), 25);
+    BlockAllocator::release(node, base + 15, 5);
+    ASSERT_EQ(BlockAllocator::accumulate_free_bytes(node), 25);
 
     // .....###############.....###############
-    BlockAllocatorV2::release(node, base + 25, 5);
-    ASSERT_EQ(BlockAllocatorV2::accumulate_free_bytes(node), 30);
+    BlockAllocator::release(node, base + 25, 5);
+    ASSERT_EQ(BlockAllocator::accumulate_free_bytes(node), 30);
 
     // .....###################################
-    BlockAllocatorV2::release(node, base + 20, 5);
-    ASSERT_EQ(BlockAllocatorV2::accumulate_free_bytes(node), 35);
+    BlockAllocator::release(node, base + 20, 5);
+    ASSERT_EQ(BlockAllocator::accumulate_free_bytes(node), 35);
 
     // ########################################
-    BlockAllocatorV2::release(node, base, 5);
-    ASSERT_EQ(BlockAllocatorV2::accumulate_free_bytes(node), size);
+    BlockAllocator::release(node, base, 5);
+    ASSERT_EQ(BlockAllocator::accumulate_free_bytes(node), size);
 }
 
 TEST_F(BlockAllocatorTests, ConsumesAdjacentFragments)
@@ -337,27 +337,27 @@ TEST_F(BlockAllocatorTests, ConsumesAdjacentFragments)
     node.header.frag_count = 6;
 
     // .........*#####**...........**#####*....
-    BlockAllocatorV2::release(node, base + 10, 5);
-    BlockAllocatorV2::release(node, base + 30, 5);
+    BlockAllocator::release(node, base + 10, 5);
+    BlockAllocator::release(node, base + 30, 5);
 
     // .....##########**...........**#####*....
-    BlockAllocatorV2::release(node, base + 5, 4);
-    ASSERT_EQ(BlockAllocatorV2::accumulate_free_bytes(node), 15);
+    BlockAllocator::release(node, base + 5, 4);
+    ASSERT_EQ(BlockAllocator::accumulate_free_bytes(node), 15);
     ASSERT_EQ(node.header.frag_count, 5);
 
     // .....#################......**#####*....
-    BlockAllocatorV2::release(node, base + 17, 5);
-    ASSERT_EQ(BlockAllocatorV2::accumulate_free_bytes(node), 22);
+    BlockAllocator::release(node, base + 17, 5);
+    ASSERT_EQ(BlockAllocator::accumulate_free_bytes(node), 22);
     ASSERT_EQ(node.header.frag_count, 3);
 
     // .....##############################*....
-    BlockAllocatorV2::release(node, base + 22, 6);
-    ASSERT_EQ(BlockAllocatorV2::accumulate_free_bytes(node), 30);
+    BlockAllocator::release(node, base + 22, 6);
+    ASSERT_EQ(BlockAllocator::accumulate_free_bytes(node), 30);
     ASSERT_EQ(node.header.frag_count, 1);
 
     // .....##############################*....
-    BlockAllocatorV2::release(node, base + 36, 4);
-    ASSERT_EQ(BlockAllocatorV2::accumulate_free_bytes(node), 35);
+    BlockAllocator::release(node, base + 36, 4);
+    ASSERT_EQ(BlockAllocator::accumulate_free_bytes(node), 35);
     ASSERT_EQ(node.header.frag_count, 0);
 }
 
@@ -367,11 +367,11 @@ TEST_F(BlockAllocatorTests, ExternalNodesDoNotConsume3ByteFragments)
     node.header.frag_count = 3;
 
     // ....***####
-    BlockAllocatorV2::release(node, base + 7, 4);
+    BlockAllocator::release(node, base + 7, 4);
 
     // ####***####
-    BlockAllocatorV2::release(node, base + 0, 4);
-    ASSERT_EQ(BlockAllocatorV2::accumulate_free_bytes(node), size - node.header.frag_count);
+    BlockAllocator::release(node, base + 0, 4);
+    ASSERT_EQ(BlockAllocator::accumulate_free_bytes(node), size - node.header.frag_count);
     ASSERT_EQ(node.header.frag_count, 3);
 }
 
@@ -383,11 +383,11 @@ TEST_F(BlockAllocatorTests, InternalNodesConsume3ByteFragments)
     node.header.frag_count = 3;
 
     // ....***####
-    BlockAllocatorV2::release(node, base + 7, 4);
+    BlockAllocator::release(node, base + 7, 4);
 
     // ###########
-    BlockAllocatorV2::release(node, base + 0, 4);
-    ASSERT_EQ(BlockAllocatorV2::accumulate_free_bytes(node), size);
+    BlockAllocator::release(node, base + 0, 4);
+    ASSERT_EQ(BlockAllocator::accumulate_free_bytes(node), size);
     ASSERT_EQ(node.header.frag_count, 0);
 }
 
@@ -519,7 +519,7 @@ TEST_F(NodeTests, Defragmentation)
 
     ASSERT_NE(node.header.frag_count, 0);
     ASSERT_NE(node.header.free_start, 0);
-    BlockAllocatorV2::defragment(node);
+    BlockAllocator::defragment(node);
     ASSERT_EQ(node.header.frag_count, 0);
     ASSERT_EQ(node.header.free_start, 0);
 
