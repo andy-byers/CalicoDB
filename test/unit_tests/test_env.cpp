@@ -99,7 +99,7 @@ constexpr auto write_out_randomly(tools::RandomGenerator &random, Writer &writer
     std::size_t counter {};
 
     while (!in.is_empty()) {
-        const auto chunk_size = std::min(in.size(), random.Next<std::size_t>(message.size() / num_chunks));
+        const auto chunk_size = std::min<std::size_t>(in.size(), random.Next(message.size() / num_chunks));
         auto chunk = in.range(0, chunk_size);
 
         if constexpr (std::is_base_of_v<Logger, Writer>) {
@@ -123,7 +123,7 @@ template <class Reader>
     std::size_t counter {};
 
     while (counter < size) {
-        const auto chunk_size = std::min(size - counter, random.Next<std::size_t>(size / num_chunks));
+        const auto chunk_size = std::min<std::size_t>(size - counter, random.Next(size / num_chunks));
         Slice slice;
         const auto s = reader.read(counter, chunk_size, out_data, &slice);
 

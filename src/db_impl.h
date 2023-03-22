@@ -26,8 +26,8 @@ class TableImpl;
 class WriteAheadLog;
 struct TableState;
 
-static constexpr auto kRootTableName = "calicodb_root";
-static constexpr auto kDefaultTableName = "default";
+static constexpr auto kRootTableName = "calicodb.root";
+static constexpr auto kDefaultTableName = "calicodb.default";
 
 struct TableState {
     LogicalPageId root_id;
@@ -87,7 +87,7 @@ public:
 
     [[nodiscard]] static auto destroy(const Options &options, const std::string &filename) -> Status;
     [[nodiscard]] static auto repair(const Options &options, const std::string &filename) -> Status;
-    [[nodiscard]] auto open(const Options &sanitized) -> Status;
+    [[nodiscard]] auto open(Options sanitized) -> Status;
 
     [[nodiscard]] auto get_property(const Slice &name, std::string *out) const -> bool override;
     [[nodiscard]] auto default_table() const -> Table * override;
@@ -119,6 +119,7 @@ public:
     auto TEST_validate() const -> void;
 
 private:
+    [[nodiscard]] auto get_table_info(std::vector<std::string> &names, std::vector<LogicalPageId> *roots) const -> Status;
     [[nodiscard]] auto remove_empty_table(const std::string &name, TableState &state) -> Status;
     [[nodiscard]] auto do_checkpoint() -> Status;
     [[nodiscard]] auto load_file_header() -> Status;
@@ -145,7 +146,7 @@ private:
     bool m_owns_info_log {};
 };
 
-auto setup_db(const std::string &, Env &, const Options &, FileHeader &state) -> Status;
+auto setup_db(const std::string &filename, Env &env, Options &options, FileHeader &header) -> Status;
 
 } // namespace calicodb
 

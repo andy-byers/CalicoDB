@@ -77,13 +77,13 @@ auto TableSet::get(Id table_id) -> TableState *
 auto TableSet::add(const LogicalPageId &root_id) -> void
 {
     const auto index = root_id.table_id.as_index();
-    while (index >= m_tables.size()) {
-        m_tables.emplace_back(nullptr);
+    if (m_tables.size() <= index) {
+        m_tables.resize(index + 1);
     }
-    if (m_tables[index] == nullptr) {
-        m_tables[index] = new TableState;
-        m_tables[index]->root_id = root_id;
-    }
+    // Table slot must not be occupied.
+    CALICODB_EXPECT_TRUE(m_tables[index] == nullptr);
+    m_tables[index] = new TableState;
+    m_tables[index]->root_id = root_id;
 }
 
 auto TableSet::erase(Id table_id) -> void
@@ -92,8 +92,8 @@ auto TableSet::erase(Id table_id) -> void
     if (m_tables[index] != nullptr) {
         delete m_tables[index]->tree;
         delete m_tables[index];
+        m_tables[index] = nullptr;
     }
-    m_tables[index] = nullptr;
 }
 
 static auto encode_logical_id(LogicalPageId id, char *out) -> void
@@ -112,15 +112,14 @@ static auto encode_logical_id(LogicalPageId id, char *out) -> void
     return Status::ok();
 }
 
-auto setup_db(const std::string &path, Env &env, const Options &options, FileHeader &header) -> Status
+auto setup_db(const std::string &filename, Env &env, Options &options, FileHeader &header) -> Status
 {
     CALICODB_EXPECT_GE(options.page_size, kMinPageSize);
     CALICODB_EXPECT_LE(options.page_size, kMaxPageSize);
     CALICODB_EXPECT_TRUE(is_power_of_two(options.page_size));
-    CALICODB_EXPECT_GE(options.cache_size, options.page_size * kMinFrameCount);
 
     Reader *reader;
-    if (auto s = env.new_reader(path, reader); s.is_ok()) {
+    if (auto s = env.new_reader(filename, reader); s.is_ok()) {
         char buffer[FileHeader::kSize];
         s = reader->read(0, sizeof(buffer), buffer, nullptr);
         delete reader;
@@ -140,10 +139,13 @@ auto setup_db(const std::string &path, Env &env, const Options &options, FileHea
     } else {
         return s;
     }
+    if (options.cache_size < kMinFrameCount * header.page_size) {
+        options.cache_size = kMinFrameCount * header.page_size;
+    }
     return Status::ok();
 }
 
-auto DBImpl::open(const Options &sanitized) -> Status
+auto DBImpl::open(Options sanitized) -> Status
 {
     const auto db_exists = m_env->file_exists(m_filename);
     if (db_exists) {
@@ -202,7 +204,9 @@ auto DBImpl::open(const Options &sanitized) -> Status
     while (cursor->is_valid()) {
         LogicalPageId root_id;
         CALICODB_TRY(decode_logical_id(cursor->value(), &root_id));
-        m_tables.add(root_id);
+        if (m_tables.get(root_id.table_id) == nullptr) {
+            m_tables.add(root_id);
+        }
         cursor->next();
     }
     delete cursor;
@@ -247,17 +251,17 @@ DBImpl::DBImpl(const Options &options, const Options &sanitized, std::string fil
 DBImpl::~DBImpl()
 {
     if (m_state.is_running && m_state.status.is_ok()) {
-        if (const auto s = m_wal->flush(); !s.is_ok()) {
-            m_info_log->logv("failed to flush wal: %s", s.to_string().data());
+        if (const auto s = m_wal->synchronize(true); !s.is_ok()) {
+            m_info_log->logv("failed to flush wal: %s", s.to_string().c_str());
         }
         if (const auto s = m_pager->flush(m_state.commit_lsn); !s.is_ok()) {
-            m_info_log->logv("failed to flush pager: %s", s.to_string().data());
+            m_info_log->logv("failed to flush pager: %s", s.to_string().c_str());
         }
         if (const auto s = m_wal->close(); !s.is_ok()) {
-            m_info_log->logv("failed to close wal: %s", s.to_string().data());
+            m_info_log->logv("failed to close wal: %s", s.to_string().c_str());
         }
         if (const auto s = ensure_consistency(); !s.is_ok()) {
-            m_info_log->logv("failed to ensure consistency: %s", s.to_string().data());
+            m_info_log->logv("failed to ensure consistency: %s", s.to_string().c_str());
         }
     }
 
@@ -451,10 +455,11 @@ auto DBImpl::vacuum() -> Status
 
 auto DBImpl::do_vacuum() -> Status
 {
+    std::vector<std::string> table_names;
+    std::vector<LogicalPageId> table_roots;
+    CALICODB_TRY(get_table_info(table_names, &table_roots));
+
     Id target {m_pager->page_count()};
-    if (target.is_root()) {
-        return Status::ok();
-    }
     auto *state = m_tables.get(Id::root());
     auto *tree = state->tree;
 
@@ -470,11 +475,20 @@ auto DBImpl::do_vacuum() -> Status
         // No pages available to vacuum: database is minimally sized.
         return Status::ok();
     }
+
+    // Update root locations in the name-to-root mapping.
+    char logical_id[LogicalPageId::kSize];
+    for (std::size_t i {}; i < table_names.size(); ++i) {
+        const auto *root = m_tables.get(table_roots[i].table_id);
+        CALICODB_EXPECT_NE(root, nullptr);
+        encode_logical_id(root->root_id, logical_id);
+        CALICODB_TRY(put(*m_root, table_names[i], logical_id));
+    }
     // Make sure the vacuum updates are in the WAL. If this succeeds, we should
     // be able to reapply the whole vacuum operation if the truncation fails.
     // The recovery routine should truncate the file to match the header page
     // count if necessary.
-    CALICODB_TRY(m_wal->flush());
+    CALICODB_TRY(m_wal->synchronize(true));
     CALICODB_TRY(m_pager->truncate(target.value));
 
     m_info_log->logv("vacuumed %llu pages", original.value - target.value);
@@ -483,6 +497,7 @@ auto DBImpl::do_vacuum() -> Status
 
 auto DBImpl::ensure_consistency() -> Status
 {
+    CALICODB_TRY(m_state.status);
     m_state.is_running = false;
     CALICODB_TRY(recovery_phase_1());
     CALICODB_TRY(recovery_phase_2());
@@ -536,15 +551,13 @@ auto DBImpl::checkpoint() -> Status
 
 auto DBImpl::do_checkpoint() -> Status
 {
-    CALICODB_TRY(m_pager->checkpoint());
-
     Page db_root;
     CALICODB_TRY(m_pager->acquire(Id::root(), db_root));
     m_pager->upgrade(db_root);
 
     FileHeader header;
     header.read(db_root.data());
-    m_pager->save_state(header);
+    header.page_count = m_pager->page_count();
     header.freelist_head = m_state.freelist_head;
     header.magic_code = FileHeader::kMagicCode;
     header.commit_lsn = m_wal->current_lsn();
@@ -554,7 +567,16 @@ auto DBImpl::do_checkpoint() -> Status
     header.write(db_root.mutate(0, FileHeader::kSize));
     m_pager->release(std::move(db_root));
 
-    return m_wal->flush();
+    // If this call succeeds, the checkpoint should persist. This method should not
+    // return a non-OK status past this point.
+    CALICODB_TRY(m_wal->synchronize(true));
+
+    // This call just performs some cleanup.
+    auto s = m_pager->checkpoint();
+    if (!s.is_ok()) {
+        SET_STATUS(s);
+    }
+    return Status::ok();
 }
 
 auto DBImpl::load_file_header() -> Status
@@ -585,16 +607,23 @@ auto DBImpl::default_table() const -> Table *
     return m_default;
 }
 
-auto DBImpl::list_tables(std::vector<std::string> &out) const -> Status
+auto DBImpl::get_table_info(std::vector<std::string> &names, std::vector<LogicalPageId> *roots) const -> Status
 {
-    CALICODB_TRY(m_state.status);
-    out.clear();
+    names.clear();
+    if (roots != nullptr) {
+        roots->clear();
+    }
 
     auto *cursor = new_cursor(*m_root);
     cursor->seek_first();
     while (cursor->is_valid()) {
         if (cursor->key() != kDefaultTableName) {
-            out.emplace_back(cursor->key().to_string());
+            names.emplace_back(cursor->key().to_string());
+            if (roots != nullptr) {
+                LogicalPageId root;
+                CALICODB_TRY(decode_logical_id(cursor->value(), &root));
+                roots->emplace_back(root);
+            }
         }
         cursor->next();
     }
@@ -604,6 +633,12 @@ auto DBImpl::list_tables(std::vector<std::string> &out) const -> Status
     return s.is_not_found() ? Status::ok() : s;
 }
 
+auto DBImpl::list_tables(std::vector<std::string> &out) const -> Status
+{
+    CALICODB_TRY(m_state.status);
+    return get_table_info(out, nullptr);
+}
+
 auto DBImpl::create_table(const TableOptions &options, const std::string &name, Table *&out) -> Status
 {
     LogicalPageId root_id;
@@ -611,6 +646,9 @@ auto DBImpl::create_table(const TableOptions &options, const std::string &name, 
     Status s;
 
     if (name == kRootTableName) {
+        // Root table should be closed, i.e. we should be in open(). Attempting to open the
+        // root table again will result in undefined behavior.
+        CALICODB_EXPECT_EQ(m_tables.get(Id::root()), nullptr);
         root_id = LogicalPageId::root();
     } else {
         const auto *state = m_tables.get(Id::root());
@@ -627,8 +665,11 @@ auto DBImpl::create_table(const TableOptions &options, const std::string &name, 
         return s;
     }
 
-    m_tables.add(root_id);
     auto *state = m_tables.get(root_id.table_id);
+    if (state == nullptr) {
+        m_tables.add(root_id);
+        state = m_tables.get(root_id.table_id);
+    }
     CALICODB_EXPECT_NE(state, nullptr);
 
     if (state->open) {
@@ -774,6 +815,10 @@ auto DBImpl::recovery_phase_1() -> Status
         return Status::ok();
     }
 
+    // It can be difficult to determine if there is already an image record for a given page
+    // in the WAL, due to the way the vacuum operation works. This set is used to ignore
+    // duplicate image records within each transaction.
+    std::unordered_set<Id, Id::Hash> duplicates;
     std::string tail(wal_block_size(m_pager->page_size()), '\0');
     std::unique_ptr<Reader> file;
     auto itr = begin(set);
@@ -817,11 +862,18 @@ auto DBImpl::recovery_phase_1() -> Status
     };
 
     const auto undo = [&](const auto &payload) {
+        if (last_lsn <= m_state.commit_lsn) {
+            return Status::ok();
+        }
         const auto decoded = decode_payload(payload);
-        if (std::holds_alternative<ImageDescriptor>(decoded)) {
+        if (std::holds_alternative<DeltaDescriptor>(decoded)) {
+            if (is_commit(std::get<DeltaDescriptor>(decoded))) {
+                duplicates.clear();
+            }
+        } else if (std::holds_alternative<ImageDescriptor>(decoded)) {
             const auto image = std::get<ImageDescriptor>(decoded);
-            return with_page(*m_pager, image, [this, &image](auto &page) {
-                if (image.lsn < m_state.commit_lsn) {
+            return with_page(*m_pager, image, [&](auto &page) {
+                if (!duplicates.insert(image.page_id).second) {
                     return;
                 }
                 const auto page_lsn = read_page_lsn(page);
@@ -854,8 +906,8 @@ auto DBImpl::recovery_phase_1() -> Status
             }
 
             last_lsn = extract_payload_lsn(payload);
-
             s = action(payload);
+
             if (s.is_not_found()) {
                 break;
             } else if (!s.is_ok()) {
@@ -902,6 +954,9 @@ auto DBImpl::recovery_phase_2() -> Status
     // Pager needs the updated state to determine the page count.
     CALICODB_TRY(load_file_header());
 
+    m_wal->m_last_lsn = m_state.commit_lsn;
+    m_wal->m_flushed_lsn = m_state.commit_lsn;
+
     // Make sure all changes have made it to disk, then remove WAL segments from
     // the right.
     CALICODB_TRY(m_pager->flush());
@@ -909,9 +964,6 @@ auto DBImpl::recovery_phase_2() -> Status
         CALICODB_TRY(m_env->remove_file(encode_segment_name(m_wal->m_prefix, itr->first)));
     }
     set.clear();
-
-    m_wal->m_last_lsn = m_state.commit_lsn;
-    m_wal->m_flushed_lsn = m_state.commit_lsn;
 
     // Make sure the file size matches the header page count, which should be
     // correct if we made it this far.

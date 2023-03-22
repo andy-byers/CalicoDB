@@ -12,9 +12,9 @@ namespace calicodb
 
 WriteAheadLog::WriteAheadLog(const Parameters &param)
     : m_prefix {param.prefix},
-      m_env {param.env},
       m_data_buffer(wal_scratch_size(param.page_size), '\x00'),
-      m_tail_buffer(wal_block_size(param.page_size), '\x00')
+      m_tail_buffer(wal_block_size(param.page_size), '\x00'),
+      m_env {param.env}
 {
     CALICODB_EXPECT_NE(m_env, nullptr);
 }
@@ -69,9 +69,26 @@ auto WriteAheadLog::flushed_lsn() const -> Lsn
     return m_flushed_lsn;
 }
 
+auto WriteAheadLog::written_lsn() const -> Lsn
+{
+    return m_written_lsn;
+}
+
 auto WriteAheadLog::current_lsn() const -> Lsn
 {
     return {m_last_lsn.value + 1};
+}
+
+auto WriteAheadLog::find_obsolete_lsn(Lsn &out) -> Status
+{
+    out = Lsn::null();
+    if (m_segments.size() > 1) {
+        auto segment = rbegin(m_segments);
+        CALICODB_TRY(cache_first_lsn(*m_env, m_prefix, segment));
+        CALICODB_EXPECT_FALSE(segment->second.is_null());
+        out.value = segment->second.value - 1;
+    }
+    return Status::ok();
 }
 
 auto WriteAheadLog::log(const Slice &payload) -> Status
@@ -80,57 +97,62 @@ auto WriteAheadLog::log(const Slice &payload) -> Status
         return Status::ok();
     }
     m_bytes_written += payload.size();
-
     CALICODB_TRY(m_writer->write(payload));
-    if (m_writer->block_count() >= kSegmentCutoff << m_segments.size()) {
+
+    if (m_writer->flushed_on_last_write()) {
+        m_written_lsn.value = m_last_lsn.value - 1;
+    }
+    if (m_writer->block_number() >= kSegmentCutoff << m_segments.size()) {
         CALICODB_TRY(close_writer());
         return open_writer();
     }
     return Status::ok();
 }
 
-auto WriteAheadLog::log_vacuum(bool is_start, Lsn *out) -> Status
+auto WriteAheadLog::advance_lsn(Lsn *out) -> void
 {
     ++m_last_lsn.value;
     if (out != nullptr) {
         *out = m_last_lsn;
     }
+}
+
+auto WriteAheadLog::log_vacuum(bool is_start, Lsn *out) -> Status
+{
+    advance_lsn(out);
     return log(encode_vacuum_payload(
         m_last_lsn, is_start, m_data_buffer.data()));
 }
 
 auto WriteAheadLog::log_delta(Id page_id, const Slice &image, const std::vector<PageDelta> &delta, Lsn *out) -> Status
 {
-    ++m_last_lsn.value;
-    if (out != nullptr) {
-        *out = m_last_lsn;
-    }
+    advance_lsn(out);
     return log(encode_deltas_payload(
         m_last_lsn, page_id, image, delta, m_data_buffer.data()));
 }
 
 auto WriteAheadLog::log_image(Id page_id, const Slice &image, Lsn *out) -> Status
 {
-    ++m_last_lsn.value;
-    if (out != nullptr) {
-        *out = m_last_lsn;
-    }
+    advance_lsn(out);
     return log(encode_image_payload(
         m_last_lsn, page_id, image, m_data_buffer.data()));
 }
 
-auto WriteAheadLog::flush() -> Status
+auto WriteAheadLog::synchronize(bool flush) -> Status
 {
     if (m_writer == nullptr) {
         return Status::ok();
     }
-    CALICODB_TRY(m_writer->flush());
+    if (flush) {
+        CALICODB_TRY(m_writer->flush());
+        m_written_lsn = m_last_lsn;
+    }
     CALICODB_TRY(m_file->sync());
 
     // Only update the "flushed LSN" when the file has been synchronized. The
     // writer will need to flush intermittently to make more room in the tail
     // buffer, but no fsync() calls are issued until this method.
-    m_flushed_lsn = m_last_lsn;
+    m_flushed_lsn = m_written_lsn;
     return Status::ok();
 }
 
@@ -144,11 +166,7 @@ auto WriteAheadLog::cleanup(Lsn recovery_lsn) -> Status
         if (++next == end(m_segments)) {
             return Status::ok();
         }
-        auto s = cache_first_lsn(*m_env, m_prefix, next);
-        if (!s.is_ok() && !s.is_not_found()) {
-            return s;
-        }
-
+        CALICODB_TRY(cache_first_lsn(*m_env, m_prefix, next));
         if (next->second > recovery_lsn) {
             return Status::ok();
         }
@@ -159,21 +177,24 @@ auto WriteAheadLog::cleanup(Lsn recovery_lsn) -> Status
 
 auto WriteAheadLog::close_writer() -> Status
 {
-    CALICODB_TRY(flush());
-    const auto written = m_writer->block_count() != 0;
+    CALICODB_TRY(synchronize(true));
+
+    // Attempt to cache the first LSN written to the segment.
+    const auto id = next_segment_id();
+    auto [itr, _] = m_segments.insert({id, Lsn::null()});
+    auto s = cache_first_lsn(*m_env, m_prefix, itr);
+
+    if (s.is_not_found()) {
+        // Segment was never written to.
+        s = m_env->remove_file(encode_segment_name(m_prefix, id));
+        m_segments.erase(id);
+    }
 
     delete m_file;
     delete m_writer;
     m_file = nullptr;
     m_writer = nullptr;
-
-    const auto id = next_segment_id();
-    if (written) {
-        m_segments.insert({id, Lsn::null()});
-    } else {
-        CALICODB_TRY(m_env->remove_file(encode_segment_name(m_prefix, id)));
-    }
-    return Status::ok();
+    return s;
 }
 
 auto WriteAheadLog::open_writer() -> Status

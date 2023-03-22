@@ -53,7 +53,7 @@ public:
     //
     // The caller is responsible for deleting the handle when it is no longer needed.
     // All objects allocated by the DB must be destroyed before the DB itself is
-    // destroyed. On failure, "db" is set to nullptr.
+    // destroyed. On failure, "*db" is set to nullptr.
     [[nodiscard]] static auto open(const Options &options, const std::string &filename, DB *&db) -> Status;
 
     // Attempt to fix a database that cannot be opened due to corruption.

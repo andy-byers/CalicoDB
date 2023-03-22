@@ -3,6 +3,7 @@
 // LICENSE.md. See AUTHORS.md for a list of contributor names.
 
 #include "tree.h"
+#include "logging.h"
 #include "unit_tests.h"
 #include <gtest/gtest.h>
 
@@ -273,6 +274,123 @@ public:
     tools::RandomGenerator random;
 };
 
+class BlockAllocatorTests : public NodeTests
+{
+public:
+    explicit BlockAllocatorTests()
+        : node {get_node(true)}
+    {
+    }
+
+    ~BlockAllocatorTests() override = default;
+
+    auto reserve_for_test(std::size_t n) -> void
+    {
+        ASSERT_LT(n, node.page.size() - FileHeader::kSize - kPageHeaderSize - NodeHeader::kSize)
+            << "reserve_for_test(" << n << ") leaves no room for possible headers";
+        size = n;
+        base = node.page.size() - n;
+    }
+
+    std::size_t size {};
+    std::size_t base {};
+    Node node;
+};
+
+TEST_F(BlockAllocatorTests, MergesAdjacentBlocks)
+{
+    reserve_for_test(40);
+
+    // ..........#####...............#####.....
+    BlockAllocator::release(node, base + 10, 5);
+    BlockAllocator::release(node, base + 30, 5);
+    ASSERT_EQ(BlockAllocator::accumulate_free_bytes(node), 10);
+
+    // .....##########...............#####.....
+    BlockAllocator::release(node, base + 5, 5);
+    ASSERT_EQ(BlockAllocator::accumulate_free_bytes(node), 15);
+
+    // .....##########...............##########
+    BlockAllocator::release(node, base + 35, 5);
+    ASSERT_EQ(BlockAllocator::accumulate_free_bytes(node), 20);
+
+    // .....###############..........##########
+    BlockAllocator::release(node, base + 15, 5);
+    ASSERT_EQ(BlockAllocator::accumulate_free_bytes(node), 25);
+
+    // .....###############.....###############
+    BlockAllocator::release(node, base + 25, 5);
+    ASSERT_EQ(BlockAllocator::accumulate_free_bytes(node), 30);
+
+    // .....###################################
+    BlockAllocator::release(node, base + 20, 5);
+    ASSERT_EQ(BlockAllocator::accumulate_free_bytes(node), 35);
+
+    // ########################################
+    BlockAllocator::release(node, base, 5);
+    ASSERT_EQ(BlockAllocator::accumulate_free_bytes(node), size);
+}
+
+TEST_F(BlockAllocatorTests, ConsumesAdjacentFragments)
+{
+    reserve_for_test(40);
+    node.header.frag_count = 6;
+
+    // .........*#####**...........**#####*....
+    BlockAllocator::release(node, base + 10, 5);
+    BlockAllocator::release(node, base + 30, 5);
+
+    // .....##########**...........**#####*....
+    BlockAllocator::release(node, base + 5, 4);
+    ASSERT_EQ(BlockAllocator::accumulate_free_bytes(node), 15);
+    ASSERT_EQ(node.header.frag_count, 5);
+
+    // .....#################......**#####*....
+    BlockAllocator::release(node, base + 17, 5);
+    ASSERT_EQ(BlockAllocator::accumulate_free_bytes(node), 22);
+    ASSERT_EQ(node.header.frag_count, 3);
+
+    // .....##############################*....
+    BlockAllocator::release(node, base + 22, 6);
+    ASSERT_EQ(BlockAllocator::accumulate_free_bytes(node), 30);
+    ASSERT_EQ(node.header.frag_count, 1);
+
+    // .....##############################*....
+    BlockAllocator::release(node, base + 36, 4);
+    ASSERT_EQ(BlockAllocator::accumulate_free_bytes(node), 35);
+    ASSERT_EQ(node.header.frag_count, 0);
+}
+
+TEST_F(BlockAllocatorTests, ExternalNodesDoNotConsume3ByteFragments)
+{
+    reserve_for_test(11);
+    node.header.frag_count = 3;
+
+    // ....***####
+    BlockAllocator::release(node, base + 7, 4);
+
+    // ####***####
+    BlockAllocator::release(node, base + 0, 4);
+    ASSERT_EQ(BlockAllocator::accumulate_free_bytes(node), size - node.header.frag_count);
+    ASSERT_EQ(node.header.frag_count, 3);
+}
+
+TEST_F(BlockAllocatorTests, InternalNodesConsume3ByteFragments)
+{
+    node = get_node(false);
+
+    reserve_for_test(11);
+    node.header.frag_count = 3;
+
+    // ....***####
+    BlockAllocator::release(node, base + 7, 4);
+
+    // ###########
+    BlockAllocator::release(node, base + 0, 4);
+    ASSERT_EQ(BlockAllocator::accumulate_free_bytes(node), size);
+    ASSERT_EQ(node.header.frag_count, 0);
+}
+
 TEST_F(NodeTests, AllocatorSkipsPointerMapPage)
 {
     (void)get_node(true);
@@ -399,11 +517,9 @@ TEST_F(NodeTests, Defragmentation)
     erase_record(node, "b");
     erase_record(node, "d");
 
-    ASSERT_NE(node.header.free_total, 0);
     ASSERT_NE(node.header.frag_count, 0);
     ASSERT_NE(node.header.free_start, 0);
-    manual_defragment(node);
-    ASSERT_EQ(node.header.free_total, 0);
+    BlockAllocator::defragment(node);
     ASSERT_EQ(node.header.frag_count, 0);
     ASSERT_EQ(node.header.free_start, 0);
 
@@ -623,7 +739,7 @@ class TreeSanityChecks : public TreeTests
 public:
     auto random_chunk(bool overflow, bool nonzero = true)
     {
-        return random.Generate(random.Next<std::size_t>(nonzero, param.page_size * overflow + 12));
+        return random.Generate(random.Next(nonzero, param.page_size * overflow + 12));
     }
 
     auto random_write() -> Record
@@ -844,7 +960,7 @@ TEST_P(CursorTests, SanityCheck_Forward)
         ASSERT_TRUE(cursor->is_valid());
         ASSERT_EQ(cursor->key(), key);
 
-        for (std::size_t n {}; n < random.Next<std::size_t>(10); ++n) {
+        for (std::size_t n {}; n < random.Next(10); ++n) {
             cursor->next();
 
             if (const auto j = i + n + 1; j < kInitialRecordCount) {
@@ -862,14 +978,14 @@ TEST_P(CursorTests, SanityCheck_Backward)
 {
     std::unique_ptr<Cursor> cursor {CursorInternal::make_cursor(*tree)};
     for (std::size_t iteration {}; iteration < 100; ++iteration) {
-        const auto i = random.Next<std::size_t>(kInitialRecordCount - 1);
+        const auto i = random.Next(kInitialRecordCount - 1);
         const auto key = make_long_key(i);
         cursor->seek(key);
 
         ASSERT_TRUE(cursor->is_valid());
         ASSERT_EQ(cursor->key(), key);
 
-        for (std::size_t n {}; n < random.Next<std::size_t>(10); ++n) {
+        for (std::size_t n {}; n < random.Next(10); ++n) {
             cursor->previous();
 
             if (i > n) {
@@ -1077,9 +1193,9 @@ public:
 
         for (std::size_t iteration {}; iteration < 5; ++iteration) {
             while (map.size() < lower_bounds + record_count) {
-                const auto key_size = random.Next<std::size_t>(1, max_key_size);
+                const auto key_size = random.Next(1, max_key_size);
                 const auto key = random.Generate(key_size);
-                const auto value_size = random.Next<std::size_t>(max_value_size);
+                const auto value_size = random.Next(max_value_size);
                 const auto value = random.Generate(value_size);
                 ASSERT_OK(tree->put(key, value));
                 map[key.to_string()] = value.to_string();
@@ -1373,22 +1489,14 @@ static auto vacuum_and_validate(VacuumTests &test, const std::string &value)
     ASSERT_OK(test.tree->vacuum_one(Id {5}, table_set, &vacuumed));
     ASSERT_TRUE(vacuumed);
     ASSERT_OK(test.pager->truncate(4));
+    ASSERT_OK(test.pager->flush());
     ASSERT_EQ(test.pager->page_count(), 4);
 
-    auto *cursor = CursorInternal::make_cursor(*test.tree);
-    cursor->seek_first();
-    ASSERT_TRUE(cursor->is_valid());
-    ASSERT_EQ(cursor->key(), "a");
-    ASSERT_EQ(cursor->value(), "value");
-    cursor->next();
-
-    ASSERT_TRUE(cursor->is_valid());
-    ASSERT_EQ(cursor->key(), "b");
-    ASSERT_EQ(cursor->value(), value);
-    cursor->next();
-
-    ASSERT_FALSE(cursor->is_valid());
-    delete cursor;
+    std::string result;
+    ASSERT_OK(test.tree->get("a", &result));
+    ASSERT_EQ(result, "value");
+    ASSERT_OK(test.tree->get("b", &result));
+    ASSERT_EQ(result, value);
 }
 
 TEST_P(VacuumTests, VacuumsOverflowChain_A)

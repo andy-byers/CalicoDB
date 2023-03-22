@@ -4,6 +4,7 @@
 
 #include "db_impl.h"
 #include "header.h"
+#include "logging.h"
 #include "tools.h"
 #include "tree.h"
 #include "unit_tests.h"
@@ -150,6 +151,30 @@ public:
     Options options;
 };
 
+TEST_F(BasicDatabaseTests, ClampsBadOptionValues)
+{
+    const auto open_and_check = [this] {
+        DB *db;
+        ASSERT_OK(DB::open(options, kFilename, db));
+        ASSERT_TRUE(db->status().is_ok());
+        delete db;
+        ASSERT_OK(DB::destroy(options, kFilename));
+    };
+
+    options.page_size = kMinPageSize / 2;
+    open_and_check();
+    options.page_size = kMaxPageSize * 2;
+    open_and_check();
+    options.page_size = kMinPageSize + 1;
+    open_and_check();
+
+    options.page_size = kMinPageSize;
+    options.cache_size = options.page_size;
+    open_and_check();
+    options.cache_size = 1 << 31;
+    open_and_check();
+}
+
 TEST_F(BasicDatabaseTests, OpensAndCloses)
 {
     DB *db;
@@ -278,6 +303,7 @@ public:
           upper_bounds {std::get<1>(GetParam())},
           reopen {std::get<2>(GetParam())}
     {
+        CALICODB_EXPECT_LE(lower_bounds, upper_bounds);
         options.page_size = 0x200;
         options.cache_size = 0x200 * 16;
         options.env = env.get();
@@ -314,7 +340,7 @@ TEST_P(DbVacuumTests, SanityCheck)
                 ASSERT_OK(db->erase(key));
             }
             ASSERT_OK(db->vacuum());
-            dynamic_cast<DBImpl &>(*db).TEST_validate();
+            db_impl(db)->TEST_validate();
         }
 
         ASSERT_OK(db->checkpoint());
@@ -334,10 +360,14 @@ INSTANTIATE_TEST_SUITE_P(
     DbVacuumTests,
     DbVacuumTests,
     ::testing::Values(
-        std::make_tuple(100, 2'000, false),
-        std::make_tuple(100, 2'000, true),
-        std::make_tuple(2'000, 100, false),
-        std::make_tuple(2'000, 100, true)));
+        std::make_tuple(0, 50, false),
+        std::make_tuple(0, 50, true),
+        std::make_tuple(10, 50, false),
+        std::make_tuple(10, 50, true),
+        std::make_tuple(0, 2'000, false),
+        std::make_tuple(0, 2'000, true),
+        std::make_tuple(400, 2'000, false),
+        std::make_tuple(400, 2'000, true)));
 
 class TestDatabase
 {
@@ -391,8 +421,8 @@ static auto add_records(TestDatabase &test, std::size_t n)
     std::map<std::string, std::string> records;
 
     for (std::size_t i {}; i < n; ++i) {
-        const auto key_size = test.random.Next<std::size_t>(1, test.options.page_size * 2);
-        const auto value_size = test.random.Next<std::size_t>(test.options.page_size * 2);
+        const auto key_size = test.random.Next(1, test.options.page_size * 2);
+        const auto value_size = test.random.Next(test.options.page_size * 2);
         const auto key = test.random.Generate(key_size).to_string();
         const auto value = test.random.Generate(value_size).to_string();
         EXPECT_OK(test.db->put(key, value));
@@ -576,14 +606,13 @@ TEST_F(DbRecoveryTests, RecoversNthBatch)
     expect_contains_records(*clone_db.db, snapshot);
 }
 
-enum class ErrorTarget {
-    kDataWrite,
-    kDataRead,
-    kWalWrite,
-    kWalRead,
+struct ErrorWrapper {
+    std::string prefix;
+    tools::Interceptor::Type type {};
+    std::size_t successes {};
 };
 
-class DbErrorTests : public testing::TestWithParam<std::size_t>
+class DbErrorTests : public testing::TestWithParam<ErrorWrapper>
 {
 protected:
     DbErrorTests()
@@ -591,22 +620,31 @@ protected:
         env = std::make_unique<tools::FaultInjectionEnv>();
         db = std::make_unique<TestDatabase>(*env);
 
-        committed = add_records(*db, 5'000);
+        committed = add_records(*db, 25'000);
         EXPECT_OK(db->db->checkpoint());
+    }
+    ~DbErrorTests() override = default;
 
+    auto set_error() -> void
+    {
         env->add_interceptor(
             tools::Interceptor {
-                "./test",
-                tools::Interceptor::kRead,
+                error.prefix,
+                error.type,
                 [this] {
-                    if (counter++ >= GetParam()) {
+                    if (counter++ >= error.successes) {
                         return special_error();
                     }
                     return Status::ok();
                 }});
     }
-    ~DbErrorTests() override = default;
 
+    auto SetUp() -> void override
+    {
+        set_error();
+    }
+
+    ErrorWrapper error {GetParam()};
     std::unique_ptr<tools::FaultInjectionEnv> env;
     std::unique_ptr<TestDatabase> db;
     std::map<std::string, std::string> committed;
@@ -671,65 +709,80 @@ INSTANTIATE_TEST_SUITE_P(
     DbErrorTests,
     DbErrorTests,
     ::testing::Values(
-        0,
-        1,
-        10,
-        100));
+        ErrorWrapper {"./test", tools::Interceptor::kRead, 0},
+        ErrorWrapper {"./test", tools::Interceptor::kRead, 1},
+        ErrorWrapper {"./test", tools::Interceptor::kRead, 10}));
 
-struct ErrorWrapper {
-    ErrorTarget target {};
-    std::size_t successes {};
-};
-
-class DbFatalErrorTests : public testing::TestWithParam<ErrorWrapper>
+class WriteBackErrorTests : public DbErrorTests
 {
 protected:
-    DbFatalErrorTests()
-    {
-        env = std::make_unique<tools::FaultInjectionEnv>();
-        db = std::make_unique<TestDatabase>(*env);
+    ~WriteBackErrorTests() override = default;
+};
 
-        // Make sure all page types are represented in the database.
-        committed = add_records(*db, 1'000);
-        for (std::size_t i {}; i < 500; ++i) {
-            const auto itr = begin(committed);
-            EXPECT_OK(db->db->erase(itr->first));
-            committed.erase(itr);
-        }
+TEST_P(WriteBackErrorTests, A)
+{
+    for (const auto &[k, v] : committed) {
+        std::string value;
+        const auto s = db->db->get(k, &value);
 
-        EXPECT_OK(db->db->checkpoint());
-
-        const auto make_interceptor = [this](const auto &prefix, auto type) {
-            return tools::Interceptor {prefix, type, [this] {
-                                           if (counter++ >= GetParam().successes) {
-                                               return special_error();
-                                           }
-                                           return Status::ok();
-                                       }};
-        };
-
-        switch (GetParam().target) {
-            case ErrorTarget::kDataRead:
-                env->add_interceptor(make_interceptor("./test", tools::Interceptor::kRead));
-                break;
-            case ErrorTarget::kDataWrite:
-                env->add_interceptor(make_interceptor("./test", tools::Interceptor::kWrite));
-                break;
-            case ErrorTarget::kWalRead:
-                env->add_interceptor(make_interceptor("./wal-", tools::Interceptor::kRead));
-                break;
-            case ErrorTarget::kWalWrite:
-                env->add_interceptor(make_interceptor("./wal-", tools::Interceptor::kWrite));
-                break;
+        if (!s.is_ok()) {
+            assert_special_error(s);
+            break;
         }
     }
+    assert_special_error(db->db->status());
+}
 
+INSTANTIATE_TEST_SUITE_P(
+    WriteBackErrorTests,
+    WriteBackErrorTests,
+    ::testing::Values(
+        ErrorWrapper {"./test", tools::Interceptor::kWrite, 0},
+        ErrorWrapper {"./test", tools::Interceptor::kWrite, 1},
+        ErrorWrapper {"./test", tools::Interceptor::kWrite, 2}));
+
+
+class TruncationErrorTests : public DbErrorTests
+{
+protected:
+    ~TruncationErrorTests() override = default;
+};
+
+TEST_P(TruncationErrorTests, HandlesTruncationError)
+{
+    tools::RandomGenerator random;
+
+    for (const auto &[key, _] : committed) {
+        ASSERT_OK(db->db->erase(key));
+    }
+    assert_special_error(db->db->vacuum());
+    assert_special_error(db->db->status());
+
+    CLEAR_INTERCEPTORS();
+    ASSERT_OK(db->reopen());
+
+    tools::expect_db_contains(*db->db, committed);
+}
+
+INSTANTIATE_TEST_SUITE_P(
+    TruncationErrorTests,
+    TruncationErrorTests,
+    ::testing::Values(
+        ErrorWrapper {"./test", tools::Interceptor::kResize, 0}));
+
+class DbFatalErrorTests : public DbErrorTests
+{
+protected:
     ~DbFatalErrorTests() override = default;
 
-    std::unique_ptr<tools::FaultInjectionEnv> env;
-    std::unique_ptr<TestDatabase> db;
-    std::map<std::string, std::string> committed;
-    std::size_t counter {};
+    auto SetUp() -> void override
+    {
+        tools::RandomGenerator random;
+        for (const auto &[k, v] : tools::fill_db(*db->db, random, 1'000)) {
+            ASSERT_OK(db->db->erase(k));
+        }
+        DbErrorTests::SetUp();
+    }
 };
 
 TEST_P(DbFatalErrorTests, ErrorsDuringModificationsAreFatal)
@@ -760,30 +813,6 @@ TEST_P(DbFatalErrorTests, OperationsAreNotPermittedAfterFatalError)
     assert_special_error(cursor->status());
     delete cursor;
 }
-//
-// TEST_P(DbFatalErrorTests, RecoversFromFatalErrors)
-//{
-//    auto itr = begin(committed);
-//    for (;;) {
-//        auto s = db->db->erase(itr++->first);
-//        if (!s.is_ok()) {
-//            assert_special_error(s);
-//            break;
-//        }
-//        ASSERT_NE(itr, end(committed));
-//    }
-//    delete db->db;
-//    db->db.reset();
-//
-//    env->clear_interceptors();
-//    db->db = std::make_unique<DBImpl>();
-//    ASSERT_OK(db->db->put(db->options, "./test"));
-//
-//    for (const auto &[key, value] : committed) {
-//        test_tools::expect_contains(*db->db, key, value);
-//    }
-//    tools::validate_db(*db->db);
-//}
 
 TEST_P(DbFatalErrorTests, VacuumReportsErrors)
 {
@@ -801,10 +830,11 @@ TEST_P(DbFatalErrorTests, RecoversFromVacuumFailure)
 
     env->clear_interceptors();
     ASSERT_OK(DB::open(db->options, "./test", db->db));
+    tools::validate_db(*db->db);
 
     for (const auto &[key, value] : committed) {
         std::string result;
-        ASSERT_OK(db->db->get(key, &result));
+        expect_ok(db->db->get(key, &result));
         ASSERT_EQ(result, value);
     }
     tools::validate_db(*db->db);
@@ -818,18 +848,15 @@ INSTANTIATE_TEST_SUITE_P(
     DbFatalErrorTests,
     DbFatalErrorTests,
     ::testing::Values(
-        ErrorWrapper {ErrorTarget::kDataRead, 0},
-        ErrorWrapper {ErrorTarget::kDataRead, 1},
-        ErrorWrapper {ErrorTarget::kDataRead, 10},
-        ErrorWrapper {ErrorTarget::kDataRead, 100},
-        ErrorWrapper {ErrorTarget::kDataWrite, 0},
-        ErrorWrapper {ErrorTarget::kDataWrite, 1},
-        ErrorWrapper {ErrorTarget::kDataWrite, 10},
-        ErrorWrapper {ErrorTarget::kDataWrite, 100},
-        ErrorWrapper {ErrorTarget::kWalWrite, 0},
-        ErrorWrapper {ErrorTarget::kWalWrite, 1},
-        ErrorWrapper {ErrorTarget::kWalWrite, 10},
-        ErrorWrapper {ErrorTarget::kWalWrite, 100}));
+        ErrorWrapper {"./test", tools::Interceptor::kRead, 0},
+        ErrorWrapper {"./test", tools::Interceptor::kRead, 1},
+        ErrorWrapper {"./test", tools::Interceptor::kRead, 50},
+        ErrorWrapper {"./test", tools::Interceptor::kWrite, 0},
+        ErrorWrapper {"./test", tools::Interceptor::kWrite, 1},
+        ErrorWrapper {"./test", tools::Interceptor::kWrite, 50},
+        ErrorWrapper {"./wal", tools::Interceptor::kWrite, 0},
+        ErrorWrapper {"./wal", tools::Interceptor::kWrite, 1},
+        ErrorWrapper {"./wal", tools::Interceptor::kWrite, 10}));
 
 class DbOpenTests
     : public OnDiskTest,
@@ -969,26 +996,13 @@ TEST_F(ApiTests, UncommittedTransactionIsRolledBack)
 
     reopen();
 
-    ASSERT_OK(calicodb::DB::open(options, "./test", db));
-    auto *cursor = db->new_cursor();
-    cursor->seek_first();
-    ASSERT_TRUE(cursor->is_valid());
-    ASSERT_EQ(cursor->key(), "a");
-    ASSERT_EQ(cursor->value(), "1");
-
-    cursor->next();
-    ASSERT_TRUE(cursor->is_valid());
-    ASSERT_EQ(cursor->key(), "b");
-    ASSERT_EQ(cursor->value(), "2");
-
-    cursor->next();
-    ASSERT_TRUE(cursor->is_valid());
-    ASSERT_EQ(cursor->key(), "c");
-    ASSERT_EQ(cursor->value(), "3");
-
-    cursor->next();
-    ASSERT_FALSE(cursor->is_valid());
-    delete cursor;
+    std::string value;
+    ASSERT_OK(db->get("a", &value));
+    ASSERT_EQ(value, "1");
+    ASSERT_OK(db->get("b", &value));
+    ASSERT_EQ(value, "2");
+    ASSERT_OK(db->get("c", &value));
+    ASSERT_EQ(value, "3");
 }
 
 TEST_F(ApiTests, EmptyTransactionsAreOk)
@@ -1072,7 +1086,7 @@ class LargePayloadTests : public ApiTests
 public:
     [[nodiscard]] auto random_string(std::size_t max_size) const -> std::string
     {
-        return random.Generate(random.Next<std::size_t>(1, max_size)).to_string();
+        return random.Generate(random.Next(1, max_size)).to_string();
     }
 
     auto run_test(std::size_t max_key_size, std::size_t max_value_size)
@@ -1120,14 +1134,16 @@ protected:
     auto SetUp() -> void override
     {
         ApiTests::SetUp();
-        ASSERT_OK(db->put("A", "x"));
-        ASSERT_OK(db->put("B", "y"));
-        ASSERT_OK(db->put("C", "z"));
+
+        tools::RandomGenerator random;
+        checkpoints[false] = tools::fill_db(*db, random, 5'000);
+
         ASSERT_OK(db->checkpoint());
 
-        ASSERT_OK(db->put("a", "1"));
-        ASSERT_OK(db->put("b", "2"));
-        ASSERT_OK(db->put("c", "3"));
+        checkpoints[true] = tools::fill_db(*db, random, 5'678);
+        for (const auto &record: checkpoints[false]) {
+            checkpoints[true].insert(record);
+        }
     }
 
     auto reopen() -> void override
@@ -1136,25 +1152,56 @@ protected:
         ApiTests::reopen();
     }
 
-    auto assert_contains_exactly(const std::vector<std::string> &keys) -> void
+    auto run_test(bool persisted) -> void
     {
-        for (const auto &key : keys) {
-            std::string value;
-            ASSERT_OK(db->get(key, &value));
+        ASSERT_OK(db->status());
+        const auto s = db->checkpoint();
+        ASSERT_EQ(s.is_ok(), persisted);
+        assert_special_error(db->status());
+
+        reopen();
+
+        ASSERT_EQ(db_impl(db)->TEST_state().record_count, checkpoints[persisted].size());
+
+        for (const auto &[key, value] : checkpoints[persisted]) {
+            std::string result;
+            ASSERT_OK(db->get(key, &result));
+            ASSERT_EQ(value, result);
         }
-        ASSERT_EQ(db_impl(db)->TEST_state().record_count, keys.size());
     }
+
+    std::map<std::string, std::string> checkpoints[2];
 };
+
+TEST_F(CommitFailureTests, DataSyncFailure)
+{
+    QUICK_INTERCEPTOR(kFilename, tools::Interceptor::kSync);
+    run_test(true);
+}
+
+TEST_F(CommitFailureTests, DataFlushFailure)
+{
+    QUICK_INTERCEPTOR(kFilename, tools::Interceptor::kWrite);
+    run_test(true);
+}
+
+TEST_F(CommitFailureTests, DataFlushFailureAfterSomeSuccess)
+{
+    auto count = 2;
+    COUNTING_INTERCEPTOR(kFilename, tools::Interceptor::kWrite, count);
+    run_test(true);
+}
 
 TEST_F(CommitFailureTests, WalFlushFailure)
 {
     QUICK_INTERCEPTOR(kWalPrefix, tools::Interceptor::kWrite);
-    assert_special_error(db->checkpoint());
-    assert_special_error(db->status());
+    run_test(false);
+}
 
-    reopen();
-
-    assert_contains_exactly({"A", "B", "C"});
+TEST_F(CommitFailureTests, WalCleanupFailure)
+{
+    QUICK_INTERCEPTOR(kWalPrefix, tools::Interceptor::kUnlink);
+    run_test(true);
 }
 
 class WalPrefixTests

@@ -14,6 +14,34 @@ namespace calicodb
 
 class Pager;
 class TableSet;
+struct Node;
+
+// Maintains a list of available memory regions within a node, called the free
+// block list, as well as the "gap" space between the cell with the lowest offset
+// and the end of the cell pointer array.
+//
+// Free blocks take the form (offset, size), where "offset" and "size" are 16-bit
+// unsigned integers. The entries are kept sorted by the "offset" field, and
+// adjacent regions are merged if possible. Free blocks must be at least 4 bytes.
+// If a region smaller than 4 bytes is released, it is considered a fragment, and
+// its size is added to the "frag_count" node header field. Luckily, it is possible
+// to clean up some of these fragments as regions are merged (see release()).
+class BlockAllocator
+{
+public:
+    static auto accumulate_free_bytes(const Node &node) -> std::size_t;
+
+    // Allocate "needed_size" bytes of contiguous memory in "node" and return the
+    // offset of the first byte, relative to the start of the page.
+    static auto allocate(Node &node, std::size_t needed_size) -> std::size_t;
+
+    // Free "block_size" bytes of contiguous memory in "node" starting at
+    // "block_start".
+    static auto release(Node &node, std::size_t block_start, std::size_t block_size) -> void;
+
+    // Merge all free blocks and fragment bytes into the gap space.
+    static auto defragment(Node &node, int skip = -1) -> void;
+};
 
 // Internal Cell Format:
 //     Size    Name
@@ -69,12 +97,10 @@ struct Node {
     const NodeMeta *meta {};
     NodeHeader header;
     std::optional<Cell> overflow;
-    PageSize overflow_index {};
-    PageSize slots_offset {};
-    PageSize gap_size {};
+    unsigned overflow_index {};
+    unsigned slots_offset {};
+    unsigned gap_size {};
 };
-
-auto manual_defragment(Node &node) -> void;
 
 // Read a cell from the node at the specified index or offset. The node must remain alive for as long as the cell.
 [[nodiscard]] auto read_cell(Node &node, std::size_t index) -> Cell;
@@ -146,19 +172,19 @@ struct PointerMap {
         Type type {};
     };
 
-    // Find the page ID of the pointer map that holds the back pointer for page "pid".
-    [[nodiscard]] static auto lookup(const Pager &pager, Id pid) -> Id;
+    // Find the page ID of the pointer map page that holds the back pointer for page "page_id".
+    [[nodiscard]] static auto lookup(const Pager &pager, Id page_id) -> Id;
 
-    // Read an entry from a pointer map.
-    [[nodiscard]] static auto read_entry(Pager &pager, Id pid, Entry &entry) -> Status;
+    // Read an entry from the pointer map.
+    [[nodiscard]] static auto read_entry(Pager &pager, Id page_id, Entry &entry) -> Status;
 
-    // Write an entry to a pointer map.
-    [[nodiscard]] static auto write_entry(Pager &pager, Id pid, Entry entry) -> Status;
+    // Write an entry to the pointer map.
+    [[nodiscard]] static auto write_entry(Pager &pager, Id page_id, Entry entry) -> Status;
 };
 
 struct NodeManager {
     [[nodiscard]] static auto allocate(Pager &pager, Freelist &freelist, Node &out, std::string &scratch, bool is_external) -> Status;
-    [[nodiscard]] static auto acquire(Pager &pager, Id pid, Node &out, std::string &scratch, bool upgrade) -> Status;
+    [[nodiscard]] static auto acquire(Pager &pager, Id page_id, Node &out, std::string &scratch, bool upgrade) -> Status;
     [[nodiscard]] static auto destroy(Freelist &freelist, Node node) -> Status;
     static auto upgrade(Pager &pager, Node &node) -> void;
     static auto release(Pager &pager, Node node) -> void;
@@ -189,7 +215,7 @@ public:
     [[nodiscard]] auto erase(const Slice &key) -> Status;
     [[nodiscard]] auto vacuum_one(Id target, TableSet &tables, bool *success = nullptr) -> Status;
     [[nodiscard]] auto allocate(bool is_external, Node &out) -> Status;
-    [[nodiscard]] auto acquire(Id pid, bool upgrade, Node &out) const -> Status;
+    [[nodiscard]] auto acquire(Id page_id, bool upgrade, Node &out) const -> Status;
     [[nodiscard]] auto destroy(Node node) -> Status;
     auto upgrade(Node &node) const -> void;
     auto release(Node node) const -> void;
@@ -225,8 +251,8 @@ private:
     [[nodiscard]] auto node_iterator(Node &node) const -> NodeIterator;
     [[nodiscard]] auto insert_cell(Node &node, std::size_t index, const Cell &cell) -> Status;
     [[nodiscard]] auto remove_cell(Node &node, std::size_t index) -> Status;
-    [[nodiscard]] auto find_parent_id(Id pid, Id &out) const -> Status;
-    [[nodiscard]] auto fix_parent_id(Id pid, Id parent_id, PointerMap::Type type) -> Status;
+    [[nodiscard]] auto find_parent_id(Id page_id, Id &out) const -> Status;
+    [[nodiscard]] auto fix_parent_id(Id page_id, Id parent_id, PointerMap::Type type) -> Status;
     [[nodiscard]] auto maybe_fix_overflow_chain(const Cell &cell, Id parent_id) -> Status;
     [[nodiscard]] auto fix_links(Node &node) -> Status;
     [[nodiscard]] auto cell_scratch() -> char *;
@@ -246,9 +272,9 @@ private:
 class CursorImpl : public Cursor
 {
     struct Location {
-        Id pid;
-        PageSize index {};
-        PageSize count {};
+        Id page_id;
+        unsigned index {};
+        unsigned count {};
     };
     mutable Status m_status;
     std::string m_key;

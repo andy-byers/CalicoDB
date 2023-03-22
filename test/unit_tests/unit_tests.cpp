@@ -28,7 +28,7 @@ auto RecordGenerator::generate(tools::RandomGenerator &random, std::size_t num_r
     std::size_t num_collisions {};
 
     while (itr != records.end()) {
-        const auto ks = random.Next<std::size_t>(min_ks, max_ks);
+        const auto ks = random.Next(min_ks, max_ks);
         auto key = random.Generate(ks).to_string();
         if (is_sequential) {
             if (set.find(key) != end(set)) {
@@ -38,7 +38,7 @@ auto RecordGenerator::generate(tools::RandomGenerator &random, std::size_t num_r
             }
             set.emplace(key);
         }
-        const auto vs = random.Next<std::size_t>(min_vs, max_vs);
+        const auto vs = random.Next(min_vs, max_vs);
         itr->key = std::move(key);
         itr->value = random.Generate(vs).to_string();
         itr++;

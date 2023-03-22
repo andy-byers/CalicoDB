@@ -2,6 +2,7 @@
 // This source code is licensed under the MIT License, which can be found in
 // LICENSE.md. See AUTHORS.md for a list of contributor names.
 
+#include "logging.h"
 #include "tools.h"
 #include <benchmark/benchmark.h>
 
@@ -9,6 +10,16 @@ enum AccessType : int64_t {
     kSequential,
     kRandom,
 };
+
+static auto access_type_name(int64_t type) -> std::string
+{
+    if (type == kSequential) {
+        return "Sequential";
+    } else if (type == kRandom) {
+        return "Random";
+    }
+    return "Unknown";
+}
 
 class Benchmark final
 {
@@ -176,7 +187,7 @@ private:
             n %= kNumRecords;
         }
         return calicodb::tools::integral_key<kKeyLength>(
-            is_sequential ? n : m_random.Next<std::size_t>(m));
+            is_sequential ? n : m_random.Next(m));
     }
 
     Parameters m_param;
@@ -189,6 +200,8 @@ private:
 
 static auto BM_Write(benchmark::State &state) -> void
 {
+    state.SetLabel("Write" + access_type_name(state.range(0)));
+
     Benchmark bench;
     for (auto _ : state) {
         bench.write(state);
@@ -200,6 +213,8 @@ BENCHMARK(BM_Write)
 
 static auto BM_Overwrite(benchmark::State &state) -> void
 {
+    state.SetLabel("Overwrite" + access_type_name(state.range(0)));
+
     Benchmark bench;
     bench.add_initial_records();
     for (auto _ : state) {
@@ -212,6 +227,8 @@ BENCHMARK(BM_Overwrite)
 
 static auto BM_Exists(benchmark::State &state) -> void
 {
+    state.SetLabel("Exists" + access_type_name(state.range(0)));
+
     Benchmark bench;
     bench.add_initial_records();
     for (auto _ : state) {
@@ -224,6 +241,8 @@ BENCHMARK(BM_Exists)
 
 static auto BM_Read(benchmark::State &state) -> void
 {
+    state.SetLabel("Read" + access_type_name(state.range(0)));
+
     Benchmark bench;
     bench.add_initial_records();
     for (auto _ : state) {
@@ -236,6 +255,9 @@ BENCHMARK(BM_Read)
 
 static auto BM_ReadWrite(benchmark::State &state) -> void
 {
+    const auto label = "ReadWrite" + access_type_name(state.range(0)) + "_1:";
+    state.SetLabel(label + calicodb::number_to_string(state.range(1)));
+
     Benchmark bench;
     bench.add_initial_records();
     for (auto _ : state) {
@@ -272,6 +294,8 @@ BENCHMARK(BM_IterateBackward);
 
 static auto BM_Seek(benchmark::State &state) -> void
 {
+    state.SetLabel("Seek" + access_type_name(state.range(0)));
+
     Benchmark bench;
     bench.add_initial_records();
     for (auto _ : state) {
@@ -284,6 +308,8 @@ BENCHMARK(BM_Seek)
 
 static auto BM_Write100K(benchmark::State &state) -> void
 {
+    state.SetLabel("Write" + access_type_name(state.range(0)) + "100K");
+
     Benchmark bench {{.value_length = 100'000}};
     for (auto _ : state) {
         bench.write(state);
@@ -295,6 +321,8 @@ BENCHMARK(BM_Write100K)
 
 static auto BM_Read100K(benchmark::State &state) -> void
 {
+    state.SetLabel("Read" + access_type_name(state.range(0)) + "100K");
+
     Benchmark bench {{.value_length = 100'000}};
     bench.add_initial_records();
     for (auto _ : state) {
@@ -307,6 +335,8 @@ BENCHMARK(BM_Read100K)
 
 static auto BM_Exists100K(benchmark::State &state) -> void
 {
+    state.SetLabel("Exists" + access_type_name(state.range(0)) + "100K");
+
     Benchmark bench {{.value_length = 100'000}};
     bench.add_initial_records();
     for (auto _ : state) {

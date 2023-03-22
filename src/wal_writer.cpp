@@ -18,15 +18,27 @@ WalWriter::WalWriter(Logger &file, std::string &tail)
     }
 }
 
+auto WalWriter::flushed_on_last_write() const -> bool
+{
+    return m_flushed;
+}
+
+auto WalWriter::block_number() const -> std::size_t
+{
+    return m_block;
+}
+
 auto WalWriter::write(const Slice &payload) -> Status
 {
     CALICODB_EXPECT_FALSE(payload.is_empty());
     auto rest = payload;
+    m_flushed = false;
 
     while (!rest.is_empty()) {
         if (m_offset + WalRecordHeader::kSize >= m_tail->size()) {
             // Clear the rest of the tail buffer and append it to the log.
             CALICODB_TRY(flush());
+            m_flushed = true;
         }
         // There should always be enough room to write the header and 1 payload byte.
         CALICODB_EXPECT_LT(m_offset + WalRecordHeader::kSize, m_tail->size());

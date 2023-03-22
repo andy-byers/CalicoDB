@@ -5,14 +5,14 @@
 #ifndef CALICODB_PAGE_H
 #define CALICODB_PAGE_H
 
-#include "delta.h"
 #include "encoding.h"
+#include "frames.h"
 #include "header.h"
+#include "delta.h"
+#include "utils.h"
 
 namespace calicodb
 {
-
-using PageSize = std::uint16_t;
 
 struct LogicalPageId {
     [[nodiscard]] static auto with_page(Id pid) -> LogicalPageId
@@ -50,12 +50,12 @@ class Page
     std::vector<PageDelta> m_deltas;
     Id m_id;
     std::size_t m_size {};
+    CacheEntry *m_entry {};
     char *m_data {};
     bool m_write {};
 
 public:
     friend class FrameManager;
-    friend class Pager;
     friend struct Node;
 
     explicit Page() = default;
@@ -68,6 +68,16 @@ public:
     [[nodiscard]] auto id() const -> Id
     {
         return m_id;
+    }
+
+    [[nodiscard]] auto entry() const -> const CacheEntry *
+    {
+        return m_entry;
+    }
+
+    [[nodiscard]] auto entry() -> CacheEntry *
+    {
+        return m_entry;
     }
 
     [[nodiscard]] auto view(std::size_t offset) const -> Slice
@@ -102,9 +112,13 @@ public:
         return m_size;
     }
 
+    [[nodiscard]] auto has_changes() const -> bool
+    {
+        return !m_deltas.empty();
+    }
+
     [[nodiscard]] auto deltas() -> const std::vector<PageDelta> &
     {
-        CALICODB_EXPECT_TRUE(m_write);
         compress_deltas(m_deltas);
         return m_deltas;
     }
@@ -138,6 +152,22 @@ public:
 inline auto write_page_lsn(Page &page, Lsn lsn) -> void
 {
     put_u64(page.mutate(page_offset(page), sizeof(Lsn)), lsn.value);
+}
+
+// TODO: These make more sense and can be used for frames as well.
+[[nodiscard]] inline auto page_offset(Id page_id) -> std::size_t
+{
+    return FileHeader::kSize * page_id.is_root();
+}
+
+[[nodiscard]] inline auto read_page_lsn(Id page_id, const char *data) -> Lsn
+{
+    return Lsn {get_u64(data + page_offset(page_id))};
+}
+
+inline auto write_page_lsn(Id page_id, Lsn lsn, char *data) -> void
+{
+    put_u64(data + page_offset(page_id), lsn.value);
 }
 
 } // namespace calicodb

@@ -4,7 +4,6 @@
 
 #include "delta.h"
 #include <algorithm>
-#include <numeric>
 
 namespace calicodb
 {
@@ -22,12 +21,10 @@ static auto merge_deltas(const PageDelta &lhs, const PageDelta &rhs) -> PageDelt
     return PageDelta {lhs.offset, new_dx};
 }
 
-auto compress_deltas(std::vector<PageDelta> &deltas) -> std::size_t
+auto compress_deltas(std::vector<PageDelta> &deltas) -> void
 {
-    if (deltas.empty()) {
-        return 0;
-    } else if (deltas.size() == 1) {
-        return deltas.front().size;
+    if (deltas.size() <= 1) {
+        return;
     }
 
     auto lhs = begin(deltas);
@@ -40,9 +37,6 @@ auto compress_deltas(std::vector<PageDelta> &deltas) -> std::size_t
         }
     }
     deltas.erase(next(lhs), end(deltas));
-    return std::accumulate(begin(deltas), end(deltas), std::size_t {}, [](auto accum, auto delta) {
-        return accum + delta.size + sizeof(delta);
-    });
 }
 
 auto insert_delta(std::vector<PageDelta> &deltas, PageDelta delta) -> void

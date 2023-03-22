@@ -15,13 +15,10 @@ class WalWriter
 public:
     explicit WalWriter(Logger &file, std::string &tail);
 
-    [[nodiscard]] auto block_count() const -> std::size_t
-    {
-        return m_block;
-    }
-
-    // NOTE: If either of these methods return a non-OK status, the state of this object is unspecified, except for the block
-    //       count, which remains valid.
+    // Returns true if the writer needed to flush the tail buffer to complete the last write. If true,
+    // then the LSN before the one just written has been flushed.
+    [[nodiscard]] auto flushed_on_last_write() const -> bool;
+    [[nodiscard]] auto block_number() const -> std::size_t;
     [[nodiscard]] auto write(const Slice &payload) -> Status;
     [[nodiscard]] auto flush() -> Status;
 
@@ -31,6 +28,7 @@ private:
     Logger *m_file {};
     std::size_t m_block {};
     std::size_t m_offset {};
+    bool m_flushed {};
 };
 
 } // namespace calicodb
