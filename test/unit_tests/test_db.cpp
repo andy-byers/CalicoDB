@@ -974,6 +974,26 @@ TEST_F(ApiTests, IsConstCorrect)
     ASSERT_OK(const_db->status());
 }
 
+TEST_F(ApiTests, CannotModifyReadOnlyTable)
+{
+    TableOptions options {AccessMode::kReadOnly};
+    Table *readonly, *readwrite;
+
+    ASSERT_OK(db->create_table({}, "table", readwrite));
+    ASSERT_OK(db->put(*readwrite, "4", "2"));
+    db->close_table(readwrite);
+
+    ASSERT_OK(db->create_table(options, "table", readonly));
+
+    // Reading is allowed.
+    std::string result;
+    ASSERT_OK(db->get(*readonly, "4", &result));
+
+    // But not modifications (even if they would do nothing).
+    ASSERT_TRUE(db->put(*readonly, "4", "2").is_invalid_argument());
+    ASSERT_TRUE(db->erase(*readonly, "5").is_invalid_argument());
+}
+
 TEST_F(ApiTests, EmptyKeysAreNotAllowed)
 {
     ASSERT_TRUE(db->put("", "value").is_invalid_argument());
