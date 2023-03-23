@@ -92,6 +92,9 @@ public:
     // Erase a specific entry, if it exists.
     auto erase(Id page_id) -> bool;
 
+    [[nodiscard]] auto hits() const -> std::uint64_t;
+    [[nodiscard]] auto misses() const -> std::uint64_t;
+
 private:
     using MapEntry = std::list<CacheEntry>::iterator;
 
@@ -103,7 +106,6 @@ private:
 
 struct Frame {
     explicit Frame(char *buffer);
-    [[nodiscard]] auto lsn() const -> Id;
 
     Id page_id;
     char *data;

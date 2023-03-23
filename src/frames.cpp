@@ -123,14 +123,19 @@ auto PageCache::evict() -> std::optional<CacheEntry>
     return std::nullopt;
 }
 
+auto PageCache::hits() const -> std::uint64_t
+{
+    return m_hits;
+}
+
+auto PageCache::misses() const -> std::uint64_t
+{
+    return m_misses;
+}
+
 Frame::Frame(char *ptr)
     : data {ptr}
 {
-}
-
-auto Frame::lsn() const -> Lsn
-{
-    return {get_u64(data + page_id.is_root() * FileHeader::kSize)};
 }
 
 FrameManager::FrameManager(Editor &file, AlignedBuffer buffer, std::size_t page_size, std::size_t frame_count)

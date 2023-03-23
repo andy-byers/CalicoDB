@@ -52,16 +52,16 @@ auto WriteAheadLog::open(const Parameters &param, WriteAheadLog **out) -> Status
 
 auto WriteAheadLog::close() -> Status
 {
-    if (m_writer == nullptr) {
-        return Status::ok();
-    }
-    return close_writer();
+    return finish_current_segment();
 }
 
 auto WriteAheadLog::start_writing() -> Status
 {
+    CALICODB_EXPECT_EQ(m_file, nullptr);
     CALICODB_EXPECT_EQ(m_writer, nullptr);
-    return open_writer();
+    CALICODB_TRY(open_next_segment(m_file));
+    m_writer = new WalWriter {*m_file, m_tail_buffer};
+    return Status::ok();
 }
 
 auto WriteAheadLog::flushed_lsn() const -> Lsn
@@ -93,9 +93,6 @@ auto WriteAheadLog::find_obsolete_lsn(Lsn &out) -> Status
 
 auto WriteAheadLog::log(const Slice &payload) -> Status
 {
-    if (m_writer == nullptr) {
-        return Status::ok();
-    }
     m_bytes_written += payload.size();
     CALICODB_TRY(m_writer->write(payload));
 
@@ -103,8 +100,16 @@ auto WriteAheadLog::log(const Slice &payload) -> Status
         m_written_lsn.value = m_last_lsn.value - 1;
     }
     if (m_writer->block_number() >= kSegmentCutoff << m_segments.size()) {
-        CALICODB_TRY(close_writer());
-        return open_writer();
+        CALICODB_TRY(finish_current_segment());
+        Logger *file;
+        auto s = open_next_segment(file);
+        if (s.is_ok()) {
+            delete m_writer;
+            delete m_file;
+            m_writer = new WalWriter {*file, m_tail_buffer};
+            m_file = file;
+        }
+        return s;
     }
     return Status::ok();
 }
@@ -140,9 +145,6 @@ auto WriteAheadLog::log_image(Id page_id, const Slice &image, Lsn *out) -> Statu
 
 auto WriteAheadLog::synchronize(bool flush) -> Status
 {
-    if (m_writer == nullptr) {
-        return Status::ok();
-    }
     if (flush) {
         CALICODB_TRY(m_writer->flush());
         m_written_lsn = m_last_lsn;
@@ -175,7 +177,7 @@ auto WriteAheadLog::cleanup(Lsn recovery_lsn) -> Status
     }
 }
 
-auto WriteAheadLog::close_writer() -> Status
+auto WriteAheadLog::finish_current_segment() -> Status
 {
     CALICODB_TRY(synchronize(true));
 
@@ -189,20 +191,15 @@ auto WriteAheadLog::close_writer() -> Status
         s = m_env->remove_file(encode_segment_name(m_prefix, id));
         m_segments.erase(id);
     }
-
-    delete m_file;
-    delete m_writer;
-    m_file = nullptr;
-    m_writer = nullptr;
     return s;
 }
 
-auto WriteAheadLog::open_writer() -> Status
+auto WriteAheadLog::open_next_segment(Logger *&file) -> Status
 {
     const auto id = next_segment_id();
-    CALICODB_TRY(m_env->new_logger(encode_segment_name(m_prefix, id), m_file));
-    m_writer = new WalWriter {*m_file, m_tail_buffer};
-    return m_env->sync_directory(split_path(m_prefix).first);
+    CALICODB_TRY(m_env->new_logger(encode_segment_name(m_prefix, id), file));
+    CALICODB_TRY(m_env->sync_directory(split_path(m_prefix).first));
+    return Status::ok();
 }
 
 auto WriteAheadLog::next_segment_id() const -> Id

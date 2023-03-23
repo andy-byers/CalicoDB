@@ -46,8 +46,8 @@ public:
 private:
     explicit WriteAheadLog(const Parameters &param);
     [[nodiscard]] auto next_segment_id() const -> Id;
-    [[nodiscard]] auto close_writer() -> Status;
-    [[nodiscard]] auto open_writer() -> Status;
+    [[nodiscard]] auto finish_current_segment() -> Status;
+    [[nodiscard]] auto open_next_segment(Logger *&file) -> Status;
     [[nodiscard]] auto log(const Slice &payload) -> Status;
     auto advance_lsn(Lsn *out) -> void;
 

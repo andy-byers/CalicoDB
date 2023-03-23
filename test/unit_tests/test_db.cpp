@@ -195,7 +195,6 @@ TEST_F(BasicDatabaseTests, StatsAreTracked)
 
     std::string property;
     ASSERT_TRUE(db->get_property("calicodb.stats", &property));
-    ASSERT_TRUE(db->get_property("calicodb.tables", &property));
 
     ASSERT_EQ(db_impl(db)->TEST_state().record_count, 0);
     ASSERT_OK(db->put(*table, "a", "1"));
@@ -944,17 +943,14 @@ TEST_F(ApiTests, OnlyReturnsValidProperties)
 {
     // Check for existence.
     ASSERT_TRUE(db->get_property("calicodb.stats", nullptr));
-    ASSERT_TRUE(db->get_property("calicodb.tables", nullptr));
-    ASSERT_FALSE(db->get_property("Calicodb.tables", nullptr));
+    ASSERT_FALSE(db->get_property("Calicodb.stats", nullptr));
     ASSERT_FALSE(db->get_property("calicodb.nonexistent", nullptr));
 
-    std::string stats, tables, scratch;
+    std::string stats, scratch;
     ASSERT_TRUE(db->get_property("calicodb.stats", &stats));
-    ASSERT_TRUE(db->get_property("calicodb.tables", &tables));
-    ASSERT_FALSE(db->get_property("Calicodb.tables", &scratch));
+    ASSERT_FALSE(db->get_property("Calicodb.stats", &scratch));
     ASSERT_FALSE(db->get_property("calicodb.nonexistent", &scratch));
     ASSERT_FALSE(stats.empty());
-    ASSERT_FALSE(tables.empty());
     ASSERT_TRUE(scratch.empty());
 }
 
@@ -974,7 +970,7 @@ TEST_F(ApiTests, IsConstCorrect)
 
     const auto *const_db = db;
     std::string property;
-    ASSERT_TRUE(const_db->get_property("calicodb.tables", &property));
+    ASSERT_TRUE(const_db->get_property("calicodb.stats", &property));
     ASSERT_OK(const_db->status());
 }
 

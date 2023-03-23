@@ -47,6 +47,16 @@ public:
     auto release(Page page) -> void;
     auto load_state(const FileHeader &header) -> void;
 
+    [[nodiscard]] auto hits() const -> std::uint64_t
+    {
+        return m_cache.hits();
+    }
+
+    [[nodiscard]] auto misses() const -> std::uint64_t
+    {
+        return m_cache.misses();
+    }
+
 private:
     explicit Pager(const Parameters &param, Editor &file, AlignedBuffer buffer);
     auto clean_page(CacheEntry &entry) -> DirtyTable::Iterator;
