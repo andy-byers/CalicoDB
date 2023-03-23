@@ -82,11 +82,11 @@ inline auto put_u64(char *out, std::uint64_t value) noexcept -> void
     dst[7] = static_cast<std::uint8_t>(value >> 56);
 }
 
-static constexpr std::size_t kVarintMaxLength {10};
+static constexpr std::size_t kVarintMaxLength = 10;
 
 [[nodiscard]] inline auto varint_length(std::uint64_t value) -> std::size_t
 {
-    std::size_t length {1};
+    std::size_t length = 1;
     while (value >= 0x80) {
         value >>= 7;
         ++length;

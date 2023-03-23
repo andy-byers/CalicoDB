@@ -33,14 +33,14 @@ class Page;
 //     32      8     commit_lsn
 //     40      2     page_size
 struct FileHeader {
-    static constexpr std::uint32_t kMagicCode {0xB11924E1};
-    static constexpr std::size_t kSize {42};
+    static constexpr std::uint32_t kMagicCode = 0xB11924E1;
+    static constexpr std::size_t kSize = 42;
     auto read(const char *data) -> void;
     auto write(char *data) const -> void;
 
     [[nodiscard]] auto compute_crc() const -> std::uint32_t;
 
-    std::uint32_t magic_code {kMagicCode};
+    std::uint32_t magic_code = kMagicCode;
     std::uint32_t header_crc {};
     std::uint64_t page_count {};
     std::uint64_t record_count {};
@@ -66,7 +66,7 @@ static constexpr auto kPageHeaderSize = sizeof(Lsn);
 //     21      2     free_start
 //     23      1     frag_count
 struct NodeHeader {
-    static constexpr std::size_t kSize {24};
+    static constexpr std::size_t kSize = 24;
     auto read(const char *data) -> void;
     auto write(char *data) const -> void;
 

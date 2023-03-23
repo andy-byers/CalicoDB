@@ -160,7 +160,7 @@ public:
 
 struct PointerMap {
     enum Type : char {
-        kTreeNode = 1,
+        kTreeNode,
         kTreeRoot,
         kOverflowHead,
         kOverflowLink,
@@ -169,7 +169,7 @@ struct PointerMap {
 
     struct Entry {
         Id back_ptr;
-        Type type {};
+        Type type;
     };
 
     // Find the page ID of the pointer map page that holds the back pointer for page "page_id".

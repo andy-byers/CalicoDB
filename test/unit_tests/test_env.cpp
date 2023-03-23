@@ -93,7 +93,7 @@ auto write_whole_file(const std::string &path, const Slice &message) -> void
 template <class Writer>
 constexpr auto write_out_randomly(tools::RandomGenerator &random, Writer &writer, const Slice &message) -> void
 {
-    constexpr std::size_t num_chunks {20};
+    constexpr std::size_t num_chunks = 20;
     ASSERT_GT(message.size(), num_chunks) << "File is too small for this test";
     Slice in {message};
     std::size_t counter {};
@@ -116,7 +116,7 @@ constexpr auto write_out_randomly(tools::RandomGenerator &random, Writer &writer
 template <class Reader>
 [[nodiscard]] auto read_back_randomly(tools::RandomGenerator &random, Reader &reader, std::size_t size) -> std::string
 {
-    static constexpr std::size_t num_chunks {20};
+    static constexpr std::size_t num_chunks = 20;
     EXPECT_GT(size, num_chunks) << "File is too small for this test";
     std::string backing(size, '\x00');
     auto *out_data = backing.data();

@@ -88,7 +88,7 @@ public:
     auto logv(const char *fmt, ...) -> void override;
 
 private:
-    static constexpr std::size_t kBufferSize {512};
+    static constexpr std::size_t kBufferSize = 512;
     std::string m_buffer;
     std::string m_filename;
     int m_file {};

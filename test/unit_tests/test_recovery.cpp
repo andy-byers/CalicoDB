@@ -20,7 +20,7 @@ public:
     static constexpr auto kFilename = "./test";
     static constexpr auto kWalPrefix = "./wal-";
     static constexpr auto kPageSize = kMinPageSize;
-    static constexpr std::size_t kFrameCount {16};
+    static constexpr std::size_t kFrameCount = 16;
 
     WalPagerInteractionTests()
         : scratch(kPageSize, '\x00'),
@@ -359,7 +359,7 @@ TEST_F(RecoveryTests, VacuumRecovery)
 TEST_F(RecoveryTests, SanityCheck)
 {
     std::map<std::string, std::string> map;
-    const std::size_t N {100};
+    const std::size_t N = 100;
 
     for (std::size_t i {}; i < N; ++i) {
         const auto k = random.Generate(db_options.page_size * 2);

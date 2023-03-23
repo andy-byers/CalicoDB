@@ -97,7 +97,7 @@ static auto decode_deltas_payload(const Slice &in) -> DeltaDescriptor
         const auto size = get_u16(data);
         data += sizeof(std::uint16_t);
 
-        delta.data = Slice {data, size};
+        delta.data = Slice(data, size);
         data += size;
         return delta;
     });
@@ -152,7 +152,7 @@ auto encode_vacuum_payload(Lsn lsn, bool is_start, char *buffer) -> Slice
 
     // Start flag (1 B)
     *buffer = static_cast<char>(is_start);
-    return Slice {saved, VacuumDescriptor::kFixedSize};
+    return Slice(saved, VacuumDescriptor::kFixedSize);
 }
 
 auto encode_deltas_payload(Lsn lsn, Id page_id, const Slice &image, const std::vector<PageDelta> &deltas, char *buffer) -> Slice
@@ -186,7 +186,7 @@ auto encode_deltas_payload(Lsn lsn, Id page_id, const Slice &image, const std::v
         std::memcpy(buffer + n, image.data() + offset, size);
         n += size;
     }
-    return Slice {saved, DeltaDescriptor::kFixedSize + n};
+    return Slice(saved, DeltaDescriptor::kFixedSize + n);
 }
 
 auto encode_image_payload(Lsn lsn, Id page_id, const Slice &image, char *buffer) -> Slice
@@ -206,7 +206,7 @@ auto encode_image_payload(Lsn lsn, Id page_id, const Slice &image, char *buffer)
 
     // Image (N B)
     std::memcpy(buffer, image.data(), image.size());
-    return Slice {saved, ImageDescriptor::kFixedSize + image.size()};
+    return Slice(saved, ImageDescriptor::kFixedSize + image.size());
 }
 
 auto extract_payload_lsn(const Slice &in) -> Lsn

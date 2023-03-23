@@ -2,15 +2,15 @@
 // This source code is licensed under the MIT License, which can be found in
 // LICENSE.md. See AUTHORS.md for a list of contributor names.
 
-#include "tree.h"
 #include "logging.h"
+#include "tree.h"
 #include "unit_tests.h"
 #include <gtest/gtest.h>
 
 namespace calicodb
 {
 
-static constexpr std::size_t kInitialRecordCount {100};
+static constexpr std::size_t kInitialRecordCount = 100;
 
 class NodeSlotTests
     : public TestWithPager,
@@ -431,9 +431,9 @@ TEST_F(NodeTests, ReadsAndWrites)
 
 TEST_F(NodeTests, NodeFreeBlockList)
 {
-    const std::size_t kMaxExtra {10};
+    const std::size_t kMaxExtra = 10;
     auto node = get_node(true);
-    std::size_t extra {kMaxExtra};
+    std::size_t extra = kMaxExtra;
 
     while (!node.overflow.has_value()) {
         write_record(node, "x", random.Generate(extra), node.header.cell_count);
@@ -861,7 +861,6 @@ INSTANTIATE_TEST_SUITE_P(
     EmptyTreeCursorTests,
     EmptyTreeCursorTests,
     ::testing::Values(TreeTestParameters {kMinPageSize}));
-
 
 class CursorTests : public TreeTests
 {

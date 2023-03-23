@@ -20,7 +20,7 @@ namespace calicodb
         }                              \
     } while (0)
 
-static constexpr Id kMaxId {std::numeric_limits<std::size_t>::max()};
+static constexpr Id kMaxId = {std::numeric_limits<std::size_t>::max()};
 
 auto Pager::open(const Parameters &param, Pager **out) -> Status
 {
@@ -35,11 +35,11 @@ auto Pager::open(const Parameters &param, Pager **out) -> Status
 
     // Allocate the frames, i.e. where pages from disk are stored in memory. Aligned to the page size, so it could
     // potentially be used for direct I/O.
-    AlignedBuffer buffer {
+    AlignedBuffer buffer(
         param.page_size * param.frame_count,
-        param.page_size};
+        param.page_size);
 
-    *out = new Pager {param, *file, std::move(buffer)};
+    *out = new Pager(param, *file, std::move(buffer));
     return Status::ok();
 }
 
@@ -238,7 +238,7 @@ auto Pager::truncate(std::size_t page_count) -> Status
     CALICODB_TRY(m_env->resize_file(m_filename, page_count * m_frames.page_size()));
 
     // Discard out-of-range cached pages.
-    for (Id id {page_count + 1}; id.value <= m_page_count; ++id.value) {
+    for (Id id = {page_count + 1}; id.value <= m_page_count; ++id.value) {
         auto *entry = m_cache.query(id);
         if (entry != nullptr) {
             if (entry->token.has_value()) {

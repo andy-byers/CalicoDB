@@ -24,7 +24,7 @@ static auto access_type_name(int64_t type) -> std::string
 class Benchmark final
 {
     static constexpr auto kFilename = "__bench_db__";
-    static constexpr std::size_t kKeyLength {16};
+    static constexpr std::size_t kKeyLength = 16;
     static constexpr std::size_t kNumRecords {10'000};
     static constexpr std::size_t kCheckpointInterval {1'000};
 

@@ -38,7 +38,7 @@ auto WalReader::read(std::string &out) -> Status
 
     for (;;) {
         const auto has_enough_space = m_tail->size() > m_offset + WalRecordHeader::kSize;
-        auto rest = Slice {*m_tail}.range(m_offset);
+        auto rest = Slice(*m_tail).range(m_offset);
 
         if (has_enough_space && WalRecordHeader::contains_record(rest)) {
             const auto temp = read_wal_record_header(rest);

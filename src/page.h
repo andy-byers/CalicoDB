@@ -5,10 +5,10 @@
 #ifndef CALICODB_PAGE_H
 #define CALICODB_PAGE_H
 
+#include "delta.h"
 #include "encoding.h"
 #include "frames.h"
 #include "header.h"
-#include "delta.h"
 #include "utils.h"
 
 namespace calicodb
@@ -39,7 +39,7 @@ struct LogicalPageId {
     {
     }
 
-    static constexpr std::size_t kSize {16};
+    static constexpr std::size_t kSize = 16;
 
     Id table_id;
     Id page_id;
@@ -82,12 +82,12 @@ public:
 
     [[nodiscard]] auto view(std::size_t offset) const -> Slice
     {
-        return Slice {m_data, m_size}.advance(offset);
+        return Slice(m_data, m_size).advance(offset);
     }
 
     [[nodiscard]] auto view(std::size_t offset, std::size_t size) const -> Slice
     {
-        return Slice {m_data, m_size}.range(offset, size);
+        return Slice(m_data, m_size).range(offset, size);
     }
 
     auto mutate(std::size_t offset, std::size_t size) -> char *

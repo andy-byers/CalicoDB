@@ -87,8 +87,8 @@ class WalRecordGenerator
 public:
     [[nodiscard]] auto setup_deltas(char *image, std::size_t image_size) -> std::vector<PageDelta>
     {
-        static constexpr std::size_t MAX_WIDTH {30};
-        static constexpr std::size_t MAX_SPREAD {20};
+        static constexpr std::size_t MAX_WIDTH = 30;
+        static constexpr std::size_t MAX_SPREAD = 20;
         std::vector<PageDelta> deltas;
 
         for (auto offset = random.Next(image_size / 10); offset < image_size;) {
@@ -111,7 +111,7 @@ private:
 class WalPayloadTests : public testing::Test
 {
 public:
-    static constexpr std::size_t kPageSize {0x80};
+    static constexpr std::size_t kPageSize = 0x80;
 
     WalPayloadTests()
         : image {random.Generate(kPageSize).to_string()},
@@ -167,7 +167,7 @@ class WalComponentTests
       public testing::Test
 {
 public:
-    static constexpr std::size_t kPageSize {0x200};
+    static constexpr std::size_t kPageSize = 0x200;
     const std::string kWalPrefix {"test-wal-"};
 
     WalComponentTests()
@@ -287,12 +287,12 @@ TEST_F(WalComponentTests, FragmentedRecord)
 TEST_F(WalComponentTests, HandlesRecordsAcrossPackedBlocks)
 {
     auto writer = make_writer(Id::root());
-    for (std::size_t i {1}; i < kPageSize * 2; ++i) {
+    for (std::size_t i = 1; i < kPageSize * 2; ++i) {
         ASSERT_OK(wal_write(writer, Lsn {i}, tools::integral_key(i)));
     }
     ASSERT_OK(writer.flush());
     auto reader = make_reader(Id::root());
-    for (std::size_t i {1}; i < kPageSize * 2; ++i) {
+    for (std::size_t i = 1; i < kPageSize * 2; ++i) {
         ASSERT_EQ(wal_read(reader), tools::integral_key(i));
     }
     assert_reader_is_done(reader);
@@ -414,7 +414,7 @@ TEST_F(WalComponentTests, PrefersToGetLsnFromCache)
 TEST_F(WalComponentTests, HandlesRecordsAcrossSparseBlocks)
 {
     auto writer = make_writer(Id::root());
-    for (std::size_t i {1}; i < kPageSize * 2; ++i) {
+    for (std::size_t i = 1; i < kPageSize * 2; ++i) {
         ASSERT_OK(wal_write(writer, Lsn {i}, tools::integral_key(i)));
         if (rand() % 8 == 0) {
             ASSERT_OK(writer.flush());
@@ -422,7 +422,7 @@ TEST_F(WalComponentTests, HandlesRecordsAcrossSparseBlocks)
     }
     ASSERT_OK(writer.flush());
     auto reader = make_reader(Id::root());
-    for (std::size_t i {1}; i < kPageSize * 2; ++i) {
+    for (std::size_t i = 1; i < kPageSize * 2; ++i) {
         ASSERT_EQ(wal_read(reader), tools::integral_key(i));
     }
     assert_reader_is_done(reader);
@@ -452,11 +452,11 @@ TEST_F(WalComponentTests, Corruption)
 {
     // Don't flush the writer, so it leaves a partial record in the WAL.
     auto writer = make_writer(Id::root());
-    for (std::size_t i {1}; i < kPageSize * 2; ++i) {
+    for (std::size_t i = 1; i < kPageSize * 2; ++i) {
         ASSERT_OK(wal_write(writer, Lsn {i}, tools::integral_key(i)));
     }
     auto reader = make_reader(Id::root());
-    for (std::size_t i {1}; i < kPageSize * 2; ++i) {
+    for (std::size_t i = 1; i < kPageSize * 2; ++i) {
         std::string data;
         auto s = wal_read_with_status(reader, data);
         if (s.is_not_found()) {

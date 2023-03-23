@@ -17,7 +17,7 @@ namespace calicodb
 class DeltaCompressionTest : public testing::Test
 {
 public:
-    static constexpr std::size_t kPageSize {0x200};
+    static constexpr std::size_t kPageSize = 0x200;
 
     [[nodiscard]] auto build_deltas(const std::vector<PageDelta> &unordered) const
     {
@@ -126,8 +126,8 @@ TEST_F(DeltaCompressionTest, OverlappingDeltasAreMerged)
 
 TEST_F(DeltaCompressionTest, SanityCheck)
 {
-    static constexpr std::size_t NUM_INSERTS {100};
-    static constexpr std::size_t MAX_DELTA_SIZE {10};
+    static constexpr std::size_t NUM_INSERTS = 100;
+    static constexpr std::size_t MAX_DELTA_SIZE = 10;
     std::vector<PageDelta> deltas;
     for (std::size_t i {}; i < NUM_INSERTS; ++i) {
         const auto offset = random.Next(kPageSize - MAX_DELTA_SIZE);
@@ -359,7 +359,7 @@ TEST_F(PagerTests, DataPersistsInEnv)
 class TruncationTests : public PagerTests
 {
 public:
-    static constexpr std::size_t kInitialPageCount {500};
+    static constexpr std::size_t kInitialPageCount = 500;
 
     auto SetUp() -> void override
     {
@@ -374,7 +374,7 @@ TEST_F(TruncationTests, AllocationAfterTruncation)
 {
     ASSERT_OK(pager->truncate(1));
 
-    for (std::size_t i {1}; i < kInitialPageCount; ++i) {
+    for (std::size_t i = 1; i < kInitialPageCount; ++i) {
         (void)allocate_write_release(tools::integral_key(i));
     }
 

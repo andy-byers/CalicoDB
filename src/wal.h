@@ -51,7 +51,7 @@ private:
     [[nodiscard]] auto log(const Slice &payload) -> Status;
     auto advance_lsn(Lsn *out) -> void;
 
-    static constexpr std::size_t kSegmentCutoff {32};
+    static constexpr std::size_t kSegmentCutoff = 32;
 
     // Maps each completed segment to the first LSN written to it.
     std::map<Id, Lsn> m_segments;

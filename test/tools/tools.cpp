@@ -467,7 +467,7 @@ auto fill_db(DB &db, Table &table, RandomGenerator &random, std::size_t num_reco
     const auto base_db_size = reinterpret_cast<const DBImpl &>(db).TEST_state().record_count;
     std::map<std::string, std::string> records;
 
-    for (; ; ) {
+    for (;;) {
         const auto db_size = reinterpret_cast<const DBImpl &>(db).TEST_state().record_count;
         if (db_size >= base_db_size + num_records) {
             break;

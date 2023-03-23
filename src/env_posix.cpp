@@ -3,6 +3,7 @@
 // LICENSE.md. See AUTHORS.md for a list of contributor names.
 
 #include "env_posix.h"
+#include "logging.h"
 #include <cstdarg>
 #include <dirent.h>
 #include <fcntl.h>
@@ -52,7 +53,7 @@ static constexpr int kFilePermissions {0644}; // -rw-r--r--
             return errno_to_status();
         }
         if (out != nullptr) {
-            *out = Slice {scratch, static_cast<std::size_t>(n)};
+            *out = Slice(scratch, static_cast<std::size_t>(n));
         }
         break;
     }
@@ -159,38 +160,14 @@ PosixInfoLogger::~PosixInfoLogger()
     close(m_file);
 }
 
-// Based off LevelDB.
 auto PosixInfoLogger::logv(const char *fmt, ...) -> void
 {
     std::va_list args;
-    for (int iteration {}; iteration < 2; ++iteration) {
-        va_start(args, fmt);
-        const auto rc = std::vsnprintf(m_buffer.data(), m_buffer.size(), fmt, args);
-        va_end(args);
+    va_start(args, fmt);
+    const auto length = write_to_string(m_buffer, fmt, args);
+    va_end(args);
 
-        if (rc < 0) {
-            break;
-        }
-        auto length = static_cast<std::size_t>(rc);
-
-        if (length >= m_buffer.size() - 1) {
-            // The message did not fit into the buffer.
-            if (iteration == 0) {
-                m_buffer.resize(length + 2);
-                continue;
-            }
-        }
-
-        // Add a newline if necessary.
-        if (m_buffer[length - 1] != '\n') {
-            m_buffer[length] = '\n';
-            ++length;
-        }
-
-        CALICODB_EXPECT_LE(length, m_buffer.size());
-        (void)file_write(m_file, Slice {m_buffer.data(), length});
-        break;
-    }
+    (void)file_write(m_file, Slice(m_buffer.data(), length));
     m_buffer.resize(kBufferSize);
 }
 

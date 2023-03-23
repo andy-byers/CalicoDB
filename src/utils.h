@@ -48,10 +48,10 @@ inline constexpr auto expect(bool cond, const char *repr, const char *file, int 
 
 } // namespace impl
 
-static constexpr std::size_t kMinPageSize {0x200};
-static constexpr std::size_t kMaxPageSize {0x8000};
-static constexpr std::size_t kMinFrameCount {16};
-static constexpr std::size_t kMaxCacheSize {1 << 30};
+static constexpr std::size_t kMinPageSize = 0x200;
+static constexpr std::size_t kMaxPageSize = 0x8000;
+static constexpr std::size_t kMinFrameCount = 16;
+static constexpr std::size_t kMaxCacheSize = 1 << 30;
 static constexpr auto kDefaultWalSuffix = "-wal-";
 static constexpr auto kDefaultLogSuffix = "-log";
 
@@ -80,8 +80,8 @@ constexpr auto is_power_of_two(T v) noexcept -> bool
 }
 
 struct Id {
-    static constexpr std::uint64_t kNull {0};
-    static constexpr std::uint64_t kRoot {1};
+    static constexpr std::uint64_t kNull = 0;
+    static constexpr std::uint64_t kRoot = 1;
 
     struct Hash {
         auto operator()(const Id &id) const -> std::uint64_t

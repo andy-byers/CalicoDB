@@ -196,8 +196,8 @@ auto DBImpl::open(Options sanitized) -> Status
     }
 
     // Create the root and default table handles.
-    CALICODB_TRY(create_table({}, kRootTableName, m_root));
-    CALICODB_TRY(create_table({}, kDefaultTableName, m_default));
+    CALICODB_TRY(create_table(TableOptions(), kRootTableName, m_root));
+    CALICODB_TRY(create_table(TableOptions(), kDefaultTableName, m_default));
 
     auto *cursor = new_cursor(*m_root);
     cursor->seek_first();
@@ -304,7 +304,7 @@ auto DBImpl::destroy(const Options &options, const std::string &filename) -> Sta
     if (options.info_log == nullptr) {
         (void)env->remove_file(path + kDefaultLogSuffix);
     }
-    Reader *reader {};
+    Reader *reader = nullptr;
     auto s = env->new_reader(path, reader);
 
     if (s.is_ok()) {
@@ -484,7 +484,7 @@ auto DBImpl::do_vacuum() -> Status
 
     // Update root locations in the name-to-root mapping.
     char logical_id[LogicalPageId::kSize];
-    for (std::size_t i {}; i < table_names.size(); ++i) {
+    for (std::size_t i = 0; i < table_names.size(); ++i) {
         const auto *root = m_tables.get(table_roots[i].table_id);
         CALICODB_EXPECT_NE(root, nullptr);
         encode_logical_id(root->root_id, logical_id);
@@ -756,7 +756,7 @@ auto DBImpl::construct_new_table(const Slice &name, LogicalPageId &root_id) -> S
     // Write an entry for the new table in the root table. This will not increase the
     // record count for the database.
     auto *db_root = m_tables.get(Id::root());
-    CALICODB_TRY(db_root->tree->put(name, Slice {payload, LogicalPageId::kSize}));
+    CALICODB_TRY(db_root->tree->put(name, Slice(payload, LogicalPageId::kSize)));
     ++m_state.batch_size;
     return Status::ok();
 }
@@ -902,7 +902,7 @@ auto DBImpl::recovery_phase_1() -> Status
         for (;;) {
             std::string reader_data;
             auto s = reader.read(reader_data);
-            Slice payload {reader_data};
+            Slice payload(reader_data);
 
             if (s.is_not_found()) {
                 break;

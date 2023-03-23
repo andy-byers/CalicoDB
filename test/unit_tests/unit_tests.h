@@ -176,8 +176,8 @@ public:
 class TestWithPager : public InMemoryTest
 {
 public:
-    const std::size_t kPageSize {0x200};
-    const std::size_t kFrameCount {16};
+    const std::size_t kPageSize = 0x200;
+    const std::size_t kFrameCount = 16;
 
     TestWithPager()
         : scratch(kPageSize, '\x00')
@@ -371,9 +371,9 @@ public:
     static unsigned default_seed;
 
     struct Parameters {
-        std::size_t mean_key_size {12};
-        std::size_t mean_value_size {18};
-        std::size_t spread {4};
+        std::size_t mean_key_size = 12;
+        std::size_t mean_value_size = 18;
+        std::size_t spread = 4;
         bool is_sequential {};
         bool is_unique {};
     };

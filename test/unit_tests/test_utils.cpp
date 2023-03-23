@@ -629,8 +629,14 @@ TEST_F(InterceptorTests, RespectsSyscallType)
     delete editor;
 }
 
+TEST(Logging, WriteFormattedString)
+{
+    std::string s;
+    write_to_string(s, "%s %d %f", "abc", 42, 1.0);
+}
 
-TEST(LevelDB_Logging, NumberToString) {
+TEST(LevelDB_Logging, NumberToString)
+{
     ASSERT_EQ("0", number_to_string(0));
     ASSERT_EQ("1", number_to_string(1));
     ASSERT_EQ("9", number_to_string(9));
@@ -656,19 +662,21 @@ TEST(LevelDB_Logging, NumberToString) {
 }
 
 void ConsumeDecimalNumberRoundtripTest(uint64_t number,
-                                       const std::string& padding = "") {
+                                       const std::string &padding = "")
+{
     std::string decimal_number = number_to_string(number);
     std::string input_string = decimal_number + padding;
     Slice input(input_string);
     Slice output = input;
     uint64_t result;
-    ASSERT_TRUE(consume_decimal_number(&output, &result));
+    ASSERT_TRUE(consume_decimal_number(output, &result));
     ASSERT_EQ(number, result);
     ASSERT_EQ(decimal_number.size(), output.data() - input.data());
     ASSERT_EQ(padding.size(), output.size());
 }
 
-TEST(LevelDB_Logging, ConsumeDecimalNumberRoundtrip) {
+TEST(LevelDB_Logging, ConsumeDecimalNumberRoundtrip)
+{
     ConsumeDecimalNumberRoundtripTest(0);
     ConsumeDecimalNumberRoundtripTest(1);
     ConsumeDecimalNumberRoundtripTest(9);
@@ -690,7 +698,8 @@ TEST(LevelDB_Logging, ConsumeDecimalNumberRoundtrip) {
     }
 }
 
-TEST(LevelDB_Logging, ConsumeDecimalNumberRoundtripWithPadding) {
+TEST(LevelDB_Logging, ConsumeDecimalNumberRoundtripWithPadding)
+{
     ConsumeDecimalNumberRoundtripTest(0, " ");
     ConsumeDecimalNumberRoundtripTest(1, "abc");
     ConsumeDecimalNumberRoundtripTest(9, "x");
@@ -708,14 +717,16 @@ TEST(LevelDB_Logging, ConsumeDecimalNumberRoundtripWithPadding) {
     }
 }
 
-void ConsumeDecimalNumberOverflowTest(const std::string& input_string) {
+void ConsumeDecimalNumberOverflowTest(const std::string &input_string)
+{
     Slice input(input_string);
     Slice output = input;
     uint64_t result;
-    ASSERT_EQ(false, consume_decimal_number(&output, &result));
+    ASSERT_EQ(false, consume_decimal_number(output, &result));
 }
 
-TEST(LevelDB_Logging, ConsumeDecimalNumberOverflow) {
+TEST(LevelDB_Logging, ConsumeDecimalNumberOverflow)
+{
     static_assert(std::numeric_limits<uint64_t>::max() == 18446744073709551615U,
                   "Test consistency check");
     ConsumeDecimalNumberOverflowTest("18446744073709551616");
@@ -735,16 +746,18 @@ TEST(LevelDB_Logging, ConsumeDecimalNumberOverflow) {
     ConsumeDecimalNumberOverflowTest("99999999999999999999");
 }
 
-void ConsumeDecimalNumberNoDigitsTest(const std::string& input_string) {
+void ConsumeDecimalNumberNoDigitsTest(const std::string &input_string)
+{
     Slice input(input_string);
     Slice output = input;
     uint64_t result;
-    ASSERT_EQ(false, consume_decimal_number(&output, &result));
+    ASSERT_EQ(false, consume_decimal_number(output, &result));
     ASSERT_EQ(input.data(), output.data());
     ASSERT_EQ(input.size(), output.size());
 }
 
-TEST(LevelDB_Logging, ConsumeDecimalNumberNoDigits) {
+TEST(LevelDB_Logging, ConsumeDecimalNumberNoDigits)
+{
     ConsumeDecimalNumberNoDigitsTest("");
     ConsumeDecimalNumberNoDigitsTest(" ");
     ConsumeDecimalNumberNoDigitsTest("a");
@@ -759,15 +772,15 @@ TEST(Logging, ConvenienceFunctions)
 {
     std::string buffer;
 
-    append_number(&buffer, 123);
+    append_number(buffer, 123);
     ASSERT_EQ(buffer, number_to_string(123));
     buffer.clear();
 
-    append_escaped_string(&buffer, "\t\n\r");
+    append_escaped_string(buffer, "\t\n\r");
     ASSERT_EQ(buffer, escape_string("\t\n\r"));
     buffer.clear();
 
-    append_double(&buffer, 1.0);
+    append_double(buffer, 1.0);
     ASSERT_EQ(buffer, double_to_string(1.0));
 }
 

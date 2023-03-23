@@ -354,7 +354,8 @@ TEST_F(TwoTableTests, RecordsPersist)
     tools::expect_db_contains(*db, *table_2, records_2);
 }
 
-class MultiTableVacuumRunner : public InMemoryTest {
+class MultiTableVacuumRunner : public InMemoryTest
+{
 public:
     const std::size_t kRecordCount {100'000};
 

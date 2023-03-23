@@ -45,7 +45,7 @@ enum WalRecordType : char {
 // The CRC field contains the CRC of the type byte, as well as the payload
 // fragment that follows the header.
 struct WalRecordHeader {
-    static constexpr std::size_t kSize {7};
+    static constexpr std::size_t kSize = 7;
 
     [[nodiscard]] static auto contains_record(const Slice &data) -> bool
     {
@@ -75,7 +75,7 @@ struct WalRecordHeader {
 // where on the page the change took place, and "size" is the number of bytes in "data". Both
 // "offset" and "size" are 16-bit unsigned integers.
 struct DeltaDescriptor {
-    static constexpr std::size_t kFixedSize {19};
+    static constexpr std::size_t kFixedSize = 19;
 
     struct Delta {
         std::size_t offset {};
@@ -100,7 +100,7 @@ struct DeltaDescriptor {
 // stored explicitly in the payload: it is known from the total size of the record fragments
 // it is composed from.
 struct ImageDescriptor {
-    static constexpr std::size_t kFixedSize {17};
+    static constexpr std::size_t kFixedSize = 17;
 
     Id page_id;
     Lsn lsn;
@@ -115,7 +115,7 @@ struct ImageDescriptor {
 //      1       8     LSN
 //      9       1     Start
 struct VacuumDescriptor {
-    static constexpr std::size_t kFixedSize {10};
+    static constexpr std::size_t kFixedSize = 10;
 
     Lsn lsn;
     bool is_start {};
@@ -133,7 +133,7 @@ using PayloadDescriptor = std::variant<
 [[nodiscard]] auto encode_image_payload(Lsn lsn, Id page_id, const Slice &image, char *buffer) -> Slice;
 [[nodiscard]] auto encode_vacuum_payload(Lsn lsn, bool is_start, char *buffer) -> Slice;
 
-static constexpr std::size_t kWalBlockScale {4};
+static constexpr std::size_t kWalBlockScale = 4;
 
 [[nodiscard]] inline constexpr auto wal_block_size(std::size_t page_size) -> std::size_t
 {

@@ -147,7 +147,7 @@ public:
         delete options.info_log;
     }
 
-    std::size_t frame_count {64};
+    std::size_t frame_count = 64;
     Options options;
 };
 
@@ -260,8 +260,8 @@ TEST_F(BasicDatabaseTests, InsertMultipleGroups)
 
 TEST_F(BasicDatabaseTests, DataPersists)
 {
-    static constexpr std::size_t NUM_ITERATIONS {5};
-    static constexpr std::size_t GROUP_SIZE {10};
+    static constexpr std::size_t NUM_ITERATIONS = 5;
+    static constexpr std::size_t GROUP_SIZE = 10;
 
     auto s = Status::ok();
     RecordGenerator generator;
@@ -740,7 +740,6 @@ INSTANTIATE_TEST_SUITE_P(
         ErrorWrapper {"./test", tools::Interceptor::kWrite, 1},
         ErrorWrapper {"./test", tools::Interceptor::kWrite, 2}));
 
-
 class TruncationErrorTests : public DbErrorTests
 {
 protected:
@@ -1157,7 +1156,7 @@ protected:
         ASSERT_OK(db->checkpoint());
 
         checkpoints[true] = tools::fill_db(*db, random, 5'678);
-        for (const auto &record: checkpoints[false]) {
+        for (const auto &record : checkpoints[false]) {
             checkpoints[true].insert(record);
         }
     }
