@@ -489,10 +489,12 @@ auto expect_db_contains(const DB &db, const std::map<std::string, std::string> &
 
 auto expect_db_contains(const DB &db, const Table &table, const std::map<std::string, std::string> &map) -> void
 {
+    std::size_t i {};
     for (const auto &[key, value] : map) {
         std::string result;
         CHECK_OK(db.get(table, key, &result));
         CHECK_EQ(result, value);
+        ++i;
     }
 }
 

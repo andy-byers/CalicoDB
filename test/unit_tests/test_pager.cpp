@@ -96,36 +96,6 @@ TEST_F(DeltaCompressionTest, ConnectedDeltasAreMerged)
     ASSERT_EQ(deltas[0].size, 4);
 }
 
-
-TEST_F(DeltaCompressionTest, asdfasfa)
-{
-    std::vector<PageDelta> deltas {
-//        {0, 1},
-//        {2, 1},
-        {4, 1},
-        {6, 1},
-        {8, 1},
-        {10, 5},
-        {20, 5},
-        {30, 5},
-    };
-    std::vector<int> cs(40);
-    for (const auto &d: deltas){
-        for(std::size_t i{};i<d.size;++i){
-            cs[d.offset+i]=1;
-        }
-    }
-    for(std::size_t i {}; i <cs.size();++i){
-        std::cerr<<(i%10);
-    }    std::cerr<<'\n';
-    for(std::size_t i {}; i <cs.size();++i){
-        std::cerr<<(cs[i]?'*':'.');
-    }
-    std::cerr<<'\n';
-    // Overlaps the first delta by 5.
-    insert_delta(deltas, {3, 10});
-}
-
 TEST_F(DeltaCompressionTest, OverlappingDeltasAreMerged)
 {
     auto deltas = build_deltas({

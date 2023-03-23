@@ -188,6 +188,23 @@ TEST_F(TableTests, TableCannotBeOpenedTwice)
     table_1 = nullptr;
 }
 
+TEST_F(TableTests, RecordsPersist)
+{
+    tools::RandomGenerator random;
+    const auto records_0 = tools::fill_db(*db, random, 1'000);
+    const auto records_1 = tools::fill_db(*db, *table, random, 1'000);
+
+    tools::expect_db_contains(*db, records_0);
+    tools::expect_db_contains(*db, *table, records_1);
+    ASSERT_OK(db->checkpoint());
+
+    reopen_db();
+    reopen_tables();
+
+    tools::expect_db_contains(*db, records_0);
+    tools::expect_db_contains(*db, *table, records_1);
+}
+
 class TwoTableTests : public TableTests
 {
 public:
@@ -317,9 +334,29 @@ TEST_F(TwoTableTests, FindExistingTables)
     ASSERT_TRUE(table_names.empty());
 }
 
+TEST_F(TwoTableTests, RecordsPersist)
+{
+    tools::RandomGenerator random;
+    const auto records_0 = tools::fill_db(*db, random, 1'000);
+    const auto records_1 = tools::fill_db(*db, *table_1, random, 1'000);
+    const auto records_2 = tools::fill_db(*db, *table_2, random, 1'000);
+
+    tools::expect_db_contains(*db, records_0);
+    tools::expect_db_contains(*db, *table_1, records_1);
+    tools::expect_db_contains(*db, *table_2, records_2);
+    ASSERT_OK(db->checkpoint());
+
+    reopen_db();
+    reopen_tables();
+
+    tools::expect_db_contains(*db, records_0);
+    tools::expect_db_contains(*db, *table_1, records_1);
+    tools::expect_db_contains(*db, *table_2, records_2);
+}
+
 class MultiTableVacuumRunner : public InMemoryTest {
 public:
-    const std::size_t kRecordCount {1'000};
+    const std::size_t kRecordCount {100'000};
 
     explicit MultiTableVacuumRunner(std::size_t num_tables)
     {
@@ -331,8 +368,8 @@ public:
 
     ~MultiTableVacuumRunner() override
     {
-        for (const auto *table : m_tables) {
-            delete table;
+        for (auto *table : m_tables) {
+            m_db->close_table(table);
         }
         delete m_db;
     }
@@ -341,8 +378,9 @@ public:
     {
         for (std::size_t i {}; i + step <= n; i += step) {
             for (std::size_t j {}; j < m_tables.size(); ++j) {
-                const auto records = tools::fill_db(*m_db, *m_tables[j], m_random, step);
-                m_records[j].insert(begin(records), end(records));
+                for (const auto &[key, value] : tools::fill_db(*m_db, *m_tables[j], m_random, step)) {
+                    m_records[j].insert_or_assign(key, value);
+                }
             }
         }
     }
@@ -364,28 +402,30 @@ public:
         ASSERT_OK(m_db->vacuum());
         db_impl(m_db)->TEST_validate();
 
-        auto tab = db_impl(m_db)->TEST_tables();
-        std::cerr << tab.get(Id {2})->tree->TEST_to_string() << "\n\n";
-
         for (std::size_t i {}; i < m_tables.size(); ++i) {
             tools::expect_db_contains(*m_db, *m_tables[i], m_records[i]);
-            delete m_tables[i];
+            m_db->close_table(m_tables[i]);
         }
-        m_tables.clear();
         delete m_db;
         m_db = nullptr;
 
         // Make sure all of this stuff can be reverted with the WAL and that the
         // default table isn't messed up.
         ASSERT_OK(DB::open(m_options, kFilename, m_db));
-
-        tab = db_impl(m_db)->TEST_tables();
-        std::cerr << tab.get(Id {2})->tree->TEST_to_string() << "\n\n";
-
         tools::expect_db_contains(*m_db, m_committed);
 
-        delete m_db;
-        m_db = nullptr;
+        // The database would get confused if the root mapping wasn't updated.
+        for (std::size_t i {}; i < m_tables.size(); ++i) {
+            const auto name = "table_" + tools::integral_key(i);
+            ASSERT_OK(m_db->create_table({}, name, m_tables[i]));
+            m_records[i].clear();
+        }
+        fill_user_tables(kRecordCount, kRecordCount);
+        for (std::size_t i {}; i < m_tables.size(); ++i) {
+            tools::expect_db_contains(*m_db, *m_tables[i], m_records[i]);
+        }
+
+        db_impl(m_db)->TEST_validate();
     }
 
 private:
@@ -421,55 +461,53 @@ private:
     DB *m_db {};
 };
 
-// TODO: Doesn't work!
-//class MultiTableVacuumTests
-//    : public MultiTableVacuumRunner,
-//      public testing::TestWithParam<std::size_t>
-//{
-//public:
-//    explicit MultiTableVacuumTests()
-//        : MultiTableVacuumRunner {GetParam()}
-//    {
-//    }
-//
-//    ~MultiTableVacuumTests() override = default;
-//};
-//
-//TEST_P(MultiTableVacuumTests, EmptyTables)
-//{
-//    run();
-//}
-//
-//TEST_P(MultiTableVacuumTests, FilledTables)
-//{
-//    fill_user_tables(kRecordCount, kRecordCount / 2);
-//    run();
-//}
-//
-//TEST_P(MultiTableVacuumTests, FilledTablesWithInterleavedPages)
-//{
-//    fill_user_tables(kRecordCount, 10);
-//    run();
-//}
-//
-//TEST_P(MultiTableVacuumTests, PartiallyFilledTables)
-//{
-//    fill_user_tables(kRecordCount, kRecordCount / 2);
-//    erase_from_user_tables(kRecordCount / 2);
-//    run();
-//}
-//
-//TEST_P(MultiTableVacuumTests, PartiallyFilledTablesWithInterleavedPages)
-//{
-//    fill_user_tables(kRecordCount, 10);
-//    erase_from_user_tables(kRecordCount / 2);
-//    run();
-//}
-//
-//INSTANTIATE_TEST_SUITE_P(
-//    MultiTableVacuumTests,
-//    MultiTableVacuumTests,
-//    ::testing::Values(0, 1, 2, 5, 10));
+class MultiTableVacuumTests
+    : public MultiTableVacuumRunner,
+      public testing::TestWithParam<std::size_t>
+{
+public:
+    explicit MultiTableVacuumTests()
+        : MultiTableVacuumRunner {GetParam()}
+    {
+    }
 
+    ~MultiTableVacuumTests() override = default;
+};
+
+TEST_P(MultiTableVacuumTests, EmptyTables)
+{
+    run();
+}
+
+TEST_P(MultiTableVacuumTests, FilledTables)
+{
+    fill_user_tables(kRecordCount, kRecordCount / 2);
+    run();
+}
+
+TEST_P(MultiTableVacuumTests, FilledTablesWithInterleavedPages)
+{
+    fill_user_tables(kRecordCount, 10);
+    run();
+}
+
+TEST_P(MultiTableVacuumTests, PartiallyFilledTables)
+{
+    fill_user_tables(kRecordCount, kRecordCount / 2);
+    erase_from_user_tables(kRecordCount / 2);
+    run();
+}
+
+TEST_P(MultiTableVacuumTests, PartiallyFilledTablesWithInterleavedPages)
+{
+    fill_user_tables(kRecordCount, 10);
+    erase_from_user_tables(kRecordCount / 2);
+    run();
+}
+
+INSTANTIATE_TEST_SUITE_P(
+    MultiTableVacuumTests,
+    MultiTableVacuumTests,
+    ::testing::Values(0, 1, 2, 5, 10));
 
 } // namespace calicodb

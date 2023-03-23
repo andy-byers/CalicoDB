@@ -39,8 +39,7 @@ auto Pager::open(const Parameters &param, Pager **out) -> Status
         param.page_size * param.frame_count,
         param.page_size};
 
-    auto *ptr = new Pager {param, *file, std::move(buffer)};
-    *out = ptr;
+    *out = new Pager {param, *file, std::move(buffer)};
     return Status::ok();
 }
 
@@ -206,8 +205,11 @@ auto Pager::upgrade(Page &page, int important) -> void
 
     // Skip writing an image record if there is definitely one for this page during this transaction.
     if (m_state->is_running && page_lsn <= m_state->commit_lsn) {
+        Lsn image_lsn;
         const auto image = page.view(0, watch_size);
-        const auto s = m_wal->log_image(page.id(), image, nullptr);
+        const auto s = m_wal->log_image(page.id(), image, &image_lsn);
+        write_page_lsn(page, image_lsn);
+
         if (!s.is_ok()) {
             SET_STATUS(s);
         }

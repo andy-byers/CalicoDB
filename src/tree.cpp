@@ -601,32 +601,6 @@ static auto merge_root(Node &root, Node &child) -> void
     root.meta = child.meta;
 }
 
-struct SeekResult {
-    unsigned index {};
-    bool exact {};
-};
-
-using FetchKey = std::function<Slice(std::size_t)>;
-
-static auto seek_binary(unsigned n, const Slice &key, const FetchKey &fetch) -> SeekResult
-{
-    auto upper {n};
-    unsigned lower {};
-
-    while (lower < upper) {
-        const auto mid = (lower + upper) / 2;
-        const auto rhs = fetch(mid);
-        if (const auto cmp = key.compare(rhs); cmp < 0) {
-            upper = mid;
-        } else if (cmp > 0) {
-            lower = mid + 1;
-        } else {
-            return {mid, true};
-        }
-    }
-    return {lower, false};
-}
-
 NodeIterator::NodeIterator(Node &node, const Parameters &param)
     : m_pager {param.pager},
       m_lhs_key {param.lhs_key},
@@ -674,8 +648,30 @@ auto NodeIterator::seek(const Slice &key, bool *found) -> Status
         return out;
     };
 
-    const auto [index, exact] = seek_binary(
-        m_node->header.cell_count, key, fetch);
+    struct Result {
+        unsigned index {};
+        bool exact {};
+    };
+
+    const auto binary_search = [&fetch, n = m_node->header.cell_count](const auto &lhs) -> Result {
+        auto upper = n;
+        unsigned lower {};
+
+        while (lower < upper) {
+            const auto mid = (lower + upper) / 2;
+            const auto rhs = fetch(mid);
+            if (const auto cmp = lhs.compare(rhs); cmp < 0) {
+                upper = mid;
+            } else if (cmp > 0) {
+                lower = mid + 1;
+            } else {
+                return {mid, true};
+            }
+        }
+        return {lower, false};
+    };
+
+    const auto [index, exact] = binary_search(key);
 
     m_index = index;
     if (found != nullptr) {

@@ -126,11 +126,12 @@ TEST_F(WalPagerInteractionTests, AllocateTruncatedPages)
     pager->release(std::move(page));
     ASSERT_EQ(wal->current_lsn().value, ++current_lsn_value);
 
-    // If the page isn't updated, no delta is written.
+    // If the page isn't updated by the user, a delta is still written due to the
+    // page LSN change.
     ASSERT_OK(pager->allocate(page));
     ASSERT_EQ(wal->current_lsn().value, ++current_lsn_value);
     pager->release(std::move(page));
-    ASSERT_EQ(wal->current_lsn().value, current_lsn_value);
+    ASSERT_EQ(wal->current_lsn().value, ++current_lsn_value);
 
     ASSERT_OK(pager->checkpoint());
 
