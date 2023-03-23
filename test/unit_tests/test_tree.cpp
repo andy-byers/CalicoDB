@@ -660,6 +660,12 @@ static auto add_initial_records(TreeTests &test, bool has_overflow = false)
     }
 }
 
+TEST_P(TreeTests, ToStringDoesNotCrash)
+{
+    add_initial_records(*this);
+    (void)tree->TEST_to_string();
+}
+
 TEST_P(TreeTests, ResolvesUnderflowsOnRightmostPosition)
 {
     add_initial_records(*this);
@@ -830,6 +836,32 @@ INSTANTIATE_TEST_SUITE_P(
         TreeTestParameters {kMaxPageSize, 0b01},
         TreeTestParameters {kMaxPageSize, 0b10},
         TreeTestParameters {kMaxPageSize, 0b11}));
+
+class EmptyTreeCursorTests : public TreeTests
+{
+protected:
+    auto SetUp() -> void override
+    {
+        TreeTests::SetUp();
+    }
+};
+
+TEST_P(EmptyTreeCursorTests, KeyAndValueUseSeparateMemory)
+{
+    std::unique_ptr<Cursor> cursor {CursorInternal::make_cursor(*tree)};
+    cursor->seek_first();
+    ASSERT_FALSE(cursor->is_valid());
+    cursor->seek_last();
+    ASSERT_FALSE(cursor->is_valid());
+    cursor->seek("42");
+    ASSERT_FALSE(cursor->is_valid());
+}
+
+INSTANTIATE_TEST_SUITE_P(
+    EmptyTreeCursorTests,
+    EmptyTreeCursorTests,
+    ::testing::Values(TreeTestParameters {kMinPageSize}));
+
 
 class CursorTests : public TreeTests
 {

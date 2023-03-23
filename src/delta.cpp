@@ -44,31 +44,26 @@ auto insert_delta(std::vector<PageDelta> &deltas, PageDelta delta) -> void
     if (delta.size == 0) {
         return;
     }
-    if (deltas.empty()) {
-        deltas.emplace_back(delta);
-        return;
-    }
-    auto itr = std::upper_bound(begin(deltas), end(deltas), delta, [](const auto &lhs, const auto &rhs) {
-        return lhs.offset <= rhs.offset;
-    });
-    const auto try_merge = [&itr](const auto &lhs, const auto &rhs) {
-        if (can_merge_ordered_deltas(lhs, rhs)) {
-            *itr = merge_deltas(lhs, rhs);
-            return true;
-        }
-        return false;
-    };
-    if (itr != end(deltas) && try_merge(delta, *itr)) {
-        return;
-    }
-    if (itr != begin(deltas)) {
-        --itr;
-        if (try_merge(*itr, delta)) {
+    auto after = std::upper_bound(
+        begin(deltas), end(deltas), delta.offset,
+        [](auto offset, const auto &rhs) {
+            return offset < rhs.offset;
+        });
+
+    if (after != end(deltas)) {
+        if (can_merge_ordered_deltas(delta, *after)) {
+            *after = merge_deltas(delta, *after);
             return;
         }
-        ++itr;
     }
-    deltas.insert(itr, delta);
+    if (after != begin(deltas)) {
+        auto before = prev(after);
+        if (can_merge_ordered_deltas(*before, delta)) {
+            *before = merge_deltas(*before, delta);
+            return;
+        }
+    }
+    deltas.insert(after, delta);
 }
 
 } // namespace calicodb

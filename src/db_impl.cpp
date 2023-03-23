@@ -362,18 +362,24 @@ auto DBImpl::get_property(const Slice &name, std::string *out) const -> bool
     if (name.starts_with("calicodb.")) {
         const auto prop = name.range(std::strlen("calicodb."));
 
-        if (prop == "tables") {
-            // TODO: This should provide information about open tables, or maybe all tables.
+        if (prop == "stats") {
             if (out != nullptr) {
-                out->append("<NOT IMPLEMENTED>");
-            }
-            return true;
-
-        } else if (prop == "stats") {
-            // TODO: This should provide information about how much data was written to/read from different files,
-            //       number of cache hits and misses, and maybe other things.
-            if (out != nullptr) {
-                out->append("<NOT IMPLEMENTED>");
+                char buffer[256];
+                std::snprintf(
+                    buffer, sizeof(buffer),
+                    "Name          Value\n"
+                    "-------------------\n"
+                    "DB read(MB)   %8.0f\n"
+                    "DB write(MB)  %8.0f\n"
+                    "WAL write(MB) %8.0f\n"
+                    "Cache hits    %ld\n"
+                    "Cache misses  %ld\n",
+                    static_cast<double>(m_pager->bytes_read()) / 1048576.0,
+                    static_cast<double>(m_pager->bytes_written()) / 1048576.0,
+                    static_cast<double>(m_wal->bytes_written()) / 1048576.0,
+                    m_pager->hits(),
+                    m_pager->misses());
+                out->append(buffer);
             }
             return true;
         }
