@@ -11,10 +11,10 @@ namespace calicodb
 {
 
 WriteAheadLog::WriteAheadLog(const Parameters &param)
-    : m_prefix {param.prefix},
+    : m_prefix(param.prefix),
       m_data_buffer(wal_scratch_size(param.page_size), '\x00'),
       m_tail_buffer(wal_block_size(param.page_size), '\x00'),
-      m_env {param.env}
+      m_env(param.env)
 {
     CALICODB_EXPECT_NE(m_env, nullptr);
 }
@@ -160,20 +160,20 @@ auto WriteAheadLog::synchronize(bool flush) -> Status
 
 auto WriteAheadLog::cleanup(Lsn recovery_lsn) -> Status
 {
-    for (auto prev = begin(m_segments);;) {
-        if (prev == end(m_segments)) {
+    for (auto before = begin(m_segments);;) {
+        if (before == end(m_segments)) {
             return Status::ok();
         }
-        auto next = prev;
-        if (++next == end(m_segments)) {
+        const auto after = next(before);
+        if (after == end(m_segments)) {
             return Status::ok();
         }
-        CALICODB_TRY(cache_first_lsn(*m_env, m_prefix, next));
-        if (recovery_lsn < next->second) {
+        CALICODB_TRY(cache_first_lsn(*m_env, m_prefix, after));
+        if (recovery_lsn < after->second) {
             return Status::ok();
         }
-        CALICODB_TRY(m_env->remove_file(encode_segment_name(m_prefix, prev->first)));
-        prev = m_segments.erase(prev);
+        CALICODB_TRY(m_env->remove_file(encode_segment_name(m_prefix, before->first)));
+        before = m_segments.erase(before);
     }
 }
 

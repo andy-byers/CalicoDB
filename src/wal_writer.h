@@ -24,11 +24,11 @@ public:
 
 private:
     std::uint32_t m_type_crc[kNumRecordTypes + 1] {};
-    std::string *m_tail {};
-    Logger *m_file {};
-    std::size_t m_block {};
-    std::size_t m_offset {};
-    bool m_flushed {};
+    std::string *m_tail = nullptr;
+    Logger *m_file = nullptr;
+    std::size_t m_block = 0;
+    std::size_t m_offset = 0;
+    bool m_flushed = false;
 };
 
 } // namespace calicodb

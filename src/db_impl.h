@@ -31,9 +31,10 @@ static constexpr auto kDefaultTableName = "calicodb.default";
 
 struct TableState {
     LogicalPageId root_id;
-    Tree *tree {};
-    bool write {};
-    bool open {};
+    TreeStatistics stats;
+    Tree *tree = nullptr;
+    bool write = false;
+    bool open = false;
 };
 
 class TableImpl : public Table

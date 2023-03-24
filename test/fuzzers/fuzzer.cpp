@@ -8,7 +8,7 @@ namespace calicodb
 {
 
 DbFuzzer::DbFuzzer(std::string path, Options *options)
-    : m_path {std::move(path)}
+    : m_path(std::move(path))
 {
     if (options != nullptr) {
         m_options = *options;

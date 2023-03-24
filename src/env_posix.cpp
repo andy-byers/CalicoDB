@@ -109,8 +109,8 @@ static constexpr int kFilePermissions = 0644; // -rw-r--r--
 }
 
 PosixReader::PosixReader(std::string filename, int file)
-    : m_filename {std::move(filename)},
-      m_file {file}
+    : m_filename(std::move(filename)),
+      m_file(file)
 {
     CALICODB_EXPECT_GE(file, 0);
 }
@@ -127,8 +127,8 @@ auto PosixReader::read(std::size_t offset, std::size_t size, char *scratch, Slic
 }
 
 PosixEditor::PosixEditor(std::string filename, int file)
-    : m_filename {std::move(filename)},
-      m_file {file}
+    : m_filename(std::move(filename)),
+      m_file(file)
 {
     CALICODB_EXPECT_GE(file, 0);
 }
@@ -156,8 +156,8 @@ auto PosixEditor::sync() -> Status
 }
 
 PosixLogger::PosixLogger(std::string filename, int file)
-    : m_filename {std::move(filename)},
-      m_file {file}
+    : m_filename(std::move(filename)),
+      m_file(file)
 {
     CALICODB_EXPECT_GE(file, 0);
 }
@@ -179,8 +179,8 @@ auto PosixLogger::sync() -> Status
 
 PosixInfoLogger::PosixInfoLogger(std::string filename, int file)
     : m_buffer(kBufferSize, '\0'),
-      m_filename {std::move(filename)},
-      m_file {file}
+      m_filename(std::move(filename)),
+      m_file(file)
 {
     CALICODB_EXPECT_GE(file, 0);
 }

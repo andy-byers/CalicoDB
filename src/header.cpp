@@ -5,7 +5,6 @@
 #include "header.h"
 #include "crc.h"
 #include "encoding.h"
-#include "page.h"
 
 namespace calicodb
 {

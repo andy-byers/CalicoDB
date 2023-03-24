@@ -41,7 +41,7 @@ public:
     }
 
     Options options;
-    DB *db {};
+    DB *db = nullptr;
 };
 
 #ifndef NDEBUG
@@ -127,7 +127,7 @@ public:
         return DefaultTableTests::reopen_db();
     }
 
-    Table *table {};
+    Table *table = nullptr;
 };
 
 TEST_F(TableTests, TablesAreRegistered)
@@ -244,8 +244,8 @@ public:
         return TableTests::reopen_db();
     }
 
-    Table *table_1 {};
-    Table *table_2 {};
+    Table *table_1 = nullptr;
+    Table *table_2 = nullptr;
 };
 
 TEST_F(TwoTableTests, TablesHaveIndependentKeys)
@@ -459,7 +459,7 @@ private:
     std::vector<Map> m_records;
     Map m_committed;
     Options m_options;
-    DB *m_db {};
+    DB *m_db = nullptr;
 };
 
 class MultiTableVacuumTests

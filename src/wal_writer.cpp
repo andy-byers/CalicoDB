@@ -9,8 +9,8 @@ namespace calicodb
 {
 
 WalWriter::WalWriter(Logger &file, std::string &tail)
-    : m_tail {&tail},
-      m_file {&file}
+    : m_tail(&tail),
+      m_file(&file)
 {
     for (std::size_t i = 0; i <= kNumRecordTypes; ++i) {
         const auto type = static_cast<char>(i);

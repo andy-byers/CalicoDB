@@ -24,12 +24,12 @@ public:
 
     struct Parameters {
         std::string filename;
-        Env *env {};
-        WriteAheadLog *wal {};
-        InfoLogger *info_log {};
-        DBState *state {};
-        std::size_t frame_count {};
-        std::size_t page_size {};
+        Env *env = nullptr;
+        WriteAheadLog *wal = nullptr;
+        InfoLogger *info_log = nullptr;
+        DBState *state = nullptr;
+        std::size_t frame_count = 0;
+        std::size_t page_size = 0;
     };
 
     [[nodiscard]] static auto open(const Parameters &param, Pager **out) -> Status;
@@ -66,12 +66,12 @@ private:
     FrameManager m_frames;
     DirtyTable m_dirty;
     PageCache m_cache;
-    WriteAheadLog *m_wal {};
-    Env *m_env {};
-    InfoLogger *m_info_log {};
-    DBState *m_state {};
+    Env *m_env = nullptr;
+    InfoLogger *m_info_log = nullptr;
+    WriteAheadLog *m_wal = nullptr;
+    DBState *m_state = nullptr;
     Lsn m_recovery_lsn;
-    std::size_t m_page_count {};
+    std::size_t m_page_count = 0;
 };
 
 } // namespace calicodb

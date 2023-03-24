@@ -56,7 +56,7 @@ struct CacheEntry {
     using Token = std::optional<DirtyTable::Iterator>;
 
     Id page_id;
-    std::size_t index {};
+    std::size_t index = 0;
     unsigned refcount {};
 
     // If the page represented by this entry is dirty, this should point
@@ -193,11 +193,11 @@ private:
     std::vector<Frame> m_frames;
     std::list<std::size_t> m_unpinned;
     std::unique_ptr<Editor> m_file;
-    std::size_t m_page_size {};
-    std::size_t m_refsum {};
+    std::size_t m_page_size = 0;
+    std::size_t m_refsum = 0;
 
-    mutable std::size_t m_bytes_read {};
-    mutable std::size_t m_bytes_written {};
+    mutable std::size_t m_bytes_read = 0;
+    mutable std::size_t m_bytes_written = 0;
 };
 
 } // namespace calicodb

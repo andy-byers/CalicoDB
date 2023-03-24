@@ -65,7 +65,7 @@ auto Status::operator=(const Status &rhs) -> Status &
 auto Status::operator=(Status &&rhs) noexcept -> Status &
 {
     if (this != &rhs) {
-        m_data = std::move(rhs.m_data);
+        std::swap(m_data, rhs.m_data);
     }
     return *this;
 }

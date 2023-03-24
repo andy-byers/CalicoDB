@@ -22,8 +22,8 @@ namespace calicodb
 }
 
 WalReader::WalReader(Reader &file, std::string &tail)
-    : m_tail {&tail},
-      m_file {&file}
+    : m_tail(&tail),
+      m_file(&file)
 {
 }
 
@@ -33,7 +33,7 @@ auto WalReader::read(std::string &out) -> Status
         CALICODB_TRY(read_tail(*m_file, 0, *m_tail));
     }
     WalRecordHeader header;
-    std::size_t end {};
+    std::size_t end = 0;
     out.clear();
 
     for (;;) {

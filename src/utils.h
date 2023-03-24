@@ -96,9 +96,8 @@ struct Id {
 
     template <class T>
     explicit Id(T t)
-        : value {static_cast<std::uint32_t>(t)}
+        : value(static_cast<std::uint32_t>(t))
     {
-        CALICODB_EXPECT_LE(t, std::numeric_limits<std::uint32_t>::max());
     }
 
     [[nodiscard]] static auto from_index(std::size_t index) noexcept -> Id
@@ -132,7 +131,7 @@ struct Id {
         return value - 1;
     }
 
-    std::uint32_t value {kNull};
+    std::uint32_t value = kNull;
 };
 
 inline auto operator<(Id lhs, Id rhs) -> bool
@@ -171,7 +170,7 @@ struct Lsn {
 
     template <class T>
     explicit Lsn(T t)
-        : value {static_cast<std::uint64_t>(t)}
+        : value(static_cast<std::uint64_t>(t))
     {
     }
 
@@ -190,7 +189,7 @@ struct Lsn {
         return value == kNull;
     }
 
-    std::uint64_t value {kNull};
+    std::uint64_t value = kNull;
 };
 
 inline auto operator<(Lsn lhs, Lsn rhs) -> bool
@@ -215,12 +214,18 @@ inline auto operator!=(Lsn lhs, Lsn rhs) -> bool
 
 struct DBState {
     Status status;
-    std::size_t batch_size {};
-    std::size_t record_count {};
+    std::size_t batch_size = 0;
+    std::size_t record_count = 0;
     Lsn commit_lsn;
     Id freelist_head;
     Id max_page_id;
-    bool is_running {};
+    bool is_running = false;
+};
+
+struct TreeStatistics {
+    std::size_t smo_count = 0;
+    std::size_t bytes_read = 0;
+    std::size_t bytes_written = 0;
 };
 
 } // namespace calicodb

@@ -351,7 +351,7 @@ TEST_F(PagerTests, DataPersistsInEnv)
         (void)allocate_write_release(tools::integral_key<16>(i));
     }
     for (std::size_t i = 0; i < kFrameCount * 10; ++i) {
-        ASSERT_EQ(acquire_read_release(Id {i + 1}, 16), tools::integral_key<16>(i))
+        ASSERT_EQ(acquire_read_release(Id(i + 1), 16), tools::integral_key<16>(i))
             << "mismatch on page " << i + 1;
     }
 }
@@ -398,7 +398,7 @@ TEST_F(TruncationTests, OutOfRangePagesAreDiscarded)
 
     // Make pages dirty.
     for (std::size_t i = 0; i < kInitialPageCount; ++i) {
-        acquire_write_release(Id {i + 1}, tools::integral_key(i));
+        acquire_write_release(Id(i + 1), tools::integral_key(i));
     }
     // Should get rid of cached pages that are out-of-range.
     ASSERT_OK(pager->truncate(kInitialPageCount - kFrameCount / 2));
@@ -406,7 +406,7 @@ TEST_F(TruncationTests, OutOfRangePagesAreDiscarded)
 
     // All cached pages are out-of-range
     for (std::size_t i = 0; i < kInitialPageCount - kFrameCount / 2; ++i) {
-        acquire_write_release(Id {i + 1}, tools::integral_key(i));
+        acquire_write_release(Id(i + 1), tools::integral_key(i));
     }
     ASSERT_OK(pager->truncate(1));
     flush_and_match_sizes();

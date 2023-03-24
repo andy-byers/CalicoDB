@@ -26,7 +26,7 @@ enum OperationType {
 constexpr std::size_t DB_MAX_RECORDS = 5'000;
 
 OpsFuzzer::OpsFuzzer(std::string path, Options *options)
-    : DbFuzzer {std::move(path), options}
+    : DbFuzzer(std::move(path), options)
 {
 }
 

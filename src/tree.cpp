@@ -179,7 +179,7 @@ static auto parse_internal_cell(const NodeMeta &meta, char *data) -> Cell
     return cell;
 }
 
-static constexpr auto sizeof_meta_lookup() -> std::size_t
+static constexpr auto sizeof_meta_lookup()
 {
     std::size_t i = 0;
     for (auto n = kMinPageSize; n <= kMaxPageSize; n *= 2) {
@@ -188,7 +188,7 @@ static constexpr auto sizeof_meta_lookup() -> std::size_t
     return i;
 }
 
-static constexpr auto create_meta_lookup() -> std::array<NodeMeta[2], sizeof_meta_lookup()>
+static constexpr auto create_meta_lookup()
 {
     std::array<NodeMeta[2], sizeof_meta_lookup()> lookup;
     for (std::size_t i = 0; i < lookup.size(); ++i) {
@@ -206,7 +206,7 @@ static constexpr auto create_meta_lookup() -> std::array<NodeMeta[2], sizeof_met
 // Stores node-type-specific function pointer lookup tables for every possible page size.
 static constexpr auto kMetaLookup = create_meta_lookup();
 
-static constexpr auto lookup_meta(std::size_t page_size, bool is_external) -> const NodeMeta *
+static constexpr auto lookup_meta(std::size_t page_size, bool is_external)
 {
     std::size_t index = 0;
     for (auto size = kMinPageSize; size != page_size; size <<= 1, ++index)
@@ -214,7 +214,7 @@ static constexpr auto lookup_meta(std::size_t page_size, bool is_external) -> co
     return &kMetaLookup[index][is_external];
 }
 
-static auto read_cell_at(Node &node, std::size_t offset) -> Cell
+static auto read_cell_at(Node &node, std::size_t offset)
 {
     return node.meta->parse_cell(*node.meta, node.page.data() + offset);
 }
@@ -550,22 +550,6 @@ auto Node::remove_slot(std::size_t index) -> void
     --header.cell_count;
 }
 
-static auto write_node_header_diff(Node &node) -> void
-{
-    const auto &header = node.header;
-    auto offset = node_header_offset(node);
-    auto &page = node.page;
-
-    char buffer[NodeHeader::kSize];
-    header.write(buffer);
-
-    for (std::size_t i = 0; i < sizeof(buffer); ++i) {
-        if (page.data()[offset + i] != buffer[i]) {
-            page.mutate(offset + i, 1)[0] = buffer[i];
-        }
-    }
-}
-
 auto Node::take() && -> Page
 {
     if (page.is_writable()) {
@@ -573,7 +557,7 @@ auto Node::take() && -> Page
             // Fragment count overflow.
             BlockAllocator::defragment(*this);
         }
-        write_node_header_diff(*this);
+        header.write(page.mutate(node_header_offset(*this), NodeHeader::kSize));
     }
     return std::move(page);
 }
@@ -601,9 +585,9 @@ static auto merge_root(Node &root, Node &child) -> void
 }
 
 NodeIterator::NodeIterator(Node &node, const Parameters &param)
-    : m_pager {param.pager},
-      m_lhs_key {param.lhs_key},
-      m_rhs_key {param.rhs_key},
+    : m_pager(param.pager),
+      m_lhs_key(param.lhs_key),
+      m_rhs_key(param.rhs_key),
       m_node {&node}
 {
     CALICODB_EXPECT_NE(m_pager, nullptr);
@@ -853,9 +837,10 @@ auto Tree::resolve_overflow(Node node) -> Status
         if (node.page.id() == m_root_id) {
             CALICODB_TRY(split_root(std::move(node), next));
         } else {
-            CALICODB_TRY(split_non_root(std::move(node), next));
+            CALICODB_TRY(split_nonroot(std::move(node), next));
         }
         node = std::move(next);
+        report_stats(kSMOCount, 1);
     }
     release(std::move(node));
     return Status::ok();
@@ -909,30 +894,30 @@ auto Tree::transfer_left(Node &left, Node &right) -> Status
     return Status::ok();
 }
 
-auto Tree::split_non_root(Node right, Node &out) -> Status
+auto Tree::split_nonroot(Node node, Node &out) -> Status
 {
-    CALICODB_EXPECT_NE(right.page.id(), m_root_id);
-    CALICODB_EXPECT_TRUE(is_overflowing(right));
-    const auto &header = right.header;
+    CALICODB_EXPECT_NE(node.page.id(), m_root_id);
+    CALICODB_EXPECT_TRUE(is_overflowing(node));
+    const auto &header = node.header;
 
     Id parent_id;
-    CALICODB_TRY(find_parent_id(right.page.id(), parent_id));
+    CALICODB_TRY(find_parent_id(node.page.id(), parent_id));
     CALICODB_EXPECT_FALSE(parent_id.is_null());
 
     Node parent, left;
     CALICODB_TRY(acquire(parent_id, true, parent));
     CALICODB_TRY(allocate(header.is_external, left));
 
-    const auto overflow_index = right.overflow_index;
-    auto overflow = *right.overflow;
-    right.overflow.reset();
+    const auto overflow_index = node.overflow_index;
+    auto overflow = *node.overflow;
+    node.overflow.reset();
 
     if (overflow_index == header.cell_count) {
         // Note the reversal of the "left" and "right" parameters. We are splitting the other way.
         // This can greatly improve the performance of sequential writes.
-        return split_non_root_fast(
+        return split_nonroot_fast(
             std::move(parent),
-            std::move(right),
+            std::move(node),
             std::move(left),
             overflow,
             out);
@@ -951,18 +936,18 @@ auto Tree::split_non_root(Node right, Node &out) -> Status
             CALICODB_TRY(insert_cell(left, left.header.cell_count, overflow));
             break;
         }
-        CALICODB_TRY(transfer_left(left, right));
+        CALICODB_TRY(transfer_left(left, node));
 
-        if (usable_space(right) >= overflow.size + 2) {
-            CALICODB_TRY(insert_cell(right, overflow_index - i - 1, overflow));
+        if (usable_space(node) >= overflow.size + 2) {
+            CALICODB_TRY(insert_cell(node, overflow_index - i - 1, overflow));
             break;
         }
         CALICODB_EXPECT_NE(i + 1, n);
     }
     CALICODB_EXPECT_FALSE(is_overflowing(left));
-    CALICODB_EXPECT_FALSE(is_overflowing(right));
+    CALICODB_EXPECT_FALSE(is_overflowing(node));
 
-    auto separator = read_cell(right, 0);
+    auto separator = read_cell(node, 0);
     detach_cell(separator, cell_scratch());
 
     if (header.is_external) {
@@ -973,8 +958,8 @@ auto Tree::split_non_root(Node right, Node &out) -> Status
             left.header.prev_id = left_sibling.page.id();
             release(std::move(left_sibling));
         }
-        right.header.prev_id = left.page.id();
-        left.header.next_id = right.page.id();
+        node.header.prev_id = left.page.id();
+        left.header.next_id = node.page.id();
         CALICODB_TRY(PayloadManager::promote(
             *m_pager,
             m_freelist,
@@ -984,7 +969,7 @@ auto Tree::split_non_root(Node right, Node &out) -> Status
     } else {
         left.header.next_id = read_child_id(separator);
         CALICODB_TRY(fix_parent_id(left.header.next_id, left.page.id(), PointerMap::kTreeNode));
-        erase_cell(right, 0);
+        erase_cell(node, 0);
     }
 
     auto itr = node_iterator(parent);
@@ -995,12 +980,12 @@ auto Tree::split_non_root(Node right, Node &out) -> Status
     CALICODB_TRY(insert_cell(parent, itr.index(), separator));
 
     release(std::move(left));
-    release(std::move(right));
+    release(std::move(node));
     out = std::move(parent);
     return Status::ok();
 }
 
-auto Tree::split_non_root_fast(Node parent, Node left, Node right, const Cell &overflow, Node &out) -> Status
+auto Tree::split_nonroot_fast(Node parent, Node left, Node right, const Cell &overflow, Node &out) -> Status
 {
     const auto &header = left.header;
     CALICODB_TRY(insert_cell(right, 0, overflow));
@@ -1072,8 +1057,10 @@ auto Tree::resolve_underflow(Node node, const Slice &anchor) -> Status
         bool exact;
         auto itr = node_iterator(parent);
         CALICODB_TRY(itr.seek(anchor, &exact));
-        CALICODB_TRY(fix_non_root(std::move(node), parent, itr.index() + exact));
+        CALICODB_TRY(fix_nonroot(std::move(node), parent, itr.index() + exact));
         node = std::move(parent);
+
+        report_stats(kSMOCount, 1);
     }
     release(std::move(node));
     return Status::ok();
@@ -1162,7 +1149,7 @@ auto Tree::merge_right(Node &left, Node right, Node &parent, std::size_t index) 
     return destroy(std::move(right));
 }
 
-auto Tree::fix_non_root(Node node, Node &parent, std::size_t index) -> Status
+auto Tree::fix_nonroot(Node node, Node &parent, std::size_t index) -> Status
 {
     CALICODB_EXPECT_NE(node.page.id(), m_root_id);
     CALICODB_EXPECT_TRUE(is_underflowing(node));
@@ -1223,7 +1210,7 @@ auto Tree::fix_root(Node root) -> Status
             erase_cell(child, child.overflow_index);
             release(std::move(root));
             Node parent;
-            CALICODB_TRY(split_non_root(std::move(child), parent));
+            CALICODB_TRY(split_nonroot(std::move(child), parent));
             release(std::move(parent));
             CALICODB_TRY(acquire(m_root_id, true, root));
         } else {
@@ -1336,13 +1323,28 @@ auto Tree::rotate_right(Node &parent, Node &left, Node &right, std::size_t index
     return Status::ok();
 }
 
-Tree::Tree(Pager &pager, Id root_id, Id &freelist_head)
-    : m_node_scratch(pager.page_size(), '\0'),
+Tree::Tree(Pager &pager, Id root_id, Id &freelist_head, TreeStatistics *stats)
+    : m_stats(stats),
+      m_node_scratch(pager.page_size(), '\0'),
       m_cell_scratch(pager.page_size(), '\0'),
-      m_freelist {pager, freelist_head},
-      m_pager {&pager},
-      m_root_id {root_id}
+      m_freelist(pager, freelist_head),
+      m_pager(&pager),
+      m_root_id(root_id)
 {
+}
+
+auto Tree::report_stats(ReportType type, std::size_t increment) const -> void
+{
+    if (m_stats == nullptr) {
+        return;
+    }
+    if (type == kBytesRead) {
+        m_stats->bytes_read += increment;
+    } else if (type == kBytesWritten) {
+        m_stats->bytes_written += increment;
+    } else {
+        m_stats->smo_count += increment;
+    }
 }
 
 auto Tree::cell_scratch() -> char *
@@ -1356,6 +1358,7 @@ auto Tree::get(const Slice &key, std::string *value) const -> Status
     SearchResult slot;
     CALICODB_TRY(find_external(key, slot));
     auto [node, index, exact] = std::move(slot);
+    report_stats(kBytesRead, key.size());
 
     if (!exact) {
         release(std::move(node));
@@ -1367,6 +1370,7 @@ auto Tree::get(const Slice &key, std::string *value) const -> Status
         Slice slice;
         CALICODB_TRY(PayloadManager::collect_value(*m_pager, *value, cell, &slice));
         value->resize(slice.size());
+        report_stats(kBytesRead, slice.size());
     }
     release(std::move(node));
     return Status::ok();
@@ -1387,6 +1391,8 @@ auto Tree::put(const Slice &key, const Slice &value, bool *exists) -> Status
 
     CALICODB_TRY(PayloadManager::emplace(*m_pager, m_freelist, cell_scratch(), node, key, value, index));
     CALICODB_TRY(resolve_overflow(std::move(node)));
+    report_stats(kBytesWritten, key.size() + value.size());
+
     if (exists != nullptr) {
         *exists = exact;
     }
@@ -1395,10 +1401,9 @@ auto Tree::put(const Slice &key, const Slice &value, bool *exists) -> Status
 
 auto Tree::erase(const Slice &key) -> Status
 {
-    Tree internal {*this};
     SearchResult slot;
 
-    CALICODB_TRY(internal.find_external(key, slot));
+    CALICODB_TRY(find_external(key, slot));
     auto [node, index, exact] = std::move(slot);
 
     if (exact) {
@@ -1406,11 +1411,11 @@ auto Tree::erase(const Slice &key) -> Status
         const auto cell = read_cell(node, index);
         CALICODB_TRY(PayloadManager::collect_key(*m_pager, m_anchor, cell, &anchor));
 
-        internal.upgrade(node);
-        CALICODB_TRY(internal.remove_cell(node, index));
-        return internal.resolve_underflow(std::move(node), anchor);
+        upgrade(node);
+        CALICODB_TRY(remove_cell(node, index));
+        return resolve_underflow(std::move(node), anchor);
     }
-    internal.release(std::move(node));
+    release(std::move(node));
     return Status::not_found("not found");
 }
 
@@ -1479,7 +1484,7 @@ auto Tree::vacuum_step(Page &free, TableSet &tables, Id last_id) -> Status
             // for the target overflowing cell.
             Node parent;
             CALICODB_TRY(acquire(entry.back_ptr, true, parent));
-            bool found {};
+            bool found = false;
             for (std::size_t i = 0; i < parent.header.cell_count; ++i) {
                 auto cell = read_cell(parent, i);
                 found = cell.has_remote && read_overflow_id(cell) == last_id;
@@ -1511,7 +1516,7 @@ auto Tree::vacuum_step(Page &free, TableSet &tables, Id last_id) -> Status
                 Node parent;
                 CALICODB_TRY(acquire(entry.back_ptr, true, parent));
                 CALICODB_EXPECT_FALSE(parent.header.is_external);
-                bool found {};
+                bool found = false;
                 for (std::size_t i = 0; !found && i <= parent.header.cell_count; ++i) {
                     const auto child_id = read_child_id(parent, i);
                     found = child_id == last_id;

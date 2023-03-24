@@ -17,25 +17,25 @@ namespace calicodb
 struct LogicalPageId {
     [[nodiscard]] static auto with_page(Id pid) -> LogicalPageId
     {
-        return LogicalPageId {Id::null(), pid};
+        return LogicalPageId(Id::null(), pid);
     }
 
     [[nodiscard]] static auto with_table(Id tid) -> LogicalPageId
     {
-        return LogicalPageId {tid, Id::null()};
+        return LogicalPageId(tid, Id::null());
     }
 
     [[nodiscard]] static auto root() -> LogicalPageId
     {
-        return LogicalPageId {Id::root(), Id::root()};
+        return LogicalPageId(Id::root(), Id::root());
     }
 
     // Results in "LogicalPageId(Id::null, Id::null())".
     explicit LogicalPageId() = default;
 
     explicit LogicalPageId(Id tid, Id pid)
-        : table_id {tid},
-          page_id {pid}
+        : table_id(tid),
+          page_id(pid)
     {
     }
 
@@ -49,10 +49,10 @@ class Page
 {
     std::vector<PageDelta> m_deltas;
     Id m_id;
-    std::size_t m_size {};
-    CacheEntry *m_entry {};
-    char *m_data {};
-    bool m_write {};
+    std::size_t m_size = 0;
+    CacheEntry *m_entry = nullptr;
+    char *m_data = nullptr;
+    bool m_write = false;
 
 public:
     friend class FrameManager;
@@ -146,7 +146,7 @@ public:
 
 [[nodiscard]] inline auto read_page_lsn(const Page &page) -> Lsn
 {
-    return Lsn {get_u64(page.data() + page_offset(page))};
+    return Lsn(get_u64(page.data() + page_offset(page)));
 }
 
 inline auto write_page_lsn(Page &page, Lsn lsn) -> void
@@ -162,7 +162,7 @@ inline auto write_page_lsn(Page &page, Lsn lsn) -> void
 
 [[nodiscard]] inline auto read_page_lsn(Id page_id, const char *data) -> Lsn
 {
-    return Lsn {get_u64(data + page_offset(page_id))};
+    return Lsn(get_u64(data + page_offset(page_id)));
 }
 
 inline auto write_page_lsn(Id page_id, Lsn lsn, char *data) -> void

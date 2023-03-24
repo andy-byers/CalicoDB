@@ -370,17 +370,17 @@ auto DBImpl::get_property(const Slice &name, std::string *out) const -> bool
 {
     if (name.starts_with("calicodb.")) {
         const auto prop = name.range(std::strlen("calicodb."));
+        std::string buffer;
 
         if (prop == "stats") {
             if (out != nullptr) {
-                char buffer[256];
-                std::snprintf(
-                    buffer, sizeof(buffer),
+                write_to_string(
+                    buffer,
                     "Name          Value\n"
                     "-------------------\n"
-                    "DB read(MB)   %8.0f\n"
-                    "DB write(MB)  %8.0f\n"
-                    "WAL write(MB) %8.0f\n"
+                    "DB read(MB)   %8.4f\n"
+                    "DB write(MB)  %8.4f\n"
+                    "WAL write(MB) %8.4f\n"
                     "Cache hits    %ld\n"
                     "Cache misses  %ld\n",
                     static_cast<double>(m_pager->bytes_read()) / 1048576.0,
@@ -389,6 +389,36 @@ auto DBImpl::get_property(const Slice &name, std::string *out) const -> bool
                     m_pager->hits(),
                     m_pager->misses());
                 out->append(buffer);
+            }
+            return true;
+        } else if (prop == "tables") {
+            if (out != nullptr) {
+                out->append(
+                    "Name             SMOCount Read(MB) Write(MB)\n"
+                    "--------------------------------------------\n");
+                std::vector<std::string> table_names;
+                std::vector<LogicalPageId> table_roots;
+                (void)get_table_info(table_names, &table_roots);
+                table_names.emplace_back(m_default->name());
+                table_roots.emplace_back(LogicalPageId::with_table(Id(2)));
+                for (std::size_t i = 0; i < table_names.size(); ++i) {
+                    const auto *state = m_tables.get(table_roots[i].table_id);
+                    if (table_names[i].size() > 16) {
+                        table_names[i].resize(13);
+                        table_names[i].append("...");
+                    }
+                    if (state != nullptr && state->open) {
+                        const auto n = write_to_string(
+                            buffer,
+                            "%-16s %8u %8.4f %9.4lf\n",
+                            table_names[i].c_str(),
+                            state->stats.smo_count,
+                            static_cast<double>(state->stats.bytes_read) / 1048576.0,
+                            static_cast<double>(state->stats.bytes_written) / 1048576.0);
+                        buffer.resize(n);
+                        out->append(buffer);
+                    }
+                }
             }
             return true;
         }
@@ -690,7 +720,7 @@ auto DBImpl::create_table(const TableOptions &options, const std::string &name, 
     if (state->open) {
         return Status::invalid_argument("table is already open");
     }
-    state->tree = new Tree(*m_pager, root_id.page_id, m_state.freelist_head);
+    state->tree = new Tree(*m_pager, root_id.page_id, m_state.freelist_head, &state->stats);
     state->write = options.mode == AccessMode::kReadWrite;
     state->open = true;
     out = new TableImpl(name, root_id.table_id);
@@ -772,7 +802,7 @@ auto DBImpl::construct_new_table(const Slice &name, LogicalPageId &root_id) -> S
 
 auto DBImpl::remove_empty_table(const std::string &name, TableState &state) -> Status
 {
-    auto &[root_id, tree, write_flag, open_flag] = state;
+    auto &[root_id, stats, tree, write_flag, open_flag] = state;
     if (root_id.table_id.is_root()) {
         return Status::ok();
     }

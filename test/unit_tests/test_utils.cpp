@@ -796,7 +796,7 @@ TEST(LevelDB_Coding, Varint64)
         values.push_back(power - 1);
         values.push_back(power + 1);
     }
-    std::size_t total_size {};
+    std::size_t total_size = 0;
     for (auto v : values) {
         total_size += varint_length(v);
     }

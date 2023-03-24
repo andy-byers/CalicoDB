@@ -175,7 +175,7 @@ auto encode_deltas_payload(Lsn lsn, Id page_id, const Slice &image, const std::v
     buffer += sizeof(std::uint16_t);
 
     // Deltas (N B)
-    std::size_t n {};
+    std::size_t n = 0;
     for (const auto &[offset, size] : deltas) {
         put_u16(buffer + n, static_cast<std::uint16_t>(offset));
         n += sizeof(std::uint16_t);

@@ -18,7 +18,7 @@ public:
     constexpr Slice() noexcept = default;
 
     constexpr Slice(const char *data, std::size_t size) noexcept
-        : m_data {data},
+        : m_data(data),
           m_size {size}
     {
         assert(m_data != nullptr);
@@ -125,8 +125,8 @@ public:
     }
 
 private:
-    const char *m_data {""};
-    std::size_t m_size {};
+    const char *m_data = "";
+    std::size_t m_size = 0;
 };
 
 inline auto operator<(const Slice &lhs, const Slice &rhs) noexcept -> bool

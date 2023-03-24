@@ -238,7 +238,7 @@ public:
     std::unique_ptr<EnvType> env;
     Options db_options;
     std::string db_prefix;
-    DB *db {};
+    DB *db = nullptr;
 };
 
 class RecoveryTests
@@ -543,7 +543,7 @@ INSTANTIATE_TEST_SUITE_P(
 class DataLossEnv : public EnvWrapper
 {
     std::string m_database_contents;
-    std::size_t m_wal_sync_size {};
+    std::size_t m_wal_sync_size = 0;
 
 public:
     explicit DataLossEnv()
@@ -583,8 +583,8 @@ public:
 class DataLossEditor : public Editor
 {
     std::string m_filename;
-    DataLossEnv *m_env {};
-    Editor *m_file {};
+    DataLossEnv *m_env = nullptr;
+    Editor *m_file = nullptr;
 
 public:
     explicit DataLossEditor(std::string filename, Editor &file, DataLossEnv &env)
@@ -629,8 +629,8 @@ public:
 class DataLossLogger : public Logger
 {
     std::string m_filename;
-    DataLossEnv *m_env {};
-    Logger *m_file {};
+    DataLossEnv *m_env = nullptr;
+    Logger *m_file = nullptr;
 
 public:
     explicit DataLossLogger(std::string filename, Logger &file, DataLossEnv &env)
@@ -756,8 +756,10 @@ TEST_P(DataLossTests, LongTransaction)
 {
     for (std::size_t i = 0; i < kCheckpointInterval * 10; ++i) {
         ASSERT_OK(db->put(tools::integral_key(i), tools::integral_key(i)));
+        if (i % kCheckpointInterval == kCheckpointInterval - 1) {
+            ASSERT_OK(db->checkpoint());
+        }
     }
-    ASSERT_OK(db->checkpoint());
 
     for (std::size_t i = 0; i < kCheckpointInterval * 10; ++i) {
         ASSERT_OK(db->erase(tools::integral_key(i)));

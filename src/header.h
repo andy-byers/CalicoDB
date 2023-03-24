@@ -44,12 +44,12 @@ struct FileHeader {
     [[nodiscard]] auto compute_crc() const -> std::uint32_t;
 
     std::uint32_t magic_code = kMagicCode;
-    std::uint32_t header_crc {};
-    std::uint32_t page_count {};
-    std::uint64_t record_count {};
-    Id freelist_head {};
-    Lsn commit_lsn {};
-    unsigned page_size {};
+    std::uint32_t header_crc = 0;
+    std::uint32_t page_count = 0;
+    std::uint64_t record_count = 0;
+    Id freelist_head;
+    Lsn commit_lsn;
+    unsigned page_size = 0;
 };
 
 // Page Header Format:
@@ -75,11 +75,11 @@ struct NodeHeader {
 
     Id next_id;
     Id prev_id;
-    unsigned cell_count {};
-    unsigned cell_start {};
-    unsigned free_start {};
-    unsigned frag_count {};
-    bool is_external {true};
+    unsigned cell_count = 0;
+    unsigned cell_start = 0;
+    unsigned free_start = 0;
+    unsigned frag_count = 0;
+    bool is_external = false;
 };
 
 } // namespace calicodb

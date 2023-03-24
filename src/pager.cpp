@@ -42,12 +42,12 @@ auto Pager::open(const Parameters &param, Pager **out) -> Status
 }
 
 Pager::Pager(const Parameters &param, Editor &file, AlignedBuffer buffer)
-    : m_filename {param.filename},
-      m_frames {file, std::move(buffer), param.page_size, param.frame_count},
-      m_wal {param.wal},
-      m_env {param.env},
-      m_info_log {param.info_log},
-      m_state {param.state}
+    : m_filename(param.filename),
+      m_frames(file, std::move(buffer), param.page_size, param.frame_count),
+      m_env(param.env),
+      m_info_log(param.info_log),
+      m_wal(param.wal),
+      m_state(param.state)
 {
     CALICODB_EXPECT_NE(m_wal, nullptr);
     CALICODB_EXPECT_NE(m_state, nullptr);

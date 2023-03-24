@@ -52,9 +52,9 @@ struct WalRecordHeader {
         return data.size() > WalRecordHeader::kSize && data[0] != '\x00';
     }
 
-    WalRecordType type {};
-    std::uint16_t size {};
-    std::uint32_t crc {};
+    WalRecordType type = kNoRecord;
+    std::uint16_t size = 0;
+    std::uint32_t crc = 0;
 };
 
 // Routines for working with WAL records.
@@ -78,8 +78,8 @@ struct DeltaDescriptor {
     static constexpr std::size_t kFixedSize = 15;
 
     struct Delta {
-        std::size_t offset {};
-        Slice data {};
+        std::size_t offset = 0;
+        Slice data;
     };
 
     Id page_id;
@@ -118,7 +118,7 @@ struct VacuumDescriptor {
     static constexpr std::size_t kFixedSize = 10;
 
     Lsn lsn;
-    bool is_start {};
+    bool is_start = false;
 };
 
 using PayloadDescriptor = std::variant<
@@ -178,7 +178,7 @@ template <class Itr>
 
     Reader *temp;
     CALICODB_TRY(env.new_reader(encode_segment_name(prefix, itr->first), temp));
-    std::unique_ptr<Reader> file {temp};
+    std::unique_ptr<Reader> file(temp);
 
     Slice slice;
     char buffer[Lsn::kSize];

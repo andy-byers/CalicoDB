@@ -24,7 +24,7 @@ public:
 
 private:
     std::string m_filename;
-    int m_file {};
+    int m_file = -1;
 };
 
 class PosixEditor : public Editor
@@ -38,7 +38,7 @@ public:
 
 private:
     std::string m_filename;
-    int m_file {};
+    int m_file = -1;
 };
 
 class PosixLogger : public Logger
@@ -51,7 +51,7 @@ public:
 
 private:
     std::string m_filename;
-    int m_file {};
+    int m_file = -1;
 };
 
 class PosixInfoLogger : public InfoLogger
@@ -65,7 +65,7 @@ private:
     static constexpr std::size_t kBufferSize = 512;
     std::string m_buffer;
     std::string m_filename;
-    int m_file {};
+    int m_file = -1;
 };
 
 class EnvPosix : public Env

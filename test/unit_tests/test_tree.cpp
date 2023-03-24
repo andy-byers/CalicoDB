@@ -199,7 +199,7 @@ TEST_F(ComponentTests, NodeIteratorHandlesOverflowKeys)
                                 &lhs_key,
                                 &rhs_key,
                             }};
-    std::size_t i {};
+    std::size_t i = 0;
     for (const auto &key : keys) {
         ASSERT_OK(itr.seek(key));
         ASSERT_EQ(itr.index(), i++);
@@ -292,8 +292,8 @@ public:
         base = node.page.size() - n;
     }
 
-    std::size_t size {};
-    std::size_t base {};
+    std::size_t size = 0;
+    std::size_t base = 0;
     Node node;
 };
 
@@ -529,8 +529,8 @@ TEST_F(NodeTests, Defragmentation)
 }
 
 struct TreeTestParameters {
-    std::size_t page_size {};
-    std::size_t extra {};
+    std::size_t page_size = 0;
+    std::size_t extra = 0;
 };
 
 class TreeTests
@@ -548,7 +548,7 @@ public:
     auto SetUp() -> void override
     {
         ASSERT_OK(Tree::create(*pager, Id::root(), freelist_head, &root_id));
-        tree = std::make_unique<Tree>(*pager, root_id, freelist_head);
+        tree = std::make_unique<Tree>(*pager, root_id, freelist_head, nullptr);
     }
 
     [[nodiscard]] auto make_long_key(std::size_t value) const
@@ -793,7 +793,7 @@ TEST_P(TreeSanityChecks, Erase)
             records[k] = v;
         }
 
-        std::size_t i {};
+        std::size_t i = 0;
         for (const auto &[key, value] : records) {
             ASSERT_OK(tree->erase(key));
         }
@@ -812,7 +812,7 @@ TEST_P(TreeSanityChecks, SmallRecords)
             records[key] = "";
         }
 
-        std::size_t i {};
+        std::size_t i = 0;
         for (const auto &[key, value] : records) {
             ASSERT_OK(tree->erase(key));
         }
@@ -886,7 +886,7 @@ TEST_P(CursorTests, SeeksForward)
 {
     std::unique_ptr<Cursor> cursor {CursorInternal::make_cursor(*tree)};
     cursor->seek_first();
-    std::size_t i {};
+    std::size_t i = 0;
     while (cursor->is_valid()) {
         ASSERT_TRUE(cursor->is_valid());
         ASSERT_EQ(cursor->key(), make_long_key(i++));
@@ -933,7 +933,7 @@ TEST_P(CursorTests, SeeksBackward)
 {
     std::unique_ptr<Cursor> cursor {CursorInternal::make_cursor(*tree)};
     cursor->seek_last();
-    std::size_t i {};
+    std::size_t i = 0;
     while (cursor->is_valid()) {
         ASSERT_EQ(cursor->key().to_string(), make_long_key(kInitialRecordCount - 1 - i++));
         ASSERT_EQ(cursor->value().to_string(), make_value('v'));
@@ -1103,14 +1103,14 @@ TEST_P(PointerMapTests, PointerMapCanFitAllPointers)
 
     for (std::size_t i = 0; i < map_size() + 10; ++i) {
         if (i != map_size()) {
-            const Id id {i + 3};
+            const Id id(i + 3);
             const PointerMap::Entry entry {id, PointerMap::kTreeNode};
             ASSERT_OK(PointerMap::write_entry(*pager, id, entry));
         }
     }
     for (std::size_t i = 0; i < map_size() + 10; ++i) {
         if (i != map_size()) {
-            const Id id {i + 3};
+            const Id id(i + 3);
             PointerMap::Entry entry;
             ASSERT_OK(PointerMap::read_entry(*pager, id, entry));
             ASSERT_EQ(entry.back_ptr.value, id.value);
@@ -1121,7 +1121,7 @@ TEST_P(PointerMapTests, PointerMapCanFitAllPointers)
 
 TEST_P(PointerMapTests, MapPagesAreRecognized)
 {
-    Id id {2};
+    Id id(2);
     ASSERT_EQ(PointerMap::lookup(*pager, id), id);
 
     // Back pointers for the next "map.map_size()" pages are stored on page 2. The next pointermap page is
@@ -1134,10 +1134,10 @@ TEST_P(PointerMapTests, MapPagesAreRecognized)
 
 TEST_P(PointerMapTests, FindsCorrectMapPages)
 {
-    std::size_t counter {};
-    Id map_id {2};
+    std::size_t counter = 0;
+    Id map_id(2);
 
-    for (Id page_id {3}; page_id.value <= 100 * map_size(); ++page_id.value) {
+    for (Id page_id(3); page_id.value <= 100 * map_size(); ++page_id.value) {
         if (counter++ == map_size()) {
             // Found a map page. Calls to find() with a page ID between this page and the next map page
             // should map to this page ID.
@@ -1202,14 +1202,14 @@ public:
         while (is_root_external()) {
             keys.emplace_back(random.Generate(max_key_size).to_string());
             (void)tree->put(keys.back(), random.Generate(max_value_size));
-            ASSERT_NE(PointerMap::lookup(*pager, Id {pager->page_count()}), Id {pager->page_count()});
+            ASSERT_NE(PointerMap::lookup(*pager, Id(pager->page_count())), Id(pager->page_count()));
         }
         for (const auto &key : keys) {
             ASSERT_OK(tree->erase(key));
         }
 
         bool vacuumed;
-        Id target {pager->page_count()};
+        Id target(pager->page_count());
         TableSet table_set;
         do {
             ASSERT_OK(tree->vacuum_one(target, table_set, &vacuumed));
@@ -1239,9 +1239,9 @@ public:
             }
 
             TableSet table_set;
-            Id target {pager->page_count()};
+            Id target(pager->page_count());
             for (;;) {
-                bool vacuumed {};
+                bool vacuumed = false;
                 ASSERT_OK(tree->vacuum_one(target, table_set, &vacuumed));
                 if (!vacuumed) {
                     break;
@@ -1357,7 +1357,7 @@ TEST_P(VacuumTests, VacuumsFreelistInOrder)
     // Page Types:     N   P   2   1
     // Page Contents: [1] [2] [3] [4] [X]
     // Page IDs:       1   2   3   4   5
-    bool vacuumed {};
+    bool vacuumed = false;
     ASSERT_OK(tree->vacuum_one(Id(5), table_set, &vacuumed));
     ASSERT_TRUE(vacuumed);
 
@@ -1418,7 +1418,7 @@ TEST_P(VacuumTests, VacuumsFreelistInReverseOrder)
     //     Page Types:     N   P   2   1
     //     Page Contents: [a] [b] [e] [d] [ ]
     //     Page IDs:       1   2   3   4   5
-    bool vacuumed {};
+    bool vacuumed = false;
     ASSERT_OK(tree->vacuum_one(Id(5), table_set, &vacuumed));
     ASSERT_TRUE(vacuumed);
     PointerMap::Entry entry;
@@ -1496,8 +1496,8 @@ TEST_P(VacuumTests, VacuumFreelistSanityCheck)
         }
 
         // This will vacuum the whole freelist, as well as the pointer map page on page 2.
-        Id target {pager->page_count()};
-        bool vacuumed {};
+        Id target(pager->page_count());
+        bool vacuumed = false;
         for (std::size_t i = 0; i < kFrameCount; ++i) {
             ASSERT_OK(tree->vacuum_one(target, table_set, &vacuumed));
             ASSERT_TRUE(vacuumed);
@@ -1695,7 +1695,7 @@ TEST_P(VacuumTests, VacuumsNodes)
     // Page IDs:       1   2   3   4
     ASSERT_EQ(pager->page_count(), 6)
         << "test was incorrectly initialized (check the key and value sizes)";
-    bool vacuumed {};
+    bool vacuumed = false;
     TableSet table_set;
     ASSERT_OK(tree->vacuum_one(Id(6), table_set, &vacuumed));
     ASSERT_TRUE(vacuumed);
@@ -1786,7 +1786,7 @@ public:
         ++last_tree_id.value;
         EXPECT_OK(Tree::create(*pager, last_tree_id, freelist_head, &root));
         root_ids.emplace_back(Id::root(), root);
-        multi_tree.emplace_back(std::make_unique<Tree>(*pager, root_ids.back().page_id, freelist_head));
+        multi_tree.emplace_back(std::make_unique<Tree>(*pager, root_ids.back().page_id, freelist_head, nullptr));
         return multi_tree.size() - 1;
     }
 

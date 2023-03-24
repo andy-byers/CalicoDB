@@ -235,8 +235,8 @@ private:
     std::string m_writer_tail;
     std::string m_reader_tail;
     std::string m_reader_data;
-    Reader *m_reader_file {};
-    Logger *m_writer_file {};
+    Reader *m_reader_file = nullptr;
+    Logger *m_writer_file = nullptr;
 };
 
 TEST_F(WalComponentTests, ManualFlush)
@@ -438,7 +438,7 @@ TEST_F(WalComponentTests, HandlesLargeRecords)
     for (std::size_t i = 0; i < 10; ++i) {
         const auto payload_size = random.Next(block_size, block_size * 5);
         payloads.emplace_back(random.Generate(payload_size).to_string());
-        ASSERT_OK(wal_write(writer, Lsn {i + 1}, payloads.back()));
+        ASSERT_OK(wal_write(writer, Lsn(i + 1), payloads.back()));
     }
     ASSERT_OK(writer.flush());
     auto reader = make_reader(Id::root());
@@ -657,7 +657,7 @@ TEST_F(WalTests, CleanupObsoleteSegments)
     auto logs = get_logs();
     for (std::size_t i = 0; logs.size() < 5; ++i) {
         const auto image = random.Generate(kPageSize);
-        ASSERT_OK(wal->log_image(Id {i + 1}, image, nullptr));
+        ASSERT_OK(wal->log_image(Id(i + 1), image, nullptr));
         logs = get_logs();
     }
     ASSERT_OK(wal->synchronize(true));
@@ -670,7 +670,7 @@ TEST_F(WalTests, CleanupObsoleteSegments)
     ASSERT_EQ(logs.size(), get_logs().size());
 
     // NOOP. LSN of the last record in the first segment passed.
-    ASSERT_OK(wal->cleanup(Lsn {lsns[1].value - 1}));
+    ASSERT_OK(wal->cleanup(Lsn(lsns[1].value - 1)));
     ASSERT_EQ(get_logs().size(), logs.size());
 
     // Remove 1 segment.
@@ -679,7 +679,7 @@ TEST_F(WalTests, CleanupObsoleteSegments)
 
     // Cleanup routine will never remove the last segment (the writer is on a new segment
     // so there are technically 2).
-    ASSERT_OK(wal->cleanup(Lsn {std::numeric_limits<std::uint64_t>::max()}));
+    ASSERT_OK(wal->cleanup(Lsn(std::numeric_limits<std::uint64_t>::max())));
     ASSERT_EQ(get_logs().size(), 2);
     ASSERT_OK(wal->close());
     wal.reset();

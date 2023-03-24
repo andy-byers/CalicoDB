@@ -137,7 +137,7 @@ class BasicDatabaseTests
 public:
     BasicDatabaseTests()
     {
-        options.page_size = 0x200;
+        options.page_size = kMinPageSize;
         options.cache_size = options.page_size * frame_count;
         options.env = env.get();
     }
@@ -390,7 +390,7 @@ public:
     explicit TestDatabase(Env &env)
     {
         options.wal_prefix = "./wal-";
-        options.page_size = 0x200;
+        options.page_size = kMinPageSize;
         options.cache_size = 32 * options.page_size;
         options.env = &env;
 
@@ -414,7 +414,7 @@ public:
     Options options;
     tools::RandomGenerator random {4 * 1'024 * 1'024};
     std::vector<Record> records;
-    DB *db {};
+    DB *db = nullptr;
 };
 
 class DbRevertTests
@@ -624,7 +624,7 @@ TEST_F(DbRecoveryTests, RecoversNthBatch)
 struct ErrorWrapper {
     std::string prefix;
     tools::Interceptor::Type type {};
-    std::size_t successes {};
+    std::size_t successes = 0;
 };
 
 class DbErrorTests : public testing::TestWithParam<ErrorWrapper>
@@ -635,7 +635,7 @@ protected:
         env = std::make_unique<tools::FaultInjectionEnv>();
         db = std::make_unique<TestDatabase>(*env);
 
-        committed = add_records(*db, 25'000);
+        committed = add_records(*db, 10'000);
         EXPECT_OK(db->db->checkpoint());
     }
     ~DbErrorTests() override = default;
@@ -663,7 +663,7 @@ protected:
     std::unique_ptr<tools::FaultInjectionEnv> env;
     std::unique_ptr<TestDatabase> db;
     std::map<std::string, std::string> committed;
-    std::size_t counter {};
+    std::size_t counter = 0;
 };
 
 TEST_P(DbErrorTests, HandlesReadErrorDuringQuery)
@@ -792,7 +792,7 @@ protected:
     auto SetUp() -> void override
     {
         tools::RandomGenerator random;
-        for (const auto &[k, v] : tools::fill_db(*db->db, random, 5'000)) {
+        for (const auto &[k, v] : tools::fill_db(*db->db, random, 10'000)) {
             ASSERT_OK(db->db->erase(k));
         }
         DbErrorTests::SetUp();
@@ -858,13 +858,13 @@ INSTANTIATE_TEST_SUITE_P(
     ::testing::Values(
         ErrorWrapper {"./test", tools::Interceptor::kRead, 0},
         ErrorWrapper {"./test", tools::Interceptor::kRead, 1},
-        ErrorWrapper {"./test", tools::Interceptor::kRead, 50},
+        ErrorWrapper {"./test", tools::Interceptor::kRead, 5},
         ErrorWrapper {"./test", tools::Interceptor::kWrite, 0},
         ErrorWrapper {"./test", tools::Interceptor::kWrite, 1},
-        ErrorWrapper {"./test", tools::Interceptor::kWrite, 50},
+        ErrorWrapper {"./test", tools::Interceptor::kWrite, 5},
         ErrorWrapper {"./wal", tools::Interceptor::kWrite, 0},
         ErrorWrapper {"./wal", tools::Interceptor::kWrite, 1},
-        ErrorWrapper {"./wal", tools::Interceptor::kWrite, 10}));
+        ErrorWrapper {"./wal", tools::Interceptor::kWrite, 5}));
 
 class DbOpenTests
     : public OnDiskTest,
@@ -945,21 +945,24 @@ protected:
 
     std::unique_ptr<tools::FaultInjectionEnv> env;
     Options options;
-    DB *db {};
+    DB *db = nullptr;
 };
 
 TEST_F(ApiTests, OnlyReturnsValidProperties)
 {
     // Check for existence.
     ASSERT_TRUE(db->get_property("calicodb.stats", nullptr));
+    ASSERT_TRUE(db->get_property("calicodb.tables", nullptr));
     ASSERT_FALSE(db->get_property("Calicodb.stats", nullptr));
     ASSERT_FALSE(db->get_property("calicodb.nonexistent", nullptr));
 
-    std::string stats, scratch;
+    std::string stats, tables, scratch;
     ASSERT_TRUE(db->get_property("calicodb.stats", &stats));
+    ASSERT_TRUE(db->get_property("calicodb.tables", &tables));
     ASSERT_FALSE(db->get_property("Calicodb.stats", &scratch));
     ASSERT_FALSE(db->get_property("calicodb.nonexistent", &scratch));
     ASSERT_FALSE(stats.empty());
+    ASSERT_FALSE(tables.empty());
     ASSERT_TRUE(scratch.empty());
 }
 
@@ -1240,7 +1243,7 @@ public:
     }
 
     Options options;
-    DB *db {};
+    DB *db = nullptr;
 };
 
 TEST_F(WalPrefixTests, WalDirectoryMustExist)

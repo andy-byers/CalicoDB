@@ -25,8 +25,8 @@ class Benchmark final
 {
     static constexpr auto kFilename = "__bench_db__";
     static constexpr std::size_t kKeyLength = 16;
-    static constexpr std::size_t kNumRecords {10'000};
-    static constexpr std::size_t kCheckpointInterval {1'000};
+    static constexpr std::size_t kNumRecords = 10'000;
+    static constexpr std::size_t kCheckpointInterval = 1'000;
 
 public:
     struct Parameters {
@@ -194,8 +194,8 @@ private:
     std::size_t m_counters[2] {};
     calicodb::tools::RandomGenerator m_random {4'194'304};
     calicodb::Options m_options;
-    calicodb::Cursor *m_cursor {};
-    calicodb::DB *m_db {};
+    calicodb::Cursor *m_cursor = nullptr;
+    calicodb::DB *m_db = nullptr;
 };
 
 static auto BM_Write(benchmark::State &state) -> void
@@ -316,8 +316,8 @@ static auto BM_Write100K(benchmark::State &state) -> void
     }
 }
 BENCHMARK(BM_Write100K)
-    ->Arg(kSequential)
-    ->Arg(kRandom);
+    ->Args({kSequential, false})
+    ->Args({kRandom, false});
 
 static auto BM_Read100K(benchmark::State &state) -> void
 {

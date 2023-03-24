@@ -374,8 +374,8 @@ public:
         std::size_t mean_key_size = 12;
         std::size_t mean_value_size = 18;
         std::size_t spread = 4;
-        bool is_sequential {};
-        bool is_unique {};
+        bool is_sequential = false;
+        bool is_unique = false;
     };
 
     RecordGenerator() = default;

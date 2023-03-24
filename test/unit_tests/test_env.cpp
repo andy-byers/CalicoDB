@@ -58,7 +58,7 @@ template <class Base, class Store>
 [[nodiscard]] auto open_blob(Store &env, const std::string &name) -> std::unique_ptr<Base>
 {
     auto s = Status::ok();
-    Base *temp {};
+    Base *temp = nullptr;
 
     if constexpr (std::is_same_v<Reader, Base>) {
         s = env.new_reader(name, temp);
@@ -96,7 +96,7 @@ constexpr auto write_out_randomly(tools::RandomGenerator &random, Writer &writer
     constexpr std::size_t num_chunks = 20;
     ASSERT_GT(message.size(), num_chunks) << "File is too small for this test";
     Slice in {message};
-    std::size_t counter {};
+    std::size_t counter = 0;
 
     while (!in.is_empty()) {
         const auto chunk_size = std::min<std::size_t>(in.size(), random.Next(message.size() / num_chunks));
@@ -120,7 +120,7 @@ template <class Reader>
     EXPECT_GT(size, num_chunks) << "File is too small for this test";
     std::string backing(size, '\x00');
     auto *out_data = backing.data();
-    std::size_t counter {};
+    std::size_t counter = 0;
 
     while (counter < size) {
         const auto chunk_size = std::min<std::size_t>(size - counter, random.Next(size / num_chunks));

@@ -67,7 +67,7 @@ public:
 protected:
     std::string m_path;
     Options m_options;
-    DB *m_db {};
+    DB *m_db = nullptr;
 };
 
 } // namespace calicodb
