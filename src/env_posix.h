@@ -8,7 +8,6 @@
 #include "calicodb/env.h"
 #include "calicodb/slice.h"
 #include "calicodb/status.h"
-#include "utils.h"
 
 namespace calicodb
 {
@@ -19,13 +18,7 @@ namespace calicodb
 class PosixReader : public Reader
 {
 public:
-    explicit PosixReader(std::string filename, int file)
-        : m_filename {std::move(filename)},
-          m_file {file}
-    {
-        CALICODB_EXPECT_GE(file, 0);
-    }
-
+    explicit PosixReader(std::string filename, int file);
     ~PosixReader() override;
     [[nodiscard]] auto read(std::size_t offset, std::size_t size, char *scratch, Slice *out) -> Status override;
 
@@ -37,13 +30,7 @@ private:
 class PosixEditor : public Editor
 {
 public:
-    explicit PosixEditor(std::string filename, int file)
-        : m_filename {std::move(filename)},
-          m_file {file}
-    {
-        CALICODB_EXPECT_GE(file, 0);
-    }
-
+    explicit PosixEditor(std::string filename, int file);
     ~PosixEditor() override;
     [[nodiscard]] auto read(std::size_t offset, std::size_t size, char *scratch, Slice *out) -> Status override;
     [[nodiscard]] auto write(std::size_t offset, const Slice &in) -> Status override;
@@ -57,13 +44,7 @@ private:
 class PosixLogger : public Logger
 {
 public:
-    explicit PosixLogger(std::string filename, int file)
-        : m_filename {std::move(filename)},
-          m_file {file}
-    {
-        CALICODB_EXPECT_GE(file, 0);
-    }
-
+    explicit PosixLogger(std::string filename, int file);
     ~PosixLogger() override;
     [[nodiscard]] auto write(const Slice &in) -> Status override;
     [[nodiscard]] auto sync() -> Status override;
@@ -76,14 +57,7 @@ private:
 class PosixInfoLogger : public InfoLogger
 {
 public:
-    explicit PosixInfoLogger(std::string filename, int file)
-        : m_buffer(kBufferSize, '\0'),
-          m_filename {std::move(filename)},
-          m_file {file}
-    {
-        CALICODB_EXPECT_GE(file, 0);
-    }
-
+    explicit PosixInfoLogger(std::string filename, int file);
     ~PosixInfoLogger() override;
     auto logv(const char *fmt, ...) -> void override;
 

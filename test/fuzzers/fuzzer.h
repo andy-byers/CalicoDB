@@ -19,7 +19,7 @@ inline auto extract_fuzzer_value(const std::uint8_t *&data, std::size_t &size) -
     static constexpr auto max_fuzzer_value_size = kMinPageSize * 2;
 
     const auto extract = [&data, &size] {
-        std::size_t result {};
+        std::size_t result = 0;
         if (size == 1) {
             result = data[0];
             ++data;
@@ -41,7 +41,7 @@ inline auto extract_fuzzer_value(const std::uint8_t *&data, std::size_t &size) -
 
     std::string result;
     if (result_size) {
-        append_number(&result, result_data);
+        append_number(result, result_data);
         result.append(std::string(result_size, '0'));
     }
     return result;

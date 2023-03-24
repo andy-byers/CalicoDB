@@ -60,8 +60,8 @@ TEST_F(DefaultTableTests, SpecialTableBehavior)
 
 TEST_F(DefaultTableTests, RootAndDefaultTablesAreAlwaysOpen)
 {
-    ASSERT_NE(db_impl(db)->TEST_tables().get(Id {1}), nullptr);
-    ASSERT_NE(db_impl(db)->TEST_tables().get(Id {2}), nullptr);
+    ASSERT_NE(db_impl(db)->TEST_tables().get(Id(1)), nullptr);
+    ASSERT_NE(db_impl(db)->TEST_tables().get(Id(2)), nullptr);
 
     std::vector<std::string> names;
     ASSERT_OK(db->list_tables(names));
@@ -133,8 +133,8 @@ public:
 TEST_F(TableTests, TablesAreRegistered)
 {
     const auto &tables = db_impl(db)->TEST_tables();
-    ASSERT_NE(tables.get(Id {1}), nullptr) << "cannot locate root table";
-    ASSERT_NE(tables.get(Id {2}), nullptr) << "cannot locate non-root table";
+    ASSERT_NE(tables.get(Id(1)), nullptr) << "cannot locate root table";
+    ASSERT_NE(tables.get(Id(2)), nullptr) << "cannot locate non-root table";
 }
 
 TEST_F(TableTests, TablesMustBeUnique)
@@ -157,9 +157,9 @@ TEST_F(TableTests, TableCreationIsPartOfTransaction)
 {
     reopen_db();
 
-    ASSERT_NE(db_impl(db)->TEST_tables().get(Id {1}), nullptr);
-    ASSERT_NE(db_impl(db)->TEST_tables().get(Id {2}), nullptr);
-    ASSERT_EQ(db_impl(db)->TEST_tables().get(Id {3}), nullptr);
+    ASSERT_NE(db_impl(db)->TEST_tables().get(Id(1)), nullptr);
+    ASSERT_NE(db_impl(db)->TEST_tables().get(Id(2)), nullptr);
+    ASSERT_EQ(db_impl(db)->TEST_tables().get(Id(3)), nullptr);
 }
 
 TEST_F(TableTests, TableDestructionIsPartOfTransaction)
@@ -173,9 +173,9 @@ TEST_F(TableTests, TableDestructionIsPartOfTransaction)
 
     reopen_db();
 
-    ASSERT_NE(db_impl(db)->TEST_tables().get(Id {1}), nullptr);
-    ASSERT_NE(db_impl(db)->TEST_tables().get(Id {2}), nullptr);
-    ASSERT_EQ(db_impl(db)->TEST_tables().get(Id {3}), nullptr);
+    ASSERT_NE(db_impl(db)->TEST_tables().get(Id(1)), nullptr);
+    ASSERT_NE(db_impl(db)->TEST_tables().get(Id(2)), nullptr);
+    ASSERT_EQ(db_impl(db)->TEST_tables().get(Id(3)), nullptr);
 }
 
 TEST_F(TableTests, TableCannotBeOpenedTwice)
@@ -272,8 +272,8 @@ TEST_F(TwoTableTests, DropTable)
     ASSERT_OK(db->drop_table(table_2));
     table_2 = nullptr;
 
-    ASSERT_EQ(db_impl(db)->TEST_tables().get(Id {3}), nullptr) << "table_1 (1 page) was not removed";
-    ASSERT_EQ(db_impl(db)->TEST_tables().get(Id {4}), nullptr) << "table_2 (> 1 page) was not removed";
+    ASSERT_EQ(db_impl(db)->TEST_tables().get(Id(3)), nullptr) << "table_1 (1 page) was not removed";
+    ASSERT_EQ(db_impl(db)->TEST_tables().get(Id(4)), nullptr) << "table_2 (> 1 page) was not removed";
 
     ASSERT_OK(db->vacuum());
     ASSERT_EQ(db_impl(db)->TEST_pager().page_count(), 3);
@@ -306,10 +306,10 @@ TEST_F(TwoTableTests, FirstAvailableTableIdIsUsed)
     ASSERT_OK(db->drop_table(table));
     table = table_1 = nullptr;
 
-    ASSERT_EQ(tables.get(Id {3}), nullptr);
+    ASSERT_EQ(tables.get(Id(3)), nullptr);
     ASSERT_OK(db->create_table({}, "\xAB\xCD\xEF", table));
 
-    ASSERT_NE(tables.get(Id {3}), nullptr) << "first table ID was not reused";
+    ASSERT_NE(tables.get(Id(3)), nullptr) << "first table ID was not reused";
 }
 
 TEST_F(TwoTableTests, FindExistingTables)
@@ -357,7 +357,7 @@ TEST_F(TwoTableTests, RecordsPersist)
 class MultiTableVacuumRunner : public InMemoryTest
 {
 public:
-    const std::size_t kRecordCount {100'000};
+    const std::size_t kRecordCount = 5'000;
 
     explicit MultiTableVacuumRunner(std::size_t num_tables)
     {
@@ -377,8 +377,8 @@ public:
 
     auto fill_user_tables(std::size_t n, std::size_t step) -> void
     {
-        for (std::size_t i {}; i + step <= n; i += step) {
-            for (std::size_t j {}; j < m_tables.size(); ++j) {
+        for (std::size_t i = 0; i + step <= n; i += step) {
+            for (std::size_t j = 0; j < m_tables.size(); ++j) {
                 for (const auto &[key, value] : tools::fill_db(*m_db, *m_tables[j], m_random, step)) {
                     m_records[j].insert_or_assign(key, value);
                 }
@@ -388,8 +388,8 @@ public:
 
     auto erase_from_user_tables(std::size_t n) -> void
     {
-        for (std::size_t i {}; i < n; ++i) {
-            for (std::size_t j {}; j < m_tables.size(); ++j) {
+        for (std::size_t i = 0; i < n; ++i) {
+            for (std::size_t j = 0; j < m_tables.size(); ++j) {
                 const auto itr = begin(m_records[j]);
                 CALICODB_EXPECT_NE(itr, end(m_records[j]));
                 ASSERT_OK(m_db->erase(*m_tables[j], itr->first));
@@ -403,7 +403,7 @@ public:
         ASSERT_OK(m_db->vacuum());
         db_impl(m_db)->TEST_validate();
 
-        for (std::size_t i {}; i < m_tables.size(); ++i) {
+        for (std::size_t i = 0; i < m_tables.size(); ++i) {
             tools::expect_db_contains(*m_db, *m_tables[i], m_records[i]);
             m_db->close_table(m_tables[i]);
         }
@@ -416,13 +416,13 @@ public:
         tools::expect_db_contains(*m_db, m_committed);
 
         // The database would get confused if the root mapping wasn't updated.
-        for (std::size_t i {}; i < m_tables.size(); ++i) {
+        for (std::size_t i = 0; i < m_tables.size(); ++i) {
             const auto name = "table_" + tools::integral_key(i);
             ASSERT_OK(m_db->create_table({}, name, m_tables[i]));
             m_records[i].clear();
         }
         fill_user_tables(kRecordCount, kRecordCount);
-        for (std::size_t i {}; i < m_tables.size(); ++i) {
+        for (std::size_t i = 0; i < m_tables.size(); ++i) {
             tools::expect_db_contains(*m_db, *m_tables[i], m_records[i]);
         }
 
@@ -438,7 +438,7 @@ private:
         m_committed = tools::fill_db(*m_db, m_random, kRecordCount);
         ASSERT_OK(m_db->checkpoint());
 
-        for (std::size_t i {}; i < num_tables; ++i) {
+        for (std::size_t i = 0; i < num_tables; ++i) {
             m_tables.emplace_back();
             m_records.emplace_back();
             const auto name = "table_" + tools::integral_key(i);

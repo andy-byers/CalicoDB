@@ -151,7 +151,7 @@ public:
 
 inline auto write_page_lsn(Page &page, Lsn lsn) -> void
 {
-    put_u64(page.mutate(page_offset(page), sizeof(Lsn)), lsn.value);
+    put_u64(page.mutate(page_offset(page), Lsn::kSize), lsn.value);
 }
 
 // TODO: These make more sense and can be used for frames as well.

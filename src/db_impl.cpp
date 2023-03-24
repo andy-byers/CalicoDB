@@ -29,11 +29,20 @@ static auto check_header_crc(const FileHeader &header) -> bool
     return crc32c::Unmask(header.header_crc) == header.compute_crc();
 }
 
+static auto encode_page_size(std::size_t page_size) -> std::uint16_t
+{
+    return page_size < kMaxPageSize ? static_cast<std::uint16_t>(page_size) : 0;
+}
+
+static auto decode_page_size(unsigned header_page_size) -> std::size_t
+{
+    return header_page_size > 0 ? header_page_size : kMaxPageSize;
+}
+
 Table::~Table() = default;
 
-TableImpl::TableImpl(const TableOptions &options, std::string name, Id table_id)
-    : m_options {options},
-      m_name {std::move(name)},
+TableImpl::TableImpl(std::string name, Id table_id)
+    : m_name {std::move(name)},
       m_id {table_id}
 {
 }
@@ -99,7 +108,7 @@ auto TableSet::erase(Id table_id) -> void
 static auto encode_logical_id(LogicalPageId id, char *out) -> void
 {
     put_u64(out, id.table_id.value);
-    put_u64(out + sizeof(Id), id.page_id.value);
+    put_u64(out + Id::kSize, id.page_id.value);
 }
 
 [[nodiscard]] static auto decode_logical_id(const Slice &in, LogicalPageId *out) -> Status
@@ -107,8 +116,8 @@ static auto encode_logical_id(LogicalPageId id, char *out) -> void
     if (in.size() != LogicalPageId::kSize) {
         return Status::corruption("logical id is corrupted");
     }
-    out->table_id.value = get_u64(in.data());
-    out->page_id.value = get_u64(in.data() + sizeof(Id));
+    out->table_id.value = get_u32(in.data());
+    out->page_id.value = get_u32(in.data() + Id::kSize);
     return Status::ok();
 }
 
@@ -135,12 +144,12 @@ auto setup_db(const std::string &filename, Env &env, Options &options, FileHeade
             return Status::corruption("database is corrupted");
         }
     } else if (s.is_not_found()) {
-        header.page_size = static_cast<std::uint16_t>(options.page_size);
+        header.page_size = encode_page_size(options.page_size);
     } else {
         return s;
     }
-    if (options.cache_size < kMinFrameCount * header.page_size) {
-        options.cache_size = kMinFrameCount * header.page_size;
+    if (options.cache_size < kMinFrameCount * decode_page_size(header.page_size)) {
+        options.cache_size = kMinFrameCount * decode_page_size(header.page_size);
     }
     return Status::ok();
 }
@@ -157,7 +166,7 @@ auto DBImpl::open(Options sanitized) -> Status
     }
     FileHeader state;
     CALICODB_TRY(setup_db(m_filename, *m_env, sanitized, state));
-    const auto page_size = state.page_size;
+    const auto page_size = decode_page_size(state.page_size);
 
     m_state.commit_lsn = state.commit_lsn;
     m_state.record_count = state.record_count;
@@ -221,7 +230,7 @@ auto DBImpl::open(Options sanitized) -> Status
         Page db_root;
         CALICODB_TRY(m_pager->acquire(Id::root(), db_root));
         m_pager->upgrade(db_root);
-        state.page_count = m_pager->page_count();
+        state.page_count = static_cast<std::uint32_t>(m_pager->page_count());
         state.header_crc = crc32c::Mask(state.compute_crc());
         state.write(db_root.mutate(0, FileHeader::kSize));
         m_pager->release(std::move(db_root));
@@ -239,12 +248,12 @@ auto DBImpl::open(Options sanitized) -> Status
 }
 
 DBImpl::DBImpl(const Options &options, const Options &sanitized, std::string filename)
-    : m_filename {std::move(filename)},
-      m_wal_prefix {sanitized.wal_prefix},
-      m_env {sanitized.env},
-      m_info_log {sanitized.info_log},
-      m_owns_env {options.env == nullptr},
-      m_owns_info_log {options.info_log == nullptr}
+    : m_env(sanitized.env),
+      m_info_log(sanitized.info_log),
+      m_filename(std::move(filename)),
+      m_wal_prefix(sanitized.wal_prefix),
+      m_owns_env(options.env == nullptr),
+      m_owns_info_log(options.info_log == nullptr)
 {
 }
 
@@ -546,7 +555,7 @@ auto DBImpl::checkpoint() -> Status
 
     if (m_state.batch_size > 0) {
         m_state.batch_size = 0;
-        m_state.max_page_id = Id {m_pager->page_count()};
+        m_state.max_page_id = Id(m_pager->page_count());
         if (auto s = do_checkpoint(); !s.is_ok()) {
             SET_STATUS(s);
             return s;
@@ -563,7 +572,7 @@ auto DBImpl::do_checkpoint() -> Status
 
     FileHeader header;
     header.read(db_root.data());
-    header.page_count = m_pager->page_count();
+    header.page_count = static_cast<std::uint32_t>(m_pager->page_count());
     header.freelist_head = m_state.freelist_head;
     header.magic_code = FileHeader::kMagicCode;
     header.commit_lsn = m_wal->current_lsn();
@@ -681,10 +690,10 @@ auto DBImpl::create_table(const TableOptions &options, const std::string &name, 
     if (state->open) {
         return Status::invalid_argument("table is already open");
     }
-    state->tree = new Tree {*m_pager, root_id.page_id, m_state.freelist_head};
+    state->tree = new Tree(*m_pager, root_id.page_id, m_state.freelist_head);
     state->write = options.mode == AccessMode::kReadWrite;
     state->open = true;
-    out = new TableImpl {options, name, root_id.table_id};
+    out = new TableImpl(name, root_id.table_id);
 
     return s;
 }
@@ -810,7 +819,7 @@ static auto with_page(Pager &pager, const Descriptor &descriptor, const Callback
 static auto is_commit(const DeltaDescriptor &deltas)
 {
     return deltas.page_id.is_root() && deltas.deltas.size() == 1 && deltas.deltas.front().offset == 0 &&
-           deltas.deltas.front().data.size() == FileHeader::kSize + sizeof(Lsn);
+           deltas.deltas.front().data.size() == FileHeader::kSize + Lsn::kSize;
 }
 
 auto DBImpl::recovery_phase_1() -> Status
@@ -837,7 +846,7 @@ auto DBImpl::recovery_phase_1() -> Status
         if (s.is_corruption()) {
             // Allow corruption/incomplete records on the last segment, past the
             // most-recent successful commit.
-            if (itr == prev(end(set)) && lsn >= m_state.commit_lsn) {
+            if (itr == prev(end(set)) && m_state.commit_lsn <= lsn) {
                 return Status::ok();
             }
         }
@@ -883,7 +892,7 @@ auto DBImpl::recovery_phase_1() -> Status
                     return;
                 }
                 const auto page_lsn = read_page_lsn(page);
-                if (page_lsn.is_null() || page_lsn > image.lsn) {
+                if (page_lsn.is_null() || image.lsn < page_lsn) {
                     m_pager->upgrade(page);
                     apply_undo(page, image);
                 }

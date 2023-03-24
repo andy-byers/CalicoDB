@@ -46,10 +46,10 @@ public:
 // Internal Cell Format:
 //     Size    Name
 //    -----------------------
-//     8       child_id
+//     4       child_id
 //     varint  key_size
 //     n       key
-//     8       [overflow_id]
+//     4       [overflow_id]
 //
 // External Cell Format:
 //     Size    Name
@@ -58,7 +58,7 @@ public:
 //     varint  key_size
 //     n       key
 //     m       value
-//     8       [overflow_id]
+//     4       [overflow_id]
 //
 struct Cell {
     char *ptr {};

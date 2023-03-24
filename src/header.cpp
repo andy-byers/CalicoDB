@@ -18,17 +18,17 @@ static auto write_file_header(char *data, const FileHeader &header) -> void
     put_u32(data, header.header_crc);
     data += sizeof(std::uint32_t);
 
-    put_u64(data, header.page_count);
-    data += sizeof(std::uint64_t);
+    put_u32(data, header.page_count);
+    data += sizeof(std::uint32_t);
+
+    put_u32(data, header.freelist_head.value);
+    data += Id::kSize;
 
     put_u64(data, header.record_count);
     data += sizeof(std::uint64_t);
 
-    put_u64(data, header.freelist_head.value);
-    data += sizeof(Id);
-
     put_u64(data, header.commit_lsn.value);
-    data += sizeof(Lsn);
+    data += Lsn::kSize;
 
     put_u16(data, static_cast<std::uint16_t>(header.page_size));
 }
@@ -41,17 +41,17 @@ auto FileHeader::read(const char *data) -> void
     header_crc = get_u32(data);
     data += sizeof(std::uint32_t);
 
-    page_count = get_u64(data);
-    data += sizeof(std::uint64_t);
+    page_count = get_u32(data);
+    data += sizeof(std::uint32_t);
+
+    freelist_head.value = get_u32(data);
+    data += Id::kSize;
 
     record_count = get_u64(data);
     data += sizeof(std::uint64_t);
 
-    freelist_head.value = get_u64(data);
-    data += sizeof(Id);
-
     commit_lsn.value = get_u64(data);
-    data += sizeof(Lsn);
+    data += Lsn::kSize;
 
     page_size = get_u16(data);
 }
@@ -73,11 +73,11 @@ auto NodeHeader::read(const char *data) -> void
     // Flags byte.
     is_external = *data++;
 
-    next_id.value = get_u64(data);
-    data += sizeof(Id);
+    next_id.value = get_u32(data);
+    data += Id::kSize;
 
-    prev_id.value = get_u64(data);
-    data += sizeof(Id);
+    prev_id.value = get_u32(data);
+    data += Id::kSize;
 
     cell_count = get_u16(data);
     data += sizeof(std::uint16_t);
@@ -95,11 +95,11 @@ auto NodeHeader::write(char *data) const -> void
 {
     *data++ = static_cast<char>(is_external);
 
-    put_u64(data, next_id.value);
-    data += sizeof(Id);
+    put_u32(data, next_id.value);
+    data += Id::kSize;
 
-    put_u64(data, prev_id.value);
-    data += sizeof(Id);
+    put_u32(data, prev_id.value);
+    data += Id::kSize;
 
     put_u16(data, static_cast<std::uint16_t>(cell_count));
     data += sizeof(std::uint16_t);

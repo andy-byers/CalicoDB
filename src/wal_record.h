@@ -67,15 +67,15 @@ struct WalRecordHeader {
 //     ---------------------------
 //      0       1     Flags
 //      1       8     LSN
-//      9       8     Page ID
-//      17      2     Delta count
-//      19      n     Delta content
+//      9       4     Page ID
+//      13      2     Delta count
+//      15      n     Delta content
 //
 // Each delta in the delta content area is an (offset, size, data) triplet. "offset" describes
 // where on the page the change took place, and "size" is the number of bytes in "data". Both
 // "offset" and "size" are 16-bit unsigned integers.
 struct DeltaDescriptor {
-    static constexpr std::size_t kFixedSize = 19;
+    static constexpr std::size_t kFixedSize = 15;
 
     struct Delta {
         std::size_t offset {};
@@ -93,14 +93,14 @@ struct DeltaDescriptor {
 //     ---------------------------
 //      0       1     Flags
 //      1       8     LSN
-//      9       8     Page ID
-//      17      n     Image
+//      9       4     Page ID
+//      13      n     Image
 //
 // The image can be any size less than or equal to the database page size. Its size is not
 // stored explicitly in the payload: it is known from the total size of the record fragments
 // it is composed from.
 struct ImageDescriptor {
-    static constexpr std::size_t kFixedSize = 17;
+    static constexpr std::size_t kFixedSize = 13;
 
     Id page_id;
     Lsn lsn;
@@ -161,7 +161,7 @@ static constexpr std::size_t kWalBlockScale = 4;
         return Id::null();
     }
 
-    return {std::stoull(name.to_string())};
+    return Id(std::stoul(name.to_string()));
 }
 
 [[nodiscard]] inline auto encode_segment_name(const Slice &prefix, Id id) -> std::string
@@ -181,7 +181,7 @@ template <class Itr>
     std::unique_ptr<Reader> file {temp};
 
     Slice slice;
-    char buffer[sizeof(Lsn)];
+    char buffer[Lsn::kSize];
     CALICODB_TRY(file->read(WalRecordHeader::kSize + 1, sizeof(buffer), buffer, &slice));
 
     itr->second = Lsn::null();

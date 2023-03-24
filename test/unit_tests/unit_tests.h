@@ -132,14 +132,14 @@ public:
     DisabledWriteAheadLog() = default;
     ~DisabledWriteAheadLog() override = default;
 
-    [[nodiscard]] auto flushed_lsn() const -> Id override
+    [[nodiscard]] auto flushed_lsn() const -> Lsn override
     {
-        return {std::numeric_limits<std::size_t>::max()};
+        return Lsn(std::numeric_limits<std::uint64_t>::max());
     }
 
-    [[nodiscard]] auto current_lsn() const -> Id override
+    [[nodiscard]] auto current_lsn() const -> Lsn override
     {
-        return Id::null();
+        return Lsn::null();
     }
 
     [[nodiscard]] auto bytes_written() const -> std::size_t override
@@ -167,7 +167,7 @@ public:
         return Status::ok();
     }
 
-    auto cleanup(Id) -> Status override
+    auto cleanup(Lsn) -> Status override
     {
         return Status::ok();
     }
@@ -176,8 +176,8 @@ public:
 class TestWithPager : public InMemoryTest
 {
 public:
-    const std::size_t kPageSize = 0x200;
-    const std::size_t kFrameCount = 16;
+    static constexpr auto kPageSize = kMinPageSize;
+    static constexpr auto kFrameCount = kMinFrameCount;
 
     TestWithPager()
         : scratch(kPageSize, '\x00')
@@ -352,7 +352,7 @@ inline auto read_file(Env &env, const std::string &path) -> std::string
 struct Record {
     inline auto operator<(const Record &rhs) const -> bool
     {
-        return Slice {key} < Slice {rhs.key};
+        return Slice(key) < Slice(rhs.key);
     }
 
     std::string key;

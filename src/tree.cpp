@@ -17,7 +17,7 @@ namespace calicodb
 static constexpr auto kMaxCellHeaderSize =
     kVarintMaxLength + // Value size  (10 B)
     kVarintMaxLength + // Key size    (10 B)
-    sizeof(Id);        // Overflow ID (8 B)
+    Id::kSize;         // Overflow ID (4 B)
 
 static constexpr std::size_t kPointerSize = 2;
 
@@ -84,12 +84,12 @@ static auto detach_cell(Cell &cell, char *backing) -> void
 
 static auto read_child_id_at(const Node &node, std::size_t offset) -> Id
 {
-    return {get_u64(node.page.data() + offset)};
+    return Id(get_u32(node.page.data() + offset));
 }
 
 static auto write_child_id_at(Node &node, std::size_t offset, Id child_id) -> void
 {
-    put_u64(node.page.mutate(offset, sizeof(Id)), child_id.value);
+    put_u32(node.page.mutate(offset, Id::kSize), child_id.value);
 }
 
 static auto read_child_id(const Node &node, std::size_t index) -> Id
@@ -105,17 +105,17 @@ static auto read_child_id(const Node &node, std::size_t index) -> Id
 
 static auto read_child_id(const Cell &cell) -> Id
 {
-    return {get_u64(cell.ptr)};
+    return Id(get_u32(cell.ptr));
 }
 
 static auto read_overflow_id(const Cell &cell) -> Id
 {
-    return {get_u64(cell.key + cell.local_size)};
+    return Id(get_u32(cell.key + cell.local_size));
 }
 
 static auto write_overflow_id(Cell &cell, Id overflow_id) -> void
 {
-    put_u64(cell.key + cell.local_size, overflow_id.value);
+    put_u32(cell.key + cell.local_size, overflow_id.value);
 }
 
 static auto write_child_id(Node &node, std::size_t index, Id child_id) -> void
@@ -132,17 +132,17 @@ static auto write_child_id(Node &node, std::size_t index, Id child_id) -> void
 
 static auto write_child_id(Cell &cell, Id child_id) -> void
 {
-    put_u64(cell.ptr, child_id.value);
+    put_u32(cell.ptr, child_id.value);
 }
 
 [[nodiscard]] auto read_next_id(const Page &page) -> Id
 {
-    return {get_u64(page.view(page_offset(page) + kPageHeaderSize))};
+    return Id(get_u32(page.view(page_offset(page) + kPageHeaderSize)));
 }
 
 auto write_next_id(Page &page, Id next_id) -> void
 {
-    put_u64(page.mutate(page_offset(page) + kPageHeaderSize, sizeof(Id)), next_id.value);
+    put_u32(page.mutate(page_offset(page) + kPageHeaderSize, Id::kSize), next_id.value);
 }
 
 static auto parse_external_cell(const NodeMeta &meta, char *data) -> Cell
@@ -159,14 +159,14 @@ static auto parse_external_cell(const NodeMeta &meta, char *data) -> Cell
     cell.key_size = key_size;
     cell.local_size = compute_local_size(key_size, value_size, meta.min_local, meta.max_local);
     cell.has_remote = cell.local_size < key_size + value_size;
-    cell.size = header_size + cell.local_size + cell.has_remote * sizeof(Id);
+    cell.size = header_size + cell.local_size + cell.has_remote * Id::kSize;
     return cell;
 }
 
 static auto parse_internal_cell(const NodeMeta &meta, char *data) -> Cell
 {
     std::uint64_t key_size;
-    const auto *ptr = decode_varint(data + sizeof(Id), key_size);
+    const auto *ptr = decode_varint(data + Id::kSize, key_size);
     const auto header_size = static_cast<std::size_t>(ptr - data);
 
     Cell cell;
@@ -175,7 +175,7 @@ static auto parse_internal_cell(const NodeMeta &meta, char *data) -> Cell
     cell.key_size = key_size;
     cell.local_size = compute_local_size(key_size, 0, meta.min_local, meta.max_local);
     cell.has_remote = cell.local_size < key_size;
-    cell.size = header_size + cell.local_size + cell.has_remote * sizeof(Id);
+    cell.size = header_size + cell.local_size + cell.has_remote * Id::kSize;
     return cell;
 }
 
@@ -502,8 +502,8 @@ static auto emplace_cell(char *out, std::size_t key_size, std::size_t value_size
     out += local_value.size();
 
     if (!overflow_id.is_null()) {
-        put_u64(out, overflow_id.value);
-        out += sizeof(overflow_id);
+        put_u32(out, overflow_id.value);
+        out += Id::kSize;
     }
     return out;
 }
@@ -1348,7 +1348,7 @@ Tree::Tree(Pager &pager, Id root_id, Id &freelist_head)
 auto Tree::cell_scratch() -> char *
 {
     // Leave space for a child ID (maximum difference between the size of a varint and an Id).
-    return m_cell_scratch.data() + sizeof(Id) - 1;
+    return m_cell_scratch.data() + Id::kSize - 1;
 }
 
 auto Tree::get(const Slice &key, std::string *value) const -> Status
@@ -1475,7 +1475,7 @@ auto Tree::vacuum_step(Page &free, TableSet &tables, Id last_id) -> Status
             break;
         }
         case PointerMap::kOverflowHead: {
-            // Back pointer points to the node that the overflow chain is rooted in. Search through that nodes cells
+            // Back pointer points to the node that the overflow chain is rooted in. Search through that node's cells
             // for the target overflowing cell.
             Node parent;
             CALICODB_TRY(acquire(entry.back_ptr, true, parent));
@@ -1569,8 +1569,8 @@ auto Tree::vacuum_step(Page &free, TableSet &tables, Id last_id) -> Status
             CALICODB_TRY(PointerMap::write_entry(*m_pager, next_id, next_entry));
         }
     }
-    std::memcpy(free.mutate(sizeof(Lsn), free.size() - sizeof(Lsn)),
-                last.data() + sizeof(Lsn), last.size() - sizeof(Lsn));
+    std::memcpy(free.mutate(Lsn::kSize, free.size() - Lsn::kSize),
+                last.data() + Lsn::kSize, last.size() - Lsn::kSize);
     m_pager->release(std::move(last));
     return Status::ok();
 }
@@ -1600,8 +1600,8 @@ auto Tree::vacuum_one(Id target, TableSet &tables, bool *success) -> Status
     return Status::ok();
 }
 
-static constexpr auto kLinkHeaderOffset = sizeof(Lsn);
-static constexpr auto kLinkContentOffset = kLinkHeaderOffset + sizeof(Id);
+static constexpr auto kLinkHeaderOffset = Lsn::kSize;
+static constexpr auto kLinkContentOffset = kLinkHeaderOffset + Id::kSize;
 
 [[nodiscard]] static auto get_readable_content(const Page &page, std::size_t size_limit) -> Slice
 {
@@ -1657,32 +1657,32 @@ auto Freelist::push(Page page) -> Status
 }
 
 // The first pointer map page is always on page 2, right after the root page.
-static constexpr Id kFirstMapId {2};
+static constexpr std::size_t kFirstMapPage = 2;
 
 static constexpr auto kEntrySize =
-    sizeof(char) + // Type
-    sizeof(Id);    // Back pointer
+    sizeof(char) + // Type (1 B)
+    Id::kSize;     // Back pointer (4 B)
 
 static auto entry_offset(Id map_id, Id page_id) -> std::size_t
 {
-    CALICODB_EXPECT_GT(page_id, map_id);
+    CALICODB_EXPECT_LT(map_id, page_id);
 
     // Account for the page LSN.
-    return sizeof(Lsn) + (page_id.value - map_id.value - 1) * kEntrySize;
+    return Lsn::kSize + (page_id.value - map_id.value - 1) * kEntrySize;
 }
 
 static auto decode_entry(const char *data) -> PointerMap::Entry
 {
     PointerMap::Entry entry;
     entry.type = PointerMap::Type {*data++};
-    entry.back_ptr.value = get_u64(data);
+    entry.back_ptr.value = get_u32(data);
     return entry;
 }
 
 auto PointerMap::read_entry(Pager &pager, Id page_id, Entry &out) -> Status
 {
     const auto mid = lookup(pager, page_id);
-    CALICODB_EXPECT_GE(mid, kFirstMapId);
+    CALICODB_EXPECT_LE(kFirstMapPage, mid.value);
     CALICODB_EXPECT_NE(mid, page_id);
 
     const auto offset = entry_offset(mid, page_id);
@@ -1698,7 +1698,7 @@ auto PointerMap::read_entry(Pager &pager, Id page_id, Entry &out) -> Status
 auto PointerMap::write_entry(Pager &pager, Id page_id, Entry entry) -> Status
 {
     const auto mid = lookup(pager, page_id);
-    CALICODB_EXPECT_GE(mid, kFirstMapId);
+    CALICODB_EXPECT_LE(kFirstMapPage, mid.value);
     CALICODB_EXPECT_NE(mid, page_id);
 
     const auto offset = entry_offset(mid, page_id);
@@ -1713,7 +1713,7 @@ auto PointerMap::write_entry(Pager &pager, Id page_id, Entry entry) -> Status
         }
         auto data = map.mutate(offset, kEntrySize);
         *data++ = entry.type;
-        put_u64(data, entry.back_ptr.value);
+        put_u32(data, entry.back_ptr.value);
     }
     pager.release(std::move(map));
     return Status::ok();
@@ -1723,13 +1723,13 @@ auto PointerMap::lookup(const Pager &pager, Id page_id) -> Id
 {
     // Root page (1) has no parents, and page 2 is the first pointer map page. If "page_id" is a pointer map
     // page, "page_id" will be returned.
-    if (page_id < kFirstMapId) {
+    if (page_id.value < kFirstMapPage) {
         return Id::null();
     }
-    const auto usable_size = pager.page_size() - sizeof(Lsn);
+    const auto usable_size = pager.page_size() - Lsn::kSize;
     const auto inc = usable_size / kEntrySize + 1;
-    const auto idx = (page_id.value - kFirstMapId.value) / inc;
-    return {idx * inc + kFirstMapId.value};
+    const auto idx = (page_id.value - kFirstMapPage) / inc;
+    return Id(idx * inc + kFirstMapPage);
 }
 
 auto NodeManager::allocate(Pager &pager, Freelist &freelist, Node &out, std::string &scratch, bool is_external) -> Status
@@ -1917,7 +1917,7 @@ auto PayloadManager::emplace(Pager &pager, Freelist &freelist, char *scratch, No
         CALICODB_TRY(OverflowList::write(pager, freelist, overflow_id, key.range(k), value.range(v)));
         PointerMap::Entry entry = {node.page.id(), PointerMap::kOverflowHead};
         CALICODB_TRY(PointerMap::write_entry(pager, overflow_id, entry));
-        total_size += sizeof(overflow_id);
+        total_size += Id::kSize;
     }
 
     const auto emplace = [&](auto *out) {
@@ -1941,7 +1941,7 @@ auto PayloadManager::promote(Pager &pager, Freelist &freelist, char *scratch, Ce
     detach_cell(cell, scratch);
 
     // "scratch" should have enough room before its "m_data" member to write the left child ID.
-    const auto header_size = sizeof(Id) + varint_length(cell.key_size);
+    const auto header_size = Id::kSize + varint_length(cell.key_size);
     cell.ptr = cell.key - header_size;
     const auto *meta = lookup_meta(pager.page_size(), true);
     cell.local_size = compute_local_size(cell.key_size, 0, meta->min_local, meta->max_local);
@@ -1955,7 +1955,7 @@ auto PayloadManager::promote(Pager &pager, Freelist &freelist, char *scratch, Ce
         const PointerMap::Entry entry = {parent_id, PointerMap::kOverflowHead};
         CALICODB_TRY(PointerMap::write_entry(pager, overflow_id, entry));
         write_overflow_id(cell, overflow_id);
-        cell.size += sizeof(Id);
+        cell.size += Id::kSize;
         cell.has_remote = true;
     }
     return Status::ok();
@@ -2584,7 +2584,7 @@ auto CursorImpl::seek(const Slice &key) -> void
 
 auto CursorInternal::make_cursor(Tree &tree) -> Cursor *
 {
-    auto *cursor = new CursorImpl {tree};
+    auto *cursor = new CursorImpl(tree);
     invalidate(*cursor, default_cursor_status());
     return cursor;
 }

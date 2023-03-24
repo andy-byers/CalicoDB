@@ -37,7 +37,7 @@ public:
         : m_param {param}
     {
         m_options.env = calicodb::Env::default_env();
-        m_options.page_size = 0x4000;
+        m_options.page_size = 1 << 15;
         m_options.cache_size = 4'194'304;
         CHECK_OK(calicodb::DB::open(m_options, kFilename, m_db));
     }
@@ -144,7 +144,7 @@ public:
 
     auto add_initial_records() -> void
     {
-        for (std::size_t i {}; i < kNumRecords; ++i) {
+        for (std::size_t i = 0; i < kNumRecords; ++i) {
             CHECK_OK(m_db->put(
                 calicodb::tools::integral_key<kKeyLength>(i),
                 m_random.Generate(m_param.value_length)));

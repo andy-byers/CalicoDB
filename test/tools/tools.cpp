@@ -24,13 +24,13 @@ namespace fs = std::filesystem;
 
 auto FakeEnv::read_file_at(const Memory &mem, std::size_t offset, std::size_t size, char *scratch, Slice *out) -> Status
 {
-    std::size_t read_size {};
-    if (Slice buffer {mem.buffer}; offset < mem.buffer.size()) {
+    std::size_t read_size = 0;
+    if (Slice buffer(mem.buffer); offset < mem.buffer.size()) {
         read_size = std::min(size, buffer.size() - offset);
         std::memcpy(scratch, buffer.advance(offset).data(), read_size);
     }
     if (out != nullptr) {
-        *out = Slice {scratch, read_size};
+        *out = Slice(scratch, read_size);
     }
     return Status::ok();
 }
@@ -183,7 +183,7 @@ auto FakeEnv::get_children(const std::string &dirname, std::vector<std::string> 
 {
     auto prefix = dirname.back() == '/' ? dirname : dirname + '/';
     for (const auto &[filename, mem] : m_memory) {
-        if (mem.created && Slice {filename}.starts_with(prefix)) {
+        if (mem.created && Slice(filename).starts_with(prefix)) {
             out.emplace_back(filename.substr(prefix.size()));
         }
     }
@@ -416,13 +416,13 @@ auto print_wals(Env &env, std::size_t page_size, const std::string &prefix) -> v
                 if (std::holds_alternative<DeltaDescriptor>(decoded)) {
                     const auto deltas = std::get<DeltaDescriptor>(decoded);
                     std::cerr << "    Delta: page_id=" << deltas.page_id.value << ", lsn=" << deltas.lsn.value << ", deltas=[\n";
-                    std::size_t i {};
+                    std::size_t i = 0;
                     for (const auto &[offset, data] : deltas.deltas) {
                         std::cerr << "        " << i++ << ": offset=" << offset << ", data=" << escape_string(data) << '\n';
                     }
                 } else if (std::holds_alternative<ImageDescriptor>(decoded)) {
                     const auto image = std::get<ImageDescriptor>(decoded);
-                    std::uint64_t before_lsn {};
+                    std::uint64_t before_lsn = 0;
                     if (image.image.size() >= 8) {
                         before_lsn = get_u64(image.image.data() + FileHeader::kSize * image.page_id.is_root());
                     }
@@ -489,7 +489,7 @@ auto expect_db_contains(const DB &db, const std::map<std::string, std::string> &
 
 auto expect_db_contains(const DB &db, const Table &table, const std::map<std::string, std::string> &map) -> void
 {
-    std::size_t i {};
+    std::size_t i = 0;
     for (const auto &[key, value] : map) {
         std::string result;
         CHECK_OK(db.get(table, key, &result));

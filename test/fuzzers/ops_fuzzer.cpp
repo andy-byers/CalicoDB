@@ -23,7 +23,7 @@ enum OperationType {
     kOpCount
 };
 
-constexpr std::size_t DB_MAX_RECORDS {5'000};
+constexpr std::size_t DB_MAX_RECORDS = 5'000;
 
 OpsFuzzer::OpsFuzzer(std::string path, Options *options)
     : DbFuzzer {std::move(path), options}

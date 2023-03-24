@@ -322,7 +322,7 @@ private:
     mutable Engine m_rng; // Not in LevelDB.
 
 public:
-    explicit RandomGenerator(std::size_t size = 4 /* KiB */ * 1'024);
+    explicit RandomGenerator(std::size_t size = 16 /* KiB */ * 1'024);
     auto Generate(std::size_t len) const -> Slice;
 
     // Not in LevelDB.

@@ -57,7 +57,7 @@ TEST_F(SliceTests, EqualsSelf)
 
 TEST_F(SliceTests, StringLiteralSlice)
 {
-    ASSERT_TRUE(Slice {test_string} == Slice {"Hello, world!"});
+    ASSERT_TRUE(Slice(test_string) == Slice {"Hello, world!"});
 }
 
 TEST_F(SliceTests, StartsWith)
@@ -78,15 +78,15 @@ TEST_F(SliceTests, ShorterSlicesAreLessThanIfOtherwiseEqual)
 
 TEST_F(SliceTests, FirstcharIsMostSignificant)
 {
-    ASSERT_TRUE(Slice {"10"} > Slice {"01"});
-    ASSERT_TRUE(Slice {"01"} < Slice {"10"});
-    ASSERT_TRUE(Slice {"10"} >= Slice {"01"});
-    ASSERT_TRUE(Slice {"01"} <= Slice {"10"});
+    ASSERT_TRUE(Slice("10") > Slice("01"));
+    ASSERT_TRUE(Slice("01") < Slice("10"));
+    ASSERT_TRUE(Slice("10") >= Slice("01"));
+    ASSERT_TRUE(Slice("01") <= Slice("10"));
 }
 
 TEST_F(SliceTests, CanGetPartialRange)
 {
-    ASSERT_TRUE(slice.range(7, 5) == Slice {"world"});
+    ASSERT_TRUE(slice.range(7, 5) == Slice("world"));
 }
 
 TEST_F(SliceTests, CanGetEntireRange)
@@ -179,7 +179,7 @@ TEST_F(SliceTests, WithCString)
 
 static constexpr auto constexpr_test_read(Slice bv, Slice answer)
 {
-    for (std::size_t i {}; i < bv.size(); ++i)
+    for (std::size_t i = 0; i < bv.size(); ++i)
         CALICODB_EXPECT_EQ(bv[i], answer[i]);
 
     (void)bv.starts_with(answer);
@@ -212,21 +212,21 @@ TEST(UtilsTest, PowerOfTwoComputationIsCorrect)
 TEST(NonPrintableSliceTests, UsesStringSize)
 {
     const std::string u {"\x00\x01", 2};
-    ASSERT_EQ(Slice {u}.size(), 2);
+    ASSERT_EQ(Slice(u).size(), 2);
 }
 
 TEST(NonPrintableSliceTests, NullcharsAreEqual)
 {
     const std::string u {"\x00", 1};
     const std::string v {"\x00", 1};
-    ASSERT_EQ(Slice {u}.compare(v), 0);
+    ASSERT_EQ(Slice(u).compare(v), 0);
 }
 
 TEST(NonPrintableSliceTests, ComparisonDoesNotStopAtNullchars)
 {
     std::string u {"\x00\x00", 2};
     std::string v {"\x00\x01", 2};
-    ASSERT_LT(Slice {u}.compare(v), 0);
+    ASSERT_LT(Slice(u).compare(v), 0);
 }
 
 TEST(NonPrintableSliceTests, BytesAreUnsignedWhenCompared)
@@ -239,7 +239,7 @@ TEST(NonPrintableSliceTests, BytesAreUnsignedWhenCompared)
     ASSERT_LT(v[0], u[0]);
 
     // Unsigned comparison should come out the other way.
-    ASSERT_LT(Slice {u}.compare(v), 0);
+    ASSERT_LT(Slice(u).compare(v), 0);
 }
 
 TEST(NonPrintableSliceTests, Conversions)
@@ -256,8 +256,8 @@ TEST(NonPrintableSliceTests, CStyleStringLengths)
 {
     const auto a = "ab";
     const char b[] {'4', '2', '\x00'};
-    ASSERT_EQ(Slice {a}.size(), 2);
-    ASSERT_EQ(Slice {b}.size(), 2);
+    ASSERT_EQ(Slice(a).size(), 2);
+    ASSERT_EQ(Slice(b).size(), 2);
 }
 
 TEST(NonPrintableSliceTests, NullByteInMiddleOfLiteralGivesIncorrectLength)
@@ -267,8 +267,8 @@ TEST(NonPrintableSliceTests, NullByteInMiddleOfLiteralGivesIncorrectLength)
 
     ASSERT_EQ(std::char_traits<char>::length(a), 1);
     ASSERT_EQ(std::char_traits<char>::length(b), 1);
-    ASSERT_EQ(Slice {a}.size(), 1);
-    ASSERT_EQ(Slice {b}.size(), 1);
+    ASSERT_EQ(Slice(a).size(), 1);
+    ASSERT_EQ(Slice(b).size(), 1);
 }
 
 template <class T>
@@ -301,21 +301,17 @@ auto run_ordering_comparisons()
 
     CALICODB_EXPECT_TRUE(x < y);
     CALICODB_EXPECT_TRUE(x <= x and x <= y);
-    CALICODB_EXPECT_TRUE(y > x);
-    CALICODB_EXPECT_TRUE(y >= y and y >= x);
     ASSERT_LT(x, y);
     ASSERT_LE(x, x);
     ASSERT_LE(x, y);
-    ASSERT_GT(y, x);
-    ASSERT_GE(y, y);
-    ASSERT_GE(y, x);
 }
 
 TEST(IdTests, TypesAreSizedCorrectly)
 {
     Id id;
-    static_assert(sizeof(Id) == sizeof(id.value));
-    static_assert(sizeof(Id) == sizeof(id.value));
+    Lsn lsn;
+    static_assert(Id::kSize == sizeof(id) && Id::kSize == sizeof(id.value));
+    static_assert(Lsn::kSize == sizeof(lsn) && Lsn::kSize == sizeof(lsn.value));
 }
 
 TEST(IdTests, IdentifiersAreNullable)

@@ -42,7 +42,7 @@ public:
     friend class DBImpl;
 
     ~TableImpl() override = default;
-    explicit TableImpl(const TableOptions &options, std::string name, Id table_id);
+    explicit TableImpl(std::string name, Id table_id);
 
     [[nodiscard]] auto name() const -> const std::string & override
     {
@@ -55,7 +55,6 @@ public:
     }
 
 private:
-    TableOptions m_options;
     std::string m_name;
     Id m_id;
 };
@@ -130,20 +129,21 @@ private:
     [[nodiscard]] auto recovery_phase_2() -> Status;
     [[nodiscard]] auto construct_new_table(const Slice &name, LogicalPageId &root_id) -> Status;
 
-    TableSet m_tables;
-    Table *m_default {};
-    Table *m_root {};
-
     mutable DBState m_state;
 
-    std::string m_filename;
-    std::string m_wal_prefix;
-    Env *m_env {};
-    InfoLogger *m_info_log {};
-    WriteAheadLog *m_wal {};
-    Pager *m_pager {};
-    bool m_owns_env {};
-    bool m_owns_info_log {};
+    TableSet m_tables;
+    Table *m_default = nullptr;
+    Table *m_root = nullptr;
+
+    WriteAheadLog *m_wal = nullptr;
+    Pager *m_pager = nullptr;
+    Env *m_env = nullptr;
+    InfoLogger *m_info_log = nullptr;
+
+    const std::string m_filename;
+    const std::string m_wal_prefix;
+    const bool m_owns_env;
+    const bool m_owns_info_log;
 };
 
 auto setup_db(const std::string &filename, Env &env, Options &options, FileHeader &header) -> Status;

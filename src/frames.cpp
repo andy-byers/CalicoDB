@@ -55,7 +55,7 @@ auto DirtyTable::remove(Iterator itr) -> Iterator
 
 auto DirtyTable::recovery_lsn() const -> Lsn
 {
-    auto itr = m_dirty.lower_bound(Lsn::root());
+    auto itr = m_dirty.lower_bound(Lsn::base());
     if (itr == m_dirty.end()) {
         return Lsn::null();
     }

@@ -41,7 +41,7 @@ auto WriteAheadLog::open(const Parameters &param, WriteAheadLog **out) -> Status
     }
     std::sort(begin(segments), end(segments));
 
-    auto *wal = new WriteAheadLog {param};
+    auto *wal = new WriteAheadLog(param);
     // Keep track of the segment files.
     for (const auto &id : segments) {
         wal->m_segments.insert({id, Lsn::null()});
@@ -60,7 +60,7 @@ auto WriteAheadLog::start_writing() -> Status
     CALICODB_EXPECT_EQ(m_file, nullptr);
     CALICODB_EXPECT_EQ(m_writer, nullptr);
     CALICODB_TRY(open_next_segment(m_file));
-    m_writer = new WalWriter {*m_file, m_tail_buffer};
+    m_writer = new WalWriter(*m_file, m_tail_buffer);
     return Status::ok();
 }
 
@@ -76,7 +76,7 @@ auto WriteAheadLog::written_lsn() const -> Lsn
 
 auto WriteAheadLog::current_lsn() const -> Lsn
 {
-    return {m_last_lsn.value + 1};
+    return Lsn(m_last_lsn.value + 1);
 }
 
 auto WriteAheadLog::find_obsolete_lsn(Lsn &out) -> Status
@@ -106,7 +106,7 @@ auto WriteAheadLog::log(const Slice &payload) -> Status
         if (s.is_ok()) {
             delete m_writer;
             delete m_file;
-            m_writer = new WalWriter {*file, m_tail_buffer};
+            m_writer = new WalWriter(*file, m_tail_buffer);
             m_file = file;
         }
         return s;
@@ -169,7 +169,7 @@ auto WriteAheadLog::cleanup(Lsn recovery_lsn) -> Status
             return Status::ok();
         }
         CALICODB_TRY(cache_first_lsn(*m_env, m_prefix, next));
-        if (next->second > recovery_lsn) {
+        if (recovery_lsn < next->second) {
             return Status::ok();
         }
         CALICODB_TRY(m_env->remove_file(encode_segment_name(m_prefix, prev->first)));

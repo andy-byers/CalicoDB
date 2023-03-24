@@ -61,7 +61,7 @@ TEST_F(DeltaCompressionTest, DeltasAreOrdered)
     });
 
     ASSERT_EQ(deltas.size(), 3);
-    for (std::size_t i {}; i < deltas.size(); ++i) {
+    for (std::size_t i = 0; i < deltas.size(); ++i) {
         ASSERT_EQ(deltas[i].offset, (i + 1) * 10);
         ASSERT_EQ(deltas[i].size, i + 1);
     }
@@ -77,7 +77,7 @@ TEST_F(DeltaCompressionTest, DeltasAreNotRepeated)
     });
 
     ASSERT_EQ(deltas.size(), 2);
-    for (std::size_t i {}; i < deltas.size(); ++i) {
+    for (std::size_t i = 0; i < deltas.size(); ++i) {
         ASSERT_EQ(deltas[i].offset, (i + 1) * 10);
         ASSERT_EQ(deltas[i].size, i + 1);
     }
@@ -129,7 +129,7 @@ TEST_F(DeltaCompressionTest, SanityCheck)
     static constexpr std::size_t NUM_INSERTS = 100;
     static constexpr std::size_t MAX_DELTA_SIZE = 10;
     std::vector<PageDelta> deltas;
-    for (std::size_t i {}; i < NUM_INSERTS; ++i) {
+    for (std::size_t i = 0; i < NUM_INSERTS; ++i) {
         const auto offset = random.Next(kPageSize - MAX_DELTA_SIZE);
         const auto size = random.Next(1, MAX_DELTA_SIZE);
         insert_delta(deltas, PageDelta {offset, size});
@@ -138,7 +138,7 @@ TEST_F(DeltaCompressionTest, SanityCheck)
 
     std::vector<int> covering(kPageSize);
     for (const auto &[offset, size] : deltas) {
-        for (std::size_t i {}; i < size; ++i) {
+        for (std::size_t i = 0; i < size; ++i) {
             ASSERT_EQ(covering.at(offset + i), 0);
             ++covering[offset + i];
         }
@@ -147,7 +147,7 @@ TEST_F(DeltaCompressionTest, SanityCheck)
 
 [[nodiscard]] static auto make_cache_entry(std::uint64_t id_value) -> CacheEntry
 {
-    return {.page_id = Id {id_value}};
+    return {.page_id = Id(id_value)};
 }
 
 class PageCacheTests : public testing::Test
@@ -172,13 +172,13 @@ TEST_F(PageCacheTests, OldestEntryIsEvictedFirst)
     cache.put(make_cache_entry(1));
     ASSERT_EQ(cache.size(), 4);
 
-    ASSERT_EQ(cache.get(Id {4})->page_id, Id {4});
-    ASSERT_EQ(cache.get(Id {3})->page_id, Id {3});
+    ASSERT_EQ(cache.get(Id(4))->page_id, Id(4));
+    ASSERT_EQ(cache.get(Id(3))->page_id, Id(3));
 
-    ASSERT_EQ(cache.evict()->page_id, Id {2});
-    ASSERT_EQ(cache.evict()->page_id, Id {1});
-    ASSERT_EQ(cache.evict()->page_id, Id {4});
-    ASSERT_EQ(cache.evict()->page_id, Id {3});
+    ASSERT_EQ(cache.evict()->page_id, Id(2));
+    ASSERT_EQ(cache.evict()->page_id, Id(1));
+    ASSERT_EQ(cache.evict()->page_id, Id(4));
+    ASSERT_EQ(cache.evict()->page_id, Id(3));
     ASSERT_EQ(cache.size(), 0);
 }
 
@@ -187,10 +187,10 @@ TEST_F(PageCacheTests, ReplacementPolicyIgnoresQuery)
     cache.put(make_cache_entry(2));
     cache.put(make_cache_entry(1));
 
-    (void)cache.query(Id {2});
+    (void)cache.query(Id(2));
 
-    ASSERT_EQ(cache.evict()->page_id, Id {2});
-    ASSERT_EQ(cache.evict()->page_id, Id {1});
+    ASSERT_EQ(cache.evict()->page_id, Id(2));
+    ASSERT_EQ(cache.evict()->page_id, Id(1));
 }
 
 TEST_F(PageCacheTests, ReferencedEntriesAreIgnoredDuringEviction)
@@ -198,9 +198,9 @@ TEST_F(PageCacheTests, ReferencedEntriesAreIgnoredDuringEviction)
     cache.put(make_cache_entry(2));
     cache.put(make_cache_entry(1));
 
-    cache.query(Id {2})->refcount = 1;
+    cache.query(Id(2))->refcount = 1;
 
-    ASSERT_EQ(cache.evict()->page_id, Id {1});
+    ASSERT_EQ(cache.evict()->page_id, Id(1));
     ASSERT_FALSE(cache.evict().has_value());
 }
 
@@ -235,7 +235,7 @@ TEST_F(FrameManagerTests, NewFrameManagerIsSetUpCorrectly)
 #ifndef NDEBUG
 TEST_F(FrameManagerTests, OutOfFramesDeathTest)
 {
-    for (std::size_t i {}; i < kFrameCount; ++i) {
+    for (std::size_t i = 0; i < kFrameCount; ++i) {
         auto *entry = cache.put(make_cache_entry(i + 1));
         ASSERT_OK(frames->pin(Id::from_index(i), *entry));
     }
@@ -247,14 +247,14 @@ TEST_F(FrameManagerTests, OutOfFramesDeathTest)
 
 auto write_to_page(Page &page, const std::string &message) -> void
 {
-    const auto offset = page_offset(page) + sizeof(Lsn);
+    const auto offset = page_offset(page) + Lsn::kSize;
     EXPECT_LE(offset + message.size(), page.size());
     std::memcpy(page.mutate(offset, message.size()), message.data(), message.size());
 }
 
 [[nodiscard]] auto read_from_page(const Page &page, std::size_t size) -> std::string
 {
-    const auto offset = page_offset(page) + sizeof(Lsn);
+    const auto offset = page_offset(page) + Lsn::kSize;
     EXPECT_LE(offset + size, page.size());
     auto message = std::string(size, '\x00');
     std::memcpy(message.data(), page.data() + offset, message.size());
@@ -318,18 +318,18 @@ TEST_F(PagerTests, NewPagerIsSetUpCorrectly)
 {
     ASSERT_EQ(pager->page_count(), 0);
     ASSERT_EQ(pager->bytes_written(), 0);
-    ASSERT_EQ(pager->recovery_lsn(), Id::null());
+    ASSERT_EQ(pager->recovery_lsn(), Lsn::null());
     EXPECT_OK(state.status);
 }
 
 TEST_F(PagerTests, AllocatesPagesAtEOF)
 {
     ASSERT_EQ(pager->page_count(), 0);
-    ASSERT_EQ(allocate_write_release("a"), Id {1});
+    ASSERT_EQ(allocate_write_release("a"), Id(1));
     ASSERT_EQ(pager->page_count(), 1);
-    ASSERT_EQ(allocate_write_release("b"), Id {2});
+    ASSERT_EQ(allocate_write_release("b"), Id(2));
     ASSERT_EQ(pager->page_count(), 2);
-    ASSERT_EQ(allocate_write_release("c"), Id {3});
+    ASSERT_EQ(allocate_write_release("c"), Id(3));
     ASSERT_EQ(pager->page_count(), 3);
 }
 
@@ -347,10 +347,10 @@ TEST_F(PagerTests, AcquireReturnsCorrectPage)
 
 TEST_F(PagerTests, DataPersistsInEnv)
 {
-    for (std::size_t i {}; i < kFrameCount * 10; ++i) {
+    for (std::size_t i = 0; i < kFrameCount * 10; ++i) {
         (void)allocate_write_release(tools::integral_key<16>(i));
     }
-    for (std::size_t i {}; i < kFrameCount * 10; ++i) {
+    for (std::size_t i = 0; i < kFrameCount * 10; ++i) {
         ASSERT_EQ(acquire_read_release(Id {i + 1}, 16), tools::integral_key<16>(i))
             << "mismatch on page " << i + 1;
     }
@@ -363,7 +363,7 @@ public:
 
     auto SetUp() -> void override
     {
-        for (std::size_t i {}; i < kInitialPageCount; ++i) {
+        for (std::size_t i = 0; i < kInitialPageCount; ++i) {
             (void)allocate_write_release(tools::integral_key(i));
         }
         ASSERT_OK(pager->flush());
@@ -378,7 +378,7 @@ TEST_F(TruncationTests, AllocationAfterTruncation)
         (void)allocate_write_release(tools::integral_key(i));
     }
 
-    for (std::size_t i {}; i < kInitialPageCount; ++i) {
+    for (std::size_t i = 0; i < kInitialPageCount; ++i) {
         const auto key = tools::integral_key(i);
         ASSERT_EQ(acquire_read_release(Id::from_index(i), key.size()), key);
     }
@@ -397,7 +397,7 @@ TEST_F(TruncationTests, OutOfRangePagesAreDiscarded)
     };
 
     // Make pages dirty.
-    for (std::size_t i {}; i < kInitialPageCount; ++i) {
+    for (std::size_t i = 0; i < kInitialPageCount; ++i) {
         acquire_write_release(Id {i + 1}, tools::integral_key(i));
     }
     // Should get rid of cached pages that are out-of-range.
@@ -405,7 +405,7 @@ TEST_F(TruncationTests, OutOfRangePagesAreDiscarded)
     flush_and_match_sizes();
 
     // All cached pages are out-of-range
-    for (std::size_t i {}; i < kInitialPageCount - kFrameCount / 2; ++i) {
+    for (std::size_t i = 0; i < kInitialPageCount - kFrameCount / 2; ++i) {
         acquire_write_release(Id {i + 1}, tools::integral_key(i));
     }
     ASSERT_OK(pager->truncate(1));
