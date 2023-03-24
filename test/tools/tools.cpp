@@ -404,7 +404,8 @@ auto print_wals(Env &env, std::size_t page_size, const std::string &prefix) -> v
             std::cerr << "Start of segment " << name << '\n';
             for (;;) {
                 auto s = reader.read(data_buffer);
-                Slice payload(data_buffer) if (s.is_not_found())
+                Slice payload(data_buffer);
+                if (s.is_not_found())
                 {
                     std::cerr << "End of segment\n";
                     break;

@@ -1480,8 +1480,8 @@ TEST_P(VacuumTests, CleansUpOverflowPayloads)
 
 TEST_P(VacuumTests, VacuumFreelistSanityCheck)
 {
-    std::default_random_engine rng(42)
-        TableSet table_set;
+    std::default_random_engine rng(42);
+    TableSet table_set;
 
     for (std::size_t iteration = 0; iteration < 1'000; ++iteration) {
         std::vector<Node> nodes;
@@ -1816,8 +1816,8 @@ public:
         multi_tree[tid]->TEST_validate();
     }
 
-    Id last_tree_id(1)
-        std::vector<std::unique_ptr<Tree>> multi_tree;
+    Id last_tree_id = Id::root();
+    std::vector<std::unique_ptr<Tree>> multi_tree;
     std::vector<std::string> payload_values;
     std::list<LogicalPageId> root_ids;
 };

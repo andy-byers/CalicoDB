@@ -70,7 +70,7 @@ template <class Base, class Store>
         ADD_FAILURE() << "Error: Unexpected blob type";
     }
     EXPECT_TRUE(s.is_ok()) << "Error: " << s.to_string().data();
-    return std::unique_ptr<Base>(temp)
+    return std::unique_ptr<Base>(temp);
 }
 
 auto write_whole_file(const std::string &path, const Slice &message) -> void
@@ -82,8 +82,8 @@ auto write_whole_file(const std::string &path, const Slice &message) -> void
 [[nodiscard]] auto read_whole_file(const std::string &path) -> std::string
 {
     std::string message;
-    std::ifstream ifs(path)
-        ifs.seekg(0, std::ios::end);
+    std::ifstream ifs(path);
+    ifs.seekg(0, std::ios::end);
     message.resize(ifs.tellg());
     ifs.seekg(0, std::ios::beg);
     ifs.read(message.data(), message.size());
@@ -95,8 +95,8 @@ constexpr auto write_out_randomly(tools::RandomGenerator &random, Writer &writer
 {
     constexpr std::size_t num_chunks = 20;
     ASSERT_GT(message.size(), num_chunks) << "File is too small for this test";
-    Slice in(message)
-        std::size_t counter = 0;
+    Slice in(message);
+    std::size_t counter = 0;
 
     while (!in.is_empty()) {
         const auto chunk_size = std::min<std::size_t>(in.size(), random.Next(message.size() / num_chunks));

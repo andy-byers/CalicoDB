@@ -216,8 +216,8 @@ public:
         std::string record(wal_scratch_size(kPageSize), '\0');
         CALICODB_TRY(reader.read(record));
         out = record.substr(1);
-        Slice buffer(out) if (lsn != nullptr)
-        {
+        Slice buffer(out);
+        if (lsn != nullptr) {
             *lsn = extract_payload_lsn(buffer);
         }
         out = buffer.advance(Lsn::kSize).to_string();
@@ -494,8 +494,8 @@ public:
         Reader *temp;
         EXPECT_OK(env->new_reader(encode_segment_name(kWalPrefix, segment_id), temp));
 
-        std::unique_ptr<Reader> file(temp)
-            WalReader reader {*file, tail_buffer};
+        std::unique_ptr<Reader> file(temp);
+        WalReader reader(*file, tail_buffer);
 
         for (;;) {
             std::string payload;
@@ -602,7 +602,7 @@ TEST_F(WalTests, UnderstandsDeltaRecords)
     ASSERT_OK(wal->start_writing());
     ASSERT_EQ(wal->bytes_written(), 0);
     const auto image = random.Generate(kPageSize);
-    std::vector<PageDelta> delta {
+    std::vector<PageDelta> delta = {
         {100, 10},
         {200, 20},
         {300, 30},
