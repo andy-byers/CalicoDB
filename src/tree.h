@@ -73,7 +73,7 @@ struct Cell {
 struct NodeMeta {
     using ParseCell = Cell (*)(const NodeMeta &, char *);
 
-    ParseCell parse_cell {};
+    ParseCell parse_cell = nullptr;
     std::size_t min_local = 0;
     std::size_t max_local = 0;
 };
@@ -97,9 +97,9 @@ struct Node {
     const NodeMeta *meta = nullptr;
     NodeHeader header;
     std::optional<Cell> overflow;
-    unsigned overflow_index {};
-    unsigned slots_offset {};
-    unsigned gap_size {};
+    unsigned overflow_index = 0;
+    unsigned slots_offset = 0;
+    unsigned gap_size = 0;
 };
 
 // Read a cell from the node at the specified index or offset. The node must remain alive for as long as the cell.
@@ -282,8 +282,8 @@ class CursorImpl : public Cursor
 {
     struct Location {
         Id page_id;
-        unsigned index {};
-        unsigned count {};
+        unsigned index = 0;
+        unsigned count = 0;
     };
     mutable Status m_status;
     std::string m_key;

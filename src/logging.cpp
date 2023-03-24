@@ -107,7 +107,7 @@ auto consume_decimal_number(Slice &in, std::uint64_t *val) -> bool
     static constexpr const std::uint64_t kMaxUint64 = std::numeric_limits<std::uint64_t>::max();
     static constexpr const char kLastDigitOfMaxUint64 = '0' + static_cast<char>(kMaxUint64 % 10);
 
-    std::uint64_t value {};
+    std::uint64_t value = 0;
 
     // reinterpret_cast-ing from char* to uint8_t* to avoid signedness.
     const auto *start = reinterpret_cast<const std::uint8_t *>(in.data());

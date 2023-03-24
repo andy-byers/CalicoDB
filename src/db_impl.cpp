@@ -42,8 +42,8 @@ static auto decode_page_size(unsigned header_page_size) -> std::size_t
 Table::~Table() = default;
 
 TableImpl::TableImpl(std::string name, Id table_id)
-    : m_name {std::move(name)},
-      m_id {table_id}
+    : m_name(std::move(name)),
+      m_id(table_id)
 {
 }
 
@@ -90,7 +90,7 @@ auto TableSet::add(const LogicalPageId &root_id) -> void
         m_tables.resize(index + 1);
     }
     // Table slot must not be occupied.
-    CALICODB_EXPECT_TRUE(m_tables[index] == nullptr);
+    CALICODB_EXPECT_EQ(m_tables[index], nullptr);
     m_tables[index] = new TableState;
     m_tables[index]->root_id = root_id;
 }
@@ -107,8 +107,8 @@ auto TableSet::erase(Id table_id) -> void
 
 static auto encode_logical_id(LogicalPageId id, char *out) -> void
 {
-    put_u64(out, id.table_id.value);
-    put_u64(out + Id::kSize, id.page_id.value);
+    put_u32(out, id.table_id.value);
+    put_u32(out + Id::kSize, id.page_id.value);
 }
 
 [[nodiscard]] static auto decode_logical_id(const Slice &in, LogicalPageId *out) -> Status

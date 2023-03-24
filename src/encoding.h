@@ -110,7 +110,7 @@ inline auto encode_varint(char *out, std::uint64_t value) -> char *
 inline auto decode_varint(const char *in, std::uint64_t &value) -> const char *
 {
     value = 0;
-    for (std::uint32_t shift {}; shift < 64; shift += 7) {
+    for (std::uint32_t shift = 0; shift < 64; shift += 7) {
         std::uint64_t c = *reinterpret_cast<const std::uint8_t *>(in);
         ++in;
         if (c & 0x80) {

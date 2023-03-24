@@ -192,8 +192,8 @@ struct Interceptor {
     }
 
     std::string prefix;
-    Callback callback {};
-    Type type {};
+    Callback callback;
+    Type type;
 };
 
 class FaultInjectionEnv : public FakeEnv

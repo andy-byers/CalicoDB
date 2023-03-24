@@ -57,7 +57,7 @@ struct CacheEntry {
 
     Id page_id;
     std::size_t index = 0;
-    unsigned refcount {};
+    unsigned refcount = 0;
 
     // If the page represented by this entry is dirty, this should point
     // into the corresponding dirty table entry.
@@ -100,8 +100,8 @@ private:
 
     std::unordered_map<Id, MapEntry, Id::Hash> m_map;
     std::list<CacheEntry> m_list;
-    std::uint64_t m_misses {};
-    std::uint64_t m_hits {};
+    std::uint64_t m_misses = 0;
+    std::uint64_t m_hits = 0;
 };
 
 struct Frame {

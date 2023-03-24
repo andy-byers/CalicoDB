@@ -12,10 +12,9 @@ namespace calicodb
 {
 
 AlignedBuffer::AlignedBuffer(std::size_t size, std::size_t alignment)
-    : m_data {
+    : m_data(
           new (std::align_val_t {alignment}) char[size](),
-          Deleter {std::align_val_t {alignment}},
-      }
+          Deleter {std::align_val_t {alignment}})
 {
     CALICODB_EXPECT_TRUE(is_power_of_two(alignment));
     CALICODB_EXPECT_EQ(size % alignment, 0);
@@ -139,9 +138,9 @@ Frame::Frame(char *ptr)
 }
 
 FrameManager::FrameManager(Editor &file, AlignedBuffer buffer, std::size_t page_size, std::size_t frame_count)
-    : m_buffer {std::move(buffer)},
-      m_file {&file},
-      m_page_size {page_size}
+    : m_buffer(std::move(buffer)),
+      m_file(&file),
+      m_page_size(page_size)
 {
     // The buffer should be aligned to the page size.
     CALICODB_EXPECT_EQ(reinterpret_cast<std::uintptr_t>(m_buffer.get()) % page_size, 0);

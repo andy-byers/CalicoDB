@@ -331,9 +331,9 @@ auto FaultInjectionEnv::clone() const -> Env *
 
 RandomGenerator::RandomGenerator(std::size_t size)
     : m_data(size, '\0'),
-      m_rng {42}
+      m_rng(42)
 {
-    std::independent_bits_engine<Engine, CHAR_BIT, unsigned char> engine {m_rng};
+    std::independent_bits_engine<Engine, CHAR_BIT, unsigned char> engine(m_rng);
     std::generate(begin(m_data), end(m_data), std::ref(engine));
 }
 
@@ -404,11 +404,13 @@ auto print_wals(Env &env, std::size_t page_size, const std::string &prefix) -> v
             std::cerr << "Start of segment " << name << '\n';
             for (;;) {
                 auto s = reader.read(data_buffer);
-                Slice payload {data_buffer};
-                if (s.is_not_found()) {
+                Slice payload(data_buffer) if (s.is_not_found())
+                {
                     std::cerr << "End of segment\n";
                     break;
-                } else if (!s.is_ok()) {
+                }
+                else if (!s.is_ok())
+                {
                     std::cerr << "Encountered \"" << get_status_name(s) << "\" status: " << s.to_string() << '\n';
                     break;
                 }

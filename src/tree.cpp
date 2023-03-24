@@ -275,7 +275,7 @@ static auto take_free_space(Node &node, std::size_t ptr0, std::size_t ptr1, std:
 
 static auto allocate_from_free_list(Node &node, std::size_t needed_size) -> std::size_t
 {
-    unsigned prev_ptr {};
+    unsigned prev_ptr = 0;
     auto curr_ptr = node.header.free_start;
 
     while (curr_ptr) {
@@ -300,7 +300,7 @@ static auto allocate_from_gap(Node &node, std::size_t needed_size) -> std::size_
 
 auto BlockAllocator::accumulate_free_bytes(const Node &node) -> std::size_t
 {
-    unsigned total {};
+    unsigned total = 0;
     for (auto ptr = node.header.free_start; ptr != 0;) {
         total += get_block_size(node, ptr);
         ptr = get_next_pointer(node, ptr);
@@ -336,7 +336,7 @@ auto BlockAllocator::release(Node &node, std::size_t block_start, std::size_t bl
     }
     // The free block list is sorted by start position. Find where the
     // new block should go.
-    unsigned prev {};
+    unsigned prev = 0;
     auto next = header.free_start;
     while (next && next < block_start) {
         prev = next;

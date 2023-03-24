@@ -623,7 +623,7 @@ TEST_F(DbRecoveryTests, RecoversNthBatch)
 
 struct ErrorWrapper {
     std::string prefix;
-    tools::Interceptor::Type type {};
+    tools::Interceptor::Type type;
     std::size_t successes = 0;
 };
 

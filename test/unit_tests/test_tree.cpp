@@ -646,7 +646,7 @@ TEST_P(TreeTests, ResolvesOverflowsOnRightmostPosition)
 
 TEST_P(TreeTests, ResolvesOverflowsOnMiddlePosition)
 {
-    for (std::size_t i {}, j {99}; i < j; ++i, --j) {
+    for (std::size_t i = 0, j = 99; i < j; ++i, --j) {
         ASSERT_OK(tree->put(make_long_key(i), make_value('v')));
         ASSERT_OK(tree->put(make_long_key(j), make_value('v')));
     }
@@ -704,12 +704,12 @@ TEST_P(TreeTests, ResolvesOverflowsFromOverwrite)
 
 TEST_P(TreeTests, SplitWithShortAndLongKeys)
 {
-    for (unsigned i {}; i < kInitialRecordCount; ++i) {
+    for (unsigned i = 0; i < kInitialRecordCount; ++i) {
         char key[3] {};
         put_u16(key, kInitialRecordCount - i - 1);
         ASSERT_OK(tree->put({key, 2}, "v"));
     }
-    for (unsigned i {}; i < kInitialRecordCount; ++i) {
+    for (unsigned i = 0; i < kInitialRecordCount; ++i) {
         const auto key = random.Generate(GetParam().page_size);
         ASSERT_OK(tree->put(key, "v"));
     }
@@ -1480,8 +1480,8 @@ TEST_P(VacuumTests, CleansUpOverflowPayloads)
 
 TEST_P(VacuumTests, VacuumFreelistSanityCheck)
 {
-    std::default_random_engine rng {42};
-    TableSet table_set;
+    std::default_random_engine rng(42)
+        TableSet table_set;
 
     for (std::size_t iteration = 0; iteration < 1'000; ++iteration) {
         std::vector<Node> nodes;
@@ -1816,8 +1816,8 @@ public:
         multi_tree[tid]->TEST_validate();
     }
 
-    Id last_tree_id {1};
-    std::vector<std::unique_ptr<Tree>> multi_tree;
+    Id last_tree_id(1)
+        std::vector<std::unique_ptr<Tree>> multi_tree;
     std::vector<std::string> payload_values;
     std::list<LogicalPageId> root_ids;
 };

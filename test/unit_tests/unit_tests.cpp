@@ -25,7 +25,7 @@ auto RecordGenerator::generate(tools::RandomGenerator &random, std::size_t num_r
     const auto max_vs = mvs + spread;
     auto itr = records.begin();
     std::unordered_set<std::string> set;
-    std::size_t num_collisions {};
+    std::size_t num_collisions = 0;
 
     while (itr != records.end()) {
         const auto ks = random.Next(min_ks, max_ks);

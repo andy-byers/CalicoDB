@@ -447,7 +447,7 @@ private:
 
         // Move the filler pages from the default table to the freelist.
         auto itr = begin(m_committed);
-        for (int i {}; i < kRecordCount / 2; ++i, ++itr) {
+        for (int i = 0; i < kRecordCount / 2; ++i, ++itr) {
             ASSERT_OK(m_db->erase(itr->first));
         }
     }

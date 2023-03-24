@@ -39,7 +39,7 @@ struct LogicalPageId {
     {
     }
 
-    static constexpr std::size_t kSize = 16;
+    static constexpr std::size_t kSize = Id::kSize * 2;
 
     Id table_id;
     Id page_id;
