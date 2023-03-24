@@ -19,8 +19,8 @@ public:
 
     struct Parameters {
         std::string prefix;
-        Env *env {};
-        std::size_t page_size {};
+        Env *env = nullptr;
+        std::size_t page_size = 0;
     };
 
     WriteAheadLog() = default;
@@ -51,7 +51,7 @@ private:
     [[nodiscard]] auto log(const Slice &payload) -> Status;
     auto advance_lsn(Lsn *out) -> void;
 
-    static constexpr std::size_t kSegmentCutoff {32};
+    static constexpr std::size_t kSegmentCutoff = 32;
 
     // Maps each completed segment to the first LSN written to it.
     std::map<Id, Lsn> m_segments;
@@ -76,12 +76,12 @@ private:
 
     std::string m_data_buffer;
     std::string m_tail_buffer;
-    std::size_t m_bytes_written {};
+    std::size_t m_bytes_written = 0;
 
-    Env *m_env {};
-    WalWriter *m_writer {};
-    Logger *m_file {};
-    Reader *m_dir {};
+    Env *m_env = nullptr;
+    WalWriter *m_writer = nullptr;
+    Logger *m_file = nullptr;
+    Reader *m_dir = nullptr;
 };
 
 } // namespace calicodb

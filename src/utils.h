@@ -9,6 +9,7 @@
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
+#include <limits>
 
 #if NDEBUG
 #define CALICODB_EXPECT_(expr, file, line)
@@ -48,10 +49,10 @@ inline constexpr auto expect(bool cond, const char *repr, const char *file, int 
 
 } // namespace impl
 
-static constexpr std::size_t kMinPageSize {0x200};
-static constexpr std::size_t kMaxPageSize {0x8000};
-static constexpr std::size_t kMinFrameCount {16};
-static constexpr std::size_t kMaxCacheSize {1 << 30};
+static constexpr std::size_t kMinPageSize = 1'024;
+static constexpr std::size_t kMaxPageSize = 65'536;
+static constexpr std::size_t kMinFrameCount = 16;
+static constexpr std::size_t kMaxCacheSize = 1 << 30;
 static constexpr auto kDefaultWalSuffix = "-wal-";
 static constexpr auto kDefaultLogSuffix = "-log";
 
@@ -80,8 +81,9 @@ constexpr auto is_power_of_two(T v) noexcept -> bool
 }
 
 struct Id {
-    static constexpr std::uint64_t kNull {0};
-    static constexpr std::uint64_t kRoot {1};
+    static constexpr std::uint32_t kNull = 0;
+    static constexpr std::uint32_t kRoot = 1;
+    static constexpr auto kSize = sizeof(kNull);
 
     struct Hash {
         auto operator()(const Id &id) const -> std::uint64_t
@@ -90,38 +92,46 @@ struct Id {
         }
     };
 
-    [[nodiscard]] static constexpr auto from_index(std::uint64_t index) noexcept -> Id
+    Id() = default;
+
+    template <class T>
+    explicit Id(T t)
+        : value(static_cast<std::uint32_t>(t))
     {
-        return {index + 1};
     }
 
-    [[nodiscard]] static constexpr auto null() noexcept -> Id
+    [[nodiscard]] static auto from_index(std::size_t index) noexcept -> Id
     {
-        return {kNull};
+        return Id(index + 1);
     }
 
-    [[nodiscard]] static constexpr auto root() noexcept -> Id
+    [[nodiscard]] static auto null() noexcept -> Id
     {
-        return {kRoot};
+        return Id(kNull);
     }
 
-    [[nodiscard]] constexpr auto is_null() const noexcept -> bool
+    [[nodiscard]] static auto root() noexcept -> Id
+    {
+        return Id(kRoot);
+    }
+
+    [[nodiscard]] auto is_null() const noexcept -> bool
     {
         return value == kNull;
     }
 
-    [[nodiscard]] constexpr auto is_root() const noexcept -> bool
+    [[nodiscard]] auto is_root() const noexcept -> bool
     {
         return value == kRoot;
     }
 
-    [[nodiscard]] constexpr auto as_index() const noexcept -> std::uint64_t
+    [[nodiscard]] auto as_index() const noexcept -> std::size_t
     {
         CALICODB_EXPECT_NE(value, null().value);
         return value - 1;
     }
 
-    std::uint64_t value {};
+    std::uint32_t value = kNull;
 };
 
 inline auto operator<(Id lhs, Id rhs) -> bool
@@ -129,19 +139,9 @@ inline auto operator<(Id lhs, Id rhs) -> bool
     return lhs.value < rhs.value;
 }
 
-inline auto operator>(Id lhs, Id rhs) -> bool
-{
-    return lhs.value > rhs.value;
-}
-
 inline auto operator<=(Id lhs, Id rhs) -> bool
 {
     return lhs.value <= rhs.value;
-}
-
-inline auto operator>=(Id lhs, Id rhs) -> bool
-{
-    return lhs.value >= rhs.value;
 }
 
 inline auto operator==(Id lhs, Id rhs) -> bool
@@ -154,16 +154,78 @@ inline auto operator!=(Id lhs, Id rhs) -> bool
     return lhs.value != rhs.value;
 }
 
-using Lsn = Id;
+struct Lsn {
+    static constexpr std::uint64_t kNull = 0;
+    static constexpr std::uint64_t kBase = 1;
+    static constexpr auto kSize = sizeof(kNull);
+
+    struct Hash {
+        auto operator()(const Lsn &id) const -> std::uint64_t
+        {
+            return id.value;
+        }
+    };
+
+    Lsn() = default;
+
+    template <class T>
+    explicit Lsn(T t)
+        : value(static_cast<std::uint64_t>(t))
+    {
+    }
+
+    [[nodiscard]] static auto null() noexcept -> Lsn
+    {
+        return Lsn(kNull);
+    }
+
+    [[nodiscard]] static auto base() noexcept -> Lsn
+    {
+        return Lsn(kBase);
+    }
+
+    [[nodiscard]] auto is_null() const noexcept -> bool
+    {
+        return value == kNull;
+    }
+
+    std::uint64_t value = kNull;
+};
+
+inline auto operator<(Lsn lhs, Lsn rhs) -> bool
+{
+    return lhs.value < rhs.value;
+}
+
+inline auto operator<=(Lsn lhs, Lsn rhs) -> bool
+{
+    return lhs.value <= rhs.value;
+}
+
+inline auto operator==(Lsn lhs, Lsn rhs) -> bool
+{
+    return lhs.value == rhs.value;
+}
+
+inline auto operator!=(Lsn lhs, Lsn rhs) -> bool
+{
+    return lhs.value != rhs.value;
+}
 
 struct DBState {
     Status status;
-    std::size_t batch_size {};
-    std::size_t record_count {};
+    std::size_t batch_size = 0;
+    std::size_t record_count = 0;
     Lsn commit_lsn;
     Id freelist_head;
     Id max_page_id;
-    bool is_running {};
+    bool is_running = false;
+};
+
+struct TreeStatistics {
+    std::size_t smo_count = 0;
+    std::size_t bytes_read = 0;
+    std::size_t bytes_written = 0;
 };
 
 } // namespace calicodb

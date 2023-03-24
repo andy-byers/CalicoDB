@@ -12,8 +12,8 @@ namespace calicodb
 {
 
 struct PageDelta {
-    std::size_t offset {};
-    std::size_t size {};
+    std::size_t offset = 0;
+    std::size_t size = 0;
 };
 
 // Join overlapping deltas in a sorted (by offset) vector. Makes sure that delta WAL records are minimally sized.

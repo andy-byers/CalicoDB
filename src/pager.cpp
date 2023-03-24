@@ -20,8 +20,6 @@ namespace calicodb
         }                              \
     } while (0)
 
-static constexpr Id kMaxId {std::numeric_limits<std::size_t>::max()};
-
 auto Pager::open(const Parameters &param, Pager **out) -> Status
 {
     CALICODB_EXPECT_TRUE(is_power_of_two(param.page_size));
@@ -35,22 +33,21 @@ auto Pager::open(const Parameters &param, Pager **out) -> Status
 
     // Allocate the frames, i.e. where pages from disk are stored in memory. Aligned to the page size, so it could
     // potentially be used for direct I/O.
-    AlignedBuffer buffer {
+    AlignedBuffer buffer(
         param.page_size * param.frame_count,
-        param.page_size};
+        param.page_size);
 
-    auto *ptr = new Pager {param, *file, std::move(buffer)};
-    *out = ptr;
+    *out = new Pager(param, *file, std::move(buffer));
     return Status::ok();
 }
 
 Pager::Pager(const Parameters &param, Editor &file, AlignedBuffer buffer)
-    : m_filename {param.filename},
-      m_frames {file, std::move(buffer), param.page_size, param.frame_count},
-      m_wal {param.wal},
-      m_env {param.env},
-      m_info_log {param.info_log},
-      m_state {param.state}
+    : m_filename(param.filename),
+      m_frames(file, std::move(buffer), param.page_size, param.frame_count),
+      m_env(param.env),
+      m_info_log(param.info_log),
+      m_wal(param.wal),
+      m_state(param.state)
 {
     CALICODB_EXPECT_NE(m_wal, nullptr);
     CALICODB_EXPECT_NE(m_state, nullptr);
@@ -102,9 +99,11 @@ auto Pager::checkpoint() -> Status
 
 auto Pager::flush(Lsn target_lsn) -> Status
 {
+    const Lsn kMaxLsn(std::numeric_limits<std::uint64_t>::max());
+
     // An LSN of NULL causes all pages to be flushed.
     if (target_lsn.is_null()) {
-        target_lsn = kMaxId;
+        target_lsn = kMaxLsn;
     }
 
     for (auto itr = m_dirty.begin(); itr != m_dirty.end();) {
@@ -114,7 +113,7 @@ auto Pager::flush(Lsn target_lsn) -> Status
         const auto &frame = m_frames.get_frame(entry->index);
         const auto page_lsn = read_page_lsn(page_id, frame.data);
 
-        if (record_lsn > target_lsn) {
+        if (target_lsn < record_lsn) {
             break;
         }
         if (page_lsn <= m_wal->flushed_lsn()) {
@@ -142,9 +141,10 @@ auto Pager::make_frame_available() -> void
         const auto &frame = m_frames.get_frame(evicted->index);
         if (m_state->is_running) {
             const auto page_lsn = read_page_lsn(frame.page_id, frame.data);
-            if (page_lsn > m_wal->flushed_lsn()) {
-                // Only flush the tail buffer if necessary. Otherwise, just fsync() the WAL file.
-                s = m_wal->synchronize(page_lsn > m_wal->written_lsn());
+            if (m_wal->flushed_lsn() < page_lsn) {
+                // Only flush the tail buffer if it's really necessary. Otherwise, just fsync() the
+                // WAL file.
+                s = m_wal->synchronize(m_wal->written_lsn() < page_lsn);
             }
         }
         if (s.is_ok()) {
@@ -161,6 +161,10 @@ auto Pager::make_frame_available() -> void
 
 auto Pager::allocate(Page &page) -> Status
 {
+    static constexpr auto kMaxPageCount = std::numeric_limits<std::uint32_t>::max();
+    if (m_page_count == kMaxPageCount) {
+        return Status::not_supported("reached the maximum database size");
+    }
     CALICODB_TRY(acquire(Id::from_index(m_page_count), page));
     upgrade(page, 0);
     ++m_page_count;
@@ -206,8 +210,11 @@ auto Pager::upgrade(Page &page, int important) -> void
 
     // Skip writing an image record if there is definitely one for this page during this transaction.
     if (m_state->is_running && page_lsn <= m_state->commit_lsn) {
+        Lsn image_lsn;
         const auto image = page.view(0, watch_size);
-        const auto s = m_wal->log_image(page.id(), image, nullptr);
+        const auto s = m_wal->log_image(page.id(), image, &image_lsn);
+        write_page_lsn(page, image_lsn);
+
         if (!s.is_ok()) {
             SET_STATUS(s);
         }
@@ -236,7 +243,7 @@ auto Pager::truncate(std::size_t page_count) -> Status
     CALICODB_TRY(m_env->resize_file(m_filename, page_count * m_frames.page_size()));
 
     // Discard out-of-range cached pages.
-    for (Id id {page_count + 1}; id.value <= m_page_count; ++id.value) {
+    for (Id id(page_count + 1); id.value <= m_page_count; ++id.value) {
         auto *entry = m_cache.query(id);
         if (entry != nullptr) {
             if (entry->token.has_value()) {

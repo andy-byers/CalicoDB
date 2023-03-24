@@ -46,10 +46,10 @@ public:
 // Internal Cell Format:
 //     Size    Name
 //    -----------------------
-//     8       child_id
+//     4       child_id
 //     varint  key_size
 //     n       key
-//     8       [overflow_id]
+//     4       [overflow_id]
 //
 // External Cell Format:
 //     Size    Name
@@ -58,24 +58,24 @@ public:
 //     varint  key_size
 //     n       key
 //     m       value
-//     8       [overflow_id]
+//     4       [overflow_id]
 //
 struct Cell {
-    char *ptr {};
-    char *key {};
-    std::size_t local_size {};
-    std::size_t key_size {};
-    std::size_t size {};
-    bool is_free {};
-    bool has_remote {};
+    char *ptr = nullptr;
+    char *key = nullptr;
+    std::size_t local_size = 0;
+    std::size_t key_size = 0;
+    std::size_t size = 0;
+    bool is_free = false;
+    bool has_remote = false;
 };
 
 struct NodeMeta {
     using ParseCell = Cell (*)(const NodeMeta &, char *);
 
-    ParseCell parse_cell {};
-    std::size_t min_local {};
-    std::size_t max_local {};
+    ParseCell parse_cell = nullptr;
+    std::size_t min_local = 0;
+    std::size_t max_local = 0;
 };
 
 struct Node {
@@ -93,13 +93,13 @@ struct Node {
     auto TEST_validate() -> void;
 
     Page page;
-    char *scratch {};
-    const NodeMeta *meta {};
+    char *scratch = nullptr;
+    const NodeMeta *meta = nullptr;
     NodeHeader header;
     std::optional<Cell> overflow;
-    unsigned overflow_index {};
-    unsigned slots_offset {};
-    unsigned gap_size {};
+    unsigned overflow_index = 0;
+    unsigned slots_offset = 0;
+    unsigned gap_size = 0;
 };
 
 // Read a cell from the node at the specified index or offset. The node must remain alive for as long as the cell.
@@ -120,8 +120,8 @@ class Freelist
 {
     friend class Tree;
 
-    Pager *m_pager {};
-    Id *m_head {};
+    Pager *m_pager = nullptr;
+    Id *m_head = nullptr;
 
 public:
     explicit Freelist(Pager &pager, Id &head);
@@ -138,19 +138,19 @@ auto write_next_id(Page &page, Id next_id) -> void;
 //       them. It's just a bit more complicated.
 class NodeIterator
 {
-    Pager *m_pager {};
-    std::string *m_lhs_key {};
-    std::string *m_rhs_key {};
-    Node *m_node {};
-    std::size_t m_index {};
+    Pager *m_pager = nullptr;
+    std::string *m_lhs_key = nullptr;
+    std::string *m_rhs_key = nullptr;
+    Node *m_node = nullptr;
+    std::size_t m_index = 0;
 
     [[nodiscard]] auto fetch_key(std::string &buffer, const Cell &cell, Slice &out) const -> Status;
 
 public:
     struct Parameters {
-        Pager *pager {};
-        std::string *lhs_key {};
-        std::string *rhs_key {};
+        Pager *pager = nullptr;
+        std::string *lhs_key = nullptr;
+        std::string *rhs_key = nullptr;
     };
     explicit NodeIterator(Node &node, const Parameters &param);
     [[nodiscard]] auto index() const -> std::size_t;
@@ -160,7 +160,7 @@ public:
 
 struct PointerMap {
     enum Type : char {
-        kTreeNode = 1,
+        kTreeNode,
         kTreeRoot,
         kOverflowHead,
         kOverflowLink,
@@ -169,7 +169,7 @@ struct PointerMap {
 
     struct Entry {
         Id back_ptr;
-        Type type {};
+        Type type;
     };
 
     // Find the page ID of the pointer map page that holds the back pointer for page "page_id".
@@ -208,7 +208,7 @@ struct PayloadManager {
 class Tree
 {
 public:
-    explicit Tree(Pager &pager, Id root_id, Id &freelist_head);
+    explicit Tree(Pager &pager, Id root_id, Id &freelist_head, TreeStatistics *stats);
     [[nodiscard]] static auto create(Pager &pager, Id table_id, Id &freelist_head, Id *out) -> Status;
     [[nodiscard]] auto put(const Slice &key, const Slice &value, bool *exists = nullptr) -> Status;
     [[nodiscard]] auto get(const Slice &key, std::string *value) const -> Status;
@@ -226,18 +226,24 @@ public:
 private:
     struct SearchResult {
         Node node;
-        std::size_t index {};
-        bool exact {};
+        std::size_t index = 0;
+        bool exact = false;
+    };
+
+    enum ReportType {
+        kBytesRead,
+        kBytesWritten,
+        kSMOCount,
     };
 
     [[nodiscard]] auto vacuum_step(Page &free, TableSet &tables, Id last_id) -> Status;
     [[nodiscard]] auto resolve_overflow(Node node) -> Status;
     [[nodiscard]] auto resolve_underflow(Node node, const Slice &anchor) -> Status;
     [[nodiscard]] auto split_root(Node root, Node &out) -> Status;
-    [[nodiscard]] auto split_non_root(Node node, Node &out) -> Status;
-    [[nodiscard]] auto split_non_root_fast(Node parent, Node left, Node right, const Cell &overflow, Node &out) -> Status;
+    [[nodiscard]] auto split_nonroot(Node node, Node &out) -> Status;
+    [[nodiscard]] auto split_nonroot_fast(Node parent, Node left, Node right, const Cell &overflow, Node &out) -> Status;
     [[nodiscard]] auto fix_root(Node root) -> Status;
-    [[nodiscard]] auto fix_non_root(Node node, Node &parent, std::size_t index) -> Status;
+    [[nodiscard]] auto fix_nonroot(Node node, Node &parent, std::size_t index) -> Status;
     [[nodiscard]] auto merge_left(Node &left, Node right, Node &parent, std::size_t index) -> Status;
     [[nodiscard]] auto merge_right(Node &left, Node right, Node &parent, std::size_t index) -> Status;
     [[nodiscard]] auto rotate_left(Node &parent, Node &left, Node &right, std::size_t index) -> Status;
@@ -257,31 +263,34 @@ private:
     [[nodiscard]] auto fix_links(Node &node) -> Status;
     [[nodiscard]] auto cell_scratch() -> char *;
 
+    auto report_stats(ReportType type, std::size_t increment) const -> void;
+
     friend class CursorImpl;
     friend class TreeValidator;
 
+    mutable TreeStatistics *m_stats = nullptr;
     mutable std::string m_key_scratch[2];
     mutable std::string m_node_scratch;
     mutable std::string m_cell_scratch;
     mutable std::string m_anchor;
     Freelist m_freelist;
-    Pager *m_pager {};
-    Id m_root_id {};
+    Pager *m_pager = nullptr;
+    Id m_root_id;
 };
 
 class CursorImpl : public Cursor
 {
     struct Location {
         Id page_id;
-        unsigned index {};
-        unsigned count {};
+        unsigned index = 0;
+        unsigned count = 0;
     };
     mutable Status m_status;
     std::string m_key;
     std::string m_value;
-    std::size_t m_key_size {};
-    std::size_t m_value_size {};
-    Tree *m_tree {};
+    std::size_t m_key_size = 0;
+    std::size_t m_value_size = 0;
+    Tree *m_tree = nullptr;
     Location m_loc;
 
     auto seek_to(Node node, std::size_t index) -> void;

@@ -33,14 +33,33 @@ The implementation is pretty straightforward: we basically do as little as possi
 #### Fixing Overflows
 As previously mentioned, tree nodes are split when they run out of room.
 To keep things simple, each node is allowed to overflow by a single cell, and overflows are resolved immediately.
+There are 3 general routines for resolving node overflows: `split_root`, `split_nonroot`, and `split_nonroot_fast`.
+Note that these routines are greatly simplified compared to the similarly-named balancing routines in SQLite.
+For instance, SQLite attempts to involve 3 nodes in their split to better redistribute cells, while this implementation only uses 2.
+
+`split_nonroot` is called when a non-root node has overflowed.
+First, allocate a new node, called `R`.
+Let the node that is overfull be `L` and the parent `P`.
+Start transferring cells from `L` to `R`, checking at each point if the overflow cell `c` will fit in `L`.
+There will be a point (once we reach the "overflow index") at which there have been enough cells transferred that `c` belongs in `R`.
+If this point is reached, then `c` is written to `R`, since it must fit.
+This routine takes advantage of the fact that the local size of a cell is limited to roughly 1/4 of the usable space on a page.
+If a maximally-sized overflow cell will not fit in `L` then it definitely will fit in `R`, since `R` was empty initially.
+This is true even if `L` was 100% full before the overflow.
+Note that this splitting routine is optimal when keys are sequential and decreasing, but has its worst case when keys are sequential and increasing.
+When a node overflows on the rightmost position, `split_nonroot_fast` is called.
+`split_nonroot_fast` allocates a new right sibling and writes the overflow cell to it.
+This makes consecutive sequential writes much faster, as well as sequential writes that are at the top of the key range.
+
+`split_root` is called when a tree root has become overfull.
+It transfers the root's contents into a new node, which is set as the empty root's rightmost child.
+`split_nonroot` is then called on the overfull child, which posts a separator to the empty root.
+This leaves the root with a single cell and 2 children.
 
 #### Fixing Underflows
 Sibling nodes are merged together when one of them has become empty.
 Since a merge involves addition of the separator cell, this may not be possible if the second node is very full.
 In this case, a single rotation is performed.
-
-#### Pointer map
-[//]: # (TODO)
 
 #### Overflow chains
 CalicoDB supports very large keys and/or values.
@@ -50,6 +69,13 @@ When a key or value is too large to fit on a page, some of it is transferred to 
 
 #### Freelist
 [//]: # (TODO)
+
+#### Pointer map
+[//]: # (TODO)
+
+Each cell that is moved between internal tree nodes must have its child's parent pointer updated.
+If the parent pointers are embedded in the nodes, splits and merges become very expensive, since each transferred cell requires the child page to be written.
+In addition to facilitating the vacuum operation, pointer maps make splits and merges much more efficient by consolidating many parent pointers on a single page.
 
 ### WAL
 The WAL record format is similar to that of `RocksDB`.
@@ -68,17 +94,19 @@ During startup, if the database has WAL segments, then we know something went wr
 ### Consistency
 CalicoDB must enforce certain rules to maintain consistency between the WAL and the database.
 First, we need to make sure that all updates are written to the WAL before affected pages are written back to the database file.
-The WAL keeps track of the last LSN it flushed to disk (the `flushed_lsn`).
-This value is queried by the pager to make sure that unprotected pages are never written back.
-The pager keeps track of a few more variables to ensure consistency: the `page_lsn`, the `record_lsn`, the `checkpoint_lsn`, and the `recovery_lsn`.
-The `page_lsn` (per page) is the LSN of the last WAL record generated for a given page.
+The WAL keeps track of the last LSN that `write()` was called on (the `written_lsn`), and the last LSN definitely on disk (the `flushed_lsn`).
+The `written_lsn` is increased when the tail buffer is flushed, and the `flushed_lsn` is increased when `fsync()` is called.
+The `flushed_lsn` is always less than or equal to the `written_lsn`.
+The `flushed_lsn` is queried by the pager to make sure unprotected pages are never written back.
+The pager keeps track of a few more variables to ensure consistency: the per-page `page_lsn`, the per-page `record_lsn`, the `checkpoint_lsn`, and the `recovery_lsn`.
+The `page_lsn` is the LSN of the last WAL record generated for a given page.
 This is the value that is compared with the WAL's `flushed_lsn` to make sure the page is safe to write out.
-The `record_lsn` (also per page) is the last `page_lsn` value that we already have on disk.
+The `record_lsn` is the last `page_lsn` value that is already on disk.
 It is saved (in-memory only) when the page is first read into memory, and each time the page is written back.
 The `recovery_lsn` represents the oldest WAL record that we still need.
-Each time the database file is synchronized, the `recovery_lsn` is updated to match the oldest `record_lsn` for a dirty cached page.
+Each time the database file is `fsync()`'d, the `recovery_lsn` is updated to match the oldest `record_lsn` for a dirty cached page.
 Every change before this point must be safely on disk.
-Intermittently, the `recovery_lsn` is checked against the WAL segments to determine if any can be removed.
-Finally, the `checkpoint_lsn` is the LSN of the most-recent commit record (the special delta record mentioned in [WAL](#wal)).
+Then, the `recovery_lsn` is checked against the WAL segments to determine if any can be removed.
+Finally, the `checkpoint_lsn` is the LSN of the most-recent checkpoint record (the special delta record mentioned in [WAL](#wal)).
 This value is saved in the database file header and is used to determine how the logical contents of the database should look.
 The database must ensure that there is always enough information in the WAL to revert to the most-recent checkpoint.

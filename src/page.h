@@ -5,10 +5,10 @@
 #ifndef CALICODB_PAGE_H
 #define CALICODB_PAGE_H
 
+#include "delta.h"
 #include "encoding.h"
 #include "frames.h"
 #include "header.h"
-#include "delta.h"
 #include "utils.h"
 
 namespace calicodb
@@ -17,29 +17,29 @@ namespace calicodb
 struct LogicalPageId {
     [[nodiscard]] static auto with_page(Id pid) -> LogicalPageId
     {
-        return LogicalPageId {Id::null(), pid};
+        return LogicalPageId(Id::null(), pid);
     }
 
     [[nodiscard]] static auto with_table(Id tid) -> LogicalPageId
     {
-        return LogicalPageId {tid, Id::null()};
+        return LogicalPageId(tid, Id::null());
     }
 
     [[nodiscard]] static auto root() -> LogicalPageId
     {
-        return LogicalPageId {Id::root(), Id::root()};
+        return LogicalPageId(Id::root(), Id::root());
     }
 
     // Results in "LogicalPageId(Id::null, Id::null())".
     explicit LogicalPageId() = default;
 
     explicit LogicalPageId(Id tid, Id pid)
-        : table_id {tid},
-          page_id {pid}
+        : table_id(tid),
+          page_id(pid)
     {
     }
 
-    static constexpr std::size_t kSize {16};
+    static constexpr std::size_t kSize = Id::kSize * 2;
 
     Id table_id;
     Id page_id;
@@ -49,10 +49,10 @@ class Page
 {
     std::vector<PageDelta> m_deltas;
     Id m_id;
-    std::size_t m_size {};
-    CacheEntry *m_entry {};
-    char *m_data {};
-    bool m_write {};
+    std::size_t m_size = 0;
+    CacheEntry *m_entry = nullptr;
+    char *m_data = nullptr;
+    bool m_write = false;
 
 public:
     friend class FrameManager;
@@ -82,12 +82,12 @@ public:
 
     [[nodiscard]] auto view(std::size_t offset) const -> Slice
     {
-        return Slice {m_data, m_size}.advance(offset);
+        return Slice(m_data, m_size).advance(offset);
     }
 
     [[nodiscard]] auto view(std::size_t offset, std::size_t size) const -> Slice
     {
-        return Slice {m_data, m_size}.range(offset, size);
+        return Slice(m_data, m_size).range(offset, size);
     }
 
     auto mutate(std::size_t offset, std::size_t size) -> char *
@@ -146,12 +146,12 @@ public:
 
 [[nodiscard]] inline auto read_page_lsn(const Page &page) -> Lsn
 {
-    return Lsn {get_u64(page.data() + page_offset(page))};
+    return Lsn(get_u64(page.data() + page_offset(page)));
 }
 
 inline auto write_page_lsn(Page &page, Lsn lsn) -> void
 {
-    put_u64(page.mutate(page_offset(page), sizeof(Lsn)), lsn.value);
+    put_u64(page.mutate(page_offset(page), Lsn::kSize), lsn.value);
 }
 
 // TODO: These make more sense and can be used for frames as well.
@@ -162,7 +162,7 @@ inline auto write_page_lsn(Page &page, Lsn lsn) -> void
 
 [[nodiscard]] inline auto read_page_lsn(Id page_id, const char *data) -> Lsn
 {
-    return Lsn {get_u64(data + page_offset(page_id))};
+    return Lsn(get_u64(data + page_offset(page_id)));
 }
 
 inline auto write_page_lsn(Id page_id, Lsn lsn, char *data) -> void

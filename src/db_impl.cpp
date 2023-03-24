@@ -29,12 +29,21 @@ static auto check_header_crc(const FileHeader &header) -> bool
     return crc32c::Unmask(header.header_crc) == header.compute_crc();
 }
 
+static auto encode_page_size(std::size_t page_size) -> std::uint16_t
+{
+    return page_size < kMaxPageSize ? static_cast<std::uint16_t>(page_size) : 0;
+}
+
+static auto decode_page_size(unsigned header_page_size) -> std::size_t
+{
+    return header_page_size > 0 ? header_page_size : kMaxPageSize;
+}
+
 Table::~Table() = default;
 
-TableImpl::TableImpl(const TableOptions &options, std::string name, Id table_id)
-    : m_options {options},
-      m_name {std::move(name)},
-      m_id {table_id}
+TableImpl::TableImpl(std::string name, Id table_id)
+    : m_name(std::move(name)),
+      m_id(table_id)
 {
 }
 
@@ -81,7 +90,7 @@ auto TableSet::add(const LogicalPageId &root_id) -> void
         m_tables.resize(index + 1);
     }
     // Table slot must not be occupied.
-    CALICODB_EXPECT_TRUE(m_tables[index] == nullptr);
+    CALICODB_EXPECT_EQ(m_tables[index], nullptr);
     m_tables[index] = new TableState;
     m_tables[index]->root_id = root_id;
 }
@@ -98,8 +107,8 @@ auto TableSet::erase(Id table_id) -> void
 
 static auto encode_logical_id(LogicalPageId id, char *out) -> void
 {
-    put_u64(out, id.table_id.value);
-    put_u64(out + sizeof(Id), id.page_id.value);
+    put_u32(out, id.table_id.value);
+    put_u32(out + Id::kSize, id.page_id.value);
 }
 
 [[nodiscard]] static auto decode_logical_id(const Slice &in, LogicalPageId *out) -> Status
@@ -107,8 +116,8 @@ static auto encode_logical_id(LogicalPageId id, char *out) -> void
     if (in.size() != LogicalPageId::kSize) {
         return Status::corruption("logical id is corrupted");
     }
-    out->table_id.value = get_u64(in.data());
-    out->page_id.value = get_u64(in.data() + sizeof(Id));
+    out->table_id.value = get_u32(in.data());
+    out->page_id.value = get_u32(in.data() + Id::kSize);
     return Status::ok();
 }
 
@@ -135,12 +144,12 @@ auto setup_db(const std::string &filename, Env &env, Options &options, FileHeade
             return Status::corruption("database is corrupted");
         }
     } else if (s.is_not_found()) {
-        header.page_size = static_cast<std::uint16_t>(options.page_size);
+        header.page_size = encode_page_size(options.page_size);
     } else {
         return s;
     }
-    if (options.cache_size < kMinFrameCount * header.page_size) {
-        options.cache_size = kMinFrameCount * header.page_size;
+    if (options.cache_size < kMinFrameCount * decode_page_size(header.page_size)) {
+        options.cache_size = kMinFrameCount * decode_page_size(header.page_size);
     }
     return Status::ok();
 }
@@ -157,7 +166,7 @@ auto DBImpl::open(Options sanitized) -> Status
     }
     FileHeader state;
     CALICODB_TRY(setup_db(m_filename, *m_env, sanitized, state));
-    const auto page_size = state.page_size;
+    const auto page_size = decode_page_size(state.page_size);
 
     m_state.commit_lsn = state.commit_lsn;
     m_state.record_count = state.record_count;
@@ -196,8 +205,8 @@ auto DBImpl::open(Options sanitized) -> Status
     }
 
     // Create the root and default table handles.
-    CALICODB_TRY(create_table({}, kRootTableName, m_root));
-    CALICODB_TRY(create_table({}, kDefaultTableName, m_default));
+    CALICODB_TRY(create_table(TableOptions(), kRootTableName, m_root));
+    CALICODB_TRY(create_table(TableOptions(), kDefaultTableName, m_default));
 
     auto *cursor = new_cursor(*m_root);
     cursor->seek_first();
@@ -221,7 +230,7 @@ auto DBImpl::open(Options sanitized) -> Status
         Page db_root;
         CALICODB_TRY(m_pager->acquire(Id::root(), db_root));
         m_pager->upgrade(db_root);
-        state.page_count = m_pager->page_count();
+        state.page_count = static_cast<std::uint32_t>(m_pager->page_count());
         state.header_crc = crc32c::Mask(state.compute_crc());
         state.write(db_root.mutate(0, FileHeader::kSize));
         m_pager->release(std::move(db_root));
@@ -239,12 +248,12 @@ auto DBImpl::open(Options sanitized) -> Status
 }
 
 DBImpl::DBImpl(const Options &options, const Options &sanitized, std::string filename)
-    : m_filename {std::move(filename)},
-      m_wal_prefix {sanitized.wal_prefix},
-      m_env {sanitized.env},
-      m_info_log {sanitized.info_log},
-      m_owns_env {options.env == nullptr},
-      m_owns_info_log {options.info_log == nullptr}
+    : m_env(sanitized.env),
+      m_info_log(sanitized.info_log),
+      m_filename(std::move(filename)),
+      m_wal_prefix(sanitized.wal_prefix),
+      m_owns_env(options.env == nullptr),
+      m_owns_info_log(options.info_log == nullptr)
 {
 }
 
@@ -304,7 +313,7 @@ auto DBImpl::destroy(const Options &options, const std::string &filename) -> Sta
     if (options.info_log == nullptr) {
         (void)env->remove_file(path + kDefaultLogSuffix);
     }
-    Reader *reader {};
+    Reader *reader = nullptr;
     auto s = env->new_reader(path, reader);
 
     if (s.is_ok()) {
@@ -361,17 +370,17 @@ auto DBImpl::get_property(const Slice &name, std::string *out) const -> bool
 {
     if (name.starts_with("calicodb.")) {
         const auto prop = name.range(std::strlen("calicodb."));
+        std::string buffer;
 
         if (prop == "stats") {
             if (out != nullptr) {
-                char buffer[256];
-                std::snprintf(
-                    buffer, sizeof(buffer),
+                write_to_string(
+                    buffer,
                     "Name          Value\n"
                     "-------------------\n"
-                    "DB read(MB)   %8.0f\n"
-                    "DB write(MB)  %8.0f\n"
-                    "WAL write(MB) %8.0f\n"
+                    "DB read(MB)   %8.4f\n"
+                    "DB write(MB)  %8.4f\n"
+                    "WAL write(MB) %8.4f\n"
                     "Cache hits    %ld\n"
                     "Cache misses  %ld\n",
                     static_cast<double>(m_pager->bytes_read()) / 1048576.0,
@@ -380,6 +389,36 @@ auto DBImpl::get_property(const Slice &name, std::string *out) const -> bool
                     m_pager->hits(),
                     m_pager->misses());
                 out->append(buffer);
+            }
+            return true;
+        } else if (prop == "tables") {
+            if (out != nullptr) {
+                out->append(
+                    "Name             SMOCount Read(MB) Write(MB)\n"
+                    "--------------------------------------------\n");
+                std::vector<std::string> table_names;
+                std::vector<LogicalPageId> table_roots;
+                (void)get_table_info(table_names, &table_roots);
+                table_names.emplace_back(m_default->name());
+                table_roots.emplace_back(LogicalPageId::with_table(Id(2)));
+                for (std::size_t i = 0; i < table_names.size(); ++i) {
+                    const auto *state = m_tables.get(table_roots[i].table_id);
+                    if (table_names[i].size() > 16) {
+                        table_names[i].resize(13);
+                        table_names[i].append("...");
+                    }
+                    if (state != nullptr && state->open) {
+                        const auto n = write_to_string(
+                            buffer,
+                            "%-16s %8u %8.4f %9.4lf\n",
+                            table_names[i].c_str(),
+                            state->stats.smo_count,
+                            static_cast<double>(state->stats.bytes_read) / 1048576.0,
+                            static_cast<double>(state->stats.bytes_written) / 1048576.0);
+                        buffer.resize(n);
+                        out->append(buffer);
+                    }
+                }
             }
             return true;
         }
@@ -484,7 +523,7 @@ auto DBImpl::do_vacuum() -> Status
 
     // Update root locations in the name-to-root mapping.
     char logical_id[LogicalPageId::kSize];
-    for (std::size_t i {}; i < table_names.size(); ++i) {
+    for (std::size_t i = 0; i < table_names.size(); ++i) {
         const auto *root = m_tables.get(table_roots[i].table_id);
         CALICODB_EXPECT_NE(root, nullptr);
         encode_logical_id(root->root_id, logical_id);
@@ -546,7 +585,7 @@ auto DBImpl::checkpoint() -> Status
 
     if (m_state.batch_size > 0) {
         m_state.batch_size = 0;
-        m_state.max_page_id = Id {m_pager->page_count()};
+        m_state.max_page_id = Id(m_pager->page_count());
         if (auto s = do_checkpoint(); !s.is_ok()) {
             SET_STATUS(s);
             return s;
@@ -563,7 +602,7 @@ auto DBImpl::do_checkpoint() -> Status
 
     FileHeader header;
     header.read(db_root.data());
-    header.page_count = m_pager->page_count();
+    header.page_count = static_cast<std::uint32_t>(m_pager->page_count());
     header.freelist_head = m_state.freelist_head;
     header.magic_code = FileHeader::kMagicCode;
     header.commit_lsn = m_wal->current_lsn();
@@ -681,10 +720,10 @@ auto DBImpl::create_table(const TableOptions &options, const std::string &name, 
     if (state->open) {
         return Status::invalid_argument("table is already open");
     }
-    state->tree = new Tree {*m_pager, root_id.page_id, m_state.freelist_head};
+    state->tree = new Tree(*m_pager, root_id.page_id, m_state.freelist_head, &state->stats);
     state->write = options.mode == AccessMode::kReadWrite;
     state->open = true;
-    out = new TableImpl {options, name, root_id.table_id};
+    out = new TableImpl(name, root_id.table_id);
 
     return s;
 }
@@ -756,14 +795,14 @@ auto DBImpl::construct_new_table(const Slice &name, LogicalPageId &root_id) -> S
     // Write an entry for the new table in the root table. This will not increase the
     // record count for the database.
     auto *db_root = m_tables.get(Id::root());
-    CALICODB_TRY(db_root->tree->put(name, Slice {payload, LogicalPageId::kSize}));
+    CALICODB_TRY(db_root->tree->put(name, Slice(payload, LogicalPageId::kSize)));
     ++m_state.batch_size;
     return Status::ok();
 }
 
 auto DBImpl::remove_empty_table(const std::string &name, TableState &state) -> Status
 {
-    auto &[root_id, tree, write_flag, open_flag] = state;
+    auto &[root_id, stats, tree, write_flag, open_flag] = state;
     if (root_id.table_id.is_root()) {
         return Status::ok();
     }
@@ -810,7 +849,7 @@ static auto with_page(Pager &pager, const Descriptor &descriptor, const Callback
 static auto is_commit(const DeltaDescriptor &deltas)
 {
     return deltas.page_id.is_root() && deltas.deltas.size() == 1 && deltas.deltas.front().offset == 0 &&
-           deltas.deltas.front().data.size() == FileHeader::kSize + sizeof(Lsn);
+           deltas.deltas.front().data.size() == FileHeader::kSize + Lsn::kSize;
 }
 
 auto DBImpl::recovery_phase_1() -> Status
@@ -837,7 +876,7 @@ auto DBImpl::recovery_phase_1() -> Status
         if (s.is_corruption()) {
             // Allow corruption/incomplete records on the last segment, past the
             // most-recent successful commit.
-            if (itr == prev(end(set)) && lsn >= m_state.commit_lsn) {
+            if (itr == prev(end(set)) && m_state.commit_lsn <= lsn) {
                 return Status::ok();
             }
         }
@@ -883,7 +922,7 @@ auto DBImpl::recovery_phase_1() -> Status
                     return;
                 }
                 const auto page_lsn = read_page_lsn(page);
-                if (page_lsn.is_null() || page_lsn > image.lsn) {
+                if (page_lsn.is_null() || image.lsn < page_lsn) {
                     m_pager->upgrade(page);
                     apply_undo(page, image);
                 }
@@ -902,7 +941,7 @@ auto DBImpl::recovery_phase_1() -> Status
         for (;;) {
             std::string reader_data;
             auto s = reader.read(reader_data);
-            Slice payload {reader_data};
+            Slice payload(reader_data);
 
             if (s.is_not_found()) {
                 break;

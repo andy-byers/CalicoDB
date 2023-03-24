@@ -2,7 +2,7 @@
 
 > **Warning**: This library has not been code reviewed, and I'm not an expert database developer. 
 > Please don't use it for anything serious!
-> I'm open to comments/criticism/pull requests though, as I want to make CalicoDB a useful library!
+> I'm open to comments/criticism/pull requests though, as I want to make CalicoDB a useful library eventually!
 
 > **Note (03/22)**: I've made some pretty big changes internally, and I think I'm content with CalicoDB's design now.
 > I'll be using the `develop` branch to work on tests and fix bugs.
@@ -10,7 +10,8 @@
 
 CalicoDB is an embedded key-value database written in C++17.
 It exposes a small API that allows storage and retrieval of arbitrary byte sequences.
-CalicoDB runs in a single thread and uses a B<sup>+</sup>-tree backend, making it optimal for read-heavy embedded applications.
+CalicoDB runs in a single thread and uses a B<sup>+</sup>-tree backend.
+It is intended for read-heavy embedded applications.
 
 ![CI status badge](https://github.com/andy-byers/CalicoDB/actions/workflows/actions.yml/badge.svg)
 
@@ -28,6 +29,7 @@ CalicoDB runs in a single thread and uses a B<sup>+</sup>-tree backend, making i
 
 ## Features
 + Records are stored in tables, each with an independent range of keys
++ All tables are stored in the same file, similar to the SQLite database file format
 + Bidirectional iteration using cursors (per-table)
 + Crash protection via write-ahead logging
 + Vacuum operation to reclaim unused memory while running
@@ -36,6 +38,7 @@ CalicoDB runs in a single thread and uses a B<sup>+</sup>-tree backend, making i
 ## Caveats
 + Concurrency control must be provided externally
 + Checkpoint routine affects all tables
++ Random writes are pretty slow
 
 ## Documentation
 Check out the [docs](doc/doc.md).

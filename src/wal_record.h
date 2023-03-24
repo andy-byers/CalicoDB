@@ -45,16 +45,16 @@ enum WalRecordType : char {
 // The CRC field contains the CRC of the type byte, as well as the payload
 // fragment that follows the header.
 struct WalRecordHeader {
-    static constexpr std::size_t kSize {7};
+    static constexpr std::size_t kSize = 7;
 
     [[nodiscard]] static auto contains_record(const Slice &data) -> bool
     {
         return data.size() > WalRecordHeader::kSize && data[0] != '\x00';
     }
 
-    WalRecordType type {};
-    std::uint16_t size {};
-    std::uint32_t crc {};
+    WalRecordType type = kNoRecord;
+    std::uint16_t size = 0;
+    std::uint32_t crc = 0;
 };
 
 // Routines for working with WAL records.
@@ -67,19 +67,19 @@ struct WalRecordHeader {
 //     ---------------------------
 //      0       1     Flags
 //      1       8     LSN
-//      9       8     Page ID
-//      17      2     Delta count
-//      19      n     Delta content
+//      9       4     Page ID
+//      13      2     Delta count
+//      15      n     Delta content
 //
 // Each delta in the delta content area is an (offset, size, data) triplet. "offset" describes
 // where on the page the change took place, and "size" is the number of bytes in "data". Both
 // "offset" and "size" are 16-bit unsigned integers.
 struct DeltaDescriptor {
-    static constexpr std::size_t kFixedSize {19};
+    static constexpr std::size_t kFixedSize = 15;
 
     struct Delta {
-        std::size_t offset {};
-        Slice data {};
+        std::size_t offset = 0;
+        Slice data;
     };
 
     Id page_id;
@@ -93,14 +93,14 @@ struct DeltaDescriptor {
 //     ---------------------------
 //      0       1     Flags
 //      1       8     LSN
-//      9       8     Page ID
-//      17      n     Image
+//      9       4     Page ID
+//      13      n     Image
 //
 // The image can be any size less than or equal to the database page size. Its size is not
 // stored explicitly in the payload: it is known from the total size of the record fragments
 // it is composed from.
 struct ImageDescriptor {
-    static constexpr std::size_t kFixedSize {17};
+    static constexpr std::size_t kFixedSize = 13;
 
     Id page_id;
     Lsn lsn;
@@ -115,10 +115,10 @@ struct ImageDescriptor {
 //      1       8     LSN
 //      9       1     Start
 struct VacuumDescriptor {
-    static constexpr std::size_t kFixedSize {10};
+    static constexpr std::size_t kFixedSize = 10;
 
     Lsn lsn;
-    bool is_start {};
+    bool is_start = false;
 };
 
 using PayloadDescriptor = std::variant<
@@ -133,7 +133,7 @@ using PayloadDescriptor = std::variant<
 [[nodiscard]] auto encode_image_payload(Lsn lsn, Id page_id, const Slice &image, char *buffer) -> Slice;
 [[nodiscard]] auto encode_vacuum_payload(Lsn lsn, bool is_start, char *buffer) -> Slice;
 
-static constexpr std::size_t kWalBlockScale {4};
+static constexpr std::size_t kWalBlockScale = 4;
 
 [[nodiscard]] inline constexpr auto wal_block_size(std::size_t page_size) -> std::size_t
 {
@@ -161,7 +161,7 @@ static constexpr std::size_t kWalBlockScale {4};
         return Id::null();
     }
 
-    return {std::stoull(name.to_string())};
+    return Id(std::stoul(name.to_string()));
 }
 
 [[nodiscard]] inline auto encode_segment_name(const Slice &prefix, Id id) -> std::string
@@ -178,10 +178,10 @@ template <class Itr>
 
     Reader *temp;
     CALICODB_TRY(env.new_reader(encode_segment_name(prefix, itr->first), temp));
-    std::unique_ptr<Reader> file {temp};
+    std::unique_ptr<Reader> file(temp);
 
     Slice slice;
-    char buffer[sizeof(Lsn)];
+    char buffer[Lsn::kSize];
     CALICODB_TRY(file->read(WalRecordHeader::kSize + 1, sizeof(buffer), buffer, &slice));
 
     itr->second = Lsn::null();

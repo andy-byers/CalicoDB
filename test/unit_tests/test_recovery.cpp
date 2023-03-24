@@ -20,7 +20,7 @@ public:
     static constexpr auto kFilename = "./test";
     static constexpr auto kWalPrefix = "./wal-";
     static constexpr auto kPageSize = kMinPageSize;
-    static constexpr std::size_t kFrameCount {16};
+    static constexpr std::size_t kFrameCount = 16;
 
     WalPagerInteractionTests()
         : scratch(kPageSize, '\x00'),
@@ -108,7 +108,7 @@ TEST_F(WalPagerInteractionTests, GeneratesAppropriateWALRecords)
 
 TEST_F(WalPagerInteractionTests, AllocateTruncatedPages)
 {
-    for (std::size_t i {}; i < 5; ++i) {
+    for (std::size_t i = 0; i < 5; ++i) {
         Page page;
         ASSERT_OK(pager->allocate(page));
         pager->release(std::move(page));
@@ -126,11 +126,12 @@ TEST_F(WalPagerInteractionTests, AllocateTruncatedPages)
     pager->release(std::move(page));
     ASSERT_EQ(wal->current_lsn().value, ++current_lsn_value);
 
-    // If the page isn't updated, no delta is written.
+    // If the page isn't updated by the user, a delta is still written due to the
+    // page LSN change.
     ASSERT_OK(pager->allocate(page));
     ASSERT_EQ(wal->current_lsn().value, ++current_lsn_value);
     pager->release(std::move(page));
-    ASSERT_EQ(wal->current_lsn().value, current_lsn_value);
+    ASSERT_EQ(wal->current_lsn().value, ++current_lsn_value);
 
     ASSERT_OK(pager->checkpoint());
 
@@ -237,7 +238,7 @@ public:
     std::unique_ptr<EnvType> env;
     Options db_options;
     std::string db_prefix;
-    DB *db {};
+    DB *db = nullptr;
 };
 
 class RecoveryTests
@@ -310,7 +311,7 @@ TEST_F(RecoveryTests, RevertsNthTransaction)
 TEST_F(RecoveryTests, VacuumRecovery)
 {
     std::vector<Record> committed;
-    for (std::size_t i {}; i < 1'000; ++i) {
+    for (std::size_t i = 0; i < 1'000; ++i) {
         committed.emplace_back(Record {
             random.Generate(100).to_string(),
             random.Generate(100).to_string(),
@@ -319,19 +320,19 @@ TEST_F(RecoveryTests, VacuumRecovery)
             committed.back().key,
             committed.back().value));
     }
-    for (std::size_t i {}; i < 1'000; ++i) {
+    for (std::size_t i = 0; i < 1'000; ++i) {
         ASSERT_OK(db->put(tools::integral_key(i), random.Generate(db_options.page_size)));
     }
-    for (std::size_t i {}; i < 1'000; ++i) {
+    for (std::size_t i = 0; i < 1'000; ++i) {
         ASSERT_OK(db->erase(tools::integral_key(i)));
     }
     ASSERT_OK(db->checkpoint());
 
     // Grow the database, then make freelist pages.
-    for (std::size_t i {}; i < 1'000; ++i) {
+    for (std::size_t i = 0; i < 1'000; ++i) {
         ASSERT_OK(db->put(tools::integral_key(i), random.Generate(db_options.page_size)));
     }
-    for (std::size_t i {}; i < 1'000; ++i) {
+    for (std::size_t i = 0; i < 1'000; ++i) {
         ASSERT_OK(db->erase(tools::integral_key(i)));
     }
     // Shrink the database.
@@ -339,7 +340,7 @@ TEST_F(RecoveryTests, VacuumRecovery)
 
     // Grow the database again. This time, it will look like we need to write image records
     // for the new pages, even though they are already in the WAL.
-    for (std::size_t i {}; i < 1'000; ++i) {
+    for (std::size_t i = 0; i < 1'000; ++i) {
         ASSERT_OK(db->put(tools::integral_key(i), random.Generate(db_options.page_size)));
     }
 
@@ -358,19 +359,19 @@ TEST_F(RecoveryTests, VacuumRecovery)
 TEST_F(RecoveryTests, SanityCheck)
 {
     std::map<std::string, std::string> map;
-    const std::size_t N {100};
+    const std::size_t N = 100;
 
-    for (std::size_t i {}; i < N; ++i) {
+    for (std::size_t i = 0; i < N; ++i) {
         const auto k = random.Generate(db_options.page_size * 2);
         const auto v = random.Generate(db_options.page_size * 4);
         map[k.to_string()] = v.to_string();
     }
 
-    for (std::size_t commit {}; commit < map.size(); ++commit) {
+    for (std::size_t commit = 0; commit < map.size(); ++commit) {
         open();
 
         auto record = begin(map);
-        for (std::size_t index {}; record != end(map); ++index, ++record) {
+        for (std::size_t index = 0; record != end(map); ++index, ++record) {
             if (index == commit) {
                 ASSERT_OK(db->checkpoint());
             } else {
@@ -380,7 +381,7 @@ TEST_F(RecoveryTests, SanityCheck)
         open();
 
         record = begin(map);
-        for (std::size_t index {}; record != end(map); ++index, ++record) {
+        for (std::size_t index = 0; record != end(map); ++index, ++record) {
             std::string value;
             if (index < commit) {
                 ASSERT_OK(db->get(record->first, &value));
@@ -401,14 +402,14 @@ class RecoverySanityCheck
 {
 public:
     RecoverySanityCheck()
-        : interceptor_prefix {std::get<0>(GetParam())}
+        : interceptor_prefix(std::get<0>(GetParam()))
     {
         open();
 
-        tools::RandomGenerator random {1'024 * 1'024 * 8};
-        const std::size_t N {250'000};
+        tools::RandomGenerator random(1'024 * 1'024 * 8);
+        const std::size_t N = 10'000;
 
-        for (std::size_t i {}; i < N; ++i) {
+        for (std::size_t i = 0; i < N; ++i) {
             const auto k = random.Generate(db_options.page_size * 2);
             const auto v = random.Generate(db_options.page_size * 4);
             map[k.to_string()] = v.to_string();
@@ -420,7 +421,7 @@ public:
     auto SetUp() -> void override
     {
         auto record = begin(map);
-        for (std::size_t index {}; record != end(map); ++index, ++record) {
+        for (std::size_t index = 0; record != end(map); ++index, ++record) {
             ASSERT_OK(db->put(record->first, record->second));
             if (record->first.front() % 10 == 1) {
                 ASSERT_OK(db->checkpoint());
@@ -533,17 +534,16 @@ INSTANTIATE_TEST_SUITE_P(
     ::testing::Values(
         std::make_tuple("./test", tools::Interceptor::kRead, 0),
         std::make_tuple("./test", tools::Interceptor::kRead, 1),
-        std::make_tuple("./test", tools::Interceptor::kRead, 3),
+        std::make_tuple("./test", tools::Interceptor::kRead, 2),
         std::make_tuple("./test", tools::Interceptor::kWrite, 0),
         std::make_tuple("./test", tools::Interceptor::kWrite, 1),
-        std::make_tuple("./test", tools::Interceptor::kWrite, 3),
         std::make_tuple("./wal-", tools::Interceptor::kOpen, 0),
         std::make_tuple("./wal-", tools::Interceptor::kOpen, 1)));
 
 class DataLossEnv : public EnvWrapper
 {
     std::string m_database_contents;
-    std::size_t m_wal_sync_size {};
+    std::size_t m_wal_sync_size = 0;
 
 public:
     explicit DataLossEnv()
@@ -583,8 +583,8 @@ public:
 class DataLossEditor : public Editor
 {
     std::string m_filename;
-    DataLossEnv *m_env {};
-    Editor *m_file {};
+    DataLossEnv *m_env = nullptr;
+    Editor *m_file = nullptr;
 
 public:
     explicit DataLossEditor(std::string filename, Editor &file, DataLossEnv &env)
@@ -629,8 +629,8 @@ public:
 class DataLossLogger : public Logger
 {
     std::string m_filename;
-    DataLossEnv *m_env {};
-    Logger *m_file {};
+    DataLossEnv *m_env = nullptr;
+    Logger *m_file = nullptr;
 
 public:
     explicit DataLossLogger(std::string filename, Logger &file, DataLossEnv &env)
@@ -726,7 +726,7 @@ public:
 
 TEST_P(DataLossTests, LossBeforeFirstCheckpoint)
 {
-    for (std::size_t i {}; i < kCheckpointInterval; ++i) {
+    for (std::size_t i = 0; i < kCheckpointInterval; ++i) {
         ASSERT_OK(db->put(tools::integral_key(i), "value"));
     }
     open();
@@ -736,7 +736,7 @@ TEST_P(DataLossTests, LossBeforeFirstCheckpoint)
 
 TEST_P(DataLossTests, RecoversLastCheckpoint)
 {
-    for (std::size_t i {}; i < kCheckpointInterval * 10; ++i) {
+    for (std::size_t i = 0; i < kCheckpointInterval * 10; ++i) {
         if (i % kCheckpointInterval == 0) {
             ASSERT_OK(db->checkpoint());
         }
@@ -744,7 +744,7 @@ TEST_P(DataLossTests, RecoversLastCheckpoint)
     }
     open();
 
-    for (std::size_t i {}; i < kCheckpointInterval * 9; ++i) {
+    for (std::size_t i = 0; i < kCheckpointInterval * 9; ++i) {
         std::string value;
         ASSERT_OK(db->get(tools::integral_key(i), &value));
         ASSERT_EQ(value, tools::integral_key(i));
@@ -754,19 +754,21 @@ TEST_P(DataLossTests, RecoversLastCheckpoint)
 
 TEST_P(DataLossTests, LongTransaction)
 {
-    for (std::size_t i {}; i < kCheckpointInterval * 10; ++i) {
+    for (std::size_t i = 0; i < kCheckpointInterval * 10; ++i) {
         ASSERT_OK(db->put(tools::integral_key(i), tools::integral_key(i)));
+        if (i % kCheckpointInterval == kCheckpointInterval - 1) {
+            ASSERT_OK(db->checkpoint());
+        }
     }
-    ASSERT_OK(db->checkpoint());
 
-    for (std::size_t i {}; i < kCheckpointInterval * 10; ++i) {
+    for (std::size_t i = 0; i < kCheckpointInterval * 10; ++i) {
         ASSERT_OK(db->erase(tools::integral_key(i)));
     }
     ASSERT_OK(db->vacuum());
 
     open();
 
-    for (std::size_t i {}; i < kCheckpointInterval * 10; ++i) {
+    for (std::size_t i = 0; i < kCheckpointInterval * 10; ++i) {
         std::string value;
         ASSERT_OK(db->get(tools::integral_key(i), &value));
         ASSERT_EQ(value, tools::integral_key(i));

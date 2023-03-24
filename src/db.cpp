@@ -43,7 +43,7 @@ auto DB::open(const Options &options, const std::string &filename, DB *&db) -> S
         CALICODB_TRY(sanitized.env->new_info_logger(log_filename, sanitized.info_log));
     }
 
-    auto *impl = new DBImpl {options, sanitized, clean_filename};
+    auto *impl = new DBImpl(options, sanitized, clean_filename);
     auto s = impl->open(sanitized);
 
     if (!s.is_ok()) {

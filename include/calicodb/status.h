@@ -19,7 +19,7 @@ public:
     // Create a status object in an OK state.
     static auto ok() -> Status
     {
-        return Status {};
+        return Status();
     }
 
     // Determine if a status is OK.

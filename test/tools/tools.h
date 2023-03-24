@@ -52,7 +52,7 @@ class FakeEnv : public Env
 public:
     struct Memory {
         std::string buffer;
-        bool created {};
+        bool created = false;
     };
 
     [[nodiscard]] virtual auto memory() -> std::unordered_map<std::string, Memory> &
@@ -108,8 +108,8 @@ public:
 protected:
     friend class FakeEnv;
 
-    FakeEnv::Memory *m_mem {};
-    FakeEnv *m_parent {};
+    FakeEnv::Memory *m_mem = nullptr;
+    FakeEnv *m_parent = nullptr;
     std::string m_filename;
 };
 
@@ -131,8 +131,8 @@ public:
 protected:
     friend class FakeEnv;
 
-    FakeEnv::Memory *m_mem {};
-    FakeEnv *m_parent {};
+    FakeEnv::Memory *m_mem = nullptr;
+    FakeEnv *m_parent = nullptr;
     std::string m_filename;
 };
 
@@ -153,8 +153,8 @@ public:
 protected:
     friend class FakeEnv;
 
-    FakeEnv::Memory *m_mem {};
-    FakeEnv *m_parent {};
+    FakeEnv::Memory *m_mem = nullptr;
+    FakeEnv *m_parent = nullptr;
     std::string m_filename;
 };
 
@@ -192,8 +192,8 @@ struct Interceptor {
     }
 
     std::string prefix;
-    Callback callback {};
-    Type type {};
+    Callback callback;
+    Type type;
 };
 
 class FaultInjectionEnv : public FakeEnv
@@ -318,11 +318,11 @@ private:
     using Engine = std::default_random_engine;
 
     std::string m_data;
-    mutable std::size_t m_pos {};
+    mutable std::size_t m_pos = 0;
     mutable Engine m_rng; // Not in LevelDB.
 
 public:
-    explicit RandomGenerator(std::size_t size = 4 /* KiB */ * 1'024);
+    explicit RandomGenerator(std::size_t size = 16 /* KiB */ * 1'024);
     auto Generate(std::size_t len) const -> Slice;
 
     // Not in LevelDB.
@@ -341,9 +341,9 @@ public:
 };
 
 struct DatabaseCounts {
-    std::size_t records {};
-    std::size_t pages {};
-    std::size_t updates {};
+    std::size_t records = 0;
+    std::size_t pages = 0;
+    std::size_t updates = 0;
 };
 
 [[nodiscard]] inline auto parse_db_counts(std::string prop) -> DatabaseCounts

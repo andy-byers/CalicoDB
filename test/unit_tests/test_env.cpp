@@ -58,7 +58,7 @@ template <class Base, class Store>
 [[nodiscard]] auto open_blob(Store &env, const std::string &name) -> std::unique_ptr<Base>
 {
     auto s = Status::ok();
-    Base *temp {};
+    Base *temp = nullptr;
 
     if constexpr (std::is_same_v<Reader, Base>) {
         s = env.new_reader(name, temp);
@@ -70,7 +70,7 @@ template <class Base, class Store>
         ADD_FAILURE() << "Error: Unexpected blob type";
     }
     EXPECT_TRUE(s.is_ok()) << "Error: " << s.to_string().data();
-    return std::unique_ptr<Base> {temp};
+    return std::unique_ptr<Base>(temp);
 }
 
 auto write_whole_file(const std::string &path, const Slice &message) -> void
@@ -82,7 +82,7 @@ auto write_whole_file(const std::string &path, const Slice &message) -> void
 [[nodiscard]] auto read_whole_file(const std::string &path) -> std::string
 {
     std::string message;
-    std::ifstream ifs {path};
+    std::ifstream ifs(path);
     ifs.seekg(0, std::ios::end);
     message.resize(ifs.tellg());
     ifs.seekg(0, std::ios::beg);
@@ -93,10 +93,10 @@ auto write_whole_file(const std::string &path, const Slice &message) -> void
 template <class Writer>
 constexpr auto write_out_randomly(tools::RandomGenerator &random, Writer &writer, const Slice &message) -> void
 {
-    constexpr std::size_t num_chunks {20};
+    constexpr std::size_t num_chunks = 20;
     ASSERT_GT(message.size(), num_chunks) << "File is too small for this test";
-    Slice in {message};
-    std::size_t counter {};
+    Slice in(message);
+    std::size_t counter = 0;
 
     while (!in.is_empty()) {
         const auto chunk_size = std::min<std::size_t>(in.size(), random.Next(message.size() / num_chunks));
@@ -116,11 +116,11 @@ constexpr auto write_out_randomly(tools::RandomGenerator &random, Writer &writer
 template <class Reader>
 [[nodiscard]] auto read_back_randomly(tools::RandomGenerator &random, Reader &reader, std::size_t size) -> std::string
 {
-    static constexpr std::size_t num_chunks {20};
+    static constexpr std::size_t num_chunks = 20;
     EXPECT_GT(size, num_chunks) << "File is too small for this test";
     std::string backing(size, '\x00');
     auto *out_data = backing.data();
-    std::size_t counter {};
+    std::size_t counter = 0;
 
     while (counter < size) {
         const auto chunk_size = std::min<std::size_t>(size - counter, random.Next(size / num_chunks));

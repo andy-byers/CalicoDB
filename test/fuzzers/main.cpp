@@ -38,7 +38,7 @@ auto main(int argc, const char *argv[]) -> int
 
     namespace fs = std::filesystem;
 
-    for (std::size_t i {1}; i < argc; ++i) {
+    for (std::size_t i = 1; i < argc; ++i) {
         if (fs::is_directory(argv[i])) {
             for (const auto &entry : fs::directory_iterator {argv[i]}) {
                 run_input(entry.path().c_str());

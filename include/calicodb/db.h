@@ -20,11 +20,11 @@ struct TableOptions;
 struct Options {
     // Size of a database page in bytes. This is the basic unit of I/O for the
     // database file. Data is read/written in page-sized chunks. Must be a power-
-    // of-two between 512 and 32768, inclusive.
-    std::size_t page_size {16'384}; // 16 KB
+    // of-two between 512 and 65536, inclusive.
+    std::size_t page_size = 16'384; // 16 KB
 
     // Size of the page cache in bytes. Must be at least 16 pages (see above).
-    std::size_t cache_size {4'194'304}; // 4 MB
+    std::size_t cache_size = 4'194'304; // 4 MB
 
     // Alternate prefix to use for WAL segment files. Defaults to "dbname-wal-",
     // where "dbname" is the name of the database.
@@ -33,16 +33,16 @@ struct Options {
     // Custom destination for info log messages. Defaults to writing to a file
     // called "dbname-log", where "dbname" is the name of the database. See env.h
     // for details.
-    InfoLogger *info_log {};
+    InfoLogger *info_log = nullptr;
 
     // Custom storage environment. See env.h for details.
-    Env *env {};
+    Env *env = nullptr;
 
     // If true, create the database if it is missing.
-    bool create_if_missing {true};
+    bool create_if_missing = true;
 
     // If true, return with an error if the database already exists.
-    bool error_if_exists {};
+    bool error_if_exists = false;
 };
 
 // On-disk collection of tables.

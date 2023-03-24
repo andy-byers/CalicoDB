@@ -17,7 +17,7 @@ namespace calicodb
 
 TEST(SegmentNameParserTests, MatchesOnPrefix)
 {
-    ASSERT_EQ(decode_segment_name("./prefix-", "./prefix-1"), Id {1});
+    ASSERT_EQ(decode_segment_name("./prefix-", "./prefix-1"), Id(1));
     ASSERT_TRUE(decode_segment_name("./prefix_", "./prefix-1").is_null());
 }
 
@@ -52,8 +52,8 @@ public:
         std::array<WalRecordType, 3> {kFirstRecord, kMiddleRecord, kFirstRecord},
         std::array<WalRecordType, 3> {kFirstRecord, kLastRecord, kFullRecord},
     };
-    WalRecordHeader lhs {};
-    WalRecordHeader rhs {};
+    WalRecordHeader lhs;
+    WalRecordHeader rhs;
 };
 
 TEST_F(WalRecordMergeTests, MergingEmptyRecordsIndicatesCorruption)
@@ -87,8 +87,8 @@ class WalRecordGenerator
 public:
     [[nodiscard]] auto setup_deltas(char *image, std::size_t image_size) -> std::vector<PageDelta>
     {
-        static constexpr std::size_t MAX_WIDTH {30};
-        static constexpr std::size_t MAX_SPREAD {20};
+        static constexpr std::size_t MAX_WIDTH = 30;
+        static constexpr std::size_t MAX_SPREAD = 20;
         std::vector<PageDelta> deltas;
 
         for (auto offset = random.Next(image_size / 10); offset < image_size;) {
@@ -111,7 +111,7 @@ private:
 class WalPayloadTests : public testing::Test
 {
 public:
-    static constexpr std::size_t kPageSize {0x80};
+    static constexpr std::size_t kPageSize = 0x80;
 
     WalPayloadTests()
         : image {random.Generate(kPageSize).to_string()},
@@ -126,8 +126,8 @@ public:
 
 TEST_F(WalPayloadTests, ImagePayloadEncoding)
 {
-    const auto payload_in = encode_image_payload(Lsn {123}, Id {456}, image, scratch.data());
-    const auto payload_out = decode_payload(Slice {scratch}.truncate(payload_in.size()));
+    const auto payload_in = encode_image_payload(Lsn(123), Id(456), image, scratch.data());
+    const auto payload_out = decode_payload(Slice(scratch).truncate(payload_in.size()));
     ASSERT_TRUE(std::holds_alternative<ImageDescriptor>(payload_out));
     const auto descriptor = std::get<ImageDescriptor>(payload_out);
     ASSERT_EQ(descriptor.lsn.value, 123);
@@ -139,23 +139,23 @@ TEST_F(WalPayloadTests, DeltaPayloadEncoding)
 {
     WalRecordGenerator generator;
     auto deltas = generator.setup_deltas(image.data(), image.size());
-    const auto payload_in = encode_deltas_payload(Lsn {123}, Id {456}, image, deltas, scratch.data());
-    const auto payload_out = decode_payload(Slice {scratch}.truncate(payload_in.size()));
+    const auto payload_in = encode_deltas_payload(Lsn(123), Id(456), image, deltas, scratch.data());
+    const auto payload_out = decode_payload(Slice(scratch).truncate(payload_in.size()));
     ASSERT_TRUE(std::holds_alternative<DeltaDescriptor>(payload_out));
     const auto descriptor = std::get<DeltaDescriptor>(payload_out);
     ASSERT_EQ(descriptor.lsn.value, 123);
     ASSERT_EQ(descriptor.page_id.value, 456);
     ASSERT_EQ(descriptor.deltas.size(), deltas.size());
     ASSERT_TRUE(std::all_of(cbegin(descriptor.deltas), cend(descriptor.deltas), [this](const auto &delta) {
-        return delta.data == Slice {image}.range(delta.offset, delta.data.size());
+        return delta.data == Slice(image).range(delta.offset, delta.data.size());
     }));
 }
 
 TEST_F(WalPayloadTests, VacuumPayloadEncoding)
 {
     WalRecordGenerator generator;
-    const auto payload_in = encode_vacuum_payload(Lsn {123}, true, scratch.data());
-    const auto payload_out = decode_payload(Slice {scratch}.truncate(payload_in.size()));
+    const auto payload_in = encode_vacuum_payload(Lsn(123), true, scratch.data());
+    const auto payload_out = decode_payload(Slice(scratch).truncate(payload_in.size()));
     ASSERT_TRUE(std::holds_alternative<VacuumDescriptor>(payload_out));
     const auto descriptor = std::get<VacuumDescriptor>(payload_out);
     ASSERT_EQ(descriptor.lsn.value, 123);
@@ -167,7 +167,7 @@ class WalComponentTests
       public testing::Test
 {
 public:
-    static constexpr std::size_t kPageSize {0x200};
+    static constexpr std::size_t kPageSize = 0x200;
     const std::string kWalPrefix {"test-wal-"};
 
     WalComponentTests()
@@ -216,11 +216,11 @@ public:
         std::string record(wal_scratch_size(kPageSize), '\0');
         CALICODB_TRY(reader.read(record));
         out = record.substr(1);
-        Slice buffer {out};
+        Slice buffer(out);
         if (lsn != nullptr) {
             *lsn = extract_payload_lsn(buffer);
         }
-        out = buffer.advance(sizeof(Lsn)).to_string();
+        out = buffer.advance(Lsn::kSize).to_string();
         return Status::ok();
     }
 
@@ -235,15 +235,15 @@ private:
     std::string m_writer_tail;
     std::string m_reader_tail;
     std::string m_reader_data;
-    Reader *m_reader_file {};
-    Logger *m_writer_file {};
+    Reader *m_reader_file = nullptr;
+    Logger *m_writer_file = nullptr;
 };
 
 TEST_F(WalComponentTests, ManualFlush)
 {
     auto writer = make_writer(Id::root());
-    ASSERT_OK(wal_write(writer, Lsn {1}, "hello"));
-    ASSERT_OK(wal_write(writer, Lsn {2}, "world"));
+    ASSERT_OK(wal_write(writer, Lsn(1), "hello"));
+    ASSERT_OK(wal_write(writer, Lsn(2), "world"));
     ASSERT_OK(writer.flush());
 }
 
@@ -251,7 +251,7 @@ TEST_F(WalComponentTests, AutomaticFlush)
 {
     auto writer = make_writer(Id::root());
 
-    auto lsn = Lsn::root();
+    auto lsn = Lsn::base();
     for (; lsn.value < kPageSize * 5; ++lsn.value) {
         ASSERT_OK(wal_write(writer, lsn, "=^.^="));
     }
@@ -260,8 +260,8 @@ TEST_F(WalComponentTests, AutomaticFlush)
 TEST_F(WalComponentTests, HandlesRecordsWithinBlock)
 {
     auto writer = make_writer(Id::root());
-    ASSERT_OK(wal_write(writer, Lsn {1}, "hello"));
-    ASSERT_OK(wal_write(writer, Lsn {2}, "world"));
+    ASSERT_OK(wal_write(writer, Lsn(1), "hello"));
+    ASSERT_OK(wal_write(writer, Lsn(2), "world"));
     ASSERT_OK(writer.flush());
 
     auto reader = make_reader(Id::root());
@@ -273,10 +273,10 @@ TEST_F(WalComponentTests, HandlesRecordsWithinBlock)
 TEST_F(WalComponentTests, FragmentedRecord)
 {
     tools::RandomGenerator random;
-    const auto payload = random.Generate(wal_scratch_size(kPageSize) - sizeof(Lsn));
+    const auto payload = random.Generate(wal_scratch_size(kPageSize) - Lsn::kSize);
 
     auto writer = make_writer(Id::root());
-    ASSERT_OK(wal_write(writer, Lsn {1}, payload));
+    ASSERT_OK(wal_write(writer, Lsn(1), payload));
     ASSERT_OK(writer.flush());
 
     auto reader = make_reader(Id::root());
@@ -287,12 +287,12 @@ TEST_F(WalComponentTests, FragmentedRecord)
 TEST_F(WalComponentTests, HandlesRecordsAcrossPackedBlocks)
 {
     auto writer = make_writer(Id::root());
-    for (std::size_t i {1}; i < kPageSize * 2; ++i) {
-        ASSERT_OK(wal_write(writer, Lsn {i}, tools::integral_key(i)));
+    for (std::size_t i = 1; i < kPageSize * 2; ++i) {
+        ASSERT_OK(wal_write(writer, Lsn(i), tools::integral_key(i)));
     }
     ASSERT_OK(writer.flush());
     auto reader = make_reader(Id::root());
-    for (std::size_t i {1}; i < kPageSize * 2; ++i) {
+    for (std::size_t i = 1; i < kPageSize * 2; ++i) {
         ASSERT_EQ(wal_read(reader), tools::integral_key(i));
     }
     assert_reader_is_done(reader);
@@ -301,12 +301,12 @@ TEST_F(WalComponentTests, HandlesRecordsAcrossPackedBlocks)
 TEST_F(WalComponentTests, ReaderReportsMismatchedCrc)
 {
     auto writer = make_writer(Id::root());
-    ASSERT_OK(wal_write(writer, Lsn {1}, "./test"));
+    ASSERT_OK(wal_write(writer, Lsn(1), "./test"));
     ASSERT_OK(writer.flush());
 
     Editor *editor;
     ASSERT_OK(env->new_editor(encode_segment_name(kWalPrefix, Id::root()), editor));
-    ASSERT_OK(editor->write(WalRecordHeader::kSize + sizeof(Lsn), "TEST"));
+    ASSERT_OK(editor->write(WalRecordHeader::kSize + Lsn::kSize, "TEST"));
     delete editor;
 
     std::string buffer;
@@ -340,7 +340,7 @@ TEST_F(WalComponentTests, ReaderReportsIncompleteBlock)
 TEST_F(WalComponentTests, ReaderReportsInvalidSize)
 {
     auto writer = make_writer(Id::root());
-    ASSERT_OK(wal_write(writer, Lsn {1}, "test"));
+    ASSERT_OK(wal_write(writer, Lsn(1), "test"));
     ASSERT_OK(writer.flush());
 
     std::string buffer(WalRecordHeader::kSize, '\0');
@@ -359,7 +359,7 @@ TEST_F(WalComponentTests, ReaderReportsInvalidSize)
 TEST_F(WalComponentTests, ReadsFirstLsn)
 {
     auto writer = make_writer(Id::root());
-    ASSERT_OK(wal_write(writer, Lsn {42}, "./test"));
+    ASSERT_OK(wal_write(writer, Lsn(42), "./test"));
     ASSERT_OK(writer.flush());
 
     std::map<Id, Lsn> set;
@@ -367,7 +367,7 @@ TEST_F(WalComponentTests, ReadsFirstLsn)
     auto itr = begin(set);
 
     ASSERT_OK(cache_first_lsn(*env, kWalPrefix, itr));
-    ASSERT_EQ(itr->second, Lsn {42});
+    ASSERT_EQ(itr->second, Lsn(42));
 }
 
 TEST_F(WalComponentTests, FailureToReadFirstLsn)
@@ -404,25 +404,25 @@ TEST_F(WalComponentTests, PrefersToGetLsnFromCache)
     std::map<Id, Lsn> set;
     set.insert({Id::root(), Lsn::null()});
     auto itr = begin(set);
-    itr->second = Lsn {42};
+    itr->second = Lsn(42);
 
     // File doesn't exist, but the LSN is cached.
     ASSERT_OK(cache_first_lsn(*env, kWalPrefix, itr));
-    ASSERT_EQ(itr->second, Lsn {42});
+    ASSERT_EQ(itr->second, Lsn(42));
 }
 
 TEST_F(WalComponentTests, HandlesRecordsAcrossSparseBlocks)
 {
     auto writer = make_writer(Id::root());
-    for (std::size_t i {1}; i < kPageSize * 2; ++i) {
-        ASSERT_OK(wal_write(writer, Lsn {i}, tools::integral_key(i)));
+    for (std::size_t i = 1; i < kPageSize * 2; ++i) {
+        ASSERT_OK(wal_write(writer, Lsn(i), tools::integral_key(i)));
         if (rand() % 8 == 0) {
             ASSERT_OK(writer.flush());
         }
     }
     ASSERT_OK(writer.flush());
     auto reader = make_reader(Id::root());
-    for (std::size_t i {1}; i < kPageSize * 2; ++i) {
+    for (std::size_t i = 1; i < kPageSize * 2; ++i) {
         ASSERT_EQ(wal_read(reader), tools::integral_key(i));
     }
     assert_reader_is_done(reader);
@@ -435,10 +435,10 @@ TEST_F(WalComponentTests, HandlesLargeRecords)
     std::vector<std::string> payloads;
 
     auto writer = make_writer(Id::root());
-    for (std::size_t i {}; i < 10; ++i) {
+    for (std::size_t i = 0; i < 10; ++i) {
         const auto payload_size = random.Next(block_size, block_size * 5);
         payloads.emplace_back(random.Generate(payload_size).to_string());
-        ASSERT_OK(wal_write(writer, Lsn {i + 1}, payloads.back()));
+        ASSERT_OK(wal_write(writer, Lsn(i + 1), payloads.back()));
     }
     ASSERT_OK(writer.flush());
     auto reader = make_reader(Id::root());
@@ -452,11 +452,11 @@ TEST_F(WalComponentTests, Corruption)
 {
     // Don't flush the writer, so it leaves a partial record in the WAL.
     auto writer = make_writer(Id::root());
-    for (std::size_t i {1}; i < kPageSize * 2; ++i) {
-        ASSERT_OK(wal_write(writer, Lsn {i}, tools::integral_key(i)));
+    for (std::size_t i = 1; i < kPageSize * 2; ++i) {
+        ASSERT_OK(wal_write(writer, Lsn(i), tools::integral_key(i)));
     }
     auto reader = make_reader(Id::root());
-    for (std::size_t i {1}; i < kPageSize * 2; ++i) {
+    for (std::size_t i = 1; i < kPageSize * 2; ++i) {
         std::string data;
         auto s = wal_read_with_status(reader, data);
         if (s.is_not_found()) {
@@ -494,8 +494,8 @@ public:
         Reader *temp;
         EXPECT_OK(env->new_reader(encode_segment_name(kWalPrefix, segment_id), temp));
 
-        std::unique_ptr<Reader> file {temp};
-        WalReader reader {*file, tail_buffer};
+        std::unique_ptr<Reader> file(temp);
+        WalReader reader(*file, tail_buffer);
 
         for (;;) {
             std::string payload;
@@ -562,11 +562,11 @@ TEST_F(WalTests, SequenceNumbersAreMonotonicallyIncreasing)
     ASSERT_OK(wal->start_writing());
     Lsn lsn;
     ASSERT_OK(wal->log_image(Id::root(), "a", &lsn));
-    ASSERT_EQ(lsn, Lsn {1});
+    ASSERT_EQ(lsn, Lsn(1));
     ASSERT_OK(wal->log_image(Id::root(), "b", &lsn));
-    ASSERT_EQ(lsn, Lsn {2});
+    ASSERT_EQ(lsn, Lsn(2));
     ASSERT_OK(wal->log_image(Id::root(), "c", &lsn));
-    ASSERT_EQ(lsn, Lsn {3});
+    ASSERT_EQ(lsn, Lsn(3));
 }
 
 TEST_F(WalTests, UnderstandsImageRecords)
@@ -574,26 +574,26 @@ TEST_F(WalTests, UnderstandsImageRecords)
     ASSERT_OK(wal->start_writing());
     ASSERT_EQ(wal->bytes_written(), 0);
     const auto image = random.Generate(kPageSize);
-    ASSERT_OK(wal->log_image(Id {10}, "", nullptr));
-    ASSERT_OK(wal->log_image(Id {20}, image, nullptr));
+    ASSERT_OK(wal->log_image(Id(0), "", nullptr));
+    ASSERT_OK(wal->log_image(Id(0), image, nullptr));
     ASSERT_OK(wal->synchronize(true));
 
     std::vector<std::string> payloads;
-    ASSERT_OK(read_segment(Id {1}, &payloads));
+    ASSERT_OK(read_segment(Id(1), &payloads));
     ASSERT_EQ(payloads.size(), 2);
 
     auto payload = decode_payload(payloads[0]);
     ASSERT_TRUE(std::holds_alternative<ImageDescriptor>(payload));
     auto descriptor = std::get<ImageDescriptor>(payload);
-    ASSERT_EQ(descriptor.lsn, Lsn {1});
-    ASSERT_EQ(descriptor.page_id, Id {10});
+    ASSERT_EQ(descriptor.lsn, Lsn(1));
+    ASSERT_EQ(descriptor.page_id, Id(0));
     ASSERT_EQ(descriptor.image, "");
 
     payload = decode_payload(payloads[1]);
     ASSERT_TRUE(std::holds_alternative<ImageDescriptor>(payload));
     descriptor = std::get<ImageDescriptor>(payload);
-    ASSERT_EQ(descriptor.lsn, Lsn {2});
-    ASSERT_EQ(descriptor.page_id, Id {20});
+    ASSERT_EQ(descriptor.lsn, Lsn(2));
+    ASSERT_EQ(descriptor.page_id, Id(0));
     ASSERT_EQ(descriptor.image, image);
 }
 
@@ -602,25 +602,25 @@ TEST_F(WalTests, UnderstandsDeltaRecords)
     ASSERT_OK(wal->start_writing());
     ASSERT_EQ(wal->bytes_written(), 0);
     const auto image = random.Generate(kPageSize);
-    std::vector<PageDelta> delta {
+    std::vector<PageDelta> delta = {
         {100, 10},
         {200, 20},
         {300, 30},
     };
-    ASSERT_OK(wal->log_delta(Id {12}, image, delta, nullptr));
+    ASSERT_OK(wal->log_delta(Id(2), image, delta, nullptr));
     ASSERT_OK(wal->synchronize(true));
 
     std::vector<std::string> payloads;
-    ASSERT_OK(read_segment(Id {1}, &payloads));
+    ASSERT_OK(read_segment(Id(1), &payloads));
     ASSERT_EQ(payloads.size(), 1);
 
     const auto payload = decode_payload(payloads[0]);
     ASSERT_TRUE(std::holds_alternative<DeltaDescriptor>(payload));
     const auto descriptor = std::get<DeltaDescriptor>(payload);
-    ASSERT_EQ(descriptor.lsn, Lsn {1});
-    ASSERT_EQ(descriptor.page_id, Id {12});
+    ASSERT_EQ(descriptor.lsn, Lsn(1));
+    ASSERT_EQ(descriptor.page_id, Id(2));
     ASSERT_EQ(descriptor.deltas.size(), 3);
-    for (std::size_t i {}; i < 3; ++i) {
+    for (std::size_t i = 0; i < 3; ++i) {
         ASSERT_EQ(descriptor.deltas[i].offset, delta[i].offset);
         ASSERT_EQ(descriptor.deltas[i].data, image.range(delta[i].offset, delta[i].size));
     }
@@ -635,19 +635,19 @@ TEST_F(WalTests, UnderstandsVacuumRecords)
     ASSERT_OK(wal->synchronize(true));
 
     std::vector<std::string> payloads;
-    ASSERT_OK(read_segment(Id {1}, &payloads));
+    ASSERT_OK(read_segment(Id(1), &payloads));
     ASSERT_EQ(payloads.size(), 2);
 
     auto payload = decode_payload(payloads[0]);
     ASSERT_TRUE(std::holds_alternative<VacuumDescriptor>(payload));
     auto descriptor = std::get<VacuumDescriptor>(payload);
-    ASSERT_EQ(descriptor.lsn, Lsn {1});
+    ASSERT_EQ(descriptor.lsn, Lsn(1));
     ASSERT_TRUE(descriptor.is_start);
 
     payload = decode_payload(payloads[1]);
     ASSERT_TRUE(std::holds_alternative<VacuumDescriptor>(payload));
     descriptor = std::get<VacuumDescriptor>(payload);
-    ASSERT_EQ(descriptor.lsn, Lsn {2});
+    ASSERT_EQ(descriptor.lsn, Lsn(2));
     ASSERT_FALSE(descriptor.is_start);
 }
 
@@ -655,9 +655,9 @@ TEST_F(WalTests, CleanupObsoleteSegments)
 {
     ASSERT_OK(wal->start_writing());
     auto logs = get_logs();
-    for (std::size_t i {}; logs.size() < 5; ++i) {
+    for (std::size_t i = 0; logs.size() < 5; ++i) {
         const auto image = random.Generate(kPageSize);
-        ASSERT_OK(wal->log_image(Id {i + 1}, image, nullptr));
+        ASSERT_OK(wal->log_image(Id(i + 1), image, nullptr));
         logs = get_logs();
     }
     ASSERT_OK(wal->synchronize(true));
@@ -670,7 +670,7 @@ TEST_F(WalTests, CleanupObsoleteSegments)
     ASSERT_EQ(logs.size(), get_logs().size());
 
     // NOOP. LSN of the last record in the first segment passed.
-    ASSERT_OK(wal->cleanup(Lsn {lsns[1].value - 1}));
+    ASSERT_OK(wal->cleanup(Lsn(lsns[1].value - 1)));
     ASSERT_EQ(get_logs().size(), logs.size());
 
     // Remove 1 segment.
@@ -679,7 +679,7 @@ TEST_F(WalTests, CleanupObsoleteSegments)
 
     // Cleanup routine will never remove the last segment (the writer is on a new segment
     // so there are technically 2).
-    ASSERT_OK(wal->cleanup(Lsn {std::numeric_limits<std::uint64_t>::max()}));
+    ASSERT_OK(wal->cleanup(Lsn(std::numeric_limits<std::uint64_t>::max())));
     ASSERT_EQ(get_logs().size(), 2);
     ASSERT_OK(wal->close());
     wal.reset();

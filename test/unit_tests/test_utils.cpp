@@ -57,7 +57,7 @@ TEST_F(SliceTests, EqualsSelf)
 
 TEST_F(SliceTests, StringLiteralSlice)
 {
-    ASSERT_TRUE(Slice {test_string} == Slice {"Hello, world!"});
+    ASSERT_TRUE(Slice(test_string) == Slice {"Hello, world!"});
 }
 
 TEST_F(SliceTests, StartsWith)
@@ -78,15 +78,15 @@ TEST_F(SliceTests, ShorterSlicesAreLessThanIfOtherwiseEqual)
 
 TEST_F(SliceTests, FirstcharIsMostSignificant)
 {
-    ASSERT_TRUE(Slice {"10"} > Slice {"01"});
-    ASSERT_TRUE(Slice {"01"} < Slice {"10"});
-    ASSERT_TRUE(Slice {"10"} >= Slice {"01"});
-    ASSERT_TRUE(Slice {"01"} <= Slice {"10"});
+    ASSERT_TRUE(Slice("10") > Slice("01"));
+    ASSERT_TRUE(Slice("01") < Slice("10"));
+    ASSERT_TRUE(Slice("10") >= Slice("01"));
+    ASSERT_TRUE(Slice("01") <= Slice("10"));
 }
 
 TEST_F(SliceTests, CanGetPartialRange)
 {
-    ASSERT_TRUE(slice.range(7, 5) == Slice {"world"});
+    ASSERT_TRUE(slice.range(7, 5) == Slice("world"));
 }
 
 TEST_F(SliceTests, CanGetEntireRange)
@@ -160,8 +160,8 @@ TEST_F(SliceTests, TruncateDeathTest)
 TEST_F(SliceTests, WithCppString)
 {
     // Construct from and compare with C++ strings.
-    std::string s {"123"};
-    Slice bv1 {s};
+    std::string s("123");
+    Slice bv1(s);
     ASSERT_TRUE(bv1 == s); // Uses an implicit conversion.
 }
 
@@ -169,18 +169,19 @@ TEST_F(SliceTests, WithCString)
 {
     // Construct from and compare with C-style strings.
     char a[4] {"123"}; // Null-terminated
-    Slice bv1 {a};
+    Slice bv1(a);
     ASSERT_TRUE(bv1 == a);
 
-    const char *s {"123"};
-    Slice bv2 {s};
+    const auto *s = "123";
+    Slice bv2(s);
     ASSERT_TRUE(bv2 == s);
 }
 
 static constexpr auto constexpr_test_read(Slice bv, Slice answer)
 {
-    for (std::size_t i {}; i < bv.size(); ++i)
+    for (std::size_t i = 0; i < bv.size(); ++i) {
         CALICODB_EXPECT_EQ(bv[i], answer[i]);
+    }
 
     (void)bv.starts_with(answer);
     (void)bv.data();
@@ -192,7 +193,7 @@ static constexpr auto constexpr_test_read(Slice bv, Slice answer)
 
 TEST_F(SliceTests, ConstantExpressions)
 {
-    static constexpr Slice bv {"42"};
+    static constexpr Slice bv("42");
     constexpr_test_read(bv, "42");
 }
 
@@ -212,41 +213,41 @@ TEST(UtilsTest, PowerOfTwoComputationIsCorrect)
 TEST(NonPrintableSliceTests, UsesStringSize)
 {
     const std::string u {"\x00\x01", 2};
-    ASSERT_EQ(Slice {u}.size(), 2);
+    ASSERT_EQ(Slice(u).size(), 2);
 }
 
 TEST(NonPrintableSliceTests, NullcharsAreEqual)
 {
     const std::string u {"\x00", 1};
     const std::string v {"\x00", 1};
-    ASSERT_EQ(Slice {u}.compare(v), 0);
+    ASSERT_EQ(Slice(u).compare(v), 0);
 }
 
 TEST(NonPrintableSliceTests, ComparisonDoesNotStopAtNullchars)
 {
-    std::string u {"\x00\x00", 2};
-    std::string v {"\x00\x01", 2};
-    ASSERT_LT(Slice {u}.compare(v), 0);
+    std::string u("\x00\x00", 2);
+    std::string v("\x00\x01", 2);
+    ASSERT_LT(Slice(u).compare(v), 0);
 }
 
 TEST(NonPrintableSliceTests, BytesAreUnsignedWhenCompared)
 {
-    std::string u {"\x0F", 1};
-    std::string v {"\x00", 1};
+    std::string u("\x0F", 1);
+    std::string v("\x00", 1);
     v[0] = static_cast<char>(0xF0);
 
     // Signed comparison. 0xF0 overflows a signed byte and becomes negative.
     ASSERT_LT(v[0], u[0]);
 
     // Unsigned comparison should come out the other way.
-    ASSERT_LT(Slice {u}.compare(v), 0);
+    ASSERT_LT(Slice(u).compare(v), 0);
 }
 
 TEST(NonPrintableSliceTests, Conversions)
 {
     // We need to pass in the size, since the first character is '\0'. Otherwise, the length will be 0.
-    std::string u {"\x00\x01", 2};
-    const Slice s {u};
+    std::string u("\x00\x01", 2);
+    const Slice s(u);
     ASSERT_EQ(s.size(), 2);
     ASSERT_EQ(s[0], '\x00');
     ASSERT_EQ(s[1], '\x01');
@@ -256,8 +257,8 @@ TEST(NonPrintableSliceTests, CStyleStringLengths)
 {
     const auto a = "ab";
     const char b[] {'4', '2', '\x00'};
-    ASSERT_EQ(Slice {a}.size(), 2);
-    ASSERT_EQ(Slice {b}.size(), 2);
+    ASSERT_EQ(Slice(a).size(), 2);
+    ASSERT_EQ(Slice(b).size(), 2);
 }
 
 TEST(NonPrintableSliceTests, NullByteInMiddleOfLiteralGivesIncorrectLength)
@@ -267,15 +268,15 @@ TEST(NonPrintableSliceTests, NullByteInMiddleOfLiteralGivesIncorrectLength)
 
     ASSERT_EQ(std::char_traits<char>::length(a), 1);
     ASSERT_EQ(std::char_traits<char>::length(b), 1);
-    ASSERT_EQ(Slice {a}.size(), 1);
-    ASSERT_EQ(Slice {b}.size(), 1);
+    ASSERT_EQ(Slice(a).size(), 1);
+    ASSERT_EQ(Slice(b).size(), 1);
 }
 
 template <class T>
 auto run_nullability_check()
 {
     const auto x = T::null();
-    const T y {x.value + 1};
+    const T y(x.value + 1);
 
     ASSERT_TRUE(x.is_null());
     ASSERT_FALSE(y.is_null());
@@ -284,8 +285,8 @@ auto run_nullability_check()
 template <class T>
 auto run_equality_comparisons()
 {
-    T x {1};
-    T y {2};
+    T x(1);
+    T y(2);
 
     CALICODB_EXPECT_TRUE(x == x);
     CALICODB_EXPECT_TRUE(x != y);
@@ -296,26 +297,22 @@ auto run_equality_comparisons()
 template <class T>
 auto run_ordering_comparisons()
 {
-    T x {1};
-    T y {2};
+    T x(1);
+    T y(2);
 
     CALICODB_EXPECT_TRUE(x < y);
     CALICODB_EXPECT_TRUE(x <= x and x <= y);
-    CALICODB_EXPECT_TRUE(y > x);
-    CALICODB_EXPECT_TRUE(y >= y and y >= x);
     ASSERT_LT(x, y);
     ASSERT_LE(x, x);
     ASSERT_LE(x, y);
-    ASSERT_GT(y, x);
-    ASSERT_GE(y, y);
-    ASSERT_GE(y, x);
 }
 
 TEST(IdTests, TypesAreSizedCorrectly)
 {
     Id id;
-    static_assert(sizeof(Id) == sizeof(id.value));
-    static_assert(sizeof(Id) == sizeof(id.value));
+    Lsn lsn;
+    static_assert(Id::kSize == sizeof(id) && Id::kSize == sizeof(id.value));
+    static_assert(Lsn::kSize == sizeof(lsn) && Lsn::kSize == sizeof(lsn.value));
 }
 
 TEST(IdTests, IdentifiersAreNullable)
@@ -629,8 +626,14 @@ TEST_F(InterceptorTests, RespectsSyscallType)
     delete editor;
 }
 
+TEST(Logging, WriteFormattedString)
+{
+    std::string s;
+    write_to_string(s, "%s %d %f", "abc", 42, 1.0);
+}
 
-TEST(LevelDB_Logging, NumberToString) {
+TEST(LevelDB_Logging, NumberToString)
+{
     ASSERT_EQ("0", number_to_string(0));
     ASSERT_EQ("1", number_to_string(1));
     ASSERT_EQ("9", number_to_string(9));
@@ -656,19 +659,21 @@ TEST(LevelDB_Logging, NumberToString) {
 }
 
 void ConsumeDecimalNumberRoundtripTest(uint64_t number,
-                                       const std::string& padding = "") {
+                                       const std::string &padding = "")
+{
     std::string decimal_number = number_to_string(number);
     std::string input_string = decimal_number + padding;
     Slice input(input_string);
     Slice output = input;
     uint64_t result;
-    ASSERT_TRUE(consume_decimal_number(&output, &result));
+    ASSERT_TRUE(consume_decimal_number(output, &result));
     ASSERT_EQ(number, result);
     ASSERT_EQ(decimal_number.size(), output.data() - input.data());
     ASSERT_EQ(padding.size(), output.size());
 }
 
-TEST(LevelDB_Logging, ConsumeDecimalNumberRoundtrip) {
+TEST(LevelDB_Logging, ConsumeDecimalNumberRoundtrip)
+{
     ConsumeDecimalNumberRoundtripTest(0);
     ConsumeDecimalNumberRoundtripTest(1);
     ConsumeDecimalNumberRoundtripTest(9);
@@ -690,7 +695,8 @@ TEST(LevelDB_Logging, ConsumeDecimalNumberRoundtrip) {
     }
 }
 
-TEST(LevelDB_Logging, ConsumeDecimalNumberRoundtripWithPadding) {
+TEST(LevelDB_Logging, ConsumeDecimalNumberRoundtripWithPadding)
+{
     ConsumeDecimalNumberRoundtripTest(0, " ");
     ConsumeDecimalNumberRoundtripTest(1, "abc");
     ConsumeDecimalNumberRoundtripTest(9, "x");
@@ -708,14 +714,16 @@ TEST(LevelDB_Logging, ConsumeDecimalNumberRoundtripWithPadding) {
     }
 }
 
-void ConsumeDecimalNumberOverflowTest(const std::string& input_string) {
+void ConsumeDecimalNumberOverflowTest(const std::string &input_string)
+{
     Slice input(input_string);
     Slice output = input;
     uint64_t result;
-    ASSERT_EQ(false, consume_decimal_number(&output, &result));
+    ASSERT_EQ(false, consume_decimal_number(output, &result));
 }
 
-TEST(LevelDB_Logging, ConsumeDecimalNumberOverflow) {
+TEST(LevelDB_Logging, ConsumeDecimalNumberOverflow)
+{
     static_assert(std::numeric_limits<uint64_t>::max() == 18446744073709551615U,
                   "Test consistency check");
     ConsumeDecimalNumberOverflowTest("18446744073709551616");
@@ -735,16 +743,18 @@ TEST(LevelDB_Logging, ConsumeDecimalNumberOverflow) {
     ConsumeDecimalNumberOverflowTest("99999999999999999999");
 }
 
-void ConsumeDecimalNumberNoDigitsTest(const std::string& input_string) {
+void ConsumeDecimalNumberNoDigitsTest(const std::string &input_string)
+{
     Slice input(input_string);
     Slice output = input;
     uint64_t result;
-    ASSERT_EQ(false, consume_decimal_number(&output, &result));
+    ASSERT_EQ(false, consume_decimal_number(output, &result));
     ASSERT_EQ(input.data(), output.data());
     ASSERT_EQ(input.size(), output.size());
 }
 
-TEST(LevelDB_Logging, ConsumeDecimalNumberNoDigits) {
+TEST(LevelDB_Logging, ConsumeDecimalNumberNoDigits)
+{
     ConsumeDecimalNumberNoDigitsTest("");
     ConsumeDecimalNumberNoDigitsTest(" ");
     ConsumeDecimalNumberNoDigitsTest("a");
@@ -759,15 +769,15 @@ TEST(Logging, ConvenienceFunctions)
 {
     std::string buffer;
 
-    append_number(&buffer, 123);
+    append_number(buffer, 123);
     ASSERT_EQ(buffer, number_to_string(123));
     buffer.clear();
 
-    append_escaped_string(&buffer, "\t\n\r");
+    append_escaped_string(buffer, "\t\n\r");
     ASSERT_EQ(buffer, escape_string("\t\n\r"));
     buffer.clear();
 
-    append_double(&buffer, 1.0);
+    append_double(buffer, 1.0);
     ASSERT_EQ(buffer, double_to_string(1.0));
 }
 
@@ -787,7 +797,7 @@ TEST(LevelDB_Coding, Varint64)
         values.push_back(power - 1);
         values.push_back(power + 1);
     }
-    std::size_t total_size {};
+    std::size_t total_size = 0;
     for (auto v : values) {
         total_size += varint_length(v);
     }

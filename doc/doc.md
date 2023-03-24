@@ -37,12 +37,12 @@ cmake -DCMAKE_BUILD_TYPE=Release -DCALICODB_BuildTests=Off .. && cmake --build .
 
 ### Slices
 ```C++
-std::string str {"abc"};
+std::string str("abc");
 
 // We can create slices from C-style strings, standard library strings, or directly from a pointer and a length.
-calicodb::Slice s1 {str.c_str()};
-calicodb::Slice s2 {str};
-calicodb::Slice s3 {str.data(), str.size()};
+calicodb::Slice s1(str.c_str());
+calicodb::Slice s2(str);
+calicodb::Slice s3(str.data(), str.size());
 
 // A slice can be converted back to a std::string using Slice::to_string().
 std::cout << s1.to_string() << '\n';
@@ -64,7 +64,7 @@ assert(s2.starts_with("ab"));
 ### Opening a database
 ```C++
 // Set some initialization options.
-const calicodb::Options options {
+const calicodb::Options options = {
     // Use pages of size 2 KB and a 2 MB page cache.
     .page_size = 0x2000,
     .cache_size = 0x200000,
@@ -201,7 +201,7 @@ if (s.is_ok()) {
 ### Tables
 
 ```C++
-calicodb::TableOptions table_options {
+calicodb::TableOptions table_options = {
     // Pass AccessMode::kReadOnly to open in read-only mode.
     .mode = AccessMode::kReadWrite,
 };

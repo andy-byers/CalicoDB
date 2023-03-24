@@ -24,9 +24,9 @@ static auto access_type_name(int64_t type) -> std::string
 class Benchmark final
 {
     static constexpr auto kFilename = "__bench_db__";
-    static constexpr std::size_t kKeyLength {16};
-    static constexpr std::size_t kNumRecords {10'000};
-    static constexpr std::size_t kCheckpointInterval {1'000};
+    static constexpr std::size_t kKeyLength = 16;
+    static constexpr std::size_t kNumRecords = 10'000;
+    static constexpr std::size_t kCheckpointInterval = 1'000;
 
 public:
     struct Parameters {
@@ -37,7 +37,7 @@ public:
         : m_param {param}
     {
         m_options.env = calicodb::Env::default_env();
-        m_options.page_size = 0x4000;
+        m_options.page_size = 1 << 15;
         m_options.cache_size = 4'194'304;
         CHECK_OK(calicodb::DB::open(m_options, kFilename, m_db));
     }
@@ -144,7 +144,7 @@ public:
 
     auto add_initial_records() -> void
     {
-        for (std::size_t i {}; i < kNumRecords; ++i) {
+        for (std::size_t i = 0; i < kNumRecords; ++i) {
             CHECK_OK(m_db->put(
                 calicodb::tools::integral_key<kKeyLength>(i),
                 m_random.Generate(m_param.value_length)));
@@ -194,8 +194,8 @@ private:
     std::size_t m_counters[2] {};
     calicodb::tools::RandomGenerator m_random {4'194'304};
     calicodb::Options m_options;
-    calicodb::Cursor *m_cursor {};
-    calicodb::DB *m_db {};
+    calicodb::Cursor *m_cursor = nullptr;
+    calicodb::DB *m_db = nullptr;
 };
 
 static auto BM_Write(benchmark::State &state) -> void
@@ -316,8 +316,8 @@ static auto BM_Write100K(benchmark::State &state) -> void
     }
 }
 BENCHMARK(BM_Write100K)
-    ->Arg(kSequential)
-    ->Arg(kRandom);
+    ->Args({kSequential, false})
+    ->Args({kRandom, false});
 
 static auto BM_Read100K(benchmark::State &state) -> void
 {

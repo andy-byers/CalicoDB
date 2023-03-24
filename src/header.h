@@ -27,56 +27,59 @@ class Page;
 //    ----------------------------
 //     0       4     magic_code
 //     4       4     header_crc
-//     8       8     page_count
+//     8       4     page_count
+//     12      4     free_list_id
 //     16      8     record_count
-//     24      8     free_list_id
-//     32      8     commit_lsn
-//     40      2     page_size
+//     24      8     commit_lsn
+//     32      2     page_size
+//
+// NOTE: The "page_size" field contains 0 if the maximum page size of 65,536 is used, since this
+// value cannot be represented by a 16-bit unsigned integer.
 struct FileHeader {
-    static constexpr std::uint32_t kMagicCode {0xB11924E1};
-    static constexpr std::size_t kSize {42};
+    static constexpr std::uint32_t kMagicCode = 0xB11924E1;
+    static constexpr std::size_t kSize = 34;
     auto read(const char *data) -> void;
     auto write(char *data) const -> void;
 
     [[nodiscard]] auto compute_crc() const -> std::uint32_t;
 
-    std::uint32_t magic_code {kMagicCode};
-    std::uint32_t header_crc {};
-    std::uint64_t page_count {};
-    std::uint64_t record_count {};
+    std::uint32_t magic_code = kMagicCode;
+    std::uint32_t header_crc = 0;
+    std::uint32_t page_count = 0;
+    std::uint64_t record_count = 0;
     Id freelist_head;
     Lsn commit_lsn;
-    unsigned page_size {};
+    unsigned page_size = 0;
 };
 
 // Page Header Format:
 //     Offset  Size  Name
 //    --------------------------
 //     0       8     page_lsn
-static constexpr auto kPageHeaderSize = sizeof(Lsn);
+static constexpr auto kPageHeaderSize = Lsn::kSize;
 
 // Node Header Format:
 //     Offset  Size  Name
 //    --------------------------
 //     0       1     flags
-//     1       8     next_id
-//     9       8     prev_id
-//     17      2     cell_count
-//     19      2     cell_start
-//     21      2     free_start
-//     23      1     frag_count
+//     1       4     next_id
+//     5       4     prev_id
+//     9       2     cell_count
+//     11      2     cell_start
+//     13      2     free_start
+//     15      1     frag_count
 struct NodeHeader {
-    static constexpr std::size_t kSize {24};
+    static constexpr std::size_t kSize = 16;
     auto read(const char *data) -> void;
     auto write(char *data) const -> void;
 
     Id next_id;
     Id prev_id;
-    unsigned cell_count {};
-    unsigned cell_start {};
-    unsigned free_start {};
-    unsigned frag_count {};
-    bool is_external {true};
+    unsigned cell_count = 0;
+    unsigned cell_start = 0;
+    unsigned free_start = 0;
+    unsigned frag_count = 0;
+    bool is_external = false;
 };
 
 } // namespace calicodb

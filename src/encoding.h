@@ -82,11 +82,11 @@ inline auto put_u64(char *out, std::uint64_t value) noexcept -> void
     dst[7] = static_cast<std::uint8_t>(value >> 56);
 }
 
-static constexpr std::size_t kVarintMaxLength {10};
+static constexpr std::size_t kVarintMaxLength = 10;
 
 [[nodiscard]] inline auto varint_length(std::uint64_t value) -> std::size_t
 {
-    std::size_t length {1};
+    std::size_t length = 1;
     while (value >= 0x80) {
         value >>= 7;
         ++length;
@@ -110,7 +110,7 @@ inline auto encode_varint(char *out, std::uint64_t value) -> char *
 inline auto decode_varint(const char *in, std::uint64_t &value) -> const char *
 {
     value = 0;
-    for (std::uint32_t shift {}; shift < 64; shift += 7) {
+    for (std::uint32_t shift = 0; shift < 64; shift += 7) {
         std::uint64_t c = *reinterpret_cast<const std::uint8_t *>(in);
         ++in;
         if (c & 0x80) {
