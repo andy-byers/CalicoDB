@@ -26,7 +26,7 @@ class Benchmark final
     static constexpr auto kFilename = "__bench_db__";
     static constexpr std::size_t kKeyLength = 16;
     static constexpr std::size_t kNumRecords = 10'000;
-    static constexpr std::size_t kCheckpointInterval = 1'000;
+    static constexpr std::size_t kCheckpointInterval = 1;
 
 public:
     struct Parameters {
@@ -83,7 +83,7 @@ public:
         state.ResumeTiming();
 
         CHECK_OK(m_db->put(key, value));
-        maybe_checkpoint();
+        maybe_commit();
         increment_counters();
     }
 
@@ -102,7 +102,7 @@ public:
             benchmark::DoNotOptimize(result);
         } else {
             CHECK_OK(m_db->put(key, value));
-            maybe_checkpoint();
+            maybe_commit();
         }
         increment_counters();
     }
@@ -149,7 +149,7 @@ public:
                 calicodb::tools::integral_key<kKeyLength>(i),
                 m_random.Generate(m_param.value_length)));
         }
-        CHECK_OK(m_db->checkpoint());
+        CHECK_OK(m_db->commit());
         m_cursor = m_db->new_cursor();
     }
 
@@ -164,10 +164,10 @@ private:
         benchmark::ClobberMemory();
     }
 
-    auto maybe_checkpoint() -> void
+    auto maybe_commit() -> void
     {
         if (m_counters[0] % kCheckpointInterval == kCheckpointInterval - 1) {
-            CHECK_OK(m_db->checkpoint());
+            CHECK_OK(m_db->commit());
         }
     }
 

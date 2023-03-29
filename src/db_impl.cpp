@@ -7,7 +7,6 @@
 #include "crc.h"
 #include "env_posix.h"
 #include "logging.h"
-#include "wal_reader.h"
 
 namespace calicodb
 {
@@ -127,15 +126,14 @@ auto setup_db(const std::string &filename, Env &env, Options &options, FileHeade
     CALICODB_EXPECT_LE(options.page_size, kMaxPageSize);
     CALICODB_EXPECT_TRUE(is_power_of_two(options.page_size));
 
-    Reader *reader;
-    if (auto s = env.new_reader(filename, reader); s.is_ok()) {
+    if (env.file_exists(filename)) {
         char buffer[FileHeader::kSize];
-        s = reader->read(0, sizeof(buffer), buffer, nullptr);
+        File *reader;
+
+        CALICODB_TRY(env.new_file(filename, reader));
+        CALICODB_TRY(reader->read_exact(0, sizeof(buffer), buffer));
         delete reader;
 
-        if (s.is_io_error()) {
-            return s;
-        }
         header.read(buffer);
         if (header.magic_code != FileHeader::kMagicCode) {
             return Status::invalid_argument("file is not a CalicoDB database");
@@ -143,10 +141,8 @@ auto setup_db(const std::string &filename, Env &env, Options &options, FileHeade
         if (!check_header_crc(header)) {
             return Status::corruption("database is corrupted");
         }
-    } else if (s.is_not_found()) {
-        header.page_size = encode_page_size(options.page_size);
     } else {
-        return s;
+        header.page_size = encode_page_size(options.page_size);
     }
     if (options.cache_size < kMinFrameCount * decode_page_size(header.page_size)) {
         options.cache_size = kMinFrameCount * decode_page_size(header.page_size);
@@ -156,7 +152,7 @@ auto setup_db(const std::string &filename, Env &env, Options &options, FileHeade
 
 auto DBImpl::open(Options sanitized) -> Status
 {
-    const auto db_exists = m_env->file_exists(m_filename);
+    const auto db_exists = m_env->file_exists(m_db_filename);
     if (db_exists) {
         if (sanitized.error_if_exists) {
             return Status::invalid_argument("database already exists");
@@ -165,28 +161,28 @@ auto DBImpl::open(Options sanitized) -> Status
         return Status::invalid_argument("database does not exist");
     }
     FileHeader state;
-    CALICODB_TRY(setup_db(m_filename, *m_env, sanitized, state));
+    CALICODB_TRY(setup_db(m_db_filename, *m_env, sanitized, state));
     const auto page_size = decode_page_size(state.page_size);
 
-    m_state.commit_lsn = state.commit_lsn;
+    m_state.ckpt_number = state.ckpt_number;
     m_state.record_count = state.record_count;
     m_state.freelist_head = state.freelist_head;
     m_state.max_page_id.value = state.page_count;
 
-    CALICODB_TRY(WriteAheadLog::open(
+    CALICODB_TRY(Wal::open(
         {
-            m_wal_prefix,
-            m_env,
+            m_wal_filename,
             page_size,
+            m_env,
         },
-        &m_wal));
+        m_wal));
 
     CALICODB_TRY(Pager::open(
         {
-            m_filename,
+            m_db_filename,
             m_env,
             m_wal,
-            m_info_log,
+            m_log,
             &m_state,
             sanitized.cache_size / page_size,
             page_size,
@@ -195,8 +191,8 @@ auto DBImpl::open(Options sanitized) -> Status
     m_pager->load_state(state);
 
     if (!db_exists) {
-        m_info_log->logv("setting up a new database");
-        CALICODB_TRY(m_env->sync_directory(split_path(m_filename).first));
+        m_log->logv("setting up a new database");
+        CALICODB_TRY(m_env->sync_directory(split_path(m_db_filename).first));
 
         // Create the root tree.
         Id root_id;
@@ -221,7 +217,7 @@ auto DBImpl::open(Options sanitized) -> Status
     delete cursor;
 
     if (db_exists) {
-        m_info_log->logv("ensuring consistency of an existing database");
+        m_log->logv("ensuring consistency of an existing database");
         // This should be a no-op if the database closed normally last time.
         CALICODB_TRY(ensure_consistency());
         CALICODB_TRY(load_file_header());
@@ -232,50 +228,41 @@ auto DBImpl::open(Options sanitized) -> Status
         m_pager->upgrade(db_root);
         state.page_count = static_cast<std::uint32_t>(m_pager->page_count());
         state.header_crc = crc32c::Mask(state.compute_crc());
-        state.write(db_root.mutate(0, FileHeader::kSize));
+        state.write(db_root.data());
         m_pager->release(std::move(db_root));
         CALICODB_TRY(m_pager->flush());
-        CALICODB_TRY(m_pager->checkpoint());
     }
-    CALICODB_TRY(m_wal->start_writing());
-
-    m_info_log->logv("pager recovery lsn is %llu", m_pager->recovery_lsn().value);
-    m_info_log->logv("wal flushed lsn is %llu", m_wal->flushed_lsn().value);
-
     CALICODB_TRY(m_state.status);
-    m_state.is_running = true;
+    m_state.use_wal = true;
     return Status::ok();
 }
 
 DBImpl::DBImpl(const Options &options, const Options &sanitized, std::string filename)
     : m_env(sanitized.env),
-      m_info_log(sanitized.info_log),
-      m_filename(std::move(filename)),
-      m_wal_prefix(sanitized.wal_prefix),
+      m_log(sanitized.info_log),
+      m_db_filename(std::move(filename)),
+      m_wal_filename(sanitized.wal_filename),
+      m_log_filename(sanitized.info_log == nullptr
+                         ? m_db_filename + kDefaultLogSuffix
+                         : ""),
       m_owns_env(options.env == nullptr),
-      m_owns_info_log(options.info_log == nullptr)
+      m_owns_log(options.info_log == nullptr)
 {
 }
 
 DBImpl::~DBImpl()
 {
-    if (m_state.is_running && m_state.status.is_ok()) {
-        if (const auto s = m_wal->synchronize(true); !s.is_ok()) {
-            m_info_log->logv("failed to flush wal: %s", s.to_string().c_str());
-        }
-        if (const auto s = m_pager->flush(m_state.commit_lsn); !s.is_ok()) {
-            m_info_log->logv("failed to flush pager: %s", s.to_string().c_str());
-        }
-        if (const auto s = m_wal->close(); !s.is_ok()) {
-            m_info_log->logv("failed to close wal: %s", s.to_string().c_str());
+    if (m_state.use_wal && m_state.status.is_ok()) {
+        if (const auto s = m_pager->checkpoint(); !s.is_ok()) {
+            m_log->logv("failed to reset wal: %s", s.to_string().c_str());
         }
         if (const auto s = ensure_consistency(); !s.is_ok()) {
-            m_info_log->logv("failed to ensure consistency: %s", s.to_string().c_str());
+            m_log->logv("failed to ensure consistency: %s", s.to_string().c_str());
         }
     }
 
-    if (m_owns_info_log) {
-        delete m_info_log;
+    if (m_owns_log) {
+        delete m_log;
     }
     if (m_owns_env) {
         delete m_env;
@@ -299,66 +286,38 @@ auto DBImpl::repair(const Options &options, const std::string &filename) -> Stat
 
 auto DBImpl::destroy(const Options &options, const std::string &filename) -> Status
 {
+    auto copy = options;
+    copy.error_if_exists = false;
+    copy.create_if_missing = false;
+
+    DB *db;
+    auto s = DB::open(copy, filename, db);
+    if (!s.is_ok()) {
+        return Status::invalid_argument(filename + " is not a CalicoDB database");
+    }
+
+    const auto *impl = reinterpret_cast<const DBImpl *>(db);
+    const auto db_name = impl->m_db_filename;
+    const auto log_name = impl->m_log_filename;
+    const auto wal_name = impl->m_wal_filename;
+    delete db;
+
     auto *env = options.env;
     if (env == nullptr) {
-        env = new EnvPosix;
+        env = Env::default_env();
     }
 
-    const auto [dir, base] = split_path(filename);
-    const auto path = join_paths(dir, base);
-    auto wal_prefix = options.wal_prefix;
-    if (wal_prefix.empty()) {
-        wal_prefix = path + kDefaultWalSuffix;
+    if (!log_name.empty()) {
+        (void)env->remove_file(log_name);
     }
-    if (options.info_log == nullptr) {
-        (void)env->remove_file(path + kDefaultLogSuffix);
-    }
-    Reader *reader = nullptr;
-    auto s = env->new_reader(path, reader);
+    (void)env->remove_file(db_name);
+    (void)env->remove_file(wal_name);
 
-    if (s.is_ok()) {
-        Slice slice;
-        char buffer[FileHeader::kSize];
-        s = reader->read(0, FileHeader::kSize, buffer, &slice);
-        if (s.is_ok() && slice.size() != sizeof(buffer)) {
-            s = Status::invalid_argument(path + " is too small to be a calicodb database");
-        }
-        if (s.is_ok()) {
-            FileHeader header;
-            header.read(buffer);
-            if (header.magic_code != FileHeader::kMagicCode) {
-                s = Status::invalid_argument(path + " is not a calicodb database");
-            }
-        }
-    }
-
-    if (s.is_ok()) {
-        s = env->remove_file(path);
-
-        std::vector<std::string> children;
-        auto t = env->get_children(dir, children);
-        if (t.is_ok()) {
-            for (const auto &name : children) {
-                const auto sibling_filename = join_paths(dir, name);
-                const auto possible_id = decode_segment_name(wal_prefix, sibling_filename);
-                if (!possible_id.is_null()) {
-                    auto u = env->remove_file(sibling_filename);
-                    if (t.is_ok()) {
-                        t = u;
-                    }
-                }
-            }
-        }
-        if (s.is_ok()) {
-            s = t;
-        }
-    }
-
-    delete reader;
-    if (options.env == nullptr) {
+    if (env != options.env) {
         delete env;
     }
-    return s;
+
+    return Status::ok();
 }
 
 auto DBImpl::status() const -> Status
@@ -378,14 +337,14 @@ auto DBImpl::get_property(const Slice &name, std::string *out) const -> bool
                     buffer,
                     "Name          Value\n"
                     "-------------------\n"
-                    "DB read(MB)   %8.4f\n"
-                    "DB write(MB)  %8.4f\n"
-                    "WAL write(MB) %8.4f\n"
+                    "Pager I/O(MB) %8.4f/%8.4f\n"
+                    "WAL I/O(MB)   %8.4f/%8.4f\n"
                     "Cache hits    %ld\n"
                     "Cache misses  %ld\n",
                     static_cast<double>(m_pager->bytes_read()) / 1048576.0,
                     static_cast<double>(m_pager->bytes_written()) / 1048576.0,
-                    static_cast<double>(m_wal->bytes_written()) / 1048576.0,
+                    static_cast<double>(m_wal->statistics().bytes_read) / 1048576.0,
+                    static_cast<double>(m_wal->statistics().bytes_written) / 1048576.0,
                     m_pager->hits(),
                     m_pager->misses());
                 out->append(buffer);
@@ -504,7 +463,7 @@ auto DBImpl::do_vacuum() -> Status
     std::vector<LogicalPageId> table_roots;
     CALICODB_TRY(get_table_info(table_names, &table_roots));
 
-    Id target {m_pager->page_count()};
+    Id target(m_pager->page_count());
     auto *state = m_tables.get(Id::root());
     auto *tree = state->tree;
 
@@ -533,24 +492,24 @@ auto DBImpl::do_vacuum() -> Status
     // be able to reapply the whole vacuum operation if the truncation fails.
     // The recovery routine should truncate the file to match the header page
     // count if necessary.
-    CALICODB_TRY(m_wal->synchronize(true));
+    //    CALICODB_TRY(m_wal->synchronize(true));
     CALICODB_TRY(m_pager->truncate(target.value));
 
-    m_info_log->logv("vacuumed %llu pages", original.value - target.value);
+    m_log->logv("vacuumed %llu pages", original.value - target.value);
     return m_pager->flush();
 }
 
 auto DBImpl::ensure_consistency() -> Status
 {
     CALICODB_TRY(m_state.status);
-    m_state.is_running = false;
+    m_state.use_wal = false;
     CALICODB_TRY(recovery_phase_1());
     CALICODB_TRY(recovery_phase_2());
-    m_state.is_running = true;
+    m_state.use_wal = true;
     return Status::ok();
 }
 
-auto DBImpl::TEST_wal() const -> const WriteAheadLog &
+auto DBImpl::TEST_wal() const -> const Wal &
 {
     return *m_wal;
 }
@@ -579,14 +538,14 @@ auto DBImpl::TEST_validate() const -> void
     }
 }
 
-auto DBImpl::checkpoint() -> Status
+auto DBImpl::commit() -> Status
 {
     CALICODB_TRY(m_state.status);
 
     if (m_state.batch_size > 0) {
         m_state.batch_size = 0;
         m_state.max_page_id = Id(m_pager->page_count());
-        if (auto s = do_checkpoint(); !s.is_ok()) {
+        if (auto s = do_commit(); !s.is_ok()) {
             SET_STATUS(s);
             return s;
         }
@@ -594,7 +553,7 @@ auto DBImpl::checkpoint() -> Status
     return Status::ok();
 }
 
-auto DBImpl::do_checkpoint() -> Status
+auto DBImpl::do_commit() -> Status
 {
     Page db_root;
     CALICODB_TRY(m_pager->acquire(Id::root(), db_root));
@@ -605,19 +564,17 @@ auto DBImpl::do_checkpoint() -> Status
     header.page_count = static_cast<std::uint32_t>(m_pager->page_count());
     header.freelist_head = m_state.freelist_head;
     header.magic_code = FileHeader::kMagicCode;
-    header.commit_lsn = m_wal->current_lsn();
-    m_state.commit_lsn = m_wal->current_lsn();
+    //    header.commit_lsn = m_wal->current_lsn();
+    //    m_state.commit_lsn = m_wal->current_lsn();
     header.record_count = m_state.record_count;
     header.header_crc = crc32c::Mask(header.compute_crc());
-    header.write(db_root.mutate(0, FileHeader::kSize));
+    header.write(db_root.data());
     m_pager->release(std::move(db_root));
 
-    // If this call succeeds, the checkpoint should persist. This method should not
-    // return a non-OK status past this point.
-    CALICODB_TRY(m_wal->synchronize(true));
+    CALICODB_TRY(m_wal->commit());
 
     // This call just performs some cleanup.
-    auto s = m_pager->checkpoint();
+    auto s = m_pager->commit();
     if (!s.is_ok()) {
         SET_STATUS(s);
     }
@@ -632,12 +589,12 @@ auto DBImpl::load_file_header() -> Status
     FileHeader header;
     header.read(root.data());
     if (!check_header_crc(header)) {
-        m_info_log->logv("file header crc mismatch (expected %u but computed %u)",
-                         crc32c::Unmask(header.header_crc), header.compute_crc());
+        m_log->logv("file header crc mismatch (expected %u but computed %u)",
+                    crc32c::Unmask(header.header_crc), header.compute_crc());
         return Status::corruption("crc mismatch");
     }
     // These values should be the same, provided that the WAL contents were correct.
-    CALICODB_EXPECT_EQ(m_state.commit_lsn, header.commit_lsn);
+    CALICODB_EXPECT_EQ(m_state.ckpt_number, header.ckpt_number);
     m_state.max_page_id.value = header.page_count;
     m_state.record_count = header.record_count;
     m_state.freelist_head = header.freelist_head;
@@ -819,211 +776,212 @@ auto DBImpl::remove_empty_table(const std::string &name, TableState &state) -> S
     return Status::ok();
 }
 
-static auto apply_undo(Page &page, const ImageDescriptor &image)
-{
-    const auto data = image.image;
-    std::memcpy(page.data(), data.data(), data.size());
-    if (page.size() > data.size()) {
-        std::memset(page.data() + data.size(), 0, page.size() - data.size());
-    }
-}
-
-static auto apply_redo(Page &page, const DeltaDescriptor &delta)
-{
-    for (auto [offset, data] : delta.deltas) {
-        std::memcpy(page.data() + offset, data.data(), data.size());
-    }
-}
-
-template <class Descriptor, class Callback>
-static auto with_page(Pager &pager, const Descriptor &descriptor, const Callback &callback)
-{
-    Page page;
-    CALICODB_TRY(pager.acquire(descriptor.page_id, page));
-
-    callback(page);
-    pager.release(std::move(page));
-    return Status::ok();
-}
-
-static auto is_commit(const DeltaDescriptor &deltas)
-{
-    return deltas.page_id.is_root() && deltas.deltas.size() == 1 && deltas.deltas.front().offset == 0 &&
-           deltas.deltas.front().data.size() == FileHeader::kSize + Lsn::kSize;
-}
+// static auto apply_undo(Page &page, const ImageDescriptor &image)
+//{
+//     const auto data = image.image;
+//     std::memcpy(page.data(), data.data(), data.size());
+//     if (page.size() > data.size()) {
+//         std::memset(page.data() + data.size(), 0, page.size() - data.size());
+//     }
+// }
+//
+// static auto apply_redo(Page &page, const DeltaDescriptor &delta)
+//{
+//     for (auto [offset, data] : delta.deltas) {
+//         std::memcpy(page.data() + offset, data.data(), data.size());
+//     }
+// }
+//
+// template <class Descriptor, class Callback>
+// static auto with_page(Pager &pager, const Descriptor &descriptor, const Callback &callback)
+//{
+//     Page page;
+//     CALICODB_TRY(pager.acquire(descriptor.page_id, page));
+//
+//     callback(page);
+//     pager.release(std::move(page));
+//     return Status::ok();
+// }
+//
+// static auto is_commit(const DeltaDescriptor &deltas)
+//{
+//     return deltas.page_id.is_root() && deltas.deltas.size() == 1 && deltas.deltas.front().offset == 0 &&
+//            deltas.deltas.front().data.size() == FileHeader::kSize + Lsn::kSize;
+// }
 
 auto DBImpl::recovery_phase_1() -> Status
 {
-    const auto &set = m_wal->m_segments;
-
-    if (set.empty()) {
-        return Status::ok();
-    }
-
-    // It can be difficult to determine if there is already an image record for a given page
-    // in the WAL, due to the way the vacuum operation works. This set is used to ignore
-    // duplicate image records within each transaction.
-    std::unordered_set<Id, Id::Hash> duplicates;
-    std::string tail(wal_block_size(m_pager->page_size()), '\0');
-    std::unique_ptr<Reader> file;
-    auto itr = begin(set);
-    auto commit_lsn = m_state.commit_lsn;
-    auto commit_itr = itr;
-    Lsn last_lsn;
-
-    const auto translate_status = [&itr, &set, this](auto s, Lsn lsn) {
-        CALICODB_EXPECT_FALSE(s.is_ok());
-        if (s.is_corruption()) {
-            // Allow corruption/incomplete records on the last segment, past the
-            // most-recent successful commit.
-            if (itr == prev(end(set)) && m_state.commit_lsn <= lsn) {
-                return Status::ok();
-            }
-        }
-        return s;
-    };
-
-    const auto redo = [&](const auto &payload) {
-        const auto decoded = decode_payload(payload);
-        if (std::holds_alternative<DeltaDescriptor>(decoded)) {
-            const auto deltas = std::get<DeltaDescriptor>(decoded);
-            if (is_commit(deltas)) {
-                commit_lsn = deltas.lsn;
-                commit_itr = itr;
-            }
-            // WARNING: Applying these updates can cause the in-memory file header variables to be incorrect. This
-            // must be fixed by the caller after this method returns.
-            return with_page(*m_pager, deltas, [this, &deltas](auto &page) {
-                if (read_page_lsn(page) < deltas.lsn) {
-                    m_pager->upgrade(page);
-                    apply_redo(page, deltas);
-                }
-            });
-        } else if (std::holds_alternative<std::monostate>(decoded)) {
-            CALICODB_TRY(translate_status(Status::corruption("wal is corrupted"), last_lsn));
-            return Status::not_found("finished");
-        }
-        return Status::ok();
-    };
-
-    const auto undo = [&](const auto &payload) {
-        if (last_lsn <= m_state.commit_lsn) {
-            return Status::ok();
-        }
-        const auto decoded = decode_payload(payload);
-        if (std::holds_alternative<DeltaDescriptor>(decoded)) {
-            if (is_commit(std::get<DeltaDescriptor>(decoded))) {
-                duplicates.clear();
-            }
-        } else if (std::holds_alternative<ImageDescriptor>(decoded)) {
-            const auto image = std::get<ImageDescriptor>(decoded);
-            return with_page(*m_pager, image, [&](auto &page) {
-                if (!duplicates.insert(image.page_id).second) {
-                    return;
-                }
-                const auto page_lsn = read_page_lsn(page);
-                if (page_lsn.is_null() || image.lsn < page_lsn) {
-                    m_pager->upgrade(page);
-                    apply_undo(page, image);
-                }
-            });
-        } else if (std::holds_alternative<std::monostate>(decoded)) {
-            CALICODB_TRY(translate_status(Status::corruption("wal is corrupted"), last_lsn));
-            return Status::not_found("finished");
-        }
-        return Status::ok();
-    };
-
-    const auto roll = [&](const auto &action) {
-        CALICODB_TRY(open_wal_reader(itr->first, file));
-        WalReader reader {*file, tail};
-
-        for (;;) {
-            std::string reader_data;
-            auto s = reader.read(reader_data);
-            Slice payload(reader_data);
-
-            if (s.is_not_found()) {
-                break;
-            } else if (!s.is_ok()) {
-                CALICODB_TRY(translate_status(s, last_lsn));
-                return Status::ok();
-            }
-
-            last_lsn = extract_payload_lsn(payload);
-            s = action(payload);
-
-            if (s.is_not_found()) {
-                break;
-            } else if (!s.is_ok()) {
-                return s;
-            }
-        }
-        return Status::ok();
-    };
-
-    // Roll forward, applying missing updates until we reach the end. The final
-    // segment may contain a partial/corrupted record.
-    for (; itr != end(set); ++itr) {
-        CALICODB_TRY(roll(redo));
-    }
-
-    // Didn't make it to the end of the WAL.
-    if (itr != end(set)) {
-        return Status::corruption("wal could not be read to the end");
-    }
-
-    if (last_lsn == commit_lsn) {
-        if (m_state.commit_lsn <= commit_lsn) {
-            m_state.commit_lsn = commit_lsn;
-            return Status::ok();
-        } else {
-            return Status::corruption("missing commit record");
-        }
-    }
-    m_state.commit_lsn = commit_lsn;
-
-    // Roll backward, reverting updates until we reach the most-recent commit. We
-    // are able to read the log forward, since the full images are disjoint.
-    // Again, the last segment we read may contain a partial/corrupted record.
-    itr = commit_itr;
-    for (; itr != end(set); ++itr) {
-        CALICODB_TRY(roll(undo));
-    }
+    //    const auto &set = m_wal->m_segments;
+    //
+    //    if (set.empty()) {
+    //        return Status::ok();
+    //    }
+    //
+    //    // It can be difficult to determine if there is already an image record for a given page
+    //    // in the WAL, due to the way the vacuum operation works. This set is used to ignore
+    //    // duplicate image records within each transaction.
+    //    std::unordered_set<Id, Id::Hash> duplicates;
+    //    std::string tail(wal_block_size(m_pager->page_size()), '\0');
+    //    std::unique_ptr<File> file;
+    //    auto itr = begin(set);
+    //    auto commit_lsn = m_state.commit_lsn;
+    //    auto commit_itr = itr;
+    //    Lsn last_lsn;
+    //
+    //    const auto translate_status = [&itr, &set, this](auto s, Lsn lsn) {
+    //        CALICODB_EXPECT_FALSE(s.is_ok());
+    //        if (s.is_corruption()) {
+    //            // Allow corruption/incomplete records on the last segment, past the
+    //            // most-recent successful commit.
+    //            if (itr == prev(end(set)) && m_state.commit_lsn <= lsn) {
+    //                return Status::ok();
+    //            }
+    //        }
+    //        return s;
+    //    };
+    //
+    //    const auto redo = [&](const auto &payload) {
+    //        const auto decoded = decode_payload(payload);
+    //        if (std::holds_alternative<DeltaDescriptor>(decoded)) {
+    //            const auto deltas = std::get<DeltaDescriptor>(decoded);
+    //            if (is_commit(deltas)) {
+    //                commit_lsn = deltas.lsn;
+    //                commit_itr = itr;
+    //            }
+    //            // WARNING: Applying these updates can cause the in-memory file header variables to be incorrect. This
+    //            // must be fixed by the caller after this method returns.
+    //            return with_page(*m_pager, deltas, [this, &deltas](auto &page) {
+    //                if (read_page_lsn(page) < deltas.lsn) {
+    //                    m_pager->upgrade(page);
+    //                    apply_redo(page, deltas);
+    //                }
+    //            });
+    //        } else if (std::holds_alternative<std::monostate>(decoded)) {
+    //            CALICODB_TRY(translate_status(Status::corruption("wal is corrupted"), last_lsn));
+    //            return Status::not_found("finished");
+    //        }
+    //        return Status::ok();
+    //    };
+    //
+    //    const auto undo = [&](const auto &payload) {
+    //        if (last_lsn <= m_state.commit_lsn) {
+    //            return Status::ok();
+    //        }
+    //        const auto decoded = decode_payload(payload);
+    //        if (std::holds_alternative<DeltaDescriptor>(decoded)) {
+    //            if (is_commit(std::get<DeltaDescriptor>(decoded))) {
+    //                duplicates.clear();
+    //            }
+    //        } else if (std::holds_alternative<ImageDescriptor>(decoded)) {
+    //            const auto image = std::get<ImageDescriptor>(decoded);
+    //            return with_page(*m_pager, image, [&](auto &page) {
+    //                if (!duplicates.insert(image.page_id).second) {
+    //                    return;
+    //                }
+    //                const auto page_lsn = read_page_lsn(page);
+    //                if (page_lsn.is_null() || image.lsn < page_lsn) {
+    //                    m_pager->upgrade(page);
+    //                    apply_undo(page, image);
+    //                }
+    //            });
+    //        } else if (std::holds_alternative<std::monostate>(decoded)) {
+    //            CALICODB_TRY(translate_status(Status::corruption("wal is corrupted"), last_lsn));
+    //            return Status::not_found("finished");
+    //        }
+    //        return Status::ok();
+    //    };
+    //
+    //    const auto roll = [&](const auto &action) {
+    //        CALICODB_TRY(open_wal_reader(itr->first, file));
+    //        WalReader reader {*file, tail};
+    //
+    //        for (;;) {
+    //            std::string reader_data;
+    //            auto s = reader.read(reader_data);
+    //            Slice payload(reader_data);
+    //
+    //            if (s.is_not_found()) {
+    //                break;
+    //            } else if (!s.is_ok()) {
+    //                CALICODB_TRY(translate_status(s, last_lsn));
+    //                return Status::ok();
+    //            }
+    //
+    //            last_lsn = extract_payload_lsn(payload);
+    //            s = action(payload);
+    //
+    //            if (s.is_not_found()) {
+    //                break;
+    //            } else if (!s.is_ok()) {
+    //                return s;
+    //            }
+    //        }
+    //        return Status::ok();
+    //    };
+    //
+    //    // Roll forward, applying missing updates until we reach the end. The final
+    //    // segment may contain a partial/corrupted record.
+    //    for (; itr != end(set); ++itr) {
+    //        CALICODB_TRY(roll(redo));
+    //    }
+    //
+    //    // Didn't make it to the end of the WAL.
+    //    if (itr != end(set)) {
+    //        return Status::corruption("wal could not be read to the end");
+    //    }
+    //
+    //    if (last_lsn == commit_lsn) {
+    //        if (m_state.commit_lsn <= commit_lsn) {
+    //            m_state.commit_lsn = commit_lsn;
+    //            return Status::ok();
+    //        } else {
+    //            return Status::corruption("missing commit record");
+    //        }
+    //    }
+    //    m_state.commit_lsn = commit_lsn;
+    //
+    //    // Roll backward, reverting updates until we reach the most-recent commit. We
+    //    // are able to read the log forward, since the full images are disjoint.
+    //    // Again, the last segment we read may contain a partial/corrupted record.
+    //    itr = commit_itr;
+    //    for (; itr != end(set); ++itr) {
+    //        CALICODB_TRY(roll(undo));
+    //    }
     return Status::ok();
 }
 
 auto DBImpl::recovery_phase_2() -> Status
 {
-    auto &set = m_wal->m_segments;
-    // Pager needs the updated state to determine the page count.
-    CALICODB_TRY(load_file_header());
-
-    m_wal->m_last_lsn = m_state.commit_lsn;
-    m_wal->m_flushed_lsn = m_state.commit_lsn;
-
-    // Make sure all changes have made it to disk, then remove WAL segments from
-    // the right.
-    CALICODB_TRY(m_pager->flush());
-    for (auto itr = rbegin(set); itr != rend(set); ++itr) {
-        CALICODB_TRY(m_env->remove_file(encode_segment_name(m_wal->m_prefix, itr->first)));
-    }
-    set.clear();
-
-    // Make sure the file size matches the header page count, which should be
-    // correct if we made it this far.
-    CALICODB_TRY(m_pager->truncate(m_pager->page_count()));
-    return m_pager->checkpoint();
-}
-
-auto DBImpl::open_wal_reader(Id segment, std::unique_ptr<Reader> &out) -> Status
-{
-    Reader *file;
-    const auto name = encode_segment_name(m_wal_prefix, segment);
-    CALICODB_TRY(m_env->new_reader(name, file));
-    out.reset(file);
+    //    auto &set = m_wal->m_segments;
+    //    // Pager needs the updated state to determine the page count.
+    //    CALICODB_TRY(load_file_header());
+    //
+    //    m_wal->m_last_lsn = m_state.commit_lsn;
+    //    m_wal->m_flushed_lsn = m_state.commit_lsn;
+    //
+    //    // Make sure all changes have made it to disk, then remove WAL segments from
+    //    // the right.
+    //    CALICODB_TRY(m_pager->flush());
+    //    for (auto itr = rbegin(set); itr != rend(set); ++itr) {
+    //        CALICODB_TRY(m_env->remove_file(encode_segment_name(m_wal->m_prefix, itr->first)));
+    //    }
+    //    set.clear();
+    //
+    //    // Make sure the file size matches the header page count, which should be
+    //    // correct if we made it this far.
+    //    CALICODB_TRY(m_pager->truncate(m_pager->page_count()));
+    //    return m_pager->commit();
     return Status::ok();
 }
+
+// auto DBImpl::open_wal_reader(Id segment, std::unique_ptr<File> &out) -> Status
+//{
+//     File *file;
+//     const auto name = encode_segment_name(m_wal_prefix, segment);
+//     CALICODB_TRY(m_env->new_file(name, file));
+//     out.reset(file);
+//     return Status::ok();
+// }
 
 #undef SET_STATUS
 

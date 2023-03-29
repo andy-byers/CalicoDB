@@ -15,23 +15,11 @@ namespace calicodb
 [[nodiscard]] auto split_path(const std::string &filename) -> std::pair<std::string, std::string>;
 [[nodiscard]] auto join_paths(const std::string &lhs, const std::string &rhs) -> std::string;
 
-class PosixReader : public Reader
+class PosixFile : public File
 {
 public:
-    explicit PosixReader(std::string filename, int file);
-    ~PosixReader() override;
-    [[nodiscard]] auto read(std::size_t offset, std::size_t size, char *scratch, Slice *out) -> Status override;
-
-private:
-    std::string m_filename;
-    int m_file = -1;
-};
-
-class PosixEditor : public Editor
-{
-public:
-    explicit PosixEditor(std::string filename, int file);
-    ~PosixEditor() override;
+    explicit PosixFile(std::string filename, int file);
+    ~PosixFile() override;
     [[nodiscard]] auto read(std::size_t offset, std::size_t size, char *scratch, Slice *out) -> Status override;
     [[nodiscard]] auto write(std::size_t offset, const Slice &in) -> Status override;
     [[nodiscard]] auto sync() -> Status override;
@@ -41,24 +29,11 @@ private:
     int m_file = -1;
 };
 
-class PosixLogger : public Logger
+class PosixLogFile : public LogFile
 {
 public:
-    explicit PosixLogger(std::string filename, int file);
-    ~PosixLogger() override;
-    [[nodiscard]] auto write(const Slice &in) -> Status override;
-    [[nodiscard]] auto sync() -> Status override;
-
-private:
-    std::string m_filename;
-    int m_file = -1;
-};
-
-class PosixInfoLogger : public InfoLogger
-{
-public:
-    explicit PosixInfoLogger(std::string filename, int file);
-    ~PosixInfoLogger() override;
+    explicit PosixLogFile(std::string filename, int file);
+    ~PosixLogFile() override;
     auto logv(const char *fmt, ...) -> void override;
 
 private:
@@ -74,10 +49,8 @@ public:
     EnvPosix() = default;
     ~EnvPosix() override = default;
     [[nodiscard]] auto get_children(const std::string &dirname, std::vector<std::string> &out) const -> Status override;
-    [[nodiscard]] auto new_reader(const std::string &filename, Reader *&out) -> Status override;
-    [[nodiscard]] auto new_editor(const std::string &filename, Editor *&out) -> Status override;
-    [[nodiscard]] auto new_logger(const std::string &filename, Logger *&out) -> Status override;
-    [[nodiscard]] auto new_info_logger(const std::string &filename, InfoLogger *&out) -> Status override;
+    [[nodiscard]] auto new_file(const std::string &filename, File *&out) -> Status override;
+    [[nodiscard]] auto new_log_file(const std::string &filename, LogFile *&out) -> Status override;
     [[nodiscard]] auto rename_file(const std::string &old_filename, const std::string &new_filename) -> Status override;
     [[nodiscard]] auto remove_file(const std::string &filename) -> Status override;
     [[nodiscard]] auto resize_file(const std::string &filename, std::size_t size) -> Status override;

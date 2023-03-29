@@ -32,15 +32,15 @@ auto DB::open(const Options &options, const std::string &filename, DB *&db) -> S
     if (!is_power_of_two(sanitized.page_size)) {
         sanitized.page_size = Options {}.page_size;
     }
-    if (sanitized.wal_prefix.empty()) {
-        sanitized.wal_prefix = clean_filename + kDefaultWalSuffix;
+    if (sanitized.wal_filename.empty()) {
+        sanitized.wal_filename = clean_filename + kDefaultWalSuffix;
     }
     if (sanitized.env == nullptr) {
         sanitized.env = Env::default_env();
     }
     if (sanitized.info_log == nullptr) {
         const auto log_filename = clean_filename + kDefaultLogSuffix;
-        CALICODB_TRY(sanitized.env->new_info_logger(log_filename, sanitized.info_log));
+        CALICODB_TRY(sanitized.env->new_log_file(log_filename, sanitized.info_log));
     }
 
     auto *impl = new DBImpl(options, sanitized, clean_filename);

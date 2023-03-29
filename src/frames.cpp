@@ -18,47 +18,8 @@ AlignedBuffer::AlignedBuffer(std::size_t size, std::size_t alignment)
 {
     CALICODB_EXPECT_TRUE(is_power_of_two(alignment));
     CALICODB_EXPECT_EQ(size % alignment, 0);
-}
 
-auto DirtyTable::size() const -> std::size_t
-{
-    return m_dirty.size();
-}
-
-auto DirtyTable::begin() -> Iterator
-{
-    using std::begin;
-    return begin(m_dirty);
-}
-
-auto DirtyTable::end() -> Iterator
-{
-    using std::end;
-    return end(m_dirty);
-}
-
-auto DirtyTable::insert(Id page_id, Lsn record_lsn) -> Iterator
-{
-    // Use find() to get the insert() overload that returns an iterator, and to
-    // assert that non-NULL LSNs are unique. The "record_lsn" is NULL when the
-    // page has never been written to.
-    auto itr = m_dirty.find(record_lsn);
-    CALICODB_EXPECT_TRUE(record_lsn.is_null() || itr == end());
-    return m_dirty.insert(itr, {record_lsn, page_id});
-}
-
-auto DirtyTable::remove(Iterator itr) -> Iterator
-{
-    return m_dirty.erase(itr);
-}
-
-auto DirtyTable::recovery_lsn() const -> Lsn
-{
-    auto itr = m_dirty.lower_bound(Lsn::base());
-    if (itr == m_dirty.end()) {
-        return Lsn::null();
-    }
-    return itr->first;
+    data = m_data.get();
 }
 
 auto PageCache::size() const -> std::size_t
@@ -132,26 +93,29 @@ auto PageCache::misses() const -> std::uint64_t
     return m_misses;
 }
 
-Frame::Frame(char *ptr)
-    : data {ptr}
-{
-}
-
-FrameManager::FrameManager(Editor &file, AlignedBuffer buffer, std::size_t page_size, std::size_t frame_count)
+FrameManager::FrameManager(AlignedBuffer buffer, std::size_t page_size, std::size_t frame_count)
     : m_buffer(std::move(buffer)),
-      m_file(&file),
+      m_frame_count(frame_count),
       m_page_size(page_size)
 {
     // The buffer should be aligned to the page size.
-    CALICODB_EXPECT_EQ(reinterpret_cast<std::uintptr_t>(m_buffer.get()) % page_size, 0);
+    CALICODB_EXPECT_EQ(reinterpret_cast<std::uintptr_t>(m_buffer.data) % page_size, 0);
 
-    while (m_frames.size() < frame_count) {
-        m_frames.emplace_back(m_buffer.get() + m_frames.size() * page_size);
-    }
-
-    while (m_unpinned.size() < m_frames.size()) {
+    while (m_unpinned.size() < frame_count) {
         m_unpinned.emplace_back(m_unpinned.size());
     }
+}
+
+auto FrameManager::get_frame(std::size_t index) const -> Slice
+{
+    CALICODB_EXPECT_LT(index, m_frame_count);
+    return {m_buffer.data + index * m_page_size, m_page_size};
+}
+
+auto FrameManager::get_frame_pointer(std::size_t index) -> char *
+{
+    CALICODB_EXPECT_LT(index, m_frame_count);
+    return m_buffer.data + index * m_page_size;
 }
 
 auto FrameManager::upgrade(Page &page) -> void
@@ -160,29 +124,26 @@ auto FrameManager::upgrade(Page &page) -> void
     page.m_write = true;
 }
 
-auto FrameManager::pin(Id page_id, CacheEntry &entry) -> Status
+auto FrameManager::pin(Id page_id, CacheEntry &entry) -> char *
 {
     CALICODB_EXPECT_FALSE(page_id.is_null());
     CALICODB_EXPECT_FALSE(m_unpinned.empty());
     CALICODB_EXPECT_EQ(entry.refcount, 0);
 
-    auto &frame = m_frames[m_unpinned.back()];
-    CALICODB_TRY(read_page_from_file(page_id, frame.data));
-
     // Associate the page ID with the frame index.
     entry.page_id = page_id;
-    frame.page_id = page_id;
     entry.index = m_unpinned.back();
+
+    auto *frame = get_frame_pointer(m_unpinned.back());
     m_unpinned.pop_back();
-    return Status::ok();
+    return frame;
 }
 
 auto FrameManager::unpin(CacheEntry &entry) -> void
 {
-    CALICODB_EXPECT_LT(entry.index, m_frames.size());
+    CALICODB_EXPECT_LT(entry.index, m_frame_count);
     CALICODB_EXPECT_FALSE(entry.page_id.is_null());
     CALICODB_EXPECT_EQ(entry.refcount, 0);
-    m_frames[entry.index].page_id = Id::null();
     m_unpinned.emplace_back(entry.index);
 }
 
@@ -194,7 +155,7 @@ auto FrameManager::ref(CacheEntry &entry, Page &page) -> Status
     ++entry.refcount;
     page.m_id = entry.page_id;
     page.m_entry = &entry;
-    page.m_data = m_frames[entry.index].data;
+    page.m_data = get_frame_pointer(entry.index);
     page.m_size = m_page_size;
     page.m_write = false;
     return Status::ok();
@@ -206,42 +167,8 @@ auto FrameManager::unref(CacheEntry &entry) -> void
     CALICODB_EXPECT_NE(entry.refcount, 0);
     CALICODB_EXPECT_NE(m_refsum, 0);
 
-    --m_refsum;
     --entry.refcount;
-}
-
-auto FrameManager::write_back(std::size_t index) -> Status
-{
-    auto &frame = get_frame(index);
-    m_bytes_written += m_page_size;
-    return write_page_to_file(frame.page_id, frame.data);
-}
-
-auto FrameManager::sync() -> Status
-{
-    return m_file->sync();
-}
-
-auto FrameManager::read_page_from_file(Id page_id, char *out) const -> Status
-{
-    const auto offset = page_id.as_index() * m_page_size;
-
-    Slice slice;
-    CALICODB_TRY(m_file->read(offset, m_page_size, out, &slice));
-    m_bytes_read += slice.size();
-
-    if (slice.is_empty()) {
-        std::memset(out, 0, m_page_size);
-    } else if (slice.size() != m_page_size) {
-        return Status::io_error("incomplete read");
-    }
-    return Status::ok();
-}
-
-auto FrameManager::write_page_to_file(Id pid, const char *in) const -> Status
-{
-    m_bytes_written += m_page_size;
-    return m_file->write(pid.as_index() * m_page_size, {in, m_page_size});
+    --m_refsum;
 }
 
 } // namespace calicodb

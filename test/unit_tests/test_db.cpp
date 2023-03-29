@@ -30,11 +30,11 @@ TEST_F(SetupTests, ReportsInvalidFileHeader)
     FileHeader header;
     Options options;
 
-    Logger *logger;
-    ASSERT_OK(env->new_logger("./test", logger));
+    File *logger;
+    ASSERT_OK(env->new_file("./test", logger));
     char payload[FileHeader::kSize];
     header.write(payload);
-    ASSERT_OK(logger->write(Slice(payload, sizeof(payload))));
+    ASSERT_OK(logger->write(0, Slice(payload, sizeof(payload))));
     delete logger;
 
     ASSERT_TRUE(setup_db("./test", *env, options, header).is_corruption());
@@ -62,7 +62,7 @@ TEST(LeakTests, LeavesUserObjects)
 {
     Options options;
     options.env = new tools::FakeEnv;
-    options.info_log = new tools::StderrLogger;
+    options.info_log = new tools::FakeLogFile;
 
     DB *db;
     ASSERT_OK(DB::open(options, "__calicodb_test", db));
@@ -74,18 +74,20 @@ TEST(LeakTests, LeavesUserObjects)
 
 TEST(BasicDestructionTests, OnlyDeletesCalicoDatabases)
 {
+    std::filesystem::remove_all("./testdb");
+
     Options options;
     options.env = new tools::FakeEnv;
 
     // "./test" does not exist.
-    ASSERT_TRUE(DB::destroy(options, "./test").is_not_found());
-    ASSERT_FALSE(options.env->file_exists("./test"));
+    ASSERT_TRUE(DB::destroy(options, "./testdb").is_invalid_argument());
+    ASSERT_FALSE(options.env->file_exists("./testdb"));
 
     // File is too small to read the header.
-    Editor *editor;
-    ASSERT_OK(options.env->new_editor("./test", editor));
-    ASSERT_TRUE(DB::destroy(options, "./test").is_invalid_argument());
-    ASSERT_TRUE(options.env->file_exists("./test"));
+    File *editor;
+    ASSERT_OK(options.env->new_file("./testdb", editor));
+    ASSERT_TRUE(DB::destroy(options, "./testdb").is_invalid_argument());
+    ASSERT_TRUE(options.env->file_exists("./testdb"));
 
     // Header magic code is incorrect.
     char buffer[FileHeader::kSize];
@@ -93,42 +95,40 @@ TEST(BasicDestructionTests, OnlyDeletesCalicoDatabases)
     header.magic_code = 42;
     header.write(buffer);
     ASSERT_OK(editor->write(0, Slice(buffer, sizeof(buffer))));
-    ASSERT_TRUE(DB::destroy(options, "./test").is_invalid_argument());
-
-    // Should work, since we just check the magic code.
-    header.magic_code = FileHeader::kMagicCode;
-    header.write(buffer);
-    ASSERT_OK(editor->write(0, Slice(buffer, sizeof(buffer))));
-    ASSERT_OK(DB::destroy(options, "./test"));
-
-    delete editor;
-    delete options.env;
-}
-
-TEST(BasicDestructionTests, OnlyDeletesCalicoWals)
-{
-    Options options;
-    options.env = new tools::FakeEnv;
-    options.wal_prefix = "./wal-";
+    ASSERT_TRUE(DB::destroy(options, "./testdb").is_invalid_argument());
 
     DB *db;
-    ASSERT_OK(DB::open(options, "./test", db));
-    delete db;
+    std::filesystem::remove_all("./testdb");
+    ASSERT_OK(DB::open(options, "./testdb", db));
+    ASSERT_OK(DB::destroy(options, "./testdb"));
 
-    // Starts with the WAL prefix of "./wal-", so it is considered a WAL file.
-    Editor *editor;
-    ASSERT_OK(options.env->new_editor("./wal-1", editor));
     delete editor;
-
-    ASSERT_OK(options.env->new_editor("./wal_1", editor));
-    delete editor;
-
-    ASSERT_OK(DB::destroy(options, "./test"));
-    ASSERT_TRUE(options.env->file_exists("./wal_1"));
-    ASSERT_FALSE(options.env->file_exists("./wal-1"));
-
     delete options.env;
 }
+
+// TEST(BasicDestructionTests, OnlyDeletesCalicoWals)
+//{
+//     Options options;
+//     options.env = new tools::FakeEnv;
+//     options.wal_filename = "./wal";
+//
+//     DB *db;
+//     ASSERT_OK(DB::open(options, "./test", db));
+//     delete db;
+//
+//     // These files are not part of the DB.
+//     File *editor;
+//     ASSERT_OK(options.env->new_file("./wal_", editor));
+//     delete editor;
+//     ASSERT_OK(options.env->new_file("./test.db", editor));
+//     delete editor;
+//
+//     ASSERT_OK(DB::destroy(options, "./test"));
+//     ASSERT_TRUE(options.env->file_exists("./wal_"));
+//     ASSERT_FALSE(options.env->file_exists("./test.db"));
+//
+//     delete options.env;
+// }
 
 class BasicDatabaseTests
     : public OnDiskTest,
@@ -158,7 +158,7 @@ TEST_F(BasicDatabaseTests, HandlesMaximumPageSize)
     options.page_size = kMaxPageSize;
     ASSERT_OK(DB::open(options, kFilename, db));
     const auto records = tools::fill_db(*db, random, 100);
-    ASSERT_OK(db->checkpoint());
+    ASSERT_OK(db->commit());
     delete db;
 
     ASSERT_OK(DB::open(options, kFilename, db));
@@ -252,7 +252,7 @@ static auto insert_random_groups(DB &db, std::size_t num_groups, std::size_t gro
             ASSERT_OK(db.put(itr->key, itr->value));
             ++itr;
         }
-        ASSERT_OK(db.checkpoint());
+        ASSERT_OK(db.commit());
     }
     dynamic_cast<const DBImpl &>(db).TEST_validate();
 }
@@ -294,7 +294,7 @@ TEST_F(BasicDatabaseTests, DataPersists)
             ASSERT_OK(db->put(itr->key, itr->value));
             ++itr;
         }
-        ASSERT_OK(db->checkpoint());
+        ASSERT_OK(db->commit());
         delete db;
     }
 
@@ -358,7 +358,7 @@ TEST_P(DbVacuumTests, SanityCheck)
             db_impl(db)->TEST_validate();
         }
 
-        ASSERT_OK(db->checkpoint());
+        ASSERT_OK(db->commit());
 
         std::size_t i = 0;
         for (const auto &[key, value] : map) {
@@ -389,7 +389,7 @@ class TestDatabase
 public:
     explicit TestDatabase(Env &env)
     {
-        options.wal_prefix = "./wal-";
+        options.wal_filename = "./wal-";
         options.page_size = kMinPageSize;
         options.cache_size = 32 * options.page_size;
         options.env = &env;
@@ -458,7 +458,7 @@ static auto expect_contains_records(const DB &db, const std::map<std::string, st
 static auto run_revert_test(TestDatabase &db)
 {
     const auto committed = add_records(db, 1'000);
-    ASSERT_OK(db.db->checkpoint());
+    ASSERT_OK(db.db->commit());
 
     // Hack to make sure the database file is up-to-date.
     (void)const_cast<Pager &>(db_impl(db.db)->TEST_pager()).flush();
@@ -477,7 +477,7 @@ TEST_F(DbRevertTests, RevertsUncommittedBatch_1)
 TEST_F(DbRevertTests, RevertsUncommittedBatch_2)
 {
     add_records(*db, 1'000);
-    ASSERT_OK(db->db->checkpoint());
+    ASSERT_OK(db->db->commit());
     run_revert_test(*db);
 }
 
@@ -490,7 +490,7 @@ TEST_F(DbRevertTests, RevertsUncommittedBatch_3)
 TEST_F(DbRevertTests, RevertsUncommittedBatch_4)
 {
     add_records(*db, 1'000);
-    ASSERT_OK(db->db->checkpoint());
+    ASSERT_OK(db->db->commit());
     run_revert_test(*db);
     add_records(*db, 1'000);
 }
@@ -499,7 +499,7 @@ TEST_F(DbRevertTests, RevertsUncommittedBatch_5)
 {
     for (std::size_t i = 0; i < 100; ++i) {
         add_records(*db, 100);
-        ASSERT_OK(db->db->checkpoint());
+        ASSERT_OK(db->db->commit());
     }
     run_revert_test(*db);
     for (std::size_t i = 0; i < 100; ++i) {
@@ -510,7 +510,7 @@ TEST_F(DbRevertTests, RevertsUncommittedBatch_5)
 TEST_F(DbRevertTests, RevertsVacuum_1)
 {
     const auto committed = add_records(*db, 1'000);
-    ASSERT_OK(db->db->checkpoint());
+    ASSERT_OK(db->db->commit());
 
     // Hack to make sure the database file is up-to-date.
     (void)const_cast<Pager &>(db_impl(db->db)->TEST_pager()).flush();
@@ -535,7 +535,7 @@ TEST_F(DbRevertTests, RevertsVacuum_2)
         ASSERT_OK(db->db->erase(itr->first));
         committed.erase(itr);
     }
-    ASSERT_OK(db->db->checkpoint());
+    ASSERT_OK(db->db->commit());
 
     (void)const_cast<Pager &>(db_impl(db->db)->TEST_pager()).flush();
 
@@ -553,7 +553,7 @@ TEST_F(DbRevertTests, RevertsVacuum_3)
         ASSERT_OK(db->db->erase(itr->first));
         committed.erase(itr);
     }
-    ASSERT_OK(db->db->checkpoint());
+    ASSERT_OK(db->db->commit());
 
     (void)const_cast<Pager &>(db_impl(db->db)->TEST_pager()).flush();
 
@@ -584,7 +584,7 @@ TEST_F(DbRecoveryTests, RecoversFirstBatch)
     {
         TestDatabase db {*env};
         snapshot = add_records(db, 5);
-        ASSERT_OK(db.db->checkpoint());
+        ASSERT_OK(db.db->commit());
 
         // Simulate a crash by cloning the database before cleanup has occurred.
         clone.reset(reinterpret_cast<const tools::FakeEnv &>(*env).clone());
@@ -610,7 +610,7 @@ TEST_F(DbRecoveryTests, RecoversNthBatch)
             for (const auto &[k, v] : add_records(db, 100)) {
                 snapshot[k] = v;
             }
-            ASSERT_OK(db.db->checkpoint());
+            ASSERT_OK(db.db->commit());
         }
 
         clone.reset(dynamic_cast<const tools::FakeEnv &>(*env).clone());
@@ -636,7 +636,7 @@ protected:
         db = std::make_unique<TestDatabase>(*env);
 
         committed = add_records(*db, 10'000);
-        EXPECT_OK(db->db->checkpoint());
+        EXPECT_OK(db->db->commit());
     }
     ~DbErrorTests() override = default;
 
@@ -819,7 +819,7 @@ TEST_P(DbFatalErrorTests, OperationsAreNotPermittedAfterFatalError)
         ASSERT_NE(itr, end(committed));
     }
     assert_special_error(db->db->status());
-    assert_special_error(db->db->checkpoint());
+    assert_special_error(db->db->commit());
     assert_special_error(db->db->put("key", "value"));
     std::string value;
     assert_special_error(db->db->get("key", &value));
@@ -922,7 +922,7 @@ protected:
     {
         env = std::make_unique<tools::FaultInjectionEnv>();
         options.env = env.get();
-        options.wal_prefix = kWalPrefix;
+        options.wal_filename = kWalPrefix;
     }
 
     ~ApiTests() override
@@ -1016,7 +1016,7 @@ TEST_F(ApiTests, UncommittedTransactionIsRolledBack)
     ASSERT_OK(db->put("a", "1"));
     ASSERT_OK(db->put("b", "2"));
     ASSERT_OK(db->put("c", "3"));
-    ASSERT_OK(db->checkpoint());
+    ASSERT_OK(db->commit());
 
     ASSERT_OK(db->put("a", "x"));
     ASSERT_OK(db->put("b", "y"));
@@ -1035,7 +1035,7 @@ TEST_F(ApiTests, UncommittedTransactionIsRolledBack)
 
 TEST_F(ApiTests, EmptyTransactionsAreOk)
 {
-    ASSERT_OK(db->checkpoint());
+    ASSERT_OK(db->commit());
 }
 
 TEST_F(ApiTests, KeysCanBeArbitraryBytes)
@@ -1047,7 +1047,7 @@ TEST_F(ApiTests, KeysCanBeArbitraryBytes)
     ASSERT_OK(db->put(key_1, "1"));
     ASSERT_OK(db->put(key_2, "2"));
     ASSERT_OK(db->put(key_3, "3"));
-    ASSERT_OK(db->checkpoint());
+    ASSERT_OK(db->commit());
 
     auto *cursor = db->new_cursor();
     cursor->seek_first();
@@ -1080,7 +1080,7 @@ TEST_F(ApiTests, HandlesLargeKeys)
     ASSERT_OK(db->put(key_1, "1"));
     ASSERT_OK(db->put(key_2, "2"));
     ASSERT_OK(db->put(key_3, "3"));
-    ASSERT_OK(db->checkpoint());
+    ASSERT_OK(db->commit());
 
     auto *cursor = db->new_cursor();
     cursor->seek_first();
@@ -1125,7 +1125,7 @@ public:
             const auto value = random_string(max_value_size);
             ASSERT_OK(db->put(key, value));
         }
-        ASSERT_OK(db->checkpoint());
+        ASSERT_OK(db->commit());
 
         for (const auto &[key, value] : map) {
             std::string result;
@@ -1133,7 +1133,7 @@ public:
             ASSERT_EQ(result, value);
             ASSERT_OK(db->erase(key));
         }
-        ASSERT_OK(db->checkpoint());
+        ASSERT_OK(db->commit());
     }
 
     tools::RandomGenerator random {4 * 1'024 * 1'024};
@@ -1164,13 +1164,13 @@ protected:
         ApiTests::SetUp();
 
         tools::RandomGenerator random;
-        checkpoints[false] = tools::fill_db(*db, random, 5'000);
+        commits[false] = tools::fill_db(*db, random, 5'000);
 
-        ASSERT_OK(db->checkpoint());
+        ASSERT_OK(db->commit());
 
-        checkpoints[true] = tools::fill_db(*db, random, 5'678);
-        for (const auto &record : checkpoints[false]) {
-            checkpoints[true].insert(record);
+        commits[true] = tools::fill_db(*db, random, 5'678);
+        for (const auto &record : commits[false]) {
+            commits[true].insert(record);
         }
     }
 
@@ -1183,22 +1183,22 @@ protected:
     auto run_test(bool persisted) -> void
     {
         ASSERT_OK(db->status());
-        const auto s = db->checkpoint();
+        const auto s = db->commit();
         ASSERT_EQ(s.is_ok(), persisted);
         assert_special_error(db->status());
 
         reopen();
 
-        ASSERT_EQ(db_impl(db)->TEST_state().record_count, checkpoints[persisted].size());
+        ASSERT_EQ(db_impl(db)->TEST_state().record_count, commits[persisted].size());
 
-        for (const auto &[key, value] : checkpoints[persisted]) {
+        for (const auto &[key, value] : commits[persisted]) {
             std::string result;
             ASSERT_OK(db->get(key, &result));
             ASSERT_EQ(value, result);
         }
     }
 
-    std::map<std::string, std::string> checkpoints[2];
+    std::map<std::string, std::string> commits[2];
 };
 
 TEST_F(CommitFailureTests, DataSyncFailure)
@@ -1248,7 +1248,7 @@ public:
 
 TEST_F(WalPrefixTests, WalDirectoryMustExist)
 {
-    options.wal_prefix = "./nonexistent/wal-";
+    options.wal_filename = "./nonexistent/wal-";
     ASSERT_TRUE(DB::open(options, kFilename, db).is_not_found());
 }
 

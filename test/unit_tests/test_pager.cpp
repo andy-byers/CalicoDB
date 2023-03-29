@@ -14,137 +14,6 @@
 namespace calicodb
 {
 
-class DeltaCompressionTest : public testing::Test
-{
-public:
-    static constexpr std::size_t kPageSize = 0x200;
-
-    [[nodiscard]] auto build_deltas(const std::vector<PageDelta> &unordered) const
-    {
-        std::vector<PageDelta> deltas;
-        for (const auto &delta : unordered) {
-            insert_delta(deltas, delta);
-        }
-        return deltas;
-    }
-
-    tools::RandomGenerator random;
-};
-
-TEST_F(DeltaCompressionTest, CompressingNothingDoesNothing)
-{
-    const auto empty = build_deltas({});
-    ASSERT_TRUE(empty.empty());
-}
-
-TEST_F(DeltaCompressionTest, InsertingEmptyDeltaDoesNothing)
-{
-    std::vector<PageDelta> deltas;
-    insert_delta(deltas, {123, 0});
-    ASSERT_TRUE(deltas.empty());
-}
-
-TEST_F(DeltaCompressionTest, CompressingSingleDeltaDoesNothing)
-{
-    const auto single = build_deltas({{123, 1}});
-    ASSERT_EQ(single.size(), 1);
-    ASSERT_EQ(single.front().offset, 123);
-    ASSERT_EQ(single.front().size, 1);
-}
-
-TEST_F(DeltaCompressionTest, DeltasAreOrdered)
-{
-    const auto deltas = build_deltas({
-        {20, 2},
-        {10, 1},
-        {30, 3},
-    });
-
-    ASSERT_EQ(deltas.size(), 3);
-    for (std::size_t i = 0; i < deltas.size(); ++i) {
-        ASSERT_EQ(deltas[i].offset, (i + 1) * 10);
-        ASSERT_EQ(deltas[i].size, i + 1);
-    }
-}
-
-TEST_F(DeltaCompressionTest, DeltasAreNotRepeated)
-{
-    const auto deltas = build_deltas({
-        {20, 2},
-        {10, 1},
-        {20, 2},
-        {10, 1},
-    });
-
-    ASSERT_EQ(deltas.size(), 2);
-    for (std::size_t i = 0; i < deltas.size(); ++i) {
-        ASSERT_EQ(deltas[i].offset, (i + 1) * 10);
-        ASSERT_EQ(deltas[i].size, i + 1);
-    }
-}
-
-TEST_F(DeltaCompressionTest, ConnectedDeltasAreMerged)
-{
-    const auto deltas = build_deltas({
-        {0, 1},
-        {1, 2},
-        {3, 1},
-    });
-
-    ASSERT_EQ(deltas.size(), 1);
-    ASSERT_EQ(deltas[0].offset, 0);
-    ASSERT_EQ(deltas[0].size, 4);
-}
-
-TEST_F(DeltaCompressionTest, OverlappingDeltasAreMerged)
-{
-    auto deltas = build_deltas({
-        {0, 10},
-        {20, 10},
-        {40, 10},
-    });
-
-    // Overlaps the first delta by 5.
-    insert_delta(deltas, {5, 10});
-
-    // Joins the second and third original deltas.
-    insert_delta(deltas, {30, 10});
-
-    // New last delta.
-    insert_delta(deltas, {60, 10});
-
-    // Overlaps the last delta by 5 and joins it to the other group.
-    insert_delta(deltas, {50, 15});
-    compress_deltas(deltas);
-
-    ASSERT_EQ(deltas.size(), 2);
-    ASSERT_EQ(deltas[0].size, 15);
-    ASSERT_EQ(deltas[0].offset, 0);
-    ASSERT_EQ(deltas[1].size, 50);
-    ASSERT_EQ(deltas[1].offset, 20);
-}
-
-TEST_F(DeltaCompressionTest, SanityCheck)
-{
-    static constexpr std::size_t NUM_INSERTS = 100;
-    static constexpr std::size_t MAX_DELTA_SIZE = 10;
-    std::vector<PageDelta> deltas;
-    for (std::size_t i = 0; i < NUM_INSERTS; ++i) {
-        const auto offset = random.Next(kPageSize - MAX_DELTA_SIZE);
-        const auto size = random.Next(1, MAX_DELTA_SIZE);
-        insert_delta(deltas, PageDelta {offset, size});
-    }
-    compress_deltas(deltas);
-
-    std::vector<int> covering(kPageSize);
-    for (const auto &[offset, size] : deltas) {
-        for (std::size_t i = 0; i < size; ++i) {
-            ASSERT_EQ(covering.at(offset + i), 0);
-            ++covering[offset + i];
-        }
-    }
-}
-
 [[nodiscard]] static auto make_cache_entry(std::uint64_t id_value) -> CacheEntry
 {
     return {.page_id = Id(id_value)};
@@ -214,11 +83,11 @@ public:
 
     explicit FrameManagerTests()
     {
-        Editor *file;
-        EXPECT_OK(env->new_editor("./test", file));
+        File *file;
+        EXPECT_OK(env->new_file("./test", file));
 
         AlignedBuffer buffer {kPageSize * kFrameCount, kPageSize};
-        frames = std::make_unique<FrameManager>(*file, std::move(buffer), kPageSize, kFrameCount);
+        frames = std::make_unique<FrameManager>(std::move(buffer), kPageSize, kFrameCount);
     }
 
     ~FrameManagerTests() override = default;
@@ -237,7 +106,7 @@ TEST_F(FrameManagerTests, OutOfFramesDeathTest)
 {
     for (std::size_t i = 0; i < kFrameCount; ++i) {
         auto *entry = cache.put(make_cache_entry(i + 1));
-        ASSERT_OK(frames->pin(Id::from_index(i), *entry));
+        (void)frames->pin(Id::from_index(i), *entry);
     }
     auto *entry = cache.put(make_cache_entry(kFrameCount + 1));
     ASSERT_EQ(frames->available(), 0);
@@ -247,17 +116,15 @@ TEST_F(FrameManagerTests, OutOfFramesDeathTest)
 
 auto write_to_page(Page &page, const std::string &message) -> void
 {
-    const auto offset = page_offset(page) + Lsn::kSize;
-    EXPECT_LE(offset + message.size(), page.size());
-    std::memcpy(page.mutate(offset, message.size()), message.data(), message.size());
+    EXPECT_LE(page_offset(page) + message.size(), page.size());
+    std::memcpy(page.data() + page_offset(page), message.data(), message.size());
 }
 
 [[nodiscard]] auto read_from_page(const Page &page, std::size_t size) -> std::string
 {
-    const auto offset = page_offset(page) + Lsn::kSize;
-    EXPECT_LE(offset + size, page.size());
+    EXPECT_LE(page_offset(page) + size, page.size());
     auto message = std::string(size, '\x00');
-    std::memcpy(message.data(), page.data() + offset, message.size());
+    std::memcpy(message.data(), page.data() + page_offset(page), message.size());
     return message;
 }
 
@@ -266,7 +133,7 @@ class PagerTests
       public testing::Test
 {
 public:
-    std::string test_message {"Hello, world!"};
+    std::string test_message = "Hello, world!";
 
     ~PagerTests() override = default;
 
@@ -318,7 +185,6 @@ TEST_F(PagerTests, NewPagerIsSetUpCorrectly)
 {
     ASSERT_EQ(pager->page_count(), 0);
     ASSERT_EQ(pager->bytes_written(), 0);
-    ASSERT_EQ(pager->recovery_lsn(), Lsn::null());
     EXPECT_OK(state.status);
 }
 

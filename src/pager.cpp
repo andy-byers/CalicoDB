@@ -20,6 +20,53 @@ namespace calicodb
         }                              \
     } while (0)
 
+auto Pager::fetch_page(Id page_id, CacheEntry *&out) -> Status
+{
+    out = m_cache.get(page_id);
+
+    if (out == nullptr) {
+        CacheEntry temp;
+        auto *data = m_frames.pin(page_id, temp);
+
+        auto found_page = false;
+        if (m_state->use_wal) {
+            // Try to read the page from the WAL.
+            auto s = m_wal->read(page_id, data);
+            if (s.is_ok()) {
+                found_page = true;
+            } else if (!s.is_not_found()) {
+                return s;
+            }
+        }
+
+        if (!found_page) {
+            // Read the page from the DB file.
+            CALICODB_TRY(read_page_from_file(page_id, data));
+        }
+        out = m_cache.put(temp);
+    }
+    return Status::ok();
+}
+
+auto Pager::read_page_from_file(Id page_id, char *out) const -> Status
+{
+    if (page_id.as_index() < m_page_count) {
+        const auto offset = page_id.as_index() * m_frames.page_size();
+        CALICODB_TRY(m_file->read_exact(offset, m_frames.page_size(), out));
+        m_bytes_read += m_frames.page_size();
+    } else {
+        std::memset(out, 0, m_frames.page_size());
+    }
+    return Status::ok();
+}
+
+auto Pager::write_page_to_file(Id pid, const Slice &in) const -> Status
+{
+    CALICODB_EXPECT_EQ(in.size(), m_frames.page_size());
+    m_bytes_written += m_frames.page_size();
+    return m_file->write(pid.as_index() * m_frames.page_size(), in);
+}
+
 auto Pager::open(const Parameters &param, Pager **out) -> Status
 {
     CALICODB_EXPECT_TRUE(is_power_of_two(param.page_size));
@@ -28,8 +75,8 @@ auto Pager::open(const Parameters &param, Pager **out) -> Status
     CALICODB_EXPECT_GE(param.frame_count, kMinFrameCount);
     CALICODB_EXPECT_LE(param.page_size * param.frame_count, kMaxCacheSize);
 
-    Editor *file;
-    CALICODB_TRY(param.env->new_editor(param.filename, file));
+    File *file;
+    CALICODB_TRY(param.env->new_file(param.filename, file));
 
     // Allocate the frames, i.e. where pages from disk are stored in memory. Aligned to the page size, so it could
     // potentially be used for direct I/O.
@@ -41,26 +88,31 @@ auto Pager::open(const Parameters &param, Pager **out) -> Status
     return Status::ok();
 }
 
-Pager::Pager(const Parameters &param, Editor &file, AlignedBuffer buffer)
+Pager::Pager(const Parameters &param, File &file, AlignedBuffer buffer)
     : m_filename(param.filename),
-      m_frames(file, std::move(buffer), param.page_size, param.frame_count),
-      m_env(param.env),
+      m_frames(std::move(buffer), param.page_size, param.frame_count),
       m_info_log(param.info_log),
+      m_file(&file),
+      m_env(param.env),
       m_wal(param.wal),
       m_state(param.state)
 {
-    CALICODB_EXPECT_NE(m_wal, nullptr);
     CALICODB_EXPECT_NE(m_state, nullptr);
+}
+
+Pager::~Pager()
+{
+    delete m_file;
 }
 
 auto Pager::bytes_read() const -> std::size_t
 {
-    return m_frames.bytes_read();
+    return m_bytes_read;
 }
 
 auto Pager::bytes_written() const -> std::size_t
 {
-    return m_frames.bytes_written();
+    return m_bytes_written;
 }
 
 auto Pager::page_count() const -> std::size_t
@@ -73,90 +125,70 @@ auto Pager::page_size() const -> std::size_t
     return m_frames.page_size();
 }
 
-auto Pager::clean_page(CacheEntry &entry) -> DirtyTable::Iterator
+auto Pager::clean_page(CacheEntry &entry) -> void
 {
-    auto token = *entry.token;
-    // Reset the dirty list reference.
-    entry.token.reset();
-    return m_dirty.remove(token);
+    entry.is_dirty = false;
+    m_dirty.erase(entry.page_id);
 }
 
 auto Pager::checkpoint() -> Status
 {
-    Lsn obsolete_lsn;
-    CALICODB_TRY(m_wal->find_obsolete_lsn(obsolete_lsn));
-    if (!obsolete_lsn.is_null()) {
-        // Flush dirty pages that are on old WAL segments.
-        CALICODB_TRY(flush(obsolete_lsn));
-    }
-    CALICODB_TRY(m_frames.sync());
+    CALICODB_EXPECT_TRUE(m_state->use_wal);
 
-    // Oldest LSN still needed for a cached page. fsync() was just called, so everything
-    // before this should be on disk.
-    m_recovery_lsn = m_dirty.recovery_lsn();
-    return m_wal->cleanup(m_recovery_lsn);
+    // Make sure everything written to the WAL is on disk.
+    CALICODB_TRY(m_wal->sync());
+
+    // Transfer the WAL contents back to the DB.
+    CALICODB_TRY(m_wal->checkpoint(*m_file));
+
+    // Make sure the data transferred from the WAL is on the DB disk.
+    return m_file->sync();
 }
 
-auto Pager::flush(Lsn target_lsn) -> Status
+auto Pager::commit() -> Status
 {
-    const Lsn kMaxLsn(std::numeric_limits<std::uint64_t>::max());
-
-    // An LSN of NULL causes all pages to be flushed.
-    if (target_lsn.is_null()) {
-        target_lsn = kMaxLsn;
-    }
-
-    for (auto itr = m_dirty.begin(); itr != m_dirty.end();) {
-        const auto [record_lsn, page_id] = *itr;
-        auto *entry = m_cache.query(page_id);
+    CALICODB_EXPECT_TRUE(m_state->use_wal);
+    for (auto dirty = begin(m_dirty); dirty != end(m_dirty);) {
+        auto *entry = m_cache.query(*dirty);
         CALICODB_EXPECT_NE(entry, nullptr);
-        const auto &frame = m_frames.get_frame(entry->index);
-        const auto page_lsn = read_page_lsn(page_id, frame.data);
-
-        if (target_lsn < record_lsn) {
-            break;
-        }
-        if (page_lsn <= m_wal->flushed_lsn()) {
-            CALICODB_TRY(m_frames.write_back(entry->index));
-            itr = clean_page(*entry);
-        } else {
-            itr = next(itr);
-        }
+        CALICODB_TRY(m_wal->write(
+            entry->page_id,
+            m_frames.get_frame(entry->index),
+            ++dirty == end(m_dirty) ? m_page_count : 0));
+        clean_page(*entry);
     }
     return Status::ok();
 }
 
-auto Pager::recovery_lsn() const -> Lsn
+auto Pager::flush() -> Status
 {
-    return m_recovery_lsn;
+    for (auto dirty = m_dirty.begin(); dirty != m_dirty.end();) {
+        auto *entry = m_cache.query(*dirty);
+        CALICODB_EXPECT_NE(entry, nullptr);
+        CALICODB_TRY(write_page_to_file(entry->page_id, m_frames.get_frame(entry->index)));
+        clean_page(*entry);
+        ++dirty;
+    }
+    return Status::ok();
 }
 
-auto Pager::make_frame_available() -> void
+auto Pager::ensure_available_frame() -> Status
 {
-    auto evicted = m_cache.evict();
-    CALICODB_EXPECT_TRUE(evicted.has_value());
+    if (m_state->status.is_ok() && !m_frames.available()) {
+        auto evicted = m_cache.evict();
+        CALICODB_EXPECT_TRUE(evicted.has_value());
 
-    if (evicted->token) {
-        Status s;
-        const auto &frame = m_frames.get_frame(evicted->index);
-        if (m_state->is_running) {
-            const auto page_lsn = read_page_lsn(frame.page_id, frame.data);
-            if (m_wal->flushed_lsn() < page_lsn) {
-                // Only flush the tail buffer if it's really necessary. Otherwise, just fsync() the
-                // WAL file.
-                s = m_wal->synchronize(m_wal->written_lsn() < page_lsn);
+        if (evicted->is_dirty) {
+            if (m_state->use_wal) {
+                SET_STATUS(m_wal->write(evicted->page_id, m_frames.get_frame(evicted->index), 0));
+            } else {
+                SET_STATUS(write_page_to_file(evicted->page_id, m_frames.get_frame(evicted->index)));
             }
+            clean_page(*evicted);
         }
-        if (s.is_ok()) {
-            // NOTE: We don't update the record LSN field because we are getting rid of this page.
-            s = m_frames.write_back(evicted->index);
-        }
-        if (!s.is_ok()) {
-            SET_STATUS(s);
-        }
-        clean_page(*evicted);
+        m_frames.unpin(*evicted);
     }
-    m_frames.unpin(*evicted);
+    return m_state->status;
 }
 
 auto Pager::allocate(Page &page) -> Status
@@ -166,7 +198,7 @@ auto Pager::allocate(Page &page) -> Status
         return Status::not_supported("reached the maximum database size");
     }
     CALICODB_TRY(acquire(Id::from_index(m_page_count), page));
-    upgrade(page, 0);
+    upgrade(page);
     ++m_page_count;
     return Status::ok();
 }
@@ -174,67 +206,32 @@ auto Pager::allocate(Page &page) -> Status
 auto Pager::acquire(Id page_id, Page &page) -> Status
 {
     CALICODB_EXPECT_FALSE(page_id.is_null());
-    CALICODB_TRY(m_state->status);
+    CALICODB_TRY(ensure_available_frame());
 
-    if (!m_frames.available()) {
-        make_frame_available();
-        CALICODB_TRY(m_state->status);
-    }
-    auto *entry = m_cache.get(page_id);
-    if (entry == nullptr) {
-        CacheEntry temp;
-        CALICODB_TRY(m_frames.pin(page_id, temp));
+    CacheEntry *entry, temp;
+    if (page_id.value > m_page_count) {
+        // Allocate a page from the end of the file.
+        auto *data = m_frames.pin(page_id, temp);
+        std::memset(data, 0, m_frames.page_size());
         entry = m_cache.put(temp);
+    } else {
+        // Read a page from either the WAL or the DB.
+        CALICODB_TRY(fetch_page(page_id, entry));
     }
     return m_frames.ref(*entry, page);
 }
 
-auto Pager::upgrade(Page &page, int important) -> void
+auto Pager::upgrade(Page &page) -> void
 {
-    CALICODB_EXPECT_LE(important, static_cast<int>(page.size()));
-    const auto page_lsn = read_page_lsn(page);
-
-    // The "important" parameter should be used when we don't need to track the before contents of
-    // the whole page. For example, when allocating a page from the freelist, we only care about
-    // the page LSN stored in the first 8 bytes; the rest is junk.
-    auto watch_size = page.size();
-    if (important >= 0) {
-        watch_size = static_cast<std::size_t>(important);
-    }
-
-    // Make sure this page is in the dirty list. This is one place where the "record LSN" is set.
-    if (!page.entry()->token.has_value()) {
-        page.entry()->token = m_dirty.insert(page.id(), page_lsn);
-    }
+    page.entry()->is_dirty = true;
+    m_dirty.insert(page.id());
     m_frames.upgrade(page);
-
-    // Skip writing an image record if there is definitely one for this page during this transaction.
-    if (m_state->is_running && page_lsn <= m_state->commit_lsn) {
-        Lsn image_lsn;
-        const auto image = page.view(0, watch_size);
-        const auto s = m_wal->log_image(page.id(), image, &image_lsn);
-        write_page_lsn(page, image_lsn);
-
-        if (!s.is_ok()) {
-            SET_STATUS(s);
-        }
-    }
 }
 
 auto Pager::release(Page page) -> void
 {
     CALICODB_EXPECT_NE(page.entry()->refcount, 0);
     m_frames.unref(*page.entry());
-
-    if (m_state->is_running && page.has_changes()) {
-        CALICODB_EXPECT_TRUE(page.is_writable());
-        write_page_lsn(page, m_wal->current_lsn());
-        auto s = m_wal->log_delta(
-            page.id(), page.view(0), page.deltas(), nullptr);
-        if (!s.is_ok()) {
-            SET_STATUS(s);
-        }
-    }
 }
 
 auto Pager::truncate(std::size_t page_count) -> Status
@@ -246,8 +243,8 @@ auto Pager::truncate(std::size_t page_count) -> Status
     for (Id id(page_count + 1); id.value <= m_page_count; ++id.value) {
         auto *entry = m_cache.query(id);
         if (entry != nullptr) {
-            if (entry->token.has_value()) {
-                m_dirty.remove(*entry->token);
+            if (entry->is_dirty) {
+                m_dirty.erase(id);
             }
             m_frames.unpin(*entry);
             m_cache.erase(id);

@@ -286,7 +286,7 @@ public:
 
     auto reserve_for_test(std::size_t n) -> void
     {
-        ASSERT_LT(n, node.page.size() - FileHeader::kSize - kPageHeaderSize - NodeHeader::kSize)
+        ASSERT_LT(n, node.page.size() - FileHeader::kSize - NodeHeader::kSize)
             << "reserve_for_test(" << n << ") leaves no room for possible headers";
         size = n;
         base = node.page.size() - n;
@@ -1055,7 +1055,7 @@ class PointerMapTests : public TreeTests
 public:
     [[nodiscard]] auto map_size() -> std::size_t
     {
-        return (pager->page_size() - Lsn::kSize) / (sizeof(char) + Id::kSize);
+        return pager->page_size() / (sizeof(char) + Id::kSize);
     }
 };
 
@@ -1880,6 +1880,10 @@ TEST_P(MultiTreeTests, MultipleSplitsAndMerges_2)
     }
 }
 
-INSTANTIATE_TEST_SUITE_P(MultiTreeTests, MultiTreeTests, ::testing::Values(TreeTestParameters {kMinPageSize}));
+INSTANTIATE_TEST_SUITE_P(
+    MultiTreeTests,
+    MultiTreeTests,
+    ::testing::Values(
+        TreeTestParameters {kMinPageSize}));
 
 } // namespace calicodb

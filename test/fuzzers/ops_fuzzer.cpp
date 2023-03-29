@@ -100,7 +100,7 @@ auto OpsFuzzer::step(const std::uint8_t *&data, std::size_t &size) -> Status
             CALICODB_TRY(m_db->vacuum());
             break;
         case kCheckpoint:
-            CALICODB_TRY(m_db->checkpoint());
+            CALICODB_TRY(m_db->commit());
             break;
         default: // kReopen
             CALICODB_TRY(reopen());

@@ -310,9 +310,7 @@ auto run_ordering_comparisons()
 TEST(IdTests, TypesAreSizedCorrectly)
 {
     Id id;
-    Lsn lsn;
     static_assert(Id::kSize == sizeof(id) && Id::kSize == sizeof(id.value));
-    static_assert(Lsn::kSize == sizeof(lsn) && Lsn::kSize == sizeof(lsn.value));
 }
 
 TEST(IdTests, IdentifiersAreNullable)
@@ -610,9 +608,9 @@ TEST_F(InterceptorTests, RespectsPrefix)
 {
     QUICK_INTERCEPTOR("./test", tools::Interceptor::kOpen);
 
-    Editor *editor;
-    assert_special_error(env->new_editor("./test", editor));
-    expect_ok(env->new_editor("./wal-", editor));
+    File *editor;
+    assert_special_error(env->new_file("./test", editor));
+    expect_ok(env->new_file("./wal-", editor));
     delete editor;
 }
 
@@ -620,8 +618,8 @@ TEST_F(InterceptorTests, RespectsSyscallType)
 {
     QUICK_INTERCEPTOR("./test", tools::Interceptor::kWrite);
 
-    Editor *editor;
-    expect_ok(env->new_editor("./test", editor));
+    File *editor;
+    expect_ok(env->new_file("./test", editor));
     assert_special_error(editor->write(0, {}));
     delete editor;
 }

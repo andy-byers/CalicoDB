@@ -5,7 +5,6 @@
 #include "tools.h"
 #include "env_posix.h"
 #include "logging.h"
-#include "wal_reader.h"
 #include <algorithm>
 #include <iomanip>
 #include <iostream>
@@ -28,9 +27,9 @@ auto FakeEnv::read_file_at(const Memory &mem, std::size_t offset, std::size_t si
     if (Slice buffer(mem.buffer); offset < mem.buffer.size()) {
         read_size = std::min(size, buffer.size() - offset);
         std::memcpy(scratch, buffer.advance(offset).data(), read_size);
-    }
-    if (out != nullptr) {
-        *out = Slice(scratch, read_size);
+        if (out != nullptr) {
+            *out = Slice(scratch, read_size);
+        }
     }
     return Status::ok();
 }
@@ -44,32 +43,17 @@ auto FakeEnv::write_file_at(Memory &mem, std::size_t offset, const Slice &in) ->
     return Status::ok();
 }
 
-auto FakeReader::read(std::size_t offset, std::size_t size, char *scratch, Slice *out) -> Status
+auto FakeFile::read(std::size_t offset, std::size_t size, char *scratch, Slice *out) -> Status
 {
     return m_parent->read_file_at(*m_mem, offset, size, scratch, out);
 }
 
-auto FakeEditor::read(std::size_t offset, std::size_t size, char *scratch, Slice *out) -> Status
-{
-    return m_parent->read_file_at(*m_mem, offset, size, scratch, out);
-}
-
-auto FakeEditor::write(std::size_t offset, const Slice &in) -> Status
+auto FakeFile::write(std::size_t offset, const Slice &in) -> Status
 {
     return m_parent->write_file_at(*m_mem, offset, in);
 }
 
-auto FakeEditor::sync() -> Status
-{
-    return Status::ok();
-}
-
-auto FakeLogger::write(const Slice &in) -> Status
-{
-    return m_parent->write_file_at(*m_mem, m_mem->buffer.size(), in);
-}
-
-auto FakeLogger::sync() -> Status
+auto FakeFile::sync() -> Status
 {
     return Status::ok();
 }
@@ -83,41 +67,17 @@ auto FakeEnv::get_memory(const std::string &filename) const -> Memory &
     return itr->second;
 }
 
-auto FakeEnv::new_reader(const std::string &filename, Reader *&out) -> Status
+auto FakeEnv::new_file(const std::string &filename, File *&out) -> Status
 {
     auto &mem = get_memory(filename);
-    if (mem.created) {
-        out = new FakeReader {filename, *this, mem};
-        return Status::ok();
-    }
-    return Status::not_found("cannot open file");
-}
-
-auto FakeEnv::new_editor(const std::string &filename, Editor *&out) -> Status
-{
-    auto &mem = get_memory(filename);
-    if (!mem.created) {
-        mem.buffer.clear();
-        mem.created = true;
-    }
-    out = new FakeEditor {filename, *this, mem};
+    out = new FakeFile {filename, *this, mem};
+    mem.created = true;
     return Status::ok();
 }
 
-auto FakeEnv::new_logger(const std::string &filename, Logger *&out) -> Status
+auto FakeEnv::new_log_file(const std::string &, LogFile *&out) -> Status
 {
-    auto &mem = get_memory(filename);
-    if (!mem.created) {
-        mem.buffer.clear();
-        mem.created = true;
-    }
-    out = new FakeLogger {filename, *this, mem};
-    return Status::ok();
-}
-
-auto FakeEnv::new_info_logger(const std::string &, InfoLogger *&out) -> Status
-{
-    out = new FakeInfoLogger;
+    out = new FakeLogFile;
     return Status::ok();
 }
 
@@ -216,75 +176,41 @@ auto FaultInjectionEnv::clear_interceptors() -> void
     m_interceptors.clear();
 }
 
-auto FaultInjectionReader::read(std::size_t offset, std::size_t size, char *scratch, Slice *out) -> Status
+auto FaultInjectionFile::read(std::size_t offset, std::size_t size, char *scratch, Slice *out) -> Status
 {
     TRY_INTERCEPT_FROM(reinterpret_cast<FaultInjectionEnv &>(*m_parent), Interceptor::kRead, m_filename);
-    return FakeReader::read(offset, size, scratch, out);
+    return FakeFile::read(offset, size, scratch, out);
 }
 
-auto FaultInjectionEditor::read(std::size_t offset, std::size_t size, char *scratch, Slice *out) -> Status
-{
-    TRY_INTERCEPT_FROM(reinterpret_cast<FaultInjectionEnv &>(*m_parent), Interceptor::kRead, m_filename);
-    return FakeEditor::read(offset, size, scratch, out);
-}
-
-auto FaultInjectionEditor::write(std::size_t offset, const Slice &in) -> Status
+auto FaultInjectionFile::write(std::size_t offset, const Slice &in) -> Status
 {
     TRY_INTERCEPT_FROM(reinterpret_cast<FaultInjectionEnv &>(*m_parent), Interceptor::kWrite, m_filename);
-    return FakeEditor::write(offset, in);
+    return FakeFile::write(offset, in);
 }
 
-auto FaultInjectionEditor::sync() -> Status
+auto FaultInjectionFile::sync() -> Status
 {
     TRY_INTERCEPT_FROM(reinterpret_cast<FaultInjectionEnv &>(*m_parent), Interceptor::kSync, m_filename);
-    return FakeEditor::sync();
+    return FakeFile::sync();
 }
 
-auto FaultInjectionLogger::write(const Slice &in) -> Status
-{
-    TRY_INTERCEPT_FROM(reinterpret_cast<FaultInjectionEnv &>(*m_parent), Interceptor::kWrite, m_filename);
-    return FakeLogger::write(in);
-}
-
-auto FaultInjectionLogger::sync() -> Status
-{
-    TRY_INTERCEPT_FROM(reinterpret_cast<FaultInjectionEnv &>(*m_parent), Interceptor::kSync, m_filename);
-    return FakeLogger::sync();
-}
-
-auto FaultInjectionEnv::new_reader(const std::string &filename, Reader *&out) -> Status
+auto FaultInjectionEnv::new_file(const std::string &filename, File *&out) -> Status
 {
     TRY_INTERCEPT_FROM(*this, Interceptor::kOpen, filename);
-    FakeReader *reader;
-    CALICODB_TRY(FakeEnv::new_reader(filename, reinterpret_cast<Reader *&>(reader)));
-    out = new FaultInjectionReader {*reader};
-    delete reader;
+    FakeFile *file;
+    CALICODB_TRY(FakeEnv::new_file(filename, reinterpret_cast<File *&>(file)));
+    out = new FaultInjectionFile(*file);
+    delete file;
     return Status::ok();
 }
 
-auto FaultInjectionEnv::new_editor(const std::string &filename, Editor *&out) -> Status
+auto FaultInjectionEnv::new_log_file(const std::string &filename, LogFile *&out) -> Status
 {
     TRY_INTERCEPT_FROM(*this, Interceptor::kOpen, filename);
-    FakeEditor *editor;
-    CALICODB_TRY(FakeEnv::new_editor(filename, reinterpret_cast<Editor *&>(editor)));
-    out = new FaultInjectionEditor {*editor};
-    delete editor;
-    return Status::ok();
-}
-
-auto FaultInjectionEnv::new_logger(const std::string &filename, Logger *&out) -> Status
-{
-    TRY_INTERCEPT_FROM(*this, Interceptor::kOpen, filename);
-    FakeLogger *logger;
-    CALICODB_TRY(FakeEnv::new_logger(filename, reinterpret_cast<Logger *&>(logger)));
-    out = new FaultInjectionLogger {*logger};
-    delete logger;
-    return Status::ok();
-}
-
-auto FaultInjectionEnv::new_info_logger(const std::string &, InfoLogger *&out) -> Status
-{
-    out = new FaultInjectionInfoLogger;
+    FakeLogFile *file;
+    CALICODB_TRY(FakeEnv::new_log_file(filename, reinterpret_cast<LogFile *&>(file)));
+    out = new FaultInjectionLogFile;
+    delete file;
     return Status::ok();
 }
 
@@ -386,59 +312,6 @@ auto print_references(Pager &pager) -> void
     }
 }
 
-auto print_wals(Env &env, std::size_t page_size, const std::string &prefix) -> void
-{
-    const auto [dir, base] = split_path(prefix);
-    std::vector<std::string> possible_segments;
-    CHECK_OK(env.get_children(dir, possible_segments));
-
-    std::string tail_buffer(wal_block_size(page_size), '\0');
-    std::string data_buffer(wal_scratch_size(page_size), '\0');
-
-    for (auto &name : possible_segments) {
-        name = join_paths(dir, name);
-        if (!decode_segment_name(prefix, name).is_null()) {
-            Reader *file;
-            CHECK_OK(env.new_reader(name, file));
-            WalReader reader {*file, tail_buffer};
-            std::cerr << "Start of segment " << name << '\n';
-            for (;;) {
-                auto s = reader.read(data_buffer);
-                Slice payload(data_buffer);
-                if (s.is_not_found())
-                {
-                    std::cerr << "End of segment\n";
-                    break;
-                }
-                else if (!s.is_ok())
-                {
-                    std::cerr << "Encountered \"" << get_status_name(s) << "\" status: " << s.to_string() << '\n';
-                    break;
-                }
-                const auto decoded = decode_payload(payload);
-                if (std::holds_alternative<DeltaDescriptor>(decoded)) {
-                    const auto deltas = std::get<DeltaDescriptor>(decoded);
-                    std::cerr << "    Delta: page_id=" << deltas.page_id.value << ", lsn=" << deltas.lsn.value << ", deltas=[\n";
-                    std::size_t i = 0;
-                    for (const auto &[offset, data] : deltas.deltas) {
-                        std::cerr << "        " << i++ << ": offset=" << offset << ", data=" << escape_string(data) << '\n';
-                    }
-                } else if (std::holds_alternative<ImageDescriptor>(decoded)) {
-                    const auto image = std::get<ImageDescriptor>(decoded);
-                    std::uint64_t before_lsn = 0;
-                    if (image.image.size() >= 8) {
-                        before_lsn = get_u64(image.image.data() + FileHeader::kSize * image.page_id.is_root());
-                    }
-                    std::cerr << "    Image: page_id=" << image.page_id.value << ", lsn=" << image.lsn.value << ", before_lsn=" << before_lsn << ", image_size=" << image.image.size() << '\n';
-                } else if (std::holds_alternative<VacuumDescriptor>(decoded)) {
-                    const auto vacuum = std::get<VacuumDescriptor>(decoded);
-                    std::cerr << "    Vacuum: is_start=" << vacuum.is_start << ", lsn=" << vacuum.lsn.value << '\n';
-                }
-            }
-        }
-    }
-}
-
 #undef TRY_INTERCEPT_FROM
 
 auto read_file_to_string(Env &env, const std::string &filename) -> std::string
@@ -448,12 +321,10 @@ auto read_file_to_string(Env &env, const std::string &filename) -> std::string
 
     std::string buffer(file_size, '\0');
 
-    Reader *file;
-    CHECK_OK(env.new_reader(filename, file));
+    File *file;
+    CHECK_OK(env.new_file(filename, file));
 
-    Slice slice;
-    CHECK_OK(file->read(0, file_size, buffer.data(), &slice));
-    CHECK_EQ(slice.size(), file_size);
+    CHECK_OK(file->read_exact(0, file_size, buffer.data()));
 
     delete file;
     return buffer;

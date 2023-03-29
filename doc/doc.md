@@ -8,7 +8,7 @@
   + [Querying a database](#querying-a-database)
   + [Vacuuming a database](#vacuuming-a-database)
   + [Tables](#tables)
-  + [Checkpoints](#checkpoints)
+  + [Checkpoints](#commits)
   + [Database properties](#database-properties)
   + [Closing a database](#closing-a-database)
   + [Destroying a database](#destroying-a-database)
@@ -94,7 +94,7 @@ if (!s.is_ok()) {
 In CalicoDB, records are stored in tables, which are on-disk mappings from keys to values.
 Keys within each table are unique, however, tables may have overlapping key ranges.
 Errors returned by methods that modify tables are fatal and the database will refuse to perform any more work.
-The next time that the database is opened, recovery will be run to undo any changes that occurred after the last checkpoint (see [Checkpoints](#checkpoints)).
+The next time that the database is opened, recovery will be run to undo any changes that occurred after the last commit (see [Checkpoints](#commits)).
 The database will always keep 1 table open, called the default table.
 Additional tables are managed using methods on the `DB` object (see [Tables](#tables)).
 When naming tables, note that the prefix "calicodb." is reserved for internal use.
@@ -240,11 +240,11 @@ if (s.is_ok()) {
 ```
 
 ### Checkpoints
-CalicoDB uses the concept of a checkpoint to provide guarantees about the logical contents of a database.
-Any work that took place before a successful checkpoint will persist, even if the program crashes afterward.
+CalicoDB uses the concept of a commit to provide guarantees about the logical contents of a database.
+Any work that took place before a successful commit will persist, even if the program crashes afterward.
 It should also be noted that this also applies to creation and removal of tables.
-At this point, checkpoints are global: they affect every table with pending updates.
-Further work may go toward implementing per-table checkpoints.
+At this point, commits are global: they affect every table with pending updates.
+Further work may go toward implementing per-table commits.
 
 ```C++
 // Add some more records.
@@ -254,8 +254,8 @@ assert(s.is_ok());
 s = db->put("myla", "brown-tabby");
 assert(s.is_ok());
 
-// Perform a checkpoint.
-s = db->checkpoint();
+// Perform a commit.
+s = db->commit();
 if (s.is_ok()) {
     // Changes are safely on disk (in the WAL, and maybe partially in the database). If we crash from 
     // here on out, the changes will be reapplied from the WAL the next time the database is opened.

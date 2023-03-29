@@ -98,7 +98,7 @@ The WAL keeps track of the last LSN that `write()` was called on (the `written_l
 The `written_lsn` is increased when the tail buffer is flushed, and the `flushed_lsn` is increased when `fsync()` is called.
 The `flushed_lsn` is always less than or equal to the `written_lsn`.
 The `flushed_lsn` is queried by the pager to make sure unprotected pages are never written back.
-The pager keeps track of a few more variables to ensure consistency: the per-page `page_lsn`, the per-page `record_lsn`, the `checkpoint_lsn`, and the `recovery_lsn`.
+The pager keeps track of a few more variables to ensure consistency: the per-page `page_lsn`, the per-page `record_lsn`, the `commit_lsn`, and the `recovery_lsn`.
 The `page_lsn` is the LSN of the last WAL record generated for a given page.
 This is the value that is compared with the WAL's `flushed_lsn` to make sure the page is safe to write out.
 The `record_lsn` is the last `page_lsn` value that is already on disk.
@@ -107,6 +107,6 @@ The `recovery_lsn` represents the oldest WAL record that we still need.
 Each time the database file is `fsync()`'d, the `recovery_lsn` is updated to match the oldest `record_lsn` for a dirty cached page.
 Every change before this point must be safely on disk.
 Then, the `recovery_lsn` is checked against the WAL segments to determine if any can be removed.
-Finally, the `checkpoint_lsn` is the LSN of the most-recent checkpoint record (the special delta record mentioned in [WAL](#wal)).
+Finally, the `commit_lsn` is the LSN of the most-recent commit record (the special delta record mentioned in [WAL](#wal)).
 This value is saved in the database file header and is used to determine how the logical contents of the database should look.
-The database must ensure that there is always enough information in the WAL to revert to the most-recent checkpoint.
+The database must ensure that there is always enough information in the WAL to revert to the most-recent commit.

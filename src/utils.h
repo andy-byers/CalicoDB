@@ -53,7 +53,7 @@ static constexpr std::size_t kMinPageSize = 1'024;
 static constexpr std::size_t kMaxPageSize = 65'536;
 static constexpr std::size_t kMinFrameCount = 16;
 static constexpr std::size_t kMaxCacheSize = 1 << 30;
-static constexpr auto kDefaultWalSuffix = "-wal-";
+static constexpr auto kDefaultWalSuffix = "-wal";
 static constexpr auto kDefaultLogSuffix = "-log";
 
 // Source: http://graphics.stanford.edu/~seander/bithacks.html#DetermineIfPowerOf2
@@ -95,37 +95,37 @@ struct Id {
     Id() = default;
 
     template <class T>
-    explicit Id(T t)
+    explicit constexpr Id(T t)
         : value(static_cast<std::uint32_t>(t))
     {
     }
 
-    [[nodiscard]] static auto from_index(std::size_t index) noexcept -> Id
+    [[nodiscard]] static constexpr auto from_index(std::size_t index) noexcept -> Id
     {
         return Id(index + 1);
     }
 
-    [[nodiscard]] static auto null() noexcept -> Id
+    [[nodiscard]] static constexpr auto null() noexcept -> Id
     {
         return Id(kNull);
     }
 
-    [[nodiscard]] static auto root() noexcept -> Id
+    [[nodiscard]] static constexpr auto root() noexcept -> Id
     {
         return Id(kRoot);
     }
 
-    [[nodiscard]] auto is_null() const noexcept -> bool
+    [[nodiscard]] constexpr auto is_null() const noexcept -> bool
     {
         return value == kNull;
     }
 
-    [[nodiscard]] auto is_root() const noexcept -> bool
+    [[nodiscard]] constexpr auto is_root() const noexcept -> bool
     {
         return value == kRoot;
     }
 
-    [[nodiscard]] auto as_index() const noexcept -> std::size_t
+    [[nodiscard]] constexpr auto as_index() const noexcept -> std::size_t
     {
         CALICODB_EXPECT_NE(value, null().value);
         return value - 1;
@@ -154,72 +154,14 @@ inline auto operator!=(Id lhs, Id rhs) -> bool
     return lhs.value != rhs.value;
 }
 
-struct Lsn {
-    static constexpr std::uint64_t kNull = 0;
-    static constexpr std::uint64_t kBase = 1;
-    static constexpr auto kSize = sizeof(kNull);
-
-    struct Hash {
-        auto operator()(const Lsn &id) const -> std::uint64_t
-        {
-            return id.value;
-        }
-    };
-
-    Lsn() = default;
-
-    template <class T>
-    explicit Lsn(T t)
-        : value(static_cast<std::uint64_t>(t))
-    {
-    }
-
-    [[nodiscard]] static auto null() noexcept -> Lsn
-    {
-        return Lsn(kNull);
-    }
-
-    [[nodiscard]] static auto base() noexcept -> Lsn
-    {
-        return Lsn(kBase);
-    }
-
-    [[nodiscard]] auto is_null() const noexcept -> bool
-    {
-        return value == kNull;
-    }
-
-    std::uint64_t value = kNull;
-};
-
-inline auto operator<(Lsn lhs, Lsn rhs) -> bool
-{
-    return lhs.value < rhs.value;
-}
-
-inline auto operator<=(Lsn lhs, Lsn rhs) -> bool
-{
-    return lhs.value <= rhs.value;
-}
-
-inline auto operator==(Lsn lhs, Lsn rhs) -> bool
-{
-    return lhs.value == rhs.value;
-}
-
-inline auto operator!=(Lsn lhs, Lsn rhs) -> bool
-{
-    return lhs.value != rhs.value;
-}
-
 struct DBState {
     Status status;
     std::size_t batch_size = 0;
     std::size_t record_count = 0;
-    Lsn commit_lsn;
+    std::size_t ckpt_number = 0;
     Id freelist_head;
     Id max_page_id;
-    bool is_running = false;
+    bool use_wal = false;
 };
 
 struct TreeStatistics {

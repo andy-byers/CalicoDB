@@ -5,7 +5,6 @@
 #ifndef CALICODB_PAGE_H
 #define CALICODB_PAGE_H
 
-#include "delta.h"
 #include "encoding.h"
 #include "frames.h"
 #include "header.h"
@@ -47,7 +46,6 @@ struct LogicalPageId {
 
 class Page
 {
-    std::vector<PageDelta> m_deltas;
     Id m_id;
     std::size_t m_size = 0;
     CacheEntry *m_entry = nullptr;
@@ -90,19 +88,12 @@ public:
         return Slice(m_data, m_size).range(offset, size);
     }
 
-    auto mutate(std::size_t offset, std::size_t size) -> char *
-    {
-        CALICODB_EXPECT_TRUE(m_write);
-        insert_delta(m_deltas, PageDelta {offset, size});
-        return m_data + offset;
-    }
-
-    [[nodiscard]] auto data() const -> const char *
+    [[nodiscard]] auto data() -> char *
     {
         return m_data;
     }
 
-    [[nodiscard]] auto data() -> char *
+    [[nodiscard]] auto data() const -> const char *
     {
         return m_data;
     }
@@ -112,24 +103,12 @@ public:
         return m_size;
     }
 
-    [[nodiscard]] auto has_changes() const -> bool
-    {
-        return !m_deltas.empty();
-    }
-
-    [[nodiscard]] auto deltas() -> const std::vector<PageDelta> &
-    {
-        compress_deltas(m_deltas);
-        return m_deltas;
-    }
-
-    auto TEST_populate(Id page_id, char *data, std::size_t size, bool write, const std::vector<PageDelta> &deltas = {}) -> void
+    auto TEST_populate(Id page_id, char *data, std::size_t size, bool write) -> void
     {
         m_id = page_id;
         m_data = data;
         m_size = size;
         m_write = write;
-        m_deltas = deltas;
     }
 
     // Disable copies but allow moves.
@@ -144,30 +123,10 @@ public:
     return FileHeader::kSize * page.id().is_root();
 }
 
-[[nodiscard]] inline auto read_page_lsn(const Page &page) -> Lsn
-{
-    return Lsn(get_u64(page.data() + page_offset(page)));
-}
-
-inline auto write_page_lsn(Page &page, Lsn lsn) -> void
-{
-    put_u64(page.mutate(page_offset(page), Lsn::kSize), lsn.value);
-}
-
 // TODO: These make more sense and can be used for frames as well.
 [[nodiscard]] inline auto page_offset(Id page_id) -> std::size_t
 {
     return FileHeader::kSize * page_id.is_root();
-}
-
-[[nodiscard]] inline auto read_page_lsn(Id page_id, const char *data) -> Lsn
-{
-    return Lsn(get_u64(data + page_offset(page_id)));
-}
-
-inline auto write_page_lsn(Id page_id, Lsn lsn, char *data) -> void
-{
-    put_u64(data + page_offset(page_id), lsn.value);
 }
 
 } // namespace calicodb

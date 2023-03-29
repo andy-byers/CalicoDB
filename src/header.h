@@ -46,17 +46,11 @@ struct FileHeader {
     std::uint32_t magic_code = kMagicCode;
     std::uint32_t header_crc = 0;
     std::uint32_t page_count = 0;
-    std::uint64_t record_count = 0;
+    std::uint64_t record_count = 0; // TODO: Don't store this! Needs to be updated way too frequently to be feasible.
     Id freelist_head;
-    Lsn commit_lsn;
+    std::uint64_t ckpt_number = 0;
     unsigned page_size = 0;
 };
-
-// Page Header Format:
-//     Offset  Size  Name
-//    --------------------------
-//     0       8     page_lsn
-static constexpr auto kPageHeaderSize = Lsn::kSize;
 
 // Node Header Format:
 //     Offset  Size  Name

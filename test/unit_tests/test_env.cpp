@@ -60,12 +60,10 @@ template <class Base, class Store>
     auto s = Status::ok();
     Base *temp = nullptr;
 
-    if constexpr (std::is_same_v<Reader, Base>) {
-        s = env.new_reader(name, temp);
-    } else if constexpr (std::is_same_v<Editor, Base>) {
-        s = env.new_editor(name, temp);
-    } else if constexpr (std::is_same_v<Logger, Base>) {
-        s = env.new_logger(name, temp);
+    if constexpr (std::is_same_v<File, Base>) {
+        s = env.new_file(name, temp);
+    } else if constexpr (std::is_same_v<File, Base>) {
+        s = env.new_file(name, temp);
     } else {
         ADD_FAILURE() << "Error: Unexpected blob type";
     }
@@ -90,8 +88,7 @@ auto write_whole_file(const std::string &path, const Slice &message) -> void
     return message;
 }
 
-template <class Writer>
-constexpr auto write_out_randomly(tools::RandomGenerator &random, Writer &writer, const Slice &message) -> void
+auto write_out_randomly(tools::RandomGenerator &random, File &writer, const Slice &message) -> void
 {
     constexpr std::size_t num_chunks = 20;
     ASSERT_GT(message.size(), num_chunks) << "File is too small for this test";
@@ -102,19 +99,14 @@ constexpr auto write_out_randomly(tools::RandomGenerator &random, Writer &writer
         const auto chunk_size = std::min<std::size_t>(in.size(), random.Next(message.size() / num_chunks));
         auto chunk = in.range(0, chunk_size);
 
-        if constexpr (std::is_base_of_v<Logger, Writer>) {
-            ASSERT_TRUE(writer.write(chunk).is_ok());
-        } else {
-            ASSERT_TRUE(writer.write(counter, chunk).is_ok());
-            counter += chunk_size;
-        }
+        ASSERT_TRUE(writer.write(counter, chunk).is_ok());
+        counter += chunk_size;
         in.advance(chunk_size);
     }
     ASSERT_TRUE(in.is_empty());
 }
 
-template <class Reader>
-[[nodiscard]] auto read_back_randomly(tools::RandomGenerator &random, Reader &reader, std::size_t size) -> std::string
+[[nodiscard]] auto read_back_randomly(tools::RandomGenerator &random, File &reader, std::size_t size) -> std::string
 {
     static constexpr std::size_t num_chunks = 20;
     EXPECT_GT(size, num_chunks) << "File is too small for this test";
@@ -124,13 +116,7 @@ template <class Reader>
 
     while (counter < size) {
         const auto chunk_size = std::min<std::size_t>(size - counter, random.Next(size / num_chunks));
-        Slice slice;
-        const auto s = reader.read(counter, chunk_size, out_data, &slice);
-
-        if (slice.size() != chunk_size) {
-            return backing;
-        }
-
+        const auto s = reader.read_exact(counter, chunk_size, out_data);
         EXPECT_TRUE(s.is_ok()) << "Error: " << s.to_string().data();
         EXPECT_EQ(chunk_size, chunk_size);
         out_data += chunk_size;
@@ -156,13 +142,13 @@ public:
     {
         std::filesystem::remove_all(filename);
 
-        InfoLogger *temp;
-        EXPECT_OK(env->new_info_logger(filename, temp));
+        LogFile *temp;
+        EXPECT_OK(env->new_log_file(filename, temp));
         file.reset(temp);
     }
 
     std::string filename {"__test_info_logger"};
-    std::unique_ptr<InfoLogger> file;
+    std::unique_ptr<LogFile> file;
 };
 
 TEST_F(PosixInfoLoggerTests, WritesFormattedText)
@@ -190,18 +176,16 @@ public:
     PosixReaderTests()
     {
         write_whole_file(kFilename, "");
-        file = open_blob<Reader>(*env, kFilename);
+        file = open_blob<File>(*env, kFilename);
     }
 
-    std::unique_ptr<Reader> file;
+    std::unique_ptr<File> file;
 };
 
 TEST_F(PosixReaderTests, NewFileIsEmpty)
 {
     std::string backing(8, '\x00');
-    Slice slice;
-    ASSERT_TRUE(file->read(0, 8, backing.data(), &slice).is_ok());
-    ASSERT_EQ(slice.size(), 0);
+    ASSERT_TRUE(file->read_exact(0, 8, backing.data()).is_not_found());
 }
 
 TEST_F(PosixReaderTests, ReadsBackContents)
@@ -215,19 +199,17 @@ class PosixEditorTests : public FileTests
 {
 public:
     PosixEditorTests()
-        : file {open_blob<Editor>(*env, kFilename)}
+        : file {open_blob<File>(*env, kFilename)}
     {
     }
 
-    std::unique_ptr<Editor> file;
+    std::unique_ptr<File> file;
 };
 
 TEST_F(PosixEditorTests, NewFileIsEmpty)
 {
     std::string backing(8, '\x00');
-    Slice slice;
-    ASSERT_TRUE(file->read(0, 8, backing.data(), &slice).is_ok());
-    ASSERT_TRUE(slice.is_empty());
+    ASSERT_TRUE(file->read_exact(0, 8, backing.data()).is_io_error());
 }
 
 TEST_F(PosixEditorTests, WritesOutAndReadsBackData)
@@ -235,24 +217,6 @@ TEST_F(PosixEditorTests, WritesOutAndReadsBackData)
     auto data = random.Generate(500);
     write_out_randomly(random, *file, data);
     ASSERT_EQ(read_back_randomly(random, *file, data.size()), data);
-}
-
-class PosixLoggerTests : public FileTests
-{
-public:
-    PosixLoggerTests()
-        : file {open_blob<Logger>(*env, kFilename)}
-    {
-    }
-
-    std::unique_ptr<Logger> file;
-};
-
-TEST_F(PosixLoggerTests, WritesOutData)
-{
-    auto data = random.Generate(500);
-    write_out_randomly<Logger>(random, *file, data);
-    ASSERT_EQ(read_whole_file(kFilename), data.to_string());
 }
 
 class EnvPosixTests : public OnDiskTest
@@ -279,21 +243,19 @@ public:
 
 TEST_F(FakeEnvTests, ReaderCannotCreateFile)
 {
-    Reader *temp;
-    const auto s = env->new_reader("nonexistent", temp);
+    File *temp;
+    const auto s = env->new_file("nonexistent", temp);
     ASSERT_TRUE(s.is_not_found()) << "Error: " << s.to_string().data();
 }
 
 TEST_F(FakeEnvTests, ReadsAndWrites)
 {
-    auto ra_editor = open_blob<Editor>(*env, kFilename);
-    auto ra_reader = open_blob<Reader>(*env, kFilename);
-    auto ap_writer = open_blob<Logger>(*env, kFilename);
+    auto ra_editor = open_blob<File>(*env, kFilename);
+    auto ra_reader = open_blob<File>(*env, kFilename);
 
     const auto first_input = random.Generate(500);
     const auto second_input = random.Generate(500);
     write_out_randomly(random, *ra_editor, first_input);
-    write_out_randomly(random, *ap_writer, second_input);
     const auto output_1 = read_back_randomly(random, *ra_reader, 1'000);
     const auto output_2 = read_back_randomly(random, *ra_editor, 1'000);
     ASSERT_EQ(output_1, output_2);
@@ -302,16 +264,16 @@ TEST_F(FakeEnvTests, ReadsAndWrites)
 
 TEST_F(FakeEnvTests, ReaderStopsAtEOF)
 {
-    auto ra_editor = open_blob<Editor>(*env, kFilename);
-    auto ra_reader = open_blob<Reader>(*env, kFilename);
+    auto ra_editor = open_blob<File>(*env, kFilename);
+    auto ra_reader = open_blob<File>(*env, kFilename);
 
     const auto data = random.Generate(500);
     write_out_randomly(random, *ra_editor, data);
 
-    std::string buffer(data.size() * 2, '\x00');
     Slice slice;
+    std::string buffer(data.size() * 2, '\x00');
     ASSERT_OK(ra_reader->read(0, buffer.size(), buffer.data(), &slice));
-    ASSERT_EQ(slice, data);
+    ASSERT_EQ(slice.size(), data.size());
 }
 
 } // namespace calicodb

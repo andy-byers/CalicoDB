@@ -5,83 +5,107 @@
 #ifndef CALICODB_WAL_H
 #define CALICODB_WAL_H
 
-#include "wal_record.h"
+#include "utils.h"
+#include <vector>
 
 namespace calicodb
 {
 
-class WalWriter;
+class Env;
+class File;
 
-class WriteAheadLog
+class WalIndex;
+class WalIterator;
+
+struct WalStatistics {
+    std::size_t bytes_read = 0;
+    std::size_t bytes_written = 0;
+};
+
+// New pager page acquire routine:
+//   1. Check if the page is cached
+//      + If it is, return it
+//      + If it is not, goto 2
+//   2. Check if the page is in the dirty table
+//      + If it is not, read it from the database file
+//      + If it is, goto 3
+//   3. Read the WAL index to determine the most-recent frame containing the page
+//   4. Use the frame contents to reconstruct the page
+//   5. Cache and return the page
+
+class Wal
 {
 public:
-    friend class DBImpl;
-
     struct Parameters {
-        std::string prefix;
-        Env *env = nullptr;
+        std::string filename;
         std::size_t page_size = 0;
+        Env *env = nullptr;
     };
 
-    WriteAheadLog() = default;
-    virtual ~WriteAheadLog();
-    [[nodiscard]] static auto open(const Parameters &param, WriteAheadLog **out) -> Status;
-    [[nodiscard]] virtual auto close() -> Status;
-    [[nodiscard]] virtual auto flushed_lsn() const -> Lsn;
-    [[nodiscard]] virtual auto written_lsn() const -> Lsn;
-    [[nodiscard]] virtual auto current_lsn() const -> Lsn;
-    [[nodiscard]] virtual auto find_obsolete_lsn(Lsn &out) -> Status;
-    [[nodiscard]] virtual auto start_writing() -> Status;
-    [[nodiscard]] virtual auto synchronize(bool flush) -> Status;
-    [[nodiscard]] virtual auto cleanup(Lsn recovery_lsn) -> Status;
-    [[nodiscard]] virtual auto log_vacuum(bool is_start, Lsn *out) -> Status;
-    [[nodiscard]] virtual auto log_delta(Id page_id, const Slice &image, const std::vector<PageDelta> &delta, Lsn *out) -> Status;
-    [[nodiscard]] virtual auto log_image(Id page_id, const Slice &image, Lsn *out) -> Status;
+    virtual ~Wal();
 
-    [[nodiscard]] virtual auto bytes_written() const -> std::size_t
-    {
-        return m_bytes_written;
-    }
+    // Open or create a WAL file called "filename".
+    [[nodiscard]] static auto open(const Parameters &param, Wal *&out) -> Status;
 
-private:
-    explicit WriteAheadLog(const Parameters &param);
-    [[nodiscard]] auto next_segment_id() const -> Id;
-    [[nodiscard]] auto finish_current_segment() -> Status;
-    [[nodiscard]] auto open_next_segment(Logger *&file) -> Status;
-    [[nodiscard]] auto log(const Slice &payload) -> Status;
-    auto advance_lsn(Lsn *out) -> void;
+    // Read the most-recent version of page "page_id" from the WAL.
+    [[nodiscard]] virtual auto read(Id page_id, char *page) -> Status = 0;
 
-    static constexpr std::size_t kSegmentCutoff = 32;
+    // Write a new version of page "page_id" to the WAL.
+    [[nodiscard]] virtual auto write(Id page_id, const Slice &page, std::size_t db_size) -> Status = 0;
 
-    // Maps each completed segment to the first LSN written to it.
-    std::map<Id, Lsn> m_segments;
+    // Write the WAL contents back to the DB. Resets internal counters such
+    // that the next write to the WAL will start at the beginning again.
+    [[nodiscard]] virtual auto checkpoint(File &db_file) -> Status = 0;
 
-    // Last LSN written to disk. Always greater than or equal to the "flushed LSN".
-    Lsn m_written_lsn;
+    [[nodiscard]] virtual auto sync() -> Status = 0;
 
-    // Last LSN that is definitely on disk. The file must be fsync()'d before
-    // this value can be increased to match the "written LSN".
-    Lsn m_flushed_lsn;
+    [[nodiscard]] virtual auto commit() -> Status = 0;
 
-    // Last LSN written to the tail buffer. Always greater than or equal to the
-    // "written LSN".
-    Lsn m_last_lsn;
+    [[nodiscard]] virtual auto statistics() const -> WalStatistics = 0;
+};
 
-    // Prefix used for WAL segments.
-    std::string m_prefix;
+struct WalIndexHeader {
+    std::uint32_t version = 0;
+    std::uint32_t change = 0;
+    bool is_init = false;
+    std::uint32_t page_size = 0;
+    std::uint32_t max_frame = 0;
+    std::uint32_t page_count = 0;
+    std::uint32_t frame_checksum = 0;
+    std::uint32_t salt[2] = {};
+    std::uint32_t checksum[2] = {};
+};
 
-    // Directory containing the WAL segments (must be a prefix of "m_prefix"). Used to
-    // fsync() the directory when a new segment is created.
-    std::string m_dirname;
+// The WAL index looks like this in memory:
+//
+//     <h><frames><hashes>
+//     <frames   ><hashes>
+//     <frames   ><hashes>
+//     ...
+//
+// "<h>" represents the index header.
 
-    std::string m_data_buffer;
-    std::string m_tail_buffer;
-    std::size_t m_bytes_written = 0;
+class WalIndex final
+{
+    std::vector<char *> m_tables;
+    WalIndexHeader *m_header = nullptr;
+    std::size_t m_frame_number = 0;
 
-    Env *m_env = nullptr;
-    WalWriter *m_writer = nullptr;
-    Logger *m_file = nullptr;
-    Reader *m_dir = nullptr;
+    struct WalTable {
+        std::uint32_t *frames = nullptr;
+        std::uint16_t *hashes = nullptr;
+        std::size_t base = 0;
+    };
+
+    [[nodiscard]] auto create_or_open_table(std::size_t table_number) -> WalTable;
+
+public:
+    ~WalIndex();
+    explicit WalIndex(WalIndexHeader &header);
+    [[nodiscard]] auto frame_for_page(Id page_id, Id min_frame_id, Id &out) -> Status;
+    [[nodiscard]] auto page_for_frame(Id frame_id) -> Id;
+    [[nodiscard]] auto assign(Id page_id, Id frame_id) -> Status;
+    auto cleanup() -> void;
 };
 
 } // namespace calicodb

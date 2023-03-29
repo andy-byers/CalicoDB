@@ -25,7 +25,7 @@ inline constexpr auto compute_min_local(std::size_t page_size) -> std::size_t
 {
     CALICODB_EXPECT_TRUE(is_power_of_two(page_size));
     // NOTE: This computation was adapted from a similar one in SQLite3.
-    return (page_size - kPageHeaderSize - NodeHeader::kSize) * 32 / 256 -
+    return (page_size - NodeHeader::kSize) * 32 / 256 -
            kMaxCellHeaderSize - kPointerSize;
 }
 
@@ -33,7 +33,7 @@ inline constexpr auto compute_max_local(std::size_t page_size) -> std::size_t
 {
     CALICODB_EXPECT_TRUE(is_power_of_two(page_size));
     // NOTE: This computation was adapted from a similar one in SQLite3.
-    return (page_size - kPageHeaderSize - NodeHeader::kSize) * 64 / 256 -
+    return (page_size - NodeHeader::kSize) * 64 / 256 -
            kMaxCellHeaderSize - kPointerSize;
 }
 
@@ -50,7 +50,7 @@ inline constexpr auto compute_local_size(std::size_t key_size, std::size_t value
 
 static auto node_header_offset(const Node &node)
 {
-    return page_offset(node.page) + kPageHeaderSize;
+    return page_offset(node.page);
 }
 
 static auto cell_slots_offset(const Node &node)
@@ -89,7 +89,7 @@ static auto read_child_id_at(const Node &node, std::size_t offset) -> Id
 
 static auto write_child_id_at(Node &node, std::size_t offset, Id child_id) -> void
 {
-    put_u32(node.page.mutate(offset, Id::kSize), child_id.value);
+    put_u32(node.page.data() + offset, child_id.value);
 }
 
 static auto read_child_id(const Node &node, std::size_t index) -> Id
@@ -137,12 +137,12 @@ static auto write_child_id(Cell &cell, Id child_id) -> void
 
 [[nodiscard]] auto read_next_id(const Page &page) -> Id
 {
-    return Id(get_u32(page.view(page_offset(page) + kPageHeaderSize)));
+    return Id(get_u32(page.view(page_offset(page))));
 }
 
 auto write_next_id(Page &page, Id next_id) -> void
 {
-    put_u32(page.mutate(page_offset(page) + kPageHeaderSize, Id::kSize), next_id.value);
+    put_u32(page.data() + page_offset(page), next_id.value);
 }
 
 static auto parse_external_cell(const NodeMeta &meta, char *data) -> Cell
@@ -237,14 +237,14 @@ auto read_cell(Node &node, std::size_t index) -> Cell
 static auto set_next_pointer(Node &node, std::size_t offset, std::size_t value) -> void
 {
     CALICODB_EXPECT_LT(value, node.page.size());
-    return put_u16(node.page.mutate(offset, kPointerSize), static_cast<std::uint16_t>(value));
+    return put_u16(node.page.data() + offset, static_cast<std::uint16_t>(value));
 }
 
 static auto set_block_size(Node &node, std::size_t offset, std::size_t value) -> void
 {
     CALICODB_EXPECT_GE(value, 4);
     CALICODB_EXPECT_LT(value, node.page.size());
-    return put_u16(node.page.mutate(offset + kPointerSize, kPointerSize), static_cast<std::uint16_t>(value));
+    return put_u16(node.page.data() + offset + kPointerSize, static_cast<std::uint16_t>(value));
 }
 
 static auto take_free_space(Node &node, std::size_t ptr0, std::size_t ptr1, std::size_t needed_size) -> std::size_t
@@ -407,7 +407,7 @@ auto BlockAllocator::defragment(Node &node, int skip) -> void
     }
     const auto offset = cell_area_offset(node);
     const auto size = node.page.size() - offset;
-    std::memcpy(node.page.mutate(offset, size), node.scratch + offset, size);
+    std::memcpy(node.page.data() + offset, node.scratch + offset, size);
 
     header.cell_start = static_cast<unsigned>(end);
     header.frag_count = 0;
@@ -457,8 +457,6 @@ static auto allocate_block(Node &node, unsigned index, unsigned size) -> std::si
     CALICODB_EXPECT_NE(offset, 0);
     node.set_slot(index, offset);
 
-    // Signal that there will be a change here, but don't write anything yet.
-    (void)node.page.mutate(offset, size);
     return offset;
 }
 
@@ -471,7 +469,7 @@ static auto free_block(Node &node, unsigned index, unsigned size) -> void
 auto write_cell(Node &node, std::size_t index, const Cell &cell) -> std::size_t
 {
     if (const auto offset = allocate_block(node, static_cast<unsigned>(index), static_cast<unsigned>(cell.size))) {
-        std::memcpy(node.page.mutate(offset, cell.size), cell.ptr, cell.size);
+        std::memcpy(node.page.data() + offset, cell.ptr, cell.size);
         return offset;
     }
     node.overflow_index = static_cast<unsigned>(index);
@@ -517,7 +515,7 @@ auto Node::get_slot(std::size_t index) const -> std::size_t
 auto Node::set_slot(std::size_t index, std::size_t pointer) -> void
 {
     CALICODB_EXPECT_LT(index, header.cell_count);
-    return put_u16(page.mutate(slots_offset + index * kPointerSize, kPointerSize), static_cast<std::uint16_t>(pointer));
+    return put_u16(page.data() + slots_offset + index * kPointerSize, static_cast<std::uint16_t>(pointer));
 }
 
 auto Node::insert_slot(std::size_t index, std::size_t pointer) -> void
@@ -531,7 +529,6 @@ auto Node::insert_slot(std::size_t index, std::size_t pointer) -> void
     std::memmove(data + kPointerSize, data, size);
     put_u16(data, static_cast<std::uint16_t>(pointer));
 
-    insert_delta(page.m_deltas, {offset, size + kPointerSize});
     gap_size -= static_cast<unsigned>(kPointerSize);
     ++header.cell_count;
 }
@@ -545,7 +542,6 @@ auto Node::remove_slot(std::size_t index) -> void
 
     std::memmove(data, data + kPointerSize, size);
 
-    insert_delta(page.m_deltas, {offset, size + kPointerSize});
     gap_size += kPointerSize;
     --header.cell_count;
 }
@@ -557,7 +553,7 @@ auto Node::take() && -> Page
             // Fragment count overflow.
             BlockAllocator::defragment(*this);
         }
-        header.write(page.mutate(node_header_offset(*this), NodeHeader::kSize));
+        header.write(page.data() + node_header_offset(*this));
     }
     return std::move(page);
 }
@@ -573,12 +569,12 @@ static auto merge_root(Node &root, Node &child) -> void
     // Copy the cell content area.
     CALICODB_EXPECT_GE(header.cell_start, cell_slots_offset(root));
     auto memory_size = child.page.size() - header.cell_start;
-    auto memory = root.page.mutate(header.cell_start, memory_size);
+    auto memory = root.page.data() + header.cell_start;
     std::memcpy(memory, child.page.data() + header.cell_start, memory_size);
 
     // Copy the header and cell pointers.
     memory_size = header.cell_count * kPointerSize;
-    memory = root.page.mutate(cell_slots_offset(root), memory_size);
+    memory = root.page.data() + cell_slots_offset(root);
     std::memcpy(memory, child.page.data() + cell_slots_offset(child), memory_size);
     root.header = header;
     root.meta = child.meta;
@@ -854,12 +850,12 @@ auto Tree::split_root(Node root, Node &out) -> Status
     // Copy the cell content area.
     const auto after_root_headers = cell_area_offset(root);
     auto memory_size = root.page.size() - after_root_headers;
-    auto memory = child.page.mutate(after_root_headers, memory_size);
+    auto memory = child.page.data() + after_root_headers;
     std::memcpy(memory, root.page.data() + after_root_headers, memory_size);
 
     // Copy the header and cell pointers. Doesn't copy the page LSN.
     memory_size = root.header.cell_count * kPointerSize;
-    memory = child.page.mutate(cell_slots_offset(child), memory_size);
+    memory = child.page.data() + cell_slots_offset(child);
     std::memcpy(memory, root.page.data() + cell_slots_offset(root), memory_size);
     child.header = root.header;
 
@@ -1574,8 +1570,7 @@ auto Tree::vacuum_step(Page &free, TableSet &tables, Id last_id) -> Status
             CALICODB_TRY(PointerMap::write_entry(*m_pager, next_id, next_entry));
         }
     }
-    std::memcpy(free.mutate(Lsn::kSize, free.size() - Lsn::kSize),
-                last.data() + Lsn::kSize, last.size() - Lsn::kSize);
+    std::memcpy(free.data(), last.data(), last.size());
     m_pager->release(std::move(last));
     return Status::ok();
 }
@@ -1605,8 +1600,7 @@ auto Tree::vacuum_one(Id target, TableSet &tables, bool *success) -> Status
     return Status::ok();
 }
 
-static constexpr auto kLinkHeaderOffset = Lsn::kSize;
-static constexpr auto kLinkContentOffset = kLinkHeaderOffset + Id::kSize;
+static constexpr auto kLinkContentOffset = Id::kSize;
 
 [[nodiscard]] static auto get_readable_content(const Page &page, std::size_t size_limit) -> Slice
 {
@@ -1628,7 +1622,7 @@ auto Freelist::pop(Page &page) -> Status
 {
     if (!m_head->is_null()) {
         CALICODB_TRY(m_pager->acquire(*m_head, page));
-        m_pager->upgrade(page, kLinkContentOffset);
+        m_pager->upgrade(page);
         *m_head = read_next_id(page);
 
         if (!m_head->is_null()) {
@@ -1671,9 +1665,7 @@ static constexpr auto kEntrySize =
 static auto entry_offset(Id map_id, Id page_id) -> std::size_t
 {
     CALICODB_EXPECT_LT(map_id, page_id);
-
-    // Account for the page LSN.
-    return Lsn::kSize + (page_id.value - map_id.value - 1) * kEntrySize;
+    return (page_id.value - map_id.value - 1) * kEntrySize;
 }
 
 static auto decode_entry(const char *data) -> PointerMap::Entry
@@ -1716,7 +1708,7 @@ auto PointerMap::write_entry(Pager &pager, Id page_id, Entry entry) -> Status
         if (!map.is_writable()) {
             pager.upgrade(map);
         }
-        auto data = map.mutate(offset, kEntrySize);
+        auto data = map.data() + offset;
         *data++ = entry.type;
         put_u32(data, entry.back_ptr.value);
     }
@@ -1731,8 +1723,7 @@ auto PointerMap::lookup(const Pager &pager, Id page_id) -> Id
     if (page_id.value < kFirstMapPage) {
         return Id::null();
     }
-    const auto usable_size = pager.page_size() - Lsn::kSize;
-    const auto inc = usable_size / kEntrySize + 1;
+    const auto inc = pager.page_size() / kEntrySize + 1;
     const auto idx = (page_id.value - kFirstMapPage) / inc;
     return Id(idx * inc + kFirstMapPage);
 }
@@ -1841,7 +1832,7 @@ auto OverflowList::write(Pager &pager, Freelist &freelist, Id &out, const Slice 
         CALICODB_TRY(s);
 
         auto content_size = std::min(a.size() + second.size(), page.size() - kLinkContentOffset);
-        auto content_data = page.mutate(kLinkContentOffset, content_size);
+        auto content_data = page.data() + kLinkContentOffset;
         auto limit = std::min(a.size(), content_size);
         std::memcpy(content_data, a.data(), limit);
         a.advance(limit);

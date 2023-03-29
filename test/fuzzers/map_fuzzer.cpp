@@ -103,7 +103,7 @@ auto MapFuzzer::step(const std::uint8_t *&data, std::size_t &size) -> Status
             reinterpret_cast<DBImpl &>(*m_db).TEST_tables().get(Id(2))->tree->TEST_validate();
             break;
         case kCheckpoint:
-            s = m_db->checkpoint();
+            s = m_db->commit();
             if (s.is_ok()) {
                 for (const auto &[k, v] : m_added) {
                     m_map[k] = v;

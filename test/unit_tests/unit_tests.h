@@ -12,7 +12,6 @@
 #include "tools.h"
 #include "utils.h"
 #include "wal.h"
-#include "wal_writer.h"
 #include <filesystem>
 #include <gtest/gtest.h>
 #include <iomanip>
@@ -126,53 +125,6 @@ public:
     std::unique_ptr<Env> env;
 };
 
-class DisabledWriteAheadLog : public WriteAheadLog
-{
-public:
-    DisabledWriteAheadLog() = default;
-    ~DisabledWriteAheadLog() override = default;
-
-    [[nodiscard]] auto flushed_lsn() const -> Lsn override
-    {
-        return Lsn(std::numeric_limits<std::uint64_t>::max());
-    }
-
-    [[nodiscard]] auto current_lsn() const -> Lsn override
-    {
-        return Lsn::null();
-    }
-
-    [[nodiscard]] auto bytes_written() const -> std::size_t override
-    {
-        return 0;
-    }
-
-    [[nodiscard]] auto log_delta(Id, const Slice &, const std::vector<PageDelta> &, Lsn *) -> Status override
-    {
-        return Status::ok();
-    }
-
-    [[nodiscard]] auto log_image(Id, const Slice &, Lsn *) -> Status override
-    {
-        return Status::ok();
-    }
-
-    [[nodiscard]] auto log_vacuum(bool, Lsn *) -> Status override
-    {
-        return Status::ok();
-    }
-
-    auto synchronize(bool flush) -> Status override
-    {
-        return Status::ok();
-    }
-
-    auto cleanup(Lsn) -> Status override
-    {
-        return Status::ok();
-    }
-};
-
 class TestWithPager : public InMemoryTest
 {
 public:
@@ -180,14 +132,15 @@ public:
     static constexpr auto kFrameCount = kMinFrameCount;
 
     TestWithPager()
-        : scratch(kPageSize, '\x00')
+        : scratch(kPageSize, '\x00'),
+          random(1'024 * 1'024 * 8)
     {
         tables.add(LogicalPageId::with_table(Id::root()));
         Pager *temp;
         EXPECT_OK(Pager::open({
                                   kFilename,
                                   env.get(),
-                                  &wal,
+                                  wal.get(),
                                   nullptr,
                                   &state,
                                   kFrameCount,
@@ -195,15 +148,16 @@ public:
                               },
                               &temp));
         pager.reset(temp);
+        state.use_wal = false;
     }
 
     DBState state;
     TableSet tables;
-    DisabledWriteAheadLog wal;
     std::string scratch;
     std::string collect_scratch;
     std::unique_ptr<Pager> pager;
-    tools::RandomGenerator random {1'024 * 1'024 * 8};
+    std::unique_ptr<tools::WalStub> wal;
+    tools::RandomGenerator random;
 };
 
 inline auto expect_ok(const Status &s) -> void
@@ -317,33 +271,34 @@ auto erase_one(T &t, const std::string &key) -> bool
 
 inline auto write_file(Env &env, const std::string &path, Slice in) -> void
 {
-    Editor *file;
-    ASSERT_TRUE(env.new_editor(path, file).is_ok());
-    ASSERT_TRUE(file->write(0, in).is_ok());
+    File *file;
+    ASSERT_OK(env.new_file(path, file));
+    ASSERT_OK(file->write(0, in));
     delete file;
 }
 
 inline auto append_file(Env &env, const std::string &path, Slice in) -> void
 {
-    Logger *file;
-    ASSERT_TRUE(env.new_logger(path, file).is_ok());
-    ASSERT_TRUE(file->write(in).is_ok());
+    std::size_t file_size;
+    ASSERT_OK(env.file_size(path, file_size));
+
+    File *file;
+    ASSERT_OK(env.new_file(path, file));
+    ASSERT_OK(file->write(file_size, in));
     delete file;
 }
 
 inline auto read_file(Env &env, const std::string &path) -> std::string
 {
-    Reader *file;
+    File *file;
     std::string out;
     std::size_t size;
 
     EXPECT_TRUE(env.file_size(path, size).is_ok());
-    EXPECT_TRUE(env.new_reader(path, file).is_ok());
+    EXPECT_TRUE(env.new_file(path, file).is_ok());
     out.resize(size);
 
-    Slice slice;
-    EXPECT_TRUE(file->read(0, size, out.data(), &slice).is_ok());
-    EXPECT_EQ(slice.size(), size);
+    EXPECT_TRUE(file->read_exact(0, size, out.data()).is_ok());
     delete file;
     return out;
 }

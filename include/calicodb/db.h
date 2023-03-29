@@ -13,7 +13,7 @@ namespace calicodb
 
 class Cursor;
 class Env;
-class InfoLogger;
+class LogFile;
 class Table;
 struct TableOptions;
 
@@ -26,14 +26,14 @@ struct Options {
     // Size of the page cache in bytes. Must be at least 16 pages (see above).
     std::size_t cache_size = 4'194'304; // 4 MB
 
-    // Alternate prefix to use for WAL segment files. Defaults to "dbname-wal-",
-    // where "dbname" is the name of the database.
-    std::string wal_prefix;
+    // Alternate filename to use for the WAL. If empty, creates the WAL at
+    // "dbname-wal", where "dbname" is the name of the database.
+    std::string wal_filename;
 
     // Custom destination for info log messages. Defaults to writing to a file
     // called "dbname-log", where "dbname" is the name of the database. See env.h
     // for details.
-    InfoLogger *info_log = nullptr;
+    LogFile *info_log = nullptr;
 
     // Custom storage environment. See env.h for details.
     Env *env = nullptr;
@@ -88,14 +88,14 @@ public:
     // next startup, the database will attempt to recover using the WAL.
     [[nodiscard]] virtual auto status() const -> Status = 0;
 
-    // Run a checkpoint operation, which updates the logical contents of the
-    // database to include all changes made since the last checkpoint.
+    // Run a commit operation, which updates the logical contents of the
+    // database to include all changes made since the last commit.
     //
     // This operation affects all tables that have pending updates, as well as creation
     // and dropping of tables. Synchronizes both the WAL and the database file with the
     // underlying filesystem, and ensures that the WAL contains the necessary information
     // to recover from a crash.
-    [[nodiscard]] virtual auto checkpoint() -> Status = 0;
+    [[nodiscard]] virtual auto commit() -> Status = 0;
 
     // Perform defragmentation and shrink the database file.
     //

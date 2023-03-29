@@ -26,8 +26,8 @@ static auto write_file_header(char *data, const FileHeader &header) -> void
     put_u64(data, header.record_count);
     data += sizeof(std::uint64_t);
 
-    put_u64(data, header.commit_lsn.value);
-    data += Lsn::kSize;
+    put_u64(data, header.ckpt_number);
+    data += sizeof(std::uint64_t);
 
     put_u16(data, static_cast<std::uint16_t>(header.page_size));
 }
@@ -49,8 +49,8 @@ auto FileHeader::read(const char *data) -> void
     record_count = get_u64(data);
     data += sizeof(std::uint64_t);
 
-    commit_lsn.value = get_u64(data);
-    data += Lsn::kSize;
+    ckpt_number = get_u64(data);
+    data += sizeof(std::uint64_t);
 
     page_size = get_u16(data);
 }

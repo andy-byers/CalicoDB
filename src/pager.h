@@ -5,8 +5,8 @@
 #ifndef CALICODB_PAGER_H
 #define CALICODB_PAGER_H
 
+#include "calicodb/env.h"
 #include "frames.h"
-#include "wal_record.h"
 #include <unordered_set>
 
 namespace calicodb
@@ -16,6 +16,7 @@ class Env;
 class FrameManager;
 class WriteAheadLog;
 class TableSet;
+class Wal;
 
 class Pager final
 {
@@ -25,25 +26,26 @@ public:
     struct Parameters {
         std::string filename;
         Env *env = nullptr;
-        WriteAheadLog *wal = nullptr;
-        InfoLogger *info_log = nullptr;
+        Wal *wal = nullptr;
+        LogFile *info_log = nullptr;
         DBState *state = nullptr;
         std::size_t frame_count = 0;
         std::size_t page_size = 0;
     };
 
+    ~Pager();
     [[nodiscard]] static auto open(const Parameters &param, Pager **out) -> Status;
     [[nodiscard]] auto page_count() const -> std::size_t;
     [[nodiscard]] auto page_size() const -> std::size_t;
-    [[nodiscard]] auto recovery_lsn() const -> Lsn;
     [[nodiscard]] auto bytes_read() const -> std::size_t;
     [[nodiscard]] auto bytes_written() const -> std::size_t;
     [[nodiscard]] auto truncate(std::size_t page_count) -> Status;
-    [[nodiscard]] auto flush(Lsn target_lsn = Lsn::null()) -> Status;
+    [[nodiscard]] auto flush() -> Status;
+    [[nodiscard]] auto commit() -> Status;
     [[nodiscard]] auto checkpoint() -> Status;
     [[nodiscard]] auto allocate(Page &page) -> Status;
     [[nodiscard]] auto acquire(Id page_id, Page &page) -> Status;
-    auto upgrade(Page &page, int important = -1) -> void;
+    auto upgrade(Page &page) -> void;
     auto release(Page page) -> void;
     auto load_state(const FileHeader &header) -> void;
 
@@ -58,19 +60,25 @@ public:
     }
 
 private:
-    explicit Pager(const Parameters &param, Editor &file, AlignedBuffer buffer);
-    auto clean_page(CacheEntry &entry) -> DirtyTable::Iterator;
-    auto make_frame_available() -> void;
+    explicit Pager(const Parameters &param, File &file, AlignedBuffer buffer);
+    [[nodiscard]] auto fetch_page(Id page_id, CacheEntry *&out) -> Status;
+    [[nodiscard]] auto read_page_from_file(Id page_id, char *out) const -> Status;
+    [[nodiscard]] auto write_page_to_file(Id pid, const Slice &in) const -> Status;
+    [[nodiscard]] auto ensure_available_frame() -> Status;
+    auto clean_page(CacheEntry &entry) -> void;
+
+    mutable std::size_t m_bytes_read = 0;
+    mutable std::size_t m_bytes_written = 0;
 
     std::string m_filename;
     FrameManager m_frames;
-    DirtyTable m_dirty;
+    std::set<Id> m_dirty;
     PageCache m_cache;
+    LogFile *m_info_log = nullptr;
+    File *m_file = nullptr;
     Env *m_env = nullptr;
-    InfoLogger *m_info_log = nullptr;
-    WriteAheadLog *m_wal = nullptr;
+    Wal *m_wal = nullptr;
     DBState *m_state = nullptr;
-    Lsn m_recovery_lsn;
     std::size_t m_page_count = 0;
 };
 

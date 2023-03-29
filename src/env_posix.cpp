@@ -45,7 +45,8 @@ static constexpr int kFilePermissions = 0644; // -rw-r--r--
 
 [[nodiscard]] static auto file_read(int file, std::size_t size, char *scratch, Slice *out) -> Status
 {
-    for (;;) {
+    const auto read_size = size;
+    for (std::size_t i = 0; i < read_size; ++i) {
         const auto n = read(file, scratch, size);
         if (n < 0) {
             if (errno == EINTR) {
@@ -53,10 +54,16 @@ static constexpr int kFilePermissions = 0644; // -rw-r--r--
             }
             return errno_to_status();
         }
-        if (out != nullptr) {
-            *out = Slice(scratch, static_cast<std::size_t>(n));
+        size -= static_cast<std::size_t>(n);
+        if (n == 0 || size == 0) {
+            break;
         }
-        break;
+    }
+    if (size != 0) {
+        std::memset(scratch + read_size - size, 0, size);
+    }
+    if (out != nullptr) {
+        *out = Slice(scratch, read_size - size);
     }
     return Status::ok();
 }
@@ -108,76 +115,36 @@ static constexpr int kFilePermissions = 0644; // -rw-r--r--
     return Status::ok();
 }
 
-PosixReader::PosixReader(std::string filename, int file)
+PosixFile::PosixFile(std::string filename, int file)
     : m_filename(std::move(filename)),
       m_file(file)
 {
     CALICODB_EXPECT_GE(file, 0);
 }
 
-PosixReader::~PosixReader()
+PosixFile::~PosixFile()
 {
     close(m_file);
 }
 
-auto PosixReader::read(std::size_t offset, std::size_t size, char *scratch, Slice *out) -> Status
+auto PosixFile::read(std::size_t offset, std::size_t size, char *scratch, Slice *out) -> Status
 {
     CALICODB_TRY(file_seek(m_file, static_cast<long>(offset), SEEK_SET, nullptr));
     return file_read(m_file, size, scratch, out);
 }
 
-PosixEditor::PosixEditor(std::string filename, int file)
-    : m_filename(std::move(filename)),
-      m_file(file)
-{
-    CALICODB_EXPECT_GE(file, 0);
-}
-
-PosixEditor::~PosixEditor()
-{
-    close(m_file);
-}
-
-auto PosixEditor::read(std::size_t offset, std::size_t size, char *scratch, Slice *out) -> Status
-{
-    CALICODB_TRY(file_seek(m_file, static_cast<long>(offset), SEEK_SET, nullptr));
-    return file_read(m_file, size, scratch, out);
-}
-
-auto PosixEditor::write(std::size_t offset, const Slice &in) -> Status
+auto PosixFile::write(std::size_t offset, const Slice &in) -> Status
 {
     CALICODB_TRY(file_seek(m_file, static_cast<long>(offset), SEEK_SET, nullptr));
     return file_write(m_file, in);
 }
 
-auto PosixEditor::sync() -> Status
+auto PosixFile::sync() -> Status
 {
     return file_sync(m_file);
 }
 
-PosixLogger::PosixLogger(std::string filename, int file)
-    : m_filename(std::move(filename)),
-      m_file(file)
-{
-    CALICODB_EXPECT_GE(file, 0);
-}
-
-PosixLogger::~PosixLogger()
-{
-    close(m_file);
-}
-
-auto PosixLogger::write(const Slice &in) -> Status
-{
-    return file_write(m_file, in);
-}
-
-auto PosixLogger::sync() -> Status
-{
-    return file_sync(m_file);
-}
-
-PosixInfoLogger::PosixInfoLogger(std::string filename, int file)
+PosixLogFile::PosixLogFile(std::string filename, int file)
     : m_buffer(kBufferSize, '\0'),
       m_filename(std::move(filename)),
       m_file(file)
@@ -185,12 +152,12 @@ PosixInfoLogger::PosixInfoLogger(std::string filename, int file)
     CALICODB_EXPECT_GE(file, 0);
 }
 
-PosixInfoLogger::~PosixInfoLogger()
+PosixLogFile::~PosixLogFile()
 {
     close(m_file);
 }
 
-auto PosixInfoLogger::logv(const char *fmt, ...) -> void
+auto PosixLogFile::logv(const char *fmt, ...) -> void
 {
     std::va_list args;
     va_start(args, fmt);
@@ -265,35 +232,19 @@ auto EnvPosix::sync_directory(const std::string &dirname) -> Status
     return s;
 }
 
-auto EnvPosix::new_reader(const std::string &filename, Reader *&out) -> Status
-{
-    int file;
-    CALICODB_TRY(file_open(filename, O_RDONLY, kFilePermissions, file));
-    out = new PosixReader(filename, file);
-    return Status::ok();
-}
-
-auto EnvPosix::new_editor(const std::string &filename, Editor *&out) -> Status
+auto EnvPosix::new_file(const std::string &filename, File *&out) -> Status
 {
     int file;
     CALICODB_TRY(file_open(filename, O_CREAT | O_RDWR, kFilePermissions, file));
-    out = new PosixEditor(filename, file);
+    out = new PosixFile(filename, file);
     return Status::ok();
 }
 
-auto EnvPosix::new_logger(const std::string &filename, Logger *&out) -> Status
+auto EnvPosix::new_log_file(const std::string &filename, LogFile *&out) -> Status
 {
     int file;
     CALICODB_TRY(file_open(filename, O_CREAT | O_WRONLY | O_APPEND, kFilePermissions, file));
-    out = new PosixLogger(filename, file);
-    return Status::ok();
-}
-
-auto EnvPosix::new_info_logger(const std::string &filename, InfoLogger *&out) -> Status
-{
-    int file;
-    CALICODB_TRY(file_open(filename, O_CREAT | O_WRONLY | O_APPEND, kFilePermissions, file));
-    out = new PosixInfoLogger(filename, file);
+    out = new PosixLogFile(filename, file);
     return Status::ok();
 }
 

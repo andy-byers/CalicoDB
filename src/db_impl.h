@@ -12,7 +12,6 @@
 #include "pager.h"
 #include "tree.h"
 #include "wal.h"
-#include "wal_writer.h"
 
 #include <map>
 
@@ -23,7 +22,7 @@ class Cursor;
 class DBImpl;
 class Env;
 class TableImpl;
-class WriteAheadLog;
+class Wal;
 struct TableState;
 
 static constexpr auto kRootTableName = "calicodb.root";
@@ -96,7 +95,7 @@ public:
     [[nodiscard]] auto drop_table(Table *&table) -> Status override;
     auto close_table(Table *&table) -> void override;
 
-    [[nodiscard]] auto checkpoint() -> Status override;
+    [[nodiscard]] auto commit() -> Status override;
     [[nodiscard]] auto status() const -> Status override;
     [[nodiscard]] auto vacuum() -> Status override;
 
@@ -112,7 +111,7 @@ public:
     using DB::erase;
     [[nodiscard]] auto erase(Table &table, const Slice &key) -> Status override;
 
-    [[nodiscard]] auto TEST_wal() const -> const WriteAheadLog &;
+    [[nodiscard]] auto TEST_wal() const -> const Wal &;
     [[nodiscard]] auto TEST_pager() const -> const Pager &;
     [[nodiscard]] auto TEST_tables() const -> const TableSet &;
     [[nodiscard]] auto TEST_state() const -> const DBState &;
@@ -121,10 +120,10 @@ public:
 private:
     [[nodiscard]] auto get_table_info(std::vector<std::string> &names, std::vector<LogicalPageId> *roots) const -> Status;
     [[nodiscard]] auto remove_empty_table(const std::string &name, TableState &state) -> Status;
-    [[nodiscard]] auto do_checkpoint() -> Status;
+    [[nodiscard]] auto do_commit() -> Status;
     [[nodiscard]] auto load_file_header() -> Status;
     [[nodiscard]] auto do_vacuum() -> Status;
-    [[nodiscard]] auto open_wal_reader(Id segment, std::unique_ptr<Reader> &out) -> Status;
+    [[nodiscard]] auto open_wal_reader(Id segment, std::unique_ptr<File> &out) -> Status;
     [[nodiscard]] auto ensure_consistency() -> Status;
     [[nodiscard]] auto recovery_phase_1() -> Status;
     [[nodiscard]] auto recovery_phase_2() -> Status;
@@ -136,15 +135,16 @@ private:
     Table *m_default = nullptr;
     Table *m_root = nullptr;
 
-    WriteAheadLog *m_wal = nullptr;
+    Wal *m_wal = nullptr;
     Pager *m_pager = nullptr;
     Env *m_env = nullptr;
-    InfoLogger *m_info_log = nullptr;
+    LogFile *m_log = nullptr;
 
-    const std::string m_filename;
-    const std::string m_wal_prefix;
+    const std::string m_db_filename;
+    const std::string m_wal_filename;
+    const std::string m_log_filename;
     const bool m_owns_env;
-    const bool m_owns_info_log;
+    const bool m_owns_log;
 };
 
 auto setup_db(const std::string &filename, Env &env, Options &options, FileHeader &header) -> Status;

@@ -84,7 +84,7 @@ TEST_F(DefaultTableTests, DefaultTablePersists)
 TEST_F(DefaultTableTests, RecordInDefaultTablePersists)
 {
     ASSERT_OK(db->put("k", "v"));
-    ASSERT_OK(db->checkpoint());
+    ASSERT_OK(db->commit());
 
     std::string v;
     ASSERT_OK(db->get("k", &v));
@@ -164,12 +164,12 @@ TEST_F(TableTests, TableCreationIsPartOfTransaction)
 
 TEST_F(TableTests, TableDestructionIsPartOfTransaction)
 {
-    ASSERT_OK(db->checkpoint());
+    ASSERT_OK(db->commit());
 
     // Checkpoint is needed for the drop_table() to persist after reopen.
     ASSERT_OK(db->drop_table(table));
     table = nullptr;
-    ASSERT_OK(db->checkpoint());
+    ASSERT_OK(db->commit());
 
     reopen_db();
 
@@ -196,7 +196,7 @@ TEST_F(TableTests, RecordsPersist)
 
     tools::expect_db_contains(*db, records_0);
     tools::expect_db_contains(*db, *table, records_1);
-    ASSERT_OK(db->checkpoint());
+    ASSERT_OK(db->commit());
 
     reopen_db();
     reopen_tables();
@@ -281,7 +281,7 @@ TEST_F(TwoTableTests, DropTable)
 
 TEST_F(TwoTableTests, TablesCreatedBeforeCheckpointAreRemembered)
 {
-    ASSERT_OK(db->checkpoint());
+    ASSERT_OK(db->commit());
     reopen_db();
 
     std::vector<std::string> tables;
@@ -344,7 +344,7 @@ TEST_F(TwoTableTests, RecordsPersist)
     tools::expect_db_contains(*db, records_0);
     tools::expect_db_contains(*db, *table_1, records_1);
     tools::expect_db_contains(*db, *table_2, records_2);
-    ASSERT_OK(db->checkpoint());
+    ASSERT_OK(db->commit());
 
     reopen_db();
     reopen_tables();
@@ -436,7 +436,7 @@ private:
 
         // Create some pages before the 2 user tables.
         m_committed = tools::fill_db(*m_db, m_random, kRecordCount);
-        ASSERT_OK(m_db->checkpoint());
+        ASSERT_OK(m_db->commit());
 
         for (std::size_t i = 0; i < num_tables; ++i) {
             m_tables.emplace_back();

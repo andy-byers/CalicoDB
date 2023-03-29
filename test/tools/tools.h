@@ -68,10 +68,8 @@ public:
     [[nodiscard]] virtual auto clone() const -> Env *;
 
     ~FakeEnv() override = default;
-    [[nodiscard]] auto new_info_logger(const std::string &filename, InfoLogger *&out) -> Status override;
-    [[nodiscard]] auto new_reader(const std::string &filename, Reader *&out) -> Status override;
-    [[nodiscard]] auto new_editor(const std::string &filename, Editor *&out) -> Status override;
-    [[nodiscard]] auto new_logger(const std::string &filename, Logger *&out) -> Status override;
+    [[nodiscard]] auto new_file(const std::string &filename, File *&out) -> Status override;
+    [[nodiscard]] auto new_log_file(const std::string &filename, LogFile *&out) -> Status override;
     [[nodiscard]] auto get_children(const std::string &dirname, std::vector<std::string> &out) const -> Status override;
     [[nodiscard]] auto rename_file(const std::string &old_filename, const std::string &new_filename) -> Status override;
     [[nodiscard]] auto file_exists(const std::string &filename) const -> bool override;
@@ -81,9 +79,8 @@ public:
     [[nodiscard]] auto sync_directory(const std::string &dirname) -> Status override { return Status::ok(); }
 
 protected:
-    friend class FakeEditor;
-    friend class FakeReader;
-    friend class FakeLogger;
+    friend class FakeFile;
+    friend class FakeLogFile;
 
     [[nodiscard]] auto get_memory(const std::string &filename) const -> Memory &;
     [[nodiscard]] auto read_file_at(const Memory &mem, std::size_t offset, std::size_t size, char *scratch, Slice *out) -> Status;
@@ -92,38 +89,17 @@ protected:
     mutable std::unordered_map<std::string, Memory> m_memory;
 };
 
-class FakeReader : public Reader
+class FakeFile : public File
 {
 public:
-    FakeReader(std::string filename, FakeEnv &parent, FakeEnv::Memory &mem)
+    FakeFile(std::string filename, FakeEnv &parent, FakeEnv::Memory &mem)
         : m_mem {&mem},
           m_parent {&parent},
           m_filename {std::move(filename)}
     {
     }
 
-    ~FakeReader() override = default;
-    [[nodiscard]] auto read(std::size_t offset, std::size_t size, char *scratch, Slice *out) -> Status override;
-
-protected:
-    friend class FakeEnv;
-
-    FakeEnv::Memory *m_mem = nullptr;
-    FakeEnv *m_parent = nullptr;
-    std::string m_filename;
-};
-
-class FakeEditor : public Editor
-{
-public:
-    FakeEditor(std::string filename, FakeEnv &parent, FakeEnv::Memory &mem)
-        : m_mem {&mem},
-          m_parent {&parent},
-          m_filename {std::move(filename)}
-    {
-    }
-
-    ~FakeEditor() override = default;
+    ~FakeFile() override = default;
     [[nodiscard]] auto read(std::size_t offset, std::size_t size, char *scratch, Slice *out) -> Status override;
     [[nodiscard]] auto write(std::size_t offset, const Slice &in) -> Status override;
     [[nodiscard]] auto sync() -> Status override;
@@ -136,32 +112,10 @@ protected:
     std::string m_filename;
 };
 
-class FakeLogger : public Logger
+class FakeLogFile : public LogFile
 {
 public:
-    FakeLogger(std::string filename, FakeEnv &parent, FakeEnv::Memory &mem)
-        : m_mem {&mem},
-          m_parent {&parent},
-          m_filename {std::move(filename)}
-    {
-    }
-
-    ~FakeLogger() override = default;
-    [[nodiscard]] auto write(const Slice &in) -> Status override;
-    [[nodiscard]] auto sync() -> Status override;
-
-protected:
-    friend class FakeEnv;
-
-    FakeEnv::Memory *m_mem = nullptr;
-    FakeEnv *m_parent = nullptr;
-    std::string m_filename;
-};
-
-class FakeInfoLogger : public InfoLogger
-{
-public:
-    ~FakeInfoLogger() override = default;
+    ~FakeLogFile() override = default;
     auto logv(const char *, ...) -> void override {}
 };
 
@@ -200,9 +154,8 @@ class FaultInjectionEnv : public FakeEnv
 {
     std::vector<Interceptor> m_interceptors;
 
-    friend class FaultInjectionEditor;
-    friend class FaultInjectionReader;
-    friend class FaultInjectionLogger;
+    friend class FaultInjectionFile;
+    friend class FaultInjectionLogFile;
 
     [[nodiscard]] auto try_intercept_syscall(Interceptor::Type type, const std::string &filename) -> Status;
 
@@ -212,10 +165,8 @@ public:
     virtual auto clear_interceptors() -> void;
 
     ~FaultInjectionEnv() override = default;
-    [[nodiscard]] auto new_info_logger(const std::string &filename, InfoLogger *&out) -> Status override;
-    [[nodiscard]] auto new_reader(const std::string &filename, Reader *&out) -> Status override;
-    [[nodiscard]] auto new_editor(const std::string &filename, Editor *&out) -> Status override;
-    [[nodiscard]] auto new_logger(const std::string &filename, Logger *&out) -> Status override;
+    [[nodiscard]] auto new_file(const std::string &filename, File *&out) -> Status override;
+    [[nodiscard]] auto new_log_file(const std::string &filename, LogFile *&out) -> Status override;
     [[nodiscard]] auto get_children(const std::string &dirname, std::vector<std::string> &out) const -> Status override;
     [[nodiscard]] auto rename_file(const std::string &old_filename, const std::string &new_filename) -> Status override;
     [[nodiscard]] auto file_exists(const std::string &filename) const -> bool override;
@@ -225,54 +176,31 @@ public:
     [[nodiscard]] auto sync_directory(const std::string &dirname) -> Status override { return Status::ok(); }
 };
 
-class FaultInjectionReader : public FakeReader
+class FaultInjectionFile : public FakeFile
 {
 public:
-    explicit FaultInjectionReader(Reader &reader)
-        : FakeReader {reinterpret_cast<FakeReader &>(reader)}
+    explicit FaultInjectionFile(File &file)
+        : FakeFile {reinterpret_cast<FakeFile &>(file)}
     {
     }
 
-    ~FaultInjectionReader() override = default;
-    [[nodiscard]] auto read(std::size_t offset, std::size_t size, char *scratch, Slice *out) -> Status override;
-};
-
-class FaultInjectionEditor : public FakeEditor
-{
-public:
-    explicit FaultInjectionEditor(Editor &editor)
-        : FakeEditor {reinterpret_cast<FakeEditor &>(editor)}
-    {
-    }
-    ~FaultInjectionEditor() override = default;
+    ~FaultInjectionFile() override = default;
     [[nodiscard]] auto read(std::size_t offset, std::size_t size, char *scratch, Slice *out) -> Status override;
     [[nodiscard]] auto write(std::size_t offset, const Slice &in) -> Status override;
     [[nodiscard]] auto sync() -> Status override;
 };
 
-class FaultInjectionLogger : public FakeLogger
+class FaultInjectionLogFile : public FakeLogFile
 {
 public:
-    explicit FaultInjectionLogger(Logger &logger)
-        : FakeLogger {reinterpret_cast<FakeLogger &>(logger)}
-    {
-    }
-    ~FaultInjectionLogger() override = default;
-    [[nodiscard]] auto write(const Slice &in) -> Status override;
-    [[nodiscard]] auto sync() -> Status override;
-};
-
-class FaultInjectionInfoLogger : public InfoLogger
-{
-public:
-    ~FaultInjectionInfoLogger() override = default;
+    ~FaultInjectionLogFile() override = default;
     auto logv(const char *, ...) -> void override {}
 };
 
-class StderrLogger : public InfoLogger
+class StderrLog : public LogFile
 {
 public:
-    ~StderrLogger() override = default;
+    ~StderrLog() override = default;
 
     auto logv(const char *fmt, ...) -> void override
     {
@@ -282,6 +210,37 @@ public:
         std::fputs("\n", stderr);
         va_end(args);
         std::fflush(stderr);
+    }
+};
+
+class WalStub : public Wal
+{
+public:
+    ~WalStub() override = default;
+
+    [[nodiscard]] auto read(Id, char *) -> Status
+    {
+        return Status::not_found("");
+    }
+
+    [[nodiscard]] auto write(Id, const Slice &) -> Status
+    {
+        return Status::ok();
+    }
+
+    [[nodiscard]] auto checkpoint() -> Status
+    {
+        return Status::ok();
+    }
+
+    [[nodiscard]] auto commit() -> Status
+    {
+        return Status::ok();
+    }
+
+    [[nodiscard]] auto statistics() const -> WalStatistics
+    {
+        return {};
     }
 };
 
