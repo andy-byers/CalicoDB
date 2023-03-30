@@ -823,7 +823,7 @@ TEST_F(WalIndexTests, SimulateUsage)
 //
 //     // Cleanup routine will never remove the last segment (the writer is on a new segment
 //     // so there are technically 2).
-//     ASSERT_OK(wal->cleanup(Lsn(std::numeric_limits<std::uint64_t>::max())));
+//     ASSERT_OK(wal->cleanup(Lsn(std::numeric_limits<U64>::max())));
 //     ASSERT_EQ(get_logs().size(), 2);
 //     ASSERT_OK(wal->close());
 //     wal.reset();

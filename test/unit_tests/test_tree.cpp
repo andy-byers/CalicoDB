@@ -1053,6 +1053,16 @@ INSTANTIATE_TEST_SUITE_P(
 class PointerMapTests : public TreeTests
 {
 public:
+    auto SetUp() -> void override
+    {
+        TreeTests::SetUp();
+
+        Page page;
+        ASSERT_OK(pager->allocate(page));
+        ASSERT_EQ(page.id().value, 2);
+        pager->release(std::move(page));
+    }
+
     [[nodiscard]] auto map_size() -> std::size_t
     {
         return pager->page_size() / (sizeof(char) + Id::kSize);
@@ -1071,10 +1081,6 @@ TEST_P(PointerMapTests, FirstPointerMapIsPage2)
 
 TEST_P(PointerMapTests, ReadsAndWritesEntries)
 {
-    std::string buffer(pager->page_size(), '\0');
-    Page map_page;
-    map_page.TEST_populate(Id(2), buffer.data(), buffer.size(), true);
-
     ASSERT_OK(PointerMap::write_entry(*pager, Id(3), PointerMap::Entry {Id(33), PointerMap::kTreeNode}));
     ASSERT_OK(PointerMap::write_entry(*pager, Id(4), PointerMap::Entry {Id(44), PointerMap::kFreelistLink}));
     ASSERT_OK(PointerMap::write_entry(*pager, Id(5), PointerMap::Entry {Id(55), PointerMap::kOverflowLink}));

@@ -56,6 +56,12 @@ static constexpr std::size_t kMaxCacheSize = 1 << 30;
 static constexpr auto kDefaultWalSuffix = "-wal";
 static constexpr auto kDefaultLogSuffix = "-log";
 
+// Fixed-width unsigned integers for use in the database file format.
+using U8 = std::uint8_t;
+using U16 = std::uint16_t;
+using U32 = std::uint32_t;
+using U64 = std::uint64_t;
+
 // Source: http://graphics.stanford.edu/~seander/bithacks.html#DetermineIfPowerOf2
 template <class T>
 constexpr auto is_power_of_two(T v) noexcept -> bool
@@ -81,12 +87,12 @@ constexpr auto is_power_of_two(T v) noexcept -> bool
 }
 
 struct Id {
-    static constexpr std::uint32_t kNull = 0;
-    static constexpr std::uint32_t kRoot = 1;
+    static constexpr U32 kNull = 0;
+    static constexpr U32 kRoot = 1;
     static constexpr auto kSize = sizeof(kNull);
 
     struct Hash {
-        auto operator()(const Id &id) const -> std::uint64_t
+        auto operator()(const Id &id) const -> U64
         {
             return id.value;
         }
@@ -96,7 +102,7 @@ struct Id {
 
     template <class T>
     explicit constexpr Id(T t)
-        : value(static_cast<std::uint32_t>(t))
+        : value(static_cast<U32>(t))
     {
     }
 
@@ -131,7 +137,7 @@ struct Id {
         return value - 1;
     }
 
-    std::uint32_t value = kNull;
+    U32 value = kNull;
 };
 
 inline auto operator<(Id lhs, Id rhs) -> bool

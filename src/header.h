@@ -36,19 +36,19 @@ class Page;
 // NOTE: The "page_size" field contains 0 if the maximum page size of 65,536 is used, since this
 // value cannot be represented by a 16-bit unsigned integer.
 struct FileHeader {
-    static constexpr std::uint32_t kMagicCode = 0xB11924E1;
+    static constexpr U32 kMagicCode = 0xB11924E1;
     static constexpr std::size_t kSize = 34;
     auto read(const char *data) -> void;
     auto write(char *data) const -> void;
 
-    [[nodiscard]] auto compute_crc() const -> std::uint32_t;
+    [[nodiscard]] auto compute_crc() const -> U32;
 
-    std::uint32_t magic_code = kMagicCode;
-    std::uint32_t header_crc = 0;
-    std::uint32_t page_count = 0;
-    std::uint64_t record_count = 0; // TODO: Don't store this! Needs to be updated way too frequently to be feasible.
+    U32 magic_code = kMagicCode;
+    U32 header_crc = 0;
+    U32 page_count = 0;
+    U64 record_count = 0; // TODO: Don't store this! Needs to be updated way too frequently to be feasible.
     Id freelist_head;
-    std::uint64_t ckpt_number = 0;
+    U64 ckpt_number = 0;
     unsigned page_size = 0;
 };
 

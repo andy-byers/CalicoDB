@@ -147,7 +147,7 @@ auto write_next_id(Page &page, Id next_id) -> void
 
 static auto parse_external_cell(const NodeMeta &meta, char *data) -> Cell
 {
-    std::uint64_t key_size, value_size;
+    U64 key_size, value_size;
     const auto *ptr = data;
     ptr = decode_varint(ptr, value_size);
     ptr = decode_varint(ptr, key_size);
@@ -165,7 +165,7 @@ static auto parse_external_cell(const NodeMeta &meta, char *data) -> Cell
 
 static auto parse_internal_cell(const NodeMeta &meta, char *data) -> Cell
 {
-    std::uint64_t key_size;
+    U64 key_size;
     const auto *ptr = decode_varint(data + Id::kSize, key_size);
     const auto header_size = static_cast<std::size_t>(ptr - data);
 
@@ -237,14 +237,14 @@ auto read_cell(Node &node, std::size_t index) -> Cell
 static auto set_next_pointer(Node &node, std::size_t offset, std::size_t value) -> void
 {
     CALICODB_EXPECT_LT(value, node.page.size());
-    return put_u16(node.page.data() + offset, static_cast<std::uint16_t>(value));
+    return put_u16(node.page.data() + offset, static_cast<U16>(value));
 }
 
 static auto set_block_size(Node &node, std::size_t offset, std::size_t value) -> void
 {
     CALICODB_EXPECT_GE(value, 4);
     CALICODB_EXPECT_LT(value, node.page.size());
-    return put_u16(node.page.data() + offset + kPointerSize, static_cast<std::uint16_t>(value));
+    return put_u16(node.page.data() + offset + kPointerSize, static_cast<U16>(value));
 }
 
 static auto take_free_space(Node &node, std::size_t ptr0, std::size_t ptr1, std::size_t needed_size) -> std::size_t
@@ -515,7 +515,7 @@ auto Node::get_slot(std::size_t index) const -> std::size_t
 auto Node::set_slot(std::size_t index, std::size_t pointer) -> void
 {
     CALICODB_EXPECT_LT(index, header.cell_count);
-    return put_u16(page.data() + slots_offset + index * kPointerSize, static_cast<std::uint16_t>(pointer));
+    return put_u16(page.data() + slots_offset + index * kPointerSize, static_cast<U16>(pointer));
 }
 
 auto Node::insert_slot(std::size_t index, std::size_t pointer) -> void
@@ -527,7 +527,7 @@ auto Node::insert_slot(std::size_t index, std::size_t pointer) -> void
     auto *data = page.data() + offset;
 
     std::memmove(data + kPointerSize, data, size);
-    put_u16(data, static_cast<std::uint16_t>(pointer));
+    put_u16(data, static_cast<U16>(pointer));
 
     gap_size -= static_cast<unsigned>(kPointerSize);
     ++header.cell_count;
@@ -1985,7 +1985,7 @@ auto PayloadManager::collect_key(Pager &pager, std::string &result, const Cell &
 
 auto PayloadManager::collect_value(Pager &pager, std::string &result, const Cell &cell, Slice *value) -> Status
 {
-    std::uint64_t value_size;
+    U64 value_size;
     decode_varint(cell.ptr, value_size);
     if (result.size() < value_size) {
         result.resize(value_size);
@@ -2063,9 +2063,9 @@ auto Node::TEST_validate() -> void
         account(0, cell_area_offset(*this));
 
         // Make sure the header fields are not obviously wrong.
-        CALICODB_EXPECT_LT(header.frag_count, static_cast<std::uint8_t>(-1) * 2);
-        CALICODB_EXPECT_LT(header.cell_count, static_cast<std::uint16_t>(-1));
-        CALICODB_EXPECT_LT(header.free_start, static_cast<std::uint16_t>(-1));
+        CALICODB_EXPECT_LT(header.frag_count, static_cast<U8>(-1) * 2);
+        CALICODB_EXPECT_LT(header.cell_count, static_cast<U16>(-1));
+        CALICODB_EXPECT_LT(header.free_start, static_cast<U16>(-1));
     }
     // Gap space.
     {
@@ -2297,7 +2297,7 @@ public:
             auto accumulated = cell.local_size;
             auto requested = cell.key_size;
             if (node.header.is_external) {
-                std::uint64_t value_size;
+                U64 value_size;
                 decode_varint(cell.ptr, value_size);
                 requested += value_size;
             }

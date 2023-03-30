@@ -26,20 +26,20 @@ TEST(TestUtils, ExpectationDeathTest)
 TEST(TestUtils, EncodingIsConsistent)
 {
     tools::RandomGenerator random;
-    const auto u16 = std::uint16_t(-1);
-    const auto u32 = std::uint32_t(-2);
-    const auto u64 = std::uint64_t(-3);
+    const auto u16 = U16(-1);
+    const auto u32 = U32(-2);
+    const auto u64 = U64(-3);
     std::string buffer(sizeof(u16) + sizeof(u32) + sizeof(u64) + 1, '\x00');
 
     auto dst = buffer.data();
     put_u16(dst, u16);
-    put_u32(dst += sizeof(std::uint16_t), u32);
-    put_u64(dst + sizeof(std::uint32_t), u64);
+    put_u32(dst += sizeof(U16), u32);
+    put_u64(dst + sizeof(U32), u64);
 
     auto src = buffer.data();
     ASSERT_EQ(u16, get_u16(src));
-    ASSERT_EQ(u32, get_u32(src += sizeof(std::uint16_t)));
-    ASSERT_EQ(u64, get_u64(src += sizeof(std::uint32_t)));
+    ASSERT_EQ(u32, get_u32(src += sizeof(U16)));
+    ASSERT_EQ(u64, get_u64(src += sizeof(U32)));
     ASSERT_EQ(buffer.back(), 0) << "buffer overflow";
 }
 

@@ -17,7 +17,7 @@ class MapFuzzer : public DbFuzzer
 public:
     ~MapFuzzer() override = default;
     explicit MapFuzzer(std::string path, Options *options = nullptr);
-    auto step(const std::uint8_t *&data, std::size_t &size) -> Status override;
+    auto step(const U8 *&data, std::size_t &size) -> Status override;
 
 private:
     std::map<std::string, std::string> m_map;

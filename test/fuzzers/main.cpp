@@ -10,7 +10,7 @@
 #include <filesystem>
 #include <string>
 
-extern "C" int LLVMFuzzerTestOneInput(const std::uint8_t *data, std::size_t size);
+extern "C" int LLVMFuzzerTestOneInput(const U8 *data, std::size_t size);
 
 auto main(int argc, const char *argv[]) -> int
 {
@@ -29,7 +29,7 @@ auto main(int argc, const char *argv[]) -> int
 
         std::fclose(fp);
 
-        const auto *data = reinterpret_cast<const std::uint8_t *>(buffer.data());
+        const auto *data = reinterpret_cast<const U8 *>(buffer.data());
         LLVMFuzzerTestOneInput(data, file_size);
         std::fprintf(stderr, "Done:    %s: (%zu bytes)\n", filename, file_size);
     };

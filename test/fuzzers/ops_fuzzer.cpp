@@ -30,7 +30,7 @@ OpsFuzzer::OpsFuzzer(std::string path, Options *options)
 {
 }
 
-auto OpsFuzzer::step(const std::uint8_t *&data, std::size_t &size) -> Status
+auto OpsFuzzer::step(const U8 *&data, std::size_t &size) -> Status
 {
     CHECK_TRUE(size >= 2);
 
@@ -108,7 +108,7 @@ auto OpsFuzzer::step(const std::uint8_t *&data, std::size_t &size) -> Status
     return m_db->status();
 }
 
-extern "C" int LLVMFuzzerTestOneInput(const std::uint8_t *data, std::size_t size)
+extern "C" int LLVMFuzzerTestOneInput(const U8 *data, std::size_t size)
 {
     Options options;
     options.env = new tools::FakeEnv;

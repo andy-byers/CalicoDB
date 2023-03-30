@@ -26,12 +26,12 @@ auto Pager::fetch_page(Id page_id, CacheEntry *&out) -> Status
 
     if (out == nullptr) {
         CacheEntry temp;
-        auto *data = m_frames.pin(page_id, temp);
+        auto *page = m_frames.pin(page_id, temp);
 
         auto found_page = false;
         if (m_state->use_wal) {
             // Try to read the page from the WAL.
-            auto s = m_wal->read(page_id, data);
+            auto s = m_wal->read(page_id, page);
             if (s.is_ok()) {
                 found_page = true;
             } else if (!s.is_not_found()) {
@@ -41,7 +41,7 @@ auto Pager::fetch_page(Id page_id, CacheEntry *&out) -> Status
 
         if (!found_page) {
             // Read the page from the DB file.
-            CALICODB_TRY(read_page_from_file(page_id, data));
+            CALICODB_TRY(read_page_from_file(page_id, page));
         }
         out = m_cache.put(temp);
     }
@@ -91,7 +91,7 @@ auto Pager::open(const Parameters &param, Pager **out) -> Status
 Pager::Pager(const Parameters &param, File &file, AlignedBuffer buffer)
     : m_filename(param.filename),
       m_frames(std::move(buffer), param.page_size, param.frame_count),
-      m_info_log(param.info_log),
+      m_log(param.log),
       m_file(&file),
       m_env(param.env),
       m_wal(param.wal),
@@ -125,10 +125,32 @@ auto Pager::page_size() const -> std::size_t
     return m_frames.page_size();
 }
 
-auto Pager::clean_page(CacheEntry &entry) -> void
+auto Pager::dirty_page(CacheEntry &entry) -> void
+{
+    CALICODB_EXPECT_FALSE(entry.is_dirty);
+    if (m_dirty) {
+        m_dirty->prev = &entry;
+    }
+    entry.is_dirty = true;
+    entry.prev = nullptr;
+    entry.next = m_dirty;
+    m_dirty = &entry;
+}
+
+auto Pager::clean_page(CacheEntry &entry) -> CacheEntry *
 {
     entry.is_dirty = false;
-    m_dirty.erase(entry.page_id);
+    if (entry.prev) {
+        entry.prev->next = entry.next;
+    } else {
+        CALICODB_EXPECT_EQ(&entry, m_dirty);
+        m_dirty = entry.next;
+    }
+    auto *next = entry.next;
+    if (next) {
+        next->prev = entry.prev;
+    }
+    return next;
 }
 
 auto Pager::checkpoint() -> Status
@@ -148,26 +170,26 @@ auto Pager::checkpoint() -> Status
 auto Pager::commit() -> Status
 {
     CALICODB_EXPECT_TRUE(m_state->use_wal);
-    for (auto dirty = begin(m_dirty); dirty != end(m_dirty);) {
-        auto *entry = m_cache.query(*dirty);
-        CALICODB_EXPECT_NE(entry, nullptr);
-        CALICODB_TRY(m_wal->write(
-            entry->page_id,
-            m_frames.get_frame(entry->index),
-            ++dirty == end(m_dirty) ? m_page_count : 0));
-        clean_page(*entry);
+    if (m_dirty == nullptr) {
+        return Status::ok();
     }
-    return Status::ok();
+    auto *p = m_dirty;
+    for (; p; p = p->next) {
+        if (p->page_id.value > m_page_count) {
+            p = clean_page(*p);
+        } else {
+            p->is_dirty = false;
+        }
+    }
+    p = m_dirty;
+    m_dirty = nullptr;
+    return m_wal->write(p, m_page_count);
 }
 
 auto Pager::flush() -> Status
 {
-    for (auto dirty = m_dirty.begin(); dirty != m_dirty.end();) {
-        auto *entry = m_cache.query(*dirty);
-        CALICODB_EXPECT_NE(entry, nullptr);
-        CALICODB_TRY(write_page_to_file(entry->page_id, m_frames.get_frame(entry->index)));
-        clean_page(*entry);
-        ++dirty;
+    for (auto *p = m_dirty; p; p = clean_page(*p)) {
+        CALICODB_TRY(write_page_to_file(p->page_id, m_frames.get_frame(p->index)));
     }
     return Status::ok();
 }
@@ -175,32 +197,35 @@ auto Pager::flush() -> Status
 auto Pager::ensure_available_frame() -> Status
 {
     if (m_state->status.is_ok() && !m_frames.available()) {
-        auto evicted = m_cache.evict();
-        CALICODB_EXPECT_TRUE(evicted.has_value());
+        auto *victim = m_cache.next_victim();
+        CALICODB_EXPECT_NE(victim, nullptr);
 
-        if (evicted->is_dirty) {
+        if (victim->is_dirty) {
+            clean_page(*victim);
             if (m_state->use_wal) {
-                SET_STATUS(m_wal->write(evicted->page_id, m_frames.get_frame(evicted->index), 0));
+                SET_STATUS(m_wal->write(&*victim, 0));
             } else {
-                SET_STATUS(write_page_to_file(evicted->page_id, m_frames.get_frame(evicted->index)));
+                SET_STATUS(write_page_to_file(victim->page_id, m_frames.get_frame(victim->index)));
             }
-            clean_page(*evicted);
         }
-        m_frames.unpin(*evicted);
+        m_frames.unpin(*victim);
+        m_cache.erase(victim->page_id);
     }
     return m_state->status;
 }
 
 auto Pager::allocate(Page &page) -> Status
 {
-    static constexpr auto kMaxPageCount = std::numeric_limits<std::uint32_t>::max();
+    static constexpr auto kMaxPageCount = std::numeric_limits<U32>::max();
     if (m_page_count == kMaxPageCount) {
         return Status::not_supported("reached the maximum database size");
     }
-    CALICODB_TRY(acquire(Id::from_index(m_page_count), page));
-    upgrade(page);
-    ++m_page_count;
-    return Status::ok();
+    auto s = acquire(Id::from_index(m_page_count), page);
+    if (s.is_ok()) {
+        ++m_page_count;
+        upgrade(page);
+    }
+    return s;
 }
 
 auto Pager::acquire(Id page_id, Page &page) -> Status
@@ -210,7 +235,7 @@ auto Pager::acquire(Id page_id, Page &page) -> Status
 
     CacheEntry *entry, temp;
     if (page_id.value > m_page_count) {
-        // Allocate a page from the end of the file.
+        // This is a new page from the end of the file.
         auto *data = m_frames.pin(page_id, temp);
         std::memset(data, 0, m_frames.page_size());
         entry = m_cache.put(temp);
@@ -223,8 +248,9 @@ auto Pager::acquire(Id page_id, Page &page) -> Status
 
 auto Pager::upgrade(Page &page) -> void
 {
-    page.entry()->is_dirty = true;
-    m_dirty.insert(page.id());
+    if (!page.entry()->is_dirty) {
+        dirty_page(*page.entry());
+    }
     m_frames.upgrade(page);
 }
 
@@ -244,7 +270,7 @@ auto Pager::truncate(std::size_t page_count) -> Status
         auto *entry = m_cache.query(id);
         if (entry != nullptr) {
             if (entry->is_dirty) {
-                m_dirty.erase(id);
+                clean_page(*entry);
             }
             m_frames.unpin(*entry);
             m_cache.erase(id);

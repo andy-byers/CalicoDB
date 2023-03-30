@@ -372,4 +372,81 @@ auto expect_db_contains(const DB &db, const Table &table, const std::map<std::st
     }
 }
 
+FakeWal::FakeWal(const Parameters &param)
+    : m_param(param)
+{
+    m_versions.emplace_back();
+}
+
+auto FakeWal::read(Id page_id, char *out) -> Status
+{
+    for (auto itr = crbegin(m_versions); itr != crend(m_versions); ++itr) {
+        for (const auto &[version_page_id, db_size, data] : *itr) {
+            if (version_page_id == page_id) {
+                std::memcpy(out, data.c_str(), data.size());
+                return Status::ok();
+            }
+        }
+    }
+    return Status::not_found("not found");
+}
+
+auto FakeWal::write(const CacheEntry *dirty, std::size_t db_size) -> Status
+{
+    for (auto *p = dirty; p; p = p->next) {
+        auto overwrite = false;
+        if (db_size == 0) {
+            for (auto &version : m_versions.back()) {
+                if (version.page_id == p->page_id) {
+                    version.data = std::string(p->page, m_param.page_size);
+                    overwrite = true;
+                    break;
+                }
+            }
+        }
+        if (overwrite) {
+            continue;
+        }
+        PageVersion version = {
+            p->page_id,
+            p->next == nullptr ? db_size : 0,
+            std::string(p->page, m_param.page_size),
+        };
+        m_versions.back().emplace_back(version);
+    }
+    return Status::ok();
+}
+
+auto FakeWal::checkpoint(File &db_file) -> Status
+{
+    // TODO: Need the env to resize the file.
+
+    // Collect the most-recent versions of each page from the total set of pages written to the WAL.
+    std::map<Id, std::string> output;
+    for (const auto &versions : m_versions) {
+        for (const auto &[page_id, db_size, data] : versions) {
+            output.insert_or_assign(page_id, data);
+        }
+    }
+    // Write back to the DB sequentially.
+    for (const auto &[page_id, page] : output) {
+        const auto offset = page_id.as_index() * m_param.page_size;
+        CALICODB_TRY(db_file.write(offset, page));
+    }
+    m_versions.clear();
+    m_versions.emplace_back();
+    return Status::ok();
+}
+
+auto FakeWal::commit() -> Status
+{
+    m_versions.emplace_back();
+    return Status::ok();
+}
+
+auto FakeWal::statistics() const -> WalStatistics
+{
+    return WalStatistics {};
+}
+
 } // namespace calicodb::tools

@@ -218,30 +218,52 @@ class WalStub : public Wal
 public:
     ~WalStub() override = default;
 
-    [[nodiscard]] auto read(Id, char *) -> Status
+    [[nodiscard]] auto read(Id, char *) -> Status override
     {
         return Status::not_found("");
     }
 
-    [[nodiscard]] auto write(Id, const Slice &) -> Status
+    [[nodiscard]] auto write(const CacheEntry *dirty, std::size_t) -> Status override
     {
         return Status::ok();
     }
 
-    [[nodiscard]] auto checkpoint() -> Status
+    [[nodiscard]] auto checkpoint(File &) -> Status override
     {
         return Status::ok();
     }
 
-    [[nodiscard]] auto commit() -> Status
+    [[nodiscard]] auto commit() -> Status override
     {
         return Status::ok();
     }
 
-    [[nodiscard]] auto statistics() const -> WalStatistics
+    [[nodiscard]] auto statistics() const -> WalStatistics override
     {
         return {};
     }
+};
+
+class FakeWal : public Wal
+{
+    struct PageVersion {
+        Id page_id;
+        std::size_t db_size;
+        std::string data;
+    };
+    std::vector<std::vector<PageVersion>> m_versions;
+    Parameters m_param;
+
+public:
+    explicit FakeWal(const Parameters &param);
+    ~FakeWal() override = default;
+
+    [[nodiscard]] auto read(Id page_id, char *out) -> Status override;
+    [[nodiscard]] auto write(const CacheEntry *dirty, std::size_t db_size) -> Status override;
+    [[nodiscard]] auto checkpoint(File &db_file) -> Status override;
+    [[nodiscard]] auto commit() -> Status override;
+    [[nodiscard]] auto sync() -> Status override {return Status::ok();}
+    [[nodiscard]] auto statistics() const -> WalStatistics override;
 };
 
 template <std::size_t Length = 12>
@@ -285,16 +307,16 @@ public:
     auto Generate(std::size_t len) const -> Slice;
 
     // Not in LevelDB.
-    auto Next(std::uint64_t t_max) const -> std::uint64_t
+    auto Next(U64 t_max) const -> U64
     {
-        std::uniform_int_distribution<std::uint64_t> dist {0, t_max};
+        std::uniform_int_distribution<U64> dist {0, t_max};
         return dist(m_rng);
     }
 
     // Not in LevelDB.
-    auto Next(std::uint64_t t_min, std::uint64_t t_max) const -> std::uint64_t
+    auto Next(U64 t_min, U64 t_max) const -> U64
     {
-        std::uniform_int_distribution<std::uint64_t> dist {t_min, t_max};
+        std::uniform_int_distribution<U64> dist {t_min, t_max};
         return dist(m_rng);
     }
 };

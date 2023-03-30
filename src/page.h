@@ -103,14 +103,6 @@ public:
         return m_size;
     }
 
-    auto TEST_populate(Id page_id, char *data, std::size_t size, bool write) -> void
-    {
-        m_id = page_id;
-        m_data = data;
-        m_size = size;
-        m_write = write;
-    }
-
     // Disable copies but allow moves.
     Page(const Page &) = delete;
     auto operator=(const Page &) -> Page & = delete;

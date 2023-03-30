@@ -26,13 +26,15 @@ struct CacheEntry {
     Id page_id;
     std::size_t index = 0;
     unsigned refcount = 0;
+    char *page = nullptr;
+
+    // Dirty list fields.
+    CacheEntry *prev = nullptr;
+    CacheEntry *next = nullptr;
     bool is_dirty = false;
 };
 
 // Mapping from page IDs to frame indices.
-//
-// If the page is made dirty, the cache entry should be updated to contain the
-// iterator returned by DirtyTable::insert().
 class PageCache final
 {
 public:
@@ -47,26 +49,29 @@ public:
     // This method alters the cache ordering if, and only if, it finds an entry.
     [[nodiscard]] auto get(Id page_id) -> CacheEntry *;
 
-    // Attempt to evict the next unreferenced entry based on the cache replacement
-    // policy.
-    [[nodiscard]] auto evict() -> std::optional<CacheEntry>;
+    // Determine the next unreferenced entry that should be evicted based on the
+    // cache replacement policy.
+    [[nodiscard]] auto next_victim() -> CacheEntry *;
 
     // Add an entry to the cache, which must not already exist.
+    //
+    // Returns the address of the cache entry, which is guaranteed to not change
+    // until erase() is called on the entry.
     auto put(CacheEntry entry) -> CacheEntry *;
 
     // Erase a specific entry, if it exists.
     auto erase(Id page_id) -> bool;
 
-    [[nodiscard]] auto hits() const -> std::uint64_t;
-    [[nodiscard]] auto misses() const -> std::uint64_t;
+    [[nodiscard]] auto hits() const -> U64;
+    [[nodiscard]] auto misses() const -> U64;
 
 private:
     using MapEntry = std::list<CacheEntry>::iterator;
 
     std::unordered_map<Id, MapEntry, Id::Hash> m_map;
     std::list<CacheEntry> m_list;
-    std::uint64_t m_misses = 0;
-    std::uint64_t m_hits = 0;
+    U64 m_misses = 0;
+    U64 m_hits = 0;
 };
 
 class AlignedBuffer

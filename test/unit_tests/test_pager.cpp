@@ -14,7 +14,7 @@
 namespace calicodb
 {
 
-[[nodiscard]] static auto make_cache_entry(std::uint64_t id_value) -> CacheEntry
+[[nodiscard]] static auto make_cache_entry(U64 id_value) -> CacheEntry
 {
     return {.page_id = Id(id_value)};
 }
@@ -30,7 +30,7 @@ TEST_F(PageCacheTests, EmptyCacheBehavior)
     ASSERT_EQ(cache.size(), 0);
     ASSERT_EQ(cache.size(), 0);
     ASSERT_EQ(cache.get(Id::root()), nullptr);
-    ASSERT_EQ(cache.evict(), std::nullopt);
+    ASSERT_EQ(cache.next_victim(), nullptr);
 }
 
 TEST_F(PageCacheTests, OldestEntryIsEvictedFirst)
@@ -44,10 +44,14 @@ TEST_F(PageCacheTests, OldestEntryIsEvictedFirst)
     ASSERT_EQ(cache.get(Id(4))->page_id, Id(4));
     ASSERT_EQ(cache.get(Id(3))->page_id, Id(3));
 
-    ASSERT_EQ(cache.evict()->page_id, Id(2));
-    ASSERT_EQ(cache.evict()->page_id, Id(1));
-    ASSERT_EQ(cache.evict()->page_id, Id(4));
-    ASSERT_EQ(cache.evict()->page_id, Id(3));
+    ASSERT_EQ(cache.next_victim()->page_id, Id(2));
+    cache.erase(cache.next_victim()->page_id);
+    ASSERT_EQ(cache.next_victim()->page_id, Id(1));
+    cache.erase(cache.next_victim()->page_id);
+    ASSERT_EQ(cache.next_victim()->page_id, Id(4));
+    cache.erase(cache.next_victim()->page_id);
+    ASSERT_EQ(cache.next_victim()->page_id, Id(3));
+    cache.erase(cache.next_victim()->page_id);
     ASSERT_EQ(cache.size(), 0);
 }
 
@@ -58,8 +62,10 @@ TEST_F(PageCacheTests, ReplacementPolicyIgnoresQuery)
 
     (void)cache.query(Id(2));
 
-    ASSERT_EQ(cache.evict()->page_id, Id(2));
-    ASSERT_EQ(cache.evict()->page_id, Id(1));
+    ASSERT_EQ(cache.next_victim()->page_id, Id(2));
+    cache.erase(cache.next_victim()->page_id);
+    ASSERT_EQ(cache.next_victim()->page_id, Id(1));
+    cache.erase(cache.next_victim()->page_id);
 }
 
 TEST_F(PageCacheTests, ReferencedEntriesAreIgnoredDuringEviction)
@@ -69,8 +75,9 @@ TEST_F(PageCacheTests, ReferencedEntriesAreIgnoredDuringEviction)
 
     cache.query(Id(2))->refcount = 1;
 
-    ASSERT_EQ(cache.evict()->page_id, Id(1));
-    ASSERT_FALSE(cache.evict().has_value());
+    ASSERT_EQ(cache.next_victim()->page_id, Id(1));
+    cache.erase(cache.next_victim()->page_id);
+    ASSERT_EQ(cache.next_victim(), nullptr);
 }
 
 class FrameManagerTests
@@ -117,14 +124,14 @@ TEST_F(FrameManagerTests, OutOfFramesDeathTest)
 auto write_to_page(Page &page, const std::string &message) -> void
 {
     EXPECT_LE(page_offset(page) + message.size(), page.size());
-    std::memcpy(page.data() + page_offset(page), message.data(), message.size());
+    std::memcpy(page.data() + page.size() - message.size(), message.data(), message.size());
 }
 
 [[nodiscard]] auto read_from_page(const Page &page, std::size_t size) -> std::string
 {
     EXPECT_LE(page_offset(page) + size, page.size());
-    auto message = std::string(size, '\x00');
-    std::memcpy(message.data(), page.data() + page_offset(page), message.size());
+    std::string message(size, '\x00');
+    std::memcpy(message.data(), page.data() + page.size() - message.size(), message.size());
     return message;
 }
 
@@ -136,6 +143,11 @@ public:
     std::string test_message = "Hello, world!";
 
     ~PagerTests() override = default;
+
+    auto SetUp() -> void override
+    {
+        state.use_wal = true;
+    }
 
     [[nodiscard]] auto allocate_write(const std::string &message) const
     {
@@ -179,6 +191,19 @@ public:
         EXPECT_OK(state.status);
         return message;
     }
+
+    [[nodiscard]] auto read_from_file(Id id, std::size_t size) const
+    {
+        File *file;
+        std::string message(size, '\x00');
+        EXPECT_OK(env->new_file(kFilename, file));
+        EXPECT_OK(file->read_exact(
+            id.value * kPageSize - message.size(),
+            message.size(),
+            message.data()));
+        delete file;
+        return message;
+    }
 };
 
 TEST_F(PagerTests, NewPagerIsSetUpCorrectly)
@@ -220,6 +245,69 @@ TEST_F(PagerTests, DataPersistsInEnv)
         ASSERT_EQ(acquire_read_release(Id(i + 1), 16), tools::integral_key<16>(i))
             << "mismatch on page " << i + 1;
     }
+}
+
+template<class Test>
+static auto write_pages(Test &test, std::size_t key_offset, std::size_t num_pages)
+{
+    for (std::size_t i = 1; i <= num_pages; ++i) {
+        const auto message = tools::integral_key<16>(i + key_offset);
+        if (i > test.pager->page_count()) {
+            (void)test.allocate_write_release(message);
+        } else {
+            test.acquire_write_release(Id(i), message);
+        }
+    }
+}
+
+template<class Test>
+static auto read_and_check(Test &test, std::size_t key_offset, std::size_t num_pages, bool from_file = false)
+{
+    for (std::size_t i = 1; i <= num_pages; ++i) {
+        const auto message = tools::integral_key<16>(i + key_offset);
+        if (from_file) {
+            ASSERT_EQ(test.read_from_file(Id(i), 16), message)
+                << "mismatch on page (from file) " << i;
+        } else {
+            ASSERT_EQ(test.acquire_read_release(Id(i), 16), message)
+                << "mismatch on page (from pager) " << i;
+        }
+    }
+}
+
+TEST_F(PagerTests, BasicIO)
+{
+    for (std::size_t i = 0; i < 10; ++i) {
+        write_pages(*this, kFrameCount * i, kFrameCount * (i + 1));
+        read_and_check(*this, kFrameCount * i, kFrameCount * (i + 1));
+    }
+}
+
+TEST_F(PagerTests, BasicCommits)
+{
+    for (std::size_t i = 0; i < 10; ++i) {
+        write_pages(*this, kFrameCount * i, kFrameCount * (i + 1));
+        ASSERT_OK(pager->commit());
+        read_and_check(*this, kFrameCount * i, kFrameCount * (i + 1));
+    }
+}
+
+TEST_F(PagerTests, BasicCheckpoints)
+{
+    for (std::size_t i = 0; i < 10; ++i) {
+        write_pages(*this, kFrameCount * i, kFrameCount * (i + 1));
+        ASSERT_OK(pager->commit());
+        read_and_check(*this, kFrameCount * i, kFrameCount * (i + 1));
+        ASSERT_OK(pager->checkpoint());
+        // Pages returned by the pager should reflect what is on disk.
+        read_and_check(*this, kFrameCount * i, kFrameCount * (i + 1));
+        read_and_check(*this, kFrameCount * i, kFrameCount * (i + 1), true);
+    }
+}
+
+TEST_F(PagerTests, WritesBackDuringCheckpoint)
+{
+
 }
 
 class TruncationTests : public PagerTests

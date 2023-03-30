@@ -68,27 +68,22 @@ auto PageCache::erase(Id page_id) -> bool
     return true;
 }
 
-auto PageCache::evict() -> std::optional<CacheEntry>
+auto PageCache::next_victim() -> CacheEntry *
 {
-    auto itr = begin(m_list);
-    while (itr != end(m_list)) {
-        if (itr->refcount == 0) {
-            auto entry = *itr;
-            m_map.erase(itr->page_id);
-            m_list.erase(itr);
-            return entry;
+    for (auto &entry : m_list) {
+        if (entry.refcount == 0) {
+            return &entry;
         }
-        ++itr;
     }
-    return std::nullopt;
+    return nullptr;
 }
 
-auto PageCache::hits() const -> std::uint64_t
+auto PageCache::hits() const -> U64
 {
     return m_hits;
 }
 
-auto PageCache::misses() const -> std::uint64_t
+auto PageCache::misses() const -> U64
 {
     return m_misses;
 }
@@ -133,6 +128,7 @@ auto FrameManager::pin(Id page_id, CacheEntry &entry) -> char *
     // Associate the page ID with the frame index.
     entry.page_id = page_id;
     entry.index = m_unpinned.back();
+    entry.page = get_frame_pointer(m_unpinned.back());
 
     auto *frame = get_frame_pointer(m_unpinned.back());
     m_unpinned.pop_back();
@@ -150,12 +146,13 @@ auto FrameManager::unpin(CacheEntry &entry) -> void
 auto FrameManager::ref(CacheEntry &entry, Page &page) -> Status
 {
     CALICODB_EXPECT_FALSE(entry.page_id.is_null());
+    CALICODB_EXPECT_EQ(entry.page, get_frame_pointer(entry.index));
 
     ++m_refsum;
     ++entry.refcount;
     page.m_id = entry.page_id;
     page.m_entry = &entry;
-    page.m_data = get_frame_pointer(entry.index);
+    page.m_data = entry.page;
     page.m_size = m_page_size;
     page.m_write = false;
     return Status::ok();

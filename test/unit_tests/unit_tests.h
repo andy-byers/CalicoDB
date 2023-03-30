@@ -135,6 +135,11 @@ public:
         : scratch(kPageSize, '\x00'),
           random(1'024 * 1'024 * 8)
     {
+        wal = std::make_unique<tools::FakeWal>(Wal::Parameters {
+            kFilename,
+            kPageSize,
+            env.get(),
+        });
         tables.add(LogicalPageId::with_table(Id::root()));
         Pager *temp;
         EXPECT_OK(Pager::open({
@@ -156,7 +161,7 @@ public:
     std::string scratch;
     std::string collect_scratch;
     std::unique_ptr<Pager> pager;
-    std::unique_ptr<tools::WalStub> wal;
+    std::unique_ptr<tools::FakeWal> wal;
     tools::RandomGenerator random;
 };
 

@@ -28,9 +28,9 @@ static auto check_header_crc(const FileHeader &header) -> bool
     return crc32c::Unmask(header.header_crc) == header.compute_crc();
 }
 
-static auto encode_page_size(std::size_t page_size) -> std::uint16_t
+static auto encode_page_size(std::size_t page_size) -> U16
 {
-    return page_size < kMaxPageSize ? static_cast<std::uint16_t>(page_size) : 0;
+    return page_size < kMaxPageSize ? static_cast<U16>(page_size) : 0;
 }
 
 static auto decode_page_size(unsigned header_page_size) -> std::size_t
@@ -226,7 +226,7 @@ auto DBImpl::open(Options sanitized) -> Status
         Page db_root;
         CALICODB_TRY(m_pager->acquire(Id::root(), db_root));
         m_pager->upgrade(db_root);
-        state.page_count = static_cast<std::uint32_t>(m_pager->page_count());
+        state.page_count = static_cast<U32>(m_pager->page_count());
         state.header_crc = crc32c::Mask(state.compute_crc());
         state.write(db_root.data());
         m_pager->release(std::move(db_root));
@@ -561,7 +561,7 @@ auto DBImpl::do_commit() -> Status
 
     FileHeader header;
     header.read(db_root.data());
-    header.page_count = static_cast<std::uint32_t>(m_pager->page_count());
+    header.page_count = static_cast<U32>(m_pager->page_count());
     header.freelist_head = m_state.freelist_head;
     header.magic_code = FileHeader::kMagicCode;
     //    header.commit_lsn = m_wal->current_lsn();

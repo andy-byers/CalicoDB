@@ -13,9 +13,9 @@ namespace calicodb
 
 class Env;
 class File;
-
 class WalIndex;
 class WalIterator;
+struct CacheEntry;
 
 struct WalStatistics {
     std::size_t bytes_read = 0;
@@ -50,8 +50,13 @@ public:
     // Read the most-recent version of page "page_id" from the WAL.
     [[nodiscard]] virtual auto read(Id page_id, char *page) -> Status = 0;
 
-    // Write a new version of page "page_id" to the WAL.
-    [[nodiscard]] virtual auto write(Id page_id, const Slice &page, std::size_t db_size) -> Status = 0;
+    struct PageDescriptor {
+        Id page_id;
+        Slice data;
+    };
+
+    // Write new versions of the given pages to the WAL.
+    [[nodiscard]] virtual auto write(const CacheEntry *dirty, std::size_t db_size) -> Status = 0;
 
     // Write the WAL contents back to the DB. Resets internal counters such
     // that the next write to the WAL will start at the beginning again.
@@ -65,16 +70,20 @@ public:
 };
 
 struct WalIndexHeader {
-    std::uint32_t version = 0;
-    std::uint32_t change = 0;
-    bool is_init = false;
-    std::uint32_t page_size = 0;
-    std::uint32_t max_frame = 0;
-    std::uint32_t page_count = 0;
-    std::uint32_t frame_checksum = 0;
-    std::uint32_t salt[2] = {};
-    std::uint32_t checksum[2] = {};
+    U32 version;
+    U32 unused;
+    U32 change;
+    U16 flags;
+    U16 page_size;
+    U32 max_frame;
+    U32 page_count;
+    U32 frame_checksum;
+    U32 salt[2];
+    U32 checksum[2];
 };
+
+static_assert(std::is_pod_v<WalIndexHeader>);
+static_assert(sizeof(WalIndexHeader) == 44);
 
 // The WAL index looks like this in memory:
 //
@@ -87,17 +96,19 @@ struct WalIndexHeader {
 
 class WalIndex final
 {
-    std::vector<char *> m_tables;
+    friend class WalImpl;
+
+    std::vector<char *> m_segments;
     WalIndexHeader *m_header = nullptr;
     std::size_t m_frame_number = 0;
 
-    struct WalTable {
-        std::uint32_t *frames = nullptr;
-        std::uint16_t *hashes = nullptr;
+    struct Segment {
+        U32 *frames = nullptr;
+        U16 *hashes = nullptr;
         std::size_t base = 0;
     };
 
-    [[nodiscard]] auto create_or_open_table(std::size_t table_number) -> WalTable;
+    [[nodiscard]] auto create_or_open_segment(std::size_t table_number) -> Segment;
 
 public:
     ~WalIndex();
@@ -105,6 +116,7 @@ public:
     [[nodiscard]] auto frame_for_page(Id page_id, Id min_frame_id, Id &out) -> Status;
     [[nodiscard]] auto page_for_frame(Id frame_id) -> Id;
     [[nodiscard]] auto assign(Id page_id, Id frame_id) -> Status;
+    [[nodiscard]] auto header() -> WalIndexHeader *;
     auto cleanup() -> void;
 };
 

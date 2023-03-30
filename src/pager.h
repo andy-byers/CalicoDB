@@ -27,7 +27,7 @@ public:
         std::string filename;
         Env *env = nullptr;
         Wal *wal = nullptr;
-        LogFile *info_log = nullptr;
+        LogFile *log = nullptr;
         DBState *state = nullptr;
         std::size_t frame_count = 0;
         std::size_t page_size = 0;
@@ -49,12 +49,12 @@ public:
     auto release(Page page) -> void;
     auto load_state(const FileHeader &header) -> void;
 
-    [[nodiscard]] auto hits() const -> std::uint64_t
+    [[nodiscard]] auto hits() const -> U64
     {
         return m_cache.hits();
     }
 
-    [[nodiscard]] auto misses() const -> std::uint64_t
+    [[nodiscard]] auto misses() const -> U64
     {
         return m_cache.misses();
     }
@@ -65,16 +65,21 @@ private:
     [[nodiscard]] auto read_page_from_file(Id page_id, char *out) const -> Status;
     [[nodiscard]] auto write_page_to_file(Id pid, const Slice &in) const -> Status;
     [[nodiscard]] auto ensure_available_frame() -> Status;
-    auto clean_page(CacheEntry &entry) -> void;
+    auto dirty_page(CacheEntry &entry) -> void;
+    auto clean_page(CacheEntry &entry) -> CacheEntry *;
 
     mutable std::size_t m_bytes_read = 0;
     mutable std::size_t m_bytes_written = 0;
 
     std::string m_filename;
     FrameManager m_frames;
-    std::set<Id> m_dirty;
     PageCache m_cache;
-    LogFile *m_info_log = nullptr;
+
+    // List of dirty page cache entries. Linked by the "prev" and "next"
+    // CacheEntry members.
+    CacheEntry *m_dirty = nullptr;
+
+    LogFile *m_log = nullptr;
     File *m_file = nullptr;
     Env *m_env = nullptr;
     Wal *m_wal = nullptr;
