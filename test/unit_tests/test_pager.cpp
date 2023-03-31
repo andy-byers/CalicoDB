@@ -247,7 +247,7 @@ TEST_F(PagerTests, DataPersistsInEnv)
     }
 }
 
-template<class Test>
+template <class Test>
 static auto write_pages(Test &test, std::size_t key_offset, std::size_t num_pages)
 {
     for (std::size_t i = 1; i <= num_pages; ++i) {
@@ -260,7 +260,7 @@ static auto write_pages(Test &test, std::size_t key_offset, std::size_t num_page
     }
 }
 
-template<class Test>
+template <class Test>
 static auto read_and_check(Test &test, std::size_t key_offset, std::size_t num_pages, bool from_file = false)
 {
     for (std::size_t i = 1; i <= num_pages; ++i) {
@@ -307,7 +307,6 @@ TEST_F(PagerTests, BasicCheckpoints)
 
 TEST_F(PagerTests, WritesBackDuringCheckpoint)
 {
-
 }
 
 class TruncationTests : public PagerTests
@@ -320,7 +319,7 @@ public:
         for (std::size_t i = 0; i < kInitialPageCount; ++i) {
             (void)allocate_write_release(tools::integral_key(i));
         }
-        ASSERT_OK(pager->flush());
+        ASSERT_OK(pager->flush_to_disk());
     }
 };
 
@@ -345,7 +344,7 @@ TEST_F(TruncationTests, OutOfRangePagesAreDiscarded)
         ASSERT_OK(env->file_size(kFilename, base_file_size));
         // If there are still cached pages past the truncation position, they will be
         // written back to disk here, causing the file size to change.
-        ASSERT_OK(pager->flush());
+        ASSERT_OK(pager->flush_to_disk());
         ASSERT_OK(env->file_size(kFilename, file_size));
         ASSERT_EQ(base_file_size, file_size);
     };

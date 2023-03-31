@@ -1526,7 +1526,7 @@ static auto vacuum_and_validate(VacuumTests &test, const std::string &value)
     ASSERT_OK(test.tree->vacuum_one(Id(5), table_set, &vacuumed));
     ASSERT_TRUE(vacuumed);
     ASSERT_OK(test.pager->truncate(4));
-    ASSERT_OK(test.pager->flush());
+    ASSERT_OK(test.pager->flush_to_disk());
     ASSERT_EQ(test.pager->page_count(), 4);
 
     std::string result;

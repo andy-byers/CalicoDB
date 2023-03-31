@@ -461,7 +461,7 @@ static auto run_revert_test(TestDatabase &db)
     ASSERT_OK(db.db->commit());
 
     // Hack to make sure the database file is up-to-date.
-    (void)const_cast<Pager &>(db_impl(db.db)->TEST_pager()).flush();
+    (void)const_cast<Pager &>(db_impl(db.db)->TEST_pager()).flush_to_disk();
 
     add_records(db, 1'000);
     ASSERT_OK(db.reopen());
@@ -513,7 +513,7 @@ TEST_F(DbRevertTests, RevertsVacuum_1)
     ASSERT_OK(db->db->commit());
 
     // Hack to make sure the database file is up-to-date.
-    (void)const_cast<Pager &>(db_impl(db->db)->TEST_pager()).flush();
+    (void)const_cast<Pager &>(db_impl(db->db)->TEST_pager()).flush_to_disk();
 
     auto uncommitted = add_records(*db, 1'000);
     for (std::size_t i = 0; i < 500; ++i) {
@@ -537,7 +537,7 @@ TEST_F(DbRevertTests, RevertsVacuum_2)
     }
     ASSERT_OK(db->db->commit());
 
-    (void)const_cast<Pager &>(db_impl(db->db)->TEST_pager()).flush();
+    (void)const_cast<Pager &>(db_impl(db->db)->TEST_pager()).flush_to_disk();
 
     add_records(*db, 1'000);
     ASSERT_OK(db->reopen());
@@ -555,7 +555,7 @@ TEST_F(DbRevertTests, RevertsVacuum_3)
     }
     ASSERT_OK(db->db->commit());
 
-    (void)const_cast<Pager &>(db_impl(db->db)->TEST_pager()).flush();
+    (void)const_cast<Pager &>(db_impl(db->db)->TEST_pager()).flush_to_disk();
 
     auto uncommitted = add_records(*db, 1'000);
     for (std::size_t i = 0; i < 500; ++i) {
@@ -589,7 +589,7 @@ TEST_F(DbRecoveryTests, RecoversFirstBatch)
         // Simulate a crash by cloning the database before cleanup has occurred.
         clone.reset(reinterpret_cast<const tools::FakeEnv &>(*env).clone());
 
-        (void)const_cast<Pager &>(db_impl(db.db)->TEST_pager()).flush();
+        (void)const_cast<Pager &>(db_impl(db.db)->TEST_pager()).flush_to_disk();
     }
     // Create a new database from the cloned data. This database will need to roll the WAL forward to become
     // consistent.
@@ -615,7 +615,7 @@ TEST_F(DbRecoveryTests, RecoversNthBatch)
 
         clone.reset(dynamic_cast<const tools::FakeEnv &>(*env).clone());
 
-        (void)const_cast<Pager &>(db_impl(db.db)->TEST_pager()).flush();
+        (void)const_cast<Pager &>(db_impl(db.db)->TEST_pager()).flush_to_disk();
     }
     TestDatabase clone_db {*clone};
     expect_contains_records(*clone_db.db, snapshot);

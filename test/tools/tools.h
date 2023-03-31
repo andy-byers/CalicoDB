@@ -262,7 +262,7 @@ public:
     [[nodiscard]] auto write(const CacheEntry *dirty, std::size_t db_size) -> Status override;
     [[nodiscard]] auto checkpoint(File &db_file) -> Status override;
     [[nodiscard]] auto commit() -> Status override;
-    [[nodiscard]] auto sync() -> Status override {return Status::ok();}
+    [[nodiscard]] auto sync() -> Status override { return Status::ok(); }
     [[nodiscard]] auto statistics() const -> WalStatistics override;
 };
 

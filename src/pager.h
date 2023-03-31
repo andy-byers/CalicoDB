@@ -40,7 +40,7 @@ public:
     [[nodiscard]] auto bytes_read() const -> std::size_t;
     [[nodiscard]] auto bytes_written() const -> std::size_t;
     [[nodiscard]] auto truncate(std::size_t page_count) -> Status;
-    [[nodiscard]] auto flush() -> Status;
+    [[nodiscard]] auto flush_to_disk() -> Status;
     [[nodiscard]] auto commit() -> Status;
     [[nodiscard]] auto checkpoint() -> Status;
     [[nodiscard]] auto allocate(Page &page) -> Status;
@@ -62,8 +62,8 @@ public:
 private:
     explicit Pager(const Parameters &param, File &file, AlignedBuffer buffer);
     [[nodiscard]] auto fetch_page(Id page_id, CacheEntry *&out) -> Status;
-    [[nodiscard]] auto read_page_from_file(Id page_id, char *out) const -> Status;
-    [[nodiscard]] auto write_page_to_file(Id pid, const Slice &in) const -> Status;
+    [[nodiscard]] auto read_page_from_file(CacheEntry &entry) const -> Status;
+    [[nodiscard]] auto write_page_to_file(const CacheEntry &entry) const -> Status;
     [[nodiscard]] auto ensure_available_frame() -> Status;
     auto dirty_page(CacheEntry &entry) -> void;
     auto clean_page(CacheEntry &entry) -> CacheEntry *;

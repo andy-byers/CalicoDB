@@ -230,7 +230,7 @@ auto DBImpl::open(Options sanitized) -> Status
         state.header_crc = crc32c::Mask(state.compute_crc());
         state.write(db_root.data());
         m_pager->release(std::move(db_root));
-        CALICODB_TRY(m_pager->flush());
+        CALICODB_TRY(m_pager->flush_to_disk());
     }
     CALICODB_TRY(m_state.status);
     m_state.use_wal = true;
@@ -496,7 +496,7 @@ auto DBImpl::do_vacuum() -> Status
     CALICODB_TRY(m_pager->truncate(target.value));
 
     m_log->logv("vacuumed %llu pages", original.value - target.value);
-    return m_pager->flush();
+    return m_pager->flush_to_disk();
 }
 
 auto DBImpl::ensure_consistency() -> Status

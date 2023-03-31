@@ -25,8 +25,8 @@ auto Pager::fetch_page(Id page_id, CacheEntry *&out) -> Status
     out = m_cache.get(page_id);
 
     if (out == nullptr) {
-        CacheEntry temp;
-        auto *page = m_frames.pin(page_id, temp);
+        CacheEntry entry;
+        auto *page = m_frames.pin(page_id, entry);
 
         auto found_page = false;
         if (m_state->use_wal) {
@@ -41,30 +41,30 @@ auto Pager::fetch_page(Id page_id, CacheEntry *&out) -> Status
 
         if (!found_page) {
             // Read the page from the DB file.
-            CALICODB_TRY(read_page_from_file(page_id, page));
+            CALICODB_TRY(read_page_from_file(entry));
         }
-        out = m_cache.put(temp);
+        out = m_cache.put(entry);
     }
     return Status::ok();
 }
 
-auto Pager::read_page_from_file(Id page_id, char *out) const -> Status
+auto Pager::read_page_from_file(CacheEntry &entry) const -> Status
 {
-    if (page_id.as_index() < m_page_count) {
-        const auto offset = page_id.as_index() * m_frames.page_size();
-        CALICODB_TRY(m_file->read_exact(offset, m_frames.page_size(), out));
+    if (entry.page_id.as_index() < m_page_count) {
+        const auto offset = entry.page_id.as_index() * m_frames.page_size();
+        CALICODB_TRY(m_file->read_exact(offset, m_frames.page_size(), entry.page));
         m_bytes_read += m_frames.page_size();
     } else {
-        std::memset(out, 0, m_frames.page_size());
+        std::memset(entry.page, 0, m_frames.page_size());
     }
     return Status::ok();
 }
 
-auto Pager::write_page_to_file(Id pid, const Slice &in) const -> Status
+auto Pager::write_page_to_file(const CacheEntry &entry) const -> Status
 {
-    CALICODB_EXPECT_EQ(in.size(), m_frames.page_size());
-    m_bytes_written += m_frames.page_size();
-    return m_file->write(pid.as_index() * m_frames.page_size(), in);
+    const Slice data(entry.page, m_frames.page_size());
+    m_bytes_written += data.size();
+    return m_file->write(entry.page_id.as_index() * data.size(), data);
 }
 
 auto Pager::open(const Parameters &param, Pager **out) -> Status
@@ -155,6 +155,8 @@ auto Pager::clean_page(CacheEntry &entry) -> CacheEntry *
 
 auto Pager::checkpoint() -> Status
 {
+    // A checkpoint must immediately follow a commit, so the cache should be clean.
+    CALICODB_EXPECT_EQ(m_dirty, nullptr);
     CALICODB_EXPECT_TRUE(m_state->use_wal);
 
     // Make sure everything written to the WAL is on disk.
@@ -163,7 +165,7 @@ auto Pager::checkpoint() -> Status
     // Transfer the WAL contents back to the DB.
     CALICODB_TRY(m_wal->checkpoint(*m_file));
 
-    // Make sure the data transferred from the WAL is on the DB disk.
+    // Make sure the data transferred from the WAL is on disk.
     return m_file->sync();
 }
 
@@ -176,6 +178,10 @@ auto Pager::commit() -> Status
     auto *p = m_dirty;
     for (; p; p = p->next) {
         if (p->page_id.value > m_page_count) {
+            // This page is past the current end of the file due to a vacuum operation
+            // decreasing the database page count. Just remove the page from the dirty
+            // list. It wouldn't be transferred back to the DB on checkpoint anyway
+            // since it is out of bounds.
             p = clean_page(*p);
         } else {
             p->is_dirty = false;
@@ -183,13 +189,15 @@ auto Pager::commit() -> Status
     }
     p = m_dirty;
     m_dirty = nullptr;
+    // The DB page count is specified here. This indicates that the writes are part of
+    // a commit.
     return m_wal->write(p, m_page_count);
 }
 
-auto Pager::flush() -> Status
+auto Pager::flush_to_disk() -> Status
 {
     for (auto *p = m_dirty; p; p = clean_page(*p)) {
-        CALICODB_TRY(write_page_to_file(p->page_id, m_frames.get_frame(p->index)));
+        CALICODB_TRY(write_page_to_file(*p));
     }
     return Status::ok();
 }
@@ -197,15 +205,21 @@ auto Pager::flush() -> Status
 auto Pager::ensure_available_frame() -> Status
 {
     if (m_state->status.is_ok() && !m_frames.available()) {
+        // There are no available frames, so the cache must be full. "next_victim()" will not find
+        // an entry to evict if all pages are referenced, which should never happen.
         auto *victim = m_cache.next_victim();
         CALICODB_EXPECT_NE(victim, nullptr);
 
         if (victim->is_dirty) {
             clean_page(*victim);
             if (m_state->use_wal) {
+                // Write just this page to the WAL. DB page count is 0 here because this write
+                // is not part of a commit.
                 SET_STATUS(m_wal->write(&*victim, 0));
             } else {
-                SET_STATUS(write_page_to_file(victim->page_id, m_frames.get_frame(victim->index)));
+                // WAL is not enabled, meaning this code is called from either recovery, checkpoint,
+                // or initialization.
+                SET_STATUS(write_page_to_file(*victim));
             }
         }
         m_frames.unpin(*victim);
@@ -216,7 +230,7 @@ auto Pager::ensure_available_frame() -> Status
 
 auto Pager::allocate(Page &page) -> Status
 {
-    static constexpr auto kMaxPageCount = std::numeric_limits<U32>::max();
+    static constexpr std::size_t kMaxPageCount = 0xFFFFFFFF - 1;
     if (m_page_count == kMaxPageCount) {
         return Status::not_supported("reached the maximum database size");
     }
@@ -233,8 +247,9 @@ auto Pager::acquire(Id page_id, Page &page) -> Status
     CALICODB_EXPECT_FALSE(page_id.is_null());
     CALICODB_TRY(ensure_available_frame());
 
-    CacheEntry *entry, temp;
+    CacheEntry *entry;
     if (page_id.value > m_page_count) {
+        CacheEntry temp;
         // This is a new page from the end of the file.
         auto *data = m_frames.pin(page_id, temp);
         std::memset(data, 0, m_frames.page_size());
@@ -263,6 +278,9 @@ auto Pager::release(Page page) -> void
 auto Pager::truncate(std::size_t page_count) -> Status
 {
     CALICODB_EXPECT_GT(page_count, 0);
+
+    // TODO: Probably don't want to truncate the file here. Just set the page count field and
+    //       possibly truncate on commit or checkpoint.
     CALICODB_TRY(m_env->resize_file(m_filename, page_count * m_frames.page_size()));
 
     // Discard out-of-range cached pages.

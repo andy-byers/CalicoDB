@@ -69,57 +69,6 @@ public:
     [[nodiscard]] virtual auto statistics() const -> WalStatistics = 0;
 };
 
-struct WalIndexHeader {
-    U32 version;
-    U32 unused;
-    U32 change;
-    U16 flags;
-    U16 page_size;
-    U32 max_frame;
-    U32 page_count;
-    U32 frame_checksum;
-    U32 salt[2];
-    U32 checksum[2];
-};
-
-static_assert(std::is_pod_v<WalIndexHeader>);
-static_assert(sizeof(WalIndexHeader) == 44);
-
-// The WAL index looks like this in memory:
-//
-//     <h><frames><hashes>
-//     <frames   ><hashes>
-//     <frames   ><hashes>
-//     ...
-//
-// "<h>" represents the index header.
-
-class WalIndex final
-{
-    friend class WalImpl;
-
-    std::vector<char *> m_segments;
-    WalIndexHeader *m_header = nullptr;
-    std::size_t m_frame_number = 0;
-
-    struct Segment {
-        U32 *frames = nullptr;
-        U16 *hashes = nullptr;
-        std::size_t base = 0;
-    };
-
-    [[nodiscard]] auto create_or_open_segment(std::size_t table_number) -> Segment;
-
-public:
-    ~WalIndex();
-    explicit WalIndex(WalIndexHeader &header);
-    [[nodiscard]] auto frame_for_page(Id page_id, Id min_frame_id, Id &out) -> Status;
-    [[nodiscard]] auto page_for_frame(Id frame_id) -> Id;
-    [[nodiscard]] auto assign(Id page_id, Id frame_id) -> Status;
-    [[nodiscard]] auto header() -> WalIndexHeader *;
-    auto cleanup() -> void;
-};
-
 } // namespace calicodb
 
 #endif // CALICODB_WAL_H
