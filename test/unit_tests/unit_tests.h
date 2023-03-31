@@ -66,23 +66,28 @@ namespace calicodb
 
 static constexpr auto kExpectationMatcher = "^expectation";
 
-#define EXPECT_OK(expr)                                                                                                     \
-    do {                                                                                                                    \
-        const auto &expect_ok_status = (expr);                                                                              \
-        EXPECT_TRUE(expect_ok_status.is_ok()) << get_status_name(expect_ok_status) << ": " << expect_ok_status.to_string(); \
+#define STREAM_MESSAGE(expr) #expr                                    \
+                                 << " == Status::ok()\" but got \""   \
+                                 << get_status_name(expect_ok_status) \
+                                 << "\" status with message \""       \
+                                 << expect_ok_status.to_string()      \
+                                 << "\"\n";
+
+#define EXPECT_OK(expr)                        \
+    do {                                       \
+        const auto &expect_ok_status = (expr); \
+        EXPECT_TRUE(expect_ok_status.is_ok())  \
+            << "expected \""                   \
+            << STREAM_MESSAGE(expr);           \
     } while (0)
 
-#define ASSERT_OK(expr)                                                                                                     \
-    do {                                                                                                                    \
-        const auto &expect_ok_status = (expr);                                                                              \
-        ASSERT_TRUE(expect_ok_status.is_ok()) << get_status_name(expect_ok_status) << ": " << expect_ok_status.to_string(); \
+#define ASSERT_OK(expr)                        \
+    do {                                       \
+        const auto &expect_ok_status = (expr); \
+        ASSERT_TRUE(expect_ok_status.is_ok())  \
+            << "asserted \""                   \
+            << STREAM_MESSAGE(expr);           \
     } while (0)
-
-[[nodiscard]] inline auto expose_message(const Status &s)
-{
-    EXPECT_TRUE(s.is_ok()) << "Unexpected " << get_status_name(s) << " status: " << s.to_string().data();
-    return s.is_ok();
-}
 
 class InMemoryTest
 {

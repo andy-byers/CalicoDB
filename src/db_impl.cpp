@@ -246,13 +246,17 @@ DBImpl::DBImpl(const Options &options, const Options &sanitized, std::string fil
                          ? m_db_filename + kDefaultLogSuffix
                          : ""),
       m_owns_env(options.env == nullptr),
-      m_owns_log(options.info_log == nullptr)
+      m_owns_log(options.info_log == nullptr),
+      m_sync(options.sync)
 {
 }
 
 DBImpl::~DBImpl()
 {
     if (m_state.use_wal && m_state.status.is_ok()) {
+        if (const auto s = m_pager->abort(); !s.is_ok()) {
+            m_log->logv("failed to abort uncommitted transaction: %s", s.to_string().c_str());
+        }
         if (const auto s = m_pager->checkpoint(); !s.is_ok()) {
             m_log->logv("failed to reset wal: %s", s.to_string().c_str());
         }
@@ -564,19 +568,16 @@ auto DBImpl::do_commit() -> Status
     header.page_count = static_cast<U32>(m_pager->page_count());
     header.freelist_head = m_state.freelist_head;
     header.magic_code = FileHeader::kMagicCode;
-    //    header.commit_lsn = m_wal->current_lsn();
-    //    m_state.commit_lsn = m_wal->current_lsn();
     header.record_count = m_state.record_count;
     header.header_crc = crc32c::Mask(header.compute_crc());
     header.write(db_root.data());
     m_pager->release(std::move(db_root));
 
-    CALICODB_TRY(m_wal->commit());
-
-    // This call just performs some cleanup.
-    auto s = m_pager->commit();
-    if (!s.is_ok()) {
-        SET_STATUS(s);
+    CALICODB_TRY(m_pager->commit());
+    if (m_wal->needs_checkpoint()) {
+        return m_pager->checkpoint();
+    } else if (m_sync) {
+        return m_wal->sync();
     }
     return Status::ok();
 }

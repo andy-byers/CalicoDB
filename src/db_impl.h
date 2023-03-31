@@ -123,7 +123,6 @@ private:
     [[nodiscard]] auto do_commit() -> Status;
     [[nodiscard]] auto load_file_header() -> Status;
     [[nodiscard]] auto do_vacuum() -> Status;
-    [[nodiscard]] auto open_wal_reader(Id segment, std::unique_ptr<File> &out) -> Status;
     [[nodiscard]] auto ensure_consistency() -> Status;
     [[nodiscard]] auto recovery_phase_1() -> Status;
     [[nodiscard]] auto recovery_phase_2() -> Status;
@@ -145,6 +144,7 @@ private:
     const std::string m_log_filename;
     const bool m_owns_env;
     const bool m_owns_log;
+    const bool m_sync;
 };
 
 auto setup_db(const std::string &filename, Env &env, Options &options, FileHeader &header) -> Status;

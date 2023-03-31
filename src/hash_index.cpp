@@ -80,28 +80,27 @@ HashIndex::~HashIndex()
 
 auto HashIndex::header() -> HashIndexHeader *
 {
-    return reinterpret_cast<HashIndexHeader *>(m_groups.front());
+    return reinterpret_cast<HashIndexHeader *>(group_data(0));
 }
 
 auto HashIndex::lookup(Key key, Value lower, Value &out) -> Status
 {
     out = 0;
 
-    if (m_hdr->max_frame < lower) {
+    const auto upper = m_hdr->max_frame;
+    if (upper == 0) {
         return Status::ok();
     }
     const auto min_group_number = index_group_number(lower);
 
     for (auto n = index_group_number(m_hdr->max_frame);; --n) {
         if (n >= m_groups.size()) {
-            break;
+            continue;
         }
         HashGroup group(n, group_data(n));
         // The guard above prevents considering groups that haven't been allocated yet.
         // Such groups would start past the current "max_frame".
         CALICODB_EXPECT_LE(group.base, m_hdr->max_frame);
-        const auto hash_min = lower >= group.base ? lower - group.base : 0;
-        const auto hash_max = m_hdr->max_frame - group.base;
         auto collisions = kNIndexValues;
         auto key_hash = index_hash(key);
         Hash relative;
@@ -112,13 +111,13 @@ auto HashIndex::lookup(Key key, Value lower, Value &out) -> Status
             if (collisions-- == 0) {
                 return too_many_collisions(key);
             }
+            const auto absolute = relative + group.base;
             const auto found =
-                relative >= hash_min &&
-                relative <= hash_max &&
+                absolute >= lower &&
+                absolute <= upper &&
                 group.keys[relative - 1] == key;
             if (found) {
-                out = group.base + relative;
-                break;
+                out = absolute;
             }
             key_hash = next_index_hash(key_hash);
         }
@@ -149,14 +148,20 @@ auto HashIndex::assign(Key key, Value value) -> Status
     const auto key_capacity = group_number ? kNIndexKeys : kNIndexKeys0;
     HashGroup group(group_number, group_data(group_number));
 
-    CALICODB_EXPECT_LE(group.base, value);
+    CALICODB_EXPECT_LT(group.base, value);
     const auto relative = value - group.base;
+    CALICODB_EXPECT_LE(relative, key_capacity);
     if (relative == 1) {
         // Clear the whole group when the first entry is inserted.
         const auto group_size =
             key_capacity * sizeof *group.keys +
             kNIndexValues * sizeof *group.hash;
         std::memset(group.keys, 0, group_size);
+    }
+
+    if (group.keys[relative - 1]) {
+        cleanup();
+        CALICODB_EXPECT_EQ(group.keys[relative - 1], 0);
     }
 
     CALICODB_EXPECT_LE(relative, key_capacity);
@@ -187,7 +192,7 @@ auto HashIndex::group_data(std::size_t group_number) -> char *
         m_groups.emplace_back();
     }
     if (m_groups[group_number] == nullptr) {
-        m_groups[group_number] = new char[kIndexGroupSize];
+        m_groups[group_number] = new char[kIndexGroupSize]();
     }
     return m_groups[group_number];
 }
@@ -321,29 +326,21 @@ HashIterator::HashIterator(HashIndex &source)
     for (U32 i = 0; i < m_num_groups; ++i) {
         HashGroup group(i, m_source->group_data(i));
 
-        U32 group_size;
+        U32 group_size = kNIndexKeys;
         if (i + 1 == m_num_groups) {
             group_size = last_value - group.base;
-        } else if (i == 1) {
+        } else if (i == 0) {
             group_size = kNIndexKeys0;
-        } else {
-            group_size = kNIndexKeys;
         }
 
         // Pointer into the special index buffer located right after the group array.
         auto *index = reinterpret_cast<Hash *>(&m_state->groups[m_num_groups]) + group.base;
-        ++group.base;
 
         for (std::size_t j = 0; j < group_size; ++j) {
             index[j] = static_cast<Hash>(j);
         }
-        mergesort(
-            group.keys,
-            index,
-            temp,
-            group_size);
-
-        m_state->groups[i].base = group.base;
+        mergesort(group.keys, index, temp, group_size);
+        m_state->groups[i].base = group.base + 1;
         m_state->groups[i].size = group_size;
         m_state->groups[i].keys = group.keys;
         m_state->groups[i].index = index;

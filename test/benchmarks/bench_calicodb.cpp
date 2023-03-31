@@ -21,19 +21,19 @@ static auto access_type_name(int64_t type) -> std::string
     return "Unknown";
 }
 
+struct Parameters {
+    std::size_t value_length = 100;
+    std::size_t commit_interval = 1;
+};
+
 class Benchmark final
 {
     static constexpr auto kFilename = "__bench_db__";
     static constexpr std::size_t kKeyLength = 16;
     static constexpr std::size_t kNumRecords = 10'000;
-    static constexpr std::size_t kCheckpointInterval = 1;
 
 public:
-    struct Parameters {
-        std::size_t value_length;
-    };
-
-    explicit Benchmark(const Parameters &param = {.value_length = 100})
+    explicit Benchmark(const Parameters &param = {})
         : m_param {param}
     {
         m_options.env = calicodb::Env::default_env();
@@ -166,7 +166,7 @@ private:
 
     auto maybe_commit() -> void
     {
-        if (m_counters[0] % kCheckpointInterval == kCheckpointInterval - 1) {
+        if (m_counters[0] % m_param.commit_interval == m_param.commit_interval - 1) {
             CHECK_OK(m_db->commit());
         }
     }
@@ -198,32 +198,51 @@ private:
     calicodb::DB *m_db = nullptr;
 };
 
+static auto set_modification_benchmark_label(benchmark::State &state)
+{
+    state.SetLabel(
+        std::string(state.range(1) ? "Over" : "") +
+        "Write" +
+        access_type_name(state.range(0)) +
+        (state.range(2) == 1 ? "" : "Batch"));
+}
+
 static auto BM_Write(benchmark::State &state) -> void
 {
-    state.SetLabel("Write" + access_type_name(state.range(0)));
+    set_modification_benchmark_label(state);
 
-    Benchmark bench;
+    Parameters param;
+    param.commit_interval = state.range(2);
+
+    Benchmark bench(param);
     for (auto _ : state) {
         bench.write(state);
     }
 }
 BENCHMARK(BM_Write)
-    ->Args({kSequential, 0})
-    ->Args({kRandom, 0});
+    ->Args({kSequential, 0, 1})
+    ->Args({kRandom, 0, 1})
+    ->Args({kSequential, 0, 1'000})
+    ->Args({kRandom, 0, 1'000});
 
 static auto BM_Overwrite(benchmark::State &state) -> void
 {
-    state.SetLabel("Overwrite" + access_type_name(state.range(0)));
+    set_modification_benchmark_label(state);
 
-    Benchmark bench;
+    Parameters param;
+    param.commit_interval = state.range(2);
+
+    Benchmark bench(param);
     bench.add_initial_records();
     for (auto _ : state) {
         bench.write(state);
     }
 }
 BENCHMARK(BM_Overwrite)
-    ->Args({kSequential, 1})
-    ->Args({kRandom, 1});
+    ->Args({kSequential, 1, 1})
+    ->Args({kRandom, 1, 1})
+    ->Args({kSequential, 1, 1'000})
+    ->Args({kRandom, 1, 1'000});
 
 static auto BM_Exists(benchmark::State &state) -> void
 {

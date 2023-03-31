@@ -414,7 +414,19 @@ auto FakeWal::write(const CacheEntry *dirty, std::size_t db_size) -> Status
         };
         m_versions.back().emplace_back(version);
     }
+    if (db_size) {
+        m_versions.emplace_back();
+    }
     return Status::ok();
+}
+
+auto FakeWal::needs_checkpoint() const -> bool
+{
+    std::size_t num_frames = 0;
+    for (const auto &version : m_versions) {
+        num_frames += version.size();
+    }
+    return num_frames > 1'000;
 }
 
 auto FakeWal::checkpoint(File &db_file) -> Status
@@ -438,9 +450,15 @@ auto FakeWal::checkpoint(File &db_file) -> Status
     return Status::ok();
 }
 
-auto FakeWal::commit() -> Status
+auto FakeWal::abort() -> Status
 {
-    m_versions.emplace_back();
+    m_versions.pop_back();
+    return Status::ok();
+}
+
+auto FakeWal::close() -> Status
+{
+    m_versions.clear();
     return Status::ok();
 }
 

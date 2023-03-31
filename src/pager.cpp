@@ -159,10 +159,8 @@ auto Pager::checkpoint() -> Status
     CALICODB_EXPECT_EQ(m_dirty, nullptr);
     CALICODB_EXPECT_TRUE(m_state->use_wal);
 
-    // Make sure everything written to the WAL is on disk.
-    CALICODB_TRY(m_wal->sync());
-
-    // Transfer the WAL contents back to the DB.
+    // Transfer the WAL contents back to the DB. Note that this call will sync the WAL
+    // file before it starts transferring any data back.
     CALICODB_TRY(m_wal->checkpoint(*m_file));
 
     // Make sure the data transferred from the WAL is on disk.
@@ -172,9 +170,8 @@ auto Pager::checkpoint() -> Status
 auto Pager::commit() -> Status
 {
     CALICODB_EXPECT_TRUE(m_state->use_wal);
-    if (m_dirty == nullptr) {
-        return Status::ok();
-    }
+    CALICODB_EXPECT_NE(m_dirty, nullptr);
+
     auto *p = m_dirty;
     for (; p; p = p->next) {
         if (p->page_id.value > m_page_count) {
@@ -192,6 +189,19 @@ auto Pager::commit() -> Status
     // The DB page count is specified here. This indicates that the writes are part of
     // a commit.
     return m_wal->write(p, m_page_count);
+}
+
+auto Pager::abort() -> Status
+{
+    CALICODB_EXPECT_TRUE(m_state->use_wal);
+    if (m_dirty == nullptr) {
+        return Status::ok();
+    }
+
+    for (auto *p = m_dirty; p; p = clean_page(*p)) {
+    }
+    m_dirty = nullptr;
+    return m_wal->abort();
 }
 
 auto Pager::flush_to_disk() -> Status

@@ -47,6 +47,8 @@ public:
     // Open or create a WAL file called "filename".
     [[nodiscard]] static auto open(const Parameters &param, Wal *&out) -> Status;
 
+    [[nodiscard]] static auto close(Wal *&wal) -> Status;
+
     // Read the most-recent version of page "page_id" from the WAL.
     [[nodiscard]] virtual auto read(Id page_id, char *page) -> Status = 0;
 
@@ -64,9 +66,14 @@ public:
 
     [[nodiscard]] virtual auto sync() -> Status = 0;
 
-    [[nodiscard]] virtual auto commit() -> Status = 0;
+    [[nodiscard]] virtual auto needs_checkpoint() const -> bool = 0;
+
+    [[nodiscard]] virtual auto abort() -> Status = 0;
 
     [[nodiscard]] virtual auto statistics() const -> WalStatistics = 0;
+
+private:
+    [[nodiscard]] virtual auto close() -> Status = 0;
 };
 
 } // namespace calicodb

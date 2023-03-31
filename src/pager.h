@@ -41,6 +41,7 @@ public:
     [[nodiscard]] auto bytes_written() const -> std::size_t;
     [[nodiscard]] auto truncate(std::size_t page_count) -> Status;
     [[nodiscard]] auto flush_to_disk() -> Status;
+    [[nodiscard]] auto abort() -> Status;
     [[nodiscard]] auto commit() -> Status;
     [[nodiscard]] auto checkpoint() -> Status;
     [[nodiscard]] auto allocate(Page &page) -> Status;

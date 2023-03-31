@@ -28,12 +28,16 @@
 #define CHECK_FALSE(cond) \
     CHECK_TRUE(!(cond))
 
-#define CHECK_OK(expr)                                        \
-    do {                                                      \
-        if (auto assert_s = (expr); !assert_s.is_ok()) {      \
-            std::fputs(assert_s.to_string().c_str(), stderr); \
-            std::abort();                                     \
-        }                                                     \
+#define CHECK_OK(expr)                                                         \
+    do {                                                                       \
+        if (auto assert_s = (expr); !assert_s.is_ok()) {                       \
+            std::fprintf(                                                      \
+                stderr,                                                        \
+                "expected \"" #expr " == Status::ok()\" but got \"%s\": %s\n", \
+                get_status_name(assert_s),                                     \
+                assert_s.to_string().c_str());                                 \
+            std::abort();                                                      \
+        }                                                                      \
     } while (0)
 
 #define CHECK_EQ(lhs, rhs)                        \
@@ -228,12 +232,22 @@ public:
         return Status::ok();
     }
 
+    [[nodiscard]] auto needs_checkpoint() const -> bool override
+    {
+        return false;
+    }
+
     [[nodiscard]] auto checkpoint(File &) -> Status override
     {
         return Status::ok();
     }
 
-    [[nodiscard]] auto commit() -> Status override
+    [[nodiscard]] auto abort() -> Status override
+    {
+        return Status::ok();
+    }
+
+    [[nodiscard]] auto close() -> Status override
     {
         return Status::ok();
     }
@@ -260,8 +274,10 @@ public:
 
     [[nodiscard]] auto read(Id page_id, char *out) -> Status override;
     [[nodiscard]] auto write(const CacheEntry *dirty, std::size_t db_size) -> Status override;
+    [[nodiscard]] auto needs_checkpoint() const -> bool override;
     [[nodiscard]] auto checkpoint(File &db_file) -> Status override;
-    [[nodiscard]] auto commit() -> Status override;
+    [[nodiscard]] auto abort() -> Status override;
+    [[nodiscard]] auto close() -> Status override;
     [[nodiscard]] auto sync() -> Status override { return Status::ok(); }
     [[nodiscard]] auto statistics() const -> WalStatistics override;
 };

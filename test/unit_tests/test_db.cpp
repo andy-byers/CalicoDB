@@ -241,7 +241,7 @@ TEST_F(BasicDatabaseTests, IsDestroyed)
 static auto insert_random_groups(DB &db, std::size_t num_groups, std::size_t group_size)
 {
     RecordGenerator generator;
-    tools::RandomGenerator random {4 * 1'024 * 1'024};
+    tools::RandomGenerator random(4 * 1'024 * 1'024);
 
     for (std::size_t iteration = 0; iteration < num_groups; ++iteration) {
         const auto records = generator.generate(random, group_size);

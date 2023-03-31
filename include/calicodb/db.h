@@ -43,6 +43,10 @@ struct Options {
 
     // If true, return with an error if the database already exists.
     bool error_if_exists = false;
+
+    // If true, sync the WAL file on every commit. Hurts performance quite a bit,
+    // but provides extra durability.
+    bool sync = false;
 };
 
 // On-disk collection of tables.
