@@ -35,10 +35,10 @@ TEST_F(PageCacheTests, EmptyCacheBehavior)
 
 TEST_F(PageCacheTests, OldestEntryIsEvictedFirst)
 {
-    cache.put(make_cache_entry(4));
-    cache.put(make_cache_entry(3));
-    cache.put(make_cache_entry(2));
-    cache.put(make_cache_entry(1));
+    (void)cache.alloc(Id(4));
+    (void)cache.alloc(Id(3));
+    (void)cache.alloc(Id(2));
+    (void)cache.alloc(Id(1));
     ASSERT_EQ(cache.size(), 4);
 
     ASSERT_EQ(cache.get(Id(4))->page_id, Id(4));
@@ -57,8 +57,8 @@ TEST_F(PageCacheTests, OldestEntryIsEvictedFirst)
 
 TEST_F(PageCacheTests, ReplacementPolicyIgnoresQuery)
 {
-    cache.put(make_cache_entry(2));
-    cache.put(make_cache_entry(1));
+    (void)cache.alloc(Id(2));
+    (void)cache.alloc(Id(1));
 
     (void)cache.query(Id(2));
 
@@ -70,8 +70,8 @@ TEST_F(PageCacheTests, ReplacementPolicyIgnoresQuery)
 
 TEST_F(PageCacheTests, ReferencedEntriesAreIgnoredDuringEviction)
 {
-    cache.put(make_cache_entry(2));
-    cache.put(make_cache_entry(1));
+    (void)cache.alloc(Id(2));
+    (void)cache.alloc(Id(1));
 
     cache.query(Id(2))->refcount = 1;
 
@@ -93,7 +93,7 @@ public:
         File *file;
         EXPECT_OK(env->new_file("./test", file));
 
-        AlignedBuffer buffer {kPageSize * kFrameCount, kPageSize};
+        AlignedBuffer buffer(kPageSize * kFrameCount, kPageSize);
         frames = std::make_unique<FrameManager>(std::move(buffer), kPageSize, kFrameCount);
     }
 
@@ -112,10 +112,10 @@ TEST_F(FrameManagerTests, NewFrameManagerIsSetUpCorrectly)
 TEST_F(FrameManagerTests, OutOfFramesDeathTest)
 {
     for (std::size_t i = 0; i < kFrameCount; ++i) {
-        auto *entry = cache.put(make_cache_entry(i + 1));
+        auto *entry = cache.alloc(Id(i + 1));
         (void)frames->pin(Id::from_index(i), *entry);
     }
-    auto *entry = cache.put(make_cache_entry(kFrameCount + 1));
+    auto *entry = cache.alloc(Id(kFrameCount + 1));
     ASSERT_EQ(frames->available(), 0);
     ASSERT_DEATH((void)frames->pin(Id::from_index(kFrameCount), *entry), "expect");
 }
@@ -123,13 +123,13 @@ TEST_F(FrameManagerTests, OutOfFramesDeathTest)
 
 auto write_to_page(Page &page, const std::string &message) -> void
 {
-    EXPECT_LE(page_offset(page) + message.size(), page.size());
+    EXPECT_LE(page_offset(page.id()) + message.size(), page.size());
     std::memcpy(page.data() + page.size() - message.size(), message.data(), message.size());
 }
 
 [[nodiscard]] auto read_from_page(const Page &page, std::size_t size) -> std::string
 {
-    EXPECT_LE(page_offset(page) + size, page.size());
+    EXPECT_LE(page_offset(page.id()) + size, page.size());
     std::string message(size, '\x00');
     std::memcpy(message.data(), page.data() + page.size() - message.size(), message.size());
     return message;
@@ -298,7 +298,8 @@ TEST_F(PagerTests, BasicCheckpoints)
         write_pages(*this, kFrameCount * i, kFrameCount * (i + 1));
         ASSERT_OK(pager->commit());
         read_and_check(*this, kFrameCount * i, kFrameCount * (i + 1));
-        ASSERT_OK(pager->checkpoint());
+        ASSERT_OK(pager->checkpoint_phase_1());
+        ASSERT_OK(pager->checkpoint_phase_2());
         // Pages returned by the pager should reflect what is on disk.
         read_and_check(*this, kFrameCount * i, kFrameCount * (i + 1));
         read_and_check(*this, kFrameCount * i, kFrameCount * (i + 1), true);
@@ -308,61 +309,61 @@ TEST_F(PagerTests, BasicCheckpoints)
 TEST_F(PagerTests, WritesBackDuringCheckpoint)
 {
 }
-
-class TruncationTests : public PagerTests
-{
-public:
-    static constexpr std::size_t kInitialPageCount = 500;
-
-    auto SetUp() -> void override
-    {
-        for (std::size_t i = 0; i < kInitialPageCount; ++i) {
-            (void)allocate_write_release(tools::integral_key(i));
-        }
-        ASSERT_OK(pager->flush_to_disk());
-    }
-};
-
-TEST_F(TruncationTests, AllocationAfterTruncation)
-{
-    ASSERT_OK(pager->truncate(1));
-
-    for (std::size_t i = 1; i < kInitialPageCount; ++i) {
-        (void)allocate_write_release(tools::integral_key(i));
-    }
-
-    for (std::size_t i = 0; i < kInitialPageCount; ++i) {
-        const auto key = tools::integral_key(i);
-        ASSERT_EQ(acquire_read_release(Id::from_index(i), key.size()), key);
-    }
-}
-
-TEST_F(TruncationTests, OutOfRangePagesAreDiscarded)
-{
-    std::size_t base_file_size, file_size;
-    const auto flush_and_match_sizes = [&] {
-        ASSERT_OK(env->file_size(kFilename, base_file_size));
-        // If there are still cached pages past the truncation position, they will be
-        // written back to disk here, causing the file size to change.
-        ASSERT_OK(pager->flush_to_disk());
-        ASSERT_OK(env->file_size(kFilename, file_size));
-        ASSERT_EQ(base_file_size, file_size);
-    };
-
-    // Make pages dirty.
-    for (std::size_t i = 0; i < kInitialPageCount; ++i) {
-        acquire_write_release(Id(i + 1), tools::integral_key(i));
-    }
-    // Should get rid of cached pages that are out-of-range.
-    ASSERT_OK(pager->truncate(kInitialPageCount - kFrameCount / 2));
-    flush_and_match_sizes();
-
-    // All cached pages are out-of-range
-    for (std::size_t i = 0; i < kInitialPageCount - kFrameCount / 2; ++i) {
-        acquire_write_release(Id(i + 1), tools::integral_key(i));
-    }
-    ASSERT_OK(pager->truncate(1));
-    flush_and_match_sizes();
-}
+//
+// class TruncationTests : public PagerTests
+//{
+// public:
+//    static constexpr std::size_t kInitialPageCount = 500;
+//
+//    auto SetUp() -> void override
+//    {
+//        for (std::size_t i = 0; i < kInitialPageCount; ++i) {
+//            (void)allocate_write_release(tools::integral_key(i));
+//        }
+//        ASSERT_OK(pager->flush_to_disk());
+//    }
+//};
+//
+// TEST_F(TruncationTests, AllocationAfterTruncation)
+//{
+//    ASSERT_OK(pager->truncate(1));
+//
+//    for (std::size_t i = 1; i < kInitialPageCount; ++i) {
+//        (void)allocate_write_release(tools::integral_key(i));
+//    }
+//
+//    for (std::size_t i = 0; i < kInitialPageCount; ++i) {
+//        const auto key = tools::integral_key(i);
+//        ASSERT_EQ(acquire_read_release(Id::from_index(i), key.size()), key);
+//    }
+//}
+//
+// TEST_F(TruncationTests, OutOfRangePagesAreDiscarded)
+//{
+//    std::size_t base_file_size, file_size;
+//    const auto flush_and_match_sizes = [&] {
+//        ASSERT_OK(env->file_size(kFilename, base_file_size));
+//        // If there are still cached pages past the truncation position, they will be
+//        // written back to disk here, causing the file size to change.
+//        ASSERT_OK(pager->flush_to_disk());
+//        ASSERT_OK(env->file_size(kFilename, file_size));
+//        ASSERT_EQ(base_file_size, file_size);
+//    };
+//
+//    // Make pages dirty.
+//    for (std::size_t i = 0; i < kInitialPageCount; ++i) {
+//        acquire_write_release(Id(i + 1), tools::integral_key(i));
+//    }
+//    // Should get rid of cached pages that are out-of-range.
+//    ASSERT_OK(pager->truncate(kInitialPageCount - kFrameCount / 2));
+//    flush_and_match_sizes();
+//
+//    // All cached pages are out-of-range
+//    for (std::size_t i = 0; i < kInitialPageCount - kFrameCount / 2; ++i) {
+//        acquire_write_release(Id(i + 1), tools::integral_key(i));
+//    }
+//    ASSERT_OK(pager->truncate(1));
+//    flush_and_match_sizes();
+//}
 
 } // namespace calicodb

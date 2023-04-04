@@ -223,15 +223,6 @@ auto EnvPosix::get_children(const std::string &dirname, std::vector<std::string>
     return Status::ok();
 }
 
-auto EnvPosix::sync_directory(const std::string &dirname) -> Status
-{
-    int dir;
-    CALICODB_TRY(file_open(dirname, O_RDONLY, kFilePermissions, dir));
-    auto s = file_sync(dir);
-    close(dir);
-    return s;
-}
-
 auto EnvPosix::new_file(const std::string &filename, File *&out) -> Status
 {
     int file;

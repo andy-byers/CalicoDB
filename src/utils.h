@@ -168,7 +168,6 @@ struct DBState {
     std::size_t record_count = 0;
     std::size_t ckpt_number = 0;
     Id freelist_head;
-    Id max_page_id;
     bool use_wal = false;
 };
 

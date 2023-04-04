@@ -50,7 +50,7 @@ inline constexpr auto compute_local_size(std::size_t key_size, std::size_t value
 
 static auto node_header_offset(const Node &node)
 {
-    return page_offset(node.page);
+    return page_offset(node.page.id());
 }
 
 static auto cell_slots_offset(const Node &node)
@@ -137,12 +137,12 @@ static auto write_child_id(Cell &cell, Id child_id) -> void
 
 [[nodiscard]] auto read_next_id(const Page &page) -> Id
 {
-    return Id(get_u32(page.view(page_offset(page))));
+    return Id(get_u32(page.view(page_offset(page.id()))));
 }
 
 auto write_next_id(Page &page, Id next_id) -> void
 {
-    put_u32(page.data() + page_offset(page), next_id.value);
+    put_u32(page.data() + page_offset(page.id()), next_id.value);
 }
 
 static auto parse_external_cell(const NodeMeta &meta, char *data) -> Cell
@@ -151,7 +151,7 @@ static auto parse_external_cell(const NodeMeta &meta, char *data) -> Cell
     const auto *ptr = data;
     ptr = decode_varint(ptr, value_size);
     ptr = decode_varint(ptr, key_size);
-    const auto header_size = static_cast<std::size_t>(ptr - data);
+    const std::uintptr_t header_size = ptr - data;
 
     Cell cell;
     cell.ptr = data;
@@ -167,7 +167,7 @@ static auto parse_internal_cell(const NodeMeta &meta, char *data) -> Cell
 {
     U64 key_size;
     const auto *ptr = decode_varint(data + Id::kSize, key_size);
-    const auto header_size = static_cast<std::size_t>(ptr - data);
+    const std::uintptr_t header_size = ptr - data;
 
     Cell cell;
     cell.ptr = data;

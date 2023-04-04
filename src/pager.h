@@ -39,11 +39,11 @@ public:
     [[nodiscard]] auto page_size() const -> std::size_t;
     [[nodiscard]] auto bytes_read() const -> std::size_t;
     [[nodiscard]] auto bytes_written() const -> std::size_t;
-    [[nodiscard]] auto truncate(std::size_t page_count) -> Status;
     [[nodiscard]] auto flush_to_disk() -> Status;
     [[nodiscard]] auto abort() -> Status;
     [[nodiscard]] auto commit() -> Status;
-    [[nodiscard]] auto checkpoint() -> Status;
+    [[nodiscard]] auto checkpoint_phase_1() -> Status;
+    [[nodiscard]] auto checkpoint_phase_2() -> Status;
     [[nodiscard]] auto allocate(Page &page) -> Status;
     [[nodiscard]] auto acquire(Id page_id, Page &page) -> Status;
     auto upgrade(Page &page) -> void;
@@ -86,6 +86,7 @@ private:
     Wal *m_wal = nullptr;
     DBState *m_state = nullptr;
     std::size_t m_page_count = 0;
+    std::size_t m_saved_count = 0;
 };
 
 } // namespace calicodb

@@ -23,10 +23,9 @@ namespace fs = std::filesystem;
 
 auto FakeEnv::read_file_at(const Memory &mem, std::size_t offset, std::size_t size, char *scratch, Slice *out) -> Status
 {
-    std::size_t read_size = 0;
-    if (Slice buffer(mem.buffer); offset < mem.buffer.size()) {
-        read_size = std::min(size, buffer.size() - offset);
-        std::memcpy(scratch, buffer.advance(offset).data(), read_size);
+    if (offset < mem.buffer.size()) {
+        const auto read_size = std::min(size, mem.buffer.size() - offset);
+        std::memcpy(scratch, mem.buffer.data() + offset, read_size);
         if (out != nullptr) {
             *out = Slice(scratch, read_size);
         }
@@ -375,90 +374,63 @@ auto expect_db_contains(const DB &db, const Table &table, const std::map<std::st
 FakeWal::FakeWal(const Parameters &param)
     : m_param(param)
 {
-    m_versions.emplace_back();
 }
 
-auto FakeWal::read(Id page_id, char *out) -> Status
+auto FakeWal::read(Id page_id, char *&out) -> Status
 {
-    for (auto itr = crbegin(m_versions); itr != crend(m_versions); ++itr) {
-        for (const auto &[version_page_id, db_size, data] : *itr) {
-            if (version_page_id == page_id) {
-                std::memcpy(out, data.c_str(), data.size());
-                return Status::ok();
-            }
+    for (const auto &map : {m_pending, m_committed}) {
+        const auto itr = map.find(page_id);
+        if (itr != end(map)) {
+            std::memcpy(out, itr->second.c_str(), m_param.page_size);
+            return Status::ok();
         }
     }
-    return Status::not_found("not found");
+    out = nullptr;
+    return Status::ok();
 }
 
 auto FakeWal::write(const CacheEntry *dirty, std::size_t db_size) -> Status
 {
     for (auto *p = dirty; p; p = p->next) {
-        auto overwrite = false;
-        if (db_size == 0) {
-            for (auto &version : m_versions.back()) {
-                if (version.page_id == p->page_id) {
-                    version.data = std::string(p->page, m_param.page_size);
-                    overwrite = true;
-                    break;
-                }
-            }
-        }
-        if (overwrite) {
-            continue;
-        }
-        PageVersion version = {
-            p->page_id,
-            p->next == nullptr ? db_size : 0,
-            std::string(p->page, m_param.page_size),
-        };
-        m_versions.back().emplace_back(version);
+        m_pending.insert_or_assign(p->page_id, std::string(p->page, m_param.page_size));
     }
     if (db_size) {
-        m_versions.emplace_back();
+        for (const auto &[k, v] : m_pending) {
+            m_committed.insert_or_assign(k, v);
+        }
+        m_pending.clear();
     }
     return Status::ok();
 }
 
 auto FakeWal::needs_checkpoint() const -> bool
 {
-    std::size_t num_frames = 0;
-    for (const auto &version : m_versions) {
-        num_frames += version.size();
-    }
-    return num_frames > 1'000;
+    return m_committed.size() > 1'000;
 }
 
 auto FakeWal::checkpoint(File &db_file) -> Status
 {
     // TODO: Need the env to resize the file.
-
-    // Collect the most-recent versions of each page from the total set of pages written to the WAL.
-    std::map<Id, std::string> output;
-    for (const auto &versions : m_versions) {
-        for (const auto &[page_id, db_size, data] : versions) {
-            output.insert_or_assign(page_id, data);
-        }
-    }
+    CALICODB_EXPECT_TRUE(m_pending.empty());
     // Write back to the DB sequentially.
-    for (const auto &[page_id, page] : output) {
+    for (const auto &[page_id, page] : m_committed) {
         const auto offset = page_id.as_index() * m_param.page_size;
         CALICODB_TRY(db_file.write(offset, page));
     }
-    m_versions.clear();
-    m_versions.emplace_back();
+    m_committed.clear();
     return Status::ok();
 }
 
 auto FakeWal::abort() -> Status
 {
-    m_versions.pop_back();
+    m_pending.clear();
     return Status::ok();
 }
 
 auto FakeWal::close() -> Status
 {
-    m_versions.clear();
+    m_pending.clear();
+    m_committed.clear();
     return Status::ok();
 }
 

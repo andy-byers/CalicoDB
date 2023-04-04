@@ -16,7 +16,7 @@ auto File::read_exact(std::size_t offset, std::size_t size, char *scratch) -> St
     Slice slice;
     auto s = read(offset, size, scratch, &slice);
     if (s.is_ok() && slice.size() != size) {
-        return Status::not_found("EOF");
+        return Status::io_error("incomplete read");
     }
     return s;
 }
@@ -80,11 +80,6 @@ auto EnvWrapper::file_size(const std::string &filename, std::size_t &out) const 
 auto EnvWrapper::remove_file(const std::string &filename) -> Status
 {
     return m_target->remove_file(filename);
-}
-
-auto EnvWrapper::sync_directory(const std::string &dirname) -> Status
-{
-    return m_target->remove_file(dirname);
 }
 
 } // namespace calicodb

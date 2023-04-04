@@ -118,7 +118,6 @@ auto write_out_randomly(tools::RandomGenerator &random, File &writer, const Slic
         const auto chunk_size = std::min<std::size_t>(size - counter, random.Next(size / num_chunks));
         const auto s = reader.read_exact(counter, chunk_size, out_data);
         EXPECT_TRUE(s.is_ok()) << "Error: " << s.to_string().data();
-        EXPECT_EQ(chunk_size, chunk_size);
         out_data += chunk_size;
         counter += chunk_size;
     }
@@ -185,7 +184,7 @@ public:
 TEST_F(PosixReaderTests, NewFileIsEmpty)
 {
     std::string backing(8, '\x00');
-    ASSERT_TRUE(file->read_exact(0, 8, backing.data()).is_not_found());
+    ASSERT_TRUE(file->read_exact(0, 8, backing.data()).is_io_error());
 }
 
 TEST_F(PosixReaderTests, ReadsBackContents)
@@ -245,7 +244,7 @@ TEST_F(FakeEnvTests, ReaderCannotCreateFile)
 {
     File *temp;
     const auto s = env->new_file("nonexistent", temp);
-    ASSERT_TRUE(s.is_not_found()) << "Error: " << s.to_string().data();
+    ASSERT_TRUE(s.is_io_error()) << "Error: " << s.to_string().data();
 }
 
 TEST_F(FakeEnvTests, ReadsAndWrites)

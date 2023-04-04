@@ -13,7 +13,7 @@ namespace calicodb
 
 AlignedBuffer::AlignedBuffer(std::size_t size, std::size_t alignment)
     : m_data(
-          new (std::align_val_t {alignment}) char[size](),
+          new(std::align_val_t {alignment}) char[size](),
           Deleter {std::align_val_t {alignment}})
 {
     CALICODB_EXPECT_TRUE(is_power_of_two(alignment));
@@ -48,11 +48,11 @@ auto PageCache::get(Id page_id) -> CacheEntry *
     return &*itr->second;
 }
 
-auto PageCache::put(CacheEntry entry) -> CacheEntry *
+auto PageCache::alloc(Id page_id) -> CacheEntry *
 {
-    CALICODB_EXPECT_EQ(query(entry.page_id), nullptr);
+    CALICODB_EXPECT_EQ(query(page_id), nullptr);
     auto [itr, _] = m_map.emplace(
-        entry.page_id, m_list.emplace(end(m_list), entry));
+        page_id, m_list.emplace(end(m_list)));
     return &*itr->second;
 }
 
@@ -119,7 +119,7 @@ auto FrameManager::upgrade(Page &page) -> void
     page.m_write = true;
 }
 
-auto FrameManager::pin(Id page_id, CacheEntry &entry) -> char *
+auto FrameManager::pin(Id page_id, CacheEntry &entry) -> void
 {
     CALICODB_EXPECT_FALSE(page_id.is_null());
     CALICODB_EXPECT_FALSE(m_unpinned.empty());
@@ -129,10 +129,7 @@ auto FrameManager::pin(Id page_id, CacheEntry &entry) -> char *
     entry.page_id = page_id;
     entry.index = m_unpinned.back();
     entry.page = get_frame_pointer(m_unpinned.back());
-
-    auto *frame = get_frame_pointer(m_unpinned.back());
     m_unpinned.pop_back();
-    return frame;
 }
 
 auto FrameManager::unpin(CacheEntry &entry) -> void

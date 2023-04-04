@@ -230,12 +230,6 @@ private:
         bool exact = false;
     };
 
-    enum ReportType {
-        kBytesRead,
-        kBytesWritten,
-        kSMOCount,
-    };
-
     [[nodiscard]] auto vacuum_step(Page &free, TableSet &tables, Id last_id) -> Status;
     [[nodiscard]] auto resolve_overflow(Node node) -> Status;
     [[nodiscard]] auto resolve_underflow(Node node, const Slice &anchor) -> Status;
@@ -262,6 +256,12 @@ private:
     [[nodiscard]] auto maybe_fix_overflow_chain(const Cell &cell, Id parent_id) -> Status;
     [[nodiscard]] auto fix_links(Node &node) -> Status;
     [[nodiscard]] auto cell_scratch() -> char *;
+
+    enum ReportType {
+        kBytesRead,
+        kBytesWritten,
+        kSMOCount,
+    };
 
     auto report_stats(ReportType type, std::size_t increment) const -> void;
 

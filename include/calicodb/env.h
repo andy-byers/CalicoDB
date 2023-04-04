@@ -38,7 +38,6 @@ public:
     [[nodiscard]] virtual auto resize_file(const std::string &path, std::size_t size) -> Status = 0;
     [[nodiscard]] virtual auto file_size(const std::string &path, std::size_t &out) const -> Status = 0;
     [[nodiscard]] virtual auto remove_file(const std::string &path) -> Status = 0;
-    [[nodiscard]] virtual auto sync_directory(const std::string &dirname) -> Status = 0;
 };
 
 class File
@@ -91,7 +90,6 @@ public:
     [[nodiscard]] auto resize_file(const std::string &filename, std::size_t size) -> Status override;
     [[nodiscard]] auto file_size(const std::string &filename, std::size_t &out) const -> Status override;
     [[nodiscard]] auto remove_file(const std::string &filename) -> Status override;
-    [[nodiscard]] auto sync_directory(const std::string &dirname) -> Status override;
 
 private:
     Env *m_target;

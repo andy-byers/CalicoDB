@@ -53,11 +53,11 @@ public:
     // cache replacement policy.
     [[nodiscard]] auto next_victim() -> CacheEntry *;
 
-    // Add an entry to the cache, which must not already exist.
+    // Create a new cache entry for page "page_id" which must not already exist.
     //
     // Returns the address of the cache entry, which is guaranteed to not change
     // until erase() is called on the entry.
-    auto put(CacheEntry entry) -> CacheEntry *;
+    [[nodiscard]] auto alloc(Id page_id) -> CacheEntry *;
 
     // Erase a specific entry, if it exists.
     auto erase(Id page_id) -> bool;
@@ -102,8 +102,8 @@ public:
     explicit FrameManager(AlignedBuffer buffer, std::size_t page_size, std::size_t frame_count);
     ~FrameManager() = default;
     [[nodiscard]] auto get_frame(std::size_t index) const -> Slice;
-    [[nodiscard]] auto pin(Id page_id, CacheEntry &entry) -> char *;
     [[nodiscard]] auto ref(CacheEntry &entry, Page &out) -> Status;
+    auto pin(Id page_id, CacheEntry &entry) -> void;
     auto unpin(CacheEntry &entry) -> void;
     auto unref(CacheEntry &entry) -> void;
     auto upgrade(Page &page) -> void;

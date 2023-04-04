@@ -3,68 +3,46 @@
 // LICENSE.md. See AUTHORS.md for a list of contributor names.
 
 #include "header.h"
-#include "crc.h"
 #include "encoding.h"
 
 namespace calicodb
 {
 
-static auto write_file_header(char *data, const FileHeader &header) -> void
+auto FileHeader::read(const char *data) -> bool
 {
-    put_u32(data, header.magic_code);
-    data += sizeof(U32);
+    if (std::memcmp(data, kIdentifier, sizeof(kIdentifier)) != 0) {
+        return false;
+    }
+    data += sizeof(kIdentifier);
 
-    put_u32(data, header.header_crc);
-    data += sizeof(U32);
-
-    put_u32(data, header.page_count);
-    data += sizeof(U32);
-
-    put_u32(data, header.freelist_head.value);
-    data += Id::kSize;
-
-    put_u64(data, header.record_count);
-    data += sizeof(U64);
-
-    put_u64(data, header.ckpt_number);
-    data += sizeof(U64);
-
-    put_u16(data, static_cast<U16>(header.page_size));
-}
-
-auto FileHeader::read(const char *data) -> void
-{
-    magic_code = get_u32(data);
-    data += sizeof(U32);
-
-    header_crc = get_u32(data);
-    data += sizeof(U32);
+    page_size = get_u16(data);
+    data += sizeof(U16);
 
     page_count = get_u32(data);
     data += sizeof(U32);
 
-    freelist_head.value = get_u32(data);
-    data += Id::kSize;
+    freelist_head = get_u32(data);
+    data += sizeof(U32);
 
-    record_count = get_u64(data);
-    data += sizeof(U64);
-
-    ckpt_number = get_u64(data);
-    data += sizeof(U64);
-
-    page_size = get_u16(data);
-}
-
-auto FileHeader::compute_crc() const -> U32
-{
-    char data[FileHeader::kSize];
-    write_file_header(data, *this);
-    return crc32c::Value(data + 8, FileHeader::kSize - 8);
+    format_version = *data++;
+    return true;
 }
 
 auto FileHeader::write(char *data) const -> void
 {
-    write_file_header(data, *this);
+    std::memcpy(data, kIdentifier, sizeof(kIdentifier));
+    data += sizeof(kIdentifier);
+
+    put_u16(data, page_size);
+    data += sizeof(U16);
+
+    put_u32(data, page_count);
+    data += sizeof(U32);
+
+    put_u32(data, freelist_head);
+    data += sizeof(U32);
+
+    *data++ = format_version;
 }
 
 auto NodeHeader::read(const char *data) -> void

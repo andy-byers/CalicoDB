@@ -119,14 +119,12 @@ public:
 
 private:
     [[nodiscard]] auto get_table_info(std::vector<std::string> &names, std::vector<LogicalPageId> *roots) const -> Status;
-    [[nodiscard]] auto remove_empty_table(const std::string &name, TableState &state) -> Status;
-    [[nodiscard]] auto do_commit() -> Status;
-    [[nodiscard]] auto load_file_header() -> Status;
-    [[nodiscard]] auto do_vacuum() -> Status;
-    [[nodiscard]] auto ensure_consistency() -> Status;
-    [[nodiscard]] auto recovery_phase_1() -> Status;
-    [[nodiscard]] auto recovery_phase_2() -> Status;
     [[nodiscard]] auto construct_new_table(const Slice &name, LogicalPageId &root_id) -> Status;
+    [[nodiscard]] auto remove_empty_table(const std::string &name, TableState &state) -> Status;
+    [[nodiscard]] auto checkpoint_if_needed(bool force = false) -> Status;
+    [[nodiscard]] auto load_file_header() -> Status;
+    [[nodiscard]] auto do_commit() -> Status;
+    [[nodiscard]] auto do_vacuum() -> Status;
 
     mutable DBState m_state;
 
@@ -146,8 +144,6 @@ private:
     const bool m_owns_log;
     const bool m_sync;
 };
-
-auto setup_db(const std::string &filename, Env &env, Options &options, FileHeader &header) -> Status;
 
 } // namespace calicodb
 

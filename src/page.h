@@ -110,12 +110,6 @@ public:
     auto operator=(Page &&) noexcept -> Page & = default;
 };
 
-[[nodiscard]] inline auto page_offset(const Page &page) -> std::size_t
-{
-    return FileHeader::kSize * page.id().is_root();
-}
-
-// TODO: These make more sense and can be used for frames as well.
 [[nodiscard]] inline auto page_offset(Id page_id) -> std::size_t
 {
     return FileHeader::kSize * page_id.is_root();

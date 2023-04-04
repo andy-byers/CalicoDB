@@ -101,208 +101,160 @@ TEST_F(WalPagerInteractionTests, WritesWalAtPageEviction)
     }
 }
 
-// TEST_F(WalPagerInteractionTests, AllocateTruncatedPages)
-//{
-//     for (std::size_t i = 0; i < 5; ++i) {
-//         Page page;
-//         ASSERT_OK(pager->allocate(page));
-//         pager->release(std::move(page));
-//     }
-//
-//     // The recovery routine handles duplicate images. It will only apply the first one
-//     // for a given page in a given transaction.
-//     ASSERT_OK(pager->truncate(1));
-//     auto current_lsn_value = wal->current_lsn().value;
-//
-//     Page page;
-//     ASSERT_OK(pager->allocate(page));
-//     ASSERT_EQ(wal->current_lsn().value, ++current_lsn_value);
-//     (void)page.mutate(page.size() - 1, 1);
-//     pager->release(std::move(page));
-//     ASSERT_EQ(wal->current_lsn().value, ++current_lsn_value);
-//
-//     // If the page isn't updated by the user, a delta is still written due to the
-//     // page LSN change.
-//     ASSERT_OK(pager->allocate(page));
-//     ASSERT_EQ(wal->current_lsn().value, ++current_lsn_value);
-//     pager->release(std::move(page));
-//     ASSERT_EQ(wal->current_lsn().value, ++current_lsn_value);
-//
-//     ASSERT_OK(pager->commit());
-//
-//     // Normal page.
-//     ASSERT_OK(pager->allocate(page));
-//     ASSERT_EQ(wal->current_lsn().value, ++current_lsn_value);
-//     (void)page.mutate(page.size() - 1, 1);
-//     pager->release(std::move(page));
-//     ASSERT_EQ(wal->current_lsn().value, ++current_lsn_value);
-// }
-//
-// template <class EnvType = tools::FaultInjectionEnv>
-// class RecoveryTestHarness
-//{
-// public:
-//     static constexpr auto kFilename = "./test";
-//     static constexpr auto kWalPrefix = "./wal-";
-//
-//     RecoveryTestHarness()
-//         : db_prefix {kFilename}
-//     {
-//         env = std::make_unique<EnvType>();
-//         db_options.wal_prefix = kWalPrefix;
-//         db_options.page_size = kMinPageSize;
-//         db_options.cache_size = kMinPageSize * 16;
-//         db_options.env = env.get();
-//
-//         open();
-//     }
-//
-//     virtual ~RecoveryTestHarness()
-//     {
-//         delete db;
-//     }
-//
-//     virtual auto close() -> void
-//     {
-//         delete db;
-//         db = nullptr;
-//     }
-//
-//     auto open_with_status(Options *options = nullptr) -> Status
-//     {
-//         close();
-//         Options opts = db_options;
-//         if (options != nullptr) {
-//             opts = *options;
-//         }
-//         if (opts.env == nullptr) {
-//             opts.env = env.get();
-//         }
-//         return DB::open(opts, db_prefix, db);
-//     }
-//
-//     auto open(Options *options = nullptr) -> void
-//     {
-//         ASSERT_OK(open_with_status(options));
-//     }
-//
-//     auto put(const std::string &k, const std::string &v) const -> Status
-//     {
-//         return db->put(k, v);
-//     }
-//
-//     auto get(const std::string &k) const -> std::string
-//     {
-//         std::string result;
-//         const auto s = db->get(k, &result);
-//         if (s.is_not_found()) {
-//             result = "NOT_FOUND";
-//         } else if (!s.is_ok()) {
-//             result = s.to_string();
-//         }
-//         return result;
-//     }
-//
-//     [[nodiscard]] auto get_logs() const -> std::vector<Id>
-//     {
-//         std::vector<std::string> filenames;
-//         EXPECT_OK(env->get_children(".", filenames));
-//         std::vector<Id> result;
-//         for (const auto &name : filenames) {
-//             if (name.find("wal-") == 0) {
-//                 result.push_back(decode_segment_name("wal-", name));
-//             }
-//         }
-//         std::sort(begin(result), end(result));
-//         return result;
-//     }
-//
-//     [[nodiscard]] auto num_logs() const -> std::size_t
-//     {
-//         return get_logs().size();
-//     }
-//
-//     [[nodiscard]] auto file_size(const std::string &fname) const -> std::size_t
-//     {
-//         std::size_t result;
-//         EXPECT_OK(env->file_size(fname, result));
-//         return result;
-//     }
-//
-//     tools::RandomGenerator random {1024 * 1024 * 4};
-//     std::unique_ptr<EnvType> env;
-//     Options db_options;
-//     std::string db_prefix;
-//     DB *db = nullptr;
-// };
-//
-// class RecoveryTests
-//     : public RecoveryTestHarness<>,
-//       public testing::Test
-//{
-// };
-//
-// TEST_F(RecoveryTests, NormalShutdown)
-//{
-//     ASSERT_EQ(num_logs(), 1);
-//
-//     ASSERT_OK(put("a", "1"));
-//     ASSERT_OK(put("b", "2"));
-//     ASSERT_OK(put("c", "3"));
-//     ASSERT_OK(db->commit());
-//     close();
-//
-//     ASSERT_EQ(num_logs(), 0);
-// }
-//
-// TEST_F(RecoveryTests, OnlyCommittedUpdatesArePersisted)
-//{
-//     ASSERT_OK(put("a", "1"));
-//     ASSERT_OK(put("b", "2"));
-//     ASSERT_OK(put("c", "3"));
-//     ASSERT_OK(db->commit());
-//
-//     ASSERT_OK(put("c", "X"));
-//     ASSERT_OK(put("d", "4"));
-//     open();
-//
-//     ASSERT_EQ(get("a"), "1");
-//     ASSERT_EQ(get("b"), "2");
-//     ASSERT_EQ(get("c"), "3");
-//     ASSERT_EQ(get("d"), "NOT_FOUND");
-// }
-//
-// TEST_F(RecoveryTests, PacksMultipleTransactionsIntoSegment)
-//{
-//     ASSERT_OK(put("a", "1"));
-//     ASSERT_OK(db->commit());
-//     ASSERT_OK(put("b", "2"));
-//     ASSERT_OK(db->commit());
-//     ASSERT_OK(put("c", "3"));
-//     ASSERT_OK(db->commit());
-//
-//     ASSERT_EQ(num_logs(), 1);
-//     open();
-//
-//     ASSERT_EQ(get("a"), "1");
-//     ASSERT_EQ(get("b"), "2");
-//     ASSERT_EQ(get("c"), "3");
-// }
-//
-// TEST_F(RecoveryTests, RevertsNthTransaction)
-//{
-//     ASSERT_OK(put("a", "1"));
-//     ASSERT_OK(db->commit());
-//     ASSERT_OK(put("b", "2"));
-//     ASSERT_OK(db->commit());
-//     ASSERT_OK(put("c", "3"));
-//     open();
-//
-//     ASSERT_EQ(get("a"), "1");
-//     ASSERT_EQ(get("b"), "2");
-//     ASSERT_EQ(get("c"), "NOT_FOUND");
-// }
-//
+template <class EnvType = tools::FaultInjectionEnv>
+class RecoveryTestHarness
+{
+public:
+    static constexpr auto kPageSize = kMinPageSize;
+    static constexpr auto kFilename = "./test";
+    static constexpr auto kWalFilename = "./wal";
+
+    RecoveryTestHarness()
+        : db_prefix {kFilename}
+    {
+        env = std::make_unique<EnvType>();
+        db_options.wal_filename = kWalFilename;
+        db_options.page_size = kPageSize;
+        db_options.cache_size = kMinPageSize * 16;
+        db_options.env = env.get();
+
+        open();
+    }
+
+    virtual ~RecoveryTestHarness()
+    {
+        delete db;
+    }
+
+    virtual auto close() -> void
+    {
+        delete db;
+        db = nullptr;
+    }
+
+    auto open_with_status(Options *options = nullptr) -> Status
+    {
+        close();
+        Options opts = db_options;
+        if (options != nullptr) {
+            opts = *options;
+        }
+        if (opts.env == nullptr) {
+            opts.env = env.get();
+        }
+        return DB::open(opts, db_prefix, db);
+    }
+
+    auto open(Options *options = nullptr) -> void
+    {
+        ASSERT_OK(open_with_status(options));
+    }
+
+    auto put(const std::string &k, const std::string &v) const -> Status
+    {
+        return db->put(k, v);
+    }
+
+    auto get(const std::string &k) const -> std::string
+    {
+        std::string result;
+        const auto s = db->get(k, &result);
+        if (s.is_not_found()) {
+            result = "NOT_FOUND";
+        } else if (!s.is_ok()) {
+            result = s.to_string();
+        }
+        return result;
+    }
+
+    [[nodiscard]] auto num_wal_frames() const -> std::size_t
+    {
+        const auto size = file_size(kWalFilename);
+        if (size > 32) {
+            return (size - 32) / (kPageSize + 24);
+        }
+        return 0;
+    }
+
+    [[nodiscard]] auto file_size(const std::string &fname) const -> std::size_t
+    {
+        std::size_t result;
+        EXPECT_OK(env->file_size(fname, result));
+        return result;
+    }
+
+    tools::RandomGenerator random {1024 * 1024 * 4};
+    std::unique_ptr<EnvType> env;
+    Options db_options;
+    std::string db_prefix;
+    DB *db = nullptr;
+};
+
+class RecoveryTests
+    : public RecoveryTestHarness<>,
+      public testing::Test
+{
+};
+
+TEST_F(RecoveryTests, NormalShutdown)
+{
+    ASSERT_EQ(num_wal_frames(), 0);
+    ASSERT_OK(put("a", "1"));
+    ASSERT_OK(put("b", "2"));
+    ASSERT_OK(put("c", "3"));
+    ASSERT_OK(db->commit());
+    ASSERT_EQ(num_wal_frames(), 1);
+    close();
+
+    ASSERT_FALSE(env->file_exists(kWalFilename));
+}
+
+TEST_F(RecoveryTests, OnlyCommittedUpdatesArePersisted)
+{
+    ASSERT_OK(put("a", "1"));
+    ASSERT_OK(put("b", "2"));
+    ASSERT_OK(put("c", "3"));
+    ASSERT_OK(db->commit());
+
+    ASSERT_OK(put("c", "X"));
+    ASSERT_OK(put("d", "4"));
+    open();
+
+    ASSERT_EQ(get("a"), "1");
+    ASSERT_EQ(get("b"), "2");
+    ASSERT_EQ(get("c"), "3");
+    ASSERT_EQ(get("d"), "NOT_FOUND");
+}
+
+TEST_F(RecoveryTests, PacksMultipleTransactionsIntoSegment)
+{
+    ASSERT_OK(put("a", "1"));
+    ASSERT_OK(db->commit());
+    ASSERT_OK(put("b", "2"));
+    ASSERT_OK(db->commit());
+    ASSERT_OK(put("c", "3"));
+    ASSERT_OK(db->commit());
+    open();
+
+    ASSERT_EQ(get("a"), "1");
+    ASSERT_EQ(get("b"), "2");
+    ASSERT_EQ(get("c"), "3");
+}
+
+TEST_F(RecoveryTests, RevertsNthTransaction)
+{
+    ASSERT_OK(put("a", "1"));
+    ASSERT_OK(db->commit());
+    ASSERT_OK(put("b", "2"));
+    ASSERT_OK(db->commit());
+    ASSERT_OK(put("c", "3"));
+    open();
+
+    ASSERT_EQ(get("a"), "1");
+    ASSERT_EQ(get("b"), "2");
+    ASSERT_EQ(get("c"), "NOT_FOUND");
+}
+
 // TEST_F(RecoveryTests, VacuumRecovery)
 //{
 //     std::vector<Record> committed;
@@ -698,7 +650,7 @@ TEST_F(WalPagerInteractionTests, WritesWalAtPageEviction)
 //         // truncate the last segment file.
 //         const auto logs = get_logs();
 //         if (!logs.empty()) {
-//             const auto segment_name = encode_segment_name(kWalPrefix, logs.back());
+//             const auto segment_name = encode_segment_name(kWalFilename, logs.back());
 //             ASSERT_OK(env->resize_file(segment_name, env->wal_sync_size()));
 //         }
 //     }

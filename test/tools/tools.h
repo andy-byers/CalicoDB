@@ -80,7 +80,6 @@ public:
     [[nodiscard]] auto resize_file(const std::string &filename, std::size_t size) -> Status override;
     [[nodiscard]] auto file_size(const std::string &filename, std::size_t &out) const -> Status override;
     [[nodiscard]] auto remove_file(const std::string &filename) -> Status override;
-    [[nodiscard]] auto sync_directory(const std::string &dirname) -> Status override { return Status::ok(); }
 
 protected:
     friend class FakeFile;
@@ -177,7 +176,6 @@ public:
     [[nodiscard]] auto resize_file(const std::string &filename, std::size_t size) -> Status override;
     [[nodiscard]] auto file_size(const std::string &filename, std::size_t &out) const -> Status override;
     [[nodiscard]] auto remove_file(const std::string &filename) -> Status override;
-    [[nodiscard]] auto sync_directory(const std::string &dirname) -> Status override { return Status::ok(); }
 };
 
 class FaultInjectionFile : public FakeFile
@@ -222,7 +220,7 @@ class WalStub : public Wal
 public:
     ~WalStub() override = default;
 
-    [[nodiscard]] auto read(Id, char *) -> Status override
+    [[nodiscard]] auto read(Id, char *&) -> Status override
     {
         return Status::not_found("");
     }
@@ -260,19 +258,15 @@ public:
 
 class FakeWal : public Wal
 {
-    struct PageVersion {
-        Id page_id;
-        std::size_t db_size;
-        std::string data;
-    };
-    std::vector<std::vector<PageVersion>> m_versions;
+    std::map<Id, std::string> m_committed;
+    std::map<Id, std::string> m_pending;
     Parameters m_param;
 
 public:
     explicit FakeWal(const Parameters &param);
     ~FakeWal() override = default;
 
-    [[nodiscard]] auto read(Id page_id, char *out) -> Status override;
+    [[nodiscard]] auto read(Id page_id, char *&out) -> Status override;
     [[nodiscard]] auto write(const CacheEntry *dirty, std::size_t db_size) -> Status override;
     [[nodiscard]] auto needs_checkpoint() const -> bool override;
     [[nodiscard]] auto checkpoint(File &db_file) -> Status override;

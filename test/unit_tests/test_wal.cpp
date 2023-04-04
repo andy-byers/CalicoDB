@@ -4,12 +4,9 @@
 
 #include "calicodb/env.h"
 #include "calicodb/slice.h"
-#include "crc.h"
-#include "hash_index.h"
 #include "logging.h"
 #include "tools.h"
 #include "unit_tests.h"
-#include <array>
 #include <gtest/gtest.h>
 
 namespace calicodb
@@ -378,55 +375,105 @@ TEST_F(WalTests, EmptyWalIsRemovedOnClose)
 
 class WalParamTests
     : public WalTestBase,
-      public testing::TestWithParam<std::tuple<bool, std::size_t, std::size_t>>
+      public testing::TestWithParam<
+          std::tuple<std::size_t, std::size_t, std::size_t>>
 {
 protected:
     static constexpr std::size_t kPageSize = kMinPageSize;
-    static constexpr std::size_t kWalHeaderSize = 32;
-    static constexpr std::size_t kFrameSize = kPageSize + 24;
 
     WalParamTests()
         : m_builder(kPageSize),
-          m_saved(kPageSize)
+          m_saved(kPageSize),
+          m_fake(Wal::Parameters {
+              .filename = "fake",
+              .page_size = kPageSize,
+              .env = env.get(),
+          })
     {
     }
 
     ~WalParamTests() override = default;
 
-    auto test_write_and_read_back() -> void
+    auto write_records(std::size_t num_pages, bool commit)
     {
-        const auto commit = std::get<0>(GetParam());
-        const auto duplicates = std::get<1>(GetParam());
-        const auto num_pages = std::get<2>(GetParam());
+        std::vector<U32> pgno(num_pages);
+        std::default_random_engine rng(42);
+        std::iota(begin(pgno), end(pgno), 1);
+        std::shuffle(begin(pgno), end(pgno), rng);
 
-        for (std::size_t iteration = 0; iteration < duplicates; ++iteration) {
-            std::vector<U32> pgno(num_pages);
-            std::default_random_engine rng(42);
-            std::iota(begin(pgno), end(pgno), 1);
-            std::shuffle(begin(pgno), end(pgno), rng);
+        std::vector<CacheEntry> dirty;
+        m_builder.build(pgno, dirty);
+        auto db_data = m_builder.data();
+        auto db_size = db_data.size() / kPageSize * commit;
+        EXPECT_OK(m_wal->write(&dirty[0], db_size));
+        EXPECT_OK(m_fake.write(&dirty[0], db_size));
+    }
 
-            std::vector<CacheEntry> dirty;
-            m_builder.build(pgno, dirty);
-            auto db_data = m_builder.data();
-            auto db_size = db_data.size() * commit;
-            ASSERT_OK(m_wal->write(&dirty[0], db_size));
-            char buffer[kPageSize];
-            for (auto pg : pgno) {
-                ASSERT_OK(m_wal->read(Id(pg), buffer));
-                const Slice from_wal(buffer, kPageSize);
-                const auto most_recent =
-                    db_data.range((pg - 1) * kPageSize, kPageSize);
-                CHECK_EQ(from_wal.to_string(), most_recent.to_string());
+    auto read_and_check_records() -> void
+    {
+        const auto db_data = m_builder.data();
+        char real[kPageSize], fake[kPageSize];
+
+        for (std::size_t i = 0;; ++i) {
+            if (i * kPageSize >= db_data.size()) {
+                break;
             }
-
-            if (commit) {
-                m_saved = m_builder;
+            auto *rp = real, *fp = fake;
+            ASSERT_OK(m_wal->read(Id(i + 1), rp));
+            ASSERT_OK(m_fake.read(Id(i + 1), fp));
+            if (fp) {
+                ASSERT_NE(rp, nullptr);
+                CHECK_EQ(std::string(real, kPageSize),
+                         std::string(fake, kPageSize));
+            } else {
+                ASSERT_EQ(rp, nullptr);
             }
         }
     }
 
+    auto test_write_and_read_back() -> void
+    {
+        for (std::size_t iteration = 0; iteration < m_iterations; ++iteration) {
+            write_records(m_pages_per_iter, m_commit_interval != 0);
+            read_and_check_records();
+        }
+    }
+
+    auto test_transactions() -> void
+    {
+        for (std::size_t iteration = 0; iteration < m_iterations; ++iteration) {
+            const auto is_commit = m_commit_interval
+                                       ? iteration % m_commit_interval == m_commit_interval - 1
+                                       : true;
+            write_records(m_pages_per_iter, is_commit);
+            if (!is_commit) {
+                ASSERT_OK(m_wal->abort());
+                ASSERT_OK(m_fake.abort());
+            }
+            read_and_check_records();
+        }
+    }
+
+    auto test_checkpoints() -> void
+    {
+        for (std::size_t iteration = 0; iteration < m_iterations; ++iteration) {
+            write_records(m_pages_per_iter, m_commit_interval != 0);
+            read_and_check_records();
+
+            File *real, *fake;
+            ASSERT_OK(env->new_file("real", real));
+            ASSERT_OK(env->new_file("fake", fake));
+            ASSERT_OK(m_wal->checkpoint(*real));
+            ASSERT_OK(m_wal->checkpoint(*fake));
+        }
+    }
+
+    std::size_t m_commit_interval = std::get<0>(GetParam());
+    std::size_t m_iterations = std::get<1>(GetParam());
+    std::size_t m_pages_per_iter = std::get<2>(GetParam());
     RandomDirtyListBuilder m_builder;
     RandomDirtyListBuilder m_saved;
+    tools::FakeWal m_fake;
 };
 
 TEST_P(WalParamTests, WriteAndReadBack)
@@ -434,37 +481,52 @@ TEST_P(WalParamTests, WriteAndReadBack)
     test_write_and_read_back();
 }
 
+TEST_P(WalParamTests, Checkpoints)
+{
+    test_checkpoints();
+}
+
+TEST_P(WalParamTests, Transactions)
+{
+    test_transactions();
+}
+
 INSTANTIATE_TEST_SUITE_P(
     WalParamTests,
     WalParamTests,
     ::testing::Values(
-        std::make_tuple(false, 1, 1),
-        std::make_tuple(false, 1, 2),
-        std::make_tuple(false, 1, 3),
-        std::make_tuple(false, 1, 10),
-        std::make_tuple(false, 1, 100),
-        std::make_tuple(false, 1, 10'000),
-        std::make_tuple(false, 1, 20'000),
-        std::make_tuple(false, 5, 1),
-        std::make_tuple(false, 5, 2),
-        std::make_tuple(false, 5, 3),
-        std::make_tuple(false, 5, 10),
-        std::make_tuple(false, 5, 100),
-        std::make_tuple(false, 5, 10'000),
-        std::make_tuple(false, 5, 20'000),
-        std::make_tuple(true, 1, 1),
-        std::make_tuple(true, 1, 2),
-        std::make_tuple(true, 1, 3),
-        std::make_tuple(true, 1, 10),
-        std::make_tuple(true, 1, 100),
-        std::make_tuple(true, 1, 10'000),
-        std::make_tuple(true, 1, 20'000),
-        std::make_tuple(true, 5, 1),
-        std::make_tuple(true, 5, 2),
-        std::make_tuple(true, 5, 3),
-        std::make_tuple(true, 5, 10),
-        std::make_tuple(true, 5, 100),
-        std::make_tuple(true, 5, 10'000),
-        std::make_tuple(true, 5, 20'000)));
+        std::make_tuple(0, 1, 1),
+        std::make_tuple(0, 1, 2),
+        std::make_tuple(0, 1, 3),
+        std::make_tuple(0, 1, 10),
+        std::make_tuple(0, 1, 100),
+        std::make_tuple(0, 1, 1'000),
+
+        std::make_tuple(0, 5, 1),
+        std::make_tuple(0, 5, 2),
+        std::make_tuple(0, 5, 3),
+        std::make_tuple(0, 5, 10),
+        std::make_tuple(0, 5, 100),
+        std::make_tuple(0, 5, 200),
+
+        std::make_tuple(1, 1, 1),
+        std::make_tuple(1, 1, 2),
+        std::make_tuple(1, 1, 3),
+        std::make_tuple(1, 1, 10),
+        std::make_tuple(1, 1, 100),
+        std::make_tuple(1, 1, 1'000),
+
+        std::make_tuple(1, 2, 1),
+        std::make_tuple(1, 5, 2),
+        std::make_tuple(1, 5, 3),
+        std::make_tuple(1, 5, 10),
+        std::make_tuple(1, 5, 100),
+        std::make_tuple(1, 5, 200),
+
+        std::make_tuple(5, 20, 1),
+        std::make_tuple(5, 20, 2),
+        std::make_tuple(5, 20, 3),
+        std::make_tuple(5, 20, 10),
+        std::make_tuple(5, 20, 50)));
 
 } // namespace calicodb
