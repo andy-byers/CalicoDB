@@ -70,7 +70,10 @@ auto FakeEnv::new_file(const std::string &filename, File *&out) -> Status
 {
     auto &mem = get_memory(filename);
     out = new FakeFile {filename, *this, mem};
-    mem.created = true;
+    if (!mem.created) {
+        mem.created = true;
+        mem.buffer.clear();
+    }
     return Status::ok();
 }
 

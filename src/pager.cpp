@@ -26,7 +26,7 @@ auto Pager::fetch_page(Id page_id, CacheEntry *&out) -> Status
 
     if (out == nullptr) {
         out = m_cache.alloc(page_id);
-        m_frames.pin(page_id, *out);
+        m_frames.pin(*out);
         char *page = nullptr;
 
         if (m_state->use_wal) {
@@ -151,10 +151,10 @@ auto Pager::clean_page(CacheEntry &entry) -> CacheEntry *
 
 auto Pager::commit() -> Status
 {
-    // If we've gotten this far through the DB's commit routine, then there must be at
-    // least 1 dirty page.
-    CALICODB_EXPECT_NE(m_dirty, nullptr);
     CALICODB_EXPECT_TRUE(m_state->use_wal);
+    if (m_dirty == nullptr) {
+        return Status::ok();
+    }
 
     auto *p = m_dirty;
     for (; p; p = p->next) {
@@ -170,6 +170,7 @@ auto Pager::commit() -> Status
     }
     p = m_dirty;
     m_dirty = nullptr;
+    m_state->batch_size = 0;
     // The DB page count is specified here. This indicates that the writes are part of
     // a commit.
     return m_wal->write(p, m_page_count);
@@ -187,6 +188,21 @@ auto Pager::abort() -> Status
     }
     m_dirty = nullptr;
     return m_wal->abort();
+}
+
+auto Pager::decrease_page_count(std::size_t page_count) -> void
+{
+    while (m_page_count > page_count) {
+        const Id id(m_page_count);
+        if (auto *entry = m_cache.query(id)) {
+            if (entry->is_dirty) {
+                clean_page(*entry);
+            }
+            m_frames.unpin(*entry);
+            m_cache.erase(id);
+        }
+        --m_page_count;
+    }
 }
 
 auto Pager::checkpoint_phase_1() -> Status
@@ -282,7 +298,7 @@ auto Pager::acquire(Id page_id, Page &page) -> Status
     if (page_id.value > m_page_count) {
         // This is a new page from the end of the file.
         entry = m_cache.alloc(page_id);
-        m_frames.pin(page_id, *entry);
+        m_frames.pin(*entry);
         std::memset(entry->page, 0, m_frames.page_size());
     } else {
         // Read a page from either the WAL or the DB.

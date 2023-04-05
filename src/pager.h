@@ -48,6 +48,7 @@ public:
     [[nodiscard]] auto acquire(Id page_id, Page &page) -> Status;
     auto upgrade(Page &page) -> void;
     auto release(Page page) -> void;
+    auto decrease_page_count(std::size_t page_count) -> void;
     auto load_state(const FileHeader &header) -> void;
 
     [[nodiscard]] auto hits() const -> U64

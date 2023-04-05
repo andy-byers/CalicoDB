@@ -240,13 +240,6 @@ public:
     tools::RandomGenerator random;
 };
 
-TEST_F(FakeEnvTests, ReaderCannotCreateFile)
-{
-    File *temp;
-    const auto s = env->new_file("nonexistent", temp);
-    ASSERT_TRUE(s.is_io_error()) << "Error: " << s.to_string().data();
-}
-
 TEST_F(FakeEnvTests, ReadsAndWrites)
 {
     auto ra_editor = open_blob<File>(*env, kFilename);

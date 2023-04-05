@@ -53,6 +53,7 @@ auto PageCache::alloc(Id page_id) -> CacheEntry *
     CALICODB_EXPECT_EQ(query(page_id), nullptr);
     auto [itr, _] = m_map.emplace(
         page_id, m_list.emplace(end(m_list)));
+    itr->second->page_id = page_id;
     return &*itr->second;
 }
 
@@ -119,14 +120,12 @@ auto FrameManager::upgrade(Page &page) -> void
     page.m_write = true;
 }
 
-auto FrameManager::pin(Id page_id, CacheEntry &entry) -> void
+auto FrameManager::pin(CacheEntry &entry) -> void
 {
-    CALICODB_EXPECT_FALSE(page_id.is_null());
+    CALICODB_EXPECT_FALSE(entry.page_id.is_null());
     CALICODB_EXPECT_FALSE(m_unpinned.empty());
     CALICODB_EXPECT_EQ(entry.refcount, 0);
 
-    // Associate the page ID with the frame index.
-    entry.page_id = page_id;
     entry.index = m_unpinned.back();
     entry.page = get_frame_pointer(m_unpinned.back());
     m_unpinned.pop_back();

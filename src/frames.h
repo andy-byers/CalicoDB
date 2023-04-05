@@ -103,7 +103,7 @@ public:
     ~FrameManager() = default;
     [[nodiscard]] auto get_frame(std::size_t index) const -> Slice;
     [[nodiscard]] auto ref(CacheEntry &entry, Page &out) -> Status;
-    auto pin(Id page_id, CacheEntry &entry) -> void;
+    auto pin(CacheEntry &entry) -> void;
     auto unpin(CacheEntry &entry) -> void;
     auto unref(CacheEntry &entry) -> void;
     auto upgrade(Page &page) -> void;

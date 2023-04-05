@@ -151,7 +151,7 @@ static auto parse_external_cell(const NodeMeta &meta, char *data) -> Cell
     const auto *ptr = data;
     ptr = decode_varint(ptr, value_size);
     ptr = decode_varint(ptr, key_size);
-    const std::uintptr_t header_size = ptr - data;
+    const auto header_size = static_cast<std::uintptr_t>(ptr - data);
 
     Cell cell;
     cell.ptr = data;
@@ -167,7 +167,7 @@ static auto parse_internal_cell(const NodeMeta &meta, char *data) -> Cell
 {
     U64 key_size;
     const auto *ptr = decode_varint(data + Id::kSize, key_size);
-    const std::uintptr_t header_size = ptr - data;
+    const auto header_size = static_cast<std::uintptr_t>(ptr - data);
 
     Cell cell;
     cell.ptr = data;

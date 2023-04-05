@@ -429,8 +429,8 @@ static auto expect_contains_records(const DB &db, const std::map<std::string, st
 {
     for (const auto &[key, value] : committed) {
         std::string result;
-        ASSERT_OK(db.get(key, &result));
-        ASSERT_EQ(result, value);
+        CHECK_OK(db.get(key, &result));
+        CHECK_EQ(result, value);
     }
 }
 
@@ -438,9 +438,6 @@ static auto run_revert_test(TestDatabase &db)
 {
     const auto committed = add_records(db, 1'000);
     ASSERT_OK(db.db->commit());
-
-    //    // Hack to make sure the database file is up-to-date.
-    //    (void)const_cast<Pager &>(db_impl(db.db)->TEST_pager()).flush_to_disk();
 
     add_records(db, 1'000);
     ASSERT_OK(db.reopen());
@@ -491,9 +488,6 @@ TEST_F(DbRevertTests, RevertsVacuum_1)
     const auto committed = add_records(*db, 1'000);
     ASSERT_OK(db->db->commit());
 
-    // Hack to make sure the database file is up-to-date.
-    (void)const_cast<Pager &>(db_impl(db->db)->TEST_pager()).flush_to_disk();
-
     auto uncommitted = add_records(*db, 1'000);
     for (std::size_t i = 0; i < 500; ++i) {
         const auto itr = begin(uncommitted);
@@ -516,8 +510,6 @@ TEST_F(DbRevertTests, RevertsVacuum_2)
     }
     ASSERT_OK(db->db->commit());
 
-    (void)const_cast<Pager &>(db_impl(db->db)->TEST_pager()).flush_to_disk();
-
     add_records(*db, 1'000);
     ASSERT_OK(db->reopen());
 
@@ -533,8 +525,6 @@ TEST_F(DbRevertTests, RevertsVacuum_3)
         committed.erase(itr);
     }
     ASSERT_OK(db->db->commit());
-
-    (void)const_cast<Pager &>(db_impl(db->db)->TEST_pager()).flush_to_disk();
 
     auto uncommitted = add_records(*db, 1'000);
     for (std::size_t i = 0; i < 500; ++i) {
@@ -562,17 +552,15 @@ TEST_F(DbRecoveryTests, RecoversFirstBatch)
 
     {
         TestDatabase db(*env);
-        snapshot = add_records(db, 5);
+        snapshot = add_records(db, 1);
         ASSERT_OK(db.db->commit());
 
         // Simulate a crash by cloning the database before cleanup has occurred.
         clone.reset(reinterpret_cast<const tools::FakeEnv &>(*env).clone());
-
-        (void)const_cast<Pager &>(db_impl(db.db)->TEST_pager()).flush_to_disk();
     }
     // Create a new database from the cloned data. This database will need to roll the WAL forward to become
     // consistent.
-    TestDatabase clone_db {*clone};
+    TestDatabase clone_db(*clone);
     ASSERT_OK(clone_db.db->status());
     expect_contains_records(*clone_db.db, snapshot);
 }
@@ -593,8 +581,6 @@ TEST_F(DbRecoveryTests, RecoversNthBatch)
         }
 
         clone.reset(dynamic_cast<const tools::FakeEnv &>(*env).clone());
-
-        (void)const_cast<Pager &>(db_impl(db.db)->TEST_pager()).flush_to_disk();
     }
     TestDatabase clone_db {*clone};
     expect_contains_records(*clone_db.db, snapshot);
@@ -622,7 +608,7 @@ protected:
     auto set_error() -> void
     {
         env->add_interceptor(
-            tools::Interceptor {
+            tools::Interceptor(
                 error.prefix,
                 error.type,
                 [this] {
@@ -630,7 +616,7 @@ protected:
                         return special_error();
                     }
                     return Status::ok();
-                }});
+                }));
     }
 
     auto SetUp() -> void override
@@ -664,7 +650,7 @@ TEST_P(DbErrorTests, HandlesReadErrorDuringQuery)
 
 TEST_P(DbErrorTests, HandlesReadErrorDuringIteration)
 {
-    std::unique_ptr<Cursor> cursor {db->db->new_cursor()};
+    std::unique_ptr<Cursor> cursor(db->db->new_cursor());
     cursor->seek_first();
     while (cursor->is_valid()) {
         (void)cursor->key();
@@ -687,7 +673,7 @@ TEST_P(DbErrorTests, HandlesReadErrorDuringIteration)
 
 TEST_P(DbErrorTests, HandlesReadErrorDuringSeek)
 {
-    std::unique_ptr<Cursor> cursor {db->db->new_cursor()};
+    std::unique_ptr<Cursor> cursor(db->db->new_cursor());
 
     for (const auto &[k, v] : committed) {
         cursor->seek(k);

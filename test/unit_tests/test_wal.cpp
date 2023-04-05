@@ -282,7 +282,7 @@ class RandomDirtyListBuilder
 public:
     explicit RandomDirtyListBuilder(std::size_t page_size)
         : m_page_size(page_size),
-          m_random(page_size * 32)
+          m_random(page_size * 32 + 123)
     {
     }
 
@@ -336,12 +336,12 @@ protected:
 
     WalTestBase()
     {
-        Wal::Parameters param = {
+        m_param = {
             .filename = kFilename,
             .page_size = kPageSize,
             .env = env.get(),
         };
-        EXPECT_OK(Wal::open(param, m_wal));
+        EXPECT_OK(Wal::open(m_param, m_wal));
     }
 
     ~WalTestBase() override
@@ -356,6 +356,7 @@ protected:
     }
 
     Wal *m_wal = nullptr;
+    Wal::Parameters m_param;
 };
 
 class WalTests
@@ -384,29 +385,39 @@ protected:
     WalParamTests()
         : m_builder(kPageSize),
           m_saved(kPageSize),
-          m_fake(Wal::Parameters {
+          m_rng(42),
+          m_fake_param {
               .filename = "fake",
               .page_size = kPageSize,
               .env = env.get(),
-          })
+          },
+          m_fake(new tools::FakeWal(m_fake_param))
     {
     }
 
-    ~WalParamTests() override = default;
+    ~WalParamTests() override
+    {
+        delete m_fake;
+    }
 
     auto write_records(std::size_t num_pages, bool commit)
     {
-        std::vector<U32> pgno(num_pages);
-        std::default_random_engine rng(42);
-        std::iota(begin(pgno), end(pgno), 1);
-        std::shuffle(begin(pgno), end(pgno), rng);
+        // The same "num_pages" is used each time, so every page in the builder's internal buffer
+        // will be overwritten. We should get back the most-recent version of each page when the
+        // WAL is queried.
+        static constexpr std::size_t kNumDuplicates = 1; // TODO: 3
+        for (std::size_t i = 0; i < kNumDuplicates; ++i) {
+            std::vector<U32> pgno(num_pages);
+            std::iota(begin(pgno), end(pgno), 1);
+            std::shuffle(begin(pgno), end(pgno), m_rng);
 
-        std::vector<CacheEntry> dirty;
-        m_builder.build(pgno, dirty);
-        auto db_data = m_builder.data();
-        auto db_size = db_data.size() / kPageSize * commit;
-        EXPECT_OK(m_wal->write(&dirty[0], db_size));
-        EXPECT_OK(m_fake.write(&dirty[0], db_size));
+            std::vector<CacheEntry> dirty;
+            m_builder.build(pgno, dirty);
+            auto db_data = m_builder.data();
+            auto db_size = db_data.size() / kPageSize * commit;
+            EXPECT_OK(m_wal->write(&dirty[0], db_size));
+            EXPECT_OK(m_fake->write(&dirty[0], db_size));
+        }
     }
 
     auto read_and_check_records() -> void
@@ -420,7 +431,7 @@ protected:
             }
             auto *rp = real, *fp = fake;
             ASSERT_OK(m_wal->read(Id(i + 1), rp));
-            ASSERT_OK(m_fake.read(Id(i + 1), fp));
+            ASSERT_OK(m_fake->read(Id(i + 1), fp));
             if (fp) {
                 ASSERT_NE(rp, nullptr);
                 CHECK_EQ(std::string(real, kPageSize),
@@ -431,6 +442,31 @@ protected:
         }
     }
 
+    auto run_and_validate_checkpoint(bool not_abort = true) -> void
+    {
+        File *real, *fake;
+        ASSERT_OK(env->new_file("real", real));
+        ASSERT_OK(env->new_file("fake", fake));
+        ASSERT_OK(m_wal->checkpoint(*real));
+        ASSERT_OK(m_fake->checkpoint(*fake));
+
+        std::size_t file_size;
+        ASSERT_OK(env->file_size("fake", file_size));
+
+        std::string real_buf(file_size, '\0');
+        std::string fake_buf(file_size, '\0');
+        ASSERT_OK(real->read_exact(0, real_buf.size(), real_buf.data()));
+        ASSERT_OK(fake->read_exact(0, fake_buf.size(), fake_buf.data()));
+        delete real;
+        delete fake;
+
+        if (not_abort) {
+            m_previous_db = m_builder.data().truncate(file_size).to_string();
+        }
+        ASSERT_EQ(real_buf, fake_buf);
+        ASSERT_EQ(real_buf, m_previous_db);
+    }
+
     auto test_write_and_read_back() -> void
     {
         for (std::size_t iteration = 0; iteration < m_iterations; ++iteration) {
@@ -439,41 +475,52 @@ protected:
         }
     }
 
-    auto test_transactions() -> void
+    auto test_operations() -> void
     {
         for (std::size_t iteration = 0; iteration < m_iterations; ++iteration) {
-            const auto is_commit = m_commit_interval
-                                       ? iteration % m_commit_interval == m_commit_interval - 1
-                                       : true;
+            const auto is_commit = m_commit_interval && iteration % m_commit_interval == m_commit_interval - 1;
             write_records(m_pages_per_iter, is_commit);
             if (!is_commit) {
                 ASSERT_OK(m_wal->abort());
-                ASSERT_OK(m_fake.abort());
+                ASSERT_OK(m_fake->abort());
             }
             read_and_check_records();
+            run_and_validate_checkpoint(is_commit);
         }
     }
 
-    auto test_checkpoints() -> void
-    {
-        for (std::size_t iteration = 0; iteration < m_iterations; ++iteration) {
-            write_records(m_pages_per_iter, m_commit_interval != 0);
-            read_and_check_records();
-
-            File *real, *fake;
-            ASSERT_OK(env->new_file("real", real));
-            ASSERT_OK(env->new_file("fake", fake));
-            ASSERT_OK(m_wal->checkpoint(*real));
-            ASSERT_OK(m_wal->checkpoint(*fake));
-        }
-    }
+//    auto test_recovery() -> void
+//    {
+//        for (std::size_t iteration = 0; iteration < m_iterations; ++iteration) {
+//            const auto is_commit = m_commit_interval && iteration % m_commit_interval == m_commit_interval - 1;
+//            write_records(m_pages_per_iter, is_commit);
+//            if (!is_commit) {
+//                ASSERT_OK(m_wal->abort());
+//                ASSERT_OK(m_fake->abort());
+//            }
+//
+//            ASSERT_OK(Wal::close(m_wal));
+//            ASSERT_OK(m_fake->close());
+//            delete m_fake;
+//            m_fake = nullptr;
+//
+//            ASSERT_OK(Wal::open(m_param, m_wal));
+//            m_fake = new tools::FakeWal(m_param, is_commit ? m_builder.data() : Slice());
+//
+//            read_and_check_records();
+//            run_and_validate_checkpoint();
+//        }
+//    }
 
     std::size_t m_commit_interval = std::get<0>(GetParam());
     std::size_t m_iterations = std::get<1>(GetParam());
     std::size_t m_pages_per_iter = std::get<2>(GetParam());
+    std::string m_previous_db;
+    std::default_random_engine m_rng;
+    Wal::Parameters m_fake_param;
     RandomDirtyListBuilder m_builder;
     RandomDirtyListBuilder m_saved;
-    tools::FakeWal m_fake;
+    tools::FakeWal *m_fake = nullptr;
 };
 
 TEST_P(WalParamTests, WriteAndReadBack)
@@ -481,15 +528,15 @@ TEST_P(WalParamTests, WriteAndReadBack)
     test_write_and_read_back();
 }
 
-TEST_P(WalParamTests, Checkpoints)
+TEST_P(WalParamTests, Operations)
 {
-    test_checkpoints();
+    test_operations();
 }
 
-TEST_P(WalParamTests, Transactions)
-{
-    test_transactions();
-}
+//TEST_P(WalParamTests, Recovery)
+//{
+//    test_recovery();
+//}
 
 INSTANTIATE_TEST_SUITE_P(
     WalParamTests,

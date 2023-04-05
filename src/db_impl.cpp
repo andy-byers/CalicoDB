@@ -27,7 +27,7 @@ static auto encode_page_size(std::size_t page_size) -> U16
     return page_size < kMaxPageSize ? static_cast<U16>(page_size) : 0;
 }
 
-static auto decode_page_size(unsigned header_page_size) -> std::size_t
+static auto decode_page_size(unsigned header_page_size) -> U32
 {
     return header_page_size > 0 ? header_page_size : kMaxPageSize;
 }
@@ -461,7 +461,7 @@ auto DBImpl::do_vacuum() -> Status
         CALICODB_TRY(put(*m_root, table_names[i], logical_id));
     }
     CALICODB_TRY(m_wal->sync());
-    m_pager->m_page_count = target.value;
+    m_pager->decrease_page_count(target.value);
 
     m_log->logv("vacuumed %llu pages", original.value - target.value);
     return Status::ok();
@@ -499,13 +499,9 @@ auto DBImpl::TEST_validate() const -> void
 auto DBImpl::commit() -> Status
 {
     CALICODB_TRY(m_state.status);
-
-    if (m_state.batch_size > 0) {
-        m_state.batch_size = 0;
-        if (auto s = do_commit(); !s.is_ok()) {
-            SET_STATUS(s);
-            return s;
-        }
+    if (auto s = do_commit(); !s.is_ok()) {
+        SET_STATUS(s);
+        return s;
     }
     return Status::ok();
 }
@@ -529,7 +525,12 @@ auto DBImpl::do_commit() -> Status
         m_pager->release(std::move(db_root));
     }
 
+    // Write all dirty pages to the WAL.
     CALICODB_TRY(m_pager->commit());
+
+    if (m_sync) {
+        CALICODB_TRY(m_wal->sync());
+    }
     return checkpoint_if_needed();
 }
 

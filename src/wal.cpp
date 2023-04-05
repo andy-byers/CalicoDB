@@ -21,16 +21,16 @@ using Hash = U16;
 static_assert(std::is_pod_v<HashIndexHeader>);
 static_assert((sizeof(HashIndexHeader) & 0b11) == 0);
 
-static constexpr std::size_t kHashPrime = 383;
-static constexpr std::size_t kNIndexHashes = 8192;
-static constexpr std::size_t kNIndexKeys = 4096;
-static constexpr auto kNIndexKeys0 =
+static constexpr U32 kHashPrime = 383;
+static constexpr U32 kNIndexHashes = 8192;
+static constexpr U32 kNIndexKeys = 4096;
+static constexpr U32 kNIndexKeys0 =
     kNIndexKeys - sizeof(HashIndexHeader) / sizeof(U32);
-static constexpr auto kIndexPageSize =
+static constexpr U32 kIndexPageSize =
     kNIndexKeys * sizeof(U32) +
     kNIndexHashes * sizeof(U16);
 
-static constexpr auto index_group_number(Value value) -> std::size_t
+static constexpr auto index_group_number(Value value) -> U32
 {
     return (value - 1 + kNIndexKeys - kNIndexKeys0) / kNIndexKeys;
 }
@@ -52,13 +52,23 @@ static auto too_many_collisions(Key key) -> Status
     return Status::corruption(message);
 }
 
+static constexpr auto encode_index_page_size(U32 page_size) -> U16
+{
+    return static_cast<U16>((page_size & 0xFF00) | page_size >> 16);
+}
+
+static constexpr auto decode_index_page_size(U16 page_size) -> U32
+{
+    return page_size == 1 ? kMaxPageSize : page_size;
+}
+
 struct HashGroup {
-    explicit HashGroup(std::size_t group_number, char *data)
+    explicit HashGroup(U32 group_number, char *data)
     {
         keys = reinterpret_cast<Key *>(data);
         hash = reinterpret_cast<Hash *>(keys + kNIndexKeys);
         if (group_number) {
-            base = static_cast<U32>(kNIndexKeys0 + (kNIndexKeys * (group_number - 1)));
+            base = kNIndexKeys0 + (kNIndexKeys * (group_number - 1));
         } else {
             keys += sizeof(HashIndexHeader) / sizeof *keys;
         }
@@ -100,9 +110,6 @@ auto HashIndex::lookup(Key key, Value lower, Value &out) -> Status
     const auto min_group_number = index_group_number(lower);
 
     for (auto n = index_group_number(m_hdr->max_frame);; --n) {
-        if (n >= m_groups.size()) {
-            continue;
-        }
         HashGroup group(n, group_data(n));
         // The guard above prevents considering groups that haven't been allocated yet.
         // Such groups would start past the current "max_frame".
@@ -215,9 +222,9 @@ auto HashIndex::cleanup() -> void
             }
         }
         // Clear the keys that correspond to cleared hash slots.
-        const std::uintptr_t rest_size =
+        const auto rest_size = static_cast<std::uintptr_t>(
             reinterpret_cast<const char *>(group.hash) -
-            reinterpret_cast<const char *>(group.keys + max_hash);
+            reinterpret_cast<const char *>(group.keys + max_hash));
         memset(group.keys + max_hash, 0, rest_size);
     }
 }
@@ -391,17 +398,32 @@ auto HashIterator::read(Entry &out) -> bool
     return result != kBadResult;
 }
 
-struct WalHdr {
-    static constexpr std::size_t kSize = 32;
-    static constexpr U32 kMagic = 0x87654321; // TODO: more-or-less arbitrary, but could make it spell something cool?
-    static constexpr U32 kVersion = 0x01'000'000;
+// WAL header layout:
+//     Offset  Size  Purpose
+//    ---------------------------------------
+//     0       4     Magic number (...)
+//     4       4     WAL version (...)
+//     8       4     DB page size
+//     12      4     Checkpoint number
+//     16      4     Salt-1
+//     20      4     Salt-2
+//     24      4     Checksum-1
+//     28      4     Checksum-2
+//
+static constexpr std::size_t kWalHdrSize = 32;
+static constexpr U32 kWalMagic = 0x87654321;
+static constexpr U32 kWalVersion = 0x01'000'000;
 
-    U32 page_size = 0;
-    U32 commit = 0;
-    U32 salt[2] = {};
-    U32 cksum[2] = {};
-};
-
+// WAL frame header layout:
+//     Offset  Size  Purpose
+//    ---------------------------------------
+//     0       4     Page number
+//     4       4     DB size in pages (0 if not a commit frame)
+//     8       4     Salt-1
+//     12      4     Salt-2
+//     16      4     Checksum-1
+//     20      4     Checksum-2
+//
 struct WalFrameHdr {
     static constexpr std::size_t kSize = 24;
 
@@ -438,11 +460,11 @@ private:
     [[nodiscard]] auto write_index_header() -> Status;
     [[nodiscard]] auto recover_index() -> Status;
     [[nodiscard]] auto restart_header(U32 salt_1) -> Status;
-    [[nodiscard]] auto decode_frame(const char *frame, const char *page, WalFrameHdr &out) -> bool;
+    [[nodiscard]] auto decode_frame(const char *frame, WalFrameHdr &out) -> bool;
     auto encode_frame(const WalFrameHdr &hdr, const char *page, char *out) -> void;
 
     WalStatistics m_stats;
-    HashIndexHeader m_hdr;
+    HashIndexHeader m_hdr = {};
     HashIndex m_index;
 
     std::string m_filename;
@@ -458,7 +480,7 @@ private:
     Env *m_env = nullptr;
     File *m_file = nullptr;
 
-    U32 m_min_frame;
+    U32 m_min_frame = 0;
 };
 
 auto Wal::open(const Parameters &param, Wal *&out) -> Status
@@ -491,8 +513,6 @@ WalImpl::WalImpl(const Parameters &param, File &file)
       m_env(param.env),
       m_file(&file)
 {
-    std::memset(&m_hdr, 0, sizeof(m_hdr));
-
     (void)m_env;
     (void)m_backfill;
 }
@@ -504,9 +524,11 @@ WalImpl::~WalImpl()
 
 static auto compute_checksum(const Slice &in, const U32 *initial, U32 *out)
 {
-    CALICODB_EXPECT_GE(in.size(), 8);
-    CALICODB_EXPECT_EQ(in.size() & 7, 0);
+    CALICODB_EXPECT_NE(out, nullptr);
+    CALICODB_EXPECT_EQ(std::uintptr_t(in.data()) & 3, 0);
     CALICODB_EXPECT_LE(in.size(), 65'536);
+    CALICODB_EXPECT_EQ(in.size() & 7, 0);
+    CALICODB_EXPECT_GT(in.size(), 0);
 
     U32 s1 = 0;
     U32 s2 = 0;
@@ -516,7 +538,7 @@ static auto compute_checksum(const Slice &in, const U32 *initial, U32 *out)
     }
 
     const auto *ptr = reinterpret_cast<const U32 *>(in.data());
-    const auto *end = ptr + in.size() / sizeof(U32);
+    const auto *end = ptr + in.size() / sizeof *ptr;
 
     do {
         s1 += *ptr++ + s2;
@@ -536,6 +558,8 @@ auto WalImpl::rewrite_checksums(U32 end) -> Status
 {
     CALICODB_EXPECT_GT(m_redo_cksum, 0);
 
+    // Find the offset of the previous checksum in the WAL file. If we are starting at
+    // the first frame, get the previous checksum from the WAL header.
     std::size_t cksum_offset = 24;
     if (m_redo_cksum > 1) {
         cksum_offset = frame_offset(m_redo_cksum - 1) + 16;
@@ -581,14 +605,14 @@ auto WalImpl::recover_index() -> Status
 
     std::size_t file_size;
     CALICODB_TRY(m_env->file_size(m_filename, file_size));
-    if (file_size > WalHdr::kSize) {
-        char header[WalHdr::kSize];
+    if (file_size > kWalHdrSize) {
+        char header[kWalHdrSize];
         CALICODB_TRY(m_file->read_exact(0, sizeof(header), header));
 
         const auto magic = get_u32(&header[0]);
         m_page_size = get_u32(&header[8]);
         const auto is_valid =
-            magic == WalHdr::kMagic &&
+            magic == kWalMagic &&
             is_power_of_two(m_page_size) &&
             m_page_size >= kMinPageSize &&
             m_page_size <= kMaxPageSize;
@@ -597,10 +621,10 @@ auto WalImpl::recover_index() -> Status
             return cleanup();
         }
         m_ckpt_number = get_u32(&header[12]);
-        std::memcpy(m_hdr.salt, &header[16], 8);
+        std::memcpy(m_hdr.salt, &header[16], sizeof(m_hdr.salt));
 
         compute_checksum(
-            Slice(header, WalHdr::kSize - 8),
+            Slice(header, kWalHdrSize - 8),
             nullptr,
             m_hdr.frame_cksum);
         if (m_hdr.frame_cksum[0] != get_u32(&header[24]) ||
@@ -608,31 +632,28 @@ auto WalImpl::recover_index() -> Status
             return finish();
         }
         const auto version = get_u32(&header[4]);
-        if (version != WalHdr::kVersion) {
+        if (version != kWalVersion) {
             s = Status::corruption("unrecognized WAL version");
             return cleanup();
         }
 
-        auto *frame_ptr = m_frame.data();
-        auto *page_ptr = frame_ptr + WalFrameHdr::kSize;
-
-        const auto last_frame = (file_size - WalHdr::kSize) / m_frame.size();
-        for (std::size_t n_group = 0; n_group <= index_group_number(last_frame); ++n_group) {
+        const auto last_frame = static_cast<U32>((file_size - kWalHdrSize) / m_frame.size());
+        for (U32 n_group = 0; n_group <= index_group_number(last_frame); ++n_group) {
             const auto last = std::min(last_frame, kNIndexKeys0 + n_group * kNIndexKeys);
             const auto first = 1 + (n_group == 0 ? 0 : kNIndexKeys0 + (n_group - 1) * kNIndexKeys);
             for (auto n_frame = first; n_frame <= last; ++n_frame) {
                 const auto offset = frame_offset(n_frame);
-                CALICODB_TRY(m_file->read_exact(offset, m_frame.size(), frame_ptr));
+                CALICODB_TRY(m_file->read_exact(offset, m_frame.size(), m_frame.data()));
                 // Decode the frame.
                 WalFrameHdr hdr;
-                if (!decode_frame(frame_ptr, page_ptr, hdr)) {
+                if (!decode_frame(m_frame.data(), hdr)) {
                     break;
                 }
                 CALICODB_TRY(m_index.assign(hdr.pgno, n_frame));
                 if (hdr.db_size) {
                     m_hdr.max_frame = n_frame;
                     m_hdr.page_count = hdr.db_size;
-                    m_hdr.page_size = m_page_size;
+                    m_hdr.page_size = encode_index_page_size(m_page_size);
                     frame_cksum[0] = m_hdr.cksum[0];
                     frame_cksum[1] = m_hdr.cksum[1];
                 }
@@ -656,7 +677,7 @@ auto WalImpl::restart_header(U32 salt_1) -> Status
     m_hdr.max_frame = 0;
     auto *salt = reinterpret_cast<char *>(m_hdr.salt);
     put_u32(salt, get_u32(salt) + 1);
-    std::memcpy(salt + sizeof *m_hdr.salt, &salt_1, sizeof(salt_1));
+    std::memcpy(salt + sizeof(U32), &salt_1, sizeof(salt_1));
     return write_index_header();
 }
 
@@ -678,9 +699,10 @@ auto WalImpl::encode_frame(const WalFrameHdr &hdr, const char *page, char *out) 
     std::memcpy(&out[24], page, m_page_size);
 }
 
-auto WalImpl::decode_frame(const char *frame, const char *page, WalFrameHdr &out) -> bool
+auto WalImpl::decode_frame(const char *frame, WalFrameHdr &out) -> bool
 {
-    if (std::memcmp(m_hdr.salt, &frame[8], 8) != 0) {
+    static constexpr std::size_t kDataFields = sizeof(U32) * 2;
+    if (std::memcmp(m_hdr.salt, &frame[kDataFields], 8) != 0) {
         return false;
     }
     const auto pgno = get_u32(&frame[0]);
@@ -688,8 +710,8 @@ auto WalImpl::decode_frame(const char *frame, const char *page, WalFrameHdr &out
         return false;
     }
     auto *cksum = m_hdr.frame_cksum;
-    compute_checksum(Slice(frame, 8), cksum, cksum);
-    compute_checksum(Slice(page, m_page_size), cksum, cksum);
+    compute_checksum(Slice(frame, kDataFields), cksum, cksum);
+    compute_checksum(Slice(frame + WalFrameHdr::kSize, m_page_size), cksum, cksum);
     if (cksum[0] != get_u32(&frame[16]) ||
         cksum[1] != get_u32(&frame[20])) {
         return false;
@@ -720,35 +742,39 @@ auto WalImpl::read(Id page_id, char *&page) -> Status
 
 auto WalImpl::write(const CacheEntry *dirty, std::size_t db_size) -> Status
 {
-    if (m_hdr.max_frame == 0) {
-        // This is the first frame written to the WAL. Write the WAL header.
-        char header[WalHdr::kSize];
-        U32 cksum[2];
-
-        put_u32(&header[0], WalHdr::kMagic);
-        put_u32(&header[4], WalHdr::kVersion);
-        put_u32(&header[8], m_page_size);
-        put_u32(&header[12], m_ckpt_number);
-        if (m_ckpt_number == 0) {
-            m_hdr.salt[0] = rand();
-            m_hdr.salt[1] = rand();
-        }
-        std::memcpy(&header[16], m_hdr.salt, sizeof(m_hdr.salt));
-        compute_checksum(Slice(header, sizeof(header) - 8), nullptr, cksum);
-        put_u32(&header[24], cksum[0]);
-        put_u32(&header[28], cksum[1]);
-        CALICODB_TRY(m_file->write(0, Slice(header, sizeof(header))));
-    }
-
     const auto is_commit = db_size > 0;
     const auto *live = m_index.header();
     auto first_frame = m_min_frame;
 
-    // Check if the WAL's copy of the index header differs from what is in the index. If so,
-    // then the WAL has been written since the last commit, with the first record located at
-    // frame ID "first".
+    // Check if the WAL's copy of the index header differs from what is on the first index page.
+    // If it is different, then the WAL has been written since the last commit, with the first
+    // record located at frame number "first_frame".
     if (std::memcmp(&m_hdr, live, sizeof(HashIndexHeader)) != 0) {
         first_frame = live->max_frame + 1;
+    }
+
+    if (m_hdr.max_frame == 0) {
+        // This is the first frame written to the WAL. Write the WAL header.
+        char header[kWalHdrSize];
+        U32 cksum[2];
+
+        put_u32(&header[0], kWalMagic);
+        put_u32(&header[4], kWalVersion);
+        put_u32(&header[8], m_page_size);
+        put_u32(&header[12], m_ckpt_number);
+        if (m_ckpt_number == 0) {
+            m_hdr.salt[0] = static_cast<U32>(rand());
+            m_hdr.salt[1] = static_cast<U32>(rand());
+        }
+        std::memcpy(&header[16], m_hdr.salt, sizeof(m_hdr.salt));
+        compute_checksum(Slice(header, sizeof(header) - sizeof(cksum)), nullptr, cksum);
+        put_u32(&header[24], cksum[0]);
+        put_u32(&header[28], cksum[1]);
+
+        m_hdr.frame_cksum[0] = cksum[0];
+        m_hdr.frame_cksum[1] = cksum[1];
+
+        CALICODB_TRY(m_file->write(0, Slice(header, sizeof(header))));
     }
 
     // Write each dirty page to the WAL.
@@ -756,10 +782,10 @@ auto WalImpl::write(const CacheEntry *dirty, std::size_t db_size) -> Status
     for (auto *p = dirty; p; p = p->next) {
         U32 frame;
 
-        // Condition ensures that if this set of pages is a commit, then the last
-        // frame will always be appended, even if another copy of the page exists
-        // in the WAL. This frame needs to have its "db_size" field set to mark
-        // that it is a commit frame.
+        // Condition ensures that if this set of pages completes a transaction, then
+        // the last frame will always be appended, even if another copy of the page
+        // exists in the WAL for this transaction. This frame needs to have its
+        // "db_size" field set to mark that it is a commit frame.
         if (first_frame && (p->next || !is_commit)) {
             // Check to see if the page has been written to the WAL already by the
             // current transaction. If so, overwrite it and indicate that checksums
@@ -833,10 +859,11 @@ auto WalImpl::checkpoint(File &db_file) -> Status
 
         // TODO: Should increase backfill count here.
     }
+    ++m_ckpt_number;
     m_min_frame = 0;
     m_hdr.max_frame = 0;
     m_index.cleanup();
-    return restart_header(rand());
+    return restart_header(static_cast<U32>(rand()));
 }
 
 auto WalImpl::sync() -> Status
@@ -858,13 +885,13 @@ auto WalImpl::close() -> Status
     if (m_hdr.max_frame == 0) {
         return m_env->remove_file(m_filename);
     }
-    return Status::ok();
+    return sync();
 }
 
 auto WalImpl::frame_offset(U32 frame) const -> std::size_t
 {
     CALICODB_EXPECT_GT(frame, 0);
-    return WalHdr::kSize + (frame - 1) * (WalFrameHdr::kSize + m_page_size);
+    return kWalHdrSize + (frame - 1) * (WalFrameHdr::kSize + m_page_size);
 }
 
 } // namespace calicodb

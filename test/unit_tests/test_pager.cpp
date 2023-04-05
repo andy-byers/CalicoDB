@@ -113,11 +113,11 @@ TEST_F(FrameManagerTests, OutOfFramesDeathTest)
 {
     for (std::size_t i = 0; i < kFrameCount; ++i) {
         auto *entry = cache.alloc(Id(i + 1));
-        (void)frames->pin(Id::from_index(i), *entry);
+        (void)frames->pin(*entry);
     }
     auto *entry = cache.alloc(Id(kFrameCount + 1));
     ASSERT_EQ(frames->available(), 0);
-    ASSERT_DEATH((void)frames->pin(Id::from_index(kFrameCount), *entry), "expect");
+    ASSERT_DEATH((void)frames->pin(*entry), "expect");
 }
 #endif // NDEBUG
 

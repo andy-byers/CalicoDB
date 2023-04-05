@@ -13,12 +13,6 @@ namespace calicodb
 
 class File;
 class LogFile;
-class LogFile;
-class LogWriter;
-class File;
-class File;
-class SeqReader;
-class SeqWriter;
 
 // CalicoDB storage environment.
 //

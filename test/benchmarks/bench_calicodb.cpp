@@ -24,6 +24,7 @@ static auto access_type_name(int64_t type) -> std::string
 struct Parameters {
     std::size_t value_length = 100;
     std::size_t commit_interval = 1;
+    bool sync = false;
 };
 
 class Benchmark final
@@ -37,8 +38,9 @@ public:
         : m_param {param}
     {
         m_options.env = calicodb::Env::default_env();
-        m_options.page_size = 1 << 15;
+        m_options.page_size = 0x2000;
         m_options.cache_size = 4'194'304;
+        m_options.sync = param.sync;
         CHECK_OK(calicodb::DB::open(m_options, kFilename, m_db));
     }
 
@@ -201,8 +203,8 @@ private:
 static auto set_modification_benchmark_label(benchmark::State &state)
 {
     state.SetLabel(
-        std::string(state.range(1) ? "Over" : "") +
-        "Write" +
+        (state.range(3) ? "Sync_" : "") +
+        std::string(state.range(1) ? "Overwrite" : "Write") +
         access_type_name(state.range(0)) +
         (state.range(2) == 1 ? "" : "Batch"));
 }
@@ -213,6 +215,7 @@ static auto BM_Write(benchmark::State &state) -> void
 
     Parameters param;
     param.commit_interval = state.range(2);
+    param.sync = state.range(3);
 
     Benchmark bench(param);
     for (auto _ : state) {
@@ -220,10 +223,14 @@ static auto BM_Write(benchmark::State &state) -> void
     }
 }
 BENCHMARK(BM_Write)
-    ->Args({kSequential, 0, 1})
-    ->Args({kRandom, 0, 1})
-    ->Args({kSequential, 0, 1'000})
-    ->Args({kRandom, 0, 1'000});
+    ->Args({kSequential, false, 1, false})
+    ->Args({kRandom, false, 1, false})
+    ->Args({kSequential, false, 1'000, false})
+    ->Args({kRandom, false, 1'000, false})
+    ->Args({kSequential, false, 1, true})
+    ->Args({kRandom, false, 1, true})
+    ->Args({kSequential, false, 1'000, true})
+    ->Args({kRandom, false, 1'000, true});
 
 static auto BM_Overwrite(benchmark::State &state) -> void
 {
@@ -231,6 +238,7 @@ static auto BM_Overwrite(benchmark::State &state) -> void
 
     Parameters param;
     param.commit_interval = state.range(2);
+    param.sync = state.range(3);
 
     Benchmark bench(param);
     bench.add_initial_records();
@@ -239,10 +247,14 @@ static auto BM_Overwrite(benchmark::State &state) -> void
     }
 }
 BENCHMARK(BM_Overwrite)
-    ->Args({kSequential, 1, 1})
-    ->Args({kRandom, 1, 1})
-    ->Args({kSequential, 1, 1'000})
-    ->Args({kRandom, 1, 1'000});
+    ->Args({kSequential, true, 1, false})
+    ->Args({kRandom, true, 1, false})
+    ->Args({kSequential, true, 1'000, false})
+    ->Args({kRandom, true, 1'000, false})
+    ->Args({kSequential, true, 1, true})
+    ->Args({kRandom, true, 1, true})
+    ->Args({kSequential, true, 1'000, true})
+    ->Args({kRandom, true, 1'000, true});
 
 static auto BM_Exists(benchmark::State &state) -> void
 {
