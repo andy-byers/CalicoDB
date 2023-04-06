@@ -4,8 +4,9 @@
 > Please don't use it for anything serious!
 > I'm open to comments/criticism/pull requests though, as I want to make CalicoDB a useful library eventually!
 
-> **Note (03/22)**: I've made some pretty big changes internally, and I think I'm content with CalicoDB's design now.
-> I'll be using the `develop` branch to work on tests and fix bugs.
+> **Note (04/05)**: I'm using this branch to work on the new WAL implementation. I'm trying out something similar
+> to SQLite's WAL, and it's pretty cool so far! Writes and commits are way faster, and it should be much easier to
+> support multiple instances open on the same database at some point.
 > -Andy
 
 CalicoDB is an embedded key-value database written in C++17.
@@ -37,7 +38,7 @@ It is intended for read-heavy embedded applications.
 
 ## Caveats
 + Concurrency control must be provided externally
-+ Checkpoint routine affects all tables
++ Commit routine affects all tables
 + Random writes are pretty slow
 
 ## Documentation
@@ -49,7 +50,9 @@ The unit tests depend on `@google/googletest`, and the benchmarks depend on `@go
 Both are downloaded using CMake's FetchContent API.
 
 ## Performance
-CalicoDB is optimized for read-heavy workloads with batches of sequential writes.
+CalicoDB uses a write-ahead log (WAL) implementation that is similar to SQLite's WAL.
+This means that most writes and commits will not modify the database file at all: they just write to the WAL.
+The WAL contents are written back to the database file during "checkpoint" operations.
 Performance benchmarks can be found [here](./test/benchmarks).
 
 ## TODO
@@ -57,9 +60,9 @@ Performance benchmarks can be found [here](./test/benchmarks).
 2. Need to implement repair (`Status DB::repair()`)
     + Run when a database cannot be opened due to corruption (not the same as recovery)
 3. Support Windows (write an `Env` implementation)
-4. When we roll back a transaction, we shouldn't undo any vacuum operations that have occurred
-   + Added a "vacuum record" that marks the start or end of a vacuum
-   + Just need to get the recovery routine to understand them
+4. Modify the tree to not use sibling pointers, or at least don't keep a left sibling pointer
+   + Causes extra pages to be written to the WAL during splits
+5. Look into writing a more involved balancing routine
 
 ## Documentation
 Check out CalicoDB's [usage and design documents](doc).

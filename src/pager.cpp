@@ -20,10 +20,21 @@ namespace calicodb
         }                              \
     } while (0)
 
+auto Pager::purge_page(Id page_id) -> void
+{
+    if (auto *entry = m_cache.query(page_id)) {
+        if (entry->is_dirty) {
+            clean_page(*entry);
+        }
+        m_frames.unpin(*entry);
+        m_cache.erase(page_id);
+    }
+}
+
 auto Pager::fetch_page(Id page_id, CacheEntry *&out) -> Status
 {
+    Status s;
     out = m_cache.get(page_id);
-
     if (out == nullptr) {
         out = m_cache.alloc(page_id);
         m_frames.pin(*out);
@@ -33,15 +44,21 @@ auto Pager::fetch_page(Id page_id, CacheEntry *&out) -> Status
             // Try to read the page from the WAL. Nulls out "page" if it cannot find the
             // page.
             page = out->page;
-            CALICODB_TRY(m_wal->read(page_id, page));
+            s = m_wal->read(page_id, page);
         }
 
-        if (page == nullptr) {
+        if (s.is_ok() && page == nullptr) {
             // Read the page from the DB file.
-            CALICODB_TRY(read_page_from_file(*out));
+            s = read_page_from_file(*out);
+        }
+
+        if (!s.is_ok()) {
+            m_frames.unpin(*out);
+            m_cache.erase(page_id);
+            out = nullptr;
         }
     }
-    return Status::ok();
+    return s;
 }
 
 auto Pager::read_page_from_file(CacheEntry &entry) const -> Status
@@ -153,9 +170,12 @@ auto Pager::commit() -> Status
 {
     CALICODB_EXPECT_TRUE(m_state->use_wal);
     if (m_dirty == nullptr) {
+        // TODO: Right now, this signifies that there were no changes to the DB. At some point, it may be possible
+        //       to have purged the cache for some reason, but still have changes to be committed. In this case,
+        //       we will need to determine that a commit is needed and if so write the root page to the WAL with
+        //       the DB size.
         return Status::ok();
     }
-
     auto *p = m_dirty;
     for (; p; p = p->next) {
         if (p->page_id.value > m_page_count) {
@@ -169,7 +189,9 @@ auto Pager::commit() -> Status
         }
     }
     p = m_dirty;
+    CALICODB_EXPECT_NE(p, nullptr);
     m_dirty = nullptr;
+
     m_state->batch_size = 0;
     // The DB page count is specified here. This indicates that the writes are part of
     // a commit.
@@ -190,22 +212,20 @@ auto Pager::abort() -> Status
     return m_wal->abort();
 }
 
-auto Pager::decrease_page_count(std::size_t page_count) -> void
+auto Pager::resize(std::size_t page_count) -> Status
 {
-    while (m_page_count > page_count) {
-        const Id id(m_page_count);
-        if (auto *entry = m_cache.query(id)) {
-            if (entry->is_dirty) {
-                clean_page(*entry);
-            }
-            m_frames.unpin(*entry);
-            m_cache.erase(id);
+    CALICODB_EXPECT_GT(page_count, 0);
+    if (page_count != m_page_count) {
+        for (auto i = page_count; i < m_page_count; ++i) {
+            purge_page(Id::from_index(i));
         }
-        --m_page_count;
+        CALICODB_TRY(m_env->resize_file(m_filename, page_count * m_frames.page_size()));
     }
+    m_page_count = page_count;
+    return Status::ok();
 }
 
-auto Pager::checkpoint_phase_1() -> Status
+auto Pager::checkpoint_phase_1(bool purge_root) -> Status
 {
     // A checkpoint must immediately follow a commit, so the cache should be clean.
     CALICODB_EXPECT_EQ(m_dirty, nullptr);
@@ -214,27 +234,18 @@ auto Pager::checkpoint_phase_1() -> Status
 
     // Transfer the WAL contents back to the DB. Note that this call will sync the WAL
     // file before it starts transferring any data back.
-    return m_wal->checkpoint(*m_file);
+    CALICODB_TRY(m_wal->checkpoint(*m_file));
+
+    if (purge_root) {
+        purge_page(Id::root());
+    }
+    return Status::ok();
 }
 
 auto Pager::checkpoint_phase_2() -> Status
 {
-    // The header page count now indicates how large the file should be. Truncate the
-    // file to match, if necessary. Discard cached pages that are out-of-range.
-    if (m_page_count < m_saved_count) {
-        CALICODB_EXPECT_GT(m_page_count, 0);
-        for (Id id(m_saved_count + 1); id.value <= m_page_count; ++id.value) {
-            auto *entry = m_cache.query(id);
-            if (entry != nullptr) {
-                if (entry->is_dirty) {
-                    clean_page(*entry);
-                }
-                m_frames.unpin(*entry);
-                m_cache.erase(id);
-            }
-        }
-        CALICODB_TRY(m_env->resize_file(m_filename, m_page_count * m_frames.page_size()));
-    }
+    std::swap(m_page_count, m_saved_count);
+    CALICODB_TRY(resize(m_page_count));
     m_saved_count = 0;
 
     // Make sure the data transferred from the WAL is on disk.
@@ -304,7 +315,8 @@ auto Pager::acquire(Id page_id, Page &page) -> Status
         // Read a page from either the WAL or the DB.
         CALICODB_TRY(fetch_page(page_id, entry));
     }
-    return m_frames.ref(*entry, page);
+    m_frames.ref(*entry, page);
+    return Status::ok();
 }
 
 auto Pager::upgrade(Page &page) -> void

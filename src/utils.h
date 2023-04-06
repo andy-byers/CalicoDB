@@ -165,7 +165,6 @@ inline auto operator!=(Id lhs, Id rhs) -> bool
 struct DBState {
     Status status;
     std::size_t batch_size = 0;
-    std::size_t record_count = 0;
     std::size_t ckpt_number = 0;
     Id freelist_head;
     bool use_wal = false;

@@ -137,7 +137,7 @@ static auto write_child_id(Cell &cell, Id child_id) -> void
 
 [[nodiscard]] auto read_next_id(const Page &page) -> Id
 {
-    return Id(get_u32(page.view(page_offset(page.id()))));
+    return Id(get_u32(page.data() + page_offset(page.id())));
 }
 
 auto write_next_id(Page &page, Id next_id) -> void
@@ -1604,7 +1604,7 @@ static constexpr auto kLinkContentOffset = Id::kSize;
 
 [[nodiscard]] static auto get_readable_content(const Page &page, std::size_t size_limit) -> Slice
 {
-    return page.view(kLinkContentOffset, std::min(size_limit, page.size() - kLinkContentOffset));
+    return page.view().range(kLinkContentOffset, std::min(size_limit, page.size() - kLinkContentOffset));
 }
 
 Freelist::Freelist(Pager &pager, Id &head)

@@ -96,9 +96,7 @@ public:
     // database to include all changes made since the last commit.
     //
     // This operation affects all tables that have pending updates, as well as creation
-    // and dropping of tables. Synchronizes both the WAL and the database file with the
-    // underlying filesystem, and ensures that the WAL contains the necessary information
-    // to recover from a crash.
+    // and dropping of tables.
     [[nodiscard]] virtual auto commit() -> Status = 0;
 
     // Perform defragmentation and shrink the database file.

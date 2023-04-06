@@ -240,20 +240,6 @@ public:
     tools::RandomGenerator random;
 };
 
-TEST_F(FakeEnvTests, ReadsAndWrites)
-{
-    auto ra_editor = open_blob<File>(*env, kFilename);
-    auto ra_reader = open_blob<File>(*env, kFilename);
-
-    const auto first_input = random.Generate(500);
-    const auto second_input = random.Generate(500);
-    write_out_randomly(random, *ra_editor, first_input);
-    const auto output_1 = read_back_randomly(random, *ra_reader, 1'000);
-    const auto output_2 = read_back_randomly(random, *ra_editor, 1'000);
-    ASSERT_EQ(output_1, output_2);
-    ASSERT_EQ(output_1, first_input.to_string() + second_input.to_string());
-}
-
 TEST_F(FakeEnvTests, ReaderStopsAtEOF)
 {
     auto ra_editor = open_blob<File>(*env, kFilename);

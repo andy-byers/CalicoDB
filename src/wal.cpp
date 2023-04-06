@@ -580,7 +580,7 @@ auto WalImpl::rewrite_checksums(U32 end) -> Status
         hdr.pgno = get_u32(&m_frame[0]);
         hdr.db_size = get_u32(&m_frame[4]);
         encode_frame(hdr, &m_frame[WalFrameHdr::kSize], m_frame.data());
-        CALICODB_TRY(m_file->write(0, Slice(m_frame).truncate(WalFrameHdr::kSize)));
+        CALICODB_TRY(m_file->write(offset, Slice(m_frame).truncate(WalFrameHdr::kSize)));
     }
     return Status::ok();
 }
@@ -838,7 +838,9 @@ auto WalImpl::checkpoint(File &db_file) -> Status
 {
     CALICODB_TRY(m_file->sync());
 
-    if (m_hdr.max_frame == 0) {
+    // TODO: This should be set to the max frame still needed by a reader.
+    auto max_safe_frame = m_hdr.max_frame;
+    if (max_safe_frame == 0) {
         return Status::ok();
     }
     HashIterator itr(m_index);
@@ -849,16 +851,18 @@ auto WalImpl::checkpoint(File &db_file) -> Status
         }
 
         CALICODB_TRY(m_file->read_exact(
-            frame_offset(entry.value),
-            WalFrameHdr::kSize + m_page_size,
+            frame_offset(entry.value) + WalFrameHdr::kSize,
+            m_page_size,
             m_frame.data()));
 
         CALICODB_TRY(db_file.write(
             (entry.key - 1) * m_page_size,
-            Slice(m_frame.data() + WalFrameHdr::kSize, m_page_size)));
+            Slice(m_frame.data(), m_page_size)));
 
         // TODO: Should increase backfill count here.
     }
+    CALICODB_TRY(m_env->resize_file(m_filename, m_hdr.page_count * m_page_size));
+
     ++m_ckpt_number;
     m_min_frame = 0;
     m_hdr.max_frame = 0;

@@ -102,12 +102,6 @@ FrameManager::FrameManager(AlignedBuffer buffer, std::size_t page_size, std::siz
     }
 }
 
-auto FrameManager::get_frame(std::size_t index) const -> Slice
-{
-    CALICODB_EXPECT_LT(index, m_frame_count);
-    return {m_buffer.data + index * m_page_size, m_page_size};
-}
-
 auto FrameManager::get_frame_pointer(std::size_t index) -> char *
 {
     CALICODB_EXPECT_LT(index, m_frame_count);
@@ -139,7 +133,7 @@ auto FrameManager::unpin(CacheEntry &entry) -> void
     m_unpinned.emplace_back(entry.index);
 }
 
-auto FrameManager::ref(CacheEntry &entry, Page &page) -> Status
+auto FrameManager::ref(CacheEntry &entry, Page &page) -> void
 {
     CALICODB_EXPECT_FALSE(entry.page_id.is_null());
     CALICODB_EXPECT_EQ(entry.page, get_frame_pointer(entry.index));
@@ -151,7 +145,6 @@ auto FrameManager::ref(CacheEntry &entry, Page &page) -> Status
     page.m_data = entry.page;
     page.m_size = m_page_size;
     page.m_write = false;
-    return Status::ok();
 }
 
 auto FrameManager::unref(CacheEntry &entry) -> void

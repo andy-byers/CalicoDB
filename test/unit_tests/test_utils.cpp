@@ -510,7 +510,7 @@ TEST_F(InterceptorTests, RespectsPrefix)
 
     File *editor;
     assert_special_error(env->new_file("./test", editor));
-    expect_ok(env->new_file("./wal-", editor));
+    expect_ok(env->new_file("./wal", editor));
     delete editor;
 }
 

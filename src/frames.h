@@ -101,10 +101,9 @@ public:
 
     explicit FrameManager(AlignedBuffer buffer, std::size_t page_size, std::size_t frame_count);
     ~FrameManager() = default;
-    [[nodiscard]] auto get_frame(std::size_t index) const -> Slice;
-    [[nodiscard]] auto ref(CacheEntry &entry, Page &out) -> Status;
     auto pin(CacheEntry &entry) -> void;
     auto unpin(CacheEntry &entry) -> void;
+    auto ref(CacheEntry &entry, Page &out) -> void;
     auto unref(CacheEntry &entry) -> void;
     auto upgrade(Page &page) -> void;
 

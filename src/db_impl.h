@@ -121,7 +121,7 @@ private:
     [[nodiscard]] auto get_table_info(std::vector<std::string> &names, std::vector<LogicalPageId> *roots) const -> Status;
     [[nodiscard]] auto construct_new_table(const Slice &name, LogicalPageId &root_id) -> Status;
     [[nodiscard]] auto remove_empty_table(const std::string &name, TableState &state) -> Status;
-    [[nodiscard]] auto checkpoint_if_needed(bool force = false) -> Status;
+    [[nodiscard]] auto checkpoint_if_needed(bool is_recovery = false) -> Status;
     [[nodiscard]] auto load_file_header() -> Status;
     [[nodiscard]] auto do_commit() -> Status;
     [[nodiscard]] auto do_vacuum() -> Status;

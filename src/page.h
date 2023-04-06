@@ -46,10 +46,10 @@ struct LogicalPageId {
 
 class Page
 {
-    Id m_id;
-    std::size_t m_size = 0;
     CacheEntry *m_entry = nullptr;
     char *m_data = nullptr;
+    std::size_t m_size = 0;
+    Id m_id;
     bool m_write = false;
 
 public:
@@ -78,14 +78,9 @@ public:
         return m_entry;
     }
 
-    [[nodiscard]] auto view(std::size_t offset) const -> Slice
+    [[nodiscard]] auto view() const -> Slice
     {
-        return Slice(m_data, m_size).advance(offset);
-    }
-
-    [[nodiscard]] auto view(std::size_t offset, std::size_t size) const -> Slice
-    {
-        return Slice(m_data, m_size).range(offset, size);
+        return Slice(m_data, m_size);
     }
 
     [[nodiscard]] auto data() -> char *

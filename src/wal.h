@@ -108,17 +108,6 @@ struct WalStatistics {
     std::size_t bytes_written = 0;
 };
 
-// New pager page acquire routine:
-//   1. Check if the page is cached
-//      + If it is, return it
-//      + If it is not, goto 2
-//   2. Check if the page is in the dirty table
-//      + If it is not, read it from the database file
-//      + If it is, goto 3
-//   3. Read the WAL index to determine the most-recent frame containing the page
-//   4. Use the frame contents to reconstruct the page
-//   5. Cache and return the page
-
 class Wal
 {
 public:

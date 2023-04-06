@@ -19,8 +19,7 @@ class Page;
 // pointer".
 //
 // The first page in the database file is called the root page. The root page contains the file
-// header at offset 0, followed by a page header and a node header (the root is always a node).
-// All other pages have a page header at offset 0, followed by type-specific headers.
+// header at offset 0, followed by a node header (the root is always a node).
 
 // File Header Format:
 //     Offset  Size  Name

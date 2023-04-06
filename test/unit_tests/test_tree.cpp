@@ -1256,11 +1256,7 @@ public:
                 --target.value;
             }
 
-            ASSERT_OK(pager->checkpoint_phase_1());
-            FileHeader header;
-            header.page_count = target.value;
-            pager->load_state(header);
-            ASSERT_OK(pager->checkpoint_phase_2());
+            pager->resize(target.value);
 
             auto *cursor = CursorInternal::make_cursor(*tree);
             for (const auto &[key, value] : map) {
@@ -1348,552 +1344,552 @@ TEST_P(VacuumTests, OverflowChainIsNullTerminated)
     pager->release(std::move(page_3));
     pager->release(std::move(page_4));
 }
-//
-// TEST_P(VacuumTests, VacuumsFreelistInOrder)
-//{
-//    TableSet table_set;
-//    auto node_3 = allocate_node(true);
-//    auto node_4 = allocate_node(true);
-//    auto node_5 = allocate_node(true);
-//    ASSERT_EQ(node_5.page.id().value, 5);
-//
-//    // Page Types:     N   P   3   2   1
-//    // Page Contents: [1] [2] [3] [4] [5]
-//    // Page IDs:       1   2   3   4   5
-//    ASSERT_OK(freelist->push(std::move(node_3.page)));
-//    ASSERT_OK(freelist->push(std::move(node_4.page)));
-//    ASSERT_OK(freelist->push(std::move(node_5.page)));
-//
-//    // Page Types:     N   P   2   1
-//    // Page Contents: [1] [2] [3] [4] [X]
-//    // Page IDs:       1   2   3   4   5
-//    bool vacuumed = false;
-//    ASSERT_OK(tree->vacuum_one(Id(5), table_set, &vacuumed));
-//    ASSERT_TRUE(vacuumed);
-//
-//    PointerMap::Entry entry;
-//    ASSERT_OK(PointerMap::read_entry(*pager, Id(4), entry));
-//    ASSERT_EQ(entry.type, PointerMap::kFreelistLink);
-//    ASSERT_EQ(entry.back_ptr, Id::null());
-//
-//    // Page Types:     N   P   1
-//    // Page Contents: [1] [2] [3] [X] [X]
-//    // Page IDs:       1   2   3   4   5
-//    ASSERT_OK(tree->vacuum_one(Id(4), table_set, &vacuumed));
-//    ASSERT_TRUE(vacuumed);
-//    ASSERT_OK(PointerMap::read_entry(*pager, Id(3), entry));
-//    ASSERT_EQ(entry.type, PointerMap::kFreelistLink);
-//    ASSERT_EQ(entry.back_ptr, Id::null());
-//
-//    // Page Types:     N   P
-//    // Page Contents: [1] [2] [X] [X] [X]
-//    // Page IDs:       1   2   3   4   5
-//    ASSERT_OK(tree->vacuum_one(Id(3), table_set, &vacuumed));
-//    ASSERT_TRUE(vacuumed);
-//    ASSERT_TRUE(freelist->is_empty());
-//
-//    // Page Types:     N
-//    // Page Contents: [1] [X] [X] [X] [X]
-//    // Page IDs:       1   2   3   4   5
-//    ASSERT_OK(tree->vacuum_one(Id(2), table_set, &vacuumed));
-//    ASSERT_TRUE(vacuumed);
-//
-//    // Page Types:     N
-//    // Page Contents: [1]
-//    // Page IDs:       1
-//    ASSERT_OK(pager->truncate(1));
-//    ASSERT_EQ(pager->page_count(), 1);
-//}
-//
-// TEST_P(VacuumTests, VacuumsFreelistInReverseOrder)
-//{
-//    TableSet table_set;
-//    auto node_3 = allocate_node(true);
-//    auto node_4 = allocate_node(true);
-//    auto node_5 = allocate_node(true);
-//
-//    // Page Types:     N   P   1   2   3
-//    // Page Contents: [a] [b] [c] [d] [e]
-//    // Page IDs:       1   2   3   4   5
-//    ASSERT_OK(freelist->push(std::move(node_5.page)));
-//    ASSERT_OK(freelist->push(std::move(node_4.page)));
-//    ASSERT_OK(freelist->push(std::move(node_3.page)));
-//
-//    // Step 1:
-//    //     Page Types:     N   P       1   2
-//    //     Page Contents: [a] [b] [e] [d] [e]
-//    //     Page IDs:       1   2   3   4   5
-//
-//    // Step 2:
-//    //     Page Types:     N   P   2   1
-//    //     Page Contents: [a] [b] [e] [d] [ ]
-//    //     Page IDs:       1   2   3   4   5
-//    bool vacuumed = false;
-//    ASSERT_OK(tree->vacuum_one(Id(5), table_set, &vacuumed));
-//    ASSERT_TRUE(vacuumed);
-//    PointerMap::Entry entry;
-//    ASSERT_OK(PointerMap::read_entry(*pager, Id(4), entry));
-//    ASSERT_EQ(entry.back_ptr, Id::null());
-//    ASSERT_EQ(entry.type, PointerMap::kFreelistLink);
-//    {
-//        Page page;
-//        ASSERT_OK(pager->acquire(Id(4), page));
-//        ASSERT_EQ(read_next_id(page), Id(3));
-//        pager->release(std::move(page));
-//    }
-//
-//    // Page Types:     N   P   1
-//    // Page Contents: [a] [b] [e] [ ] [ ]
-//    // Page IDs:       1   2   3   4   5
-//    ASSERT_OK(tree->vacuum_one(Id(4), table_set, &vacuumed));
-//    ASSERT_TRUE(vacuumed);
-//    ASSERT_OK(PointerMap::read_entry(*pager, Id(3), entry));
-//    ASSERT_EQ(entry.type, PointerMap::kFreelistLink);
-//    ASSERT_EQ(entry.back_ptr, Id::null());
-//
-//    // Page Types:     N   P
-//    // Page Contents: [a] [b] [ ] [ ] [ ]
-//    // Page IDs:       1   2   3   4   5
-//    ASSERT_OK(tree->vacuum_one(Id(3), table_set, &vacuumed));
-//    ASSERT_TRUE(vacuumed);
-//    ASSERT_TRUE(freelist->is_empty());
-//
-//    // Page Types:     N
-//    // Page Contents: [a] [ ] [ ] [ ] [ ]
-//    // Page IDs:       1   2   3   4   5
-//    ASSERT_OK(tree->vacuum_one(Id(2), table_set, &vacuumed));
-//    ASSERT_TRUE(vacuumed);
-//
-//    // Page Types:     N
-//    // Page Contents: [a]
-//    // Page IDs:       1
-//    ASSERT_OK(pager->truncate(1));
-//    ASSERT_EQ(pager->page_count(), 1);
-//}
-//
-// TEST_P(VacuumTests, CleansUpOverflowValues)
-//{
-//    clean_up_test(16, kPageSize * 2);
-//}
-//
-//// When external nodes are merged, the separator is removed. If the separator key was overflowing, we
-//// must not forget to move its overflow pages to the freelist.
-// TEST_P(VacuumTests, CleansUpOverflowKeys)
-//{
-//     clean_up_test(kPageSize * 2, 16);
-// }
-//
-// TEST_P(VacuumTests, CleansUpOverflowPayloads)
-//{
-//     clean_up_test(kPageSize * 2, kPageSize * 2);
-// }
-//
-// TEST_P(VacuumTests, VacuumFreelistSanityCheck)
-//{
-//     std::default_random_engine rng(42);
-//     TableSet table_set;
-//
-//     for (std::size_t iteration = 0; iteration < 1'000; ++iteration) {
-//         std::vector<Node> nodes;
-//         for (std::size_t i = 0; i < kFrameCount - 1; ++i) {
-//             nodes.emplace_back(allocate_node(true));
-//         }
-//
-//         std::shuffle(begin(nodes), end(nodes), rng);
-//
-//         for (auto &node : nodes) {
-//             ASSERT_OK(freelist->push(std::move(node.page)));
-//         }
-//
-//         // This will vacuum the whole freelist, as well as the pointer map page on page 2.
-//         Id target(pager->page_count());
-//         bool vacuumed = false;
-//         for (std::size_t i = 0; i < kFrameCount; ++i) {
-//             ASSERT_OK(tree->vacuum_one(target, table_set, &vacuumed));
-//             ASSERT_TRUE(vacuumed);
-//             --target.value;
-//         }
-//         ASSERT_OK(tree->vacuum_one(target, table_set, &vacuumed));
-//         ASSERT_FALSE(vacuumed);
-//         ASSERT_OK(pager->truncate(1));
-//         ASSERT_EQ(pager->page_count(), 1);
-//     }
-// }
-//
-// static auto vacuum_and_validate(VacuumTests &test, const std::string &value)
-//{
-//     TableSet table_set;
-//     bool vacuumed;
-//     ASSERT_EQ(test.pager->page_count(), 6);
-//     ASSERT_OK(test.tree->vacuum_one(Id(6), table_set, &vacuumed));
-//     ASSERT_TRUE(vacuumed);
-//     ASSERT_OK(test.tree->vacuum_one(Id(5), table_set, &vacuumed));
-//     ASSERT_TRUE(vacuumed);
-//     ASSERT_OK(test.pager->truncate(4));
-//     ASSERT_OK(test.pager->flush_to_disk());
-//     ASSERT_EQ(test.pager->page_count(), 4);
-//
-//     std::string result;
-//     ASSERT_OK(test.tree->get("a", &result));
-//     ASSERT_EQ(result, "value");
-//     ASSERT_OK(test.tree->get("b", &result));
-//     ASSERT_EQ(result, value);
-// }
-//
-// TEST_P(VacuumTests, VacuumsOverflowChain_A)
-//{
-//     // Save these pages until the overflow chain is created, otherwise they will be used for it.
-//     auto node_3 = allocate_node(true);
-//     auto node_4 = allocate_node(true);
-//     ASSERT_EQ(node_4.page.id().value, 4);
-//
-//     // Creates an overflow chain of length 2, rooted at the second cell on the root page.
-//     std::string overflow_data(3 * kPageSize / 2, 'x');
-//     ASSERT_OK(tree->put("a", "value"));
-//     ASSERT_OK(tree->put("b", overflow_data));
-//
-//     ASSERT_OK(freelist->push(std::move(node_3.page)));
-//     ASSERT_OK(freelist->push(std::move(node_4.page)));
-//
-//     // Page Types:     n   p   2   1   A   B
-//     // Page Contents: [a] [b] [c] [d] [e] [f]
-//     // Page IDs:       1   2   3   4   5   6
-//
-//     // Page Types:     n   p   1   B   A
-//     // Page Contents: [a] [b] [c] [f] [e] [ ]
-//     // Page IDs:       1   2   3   4   5   6
-//
-//     // Page Types:     n   p   A   B
-//     // Page Contents: [a] [b] [e] [f] [ ] [ ]
-//     // Page IDs:       1   2   3   4   5   6
-//
-//     // Page Types:     n   p   A   B
-//     // Page Contents: [a] [b] [e] [f]
-//     // Page IDs:       1   2   3   4
-//     vacuum_and_validate(*this, overflow_data);
-//
-//     PointerMap::Entry head_entry, tail_entry;
-//     ASSERT_OK(PointerMap::read_entry(*pager, Id(3), head_entry));
-//     ASSERT_OK(PointerMap::read_entry(*pager, Id(4), tail_entry));
-//
-//     ASSERT_TRUE(head_entry.back_ptr.is_root());
-//     ASSERT_EQ(tail_entry.back_ptr, Id(3));
-//     ASSERT_EQ(head_entry.type, PointerMap::kOverflowHead);
-//     ASSERT_EQ(tail_entry.type, PointerMap::kOverflowLink);
-// }
-//
-// TEST_P(VacuumTests, VacuumsOverflowChain_B)
-//{
-//     // This time, we'll force the head of the overflow chain to be the last page in the file.
-//     auto node_3 = allocate_node(true);
-//     auto node_4 = allocate_node(true);
-//     auto node_5 = allocate_node(true);
-//     auto node_6 = allocate_node(true);
-//     ASSERT_EQ(node_6.page.id().value, 6);
-//     ASSERT_OK(freelist->push(std::move(node_5.page)));
-//     ASSERT_OK(freelist->push(std::move(node_6.page)));
-//
-//     std::string overflow_data(3 * kPageSize / 2, 'x');
-//     ASSERT_OK(tree->put("a", "value"));
-//     ASSERT_OK(tree->put("b", overflow_data));
-//
-//     // Page Types:     n   p   2   1   B   A
-//     // Page Contents: [a] [b] [c] [d] [e] [f]
-//     // Page IDs:       1   2   3   4   5   6
-//     ASSERT_OK(freelist->push(std::move(node_3.page)));
-//     ASSERT_OK(freelist->push(std::move(node_4.page)));
-//
-//     // Page Types:     n   p   1   A   B
-//     // Page Contents: [a] [b] [c] [f] [e] [ ]
-//     // Page IDs:       1   2   3   4   5   6
-//
-//     // Page Types:     n   p   B   A
-//     // Page Contents: [a] [b] [e] [f] [ ] [ ]
-//     // Page IDs:       1   2   3   4   5   6
-//
-//     // Page Types:     n   p   B   A
-//     // Page Contents: [a] [b] [e] [f]
-//     // Page IDs:       1   2   3   4
-//     vacuum_and_validate(*this, overflow_data);
-//
-//     PointerMap::Entry head_entry, tail_entry;
-//     ASSERT_OK(PointerMap::read_entry(*pager, Id(4), head_entry));
-//     ASSERT_OK(PointerMap::read_entry(*pager, Id(3), tail_entry));
-//
-//     ASSERT_TRUE(head_entry.back_ptr.is_root());
-//     ASSERT_EQ(tail_entry.back_ptr, Id(4));
-//     ASSERT_EQ(head_entry.type, PointerMap::kOverflowHead);
-//     ASSERT_EQ(tail_entry.type, PointerMap::kOverflowLink);
-// }
-//
-// TEST_P(VacuumTests, VacuumOverflowChainSanityCheck)
-//{
-//     std::vector<Node> reserved;
-//     reserved.emplace_back(allocate_node(true));
-//     reserved.emplace_back(allocate_node(true));
-//     reserved.emplace_back(allocate_node(true));
-//     reserved.emplace_back(allocate_node(true));
-//     reserved.emplace_back(allocate_node(true));
-//     ASSERT_EQ(reserved.back().page.id().value, 7);
-//
-//     // Create overflow chains, but don't overflow the root node. Should create 3 chains, 1 of length 1, and 2 of length 2.
-//     std::vector<std::string> values;
-//     for (std::size_t i = 0; i < 3; ++i) {
-//         const auto value = random.Generate(kPageSize * std::min<std::size_t>(i + 1, 2) * 2 / 3);
-//         ASSERT_OK(tree->put(tools::integral_key<1>(i), value));
-//         values.emplace_back(value.to_string());
-//     }
-//
-//     while (!reserved.empty()) {
-//         ASSERT_OK(freelist->push(std::move(reserved.back().page)));
-//         reserved.pop_back();
-//     }
-//
-//     TableSet table_set;
-//     bool vacuumed;
-//     ASSERT_EQ(pager->page_count(), 12);
-//     ASSERT_OK(tree->vacuum_one(Id(12), table_set, &vacuumed));
-//     ASSERT_OK(tree->vacuum_one(Id(11), table_set, &vacuumed));
-//     ASSERT_OK(tree->vacuum_one(Id(10), table_set, &vacuumed));
-//     ASSERT_OK(tree->vacuum_one(Id(9), table_set, &vacuumed));
-//     ASSERT_OK(tree->vacuum_one(Id(8), table_set, &vacuumed));
-//     ASSERT_OK(pager->truncate(7));
-//     ASSERT_EQ(pager->page_count(), 7);
-//
-//     auto *cursor = CursorInternal::make_cursor(*tree);
-//     cursor->seek_first();
-//     for (std::size_t i = 0; i < values.size(); ++i) {
-//         ASSERT_TRUE(cursor->is_valid());
-//         ASSERT_EQ(cursor->key().to_string(), tools::integral_key<1>(i));
-//         ASSERT_EQ(cursor->value().to_string(), values[i]);
-//         cursor->next();
-//     }
-//     ASSERT_FALSE(cursor->is_valid());
-//     delete cursor;
-// }
-//
-// TEST_P(VacuumTests, VacuumsNodes)
-//{
-//     auto node_3 = allocate_node(true);
-//     auto node_4 = allocate_node(true);
-//     ASSERT_EQ(node_4.page.id().value, 4);
-//
-//     std::vector<std::string> values;
-//     for (std::size_t i = 0; i < 5; ++i) {
-//         const auto key = tools::integral_key(i);
-//         const auto value = random.Generate(kPageSize / 4 - 40 - key.size());
-//         ASSERT_OK(tree->put(key, value));
-//         values.emplace_back(value.to_string());
-//     }
-//
-//     // Page Types:     n   p   2   1   n   n
-//     // Page Contents: [a] [b] [c] [d] [e] [f]
-//     // Page IDs:       1   2   3   4   5   6
-//     ASSERT_OK(freelist->push(std::move(node_3.page)));
-//     ASSERT_OK(freelist->push(std::move(node_4.page)));
-//
-//     // Page Types:     n   p   1   n   n
-//     // Page Contents: [a] [b] [c] [f] [e] [ ]
-//     // Page IDs:       1   2   3   4   5   6
-//
-//     // Page Types:     n   p   n   n
-//     // Page Contents: [a] [b] [e] [f] [ ] [ ]
-//     // Page IDs:       1   2   3   4   5   6
-//
-//     // Page Types:     n   p   n   n
-//     // Page Contents: [a] [b] [e] [f]
-//     // Page IDs:       1   2   3   4
-//     ASSERT_EQ(pager->page_count(), 6)
-//         << "test was incorrectly initialized (check the key and value sizes)";
-//     bool vacuumed = false;
-//     TableSet table_set;
-//     ASSERT_OK(tree->vacuum_one(Id(6), table_set, &vacuumed));
-//     ASSERT_TRUE(vacuumed);
-//     ASSERT_OK(tree->vacuum_one(Id(5), table_set, &vacuumed));
-//     ASSERT_TRUE(vacuumed);
-//     ASSERT_OK(pager->truncate(4));
-//
-//     auto *cursor = CursorInternal::make_cursor(*tree);
-//     cursor->seek_first();
-//     for (std::size_t i = 0; i < values.size(); ++i) {
-//         ASSERT_TRUE(cursor->is_valid());
-//         ASSERT_EQ(cursor->key(), tools::integral_key(i));
-//         ASSERT_EQ(cursor->value(), values[i]);
-//         cursor->next();
-//     }
-//     ASSERT_FALSE(cursor->is_valid());
-//     delete cursor;
-// }
-//
-// TEST_P(VacuumTests, SanityCheck_Freelist)
-//{
-//     sanity_check(0, 50, 16, 16);
-// }
-//
-// TEST_P(VacuumTests, SanityCheck_Freelist_OverflowHead)
-//{
-//     sanity_check(0, 50, 16, kPageSize / 2);
-// }
-//
-// TEST_P(VacuumTests, SanityCheck_Freelist_OverflowLink)
-//{
-//     sanity_check(0, 50, 16, kPageSize * 2);
-// }
-//
-// TEST_P(VacuumTests, SanityCheck_Nodes_1)
-//{
-//     sanity_check(50, 50, 16, 16);
-// }
-//
-// TEST_P(VacuumTests, SanityCheck_Nodes_2)
-//{
-//     sanity_check(200, 50, 16, 16);
-// }
-//
-// TEST_P(VacuumTests, SanityCheck_NodesWithOverflowValues)
-//{
-//     sanity_check(50, 50, 16, kPageSize * 2);
-// }
-//
-// TEST_P(VacuumTests, SanityCheck_NodesWithOverflowKeys)
-//{
-//     sanity_check(50, 50, kPageSize * 2, 16);
-// }
-//
-// TEST_P(VacuumTests, SanityCheck_NodesWithOverflowPayloads)
-//{
-//     sanity_check(50, 50, kPageSize * 2, kPageSize * 2);
-// }
-//
-// INSTANTIATE_TEST_SUITE_P(
-//     VacuumTests,
-//     VacuumTests,
-//     ::testing::Values(
-//         TreeTestParameters {kMinPageSize},
-//         TreeTestParameters {kMinPageSize * 2},
-//         TreeTestParameters {kMaxPageSize / 2},
-//         TreeTestParameters {kMaxPageSize}));
-//
-// class MultiTreeTests : public TreeTests
-//{
-// public:
-//     MultiTreeTests()
-//         : payload_values(kInitialRecordCount)
-//     {
-//         for (auto &value : payload_values) {
-//             value = random.Generate(kPageSize * 2).to_string();
-//         }
-//     }
-//
-//     auto SetUp() -> void override
-//     {
-//         TreeTests::SetUp();
-//     }
-//
-//     auto create_tree()
-//     {
-//         Id root;
-//         ++last_tree_id.value;
-//         EXPECT_OK(Tree::create(*pager, last_tree_id, freelist_head, &root));
-//         root_ids.emplace_back(Id::root(), root);
-//         multi_tree.emplace_back(std::make_unique<Tree>(*pager, root_ids.back().page_id, freelist_head, nullptr));
-//         return multi_tree.size() - 1;
-//     }
-//
-//     auto fill_tree(std::size_t tid)
-//     {
-//         for (std::size_t i = 0; i < kInitialRecordCount; ++i) {
-//             const auto value = payload_values[(i + tid) % payload_values.size()];
-//             ASSERT_OK(multi_tree[tid]->put(make_long_key(i), value));
-//         }
-//         multi_tree[tid]->TEST_validate();
-//     }
-//
-//     auto check_tree(std::size_t tid)
-//     {
-//         std::string value;
-//         for (std::size_t i = 0; i < kInitialRecordCount; ++i) {
-//             ASSERT_OK(multi_tree[tid]->get(make_long_key(i), &value));
-//             ASSERT_EQ(value, payload_values[(i + tid) % payload_values.size()]);
-//         }
-//     }
-//
-//     auto clear_tree(std::size_t tid)
-//     {
-//         for (std::size_t i = 0; i < kInitialRecordCount; ++i) {
-//             ASSERT_OK(multi_tree[tid]->erase(make_long_key(i)));
-//         }
-//         multi_tree[tid]->TEST_validate();
-//     }
-//
-//     Id last_tree_id = Id::root();
-//     std::vector<std::unique_ptr<Tree>> multi_tree;
-//     std::vector<std::string> payload_values;
-//     std::list<LogicalPageId> root_ids;
-// };
-//
-// TEST_P(MultiTreeTests, CreateAdditionalTrees)
-//{
-//     create_tree();
-//     create_tree();
-//     create_tree();
-// }
-//
-// TEST_P(MultiTreeTests, DuplicateKeysAreAllowedBetweenTrees)
-//{
-//     const auto tid_1 = create_tree();
-//     const auto tid_2 = create_tree();
-//
-//     auto &hello_tree = multi_tree[tid_1];
-//     auto &world_tree = multi_tree[tid_2];
-//     ASSERT_OK(hello_tree->put("same_key", "hello"));
-//     ASSERT_OK(world_tree->put("same_key", "world"));
-//
-//     std::string value;
-//     ASSERT_OK(hello_tree->get("same_key", &value));
-//     ASSERT_EQ(value, "hello");
-//     ASSERT_OK(world_tree->get("same_key", &value));
-//     ASSERT_EQ(value, "world");
-// }
-//
-// TEST_P(MultiTreeTests, NonRootTreeSplitsAndMerges)
-//{
-//     const auto tid = create_tree();
-//     fill_tree(tid);
-//     clear_tree(tid);
-// }
-//
-// TEST_P(MultiTreeTests, MultipleSplitsAndMerges_1)
-//{
-//     std::vector<std::size_t> tids(10);
-//     for (auto &tid : tids) {
-//         tid = create_tree();
-//     }
-//     for (const auto &tid : tids) {
-//         fill_tree(tid);
-//     }
-//     for (const auto &tid : tids) {
-//         check_tree(tid);
-//     }
-//     for (const auto &tid : tids) {
-//         clear_tree(tid);
-//     }
-// }
-//
-// TEST_P(MultiTreeTests, MultipleSplitsAndMerges_2)
-//{
-//     for (std::size_t i = 0; i < 10; ++i) {
-//         const auto tid = create_tree();
-//         fill_tree(tid);
-//         check_tree(tid);
-//         clear_tree(tid);
-//     }
-// }
-//
-// INSTANTIATE_TEST_SUITE_P(
-//     MultiTreeTests,
-//     MultiTreeTests,
-//     ::testing::Values(
-//         TreeTestParameters {kMinPageSize}));
+
+ TEST_P(VacuumTests, VacuumsFreelistInOrder)
+{
+    TableSet table_set;
+    auto node_3 = allocate_node(true);
+    auto node_4 = allocate_node(true);
+    auto node_5 = allocate_node(true);
+    ASSERT_EQ(node_5.page.id().value, 5);
+
+    // Page Types:     N   P   3   2   1
+    // Page Contents: [1] [2] [3] [4] [5]
+    // Page IDs:       1   2   3   4   5
+    ASSERT_OK(freelist->push(std::move(node_3.page)));
+    ASSERT_OK(freelist->push(std::move(node_4.page)));
+    ASSERT_OK(freelist->push(std::move(node_5.page)));
+
+    // Page Types:     N   P   2   1
+    // Page Contents: [1] [2] [3] [4] [X]
+    // Page IDs:       1   2   3   4   5
+    bool vacuumed = false;
+    ASSERT_OK(tree->vacuum_one(Id(5), table_set, &vacuumed));
+    ASSERT_TRUE(vacuumed);
+
+    PointerMap::Entry entry;
+    ASSERT_OK(PointerMap::read_entry(*pager, Id(4), entry));
+    ASSERT_EQ(entry.type, PointerMap::kFreelistLink);
+    ASSERT_EQ(entry.back_ptr, Id::null());
+
+    // Page Types:     N   P   1
+    // Page Contents: [1] [2] [3] [X] [X]
+    // Page IDs:       1   2   3   4   5
+    ASSERT_OK(tree->vacuum_one(Id(4), table_set, &vacuumed));
+    ASSERT_TRUE(vacuumed);
+    ASSERT_OK(PointerMap::read_entry(*pager, Id(3), entry));
+    ASSERT_EQ(entry.type, PointerMap::kFreelistLink);
+    ASSERT_EQ(entry.back_ptr, Id::null());
+
+    // Page Types:     N   P
+    // Page Contents: [1] [2] [X] [X] [X]
+    // Page IDs:       1   2   3   4   5
+    ASSERT_OK(tree->vacuum_one(Id(3), table_set, &vacuumed));
+    ASSERT_TRUE(vacuumed);
+    ASSERT_TRUE(freelist->is_empty());
+
+    // Page Types:     N
+    // Page Contents: [1] [X] [X] [X] [X]
+    // Page IDs:       1   2   3   4   5
+    ASSERT_OK(tree->vacuum_one(Id(2), table_set, &vacuumed));
+    ASSERT_TRUE(vacuumed);
+
+    // Page Types:     N
+    // Page Contents: [1]
+    // Page IDs:       1
+    pager->resize(1);
+    ASSERT_EQ(pager->page_count(), 1);
+}
+
+ TEST_P(VacuumTests, VacuumsFreelistInReverseOrder)
+{
+    TableSet table_set;
+    auto node_3 = allocate_node(true);
+    auto node_4 = allocate_node(true);
+    auto node_5 = allocate_node(true);
+
+    // Page Types:     N   P   1   2   3
+    // Page Contents: [a] [b] [c] [d] [e]
+    // Page IDs:       1   2   3   4   5
+    ASSERT_OK(freelist->push(std::move(node_5.page)));
+    ASSERT_OK(freelist->push(std::move(node_4.page)));
+    ASSERT_OK(freelist->push(std::move(node_3.page)));
+
+    // Step 1:
+    //     Page Types:     N   P       1   2
+    //     Page Contents: [a] [b] [e] [d] [e]
+    //     Page IDs:       1   2   3   4   5
+
+    // Step 2:
+    //     Page Types:     N   P   2   1
+    //     Page Contents: [a] [b] [e] [d] [ ]
+    //     Page IDs:       1   2   3   4   5
+    bool vacuumed = false;
+    ASSERT_OK(tree->vacuum_one(Id(5), table_set, &vacuumed));
+    ASSERT_TRUE(vacuumed);
+    PointerMap::Entry entry;
+    ASSERT_OK(PointerMap::read_entry(*pager, Id(4), entry));
+    ASSERT_EQ(entry.back_ptr, Id::null());
+    ASSERT_EQ(entry.type, PointerMap::kFreelistLink);
+    {
+        Page page;
+        ASSERT_OK(pager->acquire(Id(4), page));
+        ASSERT_EQ(read_next_id(page), Id(3));
+        pager->release(std::move(page));
+    }
+
+    // Page Types:     N   P   1
+    // Page Contents: [a] [b] [e] [ ] [ ]
+    // Page IDs:       1   2   3   4   5
+    ASSERT_OK(tree->vacuum_one(Id(4), table_set, &vacuumed));
+    ASSERT_TRUE(vacuumed);
+    ASSERT_OK(PointerMap::read_entry(*pager, Id(3), entry));
+    ASSERT_EQ(entry.type, PointerMap::kFreelistLink);
+    ASSERT_EQ(entry.back_ptr, Id::null());
+
+    // Page Types:     N   P
+    // Page Contents: [a] [b] [ ] [ ] [ ]
+    // Page IDs:       1   2   3   4   5
+    ASSERT_OK(tree->vacuum_one(Id(3), table_set, &vacuumed));
+    ASSERT_TRUE(vacuumed);
+    ASSERT_TRUE(freelist->is_empty());
+
+    // Page Types:     N
+    // Page Contents: [a] [ ] [ ] [ ] [ ]
+    // Page IDs:       1   2   3   4   5
+    ASSERT_OK(tree->vacuum_one(Id(2), table_set, &vacuumed));
+    ASSERT_TRUE(vacuumed);
+
+    // Page Types:     N
+    // Page Contents: [a]
+    // Page IDs:       1
+    pager->resize(1);
+    ASSERT_EQ(pager->page_count(), 1);
+}
+
+ TEST_P(VacuumTests, CleansUpOverflowValues)
+{
+    clean_up_test(16, kPageSize * 2);
+}
+
+// When external nodes are merged, the separator is removed. If the separator key was overflowing, we
+// must not forget to move its overflow pages to the freelist.
+ TEST_P(VacuumTests, CleansUpOverflowKeys)
+{
+     clean_up_test(kPageSize * 2, 16);
+ }
+
+ TEST_P(VacuumTests, CleansUpOverflowPayloads)
+{
+     clean_up_test(kPageSize * 2, kPageSize * 2);
+ }
+
+ TEST_P(VacuumTests, VacuumFreelistSanityCheck)
+{
+     std::default_random_engine rng(42);
+     TableSet table_set;
+
+     for (std::size_t iteration = 0; iteration < 1'000; ++iteration) {
+         std::vector<Node> nodes;
+         for (std::size_t i = 0; i < kFrameCount - 1; ++i) {
+             nodes.emplace_back(allocate_node(true));
+         }
+
+         std::shuffle(begin(nodes), end(nodes), rng);
+
+         for (auto &node : nodes) {
+             ASSERT_OK(freelist->push(std::move(node.page)));
+         }
+
+         // This will vacuum the whole freelist, as well as the pointer map page on page 2.
+         Id target(pager->page_count());
+         bool vacuumed = false;
+         for (std::size_t i = 0; i < kFrameCount; ++i) {
+             ASSERT_OK(tree->vacuum_one(target, table_set, &vacuumed));
+             ASSERT_TRUE(vacuumed);
+             --target.value;
+         }
+         ASSERT_OK(tree->vacuum_one(target, table_set, &vacuumed));
+         ASSERT_FALSE(vacuumed);
+         pager->resize(1);
+         ASSERT_EQ(pager->page_count(), 1);
+     }
+ }
+
+ static auto vacuum_and_validate(VacuumTests &test, const std::string &value)
+{
+     TableSet table_set;
+     bool vacuumed;
+     ASSERT_EQ(test.pager->page_count(), 6);
+     ASSERT_OK(test.tree->vacuum_one(Id(6), table_set, &vacuumed));
+     ASSERT_TRUE(vacuumed);
+     ASSERT_OK(test.tree->vacuum_one(Id(5), table_set, &vacuumed));
+     ASSERT_TRUE(vacuumed);
+     test.pager->resize(4);
+     ASSERT_OK(test.pager->flush_to_disk());
+     ASSERT_EQ(test.pager->page_count(), 4);
+
+     std::string result;
+     ASSERT_OK(test.tree->get("a", &result));
+     ASSERT_EQ(result, "value");
+     ASSERT_OK(test.tree->get("b", &result));
+     ASSERT_EQ(result, value);
+ }
+
+ TEST_P(VacuumTests, VacuumsOverflowChain_A)
+{
+     // Save these pages until the overflow chain is created, otherwise they will be used for it.
+     auto node_3 = allocate_node(true);
+     auto node_4 = allocate_node(true);
+     ASSERT_EQ(node_4.page.id().value, 4);
+
+     // Creates an overflow chain of length 2, rooted at the second cell on the root page.
+     std::string overflow_data(3 * kPageSize / 2, 'x');
+     ASSERT_OK(tree->put("a", "value"));
+     ASSERT_OK(tree->put("b", overflow_data));
+
+     ASSERT_OK(freelist->push(std::move(node_3.page)));
+     ASSERT_OK(freelist->push(std::move(node_4.page)));
+
+     // Page Types:     n   p   2   1   A   B
+     // Page Contents: [a] [b] [c] [d] [e] [f]
+     // Page IDs:       1   2   3   4   5   6
+
+     // Page Types:     n   p   1   B   A
+     // Page Contents: [a] [b] [c] [f] [e] [ ]
+     // Page IDs:       1   2   3   4   5   6
+
+     // Page Types:     n   p   A   B
+     // Page Contents: [a] [b] [e] [f] [ ] [ ]
+     // Page IDs:       1   2   3   4   5   6
+
+     // Page Types:     n   p   A   B
+     // Page Contents: [a] [b] [e] [f]
+     // Page IDs:       1   2   3   4
+     vacuum_and_validate(*this, overflow_data);
+
+     PointerMap::Entry head_entry, tail_entry;
+     ASSERT_OK(PointerMap::read_entry(*pager, Id(3), head_entry));
+     ASSERT_OK(PointerMap::read_entry(*pager, Id(4), tail_entry));
+
+     ASSERT_TRUE(head_entry.back_ptr.is_root());
+     ASSERT_EQ(tail_entry.back_ptr, Id(3));
+     ASSERT_EQ(head_entry.type, PointerMap::kOverflowHead);
+     ASSERT_EQ(tail_entry.type, PointerMap::kOverflowLink);
+ }
+
+ TEST_P(VacuumTests, VacuumsOverflowChain_B)
+{
+     // This time, we'll force the head of the overflow chain to be the last page in the file.
+     auto node_3 = allocate_node(true);
+     auto node_4 = allocate_node(true);
+     auto node_5 = allocate_node(true);
+     auto node_6 = allocate_node(true);
+     ASSERT_EQ(node_6.page.id().value, 6);
+     ASSERT_OK(freelist->push(std::move(node_5.page)));
+     ASSERT_OK(freelist->push(std::move(node_6.page)));
+
+     std::string overflow_data(3 * kPageSize / 2, 'x');
+     ASSERT_OK(tree->put("a", "value"));
+     ASSERT_OK(tree->put("b", overflow_data));
+
+     // Page Types:     n   p   2   1   B   A
+     // Page Contents: [a] [b] [c] [d] [e] [f]
+     // Page IDs:       1   2   3   4   5   6
+     ASSERT_OK(freelist->push(std::move(node_3.page)));
+     ASSERT_OK(freelist->push(std::move(node_4.page)));
+
+     // Page Types:     n   p   1   A   B
+     // Page Contents: [a] [b] [c] [f] [e] [ ]
+     // Page IDs:       1   2   3   4   5   6
+
+     // Page Types:     n   p   B   A
+     // Page Contents: [a] [b] [e] [f] [ ] [ ]
+     // Page IDs:       1   2   3   4   5   6
+
+     // Page Types:     n   p   B   A
+     // Page Contents: [a] [b] [e] [f]
+     // Page IDs:       1   2   3   4
+     vacuum_and_validate(*this, overflow_data);
+
+     PointerMap::Entry head_entry, tail_entry;
+     ASSERT_OK(PointerMap::read_entry(*pager, Id(4), head_entry));
+     ASSERT_OK(PointerMap::read_entry(*pager, Id(3), tail_entry));
+
+     ASSERT_TRUE(head_entry.back_ptr.is_root());
+     ASSERT_EQ(tail_entry.back_ptr, Id(4));
+     ASSERT_EQ(head_entry.type, PointerMap::kOverflowHead);
+     ASSERT_EQ(tail_entry.type, PointerMap::kOverflowLink);
+ }
+
+ TEST_P(VacuumTests, VacuumOverflowChainSanityCheck)
+{
+     std::vector<Node> reserved;
+     reserved.emplace_back(allocate_node(true));
+     reserved.emplace_back(allocate_node(true));
+     reserved.emplace_back(allocate_node(true));
+     reserved.emplace_back(allocate_node(true));
+     reserved.emplace_back(allocate_node(true));
+     ASSERT_EQ(reserved.back().page.id().value, 7);
+
+     // Create overflow chains, but don't overflow the root node. Should create 3 chains, 1 of length 1, and 2 of length 2.
+     std::vector<std::string> values;
+     for (std::size_t i = 0; i < 3; ++i) {
+         const auto value = random.Generate(kPageSize * std::min<std::size_t>(i + 1, 2) * 2 / 3);
+         ASSERT_OK(tree->put(tools::integral_key<1>(i), value));
+         values.emplace_back(value.to_string());
+     }
+
+     while (!reserved.empty()) {
+         ASSERT_OK(freelist->push(std::move(reserved.back().page)));
+         reserved.pop_back();
+     }
+
+     TableSet table_set;
+     bool vacuumed;
+     ASSERT_EQ(pager->page_count(), 12);
+     ASSERT_OK(tree->vacuum_one(Id(12), table_set, &vacuumed));
+     ASSERT_OK(tree->vacuum_one(Id(11), table_set, &vacuumed));
+     ASSERT_OK(tree->vacuum_one(Id(10), table_set, &vacuumed));
+     ASSERT_OK(tree->vacuum_one(Id(9), table_set, &vacuumed));
+     ASSERT_OK(tree->vacuum_one(Id(8), table_set, &vacuumed));
+     pager->resize(7);
+     ASSERT_EQ(pager->page_count(), 7);
+
+     auto *cursor = CursorInternal::make_cursor(*tree);
+     cursor->seek_first();
+     for (std::size_t i = 0; i < values.size(); ++i) {
+         ASSERT_TRUE(cursor->is_valid());
+         ASSERT_EQ(cursor->key().to_string(), tools::integral_key<1>(i));
+         ASSERT_EQ(cursor->value().to_string(), values[i]);
+         cursor->next();
+     }
+     ASSERT_FALSE(cursor->is_valid());
+     delete cursor;
+ }
+
+ TEST_P(VacuumTests, VacuumsNodes)
+{
+     auto node_3 = allocate_node(true);
+     auto node_4 = allocate_node(true);
+     ASSERT_EQ(node_4.page.id().value, 4);
+
+     std::vector<std::string> values;
+     for (std::size_t i = 0; i < 5; ++i) {
+         const auto key = tools::integral_key(i);
+         const auto value = random.Generate(kPageSize / 4 - 40 - key.size());
+         ASSERT_OK(tree->put(key, value));
+         values.emplace_back(value.to_string());
+     }
+
+     // Page Types:     n   p   2   1   n   n
+     // Page Contents: [a] [b] [c] [d] [e] [f]
+     // Page IDs:       1   2   3   4   5   6
+     ASSERT_OK(freelist->push(std::move(node_3.page)));
+     ASSERT_OK(freelist->push(std::move(node_4.page)));
+
+     // Page Types:     n   p   1   n   n
+     // Page Contents: [a] [b] [c] [f] [e] [ ]
+     // Page IDs:       1   2   3   4   5   6
+
+     // Page Types:     n   p   n   n
+     // Page Contents: [a] [b] [e] [f] [ ] [ ]
+     // Page IDs:       1   2   3   4   5   6
+
+     // Page Types:     n   p   n   n
+     // Page Contents: [a] [b] [e] [f]
+     // Page IDs:       1   2   3   4
+     ASSERT_EQ(pager->page_count(), 6)
+         << "test was incorrectly initialized (check the key and value sizes)";
+     bool vacuumed = false;
+     TableSet table_set;
+     ASSERT_OK(tree->vacuum_one(Id(6), table_set, &vacuumed));
+     ASSERT_TRUE(vacuumed);
+     ASSERT_OK(tree->vacuum_one(Id(5), table_set, &vacuumed));
+     ASSERT_TRUE(vacuumed);
+     pager->resize(4);
+
+     auto *cursor = CursorInternal::make_cursor(*tree);
+     cursor->seek_first();
+     for (std::size_t i = 0; i < values.size(); ++i) {
+         ASSERT_TRUE(cursor->is_valid());
+         ASSERT_EQ(cursor->key(), tools::integral_key(i));
+         ASSERT_EQ(cursor->value(), values[i]);
+         cursor->next();
+     }
+     ASSERT_FALSE(cursor->is_valid());
+     delete cursor;
+ }
+
+ TEST_P(VacuumTests, SanityCheck_Freelist)
+{
+     sanity_check(0, 50, 16, 16);
+ }
+
+ TEST_P(VacuumTests, SanityCheck_Freelist_OverflowHead)
+{
+     sanity_check(0, 50, 16, kPageSize / 2);
+ }
+
+ TEST_P(VacuumTests, SanityCheck_Freelist_OverflowLink)
+{
+     sanity_check(0, 50, 16, kPageSize * 2);
+ }
+
+ TEST_P(VacuumTests, SanityCheck_Nodes_1)
+{
+     sanity_check(50, 50, 16, 16);
+ }
+
+ TEST_P(VacuumTests, SanityCheck_Nodes_2)
+{
+     sanity_check(200, 50, 16, 16);
+ }
+
+ TEST_P(VacuumTests, SanityCheck_NodesWithOverflowValues)
+{
+     sanity_check(50, 50, 16, kPageSize * 2);
+ }
+
+ TEST_P(VacuumTests, SanityCheck_NodesWithOverflowKeys)
+{
+     sanity_check(50, 50, kPageSize * 2, 16);
+ }
+
+ TEST_P(VacuumTests, SanityCheck_NodesWithOverflowPayloads)
+{
+     sanity_check(50, 50, kPageSize * 2, kPageSize * 2);
+ }
+
+ INSTANTIATE_TEST_SUITE_P(
+     VacuumTests,
+     VacuumTests,
+     ::testing::Values(
+         TreeTestParameters {kMinPageSize},
+         TreeTestParameters {kMinPageSize * 2},
+         TreeTestParameters {kMaxPageSize / 2},
+         TreeTestParameters {kMaxPageSize}));
+
+ class MultiTreeTests : public TreeTests
+{
+ public:
+     MultiTreeTests()
+         : payload_values(kInitialRecordCount)
+     {
+         for (auto &value : payload_values) {
+             value = random.Generate(kPageSize * 2).to_string();
+         }
+     }
+
+     auto SetUp() -> void override
+     {
+         TreeTests::SetUp();
+     }
+
+     auto create_tree()
+     {
+         Id root;
+         ++last_tree_id.value;
+         EXPECT_OK(Tree::create(*pager, last_tree_id, freelist_head, &root));
+         root_ids.emplace_back(Id::root(), root);
+         multi_tree.emplace_back(std::make_unique<Tree>(*pager, root_ids.back().page_id, freelist_head, nullptr));
+         return multi_tree.size() - 1;
+     }
+
+     auto fill_tree(std::size_t tid)
+     {
+         for (std::size_t i = 0; i < kInitialRecordCount; ++i) {
+             const auto value = payload_values[(i + tid) % payload_values.size()];
+             ASSERT_OK(multi_tree[tid]->put(make_long_key(i), value));
+         }
+         multi_tree[tid]->TEST_validate();
+     }
+
+     auto check_tree(std::size_t tid)
+     {
+         std::string value;
+         for (std::size_t i = 0; i < kInitialRecordCount; ++i) {
+             ASSERT_OK(multi_tree[tid]->get(make_long_key(i), &value));
+             ASSERT_EQ(value, payload_values[(i + tid) % payload_values.size()]);
+         }
+     }
+
+     auto clear_tree(std::size_t tid)
+     {
+         for (std::size_t i = 0; i < kInitialRecordCount; ++i) {
+             ASSERT_OK(multi_tree[tid]->erase(make_long_key(i)));
+         }
+         multi_tree[tid]->TEST_validate();
+     }
+
+     Id last_tree_id = Id::root();
+     std::vector<std::unique_ptr<Tree>> multi_tree;
+     std::vector<std::string> payload_values;
+     std::list<LogicalPageId> root_ids;
+ };
+
+ TEST_P(MultiTreeTests, CreateAdditionalTrees)
+{
+     create_tree();
+     create_tree();
+     create_tree();
+ }
+
+ TEST_P(MultiTreeTests, DuplicateKeysAreAllowedBetweenTrees)
+{
+     const auto tid_1 = create_tree();
+     const auto tid_2 = create_tree();
+
+     auto &hello_tree = multi_tree[tid_1];
+     auto &world_tree = multi_tree[tid_2];
+     ASSERT_OK(hello_tree->put("same_key", "hello"));
+     ASSERT_OK(world_tree->put("same_key", "world"));
+
+     std::string value;
+     ASSERT_OK(hello_tree->get("same_key", &value));
+     ASSERT_EQ(value, "hello");
+     ASSERT_OK(world_tree->get("same_key", &value));
+     ASSERT_EQ(value, "world");
+ }
+
+ TEST_P(MultiTreeTests, NonRootTreeSplitsAndMerges)
+{
+     const auto tid = create_tree();
+     fill_tree(tid);
+     clear_tree(tid);
+ }
+
+ TEST_P(MultiTreeTests, MultipleSplitsAndMerges_1)
+{
+     std::vector<std::size_t> tids(10);
+     for (auto &tid : tids) {
+         tid = create_tree();
+     }
+     for (const auto &tid : tids) {
+         fill_tree(tid);
+     }
+     for (const auto &tid : tids) {
+         check_tree(tid);
+     }
+     for (const auto &tid : tids) {
+         clear_tree(tid);
+     }
+ }
+
+ TEST_P(MultiTreeTests, MultipleSplitsAndMerges_2)
+{
+     for (std::size_t i = 0; i < 10; ++i) {
+         const auto tid = create_tree();
+         fill_tree(tid);
+         check_tree(tid);
+         clear_tree(tid);
+     }
+ }
+
+ INSTANTIATE_TEST_SUITE_P(
+     MultiTreeTests,
+     MultiTreeTests,
+     ::testing::Values(
+         TreeTestParameters {kMinPageSize}));
 
 } // namespace calicodb

@@ -392,7 +392,6 @@ auto DBImpl::put(Table &table, const Slice &key, const Slice &value) -> Status
     bool record_exists;
     auto s = state->tree->put(key, value, &record_exists);
     if (s.is_ok()) {
-        m_state.record_count += !record_exists;
         ++m_state.batch_size;
     } else {
         SET_STATUS(s);
@@ -413,7 +412,6 @@ auto DBImpl::erase(Table &table, const Slice &key) -> Status
     auto s = state->tree->erase(key);
     if (s.is_ok()) {
         ++m_state.batch_size;
-        --m_state.record_count;
     } else if (!s.is_not_found()) {
         SET_STATUS(s);
     }
@@ -460,8 +458,7 @@ auto DBImpl::do_vacuum() -> Status
         encode_logical_id(root->root_id, logical_id);
         CALICODB_TRY(put(*m_root, table_names[i], logical_id));
     }
-    CALICODB_TRY(m_wal->sync());
-    m_pager->decrease_page_count(target.value);
+    CALICODB_TRY(m_pager->resize(target.value));
 
     m_log->logv("vacuumed %llu pages", original.value - target.value);
     return Status::ok();
@@ -522,8 +519,8 @@ auto DBImpl::do_commit() -> Status
         header.page_count = static_cast<U32>(m_pager->page_count());
         header.freelist_head = m_state.freelist_head.value;
         header.write(db_root.data());
-        m_pager->release(std::move(db_root));
     }
+    m_pager->release(std::move(db_root));
 
     // Write all dirty pages to the WAL.
     CALICODB_TRY(m_pager->commit());
@@ -534,10 +531,10 @@ auto DBImpl::do_commit() -> Status
     return checkpoint_if_needed();
 }
 
-auto DBImpl::checkpoint_if_needed(bool force) -> Status
+auto DBImpl::checkpoint_if_needed(bool is_recovery) -> Status
 {
-    if (force || m_wal->needs_checkpoint()) {
-        CALICODB_TRY(m_pager->checkpoint_phase_1());
+    if (is_recovery || m_wal->needs_checkpoint()) {
+        CALICODB_TRY(m_pager->checkpoint_phase_1(is_recovery));
         CALICODB_TRY(load_file_header());
         CALICODB_TRY(m_pager->checkpoint_phase_2());
     }

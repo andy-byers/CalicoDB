@@ -340,14 +340,9 @@ auto fill_db(DB &db, RandomGenerator &random, std::size_t num_records, std::size
 auto fill_db(DB &db, Table &table, RandomGenerator &random, std::size_t num_records, std::size_t max_payload_size) -> std::map<std::string, std::string>
 {
     CHECK_TRUE(max_payload_size > 0);
-    const auto base_db_size = reinterpret_cast<const DBImpl &>(db).TEST_state().record_count;
     std::map<std::string, std::string> records;
 
-    for (;;) {
-        const auto db_size = reinterpret_cast<const DBImpl &>(db).TEST_state().record_count;
-        if (db_size >= base_db_size + num_records) {
-            break;
-        }
+    for (std::size_t i = 0; i < num_records; ++i) {
         const auto ksize = random.Next(1, max_payload_size);
         const auto vsize = random.Next(max_payload_size - ksize);
         const auto k = random.Generate(ksize);
@@ -365,12 +360,10 @@ auto expect_db_contains(const DB &db, const std::map<std::string, std::string> &
 
 auto expect_db_contains(const DB &db, const Table &table, const std::map<std::string, std::string> &map) -> void
 {
-    std::size_t i = 0;
     for (const auto &[key, value] : map) {
         std::string result;
         CHECK_OK(db.get(table, key, &result));
         CHECK_EQ(result, value);
-        ++i;
     }
 }
 

@@ -33,8 +33,6 @@ OpsFuzzer::OpsFuzzer(std::string path, Options *options)
 auto OpsFuzzer::step(const U8 *&data, std::size_t &size) -> Status
 {
     CHECK_TRUE(size >= 2);
-
-    const auto record_count = reinterpret_cast<const DBImpl *>(m_db)->TEST_state().record_count;
     auto operation_type = static_cast<OperationType>(*data++ % OperationType::kOpCount);
     --size;
 
@@ -43,9 +41,6 @@ auto OpsFuzzer::step(const U8 *&data, std::size_t &size) -> Status
     std::string key;
     Status s;
 
-    if (record_count > DB_MAX_RECORDS) {
-        operation_type = kErase;
-    }
     switch (operation_type) {
         case kGet:
             s = m_db->get(extract_fuzzer_key(data, size), &value);

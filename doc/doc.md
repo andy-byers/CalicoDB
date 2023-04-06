@@ -69,9 +69,8 @@ const calicodb::Options options = {
     .page_size = 0x2000,
     .cache_size = 0x200000,
     
-    // Store the WAL segments in a separate location. The directory "location" must already exist.
-    // WAL segments will look like "/location/calicodb_wal_#", where # is the segment ID.
-    .wal_prefix = "/location/calicodb_wal_",
+    // Store the WAL file in a separate location. The directory "location" must already exist.
+    .wal_filename = "/location/alternate_wal_file",
     
     .info_log = nullptr,
     
@@ -103,7 +102,7 @@ When naming tables, note that the prefix "calicodb." is reserved for internal us
 // Insert some key-value pairs into the default table.
 calicodb::Status s = db->put("lilly", "calico");
 if (s.is_io_error()) {
-    // Handle a system-level or I/O error.
+    // Handle an I/O error.
 }
 
 s = db->put("freya", "orange tabby");
@@ -132,7 +131,7 @@ if (s.is_ok()) {
 ### Querying a database
 
 ```C++
-// Query a value by key. Note that the "value" parameter is a pointer, indicating 
+// Query a record by key. Note that the "value" parameter is a pointer, indicating 
 // that it is optional. If omitted, the DB will check if the key "lilly" exists, 
 // without attempting to determine its value.
 std::string value;
@@ -239,12 +238,7 @@ if (s.is_ok()) {
 }
 ```
 
-### Checkpoints
-CalicoDB uses the concept of a commit to provide guarantees about the logical contents of a database.
-Any work that took place before a successful commit will persist, even if the program crashes afterward.
-It should also be noted that this also applies to creation and removal of tables.
-At this point, commits are global: they affect every table with pending updates.
-Further work may go toward implementing per-table commits.
+### Transactions
 
 ```C++
 // Add some more records.
@@ -257,8 +251,10 @@ assert(s.is_ok());
 // Perform a commit.
 s = db->commit();
 if (s.is_ok()) {
-    // Changes are safely on disk (in the WAL, and maybe partially in the database). If we crash from 
-    // here on out, the changes will be reapplied from the WAL the next time the database is opened.
+    // If the DB was opened in "sync" mode, then all work performed up to this point will persist if
+    // the program crashes. If the DB was opened in default (not "sync") mode, then it is possible that
+    // some fixed number of transactions will be lost if the program crashes (this depends on when the
+    // last checkpoint operation was run).
 }
 ```
 

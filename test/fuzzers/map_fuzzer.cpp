@@ -38,8 +38,6 @@ auto MapFuzzer::step(const U8 *&data, std::size_t &size) -> Status
     CHECK_TRUE(size >= 2);
 
     const auto expect_equal_contents = [this] {
-        CHECK_EQ(m_map.size(), reinterpret_cast<const DBImpl *>(m_db)->TEST_state().record_count);
-
         auto *cursor = m_db->new_cursor();
         cursor->seek_first();
         for (const auto &[key, value] : m_map) {
