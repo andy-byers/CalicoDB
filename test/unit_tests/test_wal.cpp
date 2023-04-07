@@ -447,8 +447,8 @@ protected:
         File *real, *fake;
         ASSERT_OK(env->new_file("real", real));
         ASSERT_OK(env->new_file("fake", fake));
-        ASSERT_OK(m_wal->checkpoint(*real));
-        ASSERT_OK(m_fake->checkpoint(*fake));
+        ASSERT_OK(m_wal->checkpoint(*real, nullptr));
+        ASSERT_OK(m_fake->checkpoint(*fake, nullptr));
 
         std::size_t file_size;
         ASSERT_OK(env->file_size("fake", file_size));

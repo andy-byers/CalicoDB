@@ -298,8 +298,7 @@ TEST_F(PagerTests, BasicCheckpoints)
         write_pages(*this, kFrameCount * i, kFrameCount * (i + 1));
         ASSERT_OK(pager->commit());
         read_and_check(*this, kFrameCount * i, kFrameCount * (i + 1));
-        ASSERT_OK(pager->checkpoint_phase_1());
-        ASSERT_OK(pager->checkpoint_phase_2());
+        ASSERT_OK(pager->checkpoint());
         // Pages returned by the pager should reflect what is on disk.
         read_and_check(*this, kFrameCount * i, kFrameCount * (i + 1));
         read_and_check(*this, kFrameCount * i, kFrameCount * (i + 1), true);

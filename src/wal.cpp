@@ -444,7 +444,7 @@ public:
     [[nodiscard]] auto read(Id page_id, char *&page) -> Status override;
     [[nodiscard]] auto write(const CacheEntry *dirty, std::size_t db_size) -> Status override;
     [[nodiscard]] auto needs_checkpoint() const -> bool override;
-    [[nodiscard]] auto checkpoint(File &db_file) -> Status override;
+    [[nodiscard]] auto checkpoint(File &db_file, std::size_t *db_size) -> Status override;
     [[nodiscard]] auto sync() -> Status override;
     [[nodiscard]] auto abort() -> Status override;
     [[nodiscard]] auto close() -> Status override;
@@ -834,9 +834,12 @@ auto WalImpl::needs_checkpoint() const -> bool
     return m_hdr.max_frame > 1'000;
 }
 
-auto WalImpl::checkpoint(File &db_file) -> Status
+auto WalImpl::checkpoint(File &db_file, std::size_t *db_size) -> Status
 {
     CALICODB_TRY(m_file->sync());
+    if (db_size != nullptr) {
+        *db_size = m_hdr.page_count;
+    }
 
     // TODO: This should be set to the max frame still needed by a reader.
     auto max_safe_frame = m_hdr.max_frame;
@@ -861,8 +864,6 @@ auto WalImpl::checkpoint(File &db_file) -> Status
 
         // TODO: Should increase backfill count here.
     }
-    CALICODB_TRY(m_env->resize_file(m_filename, m_hdr.page_count * m_page_size));
-
     ++m_ckpt_number;
     m_min_frame = 0;
     m_hdr.max_frame = 0;

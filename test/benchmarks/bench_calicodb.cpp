@@ -42,6 +42,7 @@ public:
         m_options.cache_size = 4'194'304;
         m_options.sync = param.sync;
         CHECK_OK(calicodb::DB::open(m_options, kFilename, m_db));
+        CHECK_OK(m_db->begin_txn());
     }
 
     ~Benchmark()
@@ -151,7 +152,8 @@ public:
                 calicodb::tools::integral_key<kKeyLength>(i),
                 m_random.Generate(m_param.value_length)));
         }
-        CHECK_OK(m_db->commit());
+        CHECK_OK(m_db->commit_txn());
+        CHECK_OK(m_db->begin_txn());
         m_cursor = m_db->new_cursor();
     }
 
@@ -169,7 +171,8 @@ private:
     auto maybe_commit() -> void
     {
         if (m_counters[0] % m_param.commit_interval == m_param.commit_interval - 1) {
-            CHECK_OK(m_db->commit());
+            CHECK_OK(m_db->commit_txn());
+            CHECK_OK(m_db->begin_txn());
         }
     }
 

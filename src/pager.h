@@ -23,6 +23,10 @@ class Pager final
 public:
     friend class DBImpl;
 
+    enum Mode {
+
+    };
+
     struct Parameters {
         std::string filename;
         Env *env = nullptr;
@@ -42,13 +46,13 @@ public:
     [[nodiscard]] auto flush_to_disk() -> Status;
     [[nodiscard]] auto abort() -> Status;
     [[nodiscard]] auto commit() -> Status;
-    [[nodiscard]] auto checkpoint_phase_1(bool purge_root = false) -> Status;
-    [[nodiscard]] auto checkpoint_phase_2() -> Status;
+    [[nodiscard]] auto checkpoint() -> Status;
     [[nodiscard]] auto allocate(Page &page) -> Status;
     [[nodiscard]] auto acquire(Id page_id, Page &page) -> Status;
-    [[nodiscard]] auto resize(std::size_t page_count) -> Status;
     auto upgrade(Page &page) -> void;
     auto release(Page page) -> void;
+    auto set_page_count(std::size_t page_count) -> void;
+    auto purge_cache() -> void;
     auto load_state(const FileHeader &header) -> void;
 
     [[nodiscard]] auto hits() const -> U64
@@ -67,7 +71,7 @@ private:
     [[nodiscard]] auto read_page_from_file(CacheEntry &entry) const -> Status;
     [[nodiscard]] auto write_page_to_file(const CacheEntry &entry) const -> Status;
     [[nodiscard]] auto ensure_available_frame() -> Status;
-    auto purge_page(Id page_id) -> void;
+    auto purge_page(CacheEntry &entry) -> void;
     auto dirty_page(CacheEntry &entry) -> void;
     auto clean_page(CacheEntry &entry) -> CacheEntry *;
 
@@ -88,7 +92,6 @@ private:
     Wal *m_wal = nullptr;
     DBState *m_state = nullptr;
     std::size_t m_page_count = 0;
-    std::size_t m_saved_count = 0;
 };
 
 } // namespace calicodb

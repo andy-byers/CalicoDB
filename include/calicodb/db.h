@@ -77,7 +77,8 @@ public:
 
     // Get a human-readable string describing the given property.
     //
-    // The "out" parameter is optional.
+    // The "out" parameter is optional: if omitted, this method performs an
+    // existence check on the property named "name".
     [[nodiscard]] virtual auto get_property(const Slice &name, std::string *out) const -> bool = 0;
 
     // Get a handle to the default table.
@@ -87,25 +88,19 @@ public:
 
     // Get a status object describing the error state.
     //
-    // If this status is not OK, then a fatal error has occurred. The database
-    // must then be closed, as it will refuse to perform any more work. On the
-    // next startup, the database will attempt to recover using the WAL.
+    // If this status is not OK, then a fatal error has occurred. The database must then
+    // be closed (or rolled back if in a user-initiated write transaction), as it will
+    // refuse to perform any more work. On the next startup, the database will attempt
+    // to recover using the WAL.
     [[nodiscard]] virtual auto status() const -> Status = 0;
 
-    // Run a commit operation, which updates the logical contents of the
-    // database to include all changes made since the last commit.
+    // Perform defragmentation.
     //
-    // This operation affects all tables that have pending updates, as well as creation
-    // and dropping of tables.
-    [[nodiscard]] virtual auto commit() -> Status = 0;
-
-    // Perform defragmentation and shrink the database file.
-    //
-    // This operation can be run at any time, however, it is a NOOP if not enough
-    // records have been erased to cause database pages to become empty.
+    // This operation can be run at any time, however, it is a NOOP if not enough records
+    // have been erased to cause database pages to become empty.
     [[nodiscard]] virtual auto vacuum() -> Status = 0;
 
-    // List the name of each table created by this database, excluding the default table.
+    // List the name of each user table created on this database.
     [[nodiscard]] virtual auto list_tables(std::vector<std::string> &out) const -> Status = 0;
 
     // Open a table and return an opaque handle to it.
@@ -125,6 +120,25 @@ public:
     //
     // This method destroys the table handle and sets "*table" to nullptr.
     virtual auto close_table(Table *&table) -> void = 0;
+
+    // Begin an explicit write transaction.
+    //
+    // If this method is not called, each modification is wrapped in its own write transaction.
+    // It is the caller's responsibility to finish the transaction by calling either commit_txn()
+    // or rollback_txn(). A pending transaction will be rolled back when the DB is closed.
+    [[nodiscard]] virtual auto begin_txn() -> Status = 0;
+
+    // Commit an explicit write transaction.
+    //
+    // Commits all modifications since begin_txn() was called to the database. This includes
+    // creation and dropping of tables.
+    [[nodiscard]] virtual auto commit_txn() -> Status = 0;
+
+    // Rollback an explicit write transaction.
+    //
+    // Rolls back all modifications since begin_txn() was called, including creation and dropping
+    // of tables.
+    [[nodiscard]] virtual auto rollback_txn() -> Status = 0;
 
     // Get a heap-allocated cursor over the contents of "table".
     //

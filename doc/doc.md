@@ -77,6 +77,8 @@ const calicodb::Options options = {
     // This can be used to inject a custom Env implementation. (see the tools::FakeEnv class in
     // tools/tools.h for an example that stores its files in memory).
     .env = nullptr,
+    
+    .sync = false,
 };
 
 // Create or open a database at "/tmp/cats".
@@ -239,17 +241,23 @@ if (s.is_ok()) {
 ```
 
 ### Transactions
+In CalicoDB, all modifications to the DB take place within write transactions.
+If the transaction API is not explicitly used, then modifications to the DB (put, erase, table management, and vacuum) are wrapped in implicit transactions. 
 
 ```C++
+// Start a transaction.
+calicodb::Status s = db->begin_txn();
+assert(s.is_ok());
+
 // Add some more records.
-calicodb::Status s = db->put("fanny", "persian");
+s = db->put("fanny", "persian");
 assert(s.is_ok());
 
 s = db->put("myla", "brown-tabby");
 assert(s.is_ok());
 
 // Perform a commit.
-s = db->commit();
+s = db->commit_txn();
 if (s.is_ok()) {
     // If the DB was opened in "sync" mode, then all work performed up to this point will persist if
     // the program crashes. If the DB was opened in default (not "sync") mode, then it is possible that

@@ -95,7 +95,10 @@ public:
     [[nodiscard]] auto drop_table(Table *&table) -> Status override;
     auto close_table(Table *&table) -> void override;
 
-    [[nodiscard]] auto commit() -> Status override;
+    [[nodiscard]] auto begin_txn() -> Status override;
+    [[nodiscard]] auto commit_txn() -> Status override;
+    [[nodiscard]] auto rollback_txn() -> Status override;
+
     [[nodiscard]] auto status() const -> Status override;
     [[nodiscard]] auto vacuum() -> Status override;
 
@@ -121,10 +124,15 @@ private:
     [[nodiscard]] auto get_table_info(std::vector<std::string> &names, std::vector<LogicalPageId> *roots) const -> Status;
     [[nodiscard]] auto construct_new_table(const Slice &name, LogicalPageId &root_id) -> Status;
     [[nodiscard]] auto remove_empty_table(const std::string &name, TableState &state) -> Status;
-    [[nodiscard]] auto checkpoint_if_needed(bool is_recovery = false) -> Status;
+    [[nodiscard]] auto checkpoint_if_needed(bool force = false) -> Status;
     [[nodiscard]] auto load_file_header() -> Status;
+
+    [[nodiscard]] auto do_put(Table &table, const Slice &key, const Slice &value) -> Status;
+    [[nodiscard]] auto do_erase(Table &table, const Slice &key) -> Status;
     [[nodiscard]] auto do_commit() -> Status;
     [[nodiscard]] auto do_vacuum() -> Status;
+    [[nodiscard]] auto do_create_table(const TableOptions &options, const std::string &name, Table *&out) -> Status;
+    [[nodiscard]] auto do_drop_table(Table *&table) -> Status;
 
     mutable DBState m_state;
 

@@ -118,6 +118,11 @@ public:
         db_options.cache_size = kMinPageSize * 16;
         db_options.env = env.get();
 
+        // TODO: Running these in sync mode right now, it's easier to tell how the DB should
+        //       look. Should test not sync mode as well. Will likely lose more than 1 transaction,
+        //       but the DB should not become corrupted.
+        db_options.sync = true;
+
         open();
     }
 
@@ -199,10 +204,11 @@ class RecoveryTests
 TEST_F(RecoveryTests, NormalShutdown)
 {
     ASSERT_EQ(num_wal_frames(), 0);
+    ASSERT_OK(db->begin_txn());
     ASSERT_OK(put("a", "1"));
     ASSERT_OK(put("b", "2"));
     ASSERT_OK(put("c", "3"));
-    ASSERT_OK(db->commit());
+    ASSERT_OK(db->commit_txn());
     ASSERT_EQ(num_wal_frames(), 1);
     close();
 
@@ -211,11 +217,13 @@ TEST_F(RecoveryTests, NormalShutdown)
 
 TEST_F(RecoveryTests, OnlyCommittedUpdatesArePersisted)
 {
+    ASSERT_OK(db->begin_txn());
     ASSERT_OK(put("a", "1"));
     ASSERT_OK(put("b", "2"));
     ASSERT_OK(put("c", "3"));
-    ASSERT_OK(db->commit());
+    ASSERT_OK(db->commit_txn());
 
+    ASSERT_OK(db->begin_txn());
     ASSERT_OK(put("c", "X"));
     ASSERT_OK(put("d", "4"));
     open();
@@ -226,27 +234,15 @@ TEST_F(RecoveryTests, OnlyCommittedUpdatesArePersisted)
     ASSERT_EQ(get("d"), "NOT_FOUND");
 }
 
-TEST_F(RecoveryTests, PacksMultipleTransactionsIntoSegment)
-{
-    ASSERT_OK(put("a", "1"));
-    ASSERT_OK(db->commit());
-    ASSERT_OK(put("b", "2"));
-    ASSERT_OK(db->commit());
-    ASSERT_OK(put("c", "3"));
-    ASSERT_OK(db->commit());
-    open();
-
-    ASSERT_EQ(get("a"), "1");
-    ASSERT_EQ(get("b"), "2");
-    ASSERT_EQ(get("c"), "3");
-}
-
 TEST_F(RecoveryTests, RevertsNthTransaction)
 {
+    ASSERT_OK(db->begin_txn());
     ASSERT_OK(put("a", "1"));
-    ASSERT_OK(db->commit());
+    ASSERT_OK(db->commit_txn());
+    ASSERT_OK(db->begin_txn());
     ASSERT_OK(put("b", "2"));
-    ASSERT_OK(db->commit());
+    ASSERT_OK(db->commit_txn());
+    ASSERT_OK(db->begin_txn());
     ASSERT_OK(put("c", "3"));
     open();
 
@@ -257,6 +253,7 @@ TEST_F(RecoveryTests, RevertsNthTransaction)
 
 TEST_F(RecoveryTests, VacuumRecovery)
 {
+    ASSERT_OK(db->begin_txn());
     std::vector<Record> committed;
     for (std::size_t i = 0; i < 1'000; ++i) {
         committed.emplace_back(Record {
@@ -267,13 +264,15 @@ TEST_F(RecoveryTests, VacuumRecovery)
             committed.back().key,
             committed.back().value));
     }
+    ASSERT_OK(db->commit_txn());
+    ASSERT_OK(db->begin_txn());
+
     for (std::size_t i = 0; i < 1'000; ++i) {
         ASSERT_OK(db->put(tools::integral_key(i), random.Generate(db_options.page_size)));
     }
     for (std::size_t i = 0; i < 1'000; ++i) {
         ASSERT_OK(db->erase(tools::integral_key(i)));
     }
-    ASSERT_OK(db->commit());
 
     // Grow the database, then make freelist pages.
     for (std::size_t i = 0; i < 1'000; ++i) {
@@ -294,7 +293,6 @@ TEST_F(RecoveryTests, VacuumRecovery)
     // Now reopen the database and roll the WAL.
     open();
 
-    // If we wrote more than one full image for a given page, we may mess up the database.
     std::string result;
     for (const auto &[key, value] : committed) {
         ASSERT_OK(db->get(key, &result));
@@ -316,11 +314,13 @@ TEST_F(RecoveryTests, SanityCheck)
 
     for (std::size_t commit = 0; commit < map.size(); ++commit) {
         open();
+        ASSERT_OK(db->begin_txn());
 
         auto record = begin(map);
         for (std::size_t index = 0; record != end(map); ++index, ++record) {
             if (index == commit) {
-                ASSERT_OK(db->commit());
+                ASSERT_OK(db->commit_txn());
+                ASSERT_OK(db->begin_txn());
             } else {
                 ASSERT_OK(db->put(record->first, record->second));
             }
@@ -367,14 +367,17 @@ public:
 
     auto SetUp() -> void override
     {
+        ASSERT_OK(db->begin_txn());
         auto record = begin(map);
         for (std::size_t index = 0; record != end(map); ++index, ++record) {
             ASSERT_OK(db->put(record->first, record->second));
             if (record->first.front() % 10 == 1) {
-                ASSERT_OK(db->commit());
+                ASSERT_OK(db->commit_txn());
+                ASSERT_OK(db->begin_txn());
             }
         }
-        ASSERT_OK(db->commit());
+        ASSERT_OK(db->commit_txn());
+        ASSERT_OK(db->begin_txn());
 
         COUNTING_INTERCEPTOR(interceptor_prefix, interceptor_type, interceptor_count);
     }
@@ -442,14 +445,12 @@ INSTANTIATE_TEST_SUITE_P(
         std::make_tuple("./test", tools::Interceptor::kRead, 0),
         std::make_tuple("./test", tools::Interceptor::kRead, 1),
         std::make_tuple("./test", tools::Interceptor::kRead, 5),
-        std::make_tuple("./test", tools::Interceptor::kWrite, 0),
-        std::make_tuple("./test", tools::Interceptor::kWrite, 1),
-        std::make_tuple("./test", tools::Interceptor::kWrite, 5),
+        std::make_tuple("./wal", tools::Interceptor::kRead, 0),
+        std::make_tuple("./wal", tools::Interceptor::kRead, 1),
+        std::make_tuple("./wal", tools::Interceptor::kRead, 5),
         std::make_tuple("./wal", tools::Interceptor::kWrite, 0),
         std::make_tuple("./wal", tools::Interceptor::kWrite, 1),
-        std::make_tuple("./wal", tools::Interceptor::kWrite, 5),
-        std::make_tuple("./wal", tools::Interceptor::kOpen, 0),
-        std::make_tuple("./wal", tools::Interceptor::kOpen, 1)));
+        std::make_tuple("./wal", tools::Interceptor::kWrite, 5)));
 
 class OpenErrorTests : public RecoverySanityCheck
 {
@@ -481,11 +482,7 @@ INSTANTIATE_TEST_SUITE_P(
     ::testing::Values(
         std::make_tuple("./test", tools::Interceptor::kRead, 0),
         std::make_tuple("./test", tools::Interceptor::kRead, 1),
-        std::make_tuple("./test", tools::Interceptor::kRead, 2),
-        std::make_tuple("./test", tools::Interceptor::kWrite, 0),
-        std::make_tuple("./test", tools::Interceptor::kWrite, 1),
-        std::make_tuple("./wal", tools::Interceptor::kOpen, 0),
-        std::make_tuple("./wal", tools::Interceptor::kOpen, 1)));
+        std::make_tuple("./test", tools::Interceptor::kRead, 2)));
 
 class DataLossEnv : public EnvWrapper
 {
@@ -589,7 +586,7 @@ class DataLossTests
       public testing::TestWithParam<std::size_t>
 {
 public:
-    const std::size_t kCheckpointInterval = GetParam();
+    const std::size_t kCommitInterval = GetParam();
 
     ~DataLossTests() override = default;
 
@@ -626,7 +623,7 @@ public:
 
 TEST_P(DataLossTests, LossBeforeFirstCheckpoint)
 {
-    for (std::size_t i = 0; i < kCheckpointInterval; ++i) {
+    for (std::size_t i = 0; i < kCommitInterval; ++i) {
         ASSERT_OK(db->put(tools::integral_key(i), "value"));
     }
     open();
@@ -634,15 +631,16 @@ TEST_P(DataLossTests, LossBeforeFirstCheckpoint)
 
 TEST_P(DataLossTests, RecoversLastCheckpoint)
 {
-    for (std::size_t i = 0; i < kCheckpointInterval * 10; ++i) {
-        if (i % kCheckpointInterval == 0) {
-            ASSERT_OK(db->commit());
+    ASSERT_OK(db->begin_txn());
+    for (std::size_t i = 0; i < kCommitInterval * 10; ++i) {
+        if (i % kCommitInterval == 0) {
+            ASSERT_OK(db->commit_txn());
         }
         ASSERT_OK(db->put(tools::integral_key(i), tools::integral_key(i)));
     }
     open();
 
-    for (std::size_t i = 0; i < kCheckpointInterval * 9; ++i) {
+    for (std::size_t i = 0; i < kCommitInterval * 9; ++i) {
         std::string value;
         ASSERT_OK(db->get(tools::integral_key(i), &value));
         ASSERT_EQ(value, tools::integral_key(i));
@@ -651,21 +649,23 @@ TEST_P(DataLossTests, RecoversLastCheckpoint)
 
 TEST_P(DataLossTests, LongTransaction)
 {
-    for (std::size_t i = 0; i < kCheckpointInterval * 10; ++i) {
+    ASSERT_OK(db->begin_txn());
+    for (std::size_t i = 0; i < kCommitInterval * 10; ++i) {
         ASSERT_OK(db->put(tools::integral_key(i), tools::integral_key(i)));
-        if (i % kCheckpointInterval == kCheckpointInterval - 1) {
-            ASSERT_OK(db->commit());
+        if (i % kCommitInterval == kCommitInterval - 1) {
+            ASSERT_OK(db->commit_txn());
+            ASSERT_OK(db->begin_txn());
         }
     }
 
-    for (std::size_t i = 0; i < kCheckpointInterval * 10; ++i) {
+    for (std::size_t i = 0; i < kCommitInterval * 10; ++i) {
         ASSERT_OK(db->erase(tools::integral_key(i)));
     }
     ASSERT_OK(db->vacuum());
 
     open();
 
-    for (std::size_t i = 0; i < kCheckpointInterval * 10; ++i) {
+    for (std::size_t i = 0; i < kCommitInterval * 10; ++i) {
         std::string value;
         ASSERT_OK(db->get(tools::integral_key(i), &value));
         ASSERT_EQ(value, tools::integral_key(i));

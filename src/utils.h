@@ -168,6 +168,7 @@ struct DBState {
     std::size_t ckpt_number = 0;
     Id freelist_head;
     bool use_wal = false;
+    bool has_txn = false;
 };
 
 struct TreeStatistics {

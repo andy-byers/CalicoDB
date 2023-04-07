@@ -4,7 +4,6 @@
 
 #include "db_impl.h"
 #include "calicodb/env.h"
-#include "env_posix.h"
 #include "logging.h"
 
 namespace calicodb
@@ -22,12 +21,12 @@ static auto get_table_id(const Table &table) -> Id
     return reinterpret_cast<const TableImpl &>(table).id();
 }
 
-static auto encode_page_size(std::size_t page_size) -> U16
+static constexpr auto encode_page_size(std::size_t page_size) -> U16
 {
     return page_size < kMaxPageSize ? static_cast<U16>(page_size) : 0;
 }
 
-static auto decode_page_size(unsigned header_page_size) -> U32
+static constexpr auto decode_page_size(unsigned header_page_size) -> U32
 {
     return header_page_size > 0 ? header_page_size : kMaxPageSize;
 }
@@ -126,11 +125,11 @@ auto DBImpl::open(Options sanitized) -> Status
         if (sanitized.error_if_exists) {
             return Status::invalid_argument("database already exists");
         }
-        File *reader;
+        File *file;
         char buffer[FileHeader::kSize];
-        CALICODB_TRY(m_env->new_file(m_db_filename, reader));
-        CALICODB_TRY(reader->read_exact(0, sizeof(buffer), buffer));
-        delete reader;
+        CALICODB_TRY(m_env->new_file(m_db_filename, file));
+        CALICODB_TRY(file->read_exact(0, sizeof(buffer), buffer));
+        delete file;
         if (!header.read(buffer)) {
             return Status::invalid_argument("file is not a CalicoDB database");
         }
@@ -172,8 +171,8 @@ auto DBImpl::open(Options sanitized) -> Status
     }
 
     // Create the root and default table handles.
-    CALICODB_TRY(create_table(TableOptions(), kRootTableName, m_root));
-    CALICODB_TRY(create_table(TableOptions(), kDefaultTableName, m_default));
+    CALICODB_TRY(do_create_table(TableOptions(), kRootTableName, m_root));
+    CALICODB_TRY(do_create_table(TableOptions(), kDefaultTableName, m_default));
 
     auto *cursor = new_cursor(*m_root);
     cursor->seek_first();
@@ -191,6 +190,7 @@ auto DBImpl::open(Options sanitized) -> Status
         m_log->logv("ensuring consistency of an existing database");
         // This should be a no-op if the database closed normally last time.
         CALICODB_TRY(checkpoint_if_needed(true));
+        m_pager->purge_cache();
         CALICODB_TRY(load_file_header());
     } else {
         // Write the initial file header.
@@ -200,6 +200,8 @@ auto DBImpl::open(Options sanitized) -> Status
         header.page_count = static_cast<U32>(m_pager->page_count());
         header.write(db_root.data());
         m_pager->release(std::move(db_root));
+        // Flush dirty pages to the DB file and fsync(). This set should include the root
+        // page, the pointer map page on page 2, and the root of the default table.
         CALICODB_TRY(m_pager->flush_to_disk());
     }
     CALICODB_TRY(m_state.status);
@@ -379,6 +381,33 @@ auto DBImpl::get(const Table &table, const Slice &key, std::string *value) const
 auto DBImpl::put(Table &table, const Slice &key, const Slice &value) -> Status
 {
     CALICODB_TRY(m_state.status);
+    const auto auto_commit = !m_state.has_txn;
+    if (auto_commit) {
+        CALICODB_TRY(begin_txn());
+    }
+    CALICODB_TRY(do_put(table, key, value));
+    if (auto_commit) {
+        return commit_txn();
+    }
+    return Status::ok();
+}
+
+auto DBImpl::erase(Table &table, const Slice &key) -> Status
+{
+    CALICODB_TRY(m_state.status);
+    const auto auto_commit = !m_state.has_txn;
+    if (auto_commit) {
+        CALICODB_TRY(begin_txn());
+    }
+    CALICODB_TRY(do_erase(table, key));
+    if (auto_commit) {
+        return commit_txn();
+    }
+    return Status::ok();
+}
+
+auto DBImpl::do_put(Table &table, const Slice &key, const Slice &value) -> Status
+{
     auto *state = m_tables.get(get_table_id(table));
     CALICODB_EXPECT_NE(state, nullptr);
 
@@ -399,9 +428,8 @@ auto DBImpl::put(Table &table, const Slice &key, const Slice &value) -> Status
     return s;
 }
 
-auto DBImpl::erase(Table &table, const Slice &key) -> Status
+auto DBImpl::do_erase(Table &table, const Slice &key) -> Status
 {
-    CALICODB_TRY(m_state.status);
     auto *state = m_tables.get(get_table_id(table));
     CALICODB_EXPECT_NE(state, nullptr);
 
@@ -421,8 +449,15 @@ auto DBImpl::erase(Table &table, const Slice &key) -> Status
 auto DBImpl::vacuum() -> Status
 {
     CALICODB_TRY(m_state.status);
+    const auto auto_commit = !m_state.has_txn;
+    if (auto_commit) {
+        CALICODB_TRY(begin_txn());
+    }
     if (auto s = do_vacuum(); !s.is_ok()) {
         SET_STATUS(s);
+    }
+    if (auto_commit) {
+        SET_STATUS(commit_txn());
     }
     return m_state.status;
 }
@@ -458,7 +493,7 @@ auto DBImpl::do_vacuum() -> Status
         encode_logical_id(root->root_id, logical_id);
         CALICODB_TRY(put(*m_root, table_names[i], logical_id));
     }
-    CALICODB_TRY(m_pager->resize(target.value));
+    m_pager->set_page_count(target.value);
 
     m_log->logv("vacuumed %llu pages", original.value - target.value);
     return Status::ok();
@@ -493,13 +528,29 @@ auto DBImpl::TEST_validate() const -> void
     }
 }
 
-auto DBImpl::commit() -> Status
+auto DBImpl::begin_txn() -> Status
+{
+    if (m_state.has_txn) {
+        return Status::not_supported("transaction has already been started");
+    }
+    m_state.has_txn = true;
+    return Status::ok();
+}
+
+auto DBImpl::commit_txn() -> Status
 {
     CALICODB_TRY(m_state.status);
     if (auto s = do_commit(); !s.is_ok()) {
         SET_STATUS(s);
         return s;
     }
+    return Status::ok();
+}
+
+auto DBImpl::rollback_txn() -> Status
+{
+    // TODO: Abort the transaction. If the DB status is not OK and this succeeds, we should purge the
+    //       page cache and set the status to OK again.
     return Status::ok();
 }
 
@@ -528,15 +579,15 @@ auto DBImpl::do_commit() -> Status
     if (m_sync) {
         CALICODB_TRY(m_wal->sync());
     }
-    return checkpoint_if_needed();
+    CALICODB_TRY(checkpoint_if_needed());
+    m_state.has_txn = false;
+    return Status::ok();
 }
 
-auto DBImpl::checkpoint_if_needed(bool is_recovery) -> Status
+auto DBImpl::checkpoint_if_needed(bool force) -> Status
 {
-    if (is_recovery || m_wal->needs_checkpoint()) {
-        CALICODB_TRY(m_pager->checkpoint_phase_1(is_recovery));
-        CALICODB_TRY(load_file_header());
-        CALICODB_TRY(m_pager->checkpoint_phase_2());
+    if (force || m_wal->needs_checkpoint()) {
+        return m_pager->checkpoint();
     }
     return Status::ok();
 }
@@ -595,6 +646,19 @@ auto DBImpl::list_tables(std::vector<std::string> &out) const -> Status
 }
 
 auto DBImpl::create_table(const TableOptions &options, const std::string &name, Table *&out) -> Status
+{
+    const auto auto_commit = !m_state.has_txn;
+    if (auto_commit) {
+        CALICODB_TRY(begin_txn());
+    }
+    CALICODB_TRY(do_create_table(options, name, out));
+    if (auto_commit) {
+        return commit_txn();
+    }
+    return Status::ok();
+}
+
+auto DBImpl::do_create_table(const TableOptions &options, const std::string &name, Table *&out) -> Status
 {
     LogicalPageId root_id;
     std::string value;
@@ -655,6 +719,19 @@ auto DBImpl::close_table(Table *&table) -> void
 
 auto DBImpl::drop_table(Table *&table) -> Status
 {
+    const auto auto_commit = !m_state.has_txn;
+    if (auto_commit) {
+        CALICODB_TRY(begin_txn());
+    }
+    CALICODB_TRY(do_drop_table(table));
+    if (auto_commit) {
+        return commit_txn();
+    }
+    return Status::ok();
+}
+
+auto DBImpl::do_drop_table(Table *&table) -> Status
+{
     if (table == nullptr) {
         return Status::ok();
     } else if (table == default_table()) {
@@ -694,7 +771,6 @@ auto DBImpl::construct_new_table(const Slice &name, LogicalPageId &root_id) -> S
         }
         ++table_id.value;
     }
-
     // Set the table ID manually, let the tree fill in the root page ID.
     root_id.table_id = table_id;
     CALICODB_TRY(Tree::create(*m_pager, table_id, m_state.freelist_head, &root_id.page_id));

@@ -1554,11 +1554,10 @@ auto Tree::vacuum_step(Page &free, TableSet &tables, Id last_id) -> Status
     }
     CALICODB_TRY(PointerMap::write_entry(*m_pager, last_id, {}));
     CALICODB_TRY(PointerMap::write_entry(*m_pager, free.id(), entry));
+
     Page last;
     CALICODB_TRY(m_pager->acquire(last_id, last));
-    // We need to upgrade the last node, even though we aren't writing to it. This causes a full image to be written,
-    // if there isn't one already, which we will need if we crash during vacuum and need to roll back.
-    m_pager->upgrade(last);
+
     const auto is_link =
         entry.type != PointerMap::kTreeNode &&
         entry.type != PointerMap::kTreeRoot;

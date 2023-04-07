@@ -1256,7 +1256,7 @@ public:
                 --target.value;
             }
 
-            pager->resize(target.value);
+            pager->set_page_count(target.value);
 
             auto *cursor = CursorInternal::make_cursor(*tree);
             for (const auto &[key, value] : map) {
@@ -1397,7 +1397,7 @@ TEST_P(VacuumTests, OverflowChainIsNullTerminated)
     // Page Types:     N
     // Page Contents: [1]
     // Page IDs:       1
-    pager->resize(1);
+    pager->set_page_count(1);
     ASSERT_EQ(pager->page_count(), 1);
 }
 
@@ -1463,7 +1463,7 @@ TEST_P(VacuumTests, OverflowChainIsNullTerminated)
     // Page Types:     N
     // Page Contents: [a]
     // Page IDs:       1
-    pager->resize(1);
+    pager->set_page_count(1);
     ASSERT_EQ(pager->page_count(), 1);
 }
 
@@ -1511,7 +1511,7 @@ TEST_P(VacuumTests, OverflowChainIsNullTerminated)
          }
          ASSERT_OK(tree->vacuum_one(target, table_set, &vacuumed));
          ASSERT_FALSE(vacuumed);
-         pager->resize(1);
+         pager->set_page_count(1);
          ASSERT_EQ(pager->page_count(), 1);
      }
  }
@@ -1525,7 +1525,7 @@ TEST_P(VacuumTests, OverflowChainIsNullTerminated)
      ASSERT_TRUE(vacuumed);
      ASSERT_OK(test.tree->vacuum_one(Id(5), table_set, &vacuumed));
      ASSERT_TRUE(vacuumed);
-     test.pager->resize(4);
+     test.pager->set_page_count(4);
      ASSERT_OK(test.pager->flush_to_disk());
      ASSERT_EQ(test.pager->page_count(), 4);
 
@@ -1653,7 +1653,7 @@ TEST_P(VacuumTests, OverflowChainIsNullTerminated)
      ASSERT_OK(tree->vacuum_one(Id(10), table_set, &vacuumed));
      ASSERT_OK(tree->vacuum_one(Id(9), table_set, &vacuumed));
      ASSERT_OK(tree->vacuum_one(Id(8), table_set, &vacuumed));
-     pager->resize(7);
+     pager->set_page_count(7);
      ASSERT_EQ(pager->page_count(), 7);
 
      auto *cursor = CursorInternal::make_cursor(*tree);
@@ -1707,7 +1707,7 @@ TEST_P(VacuumTests, OverflowChainIsNullTerminated)
      ASSERT_TRUE(vacuumed);
      ASSERT_OK(tree->vacuum_one(Id(5), table_set, &vacuumed));
      ASSERT_TRUE(vacuumed);
-     pager->resize(4);
+     pager->set_page_count(4);
 
      auto *cursor = CursorInternal::make_cursor(*tree);
      cursor->seek_first();

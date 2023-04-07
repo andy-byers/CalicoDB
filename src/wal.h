@@ -135,7 +135,7 @@ public:
 
     // Write the WAL contents back to the DB. Resets internal counters such
     // that the next write to the WAL will start at the beginning again.
-    [[nodiscard]] virtual auto checkpoint(File &db_file) -> Status = 0;
+    [[nodiscard]] virtual auto checkpoint(File &db_file, std::size_t *db_size) -> Status = 0;
 
     [[nodiscard]] virtual auto sync() -> Status = 0;
 

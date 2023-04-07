@@ -235,7 +235,7 @@ public:
         return false;
     }
 
-    [[nodiscard]] auto checkpoint(File &) -> Status override
+    [[nodiscard]] auto checkpoint(File &, std::size_t *) -> Status override
     {
         return Status::ok();
     }
@@ -260,6 +260,7 @@ class FakeWal : public Wal
 {
     std::map<Id, std::string> m_committed;
     std::map<Id, std::string> m_pending;
+    std::size_t m_db_size = 0;
     Parameters m_param;
 
 public:
@@ -269,7 +270,7 @@ public:
     [[nodiscard]] auto read(Id page_id, char *&out) -> Status override;
     [[nodiscard]] auto write(const CacheEntry *dirty, std::size_t db_size) -> Status override;
     [[nodiscard]] auto needs_checkpoint() const -> bool override;
-    [[nodiscard]] auto checkpoint(File &db_file) -> Status override;
+    [[nodiscard]] auto checkpoint(File &db_file, std::size_t *) -> Status override;
     [[nodiscard]] auto abort() -> Status override;
     [[nodiscard]] auto close() -> Status override;
     [[nodiscard]] auto sync() -> Status override { return Status::ok(); }

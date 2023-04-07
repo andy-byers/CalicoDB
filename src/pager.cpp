@@ -20,15 +20,14 @@ namespace calicodb
         }                              \
     } while (0)
 
-auto Pager::purge_page(Id page_id) -> void
+auto Pager::purge_page(CacheEntry &victim) -> void
 {
-    if (auto *entry = m_cache.query(page_id)) {
-        if (entry->is_dirty) {
-            clean_page(*entry);
-        }
-        m_frames.unpin(*entry);
-        m_cache.erase(page_id);
+    if (victim.is_dirty) {
+        clean_page(victim);
     }
+    m_frames.unpin(victim);
+    // Invalidates storage for "victim".
+    m_cache.erase(victim.page_id);
 }
 
 auto Pager::fetch_page(Id page_id, CacheEntry *&out) -> Status
@@ -170,10 +169,7 @@ auto Pager::commit() -> Status
 {
     CALICODB_EXPECT_TRUE(m_state->use_wal);
     if (m_dirty == nullptr) {
-        // TODO: Right now, this signifies that there were no changes to the DB. At some point, it may be possible
-        //       to have purged the cache for some reason, but still have changes to be committed. In this case,
-        //       we will need to determine that a commit is needed and if so write the root page to the WAL with
-        //       the DB size.
+        // TODO: It's possible that a large query forced eviction and write back of dirty pages, but we still need a commit. Just write the root page to the WAL.
         return Status::ok();
     }
     auto *p = m_dirty;
@@ -205,50 +201,37 @@ auto Pager::abort() -> Status
         return Status::ok();
     }
 
-    for (auto *p = m_dirty; p; p = clean_page(*p)) {
-        // Page is removed from the dirty list but remains cached.
+    auto s = m_wal->abort();
+    if (s.is_ok()) {
+        purge_cache();
     }
-    m_dirty = nullptr;
-    return m_wal->abort();
+    return s;
 }
 
-auto Pager::resize(std::size_t page_count) -> Status
+auto Pager::purge_cache() -> void
 {
-    CALICODB_EXPECT_GT(page_count, 0);
-    if (page_count != m_page_count) {
-        for (auto i = page_count; i < m_page_count; ++i) {
-            purge_page(Id::from_index(i));
-        }
-        CALICODB_TRY(m_env->resize_file(m_filename, page_count * m_frames.page_size()));
+    // Note that this will leave referenced pages in the cache.
+    CacheEntry *victim;
+    while ((victim = m_cache.next_victim())) {
+        CALICODB_EXPECT_NE(victim, nullptr);
+        purge_page(*victim);
     }
-    m_page_count = page_count;
-    return Status::ok();
 }
 
-auto Pager::checkpoint_phase_1(bool purge_root) -> Status
+auto Pager::checkpoint() -> Status
 {
     // A checkpoint must immediately follow a commit, so the cache should be clean.
     CALICODB_EXPECT_EQ(m_dirty, nullptr);
-    CALICODB_EXPECT_EQ(m_saved_count, 0);
-    m_saved_count = m_page_count;
+    std::size_t dbsize;
 
     // Transfer the WAL contents back to the DB. Note that this call will sync the WAL
     // file before it starts transferring any data back.
-    CALICODB_TRY(m_wal->checkpoint(*m_file));
+    CALICODB_TRY(m_wal->checkpoint(*m_file, &dbsize));
 
-    if (purge_root) {
-        purge_page(Id::root());
+    if (dbsize && dbsize != m_page_count) {
+        set_page_count(dbsize);
+        CALICODB_TRY(m_env->resize_file(m_filename, dbsize * m_frames.page_size()));
     }
-    return Status::ok();
-}
-
-auto Pager::checkpoint_phase_2() -> Status
-{
-    std::swap(m_page_count, m_saved_count);
-    CALICODB_TRY(resize(m_page_count));
-    m_saved_count = 0;
-
-    // Make sure the data transferred from the WAL is on disk.
     return m_file->sync();
 }
 
@@ -257,7 +240,17 @@ auto Pager::flush_to_disk() -> Status
     for (auto *p = m_dirty; p; p = clean_page(*p)) {
         CALICODB_TRY(write_page_to_file(*p));
     }
-    return Status::ok();
+    return m_file->sync();
+}
+
+auto Pager::set_page_count(std::size_t page_count) -> void
+{
+    for (auto i = page_count; i < m_page_count; ++i) {
+        if (auto *out_of_range = m_cache.query(Id::from_index(i))) {
+            purge_page(*out_of_range);
+        }
+    }
+    m_page_count = page_count;
 }
 
 auto Pager::ensure_available_frame() -> Status

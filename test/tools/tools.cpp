@@ -395,6 +395,7 @@ auto FakeWal::write(const CacheEntry *dirty, std::size_t db_size) -> Status
             m_committed.insert_or_assign(k, v);
         }
         m_pending.clear();
+        m_db_size = db_size;
     }
     return Status::ok();
 }
@@ -404,7 +405,7 @@ auto FakeWal::needs_checkpoint() const -> bool
     return m_committed.size() > 1'000;
 }
 
-auto FakeWal::checkpoint(File &db_file) -> Status
+auto FakeWal::checkpoint(File &db_file, std::size_t *db_size) -> Status
 {
     // TODO: Need the env to resize the file.
     CALICODB_EXPECT_TRUE(m_pending.empty());
@@ -412,6 +413,9 @@ auto FakeWal::checkpoint(File &db_file) -> Status
     for (const auto &[page_id, page] : m_committed) {
         const auto offset = page_id.as_index() * m_param.page_size;
         CALICODB_TRY(db_file.write(offset, page));
+    }
+    if (db_size != nullptr) {
+        *db_size = m_db_size;
     }
     m_committed.clear();
     return Status::ok();
