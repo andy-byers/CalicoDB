@@ -78,7 +78,7 @@ TEST_F(WalPagerInteractionTests, WritesWalAtCheckpoint)
     // WAL should not be written until a commit, or until a dirty page needs to be
     // evicted from the page cache.
     ASSERT_EQ(wal->statistics().bytes_written, initial.bytes_written);
-    ASSERT_OK(pager->commit());
+    ASSERT_OK(pager->commit_txn());
     ASSERT_GT(wal->statistics().bytes_written, initial.bytes_written + kPageSize);
 }
 

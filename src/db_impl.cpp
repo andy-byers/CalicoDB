@@ -224,7 +224,7 @@ DBImpl::DBImpl(const Options &options, const Options &sanitized, std::string fil
 DBImpl::~DBImpl()
 {
     if (m_state.use_wal && m_state.status.is_ok()) {
-        if (const auto s = m_pager->abort(); !s.is_ok()) {
+        if (const auto s = m_pager->rollback_txn(); !s.is_ok()) {
             m_log->logv("failed to revert uncommitted transaction: %s", s.to_string().c_str());
         }
         if (const auto s = checkpoint_if_needed(true); !s.is_ok()) {
@@ -467,6 +467,7 @@ auto DBImpl::do_vacuum() -> Status
     std::vector<std::string> table_names;
     std::vector<LogicalPageId> table_roots;
     CALICODB_TRY(get_table_info(table_names, &table_roots));
+    CALICODB_TRY(ensure_txn_started());
 
     Id target(m_pager->page_count());
     auto *state = m_tables.get(Id::root());
@@ -475,14 +476,14 @@ auto DBImpl::do_vacuum() -> Status
     const auto original = target;
     for (;; --target.value) {
         bool vacuumed;
-        CALICODB_TRY(tree->vacuum_one(target, m_tables, &vacuumed));
-        if (!vacuumed) {
+        SET_STATUS(tree->vacuum_one(target, m_tables, &vacuumed));
+        if (!m_state.status.is_ok() || !vacuumed) {
             break;
         }
     }
     if (target.value == m_pager->page_count()) {
         // No pages available to vacuum: database is minimally sized.
-        return Status::ok();
+        return ensure_txn_finished();
     }
 
     // Update root locations in the name-to-root mapping.
@@ -491,12 +492,13 @@ auto DBImpl::do_vacuum() -> Status
         const auto *root = m_tables.get(table_roots[i].table_id);
         CALICODB_EXPECT_NE(root, nullptr);
         encode_logical_id(root->root_id, logical_id);
-        CALICODB_TRY(put(*m_root, table_names[i], logical_id));
+        SET_STATUS(put(*m_root, table_names[i], logical_id));
+        CALICODB_TRY(m_state.status);
     }
     m_pager->set_page_count(target.value);
 
     m_log->logv("vacuumed %llu pages", original.value - target.value);
-    return Status::ok();
+    return ensure_txn_finished();
 }
 
 auto DBImpl::TEST_wal() const -> const Wal &
@@ -574,7 +576,7 @@ auto DBImpl::do_commit() -> Status
     m_pager->release(std::move(db_root));
 
     // Write all dirty pages to the WAL.
-    CALICODB_TRY(m_pager->commit());
+    CALICODB_TRY(m_pager->commit_txn());
 
     if (m_sync) {
         CALICODB_TRY(m_wal->sync());
@@ -664,6 +666,7 @@ auto DBImpl::do_create_table(const TableOptions &options, const std::string &nam
     std::string value;
     Status s;
 
+    CALICODB_TRY(ensure_txn_started());
     if (name == kRootTableName) {
         // Root table should be closed, i.e. we should be in open(). Attempting to open the
         // root table again will result in undefined behavior.
@@ -673,33 +676,29 @@ auto DBImpl::do_create_table(const TableOptions &options, const std::string &nam
         const auto *state = m_tables.get(Id::root());
         s = state->tree->get(name, &value);
         if (s.is_ok()) {
-            CALICODB_TRY(decode_logical_id(value, &root_id));
+            SET_STATUS(decode_logical_id(value, &root_id));
         } else if (s.is_not_found()) {
-            s = construct_new_table(name, root_id);
+            SET_STATUS(construct_new_table(name, root_id));
         }
     }
 
-    if (!s.is_ok()) {
-        SET_STATUS(s);
-        return s;
-    }
+    if (m_state.status.is_ok()) {
+        auto *state = m_tables.get(root_id.table_id);
+        if (state == nullptr) {
+            m_tables.add(root_id);
+            state = m_tables.get(root_id.table_id);
+        }
+        CALICODB_EXPECT_NE(state, nullptr);
 
-    auto *state = m_tables.get(root_id.table_id);
-    if (state == nullptr) {
-        m_tables.add(root_id);
-        state = m_tables.get(root_id.table_id);
+        if (state->open) {
+            return Status::invalid_argument("table is already open");
+        }
+        state->tree = new Tree(*m_pager, root_id.page_id, m_state.freelist_head, &state->stats);
+        state->write = options.mode == AccessMode::kReadWrite;
+        state->open = true;
+        out = new TableImpl(name, root_id.table_id);
     }
-    CALICODB_EXPECT_NE(state, nullptr);
-
-    if (state->open) {
-        return Status::invalid_argument("table is already open");
-    }
-    state->tree = new Tree(*m_pager, root_id.page_id, m_state.freelist_head, &state->stats);
-    state->write = options.mode == AccessMode::kReadWrite;
-    state->open = true;
-    out = new TableImpl(name, root_id.table_id);
-
-    return s;
+    return ensure_txn_finished();
 }
 
 auto DBImpl::close_table(Table *&table) -> void
@@ -737,6 +736,7 @@ auto DBImpl::do_drop_table(Table *&table) -> Status
     } else if (table == default_table()) {
         return Status::invalid_argument("cannot drop default table");
     }
+    CALICODB_TRY(ensure_txn_started());
     const auto table_id = get_table_id(*table);
     auto *cursor = new_cursor(*table);
     Status s;
@@ -751,14 +751,12 @@ auto DBImpl::do_drop_table(Table *&table) -> Status
     delete cursor;
 
     auto *state = m_tables.get(table_id);
-    s = remove_empty_table(table->name(), *state);
-    if (!s.is_ok()) {
-        SET_STATUS(s);
-    }
+    SET_STATUS(remove_empty_table(table->name(), *state));
+
     delete table;
     m_tables.erase(table_id);
     ++m_state.batch_size;
-    return s;
+    return ensure_txn_finished();
 }
 
 auto DBImpl::construct_new_table(const Slice &name, LogicalPageId &root_id) -> Status
@@ -803,6 +801,27 @@ auto DBImpl::remove_empty_table(const std::string &name, TableState &state) -> S
     tree->upgrade(root);
     CALICODB_TRY(tree->destroy(std::move(root)));
     return Status::ok();
+}
+
+auto DBImpl::ensure_txn_started() -> Status
+{
+    if (!m_state.has_txn && m_state.status.is_ok()) {
+        m_state.status = begin_txn();
+    }
+    return m_state.status;
+}
+
+auto DBImpl::ensure_txn_finished() -> Status
+{
+    if (!m_state.has_txn) {
+        if (m_state.status.is_ok()) {
+            m_state.status = begin_txn();
+        } else {
+            // rollback_txn() will fix the DB status if it succeeds.
+            return rollback_txn();
+        }
+    }
+    return m_state.status;
 }
 
 #undef SET_STATUS

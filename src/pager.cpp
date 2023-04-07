@@ -20,6 +20,11 @@ namespace calicodb
         }                              \
     } while (0)
 
+auto Pager::mode() const -> Mode
+{
+    return m_mode;
+}
+
 auto Pager::purge_page(CacheEntry &victim) -> void
 {
     if (victim.is_dirty) {
@@ -55,6 +60,9 @@ auto Pager::fetch_page(Id page_id, CacheEntry *&out) -> Status
             m_frames.unpin(*out);
             m_cache.erase(page_id);
             out = nullptr;
+            if (m_mode == kDirty) {
+                m_mode = kError;
+            }
         }
     }
     return s;
@@ -165,10 +173,17 @@ auto Pager::clean_page(CacheEntry &entry) -> CacheEntry *
     return next;
 }
 
-auto Pager::commit() -> Status
+auto Pager::begin_txn() -> Status
+{
+    m_mode = kWrite;
+    return Status::ok();
+}
+
+auto Pager::commit_txn() -> Status
 {
     CALICODB_EXPECT_TRUE(m_state->use_wal);
     if (m_dirty == nullptr) {
+        m_mode = kOpen;
         // TODO: It's possible that a large query forced eviction and write back of dirty pages, but we still need a commit. Just write the root page to the WAL.
         return Status::ok();
     }
@@ -191,10 +206,14 @@ auto Pager::commit() -> Status
     m_state->batch_size = 0;
     // The DB page count is specified here. This indicates that the writes are part of
     // a commit.
-    return m_wal->write(p, m_page_count);
+    auto s = m_wal->write(p, m_page_count);
+    if (!s.is_ok()) {
+        m_mode = kError;
+    }
+    return s;
 }
 
-auto Pager::abort() -> Status
+auto Pager::rollback_txn() -> Status
 {
     CALICODB_EXPECT_TRUE(m_state->use_wal);
     if (m_dirty == nullptr) {
@@ -204,6 +223,9 @@ auto Pager::abort() -> Status
     auto s = m_wal->abort();
     if (s.is_ok()) {
         purge_cache();
+        m_mode = kOpen;
+    } else {
+        m_mode = kError;
     }
     return s;
 }
@@ -219,6 +241,16 @@ auto Pager::purge_cache() -> void
 }
 
 auto Pager::checkpoint() -> Status
+{
+    CALICODB_EXPECT_EQ(m_mode, kOpen);
+    auto s = wal_checkpoint();
+    if (!s.is_ok()) {
+        m_mode = kError;
+    }
+    return s;
+}
+
+auto Pager::wal_checkpoint() -> Status
 {
     // A checkpoint must immediately follow a commit, so the cache should be clean.
     CALICODB_EXPECT_EQ(m_dirty, nullptr);
@@ -255,7 +287,8 @@ auto Pager::set_page_count(std::size_t page_count) -> void
 
 auto Pager::ensure_available_frame() -> Status
 {
-    if (m_state->status.is_ok() && !m_frames.available()) {
+    Status s;
+    if (!m_frames.available()) {
         // There are no available frames, so the cache must be full. "next_victim()" will not find
         // an entry to evict if all pages are referenced, which should never happen.
         auto *victim = m_cache.next_victim();
@@ -263,20 +296,24 @@ auto Pager::ensure_available_frame() -> Status
 
         if (victim->is_dirty) {
             clean_page(*victim);
+
             if (m_state->use_wal) {
                 // Write just this page to the WAL. DB page count is 0 here because this write
                 // is not part of a commit.
-                SET_STATUS(m_wal->write(&*victim, 0));
+                s = m_wal->write(&*victim, 0);
             } else {
                 // WAL is not enabled, meaning this code is called from either recovery, checkpoint,
                 // or initialization.
-                SET_STATUS(write_page_to_file(*victim));
+                s = write_page_to_file(*victim);
+            }
+            if (!s.is_ok()) {
+                m_mode = kError;
             }
         }
         m_frames.unpin(*victim);
         m_cache.erase(victim->page_id);
     }
-    return m_state->status;
+    return s;
 }
 
 auto Pager::allocate(Page &page) -> Status

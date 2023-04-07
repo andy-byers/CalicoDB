@@ -14,7 +14,6 @@ namespace calicodb
 
 class Env;
 class FrameManager;
-class WriteAheadLog;
 class TableSet;
 class Wal;
 
@@ -24,7 +23,10 @@ public:
     friend class DBImpl;
 
     enum Mode {
-
+        kOpen,
+        kWrite,
+        kDirty,
+        kError,
     };
 
     struct Parameters {
@@ -39,13 +41,15 @@ public:
 
     ~Pager();
     [[nodiscard]] static auto open(const Parameters &param, Pager **out) -> Status;
+    [[nodiscard]] auto mode() const -> Mode;
     [[nodiscard]] auto page_count() const -> std::size_t;
     [[nodiscard]] auto page_size() const -> std::size_t;
     [[nodiscard]] auto bytes_read() const -> std::size_t;
     [[nodiscard]] auto bytes_written() const -> std::size_t;
     [[nodiscard]] auto flush_to_disk() -> Status;
-    [[nodiscard]] auto abort() -> Status;
-    [[nodiscard]] auto commit() -> Status;
+    [[nodiscard]] auto begin_txn() -> Status;
+    [[nodiscard]] auto rollback_txn() -> Status;
+    [[nodiscard]] auto commit_txn() -> Status;
     [[nodiscard]] auto checkpoint() -> Status;
     [[nodiscard]] auto allocate(Page &page) -> Status;
     [[nodiscard]] auto acquire(Id page_id, Page &page) -> Status;
@@ -71,6 +75,7 @@ private:
     [[nodiscard]] auto read_page_from_file(CacheEntry &entry) const -> Status;
     [[nodiscard]] auto write_page_to_file(const CacheEntry &entry) const -> Status;
     [[nodiscard]] auto ensure_available_frame() -> Status;
+    [[nodiscard]] auto wal_checkpoint() -> Status;
     auto purge_page(CacheEntry &entry) -> void;
     auto dirty_page(CacheEntry &entry) -> void;
     auto clean_page(CacheEntry &entry) -> CacheEntry *;
@@ -92,6 +97,7 @@ private:
     Wal *m_wal = nullptr;
     DBState *m_state = nullptr;
     std::size_t m_page_count = 0;
+    Mode m_mode = kOpen;
 };
 
 } // namespace calicodb

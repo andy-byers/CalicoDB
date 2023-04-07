@@ -287,7 +287,7 @@ TEST_F(PagerTests, BasicCommits)
 {
     for (std::size_t i = 0; i < 10; ++i) {
         write_pages(*this, kFrameCount * i, kFrameCount * (i + 1));
-        ASSERT_OK(pager->commit());
+        ASSERT_OK(pager->commit_txn());
         read_and_check(*this, kFrameCount * i, kFrameCount * (i + 1));
     }
 }
@@ -296,7 +296,7 @@ TEST_F(PagerTests, BasicCheckpoints)
 {
     for (std::size_t i = 0; i < 10; ++i) {
         write_pages(*this, kFrameCount * i, kFrameCount * (i + 1));
-        ASSERT_OK(pager->commit());
+        ASSERT_OK(pager->commit_txn());
         read_and_check(*this, kFrameCount * i, kFrameCount * (i + 1));
         ASSERT_OK(pager->checkpoint());
         // Pages returned by the pager should reflect what is on disk.

@@ -13,6 +13,7 @@
 #include "tree.h"
 #include "wal.h"
 
+#include <functional>
 #include <map>
 
 namespace calicodb
@@ -127,6 +128,8 @@ private:
     [[nodiscard]] auto checkpoint_if_needed(bool force = false) -> Status;
     [[nodiscard]] auto load_file_header() -> Status;
 
+    [[nodiscard]] auto ensure_txn_started() -> Status;
+    [[nodiscard]] auto ensure_txn_finished() -> Status;
     [[nodiscard]] auto do_put(Table &table, const Slice &key, const Slice &value) -> Status;
     [[nodiscard]] auto do_erase(Table &table, const Slice &key) -> Status;
     [[nodiscard]] auto do_commit() -> Status;
