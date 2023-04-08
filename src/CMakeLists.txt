@@ -40,6 +40,7 @@ add_library(calicodb
                "${CALICODB_INCLUDE_DIR}/calicodb/cursor.h"
                "${CALICODB_INCLUDE_DIR}/calicodb/db.h"
                "${CALICODB_INCLUDE_DIR}/calicodb/env.h"
+               "${CALICODB_INCLUDE_DIR}/calicodb/options.h"
                "${CALICODB_INCLUDE_DIR}/calicodb/slice.h"
                "${CALICODB_INCLUDE_DIR}/calicodb/status.h"
                "${CALICODB_INCLUDE_DIR}/calicodb/table.h"

@@ -140,7 +140,10 @@ class PagerTests
       public testing::Test
 {
 public:
-    std::string test_message = "Hello, world!";
+    const std::string kTestMessage = "Hello, world!";
+    const std::size_t kSmallSize = kFrameCount / 2;
+    const std::size_t kFullSize = kFrameCount;
+    const std::size_t kLargeSize = kFrameCount * 2;
 
     ~PagerTests() override = default;
 
@@ -162,7 +165,6 @@ public:
         auto page = allocate_write(message);
         const auto id = page.id();
         pager->release(std::move(page));
-        EXPECT_OK(state.status);
         return id;
     }
 
@@ -179,7 +181,6 @@ public:
     {
         auto page = acquire_write(id, message);
         pager->release(std::move(page));
-        EXPECT_OK(state.status);
     }
 
     [[nodiscard]] auto acquire_read_release(Id id, std::size_t size) const
@@ -188,7 +189,6 @@ public:
         EXPECT_OK(pager->acquire(id, page));
         auto message = read_from_page(page, size);
         pager->release(std::move(page));
-        EXPECT_OK(state.status);
         return message;
     }
 
@@ -208,26 +208,27 @@ public:
 
 TEST_F(PagerTests, NewPagerIsSetUpCorrectly)
 {
-    ASSERT_EQ(pager->page_count(), 0);
-    ASSERT_EQ(pager->bytes_written(), 0);
-    EXPECT_OK(state.status);
+    ASSERT_EQ(pager->page_count(), 1);
+    ASSERT_EQ(pager->bytes_written(), kPageSize);
 }
 
 TEST_F(PagerTests, AllocatesPagesAtEOF)
 {
-    ASSERT_EQ(pager->page_count(), 0);
-    ASSERT_EQ(allocate_write_release("a"), Id(1));
+    ASSERT_TRUE(pager->begin_txn());
     ASSERT_EQ(pager->page_count(), 1);
-    ASSERT_EQ(allocate_write_release("b"), Id(2));
+    ASSERT_EQ(allocate_write_release("a"), Id(2));
     ASSERT_EQ(pager->page_count(), 2);
-    ASSERT_EQ(allocate_write_release("c"), Id(3));
+    ASSERT_EQ(allocate_write_release("b"), Id(3));
     ASSERT_EQ(pager->page_count(), 3);
+    ASSERT_EQ(allocate_write_release("c"), Id(4));
+    ASSERT_EQ(pager->page_count(), 4);
 }
 
 TEST_F(PagerTests, AcquireReturnsCorrectPage)
 {
-    const auto incorrect = allocate_write_release(test_message);
-    const auto correct = allocate_write_release(test_message);
+    ASSERT_TRUE(pager->begin_txn());
+    const auto incorrect = allocate_write_release(kTestMessage);
+    const auto correct = allocate_write_release(kTestMessage);
 
     Page page;
     ASSERT_OK(pager->acquire(correct, page));
@@ -238,24 +239,27 @@ TEST_F(PagerTests, AcquireReturnsCorrectPage)
 
 TEST_F(PagerTests, DataPersistsInEnv)
 {
+    ASSERT_TRUE(pager->begin_txn());
     for (std::size_t i = 0; i < kFrameCount * 10; ++i) {
         (void)allocate_write_release(tools::integral_key<16>(i));
     }
+    ASSERT_OK(pager->commit_txn());
     for (std::size_t i = 0; i < kFrameCount * 10; ++i) {
-        ASSERT_EQ(acquire_read_release(Id(i + 1), 16), tools::integral_key<16>(i))
+        // Skip the root page, which was already allocated and is still blank.
+        ASSERT_EQ(acquire_read_release(Id(i + 2), 16), tools::integral_key<16>(i))
             << "mismatch on page " << i + 1;
     }
 }
 
 template <class Test>
-static auto write_pages(Test &test, std::size_t key_offset, std::size_t num_pages)
+static auto write_pages(Test &test, std::size_t key_offset, std::size_t num_pages, std::size_t acquire_offset = 0)
 {
-    for (std::size_t i = 1; i <= num_pages; ++i) {
+    for (std::size_t i = 0; i < num_pages; ++i) {
         const auto message = tools::integral_key<16>(i + key_offset);
-        if (i > test.pager->page_count()) {
+        if (i >= test.pager->page_count()) {
             (void)test.allocate_write_release(message);
         } else {
-            test.acquire_write_release(Id(i), message);
+            test.acquire_write_release(Id(acquire_offset + i + 1), message);
         }
     }
 }
@@ -263,38 +267,78 @@ static auto write_pages(Test &test, std::size_t key_offset, std::size_t num_page
 template <class Test>
 static auto read_and_check(Test &test, std::size_t key_offset, std::size_t num_pages, bool from_file = false)
 {
-    for (std::size_t i = 1; i <= num_pages; ++i) {
+    for (std::size_t i = 0; i < num_pages; ++i) {
+        const Id page_id(i + 1);
         const auto message = tools::integral_key<16>(i + key_offset);
         if (from_file) {
-            ASSERT_EQ(test.read_from_file(Id(i), 16), message)
-                << "mismatch on page (from file) " << i;
+            ASSERT_EQ(test.read_from_file(page_id, 16), message)
+                << "mismatch on page " << page_id.value << " read from file";
         } else {
-            ASSERT_EQ(test.acquire_read_release(Id(i), 16), message)
-                << "mismatch on page (from pager) " << i;
+            ASSERT_EQ(test.acquire_read_release(page_id, 16), message)
+                << "mismatch on page " << page_id.value << " read from pager";
         }
     }
 }
 
-TEST_F(PagerTests, BasicIO)
+TEST_F(PagerTests, NormalReadsAndWrites)
 {
-    for (std::size_t i = 0; i < 10; ++i) {
-        write_pages(*this, kFrameCount * i, kFrameCount * (i + 1));
-        read_and_check(*this, kFrameCount * i, kFrameCount * (i + 1));
-    }
+    ASSERT_TRUE(pager->begin_txn());
+
+    write_pages(*this, 123, kSmallSize);
+    read_and_check(*this, 123, kSmallSize);
+    write_pages(*this, 456, kFullSize);
+    read_and_check(*this, 456, kFullSize);
+    write_pages(*this, 789, kLargeSize);
+    read_and_check(*this, 789, kLargeSize);
+
+    ASSERT_OK(pager->commit_txn());
 }
 
-TEST_F(PagerTests, BasicCommits)
+TEST_F(PagerTests, NormalCommits)
 {
-    for (std::size_t i = 0; i < 10; ++i) {
-        write_pages(*this, kFrameCount * i, kFrameCount * (i + 1));
-        ASSERT_OK(pager->commit_txn());
-        read_and_check(*this, kFrameCount * i, kFrameCount * (i + 1));
-    }
+    ASSERT_TRUE(pager->begin_txn());
+    write_pages(*this, 123, kSmallSize);
+    ASSERT_OK(pager->commit_txn());
+    read_and_check(*this, 123, kSmallSize);
+
+    ASSERT_TRUE(pager->begin_txn());
+    write_pages(*this, 456, kFullSize);
+    ASSERT_OK(pager->commit_txn());
+    read_and_check(*this, 456, kFullSize);
+
+    ASSERT_TRUE(pager->begin_txn());
+    write_pages(*this, 789, kLargeSize);
+    ASSERT_OK(pager->commit_txn());
+    read_and_check(*this, 789, kLargeSize);
+}
+
+TEST_F(PagerTests, BasicRollbacks)
+{
+    ASSERT_TRUE(pager->begin_txn());
+    write_pages(*this, 123, kLargeSize);
+    ASSERT_OK(pager->commit_txn());
+    read_and_check(*this, 123, kLargeSize);
+
+    ASSERT_TRUE(pager->begin_txn());
+    write_pages(*this, 456, kSmallSize);
+    ASSERT_OK(pager->rollback_txn());
+    read_and_check(*this, 123, kLargeSize);
+
+    ASSERT_TRUE(pager->begin_txn());
+    write_pages(*this, 789, kFullSize);
+    ASSERT_OK(pager->rollback_txn());
+    read_and_check(*this, 123, kLargeSize);
+
+    ASSERT_TRUE(pager->begin_txn());
+    write_pages(*this, 0, kLargeSize);
+    ASSERT_OK(pager->rollback_txn());
+    read_and_check(*this, 123, kLargeSize);
 }
 
 TEST_F(PagerTests, BasicCheckpoints)
 {
     for (std::size_t i = 0; i < 10; ++i) {
+        ASSERT_TRUE(pager->begin_txn());
         write_pages(*this, kFrameCount * i, kFrameCount * (i + 1));
         ASSERT_OK(pager->commit_txn());
         read_and_check(*this, kFrameCount * i, kFrameCount * (i + 1));
@@ -303,6 +347,20 @@ TEST_F(PagerTests, BasicCheckpoints)
         read_and_check(*this, kFrameCount * i, kFrameCount * (i + 1));
         read_and_check(*this, kFrameCount * i, kFrameCount * (i + 1), true);
     }
+}
+
+TEST_F(PagerTests, OnlyWritesBackCommittedWalFrames)
+{
+    ASSERT_TRUE(pager->begin_txn());
+    write_pages(*this, 0, kLargeSize);
+    ASSERT_OK(pager->commit_txn());
+
+    ASSERT_TRUE(pager->begin_txn());
+    write_pages(*this, 123, kSmallSize);
+    ASSERT_OK(pager->rollback_txn());
+
+    ASSERT_OK(pager->checkpoint());
+    read_and_check(*this, 0, kLargeSize);
 }
 
 TEST_F(PagerTests, WritesBackDuringCheckpoint)

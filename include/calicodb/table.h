@@ -10,17 +10,6 @@
 namespace calicodb
 {
 
-enum class AccessMode {
-    kReadOnly,
-    kReadWrite,
-};
-
-struct TableOptions {
-    // If set to kReadOnly, calls to put() or erase() on the table will return with
-    // an error.
-    AccessMode mode = AccessMode::kReadWrite;
-};
-
 // Persistent ordered mapping from keys to values within a CalicoDB database.
 //
 // Keys are unique within each table.

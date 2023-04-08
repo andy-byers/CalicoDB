@@ -13,8 +13,9 @@
 namespace calicodb
 {
 
-#define SET_STATUS(s)                  \
+#define SET_ERROR(s)                   \
     do {                               \
+        m_mode = kError;               \
         if (m_state->status.is_ok()) { \
             m_state->status = s;       \
         }                              \
@@ -25,9 +26,9 @@ auto Pager::mode() const -> Mode
     return m_mode;
 }
 
-auto Pager::purge_page(CacheEntry &victim) -> void
+auto Pager::purge_entry(CacheEntry &victim) -> void
 {
-    if (victim.is_dirty) {
+    if (is_dirty(victim)) {
         clean_page(victim);
     }
     m_frames.unpin(victim);
@@ -35,35 +36,40 @@ auto Pager::purge_page(CacheEntry &victim) -> void
     m_cache.erase(victim.page_id);
 }
 
-auto Pager::fetch_page(Id page_id, CacheEntry *&out) -> Status
+auto Pager::populate_entry(CacheEntry &out) -> Status
+{
+    char *page = nullptr;
+    Status s;
+
+    if (m_state->use_wal) {
+        // Try to read the page from the WAL. Nulls out "page" if it cannot find the
+        // page.
+        page = out.page;
+        s = m_wal->read(out.page_id, page);
+    }
+
+    if (s.is_ok() && page == nullptr) {
+        // Read the page from the DB file.
+        s = read_page_from_file(out);
+    }
+
+    if (!s.is_ok()) {
+        m_frames.unpin(out);
+        if (m_mode == kDirty) {
+            SET_ERROR(s);
+        }
+    }
+    return s;
+}
+
+auto Pager::cache_entry(Id page_id, CacheEntry *&out) -> Status
 {
     Status s;
     out = m_cache.get(page_id);
     if (out == nullptr) {
         out = m_cache.alloc(page_id);
         m_frames.pin(*out);
-        char *page = nullptr;
-
-        if (m_state->use_wal) {
-            // Try to read the page from the WAL. Nulls out "page" if it cannot find the
-            // page.
-            page = out->page;
-            s = m_wal->read(page_id, page);
-        }
-
-        if (s.is_ok() && page == nullptr) {
-            // Read the page from the DB file.
-            s = read_page_from_file(*out);
-        }
-
-        if (!s.is_ok()) {
-            m_frames.unpin(*out);
-            m_cache.erase(page_id);
-            out = nullptr;
-            if (m_mode == kDirty) {
-                m_mode = kError;
-            }
-        }
+        return populate_entry(*out);
     }
     return s;
 }
@@ -87,25 +93,39 @@ auto Pager::write_page_to_file(const CacheEntry &entry) const -> Status
     return m_file->write(entry.page_id.as_index() * data.size(), data);
 }
 
-auto Pager::open(const Parameters &param, Pager **out) -> Status
+auto Pager::open(const Parameters &param, Pager *&out) -> Status
 {
     CALICODB_EXPECT_TRUE(is_power_of_two(param.page_size));
     CALICODB_EXPECT_GE(param.page_size, kMinPageSize);
     CALICODB_EXPECT_LE(param.page_size, kMaxPageSize);
     CALICODB_EXPECT_GE(param.frame_count, kMinFrameCount);
     CALICODB_EXPECT_LE(param.page_size * param.frame_count, kMaxCacheSize);
+    const auto exists = param.env->file_exists(param.filename);
 
     File *file;
     CALICODB_TRY(param.env->new_file(param.filename, file));
 
     // Allocate the frames, i.e. where pages from disk are stored in memory. Aligned
-    // to the page size, so it couldnpotentially be used for direct I/O.
+    // to the page size, so it could potentially be used for direct I/O.
     AlignedBuffer buffer(
         param.page_size * param.frame_count,
         param.page_size);
 
-    *out = new Pager(param, *file, std::move(buffer));
-    return Status::ok();
+    out = new Pager(param, *file, std::move(buffer));
+
+    Status s;
+    if (exists) {
+        s = out->read_page_from_file(out->m_root);
+    } else {
+        // Write the root page, initially blank.
+        s = out->write_page_to_file(out->m_root);
+        ++out->m_page_count;
+    }
+    if (!s.is_ok()) {
+        delete out;
+        out = nullptr;
+    }
+    return s;
 }
 
 Pager::Pager(const Parameters &param, File &file, AlignedBuffer buffer)
@@ -118,10 +138,13 @@ Pager::Pager(const Parameters &param, File &file, AlignedBuffer buffer)
       m_state(param.state)
 {
     CALICODB_EXPECT_NE(m_state, nullptr);
+    m_root.page_id = Id::root();
+    m_frames.pin(m_root);
 }
 
 Pager::~Pager()
 {
+    m_frames.unpin(m_root);
     delete m_file;
 }
 
@@ -145,13 +168,18 @@ auto Pager::page_size() const -> std::size_t
     return m_frames.page_size();
 }
 
+auto Pager::is_dirty(const CacheEntry &entry) const -> bool
+{
+    return entry.next || entry.prev || &entry == m_dirty;
+}
+
 auto Pager::dirty_page(CacheEntry &entry) -> void
 {
-    CALICODB_EXPECT_FALSE(entry.is_dirty);
+    CALICODB_EXPECT_FALSE(is_dirty(entry));
     if (m_dirty) {
+        CALICODB_EXPECT_FALSE(m_dirty->prev);
         m_dirty->prev = &entry;
     }
-    entry.is_dirty = true;
     entry.prev = nullptr;
     entry.next = m_dirty;
     m_dirty = &entry;
@@ -159,7 +187,10 @@ auto Pager::dirty_page(CacheEntry &entry) -> void
 
 auto Pager::clean_page(CacheEntry &entry) -> CacheEntry *
 {
-    entry.is_dirty = false;
+    CALICODB_EXPECT_TRUE(m_dirty);
+    CALICODB_EXPECT_FALSE(m_dirty->prev);
+    CALICODB_EXPECT_TRUE(is_dirty(entry));
+
     if (entry.prev) {
         entry.prev->next = entry.next;
     } else {
@@ -170,59 +201,86 @@ auto Pager::clean_page(CacheEntry &entry) -> CacheEntry *
     if (next) {
         next->prev = entry.prev;
     }
+    entry.prev = nullptr;
+    entry.next = nullptr;
     return next;
 }
 
-auto Pager::begin_txn() -> Status
+auto Pager::begin_txn() -> bool
 {
-    m_mode = kWrite;
-    return Status::ok();
+    CALICODB_EXPECT_NE(m_mode, kError);
+    if (m_mode == kOpen) {
+        m_mode = kWrite;
+        return true;
+    }
+    return false;
 }
 
 auto Pager::commit_txn() -> Status
 {
     CALICODB_EXPECT_TRUE(m_state->use_wal);
-    if (m_dirty == nullptr) {
-        m_mode = kOpen;
-        // TODO: It's possible that a large query forced eviction and write back of dirty pages, but we still need a commit. Just write the root page to the WAL.
-        return Status::ok();
-    }
-    auto *p = m_dirty;
-    for (; p; p = p->next) {
-        if (p->page_id.value > m_page_count) {
-            // This page is past the current end of the file due to a vacuum operation
-            // decreasing the database page count. Just remove the page from the dirty
-            // list. It wouldn't be transferred back to the DB on checkpoint anyway
-            // since it is out of bounds.
-            p = clean_page(*p);
-        } else {
-            p->is_dirty = false;
-        }
-    }
-    p = m_dirty;
-    CALICODB_EXPECT_NE(p, nullptr);
-    m_dirty = nullptr;
+    CALICODB_EXPECT_GE(m_mode, kWrite);
 
-    m_state->batch_size = 0;
-    // The DB page count is specified here. This indicates that the writes are part of
-    // a commit.
-    auto s = m_wal->write(p, m_page_count);
-    if (!s.is_ok()) {
-        m_mode = kError;
+    // Report prior errors again.
+    CALICODB_TRY(m_state->status);
+
+    if (m_mode == kWrite) {
+        // No work done in this transaction.
+        CALICODB_EXPECT_EQ(m_dirty, nullptr);
+        m_mode = kOpen;
     }
-    return s;
+
+    if (m_mode == kDirty) {
+        if (m_dirty == nullptr) {
+            // Ensure that there is always a WAL frame to store the DB size.
+            m_dirty = &m_root;
+        }
+        auto *p = m_dirty;
+        for (; p; p = p->next) {
+            if (p->page_id.value > m_page_count) {
+                // This page is past the current end of the file due to a vacuum operation
+                // decreasing the page count. Just remove the page from the dirty list. It 
+                // wouldn't be transferred back to the DB on checkpoint anyway since it is 
+                // out of bounds.
+                p = clean_page(*p);
+            }
+        }
+        p = m_dirty;
+        CALICODB_EXPECT_NE(p, nullptr);
+        m_state->batch_size = 0;
+        m_dirty = nullptr;
+        m_mode = kOpen;
+
+        // The DB page count is specified here. This indicates that the writes are part of
+        // a commit.
+        auto s = m_wal->write(p, m_page_count);
+        if (!s.is_ok()) {
+            SET_ERROR(s);
+        }
+        return s;
+    }
+    return Status::ok();
 }
 
 auto Pager::rollback_txn() -> Status
 {
     CALICODB_EXPECT_TRUE(m_state->use_wal);
-    if (m_dirty == nullptr) {
+    if (m_mode <= kWrite) {
+        m_mode = kOpen;
         return Status::ok();
     }
-
+    if (m_in_ckpt) {
+        CALICODB_EXPECT_EQ(m_mode, kError);
+        return checkpoint();
+    }
     auto s = m_wal->abort();
     if (s.is_ok()) {
+        // Refresh the in-memory DB root page.
+        s = populate_entry(m_root);
+    }
+    if (s.is_ok()) {
         purge_cache();
+        m_state->status = Status::ok();
         m_mode = kOpen;
     } else {
         m_mode = kError;
@@ -236,15 +294,22 @@ auto Pager::purge_cache() -> void
     CacheEntry *victim;
     while ((victim = m_cache.next_victim())) {
         CALICODB_EXPECT_NE(victim, nullptr);
-        purge_page(*victim);
+        purge_entry(*victim);
     }
 }
 
 auto Pager::checkpoint() -> Status
 {
-    CALICODB_EXPECT_EQ(m_mode, kOpen);
+    CALICODB_EXPECT_TRUE(
+        m_mode == kOpen || // Normal checkpoint, right after a commit
+        (m_mode == kError && m_in_ckpt)); // Attempt to fix a failed checkpoint
+
+    m_in_ckpt = true;
     auto s = wal_checkpoint();
-    if (!s.is_ok()) {
+    if (s.is_ok()) {
+        m_in_ckpt = false;
+        m_mode = kOpen;
+    } else {
         m_mode = kError;
     }
     return s;
@@ -264,7 +329,8 @@ auto Pager::wal_checkpoint() -> Status
         set_page_count(dbsize);
         CALICODB_TRY(m_env->resize_file(m_filename, dbsize * m_frames.page_size()));
     }
-    return m_file->sync();
+    CALICODB_TRY(m_file->sync());
+    return read_page_from_file(m_root);
 }
 
 auto Pager::flush_to_disk() -> Status
@@ -279,7 +345,7 @@ auto Pager::set_page_count(std::size_t page_count) -> void
 {
     for (auto i = page_count; i < m_page_count; ++i) {
         if (auto *out_of_range = m_cache.query(Id::from_index(i))) {
-            purge_page(*out_of_range);
+            purge_entry(*out_of_range);
         }
     }
     m_page_count = page_count;
@@ -294,7 +360,7 @@ auto Pager::ensure_available_frame() -> Status
         auto *victim = m_cache.next_victim();
         CALICODB_EXPECT_NE(victim, nullptr);
 
-        if (victim->is_dirty) {
+        if (is_dirty(*victim)) {
             clean_page(*victim);
 
             if (m_state->use_wal) {
@@ -307,7 +373,8 @@ auto Pager::ensure_available_frame() -> Status
                 s = write_page_to_file(*victim);
             }
             if (!s.is_ok()) {
-                m_mode = kError;
+                // This is an error, regardless of what mode the pager is in.
+                SET_ERROR(s);
             }
         }
         m_frames.unpin(*victim);
@@ -333,6 +400,9 @@ auto Pager::allocate(Page &page) -> Status
 auto Pager::acquire(Id page_id, Page &page) -> Status
 {
     CALICODB_EXPECT_FALSE(page_id.is_null());
+
+    // Ensure that the next call to "m_frames.pin()" has an available slot in
+    // the frame buffer.
     CALICODB_TRY(ensure_available_frame());
 
     CacheEntry *entry;
@@ -341,18 +411,34 @@ auto Pager::acquire(Id page_id, Page &page) -> Status
         entry = m_cache.alloc(page_id);
         m_frames.pin(*entry);
         std::memset(entry->page, 0, m_frames.page_size());
-    } else {
+    } else if (!page_id.is_root()) {
         // Read a page from either the WAL or the DB.
-        CALICODB_TRY(fetch_page(page_id, entry));
+        CALICODB_TRY(cache_entry(page_id, entry));
+    } else {
+        entry = &m_root;
     }
     m_frames.ref(*entry, page);
     return Status::ok();
 }
 
+auto Pager::acquire_root() -> Page
+{
+    Page root;
+    m_frames.ref(m_root, root);
+    return root;
+}
+
 auto Pager::upgrade(Page &page) -> void
 {
-    if (!page.entry()->is_dirty) {
+    CALICODB_EXPECT_TRUE(
+        !m_state->use_wal || // In initialization routine
+        m_mode >= kWrite); // Transaction has started
+
+    if (!is_dirty(*page.entry())) {
         dirty_page(*page.entry());
+        if (m_mode == kWrite) {
+            m_mode = kDirty;
+        }
     }
     m_frames.upgrade(page);
 }
@@ -367,5 +453,25 @@ auto Pager::load_state(const FileHeader &header) -> void
 {
     m_page_count = header.page_count;
 }
+
+auto Pager::TEST_validate() const -> void
+{
+#ifndef NDEBUG
+    if (m_mode <= kWrite) {
+        CALICODB_EXPECT_EQ(m_dirty, nullptr);
+    } else {
+        if (m_mode == kDirty) {
+            CALICODB_EXPECT_NE(m_dirty, nullptr);
+        }
+        auto *p = m_dirty;
+        while (p) {
+            CALICODB_EXPECT_TRUE(is_dirty(*p));
+            p = p->next;
+        }
+    }
+#endif // NDEBUG
+}
+
+#undef SET_ERROR
 
 } // namespace calicodb

@@ -683,7 +683,7 @@ auto Tree::create(Pager &pager, Id table_id, Id &freelist_head, Id *out) -> Stat
 {
     Node node;
     std::string scratch;
-    Freelist freelist {pager, freelist_head};
+    Freelist freelist(pager, freelist_head);
     CALICODB_TRY(NodeManager::allocate(pager, freelist, node, scratch, true));
     const auto root_id = node.page.id();
     NodeManager::release(pager, std::move(node));
@@ -724,8 +724,11 @@ auto Tree::find_external(const Slice &key, Node node, SearchResult &out) const -
     for (;;) {
         bool exact;
         auto itr = node_iterator(node);
-        CALICODB_TRY(itr.seek(key, &exact));
-
+        auto s = itr.seek(key, &exact);
+        if (!s.is_ok()) {
+            release(std::move(node));
+            return s;
+        }
         if (node.header.is_external) {
             out.node = std::move(node);
             out.index = itr.index();
@@ -1361,15 +1364,16 @@ auto Tree::get(const Slice &key, std::string *value) const -> Status
         return Status::not_found("not found");
     }
 
+    Status s;
     if (value != nullptr) {
         const auto cell = read_cell(node, index);
         Slice slice;
-        CALICODB_TRY(PayloadManager::collect_value(*m_pager, *value, cell, &slice));
+        s = PayloadManager::collect_value(*m_pager, *value, cell, &slice);
         value->resize(slice.size());
         report_stats(kBytesRead, slice.size());
     }
     release(std::move(node));
-    return Status::ok();
+    return s;
 }
 
 auto Tree::put(const Slice &key, const Slice &value, bool *exists) -> Status
@@ -2584,10 +2588,10 @@ auto CursorInternal::make_cursor(Tree &tree) -> Cursor *
     return cursor;
 }
 
-auto CursorInternal::invalidate(const Cursor &cursor, Status status) -> void
+auto CursorInternal::invalidate(const Cursor &cursor, Status error) -> void
 {
-    CALICODB_EXPECT_FALSE(status.is_ok());
-    reinterpret_cast<const CursorImpl &>(cursor).m_status = std::move(status);
+    CALICODB_EXPECT_FALSE(error.is_ok());
+    reinterpret_cast<const CursorImpl &>(cursor).m_status = std::move(error);
 }
 
 } // namespace calicodb

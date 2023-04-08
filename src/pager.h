@@ -40,14 +40,13 @@ public:
     };
 
     ~Pager();
-    [[nodiscard]] static auto open(const Parameters &param, Pager **out) -> Status;
+    [[nodiscard]] static auto open(const Parameters &param, Pager *&out) -> Status;
     [[nodiscard]] auto mode() const -> Mode;
     [[nodiscard]] auto page_count() const -> std::size_t;
     [[nodiscard]] auto page_size() const -> std::size_t;
     [[nodiscard]] auto bytes_read() const -> std::size_t;
     [[nodiscard]] auto bytes_written() const -> std::size_t;
-    [[nodiscard]] auto flush_to_disk() -> Status;
-    [[nodiscard]] auto begin_txn() -> Status;
+    [[nodiscard]] auto begin_txn() -> bool;
     [[nodiscard]] auto rollback_txn() -> Status;
     [[nodiscard]] auto commit_txn() -> Status;
     [[nodiscard]] auto checkpoint() -> Status;
@@ -56,8 +55,9 @@ public:
     auto upgrade(Page &page) -> void;
     auto release(Page page) -> void;
     auto set_page_count(std::size_t page_count) -> void;
-    auto purge_cache() -> void;
     auto load_state(const FileHeader &header) -> void;
+
+    [[nodiscard]] auto acquire_root() -> Page;
 
     [[nodiscard]] auto hits() const -> U64
     {
@@ -69,14 +69,20 @@ public:
         return m_cache.misses();
     }
 
+    auto TEST_validate() const -> void;
+
 private:
     explicit Pager(const Parameters &param, File &file, AlignedBuffer buffer);
-    [[nodiscard]] auto fetch_page(Id page_id, CacheEntry *&out) -> Status;
+    [[nodiscard]] auto flush_to_disk() -> Status;
+    [[nodiscard]] auto populate_entry(CacheEntry &out) -> Status;
+    [[nodiscard]] auto cache_entry(Id page_id, CacheEntry *&out) -> Status;
+    [[nodiscard]] auto is_dirty(const CacheEntry &entry) const -> bool;
     [[nodiscard]] auto read_page_from_file(CacheEntry &entry) const -> Status;
     [[nodiscard]] auto write_page_to_file(const CacheEntry &entry) const -> Status;
     [[nodiscard]] auto ensure_available_frame() -> Status;
     [[nodiscard]] auto wal_checkpoint() -> Status;
-    auto purge_page(CacheEntry &entry) -> void;
+    auto purge_cache() -> void;
+    auto purge_entry(CacheEntry &victim) -> void;
     auto dirty_page(CacheEntry &entry) -> void;
     auto clean_page(CacheEntry &entry) -> CacheEntry *;
 
@@ -87,9 +93,18 @@ private:
     FrameManager m_frames;
     PageCache m_cache;
 
+    // The root page is always acquired. Keep info about it here.
+    CacheEntry m_root;
+
     // List of dirty page cache entries. Linked by the "prev" and "next"
     // CacheEntry members.
     CacheEntry *m_dirty = nullptr;
+
+    // True if a checkpoint operation is being run, false otherwise. Used
+    // to indicate failure during a checkpoint.
+    bool m_in_ckpt = false;
+
+    int m_txn = 0;
 
     LogFile *m_log = nullptr;
     File *m_file = nullptr;

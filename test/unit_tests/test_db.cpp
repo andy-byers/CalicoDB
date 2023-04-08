@@ -199,13 +199,13 @@ static auto insert_random_groups(DB &db, std::size_t num_groups, std::size_t gro
         const auto records = generator.generate(random, group_size);
         auto itr = cbegin(records);
         ASSERT_OK(db.status());
-        ASSERT_OK(db.begin_txn());
+        const auto txn = db.begin_txn(TxnOptions());
 
         for (std::size_t i = 0; i < group_size; ++i) {
             ASSERT_OK(db.put(itr->key, itr->value));
             ++itr;
         }
-        ASSERT_OK(db.commit_txn());
+        ASSERT_OK(db.commit_txn(txn));
     }
     dynamic_cast<const DBImpl &>(db).TEST_validate();
 }
@@ -243,12 +243,12 @@ TEST_F(BasicDatabaseTests, DataPersists)
         ASSERT_OK(DB::open(options, kFilename, db));
         ASSERT_OK(db->status());
 
-        ASSERT_OK(db->begin_txn());
+        const auto txn = db->begin_txn(TxnOptions());
         for (std::size_t i = 0; i < kGroupSize; ++i) {
             ASSERT_OK(db->put(itr->key, itr->value));
             ++itr;
         }
-        ASSERT_OK(db->commit_txn());
+        ASSERT_OK(db->commit_txn(txn));
         delete db;
     }
 
@@ -296,7 +296,7 @@ TEST_P(DbVacuumTests, SanityCheck)
             delete db;
             ASSERT_OK(DB::open(options, kFilename, db));
         }
-        ASSERT_OK(db->begin_txn());
+        auto txn = db->begin_txn(TxnOptions());
 
         for (std::size_t batch = 0; batch < 4; ++batch) {
             while (map.size() < upper_bounds) {
@@ -314,7 +314,7 @@ TEST_P(DbVacuumTests, SanityCheck)
             db_impl(db)->TEST_validate();
         }
 
-        ASSERT_OK(db->commit_txn());
+        ASSERT_OK(db->commit_txn(txn));
 
         std::size_t i = 0;
         for (const auto &[key, value] : map) {
@@ -413,11 +413,11 @@ static auto expect_contains_records(const DB &db, const std::map<std::string, st
 
 static auto run_revert_test(TestDatabase &db)
 {
-    ASSERT_OK(db.db->begin_txn());
+    auto txn = db.db->begin_txn(TxnOptions());
     const auto committed = add_records(db, 1'000);
-    ASSERT_OK(db.db->commit_txn());
+    ASSERT_OK(db.db->commit_txn(txn));
 
-    ASSERT_OK(db.db->begin_txn());
+    txn = db.db->begin_txn(TxnOptions());
     add_records(db, 1'000);
     // Explicit BEGIN but no COMMIT.
     ASSERT_OK(db.reopen());
@@ -432,9 +432,9 @@ TEST_F(DbRevertTests, RevertsUncommittedBatch_1)
 
 TEST_F(DbRevertTests, RevertsUncommittedBatch_2)
 {
-    ASSERT_OK(db->db->begin_txn());
+    ASSERT_EQ(db->db->begin_txn(TxnOptions()), 1);
     add_records(*db, 1'000);
-    ASSERT_OK(db->db->commit_txn());
+    ASSERT_OK(db->db->commit_txn(1));
     run_revert_test(*db);
 }
 
@@ -446,9 +446,9 @@ TEST_F(DbRevertTests, RevertsUncommittedBatch_3)
 
 TEST_F(DbRevertTests, RevertsUncommittedBatch_4)
 {
-    ASSERT_OK(db->db->begin_txn());
+    ASSERT_EQ(db->db->begin_txn(TxnOptions()), 1);
     add_records(*db, 1'000);
-    ASSERT_OK(db->db->commit_txn());
+    ASSERT_OK(db->db->commit_txn(1));
     run_revert_test(*db);
     add_records(*db, 1'000);
 }
@@ -456,9 +456,9 @@ TEST_F(DbRevertTests, RevertsUncommittedBatch_4)
 TEST_F(DbRevertTests, RevertsUncommittedBatch_5)
 {
     for (std::size_t i = 0; i < 100; ++i) {
-        ASSERT_OK(db->db->begin_txn());
+        ASSERT_EQ(db->db->begin_txn(TxnOptions()), i + 1);
         add_records(*db, 100);
-        ASSERT_OK(db->db->commit_txn());
+        ASSERT_OK(db->db->commit_txn(i + 1));
     }
     run_revert_test(*db);
     for (std::size_t i = 0; i < 100; ++i) {
@@ -468,11 +468,11 @@ TEST_F(DbRevertTests, RevertsUncommittedBatch_5)
 
 TEST_F(DbRevertTests, RevertsVacuum_1)
 {
-    ASSERT_OK(db->db->begin_txn());
+    ASSERT_EQ(db->db->begin_txn(TxnOptions()), 1);
     const auto committed = add_records(*db, 1'000);
-    ASSERT_OK(db->db->commit_txn());
+    ASSERT_OK(db->db->commit_txn(1));
 
-    ASSERT_OK(db->db->begin_txn());
+    ASSERT_EQ(db->db->begin_txn(TxnOptions()), 2);
     auto uncommitted = add_records(*db, 1'000);
     for (std::size_t i = 0; i < 500; ++i) {
         const auto itr = begin(uncommitted);
@@ -487,16 +487,16 @@ TEST_F(DbRevertTests, RevertsVacuum_1)
 
 TEST_F(DbRevertTests, RevertsVacuum_2)
 {
-    ASSERT_OK(db->db->begin_txn());
+    ASSERT_EQ(db->db->begin_txn(TxnOptions()), 1);
     auto committed = add_records(*db, 1'000);
     for (std::size_t i = 0; i < 500; ++i) {
         const auto itr = begin(committed);
         ASSERT_OK(db->db->erase(itr->first));
         committed.erase(itr);
     }
-    ASSERT_OK(db->db->commit_txn());
+    ASSERT_OK(db->db->commit_txn(1));
 
-    ASSERT_OK(db->db->begin_txn());
+    ASSERT_EQ(db->db->begin_txn(TxnOptions()), 2);
     add_records(*db, 1'000);
     ASSERT_OK(db->reopen());
 
@@ -505,14 +505,15 @@ TEST_F(DbRevertTests, RevertsVacuum_2)
 
 TEST_F(DbRevertTests, RevertsVacuum_3)
 {
-    ASSERT_OK(db->db->begin_txn());
+    ASSERT_EQ(db->db->begin_txn(TxnOptions()), 1);
     auto committed = add_records(*db, 1'000);
     for (std::size_t i = 0; i < 900; ++i) {
         const auto itr = begin(committed);
         ASSERT_OK(db->db->erase(itr->first));
         committed.erase(itr);
     }
-    ASSERT_OK(db->db->commit_txn());
+    ASSERT_OK(db->db->commit_txn(1));
+    ASSERT_EQ(db->db->begin_txn(TxnOptions()), 2);
 
     auto uncommitted = add_records(*db, 1'000);
     for (std::size_t i = 0; i < 500; ++i) {
@@ -540,9 +541,9 @@ TEST_F(DbRecoveryTests, RecoversFirstBatch)
 
     {
         TestDatabase db(*env);
-        ASSERT_OK(db.db->begin_txn());
+        ASSERT_EQ(db.db->begin_txn(TxnOptions()), 1);
         snapshot = add_records(db, 1'234);
-        ASSERT_OK(db.db->commit_txn());
+        ASSERT_OK(db.db->commit_txn(1));
 
         // Simulate a crash by cloning the database before cleanup has occurred.
         clone.reset(reinterpret_cast<const tools::FakeEnv &>(*env).clone());
@@ -563,11 +564,11 @@ TEST_F(DbRecoveryTests, RecoversNthBatch)
         TestDatabase db(*env);
 
         for (std::size_t i = 0; i < 10; ++i) {
-            ASSERT_OK(db.db->begin_txn());
+            ASSERT_EQ(db.db->begin_txn(TxnOptions()), i + 1);
             for (const auto &[k, v] : add_records(db, 1'234)) {
                 snapshot[k] = v;
             }
-            ASSERT_OK(db.db->commit_txn());
+            ASSERT_OK(db.db->commit_txn(i + 1));
         }
 
         clone.reset(dynamic_cast<const tools::FakeEnv &>(*env).clone());
@@ -591,9 +592,9 @@ protected:
         env = std::make_unique<tools::FaultInjectionEnv>();
         db = std::make_unique<TestDatabase>(*env);
 
-        EXPECT_OK(db->db->begin_txn());
+        EXPECT_EQ(db->db->begin_txn(TxnOptions()), 1);
         committed = add_records(*db, 10'000);
-        EXPECT_OK(db->db->commit_txn());
+        EXPECT_OK(db->db->commit_txn(1));
     }
     ~DbErrorTests() override = default;
 
@@ -692,12 +693,12 @@ protected:
 
     auto SetUp() -> void override
     {
-        ASSERT_OK(db->db->begin_txn());
+        ASSERT_EQ(db->db->begin_txn(TxnOptions()), 1);
         tools::RandomGenerator random;
         for (const auto &[k, v] : tools::fill_db(*db->db, random, 10'000)) {
             ASSERT_OK(db->db->erase(k));
         }
-        ASSERT_OK(db->db->commit_txn());
+        ASSERT_OK(db->db->commit_txn(1));
         DbErrorTests::SetUp();
     }
 };
@@ -717,13 +718,13 @@ TEST_P(DbFatalErrorTests, ErrorsDuringModificationsAreFatal)
 
 TEST_P(DbFatalErrorTests, OperationsAreNotPermittedAfterFatalError)
 {
-    ASSERT_OK(db->db->begin_txn());
+    ASSERT_EQ(db->db->begin_txn(TxnOptions()), 1);
     auto itr = begin(committed);
     while (db->db->erase(itr++->first).is_ok()) {
         ASSERT_NE(itr, end(committed));
     }
     assert_special_error(db->db->status());
-    assert_special_error(db->db->commit_txn());
+    assert_special_error(db->db->commit_txn(1));
     assert_special_error(db->db->put("key", "value"));
     std::string value;
     assert_special_error(db->db->get("key", &value));
@@ -736,7 +737,7 @@ TEST_P(DbFatalErrorTests, OperationsAreNotPermittedAfterFatalError)
 //       header page count is left incorrect. We should be able to recover from that.
 TEST_P(DbFatalErrorTests, RecoversFromVacuumFailure)
 {
-    ASSERT_OK(db->db->begin_txn());
+    ASSERT_EQ(db->db->begin_txn(TxnOptions()), 1);
     assert_special_error(db->db->vacuum());
     delete db->db;
     db->db = nullptr;
@@ -915,13 +916,13 @@ TEST_F(ApiTests, EmptyKeysAreNotAllowed)
 
 TEST_F(ApiTests, UncommittedTransactionIsRolledBack)
 {
-    ASSERT_OK(db->begin_txn());
+    ASSERT_EQ(db->begin_txn(TxnOptions()), 1);
     ASSERT_OK(db->put("a", "1"));
     ASSERT_OK(db->put("b", "2"));
     ASSERT_OK(db->put("c", "3"));
-    ASSERT_OK(db->commit_txn());
+    ASSERT_OK(db->commit_txn(1));
 
-    ASSERT_OK(db->begin_txn());
+    ASSERT_EQ(db->begin_txn(TxnOptions()), 2);
     ASSERT_OK(db->put("a", "x"));
     ASSERT_OK(db->put("b", "y"));
     ASSERT_OK(db->put("c", "z"));
@@ -939,8 +940,8 @@ TEST_F(ApiTests, UncommittedTransactionIsRolledBack)
 
 TEST_F(ApiTests, EmptyTransactionsAreOk)
 {
-    ASSERT_OK(db->begin_txn());
-    ASSERT_OK(db->commit_txn());
+    ASSERT_EQ(db->begin_txn(TxnOptions()), 1);
+    ASSERT_OK(db->commit_txn(1));
 }
 
 TEST_F(ApiTests, KeysCanBeArbitraryBytes)
@@ -949,11 +950,11 @@ TEST_F(ApiTests, KeysCanBeArbitraryBytes)
     const std::string key_2("\x00\x01", 2);
     const std::string key_3("\x01\x00", 2);
 
-    ASSERT_OK(db->begin_txn());
+    ASSERT_EQ(db->begin_txn(TxnOptions()), 1);
     ASSERT_OK(db->put(key_1, "1"));
     ASSERT_OK(db->put(key_2, "2"));
     ASSERT_OK(db->put(key_3, "3"));
-    ASSERT_OK(db->commit_txn());
+    ASSERT_OK(db->commit_txn(1));
 
     auto *cursor = db->new_cursor();
     cursor->seek_first();
@@ -983,11 +984,11 @@ TEST_F(ApiTests, HandlesLargeKeys)
     const auto key_2 = '\x02' + random.Generate(options.page_size * 100).to_string();
     const auto key_3 = '\x03' + random.Generate(options.page_size * 100).to_string();
 
-    ASSERT_OK(db->begin_txn());
+    ASSERT_EQ(db->begin_txn(TxnOptions()), 1);
     ASSERT_OK(db->put(key_1, "1"));
     ASSERT_OK(db->put(key_2, "2"));
     ASSERT_OK(db->put(key_3, "3"));
-    ASSERT_OK(db->commit_txn());
+    ASSERT_OK(db->commit_txn(1));
 
     auto *cursor = db->new_cursor();
     cursor->seek_first();
@@ -1026,23 +1027,23 @@ public:
 
     auto run_test(std::size_t max_key_size, std::size_t max_value_size)
     {
-        ASSERT_OK(db->begin_txn());
+        ASSERT_EQ(db->begin_txn(TxnOptions()), 1);
         std::unordered_map<std::string, std::string> map;
         for (std::size_t i = 0; i < 100; ++i) {
             const auto key = random_string(max_key_size);
             const auto value = random_string(max_value_size);
             ASSERT_OK(db->put(key, value));
         }
-        ASSERT_OK(db->commit_txn());
+        ASSERT_OK(db->commit_txn(1));
 
-        ASSERT_OK(db->begin_txn());
+        ASSERT_EQ(db->begin_txn(TxnOptions()), 1);
         for (const auto &[key, value] : map) {
             std::string result;
             ASSERT_OK(db->get(key, &result));
             ASSERT_EQ(result, value);
             ASSERT_OK(db->erase(key));
         }
-        ASSERT_OK(db->commit_txn());
+        ASSERT_OK(db->commit_txn(1));
     }
 
     tools::RandomGenerator random {4 * 1'024 * 1'024};
@@ -1073,11 +1074,11 @@ protected:
         ApiTests::SetUp();
 
         tools::RandomGenerator random;
-        ASSERT_OK(db->begin_txn());
+        ASSERT_EQ(db->begin_txn(TxnOptions()), 1);
         commits[false] = tools::fill_db(*db, random, 5'000);
-        ASSERT_OK(db->commit_txn());
+        ASSERT_OK(db->commit_txn(1));
 
-        ASSERT_OK(db->begin_txn());
+        ASSERT_EQ(db->begin_txn(TxnOptions()), 2);
         commits[true] = tools::fill_db(*db, random, 5'678);
         for (const auto &record : commits[false]) {
             commits[true].insert(record);
@@ -1093,7 +1094,7 @@ protected:
     auto run_test(bool persisted) -> void
     {
         ASSERT_OK(db->status());
-        const auto s = db->commit_txn();
+        const auto s = db->commit_txn(2);
         ASSERT_EQ(s.is_ok(), persisted);
         assert_special_error(db->status());
 

@@ -1526,7 +1526,6 @@ TEST_P(VacuumTests, OverflowChainIsNullTerminated)
      ASSERT_OK(test.tree->vacuum_one(Id(5), table_set, &vacuumed));
      ASSERT_TRUE(vacuumed);
      test.pager->set_page_count(4);
-     ASSERT_OK(test.pager->flush_to_disk());
      ASSERT_EQ(test.pager->page_count(), 4);
 
      std::string result;

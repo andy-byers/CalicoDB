@@ -154,10 +154,10 @@ TEST_F(TableTests, VacuumDroppedTable)
 
 TEST_F(TableTests, TableDestructionIsPartOfTransaction)
 {
-    ASSERT_OK(db->begin_txn());
+    ASSERT_EQ(db->begin_txn(TxnOptions()), 1);
     ASSERT_OK(db->drop_table(table));
     table = nullptr;
-    ASSERT_OK(db->commit_txn());
+    ASSERT_OK(db->commit_txn(1));
 
     reopen_db();
 
@@ -423,11 +423,11 @@ private:
         ASSERT_OK(DB::open(options, kFilename, m_db));
 
         // Create some pages before the 2 user tables.
-        ASSERT_OK(m_db->begin_txn());
+        ASSERT_EQ(m_db->begin_txn(TxnOptions()), 1);
         m_committed = tools::fill_db(*m_db, m_random, kRecordCount);
-        ASSERT_OK(m_db->commit_txn());
+        ASSERT_OK(m_db->commit_txn(1));
 
-        ASSERT_OK(m_db->begin_txn());
+        ASSERT_EQ(m_db->begin_txn(TxnOptions()), 2);
         for (std::size_t i = 0; i < num_tables; ++i) {
             m_tables.emplace_back();
             m_records.emplace_back();

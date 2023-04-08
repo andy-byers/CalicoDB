@@ -96,9 +96,9 @@ public:
     [[nodiscard]] auto drop_table(Table *&table) -> Status override;
     auto close_table(Table *&table) -> void override;
 
-    [[nodiscard]] auto begin_txn() -> Status override;
-    [[nodiscard]] auto commit_txn() -> Status override;
-    [[nodiscard]] auto rollback_txn() -> Status override;
+    [[nodiscard]] auto begin_txn(const TxnOptions &options) -> unsigned override;
+    [[nodiscard]] auto commit_txn(unsigned txn) -> Status override;
+    [[nodiscard]] auto rollback_txn(unsigned txn) -> Status override;
 
     [[nodiscard]] auto status() const -> Status override;
     [[nodiscard]] auto vacuum() -> Status override;
@@ -128,11 +128,10 @@ private:
     [[nodiscard]] auto checkpoint_if_needed(bool force = false) -> Status;
     [[nodiscard]] auto load_file_header() -> Status;
 
-    [[nodiscard]] auto ensure_txn_started() -> Status;
-    [[nodiscard]] auto ensure_txn_finished() -> Status;
+    [[nodiscard]] auto ensure_txn_started(bool &implicit_txn) -> Status;
+    [[nodiscard]] auto ensure_txn_finished(bool implicit_txn) -> Status;
     [[nodiscard]] auto do_put(Table &table, const Slice &key, const Slice &value) -> Status;
     [[nodiscard]] auto do_erase(Table &table, const Slice &key) -> Status;
-    [[nodiscard]] auto do_commit() -> Status;
     [[nodiscard]] auto do_vacuum() -> Status;
     [[nodiscard]] auto do_create_table(const TableOptions &options, const std::string &name, Table *&out) -> Status;
     [[nodiscard]] auto do_drop_table(Table *&table) -> Status;
@@ -147,6 +146,9 @@ private:
     Pager *m_pager = nullptr;
     Env *m_env = nullptr;
     LogFile *m_log = nullptr;
+
+    unsigned m_txn = 0;
+    unsigned m_auto_txn = 0;
 
     const std::string m_db_filename;
     const std::string m_wal_filename;

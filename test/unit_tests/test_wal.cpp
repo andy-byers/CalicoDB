@@ -303,7 +303,6 @@ public:
                 m_page_size);
 
             out[i].page_id = Id(pgno[i]);
-            out[i].is_dirty = true;
             if (i != 0) {
                 out[i].prev = &out[i - 1];
             }

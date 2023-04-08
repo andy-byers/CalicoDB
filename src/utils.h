@@ -26,11 +26,11 @@
 #define CALICODB_EXPECT_GT(lhs, rhs) CALICODB_EXPECT_TRUE((lhs) > (rhs))
 #define CALICODB_EXPECT_GE(lhs, rhs) CALICODB_EXPECT_TRUE((lhs) >= (rhs))
 
-#define CALICODB_TRY(expr)                                     \
-    do {                                                       \
-        if (auto __cdb_try_s = (expr); !__cdb_try_s.is_ok()) { \
-            return __cdb_try_s;                                \
-        }                                                      \
+#define CALICODB_TRY(expr)                                               \
+    do {                                                                 \
+        if (auto __calicodb_try_s = (expr); !__calicodb_try_s.is_ok()) { \
+            return __calicodb_try_s;                                     \
+        }                                                                \
     } while (0)
 
 #define ARRAY_SIZE(x) (sizeof(x) / sizeof(x[0]))
@@ -168,7 +168,6 @@ struct DBState {
     std::size_t ckpt_number = 0;
     Id freelist_head;
     bool use_wal = false;
-    bool has_txn = false;
 };
 
 struct TreeStatistics {

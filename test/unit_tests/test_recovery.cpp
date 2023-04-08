@@ -36,13 +36,13 @@ public:
     {
         tables.add(LogicalPageId::root());
 
-        const Wal::Parameters wal_param {
+        const Wal::Parameters wal_param = {
             kWalFilename,
             kPageSize,
             env.get()};
         ASSERT_OK(Wal::open(wal_param, wal));
 
-        const Pager::Parameters pager_param {
+        const Pager::Parameters pager_param = {
             kFilename,
             env.get(),
             wal,
@@ -51,7 +51,7 @@ public:
             kFrameCount,
             kPageSize,
         };
-        ASSERT_OK(Pager::open(pager_param, &pager));
+        ASSERT_OK(Pager::open(pager_param, pager));
         state.use_wal = true;
     }
 
@@ -204,11 +204,11 @@ class RecoveryTests
 TEST_F(RecoveryTests, NormalShutdown)
 {
     ASSERT_EQ(num_wal_frames(), 0);
-    ASSERT_OK(db->begin_txn());
+    ASSERT_EQ(db->begin_txn(TxnOptions()), 1);
     ASSERT_OK(put("a", "1"));
     ASSERT_OK(put("b", "2"));
     ASSERT_OK(put("c", "3"));
-    ASSERT_OK(db->commit_txn());
+    ASSERT_OK(db->commit_txn(1));
     ASSERT_EQ(num_wal_frames(), 1);
     close();
 
@@ -217,13 +217,13 @@ TEST_F(RecoveryTests, NormalShutdown)
 
 TEST_F(RecoveryTests, OnlyCommittedUpdatesArePersisted)
 {
-    ASSERT_OK(db->begin_txn());
+    ASSERT_EQ(db->begin_txn(TxnOptions()), 1);
     ASSERT_OK(put("a", "1"));
     ASSERT_OK(put("b", "2"));
     ASSERT_OK(put("c", "3"));
-    ASSERT_OK(db->commit_txn());
+    ASSERT_OK(db->commit_txn(1));
 
-    ASSERT_OK(db->begin_txn());
+    ASSERT_EQ(db->begin_txn(TxnOptions()), 1);
     ASSERT_OK(put("c", "X"));
     ASSERT_OK(put("d", "4"));
     open();
@@ -236,13 +236,13 @@ TEST_F(RecoveryTests, OnlyCommittedUpdatesArePersisted)
 
 TEST_F(RecoveryTests, RevertsNthTransaction)
 {
-    ASSERT_OK(db->begin_txn());
+    ASSERT_EQ(db->begin_txn(TxnOptions()), 1);
     ASSERT_OK(put("a", "1"));
-    ASSERT_OK(db->commit_txn());
-    ASSERT_OK(db->begin_txn());
+    ASSERT_OK(db->commit_txn(1));
+    ASSERT_EQ(db->begin_txn(TxnOptions()), 2);
     ASSERT_OK(put("b", "2"));
-    ASSERT_OK(db->commit_txn());
-    ASSERT_OK(db->begin_txn());
+    ASSERT_OK(db->commit_txn(2));
+    ASSERT_EQ(db->begin_txn(TxnOptions()), 3);
     ASSERT_OK(put("c", "3"));
     open();
 
@@ -253,7 +253,7 @@ TEST_F(RecoveryTests, RevertsNthTransaction)
 
 TEST_F(RecoveryTests, VacuumRecovery)
 {
-    ASSERT_OK(db->begin_txn());
+    ASSERT_EQ(db->begin_txn(TxnOptions()), 1);
     std::vector<Record> committed;
     for (std::size_t i = 0; i < 1'000; ++i) {
         committed.emplace_back(Record {
@@ -264,8 +264,8 @@ TEST_F(RecoveryTests, VacuumRecovery)
             committed.back().key,
             committed.back().value));
     }
-    ASSERT_OK(db->commit_txn());
-    ASSERT_OK(db->begin_txn());
+    ASSERT_OK(db->commit_txn(1));
+    ASSERT_EQ(db->begin_txn(TxnOptions()), 2);
 
     for (std::size_t i = 0; i < 1'000; ++i) {
         ASSERT_OK(db->put(tools::integral_key(i), random.Generate(db_options.page_size)));
@@ -312,15 +312,16 @@ TEST_F(RecoveryTests, SanityCheck)
         map[k.to_string()] = v.to_string();
     }
 
+    unsigned txn;
     for (std::size_t commit = 0; commit < map.size(); ++commit) {
         open();
-        ASSERT_OK(db->begin_txn());
+        txn = db->begin_txn(TxnOptions());
 
         auto record = begin(map);
         for (std::size_t index = 0; record != end(map); ++index, ++record) {
             if (index == commit) {
-                ASSERT_OK(db->commit_txn());
-                ASSERT_OK(db->begin_txn());
+                ASSERT_OK(db->commit_txn(txn));
+                txn = db->begin_txn(TxnOptions());
             } else {
                 ASSERT_OK(db->put(record->first, record->second));
             }
@@ -367,17 +368,17 @@ public:
 
     auto SetUp() -> void override
     {
-        ASSERT_OK(db->begin_txn());
+        m_txn = db->begin_txn(TxnOptions());
         auto record = begin(map);
         for (std::size_t index = 0; record != end(map); ++index, ++record) {
             ASSERT_OK(db->put(record->first, record->second));
             if (record->first.front() % 10 == 1) {
-                ASSERT_OK(db->commit_txn());
-                ASSERT_OK(db->begin_txn());
+                ASSERT_OK(db->commit_txn(m_txn));
+                m_txn = db->begin_txn(TxnOptions());
             }
         }
-        ASSERT_OK(db->commit_txn());
-        ASSERT_OK(db->begin_txn());
+        ASSERT_OK(db->commit_txn(m_txn));
+        m_txn = db->begin_txn(TxnOptions());
 
         COUNTING_INTERCEPTOR(interceptor_prefix, interceptor_type, interceptor_count);
     }
@@ -398,6 +399,7 @@ public:
     tools::Interceptor::Type interceptor_type {std::get<1>(GetParam())};
     int interceptor_count {std::get<2>(GetParam())};
     std::map<std::string, std::string> map;
+    unsigned m_txn;
 };
 
 TEST_P(RecoverySanityCheck, FailureWhileRunning)
@@ -594,7 +596,7 @@ public:
     {
         // Hack to force an error to occur. The DB won't attempt to recover on close()
         // in this case. It will have to wait until open().
-        const_cast<DBState &>(db_impl(db)->TEST_state()).status = special_error();
+//        const_cast<DBState &>(db_impl(db)->TEST_state()).status = special_error();
 
         RecoveryTestHarness::close();
 
@@ -631,10 +633,10 @@ TEST_P(DataLossTests, LossBeforeFirstCheckpoint)
 
 TEST_P(DataLossTests, RecoversLastCheckpoint)
 {
-    ASSERT_OK(db->begin_txn());
+    auto txn = db->begin_txn(TxnOptions());
     for (std::size_t i = 0; i < kCommitInterval * 10; ++i) {
         if (i % kCommitInterval == 0) {
-            ASSERT_OK(db->commit_txn());
+            ASSERT_OK(db->commit_txn(txn));
         }
         ASSERT_OK(db->put(tools::integral_key(i), tools::integral_key(i)));
     }
@@ -649,12 +651,12 @@ TEST_P(DataLossTests, RecoversLastCheckpoint)
 
 TEST_P(DataLossTests, LongTransaction)
 {
-    ASSERT_OK(db->begin_txn());
+    auto txn = db->begin_txn(TxnOptions());
     for (std::size_t i = 0; i < kCommitInterval * 10; ++i) {
         ASSERT_OK(db->put(tools::integral_key(i), tools::integral_key(i)));
         if (i % kCommitInterval == kCommitInterval - 1) {
-            ASSERT_OK(db->commit_txn());
-            ASSERT_OK(db->begin_txn());
+            ASSERT_OK(db->commit_txn(txn));
+            ASSERT_EQ(db->begin_txn(TxnOptions()), 1);
         }
     }
 

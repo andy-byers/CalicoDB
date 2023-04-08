@@ -5,6 +5,7 @@
 #ifndef CALICODB_DB_H
 #define CALICODB_DB_H
 
+#include "options.h"
 #include "status.h"
 #include <vector>
 
@@ -15,39 +16,6 @@ class Cursor;
 class Env;
 class LogFile;
 class Table;
-struct TableOptions;
-
-struct Options {
-    // Size of a database page in bytes. This is the basic unit of I/O for the
-    // database file. Data is read/written in page-sized chunks. Must be a power-
-    // of-two between 512 and 65536, inclusive.
-    std::size_t page_size = 16'384; // 16 KB
-
-    // Size of the page cache in bytes. Must be at least 16 pages (see above).
-    std::size_t cache_size = 4'194'304; // 4 MB
-
-    // Alternate filename to use for the WAL. If empty, creates the WAL at
-    // "dbname-wal", where "dbname" is the name of the database.
-    std::string wal_filename;
-
-    // Custom destination for info log messages. Defaults to writing to a file
-    // called "dbname-log", where "dbname" is the name of the database. See env.h
-    // for details.
-    LogFile *info_log = nullptr;
-
-    // Custom storage environment. See env.h for details.
-    Env *env = nullptr;
-
-    // If true, create the database if it is missing.
-    bool create_if_missing = true;
-
-    // If true, return with an error if the database already exists.
-    bool error_if_exists = false;
-
-    // If true, sync the WAL file on every commit. Hurts performance quite a bit,
-    // but provides extra durability.
-    bool sync = false;
-};
 
 // On-disk collection of tables.
 class DB
@@ -125,20 +93,22 @@ public:
     //
     // If this method is not called, each modification is wrapped in its own write transaction.
     // It is the caller's responsibility to finish the transaction by calling either commit_txn()
-    // or rollback_txn(). A pending transaction will be rolled back when the DB is closed.
-    [[nodiscard]] virtual auto begin_txn() -> Status = 0;
+    // or rollback_txn(). A pending transaction will be rolled back when the DB is closed. Returns
+    // a unique integer representing the transaction. If a transaction has already been started,
+    // that transaction's identifier will be returned.
+    [[nodiscard]] virtual auto begin_txn(const TxnOptions &options) -> unsigned = 0;
 
     // Commit an explicit write transaction.
     //
-    // Commits all modifications since begin_txn() was called to the database. This includes
+    // Commits all modifications made during transaction "txn" to the database. This includes
     // creation and dropping of tables.
-    [[nodiscard]] virtual auto commit_txn() -> Status = 0;
+    [[nodiscard]] virtual auto commit_txn(unsigned txn) -> Status = 0;
 
     // Rollback an explicit write transaction.
     //
-    // Rolls back all modifications since begin_txn() was called, including creation and dropping
+    // Rolls back all modifications for transaction "txn", including creation and dropping
     // of tables.
-    [[nodiscard]] virtual auto rollback_txn() -> Status = 0;
+    [[nodiscard]] virtual auto rollback_txn(unsigned txn) -> Status = 0;
 
     // Get a heap-allocated cursor over the contents of "table".
     //

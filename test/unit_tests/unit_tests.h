@@ -156,7 +156,7 @@ public:
                                   kFrameCount,
                                   kPageSize,
                               },
-                              &temp));
+                              temp));
         pager.reset(temp);
         state.use_wal = false;
     }
