@@ -308,7 +308,7 @@ auto Pager::purge_state() -> void
 auto Pager::checkpoint() -> Status
 {
     CALICODB_EXPECT_TRUE(
-        m_mode == kOpen || // Normal checkpoint, right after a commit
+        m_mode == kOpen ||                // Normal checkpoint, right after a commit
         (m_mode == kError && m_in_ckpt)); // Attempt to fix a failed checkpoint
 
     m_in_ckpt = true;
@@ -498,7 +498,7 @@ auto Pager::upgrade(Page &page) -> void
 {
     CALICODB_EXPECT_TRUE(
         !m_state->use_wal || // In initialization routine
-        m_mode >= kWrite); // Transaction has started
+        m_mode >= kWrite);   // Transaction has started
 
     if (!page.entry()->is_dirty) {
         dirty_page(*page.entry());

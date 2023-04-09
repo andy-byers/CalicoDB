@@ -409,7 +409,7 @@ public:
     {
         // Hack to force an error to occur. The DB won't attempt to recover on close()
         // in this case. It will have to wait until open().
-//        const_cast<DBState &>(db_impl(db)->TEST_state()).status = special_error();
+        //        const_cast<DBState &>(db_impl(db)->TEST_state()).status = special_error();
 
         RecoveryTestHarness::close();
 

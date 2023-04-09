@@ -45,23 +45,23 @@ namespace calicodb
         dynamic_cast<tools::FaultInjectionEnv &>(*env).clear_interceptors(); \
     } while (0)
 
-#define QUICK_INTERCEPTOR(filename__, type__)                                  \
-    do {                                                                     \
-        dynamic_cast<tools::FaultInjectionEnv &>(*env)                       \
-            .add_interceptor(filename__, tools::Interceptor {(type__), [] {  \
-                                                     return special_error(); \
-                                                 }});                        \
+#define QUICK_INTERCEPTOR(filename__, type__)                                            \
+    do {                                                                                 \
+        dynamic_cast<tools::FaultInjectionEnv &>(*env)                                   \
+            .add_interceptor(filename__, tools::Interceptor {(type__), [] {              \
+                                                                 return special_error(); \
+                                                             }});                        \
     } while (0)
 
-#define COUNTING_INTERCEPTOR(filename__, type__, n__)                                   \
-    do {                                                                              \
-        dynamic_cast<tools::FaultInjectionEnv &>(*env)                                \
-            .add_interceptor(filename__, tools::Interceptor {(type__), [&n = (n__)] { \
-                                                     if (n-- <= 0) {                  \
-                                                         return special_error();      \
-                                                     }                                \
-                                                     return Status::ok();             \
-                                                 }});                                 \
+#define COUNTING_INTERCEPTOR(filename__, type__, n__)                                        \
+    do {                                                                                     \
+        dynamic_cast<tools::FaultInjectionEnv &>(*env)                                       \
+            .add_interceptor(filename__, tools::Interceptor {(type__), [&n = (n__)] {        \
+                                                                 if (n-- <= 0) {             \
+                                                                     return special_error(); \
+                                                                 }                           \
+                                                                 return Status::ok();        \
+                                                             }});                            \
     } while (0)
 
 static constexpr auto kExpectationMatcher = "^expectation";

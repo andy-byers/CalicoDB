@@ -13,7 +13,7 @@ namespace calicodb
 
 AlignedBuffer::AlignedBuffer(std::size_t size, std::size_t alignment)
     : m_data(
-          new(std::align_val_t {alignment}) char[size](),
+          new (std::align_val_t {alignment}) char[size](),
           Deleter {std::align_val_t {alignment}})
 {
     CALICODB_EXPECT_TRUE(is_power_of_two(alignment));

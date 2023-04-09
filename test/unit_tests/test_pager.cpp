@@ -142,10 +142,10 @@ public:
     static constexpr auto kWalFilename = "./wal";
     static constexpr std::size_t kPagerFrames = kMinFrameCount; // Number of frames available to the pager
     static constexpr std::size_t kSomePages = kPagerFrames / 5; // Just a few pages
-    static constexpr std::size_t kFullCache = kPagerFrames; // Enough pages to fill the page cache
+    static constexpr std::size_t kFullCache = kPagerFrames;     // Enough pages to fill the page cache
     static constexpr std::size_t kManyPages = kPagerFrames * 5; // Lots of pages, enough to cause many evictions
     static constexpr U32 kPageSize = kMinPageSize;
-    
+
     auto init() -> void
     {
         ASSERT_NE(env, nullptr);
@@ -171,7 +171,7 @@ public:
         ASSERT_OK(m_pager->commit_txn());
         m_state.use_wal = true;
     }
-    
+
     virtual ~PagerWalTestHarness()
     {
         m_pager->TEST_validate();
@@ -435,7 +435,7 @@ TEST_F(PagerTests, RandomPageUsage)
 
     ASSERT_TRUE(m_pager->begin_txn());
     write_pages(*this, 0, is.size());
-    for (auto i  : is) {
+    for (auto i : is) {
         acquire_write_release(Id(i + 1), tools::integral_key<16>(i + 42));
     }
     ASSERT_OK(m_pager->commit_txn());
@@ -586,7 +586,6 @@ TEST_F(TruncationTests, PurgeRootDeathTest)
     ASSERT_DEATH(m_pager->set_page_count(0), "expect");
 }
 #endif // NDEBUG
-
 
 class RandomDirtyListBuilder
 {
@@ -907,7 +906,7 @@ public:
         if (!s.is_ok()) {
             return;
         }
-        
+
         const Pager::Parameters pager_param = {
             kDBFilename,
             env,
@@ -917,7 +916,7 @@ public:
             kPagerFrames,
             kPageSize,
         };
-        
+
         s = Pager::open(pager_param, m_pager);
         m_state.use_wal = true;
         if (!s.is_ok()) {
@@ -976,7 +975,7 @@ public:
         m_pager = nullptr;
         m_wal = nullptr;
     }
-    
+
     tools::RandomGenerator random;
     int m_counter = 0;
     bool m_completed = false;

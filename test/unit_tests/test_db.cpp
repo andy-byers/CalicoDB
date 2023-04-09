@@ -86,29 +86,29 @@ TEST(BasicDestructionTests, OnlyDeletesCalicoDatabases)
     delete options.env;
 }
 
- TEST(BasicDestructionTests, OnlyDeletesCalicoWals)
+TEST(BasicDestructionTests, OnlyDeletesCalicoWals)
 {
-     Options options;
-     options.env = new tools::FakeEnv;
-     options.wal_filename = "./wal";
+    Options options;
+    options.env = new tools::FakeEnv;
+    options.wal_filename = "./wal";
 
-     DB *db;
-     ASSERT_OK(DB::open(options, "./test", db));
-     delete db;
+    DB *db;
+    ASSERT_OK(DB::open(options, "./test", db));
+    delete db;
 
-     // These files are not part of the DB.
-     File *editor;
-     ASSERT_OK(options.env->new_file("./wal_", editor));
-     delete editor;
-     ASSERT_OK(options.env->new_file("./test.db", editor));
-     delete editor;
+    // These files are not part of the DB.
+    File *editor;
+    ASSERT_OK(options.env->new_file("./wal_", editor));
+    delete editor;
+    ASSERT_OK(options.env->new_file("./test.db", editor));
+    delete editor;
 
-     ASSERT_OK(DB::destroy(options, "./test"));
-     ASSERT_TRUE(options.env->file_exists("./wal_"));
-     ASSERT_TRUE(options.env->file_exists("./test.db"));
+    ASSERT_OK(DB::destroy(options, "./test"));
+    ASSERT_TRUE(options.env->file_exists("./wal_"));
+    ASSERT_TRUE(options.env->file_exists("./test.db"));
 
-     delete options.env;
- }
+    delete options.env;
+}
 
 class BasicDatabaseTests
     : public OnDiskTest,
@@ -176,13 +176,13 @@ TEST_F(BasicDatabaseTests, OpensAndCloses)
         ASSERT_OK(DB::open(options, kFilename, db));
         delete db;
 
-        File*file;
-        ASSERT_OK(env->new_file(kFilename,file));
+        File *file;
+        ASSERT_OK(env->new_file(kFilename, file));
         std::size_t fs;
-        ASSERT_OK(env->file_size(kFilename,fs));
-        std::string fd(fs,'\0');
-        ASSERT_OK(file->read_exact(0,fs,fd.data()));
-        std::cerr<<escape_string(fd)<<"\n\n";
+        ASSERT_OK(env->file_size(kFilename, fs));
+        std::string fd(fs, '\0');
+        ASSERT_OK(file->read_exact(0, fs, fd.data()));
+        std::cerr << escape_string(fd) << "\n\n";
     }
     ASSERT_TRUE(env->file_exists(kFilename));
 }

@@ -1604,7 +1604,7 @@ static constexpr auto kLinkContentOffset = Id::kSize;
 auto NodeManager::allocate(Pager &pager, Node &out, std::string &scratch, bool is_external) -> Status
 {
     CALICODB_TRY(pager.allocate(out.page));
-    
+
     // Should not be a pointer map page.
     CALICODB_EXPECT_NE(PointerMap::lookup(pager, out.page.id()), out.page.id());
 
@@ -2095,25 +2095,25 @@ class TreeValidator
     }
 
 public:
-//    static auto validate_freelist(Tree &tree, Id head) -> void
-//    {
-//        auto &pager = *tree.m_pager;
-//        auto &freelist = tree.freelist;
-//        if (freelist.is_empty()) {
-//            return;
-//        }
-//        CHECK_TRUE(!head.is_null());
-//        Page page;
-//        CHECK_OK(pager.acquire(head, page));
-//
-//        Id parent_id;
-//        traverse_chain(pager, std::move(page), [&](const auto &link) {
-//            Id found_id;
-//            CHECK_OK(tree.find_parent_id(link.id(), found_id));
-//            CHECK_TRUE(found_id == parent_id);
-//            parent_id = link.id();
-//        });
-//    }
+    //    static auto validate_freelist(Tree &tree, Id head) -> void
+    //    {
+    //        auto &pager = *tree.m_pager;
+    //        auto &freelist = tree.freelist;
+    //        if (freelist.is_empty()) {
+    //            return;
+    //        }
+    //        CHECK_TRUE(!head.is_null());
+    //        Page page;
+    //        CHECK_OK(pager.acquire(head, page));
+    //
+    //        Id parent_id;
+    //        traverse_chain(pager, std::move(page), [&](const auto &link) {
+    //            Id found_id;
+    //            CHECK_OK(tree.find_parent_id(link.id(), found_id));
+    //            CHECK_TRUE(found_id == parent_id);
+    //            parent_id = link.id();
+    //        });
+    //    }
 
     static auto validate_tree(const Tree &tree) -> void
     {
@@ -2219,7 +2219,7 @@ public:
 
 auto Tree::TEST_validate() -> void
 {
-//    TreeValidator::validate_freelist(*this, *freelist.m_head);
+    //    TreeValidator::validate_freelist(*this, *freelist.m_head);
     TreeValidator::validate_tree(*this);
 }
 

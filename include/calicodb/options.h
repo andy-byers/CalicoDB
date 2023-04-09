@@ -57,7 +57,6 @@ struct TableOptions {
 };
 
 struct TxnOptions {
-
 };
 
 } // namespace calicodb

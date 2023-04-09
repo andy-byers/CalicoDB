@@ -90,7 +90,7 @@ auto FakeEnv::remove_file(const std::string &filename) -> Status
         return Status::not_found('"' + filename + "\" does not exist");
     }
     // Don't actually get rid of any memory. We should be able to unlink a file and still access it
-    // through open file descriptors, so if anyone has this file open, they should still be able to 
+    // through open file descriptors, so if anyone has this file open, they should still be able to
     // access it.
     itr->second.created = false;
     return Status::ok();
