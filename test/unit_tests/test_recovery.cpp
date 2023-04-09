@@ -16,11 +16,8 @@ class RecoveryTestHarness
 {
 public:
     static constexpr auto kPageSize = kMinPageSize;
-    static constexpr auto kFilename = "./test";
-    static constexpr auto kWalFilename = "./wal";
 
     RecoveryTestHarness()
-        : db_prefix {kFilename}
     {
         env = std::make_unique<EnvType>();
         db_options.wal_filename = kWalFilename;
@@ -57,7 +54,7 @@ public:
         if (opts.env == nullptr) {
             opts.env = env.get();
         }
-        return DB::open(opts, db_prefix, db);
+        return DB::open(opts, kDBFilename, db);
     }
 
     auto open(Options *options = nullptr) -> void
@@ -101,7 +98,6 @@ public:
     tools::RandomGenerator random {1024 * 1024 * 4};
     std::unique_ptr<EnvType> env;
     Options db_options;
-    std::string db_prefix;
     DB *db = nullptr;
 };
 
@@ -133,7 +129,7 @@ TEST_F(RecoveryTests, OnlyCommittedUpdatesArePersisted)
     ASSERT_OK(put("c", "3"));
     ASSERT_OK(db->commit_txn(1));
 
-    ASSERT_EQ(db->begin_txn(TxnOptions()), 1);
+    ASSERT_EQ(db->begin_txn(TxnOptions()), 2);
     ASSERT_OK(put("c", "X"));
     ASSERT_OK(put("d", "4"));
     open();
@@ -250,7 +246,7 @@ TEST_F(RecoveryTests, SanityCheck)
         }
         close();
 
-        ASSERT_OK(DB::destroy(db_options, db_prefix));
+        ASSERT_OK(DB::destroy(db_options, kDBFilename));
     }
 }
 
@@ -306,8 +302,8 @@ public:
     }
 
     std::string interceptor_prefix;
-    tools::Interceptor::Type interceptor_type {std::get<1>(GetParam())};
-    int interceptor_count {std::get<2>(GetParam())};
+    tools::Interceptor::Type interceptor_type = std::get<1>(GetParam());
+    int interceptor_count = std::get<2>(GetParam());
     std::map<std::string, std::string> map;
     unsigned m_txn;
 };
@@ -424,7 +420,7 @@ public:
 
     auto drop_unsynced_db_data() const -> void
     {
-        env->drop_after_last_sync(kFilename);
+        env->drop_after_last_sync(kDBFilename);
     }
 };
 

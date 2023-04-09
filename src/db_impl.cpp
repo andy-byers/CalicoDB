@@ -31,22 +31,20 @@ static constexpr auto decode_page_size(unsigned header_page_size) -> U32
 
 static auto unrecognized_txn(unsigned have_txn, unsigned want_txn)
 {
-    std::string msg("unrecognized txn number ");
-    append_number(msg, have_txn);
-    if (want_txn) {
-        msg.append(" current txn is ");
-        append_number(msg, want_txn);
-    } else {
-        msg.append(" (txn has not been started)");
-    }
-    return Status::invalid_argument(msg);
+    std::string message;
+    write_to_string(
+        message,
+        "unrecognized txn number %u (current txn is %u)",
+        have_txn,
+        want_txn);
+    return Status::invalid_argument(message);
 }
 
 Table::~Table() = default;
 
-TableImpl::TableImpl(std::string name, TableState *state, Id table_id)
+TableImpl::TableImpl(std::string name, TableState &state, Id table_id)
     : m_name(std::move(name)),
-      m_state(state),
+      m_state(&state),
       m_id(table_id)
 {
 }
@@ -171,7 +169,6 @@ auto DBImpl::open(const Options &sanitized) -> Status
         page_size,
     };
     CALICODB_TRY(Pager::open(pager_param, m_pager));
-    m_pager->m_mode = Pager::kWrite;
 
     if (db_exists) {
         m_pager->load_state(header);
@@ -205,6 +202,12 @@ auto DBImpl::open(const Options &sanitized) -> Status
         m_pager->purge_state();
         CALICODB_TRY(load_file_header());
     } else {
+        // Write the initial file header containing the page size.
+        auto root = m_pager->acquire_root();
+        m_pager->upgrade(root);
+        header.write(root.data());
+        m_pager->release(std::move(root));
+
         // Commit the initial transaction. Since the WAL is not enabled, this will write
         // to the DB file and call fsync(). The dirty page set should include the root
         // page, the pointer map page on page 2, and the root of the default table.
@@ -369,9 +372,8 @@ auto DBImpl::get_property(const Slice &name, std::string *out) const -> bool
 
 auto DBImpl::new_cursor(const Table &table) const -> Cursor *
 {
-    const auto *state = table_impl(table).state();
-    CALICODB_EXPECT_NE(state, nullptr);
-    auto *cursor = CursorInternal::make_cursor(*state->tree);
+    const auto &state = table_impl(table).state();
+    auto *cursor = CursorInternal::make_cursor(*state.tree);
     if (m_pager->mode() == Pager::kError) {
         CALICODB_EXPECT_FALSE(m_state.status.is_ok());
         CursorInternal::invalidate(*cursor, m_state.status);
@@ -384,9 +386,7 @@ auto DBImpl::get(const Table &table, const Slice &key, std::string *value) const
     if (m_pager->mode() == Pager::kError) {
         return status();
     }
-    const auto *state = table_impl(table).state();
-    CALICODB_EXPECT_NE(state, nullptr);
-    return state->tree->get(key, value);
+    return table_impl(table).state().tree->get(key, value);
 }
 
 auto DBImpl::put(Table &table, const Slice &key, const Slice &value) -> Status
@@ -407,26 +407,23 @@ auto DBImpl::erase(Table &table, const Slice &key) -> Status
 
 auto DBImpl::do_put(Table &table, const Slice &key, const Slice &value) -> Status
 {
-    auto *state = table_impl(table).state();
-    CALICODB_EXPECT_NE(state, nullptr);
-
-    if (!state->write) {
+    auto &state = table_impl(table).state();
+    if (!state.write) {
         return Status::invalid_argument("table is not writable");
     }
     if (key.is_empty()) {
         return Status::invalid_argument("key is empty");
     }
-    return state->tree->put(key, value, nullptr);
+    return state.tree->put(key, value, nullptr);
 }
 
 auto DBImpl::do_erase(Table &table, const Slice &key) -> Status
 {
-    auto *state = table_impl(table).state();
-    CALICODB_EXPECT_NE(state, nullptr);
-    if (!state->write) {
+    auto &state = table_impl(table).state();
+    if (!state.write) {
         return Status::invalid_argument("table is not writable");
     }
-    return state->tree->erase(key);
+    return state.tree->erase(key);
 }
 
 auto DBImpl::vacuum() -> Status
@@ -444,8 +441,8 @@ auto DBImpl::do_vacuum() -> Status
     CALICODB_TRY(get_table_info(table_names, &table_roots));
 
     Id target(m_pager->page_count());
-    auto *state = table_impl(*m_root).state();
-    auto *tree = state->tree;
+    auto &state = table_impl(*m_root).state();
+    auto *tree = state.tree;
 
     const auto original = target;
     for (;; --target.value) {
@@ -612,9 +609,8 @@ auto DBImpl::do_create_table(const TableOptions &options, const std::string &nam
         CALICODB_EXPECT_EQ(m_tables.get(Id::root()), nullptr);
         root_id = LogicalPageId::root();
     } else {
-        const auto *state = table_impl(*m_root).state();
-        CALICODB_EXPECT_NE(state, nullptr);
-        s = state->tree->get(name, &value);
+        const auto &state = table_impl(*m_root).state();
+        s = state.tree->get(name, &value);
         if (s.is_ok()) {
             s = decode_logical_id(value, &root_id);
         } else if (s.is_not_found()) {
@@ -636,7 +632,7 @@ auto DBImpl::do_create_table(const TableOptions &options, const std::string &nam
         state->tree = new Tree(*m_pager, root_id.page_id, &state->stats);
         state->write = options.mode == AccessMode::kReadWrite;
         state->open = true;
-        out = new TableImpl(name, state, root_id.table_id);
+        out = new TableImpl(name, *state, root_id.table_id);
     }
     return Status::ok();
 }
@@ -646,13 +642,12 @@ auto DBImpl::close_table(Table *&table) -> void
     if (table == nullptr || table == default_table()) {
         return;
     }
-    auto *state = table_impl(*table).state();
-    CALICODB_EXPECT_NE(state, nullptr);
+    auto &state = table_impl(*table).state();
 
-    delete state->tree;
-    state->tree = nullptr;
-    state->write = false;
-    state->open = false;
+    delete state.tree;
+    state.tree = nullptr;
+    state.write = false;
+    state.open = false;
     delete table;
 }
 
@@ -684,7 +679,7 @@ auto DBImpl::do_drop_table(Table *&table) -> Status
     delete cursor;
 
     auto &impl = table_impl(*table);
-    s = remove_empty_table(table->name(), *impl.state());
+    s = remove_empty_table(table->name(), impl.state());
 
     m_tables.erase(impl.id());
     delete table;
@@ -696,8 +691,8 @@ auto DBImpl::construct_new_table(const Slice &name, LogicalPageId &root_id) -> S
 {
     // Find the first available table ID.
     auto table_id = Id::root();
-    for (const auto &itr : m_tables) {
-        if (itr == nullptr) {
+    for (const auto *state : m_tables) {
+        if (state == nullptr) {
             break;
         }
         ++table_id.value;
@@ -711,8 +706,8 @@ auto DBImpl::construct_new_table(const Slice &name, LogicalPageId &root_id) -> S
 
     // Write an entry for the new table in the root table. This will not increase the
     // record count for the database.
-    auto *root_state = table_impl(*m_root).state();
-    return root_state->tree->put(name, Slice(payload, LogicalPageId::kSize));
+    auto &root_state = table_impl(*m_root).state();
+    return root_state.tree->put(name, Slice(payload, LogicalPageId::kSize));
 }
 
 auto DBImpl::remove_empty_table(const std::string &name, TableState &state) -> Status
@@ -725,8 +720,8 @@ auto DBImpl::remove_empty_table(const std::string &name, TableState &state) -> S
     if (root.header.cell_count != 0) {
         return Status::io_error("table could not be emptied");
     }
-    auto *root_state = table_impl(*m_root).state();
-    CALICODB_TRY(root_state->tree->erase(name));
+    auto &root_state = table_impl(*m_root).state();
+    CALICODB_TRY(root_state.tree->erase(name));
     tree->upgrade(root);
     return tree->destroy(std::move(root));
 }

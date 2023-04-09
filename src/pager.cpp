@@ -21,7 +21,7 @@ auto Pager::mode() const -> Mode
 auto Pager::purge_entry(CacheEntry &victim) -> void
 {
     if (victim.is_dirty) {
-        clean_page(victim);
+        dirtylist_remove(victim);
     }
     m_frames.unpin(victim);
     // Invalidates storage for "victim".
@@ -105,34 +105,29 @@ auto Pager::open(const Parameters &param, Pager *&out) -> Status
         param.page_size);
 
     out = new Pager(param, *file, std::move(buffer));
-
-    // The rest of this method serves to allocate/acquire the root page (the
-    // first page in the file) via the usual routines, then move its cache
-    // entry to a dedicated member variable. The root page stays in memory
-    // as long as the pager is alive (it is refreshed after a rollback).
-    Page p;
-    Status s;
-    if (exists) {
-        s = out->acquire(Id::root(), p);
-    } else {
-        s = out->allocate(p);
-    }
+    auto s = out->initialize_root(!exists);
     if (!s.is_ok()) {
         delete out;
         out = nullptr;
     }
-    // Copy metadata and frame pointer.
-    out->m_root = *p.entry();
-    out->release(std::move(p));
-    out->m_cache.erase(Id::root());
-    if (out->m_dirty) {
+    return s;
+}
+
+auto Pager::initialize_root(bool fresh_pager) -> Status
+{
+    // Dedicate a slot in the buffer for the root page, but don't actually put it
+    // in the page cache.
+    m_root.page_id = Id::root();
+    m_frames.pin(m_root);
+
+    auto s = populate_entry(m_root);
+    if (s.is_ok() && fresh_pager) {
         // If this is a new file, the root page is dirty since it was just
-        // allocated. Fix the invalid dirty list reference.
-        CALICODB_EXPECT_FALSE(exists);
-        out->m_dirty = &out->m_root;
-        out->m_mode = kDirty;
-        CALICODB_EXPECT_FALSE(out->m_dirty->prev);
-        CALICODB_EXPECT_FALSE(out->m_dirty->next);
+        // allocated.
+        m_root.is_dirty = true;
+        m_dirty = &m_root;
+        m_mode = kDirty;
+        ++m_page_count;
     }
     return s;
 }
@@ -177,7 +172,7 @@ auto Pager::page_size() const -> std::size_t
     return m_frames.page_size();
 }
 
-auto Pager::dirty_page(CacheEntry &entry) -> void
+auto Pager::dirtylist_add(CacheEntry &entry) -> void
 {
     CALICODB_EXPECT_FALSE(entry.is_dirty);
     if (m_dirty) {
@@ -190,7 +185,7 @@ auto Pager::dirty_page(CacheEntry &entry) -> void
     m_dirty = &entry;
 }
 
-auto Pager::clean_page(CacheEntry &entry) -> CacheEntry *
+auto Pager::dirtylist_remove(CacheEntry &entry) -> CacheEntry *
 {
     CALICODB_EXPECT_TRUE(m_dirty);
     CALICODB_EXPECT_FALSE(m_dirty->prev);
@@ -256,8 +251,12 @@ auto Pager::commit_txn() -> Status
             m_dirty = &m_root;
         }
 
-        m_mode = kOpen;
-        return set_status(flush_to_disk());
+        auto s = flush_to_disk();
+        if (s.is_ok()) {
+            m_mode = kOpen;
+            m_saved_count = m_page_count;
+        }
+        return set_status(s);
     }
     return Status::ok();
 }
@@ -280,9 +279,10 @@ auto Pager::rollback_txn() -> Status
         s = populate_entry(m_root);
     }
     if (s.is_ok()) {
-        purge_state();
+        m_page_count = m_saved_count;
         m_state->status = Status::ok();
         m_mode = kOpen;
+        purge_state();
     } else {
         m_mode = kError;
     }
@@ -308,8 +308,8 @@ auto Pager::purge_state() -> void
 auto Pager::checkpoint() -> Status
 {
     CALICODB_EXPECT_TRUE(
-        m_mode == kOpen ||                // Normal checkpoint, right after a commit
-        (m_mode == kError && m_in_ckpt)); // Attempt to fix a failed checkpoint
+        (m_mode == kOpen && !m_in_ckpt) || // Normal checkpoint, right after a commit
+        (m_mode == kError && m_in_ckpt));  // Attempt to fix a failed checkpoint
 
     m_in_ckpt = true;
     auto s = wal_checkpoint();
@@ -350,7 +350,7 @@ auto Pager::flush_to_disk() -> Status
                 // decreasing the page count. Just remove the page from the dirty list. It
                 // wouldn't be transferred back to the DB on checkpoint anyway since it is
                 // out of bounds.
-                p = clean_page(*p);
+                p = dirtylist_remove(*p);
             } else {
                 p->is_dirty = false;
             }
@@ -365,7 +365,7 @@ auto Pager::flush_to_disk() -> Status
         return m_wal->write(p, m_page_count);
     }
 
-    for (auto *p = m_dirty; p; p = clean_page(*p)) {
+    for (auto *p = m_dirty; p; p = dirtylist_remove(*p)) {
         CALICODB_TRY(write_page_to_file(*p));
     }
     return m_file->sync();
@@ -401,7 +401,7 @@ auto Pager::ensure_available_frame() -> Status
         CALICODB_EXPECT_NE(victim, nullptr);
 
         if (victim->is_dirty) {
-            clean_page(*victim);
+            dirtylist_remove(*victim);
 
             if (m_state->use_wal) {
                 // Write just this page to the WAL. DB page count is 0 here because this write
@@ -501,7 +501,7 @@ auto Pager::upgrade(Page &page) -> void
         m_mode >= kWrite);   // Transaction has started
 
     if (!page.entry()->is_dirty) {
-        dirty_page(*page.entry());
+        dirtylist_add(*page.entry());
         if (m_mode == kWrite) {
             m_mode = kDirty;
         }

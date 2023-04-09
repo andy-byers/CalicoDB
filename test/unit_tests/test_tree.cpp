@@ -68,7 +68,8 @@ public:
         freelist = std::make_unique<Freelist>(*pager, freelist_head);
 
         Node root;
-        ASSERT_OK(NodeManager::allocate(*pager, root, node_scratch, true));
+        ASSERT_OK(NodeManager::acquire(*pager, Id::root(), root, node_scratch, true));
+        root.header.is_external = true;
         NodeManager::release(*pager, std::move(root));
     }
 

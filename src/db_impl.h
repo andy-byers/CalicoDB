@@ -43,7 +43,7 @@ public:
     friend class DBImpl;
 
     ~TableImpl() override = default;
-    explicit TableImpl(std::string name, TableState *state, Id table_id);
+    explicit TableImpl(std::string name, TableState &state, Id table_id);
 
     [[nodiscard]] auto name() const -> const std::string & override
     {
@@ -55,14 +55,19 @@ public:
         return m_id;
     }
 
-    [[nodiscard]] auto state() const -> TableState *
+    [[nodiscard]] auto state() -> TableState &
     {
-        return m_state;
+        return *m_state;
+    }
+
+    [[nodiscard]] auto state() const -> const TableState &
+    {
+        return *m_state;
     }
 
 private:
     std::string m_name;
-    TableState *m_state = nullptr;
+    TableState *m_state;
     Id m_id;
 };
 

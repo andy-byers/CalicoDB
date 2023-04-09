@@ -428,20 +428,20 @@ private:
     mutable Engine m_rng; // Not in LevelDB.
 
 public:
-    explicit RandomGenerator(std::size_t size = 16 /* KiB */ * 1'024);
+    explicit RandomGenerator(std::size_t size = 256 /* KiB */ * 1'024);
     auto Generate(std::size_t len) const -> Slice;
 
     // Not in LevelDB.
     auto Next(U64 t_max) const -> U64
     {
-        std::uniform_int_distribution<U64> dist {0, t_max};
+        std::uniform_int_distribution<U64> dist(0, t_max);
         return dist(m_rng);
     }
 
     // Not in LevelDB.
     auto Next(U64 t_min, U64 t_max) const -> U64
     {
-        std::uniform_int_distribution<U64> dist {t_min, t_max};
+        std::uniform_int_distribution<U64> dist(t_min, t_max);
         return dist(m_rng);
     }
 };

@@ -117,6 +117,11 @@ public:
         return m_unpinned.size();
     }
 
+    [[nodiscard]] auto refsum() const -> std::size_t
+    {
+        return m_refsum;
+    }
+
     // Disable move and copy.
     auto operator=(FrameManager &) -> void = delete;
     FrameManager(FrameManager &) = delete;

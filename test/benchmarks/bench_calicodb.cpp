@@ -32,6 +32,7 @@ class Benchmark final
     static constexpr auto kFilename = "__bench_db__";
     static constexpr std::size_t kKeyLength = 16;
     static constexpr std::size_t kNumRecords = 10'000;
+    unsigned m_txn;
 
 public:
     explicit Benchmark(const Parameters &param = {})
@@ -42,7 +43,7 @@ public:
         m_options.cache_size = 4'194'304;
         m_options.sync = param.sync;
         CHECK_OK(calicodb::DB::open(m_options, kFilename, m_db));
-        CHECK_OK(m_db->begin_txn());
+        m_txn = m_db->begin_txn(calicodb::TxnOptions());
     }
 
     ~Benchmark()
@@ -152,8 +153,8 @@ public:
                 calicodb::tools::integral_key<kKeyLength>(i),
                 m_random.Generate(m_param.value_length)));
         }
-        CHECK_OK(m_db->commit_txn());
-        CHECK_OK(m_db->begin_txn());
+        CHECK_OK(m_db->commit_txn(m_txn));
+        m_txn = m_db->begin_txn(calicodb::TxnOptions());
         m_cursor = m_db->new_cursor();
     }
 
@@ -171,8 +172,8 @@ private:
     auto maybe_commit() -> void
     {
         if (m_counters[0] % m_param.commit_interval == m_param.commit_interval - 1) {
-            CHECK_OK(m_db->commit_txn());
-            CHECK_OK(m_db->begin_txn());
+            CHECK_OK(m_db->commit_txn(m_txn));
+            m_txn = m_db->begin_txn(calicodb::TxnOptions());
         }
     }
 

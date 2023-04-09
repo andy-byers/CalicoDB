@@ -95,6 +95,7 @@ public:
 
 private:
     explicit Pager(const Parameters &param, File &file, AlignedBuffer buffer);
+    [[nodiscard]] auto initialize_root(bool fresh_pager) -> Status;
     [[nodiscard]] auto populate_entry(CacheEntry &out) -> Status;
     [[nodiscard]] auto cache_entry(Id page_id, CacheEntry *&out) -> Status;
     [[nodiscard]] auto read_page_from_file(CacheEntry &entry) const -> Status;
@@ -103,8 +104,8 @@ private:
     [[nodiscard]] auto wal_checkpoint() -> Status;
     auto purge_state() -> void;
     auto purge_entry(CacheEntry &victim) -> void;
-    auto dirty_page(CacheEntry &entry) -> void;
-    auto clean_page(CacheEntry &entry) -> CacheEntry *;
+    auto dirtylist_add(CacheEntry &entry) -> void;
+    auto dirtylist_remove(CacheEntry &entry) -> CacheEntry *;
 
     mutable std::size_t m_bytes_read = 0;
     mutable std::size_t m_bytes_written = 0;
@@ -132,6 +133,7 @@ private:
     Env *m_env = nullptr;
     Wal *m_wal = nullptr;
     std::size_t m_page_count = 0;
+    std::size_t m_saved_count = 0;
 };
 
 struct PointerMap {

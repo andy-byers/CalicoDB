@@ -20,6 +20,9 @@
 namespace calicodb
 {
 
+static constexpr auto kDBFilename = "./test";
+static constexpr auto kWalFilename = "./wal";
+
 [[nodiscard]] static auto db_impl(const DB *db) -> const DBImpl *
 {
     return reinterpret_cast<const DBImpl *>(db);

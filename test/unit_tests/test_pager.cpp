@@ -14,6 +14,11 @@
 namespace calicodb
 {
 
+[[nodiscard]] static auto make_key(U64 k) -> std::string
+{
+    return tools::integral_key<16>(k);
+}
+
 [[nodiscard]] static auto make_cache_entry(U64 id_value) -> CacheEntry
 {
     return {.page_id = Id(id_value)};
@@ -237,6 +242,27 @@ public:
         return message;
     }
 
+    [[nodiscard]] auto create_freelist_pages(std::size_t n) const -> Status
+    {
+        CHECK_TRUE(n < kPagerFrames);
+        std::vector<Page> pages;
+        for (std::size_t i = 0; i < n; ++i) {
+            Page page;
+            // Use the real allocate method (not fake_allocate()), which doesn't hand out pointer map pages.
+            // We should not destroy pointer map pages; doing so indicates a programming error. Pointer map
+            // pages are destroyed naturally when the file shrinks (and the last page is never a pointer map
+            // page, unless the DB was unable to allocate the page following it: a state which requires a
+            // rollback anyway).
+            CALICODB_TRY(m_pager->allocate(page));
+            pages.emplace_back(std::move(page));
+        }
+        while (!pages.empty()) {
+            CALICODB_TRY(m_pager->destroy(std::move(pages.back())));
+            pages.pop_back();
+        }
+        return Status::ok();
+    }
+    
     [[nodiscard]] auto read_from_db_file(Id id, std::size_t size) const
     {
         File *file;
@@ -314,7 +340,7 @@ template <class Test>
 static auto write_pages(Test &test, std::size_t key_offset, std::size_t num_pages, std::size_t acquire_offset = 0)
 {
     for (std::size_t i = 0; i < num_pages; ++i) {
-        const auto message = tools::integral_key<16>(i + key_offset);
+        const auto message = make_key(i + key_offset);
         test.acquire_write_release(Id(acquire_offset + i + 1), message);
     }
 }
@@ -324,7 +350,7 @@ static auto read_and_check(Test &test, std::size_t key_offset, std::size_t num_p
 {
     for (std::size_t i = 0; i < num_pages; ++i) {
         const Id page_id(i + 1);
-        const auto message = tools::integral_key<16>(i + key_offset);
+        const auto message = make_key(i + key_offset);
         if (from_file) {
             ASSERT_EQ(test.read_from_db_file(page_id, 16), message)
                 << "mismatch on page " << page_id.value << " read from file";
@@ -390,6 +416,28 @@ TEST_F(PagerTests, BasicRollbacks)
     read_and_check(*this, 123, kManyPages);
 }
 
+TEST_F(PagerTests, RollbackPageCounts)
+{
+    ASSERT_TRUE(m_pager->begin_txn());
+    write_pages(*this, 0, 10);
+    ASSERT_EQ(m_pager->page_count(), 10);
+    ASSERT_OK(m_pager->rollback_txn());
+    ASSERT_EQ(m_pager->page_count(), 1);
+
+    ASSERT_EQ(m_pager->page_count(), 1);
+    ASSERT_TRUE(m_pager->begin_txn());
+    write_pages(*this, 123, 10);
+    ASSERT_EQ(m_pager->page_count(), 10);
+    ASSERT_OK(m_pager->commit_txn());
+
+    ASSERT_TRUE(m_pager->begin_txn());
+    write_pages(*this, 456, 20);
+    ASSERT_EQ(m_pager->page_count(), 20);
+    ASSERT_OK(m_pager->rollback_txn());
+    ASSERT_EQ(m_pager->page_count(), 10);
+    read_and_check(*this, 123, 10);
+}
+
 TEST_F(PagerTests, BasicCheckpoints)
 {
     for (std::size_t i = 0; i < 10; ++i) {
@@ -420,7 +468,7 @@ TEST_F(PagerTests, ReverseSequentialPageUsage)
 
     for (std::size_t i = 0; i < kManyPages; ++i) {
         const auto j = kManyPages - i - 1;
-        acquire_write_release(Id(j + 1), tools::integral_key<16>(j + 42));
+        acquire_write_release(Id(j + 1), make_key(j + 42));
     }
     ASSERT_OK(m_pager->commit_txn());
     read_and_check(*this, 42, kManyPages);
@@ -436,7 +484,7 @@ TEST_F(PagerTests, RandomPageUsage)
     ASSERT_TRUE(m_pager->begin_txn());
     write_pages(*this, 0, is.size());
     for (auto i : is) {
-        acquire_write_release(Id(i + 1), tools::integral_key<16>(i + 42));
+        acquire_write_release(Id(i + 1), make_key(i + 42));
     }
     ASSERT_OK(m_pager->commit_txn());
     read_and_check(*this, 42, is.size());
@@ -517,15 +565,68 @@ TEST_F(PagerTests, AcquirePastEOF)
     read_and_check(*this, 42, kOutOfBounds);
 }
 
-#ifndef NDEBUG
-TEST_F(PagerTests, InvalidModeDeathTests)
+TEST_F(PagerTests, FreelistUsage)
 {
+    ASSERT_TRUE(m_pager->begin_txn());
+    ASSERT_OK(create_freelist_pages(kSomePages * 2));
+    write_pages(*this, 123, kSomePages * 2);
+    ASSERT_OK(m_pager->commit_txn());
+    read_and_check(*this, 123, kSomePages * 2);
+
+    ASSERT_TRUE(m_pager->begin_txn());
+    write_pages(*this, 456, kSomePages);
+    ASSERT_OK(m_pager->rollback_txn());
+    read_and_check(*this, 123, kSomePages * 2);
+
+    ASSERT_OK(m_pager->checkpoint());
+    read_and_check(*this, 123, kSomePages * 2);
+    read_and_check(*this, 123, kSomePages * 2, true);
+}
+
+#ifndef NDEBUG
+TEST_F(PagerTests, InvalidModeDeathTest)
+{
+    ASSERT_EQ(m_pager->mode(), Pager::kOpen);
     ASSERT_DEATH((void)m_pager->commit_txn(), "expect");
     ASSERT_DEATH((void)m_pager->rollback_txn(), "expect");
 
     m_pager->set_status(Status::io_error("I/O error"));
+    ASSERT_EQ(m_pager->mode(), Pager::kError);
     ASSERT_DEATH((void)m_pager->begin_txn(), "expect");
     ASSERT_DEATH((void)m_pager->checkpoint(), "expect");
+}
+
+TEST_F(PagerTests, DoubleFreeDeathTest)
+{
+    ASSERT_TRUE(m_pager->begin_txn());
+    for (std::size_t i = 0; i < 2; ++i) {
+        for (std::size_t j = 0; j < 2; ++j) {
+            Page page;
+            ASSERT_OK(m_pager->allocate(page));
+
+            if (i) {
+                m_pager->release(std::move(page));
+            } else {
+                ASSERT_OK(m_pager->destroy(std::move(page)));
+            }
+
+            if (j) {
+                ASSERT_DEATH(m_pager->release(std::move(page)), "expect");
+            } else {
+                ASSERT_DEATH((void)m_pager->destroy(std::move(page)), "expect");
+            }
+        }
+    }
+    ASSERT_OK(m_pager->commit_txn());
+}
+
+TEST_F(PagerTests, DestroyPointerMapPageDeathTest)
+{
+    ASSERT_TRUE(m_pager->begin_txn());
+    Page page;
+    ASSERT_OK(m_pager->acquire(Id(2), page));
+    ASSERT_DEATH((void)m_pager->destroy(std::move(page)), "expect");
+    ASSERT_OK(m_pager->commit_txn());
 }
 #endif // NDEBUG
 
@@ -564,13 +665,14 @@ TEST_F(TruncationTests, OnlyValidPagesAreCheckpointed)
 
     std::size_t file_size;
     ASSERT_OK(env->file_size(kDBFilename, file_size));
-    ASSERT_EQ(file_size, 0);
+    ASSERT_EQ(file_size, kPageSize)
+        << "root page was not allocated";
 
     ASSERT_OK(m_pager->commit_txn());
 
     // When the WAL is enabled, the DB file is not written until checkpoint.
     ASSERT_OK(env->file_size(kDBFilename, file_size));
-    ASSERT_EQ(file_size, 0);
+    ASSERT_EQ(file_size, kPageSize);
 
     // If there are still cached pages past the truncation position, they will be
     // written back to disk here, causing the file size to be incorrect.
@@ -592,7 +694,7 @@ class RandomDirtyListBuilder
 public:
     explicit RandomDirtyListBuilder(std::size_t page_size)
         : m_page_size(page_size),
-          m_random(page_size * 32 + 123)
+          m_random(page_size * 256)
     {
     }
 
@@ -685,15 +787,12 @@ TEST_F(WalTests, EmptyWalIsRemovedOnClose)
 
 TEST_F(WalTests, WritingEmptyDirtyListIsNOOP)
 {
-    std::size_t initial_size;
-    ASSERT_OK(env->file_size(kFilename, initial_size));
-
     ASSERT_OK(m_wal->write(nullptr, 0));
     ASSERT_OK(m_wal->write(nullptr, 0));
 
     std::size_t file_size;
     ASSERT_OK(env->file_size(kFilename, file_size));
-    ASSERT_EQ(file_size, initial_size);
+    ASSERT_LT(file_size, kPageSize);
 }
 
 class WalParamTests
@@ -727,7 +826,7 @@ protected:
         // The same "num_pages" is used each time, so every page in the builder's internal buffer
         // will be overwritten. We should get back the most-recent version of each page when the
         // WAL is queried.
-        static constexpr std::size_t kNumDuplicates = 1; // TODO: 3
+        static constexpr std::size_t kNumDuplicates = 3;
         for (std::size_t i = 0; i < kNumDuplicates; ++i) {
             std::vector<U32> pgno(num_pages);
             std::iota(begin(pgno), end(pgno), 1);
@@ -797,7 +896,15 @@ protected:
         }
     }
 
-    auto test_operations() -> void
+    auto reopen_wals() -> void
+    {
+        // Leave the fake WAL alone. The real WAL should run its index recovery routine
+        // to get back to the state it was in before it was closed.
+        ASSERT_OK(Wal::close(m_wal));
+        ASSERT_OK(Wal::open(m_param, m_wal));
+    }
+
+    auto test_operations(bool reopen = false) -> void
     {
         for (std::size_t iteration = 0; iteration < m_iterations; ++iteration) {
             const auto is_commit = m_commit_interval && iteration % m_commit_interval == m_commit_interval - 1;
@@ -805,6 +912,9 @@ protected:
             if (!is_commit) {
                 ASSERT_OK(m_wal->abort());
                 ASSERT_OK(m_fake->abort());
+            }
+            if (reopen) {
+                reopen_wals();
             }
             read_and_check_records();
             run_and_validate_checkpoint(is_commit);
@@ -830,6 +940,11 @@ TEST_P(WalParamTests, WriteAndReadBack)
 TEST_P(WalParamTests, Operations)
 {
     test_operations();
+}
+
+TEST_P(WalParamTests, Recovery)
+{
+    test_operations(true);
 }
 
 INSTANTIATE_TEST_SUITE_P(
@@ -887,10 +1002,6 @@ public:
         env = new tools::FaultInjectionEnv;
     }
 
-    auto interceptor_callback()
-    {
-        return m_counter-- <= 0 ? special_error() : Status::ok();
-    }
 
     auto run_setup_and_operations()
     {
@@ -934,7 +1045,7 @@ public:
         for (auto i : indices) {
             Page page;
             const Id page_id(i + 1);
-            const auto message = tools::integral_key<16>(i);
+            const auto message = make_key(i);
             s = m_pager->acquire(page_id, page);
             if (!s.is_ok()) {
                 break;

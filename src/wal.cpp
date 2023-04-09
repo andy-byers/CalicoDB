@@ -775,6 +775,7 @@ auto WalImpl::write(const CacheEntry *dirty, std::size_t db_size) -> Status
         m_hdr.frame_cksum[1] = cksum[1];
 
         CALICODB_TRY(m_file->write(0, Slice(header, sizeof(header))));
+        CALICODB_TRY(m_file->sync());
     }
 
     // Write each dirty page to the WAL.
