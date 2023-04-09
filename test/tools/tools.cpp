@@ -69,7 +69,7 @@ auto FakeEnv::get_memory(const std::string &filename) const -> Memory &
 auto FakeEnv::new_file(const std::string &filename, File *&out) -> Status
 {
     auto &mem = get_memory(filename);
-    out = new FakeFile {filename, *this, mem};
+    out = new FakeFile(filename, *this, mem);
     if (!mem.created) {
         mem.created = true;
         mem.buffer.clear();
@@ -85,14 +85,13 @@ auto FakeEnv::new_log_file(const std::string &, LogFile *&out) -> Status
 
 auto FakeEnv::remove_file(const std::string &filename) -> Status
 {
-    auto &mem = get_memory(filename);
     auto itr = m_memory.find(filename);
     if (itr == end(m_memory)) {
-        return Status::not_found("cannot remove file");
+        return Status::not_found('"' + filename + "\" does not exist");
     }
     // Don't actually get rid of any memory. We should be able to unlink a file and still access it
-    // through open file descriptors, so if any readers or writers have this file put, they should
-    // still be able to use it.
+    // through open file descriptors, so if anyone has this file open, they should still be able to 
+    // access it.
     itr->second.created = false;
     return Status::ok();
 }
@@ -101,7 +100,7 @@ auto FakeEnv::resize_file(const std::string &filename, std::size_t size) -> Stat
 {
     auto itr = m_memory.find(filename);
     if (itr == end(m_memory)) {
-        return Status::io_error("cannot resize file");
+        return Status::not_found('"' + filename + "\" does not exist");
     }
     itr->second.buffer.resize(size);
     return Status::ok();
@@ -154,23 +153,78 @@ auto FakeEnv::get_children(const std::string &dirname, std::vector<std::string> 
 
 auto FakeEnv::clone() const -> Env *
 {
-    auto *env = new FaultInjectionEnv;
+    auto *env = new FakeEnv;
     env->m_memory = m_memory;
     return env;
 }
 
+static auto fake_env(Env &env) -> FakeEnv &
+{
+    return reinterpret_cast<FakeEnv &>(env);
+}
+
+static auto fake_env(const Env &env) -> const FakeEnv &
+{
+    return reinterpret_cast<const FakeEnv &>(env);
+}
+
+auto DataLossEnv::save_file_contents(const std::string &filename) -> void
+{
+    m_save_states.insert_or_assign(filename, read_file_to_string(*target(), filename));
+}
+
+auto DataLossEnv::overwrite_file(const std::string &filename, const std::string &contents) -> void
+{
+    write_string_to_file(*target(), filename, contents);
+
+    auto mem = fake_env(*target()).memory().find(filename);
+    CALICODB_EXPECT_NE(mem, end(fake_env(*target()).memory()));
+    mem->second.buffer.resize(contents.size());
+}
+
+auto DataLossEnv::drop_after_last_sync() -> void
+{
+    for (const auto &[filename, _] : fake_env(*target()).memory()) {
+        drop_after_last_sync(filename);
+    }
+}
+
+auto DataLossEnv::drop_after_last_sync(const std::string &filename) -> void
+{
+    const auto buf = m_save_states.find(filename);
+    if (buf != end(m_save_states)) {
+        overwrite_file(filename, buf->second);
+    } else {
+        overwrite_file(filename, "");
+    }
+}
+
+auto DataLossEnv::new_file(const std::string &filename, File *&out) -> Status
+{
+    CHECK_OK(target()->new_file(filename, out));
+    out = new DataLossFile(filename, *out, *this);
+    return Status::ok();
+}
+
 auto FaultInjectionEnv::try_intercept_syscall(Interceptor::Type type, const std::string &filename) -> Status
 {
-    for (const auto &interceptor : m_interceptors) {
-        if (interceptor.type == type && filename.find(interceptor.prefix) == 0) {
-            CALICODB_TRY(interceptor());
+    for (const auto &[name, interceptors] : m_interceptors) {
+        if (name != filename) {
+            continue;
+        }
+        for (const auto &interceptor : interceptors) {
+            if (interceptor.type == type) {
+                return interceptor.callback();
+            }
         }
     }
     return Status::ok();
 }
-auto FaultInjectionEnv::add_interceptor(Interceptor interceptor) -> void
+
+auto FaultInjectionEnv::add_interceptor(const std::string &filename, Interceptor interceptor) -> void
 {
-    m_interceptors.emplace_back(std::move(interceptor));
+    auto [group, _] = m_interceptors.insert({filename, {}});
+    group->second.emplace_back(std::move(interceptor));
 }
 
 auto FaultInjectionEnv::clear_interceptors() -> void
@@ -178,31 +232,46 @@ auto FaultInjectionEnv::clear_interceptors() -> void
     m_interceptors.clear();
 }
 
+auto FaultInjectionEnv::clear_interceptors(const std::string &filename) -> void
+{
+    auto group = m_interceptors.find(filename);
+    if (group != end(m_interceptors)) {
+        group->second.clear();
+    }
+}
+
+FaultInjectionFile::~FaultInjectionFile()
+{
+    delete m_target;
+}
+
 auto FaultInjectionFile::read(std::size_t offset, std::size_t size, char *scratch, Slice *out) -> Status
 {
-    TRY_INTERCEPT_FROM(reinterpret_cast<FaultInjectionEnv &>(*m_parent), Interceptor::kRead, m_filename);
-    return FakeFile::read(offset, size, scratch, out);
+    TRY_INTERCEPT_FROM(parent(), Interceptor::kRead, m_target->filename());
+    return m_target->read(offset, size, scratch, out);
 }
 
 auto FaultInjectionFile::write(std::size_t offset, const Slice &in) -> Status
 {
-    TRY_INTERCEPT_FROM(reinterpret_cast<FaultInjectionEnv &>(*m_parent), Interceptor::kWrite, m_filename);
-    return FakeFile::write(offset, in);
+    TRY_INTERCEPT_FROM(parent(), Interceptor::kWrite, m_target->filename());
+    return m_target->write(offset, in);
 }
 
 auto FaultInjectionFile::sync() -> Status
 {
-    TRY_INTERCEPT_FROM(reinterpret_cast<FaultInjectionEnv &>(*m_parent), Interceptor::kSync, m_filename);
-    return FakeFile::sync();
+    TRY_INTERCEPT_FROM(parent(), Interceptor::kSync, m_target->filename());
+    return m_target->sync();
 }
 
 auto FaultInjectionEnv::new_file(const std::string &filename, File *&out) -> Status
 {
     TRY_INTERCEPT_FROM(*this, Interceptor::kOpen, filename);
-    FakeFile *file;
-    CALICODB_TRY(FakeEnv::new_file(filename, reinterpret_cast<File *&>(file)));
-    out = new FaultInjectionFile(*file);
-    delete file;
+    DataLossFile *file;
+    CALICODB_TRY(DataLossEnv::new_file(filename, reinterpret_cast<File *&>(file)));
+    // DataLossEnv doesn't drop data unless it is told to. Each time a file is opened, get rid of
+    // everything we didn't explicitly fsync().
+    drop_after_last_sync(filename);
+    out = new FaultInjectionFile(file);
     return Status::ok();
 }
 
@@ -210,7 +279,7 @@ auto FaultInjectionEnv::new_log_file(const std::string &filename, LogFile *&out)
 {
     TRY_INTERCEPT_FROM(*this, Interceptor::kOpen, filename);
     FakeLogFile *file;
-    CALICODB_TRY(FakeEnv::new_log_file(filename, reinterpret_cast<LogFile *&>(file)));
+    CALICODB_TRY(DataLossEnv::new_log_file(filename, reinterpret_cast<LogFile *&>(file)));
     out = new FaultInjectionLogFile;
     delete file;
     return Status::ok();
@@ -219,41 +288,41 @@ auto FaultInjectionEnv::new_log_file(const std::string &filename, LogFile *&out)
 auto FaultInjectionEnv::remove_file(const std::string &filename) -> Status
 {
     TRY_INTERCEPT_FROM(*this, Interceptor::kUnlink, filename);
-    return FakeEnv::remove_file(filename);
+    return DataLossEnv::remove_file(filename);
 }
 
 auto FaultInjectionEnv::resize_file(const std::string &filename, std::size_t size) -> Status
 {
     TRY_INTERCEPT_FROM(*this, Interceptor::kResize, filename);
-    return FakeEnv::resize_file(filename, size);
+    return DataLossEnv::resize_file(filename, size);
 }
 
 auto FaultInjectionEnv::rename_file(const std::string &old_filename, const std::string &new_filename) -> Status
 {
     TRY_INTERCEPT_FROM(*this, Interceptor::kRename, old_filename);
-    return FakeEnv::rename_file(old_filename, new_filename);
+    return DataLossEnv::rename_file(old_filename, new_filename);
 }
 
 auto FaultInjectionEnv::file_size(const std::string &filename, std::size_t &out) const -> Status
 {
-    return FakeEnv::file_size(filename, out);
+    return DataLossEnv::file_size(filename, out);
 }
 
 auto FaultInjectionEnv::file_exists(const std::string &filename) const -> bool
 {
-    return FakeEnv::file_exists(filename);
+    return DataLossEnv::file_exists(filename);
 }
 
 auto FaultInjectionEnv::get_children(const std::string &dirname, std::vector<std::string> &out) const -> Status
 {
-    return FakeEnv::get_children(dirname, out);
+    return DataLossEnv::get_children(dirname, out);
 }
 
 auto FaultInjectionEnv::clone() const -> Env *
 {
-    auto *env = new FaultInjectionEnv;
-    env->m_memory = m_memory;
-    env->m_interceptors = m_interceptors;
+    auto *env = fake_env(*target()).clone();
+    reinterpret_cast<FaultInjectionEnv *>(env)
+        ->m_interceptors = m_interceptors;
     return env;
 }
 
@@ -320,16 +389,28 @@ auto read_file_to_string(Env &env, const std::string &filename) -> std::string
 {
     std::size_t file_size;
     CHECK_OK(env.file_size(filename, file_size));
-
     std::string buffer(file_size, '\0');
 
     File *file;
     CHECK_OK(env.new_file(filename, file));
-
     CHECK_OK(file->read_exact(0, file_size, buffer.data()));
-
     delete file;
+
     return buffer;
+}
+
+auto write_string_to_file(Env &env, const std::string &filename, std::string buffer, long offset) -> void
+{
+    std::size_t write_pos;
+    if (offset < 0) {
+        CHECK_OK(env.file_size(filename, write_pos));
+    } else {
+        write_pos = offset;
+    }
+    File *file;
+    CHECK_OK(env.new_file(filename, file));
+    CHECK_OK(file->write(write_pos, buffer.data()));
+    delete file;
 }
 
 auto fill_db(DB &db, RandomGenerator &random, std::size_t num_records, std::size_t max_payload_size) -> std::map<std::string, std::string>

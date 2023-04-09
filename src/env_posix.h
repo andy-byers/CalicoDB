@@ -14,6 +14,7 @@ namespace calicodb
 
 [[nodiscard]] auto split_path(const std::string &filename) -> std::pair<std::string, std::string>;
 [[nodiscard]] auto join_paths(const std::string &lhs, const std::string &rhs) -> std::string;
+[[nodiscard]] auto cleanup_path(const std::string &filename) -> std::string;
 
 class PosixFile : public File
 {

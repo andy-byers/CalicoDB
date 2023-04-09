@@ -7,12 +7,12 @@
 
 #include "calicodb/cursor.h"
 #include "page.h"
+#include "pager.h"
 #include <optional>
 
 namespace calicodb
 {
 
-class Pager;
 class TableSet;
 struct Node;
 
@@ -112,27 +112,6 @@ auto write_cell(Node &node, std::size_t index, const Cell &cell) -> std::size_t;
 // Erase a cell from the node at the specified index.
 auto erase_cell(Node &node, std::size_t index) -> void;
 
-// Freelist management. The freelist is essentially a linked list that is threaded through the database. Each freelist
-// link page contains a pointer to the next freelist link page, or to Id::null() if it is the last link. Pages that are
-// no longer needed by the tree are placed at the front of the freelist. When more pages are needed, the freelist is
-// checked first. Only if it is empty do we allocate a page from the end of the file.
-class Freelist
-{
-    friend class Tree;
-
-    Pager *m_pager = nullptr;
-    Id *m_head = nullptr;
-
-public:
-    explicit Freelist(Pager &pager, Id &head);
-    [[nodiscard]] auto is_empty() const -> bool;
-    [[nodiscard]] auto pop(Page &page) -> Status;
-    [[nodiscard]] auto push(Page page) -> Status;
-};
-
-[[nodiscard]] auto read_next_id(const Page &page) -> Id;
-auto write_next_id(Page &page, Id next_id) -> void;
-
 // TODO: This implementation takes a shortcut and reads fragmented keys into a temporary buffer.
 //       This isn't necessary: we could iterate through, page by page, and compare bytes as we encounter
 //       them. It's just a bit more complicated.
@@ -158,49 +137,25 @@ public:
     [[nodiscard]] auto seek(const Cell &cell, bool *found = nullptr) -> Status;
 };
 
-struct PointerMap {
-    enum Type : char {
-        kTreeNode,
-        kTreeRoot,
-        kOverflowHead,
-        kOverflowLink,
-        kFreelistLink,
-    };
-
-    struct Entry {
-        Id back_ptr;
-        Type type;
-    };
-
-    // Find the page ID of the pointer map page that holds the back pointer for page "page_id".
-    [[nodiscard]] static auto lookup(const Pager &pager, Id page_id) -> Id;
-
-    // Read an entry from the pointer map.
-    [[nodiscard]] static auto read_entry(Pager &pager, Id page_id, Entry &entry) -> Status;
-
-    // Write an entry to the pointer map.
-    [[nodiscard]] static auto write_entry(Pager &pager, Id page_id, Entry entry) -> Status;
-};
-
 struct NodeManager {
-    [[nodiscard]] static auto allocate(Pager &pager, Freelist &freelist, Node &out, std::string &scratch, bool is_external) -> Status;
+    [[nodiscard]] static auto allocate(Pager &pager, Node &out, std::string &scratch, bool is_external) -> Status;
     [[nodiscard]] static auto acquire(Pager &pager, Id page_id, Node &out, std::string &scratch, bool upgrade) -> Status;
-    [[nodiscard]] static auto destroy(Freelist &freelist, Node node) -> Status;
+    [[nodiscard]] static auto destroy(Pager &pager, Node node) -> Status;
     static auto upgrade(Pager &pager, Node &node) -> void;
     static auto release(Pager &pager, Node node) -> void;
 };
 
 struct OverflowList {
     [[nodiscard]] static auto read(Pager &pager, Id head_id, std::size_t offset, std::size_t size, char *scratch) -> Status;
-    [[nodiscard]] static auto write(Pager &pager, Freelist &freelist, Id &out, const Slice &first, const Slice &second = {}) -> Status;
-    [[nodiscard]] static auto copy(Pager &pager, Freelist &freelist, Id overflow_id, std::size_t size, Id &out) -> Status;
-    [[nodiscard]] static auto erase(Pager &pager, Freelist &freelist, Id head_id) -> Status;
+    [[nodiscard]] static auto write(Pager &pager, Id &out, const Slice &first, const Slice &second = {}) -> Status;
+    [[nodiscard]] static auto copy(Pager &pager, Id overflow_id, std::size_t size, Id &out) -> Status;
+    [[nodiscard]] static auto erase(Pager &pager, Id head_id) -> Status;
 };
 
 struct PayloadManager {
 
-    [[nodiscard]] static auto emplace(Pager &pager, Freelist &freelist, char *scratch, Node &node, const Slice &key, const Slice &value, std::size_t index) -> Status;
-    [[nodiscard]] static auto promote(Pager &pager, Freelist &freelist, char *scratch, Cell &cell, Id parent_id) -> Status;
+    [[nodiscard]] static auto emplace(Pager &pager, char *scratch, Node &node, const Slice &key, const Slice &value, std::size_t index) -> Status;
+    [[nodiscard]] static auto promote(Pager &pager, char *scratch, Cell &cell, Id parent_id) -> Status;
     [[nodiscard]] static auto collect_key(Pager &pager, std::string &scratch, const Cell &cell, Slice *key) -> Status;
     [[nodiscard]] static auto collect_value(Pager &pager, std::string &scratch, const Cell &cell, Slice *value) -> Status;
 };
@@ -208,12 +163,12 @@ struct PayloadManager {
 class Tree
 {
 public:
-    explicit Tree(Pager &pager, Id root_id, Id &freelist_head, TreeStatistics *stats);
-    [[nodiscard]] static auto create(Pager &pager, Id table_id, Id &freelist_head, Id *out) -> Status;
+    explicit Tree(Pager &pager, Id root_id, TreeStatistics *stats);
+    [[nodiscard]] static auto create(Pager &pager, Id table_id, Id *out) -> Status;
     [[nodiscard]] auto put(const Slice &key, const Slice &value, bool *exists = nullptr) -> Status;
     [[nodiscard]] auto get(const Slice &key, std::string *value) const -> Status;
     [[nodiscard]] auto erase(const Slice &key) -> Status;
-    [[nodiscard]] auto vacuum_one(Id target, TableSet &tables, bool *success = nullptr) -> Status;
+    [[nodiscard]] auto vacuum_one(Id target, Freelist &freelist, TableSet &tables, bool *success = nullptr) -> Status;
     [[nodiscard]] auto allocate(bool is_external, Node &out) -> Status;
     [[nodiscard]] auto acquire(Id page_id, bool upgrade, Node &out) const -> Status;
     [[nodiscard]] auto destroy(Node node) -> Status;
@@ -230,7 +185,7 @@ private:
         bool exact = false;
     };
 
-    [[nodiscard]] auto vacuum_step(Page &free, TableSet &tables, Id last_id) -> Status;
+    [[nodiscard]] auto vacuum_step(Page &free, Freelist &freelist, TableSet &tables, Id last_id) -> Status;
     [[nodiscard]] auto resolve_overflow(Node node) -> Status;
     [[nodiscard]] auto resolve_underflow(Node node, const Slice &anchor) -> Status;
     [[nodiscard]] auto split_root(Node root, Node &out) -> Status;
@@ -273,7 +228,6 @@ private:
     mutable std::string m_node_scratch;
     mutable std::string m_cell_scratch;
     mutable std::string m_anchor;
-    Freelist m_freelist;
     Pager *m_pager = nullptr;
     Id m_root_id;
 };

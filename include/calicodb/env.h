@@ -74,6 +74,7 @@ class EnvWrapper : public Env
 public:
     explicit EnvWrapper(Env &env);
     [[nodiscard]] auto target() -> Env *;
+    [[nodiscard]] auto target() const -> const Env *;
 
     ~EnvWrapper() override;
     [[nodiscard]] auto new_file(const std::string &path, File *&out) -> Status override;

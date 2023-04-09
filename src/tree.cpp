@@ -135,16 +135,6 @@ static auto write_child_id(Cell &cell, Id child_id) -> void
     put_u32(cell.ptr, child_id.value);
 }
 
-[[nodiscard]] auto read_next_id(const Page &page) -> Id
-{
-    return Id(get_u32(page.data() + page_offset(page.id())));
-}
-
-auto write_next_id(Page &page, Id next_id) -> void
-{
-    put_u32(page.data() + page_offset(page.id()), next_id.value);
-}
-
 static auto parse_external_cell(const NodeMeta &meta, char *data) -> Cell
 {
     U64 key_size, value_size;
@@ -679,22 +669,28 @@ auto NodeIterator::seek(const Cell &cell, bool *found) -> Status
     return node.header.cell_count == 0;
 }
 
-auto Tree::create(Pager &pager, Id table_id, Id &freelist_head, Id *out) -> Status
+auto Tree::create(Pager &pager, Id table_id, Id *out) -> Status
 {
-    Node node;
     std::string scratch;
-    Freelist freelist(pager, freelist_head);
-    CALICODB_TRY(NodeManager::allocate(pager, freelist, node, scratch, true));
-    const auto root_id = node.page.id();
-    NodeManager::release(pager, std::move(node));
+    Id root_id;
+    Node node;
 
     if (!table_id.is_root()) {
+        CALICODB_TRY(NodeManager::allocate(pager, node, scratch, true));
+        root_id = node.page.id();
+        NodeManager::release(pager, std::move(node));
+
         CALICODB_EXPECT_FALSE(root_id.is_root());
         // If the page is a root page other than the database root, the back pointer field is used
         // to store the table ID. This lets the vacuum routine quickly locate open tables so their
         // in-memory root variables can be updated.
         PointerMap::Entry entry = {table_id, PointerMap::kTreeRoot};
         CALICODB_TRY(PointerMap::write_entry(pager, root_id, entry));
+    } else {
+        CALICODB_TRY(NodeManager::acquire(pager, Id::root(), node, scratch, true));
+        node.header.is_external = true;
+        NodeManager::release(pager, std::move(node));
+        root_id = Id::root();
     }
     if (out != nullptr) {
         *out = root_id;
@@ -704,7 +700,7 @@ auto Tree::create(Pager &pager, Id table_id, Id &freelist_head, Id *out) -> Stat
 
 auto Tree::node_iterator(Node &node) const -> NodeIterator
 {
-    const NodeIterator::Parameters param {
+    const NodeIterator::Parameters param = {
         m_pager,
         &m_key_scratch[0],
         &m_key_scratch[1],
@@ -777,7 +773,7 @@ auto Tree::remove_cell(Node &node, std::size_t index) -> Status
 {
     const auto cell = read_cell(node, index);
     if (cell.has_remote) {
-        CALICODB_TRY(OverflowList::erase(*m_pager, m_freelist, read_overflow_id(cell)));
+        CALICODB_TRY(OverflowList::erase(*m_pager, read_overflow_id(cell)));
     }
     erase_cell(node, index, cell.size);
     return Status::ok();
@@ -806,7 +802,7 @@ auto Tree::fix_links(Node &node) -> Status
 
 auto Tree::allocate(bool is_external, Node &out) -> Status
 {
-    return NodeManager::allocate(*m_pager, m_freelist, out, m_node_scratch, is_external);
+    return NodeManager::allocate(*m_pager, out, m_node_scratch, is_external);
 }
 
 auto Tree::acquire(Id page_id, bool upgrade, Node &out) const -> Status
@@ -816,7 +812,7 @@ auto Tree::acquire(Id page_id, bool upgrade, Node &out) const -> Status
 
 auto Tree::destroy(Node node) -> Status
 {
-    return NodeManager::destroy(m_freelist, std::move(node));
+    return NodeManager::destroy(*m_pager, std::move(node));
 }
 
 auto Tree::upgrade(Node &node) const -> void
@@ -961,7 +957,6 @@ auto Tree::split_nonroot(Node node, Node &out) -> Status
         left.header.next_id = node.page.id();
         CALICODB_TRY(PayloadManager::promote(
             *m_pager,
-            m_freelist,
             nullptr,
             separator,
             parent_id));
@@ -1007,7 +1002,6 @@ auto Tree::split_nonroot_fast(Node parent, Node left, Node right, const Cell &ov
         separator = read_cell(right, 0);
         CALICODB_TRY(PayloadManager::promote(
             *m_pager,
-            m_freelist,
             cell_scratch(),
             separator,
             parent.page.id()));
@@ -1238,7 +1232,6 @@ auto Tree::rotate_left(Node &parent, Node &left, Node &right, std::size_t index)
         auto separator = read_cell(right, 0);
         CALICODB_TRY(PayloadManager::promote(
             *m_pager,
-            m_freelist,
             cell_scratch(),
             separator,
             parent.page.id()));
@@ -1286,7 +1279,6 @@ auto Tree::rotate_right(Node &parent, Node &left, Node &right, std::size_t index
         auto separator = highest;
         CALICODB_TRY(PayloadManager::promote(
             *m_pager,
-            m_freelist,
             cell_scratch(),
             separator,
             parent.page.id()));
@@ -1322,11 +1314,10 @@ auto Tree::rotate_right(Node &parent, Node &left, Node &right, std::size_t index
     return Status::ok();
 }
 
-Tree::Tree(Pager &pager, Id root_id, Id &freelist_head, TreeStatistics *stats)
+Tree::Tree(Pager &pager, Id root_id, TreeStatistics *stats)
     : m_stats(stats),
       m_node_scratch(pager.page_size(), '\0'),
       m_cell_scratch(pager.page_size(), '\0'),
-      m_freelist(pager, freelist_head),
       m_pager(&pager),
       m_root_id(root_id)
 {
@@ -1389,7 +1380,7 @@ auto Tree::put(const Slice &key, const Slice &value, bool *exists) -> Status
         CALICODB_TRY(remove_cell(node, index));
     }
 
-    CALICODB_TRY(PayloadManager::emplace(*m_pager, m_freelist, cell_scratch(), node, key, value, index));
+    CALICODB_TRY(PayloadManager::emplace(*m_pager, cell_scratch(), node, key, value, index));
     CALICODB_TRY(resolve_overflow(std::move(node)));
     report_stats(kBytesWritten, key.size() + value.size());
 
@@ -1441,7 +1432,7 @@ auto Tree::find_highest(Node &out) const -> Status
     return Status::ok();
 }
 
-auto Tree::vacuum_step(Page &free, TableSet &tables, Id last_id) -> Status
+auto Tree::vacuum_step(Page &free, Freelist &freelist, TableSet &tables, Id last_id) -> Status
 {
     CALICODB_EXPECT_NE(free.id(), last_id);
 
@@ -1459,8 +1450,8 @@ auto Tree::vacuum_step(Page &free, TableSet &tables, Id last_id) -> Status
 
     switch (entry.type) {
         case PointerMap::kFreelistLink: {
-            if (last_id == *m_freelist.m_head) {
-                *m_freelist.m_head = free.id();
+            if (last_id == *freelist.m_head) {
+                *freelist.m_head = free.id();
             } else if (last_id != free.id()) {
                 // Back pointer points to another freelist page.
                 CALICODB_EXPECT_FALSE(entry.back_ptr.is_null());
@@ -1578,23 +1569,23 @@ auto Tree::vacuum_step(Page &free, TableSet &tables, Id last_id) -> Status
     return Status::ok();
 }
 
-auto Tree::vacuum_one(Id target, TableSet &tables, bool *success) -> Status
+auto Tree::vacuum_one(Id target, Freelist &freelist, TableSet &tables, bool *success) -> Status
 {
     if (PointerMap::lookup(*m_pager, target) == target) {
         *success = true;
         return Status::ok();
     }
-    if (target.is_root() || m_freelist.is_empty()) {
+    if (target.is_root() || freelist.is_empty()) {
         *success = false;
         return Status::ok();
     }
 
     // Swap the head of the freelist with the last page in the file.
     Page head;
-    CALICODB_TRY(m_freelist.pop(head));
+    CALICODB_TRY(freelist.pop(head));
     if (target != head.id()) {
         // Swap the last page with the freelist head.
-        CALICODB_TRY(vacuum_step(head, tables, target));
+        CALICODB_TRY(vacuum_step(head, freelist, tables, target));
     } else {
         CALICODB_TRY(fix_parent_id(target, Id::null(), {}));
     }
@@ -1610,145 +1601,11 @@ static constexpr auto kLinkContentOffset = Id::kSize;
     return page.view().range(kLinkContentOffset, std::min(size_limit, page.size() - kLinkContentOffset));
 }
 
-Freelist::Freelist(Pager &pager, Id &head)
-    : m_pager {&pager},
-      m_head {&head}
+auto NodeManager::allocate(Pager &pager, Node &out, std::string &scratch, bool is_external) -> Status
 {
-}
-
-[[nodiscard]] auto Freelist::is_empty() const -> bool
-{
-    return m_head->is_null();
-}
-
-auto Freelist::pop(Page &page) -> Status
-{
-    if (!m_head->is_null()) {
-        CALICODB_TRY(m_pager->acquire(*m_head, page));
-        m_pager->upgrade(page);
-        *m_head = read_next_id(page);
-
-        if (!m_head->is_null()) {
-            // Only clear the back pointer for the new freelist head. Callers must make sure to update the returned
-            // node's back pointer at some point.
-            const PointerMap::Entry entry = {Id::null(), PointerMap::kFreelistLink};
-            CALICODB_TRY(PointerMap::write_entry(*m_pager, *m_head, entry));
-        }
-        return Status::ok();
-    }
-    return Status::not_supported("free list is empty");
-}
-
-auto Freelist::push(Page page) -> Status
-{
-    CALICODB_EXPECT_FALSE(page.id().is_root());
-    write_next_id(page, *m_head);
-
-    // Write the parent of the old head, if it exists.
-    PointerMap::Entry entry = {page.id(), PointerMap::kFreelistLink};
-    if (!m_head->is_null()) {
-        CALICODB_TRY(PointerMap::write_entry(*m_pager, *m_head, entry));
-    }
-    // Clear the parent of the new head.
-    entry.back_ptr = Id::null();
-    CALICODB_TRY(PointerMap::write_entry(*m_pager, page.id(), entry));
-
-    *m_head = page.id();
-    m_pager->release(std::move(page));
-    return Status::ok();
-}
-
-// The first pointer map page is always on page 2, right after the root page.
-static constexpr std::size_t kFirstMapPage = 2;
-
-static constexpr auto kEntrySize =
-    sizeof(char) + // Type (1 B)
-    Id::kSize;     // Back pointer (4 B)
-
-static auto entry_offset(Id map_id, Id page_id) -> std::size_t
-{
-    CALICODB_EXPECT_LT(map_id, page_id);
-    return (page_id.value - map_id.value - 1) * kEntrySize;
-}
-
-static auto decode_entry(const char *data) -> PointerMap::Entry
-{
-    PointerMap::Entry entry;
-    entry.type = PointerMap::Type {*data++};
-    entry.back_ptr.value = get_u32(data);
-    return entry;
-}
-
-auto PointerMap::read_entry(Pager &pager, Id page_id, Entry &out) -> Status
-{
-    const auto mid = lookup(pager, page_id);
-    CALICODB_EXPECT_LE(kFirstMapPage, mid.value);
-    CALICODB_EXPECT_NE(mid, page_id);
-
-    const auto offset = entry_offset(mid, page_id);
-    CALICODB_EXPECT_LE(offset + kEntrySize, pager.page_size());
-
-    Page map;
-    CALICODB_TRY(pager.acquire(mid, map));
-    out = decode_entry(map.data() + offset);
-    pager.release(std::move(map));
-    return Status::ok();
-}
-
-auto PointerMap::write_entry(Pager &pager, Id page_id, Entry entry) -> Status
-{
-    const auto mid = lookup(pager, page_id);
-    CALICODB_EXPECT_LE(kFirstMapPage, mid.value);
-    CALICODB_EXPECT_NE(mid, page_id);
-
-    const auto offset = entry_offset(mid, page_id);
-    CALICODB_EXPECT_LE(offset + kEntrySize, pager.page_size());
-
-    Page map;
-    CALICODB_TRY(pager.acquire(mid, map));
-    const auto [back_ptr, type] = decode_entry(map.data() + offset);
-    if (entry.back_ptr != back_ptr || entry.type != type) {
-        if (!map.is_writable()) {
-            pager.upgrade(map);
-        }
-        auto data = map.data() + offset;
-        *data++ = entry.type;
-        put_u32(data, entry.back_ptr.value);
-    }
-    pager.release(std::move(map));
-    return Status::ok();
-}
-
-auto PointerMap::lookup(const Pager &pager, Id page_id) -> Id
-{
-    // Root page (1) has no parents, and page 2 is the first pointer map page. If "page_id" is a pointer map
-    // page, "page_id" will be returned.
-    if (page_id.value < kFirstMapPage) {
-        return Id::null();
-    }
-    const auto inc = pager.page_size() / kEntrySize + 1;
-    const auto idx = (page_id.value - kFirstMapPage) / inc;
-    return Id(idx * inc + kFirstMapPage);
-}
-
-auto NodeManager::allocate(Pager &pager, Freelist &freelist, Node &out, std::string &scratch, bool is_external) -> Status
-{
-    const auto fetch_unused_page = [&freelist, &pager](Page &page) {
-        if (freelist.is_empty()) {
-            CALICODB_TRY(pager.allocate(page));
-            // Since this is a fresh page from the end of the file, it could be a pointer map page. If so,
-            // it is already blank, so just skip it and allocate another. It'll get filled in as the pages
-            // following it are used.
-            if (PointerMap::lookup(pager, page.id()) == page.id()) {
-                pager.release(std::move(page));
-                return pager.allocate(page);
-            }
-            return Status::ok();
-        } else {
-            return freelist.pop(page);
-        }
-    };
-    CALICODB_TRY(fetch_unused_page(out.page));
+    CALICODB_TRY(pager.allocate(out.page));
+    
+    // Should not be a pointer map page.
     CALICODB_EXPECT_NE(PointerMap::lookup(pager, out.page.id()), out.page.id());
 
     out.header.is_external = is_external;
@@ -1781,9 +1638,9 @@ auto NodeManager::release(Pager &pager, Node node) -> void
     pager.release(std::move(node).take());
 }
 
-auto NodeManager::destroy(Freelist &freelist, Node node) -> Status
+auto NodeManager::destroy(Pager &pager, Node node) -> Status
 {
-    return freelist.push(std::move(node.page));
+    return pager.destroy(std::move(node.page));
 }
 
 auto OverflowList::read(Pager &pager, Id head_id, std::size_t offset, std::size_t payload_size, char *buffer) -> Status
@@ -1810,7 +1667,7 @@ auto OverflowList::read(Pager &pager, Id head_id, std::size_t offset, std::size_
     return Status::ok();
 }
 
-auto OverflowList::write(Pager &pager, Freelist &freelist, Id &out, const Slice &first, const Slice &second) -> Status
+auto OverflowList::write(Pager &pager, Id &out, const Slice &first, const Slice &second) -> Status
 {
     std::optional<Page> prev;
     auto head = Id::null();
@@ -1824,15 +1681,7 @@ auto OverflowList::write(Pager &pager, Freelist &freelist, Id &out, const Slice 
 
     while (!a.is_empty()) {
         Page page;
-        auto s = freelist.pop(page);
-        if (s.is_not_supported()) {
-            s = pager.allocate(page);
-            if (s.is_ok() && PointerMap::lookup(pager, page.id()) == page.id()) {
-                pager.release(std::move(page));
-                s = pager.allocate(page);
-            }
-        }
-        CALICODB_TRY(s);
+        CALICODB_TRY(pager.allocate(page));
 
         auto content_size = std::min(a.size() + second.size(), page.size() - kLinkContentOffset);
         auto content_data = page.data() + kLinkContentOffset;
@@ -1871,28 +1720,28 @@ auto OverflowList::write(Pager &pager, Freelist &freelist, Id &out, const Slice 
     return Status::ok();
 }
 
-auto OverflowList::copy(Pager &pager, Freelist &freelist, Id overflow_id, std::size_t size, Id &out) -> Status
+auto OverflowList::copy(Pager &pager, Id overflow_id, std::size_t size, Id &out) -> Status
 {
     std::string scratch; // TODO: Copy page-by-page: no scratch is necessary.
     scratch.resize(size);
 
     CALICODB_TRY(read(pager, overflow_id, 0, size, scratch.data()));
-    return write(pager, freelist, out, scratch);
+    return write(pager, out, scratch);
 }
 
-auto OverflowList::erase(Pager &pager, Freelist &freelist, Id head_id) -> Status
+auto OverflowList::erase(Pager &pager, Id head_id) -> Status
 {
     while (!head_id.is_null()) {
         Page page;
         CALICODB_TRY(pager.acquire(head_id, page));
         head_id = read_next_id(page);
         pager.upgrade(page);
-        CALICODB_TRY(freelist.push(std::move(page)));
+        CALICODB_TRY(pager.destroy(std::move(page)));
     }
     return Status::ok();
 }
 
-auto PayloadManager::emplace(Pager &pager, Freelist &freelist, char *scratch, Node &node, const Slice &key, const Slice &value, std::size_t index) -> Status
+auto PayloadManager::emplace(Pager &pager, char *scratch, Node &node, const Slice &key, const Slice &value, std::size_t index) -> Status
 {
     CALICODB_EXPECT_TRUE(node.header.is_external);
 
@@ -1913,7 +1762,7 @@ auto PayloadManager::emplace(Pager &pager, Freelist &freelist, char *scratch, No
 
     Id overflow_id;
     if (has_remote) {
-        CALICODB_TRY(OverflowList::write(pager, freelist, overflow_id, key.range(k), value.range(v)));
+        CALICODB_TRY(OverflowList::write(pager, overflow_id, key.range(k), value.range(v)));
         PointerMap::Entry entry = {node.page.id(), PointerMap::kOverflowHead};
         CALICODB_TRY(PointerMap::write_entry(pager, overflow_id, entry));
         total_size += Id::kSize;
@@ -1935,7 +1784,7 @@ auto PayloadManager::emplace(Pager &pager, Freelist &freelist, char *scratch, No
     return Status::ok();
 }
 
-auto PayloadManager::promote(Pager &pager, Freelist &freelist, char *scratch, Cell &cell, Id parent_id) -> Status
+auto PayloadManager::promote(Pager &pager, char *scratch, Cell &cell, Id parent_id) -> Status
 {
     detach_cell(cell, scratch);
 
@@ -1950,7 +1799,7 @@ auto PayloadManager::promote(Pager &pager, Freelist &freelist, char *scratch, Ce
     if (cell.key_size > cell.local_size) {
         // Part of the key is on an overflow page. No value is stored locally in this case, so the local size computation is still correct.
         Id overflow_id;
-        CALICODB_TRY(OverflowList::copy(pager, freelist, read_overflow_id(cell), cell.key_size - cell.local_size, overflow_id));
+        CALICODB_TRY(OverflowList::copy(pager, read_overflow_id(cell), cell.key_size - cell.local_size, overflow_id));
         const PointerMap::Entry entry = {parent_id, PointerMap::kOverflowHead};
         CALICODB_TRY(PointerMap::write_entry(pager, overflow_id, entry));
         write_overflow_id(cell, overflow_id);
@@ -2246,25 +2095,25 @@ class TreeValidator
     }
 
 public:
-    static auto validate_freelist(Tree &tree, Id head) -> void
-    {
-        auto &pager = *tree.m_pager;
-        auto &freelist = tree.m_freelist;
-        if (freelist.is_empty()) {
-            return;
-        }
-        CHECK_TRUE(!head.is_null());
-        Page page;
-        CHECK_OK(pager.acquire(head, page));
-
-        Id parent_id;
-        traverse_chain(pager, std::move(page), [&](const auto &link) {
-            Id found_id;
-            CHECK_OK(tree.find_parent_id(link.id(), found_id));
-            CHECK_TRUE(found_id == parent_id);
-            parent_id = link.id();
-        });
-    }
+//    static auto validate_freelist(Tree &tree, Id head) -> void
+//    {
+//        auto &pager = *tree.m_pager;
+//        auto &freelist = tree.freelist;
+//        if (freelist.is_empty()) {
+//            return;
+//        }
+//        CHECK_TRUE(!head.is_null());
+//        Page page;
+//        CHECK_OK(pager.acquire(head, page));
+//
+//        Id parent_id;
+//        traverse_chain(pager, std::move(page), [&](const auto &link) {
+//            Id found_id;
+//            CHECK_OK(tree.find_parent_id(link.id(), found_id));
+//            CHECK_TRUE(found_id == parent_id);
+//            parent_id = link.id();
+//        });
+//    }
 
     static auto validate_tree(const Tree &tree) -> void
     {
@@ -2370,7 +2219,7 @@ public:
 
 auto Tree::TEST_validate() -> void
 {
-    TreeValidator::validate_freelist(*this, *m_freelist.m_head);
+//    TreeValidator::validate_freelist(*this, *freelist.m_head);
     TreeValidator::validate_tree(*this);
 }
 

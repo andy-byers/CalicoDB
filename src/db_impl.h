@@ -43,7 +43,7 @@ public:
     friend class DBImpl;
 
     ~TableImpl() override = default;
-    explicit TableImpl(std::string name, Id table_id);
+    explicit TableImpl(std::string name, TableState *state, Id table_id);
 
     [[nodiscard]] auto name() const -> const std::string & override
     {
@@ -55,8 +55,14 @@ public:
         return m_id;
     }
 
+    [[nodiscard]] auto state() const -> TableState *
+    {
+        return m_state;
+    }
+
 private:
     std::string m_name;
+    TableState *m_state = nullptr;
     Id m_id;
 };
 
@@ -87,7 +93,7 @@ public:
 
     [[nodiscard]] static auto destroy(const Options &options, const std::string &filename) -> Status;
     [[nodiscard]] static auto repair(const Options &options, const std::string &filename) -> Status;
-    [[nodiscard]] auto open(Options sanitized) -> Status;
+    [[nodiscard]] auto open(const Options &sanitized) -> Status;
 
     [[nodiscard]] auto get_property(const Slice &name, std::string *out) const -> bool override;
     [[nodiscard]] auto default_table() const -> Table * override;

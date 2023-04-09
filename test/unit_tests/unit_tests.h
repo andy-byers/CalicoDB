@@ -45,18 +45,18 @@ namespace calicodb
         dynamic_cast<tools::FaultInjectionEnv &>(*env).clear_interceptors(); \
     } while (0)
 
-#define QUICK_INTERCEPTOR(prefix__, type__)                                  \
+#define QUICK_INTERCEPTOR(filename__, type__)                                  \
     do {                                                                     \
         dynamic_cast<tools::FaultInjectionEnv &>(*env)                       \
-            .add_interceptor(tools::Interceptor {(prefix__), (type__), [] {  \
+            .add_interceptor(filename__, tools::Interceptor {(type__), [] {  \
                                                      return special_error(); \
                                                  }});                        \
     } while (0)
 
-#define COUNTING_INTERCEPTOR(prefix__, type__, n__)                                   \
+#define COUNTING_INTERCEPTOR(filename__, type__, n__)                                   \
     do {                                                                              \
         dynamic_cast<tools::FaultInjectionEnv &>(*env)                                \
-            .add_interceptor(tools::Interceptor {(prefix__), (type__), [&n = (n__)] { \
+            .add_interceptor(filename__, tools::Interceptor {(type__), [&n = (n__)] { \
                                                      if (n-- <= 0) {                  \
                                                          return special_error();      \
                                                      }                                \
@@ -137,15 +137,14 @@ public:
     static constexpr auto kFrameCount = kMinFrameCount;
 
     TestWithPager()
-        : scratch(kPageSize, '\x00'),
-          random(1'024 * 1'024 * 8)
+        : random(1'024 * 1'024 * 8)
     {
+        // Using the fake WAL, so everything must be checkpointed before this is run.
         wal = std::make_unique<tools::FakeWal>(Wal::Parameters {
             kFilename,
             kPageSize,
             env.get(),
         });
-        tables.add(LogicalPageId::with_table(Id::root()));
         Pager *temp;
         EXPECT_OK(Pager::open({
                                   kFilename,
@@ -158,13 +157,12 @@ public:
                               },
                               temp));
         pager.reset(temp);
+
+        // Don't use the WAL yet. Commit will flush directly to the DB file.
         state.use_wal = false;
     }
 
     DBState state;
-    TableSet tables;
-    std::string scratch;
-    std::string collect_scratch;
     std::unique_ptr<Pager> pager;
     std::unique_ptr<tools::FakeWal> wal;
     tools::RandomGenerator random;

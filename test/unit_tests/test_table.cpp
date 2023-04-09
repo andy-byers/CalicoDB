@@ -154,10 +154,10 @@ TEST_F(TableTests, VacuumDroppedTable)
 
 TEST_F(TableTests, TableDestructionIsPartOfTransaction)
 {
-    ASSERT_EQ(db->begin_txn(TxnOptions()), 1);
+    const auto txn = db->begin_txn(TxnOptions());
     ASSERT_OK(db->drop_table(table));
     table = nullptr;
-    ASSERT_OK(db->commit_txn(1));
+    ASSERT_OK(db->commit_txn(txn));
 
     reopen_db();
 

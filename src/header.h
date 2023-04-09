@@ -49,7 +49,7 @@ struct FileHeader {
 // Node Header Format:
 //     Offset  Size  Name
 //    --------------------------
-//     0       1     Flags byte (0 = internal node, 1 = external node)
+//     0       1     Flags byte (1 = external, internal otherwise)
 //     1       4     next_id
 //     5       4     prev_id
 //     9       2     cell_count

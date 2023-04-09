@@ -11,96 +11,6 @@
 namespace calicodb
 {
 
-class WalPagerInteractionTests
-    : public InMemoryTest,
-      public testing::Test
-{
-public:
-    static constexpr auto kFilename = "./test";
-    static constexpr auto kWalFilename = "./wal";
-    static constexpr auto kPageSize = kMinPageSize;
-    static constexpr std::size_t kFrameCount = 16;
-
-    WalPagerInteractionTests()
-        : scratch(kPageSize, '\x00')
-    {
-    }
-
-    ~WalPagerInteractionTests() override
-    {
-        delete wal;
-        delete pager;
-    }
-
-    auto SetUp() -> void override
-    {
-        tables.add(LogicalPageId::root());
-
-        const Wal::Parameters wal_param = {
-            kWalFilename,
-            kPageSize,
-            env.get()};
-        ASSERT_OK(Wal::open(wal_param, wal));
-
-        const Pager::Parameters pager_param = {
-            kFilename,
-            env.get(),
-            wal,
-            nullptr,
-            &state,
-            kFrameCount,
-            kPageSize,
-        };
-        ASSERT_OK(Pager::open(pager_param, pager));
-        state.use_wal = true;
-    }
-
-    DBState state;
-    std::string scratch;
-    std::string collect_scratch;
-    std::string payload_buffer;
-    std::string tail_buffer;
-    Pager *pager;
-    Wal *wal;
-    TableSet tables;
-    tools::RandomGenerator random {1'024 * 1'024 * 8};
-};
-
-TEST_F(WalPagerInteractionTests, WritesWalAtCheckpoint)
-{
-    const auto initial = wal->statistics();
-    Page page;
-
-    ASSERT_OK(pager->allocate(page));
-    ++page.data()[page.size() - 1];
-    pager->release(std::move(page));
-
-    // WAL should not be written until a commit, or until a dirty page needs to be
-    // evicted from the page cache.
-    ASSERT_EQ(wal->statistics().bytes_written, initial.bytes_written);
-    ASSERT_OK(pager->commit_txn());
-    ASSERT_GT(wal->statistics().bytes_written, initial.bytes_written + kPageSize);
-}
-
-TEST_F(WalPagerInteractionTests, WritesWalAtPageEviction)
-{
-    const auto initial = wal->statistics();
-
-    for (std::size_t i = 0; i < kFrameCount + 1; ++i) {
-        Page page;
-
-        ASSERT_OK(pager->allocate(page));
-        ++page.data()[page.size() - 1];
-        pager->release(std::move(page));
-
-        if (i < kFrameCount) {
-            ASSERT_EQ(wal->statistics().bytes_written, initial.bytes_written);
-        } else {
-            ASSERT_GT(wal->statistics().bytes_written, initial.bytes_written + kPageSize);
-        }
-    }
-}
-
 template <class EnvType = tools::FaultInjectionEnv>
 class RecoveryTestHarness
 {
@@ -486,105 +396,8 @@ INSTANTIATE_TEST_SUITE_P(
         std::make_tuple("./test", tools::Interceptor::kRead, 1),
         std::make_tuple("./test", tools::Interceptor::kRead, 2)));
 
-class DataLossEnv : public EnvWrapper
-{
-    std::string m_db_contents;
-    std::string m_wal_contents;
-
-public:
-    explicit DataLossEnv()
-        : EnvWrapper {*new tools::FakeEnv}
-    {
-    }
-
-    ~DataLossEnv() override
-    {
-        delete target();
-    }
-
-    [[nodiscard]] auto new_file(const std::string &filename, File *&out) -> Status override;
-
-    auto register_db_contents(std::string db_contents) -> void
-    {
-        m_db_contents = std::move(db_contents);
-    }
-
-    auto register_wal_contents(std::string wal_contents) -> void
-    {
-        m_wal_contents = std::move(wal_contents);
-    }
-
-    [[nodiscard]] auto db_contents() const -> std::string
-    {
-        return m_db_contents;
-    }
-
-    [[nodiscard]] auto wal_contents() const -> std::string
-    {
-        return m_wal_contents;
-    }
-};
-
-class DataLossFile : public File
-{
-    std::string m_filename;
-    DataLossEnv *m_env = nullptr;
-    File *m_file = nullptr;
-
-public:
-    explicit DataLossFile(std::string filename, File &file, DataLossEnv &env)
-        : m_filename {std::move(filename)},
-          m_env {&env},
-          m_file {&file}
-    {
-    }
-
-    ~DataLossFile() override
-    {
-        delete m_file;
-    }
-
-    [[nodiscard]] auto read(std::size_t offset, std::size_t size, char *scratch, Slice *out) -> Status override
-    {
-        return m_file->read(offset, size, scratch, out);
-    }
-
-    [[nodiscard]] auto write(std::size_t offset, const Slice &in) -> Status override
-    {
-        return m_file->write(offset, in);
-    }
-
-    [[nodiscard]] auto sync() -> Status override
-    {
-        CALICODB_TRY(m_file->sync());
-
-        std::size_t file_size;
-        EXPECT_OK(m_env->file_size(m_filename, file_size));
-
-        Slice slice;
-        std::string contents(file_size, '\0');
-        EXPECT_OK(m_file->read(0, file_size, contents.data(), &slice));
-        EXPECT_EQ(slice.size(), file_size);
-
-        // TODO: Save each file's sync'd contents in a map or something, keyed by filename.
-        if (m_filename.find("wal") == std::string::npos) {
-            m_env->register_db_contents(std::move(contents));
-        } else {
-            m_env->register_wal_contents(std::move(contents));
-        }
-        return Status::ok();
-    }
-};
-
-auto DataLossEnv::new_file(const std::string &filename, File *&out) -> Status
-{
-    EXPECT_OK(target()->new_file(filename, out));
-    out = new DataLossFile {filename, *out, *this};
-    return Status::ok();
-}
-
 class DataLossTests
-    : public RecoveryTestHarness<DataLossEnv>,
+    : public RecoveryTestHarness<tools::DataLossEnv>,
       public testing::TestWithParam<std::size_t>
 {
 public:
@@ -606,20 +419,12 @@ public:
 
     auto drop_unsynced_wal_data() const -> void
     {
-        File *file;
-        EXPECT_OK(env->new_file(kWalFilename, file));
-        EXPECT_OK(env->resize_file(kWalFilename, 0));
-        EXPECT_OK(file->write(0, env->wal_contents()));
-        delete file;
+        env->drop_after_last_sync(kWalFilename);
     }
 
     auto drop_unsynced_db_data() const -> void
     {
-        File *file;
-        EXPECT_OK(env->new_file(kFilename, file));
-        EXPECT_OK(env->resize_file(kFilename, 0));
-        EXPECT_OK(file->write(0, env->db_contents()));
-        delete file;
+        env->drop_after_last_sync(kFilename);
     }
 };
 

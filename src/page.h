@@ -110,6 +110,16 @@ public:
     return FileHeader::kSize * page_id.is_root();
 }
 
+[[nodiscard]] inline auto read_next_id(const Page &page) -> Id
+{
+    return Id(get_u32(page.data() + page_offset(page.id())));
+}
+
+inline auto write_next_id(Page &page, Id next_id) -> void
+{
+    put_u32(page.data() + page_offset(page.id()), next_id.value);
+}
+
 } // namespace calicodb
 
 #endif // CALICODB_PAGE_H

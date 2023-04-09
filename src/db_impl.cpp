@@ -9,9 +9,14 @@
 namespace calicodb
 {
 
-static auto get_table_id(const Table &table) -> Id
+static auto table_impl(const Table &table) -> const TableImpl &
 {
-    return reinterpret_cast<const TableImpl &>(table).id();
+    return reinterpret_cast<const TableImpl &>(table);
+}
+
+static auto table_impl(Table &table) -> TableImpl &
+{
+    return reinterpret_cast<TableImpl &>(table);
 }
 
 static constexpr auto encode_page_size(std::size_t page_size) -> U16
@@ -39,8 +44,9 @@ static auto unrecognized_txn(unsigned have_txn, unsigned want_txn)
 
 Table::~Table() = default;
 
-TableImpl::TableImpl(std::string name, Id table_id)
+TableImpl::TableImpl(std::string name, TableState *state, Id table_id)
     : m_name(std::move(name)),
+      m_state(state),
       m_id(table_id)
 {
 }
@@ -119,7 +125,7 @@ static auto encode_logical_id(LogicalPageId id, char *out) -> void
     return Status::ok();
 }
 
-auto DBImpl::open(Options sanitized) -> Status
+auto DBImpl::open(const Options &sanitized) -> Status
 {
     CALICODB_EXPECT_GE(sanitized.page_size, kMinPageSize);
     CALICODB_EXPECT_LE(sanitized.page_size, kMaxPageSize);
@@ -165,16 +171,15 @@ auto DBImpl::open(Options sanitized) -> Status
         page_size,
     };
     CALICODB_TRY(Pager::open(pager_param, m_pager));
-    m_pager->load_state(header);
     m_pager->m_mode = Pager::kWrite;
 
-    if (!db_exists) {
+    if (db_exists) {
+        m_pager->load_state(header);
+    } else {
         m_log->logv("setting up a new database");
 
-        // Create the root tree.
-        Id root_id;
-        CALICODB_TRY(Tree::create(*m_pager, Id::root(), m_state.freelist_head, &root_id));
-        CALICODB_EXPECT_TRUE(root_id.is_root());
+        // Create the root table tree manually.
+        CALICODB_TRY(Tree::create(*m_pager, Id::root(), nullptr));
     }
 
     // Create the root and default table handles.
@@ -197,22 +202,16 @@ auto DBImpl::open(Options sanitized) -> Status
         m_log->logv("ensuring consistency of an existing database");
         // This should be a no-op if the database closed normally last time.
         CALICODB_TRY(checkpoint_if_needed(true));
-        m_pager->purge_cache();
+        m_pager->purge_state();
         CALICODB_TRY(load_file_header());
     } else {
-        // Write the initial file header.
-        auto root = m_pager->acquire_root();
-        m_pager->upgrade(root);
-        header.page_count = static_cast<U32>(m_pager->page_count());
-        header.write(root.data());
-        m_pager->release(std::move(root));
-        // Flush dirty pages to the DB file and fsync(). This set should include the root
+        // Commit the initial transaction. Since the WAL is not enabled, this will write
+        // to the DB file and call fsync(). The dirty page set should include the root
         // page, the pointer map page on page 2, and the root of the default table.
-        CALICODB_TRY(m_pager->flush_to_disk());
+        CALICODB_TRY(m_pager->commit_txn());
     }
     CALICODB_TRY(status());
     m_state.use_wal = true;
-    m_pager->m_mode = Pager::kOpen;
     return Status::ok();
 }
 
@@ -370,7 +369,7 @@ auto DBImpl::get_property(const Slice &name, std::string *out) const -> bool
 
 auto DBImpl::new_cursor(const Table &table) const -> Cursor *
 {
-    const auto *state = m_tables.get(get_table_id(table));
+    const auto *state = table_impl(table).state();
     CALICODB_EXPECT_NE(state, nullptr);
     auto *cursor = CursorInternal::make_cursor(*state->tree);
     if (m_pager->mode() == Pager::kError) {
@@ -385,7 +384,7 @@ auto DBImpl::get(const Table &table, const Slice &key, std::string *value) const
     if (m_pager->mode() == Pager::kError) {
         return status();
     }
-    const auto *state = m_tables.get(get_table_id(table));
+    const auto *state = table_impl(table).state();
     CALICODB_EXPECT_NE(state, nullptr);
     return state->tree->get(key, value);
 }
@@ -408,7 +407,7 @@ auto DBImpl::erase(Table &table, const Slice &key) -> Status
 
 auto DBImpl::do_put(Table &table, const Slice &key, const Slice &value) -> Status
 {
-    auto *state = m_tables.get(get_table_id(table));
+    auto *state = table_impl(table).state();
     CALICODB_EXPECT_NE(state, nullptr);
 
     if (!state->write) {
@@ -417,29 +416,17 @@ auto DBImpl::do_put(Table &table, const Slice &key, const Slice &value) -> Statu
     if (key.is_empty()) {
         return Status::invalid_argument("key is empty");
     }
-
-    bool record_exists;
-    auto s = state->tree->put(key, value, &record_exists);
-    if (s.is_ok()) {
-        ++m_state.batch_size;
-    }
-    return s;
+    return state->tree->put(key, value, nullptr);
 }
 
 auto DBImpl::do_erase(Table &table, const Slice &key) -> Status
 {
-    auto *state = m_tables.get(get_table_id(table));
+    auto *state = table_impl(table).state();
     CALICODB_EXPECT_NE(state, nullptr);
-
     if (!state->write) {
         return Status::invalid_argument("table is not writable");
     }
-
-    auto s = state->tree->erase(key);
-    if (s.is_ok()) {
-        ++m_state.batch_size;
-    }
-    return s;
+    return state->tree->erase(key);
 }
 
 auto DBImpl::vacuum() -> Status
@@ -457,13 +444,13 @@ auto DBImpl::do_vacuum() -> Status
     CALICODB_TRY(get_table_info(table_names, &table_roots));
 
     Id target(m_pager->page_count());
-    auto *state = m_tables.get(Id::root());
+    auto *state = table_impl(*m_root).state();
     auto *tree = state->tree;
 
     const auto original = target;
     for (;; --target.value) {
         bool vacuumed;
-        CALICODB_TRY(tree->vacuum_one(target, m_tables, &vacuumed));
+        CALICODB_TRY(tree->vacuum_one(target, m_pager->m_freelist, m_tables, &vacuumed));
         if (!vacuumed) {
             break;
         }
@@ -479,7 +466,8 @@ auto DBImpl::do_vacuum() -> Status
         const auto *root = m_tables.get(table_roots[i].table_id);
         CALICODB_EXPECT_NE(root, nullptr);
         encode_logical_id(root->root_id, logical_id);
-        CALICODB_TRY(put(*m_root, table_names[i], logical_id));
+        CALICODB_TRY(m_pager->set_status(
+            put(*m_root, table_names[i], logical_id)));
     }
     m_pager->set_page_count(target.value);
 
@@ -534,28 +522,12 @@ auto DBImpl::commit_txn(unsigned txn) -> Status
     if (txn != m_txn) {
         return unrecognized_txn(txn, m_txn);
     }
-    if (m_pager->mode() == Pager::kDirty) {
-        auto root = m_pager->acquire_root();
-
-        FileHeader header;
-        header.read(root.data());
-
-        const auto needs_new_header =
-            header.page_count != m_pager->page_count() ||
-            header.freelist_head != m_state.freelist_head.value;
-        if (needs_new_header) {
-            m_pager->upgrade(root);
-            header.page_count = static_cast<U32>(m_pager->page_count());
-            header.freelist_head = m_state.freelist_head.value;
-            header.write(root.data());
-        }
-        m_pager->release(std::move(root));
-    }
-    // Write all dirty pages to the WAL.
     CALICODB_TRY(m_pager->commit_txn());
 
     if (m_sync) {
-        CALICODB_TRY(m_wal->sync());
+        // Failure to sync the WAL requires a rollback. Make sure the pager knows to
+        // skip the checkpoint below.
+        m_pager->set_status(m_wal->sync());
     }
     CALICODB_TRY(checkpoint_if_needed());
     return status();
@@ -640,7 +612,7 @@ auto DBImpl::do_create_table(const TableOptions &options, const std::string &nam
         CALICODB_EXPECT_EQ(m_tables.get(Id::root()), nullptr);
         root_id = LogicalPageId::root();
     } else {
-        const auto *state = m_tables.get(Id::root());
+        const auto *state = table_impl(*m_root).state();
         CALICODB_EXPECT_NE(state, nullptr);
         s = state->tree->get(name, &value);
         if (s.is_ok()) {
@@ -661,10 +633,10 @@ auto DBImpl::do_create_table(const TableOptions &options, const std::string &nam
         if (state->open) {
             return Status::invalid_argument("table is already open");
         }
-        state->tree = new Tree(*m_pager, root_id.page_id, m_state.freelist_head, &state->stats);
+        state->tree = new Tree(*m_pager, root_id.page_id, &state->stats);
         state->write = options.mode == AccessMode::kReadWrite;
         state->open = true;
-        out = new TableImpl(name, root_id.table_id);
+        out = new TableImpl(name, state, root_id.table_id);
     }
     return Status::ok();
 }
@@ -674,7 +646,7 @@ auto DBImpl::close_table(Table *&table) -> void
     if (table == nullptr || table == default_table()) {
         return;
     }
-    auto *state = m_tables.get(get_table_id(*table));
+    auto *state = table_impl(*table).state();
     CALICODB_EXPECT_NE(state, nullptr);
 
     delete state->tree;
@@ -699,7 +671,6 @@ auto DBImpl::do_drop_table(Table *&table) -> Status
     } else if (table == default_table()) {
         return Status::invalid_argument("cannot drop default table");
     }
-    const auto table_id = get_table_id(*table);
     auto *cursor = new_cursor(*table);
     Status s;
 
@@ -712,12 +683,12 @@ auto DBImpl::do_drop_table(Table *&table) -> Status
     }
     delete cursor;
 
-    auto *state = m_tables.get(table_id);
-    s = remove_empty_table(table->name(), *state);
+    auto &impl = table_impl(*table);
+    s = remove_empty_table(table->name(), *impl.state());
 
+    m_tables.erase(impl.id());
     delete table;
-    m_tables.erase(table_id);
-    ++m_state.batch_size;
+    table = nullptr;
     return s;
 }
 
@@ -733,17 +704,15 @@ auto DBImpl::construct_new_table(const Slice &name, LogicalPageId &root_id) -> S
     }
     // Set the table ID manually, let the tree fill in the root page ID.
     root_id.table_id = table_id;
-    CALICODB_TRY(Tree::create(*m_pager, table_id, m_state.freelist_head, &root_id.page_id));
+    CALICODB_TRY(Tree::create(*m_pager, table_id, &root_id.page_id));
 
     char payload[LogicalPageId::kSize];
     encode_logical_id(root_id, payload);
 
     // Write an entry for the new table in the root table. This will not increase the
     // record count for the database.
-    auto *db_root = m_tables.get(Id::root());
-    CALICODB_TRY(db_root->tree->put(name, Slice(payload, LogicalPageId::kSize)));
-    ++m_state.batch_size;
-    return Status::ok();
+    auto *root_state = table_impl(*m_root).state();
+    return root_state->tree->put(name, Slice(payload, LogicalPageId::kSize));
 }
 
 auto DBImpl::remove_empty_table(const std::string &name, TableState &state) -> Status
@@ -756,7 +725,7 @@ auto DBImpl::remove_empty_table(const std::string &name, TableState &state) -> S
     if (root.header.cell_count != 0) {
         return Status::io_error("table could not be emptied");
     }
-    auto *root_state = m_tables.get(Id::root());
+    auto *root_state = table_impl(*m_root).state();
     CALICODB_TRY(root_state->tree->erase(name));
     tree->upgrade(root);
     return tree->destroy(std::move(root));

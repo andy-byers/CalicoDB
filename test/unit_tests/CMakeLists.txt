@@ -16,7 +16,7 @@ add_executable(unit_tests
         test_env.cpp
         test_tree.cpp
         test_utils.cpp
-        test_wal.cpp
+        test_index.cpp
         unit_tests.cpp
         unit_tests.h test_table.cpp)
 target_link_libraries(unit_tests

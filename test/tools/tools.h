@@ -84,6 +84,7 @@ public:
 protected:
     friend class FakeFile;
     friend class FakeLogFile;
+    friend class FaultInjectionEnv;
 
     [[nodiscard]] auto get_memory(const std::string &filename) const -> Memory &;
     [[nodiscard]] auto read_file_at(const Memory &mem, std::size_t offset, std::size_t size, char *scratch, Slice *out) -> Status;
@@ -106,6 +107,21 @@ public:
     [[nodiscard]] auto read(std::size_t offset, std::size_t size, char *scratch, Slice *out) -> Status override;
     [[nodiscard]] auto write(std::size_t offset, const Slice &in) -> Status override;
     [[nodiscard]] auto sync() -> Status override;
+
+    [[nodiscard]] auto parent() -> FakeEnv &
+    {
+        return *m_parent;
+    }
+
+    [[nodiscard]] auto parent() const -> const FakeEnv &
+    {
+        return *m_parent;
+    }
+
+    [[nodiscard]] auto filename() -> const std::string &
+    {
+        return m_filename;
+    }
 
 protected:
     friend class FakeEnv;
@@ -136,10 +152,9 @@ struct Interceptor {
 
     using Callback = std::function<Status()>;
 
-    explicit Interceptor(std::string prefix_, Type type_, Callback callback_)
-        : prefix {std::move(prefix_)},
-          callback {std::move(callback_)},
-          type {type_}
+    explicit Interceptor(Type t, Callback c)
+        : callback(std::move(c)),
+          type(t)
     {
     }
 
@@ -148,14 +163,96 @@ struct Interceptor {
         return callback();
     }
 
-    std::string prefix;
     Callback callback;
     Type type;
 };
 
-class FaultInjectionEnv : public FakeEnv
+class DataLossEnv : public EnvWrapper
 {
-    std::vector<Interceptor> m_interceptors;
+    friend class DataLossFile;
+
+    std::unordered_map<std::string, std::string> m_save_states;
+
+    auto save_file_contents(const std::string &clean_filename) -> void;
+    auto overwrite_file(const std::string &clean_filename, const std::string &contents) -> void;
+
+public:
+    explicit DataLossEnv()
+        : EnvWrapper(*new tools::FakeEnv)
+    {
+    }
+
+    explicit DataLossEnv(Env &env)
+        : EnvWrapper(env)
+    {
+    }
+
+    ~DataLossEnv() override
+    {
+        delete target();
+    }
+
+    [[nodiscard]] auto new_file(const std::string &filename, File *&out) -> Status override;
+
+    virtual auto drop_after_last_sync() -> void;
+    virtual auto drop_after_last_sync(const std::string &filename) -> void;
+};
+
+class DataLossFile : public File
+{
+    std::string m_filename;
+    DataLossEnv *m_env = nullptr;
+    File *m_file = nullptr;
+
+public:
+    explicit DataLossFile(std::string filename, File &file, DataLossEnv &env)
+        : m_filename(std::move(filename)),
+          m_env(&env),
+          m_file(&file)
+    {
+    }
+
+    ~DataLossFile() override
+    {
+        delete m_file;
+    }
+
+    [[nodiscard]] auto parent() -> DataLossEnv *
+    {
+        return m_env;
+    }
+
+    [[nodiscard]] auto parent() const -> const DataLossEnv *
+    {
+        return m_env;
+    }
+
+    [[nodiscard]] auto filename() const -> const std::string &
+    {
+        return m_filename;
+    }
+
+    [[nodiscard]] auto read(std::size_t offset, std::size_t size, char *scratch, Slice *out) -> Status override
+    {
+        return m_file->read(offset, size, scratch, out);
+    }
+
+    [[nodiscard]] auto write(std::size_t offset, const Slice &in) -> Status override
+    {
+        return m_file->write(offset, in);
+    }
+
+    [[nodiscard]] auto sync() -> Status override
+    {
+        CALICODB_TRY(m_file->sync());
+        m_env->save_file_contents(m_filename);
+        return Status::ok();
+    }
+};
+
+class FaultInjectionEnv : public DataLossEnv
+{
+    std::unordered_map<std::string, std::vector<Interceptor>> m_interceptors;
 
     friend class FaultInjectionFile;
     friend class FaultInjectionLogFile;
@@ -163,8 +260,9 @@ class FaultInjectionEnv : public FakeEnv
     [[nodiscard]] auto try_intercept_syscall(Interceptor::Type type, const std::string &filename) -> Status;
 
 public:
-    [[nodiscard]] auto clone() const -> Env * override;
-    virtual auto add_interceptor(Interceptor interceptor) -> void;
+    [[nodiscard]] auto clone() const -> Env *;
+    virtual auto add_interceptor(const std::string &filename, Interceptor interceptor) -> void;
+    virtual auto clear_interceptors(const std::string &filename) -> void;
     virtual auto clear_interceptors() -> void;
 
     ~FaultInjectionEnv() override = default;
@@ -178,15 +276,31 @@ public:
     [[nodiscard]] auto remove_file(const std::string &filename) -> Status override;
 };
 
-class FaultInjectionFile : public FakeFile
+class FaultInjectionFile : public File
 {
-public:
-    explicit FaultInjectionFile(File &file)
-        : FakeFile {reinterpret_cast<FakeFile &>(file)}
+    friend class FaultInjectionEnv;
+
+    DataLossFile *m_target = nullptr;
+
+    [[nodiscard]] auto parent() const -> const FaultInjectionEnv &
     {
+        return reinterpret_cast<const FaultInjectionEnv &>(*m_target->parent());
     }
 
-    ~FaultInjectionFile() override = default;
+    [[nodiscard]] auto parent() -> FaultInjectionEnv &
+    {
+        return reinterpret_cast<FaultInjectionEnv &>(*m_target->parent());
+    }
+
+    explicit FaultInjectionFile(DataLossFile *&file)
+        : m_target(file)
+    {
+        // Takes ownership.
+        file = nullptr;
+    }
+
+public:
+    ~FaultInjectionFile() override;
     [[nodiscard]] auto read(std::size_t offset, std::size_t size, char *scratch, Slice *out) -> Status override;
     [[nodiscard]] auto write(std::size_t offset, const Slice &in) -> Status override;
     [[nodiscard]] auto sync() -> Status override;
@@ -369,6 +483,7 @@ auto print_references(Pager &pager) -> void;
 auto print_wals(Env &env, std::size_t page_size, const std::string &prefix) -> void;
 
 auto read_file_to_string(Env &env, const std::string &filename) -> std::string;
+auto write_string_to_file(Env &env, const std::string &filename, std::string buffer, long offset = -1) -> void;
 auto fill_db(DB &db, RandomGenerator &random, std::size_t num_records, std::size_t max_payload_size = 100) -> std::map<std::string, std::string>;
 auto fill_db(DB &db, Table &table, RandomGenerator &random, std::size_t num_records, std::size_t max_payload_size = 100) -> std::map<std::string, std::string>;
 auto expect_db_contains(const DB &db, const std::map<std::string, std::string> &map) -> void;

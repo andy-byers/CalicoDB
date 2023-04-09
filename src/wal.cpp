@@ -821,8 +821,12 @@ auto WalImpl::write(const CacheEntry *dirty, std::size_t db_size) -> Status
 
     m_hdr.max_frame = next_frame - 1;
     if (is_commit) {
-        ++m_hdr.change;
+        // If this is a commit, then at least 1 frame (the commit frame) must be written. The
+        // pager has logic to make sure of this (the root page is forcibly written if no pages
+        // are dirty).
+        CALICODB_EXPECT_TRUE(dirty);
         m_hdr.page_count = static_cast<U32>(db_size);
+        ++m_hdr.change;
         return write_index_header();
     }
 

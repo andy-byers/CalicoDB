@@ -48,7 +48,7 @@ auto FileHeader::write(char *data) const -> void
 auto NodeHeader::read(const char *data) -> void
 {
     // Flags byte.
-    is_external = *data++;
+    is_external = *data++ & 1;
 
     next_id.value = get_u32(data);
     data += Id::kSize;
@@ -70,7 +70,7 @@ auto NodeHeader::read(const char *data) -> void
 
 auto NodeHeader::write(char *data) const -> void
 {
-    *data++ = static_cast<char>(is_external);
+    *data++ = is_external ? 1 : 2;
 
     put_u32(data, next_id.value);
     data += Id::kSize;

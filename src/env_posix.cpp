@@ -17,12 +17,13 @@ namespace calicodb
 
 static constexpr int kFilePermissions = 0644; // -rw-r--r--
 
-[[nodiscard]] static auto to_status(int code) -> Status
+[[nodiscard]] static auto translate_error(int error) -> Status
 {
-    if (code == ENOENT) {
-        return Status::not_found(strerror(code));
+    CALICODB_EXPECT_NE(error, 0);
+    if (error != ENOENT) {
+        return Status::io_error(strerror(error));
     } else {
-        return Status::io_error(strerror(code));
+        return Status::not_found(strerror(error));
     }
 }
 
@@ -30,7 +31,7 @@ static constexpr int kFilePermissions = 0644; // -rw-r--r--
 {
     const auto code = errno;
     errno = 0;
-    return to_status(code);
+    return translate_error(code);
 }
 
 [[nodiscard]] static auto file_open(const std::string &name, int mode, int permissions, int &out) -> Status
@@ -257,6 +258,12 @@ auto split_path(const std::string &filename) -> std::pair<std::string, std::stri
 auto join_paths(const std::string &lhs, const std::string &rhs) -> std::string
 {
     return lhs + '/' + rhs;
+}
+
+auto cleanup_path(const std::string &filename) -> std::string
+{
+    const auto [dir, base] = split_path(filename);
+    return join_paths(dir, base);
 }
 
 } // namespace calicodb

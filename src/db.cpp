@@ -23,8 +23,7 @@ static auto clip_to_range(T &t, V min, V max) -> void
 
 auto DB::open(const Options &options, const std::string &filename, DB *&db) -> Status
 {
-    const auto [dir, base] = split_path(filename);
-    const auto clean_filename = join_paths(dir, base);
+    const auto clean_filename = cleanup_path(filename);
 
     auto sanitized = options;
     clip_to_range(sanitized.page_size, kMinPageSize, kMaxPageSize);

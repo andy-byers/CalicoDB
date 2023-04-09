@@ -42,6 +42,11 @@ auto EnvWrapper::target() -> Env *
     return m_target;
 }
 
+auto EnvWrapper::target() const -> const Env *
+{
+    return m_target;
+}
+
 auto EnvWrapper::new_file(const std::string &filename, File *&out) -> Status
 {
     return m_target->new_file(filename, out);

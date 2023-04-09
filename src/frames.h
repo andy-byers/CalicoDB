@@ -31,6 +31,7 @@ struct CacheEntry {
     // Dirty list fields.
     CacheEntry *prev = nullptr;
     CacheEntry *next = nullptr;
+    bool is_dirty = false;
 };
 
 // Mapping from page IDs to frame indices.

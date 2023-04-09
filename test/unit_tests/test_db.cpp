@@ -175,6 +175,14 @@ TEST_F(BasicDatabaseTests, OpensAndCloses)
     for (std::size_t i = 0; i < 3; ++i) {
         ASSERT_OK(DB::open(options, kFilename, db));
         delete db;
+
+        File*file;
+        ASSERT_OK(env->new_file(kFilename,file));
+        std::size_t fs;
+        ASSERT_OK(env->file_size(kFilename,fs));
+        std::string fd(fs,'\0');
+        ASSERT_OK(file->read_exact(0,fs,fd.data()));
+        std::cerr<<escape_string(fd)<<"\n\n";
     }
     ASSERT_TRUE(env->file_exists(kFilename));
 }
@@ -579,7 +587,7 @@ TEST_F(DbRecoveryTests, RecoversNthBatch)
 }
 
 struct ErrorWrapper {
-    std::string prefix;
+    std::string filename;
     tools::Interceptor::Type type;
     std::size_t successes = 0;
 };
@@ -601,8 +609,8 @@ protected:
     auto set_error() -> void
     {
         env->add_interceptor(
+            error.filename,
             tools::Interceptor(
-                error.prefix,
                 error.type,
                 [this] {
                     if (counter++ >= error.successes) {
