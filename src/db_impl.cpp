@@ -3,6 +3,7 @@
 // LICENSE.md. See AUTHORS.md for a list of contributor names.
 
 #include "db_impl.h"
+#include "encoding.h"
 #include "calicodb/env.h"
 #include "logging.h"
 
@@ -32,11 +33,15 @@ static constexpr auto decode_page_size(unsigned header_page_size) -> U32
 static auto unrecognized_txn(unsigned have_txn, unsigned want_txn)
 {
     std::string message;
-    write_to_string(
-        message,
-        "unrecognized txn number %u (current txn is %u)",
-        have_txn,
-        want_txn);
+    if (want_txn) {
+        write_to_string(
+            message,
+            "unrecognized txn number %u (current txn is %u)",
+            have_txn,
+            want_txn);
+    } else {
+        message = "transaction has not been started";
+    }
     return Status::invalid_argument(message);
 }
 
@@ -138,8 +143,11 @@ auto DBImpl::open(const Options &sanitized) -> Status
         File *file;
         char buffer[FileHeader::kSize];
         CALICODB_TRY(m_env->new_file(m_db_filename, file));
-        CALICODB_TRY(file->read_exact(0, sizeof(buffer), buffer));
+        auto s = file->read_exact(0, sizeof(buffer), buffer);
         delete file;
+        if (!s.is_ok()) {
+            return s;
+        }
         if (!header.read(buffer)) {
             return Status::invalid_argument("file is not a CalicoDB database");
         }
@@ -238,8 +246,13 @@ DBImpl::~DBImpl()
                 m_log->logv("failed to revert uncommitted transaction: %s", s.to_string().c_str());
             }
         }
-        if (const auto s = checkpoint_if_needed(true); !s.is_ok()) {
-            m_log->logv("failed to checkpoint database: %s", s.to_string().c_str());
+        if (m_pager->mode() == Pager::kOpen) {
+            // If there was an error and rollback_txn() was able to fix it, then we can checkpoint
+            // here. Otherwise, the call to Wal::close() below will not delete the WAL, and recovery
+            // will be attempted next time DB::open() is called.
+            if (const auto s = checkpoint_if_needed(true); !s.is_ok()) {
+                m_log->logv("failed to checkpoint database: %s", s.to_string().c_str());
+            }
         }
         if (const auto s = Wal::close(m_wal); !s.is_ok()) {
             m_log->logv("failed to close WAL: %s", s.to_string().c_str());
@@ -447,7 +460,7 @@ auto DBImpl::do_vacuum() -> Status
     const auto original = target;
     for (;; --target.value) {
         bool vacuumed;
-        CALICODB_TRY(tree->vacuum_one(target, m_pager->m_freelist, m_tables, &vacuumed));
+        CALICODB_TRY(tree->vacuum_one(target, m_tables, &vacuumed));
         if (!vacuumed) {
             break;
         }
@@ -508,7 +521,7 @@ auto DBImpl::begin_txn(const TxnOptions &) -> unsigned
 
 auto DBImpl::rollback_txn(unsigned txn) -> Status
 {
-    if (txn != m_txn) {
+    if (txn != m_txn || m_pager->mode() == Pager::kOpen) {
         return unrecognized_txn(txn, m_txn);
     }
     return m_pager->rollback_txn();
@@ -516,7 +529,7 @@ auto DBImpl::rollback_txn(unsigned txn) -> Status
 
 auto DBImpl::commit_txn(unsigned txn) -> Status
 {
-    if (txn != m_txn) {
+    if (txn != m_txn || m_pager->mode() == Pager::kOpen) {
         return unrecognized_txn(txn, m_txn);
     }
     CALICODB_TRY(m_pager->commit_txn());
@@ -524,7 +537,8 @@ auto DBImpl::commit_txn(unsigned txn) -> Status
     if (m_sync) {
         // Failure to sync the WAL requires a rollback. Make sure the pager knows to
         // skip the checkpoint below.
-        m_pager->set_status(m_wal->sync());
+        m_pager->set_status(
+            m_wal->sync());
     }
     CALICODB_TRY(checkpoint_if_needed());
     return status();

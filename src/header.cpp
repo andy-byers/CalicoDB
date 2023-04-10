@@ -47,6 +47,11 @@ auto FileHeader::write(char *data) const -> void
 
 auto NodeHeader::read(const char *data) -> void
 {
+    // TODO: Return a bool from this method. false if there is corruption, true otherwise.
+    //       These asserts should be made into guard clauses at some point. The tree layer
+    //       can set an error status on the pager if there is corruption detected.
+    CALICODB_EXPECT_EQ(*data & ~0b11, 0);
+
     // Flags byte.
     is_external = *data++ & 1;
 

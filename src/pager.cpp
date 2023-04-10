@@ -4,6 +4,7 @@
 
 #include "pager.h"
 #include "db_impl.h"
+#include "encoding.h"
 #include "header.h"
 #include "logging.h"
 #include "page.h"
@@ -47,7 +48,12 @@ auto Pager::populate_entry(CacheEntry &out) -> Status
 
     if (!s.is_ok()) {
         m_frames.unpin(out);
-        if (m_mode == kDirty) {
+        m_cache.erase(out.page_id);
+        if (m_mode != kOpen) {
+            // TODO: Really, an error should only be set if m_mode == kDirty. The tree module will need to be revised a bit
+            //       to make sure pages are always released before returning (this always happens on the happy path, but if
+            //       there was an error, it may not happen). For now, just be a bit more strict than necessary, setting an
+            //       error so the cache can be purged to fix the reference counts.
             set_status(s);
         }
     }
@@ -71,19 +77,21 @@ auto Pager::read_page_from_file(CacheEntry &entry) const -> Status
     Slice slice;
     const auto offset = entry.page_id.as_index() * m_frames.page_size();
     auto s = m_file->read(offset, m_frames.page_size(), entry.page, &slice);
-    if (m_mode > kOpen) { // TODO: Should be kRead, once that mode exists.
-        set_status(s);
+    if (s.is_ok()) {
+        m_bytes_read += slice.size();
+        std::memset(entry.page + slice.size(), 0, m_frames.page_size() - slice.size());
     }
-    m_bytes_read += slice.size();
-    std::memset(entry.page + slice.size(), 0, m_frames.page_size() - slice.size());
     return s;
 }
 
 auto Pager::write_page_to_file(const CacheEntry &entry) const -> Status
 {
     const Slice data(entry.page, m_frames.page_size());
-    m_bytes_written += data.size();
-    return m_file->write(entry.page_id.as_index() * data.size(), data);
+    auto s = m_file->write(entry.page_id.as_index() * data.size(), data);
+    if (s.is_ok()) {
+        m_bytes_written += data.size();
+    }
+    return s;
 }
 
 auto Pager::open(const Parameters &param, Pager *&out) -> Status
@@ -253,8 +261,9 @@ auto Pager::commit_txn() -> Status
 
         auto s = flush_to_disk();
         if (s.is_ok()) {
-            m_mode = kOpen;
+            CALICODB_EXPECT_FALSE(m_dirty);
             m_saved_count = m_page_count;
+            m_mode = kOpen;
         }
         return set_status(s);
     }
@@ -275,14 +284,14 @@ auto Pager::rollback_txn() -> Status
     }
     auto s = m_wal->abort();
     if (s.is_ok()) {
-        // Refresh the in-memory DB root page.
-        s = populate_entry(m_root);
-    }
-    if (s.is_ok()) {
         m_page_count = m_saved_count;
         m_state->status = Status::ok();
-        m_mode = kOpen;
         purge_state();
+        // Refresh the in-memory DB root page.
+        s = populate_entry(m_root);
+        if (s.is_ok()) {
+            m_mode = kOpen;
+        }
     } else {
         m_mode = kError;
     }
@@ -291,13 +300,14 @@ auto Pager::rollback_txn() -> Status
 
 auto Pager::purge_state() -> void
 {
-    // Note that this will leave referenced pages in the cache.
     CacheEntry *victim;
-    while ((victim = m_cache.next_victim())) {
+    while ((victim = m_cache.next_victim(true))) {
         CALICODB_EXPECT_NE(victim, nullptr);
         purge_entry(*victim);
     }
+    CALICODB_EXPECT_EQ(m_cache.size(), 0);
     if (m_dirty) {
+        CALICODB_EXPECT_EQ(m_dirty, &m_root);
         CALICODB_EXPECT_FALSE(m_dirty->prev);
         CALICODB_EXPECT_FALSE(m_dirty->next);
         m_dirty->is_dirty = false;
@@ -501,7 +511,7 @@ auto Pager::upgrade(Page &page) -> void
         m_mode >= kWrite);   // Transaction has started
 
     if (!page.entry()->is_dirty) {
-        dirtylist_add(*page.entry());
+        dirtylist_add(*page.m_entry);
         if (m_mode == kWrite) {
             m_mode = kDirty;
         }
@@ -511,18 +521,22 @@ auto Pager::upgrade(Page &page) -> void
 
 auto Pager::release(Page page) -> void
 {
-    CALICODB_EXPECT_NE(page.entry()->refcount, 0);
-    m_frames.unref(*page.entry());
+    CALICODB_EXPECT_GT(page.m_entry->refcount, 0);
+    m_frames.unref(*page.m_entry);
 }
 
 auto Pager::load_state(const FileHeader &header) -> void
 {
     m_page_count = header.page_count;
+    m_saved_count = header.page_count;
 }
 
 auto Pager::TEST_validate() const -> void
 {
 #ifndef NDEBUG
+    // Some caller forgot to release a page.
+    CALICODB_EXPECT_EQ(m_frames.refsum(), 0);
+
     if (m_mode <= kWrite) {
         CALICODB_EXPECT_EQ(m_dirty, nullptr);
     } else {

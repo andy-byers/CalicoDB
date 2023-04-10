@@ -12,18 +12,18 @@ namespace calicodb
 {
 
 template <class EnvType = tools::FaultInjectionEnv>
-class RecoveryTestHarness
+class RecoveryTestHarness : public EnvTestHarness<EnvType>
 {
 public:
+    using Base = EnvTestHarness<EnvType>;
     static constexpr auto kPageSize = kMinPageSize;
 
     RecoveryTestHarness()
     {
-        env = std::make_unique<EnvType>();
         db_options.wal_filename = kWalFilename;
         db_options.page_size = kPageSize;
         db_options.cache_size = kMinPageSize * 16;
-        db_options.env = env.get();
+        db_options.env = &Base::env();
 
         // TODO: Running these in sync mode right now, it's easier to tell how the DB should
         //       look. Should test not sync mode as well. Will likely lose more than 1 transaction,
@@ -33,7 +33,7 @@ public:
         open();
     }
 
-    virtual ~RecoveryTestHarness()
+    ~RecoveryTestHarness() override
     {
         delete db;
     }
@@ -52,7 +52,7 @@ public:
             opts = *options;
         }
         if (opts.env == nullptr) {
-            opts.env = env.get();
+            opts.env = &Base::env();
         }
         return DB::open(opts, kDBFilename, db);
     }
@@ -91,12 +91,11 @@ public:
     [[nodiscard]] auto file_size(const std::string &fname) const -> std::size_t
     {
         std::size_t result;
-        EXPECT_OK(env->file_size(fname, result));
+        EXPECT_OK(Base::env().file_size(fname, result));
         return result;
     }
 
-    tools::RandomGenerator random {1024 * 1024 * 4};
-    std::unique_ptr<EnvType> env;
+    tools::RandomGenerator random;
     Options db_options;
     DB *db = nullptr;
 };
@@ -105,56 +104,131 @@ class RecoveryTests
     : public RecoveryTestHarness<>,
       public testing::Test
 {
+protected:
+    static constexpr std::size_t kN = 500;
 };
 
 TEST_F(RecoveryTests, NormalShutdown)
 {
     ASSERT_EQ(num_wal_frames(), 0);
-    ASSERT_EQ(db->begin_txn(TxnOptions()), 1);
+    // begin_txn() was not called, so there will be 3 implicit transactions,
+    // requiring 3 commit WAL frames to be written.
     ASSERT_OK(put("a", "1"));
     ASSERT_OK(put("b", "2"));
     ASSERT_OK(put("c", "3"));
-    ASSERT_OK(db->commit_txn(1));
-    ASSERT_EQ(num_wal_frames(), 1);
+    ASSERT_EQ(num_wal_frames(), 3);
     close();
 
-    ASSERT_FALSE(env->file_exists(kWalFilename));
+    ASSERT_FALSE(Base::env().file_exists(kWalFilename));
 }
 
-TEST_F(RecoveryTests, OnlyCommittedUpdatesArePersisted)
+TEST_F(RecoveryTests, RollbackA)
 {
-    ASSERT_EQ(db->begin_txn(TxnOptions()), 1);
-    ASSERT_OK(put("a", "1"));
-    ASSERT_OK(put("b", "2"));
-    ASSERT_OK(put("c", "3"));
-    ASSERT_OK(db->commit_txn(1));
+    std::string prefix;
+    for (std::size_t i = 0; i < kN; ++i) {
+        auto txn = db->begin_txn(TxnOptions());
+        ASSERT_OK(put(prefix + "a", "1"));
+        ASSERT_OK(put(prefix + "b", "2"));
+        ASSERT_OK(put(prefix + "c", "3"));
+        ASSERT_OK(db->commit_txn(txn));
 
-    ASSERT_EQ(db->begin_txn(TxnOptions()), 2);
-    ASSERT_OK(put("c", "X"));
-    ASSERT_OK(put("d", "4"));
-    open();
+        txn = db->begin_txn(TxnOptions());
+        ASSERT_OK(put(prefix + "c", "X"));
+        ASSERT_OK(put(prefix + "d", "4"));
+        if (i & 1) {
+            // If rollback_txn() is not called, rollback happens automatically when the DB
+            // is closed (or the next call to DB::open() if an error occurred).
+            ASSERT_OK(db->rollback_txn(txn));
+        }
+        open();
 
-    ASSERT_EQ(get("a"), "1");
-    ASSERT_EQ(get("b"), "2");
-    ASSERT_EQ(get("c"), "3");
-    ASSERT_EQ(get("d"), "NOT_FOUND");
+        ASSERT_EQ(get(prefix + "a"), "1");
+        ASSERT_EQ(get(prefix + "b"), "2");
+        ASSERT_EQ(get(prefix + "c"), "3");
+        ASSERT_EQ(get(prefix + "d"), "NOT_FOUND");
+        prefix += '_';
+    }
 }
 
-TEST_F(RecoveryTests, RevertsNthTransaction)
+TEST_F(RecoveryTests, RollbackB)
 {
-    ASSERT_EQ(db->begin_txn(TxnOptions()), 1);
-    ASSERT_OK(put("a", "1"));
-    ASSERT_OK(db->commit_txn(1));
-    ASSERT_EQ(db->begin_txn(TxnOptions()), 2);
-    ASSERT_OK(put("b", "2"));
-    ASSERT_OK(db->commit_txn(2));
-    ASSERT_EQ(db->begin_txn(TxnOptions()), 3);
-    ASSERT_OK(put("c", "3"));
+    for (std::size_t iteration = 0; iteration < 3; ++iteration) {
+        // Keep these changes.
+        const auto base = iteration * kN;
+        auto txn = db->begin_txn(TxnOptions());
+        for (std::size_t i = 0; i < kN; ++i) {
+            const auto key = tools::integral_key(base + i);
+            ASSERT_OK(put(key, key));
+        }
+        ASSERT_OK(db->commit_txn(txn));
+
+        // Rollback these changes.
+        txn = db->begin_txn(TxnOptions());
+        for (std::size_t i = 0; i < kN; ++i) {
+            ASSERT_OK(db->erase(tools::integral_key(base + i)));
+        }
+        for (std::size_t i = kN; i < kN * 2; ++i) {
+            ASSERT_OK(put(tools::integral_key(base + i), "42"));
+        }
+
+        // Every possible combination these 2 calls should produce the same
+        // outcome: rollback of the current transaction.
+        if (iteration <= 1) {
+            ASSERT_OK(db->rollback_txn(txn));
+        }
+        if (iteration >= 1) {
+            open();
+        }
+
+        // Only the committed changes should persist.
+        for (std::size_t i = 0; i < kN * 2; ++i) {
+            const auto key = tools::integral_key(base + i);
+            ASSERT_EQ(get(key), i < kN ? key : "NOT_FOUND");
+        }
+    }
+}
+
+TEST_F(RecoveryTests, RollbackC)
+{
+    auto records = tools::fill_db(*db, random, kN);
     open();
 
-    ASSERT_EQ(get("a"), "1");
-    ASSERT_EQ(get("b"), "2");
-    ASSERT_EQ(get("c"), "NOT_FOUND");
+    auto txn = db->begin_txn(TxnOptions());
+    tools::fill_db(*db, random, kN);
+    ASSERT_OK(db->rollback_txn(txn));
+
+    for (const auto &[key, value] : records) {
+        ASSERT_EQ(get(key), value);
+    }
+}
+
+TEST_F(RecoveryTests, RollbackD)
+{
+    auto records = tools::fill_db(*db, random, kN);
+    open();
+    const auto actual = tools::read_file_to_string(*m_env, kDBFilename).substr(kPageSize*2, kPageSize);
+
+    for (std::size_t iteration = 0; iteration < 3; ++iteration) {
+        auto txn = db->begin_txn(TxnOptions());
+        for (std::size_t i = 0; i < kN; ++i) {
+            // Same keys each time. Since what we did before was rolled back, these
+            // keys don't exist anyway.
+            const auto key = tools::integral_key(i);
+            ASSERT_OK(put(key, key));
+        }
+        ASSERT_OK(db->rollback_txn(txn));
+
+        const auto before = tools::read_file_to_string(*m_env, kDBFilename).substr(kPageSize*2, kPageSize);
+
+        if (iteration & 1) {
+            open();
+        }
+        const auto after = tools::read_file_to_string(*m_env, kDBFilename).substr(kPageSize*2, kPageSize);
+
+        for (const auto &[key, value] : records) {
+            ASSERT_EQ(get(key), value);
+        }
+    }
 }
 
 TEST_F(RecoveryTests, VacuumRecovery)
@@ -210,9 +284,8 @@ TEST_F(RecoveryTests, VacuumRecovery)
 TEST_F(RecoveryTests, SanityCheck)
 {
     std::map<std::string, std::string> map;
-    const std::size_t N = 100;
 
-    for (std::size_t i = 0; i < N; ++i) {
+    for (std::size_t i = 0; i < kN; ++i) {
         const auto k = random.Generate(db_options.page_size * 2);
         const auto v = random.Generate(db_options.page_size * 4);
         map[k.to_string()] = v.to_string();
@@ -255,7 +328,7 @@ class RecoverySanityCheck
       public testing::TestWithParam<std::tuple<std::string, tools::Interceptor::Type, int>>
 {
 public:
-    RecoverySanityCheck()
+    explicit RecoverySanityCheck()
         : interceptor_prefix(std::get<0>(GetParam()))
     {
         open();
@@ -305,7 +378,7 @@ public:
     tools::Interceptor::Type interceptor_type = std::get<1>(GetParam());
     int interceptor_count = std::get<2>(GetParam());
     std::map<std::string, std::string> map;
-    unsigned m_txn;
+    unsigned m_txn = 0;
 };
 
 TEST_P(RecoverySanityCheck, FailureWhileRunning)
@@ -350,15 +423,15 @@ INSTANTIATE_TEST_SUITE_P(
     RecoverySanityCheck,
     RecoverySanityCheck,
     ::testing::Values(
-        std::make_tuple("./test", tools::Interceptor::kRead, 0),
-        std::make_tuple("./test", tools::Interceptor::kRead, 1),
-        std::make_tuple("./test", tools::Interceptor::kRead, 5),
-        std::make_tuple("./wal", tools::Interceptor::kRead, 0),
-        std::make_tuple("./wal", tools::Interceptor::kRead, 1),
-        std::make_tuple("./wal", tools::Interceptor::kRead, 5),
-        std::make_tuple("./wal", tools::Interceptor::kWrite, 0),
-        std::make_tuple("./wal", tools::Interceptor::kWrite, 1),
-        std::make_tuple("./wal", tools::Interceptor::kWrite, 5)));
+        std::make_tuple(kDBFilename, tools::Interceptor::kRead, 0),
+        std::make_tuple(kDBFilename, tools::Interceptor::kRead, 1),
+        std::make_tuple(kDBFilename, tools::Interceptor::kRead, 5),
+        std::make_tuple(kWalFilename, tools::Interceptor::kRead, 0),
+        std::make_tuple(kWalFilename, tools::Interceptor::kRead, 1),
+        std::make_tuple(kWalFilename, tools::Interceptor::kRead, 5),
+        std::make_tuple(kWalFilename, tools::Interceptor::kWrite, 0),
+        std::make_tuple(kWalFilename, tools::Interceptor::kWrite, 1),
+        std::make_tuple(kWalFilename, tools::Interceptor::kWrite, 5)));
 
 class OpenErrorTests : public RecoverySanityCheck
 {
@@ -388,15 +461,15 @@ INSTANTIATE_TEST_SUITE_P(
     OpenErrorTests,
     OpenErrorTests,
     ::testing::Values(
-        std::make_tuple("./test", tools::Interceptor::kRead, 0),
-        std::make_tuple("./test", tools::Interceptor::kRead, 1),
-        std::make_tuple("./test", tools::Interceptor::kRead, 2)));
+        std::make_tuple(kDBFilename, tools::Interceptor::kRead, 0),
+        std::make_tuple(kDBFilename, tools::Interceptor::kRead, 1)));
 
 class DataLossTests
     : public RecoveryTestHarness<tools::DataLossEnv>,
       public testing::TestWithParam<std::size_t>
 {
 public:
+    using Base = RecoveryTestHarness<tools::DataLossEnv>;
     const std::size_t kCommitInterval = GetParam();
 
     ~DataLossTests() override = default;
@@ -413,14 +486,14 @@ public:
         drop_unsynced_db_data();
     }
 
-    auto drop_unsynced_wal_data() const -> void
+    auto drop_unsynced_wal_data() -> void
     {
-        env->drop_after_last_sync(kWalFilename);
+        Base::env().drop_after_last_sync(kWalFilename);
     }
 
-    auto drop_unsynced_db_data() const -> void
+    auto drop_unsynced_db_data() -> void
     {
-        env->drop_after_last_sync(kDBFilename);
+        Base::env().drop_after_last_sync(kDBFilename);
     }
 };
 
@@ -436,17 +509,24 @@ TEST_P(DataLossTests, RecoversLastCheckpoint)
 {
     auto txn = db->begin_txn(TxnOptions());
     for (std::size_t i = 0; i < kCommitInterval * 10; ++i) {
-        if (i % kCommitInterval == 0) {
+        if (i && i % kCommitInterval == 0) {
+            // All updates are committed except for the last kCommitInterval writes.
             ASSERT_OK(db->commit_txn(txn));
+            txn = db->begin_txn(TxnOptions());
         }
         ASSERT_OK(db->put(tools::integral_key(i), tools::integral_key(i)));
     }
     open();
 
-    for (std::size_t i = 0; i < kCommitInterval * 9; ++i) {
+    for (std::size_t i = 0; i < kCommitInterval * 10; ++i) {
         std::string value;
-        ASSERT_OK(db->get(tools::integral_key(i), &value));
-        ASSERT_EQ(value, tools::integral_key(i));
+        const auto s = db->get(tools::integral_key(i), &value);
+        if (i < kCommitInterval * 9) {
+            ASSERT_OK(s);
+            ASSERT_EQ(value, tools::integral_key(i));
+        } else {
+            ASSERT_TRUE(s.is_not_found());
+        }
     }
 }
 
@@ -457,7 +537,7 @@ TEST_P(DataLossTests, LongTransaction)
         ASSERT_OK(db->put(tools::integral_key(i), tools::integral_key(i)));
         if (i % kCommitInterval == kCommitInterval - 1) {
             ASSERT_OK(db->commit_txn(txn));
-            ASSERT_EQ(db->begin_txn(TxnOptions()), 1);
+            txn = db->begin_txn(TxnOptions());
         }
     }
 

@@ -20,8 +20,8 @@
 namespace calicodb
 {
 
-static constexpr auto kDBFilename = "./test";
-static constexpr auto kWalFilename = "./wal";
+static constexpr auto kDBFilename = "./_test-db";
+static constexpr auto kWalFilename = "./_test-wal";
 
 [[nodiscard]] static auto db_impl(const DB *db) -> const DBImpl *
 {
@@ -45,21 +45,19 @@ static constexpr auto kWalFilename = "./wal";
 
 #define CLEAR_INTERCEPTORS()                                                 \
     do {                                                                     \
-        dynamic_cast<tools::FaultInjectionEnv &>(*env).clear_interceptors(); \
+        env().clear_interceptors(); \
     } while (0)
 
 #define QUICK_INTERCEPTOR(filename__, type__)                                            \
     do {                                                                                 \
-        dynamic_cast<tools::FaultInjectionEnv &>(*env)                                   \
-            .add_interceptor(filename__, tools::Interceptor {(type__), [] {              \
+        env().add_interceptor(filename__, tools::Interceptor {(type__), [] {             \
                                                                  return special_error(); \
                                                              }});                        \
     } while (0)
 
 #define COUNTING_INTERCEPTOR(filename__, type__, n__)                                        \
     do {                                                                                     \
-        dynamic_cast<tools::FaultInjectionEnv &>(*env)                                       \
-            .add_interceptor(filename__, tools::Interceptor {(type__), [&n = (n__)] {        \
+        env().add_interceptor(filename__, tools::Interceptor {(type__), [&n = (n__)] {       \
                                                                  if (n-- <= 0) {             \
                                                                      return special_error(); \
                                                                  }                           \
@@ -92,92 +90,82 @@ static constexpr auto kExpectationMatcher = "^expectation";
             << STREAM_MESSAGE(expr);           \
     } while (0)
 
-class InMemoryTest
+template<class EnvType>
+class EnvTestHarness
 {
 public:
-    const std::string kFilename {"./test"};
-
-    InMemoryTest()
-        : env {std::make_unique<tools::FakeEnv>()}
+    explicit EnvTestHarness()
+        : m_env(new EnvType())
     {
+        (void)m_env->remove_file(kDBFilename);
+        (void)m_env->remove_file(kWalFilename);
     }
 
-    virtual ~InMemoryTest() = default;
-
-    [[nodiscard]] auto get_env() -> tools::FakeEnv &
+    virtual ~EnvTestHarness()
     {
-        return dynamic_cast<tools::FakeEnv &>(*env);
+        delete m_env;
     }
 
-    std::unique_ptr<Env> env;
+    [[nodiscard]] auto env() -> EnvType &
+    {
+        return reinterpret_cast<EnvType &>(*m_env);
+    }
+
+    [[nodiscard]] auto env() const -> const EnvType &
+    {
+        return reinterpret_cast<const EnvType &>(*m_env);
+    }
+
+protected:
+    Env *m_env;
 };
 
-class OnDiskTest
+template<class EnvType>
+class PagerTestHarness : public EnvTestHarness<EnvType>
 {
 public:
-    const std::string kTestDir {"./test_dir"};
-    const std::string kFilename {join_paths(kTestDir, "test")};
-
-    OnDiskTest()
-        : env {Env::default_env()}
-    {
-        std::filesystem::remove_all(kTestDir);
-        std::filesystem::create_directory(kTestDir);
-    }
-
-    virtual ~OnDiskTest()
-    {
-        std::filesystem::remove_all(kTestDir);
-    }
-
-    std::unique_ptr<Env> env;
-};
-
-class TestWithPager : public InMemoryTest
-{
-public:
+    using Base = EnvTestHarness<EnvType>;
     static constexpr auto kPageSize = kMinPageSize;
     static constexpr auto kFrameCount = kMinFrameCount;
 
-    TestWithPager()
-        : random(1'024 * 1'024 * 8)
+    PagerTestHarness()
     {
-        // Using the fake WAL, so everything must be checkpointed before this is run.
-        wal = std::make_unique<tools::FakeWal>(Wal::Parameters {
-            kFilename,
+        const Wal::Parameters wal_param = {
+            kDBFilename,
             kPageSize,
-            env.get(),
-        });
-        Pager *temp;
-        EXPECT_OK(Pager::open({
-                                  kFilename,
-                                  env.get(),
-                                  wal.get(),
-                                  nullptr,
-                                  &state,
-                                  kFrameCount,
-                                  kPageSize,
-                              },
-                              temp));
-        pager.reset(temp);
+            &Base::env(),
+        };
 
-        // Don't use the WAL yet. Commit will flush directly to the DB file.
-        state.use_wal = false;
+        m_wal = new tools::FakeWal(wal_param);
+
+        const Pager::Parameters pager_param = {
+            kDBFilename,
+            &Base::env(),
+            m_wal,
+            nullptr,
+            &m_state,
+            kFrameCount,
+            kPageSize,
+        };
+
+        EXPECT_OK(Pager::open(pager_param, m_pager));
+
+        // Descendents must opt in to using the WAL. "state.use_wal" must be set before
+        // Pager::rollback_txn() is called.
+        m_state.use_wal = false;
     }
 
-    DBState state;
-    std::unique_ptr<Pager> pager;
-    std::unique_ptr<tools::FakeWal> wal;
-    tools::RandomGenerator random;
+    ~PagerTestHarness() override
+    {
+        delete m_pager;
+        delete m_wal;
+    }
+
+protected:
+    DBState m_state;
+    Pager *m_pager = nullptr;
+    Wal *m_wal = nullptr;
 };
-
-inline auto expect_ok(const Status &s) -> void
-{
-    if (!s.is_ok()) {
-        std::fprintf(stderr, "unexpected %s status: %s\n", get_status_name(s), s.to_string().data());
-        std::abort();
-    }
-}
 
 [[nodiscard]] inline auto special_error()
 {
@@ -229,21 +217,6 @@ auto contains(T &t, const std::string &key, const std::string &value) -> bool
 }
 
 template <class T>
-auto expect_contains(T &t, const std::string &key, const std::string &value) -> void
-{
-    std::string val;
-    if (auto s = get(t, key, &val); s.is_ok()) {
-        if (val != value) {
-            std::cerr << "value does not match (\"" << value << "\" != \"" << val << "\")\n";
-            std::abort();
-        }
-    } else {
-        std::cerr << "could not find key " << key << '\n';
-        std::abort();
-    }
-}
-
-template <class T>
 auto insert(T &t, const std::string &key, const std::string &value) -> void
 {
     auto s = t.add(key, value);
@@ -264,55 +237,6 @@ auto erase(T &t, const std::string &key) -> bool
     return !s.is_not_found();
 }
 
-template <class T>
-auto erase_one(T &t, const std::string &key) -> bool
-{
-    auto was_erased = t.erase(get(t, key));
-    EXPECT_TRUE(was_erased.has_value());
-    if (was_erased.value())
-        return true;
-    auto cursor = t.first();
-    EXPECT_EQ(cursor.error(), std::nullopt);
-    if (!cursor.is_valid())
-        return false;
-    was_erased = t.erase(cursor);
-    EXPECT_TRUE(was_erased.value());
-    return true;
-}
-
-inline auto write_file(Env &env, const std::string &path, Slice in) -> void
-{
-    File *file;
-    ASSERT_OK(env.new_file(path, file));
-    ASSERT_OK(file->write(0, in));
-    delete file;
-}
-
-inline auto append_file(Env &env, const std::string &path, Slice in) -> void
-{
-    std::size_t file_size;
-    ASSERT_OK(env.file_size(path, file_size));
-
-    File *file;
-    ASSERT_OK(env.new_file(path, file));
-    ASSERT_OK(file->write(file_size, in));
-    delete file;
-}
-
-inline auto read_file(Env &env, const std::string &path) -> std::string
-{
-    File *file;
-    std::string out;
-    std::size_t size;
-
-    EXPECT_TRUE(env.file_size(path, size).is_ok());
-    EXPECT_TRUE(env.new_file(path, file).is_ok());
-    out.resize(size);
-
-    EXPECT_TRUE(file->read_exact(0, size, out.data()).is_ok());
-    delete file;
-    return out;
-}
 } // namespace test_tools
 
 struct Record {

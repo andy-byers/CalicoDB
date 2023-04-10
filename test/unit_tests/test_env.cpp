@@ -54,26 +54,17 @@ TEST(PathParserTests, JoinsComponents)
     ASSERT_EQ(join_paths("dirname", "basename"), "dirname/basename");
 }
 
-template <class Base, class Store>
-[[nodiscard]] auto open_blob(Store &env, const std::string &name) -> std::unique_ptr<Base>
+template <class EnvType>
+[[nodiscard]] auto open_file(EnvType &env, const std::string &filename) -> std::unique_ptr<File>
 {
-    auto s = Status::ok();
-    Base *temp = nullptr;
-
-    if constexpr (std::is_same_v<File, Base>) {
-        s = env.new_file(name, temp);
-    } else if constexpr (std::is_same_v<File, Base>) {
-        s = env.new_file(name, temp);
-    } else {
-        ADD_FAILURE() << "Error: Unexpected blob type";
-    }
-    EXPECT_TRUE(s.is_ok()) << "Error: " << s.to_string().data();
-    return std::unique_ptr<Base>(temp);
+    File *temp = nullptr;
+    EXPECT_OK(env.new_file(filename, temp));
+    return std::unique_ptr<File>(temp);
 }
 
 auto write_whole_file(const std::string &path, const Slice &message) -> void
 {
-    std::ofstream ofs {path, std::ios::trunc};
+    std::ofstream ofs(path, std::ios::trunc);
     ofs << message.to_string();
 }
 
@@ -125,7 +116,7 @@ auto write_out_randomly(tools::RandomGenerator &random, File &writer, const Slic
 }
 
 class FileTests
-    : public OnDiskTest,
+    : public EnvTestHarness<EnvPosix>,
       public testing::Test
 {
 public:
@@ -142,7 +133,7 @@ public:
         std::filesystem::remove_all(filename);
 
         LogFile *temp;
-        EXPECT_OK(env->new_log_file(filename, temp));
+        EXPECT_OK(env().new_log_file(filename, temp));
         file.reset(temp);
     }
 
@@ -174,8 +165,8 @@ class PosixReaderTests : public FileTests
 public:
     PosixReaderTests()
     {
-        write_whole_file(kFilename, "");
-        file = open_blob<File>(*env, kFilename);
+        write_whole_file(kDBFilename, "");
+        file = open_file(env(), kDBFilename);
     }
 
     std::unique_ptr<File> file;
@@ -190,7 +181,7 @@ TEST_F(PosixReaderTests, NewFileIsEmpty)
 TEST_F(PosixReaderTests, ReadsBackContents)
 {
     auto data = random.Generate(500);
-    write_whole_file(kFilename, data);
+    write_whole_file(kDBFilename, data);
     ASSERT_EQ(read_back_randomly(random, *file, data.size()), data);
 }
 
@@ -198,8 +189,9 @@ class PosixEditorTests : public FileTests
 {
 public:
     PosixEditorTests()
-        : file {open_blob<File>(*env, kFilename)}
+        : file(open_file(env(), kDBFilename))
     {
+        write_whole_file(kDBFilename, "");
     }
 
     std::unique_ptr<File> file;
@@ -218,20 +210,8 @@ TEST_F(PosixEditorTests, WritesOutAndReadsBackData)
     ASSERT_EQ(read_back_randomly(random, *file, data.size()), data);
 }
 
-class EnvPosixTests : public OnDiskTest
-{
-public:
-    EnvPosixTests()
-    {
-    }
-
-    ~EnvPosixTests() override = default;
-
-    tools::RandomGenerator random;
-};
-
 class FakeEnvTests
-    : public InMemoryTest,
+    : public EnvTestHarness<tools::FakeEnv>,
       public testing::Test
 {
 public:
@@ -242,8 +222,8 @@ public:
 
 TEST_F(FakeEnvTests, ReaderStopsAtEOF)
 {
-    auto ra_editor = open_blob<File>(*env, kFilename);
-    auto ra_reader = open_blob<File>(*env, kFilename);
+    auto ra_editor = open_file(env(), kDBFilename);
+    auto ra_reader = open_file(env(), kDBFilename);
 
     const auto data = random.Generate(500);
     write_out_randomly(random, *ra_editor, data);

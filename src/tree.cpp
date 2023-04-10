@@ -4,6 +4,7 @@
 
 #include "tree.h"
 #include "db_impl.h"
+#include "encoding.h"
 #include "logging.h"
 #include "pager.h"
 #include "utils.h"
@@ -1063,6 +1064,7 @@ auto Tree::merge_left(Node &left, Node right, Node &parent, std::size_t index) -
 {
     CALICODB_EXPECT_FALSE(parent.header.is_external);
     CALICODB_EXPECT_TRUE(is_underflowing(left));
+
     if (left.header.is_external) {
         CALICODB_EXPECT_TRUE(right.header.is_external);
         left.header.next_id = right.header.next_id;
@@ -1432,9 +1434,10 @@ auto Tree::find_highest(Node &out) const -> Status
     return Status::ok();
 }
 
-auto Tree::vacuum_step(Page &free, Freelist &freelist, TableSet &tables, Id last_id) -> Status
+auto Tree::vacuum_step(Page &free, TableSet &tables, Id last_id) -> Status
 {
     CALICODB_EXPECT_NE(free.id(), last_id);
+    auto &freelist = m_pager->m_freelist;
 
     PointerMap::Entry entry;
     CALICODB_TRY(PointerMap::read_entry(*m_pager, last_id, entry));
@@ -1569,12 +1572,13 @@ auto Tree::vacuum_step(Page &free, Freelist &freelist, TableSet &tables, Id last
     return Status::ok();
 }
 
-auto Tree::vacuum_one(Id target, Freelist &freelist, TableSet &tables, bool *success) -> Status
+auto Tree::vacuum_one(Id target, TableSet &tables, bool *success) -> Status
 {
     if (PointerMap::lookup(*m_pager, target) == target) {
         *success = true;
         return Status::ok();
     }
+    auto &freelist = m_pager->m_freelist;
     if (target.is_root() || freelist.is_empty()) {
         *success = false;
         return Status::ok();
@@ -1585,7 +1589,7 @@ auto Tree::vacuum_one(Id target, Freelist &freelist, TableSet &tables, bool *suc
     CALICODB_TRY(freelist.pop(head));
     if (target != head.id()) {
         // Swap the last page with the freelist head.
-        CALICODB_TRY(vacuum_step(head, freelist, tables, target));
+        CALICODB_TRY(vacuum_step(head, tables, target));
     } else {
         CALICODB_TRY(fix_parent_id(target, Id::null(), {}));
     }

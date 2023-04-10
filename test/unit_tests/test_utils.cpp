@@ -493,15 +493,10 @@ TEST(SizeDescriptorTests, ProducesSensibleResults)
     ASSERT_EQ(describe_size(10'000ULL, 3), "9.77 KiB");
 }
 
-class InterceptorTests : public testing::Test
+class InterceptorTests
+    : public testing::Test,
+      public EnvTestHarness<tools::FaultInjectionEnv>
 {
-public:
-    InterceptorTests()
-        : env {std::make_unique<tools::FaultInjectionEnv>()}
-    {
-    }
-
-    std::unique_ptr<tools::FaultInjectionEnv> env;
 };
 
 TEST_F(InterceptorTests, RespectsPrefix)
@@ -509,8 +504,8 @@ TEST_F(InterceptorTests, RespectsPrefix)
     QUICK_INTERCEPTOR("./test", tools::Interceptor::kOpen);
 
     File *editor;
-    assert_special_error(env->new_file("./test", editor));
-    expect_ok(env->new_file("./wal", editor));
+    assert_special_error(env().new_file("./test", editor));
+    ASSERT_OK(env().new_file("./wal", editor));
     delete editor;
 }
 
@@ -519,7 +514,7 @@ TEST_F(InterceptorTests, RespectsSyscallType)
     QUICK_INTERCEPTOR("./test", tools::Interceptor::kWrite);
 
     File *editor;
-    expect_ok(env->new_file("./test", editor));
+    ASSERT_OK(env().new_file("./test", editor));
     assert_special_error(editor->write(0, {}));
     delete editor;
 }

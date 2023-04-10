@@ -513,7 +513,6 @@ WalImpl::WalImpl(const Parameters &param, File &file)
       m_env(param.env),
       m_file(&file)
 {
-    (void)m_env;
     (void)m_backfill;
 }
 

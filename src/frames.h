@@ -51,7 +51,7 @@ public:
 
     // Determine the next unreferenced entry that should be evicted based on the
     // cache replacement policy.
-    [[nodiscard]] auto next_victim() -> CacheEntry *;
+    [[nodiscard]] auto next_victim(bool ignore_refcounts = false) -> CacheEntry *;
 
     // Create a new cache entry for page "page_id" which must not already exist.
     //

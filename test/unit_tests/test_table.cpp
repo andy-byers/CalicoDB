@@ -11,7 +11,7 @@ namespace calicodb
 {
 
 class DefaultTableTests
-    : public InMemoryTest,
+    : public EnvTestHarness<tools::FakeEnv>,
       public testing::Test
 {
 public:
@@ -19,7 +19,7 @@ public:
     {
         options.page_size = kMinPageSize;
         options.cache_size = kMinPageSize * 16;
-        options.env = env.get();
+        options.env = &env();
     }
 
     ~DefaultTableTests() override
@@ -37,7 +37,7 @@ public:
         delete db;
         db = nullptr;
 
-        return DB::open(options, kFilename, db);
+        return DB::open(options, kDBFilename, db);
     }
 
     Options options;
@@ -342,7 +342,7 @@ TEST_F(TwoTableTests, RecordsPersist)
     tools::expect_db_contains(*db, *table_2, records_2);
 }
 
-class MultiTableVacuumRunner : public InMemoryTest
+class MultiTableVacuumRunner : public EnvTestHarness<tools::FakeEnv>
 {
 public:
     const std::size_t kRecordCount = 5'000;
@@ -351,11 +351,11 @@ public:
     {
         m_options.page_size = kMinPageSize;
         m_options.cache_size = kMinPageSize * 16;
-        m_options.env = env.get();
+        m_options.env = &env();
         initialize(num_tables, m_options);
     }
 
-    ~MultiTableVacuumRunner() override
+    virtual ~MultiTableVacuumRunner()
     {
         for (auto *table : m_tables) {
             m_db->close_table(table);
@@ -400,7 +400,7 @@ public:
 
         // Make sure all of this stuff can be reverted with the WAL and that the
         // default table isn't messed up.
-        ASSERT_OK(DB::open(m_options, kFilename, m_db));
+        ASSERT_OK(DB::open(m_options, kDBFilename, m_db));
         tools::expect_db_contains(*m_db, m_committed);
 
         // The database would get confused if the root mapping wasn't updated.
@@ -420,7 +420,7 @@ public:
 private:
     auto initialize(std::size_t num_tables, const Options &options) -> void
     {
-        ASSERT_OK(DB::open(options, kFilename, m_db));
+        ASSERT_OK(DB::open(options, kDBFilename, m_db));
 
         // Create some pages before the 2 user tables.
         ASSERT_EQ(m_db->begin_txn(TxnOptions()), 1);

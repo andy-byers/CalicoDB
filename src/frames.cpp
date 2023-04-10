@@ -69,10 +69,10 @@ auto PageCache::erase(Id page_id) -> bool
     return true;
 }
 
-auto PageCache::next_victim() -> CacheEntry *
+auto PageCache::next_victim(bool ignore_refcounts) -> CacheEntry *
 {
     for (auto &entry : m_list) {
-        if (entry.refcount == 0) {
+        if (ignore_refcounts || entry.refcount == 0) {
             return &entry;
         }
     }
@@ -129,7 +129,7 @@ auto FrameManager::unpin(CacheEntry &entry) -> void
 {
     CALICODB_EXPECT_LT(entry.index, m_frame_count);
     CALICODB_EXPECT_FALSE(entry.page_id.is_null());
-    CALICODB_EXPECT_EQ(entry.refcount, 0);
+//    CALICODB_EXPECT_EQ(entry.refcount, 0);
     m_unpinned.emplace_back(entry.index);
 }
 

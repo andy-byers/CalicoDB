@@ -86,7 +86,7 @@ TEST_F(PageCacheTests, ReferencedEntriesAreIgnoredDuringEviction)
 }
 
 class FrameManagerTests
-    : public InMemoryTest,
+    : public EnvTestHarness<tools::FakeEnv>,
       public testing::Test
 {
 public:
@@ -95,9 +95,6 @@ public:
 
     explicit FrameManagerTests()
     {
-        File *file;
-        EXPECT_OK(env->new_file("./test", file));
-
         AlignedBuffer buffer(kPageSize * kPagerFrames, kPageSize);
         frames = std::make_unique<FrameManager>(std::move(buffer), kPageSize, kPagerFrames);
     }
@@ -143,8 +140,6 @@ auto write_to_page(Page &page, const std::string &message) -> void
 class PagerWalTestHarness
 {
 public:
-    static constexpr auto kDBFilename = "./db";
-    static constexpr auto kWalFilename = "./wal";
     static constexpr std::size_t kPagerFrames = kMinFrameCount; // Number of frames available to the pager
     static constexpr std::size_t kSomePages = kPagerFrames / 5; // Just a few pages
     static constexpr std::size_t kFullCache = kPagerFrames;     // Enough pages to fill the page cache
@@ -179,7 +174,6 @@ public:
 
     virtual ~PagerWalTestHarness()
     {
-        m_pager->TEST_validate();
         delete m_pager;
         delete m_wal;
         delete env;
@@ -738,24 +732,22 @@ private:
     std::size_t m_page_size = 0;
 };
 
-class WalTestBase : public InMemoryTest
+class WalTestBase : public EnvTestHarness<tools::FakeEnv>
 {
 protected:
     static constexpr std::size_t kPageSize = kMinPageSize;
-    static constexpr std::size_t kWalHeaderSize = 32;
-    static constexpr std::size_t kFrameSize = kPageSize + 24;
 
     WalTestBase()
     {
         m_param = {
-            .filename = kFilename,
+            .filename = kWalFilename,
             .page_size = kPageSize,
-            .env = env.get(),
+            .env = &env(),
         };
         EXPECT_OK(Wal::open(m_param, m_wal));
     }
 
-    ~WalTestBase() override
+    virtual ~WalTestBase()
     {
         close();
     }
@@ -780,9 +772,9 @@ protected:
 
 TEST_F(WalTests, EmptyWalIsRemovedOnClose)
 {
-    ASSERT_TRUE(env->file_exists(kFilename));
+    ASSERT_TRUE(env().file_exists(kWalFilename));
     close();
-    ASSERT_FALSE(env->file_exists(kFilename));
+    ASSERT_FALSE(env().file_exists(kWalFilename));
 }
 
 TEST_F(WalTests, WritingEmptyDirtyListIsNOOP)
@@ -791,7 +783,7 @@ TEST_F(WalTests, WritingEmptyDirtyListIsNOOP)
     ASSERT_OK(m_wal->write(nullptr, 0));
 
     std::size_t file_size;
-    ASSERT_OK(env->file_size(kFilename, file_size));
+    ASSERT_OK(env().file_size(kWalFilename, file_size));
     ASSERT_LT(file_size, kPageSize);
 }
 
@@ -810,7 +802,7 @@ protected:
           m_fake_param {
               .filename = "fake",
               .page_size = kPageSize,
-              .env = env.get(),
+              .env = &env(),
           },
           m_fake(new tools::FakeWal(m_fake_param))
     {
@@ -863,16 +855,23 @@ protected:
         }
     }
 
-    auto run_and_validate_checkpoint(bool not_abort = true) -> void
+    auto reopen_wals() -> void
+    {
+        ASSERT_OK(Wal::close(m_wal));
+        ASSERT_OK(Wal::open(m_param, m_wal));
+        ASSERT_OK(m_fake->abort());
+    }
+
+    auto run_and_validate_checkpoint(bool save_state = true) -> void
     {
         File *real, *fake;
-        ASSERT_OK(env->new_file("real", real));
-        ASSERT_OK(env->new_file("fake", fake));
+        ASSERT_OK(env().new_file("real", real));
+        ASSERT_OK(env().new_file("fake", fake));
         ASSERT_OK(m_wal->checkpoint(*real, nullptr));
         ASSERT_OK(m_fake->checkpoint(*fake, nullptr));
 
         std::size_t file_size;
-        ASSERT_OK(env->file_size("fake", file_size));
+        ASSERT_OK(env().file_size("fake", file_size));
 
         std::string real_buf(file_size, '\0');
         std::string fake_buf(file_size, '\0');
@@ -881,7 +880,7 @@ protected:
         delete real;
         delete fake;
 
-        if (not_abort) {
+        if (save_state) {
             m_previous_db = m_builder.data().truncate(file_size).to_string();
         }
         ASSERT_EQ(real_buf, fake_buf);
@@ -896,20 +895,12 @@ protected:
         }
     }
 
-    auto reopen_wals() -> void
-    {
-        // Leave the fake WAL alone. The real WAL should run its index recovery routine
-        // to get back to the state it was in before it was closed.
-        ASSERT_OK(Wal::close(m_wal));
-        ASSERT_OK(Wal::open(m_param, m_wal));
-    }
-
-    auto test_operations(bool reopen = false) -> void
+    auto test_operations(bool abort_uncommitted, bool reopen) -> void
     {
         for (std::size_t iteration = 0; iteration < m_iterations; ++iteration) {
             const auto is_commit = m_commit_interval && iteration % m_commit_interval == m_commit_interval - 1;
             write_records(m_pages_per_iter, is_commit);
-            if (!is_commit) {
+            if (abort_uncommitted && !is_commit) {
                 ASSERT_OK(m_wal->abort());
                 ASSERT_OK(m_fake->abort());
             }
@@ -917,7 +908,9 @@ protected:
                 reopen_wals();
             }
             read_and_check_records();
-            run_and_validate_checkpoint(is_commit);
+            if (abort_uncommitted || is_commit) {
+                run_and_validate_checkpoint(is_commit);
+            }
         }
     }
 
@@ -937,14 +930,24 @@ TEST_P(WalParamTests, WriteAndReadBack)
     test_write_and_read_back();
 }
 
-TEST_P(WalParamTests, Operations)
+TEST_P(WalParamTests, OperationsA)
 {
-    test_operations();
+    test_operations(true, false);
 }
 
-TEST_P(WalParamTests, Recovery)
+TEST_P(WalParamTests, OperationsB)
 {
-    test_operations(true);
+    test_operations(true, true);
+}
+
+TEST_P(WalParamTests, OperationsC)
+{
+    test_operations(false, false);
+}
+
+TEST_P(WalParamTests, OperationsD)
+{
+    test_operations(false, true);
 }
 
 INSTANTIATE_TEST_SUITE_P(
@@ -995,13 +998,15 @@ public:
     {
     }
 
-    ~WalPagerFaultTests() override = default;
+    ~WalPagerFaultTests() override
+    {
+        close_pager_and_wal();
+    }
 
     auto SetUp() -> void override
     {
         env = new tools::FaultInjectionEnv;
     }
-
 
     auto run_setup_and_operations()
     {
@@ -1030,59 +1035,70 @@ public:
 
         s = Pager::open(pager_param, m_pager);
         m_state.use_wal = true;
-        if (!s.is_ok()) {
-            return;
-        }
-        (void)m_pager->begin_txn();
 
-        std::vector<std::size_t> indices(std::get<0>(GetParam()));
-        std::iota(begin(indices), end(indices), 0);
-        std::default_random_engine rng(42);
-        std::shuffle(begin(indices), end(indices), rng);
+        if (s.is_ok()) {
+            (void)m_pager->begin_txn();
 
-        // Transaction has already been started, since this is the first time the pager
-        // has been opened.
-        for (auto i : indices) {
-            Page page;
-            const Id page_id(i + 1);
-            const auto message = make_key(i);
-            s = m_pager->acquire(page_id, page);
-            if (!s.is_ok()) {
-                break;
-            }
+            std::vector<std::size_t> indices(std::get<0>(GetParam()));
+            std::iota(begin(indices), end(indices), 0);
+            std::default_random_engine rng(42);
+            std::shuffle(begin(indices), end(indices), rng);
 
-            m_pager->upgrade(page);
-            std::memcpy(page.data() + page.size() - message.size(), message.data(), message.size());
-            m_pager->release(std::move(page));
-
-            // Perform a commit every so often and checkpoint at a less frequent interval.
-            if (i && i % 25 == 0) {
-                s = m_pager->commit_txn();
+            // Transaction has already been started, since this is the first time the pager
+            // has been opened.
+            for (auto i : indices) {
+                Page page;
+                const Id page_id(i + 1);
+                const auto message = make_key(i);
+                s = m_pager->acquire(page_id, page);
                 if (!s.is_ok()) {
                     break;
                 }
-                if (i % 5 == 0) {
-                    s = m_pager->checkpoint();
+
+                m_pager->upgrade(page);
+                std::memcpy(page.data() + page.size() - message.size(), message.data(), message.size());
+                m_pager->release(std::move(page));
+
+                // Perform a commit every so often and checkpoint at a less frequent interval.
+                if (i && i % 25 == 0) {
+                    s = m_pager->commit_txn();
                     if (!s.is_ok()) {
                         break;
                     }
+                    if (i % 5 == 0) {
+                        s = m_pager->checkpoint();
+                        if (!s.is_ok()) {
+                            break;
+                        }
+                    }
+                    ASSERT_TRUE(m_pager->begin_txn());
                 }
-                ASSERT_TRUE(m_pager->begin_txn());
+            }
+            if (s.is_ok()) {
+                s = m_pager->commit_txn();
+                if (s.is_ok()) {
+                    s = m_pager->checkpoint();
+                }
+            }
+
+            if (s.is_ok()) {
+                m_counter = -1;
+                // Should have written monotonically increasing integers back to the DB file.
+                read_and_check(*this, 0, indices.size());
+                read_and_check(*this, 0, indices.size(), true);
+                m_completed = true;
+            } else {
+                // Only 1 interceptor is set, so this should succeed.
+                ASSERT_OK(m_pager->rollback_txn());
             }
         }
+        close_pager_and_wal();
+    }
 
-        if (s.is_ok()) {
-            m_counter = -1;
-            // Should have written monotonically increasing integers back to the DB file.
-            read_and_check(*this, 0, indices.size());
-            read_and_check(*this, 0, indices.size(), true);
-            m_completed = true;
-        } else {
-            // Only 1 interceptor is set, so this should succeed.
-            ASSERT_OK(m_pager->rollback_txn());
-        }
+    auto close_pager_and_wal() -> void
+    {
+        (void)Wal::close(m_wal);
         delete m_pager;
-        delete m_wal;
         m_pager = nullptr;
         m_wal = nullptr;
     }
@@ -1113,9 +1129,14 @@ INSTANTIATE_TEST_SUITE_P(
     WalPagerFaultTests,
     WalPagerFaultTests,
     ::testing::Values(
-        std::make_tuple(20'000, WalPagerFaultTests::kDBFilename, tools::Interceptor::kRead),
-        std::make_tuple(20'000, WalPagerFaultTests::kDBFilename, tools::Interceptor::kWrite),
-        std::make_tuple(500, WalPagerFaultTests::kWalFilename, tools::Interceptor::kRead),
-        std::make_tuple(500, WalPagerFaultTests::kWalFilename, tools::Interceptor::kWrite)));
+        std::make_tuple(10, kDBFilename, tools::Interceptor::kRead),
+        std::make_tuple(10, kDBFilename, tools::Interceptor::kWrite),
+        std::make_tuple(10, kWalFilename, tools::Interceptor::kRead),
+        std::make_tuple(10, kWalFilename, tools::Interceptor::kWrite),
+
+        std::make_tuple(100, kDBFilename, tools::Interceptor::kRead),
+        std::make_tuple(100, kDBFilename, tools::Interceptor::kWrite),
+        std::make_tuple(100, kWalFilename, tools::Interceptor::kRead),
+        std::make_tuple(100, kWalFilename, tools::Interceptor::kWrite)));
 
 } // namespace calicodb

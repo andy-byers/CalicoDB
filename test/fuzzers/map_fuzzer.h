@@ -23,6 +23,7 @@ private:
     std::map<std::string, std::string> m_map;
     std::map<std::string, std::string> m_added;
     std::set<std::string> m_erased;
+    unsigned m_txn = 0;
 };
 
 } // namespace calicodb

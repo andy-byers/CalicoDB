@@ -40,6 +40,7 @@ class Pager final
 {
 public:
     friend class DBImpl;
+    friend class Tree;
 
     enum Mode {
         kOpen,
@@ -69,7 +70,6 @@ public:
     [[nodiscard]] auto rollback_txn() -> Status;
     [[nodiscard]] auto commit_txn() -> Status;
     [[nodiscard]] auto checkpoint() -> Status;
-    [[nodiscard]] auto flush_to_disk() -> Status;
     [[nodiscard]] auto allocate(Page &page) -> Status;
     [[nodiscard]] auto destroy(Page page) -> Status;
     [[nodiscard]] auto acquire(Id page_id, Page &page) -> Status;
@@ -102,6 +102,7 @@ private:
     [[nodiscard]] auto write_page_to_file(const CacheEntry &entry) const -> Status;
     [[nodiscard]] auto ensure_available_frame() -> Status;
     [[nodiscard]] auto wal_checkpoint() -> Status;
+    [[nodiscard]] auto flush_to_disk() -> Status;
     auto purge_state() -> void;
     auto purge_entry(CacheEntry &victim) -> void;
     auto dirtylist_add(CacheEntry &entry) -> void;

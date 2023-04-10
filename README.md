@@ -38,7 +38,6 @@ It is intended for read-heavy embedded applications.
 
 ## Caveats
 + Concurrency control must be provided externally
-+ Commit routine affects all tables
 + Random writes are pretty slow
 
 ## Documentation

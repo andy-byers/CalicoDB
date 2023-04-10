@@ -5,13 +5,12 @@
 #ifndef CALICODB_PAGE_H
 #define CALICODB_PAGE_H
 
-#include "encoding.h"
-#include "frames.h"
-#include "header.h"
 #include "utils.h"
 
 namespace calicodb
 {
+
+struct CacheEntry;
 
 struct LogicalPageId {
     [[nodiscard]] static auto with_page(Id pid) -> LogicalPageId
@@ -54,49 +53,18 @@ class Page
 
 public:
     friend class FrameManager;
+    friend class Pager;
     friend struct Node;
 
     explicit Page() = default;
 
-    [[nodiscard]] auto is_writable() const -> bool
-    {
-        return m_write;
-    }
-
-    [[nodiscard]] auto id() const -> Id
-    {
-        return m_id;
-    }
-
-    [[nodiscard]] auto entry() const -> const CacheEntry *
-    {
-        return m_entry;
-    }
-
-    [[nodiscard]] auto entry() -> CacheEntry *
-    {
-        return m_entry;
-    }
-
-    [[nodiscard]] auto view() const -> Slice
-    {
-        return Slice(m_data, m_size);
-    }
-
-    [[nodiscard]] auto data() -> char *
-    {
-        return m_data;
-    }
-
-    [[nodiscard]] auto data() const -> const char *
-    {
-        return m_data;
-    }
-
-    [[nodiscard]] auto size() const -> std::size_t
-    {
-        return m_size;
-    }
+    [[nodiscard]] auto is_writable() const -> bool;
+    [[nodiscard]] auto id() const -> Id;
+    [[nodiscard]] auto entry() const -> const CacheEntry *;
+    [[nodiscard]] auto view() const -> Slice;
+    [[nodiscard]] auto data() -> char *;
+    [[nodiscard]] auto data() const -> const char *;
+    [[nodiscard]] auto size() const -> std::size_t;
 
     // Disable copies but allow moves.
     Page(const Page &) = delete;
@@ -105,20 +73,9 @@ public:
     auto operator=(Page &&) noexcept -> Page & = default;
 };
 
-[[nodiscard]] inline auto page_offset(Id page_id) -> std::size_t
-{
-    return FileHeader::kSize * page_id.is_root();
-}
-
-[[nodiscard]] inline auto read_next_id(const Page &page) -> Id
-{
-    return Id(get_u32(page.data() + page_offset(page.id())));
-}
-
-inline auto write_next_id(Page &page, Id next_id) -> void
-{
-    put_u32(page.data() + page_offset(page.id()), next_id.value);
-}
+[[nodiscard]] auto page_offset(Id page_id) -> std::size_t;
+[[nodiscard]] auto read_next_id(const Page &page) -> Id;
+auto write_next_id(Page &page, Id next_id) -> void;
 
 } // namespace calicodb
 

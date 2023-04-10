@@ -17,7 +17,9 @@ enum OperationType {
     kSeekIter,
     kIterForward,
     kIterReverse,
-    kCheckpoint,
+    kBeginTxn,
+    kCommitTxn,
+    kRollbackTxn,
     kVacuum,
     kReopen,
     kOpCount
@@ -94,8 +96,20 @@ auto OpsFuzzer::step(const U8 *&data, std::size_t &size) -> Status
         case kVacuum:
             CALICODB_TRY(m_db->vacuum());
             break;
-        case kCheckpoint:
-            CALICODB_TRY(m_db->commit());
+        case kBeginTxn:
+            m_txn = m_db->begin_txn(TxnOptions());
+            break;
+        case kCommitTxn:
+            s = m_db->commit_txn(m_txn);
+            if (!s.is_ok() && !s.is_invalid_argument()) {
+                return s;
+            }
+            break;
+        case kRollbackTxn:
+            s = m_db->rollback_txn(m_txn);
+            if (!s.is_ok() && !s.is_invalid_argument()) {
+                return s;
+            }
             break;
         default: // kReopen
             CALICODB_TRY(reopen());

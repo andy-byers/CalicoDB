@@ -20,7 +20,9 @@ using namespace calicodb::tools;
 enum OperationType {
     kPut,
     kErase,
-    kCheckpoint,
+    kBeginTxn,
+    kRollbackTxn,
+    kCommitTxn,
     kReopen,
     kVacuum,
     kOpCount
@@ -51,6 +53,30 @@ auto MapFuzzer::step(const U8 *&data, std::size_t &size) -> Status
         delete cursor;
     };
 
+    const auto discard_pending = [this, &expect_equal_contents] {
+        if (m_txn) {
+            m_added.clear();
+            m_erased.clear();
+
+            expect_equal_contents();
+            m_txn = 0;
+        }
+    };
+
+    const auto commit_pending = [this, &cleanup = discard_pending] {
+        if (m_txn) {
+            // Only commit if we aren't in a transaction. These writes are performed inside implicit
+            // transactions that are managed by the DB.
+            for (const auto &[k, v] : m_added) {
+                m_map[k] = v;
+            }
+            for (const auto &k : m_erased) {
+                m_map.erase(k);
+            }
+        }
+        cleanup();
+    };
+
     auto operation_type = static_cast<OperationType>(*data++ % OperationType::kOpCount);
     --size;
 
@@ -73,8 +99,8 @@ auto MapFuzzer::step(const U8 *&data, std::size_t &size) -> Status
                     m_erased.erase(itr);
                 }
                 m_added[key] = value;
+                commit_pending();
             }
-            reinterpret_cast<DBImpl &>(*m_db).TEST_tables().get(Id(2))->tree->TEST_validate();
             break;
         case kErase: {
             key = extract_fuzzer_key(data, size);
@@ -88,32 +114,31 @@ auto MapFuzzer::step(const U8 *&data, std::size_t &size) -> Status
                         m_added.erase(itr);
                     }
                     m_erased.insert(key);
+                    commit_pending();
                 } else if (s.is_not_found()) {
                     s = Status::ok();
                 }
             }
             delete cursor;
-            reinterpret_cast<DBImpl &>(*m_db).TEST_tables().get(Id(2))->tree->TEST_validate();
             break;
         }
         case kVacuum:
             s = m_db->vacuum();
-            reinterpret_cast<DBImpl &>(*m_db).TEST_tables().get(Id(2))->tree->TEST_validate();
             break;
-        case kCheckpoint:
-            s = m_db->commit();
+        case kBeginTxn:
+            m_txn = m_db->begin_txn(TxnOptions());
+            break;
+        case kRollbackTxn:
+            s = m_db->rollback_txn(m_txn);
             if (s.is_ok()) {
-                for (const auto &[k, v] : m_added) {
-                    m_map[k] = v;
-                }
-                for (const auto &k : m_erased) {
-                    m_map.erase(k);
-                }
-                m_added.clear();
-                m_erased.clear();
-                expect_equal_contents();
+                discard_pending();
             }
-            reinterpret_cast<DBImpl &>(*m_db).TEST_tables().get(Id(2))->tree->TEST_validate();
+            break;
+        case kCommitTxn:
+            s = m_db->commit_txn(m_txn);
+            if (s.is_ok()) {
+                commit_pending();
+            }
             break;
         default: // kReopen
             m_added.clear();

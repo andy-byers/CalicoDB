@@ -12,6 +12,8 @@ namespace calicodb
 
 class OpsFuzzer : public DbFuzzer
 {
+    unsigned m_txn = 0;
+
 public:
     ~OpsFuzzer() override = default;
     explicit OpsFuzzer(std::string path, Options *options = nullptr);

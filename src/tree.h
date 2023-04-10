@@ -6,6 +6,7 @@
 #define CALICODB_TREE_H
 
 #include "calicodb/cursor.h"
+#include "header.h"
 #include "page.h"
 #include "pager.h"
 #include <optional>
@@ -168,7 +169,7 @@ public:
     [[nodiscard]] auto put(const Slice &key, const Slice &value, bool *exists = nullptr) -> Status;
     [[nodiscard]] auto get(const Slice &key, std::string *value) const -> Status;
     [[nodiscard]] auto erase(const Slice &key) -> Status;
-    [[nodiscard]] auto vacuum_one(Id target, Freelist &freelist, TableSet &tables, bool *success = nullptr) -> Status;
+    [[nodiscard]] auto vacuum_one(Id target, TableSet &tables, bool *success = nullptr) -> Status;
     [[nodiscard]] auto allocate(bool is_external, Node &out) -> Status;
     [[nodiscard]] auto acquire(Id page_id, bool upgrade, Node &out) const -> Status;
     [[nodiscard]] auto destroy(Node node) -> Status;
@@ -185,7 +186,7 @@ private:
         bool exact = false;
     };
 
-    [[nodiscard]] auto vacuum_step(Page &free, Freelist &freelist, TableSet &tables, Id last_id) -> Status;
+    [[nodiscard]] auto vacuum_step(Page &free, TableSet &tables, Id last_id) -> Status;
     [[nodiscard]] auto resolve_overflow(Node node) -> Status;
     [[nodiscard]] auto resolve_underflow(Node node, const Slice &anchor) -> Status;
     [[nodiscard]] auto split_root(Node root, Node &out) -> Status;

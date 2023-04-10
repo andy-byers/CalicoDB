@@ -3,6 +3,7 @@
 // LICENSE.md. See AUTHORS.md for a list of contributor names.
 
 #include "tools.h"
+#include "encoding.h"
 #include "env_posix.h"
 #include "logging.h"
 #include <algorithm>
@@ -175,7 +176,7 @@ auto DataLossEnv::save_file_contents(const std::string &filename) -> void
 
 auto DataLossEnv::overwrite_file(const std::string &filename, const std::string &contents) -> void
 {
-    write_string_to_file(*target(), filename, contents);
+    write_string_to_file(*target(), filename, contents, 0);
 
     auto mem = fake_env(*target()).memory().find(filename);
     CALICODB_EXPECT_NE(mem, end(fake_env(*target()).memory()));
@@ -201,9 +202,20 @@ auto DataLossEnv::drop_after_last_sync(const std::string &filename) -> void
 
 auto DataLossEnv::new_file(const std::string &filename, File *&out) -> Status
 {
-    CHECK_OK(target()->new_file(filename, out));
-    out = new DataLossFile(filename, *out, *this);
-    return Status::ok();
+    auto s = target()->new_file(filename, out);
+    if (s.is_ok()) {
+        out = new DataLossFile(filename, *out, *this);
+    }
+    return s;
+}
+
+auto DataLossEnv::remove_file(const std::string &filename) -> Status
+{
+    auto s = target()->remove_file(filename);
+    if (s.is_ok()) {
+        m_save_states.erase(filename);
+    }
+    return s;
 }
 
 auto FaultInjectionEnv::try_intercept_syscall(Interceptor::Type type, const std::string &filename) -> Status
@@ -409,7 +421,7 @@ auto write_string_to_file(Env &env, const std::string &filename, std::string buf
     }
     File *file;
     CHECK_OK(env.new_file(filename, file));
-    CHECK_OK(file->write(write_pos, buffer.data()));
+    CHECK_OK(file->write(write_pos, buffer));
     delete file;
 }
 

@@ -193,6 +193,7 @@ public:
     }
 
     [[nodiscard]] auto new_file(const std::string &filename, File *&out) -> Status override;
+    [[nodiscard]] auto remove_file(const std::string &filename) -> Status override;
 
     virtual auto drop_after_last_sync() -> void;
     virtual auto drop_after_last_sync(const std::string &filename) -> void;
