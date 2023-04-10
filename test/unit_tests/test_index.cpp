@@ -28,7 +28,7 @@ protected:
         ASSERT_OK(m_index.assign(key, ++m_header.max_frame));
     }
 
-    HashIndexHeader m_header;
+    HashIndexHeader m_header = {};
     HashIndex m_index;
 };
 

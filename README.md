@@ -4,11 +4,6 @@
 > Please don't use it for anything serious!
 > I'm open to comments/criticism/pull requests though, as I want to make CalicoDB a useful library eventually!
 
-> **Note (04/05)**: I'm using this branch to work on the new WAL implementation. I'm trying out something similar
-> to SQLite's WAL, and it's pretty cool so far! Writes and commits are way faster, and it should be much easier to
-> support multiple instances open on the same database at some point.
-> -Andy
-
 CalicoDB is an embedded key-value database written in C++17.
 It exposes a small API that allows storage and retrieval of arbitrary byte sequences.
 CalicoDB runs in a single thread and uses a B<sup>+</sup>-tree backend.

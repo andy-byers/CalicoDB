@@ -2,16 +2,16 @@
 
 + [Build](#build)
 + [API](#api)
-  + [Slices](#slices)
-  + [Opening a database](#opening-a-database)
-  + [Updating a database](#updating-a-database)
-  + [Querying a database](#querying-a-database)
-  + [Vacuuming a database](#vacuuming-a-database)
-  + [Tables](#tables)
-  + [Checkpoints](#commits)
-  + [Database properties](#database-properties)
-  + [Closing a database](#closing-a-database)
-  + [Destroying a database](#destroying-a-database)
+    + [Slices](#slices)
+    + [Opening a database](#opening-a-database)
+    + [Updating a database](#updating-a-database)
+    + [Querying a database](#querying-a-database)
+    + [Vacuuming a database](#vacuuming-a-database)
+    + [Tables](#tables)
+    + [Transactions](#transactions)
+    + [Database properties](#database-properties)
+    + [Closing a database](#closing-a-database)
+    + [Destroying a database](#destroying-a-database)
 + [Acknowledgements](#acknowledgements)
 
 ## Build
@@ -37,12 +37,12 @@ cmake -DCMAKE_BUILD_TYPE=Release -DCALICODB_BuildTests=Off .. && cmake --build .
 
 ### Slices
 ```C++
-std::string str("abc");
+std::string str {"abc"};
 
 // We can create slices from C-style strings, standard library strings, or directly from a pointer and a length.
-calicodb::Slice s1(str.c_str());
-calicodb::Slice s2(str);
-calicodb::Slice s3(str.data(), str.size());
+calicodb::Slice s1 {str.c_str()};
+calicodb::Slice s2 {str};
+calicodb::Slice s3 {str.data(), str.size()};
 
 // A slice can be converted back to a std::string using Slice::to_string().
 std::cout << s1.to_string() << '\n';
@@ -64,21 +64,20 @@ assert(s2.starts_with("ab"));
 ### Opening a database
 ```C++
 // Set some initialization options.
-const calicodb::Options options = {
+const calicodb::Options options {
     // Use pages of size 2 KB and a 2 MB page cache.
     .page_size = 0x2000,
     .cache_size = 0x200000,
     
-    // Store the WAL file in a separate location. The directory "location" must already exist.
-    .wal_filename = "/location/alternate_wal_file",
+    // Store the WAL segments in a separate location. The directory "location" must already exist.
+    // WAL segments will look like "/location/calicodb_wal_#", where # is the segment ID.
+    .wal_prefix = "/location/calicodb_wal_",
     
     .info_log = nullptr,
     
     // This can be used to inject a custom Env implementation. (see the tools::FakeEnv class in
     // tools/tools.h for an example that stores its files in memory).
     .env = nullptr,
-    
-    .sync = false,
 };
 
 // Create or open a database at "/tmp/cats".
@@ -95,7 +94,7 @@ if (!s.is_ok()) {
 In CalicoDB, records are stored in tables, which are on-disk mappings from keys to values.
 Keys within each table are unique, however, tables may have overlapping key ranges.
 Errors returned by methods that modify tables are fatal and the database will refuse to perform any more work.
-The next time that the database is opened, recovery will be run to undo any changes that occurred after the last commit (see [Checkpoints](#commits)).
+The next time that the database is opened, recovery will be run to undo any changes that occurred after the last checkpoint (see [Checkpoints](#checkpoints)).
 The database will always keep 1 table open, called the default table.
 Additional tables are managed using methods on the `DB` object (see [Tables](#tables)).
 When naming tables, note that the prefix "calicodb." is reserved for internal use.
@@ -104,7 +103,7 @@ When naming tables, note that the prefix "calicodb." is reserved for internal us
 // Insert some key-value pairs into the default table.
 calicodb::Status s = db->put("lilly", "calico");
 if (s.is_io_error()) {
-    // Handle an I/O error.
+    // Handle a system-level or I/O error.
 }
 
 s = db->put("freya", "orange tabby");
@@ -133,7 +132,7 @@ if (s.is_ok()) {
 ### Querying a database
 
 ```C++
-// Query a record by key. Note that the "value" parameter is a pointer, indicating 
+// Query a value by key. Note that the "value" parameter is a pointer, indicating 
 // that it is optional. If omitted, the DB will check if the key "lilly" exists, 
 // without attempting to determine its value.
 std::string value;
@@ -202,7 +201,7 @@ if (s.is_ok()) {
 ### Tables
 
 ```C++
-calicodb::TableOptions table_options = {
+calicodb::TableOptions table_options {
     // Pass AccessMode::kReadOnly to open in read-only mode.
     .mode = AccessMode::kReadWrite,
 };
@@ -241,28 +240,35 @@ if (s.is_ok()) {
 ```
 
 ### Transactions
-In CalicoDB, all modifications to the DB take place within write transactions.
-If the transaction API is not explicitly used, then modifications to the DB (put, erase, table management, and vacuum) are wrapped in implicit transactions. 
 
 ```C++
 // Start a transaction.
-calicodb::Status s = db->begin_txn();
-assert(s.is_ok());
+const TxnOptions txn_options = {
+
+};
+const auto txn = db->begin_txn(txn_options);
 
 // Add some more records.
-s = db->put("fanny", "persian");
+calicodb::Status s = db->put("fanny", "persian");
 assert(s.is_ok());
 
 s = db->put("myla", "brown-tabby");
 assert(s.is_ok());
 
-// Perform a commit.
-s = db->commit_txn();
+// Perform a checkpoint.
+s = db->commit_txn(txn);
 if (s.is_ok()) {
-    // If the DB was opened in "sync" mode, then all work performed up to this point will persist if
-    // the program crashes. If the DB was opened in default (not "sync") mode, then it is possible that
-    // some fixed number of transactions will be lost if the program crashes (this depends on when the
-    // last checkpoint operation was run).
+    // Changes are safely on disk (in the WAL, and maybe partially in the database). If we crash from 
+    // here on out, the changes will be reapplied from the WAL the next time the database is opened.
+} else {
+    // Something went wrong, most-likely this is an I/O error. rollback_txn() can be called with the
+    // transaction number to attempt to undo changes made since begin_txn() was called. If successful,
+    // in-memory pages will be discarded and the DB status restored to OK.
+    s = db->rollback_txn(txn);
+    if (s.is_ok()) {
+        // The DB must be in a consistent state again.
+        assert(db->status().is_ok());
+    }
 }
 ```
 
@@ -278,7 +284,7 @@ bool exists = db->get_property("calicodb.stats", &prop);
 exists = db->get_property("calicodb.stats", nullptr);
 ```
 
-### Closing a database 
+### Closing a database
 To close the database, just `delete` the handle.
 During close, the database is made consistent and the whole WAL is removed.
 If an instance leaves any WAL segments behind after closing, then something has gone wrong.
