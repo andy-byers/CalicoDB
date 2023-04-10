@@ -5,6 +5,7 @@
 #ifndef CALICODB_DB_H
 #define CALICODB_DB_H
 
+#include "options.h"
 #include "status.h"
 #include <vector>
 
@@ -13,37 +14,8 @@ namespace calicodb
 
 class Cursor;
 class Env;
-class InfoLogger;
+class LogFile;
 class Table;
-struct TableOptions;
-
-struct Options {
-    // Size of a database page in bytes. This is the basic unit of I/O for the
-    // database file. Data is read/written in page-sized chunks. Must be a power-
-    // of-two between 512 and 65536, inclusive.
-    std::size_t page_size = 16'384; // 16 KB
-
-    // Size of the page cache in bytes. Must be at least 16 pages (see above).
-    std::size_t cache_size = 4'194'304; // 4 MB
-
-    // Alternate prefix to use for WAL segment files. Defaults to "dbname-wal-",
-    // where "dbname" is the name of the database.
-    std::string wal_prefix;
-
-    // Custom destination for info log messages. Defaults to writing to a file
-    // called "dbname-log", where "dbname" is the name of the database. See env.h
-    // for details.
-    InfoLogger *info_log = nullptr;
-
-    // Custom storage environment. See env.h for details.
-    Env *env = nullptr;
-
-    // If true, create the database if it is missing.
-    bool create_if_missing = true;
-
-    // If true, return with an error if the database already exists.
-    bool error_if_exists = false;
-};
 
 // On-disk collection of tables.
 class DB
@@ -73,7 +45,8 @@ public:
 
     // Get a human-readable string describing the given property.
     //
-    // The "out" parameter is optional.
+    // The "out" parameter is optional: if omitted, this method performs an
+    // existence check on the property named "name".
     [[nodiscard]] virtual auto get_property(const Slice &name, std::string *out) const -> bool = 0;
 
     // Get a handle to the default table.
@@ -83,27 +56,19 @@ public:
 
     // Get a status object describing the error state.
     //
-    // If this status is not OK, then a fatal error has occurred. The database
-    // must then be closed, as it will refuse to perform any more work. On the
-    // next startup, the database will attempt to recover using the WAL.
+    // If this status is not OK, then a fatal error has occurred. The database must then
+    // be closed (or rolled back if in a user-initiated write transaction), as it will
+    // refuse to perform any more work. On the next startup, the database will attempt
+    // to recover using the WAL.
     [[nodiscard]] virtual auto status() const -> Status = 0;
 
-    // Run a checkpoint operation, which updates the logical contents of the
-    // database to include all changes made since the last checkpoint.
+    // Perform defragmentation.
     //
-    // This operation affects all tables that have pending updates, as well as creation
-    // and dropping of tables. Synchronizes both the WAL and the database file with the
-    // underlying filesystem, and ensures that the WAL contains the necessary information
-    // to recover from a crash.
-    [[nodiscard]] virtual auto checkpoint() -> Status = 0;
-
-    // Perform defragmentation and shrink the database file.
-    //
-    // This operation can be run at any time, however, it is a NOOP if not enough
-    // records have been erased to cause database pages to become empty.
+    // This operation can be run at any time, however, it is a NOOP if not enough records
+    // have been erased to cause database pages to become empty.
     [[nodiscard]] virtual auto vacuum() -> Status = 0;
 
-    // List the name of each table created by this database, excluding the default table.
+    // List the name of each user table created on this database.
     [[nodiscard]] virtual auto list_tables(std::vector<std::string> &out) const -> Status = 0;
 
     // Open a table and return an opaque handle to it.
@@ -123,6 +88,27 @@ public:
     //
     // This method destroys the table handle and sets "*table" to nullptr.
     virtual auto close_table(Table *&table) -> void = 0;
+
+    // Begin an explicit write transaction.
+    //
+    // If this method is not called, each modification is wrapped in its own write transaction.
+    // It is the caller's responsibility to finish the transaction by calling either commit_txn()
+    // or rollback_txn(). A pending transaction will be rolled back when the DB is closed. Returns
+    // a unique integer representing the transaction. If a transaction has already been started,
+    // that transaction's identifier will be returned.
+    [[nodiscard]] virtual auto begin_txn(const TxnOptions &options) -> unsigned = 0;
+
+    // Commit an explicit write transaction.
+    //
+    // Commits all modifications made during transaction "txn" to the database. This includes
+    // creation and dropping of tables.
+    [[nodiscard]] virtual auto commit_txn(unsigned txn) -> Status = 0;
+
+    // Rollback an explicit write transaction.
+    //
+    // Rolls back all modifications for transaction "txn", including creation and dropping
+    // of tables.
+    [[nodiscard]] virtual auto rollback_txn(unsigned txn) -> Status = 0;
 
     // Get a heap-allocated cursor over the contents of "table".
     //

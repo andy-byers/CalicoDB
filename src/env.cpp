@@ -4,17 +4,24 @@
 
 #include "calicodb/env.h"
 #include "env_posix.h"
+#include "utils.h"
 
 namespace calicodb
 {
 
-Editor::~Editor() = default;
+File::~File() = default;
 
-InfoLogger::~InfoLogger() = default;
+auto File::read_exact(std::size_t offset, std::size_t size, char *scratch) -> Status
+{
+    Slice slice;
+    auto s = read(offset, size, scratch, &slice);
+    if (s.is_ok() && slice.size() != size) {
+        return Status::io_error("incomplete read");
+    }
+    return s;
+}
 
-Logger::~Logger() = default;
-
-Reader::~Reader() = default;
+LogFile::~LogFile() = default;
 
 Env::~Env() = default;
 
@@ -35,24 +42,19 @@ auto EnvWrapper::target() -> Env *
     return m_target;
 }
 
-auto EnvWrapper::new_reader(const std::string &filename, Reader *&out) -> Status
+auto EnvWrapper::target() const -> const Env *
 {
-    return m_target->new_reader(filename, out);
+    return m_target;
 }
 
-auto EnvWrapper::new_editor(const std::string &filename, Editor *&out) -> Status
+auto EnvWrapper::new_file(const std::string &filename, File *&out) -> Status
 {
-    return m_target->new_editor(filename, out);
+    return m_target->new_file(filename, out);
 }
 
-auto EnvWrapper::new_logger(const std::string &filename, Logger *&out) -> Status
+auto EnvWrapper::new_log_file(const std::string &filename, LogFile *&out) -> Status
 {
-    return m_target->new_logger(filename, out);
-}
-
-auto EnvWrapper::new_info_logger(const std::string &filename, InfoLogger *&out) -> Status
-{
-    return m_target->new_info_logger(filename, out);
+    return m_target->new_log_file(filename, out);
 }
 
 auto EnvWrapper::get_children(const std::string &dirname, std::vector<std::string> &out) const -> Status
@@ -83,11 +85,6 @@ auto EnvWrapper::file_size(const std::string &filename, std::size_t &out) const 
 auto EnvWrapper::remove_file(const std::string &filename) -> Status
 {
     return m_target->remove_file(filename);
-}
-
-auto EnvWrapper::sync_directory(const std::string &dirname) -> Status
-{
-    return m_target->remove_file(dirname);
 }
 
 } // namespace calicodb

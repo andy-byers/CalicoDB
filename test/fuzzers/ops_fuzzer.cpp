@@ -17,7 +17,9 @@ enum OperationType {
     kSeekIter,
     kIterForward,
     kIterReverse,
-    kCheckpoint,
+    kBeginTxn,
+    kCommitTxn,
+    kRollbackTxn,
     kVacuum,
     kReopen,
     kOpCount
@@ -30,11 +32,9 @@ OpsFuzzer::OpsFuzzer(std::string path, Options *options)
 {
 }
 
-auto OpsFuzzer::step(const std::uint8_t *&data, std::size_t &size) -> Status
+auto OpsFuzzer::step(const U8 *&data, std::size_t &size) -> Status
 {
     CHECK_TRUE(size >= 2);
-
-    const auto record_count = reinterpret_cast<const DBImpl *>(m_db)->TEST_state().record_count;
     auto operation_type = static_cast<OperationType>(*data++ % OperationType::kOpCount);
     --size;
 
@@ -43,9 +43,6 @@ auto OpsFuzzer::step(const std::uint8_t *&data, std::size_t &size) -> Status
     std::string key;
     Status s;
 
-    if (record_count > DB_MAX_RECORDS) {
-        operation_type = kErase;
-    }
     switch (operation_type) {
         case kGet:
             s = m_db->get(extract_fuzzer_key(data, size), &value);
@@ -99,8 +96,20 @@ auto OpsFuzzer::step(const std::uint8_t *&data, std::size_t &size) -> Status
         case kVacuum:
             CALICODB_TRY(m_db->vacuum());
             break;
-        case kCheckpoint:
-            CALICODB_TRY(m_db->checkpoint());
+        case kBeginTxn:
+            m_txn = m_db->begin_txn(TxnOptions());
+            break;
+        case kCommitTxn:
+            s = m_db->commit_txn(m_txn);
+            if (!s.is_ok() && !s.is_invalid_argument()) {
+                return s;
+            }
+            break;
+        case kRollbackTxn:
+            s = m_db->rollback_txn(m_txn);
+            if (!s.is_ok() && !s.is_invalid_argument()) {
+                return s;
+            }
             break;
         default: // kReopen
             CALICODB_TRY(reopen());
@@ -108,7 +117,7 @@ auto OpsFuzzer::step(const std::uint8_t *&data, std::size_t &size) -> Status
     return m_db->status();
 }
 
-extern "C" int LLVMFuzzerTestOneInput(const std::uint8_t *data, std::size_t size)
+extern "C" int LLVMFuzzerTestOneInput(const U8 *data, std::size_t size)
 {
     Options options;
     options.env = new tools::FakeEnv;

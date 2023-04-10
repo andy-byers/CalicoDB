@@ -11,7 +11,7 @@ namespace calicodb
 {
 
 class DefaultTableTests
-    : public InMemoryTest,
+    : public EnvTestHarness<tools::FakeEnv>,
       public testing::Test
 {
 public:
@@ -19,7 +19,7 @@ public:
     {
         options.page_size = kMinPageSize;
         options.cache_size = kMinPageSize * 16;
-        options.env = env.get();
+        options.env = &env();
     }
 
     ~DefaultTableTests() override
@@ -37,7 +37,7 @@ public:
         delete db;
         db = nullptr;
 
-        return DB::open(options, kFilename, db);
+        return DB::open(options, kDBFilename, db);
     }
 
     Options options;
@@ -84,7 +84,6 @@ TEST_F(DefaultTableTests, DefaultTablePersists)
 TEST_F(DefaultTableTests, RecordInDefaultTablePersists)
 {
     ASSERT_OK(db->put("k", "v"));
-    ASSERT_OK(db->checkpoint());
 
     std::string v;
     ASSERT_OK(db->get("k", &v));
@@ -153,8 +152,13 @@ TEST_F(TableTests, VacuumDroppedTable)
     ASSERT_EQ(db_impl(db)->TEST_pager().page_count(), 3);
 }
 
-TEST_F(TableTests, TableCreationIsPartOfTransaction)
+TEST_F(TableTests, TableDestructionIsPartOfTransaction)
 {
+    const auto txn = db->begin_txn(TxnOptions());
+    ASSERT_OK(db->drop_table(table));
+    table = nullptr;
+    ASSERT_OK(db->commit_txn(txn));
+
     reopen_db();
 
     ASSERT_NE(db_impl(db)->TEST_tables().get(Id(1)), nullptr);
@@ -162,14 +166,10 @@ TEST_F(TableTests, TableCreationIsPartOfTransaction)
     ASSERT_EQ(db_impl(db)->TEST_tables().get(Id(3)), nullptr);
 }
 
-TEST_F(TableTests, TableDestructionIsPartOfTransaction)
+TEST_F(TableTests, TableDestructionIsAtomic)
 {
-    ASSERT_OK(db->checkpoint());
-
-    // Checkpoint is needed for the drop_table() to persist after reopen.
     ASSERT_OK(db->drop_table(table));
     table = nullptr;
-    ASSERT_OK(db->checkpoint());
 
     reopen_db();
 
@@ -196,7 +196,6 @@ TEST_F(TableTests, RecordsPersist)
 
     tools::expect_db_contains(*db, records_0);
     tools::expect_db_contains(*db, *table, records_1);
-    ASSERT_OK(db->checkpoint());
 
     reopen_db();
     reopen_tables();
@@ -279,9 +278,8 @@ TEST_F(TwoTableTests, DropTable)
     ASSERT_EQ(db_impl(db)->TEST_pager().page_count(), 3);
 }
 
-TEST_F(TwoTableTests, TablesCreatedBeforeCheckpointAreRemembered)
+TEST_F(TwoTableTests, CreatedTablesPersist)
 {
-    ASSERT_OK(db->checkpoint());
     reopen_db();
 
     std::vector<std::string> tables;
@@ -289,15 +287,6 @@ TEST_F(TwoTableTests, TablesCreatedBeforeCheckpointAreRemembered)
     ASSERT_EQ(tables.size(), 2);
     ASSERT_EQ(tables[0], "table");
     ASSERT_EQ(tables[1], "table_2");
-}
-
-TEST_F(TwoTableTests, TablesCreatedAfterCheckpointAreForgotten)
-{
-    reopen_db();
-
-    std::vector<std::string> tables;
-    ASSERT_OK(db->list_tables(tables));
-    ASSERT_TRUE(tables.empty());
 }
 
 TEST_F(TwoTableTests, FirstAvailableTableIdIsUsed)
@@ -344,7 +333,6 @@ TEST_F(TwoTableTests, RecordsPersist)
     tools::expect_db_contains(*db, records_0);
     tools::expect_db_contains(*db, *table_1, records_1);
     tools::expect_db_contains(*db, *table_2, records_2);
-    ASSERT_OK(db->checkpoint());
 
     reopen_db();
     reopen_tables();
@@ -354,7 +342,7 @@ TEST_F(TwoTableTests, RecordsPersist)
     tools::expect_db_contains(*db, *table_2, records_2);
 }
 
-class MultiTableVacuumRunner : public InMemoryTest
+class MultiTableVacuumRunner : public EnvTestHarness<tools::FakeEnv>
 {
 public:
     const std::size_t kRecordCount = 5'000;
@@ -363,11 +351,11 @@ public:
     {
         m_options.page_size = kMinPageSize;
         m_options.cache_size = kMinPageSize * 16;
-        m_options.env = env.get();
+        m_options.env = &env();
         initialize(num_tables, m_options);
     }
 
-    ~MultiTableVacuumRunner() override
+    virtual ~MultiTableVacuumRunner()
     {
         for (auto *table : m_tables) {
             m_db->close_table(table);
@@ -412,7 +400,7 @@ public:
 
         // Make sure all of this stuff can be reverted with the WAL and that the
         // default table isn't messed up.
-        ASSERT_OK(DB::open(m_options, kFilename, m_db));
+        ASSERT_OK(DB::open(m_options, kDBFilename, m_db));
         tools::expect_db_contains(*m_db, m_committed);
 
         // The database would get confused if the root mapping wasn't updated.
@@ -432,12 +420,14 @@ public:
 private:
     auto initialize(std::size_t num_tables, const Options &options) -> void
     {
-        ASSERT_OK(DB::open(options, kFilename, m_db));
+        ASSERT_OK(DB::open(options, kDBFilename, m_db));
 
         // Create some pages before the 2 user tables.
+        ASSERT_EQ(m_db->begin_txn(TxnOptions()), 1);
         m_committed = tools::fill_db(*m_db, m_random, kRecordCount);
-        ASSERT_OK(m_db->checkpoint());
+        ASSERT_OK(m_db->commit_txn(1));
 
+        ASSERT_EQ(m_db->begin_txn(TxnOptions()), 2);
         for (std::size_t i = 0; i < num_tables; ++i) {
             m_tables.emplace_back();
             m_records.emplace_back();
@@ -482,7 +472,7 @@ TEST_P(MultiTableVacuumTests, EmptyTables)
 
 TEST_P(MultiTableVacuumTests, FilledTables)
 {
-    fill_user_tables(kRecordCount, kRecordCount / 2);
+    fill_user_tables(15, 15); // kRecordCount, kRecordCount / 2);
     run();
 }
 

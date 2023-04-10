@@ -5,83 +5,148 @@
 #ifndef CALICODB_WAL_H
 #define CALICODB_WAL_H
 
-#include "wal_record.h"
+#include "utils.h"
+#include <vector>
 
 namespace calicodb
 {
 
-class WalWriter;
+class Env;
+class File;
+struct CacheEntry;
 
-class WriteAheadLog
+struct HashIndexHeader {
+    enum Flags {
+        INITIALIZED = 1,
+    };
+    U32 version;
+    U32 unused;
+    U32 change;
+    U16 flags;
+    U16 page_size;
+    U32 max_frame;
+    U32 page_count;
+    U32 frame_cksum[2];
+    U32 salt[2];
+    U32 cksum[2];
+};
+
+// TODO: The hash index is meant to be constructed in shared memory. At some point,
+//       the Env needs to provide memory mapping functionality. Pass a memory-mapped
+//       file object in, or just the Env itself. This class should handle writing the
+//       header on the first insert.
+class HashIndex final
 {
 public:
-    friend class DBImpl;
+    friend class HashIterator;
 
-    struct Parameters {
-        std::string prefix;
-        Env *env = nullptr;
-        std::size_t page_size = 0;
-    };
+    using Key = U32;
+    using Value = U32;
 
-    WriteAheadLog() = default;
-    virtual ~WriteAheadLog();
-    [[nodiscard]] static auto open(const Parameters &param, WriteAheadLog **out) -> Status;
-    [[nodiscard]] virtual auto close() -> Status;
-    [[nodiscard]] virtual auto flushed_lsn() const -> Lsn;
-    [[nodiscard]] virtual auto written_lsn() const -> Lsn;
-    [[nodiscard]] virtual auto current_lsn() const -> Lsn;
-    [[nodiscard]] virtual auto find_obsolete_lsn(Lsn &out) -> Status;
-    [[nodiscard]] virtual auto start_writing() -> Status;
-    [[nodiscard]] virtual auto synchronize(bool flush) -> Status;
-    [[nodiscard]] virtual auto cleanup(Lsn recovery_lsn) -> Status;
-    [[nodiscard]] virtual auto log_vacuum(bool is_start, Lsn *out) -> Status;
-    [[nodiscard]] virtual auto log_delta(Id page_id, const Slice &image, const std::vector<PageDelta> &delta, Lsn *out) -> Status;
-    [[nodiscard]] virtual auto log_image(Id page_id, const Slice &image, Lsn *out) -> Status;
-
-    [[nodiscard]] virtual auto bytes_written() const -> std::size_t
-    {
-        return m_bytes_written;
-    }
+    ~HashIndex();
+    explicit HashIndex(HashIndexHeader &header);
+    [[nodiscard]] auto fetch(Value value) -> Key;
+    [[nodiscard]] auto lookup(Key key, Value lower, Value &out) -> Status;
+    [[nodiscard]] auto assign(Key key, Value value) -> Status;
+    [[nodiscard]] auto header() -> HashIndexHeader *;
+    auto cleanup() -> void;
 
 private:
-    explicit WriteAheadLog(const Parameters &param);
-    [[nodiscard]] auto next_segment_id() const -> Id;
-    [[nodiscard]] auto finish_current_segment() -> Status;
-    [[nodiscard]] auto open_next_segment(Logger *&file) -> Status;
-    [[nodiscard]] auto log(const Slice &payload) -> Status;
-    auto advance_lsn(Lsn *out) -> void;
+    [[nodiscard]] auto group_data(std::size_t group_number) -> char *;
 
-    static constexpr std::size_t kSegmentCutoff = 32;
+    // Storage for hash table groups.
+    std::vector<char *> m_groups;
 
-    // Maps each completed segment to the first LSN written to it.
-    std::map<Id, Lsn> m_segments;
+    // Address of the hash table header kept in memory. This version of the header corresponds
+    // to the current transaction. The one stored in the first table group corresponds to the
+    // most-recently-committed transaction.
+    HashIndexHeader *m_hdr = nullptr;
+};
 
-    // Last LSN written to disk. Always greater than or equal to the "flushed LSN".
-    Lsn m_written_lsn;
+// Construct for iterating through the hash index.
+class HashIterator final
+{
+public:
+    using Key = HashIndex::Key;
+    using Value = HashIndex::Value;
 
-    // Last LSN that is definitely on disk. The file must be fsync()'d before
-    // this value can be increased to match the "written LSN".
-    Lsn m_flushed_lsn;
+    struct Entry {
+        Key key = 0;
+        Value value = 0;
+    };
 
-    // Last LSN written to the tail buffer. Always greater than or equal to the
-    // "written LSN".
-    Lsn m_last_lsn;
+    ~HashIterator();
 
-    // Prefix used for WAL segments.
-    std::string m_prefix;
+    // Create an iterator over the contents of the provided hash index.
+    explicit HashIterator(HashIndex &index);
 
-    // Directory containing the WAL segments (must be a prefix of "m_prefix"). Used to
-    // fsync() the directory when a new segment is created.
-    std::string m_dirname;
+    // Return the next hash entry.
+    //
+    // This method should return a key that is greater than the last key returned by this
+    // method, along with its most-recently-set value.
+    [[nodiscard]] auto read(Entry &out) -> bool;
 
-    std::string m_data_buffer;
-    std::string m_tail_buffer;
-    std::size_t m_bytes_written = 0;
+private:
+    struct State {
+        struct Group {
+            Key *keys;
+            U16 *index;
+            U32 size;
+            U32 next;
+            U32 base;
+        } groups[1];
+    };
 
-    Env *m_env = nullptr;
-    WalWriter *m_writer = nullptr;
-    Logger *m_file = nullptr;
-    Reader *m_dir = nullptr;
+    HashIndex *m_source = nullptr;
+    State *m_state = nullptr;
+    std::size_t m_num_groups = 0;
+    Key m_prior = 0;
+};
+
+struct WalStatistics {
+    std::size_t bytes_read = 0;
+    std::size_t bytes_written = 0;
+};
+
+class Wal
+{
+public:
+    struct Parameters {
+        std::string filename;
+        U32 page_size = 0;
+        Env *env = nullptr;
+    };
+
+    virtual ~Wal();
+
+    // Open or create a WAL file called "filename".
+    [[nodiscard]] static auto open(const Parameters &param, Wal *&out) -> Status;
+
+    [[nodiscard]] static auto close(Wal *&wal) -> Status;
+
+    // Read the most-recent version of page "page_id" from the WAL.
+    //
+    // "page" must point to at least a full page of memory. It is set to nullptr if
+    // page "page_id" does not exist in the WAL.
+    [[nodiscard]] virtual auto read(Id page_id, char *&page) -> Status = 0;
+
+    // Write new versions of the given pages to the WAL.
+    [[nodiscard]] virtual auto write(const CacheEntry *dirty, std::size_t db_size) -> Status = 0;
+
+    // Write the WAL contents back to the DB. Resets internal counters such
+    // that the next write to the WAL will start at the beginning again.
+    [[nodiscard]] virtual auto checkpoint(File &db_file, std::size_t *db_size) -> Status = 0;
+
+    [[nodiscard]] virtual auto sync() -> Status = 0;
+
+    [[nodiscard]] virtual auto needs_checkpoint() const -> bool = 0;
+
+    [[nodiscard]] virtual auto abort() -> Status = 0;
+
+    [[nodiscard]] virtual auto statistics() const -> WalStatistics = 0;
+
+private:
+    [[nodiscard]] virtual auto close() -> Status = 0;
 };
 
 } // namespace calicodb

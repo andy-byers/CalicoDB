@@ -10,81 +10,81 @@
 namespace calicodb
 {
 
-inline auto get_u16(const char *in) noexcept -> std::uint16_t
+inline auto get_u16(const char *in) noexcept -> U16
 {
-    const auto src = reinterpret_cast<const std::uint8_t *>(in);
-    return static_cast<std::uint16_t>(src[0] | src[1] << 8);
+    const auto src = reinterpret_cast<const U8 *>(in);
+    return static_cast<U16>(src[0] | src[1] << 8);
 }
 
-inline auto get_u16(const Slice &in) noexcept -> std::uint16_t
+inline auto get_u16(const Slice &in) noexcept -> U16
 {
     return get_u16(in.data());
 }
 
-inline auto get_u32(const char *in) noexcept -> std::uint32_t
+inline auto get_u32(const char *in) noexcept -> U32
 {
-    const auto src = reinterpret_cast<const std::uint8_t *>(in);
-    return static_cast<std::uint32_t>(src[0]) |
-           static_cast<std::uint32_t>(src[1]) << 8 |
-           static_cast<std::uint32_t>(src[2]) << 16 |
-           static_cast<std::uint32_t>(src[3]) << 24;
+    const auto src = reinterpret_cast<const U8 *>(in);
+    return static_cast<U32>(src[0]) |
+           static_cast<U32>(src[1]) << 8 |
+           static_cast<U32>(src[2]) << 16 |
+           static_cast<U32>(src[3]) << 24;
 }
 
-inline auto get_u32(const Slice &in) noexcept -> std::uint32_t
+inline auto get_u32(const Slice &in) noexcept -> U32
 {
     return get_u32(in.data());
 }
 
-inline auto get_u64(const char *in) noexcept -> std::uint64_t
+inline auto get_u64(const char *in) noexcept -> U64
 {
-    const auto src = reinterpret_cast<const std::uint8_t *>(in);
-    return static_cast<std::uint64_t>(src[0]) |
-           static_cast<std::uint64_t>(src[1]) << 8 |
-           static_cast<std::uint64_t>(src[2]) << 16 |
-           static_cast<std::uint64_t>(src[3]) << 24 |
-           static_cast<std::uint64_t>(src[4]) << 32 |
-           static_cast<std::uint64_t>(src[5]) << 40 |
-           static_cast<std::uint64_t>(src[6]) << 48 |
-           static_cast<std::uint64_t>(src[7]) << 56;
+    const auto src = reinterpret_cast<const U8 *>(in);
+    return static_cast<U64>(src[0]) |
+           static_cast<U64>(src[1]) << 8 |
+           static_cast<U64>(src[2]) << 16 |
+           static_cast<U64>(src[3]) << 24 |
+           static_cast<U64>(src[4]) << 32 |
+           static_cast<U64>(src[5]) << 40 |
+           static_cast<U64>(src[6]) << 48 |
+           static_cast<U64>(src[7]) << 56;
 }
 
-inline auto get_u64(const Slice &in) noexcept -> std::uint64_t
+inline auto get_u64(const Slice &in) noexcept -> U64
 {
     return get_u64(in.data());
 }
 
-inline auto put_u16(char *out, std::uint16_t value) noexcept -> void
+inline auto put_u16(char *out, U16 value) noexcept -> void
 {
-    auto *dst = reinterpret_cast<std::uint8_t *>(out);
-    dst[0] = static_cast<std::uint8_t>(value);
-    dst[1] = static_cast<std::uint8_t>(value >> 8);
+    auto *dst = reinterpret_cast<U8 *>(out);
+    dst[0] = static_cast<U8>(value);
+    dst[1] = static_cast<U8>(value >> 8);
 }
 
-inline auto put_u32(char *out, std::uint32_t value) noexcept -> void
+inline auto put_u32(char *out, U32 value) noexcept -> void
 {
-    auto *dst = reinterpret_cast<std::uint8_t *>(out);
-    dst[0] = static_cast<std::uint8_t>(value);
-    dst[1] = static_cast<std::uint8_t>(value >> 8);
-    dst[2] = static_cast<std::uint8_t>(value >> 16);
-    dst[3] = static_cast<std::uint8_t>(value >> 24);
+    auto *dst = reinterpret_cast<U8 *>(out);
+    dst[0] = static_cast<U8>(value);
+    dst[1] = static_cast<U8>(value >> 8);
+    dst[2] = static_cast<U8>(value >> 16);
+    dst[3] = static_cast<U8>(value >> 24);
 }
 
-inline auto put_u64(char *out, std::uint64_t value) noexcept -> void
+inline auto put_u64(char *out, U64 value) noexcept -> void
 {
-    auto *dst = reinterpret_cast<std::uint8_t *>(out);
-    dst[0] = static_cast<std::uint8_t>(value);
-    dst[1] = static_cast<std::uint8_t>(value >> 8);
-    dst[2] = static_cast<std::uint8_t>(value >> 16);
-    dst[3] = static_cast<std::uint8_t>(value >> 24);
-    dst[4] = static_cast<std::uint8_t>(value >> 32);
-    dst[5] = static_cast<std::uint8_t>(value >> 40);
-    dst[6] = static_cast<std::uint8_t>(value >> 48);
-    dst[7] = static_cast<std::uint8_t>(value >> 56);
+    auto *dst = reinterpret_cast<U8 *>(out);
+    dst[0] = static_cast<U8>(value);
+    dst[1] = static_cast<U8>(value >> 8);
+    dst[2] = static_cast<U8>(value >> 16);
+    dst[3] = static_cast<U8>(value >> 24);
+    dst[4] = static_cast<U8>(value >> 32);
+    dst[5] = static_cast<U8>(value >> 40);
+    dst[6] = static_cast<U8>(value >> 48);
+    dst[7] = static_cast<U8>(value >> 56);
 }
 
 static constexpr std::size_t kVarintMaxLength = 10;
 
-[[nodiscard]] inline auto varint_length(std::uint64_t value) -> std::size_t
+[[nodiscard]] inline auto varint_length(U64 value) -> std::size_t
 {
     std::size_t length = 1;
     while (value >= 0x80) {
@@ -94,24 +94,24 @@ static constexpr std::size_t kVarintMaxLength = 10;
     return length;
 }
 
-inline auto encode_varint(char *out, std::uint64_t value) -> char *
+inline auto encode_varint(char *out, U64 value) -> char *
 {
-    auto *ptr = reinterpret_cast<std::uint8_t *>(out);
+    auto *ptr = reinterpret_cast<U8 *>(out);
     while (value >= 0x80) {
-        *ptr++ = std::uint8_t(value) | 0x80;
+        *ptr++ = U8(value) | 0x80;
         value >>= 7;
     }
-    *ptr++ = static_cast<std::uint8_t>(value);
+    *ptr++ = static_cast<U8>(value);
     return reinterpret_cast<char *>(ptr);
 }
 
 // TODO: We should pass an "end" variable to mark the end of possible input. This will help
 //       catch corruption in data pages, and prevent out-of-bounds reads.
-inline auto decode_varint(const char *in, std::uint64_t &value) -> const char *
+inline auto decode_varint(const char *in, U64 &value) -> const char *
 {
     value = 0;
-    for (std::uint32_t shift = 0; shift < 64; shift += 7) {
-        std::uint64_t c = *reinterpret_cast<const std::uint8_t *>(in);
+    for (U32 shift = 0; shift < 64; shift += 7) {
+        U64 c = *reinterpret_cast<const U8 *>(in);
         ++in;
         if (c & 0x80) {
             value |= (c & 0x7F) << shift;

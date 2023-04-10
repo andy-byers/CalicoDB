@@ -12,8 +12,8 @@
 #include "pager.h"
 #include "tree.h"
 #include "wal.h"
-#include "wal_writer.h"
 
+#include <functional>
 #include <map>
 
 namespace calicodb
@@ -23,7 +23,7 @@ class Cursor;
 class DBImpl;
 class Env;
 class TableImpl;
-class WriteAheadLog;
+class Wal;
 struct TableState;
 
 static constexpr auto kRootTableName = "calicodb.root";
@@ -43,7 +43,7 @@ public:
     friend class DBImpl;
 
     ~TableImpl() override = default;
-    explicit TableImpl(std::string name, Id table_id);
+    explicit TableImpl(std::string name, TableState &state, Id table_id);
 
     [[nodiscard]] auto name() const -> const std::string & override
     {
@@ -55,8 +55,19 @@ public:
         return m_id;
     }
 
+    [[nodiscard]] auto state() -> TableState &
+    {
+        return *m_state;
+    }
+
+    [[nodiscard]] auto state() const -> const TableState &
+    {
+        return *m_state;
+    }
+
 private:
     std::string m_name;
+    TableState *m_state;
     Id m_id;
 };
 
@@ -87,7 +98,7 @@ public:
 
     [[nodiscard]] static auto destroy(const Options &options, const std::string &filename) -> Status;
     [[nodiscard]] static auto repair(const Options &options, const std::string &filename) -> Status;
-    [[nodiscard]] auto open(Options sanitized) -> Status;
+    [[nodiscard]] auto open(const Options &sanitized) -> Status;
 
     [[nodiscard]] auto get_property(const Slice &name, std::string *out) const -> bool override;
     [[nodiscard]] auto default_table() const -> Table * override;
@@ -96,7 +107,10 @@ public:
     [[nodiscard]] auto drop_table(Table *&table) -> Status override;
     auto close_table(Table *&table) -> void override;
 
-    [[nodiscard]] auto checkpoint() -> Status override;
+    [[nodiscard]] auto begin_txn(const TxnOptions &options) -> unsigned override;
+    [[nodiscard]] auto commit_txn(unsigned txn) -> Status override;
+    [[nodiscard]] auto rollback_txn(unsigned txn) -> Status override;
+
     [[nodiscard]] auto status() const -> Status override;
     [[nodiscard]] auto vacuum() -> Status override;
 
@@ -112,7 +126,7 @@ public:
     using DB::erase;
     [[nodiscard]] auto erase(Table &table, const Slice &key) -> Status override;
 
-    [[nodiscard]] auto TEST_wal() const -> const WriteAheadLog &;
+    [[nodiscard]] auto TEST_wal() const -> const Wal &;
     [[nodiscard]] auto TEST_pager() const -> const Pager &;
     [[nodiscard]] auto TEST_tables() const -> const TableSet &;
     [[nodiscard]] auto TEST_state() const -> const DBState &;
@@ -120,15 +134,18 @@ public:
 
 private:
     [[nodiscard]] auto get_table_info(std::vector<std::string> &names, std::vector<LogicalPageId> *roots) const -> Status;
-    [[nodiscard]] auto remove_empty_table(const std::string &name, TableState &state) -> Status;
-    [[nodiscard]] auto do_checkpoint() -> Status;
-    [[nodiscard]] auto load_file_header() -> Status;
-    [[nodiscard]] auto do_vacuum() -> Status;
-    [[nodiscard]] auto open_wal_reader(Id segment, std::unique_ptr<Reader> &out) -> Status;
-    [[nodiscard]] auto ensure_consistency() -> Status;
-    [[nodiscard]] auto recovery_phase_1() -> Status;
-    [[nodiscard]] auto recovery_phase_2() -> Status;
     [[nodiscard]] auto construct_new_table(const Slice &name, LogicalPageId &root_id) -> Status;
+    [[nodiscard]] auto remove_empty_table(const std::string &name, TableState &state) -> Status;
+    [[nodiscard]] auto checkpoint_if_needed(bool force = false) -> Status;
+    [[nodiscard]] auto load_file_header() -> Status;
+
+    [[nodiscard]] auto ensure_txn_started(bool &implicit_txn) -> Status;
+    [[nodiscard]] auto ensure_txn_finished(bool implicit_txn) -> Status;
+    [[nodiscard]] auto do_put(Table &table, const Slice &key, const Slice &value) -> Status;
+    [[nodiscard]] auto do_erase(Table &table, const Slice &key) -> Status;
+    [[nodiscard]] auto do_vacuum() -> Status;
+    [[nodiscard]] auto do_create_table(const TableOptions &options, const std::string &name, Table *&out) -> Status;
+    [[nodiscard]] auto do_drop_table(Table *&table) -> Status;
 
     mutable DBState m_state;
 
@@ -136,18 +153,21 @@ private:
     Table *m_default = nullptr;
     Table *m_root = nullptr;
 
-    WriteAheadLog *m_wal = nullptr;
+    Wal *m_wal = nullptr;
     Pager *m_pager = nullptr;
     Env *m_env = nullptr;
-    InfoLogger *m_info_log = nullptr;
+    LogFile *m_log = nullptr;
 
-    const std::string m_filename;
-    const std::string m_wal_prefix;
+    unsigned m_txn = 0;
+    unsigned m_auto_txn = 0;
+
+    const std::string m_db_filename;
+    const std::string m_wal_filename;
+    const std::string m_log_filename;
     const bool m_owns_env;
-    const bool m_owns_info_log;
+    const bool m_owns_log;
+    const bool m_sync;
 };
-
-auto setup_db(const std::string &filename, Env &env, Options &options, FileHeader &header) -> Status;
 
 } // namespace calicodb
 

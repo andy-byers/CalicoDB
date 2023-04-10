@@ -14,7 +14,7 @@
 namespace calicodb
 {
 
-inline auto extract_fuzzer_value(const std::uint8_t *&data, std::size_t &size) -> std::string
+inline auto extract_fuzzer_value(const U8 *&data, std::size_t &size) -> std::string
 {
     static constexpr auto max_fuzzer_value_size = kMinPageSize * 2;
 
@@ -47,7 +47,7 @@ inline auto extract_fuzzer_value(const std::uint8_t *&data, std::size_t &size) -
     return result;
 }
 
-inline auto extract_fuzzer_key(const std::uint8_t *&data, std::size_t &size) -> std::string
+inline auto extract_fuzzer_key(const U8 *&data, std::size_t &size) -> std::string
 {
     if (size == 0) {
         return "0";
@@ -60,7 +60,7 @@ class DbFuzzer
 public:
     virtual ~DbFuzzer();
     explicit DbFuzzer(std::string path, Options *options = nullptr);
-    [[nodiscard]] virtual auto step(const std::uint8_t *&data, std::size_t &size) -> Status = 0;
+    [[nodiscard]] virtual auto step(const U8 *&data, std::size_t &size) -> Status = 0;
     [[nodiscard]] virtual auto reopen() -> Status;
     virtual auto validate() -> void;
 

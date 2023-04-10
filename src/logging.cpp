@@ -101,16 +101,16 @@ auto escape_string(const Slice &value) -> std::string
 }
 
 // Modified from LevelDB.
-auto consume_decimal_number(Slice &in, std::uint64_t *val) -> bool
+auto consume_decimal_number(Slice &in, U64 *val) -> bool
 {
     // Constants that will be optimized away.
-    static constexpr const std::uint64_t kMaxUint64 = std::numeric_limits<std::uint64_t>::max();
+    static constexpr const U64 kMaxUint64 = std::numeric_limits<U64>::max();
     static constexpr const char kLastDigitOfMaxUint64 = '0' + static_cast<char>(kMaxUint64 % 10);
 
-    std::uint64_t value = 0;
+    U64 value = 0;
 
     // reinterpret_cast-ing from char* to uint8_t* to avoid signedness.
-    const auto *start = reinterpret_cast<const std::uint8_t *>(in.data());
+    const auto *start = reinterpret_cast<const U8 *>(in.data());
 
     const auto *end = start + in.size();
     const auto *current = start;

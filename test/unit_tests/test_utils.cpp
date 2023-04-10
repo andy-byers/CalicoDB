@@ -7,7 +7,6 @@
 #include <vector>
 
 #include "calicodb/slice.h"
-#include "crc.h"
 #include "encoding.h"
 #include "logging.h"
 #include "unit_tests.h"
@@ -26,20 +25,20 @@ TEST(TestUtils, ExpectationDeathTest)
 TEST(TestUtils, EncodingIsConsistent)
 {
     tools::RandomGenerator random;
-    const auto u16 = std::uint16_t(-1);
-    const auto u32 = std::uint32_t(-2);
-    const auto u64 = std::uint64_t(-3);
+    const auto u16 = U16(-1);
+    const auto u32 = U32(-2);
+    const auto u64 = U64(-3);
     std::string buffer(sizeof(u16) + sizeof(u32) + sizeof(u64) + 1, '\x00');
 
     auto dst = buffer.data();
     put_u16(dst, u16);
-    put_u32(dst += sizeof(std::uint16_t), u32);
-    put_u64(dst + sizeof(std::uint32_t), u64);
+    put_u32(dst += sizeof(U16), u32);
+    put_u64(dst + sizeof(U32), u64);
 
     auto src = buffer.data();
     ASSERT_EQ(u16, get_u16(src));
-    ASSERT_EQ(u32, get_u32(src += sizeof(std::uint16_t)));
-    ASSERT_EQ(u64, get_u64(src += sizeof(std::uint32_t)));
+    ASSERT_EQ(u32, get_u32(src += sizeof(U16)));
+    ASSERT_EQ(u64, get_u64(src += sizeof(U32)));
     ASSERT_EQ(buffer.back(), 0) << "buffer overflow";
 }
 
@@ -310,9 +309,7 @@ auto run_ordering_comparisons()
 TEST(IdTests, TypesAreSizedCorrectly)
 {
     Id id;
-    Lsn lsn;
     static_assert(Id::kSize == sizeof(id) && Id::kSize == sizeof(id.value));
-    static_assert(Lsn::kSize == sizeof(lsn) && Lsn::kSize == sizeof(lsn.value));
 }
 
 TEST(IdTests, IdentifiersAreNullable)
@@ -458,105 +455,6 @@ TEST(MiscTests, StringsUsesSizeParameterForComparisons)
     ASSERT_EQ(v[2][2], '\x33');
 }
 
-// CRC tests from LevelDB.
-namespace crc32c
-{
-
-TEST(LevelDB_CRC, StandardResults)
-{
-    // From rfc3720 section B.4.
-    char buf[32];
-
-    memset(buf, 0, sizeof(buf));
-    ASSERT_EQ(0x8a9136aa, Value(buf, sizeof(buf)));
-
-    memset(buf, 0xff, sizeof(buf));
-    ASSERT_EQ(0x62a8ab43, Value(buf, sizeof(buf)));
-
-    for (int i = 0; i < 32; i++) {
-        buf[i] = i;
-    }
-    ASSERT_EQ(0x46dd794e, Value(buf, sizeof(buf)));
-
-    for (int i = 0; i < 32; i++) {
-        buf[i] = 31 - i;
-    }
-    ASSERT_EQ(0x113fdb5c, Value(buf, sizeof(buf)));
-
-    uint8_t data[48] = {
-        0x01,
-        0xc0,
-        0x00,
-        0x00,
-        0x00,
-        0x00,
-        0x00,
-        0x00,
-        0x00,
-        0x00,
-        0x00,
-        0x00,
-        0x00,
-        0x00,
-        0x00,
-        0x00,
-        0x14,
-        0x00,
-        0x00,
-        0x00,
-        0x00,
-        0x00,
-        0x04,
-        0x00,
-        0x00,
-        0x00,
-        0x00,
-        0x14,
-        0x00,
-        0x00,
-        0x00,
-        0x18,
-        0x28,
-        0x00,
-        0x00,
-        0x00,
-        0x00,
-        0x00,
-        0x00,
-        0x00,
-        0x02,
-        0x00,
-        0x00,
-        0x00,
-        0x00,
-        0x00,
-        0x00,
-        0x00,
-    };
-    ASSERT_EQ(0xd9963a56, Value(reinterpret_cast<char *>(data), sizeof(data)));
-}
-
-TEST(LevelDB_CRC, Values)
-{
-    ASSERT_NE(Value("a", 1), Value("foo", 3));
-}
-
-TEST(LevelDB_CRC, Extend)
-{
-    ASSERT_EQ(Value("hello world", 11), Extend(Value("hello ", 6), "world", 5));
-}
-
-TEST(LevelDB_CRC, Mask)
-{
-    uint32_t crc = Value("foo", 3);
-    ASSERT_NE(crc, Mask(crc));
-    ASSERT_NE(crc, Mask(Mask(crc)));
-    ASSERT_EQ(crc, Unmask(Mask(crc)));
-    ASSERT_EQ(crc, Unmask(Unmask(Mask(Mask(crc)))));
-}
-
-} // namespace crc32c
-
 [[nodiscard]] auto describe_size(std::size_t size, int precision = 4) -> std::string
 {
     static constexpr std::size_t KiB {1'024};
@@ -595,24 +493,19 @@ TEST(SizeDescriptorTests, ProducesSensibleResults)
     ASSERT_EQ(describe_size(10'000ULL, 3), "9.77 KiB");
 }
 
-class InterceptorTests : public testing::Test
+class InterceptorTests
+    : public testing::Test,
+      public EnvTestHarness<tools::FaultInjectionEnv>
 {
-public:
-    InterceptorTests()
-        : env {std::make_unique<tools::FaultInjectionEnv>()}
-    {
-    }
-
-    std::unique_ptr<tools::FaultInjectionEnv> env;
 };
 
 TEST_F(InterceptorTests, RespectsPrefix)
 {
     QUICK_INTERCEPTOR("./test", tools::Interceptor::kOpen);
 
-    Editor *editor;
-    assert_special_error(env->new_editor("./test", editor));
-    expect_ok(env->new_editor("./wal-", editor));
+    File *editor;
+    assert_special_error(env().new_file("./test", editor));
+    ASSERT_OK(env().new_file("./wal", editor));
     delete editor;
 }
 
@@ -620,8 +513,8 @@ TEST_F(InterceptorTests, RespectsSyscallType)
 {
     QUICK_INTERCEPTOR("./test", tools::Interceptor::kWrite);
 
-    Editor *editor;
-    expect_ok(env->new_editor("./test", editor));
+    File *editor;
+    ASSERT_OK(env().new_file("./test", editor));
     assert_special_error(editor->write(0, {}));
     delete editor;
 }

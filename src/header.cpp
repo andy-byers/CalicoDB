@@ -3,74 +3,57 @@
 // LICENSE.md. See AUTHORS.md for a list of contributor names.
 
 #include "header.h"
-#include "crc.h"
 #include "encoding.h"
 
 namespace calicodb
 {
 
-static auto write_file_header(char *data, const FileHeader &header) -> void
+auto FileHeader::read(const char *data) -> bool
 {
-    put_u32(data, header.magic_code);
-    data += sizeof(std::uint32_t);
-
-    put_u32(data, header.header_crc);
-    data += sizeof(std::uint32_t);
-
-    put_u32(data, header.page_count);
-    data += sizeof(std::uint32_t);
-
-    put_u32(data, header.freelist_head.value);
-    data += Id::kSize;
-
-    put_u64(data, header.record_count);
-    data += sizeof(std::uint64_t);
-
-    put_u64(data, header.commit_lsn.value);
-    data += Lsn::kSize;
-
-    put_u16(data, static_cast<std::uint16_t>(header.page_size));
-}
-
-auto FileHeader::read(const char *data) -> void
-{
-    magic_code = get_u32(data);
-    data += sizeof(std::uint32_t);
-
-    header_crc = get_u32(data);
-    data += sizeof(std::uint32_t);
-
-    page_count = get_u32(data);
-    data += sizeof(std::uint32_t);
-
-    freelist_head.value = get_u32(data);
-    data += Id::kSize;
-
-    record_count = get_u64(data);
-    data += sizeof(std::uint64_t);
-
-    commit_lsn.value = get_u64(data);
-    data += Lsn::kSize;
+    if (std::memcmp(data, kIdentifier, sizeof(kIdentifier)) != 0) {
+        return false;
+    }
+    data += sizeof(kIdentifier);
 
     page_size = get_u16(data);
-}
+    data += sizeof(U16);
 
-auto FileHeader::compute_crc() const -> std::uint32_t
-{
-    char data[FileHeader::kSize];
-    write_file_header(data, *this);
-    return crc32c::Value(data + 8, FileHeader::kSize - 8);
+    page_count = get_u32(data);
+    data += sizeof(U32);
+
+    freelist_head = get_u32(data);
+    data += sizeof(U32);
+
+    format_version = *data++;
+    return true;
 }
 
 auto FileHeader::write(char *data) const -> void
 {
-    write_file_header(data, *this);
+    std::memcpy(data, kIdentifier, sizeof(kIdentifier));
+    data += sizeof(kIdentifier);
+
+    put_u16(data, page_size);
+    data += sizeof(U16);
+
+    put_u32(data, page_count);
+    data += sizeof(U32);
+
+    put_u32(data, freelist_head);
+    data += sizeof(U32);
+
+    *data++ = format_version;
 }
 
 auto NodeHeader::read(const char *data) -> void
 {
+    // TODO: Return a bool from this method. false if there is corruption, true otherwise.
+    //       These asserts should be made into guard clauses at some point. The tree layer
+    //       can set an error status on the pager if there is corruption detected.
+    CALICODB_EXPECT_EQ(*data & ~0b11, 0);
+
     // Flags byte.
-    is_external = *data++;
+    is_external = *data++ & 1;
 
     next_id.value = get_u32(data);
     data += Id::kSize;
@@ -79,20 +62,20 @@ auto NodeHeader::read(const char *data) -> void
     data += Id::kSize;
 
     cell_count = get_u16(data);
-    data += sizeof(std::uint16_t);
+    data += sizeof(U16);
 
     cell_start = get_u16(data);
-    data += sizeof(std::uint16_t);
+    data += sizeof(U16);
 
     free_start = get_u16(data);
-    data += sizeof(std::uint16_t);
+    data += sizeof(U16);
 
-    frag_count = static_cast<std::uint8_t>(*data);
+    frag_count = static_cast<U8>(*data);
 }
 
 auto NodeHeader::write(char *data) const -> void
 {
-    *data++ = static_cast<char>(is_external);
+    *data++ = is_external ? 1 : 2;
 
     put_u32(data, next_id.value);
     data += Id::kSize;
@@ -100,14 +83,14 @@ auto NodeHeader::write(char *data) const -> void
     put_u32(data, prev_id.value);
     data += Id::kSize;
 
-    put_u16(data, static_cast<std::uint16_t>(cell_count));
-    data += sizeof(std::uint16_t);
+    put_u16(data, static_cast<U16>(cell_count));
+    data += sizeof(U16);
 
-    put_u16(data, static_cast<std::uint16_t>(cell_start));
-    data += sizeof(std::uint16_t);
+    put_u16(data, static_cast<U16>(cell_start));
+    data += sizeof(U16);
 
-    put_u16(data, static_cast<std::uint16_t>(free_start));
-    data += sizeof(std::uint16_t);
+    put_u16(data, static_cast<U16>(free_start));
+    data += sizeof(U16);
 
     *data = static_cast<char>(frag_count);
 }

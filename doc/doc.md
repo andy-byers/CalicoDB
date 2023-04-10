@@ -2,16 +2,16 @@
 
 + [Build](#build)
 + [API](#api)
-  + [Slices](#slices)
-  + [Opening a database](#opening-a-database)
-  + [Updating a database](#updating-a-database)
-  + [Querying a database](#querying-a-database)
-  + [Vacuuming a database](#vacuuming-a-database)
-  + [Tables](#tables)
-  + [Checkpoints](#checkpoints)
-  + [Database properties](#database-properties)
-  + [Closing a database](#closing-a-database)
-  + [Destroying a database](#destroying-a-database)
+    + [Slices](#slices)
+    + [Opening a database](#opening-a-database)
+    + [Updating a database](#updating-a-database)
+    + [Querying a database](#querying-a-database)
+    + [Vacuuming a database](#vacuuming-a-database)
+    + [Tables](#tables)
+    + [Transactions](#transactions)
+    + [Database properties](#database-properties)
+    + [Closing a database](#closing-a-database)
+    + [Destroying a database](#destroying-a-database)
 + [Acknowledgements](#acknowledgements)
 
 ## Build
@@ -239,14 +239,15 @@ if (s.is_ok()) {
 }
 ```
 
-### Checkpoints
-CalicoDB uses the concept of a checkpoint to provide guarantees about the logical contents of a database.
-Any work that took place before a successful checkpoint will persist, even if the program crashes afterward.
-It should also be noted that this also applies to creation and removal of tables.
-At this point, checkpoints are global: they affect every table with pending updates.
-Further work may go toward implementing per-table checkpoints.
+### Transactions
 
 ```C++
+// Start a transaction.
+const TxnOptions txn_options = {
+
+};
+const auto txn = db->begin_txn(txn_options);
+
 // Add some more records.
 calicodb::Status s = db->put("fanny", "persian");
 assert(s.is_ok());
@@ -255,10 +256,19 @@ s = db->put("myla", "brown-tabby");
 assert(s.is_ok());
 
 // Perform a checkpoint.
-s = db->checkpoint();
+s = db->commit_txn(txn);
 if (s.is_ok()) {
     // Changes are safely on disk (in the WAL, and maybe partially in the database). If we crash from 
     // here on out, the changes will be reapplied from the WAL the next time the database is opened.
+} else {
+    // Something went wrong, most-likely this is an I/O error. rollback_txn() can be called with the
+    // transaction number to attempt to undo changes made since begin_txn() was called. If successful,
+    // in-memory pages will be discarded and the DB status restored to OK.
+    s = db->rollback_txn(txn);
+    if (s.is_ok()) {
+        // The DB must be in a consistent state again.
+        assert(db->status().is_ok());
+    }
 }
 ```
 
@@ -274,7 +284,7 @@ bool exists = db->get_property("calicodb.stats", &prop);
 exists = db->get_property("calicodb.stats", nullptr);
 ```
 
-### Closing a database 
+### Closing a database
 To close the database, just `delete` the handle.
 During close, the database is made consistent and the whole WAL is removed.
 If an instance leaves any WAL segments behind after closing, then something has gone wrong.

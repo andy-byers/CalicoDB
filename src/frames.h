@@ -5,11 +5,11 @@
 #ifndef CALICODB_FRAMES_H
 #define CALICODB_FRAMES_H
 
-#include "delta.h"
 #include "utils.h"
 #include <list>
 #include <map>
 #include <optional>
+#include <set>
 #include <unordered_map>
 #include <vector>
 
@@ -19,55 +19,22 @@ namespace calicodb
 struct FileHeader;
 class Page;
 class Pager;
-class Editor;
+class File;
 class Env;
 
-// Manages the set of dirty pages.
-//
-// When a page is first made dirty, it should be added to this table along
-// with the current page LSN.
-class DirtyTable final
-{
-public:
-    using Iterator = std::multimap<Lsn, Id>::iterator;
-
-    // Return the number of dirty pages.
-    [[nodiscard]] auto size() const -> std::size_t;
-
-    // Iterate over dirty pages, ordered by increasing record LSNs.
-    [[nodiscard]] auto begin() -> Iterator;
-    [[nodiscard]] auto end() -> Iterator;
-
-    // Add a recently-modified page to the table.
-    [[nodiscard]] auto insert(Id page_id, Lsn record_lsn) -> Iterator;
-
-    // Remove a recently-flushed or recently-truncated page from the table.
-    auto remove(Iterator itr) -> Iterator;
-
-    // Find the oldest non-NULL LSN currently in the table.
-    [[nodiscard]] auto recovery_lsn() const -> Lsn;
-
-private:
-    // There may be multiple Lsn::null() in the dirty set.
-    std::multimap<Lsn, Id> m_dirty;
-};
-
 struct CacheEntry {
-    using Token = std::optional<DirtyTable::Iterator>;
-
     Id page_id;
     std::size_t index = 0;
     unsigned refcount = 0;
+    char *page = nullptr;
 
-    // If the page represented by this entry is dirty, this should point
-    // into the corresponding dirty table entry.
-    Token token;
+    // Dirty list fields.
+    CacheEntry *prev = nullptr;
+    CacheEntry *next = nullptr;
+    bool is_dirty = false;
 };
 
 // Mapping from page IDs to frame indices.
-//
-// If the page is made dirty, the cache entry should be updated to contain the
-// iterator returned by DirtyTable::insert().
 class PageCache final
 {
 public:
@@ -82,51 +49,33 @@ public:
     // This method alters the cache ordering if, and only if, it finds an entry.
     [[nodiscard]] auto get(Id page_id) -> CacheEntry *;
 
-    // Evict the next unreferenced entry based on the cache replacement policy, if
-    // one exists.
-    [[nodiscard]] auto evict() -> std::optional<CacheEntry>;
+    // Determine the next unreferenced entry that should be evicted based on the
+    // cache replacement policy.
+    [[nodiscard]] auto next_victim(bool ignore_refcounts = false) -> CacheEntry *;
 
-    // Add an entry to the cache, which must not already exist.
-    auto put(CacheEntry entry) -> CacheEntry *;
+    // Create a new cache entry for page "page_id" which must not already exist.
+    //
+    // Returns the address of the cache entry, which is guaranteed to not change
+    // until erase() is called on the entry.
+    [[nodiscard]] auto alloc(Id page_id) -> CacheEntry *;
 
     // Erase a specific entry, if it exists.
     auto erase(Id page_id) -> bool;
 
-    [[nodiscard]] auto hits() const -> std::uint64_t;
-    [[nodiscard]] auto misses() const -> std::uint64_t;
+    [[nodiscard]] auto hits() const -> U64;
+    [[nodiscard]] auto misses() const -> U64;
 
 private:
     using MapEntry = std::list<CacheEntry>::iterator;
 
     std::unordered_map<Id, MapEntry, Id::Hash> m_map;
     std::list<CacheEntry> m_list;
-    std::uint64_t m_misses = 0;
-    std::uint64_t m_hits = 0;
-};
-
-struct Frame {
-    explicit Frame(char *buffer);
-
-    Id page_id;
-    char *data;
+    U64 m_misses = 0;
+    U64 m_hits = 0;
 };
 
 class AlignedBuffer
 {
-public:
-    explicit AlignedBuffer(std::size_t size, std::size_t alignment);
-
-    [[nodiscard]] auto get() -> char *
-    {
-        return m_data.get();
-    }
-
-    [[nodiscard]] auto get() const -> const char *
-    {
-        return m_data.get();
-    }
-
-private:
     struct Deleter {
         auto operator()(char *ptr) const -> void
         {
@@ -137,6 +86,11 @@ private:
     };
 
     std::unique_ptr<char[], Deleter> m_data;
+
+public:
+    explicit AlignedBuffer(std::size_t size, std::size_t alignment);
+
+    char *data;
 };
 
 class FrameManager final
@@ -145,13 +99,11 @@ public:
     friend class DBImpl;
     friend class Pager;
 
-    explicit FrameManager(Editor &file, AlignedBuffer buffer, std::size_t page_size, std::size_t frame_count);
+    explicit FrameManager(AlignedBuffer buffer, std::size_t page_size, std::size_t frame_count);
     ~FrameManager() = default;
-    [[nodiscard]] auto write_back(std::size_t index) -> Status;
-    [[nodiscard]] auto sync() -> Status;
-    [[nodiscard]] auto pin(Id page_id, CacheEntry &entry) -> Status;
-    [[nodiscard]] auto ref(CacheEntry &entry, Page &out) -> Status;
+    auto pin(CacheEntry &entry) -> void;
     auto unpin(CacheEntry &entry) -> void;
+    auto ref(CacheEntry &entry, Page &out) -> void;
     auto unref(CacheEntry &entry) -> void;
     auto upgrade(Page &page) -> void;
 
@@ -165,20 +117,9 @@ public:
         return m_unpinned.size();
     }
 
-    [[nodiscard]] auto get_frame(std::size_t index) const -> const Frame &
+    [[nodiscard]] auto refsum() const -> std::size_t
     {
-        CALICODB_EXPECT_LT(index, m_frames.size());
-        return m_frames[index];
-    }
-
-    [[nodiscard]] auto bytes_read() const -> std::size_t
-    {
-        return m_bytes_read;
-    }
-
-    [[nodiscard]] auto bytes_written() const -> std::size_t
-    {
-        return m_bytes_written;
+        return m_refsum;
     }
 
     // Disable move and copy.
@@ -186,18 +127,13 @@ public:
     FrameManager(FrameManager &) = delete;
 
 private:
-    [[nodiscard]] auto read_page_from_file(Id page_id, char *out) const -> Status;
-    [[nodiscard]] auto write_page_to_file(Id page_id, const char *in) const -> Status;
+    [[nodiscard]] auto get_frame_pointer(std::size_t index) -> char *;
 
     AlignedBuffer m_buffer;
-    std::vector<Frame> m_frames;
     std::list<std::size_t> m_unpinned;
-    std::unique_ptr<Editor> m_file;
+    std::size_t m_frame_count = 0;
     std::size_t m_page_size = 0;
     std::size_t m_refsum = 0;
-
-    mutable std::size_t m_bytes_read = 0;
-    mutable std::size_t m_bytes_written = 0;
 };
 
 } // namespace calicodb

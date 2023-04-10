@@ -21,25 +21,29 @@ static auto access_type_name(int64_t type) -> std::string
     return "Unknown";
 }
 
+struct Parameters {
+    std::size_t value_length = 100;
+    std::size_t commit_interval = 1;
+    bool sync = false;
+};
+
 class Benchmark final
 {
     static constexpr auto kFilename = "__bench_db__";
     static constexpr std::size_t kKeyLength = 16;
     static constexpr std::size_t kNumRecords = 10'000;
-    static constexpr std::size_t kCheckpointInterval = 1'000;
+    unsigned m_txn;
 
 public:
-    struct Parameters {
-        std::size_t value_length;
-    };
-
-    explicit Benchmark(const Parameters &param = {.value_length = 100})
+    explicit Benchmark(const Parameters &param = {})
         : m_param {param}
     {
         m_options.env = calicodb::Env::default_env();
-        m_options.page_size = 1 << 15;
+        m_options.page_size = 0x2000;
         m_options.cache_size = 4'194'304;
+        m_options.sync = param.sync;
         CHECK_OK(calicodb::DB::open(m_options, kFilename, m_db));
+        m_txn = m_db->begin_txn(calicodb::TxnOptions());
     }
 
     ~Benchmark()
@@ -83,7 +87,7 @@ public:
         state.ResumeTiming();
 
         CHECK_OK(m_db->put(key, value));
-        maybe_checkpoint();
+        maybe_commit();
         increment_counters();
     }
 
@@ -102,7 +106,7 @@ public:
             benchmark::DoNotOptimize(result);
         } else {
             CHECK_OK(m_db->put(key, value));
-            maybe_checkpoint();
+            maybe_commit();
         }
         increment_counters();
     }
@@ -149,7 +153,8 @@ public:
                 calicodb::tools::integral_key<kKeyLength>(i),
                 m_random.Generate(m_param.value_length)));
         }
-        CHECK_OK(m_db->checkpoint());
+        CHECK_OK(m_db->commit_txn(m_txn));
+        m_txn = m_db->begin_txn(calicodb::TxnOptions());
         m_cursor = m_db->new_cursor();
     }
 
@@ -164,10 +169,11 @@ private:
         benchmark::ClobberMemory();
     }
 
-    auto maybe_checkpoint() -> void
+    auto maybe_commit() -> void
     {
-        if (m_counters[0] % kCheckpointInterval == kCheckpointInterval - 1) {
-            CHECK_OK(m_db->checkpoint());
+        if (m_counters[0] % m_param.commit_interval == m_param.commit_interval - 1) {
+            CHECK_OK(m_db->commit_txn(m_txn));
+            m_txn = m_db->begin_txn(calicodb::TxnOptions());
         }
     }
 
@@ -198,32 +204,61 @@ private:
     calicodb::DB *m_db = nullptr;
 };
 
+static auto set_modification_benchmark_label(benchmark::State &state)
+{
+    state.SetLabel(
+        (state.range(3) ? "Sync_" : "") +
+        std::string(state.range(1) ? "Overwrite" : "Write") +
+        access_type_name(state.range(0)) +
+        (state.range(2) == 1 ? "" : "Batch"));
+}
+
 static auto BM_Write(benchmark::State &state) -> void
 {
-    state.SetLabel("Write" + access_type_name(state.range(0)));
+    set_modification_benchmark_label(state);
 
-    Benchmark bench;
+    Parameters param;
+    param.commit_interval = state.range(2);
+    param.sync = state.range(3);
+
+    Benchmark bench(param);
     for (auto _ : state) {
         bench.write(state);
     }
 }
 BENCHMARK(BM_Write)
-    ->Args({kSequential, 0})
-    ->Args({kRandom, 0});
+    ->Args({kSequential, false, 1, false})
+    ->Args({kRandom, false, 1, false})
+    ->Args({kSequential, false, 1'000, false})
+    ->Args({kRandom, false, 1'000, false})
+    ->Args({kSequential, false, 1, true})
+    ->Args({kRandom, false, 1, true})
+    ->Args({kSequential, false, 1'000, true})
+    ->Args({kRandom, false, 1'000, true});
 
 static auto BM_Overwrite(benchmark::State &state) -> void
 {
-    state.SetLabel("Overwrite" + access_type_name(state.range(0)));
+    set_modification_benchmark_label(state);
 
-    Benchmark bench;
+    Parameters param;
+    param.commit_interval = state.range(2);
+    param.sync = state.range(3);
+
+    Benchmark bench(param);
     bench.add_initial_records();
     for (auto _ : state) {
         bench.write(state);
     }
 }
 BENCHMARK(BM_Overwrite)
-    ->Args({kSequential, 1})
-    ->Args({kRandom, 1});
+    ->Args({kSequential, true, 1, false})
+    ->Args({kRandom, true, 1, false})
+    ->Args({kSequential, true, 1'000, false})
+    ->Args({kRandom, true, 1'000, false})
+    ->Args({kSequential, true, 1, true})
+    ->Args({kRandom, true, 1, true})
+    ->Args({kSequential, true, 1'000, true})
+    ->Args({kRandom, true, 1'000, true});
 
 static auto BM_Exists(benchmark::State &state) -> void
 {

@@ -28,12 +28,16 @@
 #define CHECK_FALSE(cond) \
     CHECK_TRUE(!(cond))
 
-#define CHECK_OK(expr)                                        \
-    do {                                                      \
-        if (auto assert_s = (expr); !assert_s.is_ok()) {      \
-            std::fputs(assert_s.to_string().c_str(), stderr); \
-            std::abort();                                     \
-        }                                                     \
+#define CHECK_OK(expr)                                                         \
+    do {                                                                       \
+        if (auto assert_s = (expr); !assert_s.is_ok()) {                       \
+            std::fprintf(                                                      \
+                stderr,                                                        \
+                "expected \"" #expr " == Status::ok()\" but got \"%s\": %s\n", \
+                get_status_name(assert_s),                                     \
+                assert_s.to_string().c_str());                                 \
+            std::abort();                                                      \
+        }                                                                      \
     } while (0)
 
 #define CHECK_EQ(lhs, rhs)                        \
@@ -68,22 +72,19 @@ public:
     [[nodiscard]] virtual auto clone() const -> Env *;
 
     ~FakeEnv() override = default;
-    [[nodiscard]] auto new_info_logger(const std::string &filename, InfoLogger *&out) -> Status override;
-    [[nodiscard]] auto new_reader(const std::string &filename, Reader *&out) -> Status override;
-    [[nodiscard]] auto new_editor(const std::string &filename, Editor *&out) -> Status override;
-    [[nodiscard]] auto new_logger(const std::string &filename, Logger *&out) -> Status override;
+    [[nodiscard]] auto new_file(const std::string &filename, File *&out) -> Status override;
+    [[nodiscard]] auto new_log_file(const std::string &filename, LogFile *&out) -> Status override;
     [[nodiscard]] auto get_children(const std::string &dirname, std::vector<std::string> &out) const -> Status override;
     [[nodiscard]] auto rename_file(const std::string &old_filename, const std::string &new_filename) -> Status override;
     [[nodiscard]] auto file_exists(const std::string &filename) const -> bool override;
     [[nodiscard]] auto resize_file(const std::string &filename, std::size_t size) -> Status override;
     [[nodiscard]] auto file_size(const std::string &filename, std::size_t &out) const -> Status override;
     [[nodiscard]] auto remove_file(const std::string &filename) -> Status override;
-    [[nodiscard]] auto sync_directory(const std::string &dirname) -> Status override { return Status::ok(); }
 
 protected:
-    friend class FakeEditor;
-    friend class FakeReader;
-    friend class FakeLogger;
+    friend class FakeFile;
+    friend class FakeLogFile;
+    friend class FaultInjectionEnv;
 
     [[nodiscard]] auto get_memory(const std::string &filename) const -> Memory &;
     [[nodiscard]] auto read_file_at(const Memory &mem, std::size_t offset, std::size_t size, char *scratch, Slice *out) -> Status;
@@ -92,63 +93,35 @@ protected:
     mutable std::unordered_map<std::string, Memory> m_memory;
 };
 
-class FakeReader : public Reader
+class FakeFile : public File
 {
 public:
-    FakeReader(std::string filename, FakeEnv &parent, FakeEnv::Memory &mem)
+    FakeFile(std::string filename, FakeEnv &parent, FakeEnv::Memory &mem)
         : m_mem {&mem},
           m_parent {&parent},
           m_filename {std::move(filename)}
     {
     }
 
-    ~FakeReader() override = default;
-    [[nodiscard]] auto read(std::size_t offset, std::size_t size, char *scratch, Slice *out) -> Status override;
-
-protected:
-    friend class FakeEnv;
-
-    FakeEnv::Memory *m_mem = nullptr;
-    FakeEnv *m_parent = nullptr;
-    std::string m_filename;
-};
-
-class FakeEditor : public Editor
-{
-public:
-    FakeEditor(std::string filename, FakeEnv &parent, FakeEnv::Memory &mem)
-        : m_mem {&mem},
-          m_parent {&parent},
-          m_filename {std::move(filename)}
-    {
-    }
-
-    ~FakeEditor() override = default;
+    ~FakeFile() override = default;
     [[nodiscard]] auto read(std::size_t offset, std::size_t size, char *scratch, Slice *out) -> Status override;
     [[nodiscard]] auto write(std::size_t offset, const Slice &in) -> Status override;
     [[nodiscard]] auto sync() -> Status override;
 
-protected:
-    friend class FakeEnv;
-
-    FakeEnv::Memory *m_mem = nullptr;
-    FakeEnv *m_parent = nullptr;
-    std::string m_filename;
-};
-
-class FakeLogger : public Logger
-{
-public:
-    FakeLogger(std::string filename, FakeEnv &parent, FakeEnv::Memory &mem)
-        : m_mem {&mem},
-          m_parent {&parent},
-          m_filename {std::move(filename)}
+    [[nodiscard]] auto parent() -> FakeEnv &
     {
+        return *m_parent;
     }
 
-    ~FakeLogger() override = default;
-    [[nodiscard]] auto write(const Slice &in) -> Status override;
-    [[nodiscard]] auto sync() -> Status override;
+    [[nodiscard]] auto parent() const -> const FakeEnv &
+    {
+        return *m_parent;
+    }
+
+    [[nodiscard]] auto filename() -> const std::string &
+    {
+        return m_filename;
+    }
 
 protected:
     friend class FakeEnv;
@@ -158,10 +131,10 @@ protected:
     std::string m_filename;
 };
 
-class FakeInfoLogger : public InfoLogger
+class FakeLogFile : public LogFile
 {
 public:
-    ~FakeInfoLogger() override = default;
+    ~FakeLogFile() override = default;
     auto logv(const char *, ...) -> void override {}
 };
 
@@ -179,10 +152,9 @@ struct Interceptor {
 
     using Callback = std::function<Status()>;
 
-    explicit Interceptor(std::string prefix_, Type type_, Callback callback_)
-        : prefix {std::move(prefix_)},
-          callback {std::move(callback_)},
-          type {type_}
+    explicit Interceptor(Type t, Callback c)
+        : callback(std::move(c)),
+          type(t)
     {
     }
 
@@ -191,88 +163,161 @@ struct Interceptor {
         return callback();
     }
 
-    std::string prefix;
     Callback callback;
     Type type;
 };
 
-class FaultInjectionEnv : public FakeEnv
+class DataLossEnv : public EnvWrapper
 {
-    std::vector<Interceptor> m_interceptors;
+    friend class DataLossFile;
 
-    friend class FaultInjectionEditor;
-    friend class FaultInjectionReader;
-    friend class FaultInjectionLogger;
+    std::unordered_map<std::string, std::string> m_save_states;
+
+    auto save_file_contents(const std::string &clean_filename) -> void;
+    auto overwrite_file(const std::string &clean_filename, const std::string &contents) -> void;
+
+public:
+    explicit DataLossEnv()
+        : EnvWrapper(*new tools::FakeEnv)
+    {
+    }
+
+    explicit DataLossEnv(Env &env)
+        : EnvWrapper(env)
+    {
+    }
+
+    ~DataLossEnv() override
+    {
+        delete target();
+    }
+
+    [[nodiscard]] auto new_file(const std::string &filename, File *&out) -> Status override;
+    [[nodiscard]] auto remove_file(const std::string &filename) -> Status override;
+
+    virtual auto drop_after_last_sync() -> void;
+    virtual auto drop_after_last_sync(const std::string &filename) -> void;
+};
+
+class DataLossFile : public File
+{
+    std::string m_filename;
+    DataLossEnv *m_env = nullptr;
+    File *m_file = nullptr;
+
+public:
+    explicit DataLossFile(std::string filename, File &file, DataLossEnv &env)
+        : m_filename(std::move(filename)),
+          m_env(&env),
+          m_file(&file)
+    {
+    }
+
+    ~DataLossFile() override
+    {
+        delete m_file;
+    }
+
+    [[nodiscard]] auto parent() -> DataLossEnv *
+    {
+        return m_env;
+    }
+
+    [[nodiscard]] auto parent() const -> const DataLossEnv *
+    {
+        return m_env;
+    }
+
+    [[nodiscard]] auto filename() const -> const std::string &
+    {
+        return m_filename;
+    }
+
+    [[nodiscard]] auto read(std::size_t offset, std::size_t size, char *scratch, Slice *out) -> Status override
+    {
+        return m_file->read(offset, size, scratch, out);
+    }
+
+    [[nodiscard]] auto write(std::size_t offset, const Slice &in) -> Status override
+    {
+        return m_file->write(offset, in);
+    }
+
+    [[nodiscard]] auto sync() -> Status override
+    {
+        CALICODB_TRY(m_file->sync());
+        m_env->save_file_contents(m_filename);
+        return Status::ok();
+    }
+};
+
+class FaultInjectionEnv : public DataLossEnv
+{
+    std::unordered_map<std::string, std::vector<Interceptor>> m_interceptors;
+
+    friend class FaultInjectionFile;
+    friend class FaultInjectionLogFile;
 
     [[nodiscard]] auto try_intercept_syscall(Interceptor::Type type, const std::string &filename) -> Status;
 
 public:
-    [[nodiscard]] auto clone() const -> Env * override;
-    virtual auto add_interceptor(Interceptor interceptor) -> void;
+    [[nodiscard]] auto clone() const -> Env *;
+    virtual auto add_interceptor(const std::string &filename, Interceptor interceptor) -> void;
+    virtual auto clear_interceptors(const std::string &filename) -> void;
     virtual auto clear_interceptors() -> void;
 
     ~FaultInjectionEnv() override = default;
-    [[nodiscard]] auto new_info_logger(const std::string &filename, InfoLogger *&out) -> Status override;
-    [[nodiscard]] auto new_reader(const std::string &filename, Reader *&out) -> Status override;
-    [[nodiscard]] auto new_editor(const std::string &filename, Editor *&out) -> Status override;
-    [[nodiscard]] auto new_logger(const std::string &filename, Logger *&out) -> Status override;
+    [[nodiscard]] auto new_file(const std::string &filename, File *&out) -> Status override;
+    [[nodiscard]] auto new_log_file(const std::string &filename, LogFile *&out) -> Status override;
     [[nodiscard]] auto get_children(const std::string &dirname, std::vector<std::string> &out) const -> Status override;
     [[nodiscard]] auto rename_file(const std::string &old_filename, const std::string &new_filename) -> Status override;
     [[nodiscard]] auto file_exists(const std::string &filename) const -> bool override;
     [[nodiscard]] auto resize_file(const std::string &filename, std::size_t size) -> Status override;
     [[nodiscard]] auto file_size(const std::string &filename, std::size_t &out) const -> Status override;
     [[nodiscard]] auto remove_file(const std::string &filename) -> Status override;
-    [[nodiscard]] auto sync_directory(const std::string &dirname) -> Status override { return Status::ok(); }
 };
 
-class FaultInjectionReader : public FakeReader
+class FaultInjectionFile : public File
 {
-public:
-    explicit FaultInjectionReader(Reader &reader)
-        : FakeReader {reinterpret_cast<FakeReader &>(reader)}
+    friend class FaultInjectionEnv;
+
+    DataLossFile *m_target = nullptr;
+
+    [[nodiscard]] auto parent() const -> const FaultInjectionEnv &
     {
+        return reinterpret_cast<const FaultInjectionEnv &>(*m_target->parent());
     }
 
-    ~FaultInjectionReader() override = default;
-    [[nodiscard]] auto read(std::size_t offset, std::size_t size, char *scratch, Slice *out) -> Status override;
-};
-
-class FaultInjectionEditor : public FakeEditor
-{
-public:
-    explicit FaultInjectionEditor(Editor &editor)
-        : FakeEditor {reinterpret_cast<FakeEditor &>(editor)}
+    [[nodiscard]] auto parent() -> FaultInjectionEnv &
     {
+        return reinterpret_cast<FaultInjectionEnv &>(*m_target->parent());
     }
-    ~FaultInjectionEditor() override = default;
+
+    explicit FaultInjectionFile(DataLossFile *&file)
+        : m_target(file)
+    {
+        // Takes ownership.
+        file = nullptr;
+    }
+
+public:
+    ~FaultInjectionFile() override;
     [[nodiscard]] auto read(std::size_t offset, std::size_t size, char *scratch, Slice *out) -> Status override;
     [[nodiscard]] auto write(std::size_t offset, const Slice &in) -> Status override;
     [[nodiscard]] auto sync() -> Status override;
 };
 
-class FaultInjectionLogger : public FakeLogger
+class FaultInjectionLogFile : public FakeLogFile
 {
 public:
-    explicit FaultInjectionLogger(Logger &logger)
-        : FakeLogger {reinterpret_cast<FakeLogger &>(logger)}
-    {
-    }
-    ~FaultInjectionLogger() override = default;
-    [[nodiscard]] auto write(const Slice &in) -> Status override;
-    [[nodiscard]] auto sync() -> Status override;
-};
-
-class FaultInjectionInfoLogger : public InfoLogger
-{
-public:
-    ~FaultInjectionInfoLogger() override = default;
+    ~FaultInjectionLogFile() override = default;
     auto logv(const char *, ...) -> void override {}
 };
 
-class StderrLogger : public InfoLogger
+class StderrLog : public LogFile
 {
 public:
-    ~StderrLogger() override = default;
+    ~StderrLog() override = default;
 
     auto logv(const char *fmt, ...) -> void override
     {
@@ -283,6 +328,68 @@ public:
         va_end(args);
         std::fflush(stderr);
     }
+};
+
+class WalStub : public Wal
+{
+public:
+    ~WalStub() override = default;
+
+    [[nodiscard]] auto read(Id, char *&) -> Status override
+    {
+        return Status::not_found("");
+    }
+
+    [[nodiscard]] auto write(const CacheEntry *dirty, std::size_t) -> Status override
+    {
+        return Status::ok();
+    }
+
+    [[nodiscard]] auto needs_checkpoint() const -> bool override
+    {
+        return false;
+    }
+
+    [[nodiscard]] auto checkpoint(File &, std::size_t *) -> Status override
+    {
+        return Status::ok();
+    }
+
+    [[nodiscard]] auto abort() -> Status override
+    {
+        return Status::ok();
+    }
+
+    [[nodiscard]] auto close() -> Status override
+    {
+        return Status::ok();
+    }
+
+    [[nodiscard]] auto statistics() const -> WalStatistics override
+    {
+        return {};
+    }
+};
+
+class FakeWal : public Wal
+{
+    std::map<Id, std::string> m_committed;
+    std::map<Id, std::string> m_pending;
+    std::size_t m_db_size = 0;
+    Parameters m_param;
+
+public:
+    explicit FakeWal(const Parameters &param);
+    ~FakeWal() override = default;
+
+    [[nodiscard]] auto read(Id page_id, char *&out) -> Status override;
+    [[nodiscard]] auto write(const CacheEntry *dirty, std::size_t db_size) -> Status override;
+    [[nodiscard]] auto needs_checkpoint() const -> bool override;
+    [[nodiscard]] auto checkpoint(File &db_file, std::size_t *) -> Status override;
+    [[nodiscard]] auto abort() -> Status override;
+    [[nodiscard]] auto close() -> Status override;
+    [[nodiscard]] auto sync() -> Status override { return Status::ok(); }
+    [[nodiscard]] auto statistics() const -> WalStatistics override;
 };
 
 template <std::size_t Length = 12>
@@ -322,20 +429,20 @@ private:
     mutable Engine m_rng; // Not in LevelDB.
 
 public:
-    explicit RandomGenerator(std::size_t size = 16 /* KiB */ * 1'024);
+    explicit RandomGenerator(std::size_t size = 256 /* KiB */ * 1'024);
     auto Generate(std::size_t len) const -> Slice;
 
     // Not in LevelDB.
-    auto Next(std::uint64_t t_max) const -> std::uint64_t
+    auto Next(U64 t_max) const -> U64
     {
-        std::uniform_int_distribution<std::uint64_t> dist {0, t_max};
+        std::uniform_int_distribution<U64> dist(0, t_max);
         return dist(m_rng);
     }
 
     // Not in LevelDB.
-    auto Next(std::uint64_t t_min, std::uint64_t t_max) const -> std::uint64_t
+    auto Next(U64 t_min, U64 t_max) const -> U64
     {
-        std::uniform_int_distribution<std::uint64_t> dist {t_min, t_max};
+        std::uniform_int_distribution<U64> dist(t_min, t_max);
         return dist(m_rng);
     }
 };
@@ -377,6 +484,7 @@ auto print_references(Pager &pager) -> void;
 auto print_wals(Env &env, std::size_t page_size, const std::string &prefix) -> void;
 
 auto read_file_to_string(Env &env, const std::string &filename) -> std::string;
+auto write_string_to_file(Env &env, const std::string &filename, std::string buffer, long offset = -1) -> void;
 auto fill_db(DB &db, RandomGenerator &random, std::size_t num_records, std::size_t max_payload_size = 100) -> std::map<std::string, std::string>;
 auto fill_db(DB &db, Table &table, RandomGenerator &random, std::size_t num_records, std::size_t max_payload_size = 100) -> std::map<std::string, std::string>;
 auto expect_db_contains(const DB &db, const std::map<std::string, std::string> &map) -> void;

@@ -19,49 +19,37 @@ class Page;
 // pointer".
 //
 // The first page in the database file is called the root page. The root page contains the file
-// header at offset 0, followed by a page header and a node header (the root is always a node).
-// All other pages have a page header at offset 0, followed by type-specific headers.
+// header at offset 0, followed by a node header (the root is always a node).
 
 // File Header Format:
 //     Offset  Size  Name
 //    ----------------------------
-//     0       4     magic_code
-//     4       4     header_crc
-//     8       4     page_count
-//     12      4     free_list_id
-//     16      8     record_count
-//     24      8     commit_lsn
-//     32      2     page_size
+//     0       18    Identifier string
+//     18      2     Page size
+//     20      4     Number of pages in the DB
+//     24      4     Freelist head
+//     28      1     File format version
+//     29      35    Reserved
 //
 // NOTE: The "page_size" field contains 0 if the maximum page size of 65,536 is used, since this
 // value cannot be represented by a 16-bit unsigned integer.
 struct FileHeader {
-    static constexpr std::uint32_t kMagicCode = 0xB11924E1;
-    static constexpr std::size_t kSize = 34;
-    auto read(const char *data) -> void;
+    static constexpr char kIdentifier[18] = "CalicoDB format 1";
+    static constexpr std::size_t kSize = 64;
+
+    auto read(const char *data) -> bool;
     auto write(char *data) const -> void;
 
-    [[nodiscard]] auto compute_crc() const -> std::uint32_t;
-
-    std::uint32_t magic_code = kMagicCode;
-    std::uint32_t header_crc = 0;
-    std::uint32_t page_count = 0;
-    std::uint64_t record_count = 0;
-    Id freelist_head;
-    Lsn commit_lsn;
-    unsigned page_size = 0;
+    U16 page_size = 0;
+    U32 page_count = 0;
+    U32 freelist_head = 0;
+    char format_version = 0;
 };
-
-// Page Header Format:
-//     Offset  Size  Name
-//    --------------------------
-//     0       8     page_lsn
-static constexpr auto kPageHeaderSize = Lsn::kSize;
 
 // Node Header Format:
 //     Offset  Size  Name
 //    --------------------------
-//     0       1     flags
+//     0       1     Flags byte (1 = external, internal otherwise)
 //     1       4     next_id
 //     5       4     prev_id
 //     9       2     cell_count

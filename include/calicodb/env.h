@@ -11,10 +11,8 @@
 namespace calicodb
 {
 
-class Editor;
-class InfoLogger;
-class Logger;
-class Reader;
+class File;
+class LogFile;
 
 // CalicoDB storage environment.
 //
@@ -26,24 +24,20 @@ public:
     static auto default_env() -> Env *;
 
     virtual ~Env();
-    [[nodiscard]] virtual auto new_reader(const std::string &path, Reader *&out) -> Status = 0;
-    [[nodiscard]] virtual auto new_editor(const std::string &path, Editor *&out) -> Status = 0;
-    [[nodiscard]] virtual auto new_logger(const std::string &path, Logger *&out) -> Status = 0;
-    [[nodiscard]] virtual auto new_info_logger(const std::string &path, InfoLogger *&out) -> Status = 0;
+    [[nodiscard]] virtual auto new_file(const std::string &path, File *&out) -> Status = 0;
+    [[nodiscard]] virtual auto new_log_file(const std::string &path, LogFile *&out) -> Status = 0;
     [[nodiscard]] virtual auto get_children(const std::string &path, std::vector<std::string> &out) const -> Status = 0;
     [[nodiscard]] virtual auto rename_file(const std::string &old_path, const std::string &new_path) -> Status = 0;
     [[nodiscard]] virtual auto file_exists(const std::string &path) const -> bool = 0;
     [[nodiscard]] virtual auto resize_file(const std::string &path, std::size_t size) -> Status = 0;
     [[nodiscard]] virtual auto file_size(const std::string &path, std::size_t &out) const -> Status = 0;
     [[nodiscard]] virtual auto remove_file(const std::string &path) -> Status = 0;
-    [[nodiscard]] virtual auto sync_directory(const std::string &dirname) -> Status = 0;
 };
 
-// Construct that provides read-only random access to a file.
-class Reader
+class File
 {
 public:
-    virtual ~Reader();
+    virtual ~File();
 
     // Attempt to read "size" bytes from the file at the given offset.
     //
@@ -51,20 +45,11 @@ public:
     // memory. On success, sets "*out" to point to the data that was read, which may
     // be less than what was requested, but only if "out" is not nullptr.
     [[nodiscard]] virtual auto read(std::size_t offset, std::size_t size, char *scratch, Slice *out) -> Status = 0;
-};
 
-// Construct that provides random access to a file.
-class Editor
-{
-public:
-    virtual ~Editor();
-
-    // Attempt to read "size" bytes from the file at the given offset.
+    // Read exactly "size" bytes from the file at the given offset.
     //
-    // Reads into "scratch", which must point to at least "size" bytes of available
-    // memory. On success, sets "*out" to point to the data that was read, which may
-    // be less than what was requested, but only if "out" is not nullptr.
-    [[nodiscard]] virtual auto read(std::size_t offset, std::size_t size, char *scratch, Slice *out) -> Status = 0;
+    // Return a "not found" status if there is not enough data remaining in the file.
+    [[nodiscard]] virtual auto read_exact(std::size_t offset, std::size_t size, char *scratch) -> Status;
 
     // Write "in" to the file at the given offset.
     [[nodiscard]] virtual auto write(std::size_t offset, const Slice &in) -> Status = 0;
@@ -73,24 +58,11 @@ public:
     [[nodiscard]] virtual auto sync() -> Status = 0;
 };
 
-// Construct that appends to a file.
-class Logger
-{
-public:
-    virtual ~Logger();
-
-    // Write "in" to the end of the file.
-    [[nodiscard]] virtual auto write(const Slice &in) -> Status = 0;
-
-    // Synchronize with the underlying filesystem.
-    [[nodiscard]] virtual auto sync() -> Status = 0;
-};
-
 // Construct for logging information about the program.
-class InfoLogger
+class LogFile
 {
 public:
-    virtual ~InfoLogger();
+    virtual ~LogFile();
 
     // Write a message to the info log using format string "fmt", which must be a
     // string literal.
@@ -102,19 +74,17 @@ class EnvWrapper : public Env
 public:
     explicit EnvWrapper(Env &env);
     [[nodiscard]] auto target() -> Env *;
+    [[nodiscard]] auto target() const -> const Env *;
 
     ~EnvWrapper() override;
-    [[nodiscard]] auto new_reader(const std::string &filename, Reader *&out) -> Status override;
-    [[nodiscard]] auto new_editor(const std::string &filename, Editor *&out) -> Status override;
-    [[nodiscard]] auto new_logger(const std::string &filename, Logger *&out) -> Status override;
-    [[nodiscard]] auto new_info_logger(const std::string &filename, InfoLogger *&out) -> Status override;
+    [[nodiscard]] auto new_file(const std::string &path, File *&out) -> Status override;
+    [[nodiscard]] auto new_log_file(const std::string &path, LogFile *&out) -> Status override;
     [[nodiscard]] auto get_children(const std::string &dirname, std::vector<std::string> &out) const -> Status override;
     [[nodiscard]] auto rename_file(const std::string &old_filename, const std::string &new_filename) -> Status override;
     [[nodiscard]] auto file_exists(const std::string &filename) const -> bool override;
     [[nodiscard]] auto resize_file(const std::string &filename, std::size_t size) -> Status override;
     [[nodiscard]] auto file_size(const std::string &filename, std::size_t &out) const -> Status override;
     [[nodiscard]] auto remove_file(const std::string &filename) -> Status override;
-    [[nodiscard]] auto sync_directory(const std::string &dirname) -> Status override;
 
 private:
     Env *m_target;

@@ -23,8 +23,7 @@ static auto clip_to_range(T &t, V min, V max) -> void
 
 auto DB::open(const Options &options, const std::string &filename, DB *&db) -> Status
 {
-    const auto [dir, base] = split_path(filename);
-    const auto clean_filename = join_paths(dir, base);
+    const auto clean_filename = cleanup_path(filename);
 
     auto sanitized = options;
     clip_to_range(sanitized.page_size, kMinPageSize, kMaxPageSize);
@@ -32,15 +31,15 @@ auto DB::open(const Options &options, const std::string &filename, DB *&db) -> S
     if (!is_power_of_two(sanitized.page_size)) {
         sanitized.page_size = Options {}.page_size;
     }
-    if (sanitized.wal_prefix.empty()) {
-        sanitized.wal_prefix = clean_filename + kDefaultWalSuffix;
+    if (sanitized.wal_filename.empty()) {
+        sanitized.wal_filename = clean_filename + kDefaultWalSuffix;
     }
     if (sanitized.env == nullptr) {
         sanitized.env = Env::default_env();
     }
     if (sanitized.info_log == nullptr) {
         const auto log_filename = clean_filename + kDefaultLogSuffix;
-        CALICODB_TRY(sanitized.env->new_info_logger(log_filename, sanitized.info_log));
+        CALICODB_TRY(sanitized.env->new_log_file(log_filename, sanitized.info_log));
     }
 
     auto *impl = new DBImpl(options, sanitized, clean_filename);

@@ -72,27 +72,27 @@ auto Status::operator=(Status &&rhs) noexcept -> Status &
 
 auto Status::not_found(const Slice &what) -> Status
 {
-    return Status {kNotFound, what};
+    return Status(kNotFound, what);
 }
 
 auto Status::invalid_argument(const Slice &what) -> Status
 {
-    return Status {kInvalidArgument, what};
+    return Status(kInvalidArgument, what);
 }
 
 auto Status::io_error(const Slice &what) -> Status
 {
-    return Status {kIOError, what};
+    return Status(kIOError, what);
 }
 
 auto Status::not_supported(const Slice &what) -> Status
 {
-    return Status {kNotSupported, what};
+    return Status(kNotSupported, what);
 }
 
 auto Status::corruption(const Slice &what) -> Status
 {
-    return Status {kCorruption, what};
+    return Status(kCorruption, what);
 }
 
 auto Status::is_invalid_argument() const -> bool
