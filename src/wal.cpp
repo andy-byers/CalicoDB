@@ -57,10 +57,10 @@ static constexpr auto encode_index_page_size(U32 page_size) -> U16
     return static_cast<U16>((page_size & 0xFF00) | page_size >> 16);
 }
 
-static constexpr auto decode_index_page_size(U16 page_size) -> U32
-{
-    return page_size == 1 ? kMaxPageSize : page_size;
-}
+//static constexpr auto decode_index_page_size(U16 page_size) -> U32
+//{
+//    return page_size == 1 ? kMaxPageSize : page_size;
+//}
 
 struct HashGroup {
     explicit HashGroup(U32 group_number, char *data)
