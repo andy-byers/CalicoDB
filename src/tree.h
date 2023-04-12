@@ -148,7 +148,7 @@ struct NodeManager {
 
 struct OverflowList {
     [[nodiscard]] static auto read(Pager &pager, Id head_id, std::size_t offset, std::size_t size, char *scratch) -> Status;
-    [[nodiscard]] static auto write(Pager &pager, Id &out, const Slice &first, const Slice &second = {}) -> Status;
+    [[nodiscard]] static auto write(Pager &pager, Id &out, const Slice &key, const Slice &value = {}) -> Status;
     [[nodiscard]] static auto copy(Pager &pager, Id overflow_id, std::size_t size, Id &out) -> Status;
     [[nodiscard]] static auto erase(Pager &pager, Id head_id) -> Status;
 };

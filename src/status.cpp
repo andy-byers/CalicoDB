@@ -4,60 +4,72 @@
 
 #include "calicodb/status.h"
 #include "calicodb/slice.h"
+#include "utils.h"
 
 namespace calicodb
 {
 
 enum Code : char {
-    kInvalidArgument = 1,
-    kIOError = 2,
-    kNotSupported = 3,
-    kCorruption = 4,
-    kNotFound = 5,
+    kOK,
+    kInvalidArgument,
+    kIOError,
+    kNotSupported,
+    kCorruption,
+    kNotFound,
 };
 
-static auto maybe_copy_data(const char *data) -> std::unique_ptr<char[]>
+static auto new_status_string(const char *data, Code code) -> char *
 {
-    // Status is OK, so there isn't anything to copy.
-    if (data == nullptr) {
-        return nullptr;
-    }
-    // Allocate memory for the copied message/status code.
-    const auto total_size = std::char_traits<char>::length(data) + sizeof(char);
-    auto copy = std::make_unique<char[]>(total_size);
+    CALICODB_EXPECT_TRUE(data);
+    // "data" doesn't need to be null-terminated, since it may come from a slice. It
+    // should point to a human-readable message to store in the status.
+    const auto data_size =
+        sizeof(Code) + std::char_traits<char>::length(data) + 1;
+    auto *p = new char[data_size]();
+    std::memcpy(p + sizeof(Code), data, data_size - 1);
+    p[0] = code;
+    return p;
+}
 
-    // Copy the status, std::make_unique<char[]>() will zero initialize, so we already have the null byte.
-    std::memcpy(copy.get(), data, total_size - sizeof(char));
-    return copy;
+static auto copy_status_string(const char *data) -> char *
+{
+    if (data) {
+        // Allocate memory for the copied message/status code. "data" should be the
+        // "m_data" member of another Status, meaning it points to a null-terminated
+        // string which includes the status code at the front.
+        const auto data_size =
+            std::char_traits<char>::length(data) + 1;
+        auto *p = new char[data_size]();
+        std::memcpy(p, data, data_size - 1);
+        return p;
+    }
+    return nullptr;
 }
 
 Status::Status(char code, const Slice &what)
-    : m_data {std::make_unique<char[]>(what.size() + 2 * sizeof(char))}
+    : m_data(new_status_string(what.data(), Code {code}))
 {
-    auto *ptr = m_data.get();
-
-    // The first byte holds the status type.
-    *ptr++ = code;
-
-    // The rest holds the message, plus a '\0'. std::make_unique<char[]>() performs value initialization, so the byte is already
-    // zeroed out. See https://en.cppreference.com/w/cpp/memory/unique_ptr/make_unique, overload (2).
-    std::memcpy(ptr, what.data(), what.size());
 }
 
 Status::Status(const Status &rhs)
-    : m_data {maybe_copy_data(rhs.m_data.get())}
+    : m_data(copy_status_string(rhs.m_data))
 {
 }
 
 Status::Status(Status &&rhs) noexcept
-    : m_data {std::move(rhs.m_data)}
 {
+    std::swap(m_data, rhs.m_data);
+}
+
+Status::~Status()
+{
+    delete[] m_data;
 }
 
 auto Status::operator=(const Status &rhs) -> Status &
 {
     if (this != &rhs) {
-        m_data = maybe_copy_data(rhs.m_data.get());
+        m_data = copy_status_string(rhs.m_data);
     }
     return *this;
 }
@@ -122,7 +134,7 @@ auto Status::is_not_found() const -> bool
 
 auto Status::to_string() const -> std::string
 {
-    return {m_data ? m_data.get() + sizeof(Code) : "OK"};
+    return {m_data ? m_data + sizeof(Code) : "OK"};
 }
 
 } // namespace calicodb

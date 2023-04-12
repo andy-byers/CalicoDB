@@ -164,7 +164,7 @@ extern "C" int LLVMFuzzerTestOneInput(const U8 *data, std::size_t size)
     options.cache_size = kMinPageSize * 16;
 
     {
-        MapFuzzer fuzzer {"map_db", &options};
+        MapFuzzer fuzzer("map_db", &options);
 
         while (size > 1) {
             CHECK_OK(fuzzer.step(data, size));

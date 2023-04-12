@@ -54,28 +54,13 @@ namespace calicodb::tools
 class FakeEnv : public Env
 {
 public:
-    struct Memory {
-        std::string buffer;
-        bool created = false;
-    };
-
-    [[nodiscard]] virtual auto memory() -> std::unordered_map<std::string, Memory> &
-    {
-        return m_memory;
-    }
-
-    [[nodiscard]] virtual auto memory() const -> const std::unordered_map<std::string, Memory> &
-    {
-        return m_memory;
-    }
-
     [[nodiscard]] virtual auto clone() const -> Env *;
+    [[nodiscard]] virtual auto get_file_contents(const std::string &filename) const -> std::string;
+    virtual auto put_file_contents(const std::string &filename, std::string contents) -> void;
 
     ~FakeEnv() override = default;
     [[nodiscard]] auto new_file(const std::string &filename, File *&out) -> Status override;
     [[nodiscard]] auto new_log_file(const std::string &filename, LogFile *&out) -> Status override;
-    [[nodiscard]] auto get_children(const std::string &dirname, std::vector<std::string> &out) const -> Status override;
-    [[nodiscard]] auto rename_file(const std::string &old_filename, const std::string &new_filename) -> Status override;
     [[nodiscard]] auto file_exists(const std::string &filename) const -> bool override;
     [[nodiscard]] auto resize_file(const std::string &filename, std::size_t size) -> Status override;
     [[nodiscard]] auto file_size(const std::string &filename, std::size_t &out) const -> Status override;
@@ -84,22 +69,27 @@ public:
 protected:
     friend class FakeFile;
     friend class FakeLogFile;
-    friend class FaultInjectionEnv;
+    friend class TestEnv;
 
-    [[nodiscard]] auto get_memory(const std::string &filename) const -> Memory &;
-    [[nodiscard]] auto read_file_at(const Memory &mem, std::size_t offset, std::size_t size, char *scratch, Slice *out) -> Status;
-    [[nodiscard]] auto write_file_at(Memory &mem, std::size_t offset, const Slice &in) -> Status;
+    struct FileState {
+        std::string buffer;
+        bool created = false;
+    };
 
-    mutable std::unordered_map<std::string, Memory> m_memory;
+    [[nodiscard]] auto open_or_create_file(const std::string &filename) const -> FileState &;
+    [[nodiscard]] auto read_file_at(const FileState &mem, std::size_t offset, std::size_t size, char *scratch, Slice *out) -> Status;
+    [[nodiscard]] auto write_file_at(FileState &mem, std::size_t offset, const Slice &in) -> Status;
+
+    mutable std::unordered_map<std::string, FileState> m_state;
 };
 
 class FakeFile : public File
 {
 public:
-    FakeFile(std::string filename, FakeEnv &parent, FakeEnv::Memory &mem)
-        : m_mem {&mem},
-          m_parent {&parent},
-          m_filename {std::move(filename)}
+    FakeFile(std::string filename, FakeEnv &env, FakeEnv::FileState &mem)
+        : m_state(&mem),
+          m_env(&env),
+          m_filename(std::move(filename))
     {
     }
 
@@ -108,14 +98,14 @@ public:
     [[nodiscard]] auto write(std::size_t offset, const Slice &in) -> Status override;
     [[nodiscard]] auto sync() -> Status override;
 
-    [[nodiscard]] auto parent() -> FakeEnv &
+    [[nodiscard]] auto env() -> FakeEnv &
     {
-        return *m_parent;
+        return *m_env;
     }
 
-    [[nodiscard]] auto parent() const -> const FakeEnv &
+    [[nodiscard]] auto env() const -> const FakeEnv &
     {
-        return *m_parent;
+        return *m_env;
     }
 
     [[nodiscard]] auto filename() -> const std::string &
@@ -124,10 +114,8 @@ public:
     }
 
 protected:
-    friend class FakeEnv;
-
-    FakeEnv::Memory *m_mem = nullptr;
-    FakeEnv *m_parent = nullptr;
+    FakeEnv::FileState *m_state = nullptr;
+    FakeEnv *m_env = nullptr;
     std::string m_filename;
 };
 
@@ -135,7 +123,7 @@ class FakeLogFile : public LogFile
 {
 public:
     ~FakeLogFile() override = default;
-    auto logv(const char *, ...) -> void override {}
+    auto write(const Slice &) -> void override {}
 };
 
 struct Interceptor {
@@ -146,7 +134,6 @@ struct Interceptor {
         kSync,
         kUnlink,
         kResize,
-        kRename,
         kTypeCount
     };
 
@@ -167,151 +154,68 @@ struct Interceptor {
     Type type;
 };
 
-class DataLossEnv : public EnvWrapper
+class TestEnv : public EnvWrapper
 {
-    friend class DataLossFile;
-
-    std::unordered_map<std::string, std::string> m_save_states;
-
-    auto save_file_contents(const std::string &clean_filename) -> void;
-    auto overwrite_file(const std::string &clean_filename, const std::string &contents) -> void;
-
 public:
-    explicit DataLossEnv()
-        : EnvWrapper(*new tools::FakeEnv)
-    {
-    }
+    explicit TestEnv();
+    explicit TestEnv(Env &env);
+    ~TestEnv() override;
 
-    explicit DataLossEnv(Env &env)
-        : EnvWrapper(env)
-    {
-    }
+    // NOTE: clone() always clones files into a FakeEnv, and only works properly if
+    //       the wrapped Env was empty when passed to the constructor.
+    [[nodiscard]] virtual auto clone() -> Env *;
 
-    ~DataLossEnv() override
-    {
-        delete target();
-    }
+    // The TestFile wrapper reads the whole file and saves it in memory after a
+    // successful call to sync(). When a TestFile is closed, .
+    virtual auto drop_after_last_sync(const std::string &filename) -> void;
+    virtual auto drop_after_last_sync() -> void;
+
+    virtual auto add_interceptor(const std::string &filename, Interceptor interceptor) -> void;
+    virtual auto clear_interceptors() -> void;
+    virtual auto clear_interceptors(const std::string &filename) -> void;
 
     [[nodiscard]] auto new_file(const std::string &filename, File *&out) -> Status override;
+    [[nodiscard]] auto resize_file(const std::string &filename, std::size_t file_size) -> Status override;
     [[nodiscard]] auto remove_file(const std::string &filename) -> Status override;
 
-    virtual auto drop_after_last_sync() -> void;
-    virtual auto drop_after_last_sync(const std::string &filename) -> void;
-};
+private:
+    friend class TestFile;
 
-class DataLossFile : public File
-{
-    std::string m_filename;
-    DataLossEnv *m_env = nullptr;
-    File *m_file = nullptr;
+    struct FileState {
+        std::vector<Interceptor> interceptors;
+        std::string saved_state;
+        bool unlinked = false;
+    };
 
-public:
-    explicit DataLossFile(std::string filename, File &file, DataLossEnv &env)
-        : m_filename(std::move(filename)),
-          m_env(&env),
-          m_file(&file)
-    {
-    }
-
-    ~DataLossFile() override
-    {
-        delete m_file;
-    }
-
-    [[nodiscard]] auto parent() -> DataLossEnv *
-    {
-        return m_env;
-    }
-
-    [[nodiscard]] auto parent() const -> const DataLossEnv *
-    {
-        return m_env;
-    }
-
-    [[nodiscard]] auto filename() const -> const std::string &
-    {
-        return m_filename;
-    }
-
-    [[nodiscard]] auto read(std::size_t offset, std::size_t size, char *scratch, Slice *out) -> Status override
-    {
-        return m_file->read(offset, size, scratch, out);
-    }
-
-    [[nodiscard]] auto write(std::size_t offset, const Slice &in) -> Status override
-    {
-        return m_file->write(offset, in);
-    }
-
-    [[nodiscard]] auto sync() -> Status override
-    {
-        CALICODB_TRY(m_file->sync());
-        m_env->save_file_contents(m_filename);
-        return Status::ok();
-    }
-};
-
-class FaultInjectionEnv : public DataLossEnv
-{
-    std::unordered_map<std::string, std::vector<Interceptor>> m_interceptors;
-
-    friend class FaultInjectionFile;
-    friend class FaultInjectionLogFile;
+    mutable std::unordered_map<std::string, FileState> m_state;
 
     [[nodiscard]] auto try_intercept_syscall(Interceptor::Type type, const std::string &filename) -> Status;
-
-public:
-    [[nodiscard]] auto clone() const -> Env *;
-    virtual auto add_interceptor(const std::string &filename, Interceptor interceptor) -> void;
-    virtual auto clear_interceptors(const std::string &filename) -> void;
-    virtual auto clear_interceptors() -> void;
-
-    ~FaultInjectionEnv() override = default;
-    [[nodiscard]] auto new_file(const std::string &filename, File *&out) -> Status override;
-    [[nodiscard]] auto new_log_file(const std::string &filename, LogFile *&out) -> Status override;
-    [[nodiscard]] auto get_children(const std::string &dirname, std::vector<std::string> &out) const -> Status override;
-    [[nodiscard]] auto rename_file(const std::string &old_filename, const std::string &new_filename) -> Status override;
-    [[nodiscard]] auto file_exists(const std::string &filename) const -> bool override;
-    [[nodiscard]] auto resize_file(const std::string &filename, std::size_t size) -> Status override;
-    [[nodiscard]] auto file_size(const std::string &filename, std::size_t &out) const -> Status override;
-    [[nodiscard]] auto remove_file(const std::string &filename) -> Status override;
+    auto save_file_contents(const std::string &filename) -> void;
+    auto overwrite_file(const std::string &filename, const std::string &contents) -> void;
 };
 
-class FaultInjectionFile : public File
+class TestFile : public File
 {
-    friend class FaultInjectionEnv;
+    friend class TestEnv;
 
-    DataLossFile *m_target = nullptr;
+    std::string m_filename;
+    TestEnv *m_env = nullptr;
+    File *m_file = nullptr;
 
-    [[nodiscard]] auto parent() const -> const FaultInjectionEnv &
-    {
-        return reinterpret_cast<const FaultInjectionEnv &>(*m_target->parent());
-    }
-
-    [[nodiscard]] auto parent() -> FaultInjectionEnv &
-    {
-        return reinterpret_cast<FaultInjectionEnv &>(*m_target->parent());
-    }
-
-    explicit FaultInjectionFile(DataLossFile *&file)
-        : m_target(file)
-    {
-        // Takes ownership.
-        file = nullptr;
-    }
+    explicit TestFile(std::string filename, File &file, TestEnv &env);
 
 public:
-    ~FaultInjectionFile() override;
+    ~TestFile() override;
     [[nodiscard]] auto read(std::size_t offset, std::size_t size, char *scratch, Slice *out) -> Status override;
     [[nodiscard]] auto write(std::size_t offset, const Slice &in) -> Status override;
     [[nodiscard]] auto sync() -> Status override;
 };
 
-class FaultInjectionLogFile : public FakeLogFile
+class TestLogFile : public LogFile
 {
 public:
-    ~FaultInjectionLogFile() override = default;
-    auto logv(const char *, ...) -> void override {}
+    ~TestLogFile() override = default;
+    auto write(const Slice &) -> void override {}
 };
 
 class StderrLog : public LogFile
@@ -319,13 +223,12 @@ class StderrLog : public LogFile
 public:
     ~StderrLog() override = default;
 
-    auto logv(const char *fmt, ...) -> void override
+    auto write(const Slice &in) -> void override
     {
-        std::va_list args;
-        va_start(args, fmt);
-        std::vfprintf(stderr, fmt, args);
-        std::fputs("\n", stderr);
-        va_end(args);
+        std::fputs(in.to_string().c_str(), stderr);
+        if (in.data()[in.size() - 1] != '\n') {
+            std::fputc('\n', stderr);
+        }
         std::fflush(stderr);
     }
 };
@@ -402,14 +305,6 @@ static auto integral_key(std::size_t key) -> std::string
         return key_string.substr(0, Length);
     } else {
         return std::string(Length - key_string.size(), '0') + key_string;
-    }
-}
-
-inline auto expect_non_error(const Status &s)
-{
-    if (!s.is_ok() && !s.is_not_found()) {
-        std::fprintf(stderr, "error: %s\n", s.to_string().data());
-        std::abort();
     }
 }
 

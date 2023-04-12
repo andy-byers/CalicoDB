@@ -5,6 +5,7 @@
 #include "calicodb/db.h"
 #include "db_impl.h"
 #include "env_posix.h"
+#include "logging.h"
 #include "utils.h"
 
 namespace calicodb
@@ -39,7 +40,10 @@ auto DB::open(const Options &options, const std::string &filename, DB *&db) -> S
     }
     if (sanitized.info_log == nullptr) {
         const auto log_filename = clean_filename + kDefaultLogSuffix;
-        CALICODB_TRY(sanitized.env->new_log_file(log_filename, sanitized.info_log));
+        auto s = sanitized.env->new_log_file(log_filename, sanitized.info_log);
+        if (!s.is_ok()) {
+            sanitized.info_log = nullptr;
+        }
     }
 
     auto *impl = new DBImpl(options, sanitized, clean_filename);

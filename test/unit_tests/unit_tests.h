@@ -131,12 +131,12 @@ public:
     PagerTestHarness()
     {
         const Wal::Parameters wal_param = {
-            kDBFilename,
+            kWalFilename,
             kPageSize,
             &Base::env(),
         };
 
-        m_wal = new tools::FakeWal(wal_param);
+        CHECK_OK(Wal::open(wal_param, m_wal));
 
         const Pager::Parameters pager_param = {
             kDBFilename,
@@ -148,17 +148,18 @@ public:
             kPageSize,
         };
 
-        EXPECT_OK(Pager::open(pager_param, m_pager));
+        CHECK_OK(Pager::open(pager_param, m_pager));
 
-        // Descendents must opt in to using the WAL. "state.use_wal" must be set before
-        // Pager::rollback_txn() is called.
+        // Descendents must opt in to using the WAL.
         m_state.use_wal = false;
     }
 
     ~PagerTestHarness() override
     {
         delete m_pager;
-        delete m_wal;
+        m_pager = nullptr;
+
+        (void)Wal::close(m_wal);
     }
 
 protected:
@@ -179,102 +180,6 @@ inline auto assert_special_error(const Status &s)
         std::abort();
     }
 }
-
-namespace test_tools
-{
-
-template <class T>
-auto get(T &t, const std::string &key, std::string *value) -> Status
-{
-    return t.get(key, value);
-}
-
-template <class T>
-auto find(T &t, const std::string &key) -> Cursor *
-{
-    auto *cursor = t.new_cursor();
-    if (cursor) {
-        cursor->seek(key);
-    }
-    return cursor;
-}
-
-template <class T>
-auto contains(T &t, const std::string &key) -> bool
-{
-    std::string value;
-    return get(t, key, value).is_ok();
-}
-
-template <class T>
-auto contains(T &t, const std::string &key, const std::string &value) -> bool
-{
-    std::string val;
-    if (auto s = get(t, key, val); s.is_ok()) {
-        return val == value;
-    }
-    return false;
-}
-
-template <class T>
-auto insert(T &t, const std::string &key, const std::string &value) -> void
-{
-    auto s = t.add(key, value);
-    if (!s.is_ok()) {
-        std::fputs(s.to_string().data(), stderr);
-        std::abort();
-    }
-}
-
-template <class T>
-auto erase(T &t, const std::string &key) -> bool
-{
-    auto s = t.erase(get(t, key));
-    if (!s.is_ok() && !s.is_not_found()) {
-        std::fputs(s.to_string().data(), stderr);
-        std::abort();
-    }
-    return !s.is_not_found();
-}
-
-} // namespace test_tools
-
-struct Record {
-    inline auto operator<(const Record &rhs) const -> bool
-    {
-        return Slice(key) < Slice(rhs.key);
-    }
-
-    std::string key;
-    std::string value;
-};
-
-auto operator>(const Record &, const Record &) -> bool;
-auto operator<=(const Record &, const Record &) -> bool;
-auto operator>=(const Record &, const Record &) -> bool;
-auto operator==(const Record &, const Record &) -> bool;
-auto operator!=(const Record &, const Record &) -> bool;
-
-class RecordGenerator
-{
-public:
-    static unsigned default_seed;
-
-    struct Parameters {
-        std::size_t mean_key_size = 12;
-        std::size_t mean_value_size = 18;
-        std::size_t spread = 4;
-        bool is_sequential = false;
-        bool is_unique = false;
-    };
-
-    RecordGenerator() = default;
-    explicit RecordGenerator(Parameters);
-    auto generate(tools::RandomGenerator &, std::size_t) const -> std::vector<Record>;
-
-private:
-    Parameters m_param;
-};
 
 } // namespace calicodb
 

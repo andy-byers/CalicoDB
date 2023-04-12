@@ -50,6 +50,7 @@ auto PageCache::get(Id page_id) -> CacheEntry *
 
 auto PageCache::alloc(Id page_id) -> CacheEntry *
 {
+    CALICODB_EXPECT_FALSE(page_id.is_null());
     CALICODB_EXPECT_EQ(query(page_id), nullptr);
     auto [itr, _] = m_map.emplace(
         page_id, m_list.emplace(end(m_list)));

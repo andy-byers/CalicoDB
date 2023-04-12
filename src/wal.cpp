@@ -48,7 +48,7 @@ static constexpr auto next_index_hash(Hash hash) -> Hash
 static auto too_many_collisions(Key key) -> Status
 {
     std::string message;
-    write_to_string(message, "too many WAL index collisions for page %u", key);
+    append_fmt_string(message, "too many WAL index collisions for page %u", key);
     return Status::corruption(message);
 }
 
@@ -727,12 +727,12 @@ auto WalImpl::read(Id page_id, char *&page) -> Status
 
     if (frame) {
         CALICODB_TRY(m_file->read_exact(
-            frame_offset(frame),
-            WalFrameHdr::kSize + m_page_size,
+            frame_offset(frame) + WalFrameHdr::kSize,
+            m_page_size,
             m_frame.data()));
 
-        std::memcpy(page, m_frame.data() + WalFrameHdr::kSize, m_page_size);
-        m_stats.bytes_read += m_frame.size();
+        std::memcpy(page, m_frame.data(), m_page_size);
+        m_stats.bytes_read += m_page_size;
     } else {
         page = nullptr;
     }

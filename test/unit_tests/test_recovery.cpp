@@ -11,7 +11,7 @@
 namespace calicodb
 {
 
-template <class EnvType = tools::FaultInjectionEnv>
+template <class EnvType = tools::TestEnv>
 class RecoveryTestHarness : public EnvTestHarness<EnvType>
 {
 public:
@@ -233,19 +233,10 @@ TEST_F(RecoveryTests, RollbackD)
 
 TEST_F(RecoveryTests, VacuumRecovery)
 {
-    ASSERT_EQ(db->begin_txn(TxnOptions()), 1);
-    std::vector<Record> committed;
-    for (std::size_t i = 0; i < 1'000; ++i) {
-        committed.emplace_back(Record {
-            random.Generate(100).to_string(),
-            random.Generate(100).to_string(),
-        });
-        ASSERT_OK(db->put(
-            committed.back().key,
-            committed.back().value));
-    }
-    ASSERT_OK(db->commit_txn(1));
-    ASSERT_EQ(db->begin_txn(TxnOptions()), 2);
+    auto txn = db->begin_txn(TxnOptions());
+    const auto committed = tools::fill_db(*db, random, 5'000);
+    ASSERT_OK(db->commit_txn(txn));
+    txn = db->begin_txn(TxnOptions());
 
     for (std::size_t i = 0; i < 1'000; ++i) {
         ASSERT_OK(db->put(tools::integral_key(i), random.Generate(db_options.page_size)));
@@ -465,11 +456,11 @@ INSTANTIATE_TEST_SUITE_P(
         std::make_tuple(kDBFilename, tools::Interceptor::kRead, 1)));
 
 class DataLossTests
-    : public RecoveryTestHarness<tools::DataLossEnv>,
+    : public RecoveryTestHarness<tools::TestEnv>,
       public testing::TestWithParam<std::size_t>
 {
 public:
-    using Base = RecoveryTestHarness<tools::DataLossEnv>;
+    using Base = RecoveryTestHarness<tools::TestEnv>;
     const std::size_t kCommitInterval = GetParam();
 
     ~DataLossTests() override = default;
