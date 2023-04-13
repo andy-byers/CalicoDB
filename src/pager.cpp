@@ -134,8 +134,7 @@ auto Pager::initialize_root(bool fresh_pager) -> Status
     if (s.is_ok() && fresh_pager) {
         // If this is a new file, the root page is dirty since it was just
         // allocated.
-        m_root.is_dirty = true;
-        m_dirty = &m_root;
+        dirtylist_add(m_root);
         m_mode = kDirty;
         ++m_page_count;
     }
@@ -222,17 +221,17 @@ auto Pager::dirtylist_remove(CacheEntry &entry) -> CacheEntry *
         entry.prev->next = entry.next;
     } else {
         // NULLs out the dirty list head when the last entry is removed ("next"
-        // is nullptr).
+        // is nullptr in that case).
         CALICODB_EXPECT_EQ(&entry, m_dirty);
         m_dirty = entry.next;
     }
     auto *next = entry.next;
     if (next) {
         next->prev = entry.prev;
+        entry.next = nullptr;
     }
-    entry.is_dirty = false;
     entry.prev = nullptr;
-    entry.next = nullptr;
+    entry.is_dirty = false;
     return next;
 }
 
@@ -277,8 +276,7 @@ auto Pager::commit_txn() -> Status
 
         if (m_dirty == nullptr) {
             // Ensure that there is always a WAL frame to store the DB size.
-            m_dirty = &m_root;
-            m_dirty->is_dirty = true;
+            dirtylist_add(m_root);
         }
 
         auto s = flush_to_disk();
@@ -396,7 +394,7 @@ auto Pager::flush_to_disk() -> Status
         // The DB page count is specified here. This indicates that the writes are part of
         // a commit, which is always the case if this method is called while the WAL is
         // enabled.
-        return m_wal->write(p, m_page_count);
+        CALICODB_TRY(m_wal->write(p, m_page_count));
     }
 
     for (auto *p = m_dirty; p; p = dirtylist_remove(*p)) {
@@ -602,14 +600,20 @@ static auto decode_entry(const char *data) -> PointerMap::Entry
 
 auto PointerMap::lookup(const Pager &pager, Id page_id) -> Id
 {
-    // Root page (1) has no parents, and page 2 is the first pointer map page. If "page_id" is a pointer map
-    // page, "page_id" will be returned.
+    CALICODB_EXPECT_NE(page_id, Id::null());
+    // Root page (1) has no parents, and page 2 is the first pointer map page. If "page_id" is a
+    // pointer map page, "page_id" will be returned.
     if (page_id.value < kFirstMapPage) {
         return Id::null();
     }
     const auto inc = pager.page_size() / kEntrySize + 1;
     const auto idx = (page_id.value - kFirstMapPage) / inc;
     return Id(idx * inc + kFirstMapPage);
+}
+
+auto PointerMap::is_map(const Pager &pager, Id page_id) -> bool
+{
+    return lookup(pager, page_id) == page_id;
 }
 
 auto PointerMap::read_entry(Pager &pager, Id page_id, Entry &out) -> Status
@@ -653,8 +657,8 @@ auto PointerMap::write_entry(Pager &pager, Id page_id, Entry entry) -> Status
 }
 
 Freelist::Freelist(Pager &pager, Id &head)
-    : m_pager {&pager},
-      m_head {&head}
+    : m_pager(&pager),
+      m_head(&head)
 {
 }
 
@@ -665,20 +669,22 @@ Freelist::Freelist(Pager &pager, Id &head)
 
 auto Freelist::pop(Page &page) -> Status
 {
-    if (!m_head->is_null()) {
-        CALICODB_TRY(m_pager->acquire(*m_head, page));
-        m_pager->upgrade(page);
-        *m_head = read_next_id(page);
+    CALICODB_EXPECT_FALSE(is_empty());
+    CALICODB_TRY(m_pager->acquire(*m_head, page));
+    m_pager->upgrade(page);
+    *m_head = read_next_id(page);
 
-        if (!m_head->is_null()) {
-            // Only clear the back pointer for the new freelist head. Callers must make sure to update the returned
-            // node's back pointer at some point.
-            const PointerMap::Entry entry = {Id::null(), PointerMap::kFreelistLink};
-            CALICODB_TRY(PointerMap::write_entry(*m_pager, *m_head, entry));
+    Status s;
+    if (!m_head->is_null()) {
+        // Only clear the back pointer for the new freelist head. Callers must make sure to update the returned
+        // node's back pointer at some point.
+        const PointerMap::Entry entry = {Id::null(), PointerMap::kFreelistLink};
+        s = PointerMap::write_entry(*m_pager, *m_head, entry);
+        if (!s.is_ok()) {
+            m_pager->release(std::move(page));
         }
-        return Status::ok();
     }
-    return Status::not_supported("free list is empty");
+    return s;
 }
 
 auto Freelist::push(Page page) -> Status

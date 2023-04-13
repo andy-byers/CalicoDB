@@ -575,7 +575,7 @@ NodeIterator::NodeIterator(Node &node, const Parameters &param)
     : m_pager(param.pager),
       m_lhs_key(param.lhs_key),
       m_rhs_key(param.rhs_key),
-      m_node {&node}
+      m_node(&node)
 {
     CALICODB_EXPECT_NE(m_pager, nullptr);
     CALICODB_EXPECT_NE(m_lhs_key, nullptr);
@@ -697,6 +697,43 @@ auto Tree::create(Pager &pager, Id table_id, Id *out) -> Status
         *out = root_id;
     }
     return Status::ok();
+}
+
+auto Tree::track_cursor(CursorImpl &cursor) -> void
+{
+    if (m_cursors) {
+        CALICODB_EXPECT_FALSE(m_cursors->m_prev);
+        m_cursors->m_prev = &cursor;
+    }
+    cursor.m_prev = nullptr;
+    cursor.m_next = m_cursors;
+    m_cursors = &cursor;
+}
+
+auto Tree::forget_cursor(CursorImpl &cursor) -> void
+{
+    CALICODB_EXPECT_TRUE(m_cursors);
+    CALICODB_EXPECT_FALSE(m_cursors->m_prev);
+
+    if (cursor.m_prev) {
+        cursor.m_prev->m_next = cursor.m_next;
+    } else {
+        CALICODB_EXPECT_EQ(&cursor, m_cursors);
+        m_cursors = cursor.m_next;
+    }
+    auto *next = cursor.m_next;
+    if (next) {
+        next->m_prev = cursor.m_prev;
+        cursor.m_next = nullptr;
+    }
+    cursor.m_prev = nullptr;
+}
+
+auto Tree::inform_cursors() -> void
+{
+    for (auto *c = m_cursors; c; c = c->m_next) {
+        c->m_needs_repos = true;
+    }
 }
 
 auto Tree::node_iterator(Node &node) const -> NodeIterator
@@ -1574,7 +1611,7 @@ auto Tree::vacuum_step(Page &free, TableSet &tables, Id last_id) -> Status
 
 auto Tree::vacuum_one(Id target, TableSet &tables, bool *success) -> Status
 {
-    if (PointerMap::lookup(*m_pager, target) == target) {
+    if (PointerMap::is_map(*m_pager, target)) {
         *success = true;
         return Status::ok();
     }
@@ -1610,7 +1647,7 @@ auto NodeManager::allocate(Pager &pager, Node &out, std::string &scratch, bool i
     CALICODB_TRY(pager.allocate(out.page));
 
     // Should not be a pointer map page.
-    CALICODB_EXPECT_NE(PointerMap::lookup(pager, out.page.id()), out.page.id());
+    CALICODB_EXPECT_FALSE(PointerMap::is_map(pager, out.page.id()));
 
     out.header.is_external = is_external;
     out.scratch = scratch.data();
@@ -2262,6 +2299,11 @@ auto Tree::TEST_validate() -> void
 Cursor::Cursor() = default;
 Cursor::~Cursor() = default;
 
+CursorImpl::~CursorImpl()
+{
+    m_tree->forget_cursor(*this);
+}
+
 auto CursorImpl::is_valid() const -> bool
 {
     return m_status.is_ok();
@@ -2439,6 +2481,7 @@ auto CursorInternal::make_cursor(Tree &tree) -> Cursor *
 {
     auto *cursor = new CursorImpl(tree);
     invalidate(*cursor, default_cursor_status());
+    tree.track_cursor(*cursor);
     return cursor;
 }
 

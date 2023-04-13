@@ -524,7 +524,11 @@ auto DBImpl::rollback_txn(unsigned txn) -> Status
     if (txn != m_txn || m_pager->mode() == Pager::kOpen) {
         return unrecognized_txn(txn, m_txn);
     }
-    return m_pager->rollback_txn();
+    auto s = m_pager->rollback_txn();
+    if (s.is_ok()) {
+        s = load_file_header();
+    }
+    return s;
 }
 
 auto DBImpl::commit_txn(unsigned txn) -> Status

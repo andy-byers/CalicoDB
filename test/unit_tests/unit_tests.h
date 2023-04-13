@@ -12,6 +12,7 @@
 #include "tools.h"
 #include "utils.h"
 #include "wal.h"
+#include "env_helpers.h"
 #include <filesystem>
 #include <gtest/gtest.h>
 #include <iomanip>

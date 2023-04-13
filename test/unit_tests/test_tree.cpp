@@ -1061,7 +1061,6 @@ public:
 
 TEST_P(PointerMapTests, FirstPointerMapIsPage2)
 {
-    ASSERT_EQ(PointerMap::lookup(*m_pager, Id(0)), Id(0));
     ASSERT_EQ(PointerMap::lookup(*m_pager, Id(1)), Id(0));
     ASSERT_EQ(PointerMap::lookup(*m_pager, Id(2)), Id(2));
     ASSERT_EQ(PointerMap::lookup(*m_pager, Id(3)), Id(2));
@@ -1144,6 +1143,14 @@ TEST_P(PointerMapTests, FindsCorrectMapPages)
         }
     }
 }
+
+#ifndef NDEBUG
+TEST_P(PointerMapTests, LookupNullIdDeathTest)
+{
+    ASSERT_DEATH((void)PointerMap::lookup(*m_pager, Id(0)), kExpectationMatcher);
+    ASSERT_DEATH((void)PointerMap::is_map(*m_pager, Id(0)), kExpectationMatcher);
+}
+#endif // NDEBUG
 
 INSTANTIATE_TEST_SUITE_P(
     PointerMapTests,

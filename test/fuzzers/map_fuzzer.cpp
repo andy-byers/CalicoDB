@@ -54,25 +54,18 @@ auto MapFuzzer::step(const U8 *&data, std::size_t &size) -> Status
     };
 
     const auto discard_pending = [this, &expect_equal_contents] {
-        if (m_txn) {
-            m_added.clear();
-            m_erased.clear();
-
-            expect_equal_contents();
-            m_txn = 0;
-        }
+        m_txn = 0;
+        m_added.clear();
+        m_erased.clear();
+        expect_equal_contents();
     };
 
     const auto commit_pending = [this, &cleanup = discard_pending] {
-        if (m_txn) {
-            // Only commit if we aren't in a transaction. These writes are performed inside implicit
-            // transactions that are managed by the DB.
-            for (const auto &[k, v] : m_added) {
-                m_map[k] = v;
-            }
-            for (const auto &k : m_erased) {
-                m_map.erase(k);
-            }
+        for (const auto &[k, v] : m_added) {
+            m_map.insert_or_assign(k, v);
+        }
+        for (const auto &k : m_erased) {
+            m_map.erase(k);
         }
         cleanup();
     };
@@ -93,12 +86,12 @@ auto MapFuzzer::step(const U8 *&data, std::size_t &size) -> Status
         case kPut:
             key = extract_fuzzer_key(data, size);
             value = extract_fuzzer_value(data, size);
-            s = m_db->put(key, value);
-            if (s.is_ok()) {
-                if (const auto itr = m_erased.find(key); itr != end(m_erased)) {
-                    m_erased.erase(itr);
-                }
-                m_added[key] = value;
+            CALICODB_TRY(m_db->put(key, value));
+            if (const auto itr = m_erased.find(key); itr != end(m_erased)) {
+                m_erased.erase(itr);
+            }
+            m_added.insert_or_assign(key, value);
+            if (!m_txn) {
                 commit_pending();
             }
             break;
@@ -107,51 +100,45 @@ auto MapFuzzer::step(const U8 *&data, std::size_t &size) -> Status
             auto *cursor = m_db->new_cursor();
             cursor->seek(key);
             if (cursor->is_valid()) {
-                s = m_db->erase(cursor->key());
-                if (s.is_ok()) {
-                    key = cursor->key().to_string();
-                    if (const auto itr = m_added.find(key); itr != end(m_added)) {
-                        m_added.erase(itr);
-                    }
-                    m_erased.insert(key);
+                CALICODB_TRY(m_db->erase(cursor->key()));
+                key = cursor->key().to_string();
+                if (const auto itr = m_added.find(key); itr != end(m_added)) {
+                    m_added.erase(itr);
+                }
+                m_erased.insert(key);
+                if (!m_txn) {
                     commit_pending();
-                } else if (s.is_not_found()) {
-                    s = Status::ok();
                 }
             }
             delete cursor;
             break;
         }
         case kVacuum:
-            s = m_db->vacuum();
+            CALICODB_TRY(m_db->vacuum());
             break;
         case kBeginTxn:
             m_txn = m_db->begin_txn(TxnOptions());
             break;
         case kRollbackTxn:
-            s = m_db->rollback_txn(m_txn);
-            if (s.is_ok()) {
+            if (m_txn) {
+                CALICODB_TRY(m_db->rollback_txn(m_txn));
                 discard_pending();
+                expect_equal_contents();
             }
             break;
         case kCommitTxn:
-            s = m_db->commit_txn(m_txn);
-            if (s.is_ok()) {
+            if (m_txn) {
+                CALICODB_TRY(m_db->commit_txn(m_txn));
                 commit_pending();
+                expect_equal_contents();
             }
             break;
         default: // kReopen
+            m_txn = 0;
             m_added.clear();
             m_erased.clear();
-            s = reopen();
-            if (s.is_ok()) {
-                expect_equal_contents();
-            }
-    }
-    if (!s.is_ok()) {
-        m_added.clear();
-        m_erased.clear();
-        return s;
+            CALICODB_TRY(reopen());
+            expect_equal_contents();
     }
     return m_db->status();
 }
