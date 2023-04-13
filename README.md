@@ -41,7 +41,7 @@ Check out the [docs](doc/doc.md).
 ## Dependencies
 The library itself has no dependencies.
 The unit tests depend on `@google/googletest`, and the benchmarks depend on `@google/benchmark`.
-Both are downloaded using CMake's FetchContent API.
+Both are downloaded using during the build.
 
 ## Performance
 CalicoDB uses a write-ahead log (WAL) implementation that is similar to SQLite's WAL.
@@ -57,6 +57,9 @@ Performance benchmarks can be found [here](./test/benchmarks).
 4. Modify the tree to not use sibling pointers, or at least don't keep a left sibling pointer
    + Causes extra pages to be written to the WAL during splits
 5. Look into writing a more involved balancing routine
+6. Better freelist that 2 types of pages: leaf and trunk pages
+   + Leaf pages contain no data and don't have to be written to the WAL
+   + Trunk pages contain the page IDs of many leaf pages
 
 ## Documentation
 Check out CalicoDB's [usage and design documents](doc).

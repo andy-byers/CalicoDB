@@ -125,10 +125,10 @@ public:
     tools::RandomGenerator random;
 };
 
-class PosixInfoLoggerTests : public FileTests
+class PosixLogFileTests : public FileTests
 {
 public:
-    PosixInfoLoggerTests()
+    PosixLogFileTests()
     {
         std::filesystem::remove_all(filename);
 
@@ -141,23 +141,16 @@ public:
     std::unique_ptr<LogFile> file;
 };
 
-TEST_F(PosixInfoLoggerTests, WritesFormattedText)
+TEST_F(PosixLogFileTests, WritesFormattedText)
 {
-    file->logv("test %03d %.03f %s\n", 12, 0.21f, "abc");
+    logv(file.get(), "test %03d %.03f %s\n", 12, 0.21f, "abc");
     ASSERT_EQ("test 012 0.210 abc\n", read_whole_file(filename));
 }
 
-TEST_F(PosixInfoLoggerTests, AddsNewline)
+TEST_F(PosixLogFileTests, AddsNewline)
 {
-    file->logv("test");
+    logv(file.get(), "test");
     ASSERT_EQ("test\n", read_whole_file(filename));
-}
-
-TEST_F(PosixInfoLoggerTests, ResizesBuffer)
-{
-    const std::string message(512 * 10, 'x');
-    file->logv("%s", message.c_str());
-    ASSERT_EQ(message + '\n', read_whole_file(filename));
 }
 
 class PosixReaderTests : public FileTests
@@ -232,6 +225,46 @@ TEST_F(FakeEnvTests, ReaderStopsAtEOF)
     std::string buffer(data.size() * 2, '\x00');
     ASSERT_OK(ra_reader->read(0, buffer.size(), buffer.data(), &slice));
     ASSERT_EQ(slice.size(), data.size());
+}
+
+class TestEnvTests
+    : public EnvTestHarness<tools::TestEnv>,
+      public testing::Test
+{
+protected:
+    ~TestEnvTests() override = default;
+};
+
+TEST_F(TestEnvTests, OperationsOnUnlinkedFiles)
+{
+    File *file;
+    ASSERT_OK(env().new_file("test", file));
+    ASSERT_OK(env().remove_file("test"));
+    ASSERT_FALSE(env().file_exists("test"));
+
+    std::size_t file_size;
+    ASSERT_TRUE(env().file_size("test", file_size).is_not_found());
+
+    // Read, write, and sync should still work.
+    const Slice message("Hello, world!", 13);
+    ASSERT_OK(file->write(0, message));
+    ASSERT_OK(file->sync());
+    char buffer[13];
+    ASSERT_OK(file->read_exact(0, sizeof(buffer), buffer));
+    ASSERT_EQ(message, Slice(buffer, sizeof(buffer)));
+
+    // Interceptors should work.
+    QUICK_INTERCEPTOR("test", tools::Interceptor::kSync);
+    assert_special_error(file->sync());
+    env().clear_interceptors();
+
+    // The file was unlinked, so it should be empty next time it is opened.
+    delete file;
+    ASSERT_OK(env().new_file("test", file));
+    Slice slice;
+    ASSERT_OK(file->read(0, sizeof(buffer), buffer, &slice));
+    ASSERT_TRUE(slice.is_empty());
+    delete file;
 }
 
 } // namespace calicodb

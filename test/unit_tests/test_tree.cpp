@@ -748,7 +748,7 @@ public:
         return random.Generate(random.Next(nonzero, param.page_size * overflow + 12));
     }
 
-    auto random_write() -> Record
+    auto random_write() -> std::pair<std::string, std::string>
     {
         const auto key = random_chunk(overflow_keys);
         const auto val = random_chunk(overflow_values, false);
@@ -1061,7 +1061,6 @@ public:
 
 TEST_P(PointerMapTests, FirstPointerMapIsPage2)
 {
-    ASSERT_EQ(PointerMap::lookup(*m_pager, Id(0)), Id(0));
     ASSERT_EQ(PointerMap::lookup(*m_pager, Id(1)), Id(0));
     ASSERT_EQ(PointerMap::lookup(*m_pager, Id(2)), Id(2));
     ASSERT_EQ(PointerMap::lookup(*m_pager, Id(3)), Id(2));
@@ -1144,6 +1143,14 @@ TEST_P(PointerMapTests, FindsCorrectMapPages)
         }
     }
 }
+
+#ifndef NDEBUG
+TEST_P(PointerMapTests, LookupNullIdDeathTest)
+{
+    ASSERT_DEATH((void)PointerMap::lookup(*m_pager, Id(0)), kExpectationMatcher);
+    ASSERT_DEATH((void)PointerMap::is_map(*m_pager, Id(0)), kExpectationMatcher);
+}
+#endif // NDEBUG
 
 INSTANTIATE_TEST_SUITE_P(
     PointerMapTests,
@@ -1880,5 +1887,139 @@ INSTANTIATE_TEST_SUITE_P(
     MultiTreeTests,
     ::testing::Values(
         TreeTestParameters {kMinPageSize}));
+
+template<class T>
+class PermutationGenerator {
+    std::vector<T> m_values;
+    std::vector<std::size_t> m_indices;
+
+public:
+    explicit PermutationGenerator(std::vector<T> values)
+        : m_values(std::move(values)),
+          m_indices(m_values.size())
+    {
+        std::iota(begin(m_indices), end(m_indices), 0);
+    }
+
+    [[nodiscard]] auto operator()(std::vector<T> &out) -> bool
+    {
+        if (out.size() != m_values.size()) {
+            out.resize(m_values.size());
+        }
+        const auto not_reset = std::next_permutation(
+            begin(m_indices), end(m_indices));
+        auto value = begin(out);
+        for (const auto &index : m_indices) {
+            *value++ = m_values[index];
+        }
+        return not_reset;
+    }
+};
+
+TEST(PermutationGeneratorTests, GeneratesAllPermutationsInLexicographicalOrder)
+{
+    std::vector<int> result;
+    PermutationGenerator<int> generator({
+        1, 2, 3,
+    });
+
+    for (int iteration = 0; iteration < 2; ++iteration) {
+        ASSERT_TRUE(generator(result));
+        ASSERT_EQ((std::vector<int> {1, 3, 2}), result);
+        ASSERT_TRUE(generator(result));
+        ASSERT_EQ((std::vector<int> {2, 1, 3}), result);
+        ASSERT_TRUE(generator(result));
+        ASSERT_EQ((std::vector<int> {2, 3, 1}), result);
+        ASSERT_TRUE(generator(result));
+        ASSERT_EQ((std::vector<int> {3, 1, 2}), result);
+        ASSERT_TRUE(generator(result));
+        ASSERT_EQ((std::vector<int> {3, 2, 1}), result);
+        ASSERT_FALSE(generator(result));
+        ASSERT_EQ((std::vector<int> {1, 2, 3}), result);
+    }
+}
+
+class RebalanceTests : public TreeTests {
+public:
+    ~RebalanceTests() override = default;
+
+    struct RecordInfo {
+        std::size_t key = 0;
+        std::size_t value_size = 0;
+
+        auto operator<(const RecordInfo &rhs) const -> bool
+        {
+            return key < rhs.key;
+        }
+    };
+
+    auto run(const std::vector<std::size_t> &sizes) -> void
+    {
+        std::vector<RecordInfo> info;
+        info.reserve(sizes.size());
+        for (std::size_t i = 0; i < sizes.size(); ++i) {
+            info.emplace_back(RecordInfo {i, sizes[i]});
+        }
+        PermutationGenerator<RecordInfo> generator(info);
+        while (generator(info)) {
+            std::size_t iteration = 0;
+            for (std::size_t i = 0; i < GetParam().extra; ++i) {
+                for (const auto &[k, value_size] : info) {
+                    ASSERT_OK(tree->put(
+                        tools::integral_key(iteration * info.size() + k),
+                        m_random.Generate(value_size)));
+                }
+                ++iteration;
+            }
+
+            tree->TEST_validate();
+
+            iteration = 0;
+            for (std::size_t i = 0; i < GetParam().extra; ++i) {
+                for (const auto &[k, _] : info) {
+                    ASSERT_OK(tree->erase(tools::integral_key(iteration * info.size() + k)));
+                }
+                ++iteration;
+            }
+        }
+    }
+
+protected:
+    tools::RandomGenerator m_random;
+};
+
+TEST_P(RebalanceTests, A)
+{
+    run({10, 10, 10, 10, 10, 10, 10, 10});
+}
+
+TEST_P(RebalanceTests, B)
+{
+    run({10, 10, 10, 10, 10, 10, 10, 10});
+}
+
+TEST_P(RebalanceTests, C)
+{
+    run({200, 200, 200, 200, 10, 10, 10, 10});
+}
+
+TEST_P(RebalanceTests, D)
+{
+    run({200, 200, 200, 200, 200, 200, 200, 10});
+}
+
+TEST_P(RebalanceTests, E)
+{
+    run({200, 200, 200, 200, 200, 200, 200, 200});
+}
+
+INSTANTIATE_TEST_SUITE_P(
+    RebalanceTests,
+    RebalanceTests,
+    ::testing::Values(
+        TreeTestParameters {kMinPageSize, 1},
+        TreeTestParameters {kMinPageSize, 5},
+        TreeTestParameters {kMinPageSize, 10}));
+
 
 } // namespace calicodb

@@ -105,6 +105,7 @@ private:
     [[nodiscard]] auto flush_to_disk() -> Status;
     auto purge_state() -> void;
     auto purge_entry(CacheEntry &victim) -> void;
+
     auto dirtylist_add(CacheEntry &entry) -> void;
     auto dirtylist_remove(CacheEntry &entry) -> CacheEntry *;
 
@@ -151,8 +152,12 @@ struct PointerMap {
         Type type;
     };
 
-    // Find the page ID of the pointer map page that holds the back pointer for page "page_id".
+    // Return the page ID of the pointer map page that holds the back pointer for page "page_id",
+    // Id::null() otherwise.
     [[nodiscard]] static auto lookup(const Pager &pager, Id page_id) -> Id;
+
+    // Return true if page "page_id" is a pointer map page, false otherwise.
+    [[nodiscard]] static auto is_map(const Pager &pager, Id page_id) -> bool;
 
     // Read an entry from the pointer map.
     [[nodiscard]] static auto read_entry(Pager &pager, Id page_id, Entry &entry) -> Status;

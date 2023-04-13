@@ -1,7 +1,9 @@
 
 add_library(calicodb_tools
         tools.cpp
-        tools.h)
+        tools.h
+        env_helpers.cpp
+        env_helpers.h)
 target_link_libraries(calicodb_tools
         PUBLIC calicodb)
 target_include_directories(calicodb_tools

@@ -158,28 +158,14 @@ PosixLogFile::~PosixLogFile()
     close(m_file);
 }
 
-auto PosixLogFile::logv(const char *fmt, ...) -> void
+auto PosixLogFile::write(const Slice &in) -> void
 {
-    std::va_list args;
-    va_start(args, fmt);
-    const auto length = write_to_string(m_buffer, fmt, args);
-    va_end(args);
-
-    (void)file_write(m_file, Slice(m_buffer.data(), length));
-    m_buffer.resize(kBufferSize);
+    (void)file_write(m_file, in);
 }
 
 auto EnvPosix::resize_file(const std::string &path, std::size_t size) -> Status
 {
     return file_resize(path, size);
-}
-
-auto EnvPosix::rename_file(const std::string &old_path, const std::string &new_path) -> Status
-{
-    if (rename(old_path.c_str(), new_path.c_str())) {
-        return errno_to_status();
-    }
-    return Status::ok();
 }
 
 auto EnvPosix::remove_file(const std::string &path) -> Status
@@ -199,28 +185,6 @@ auto EnvPosix::file_size(const std::string &path, std::size_t &out) const -> Sta
         return errno_to_status();
     }
     out = static_cast<std::size_t>(st.st_size);
-    return Status::ok();
-}
-
-auto EnvPosix::get_children(const std::string &dirname, std::vector<std::string> &out) const -> Status
-{
-    const auto skip = [](const auto *s) {
-        return !std::strcmp(s, ".") || !std::strcmp(s, "..");
-    };
-
-    out.clear();
-    auto *dir = opendir(dirname.c_str());
-    if (dir == nullptr) {
-        return errno_to_status();
-    }
-    struct dirent *ent;
-    while ((ent = readdir(dir))) {
-        if (skip(ent->d_name)) {
-            continue;
-        }
-        out.emplace_back(ent->d_name);
-    }
-    closedir(dir);
     return Status::ok();
 }
 

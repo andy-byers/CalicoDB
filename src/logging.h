@@ -12,8 +12,7 @@
 namespace calicodb
 {
 
-auto write_to_string(std::string &out, const char *fmt, std::va_list args) -> std::size_t;
-auto write_to_string(std::string &out, const char *fmt, ...) -> std::size_t;
+auto append_fmt_string(std::string &out, const char *fmt, ...) -> std::size_t;
 
 auto append_number(std::string &out, std::size_t value) -> void;
 auto append_double(std::string &out, double value) -> void;

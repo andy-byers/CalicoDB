@@ -3,52 +3,82 @@
 // LICENSE.md. See AUTHORS.md for a list of contributor names.
 
 #include "logging.h"
+#include "calicodb/env.h"
 #include "utils.h"
 #include <limits>
 
 namespace calicodb
 {
 
-auto write_to_string(std::string &out, const char *fmt, std::va_list args) -> std::size_t
+struct WriteInfo {
+    std::size_t length = 0;
+    bool success = false;
+};
+
+static auto try_write(char *buffer, std::size_t buffer_size, const char *fmt, std::va_list args) -> WriteInfo
 {
-    for (int iteration = 0; iteration < 2; ++iteration) {
-        std::va_list copy;
-        va_copy(copy, args);
-        const auto rc = std::vsnprintf(out.data(), out.size(), fmt, copy);
-        va_end(copy);
-
-        if (rc < 0) {
-            break;
-        }
-        auto length = static_cast<std::size_t>(rc);
-
-        if (length + 1 >= out.size()) {
+    std::va_list copy;
+    va_copy(copy, args);
+    const auto rc = std::vsnprintf(buffer, buffer_size, fmt, copy);
+    va_end(copy);
+        
+    WriteInfo info;
+    if (rc >= 0) {
+        info.length = static_cast<std::size_t>(rc);
+        if (info.length + 1 >= buffer_size) {
             // The message did not fit into the buffer.
-            if (iteration == 0) {
-                out.resize(length + 2);
-                continue;
-            }
+            return {info.length + 2, false};
         }
-
+        info.success = true;
         // Add a newline if necessary.
-        if (out[length - 1] != '\n') {
-            out[length] = '\n';
-            ++length;
+        if (buffer[info.length - 1] != '\n') {
+            buffer[info.length] = '\n';
+            ++info.length;
         }
-
-        CALICODB_EXPECT_LE(length, out.size());
-        return length;
     }
-    return 0;
+    return info;
 }
 
-auto write_to_string(std::string &out, const char *fmt, ...) -> std::size_t
+auto append_fmt_string(std::string &out, const char *fmt, ...) -> std::size_t
 {
     std::va_list args;
     va_start(args, fmt);
-    const auto length = write_to_string(out, fmt, args);
+    auto info = try_write(out.data(), out.size(), fmt, args);
+    if (!info.success) {
+        out.resize(info.length);
+        info = try_write(out.data(), out.size(), fmt, args);
+    }
     va_end(args);
-    return length;
+    return info.length;
+}
+
+auto logv(LogFile *log, const char *fmt, ...) -> void
+{
+    if (log) {
+        std::va_list args;
+        va_start(args, fmt);
+
+        // Try to fit the message in this stack buffer. If it won't fit, allocate space
+        // for it on the heap.
+        char fixed[128];
+        auto *p = fixed;
+        char *variable = nullptr;
+
+        WriteInfo info;
+        info.length = sizeof(fixed);
+        for (int i = 0; i < 2; ++i) {
+            info = try_write(p, info.length, fmt, args);
+            if (info.success) {
+                log->write(Slice(p, info.length));
+                break;
+            } else if (i == 0) {
+                variable = new char[info.length];
+                p = variable;
+            }
+        }
+        delete[] variable;
+        va_end(args);
+    }
 }
 
 auto append_number(std::string &out, std::size_t value) -> void

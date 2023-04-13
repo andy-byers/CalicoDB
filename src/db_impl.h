@@ -159,7 +159,6 @@ private:
     LogFile *m_log = nullptr;
 
     unsigned m_txn = 0;
-    unsigned m_auto_txn = 0;
 
     const std::string m_db_filename;
     const std::string m_wal_filename;

@@ -13,331 +13,6 @@
 namespace calicodb::tools
 {
 
-#define TRY_INTERCEPT_FROM(source, type, filename)                                                     \
-    do {                                                                                               \
-        if (auto intercept_s = (source).try_intercept_syscall(type, filename); !intercept_s.is_ok()) { \
-            return intercept_s;                                                                        \
-        }                                                                                              \
-    } while (0)
-
-namespace fs = std::filesystem;
-
-auto FakeEnv::read_file_at(const Memory &mem, std::size_t offset, std::size_t size, char *scratch, Slice *out) -> Status
-{
-    if (offset < mem.buffer.size()) {
-        const auto read_size = std::min(size, mem.buffer.size() - offset);
-        std::memcpy(scratch, mem.buffer.data() + offset, read_size);
-        if (out != nullptr) {
-            *out = Slice(scratch, read_size);
-        }
-    }
-    return Status::ok();
-}
-
-auto FakeEnv::write_file_at(Memory &mem, std::size_t offset, const Slice &in) -> Status
-{
-    if (const auto write_end = offset + in.size(); mem.buffer.size() < write_end) {
-        mem.buffer.resize(write_end);
-    }
-    std::memcpy(mem.buffer.data() + offset, in.data(), in.size());
-    return Status::ok();
-}
-
-auto FakeFile::read(std::size_t offset, std::size_t size, char *scratch, Slice *out) -> Status
-{
-    return m_parent->read_file_at(*m_mem, offset, size, scratch, out);
-}
-
-auto FakeFile::write(std::size_t offset, const Slice &in) -> Status
-{
-    return m_parent->write_file_at(*m_mem, offset, in);
-}
-
-auto FakeFile::sync() -> Status
-{
-    return Status::ok();
-}
-
-auto FakeEnv::get_memory(const std::string &filename) const -> Memory &
-{
-    auto itr = m_memory.find(filename);
-    if (itr == end(m_memory)) {
-        itr = m_memory.insert(itr, {filename, {}});
-    }
-    return itr->second;
-}
-
-auto FakeEnv::new_file(const std::string &filename, File *&out) -> Status
-{
-    auto &mem = get_memory(filename);
-    out = new FakeFile(filename, *this, mem);
-    if (!mem.created) {
-        mem.created = true;
-        mem.buffer.clear();
-    }
-    return Status::ok();
-}
-
-auto FakeEnv::new_log_file(const std::string &, LogFile *&out) -> Status
-{
-    out = new FakeLogFile;
-    return Status::ok();
-}
-
-auto FakeEnv::remove_file(const std::string &filename) -> Status
-{
-    auto itr = m_memory.find(filename);
-    if (itr == end(m_memory)) {
-        return Status::not_found('"' + filename + "\" does not exist");
-    }
-    // Don't actually get rid of any memory. We should be able to unlink a file and still access it
-    // through open file descriptors, so if anyone has this file open, they should still be able to
-    // access it.
-    itr->second.created = false;
-    return Status::ok();
-}
-
-auto FakeEnv::resize_file(const std::string &filename, std::size_t size) -> Status
-{
-    auto itr = m_memory.find(filename);
-    if (itr == end(m_memory)) {
-        return Status::not_found('"' + filename + "\" does not exist");
-    }
-    itr->second.buffer.resize(size);
-    return Status::ok();
-}
-
-auto FakeEnv::rename_file(const std::string &old_filename, const std::string &new_filename) -> Status
-{
-    if (new_filename.empty()) {
-        return Status::invalid_argument("name has zero length");
-    }
-
-    auto node = m_memory.extract(old_filename);
-    if (node.empty()) {
-        return Status::not_found("file does not exist");
-    }
-
-    node.key() = new_filename;
-    m_memory.insert(std::move(node));
-    return Status::ok();
-}
-
-auto FakeEnv::file_size(const std::string &filename, std::size_t &out) const -> Status
-{
-    auto itr = m_memory.find(filename);
-    if (itr == cend(m_memory)) {
-        return Status::not_found("file does not exist");
-    }
-    out = itr->second.buffer.size();
-    return Status::ok();
-}
-
-auto FakeEnv::file_exists(const std::string &filename) const -> bool
-{
-    if (const auto &itr = m_memory.find(filename); itr != end(m_memory)) {
-        return itr->second.created;
-    }
-    return false;
-}
-
-auto FakeEnv::get_children(const std::string &dirname, std::vector<std::string> &out) const -> Status
-{
-    auto prefix = dirname.back() == '/' ? dirname : dirname + '/';
-    for (const auto &[filename, mem] : m_memory) {
-        if (mem.created && Slice(filename).starts_with(prefix)) {
-            out.emplace_back(filename.substr(prefix.size()));
-        }
-    }
-    return Status::ok();
-}
-
-auto FakeEnv::clone() const -> Env *
-{
-    auto *env = new FakeEnv;
-    env->m_memory = m_memory;
-    return env;
-}
-
-static auto fake_env(Env &env) -> FakeEnv &
-{
-    return reinterpret_cast<FakeEnv &>(env);
-}
-
-static auto fake_env(const Env &env) -> const FakeEnv &
-{
-    return reinterpret_cast<const FakeEnv &>(env);
-}
-
-auto DataLossEnv::save_file_contents(const std::string &filename) -> void
-{
-    m_save_states.insert_or_assign(filename, read_file_to_string(*target(), filename));
-}
-
-auto DataLossEnv::overwrite_file(const std::string &filename, const std::string &contents) -> void
-{
-    write_string_to_file(*target(), filename, contents, 0);
-
-    auto mem = fake_env(*target()).memory().find(filename);
-    CALICODB_EXPECT_NE(mem, end(fake_env(*target()).memory()));
-    mem->second.buffer.resize(contents.size());
-}
-
-auto DataLossEnv::drop_after_last_sync() -> void
-{
-    for (const auto &[filename, _] : fake_env(*target()).memory()) {
-        drop_after_last_sync(filename);
-    }
-}
-
-auto DataLossEnv::drop_after_last_sync(const std::string &filename) -> void
-{
-    const auto buf = m_save_states.find(filename);
-    if (buf != end(m_save_states)) {
-        overwrite_file(filename, buf->second);
-    } else {
-        overwrite_file(filename, "");
-    }
-}
-
-auto DataLossEnv::new_file(const std::string &filename, File *&out) -> Status
-{
-    auto s = target()->new_file(filename, out);
-    if (s.is_ok()) {
-        out = new DataLossFile(filename, *out, *this);
-    }
-    return s;
-}
-
-auto DataLossEnv::remove_file(const std::string &filename) -> Status
-{
-    auto s = target()->remove_file(filename);
-    if (s.is_ok()) {
-        m_save_states.erase(filename);
-    }
-    return s;
-}
-
-auto FaultInjectionEnv::try_intercept_syscall(Interceptor::Type type, const std::string &filename) -> Status
-{
-    for (const auto &[name, interceptors] : m_interceptors) {
-        if (name != filename) {
-            continue;
-        }
-        for (const auto &interceptor : interceptors) {
-            if (interceptor.type == type) {
-                return interceptor.callback();
-            }
-        }
-    }
-    return Status::ok();
-}
-
-auto FaultInjectionEnv::add_interceptor(const std::string &filename, Interceptor interceptor) -> void
-{
-    auto [group, _] = m_interceptors.insert({filename, {}});
-    group->second.emplace_back(std::move(interceptor));
-}
-
-auto FaultInjectionEnv::clear_interceptors() -> void
-{
-    m_interceptors.clear();
-}
-
-auto FaultInjectionEnv::clear_interceptors(const std::string &filename) -> void
-{
-    auto group = m_interceptors.find(filename);
-    if (group != end(m_interceptors)) {
-        group->second.clear();
-    }
-}
-
-FaultInjectionFile::~FaultInjectionFile()
-{
-    delete m_target;
-}
-
-auto FaultInjectionFile::read(std::size_t offset, std::size_t size, char *scratch, Slice *out) -> Status
-{
-    TRY_INTERCEPT_FROM(parent(), Interceptor::kRead, m_target->filename());
-    return m_target->read(offset, size, scratch, out);
-}
-
-auto FaultInjectionFile::write(std::size_t offset, const Slice &in) -> Status
-{
-    TRY_INTERCEPT_FROM(parent(), Interceptor::kWrite, m_target->filename());
-    return m_target->write(offset, in);
-}
-
-auto FaultInjectionFile::sync() -> Status
-{
-    TRY_INTERCEPT_FROM(parent(), Interceptor::kSync, m_target->filename());
-    return m_target->sync();
-}
-
-auto FaultInjectionEnv::new_file(const std::string &filename, File *&out) -> Status
-{
-    TRY_INTERCEPT_FROM(*this, Interceptor::kOpen, filename);
-    DataLossFile *file;
-    CALICODB_TRY(DataLossEnv::new_file(filename, reinterpret_cast<File *&>(file)));
-    // DataLossEnv doesn't drop data unless it is told to. Each time a file is opened, get rid of
-    // everything we didn't explicitly fsync().
-    drop_after_last_sync(filename);
-    out = new FaultInjectionFile(file);
-    return Status::ok();
-}
-
-auto FaultInjectionEnv::new_log_file(const std::string &filename, LogFile *&out) -> Status
-{
-    TRY_INTERCEPT_FROM(*this, Interceptor::kOpen, filename);
-    FakeLogFile *file;
-    CALICODB_TRY(DataLossEnv::new_log_file(filename, reinterpret_cast<LogFile *&>(file)));
-    out = new FaultInjectionLogFile;
-    delete file;
-    return Status::ok();
-}
-
-auto FaultInjectionEnv::remove_file(const std::string &filename) -> Status
-{
-    TRY_INTERCEPT_FROM(*this, Interceptor::kUnlink, filename);
-    return DataLossEnv::remove_file(filename);
-}
-
-auto FaultInjectionEnv::resize_file(const std::string &filename, std::size_t size) -> Status
-{
-    TRY_INTERCEPT_FROM(*this, Interceptor::kResize, filename);
-    return DataLossEnv::resize_file(filename, size);
-}
-
-auto FaultInjectionEnv::rename_file(const std::string &old_filename, const std::string &new_filename) -> Status
-{
-    TRY_INTERCEPT_FROM(*this, Interceptor::kRename, old_filename);
-    return DataLossEnv::rename_file(old_filename, new_filename);
-}
-
-auto FaultInjectionEnv::file_size(const std::string &filename, std::size_t &out) const -> Status
-{
-    return DataLossEnv::file_size(filename, out);
-}
-
-auto FaultInjectionEnv::file_exists(const std::string &filename) const -> bool
-{
-    return DataLossEnv::file_exists(filename);
-}
-
-auto FaultInjectionEnv::get_children(const std::string &dirname, std::vector<std::string> &out) const -> Status
-{
-    return DataLossEnv::get_children(dirname, out);
-}
-
-auto FaultInjectionEnv::clone() const -> Env *
-{
-    auto *env = fake_env(*target()).clone();
-    reinterpret_cast<FaultInjectionEnv *>(env)
-        ->m_interceptors = m_interceptors;
-    return env;
-}
-
 RandomGenerator::RandomGenerator(std::size_t size)
     : m_data(size, '\0'),
       m_rng(42)
@@ -382,13 +57,13 @@ auto print_references(Pager &pager) -> void
                 std::cerr << "1 -> root for table " << entry.back_ptr.value << " -> ...\n";
                 break;
             case PointerMap::kFreelistLink:
-                std::cerr << entry.back_ptr.value << " -> freelist link -> " << get_u64(page.data() + 8) << '\n';
+                std::cerr << entry.back_ptr.value << " -> freelist link -> " << get_u32(page.data()) << '\n';
                 break;
             case PointerMap::kOverflowHead:
-                std::cerr << entry.back_ptr.value << " -> overflow head -> " << get_u64(page.data() + 8) << '\n';
+                std::cerr << entry.back_ptr.value << " -> overflow head -> " << get_u32(page.data()) << '\n';
                 break;
             case PointerMap::kOverflowLink:
-                std::cerr << entry.back_ptr.value << " -> overflow link -> " << get_u64(page.data() + 8) << '\n';
+                std::cerr << entry.back_ptr.value << " -> overflow link -> " << get_u32(page.data()) << '\n';
                 break;
         }
         pager.release(std::move(page));
@@ -400,7 +75,11 @@ auto print_references(Pager &pager) -> void
 auto read_file_to_string(Env &env, const std::string &filename) -> std::string
 {
     std::size_t file_size;
-    CHECK_OK(env.file_size(filename, file_size));
+    const auto s = env.file_size(filename, file_size);
+    if (s.is_not_found()) {
+        // File was unlinked.
+        return "";
+    }
     std::string buffer(file_size, '\0');
 
     File *file;
@@ -423,6 +102,23 @@ auto write_string_to_file(Env &env, const std::string &filename, std::string buf
     CHECK_OK(env.new_file(filename, file));
     CHECK_OK(file->write(write_pos, buffer));
     delete file;
+}
+
+auto hexdump_page(const Page &page) -> void
+{
+    std::fprintf(stderr,"%u:\n",page.id().value);
+    for (std::size_t i = 0; i < page.size() / 16; ++i){
+        std::fputs("    ", stderr);
+        for(std::size_t j = 0; j < 16; ++j){
+            const auto c=page.data()[i * 16 + j];
+            if (std::isprint(c)) {
+                std::fprintf(stderr, "%2c ", c);
+            } else {
+                std::fprintf(stderr, "%02X ", std::uint8_t(c));
+            }
+        }
+        std::fputc('\n', stderr);
+    }
 }
 
 auto fill_db(DB &db, RandomGenerator &random, std::size_t num_records, std::size_t max_payload_size) -> std::map<std::string, std::string>

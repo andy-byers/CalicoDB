@@ -35,7 +35,7 @@ class PosixLogFile : public LogFile
 public:
     explicit PosixLogFile(std::string filename, int file);
     ~PosixLogFile() override;
-    auto logv(const char *fmt, ...) -> void override;
+    auto write(const Slice &in) -> void override;
 
 private:
     static constexpr std::size_t kBufferSize = 512;
@@ -49,10 +49,8 @@ class EnvPosix : public Env
 public:
     EnvPosix() = default;
     ~EnvPosix() override = default;
-    [[nodiscard]] auto get_children(const std::string &dirname, std::vector<std::string> &out) const -> Status override;
     [[nodiscard]] auto new_file(const std::string &filename, File *&out) -> Status override;
     [[nodiscard]] auto new_log_file(const std::string &filename, LogFile *&out) -> Status override;
-    [[nodiscard]] auto rename_file(const std::string &old_filename, const std::string &new_filename) -> Status override;
     [[nodiscard]] auto remove_file(const std::string &filename) -> Status override;
     [[nodiscard]] auto resize_file(const std::string &filename, std::size_t size) -> Status override;
     [[nodiscard]] auto file_exists(const std::string &filename) const -> bool override;
