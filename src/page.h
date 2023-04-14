@@ -10,7 +10,8 @@
 namespace calicodb
 {
 
-struct CacheEntry;
+class Pager;
+struct PageRef;
 
 struct LogicalPageId {
     [[nodiscard]] static auto with_page(Id pid) -> LogicalPageId
@@ -43,34 +44,38 @@ struct LogicalPageId {
     Id page_id;
 };
 
-class Page
+class Page final
 {
-    CacheEntry *m_entry = nullptr;
+    Pager *m_pager = nullptr;
+    PageRef *m_ref = nullptr;
     char *m_data = nullptr;
     std::size_t m_size = 0;
     Id m_id;
     bool m_write = false;
 
 public:
-    friend class FrameManager;
+    friend class BufferManager;
     friend class Pager;
     friend struct Node;
 
     explicit Page() = default;
+    explicit Page(Pager &pager, PageRef &ref);
+    ~Page();
 
     [[nodiscard]] auto is_writable() const -> bool;
     [[nodiscard]] auto id() const -> Id;
-    [[nodiscard]] auto entry() const -> const CacheEntry *;
     [[nodiscard]] auto view() const -> Slice;
     [[nodiscard]] auto data() -> char *;
     [[nodiscard]] auto data() const -> const char *;
     [[nodiscard]] auto size() const -> std::size_t;
 
-    // Disable copies but allow moves.
+    // Disable copies.
     Page(const Page &) = delete;
     auto operator=(const Page &) -> Page & = delete;
-    Page(Page &&) noexcept = default;
-    auto operator=(Page &&) noexcept -> Page & = default;
+
+    // Custom move to handle NULLing out the Pager pointer.
+    Page(Page &&rhs) noexcept;
+    auto operator=(Page &&rhs) noexcept -> Page &;
 };
 
 [[nodiscard]] auto page_offset(Id page_id) -> std::size_t;

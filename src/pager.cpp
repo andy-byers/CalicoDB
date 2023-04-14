@@ -19,17 +19,15 @@ auto Pager::mode() const -> Mode
     return m_mode;
 }
 
-auto Pager::purge_entry(CacheEntry &victim) -> void
+auto Pager::purge_page(PageRef &victim) -> void
 {
-    if (victim.is_dirty) {
-        dirtylist_remove(victim);
+    if (victim.dirty) {
+        m_dirtylist.remove(victim);
     }
-    m_frames.unpin(victim);
-    // Invalidates storage for "victim".
-    m_cache.erase(victim.page_id);
+    m_bufmgr.erase(victim.page_id);
 }
 
-auto Pager::populate_entry(CacheEntry &out) -> Status
+auto Pager::read_page(PageRef &out) -> Status
 {
     char *page = nullptr;
     Status s;
@@ -47,8 +45,9 @@ auto Pager::populate_entry(CacheEntry &out) -> Status
     }
 
     if (!s.is_ok()) {
-        m_frames.unpin(out);
-        m_cache.erase(out.page_id);
+        if (!out.page_id.is_root()) {
+            m_bufmgr.erase(out.page_id);
+        }
         if (m_mode != kOpen) {
             // TODO: Really, an error should only be set if m_mode == kDirty. The tree module will need to be revised a bit
             //       to make sure pages are always released before returning (this always happens on the happy path, but if
@@ -60,38 +59,24 @@ auto Pager::populate_entry(CacheEntry &out) -> Status
     return s;
 }
 
-auto Pager::cache_entry(Id page_id, CacheEntry *&out) -> Status
-{
-    CALICODB_EXPECT_FALSE(page_id.is_root());
-
-    Status s;
-    out = m_cache.get(page_id);
-    if (out == nullptr) {
-        out = m_cache.alloc(page_id);
-        m_frames.pin(*out);
-        return populate_entry(*out);
-    }
-    return s;
-}
-
-auto Pager::read_page_from_file(CacheEntry &entry) const -> Status
+auto Pager::read_page_from_file(PageRef &ref) const -> Status
 {
     Slice slice;
-    const auto offset = entry.page_id.as_index() * m_frames.page_size();
-    auto s = m_file->read(offset, m_frames.page_size(), entry.page, &slice);
+    const auto offset = ref.page_id.as_index() * m_bufmgr.page_size();
+    auto s = m_file->read(offset, m_bufmgr.page_size(), ref.page, &slice);
     if (s.is_ok()) {
-        m_bytes_read += slice.size();
-        std::memset(entry.page + slice.size(), 0, m_frames.page_size() - slice.size());
+        m_statistics.bytes_read += slice.size();
+        std::memset(ref.page + slice.size(), 0, m_bufmgr.page_size() - slice.size());
     }
     return s;
 }
 
-auto Pager::write_page_to_file(const CacheEntry &entry) const -> Status
+auto Pager::write_page_to_file(const PageRef &ref) const -> Status
 {
-    const Slice data(entry.page, m_frames.page_size());
-    auto s = m_file->write(entry.page_id.as_index() * data.size(), data);
+    const Slice data(ref.page, m_bufmgr.page_size());
+    auto s = m_file->write(ref.page_id.as_index() * data.size(), data);
     if (s.is_ok()) {
-        m_bytes_written += data.size();
+        m_statistics.bytes_written += data.size();
     }
     return s;
 }
@@ -108,13 +93,7 @@ auto Pager::open(const Parameters &param, Pager *&out) -> Status
     File *file;
     CALICODB_TRY(param.env->new_file(param.filename, file));
 
-    // Allocate the frames, i.e. where pages from disk are stored in memory. Aligned
-    // to the page size, so it could potentially be used for direct I/O.
-    AlignedBuffer buffer(
-        param.page_size * param.frame_count,
-        param.page_size);
-
-    out = new Pager(param, *file, std::move(buffer));
+    out = new Pager(param, *file);
     auto s = out->initialize_root(!exists);
     if (!s.is_ok()) {
         delete out;
@@ -125,27 +104,23 @@ auto Pager::open(const Parameters &param, Pager *&out) -> Status
 
 auto Pager::initialize_root(bool fresh_pager) -> Status
 {
-    // Dedicate a slot in the buffer for the root page, but don't actually put it
-    // in the page cache.
-    m_root.page_id = Id::root();
-    m_frames.pin(m_root);
-
-    auto s = populate_entry(m_root);
+    auto *root = m_bufmgr.root();
+    auto s = read_page(*root);
     if (s.is_ok() && fresh_pager) {
         // If this is a new file, the root page is dirty since it was just
         // allocated.
-        dirtylist_add(m_root);
+        m_dirtylist.add(*root);
         m_mode = kDirty;
         ++m_page_count;
     }
     return s;
 }
 
-Pager::Pager(const Parameters &param, File &file, AlignedBuffer buffer)
+Pager::Pager(const Parameters &param, File &file)
     : m_state(param.state),
       m_filename(param.filename),
-      m_frames(std::move(buffer), param.page_size, param.frame_count),
       m_freelist(*this, m_state->freelist_head),
+      m_bufmgr(param.page_size, param.frame_count),
       m_log(param.log),
       m_file(&file),
       m_env(param.env),
@@ -159,14 +134,9 @@ Pager::~Pager()
     delete m_file;
 }
 
-auto Pager::bytes_read() const -> std::size_t
+auto Pager::statistics() const -> const Statistics &
 {
-    return m_bytes_read;
-}
-
-auto Pager::bytes_written() const -> std::size_t
-{
-    return m_bytes_written;
+    return m_statistics;
 }
 
 auto Pager::page_count() const -> std::size_t
@@ -176,63 +146,7 @@ auto Pager::page_count() const -> std::size_t
 
 auto Pager::page_size() const -> std::size_t
 {
-    return m_frames.page_size();
-}
-
-auto Pager::dirtylist_add(CacheEntry &entry) -> void
-{
-#ifdef CALICODB_EXPENSIVE_CHECKS
-    // Entry should not already be in the dirty list.
-    for (auto *p = m_dirty; p; p = p->next) {
-        CALICODB_EXPECT_NE(p, &entry);
-    }
-#endif // CALICODB_EXPENSIVE_CHECKS
-
-    CALICODB_EXPECT_FALSE(entry.is_dirty);
-    if (m_dirty) {
-        CALICODB_EXPECT_FALSE(m_dirty->prev);
-        m_dirty->prev = &entry;
-    }
-    entry.is_dirty = true;
-    entry.prev = nullptr;
-    entry.next = m_dirty;
-    m_dirty = &entry;
-}
-
-auto Pager::dirtylist_remove(CacheEntry &entry) -> CacheEntry *
-{
-#ifdef CALICODB_EXPENSIVE_CHECKS
-    // Entry should exist in the dirty list.
-    auto found = false;
-    for (auto *p = m_dirty; p; p = p->next) {
-        if (p == &entry) {
-            CALICODB_EXPECT_FALSE(found);
-            found = true;
-        }
-    }
-    CALICODB_EXPECT_TRUE(found);
-#endif // CALICODB_EXPENSIVE_CHECKS
-
-    CALICODB_EXPECT_TRUE(m_dirty);
-    CALICODB_EXPECT_FALSE(m_dirty->prev);
-    CALICODB_EXPECT_TRUE(entry.is_dirty);
-
-    if (entry.prev) {
-        entry.prev->next = entry.next;
-    } else {
-        // NULLs out the dirty list head when the last entry is removed ("next"
-        // is nullptr in that case).
-        CALICODB_EXPECT_EQ(&entry, m_dirty);
-        m_dirty = entry.next;
-    }
-    auto *next = entry.next;
-    if (next) {
-        next->prev = entry.prev;
-        entry.next = nullptr;
-    }
-    entry.prev = nullptr;
-    entry.is_dirty = false;
-    return next;
+    return m_bufmgr.page_size();
 }
 
 auto Pager::begin_txn() -> bool
@@ -251,7 +165,7 @@ auto Pager::commit_txn() -> Status
     if (m_mode <= kWrite) {
         // No work done in this transaction, or not even in a transaction. Nothing should be
         // modified.
-        CALICODB_EXPECT_EQ(m_dirty, nullptr);
+        CALICODB_EXPECT_FALSE(m_dirtylist.head);
         m_mode = kOpen;
         return Status::ok();
     }
@@ -274,14 +188,14 @@ auto Pager::commit_txn() -> Status
         }
         release(std::move(root));
 
-        if (m_dirty == nullptr) {
+        if (m_dirtylist.head == nullptr) {
             // Ensure that there is always a WAL frame to store the DB size.
-            dirtylist_add(m_root);
+            m_dirtylist.head = m_bufmgr.root();
         }
 
-        auto s = flush_to_disk();
+        auto s = flush_all_pages();
         if (s.is_ok()) {
-            CALICODB_EXPECT_FALSE(m_dirty);
+            CALICODB_EXPECT_FALSE(m_dirtylist.head);
             m_saved_count = m_page_count;
             m_mode = kOpen;
         }
@@ -306,9 +220,9 @@ auto Pager::rollback_txn() -> Status
     if (s.is_ok()) {
         m_page_count = m_saved_count;
         m_state->status = Status::ok();
-        purge_state();
+        purge_all_pages();
         // Refresh the in-memory DB root page.
-        s = populate_entry(m_root);
+        s = read_page(*m_bufmgr.root());
         if (s.is_ok()) {
             m_mode = kOpen;
         }
@@ -318,20 +232,20 @@ auto Pager::rollback_txn() -> Status
     return s;
 }
 
-auto Pager::purge_state() -> void
+auto Pager::purge_all_pages() -> void
 {
-    CacheEntry *victim;
-    while ((victim = m_cache.next_victim(true))) {
+    PageRef *victim;
+    while ((victim = m_bufmgr.next_victim())) {
         CALICODB_EXPECT_NE(victim, nullptr);
-        purge_entry(*victim);
+        purge_page(*victim);
     }
-    CALICODB_EXPECT_EQ(m_cache.size(), 0);
-    if (m_dirty) {
-        CALICODB_EXPECT_EQ(m_dirty, &m_root);
-        CALICODB_EXPECT_FALSE(m_dirty->prev);
-        CALICODB_EXPECT_FALSE(m_dirty->next);
-        m_dirty->is_dirty = false;
-        m_dirty = nullptr;
+    CALICODB_EXPECT_EQ(m_bufmgr.size(), 0);
+    if (m_dirtylist.head) {
+        CALICODB_EXPECT_EQ(m_dirtylist.head, m_bufmgr.root());
+        CALICODB_EXPECT_FALSE(m_dirtylist.head->prev);
+        CALICODB_EXPECT_FALSE(m_dirtylist.head->next);
+        m_dirtylist.head->dirty = false;
+        m_dirtylist.head = nullptr;
     }
 }
 
@@ -354,8 +268,9 @@ auto Pager::checkpoint() -> Status
 
 auto Pager::wal_checkpoint() -> Status
 {
-    // A checkpoint must immediately follow a commit, so the cache should be clean.
-    CALICODB_EXPECT_EQ(m_dirty, nullptr);
+    // A checkpoint must immediately follow a commit or rollback, so the cache should
+    // be clean.
+    CALICODB_EXPECT_FALSE(m_dirtylist.head);
     CALICODB_EXPECT_TRUE(m_in_ckpt);
     std::size_t dbsize;
 
@@ -365,42 +280,39 @@ auto Pager::wal_checkpoint() -> Status
 
     if (dbsize) {
         set_page_count(dbsize);
-        CALICODB_TRY(m_env->resize_file(m_filename, dbsize * m_frames.page_size()));
+        CALICODB_TRY(m_env->resize_file(m_filename, dbsize * m_bufmgr.page_size()));
     }
     return m_file->sync();
 }
 
-auto Pager::flush_to_disk() -> Status
+auto Pager::flush_all_pages() -> Status
 {
     if (m_state->use_wal) {
-        auto *p = m_dirty;
+        auto *p = m_dirtylist.head;
         for (; p; p = p->next) {
-            CALICODB_EXPECT_TRUE(p->is_dirty);
             if (p->page_id.value > m_page_count) {
                 // This page is past the current end of the file due to a vacuum operation
                 // decreasing the page count. Just remove the page from the dirty list. It
                 // wouldn't be transferred back to the DB on checkpoint anyway since it is
                 // out of bounds.
-                p = dirtylist_remove(*p);
+                p = m_dirtylist.remove(*p);
             } else {
-                p->is_dirty = false;
+                p->dirty = false;
             }
         }
-        p = m_dirty;
-        m_dirty = nullptr;
-
-        CALICODB_EXPECT_NE(p, nullptr);
+        p = m_dirtylist.head;
+        m_dirtylist.head = nullptr;
 
         // The DB page count is specified here. This indicates that the writes are part of
         // a commit, which is always the case if this method is called while the WAL is
         // enabled.
-        CALICODB_TRY(m_wal->write(p, m_page_count));
+        CALICODB_EXPECT_NE(p, nullptr);
+        return m_wal->write(p, m_page_count);
     }
 
-    for (auto *p = m_dirty; p; p = dirtylist_remove(*p)) {
+    for (auto *p = m_dirtylist.head; p; p = m_dirtylist.remove(*p)) {
         CALICODB_TRY(write_page_to_file(*p));
     }
-    CALICODB_EXPECT_FALSE(m_dirty);
     return m_file->sync();
 }
 
@@ -417,24 +329,24 @@ auto Pager::set_page_count(std::size_t page_count) -> void
 {
     CALICODB_EXPECT_GT(page_count, 0);
     for (auto i = page_count; i < m_page_count; ++i) {
-        if (auto *out_of_range = m_cache.query(Id::from_index(i))) {
-            purge_entry(*out_of_range);
+        if (auto *out_of_range = m_bufmgr.query(Id::from_index(i))) {
+            purge_page(*out_of_range);
         }
     }
     m_page_count = page_count;
 }
 
-auto Pager::ensure_available_frame() -> Status
+auto Pager::ensure_available_buffer() -> Status
 {
     Status s;
-    if (!m_frames.available()) {
+    if (!m_bufmgr.available()) {
         // There are no available frames, so the cache must be full. "next_victim()" will not find
-        // an entry to evict if all pages are referenced, which should never happen.
-        auto *victim = m_cache.next_victim();
+        // an ref to evict if all pages are referenced, which should never happen.
+        auto *victim = m_bufmgr.next_victim();
         CALICODB_EXPECT_NE(victim, nullptr);
 
-        if (victim->is_dirty) {
-            dirtylist_remove(*victim);
+        if (victim->dirty) {
+            m_dirtylist.remove(*victim);
 
             if (m_state->use_wal) {
                 // Write just this page to the WAL. DB page count is 0 here because this write
@@ -451,8 +363,7 @@ auto Pager::ensure_available_frame() -> Status
                 set_status(s);
             }
         }
-        m_frames.unpin(*victim);
-        m_cache.erase(victim->page_id);
+        m_bufmgr.erase(victim->page_id);
     }
     return s;
 }
@@ -490,30 +401,24 @@ auto Pager::acquire(Id page_id, Page &page) -> Status
 {
     CALICODB_EXPECT_FALSE(page_id.is_null());
 
-    // Ensure that the next call to "m_frames.pin()" has an available slot in
-    // the frame buffer.
-    CALICODB_TRY(ensure_available_frame());
-
-    CacheEntry *entry;
-    if (page_id.value > m_page_count) {
-        // This is a new page from the end of the file. The root page is
-        // allocated before this method is ever called.
-        CALICODB_EXPECT_FALSE(page_id.is_root());
-        entry = m_cache.alloc(page_id);
-        m_frames.pin(*entry);
-        std::memset(entry->page, 0, m_frames.page_size());
-        m_page_count = page_id.value;
-    } else if (!page_id.is_root()) {
-        // Read a page from either the WAL or the DB.
-        CALICODB_TRY(cache_entry(page_id, entry));
+    PageRef *ref;
+    if (page_id.is_root()) {
+        ref = m_bufmgr.root();
     } else {
-        // Root page always occupies a frame, but is not stored in the cache
-        // structure. If the root page is being acquired through this method
-        // (not acquire_root()), then it is being used to access the root
-        // tree mapping, not the file header.
-        entry = &m_root;
+        ref = m_bufmgr.get(page_id);
+        if (!ref) {
+            CALICODB_TRY(ensure_available_buffer());
+            ref = m_bufmgr.alloc(page_id);
+            if (page_id.as_index() < m_page_count) {
+                CALICODB_TRY(read_page(*ref));
+            } else {
+                std::memset(ref->page, 0, m_bufmgr.page_size());
+                m_page_count = page_id.value;
+            }
+        }
     }
-    m_frames.ref(*entry, page);
+    m_bufmgr.ref(*ref);
+    page = Page(*this, *ref);
     return Status::ok();
 }
 
@@ -524,9 +429,8 @@ auto Pager::destroy(Page page) -> Status
 
 auto Pager::acquire_root() -> Page
 {
-    Page root;
-    m_frames.ref(m_root, root);
-    return root;
+    m_bufmgr.ref(*m_bufmgr.root());
+    return Page(*this, *m_bufmgr.root());
 }
 
 auto Pager::upgrade(Page &page) -> void
@@ -535,19 +439,21 @@ auto Pager::upgrade(Page &page) -> void
         !m_state->use_wal || // In initialization routine
         m_mode >= kWrite);   // Transaction has started
 
-    if (!page.entry()->is_dirty) {
-        dirtylist_add(*page.m_entry);
+    if (!page.m_ref->dirty) {
+        m_dirtylist.add(*page.m_ref);
         if (m_mode == kWrite) {
             m_mode = kDirty;
         }
     }
-    m_frames.upgrade(page);
+    CALICODB_EXPECT_FALSE(page.m_write);
+    page.m_write = true;
 }
 
 auto Pager::release(Page page) -> void
 {
-    CALICODB_EXPECT_GT(page.m_entry->refcount, 0);
-    m_frames.unref(*page.m_entry);
+    CALICODB_EXPECT_GT(page.m_ref->refcount, 0);
+    m_bufmgr.unref(*page.m_ref);
+    page.m_pager = nullptr;
 }
 
 auto Pager::load_state(const FileHeader &header) -> void
@@ -558,23 +464,23 @@ auto Pager::load_state(const FileHeader &header) -> void
 
 auto Pager::TEST_validate() const -> void
 {
-#ifdef CALICODB_EXPENSIVE_CHECKS
-    // Some caller forgot to release a page.
-    CALICODB_EXPECT_EQ(m_frames.refsum(), 0);
+#ifndef NDEBUG
+    // Some caller has a live page.
+    CALICODB_EXPECT_EQ(m_bufmgr.refsum(), 0);
 
     if (m_mode <= kWrite) {
-        CALICODB_EXPECT_EQ(m_dirty, nullptr);
+        CALICODB_EXPECT_FALSE(m_dirtylist.head);
     } else {
         if (m_mode == kDirty) {
-            CALICODB_EXPECT_NE(m_dirty, nullptr);
+            CALICODB_EXPECT_TRUE(m_dirtylist.head);
         }
-        auto *p = m_dirty;
+        auto *p = m_dirtylist.head;
         while (p) {
-            CALICODB_EXPECT_TRUE(p->is_dirty);
+            CALICODB_EXPECT_TRUE(p->dirty);
             p = p->next;
         }
     }
-#endif // CALICODB_EXPENSIVE_CHECKS
+#endif // NDEBUG
 }
 
 // The first pointer map page is always on page 2, right after the root page.
@@ -600,9 +506,10 @@ static auto decode_entry(const char *data) -> PointerMap::Entry
 
 auto PointerMap::lookup(const Pager &pager, Id page_id) -> Id
 {
-    CALICODB_EXPECT_NE(page_id, Id::null());
-    // Root page (1) has no parents, and page 2 is the first pointer map page. If "page_id" is a
-    // pointer map page, "page_id" will be returned.
+    CALICODB_EXPECT_FALSE(page_id.is_null());
+
+    // Root page (1) has no parents, and page 2 is the first pointer map page. If "page_id" is a pointer map
+    // page, "page_id" will be returned.
     if (page_id.value < kFirstMapPage) {
         return Id::null();
     }
@@ -657,8 +564,8 @@ auto PointerMap::write_entry(Pager &pager, Id page_id, Entry entry) -> Status
 }
 
 Freelist::Freelist(Pager &pager, Id &head)
-    : m_pager(&pager),
-      m_head(&head)
+    : m_pager {&pager},
+      m_head {&head}
 {
 }
 
@@ -669,22 +576,20 @@ Freelist::Freelist(Pager &pager, Id &head)
 
 auto Freelist::pop(Page &page) -> Status
 {
-    CALICODB_EXPECT_FALSE(is_empty());
-    CALICODB_TRY(m_pager->acquire(*m_head, page));
-    m_pager->upgrade(page);
-    *m_head = read_next_id(page);
-
-    Status s;
     if (!m_head->is_null()) {
-        // Only clear the back pointer for the new freelist head. Callers must make sure to update the returned
-        // node's back pointer at some point.
-        const PointerMap::Entry entry = {Id::null(), PointerMap::kFreelistLink};
-        s = PointerMap::write_entry(*m_pager, *m_head, entry);
-        if (!s.is_ok()) {
-            m_pager->release(std::move(page));
+        CALICODB_TRY(m_pager->acquire(*m_head, page));
+        m_pager->upgrade(page);
+        *m_head = read_next_id(page);
+
+        if (!m_head->is_null()) {
+            // Only clear the back pointer for the new freelist head. Callers must make sure to update the returned
+            // node's back pointer at some point.
+            const PointerMap::Entry entry = {Id::null(), PointerMap::kFreelistLink};
+            CALICODB_TRY(PointerMap::write_entry(*m_pager, *m_head, entry));
         }
+        return Status::ok();
     }
-    return s;
+    return Status::not_supported("free list is empty");
 }
 
 auto Freelist::push(Page page) -> Status

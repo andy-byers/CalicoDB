@@ -5,8 +5,8 @@
 #ifndef CALICODB_PAGER_H
 #define CALICODB_PAGER_H
 
+#include "bufmgr.h"
 #include "calicodb/env.h"
-#include "frames.h"
 #include <unordered_set>
 
 namespace calicodb
@@ -14,7 +14,7 @@ namespace calicodb
 
 class Env;
 class Freelist;
-class FrameManager;
+class BufferManager;
 class TableSet;
 class Wal;
 
@@ -59,13 +59,17 @@ public:
         std::size_t page_size = 0;
     };
 
+    struct Statistics {
+        std::size_t bytes_read = 0;
+        std::size_t bytes_written = 0;
+    };
+
     ~Pager();
     [[nodiscard]] static auto open(const Parameters &param, Pager *&out) -> Status;
     [[nodiscard]] auto mode() const -> Mode;
     [[nodiscard]] auto page_count() const -> std::size_t;
     [[nodiscard]] auto page_size() const -> std::size_t;
-    [[nodiscard]] auto bytes_read() const -> std::size_t;
-    [[nodiscard]] auto bytes_written() const -> std::size_t;
+    [[nodiscard]] auto statistics() const -> const Statistics &;
     [[nodiscard]] auto begin_txn() -> bool;
     [[nodiscard]] auto rollback_txn() -> Status;
     [[nodiscard]] auto commit_txn() -> Status;
@@ -83,48 +87,36 @@ public:
 
     [[nodiscard]] auto hits() const -> U64
     {
-        return m_cache.hits();
+        return m_bufmgr.hits();
     }
 
     [[nodiscard]] auto misses() const -> U64
     {
-        return m_cache.misses();
+        return m_bufmgr.misses();
     }
 
     auto TEST_validate() const -> void;
 
 private:
-    explicit Pager(const Parameters &param, File &file, AlignedBuffer buffer);
+    explicit Pager(const Parameters &param, File &file);
     [[nodiscard]] auto initialize_root(bool fresh_pager) -> Status;
-    [[nodiscard]] auto populate_entry(CacheEntry &out) -> Status;
-    [[nodiscard]] auto cache_entry(Id page_id, CacheEntry *&out) -> Status;
-    [[nodiscard]] auto read_page_from_file(CacheEntry &entry) const -> Status;
-    [[nodiscard]] auto write_page_to_file(const CacheEntry &entry) const -> Status;
-    [[nodiscard]] auto ensure_available_frame() -> Status;
+    [[nodiscard]] auto read_page(PageRef &out) -> Status;
+    [[nodiscard]] auto read_page_from_file(PageRef &ref) const -> Status;
+    [[nodiscard]] auto write_page_to_file(const PageRef &entry) const -> Status;
+    [[nodiscard]] auto ensure_available_buffer() -> Status;
     [[nodiscard]] auto wal_checkpoint() -> Status;
-    [[nodiscard]] auto flush_to_disk() -> Status;
-    auto purge_state() -> void;
-    auto purge_entry(CacheEntry &victim) -> void;
+    [[nodiscard]] auto flush_all_pages() -> Status;
+    auto purge_page(PageRef &victim) -> void;
+    auto purge_all_pages() -> void;
 
-    auto dirtylist_add(CacheEntry &entry) -> void;
-    auto dirtylist_remove(CacheEntry &entry) -> CacheEntry *;
-
-    mutable std::size_t m_bytes_read = 0;
-    mutable std::size_t m_bytes_written = 0;
+    mutable Statistics m_statistics;
     mutable DBState *m_state = nullptr;
     mutable Mode m_mode = kOpen;
 
     std::string m_filename;
-    FrameManager m_frames;
+    Dirtylist m_dirtylist;
     Freelist m_freelist;
-    PageCache m_cache;
-
-    // The root page is always acquired. Keep info about it here.
-    CacheEntry m_root;
-
-    // List of dirty page cache entries. Linked by the "prev" and "next"
-    // CacheEntry members.
-    CacheEntry *m_dirty = nullptr;
+    Bufmgr m_bufmgr;
 
     // True if a checkpoint operation is being run, false otherwise. Used
     // to indicate failure during a checkpoint.

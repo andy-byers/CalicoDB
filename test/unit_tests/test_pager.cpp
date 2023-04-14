@@ -2,7 +2,7 @@
 // This source code is licensed under the MIT License, which can be found in
 // LICENSE.md. See AUTHORS.md for a list of contributor names.
 
-#include "frames.h"
+#include "bufmgr.h"
 #include "header.h"
 #include "logging.h"
 #include "page.h"
@@ -19,109 +19,108 @@ namespace calicodb
     return tools::integral_key<16>(k);
 }
 
-[[nodiscard]] static auto make_cache_entry(U64 id_value) -> CacheEntry
+[[nodiscard]] static auto make_cache_entry(U64 id_value) -> PageRef
 {
     return {.page_id = Id(id_value)};
 }
 
-class PageCacheTests : public testing::Test
-{
-public:
-    PageCache cache;
-};
-
-TEST_F(PageCacheTests, EmptyCacheBehavior)
-{
-    ASSERT_EQ(cache.size(), 0);
-    ASSERT_EQ(cache.size(), 0);
-    ASSERT_EQ(cache.get(Id::root()), nullptr);
-    ASSERT_EQ(cache.next_victim(), nullptr);
-}
-
-TEST_F(PageCacheTests, OldestEntryIsEvictedFirst)
-{
-    (void)cache.alloc(Id(4));
-    (void)cache.alloc(Id(3));
-    (void)cache.alloc(Id(2));
-    (void)cache.alloc(Id(1));
-    ASSERT_EQ(cache.size(), 4);
-
-    ASSERT_EQ(cache.get(Id(4))->page_id, Id(4));
-    ASSERT_EQ(cache.get(Id(3))->page_id, Id(3));
-
-    ASSERT_EQ(cache.next_victim()->page_id, Id(2));
-    cache.erase(cache.next_victim()->page_id);
-    ASSERT_EQ(cache.next_victim()->page_id, Id(1));
-    cache.erase(cache.next_victim()->page_id);
-    ASSERT_EQ(cache.next_victim()->page_id, Id(4));
-    cache.erase(cache.next_victim()->page_id);
-    ASSERT_EQ(cache.next_victim()->page_id, Id(3));
-    cache.erase(cache.next_victim()->page_id);
-    ASSERT_EQ(cache.size(), 0);
-}
-
-TEST_F(PageCacheTests, ReplacementPolicyIgnoresQuery)
-{
-    (void)cache.alloc(Id(2));
-    (void)cache.alloc(Id(1));
-
-    (void)cache.query(Id(2));
-
-    ASSERT_EQ(cache.next_victim()->page_id, Id(2));
-    cache.erase(cache.next_victim()->page_id);
-    ASSERT_EQ(cache.next_victim()->page_id, Id(1));
-    cache.erase(cache.next_victim()->page_id);
-}
-
-TEST_F(PageCacheTests, ReferencedEntriesAreIgnoredDuringEviction)
-{
-    (void)cache.alloc(Id(2));
-    (void)cache.alloc(Id(1));
-
-    cache.query(Id(2))->refcount = 1;
-
-    ASSERT_EQ(cache.next_victim()->page_id, Id(1));
-    cache.erase(cache.next_victim()->page_id);
-    ASSERT_EQ(cache.next_victim(), nullptr);
-}
-
-class FrameManagerTests
-    : public EnvTestHarness<tools::FakeEnv>,
-      public testing::Test
-{
-public:
-    static constexpr auto kPageSize = kMinPageSize;
-    static constexpr auto kPagerFrames = kMinFrameCount;
-
-    explicit FrameManagerTests()
-    {
-        AlignedBuffer buffer(kPageSize * kPagerFrames, kPageSize);
-        frames = std::make_unique<FrameManager>(std::move(buffer), kPageSize, kPagerFrames);
-    }
-
-    ~FrameManagerTests() override = default;
-
-    std::unique_ptr<FrameManager> frames;
-    PageCache cache;
-};
-
-TEST_F(FrameManagerTests, NewFrameManagerIsSetUpCorrectly)
-{
-    ASSERT_EQ(frames->available(), kPagerFrames);
-}
-
-#ifndef NDEBUG
-TEST_F(FrameManagerTests, OutOfFramesDeathTest)
-{
-    for (std::size_t i = 0; i < kPagerFrames; ++i) {
-        auto *entry = cache.alloc(Id(i + 1));
-        (void)frames->pin(*entry);
-    }
-    auto *entry = cache.alloc(Id(kPagerFrames + 1));
-    ASSERT_EQ(frames->available(), 0);
-    ASSERT_DEATH((void)frames->pin(*entry), "expect");
-}
-#endif // NDEBUG
+// class PageCacheTests : public testing::Test
+//{
+// public:
+//     PageCache cache;
+// };
+//
+// TEST_F(PageCacheTests, EmptyCacheBehavior)
+//{
+//     ASSERT_EQ(cache.size(), 0);
+//     ASSERT_EQ(cache.size(), 0);
+//     ASSERT_EQ(cache.get(Id::root()), nullptr);
+//     ASSERT_EQ(cache.next_victim(), nullptr);
+// }
+//
+// TEST_F(PageCacheTests, OldestEntryIsEvictedFirst)
+//{
+//     (void)cache.alloc(Id(4));
+//     (void)cache.alloc(Id(3));
+//     (void)cache.alloc(Id(2));
+//     (void)cache.alloc(Id(1));
+//     ASSERT_EQ(cache.size(), 4);
+//
+//     ASSERT_EQ(cache.get(Id(4))->page_id, Id(4));
+//     ASSERT_EQ(cache.get(Id(3))->page_id, Id(3));
+//
+//     ASSERT_EQ(cache.next_victim()->page_id, Id(2));
+//     cache.erase(cache.next_victim()->page_id);
+//     ASSERT_EQ(cache.next_victim()->page_id, Id(1));
+//     cache.erase(cache.next_victim()->page_id);
+//     ASSERT_EQ(cache.next_victim()->page_id, Id(4));
+//     cache.erase(cache.next_victim()->page_id);
+//     ASSERT_EQ(cache.next_victim()->page_id, Id(3));
+//     cache.erase(cache.next_victim()->page_id);
+//     ASSERT_EQ(cache.size(), 0);
+// }
+//
+// TEST_F(PageCacheTests, ReplacementPolicyIgnoresQuery)
+//{
+//     (void)cache.alloc(Id(2));
+//     (void)cache.alloc(Id(1));
+//
+//     (void)cache.query(Id(2));
+//
+//     ASSERT_EQ(cache.next_victim()->page_id, Id(2));
+//     cache.erase(cache.next_victim()->page_id);
+//     ASSERT_EQ(cache.next_victim()->page_id, Id(1));
+//     cache.erase(cache.next_victim()->page_id);
+// }
+//
+// TEST_F(PageCacheTests, ReferencedEntriesAreIgnoredDuringEviction)
+//{
+//     (void)cache.alloc(Id(2));
+//     (void)cache.alloc(Id(1));
+//
+//     cache.query(Id(2))->refcount = 1;
+//
+//     ASSERT_EQ(cache.next_victim()->page_id, Id(1));
+//     cache.erase(cache.next_victim()->page_id);
+//     ASSERT_EQ(cache.next_victim(), nullptr);
+// }
+//
+// class FrameManagerTests
+//     : public EnvTestHarness<tools::FakeEnv>,
+//       public testing::Test
+//{
+// public:
+//     static constexpr auto kPageSize = kMinPageSize;
+//     static constexpr auto kPagerFrames = kMinFrameCount;
+//
+//     explicit FrameManagerTests()
+//     {
+//         frames = std::make_unique<BufferManager>(kPageSize, kPagerFrames);
+//     }
+//
+//     ~FrameManagerTests() override = default;
+//
+//     std::unique_ptr<BufferManager> frames;
+//     PageCache cache;
+// };
+//
+// TEST_F(FrameManagerTests, NewFrameManagerIsSetUpCorrectly)
+//{
+//     ASSERT_EQ(frames->available(), kPagerFrames);
+// }
+//
+//#ifndef NDEBUG
+// TEST_F(FrameManagerTests, OutOfFramesDeathTest)
+//{
+//     for (std::size_t i = 0; i < kPagerFrames; ++i) {
+//         auto *entry = cache.alloc(Id(i + 1));
+//         (void)frames->pin(*entry);
+//     }
+//     auto *entry = cache.alloc(Id(kPagerFrames + 1));
+//     ASSERT_EQ(frames->available(), 0);
+//     ASSERT_DEATH((void)frames->pin(*entry), "expect");
+// }
+//#endif // NDEBUG
 
 auto write_to_page(Page &page, const std::string &message) -> void
 {
@@ -256,7 +255,7 @@ public:
         }
         return Status::ok();
     }
-    
+
     [[nodiscard]] auto read_from_db_file(Id id, std::size_t size) const
     {
         File *file;
@@ -303,7 +302,7 @@ public:
 TEST_F(PagerTests, NewPagerIsSetUpCorrectly)
 {
     ASSERT_EQ(m_pager->page_count(), 1);
-    ASSERT_EQ(m_pager->bytes_written(), 1'024)
+    ASSERT_EQ(m_pager->statistics().bytes_written, 1'024)
         << "test should direct first write to the DB file";
 }
 
@@ -694,7 +693,7 @@ public:
 
     // NOTE: Invalidates dirty lists previously obtained through this method. The pgno vector must not
     //       have any duplicate page numbers.
-    auto build(const std::vector<U32> &pgno, std::vector<CacheEntry> &out) -> void
+    auto build(const std::vector<U32> &pgno, std::vector<PageRef> &out) -> void
     {
         CALICODB_EXPECT_FALSE(pgno.empty());
         out.resize(pgno.size());
@@ -824,7 +823,7 @@ protected:
             std::iota(begin(pgno), end(pgno), 1);
             std::shuffle(begin(pgno), end(pgno), m_rng);
 
-            std::vector<CacheEntry> dirty;
+            std::vector<PageRef> dirty;
             m_builder.build(pgno, dirty);
             auto db_data = m_builder.data();
             auto db_size = db_data.size() / kPageSize * commit;

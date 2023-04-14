@@ -13,7 +13,7 @@ namespace calicodb
 
 class Env;
 class File;
-struct CacheEntry;
+struct PageRef;
 
 struct HashIndexHeader {
     enum Flags {
@@ -131,7 +131,7 @@ public:
     [[nodiscard]] virtual auto read(Id page_id, char *&page) -> Status = 0;
 
     // Write new versions of the given pages to the WAL.
-    [[nodiscard]] virtual auto write(const CacheEntry *dirty, std::size_t db_size) -> Status = 0;
+    [[nodiscard]] virtual auto write(const PageRef *dirty, std::size_t db_size) -> Status = 0;
 
     // Write the WAL contents back to the DB. Resets internal counters such
     // that the next write to the WAL will start at the beginning again.

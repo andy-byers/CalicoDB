@@ -20,7 +20,7 @@ The pager module provides in-memory caching for database pages read by the `Env`
 It is the pager's job to maintain consistency between database pages on disk and in memory, and to coordinate with the WAL.
 
 ### Tree
-CalicoDB trees are similar to index B-trees in SQLite3.
+CalicoDB trees are similar to slot B-trees in SQLite3.
 Every tree is rooted on some database page, called its root page.
 The root tree is the tree that is rooted on the first database page.
 It is used to store a name-to-root mapping for the other trees, if any exist.
@@ -39,7 +39,7 @@ For instance, SQLite attempts to involve 3 nodes in their split to better redist
 First, allocate a new node, called `R`.
 Let the node that is overfull be `L` and the parent `P`.
 Start transferring cells from `L` to `R`, checking at each point if the overflow cell `c` will fit in `L`.
-There will be a point (once we reach the "overflow index") at which there have been enough cells transferred that `c` belongs in `R`.
+There will be a point (once we reach the "overflow slot") at which there have been enough cells transferred that `c` belongs in `R`.
 If this point is reached, then `c` is written to `R`, since it must fit.
 This routine takes advantage of the fact that the local size of a cell is limited to roughly 1/4 of the usable space on a page.
 If a maximally-sized overflow cell will not fit in `L` then it definitely will fit in `R`, since `R` was empty initially.

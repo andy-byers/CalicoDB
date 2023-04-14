@@ -3,13 +3,49 @@
 // LICENSE.md. See AUTHORS.md for a list of contributor names.
 
 #include "page.h"
+#include "bufmgr.h"
 #include "encoding.h"
-#include "frames.h"
 #include "header.h"
 #include "pager.h"
 
 namespace calicodb
 {
+
+Page::Page(Pager &pager, PageRef &ref)
+    : m_pager(&pager),
+      m_ref(&ref),
+      m_data(ref.page),
+      m_size(pager.page_size()),
+      m_id(ref.page_id)
+{
+}
+
+Page::~Page()
+{
+    if (m_pager) {
+        m_pager->release(std::move(*this));
+    }
+}
+
+Page::Page(Page &&rhs) noexcept
+{
+    *this = std::move(rhs);
+}
+
+auto Page::operator=(Page &&rhs) noexcept -> Page &
+{
+    if (this != &rhs) {
+        m_pager = rhs.m_pager;
+        rhs.m_pager = nullptr;
+
+        m_ref = rhs.m_ref;
+        m_data = rhs.m_data;
+        m_size = rhs.m_size;
+        m_id = rhs.m_id;
+        m_write = rhs.m_write;
+    }
+    return *this;
+}
 
 auto Page::is_writable() const -> bool
 {
@@ -19,11 +55,6 @@ auto Page::is_writable() const -> bool
 auto Page::id() const -> Id
 {
     return m_id;
-}
-
-auto Page::entry() const -> const CacheEntry *
-{
-    return m_entry;
 }
 
 auto Page::view() const -> Slice

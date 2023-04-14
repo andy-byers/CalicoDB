@@ -3,9 +3,9 @@
 // LICENSE.md. See AUTHORS.md for a list of contributor names.
 
 #include "wal.h"
+#include "bufmgr.h"
 #include "encoding.h"
 #include "env_posix.h"
-#include "frames.h"
 #include "logging.h"
 
 namespace calicodb
@@ -16,8 +16,8 @@ using Value = HashIndex::Value;
 using Hash = U16;
 
 // Header is stored at the start of the first index group. std::memcpy() is used
-// on the struct, so it needs to be a POD. Its size should be a multiple of 4 to
-// prevent misaligned accesses.
+// on the struct, so it needs to be a POD (or at least trivially copiable). Its
+// size should be a multiple of 4 to prevent misaligned accesses.
 static_assert(std::is_pod_v<HashIndexHeader>);
 static_assert((sizeof(HashIndexHeader) & 0b11) == 0);
 
@@ -57,10 +57,10 @@ static constexpr auto encode_index_page_size(U32 page_size) -> U16
     return static_cast<U16>((page_size & 0xFF00) | page_size >> 16);
 }
 
-//static constexpr auto decode_index_page_size(U16 page_size) -> U32
+// static constexpr auto decode_index_page_size(U16 page_size) -> U32
 //{
-//    return page_size == 1 ? kMaxPageSize : page_size;
-//}
+//     return page_size == 1 ? kMaxPageSize : page_size;
+// }
 
 struct HashGroup {
     explicit HashGroup(U32 group_number, char *data)
@@ -401,8 +401,8 @@ auto HashIterator::read(Entry &out) -> bool
 // WAL header layout:
 //     Offset  Size  Purpose
 //    ---------------------------------------
-//     0       4     Magic number (...)
-//     4       4     WAL version (...)
+//     0       4     Magic number (1559861749)
+//     4       4     WAL version (1)
 //     8       4     DB page size
 //     12      4     Checkpoint number
 //     16      4     Salt-1
@@ -411,14 +411,14 @@ auto HashIterator::read(Entry &out) -> bool
 //     28      4     Checksum-2
 //
 static constexpr std::size_t kWalHdrSize = 32;
-static constexpr U32 kWalMagic = 0x87654321;
-static constexpr U32 kWalVersion = 0x01'000'000;
+static constexpr U32 kWalMagic = 1559861749;
+static constexpr U32 kWalVersion = 1;
 
 // WAL frame header layout:
 //     Offset  Size  Purpose
 //    ---------------------------------------
 //     0       4     Page number
-//     4       4     DB size in pages (0 if not a commit frame)
+//     4       4     DB size in pages (> 0 if commit frame)
 //     8       4     Salt-1
 //     12      4     Salt-2
 //     16      4     Checksum-1
@@ -442,7 +442,7 @@ public:
 
     [[nodiscard]] auto open() -> Status;
     [[nodiscard]] auto read(Id page_id, char *&page) -> Status override;
-    [[nodiscard]] auto write(const CacheEntry *dirty, std::size_t db_size) -> Status override;
+    [[nodiscard]] auto write(const PageRef *dirty, std::size_t db_size) -> Status override;
     [[nodiscard]] auto needs_checkpoint() const -> bool override;
     [[nodiscard]] auto checkpoint(File &db_file, std::size_t *db_size) -> Status override;
     [[nodiscard]] auto sync() -> Status override;
@@ -456,7 +456,7 @@ public:
 
 private:
     [[nodiscard]] auto frame_offset(U32 frame) const -> std::size_t;
-    [[nodiscard]] auto rewrite_checksums(U32 last) -> Status;
+    [[nodiscard]] auto rewrite_checksums(U32 end) -> Status;
     [[nodiscard]] auto write_index_header() -> Status;
     [[nodiscard]] auto recover_index() -> Status;
     [[nodiscard]] auto restart_header(U32 salt_1) -> Status;
@@ -739,7 +739,7 @@ auto WalImpl::read(Id page_id, char *&page) -> Status
     return Status::ok();
 }
 
-auto WalImpl::write(const CacheEntry *dirty, std::size_t db_size) -> Status
+auto WalImpl::write(const PageRef *dirty, std::size_t db_size) -> Status
 {
     const auto is_commit = db_size > 0;
     const auto *live = m_index.header();
