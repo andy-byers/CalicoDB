@@ -3,8 +3,8 @@
 // LICENSE.md. See AUTHORS.md for a list of contributor names.
 
 #include "db_impl.h"
-#include "encoding.h"
 #include "calicodb/env.h"
+#include "encoding.h"
 #include "logging.h"
 
 namespace calicodb
@@ -207,7 +207,7 @@ auto DBImpl::open(const Options &sanitized) -> Status
         m_log->logv("ensuring consistency of an existing database");
         // This should be a no-op if the database closed normally last time.
         CALICODB_TRY(checkpoint_if_needed(true));
-        m_pager->purge_state();
+        m_pager->purge_all_pages();
         CALICODB_TRY(load_file_header());
     } else {
         // Write the initial file header containing the page size.
@@ -339,8 +339,8 @@ auto DBImpl::get_property(const Slice &name, std::string *out) const -> bool
                     "WAL I/O(MB)   %8.4f/%8.4f\n"
                     "Cache hits    %ld\n"
                     "Cache misses  %ld\n",
-                    static_cast<double>(m_pager->bytes_read()) / 1048576.0,
-                    static_cast<double>(m_pager->bytes_written()) / 1048576.0,
+                    static_cast<double>(m_pager->statistics().bytes_read) / 1048576.0,
+                    static_cast<double>(m_pager->statistics().bytes_written) / 1048576.0,
                     static_cast<double>(m_wal->statistics().bytes_read) / 1048576.0,
                     static_cast<double>(m_wal->statistics().bytes_written) / 1048576.0,
                     m_pager->hits(),

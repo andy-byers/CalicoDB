@@ -478,7 +478,7 @@ auto FakeWal::read(Id page_id, char *&out) -> Status
     return Status::ok();
 }
 
-auto FakeWal::write(const CacheEntry *dirty, std::size_t db_size) -> Status
+auto FakeWal::write(const PageRef *dirty, std::size_t db_size) -> Status
 {
     for (auto *p = dirty; p; p = p->next) {
         m_pending.insert_or_assign(p->page_id, std::string(p->page, m_param.page_size));

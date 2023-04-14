@@ -43,26 +43,26 @@ static constexpr auto kWalFilename = "./_test-wal";
     return reinterpret_cast<TableImpl *>(table);
 }
 
-#define CLEAR_INTERCEPTORS()                                                 \
-    do {                                                                     \
+#define CLEAR_INTERCEPTORS()        \
+    do {                            \
         env().clear_interceptors(); \
     } while (0)
 
-#define QUICK_INTERCEPTOR(filename__, type__)                                            \
-    do {                                                                                 \
-        env().add_interceptor(filename__, tools::Interceptor {(type__), [] {             \
-                                                                 return special_error(); \
-                                                             }});                        \
+#define QUICK_INTERCEPTOR(filename__, type__)                                             \
+    do {                                                                                  \
+        env().add_interceptor(filename__, tools::Interceptor {(type__), [] {              \
+                                                                  return special_error(); \
+                                                              }});                        \
     } while (0)
 
-#define COUNTING_INTERCEPTOR(filename__, type__, n__)                                        \
-    do {                                                                                     \
-        env().add_interceptor(filename__, tools::Interceptor {(type__), [&n = (n__)] {       \
-                                                                 if (n-- <= 0) {             \
-                                                                     return special_error(); \
-                                                                 }                           \
-                                                                 return Status::ok();        \
-                                                             }});                            \
+#define COUNTING_INTERCEPTOR(filename__, type__, n__)                                         \
+    do {                                                                                      \
+        env().add_interceptor(filename__, tools::Interceptor {(type__), [&n = (n__)] {        \
+                                                                  if (n-- <= 0) {             \
+                                                                      return special_error(); \
+                                                                  }                           \
+                                                                  return Status::ok();        \
+                                                              }});                            \
     } while (0)
 
 static constexpr auto kExpectationMatcher = "^expectation";
@@ -90,7 +90,7 @@ static constexpr auto kExpectationMatcher = "^expectation";
             << STREAM_MESSAGE(expr);           \
     } while (0)
 
-template<class EnvType>
+template <class EnvType>
 class EnvTestHarness
 {
 public:
@@ -120,7 +120,7 @@ protected:
     Env *m_env;
 };
 
-template<class EnvType>
+template <class EnvType>
 class PagerTestHarness : public EnvTestHarness<EnvType>
 {
 public:

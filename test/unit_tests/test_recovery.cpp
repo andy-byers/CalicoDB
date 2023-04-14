@@ -206,7 +206,7 @@ TEST_F(RecoveryTests, RollbackD)
 {
     auto records = tools::fill_db(*db, random, kN);
     open();
-    const auto actual = tools::read_file_to_string(*m_env, kDBFilename).substr(kPageSize*2, kPageSize);
+    const auto actual = tools::read_file_to_string(*m_env, kDBFilename).substr(kPageSize * 2, kPageSize);
 
     for (std::size_t iteration = 0; iteration < 3; ++iteration) {
         auto txn = db->begin_txn(TxnOptions());
@@ -218,12 +218,12 @@ TEST_F(RecoveryTests, RollbackD)
         }
         ASSERT_OK(db->rollback_txn(txn));
 
-        const auto before = tools::read_file_to_string(*m_env, kDBFilename).substr(kPageSize*2, kPageSize);
+        const auto before = tools::read_file_to_string(*m_env, kDBFilename).substr(kPageSize * 2, kPageSize);
 
         if (iteration & 1) {
             open();
         }
-        const auto after = tools::read_file_to_string(*m_env, kDBFilename).substr(kPageSize*2, kPageSize);
+        const auto after = tools::read_file_to_string(*m_env, kDBFilename).substr(kPageSize * 2, kPageSize);
 
         for (const auto &[key, value] : records) {
             ASSERT_EQ(get(key), value);

@@ -340,7 +340,7 @@ public:
         return Status::not_found("");
     }
 
-    [[nodiscard]] auto write(const CacheEntry *dirty, std::size_t) -> Status override
+    [[nodiscard]] auto write(const PageRef *dirty, std::size_t) -> Status override
     {
         return Status::ok();
     }
@@ -383,7 +383,7 @@ public:
     ~FakeWal() override = default;
 
     [[nodiscard]] auto read(Id page_id, char *&out) -> Status override;
-    [[nodiscard]] auto write(const CacheEntry *dirty, std::size_t db_size) -> Status override;
+    [[nodiscard]] auto write(const PageRef *dirty, std::size_t db_size) -> Status override;
     [[nodiscard]] auto needs_checkpoint() const -> bool override;
     [[nodiscard]] auto checkpoint(File &db_file, std::size_t *) -> Status override;
     [[nodiscard]] auto abort() -> Status override;
