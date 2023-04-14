@@ -506,6 +506,8 @@ static auto decode_entry(const char *data) -> PointerMap::Entry
 
 auto PointerMap::lookup(const Pager &pager, Id page_id) -> Id
 {
+    CALICODB_EXPECT_FALSE(page_id.is_null());
+
     // Root page (1) has no parents, and page 2 is the first pointer map page. If "page_id" is a pointer map
     // page, "page_id" will be returned.
     if (page_id.value < kFirstMapPage) {
@@ -514,6 +516,11 @@ auto PointerMap::lookup(const Pager &pager, Id page_id) -> Id
     const auto inc = pager.page_size() / kEntrySize + 1;
     const auto idx = (page_id.value - kFirstMapPage) / inc;
     return Id(idx * inc + kFirstMapPage);
+}
+
+auto PointerMap::is_map(const Pager &pager, Id page_id) -> bool
+{
+    return lookup(pager, page_id) == page_id;
 }
 
 auto PointerMap::read_entry(Pager &pager, Id page_id, Entry &out) -> Status
