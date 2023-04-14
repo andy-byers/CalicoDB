@@ -34,7 +34,7 @@ static auto unrecognized_txn(unsigned have_txn, unsigned want_txn)
 {
     std::string message;
     if (want_txn) {
-        write_to_string(
+        append_fmt_string(
             message,
             "unrecognized txn number %u (current txn is %u)",
             have_txn,
@@ -181,7 +181,7 @@ auto DBImpl::open(const Options &sanitized) -> Status
     if (db_exists) {
         m_pager->load_state(header);
     } else {
-        m_log->logv("setting up a new database");
+        logv(m_log, "setting up a new database");
 
         // Create the root table tree manually.
         CALICODB_TRY(Tree::create(*m_pager, Id::root(), nullptr));
@@ -204,7 +204,7 @@ auto DBImpl::open(const Options &sanitized) -> Status
     delete cursor;
 
     if (db_exists) {
-        m_log->logv("ensuring consistency of an existing database");
+        logv(m_log, "ensuring consistency of an existing database");
         // This should be a no-op if the database closed normally last time.
         CALICODB_TRY(checkpoint_if_needed(true));
         m_pager->purge_all_pages();
@@ -243,7 +243,7 @@ DBImpl::~DBImpl()
     if (m_state.use_wal) {
         if (m_pager->mode() != Pager::kOpen) {
             if (auto s = m_pager->rollback_txn(); !s.is_ok()) {
-                m_log->logv("failed to revert uncommitted transaction: %s", s.to_string().c_str());
+                logv(m_log, "failed to revert uncommitted transaction: %s", s.to_string().c_str());
             }
         }
         if (m_pager->mode() == Pager::kOpen) {
@@ -251,11 +251,11 @@ DBImpl::~DBImpl()
             // here. Otherwise, the call to Wal::close() below will not delete the WAL, and recovery
             // will be attempted next time DB::open() is called.
             if (const auto s = checkpoint_if_needed(true); !s.is_ok()) {
-                m_log->logv("failed to checkpoint database: %s", s.to_string().c_str());
+                logv(m_log, "failed to checkpoint database: %s", s.to_string().c_str());
             }
         }
         if (const auto s = Wal::close(m_wal); !s.is_ok()) {
-            m_log->logv("failed to close WAL: %s", s.to_string().c_str());
+            logv(m_log, "failed to close WAL: %s", s.to_string().c_str());
         }
     }
 
@@ -331,7 +331,7 @@ auto DBImpl::get_property(const Slice &name, std::string *out) const -> bool
 
         if (prop == "stats") {
             if (out != nullptr) {
-                write_to_string(
+                append_fmt_string(
                     buffer,
                     "Name          Value\n"
                     "-------------------\n"
@@ -365,7 +365,7 @@ auto DBImpl::get_property(const Slice &name, std::string *out) const -> bool
                         table_names[i].append("...");
                     }
                     if (state != nullptr && state->open) {
-                        const auto n = write_to_string(
+                        const auto n = append_fmt_string(
                             buffer,
                             "%-16s %8u %8.4f %9.4lf\n",
                             table_names[i].c_str(),
@@ -481,7 +481,7 @@ auto DBImpl::do_vacuum() -> Status
     }
     m_pager->set_page_count(target.value);
 
-    m_log->logv("vacuumed %llu pages", original.value - target.value);
+    logv(m_log, "vacuumed %llu pages", original.value - target.value);
     return Status::ok();
 }
 
@@ -524,7 +524,11 @@ auto DBImpl::rollback_txn(unsigned txn) -> Status
     if (txn != m_txn || m_pager->mode() == Pager::kOpen) {
         return unrecognized_txn(txn, m_txn);
     }
-    return m_pager->rollback_txn();
+    auto s = m_pager->rollback_txn();
+    if (s.is_ok()) {
+        s = load_file_header();
+    }
+    return s;
 }
 
 auto DBImpl::commit_txn(unsigned txn) -> Status
@@ -744,9 +748,8 @@ auto DBImpl::ensure_txn_started(bool &implicit_txn) -> Status
 {
     implicit_txn = m_pager->mode() == Pager::kOpen;
     if (implicit_txn) {
-        m_auto_txn = begin_txn(TxnOptions());
+        (void)begin_txn(TxnOptions());
     }
-    // Transaction was already started, or there was an error.
     return status();
 }
 
@@ -754,9 +757,9 @@ auto DBImpl::ensure_txn_finished(bool implicit_txn) -> Status
 {
     if (implicit_txn) {
         if (m_pager->mode() == Pager::kError) {
-            return rollback_txn(m_auto_txn);
+            return rollback_txn(m_txn);
         } else {
-            return commit_txn(m_auto_txn);
+            return commit_txn(m_txn);
         }
     }
     return status();

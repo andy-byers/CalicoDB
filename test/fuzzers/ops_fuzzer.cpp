@@ -61,9 +61,8 @@ auto OpsFuzzer::step(const U8 *&data, std::size_t &size) -> Status
             cursor->seek(key);
             if (cursor->is_valid()) {
                 s = m_db->erase(cursor->key());
-                if (s.is_not_found()) {
-                    s = Status::ok();
-                }
+                // Cursor is valid, so the record must exist.
+                CHECK_FALSE(s.is_not_found());
             }
             CALICODB_TRY(s);
             break;
@@ -125,7 +124,7 @@ extern "C" int LLVMFuzzerTestOneInput(const U8 *data, std::size_t size)
     options.cache_size = kMinPageSize * 16;
 
     {
-        OpsFuzzer fuzzer {"ops_db", &options};
+        OpsFuzzer fuzzer("ops_db", &options);
 
         while (size > 1) {
             CHECK_OK(fuzzer.step(data, size));

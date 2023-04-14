@@ -6,7 +6,6 @@
 #define CALICODB_STATUS_H
 
 #include "slice.h"
-#include <memory>
 
 namespace calicodb
 {
@@ -15,6 +14,7 @@ class Status final
 {
 public:
     explicit Status() = default;
+    ~Status();
 
     // Create a status object in an OK state.
     static auto ok() -> Status
@@ -56,7 +56,7 @@ private:
     explicit Status(char code, const Slice &what);
 
     // Storage for a status code and a null-terminated message.
-    std::unique_ptr<char[]> m_data;
+    const char *m_data = nullptr;
 };
 
 static_assert(sizeof(Status) == sizeof(void *));

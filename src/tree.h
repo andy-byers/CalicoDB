@@ -14,6 +14,7 @@
 namespace calicodb
 {
 
+class CursorImpl;
 class TableSet;
 struct Node;
 
@@ -148,7 +149,7 @@ struct NodeManager {
 
 struct OverflowList {
     [[nodiscard]] static auto read(Pager &pager, Id head_id, std::size_t offset, std::size_t size, char *scratch) -> Status;
-    [[nodiscard]] static auto write(Pager &pager, Id &out, const Slice &first, const Slice &second = {}) -> Status;
+    [[nodiscard]] static auto write(Pager &pager, Id &out, const Slice &key, const Slice &value = {}) -> Status;
     [[nodiscard]] static auto copy(Pager &pager, Id overflow_id, std::size_t size, Id &out) -> Status;
     [[nodiscard]] static auto erase(Pager &pager, Id head_id) -> Status;
 };
@@ -213,6 +214,10 @@ private:
     [[nodiscard]] auto fix_links(Node &node) -> Status;
     [[nodiscard]] auto cell_scratch() -> char *;
 
+    auto track_cursor(CursorImpl &cursor) -> void;
+    auto forget_cursor(CursorImpl &cursor) -> void;
+    auto inform_cursors() -> void;
+
     enum ReportType {
         kBytesRead,
         kBytesWritten,
@@ -221,8 +226,12 @@ private:
 
     auto report_stats(ReportType type, std::size_t increment) const -> void;
 
+    friend class CursorInternal;
     friend class CursorImpl;
     friend class TreeValidator;
+
+    // List of active cursors.
+    CursorImpl *m_cursors = nullptr;
 
     mutable TreeStatistics *m_stats = nullptr;
     mutable std::string m_key_scratch[2];
@@ -248,18 +257,23 @@ class CursorImpl : public Cursor
     Tree *m_tree = nullptr;
     Location m_loc;
 
+    CursorImpl *m_prev = nullptr;
+    CursorImpl *m_next = nullptr;
+    bool m_needs_repos = false;
+
     auto seek_to(Node node, std::size_t index) -> void;
     auto fetch_payload() -> Status;
 
 public:
     friend class CursorInternal;
+    friend class Tree;
 
     explicit CursorImpl(Tree &tree)
-        : m_tree {&tree}
+        : m_tree(&tree)
     {
     }
 
-    ~CursorImpl() override = default;
+    ~CursorImpl() override;
 
     [[nodiscard]] auto is_valid() const -> bool override;
     [[nodiscard]] auto status() const -> Status override;

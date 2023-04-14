@@ -19,25 +19,25 @@ public:
 
     constexpr Slice(const char *data, std::size_t size) noexcept
         : m_data(data),
-          m_size {size}
+          m_size(size)
     {
         assert(m_data != nullptr);
     }
 
     constexpr Slice(const char *data) noexcept
-        : m_data {data}
+        : m_data(data)
     {
         assert(m_data != nullptr);
         m_size = std::char_traits<char>::length(m_data);
     }
 
     constexpr Slice(const std::string_view &rhs) noexcept
-        : Slice {rhs.data(), rhs.size()}
+        : Slice(rhs.data(), rhs.size())
     {
     }
 
     Slice(const std::string &rhs) noexcept
-        : Slice {rhs.data(), rhs.size()}
+        : Slice(rhs.data(), rhs.size())
     {
     }
 

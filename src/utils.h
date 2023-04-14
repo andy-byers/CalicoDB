@@ -12,9 +12,12 @@
 #include <limits>
 
 #if NDEBUG
-#define CALICODB_EXPECT_(expr, file, line)
+#  define CALICODB_EXPECT_(expr, file, line)
 #else
 #define CALICODB_EXPECT_(expr, file, line) impl::expect(expr, #expr, file, line)
+#  ifdef CALICODB_BUILD_TESTS
+#    define CALICODB_EXPENSIVE_CHECKS
+#  endif // CALICODB_BUILD_TESTS
 #endif // NDEBUG
 
 #define CALICODB_EXPECT_TRUE(expr) CALICODB_EXPECT_(expr, __FILE__, __LINE__)

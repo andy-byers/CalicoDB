@@ -7,6 +7,7 @@
 
 #include "calicodb/db.h"
 #include "encoding.h"
+#include "env_helpers.h"
 #include "logging.h"
 #include "tools.h"
 #include <iostream>

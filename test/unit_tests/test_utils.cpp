@@ -495,7 +495,7 @@ TEST(SizeDescriptorTests, ProducesSensibleResults)
 
 class InterceptorTests
     : public testing::Test,
-      public EnvTestHarness<tools::FaultInjectionEnv>
+      public EnvTestHarness<tools::TestEnv>
 {
 };
 
@@ -522,7 +522,23 @@ TEST_F(InterceptorTests, RespectsSyscallType)
 TEST(Logging, WriteFormattedString)
 {
     std::string s;
-    write_to_string(s, "%s %d %f", "abc", 42, 1.0);
+    append_fmt_string(s, "%s %d %f", "abc", 42, 1.0);
+}
+
+TEST(Logging, Logv)
+{
+    LogFile *log;
+    tools::FakeEnv env;
+    ASSERT_OK(env.new_log_file("test", log));
+
+    std::string message("Hello, world!");
+    logv(nullptr, "%s", message.c_str());
+    logv(log, "%s", message.c_str());
+
+    message.resize(1'024, '.');
+    logv(log, "%s", message.c_str());
+
+    delete log;
 }
 
 TEST(LevelDB_Logging, NumberToString)

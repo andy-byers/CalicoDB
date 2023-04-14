@@ -57,16 +57,6 @@ auto EnvWrapper::new_log_file(const std::string &filename, LogFile *&out) -> Sta
     return m_target->new_log_file(filename, out);
 }
 
-auto EnvWrapper::get_children(const std::string &dirname, std::vector<std::string> &out) const -> Status
-{
-    return m_target->get_children(dirname, out);
-}
-
-auto EnvWrapper::rename_file(const std::string &old_filename, const std::string &new_filename) -> Status
-{
-    return m_target->rename_file(old_filename, new_filename);
-}
-
 auto EnvWrapper::file_exists(const std::string &filename) const -> bool
 {
     return m_target->file_exists(filename);

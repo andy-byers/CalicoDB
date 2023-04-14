@@ -205,21 +205,14 @@ TEST_F(BasicDatabaseTests, ClampsBadOptionValues)
     open_and_check();
 }
 
+// CAUTION: PRNG state does not persist between calls.
 static auto insert_random_groups(DB &db, std::size_t num_groups, std::size_t group_size)
 {
-    RecordGenerator generator;
-    tools::RandomGenerator random(4 * 1'024 * 1'024);
-
+    tools::RandomGenerator random;
     for (std::size_t iteration = 0; iteration < num_groups; ++iteration) {
-        const auto records = generator.generate(random, group_size);
-        auto itr = cbegin(records);
         ASSERT_OK(db.status());
         const auto txn = db.begin_txn(TxnOptions());
-
-        for (std::size_t i = 0; i < group_size; ++i) {
-            ASSERT_OK(db.put(itr->key, itr->value));
-            ++itr;
-        }
+        tools::fill_db(db, random, group_size);
         ASSERT_OK(db.commit_txn(txn));
     }
     dynamic_cast<const DBImpl &>(db).TEST_validate();
@@ -247,11 +240,9 @@ TEST_F(BasicDatabaseTests, DataPersists)
     static constexpr std::size_t kGroupSize = 10;
 
     auto s = Status::ok();
-    RecordGenerator generator;
     tools::RandomGenerator random(4 * 1'024 * 1'024);
 
-    const auto records = generator.generate(random, kGroupSize * kNumIterations);
-    auto itr = cbegin(records);
+    std::map<std::string, std::string> records;
     DB *db;
 
     for (std::size_t iteration = 0; iteration < kNumIterations; ++iteration) {
@@ -259,9 +250,8 @@ TEST_F(BasicDatabaseTests, DataPersists)
         ASSERT_OK(db->status());
 
         const auto txn = db->begin_txn(TxnOptions());
-        for (std::size_t i = 0; i < kGroupSize; ++i) {
-            ASSERT_OK(db->put(itr->key, itr->value));
-            ++itr;
+        for (const auto &[k, v] : tools::fill_db(*db, random, kGroupSize)) {
+            records.insert_or_assign(k, v);
         }
         ASSERT_OK(db->commit_txn(txn));
         delete db;
@@ -433,7 +423,6 @@ public:
 
     Options options;
     tools::RandomGenerator random;
-    std::vector<Record> records;
     DB *db = nullptr;
 };
 
@@ -650,10 +639,10 @@ struct ErrorWrapper {
 
 class DbErrorTests
     : public testing::TestWithParam<ErrorWrapper>,
-      public EnvTestHarness<tools::FaultInjectionEnv>
+      public EnvTestHarness<tools::TestEnv>
 {
 protected:
-    using Base = EnvTestHarness<tools::FaultInjectionEnv>;
+    using Base = EnvTestHarness<tools::TestEnv>;
 
     DbErrorTests()
     {
@@ -883,7 +872,7 @@ TEST_F(DbOpenTests, FailsIfDbExists)
 
 class ApiTests
     : public testing::Test,
-      public EnvTestHarness<tools::FaultInjectionEnv>
+      public EnvTestHarness<tools::TestEnv>
 {
 protected:
     ApiTests()
@@ -955,6 +944,27 @@ TEST_F(ApiTests, IsConstCorrect)
 TEST_F(ApiTests, FirstTxnNumberIsNonzero)
 {
     ASSERT_NE(db->begin_txn(TxnOptions()), 0);
+}
+
+TEST_F(ApiTests, OnlyRecognizesCurrentTransaction)
+{
+    auto txn = db->begin_txn(TxnOptions());
+
+    // Incorrect transaction number.
+    ASSERT_TRUE(db->commit_txn(txn - 1).is_invalid_argument());
+    ASSERT_TRUE(db->commit_txn(txn + 1).is_invalid_argument());
+    ASSERT_TRUE(db->rollback_txn(txn - 1).is_invalid_argument());
+    ASSERT_TRUE(db->rollback_txn(txn + 1).is_invalid_argument());
+
+    ASSERT_OK(db->commit_txn(txn));
+
+    // Transaction has already completed.
+    ASSERT_TRUE(db->commit_txn(txn - 1).is_invalid_argument());
+    ASSERT_TRUE(db->commit_txn(txn).is_invalid_argument());
+    ASSERT_TRUE(db->commit_txn(txn + 1).is_invalid_argument());
+    ASSERT_TRUE(db->rollback_txn(txn - 1).is_invalid_argument());
+    ASSERT_TRUE(db->rollback_txn(txn).is_invalid_argument());
+    ASSERT_TRUE(db->rollback_txn(txn + 1).is_invalid_argument());
 }
 
 TEST_F(ApiTests, CannotModifyReadOnlyTable)
@@ -1083,6 +1093,42 @@ TEST_F(ApiTests, CheckIfKeyExists)
     ASSERT_TRUE(db->get("k", nullptr).is_not_found());
     ASSERT_OK(db->put("k", "v"));
     ASSERT_OK(db->get("k", nullptr));
+}
+
+class NoLoggingEnv : public EnvWrapper {
+    Env *m_env;
+
+public:
+    explicit NoLoggingEnv()
+        : EnvWrapper(*new tools::FakeEnv),
+          m_env(target())
+    {
+    }
+
+    ~NoLoggingEnv() override
+    {
+        delete m_env;
+    }
+
+    [[nodiscard]] auto new_log_file(const std::string &filename, LogFile *&out) -> Status override
+    {
+        return Status::not_supported("logging is not supported");
+    }
+};
+
+TEST(DisabledLoggingTests, LoggingIsNotNecessary)
+{
+    Options options;
+    NoLoggingEnv no_logging_env;
+    options.env = &no_logging_env;
+
+    DB *db;
+    ASSERT_OK(DB::open(options, "db", db));
+
+    tools::RandomGenerator random;
+    tools::expect_db_contains(*db, tools::fill_db(*db, random, 100));
+
+    delete db;
 }
 
 class LargePayloadTests : public ApiTests

@@ -1004,7 +1004,7 @@ public:
 
     auto SetUp() -> void override
     {
-        env = new tools::FaultInjectionEnv;
+        env = new tools::TestEnv;
     }
 
     auto run_setup_and_operations()
@@ -1110,7 +1110,7 @@ public:
 TEST_P(WalPagerFaultTests, SetupAndOperations)
 {
     const auto [_, filename, type] = GetParam();
-    reinterpret_cast<tools::FaultInjectionEnv *>(env)
+    reinterpret_cast<tools::TestEnv *>(env)
         ->add_interceptor(filename, tools::Interceptor(
                                         type,
                                         [this] {
