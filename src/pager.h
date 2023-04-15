@@ -36,6 +36,18 @@ public:
     [[nodiscard]] auto push(Page page) -> Status;
 };
 
+// Pager state transitions:
+//
+//     StateA --> StateB  Method      LockA -------> LockB
+//    ----------------------------------------------------------
+//     kOpen ---> kRead   lock        <none> ------> kShared
+//     kRead ---> kWrite  begin       kShared -----> kExclusive
+//     kWrite --> kDirty  mark_dirty  kExclusive --> kExclusive
+//     kDirty --> kWrite  commit      kExclusive --> kExclusive
+//     kDirty --> kWrite  rollback    kExclusive --> kExclusive
+//     ****** --> kOpen   unlock      ****** ------> <none>
+//     ****** --> kError  set_state   ****** ------> ******
+//
 class Pager final
 {
 public:
@@ -44,6 +56,7 @@ public:
 
     enum Mode {
         kOpen,
+        kRead,
         kWrite,
         kDirty,
         kError,

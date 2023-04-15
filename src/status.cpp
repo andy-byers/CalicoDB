@@ -16,6 +16,7 @@ enum Code : char {
     kNotSupported,
     kCorruption,
     kNotFound,
+    kBusy,
 };
 
 static auto new_status_string(const char *data, Code code) -> char *
@@ -82,6 +83,11 @@ auto Status::operator=(Status &&rhs) noexcept -> Status &
     return *this;
 }
 
+auto Status::busy(const Slice &what) -> Status
+{
+    return Status(kBusy, what);
+}
+
 auto Status::not_found(const Slice &what) -> Status
 {
     return Status(kNotFound, what);
@@ -130,6 +136,11 @@ auto Status::is_corruption() const -> bool
 auto Status::is_not_found() const -> bool
 {
     return !is_ok() && Code {m_data[0]} == kNotFound;
+}
+
+auto Status::is_busy() const -> bool
+{
+    return !is_ok() && Code {m_data[0]} == kBusy;
 }
 
 auto Status::to_string() const -> std::string

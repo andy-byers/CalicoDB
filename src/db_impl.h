@@ -138,6 +138,7 @@ private:
     [[nodiscard]] auto remove_empty_table(const std::string &name, TableState &state) -> Status;
     [[nodiscard]] auto checkpoint_if_needed(bool force = false) -> Status;
     [[nodiscard]] auto load_file_header() -> Status;
+    auto invalidate_live_cursors() -> void;
 
     [[nodiscard]] auto ensure_txn_started(bool &implicit_txn) -> Status;
     [[nodiscard]] auto ensure_txn_finished(bool implicit_txn) -> Status;
@@ -153,12 +154,15 @@ private:
     Table *m_default = nullptr;
     Table *m_root = nullptr;
 
-    Wal *m_wal = nullptr;
-    Pager *m_pager = nullptr;
+    // Members involved in transactions are mutable, since read transactions
+    // are supported. Implicit read transactions are wrapped around calls to
+    // get() and various Cursor calls when begin_txn() was never called.
+    mutable Wal *m_wal = nullptr;
+    mutable Pager *m_pager = nullptr;
+    mutable unsigned m_txn = 0;
+
     Env *m_env = nullptr;
     LogFile *m_log = nullptr;
-
-    unsigned m_txn = 0;
 
     const std::string m_db_filename;
     const std::string m_wal_filename;

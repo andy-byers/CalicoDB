@@ -24,103 +24,73 @@ namespace calicodb
     return {.page_id = Id(id_value)};
 }
 
-// class PageCacheTests : public testing::Test
-//{
-// public:
-//     PageCache cache;
-// };
-//
-// TEST_F(PageCacheTests, EmptyCacheBehavior)
-//{
-//     ASSERT_EQ(cache.size(), 0);
-//     ASSERT_EQ(cache.size(), 0);
-//     ASSERT_EQ(cache.get(Id::root()), nullptr);
-//     ASSERT_EQ(cache.next_victim(), nullptr);
-// }
-//
-// TEST_F(PageCacheTests, OldestEntryIsEvictedFirst)
-//{
-//     (void)cache.alloc(Id(4));
-//     (void)cache.alloc(Id(3));
-//     (void)cache.alloc(Id(2));
-//     (void)cache.alloc(Id(1));
-//     ASSERT_EQ(cache.size(), 4);
-//
-//     ASSERT_EQ(cache.get(Id(4))->page_id, Id(4));
-//     ASSERT_EQ(cache.get(Id(3))->page_id, Id(3));
-//
-//     ASSERT_EQ(cache.next_victim()->page_id, Id(2));
-//     cache.erase(cache.next_victim()->page_id);
-//     ASSERT_EQ(cache.next_victim()->page_id, Id(1));
-//     cache.erase(cache.next_victim()->page_id);
-//     ASSERT_EQ(cache.next_victim()->page_id, Id(4));
-//     cache.erase(cache.next_victim()->page_id);
-//     ASSERT_EQ(cache.next_victim()->page_id, Id(3));
-//     cache.erase(cache.next_victim()->page_id);
-//     ASSERT_EQ(cache.size(), 0);
-// }
-//
-// TEST_F(PageCacheTests, ReplacementPolicyIgnoresQuery)
-//{
-//     (void)cache.alloc(Id(2));
-//     (void)cache.alloc(Id(1));
-//
-//     (void)cache.query(Id(2));
-//
-//     ASSERT_EQ(cache.next_victim()->page_id, Id(2));
-//     cache.erase(cache.next_victim()->page_id);
-//     ASSERT_EQ(cache.next_victim()->page_id, Id(1));
-//     cache.erase(cache.next_victim()->page_id);
-// }
-//
-// TEST_F(PageCacheTests, ReferencedEntriesAreIgnoredDuringEviction)
-//{
-//     (void)cache.alloc(Id(2));
-//     (void)cache.alloc(Id(1));
-//
-//     cache.query(Id(2))->refcount = 1;
-//
-//     ASSERT_EQ(cache.next_victim()->page_id, Id(1));
-//     cache.erase(cache.next_victim()->page_id);
-//     ASSERT_EQ(cache.next_victim(), nullptr);
-// }
-//
-// class FrameManagerTests
-//     : public EnvTestHarness<tools::FakeEnv>,
-//       public testing::Test
-//{
-// public:
-//     static constexpr auto kPageSize = kMinPageSize;
-//     static constexpr auto kPagerFrames = kMinFrameCount;
-//
-//     explicit FrameManagerTests()
-//     {
-//         frames = std::make_unique<BufferManager>(kPageSize, kPagerFrames);
-//     }
-//
-//     ~FrameManagerTests() override = default;
-//
-//     std::unique_ptr<BufferManager> frames;
-//     PageCache cache;
-// };
-//
-// TEST_F(FrameManagerTests, NewFrameManagerIsSetUpCorrectly)
-//{
-//     ASSERT_EQ(frames->available(), kPagerFrames);
-// }
-//
-//#ifndef NDEBUG
-// TEST_F(FrameManagerTests, OutOfFramesDeathTest)
-//{
-//     for (std::size_t i = 0; i < kPagerFrames; ++i) {
-//         auto *entry = cache.alloc(Id(i + 1));
-//         (void)frames->pin(*entry);
-//     }
-//     auto *entry = cache.alloc(Id(kPagerFrames + 1));
-//     ASSERT_EQ(frames->available(), 0);
-//     ASSERT_DEATH((void)frames->pin(*entry), "expect");
-// }
-//#endif // NDEBUG
+ class PageCacheTests : public testing::Test
+{
+ public:
+     explicit PageCacheTests()
+         : mgr(kMinPageSize, kMinFrameCount)
+     {
+     }
+
+     ~PageCacheTests() override = default;
+
+     Bufmgr mgr;
+ };
+
+ TEST_F(PageCacheTests, EmptyBehavior)
+{
+     ASSERT_EQ(mgr.size(), 0);
+     ASSERT_EQ(mgr.size(), 0);
+     ASSERT_EQ(mgr.get(Id(2)), nullptr);
+     ASSERT_EQ(mgr.next_victim(), nullptr);
+ }
+
+ TEST_F(PageCacheTests, OldestReferenceIsEvictedFirst)
+{
+    (void)mgr.alloc(Id(5));
+    (void)mgr.alloc(Id(4));
+    (void)mgr.alloc(Id(3));
+    (void)mgr.alloc(Id(2));
+     ASSERT_EQ(mgr.size(), 4);
+
+     ASSERT_EQ(mgr.get(Id(5))->page_id, Id(5));
+     ASSERT_EQ(mgr.get(Id(4))->page_id, Id(4));
+
+     ASSERT_EQ(mgr.next_victim()->page_id, Id(3));
+     mgr.erase(mgr.next_victim()->page_id);
+     ASSERT_EQ(mgr.next_victim()->page_id, Id(2));
+     mgr.erase(mgr.next_victim()->page_id);
+     ASSERT_EQ(mgr.next_victim()->page_id, Id(5));
+     mgr.erase(mgr.next_victim()->page_id);
+     ASSERT_EQ(mgr.next_victim()->page_id, Id(4));
+     mgr.erase(mgr.next_victim()->page_id);
+     ASSERT_EQ(mgr.size(), 0);
+ }
+
+ TEST_F(PageCacheTests, ReplacementPolicyIgnoresQuery)
+{
+     (void)mgr.alloc(Id(3));
+     (void)mgr.alloc(Id(2));
+
+     (void)mgr.query(Id(3));
+
+     ASSERT_EQ(mgr.next_victim()->page_id, Id(3));
+     mgr.erase(mgr.next_victim()->page_id);
+     ASSERT_EQ(mgr.next_victim()->page_id, Id(2));
+     mgr.erase(mgr.next_victim()->page_id);
+ }
+
+ TEST_F(PageCacheTests, RefcountsAreConsideredDuringEviction)
+{
+     (void)mgr.alloc(Id(3));
+     (void)mgr.alloc(Id(2));
+
+     mgr.query(Id(3))->refcount = 2;
+
+     ASSERT_EQ(mgr.next_victim()->page_id, Id(2));
+     mgr.erase(mgr.next_victim()->page_id);
+     ASSERT_EQ(mgr.next_victim(), nullptr);
+ }
 
 auto write_to_page(Page &page, const std::string &message) -> void
 {
@@ -628,6 +598,8 @@ class TruncationTests : public PagerTests
 public:
     static constexpr std::size_t kInitialPageCount = 500;
 
+    ~TruncationTests() override = default;
+
     auto SetUp() -> void override
     {
         PagerTests::SetUp();
@@ -746,7 +718,7 @@ protected:
         EXPECT_OK(Wal::open(m_param, m_wal));
     }
 
-    virtual ~WalTestBase()
+    ~WalTestBase() override
     {
         close();
     }

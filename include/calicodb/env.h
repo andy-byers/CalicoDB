@@ -13,13 +13,31 @@ namespace calicodb
 class File;
 class LogFile;
 
-// CalicoDB storage environment.
+// CalicoDB storage environment
 //
-// Handles platform-specific filesystem manipulations and manages allocation of I/O
-// helper objects (Reader, Editor, etc.).
+// Handles platform-specific filesystem manipulations and file locking.
 class Env
 {
 public:
+    // CalicoDB file lock modes (from SQLite). The mode kPending is never explicitly
+    // requested. An Env implementation may, however, leave a file locked in kPending
+    // mode if an exclusive lock could not be granted while a kReserved lock was held.
+    // The following state transitions must be supported:
+    //
+    //     <unlocked> -> kShared
+    //     kShared -> kReserved
+    //     kShared -> kExclusive
+    //     kReserved -> (kPending) -> kExclusive
+    //     kPending -> kExclusive
+    //
+    enum LockMode {
+        kShared = 1,
+        kReserved,
+        kPending,
+        kExclusive,
+    };
+
+    // Return a heap-allocated handle to this platform's default Env implementation
     static auto default_env() -> Env *;
 
     virtual ~Env();
@@ -29,6 +47,15 @@ public:
     [[nodiscard]] virtual auto resize_file(const std::string &filename, std::size_t size) -> Status = 0;
     [[nodiscard]] virtual auto file_size(const std::string &filename, std::size_t &out) const -> Status = 0;
     [[nodiscard]] virtual auto remove_file(const std::string &filename) -> Status = 0;
+
+    virtual auto srand(unsigned seed) -> void = 0;
+    [[nodiscard]] virtual auto rand() -> unsigned = 0;
+
+    // NOTE: As of right now, these methods are not meant to be called concurrently
+    //       from multiple threads. The Env object is not thread-safe. They should
+    //       be used to coordinate with other processes, each with their own Env.
+    [[nodiscard]] virtual auto lock(File &file, LockMode mode) -> Status = 0;
+    [[nodiscard]] virtual auto unlock(File &file) -> Status = 0;
 };
 
 class File
@@ -81,6 +108,12 @@ public:
     [[nodiscard]] auto resize_file(const std::string &filename, std::size_t size) -> Status override;
     [[nodiscard]] auto file_size(const std::string &filename, std::size_t &out) const -> Status override;
     [[nodiscard]] auto remove_file(const std::string &filename) -> Status override;
+
+    auto srand(unsigned seed) -> void override;
+    [[nodiscard]] auto rand() -> unsigned override;
+
+    [[nodiscard]] auto lock(File &file, LockMode mode) -> Status override;
+    [[nodiscard]] auto unlock(File &file) -> Status override;
 
 private:
     Env *m_target;

@@ -1,6 +1,6 @@
-//
-// Created by andy-byers on 4/12/23.
-//
+// Copyright (c) 2022, The CalicoDB Authors. All rights reserved.
+// This source code is licensed under the MIT License, which can be found in
+// LICENSE.md. See AUTHORS.md for a list of contributor names.
 
 #include "env_helpers.h"
 
@@ -135,6 +135,16 @@ auto FakeEnv::file_exists(const std::string &filename) const -> bool
         return itr->second.created;
     }
     return false;
+}
+
+auto FakeEnv::srand(unsigned seed) -> void
+{
+    ::srand(seed);
+}
+
+auto FakeEnv::rand() -> unsigned
+{
+    return ::rand();
 }
 
 auto FakeEnv::clone() const -> Env *

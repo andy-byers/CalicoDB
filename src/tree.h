@@ -162,10 +162,11 @@ struct PayloadManager {
     [[nodiscard]] static auto collect_value(Pager &pager, std::string &scratch, const Cell &cell, Slice *value) -> Status;
 };
 
-class Tree
+class Tree final
 {
 public:
     explicit Tree(Pager &pager, Id root_id, TreeStatistics *stats);
+    ~Tree();
     [[nodiscard]] static auto create(Pager &pager, Id table_id, Id *out) -> Status;
     [[nodiscard]] auto put(const Slice &key, const Slice &value, bool *exists = nullptr) -> Status;
     [[nodiscard]] auto get(const Slice &key, std::string *value) const -> Status;
@@ -226,6 +227,7 @@ private:
 
     auto report_stats(ReportType type, std::size_t increment) const -> void;
 
+    friend class DBImpl;
     friend class CursorInternal;
     friend class CursorImpl;
     friend class TreeValidator;
@@ -259,7 +261,6 @@ class CursorImpl : public Cursor
 
     CursorImpl *m_prev = nullptr;
     CursorImpl *m_next = nullptr;
-    bool m_needs_repos = false;
 
     auto seek_to(Node node, std::size_t index) -> void;
     auto fetch_payload() -> Status;

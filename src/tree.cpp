@@ -15,6 +15,11 @@
 namespace calicodb
 {
 
+[[nodiscard]] static auto default_cursor_status() -> Status
+{
+    return Status::not_found("cursor is invalid");
+}
+
 static constexpr auto kMaxCellHeaderSize =
     kVarintMaxLength + // Value size  (10 B)
     kVarintMaxLength + // Key size    (10 B)
@@ -732,7 +737,7 @@ auto Tree::forget_cursor(CursorImpl &cursor) -> void
 auto Tree::inform_cursors() -> void
 {
     for (auto *c = m_cursors; c; c = c->m_next) {
-        c->m_needs_repos = true;
+        CursorInternal::invalidate(*c, default_cursor_status());
     }
 }
 
@@ -743,7 +748,7 @@ auto Tree::node_iterator(Node &node) const -> NodeIterator
         &m_key_scratch[0],
         &m_key_scratch[1],
     };
-    return NodeIterator {node, param};
+    return NodeIterator(node, param);
 }
 
 auto Tree::find_external(const Slice &key, SearchResult &out) const -> Status
@@ -1362,6 +1367,14 @@ Tree::Tree(Pager &pager, Id root_id, TreeStatistics *stats)
 {
 }
 
+Tree::~Tree()
+{
+    for (auto *c = m_cursors; c; c = c->m_next) {
+        c->m_tree = nullptr;
+    }
+    inform_cursors();
+}
+
 auto Tree::report_stats(ReportType type, std::size_t increment) const -> void
 {
     if (m_stats == nullptr) {
@@ -1422,6 +1435,7 @@ auto Tree::put(const Slice &key, const Slice &value, bool *exists) -> Status
     CALICODB_TRY(PayloadManager::emplace(*m_pager, cell_scratch(), node, key, value, index));
     CALICODB_TRY(resolve_overflow(std::move(node)));
     report_stats(kBytesWritten, key.size() + value.size());
+    inform_cursors();
 
     if (exists != nullptr) {
         *exists = exact;
@@ -1443,6 +1457,8 @@ auto Tree::erase(const Slice &key) -> Status
 
         upgrade(node);
         CALICODB_TRY(remove_cell(node, index));
+
+        inform_cursors();
         return resolve_underflow(std::move(node), anchor);
     }
     release(std::move(node));
@@ -1585,7 +1601,10 @@ auto Tree::vacuum_step(Page &free, TableSet &tables, Id last_id) -> Status
                 }
             }
             release(std::move(last));
+            break;
         }
+        default:
+            return Status::corruption("pointer map page is corrupted");
     }
     CALICODB_TRY(PointerMap::write_entry(*m_pager, last_id, {}));
     CALICODB_TRY(PointerMap::write_entry(*m_pager, free.id(), entry));
@@ -2291,17 +2310,14 @@ auto Tree::TEST_validate() -> void
 
 #endif // CALICODB_BUILD_TESTS
 
-[[nodiscard]] static auto default_cursor_status() -> Status
-{
-    return Status::not_found("cursor is invalid");
-}
-
 Cursor::Cursor() = default;
 Cursor::~Cursor() = default;
 
 CursorImpl::~CursorImpl()
 {
-    m_tree->forget_cursor(*this);
+    if (m_tree) {
+        m_tree->forget_cursor(*this);
+    }
 }
 
 auto CursorImpl::is_valid() const -> bool

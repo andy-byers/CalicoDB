@@ -25,6 +25,12 @@ public:
     [[nodiscard]] auto file_size(const std::string &filename, std::size_t &out) const -> Status override;
     [[nodiscard]] auto remove_file(const std::string &filename) -> Status override;
 
+    auto srand(unsigned seed) -> void override;
+    [[nodiscard]] auto rand() -> unsigned override;
+
+    [[nodiscard]] auto lock(File &, LockMode) -> Status override {return Status::ok();}
+    [[nodiscard]] auto unlock(File &) -> Status override {return Status::ok();}
+
 protected:
     friend class FakeFile;
     friend class FakeLogFile;

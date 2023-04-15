@@ -480,6 +480,7 @@ auto DBImpl::do_vacuum() -> Status
             put(*m_root, table_names[i], logical_id)));
     }
     m_pager->set_page_count(target.value);
+    invalidate_live_cursors();
 
     logv(m_log, "vacuumed %llu pages", original.value - target.value);
     return Status::ok();
@@ -526,6 +527,7 @@ auto DBImpl::rollback_txn(unsigned txn) -> Status
     }
     auto s = m_pager->rollback_txn();
     if (s.is_ok()) {
+        invalidate_live_cursors();
         s = load_file_header();
     }
     return s;
@@ -763,6 +765,16 @@ auto DBImpl::ensure_txn_finished(bool implicit_txn) -> Status
         }
     }
     return status();
+}
+
+auto DBImpl::invalidate_live_cursors() -> void
+{
+    for (auto *state : m_tables) {
+        if (state && state->tree) {
+            CALICODB_EXPECT_TRUE(state->open);
+            state->tree->inform_cursors();
+        }
+    }
 }
 
 } // namespace calicodb

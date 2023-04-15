@@ -762,8 +762,8 @@ auto WalImpl::write(const PageRef *dirty, std::size_t db_size) -> Status
         put_u32(&header[8], m_page_size);
         put_u32(&header[12], m_ckpt_number);
         if (m_ckpt_number == 0) {
-            m_hdr.salt[0] = static_cast<U32>(rand());
-            m_hdr.salt[1] = static_cast<U32>(rand());
+            m_hdr.salt[0] = m_env->rand();
+            m_hdr.salt[1] = m_env->rand();
         }
         std::memcpy(&header[16], m_hdr.salt, sizeof(m_hdr.salt));
         compute_checksum(Slice(header, sizeof(header) - sizeof(cksum)), nullptr, cksum);
@@ -872,7 +872,7 @@ auto WalImpl::checkpoint(File &db_file, std::size_t *db_size) -> Status
     m_min_frame = 0;
     m_hdr.max_frame = 0;
     m_index.cleanup();
-    return restart_header(static_cast<U32>(rand()));
+    return restart_header(m_env->rand());
 }
 
 auto WalImpl::sync() -> Status

@@ -6,8 +6,7 @@
 #define CALICODB_ENV_POSIX_H
 
 #include "calicodb/env.h"
-#include "calicodb/slice.h"
-#include "calicodb/status.h"
+#include "utils.h"
 
 namespace calicodb
 {
@@ -26,8 +25,10 @@ public:
     [[nodiscard]] auto sync() -> Status override;
 
 private:
+    friend class EnvPosix;
     std::string m_filename;
     int m_file = -1;
+    int m_lock = 0;
 };
 
 class PosixLogFile : public LogFile
@@ -46,8 +47,11 @@ private:
 
 class EnvPosix : public Env
 {
+    U16 m_rng[3] = {};
+    pid_t m_pid;
+
 public:
-    EnvPosix() = default;
+    EnvPosix();
     ~EnvPosix() override = default;
     [[nodiscard]] auto new_file(const std::string &filename, File *&out) -> Status override;
     [[nodiscard]] auto new_log_file(const std::string &filename, LogFile *&out) -> Status override;
@@ -55,6 +59,12 @@ public:
     [[nodiscard]] auto resize_file(const std::string &filename, std::size_t size) -> Status override;
     [[nodiscard]] auto file_exists(const std::string &filename) const -> bool override;
     [[nodiscard]] auto file_size(const std::string &filename, std::size_t &out) const -> Status override;
+
+    auto srand(unsigned seed) -> void override;
+    [[nodiscard]] auto rand() -> unsigned override;
+
+    [[nodiscard]] auto lock(File &file, LockMode mode) -> Status override;
+    [[nodiscard]] auto unlock(File &file) -> Status override;
 };
 
 } // namespace calicodb

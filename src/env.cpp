@@ -77,4 +77,24 @@ auto EnvWrapper::remove_file(const std::string &filename) -> Status
     return m_target->remove_file(filename);
 }
 
+auto EnvWrapper::lock(File &file, LockMode mode) -> Status
+{
+    return m_target->lock(file, mode);
+}
+
+auto EnvWrapper::unlock(File &file) -> Status
+{
+    return m_target->unlock(file);
+}
+
+auto EnvWrapper::srand(unsigned seed) -> void
+{
+    m_target->srand(seed);
+}
+
+auto EnvWrapper::rand() -> unsigned
+{
+    return m_target->rand();
+}
+
 } // namespace calicodb

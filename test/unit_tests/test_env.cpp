@@ -10,6 +10,9 @@
 #include <fstream>
 #include <gtest/gtest.h>
 
+#include <sys/fcntl.h>
+#include <sys/types.h>
+
 namespace calicodb
 {
 
