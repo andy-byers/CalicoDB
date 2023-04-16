@@ -10,5 +10,3 @@ add_executable(bench_calicodb
         bench_calicodb.cpp)
 target_link_libraries(bench_calicodb
         PRIVATE benchmark calicodb_tools)
-target_compile_options(bench_calicodb
-        PRIVATE "${CALICODB_WARNINGS}")

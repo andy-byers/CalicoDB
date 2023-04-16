@@ -64,7 +64,7 @@ TEST(BasicDestructionTests, OnlyDeletesCalicoDatabases)
 
     // File is too small to read the header.
     File *file;
-    ASSERT_OK(options.env->new_file("./testdb", file));
+    ASSERT_OK(options.env->new_file("./testdb", Env::kCreate | Env::kReadWrite, file));
     ASSERT_TRUE(DB::destroy(options, "./testdb").is_invalid_argument());
     ASSERT_TRUE(options.env->file_exists("./testdb"));
 
@@ -98,9 +98,9 @@ TEST(BasicDestructionTests, OnlyDeletesCalicoWals)
 
     // These files are not part of the DB.
     File *editor;
-    ASSERT_OK(options.env->new_file("./wal_", editor));
+    ASSERT_OK(options.env->new_file("./wal_", Env::kCreate | Env::kReadWrite, editor));
     delete editor;
-    ASSERT_OK(options.env->new_file("./test.db", editor));
+    ASSERT_OK(options.env->new_file("./test.db", Env::kCreate | Env::kReadWrite, editor));
     delete editor;
 
     ASSERT_OK(DB::destroy(options, "./test"));
@@ -826,7 +826,7 @@ INSTANTIATE_TEST_SUITE_P(
         ErrorWrapper {"./wal", tools::Interceptor::kWrite, 5}));
 
 class DbOpenTests
-    : public EnvTestHarness<EnvPosix>,
+    : public EnvTestHarness<PosixEnv>,
       public testing::Test
 {
 protected:
@@ -1095,7 +1095,8 @@ TEST_F(ApiTests, CheckIfKeyExists)
     ASSERT_OK(db->get("k", nullptr));
 }
 
-class NoLoggingEnv : public EnvWrapper {
+class NoLoggingEnv : public EnvWrapper
+{
     Env *m_env;
 
 public:
@@ -1236,7 +1237,7 @@ TEST_F(CommitFailureTests, WalFlushFailure)
 }
 
 class WalPrefixTests
-    : public EnvTestHarness<EnvPosix>,
+    : public EnvTestHarness<PosixEnv>,
       public testing::Test
 {
 public:

@@ -504,8 +504,8 @@ TEST_F(InterceptorTests, RespectsPrefix)
     QUICK_INTERCEPTOR("./test", tools::Interceptor::kOpen);
 
     File *editor;
-    assert_special_error(env().new_file("./test", editor));
-    ASSERT_OK(env().new_file("./wal", editor));
+    assert_special_error(env().new_file("./test", Env::kCreate | Env::kReadWrite, editor));
+    ASSERT_OK(env().new_file("./wal", Env::kCreate | Env::kReadWrite, editor));
     delete editor;
 }
 
@@ -514,7 +514,7 @@ TEST_F(InterceptorTests, RespectsSyscallType)
     QUICK_INTERCEPTOR("./test", tools::Interceptor::kWrite);
 
     File *editor;
-    ASSERT_OK(env().new_file("./test", editor));
+    ASSERT_OK(env().new_file("./test", Env::kCreate | Env::kReadWrite, editor));
     assert_special_error(editor->write(0, {}));
     delete editor;
 }

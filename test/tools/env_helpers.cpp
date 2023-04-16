@@ -4,7 +4,7 @@
 
 #include "env_helpers.h"
 
-namespace calicodb::tools 
+namespace calicodb::tools
 {
 
 #define TRY_INTERCEPT_FROM(source, type, filename)                                                     \
@@ -13,7 +13,6 @@ namespace calicodb::tools
             return intercept_s;                                                                        \
         }                                                                                              \
     } while (0)
-
 
 auto FakeEnv::get_file_contents(const std::string &filename) const -> std::string
 {
@@ -79,7 +78,7 @@ auto FakeEnv::open_or_create_file(const std::string &filename) const -> FileStat
     return itr->second;
 }
 
-auto FakeEnv::new_file(const std::string &filename, File *&out) -> Status
+auto FakeEnv::new_file(const std::string &filename, OpenMode, File *&out) -> Status
 {
     auto &mem = open_or_create_file(filename);
     out = new FakeFile(filename, *this, mem);
@@ -208,11 +207,11 @@ auto TestEnv::drop_after_last_sync(const std::string &filename) -> void
     }
 }
 
-auto TestEnv::new_file(const std::string &filename, File *&out) -> Status
+auto TestEnv::new_file(const std::string &filename, OpenMode mode, File *&out) -> Status
 {
     TRY_INTERCEPT_FROM(*this, Interceptor::kOpen, filename);
 
-    auto s = target()->new_file(filename, out);
+    auto s = target()->new_file(filename, mode, out);
     if (s.is_ok()) {
         auto state = m_state.find(filename);
         if (state == end(m_state)) {

@@ -62,7 +62,7 @@ public:
         return Status::not_found("");
     }
 
-    [[nodiscard]] auto write(const PageRef *dirty, std::size_t) -> Status override
+    [[nodiscard]] auto write(const PageRef *, std::size_t) -> Status override
     {
         return Status::ok();
     }
@@ -199,7 +199,8 @@ auto print_wals(Env &env, std::size_t page_size, const std::string &prefix) -> v
 auto hexdump_page(const Page &page) -> void;
 
 auto read_file_to_string(Env &env, const std::string &filename) -> std::string;
-auto write_string_to_file(Env &env, const std::string &filename, std::string buffer, long offset = -1) -> void;
+auto write_string_to_file(Env &env, const std::string &filename, const std::string &buffer, long offset = -1) -> void;
+auto assign_file_contents(Env &env, const std::string &filename, const std::string &contents) -> void;
 auto fill_db(DB &db, RandomGenerator &random, std::size_t num_records, std::size_t max_payload_size = 100) -> std::map<std::string, std::string>;
 auto fill_db(DB &db, Table &table, RandomGenerator &random, std::size_t num_records, std::size_t max_payload_size = 100) -> std::map<std::string, std::string>;
 auto expect_db_contains(const DB &db, const std::map<std::string, std::string> &map) -> void;

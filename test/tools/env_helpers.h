@@ -18,7 +18,7 @@ public:
     virtual auto put_file_contents(const std::string &filename, std::string contents) -> void;
 
     ~FakeEnv() override = default;
-    [[nodiscard]] auto new_file(const std::string &filename, File *&out) -> Status override;
+    [[nodiscard]] auto new_file(const std::string &filename, OpenMode mode, File *&out) -> Status override;
     [[nodiscard]] auto new_log_file(const std::string &filename, LogFile *&out) -> Status override;
     [[nodiscard]] auto file_exists(const std::string &filename) const -> bool override;
     [[nodiscard]] auto resize_file(const std::string &filename, std::size_t size) -> Status override;
@@ -28,8 +28,8 @@ public:
     auto srand(unsigned seed) -> void override;
     [[nodiscard]] auto rand() -> unsigned override;
 
-    [[nodiscard]] auto lock(File &, LockMode) -> Status override {return Status::ok();}
-    [[nodiscard]] auto unlock(File &) -> Status override {return Status::ok();}
+    [[nodiscard]] auto lock(File &, LockMode mode) -> Status override { return Status::ok(); }
+    [[nodiscard]] auto unlock(File &, LockMode mode) -> Status override { return Status::ok(); }
 
 protected:
     friend class FakeFile;
@@ -139,7 +139,7 @@ public:
     virtual auto clear_interceptors() -> void;
     virtual auto clear_interceptors(const std::string &filename) -> void;
 
-    [[nodiscard]] auto new_file(const std::string &filename, File *&out) -> Status override;
+    [[nodiscard]] auto new_file(const std::string &filename, OpenMode mode, File *&out) -> Status override;
     [[nodiscard]] auto resize_file(const std::string &filename, std::size_t file_size) -> Status override;
     [[nodiscard]] auto remove_file(const std::string &filename) -> Status override;
 

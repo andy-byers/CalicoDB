@@ -1888,8 +1888,9 @@ INSTANTIATE_TEST_SUITE_P(
     ::testing::Values(
         TreeTestParameters {kMinPageSize}));
 
-template<class T>
-class PermutationGenerator {
+template <class T>
+class PermutationGenerator
+{
     std::vector<T> m_values;
     std::vector<std::size_t> m_indices;
 
@@ -1920,7 +1921,9 @@ TEST(PermutationGeneratorTests, GeneratesAllPermutationsInLexicographicalOrder)
 {
     std::vector<int> result;
     PermutationGenerator<int> generator({
-        1, 2, 3,
+        1,
+        2,
+        3,
     });
 
     for (int iteration = 0; iteration < 2; ++iteration) {
@@ -1939,7 +1942,8 @@ TEST(PermutationGeneratorTests, GeneratesAllPermutationsInLexicographicalOrder)
     }
 }
 
-class RebalanceTests : public TreeTests {
+class RebalanceTests : public TreeTests
+{
 public:
     ~RebalanceTests() override = default;
 
@@ -2020,6 +2024,5 @@ INSTANTIATE_TEST_SUITE_P(
         TreeTestParameters {kMinPageSize, 1},
         TreeTestParameters {kMinPageSize, 5},
         TreeTestParameters {kMinPageSize, 10}));
-
 
 } // namespace calicodb

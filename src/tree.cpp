@@ -1932,7 +1932,7 @@ auto PayloadManager::collect_value(Pager &pager, std::string &result, const Cell
     return Status::ok();
 }
 
-#if CALICODB_BUILD_TESTS
+#if CALICODB_TEST
 
 #define CHECK_OK(expr)                                                                     \
     do {                                                                                   \
@@ -2308,7 +2308,7 @@ auto Tree::TEST_validate() -> void
 {
 }
 
-#endif // CALICODB_BUILD_TESTS
+#endif // CALICODB_TEST
 
 Cursor::Cursor() = default;
 Cursor::~Cursor() = default;

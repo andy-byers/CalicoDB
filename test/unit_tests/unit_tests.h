@@ -7,12 +7,12 @@
 
 #include "calicodb/status.h"
 #include "db_impl.h"
+#include "env_helpers.h"
 #include "env_posix.h"
 #include "page.h"
 #include "tools.h"
 #include "utils.h"
 #include "wal.h"
-#include "env_helpers.h"
 #include <filesystem>
 #include <gtest/gtest.h>
 #include <iomanip>
@@ -96,8 +96,12 @@ class EnvTestHarness
 {
 public:
     explicit EnvTestHarness()
-        : m_env(new EnvType())
     {
+        if constexpr (std::is_same_v<EnvType, PosixEnv>) {
+            m_env = Env::default_env();
+        } else {
+            m_env = new EnvType();
+        }
         (void)m_env->remove_file(kDBFilename);
         (void)m_env->remove_file(kWalFilename);
     }

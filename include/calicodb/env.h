@@ -19,19 +19,17 @@ class LogFile;
 class Env
 {
 public:
-    // CalicoDB file lock modes (from SQLite). The mode kPending is never explicitly
-    // requested. An Env implementation may, however, leave a file locked in kPending
-    // mode if an exclusive lock could not be granted while a kReserved lock was held.
-    // The following state transitions must be supported:
-    //
-    //     <unlocked> -> kShared
-    //     kShared -> kReserved
-    //     kShared -> kExclusive
-    //     kReserved -> (kPending) -> kExclusive
-    //     kPending -> kExclusive
-    //
+    enum OpenMode : int {
+        kCreate = 1,
+
+        // These 2 flags are mutually exclusive: only 1 may be set when opening a file.
+        kReadOnly = 2,
+        kReadWrite = 4,
+    };
+
     enum LockMode {
-        kShared = 1,
+        kUnlocked,
+        kShared,
         kReserved,
         kPending,
         kExclusive,
@@ -41,7 +39,7 @@ public:
     static auto default_env() -> Env *;
 
     virtual ~Env();
-    [[nodiscard]] virtual auto new_file(const std::string &filename, File *&out) -> Status = 0;
+    [[nodiscard]] virtual auto new_file(const std::string &filename, OpenMode mode, File *&out) -> Status = 0;
     [[nodiscard]] virtual auto new_log_file(const std::string &filename, LogFile *&out) -> Status = 0;
     [[nodiscard]] virtual auto file_exists(const std::string &filename) const -> bool = 0;
     [[nodiscard]] virtual auto resize_file(const std::string &filename, std::size_t size) -> Status = 0;
@@ -51,11 +49,22 @@ public:
     virtual auto srand(unsigned seed) -> void = 0;
     [[nodiscard]] virtual auto rand() -> unsigned = 0;
 
-    // NOTE: As of right now, these methods are not meant to be called concurrently
-    //       from multiple threads. The Env object is not thread-safe. They should
-    //       be used to coordinate with other processes, each with their own Env.
+    // Take a lock on the given file
+    //
+    // Return Status::ok() if the lock is granted, Status::busy() if an
+    // incompatible lock is already held by a different thread or process,
+    // or a Status::io_error() if a system call otherwise fails.
+    //
+    //     Before -> (Intermediate) -> After
+    //    ----------------------------------------
+    //     kUnlocked ----------------> kShared
+    //     kShared ------------------> kReserved
+    //     kShared ------------------> kExclusive
+    //     kReserved --> (kPending) -> kExclusive
+    //     kPending -----------------> kExclusive
+    //
     [[nodiscard]] virtual auto lock(File &file, LockMode mode) -> Status = 0;
-    [[nodiscard]] virtual auto unlock(File &file) -> Status = 0;
+    [[nodiscard]] virtual auto unlock(File &file, LockMode mode) -> Status = 0;
 };
 
 class File
@@ -102,7 +111,7 @@ public:
     [[nodiscard]] auto target() const -> const Env *;
 
     ~EnvWrapper() override;
-    [[nodiscard]] auto new_file(const std::string &filename, File *&out) -> Status override;
+    [[nodiscard]] auto new_file(const std::string &filename, OpenMode mode, File *&out) -> Status override;
     [[nodiscard]] auto new_log_file(const std::string &filename, LogFile *&out) -> Status override;
     [[nodiscard]] auto file_exists(const std::string &filename) const -> bool override;
     [[nodiscard]] auto resize_file(const std::string &filename, std::size_t size) -> Status override;
@@ -113,11 +122,19 @@ public:
     [[nodiscard]] auto rand() -> unsigned override;
 
     [[nodiscard]] auto lock(File &file, LockMode mode) -> Status override;
-    [[nodiscard]] auto unlock(File &file) -> Status override;
+    [[nodiscard]] auto unlock(File &file, LockMode mode) -> Status override;
 
 private:
     Env *m_target;
 };
+
+// Allow composition of open modes with OR
+inline constexpr auto operator|(Env::OpenMode lhs, Env::OpenMode rhs) -> Env::OpenMode
+{
+    return Env::OpenMode {
+        static_cast<int>(lhs) |
+        static_cast<int>(rhs)};
+}
 
 } // namespace calicodb
 

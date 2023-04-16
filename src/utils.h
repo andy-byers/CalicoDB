@@ -12,12 +12,12 @@
 #include <limits>
 
 #if NDEBUG
-#  define CALICODB_EXPECT_(expr, file, line)
+#define CALICODB_EXPECT_(expr, file, line)
 #else
 #define CALICODB_EXPECT_(expr, file, line) impl::expect(expr, #expr, file, line)
-#  ifdef CALICODB_BUILD_TESTS
-#    define CALICODB_EXPENSIVE_CHECKS
-#  endif // CALICODB_BUILD_TESTS
+#ifdef CALICODB_TEST
+#define CALICODB_EXPENSIVE_CHECKS
+#endif // CALICODB_TEST
 #endif // NDEBUG
 
 #define CALICODB_EXPECT_TRUE(expr) CALICODB_EXPECT_(expr, __FILE__, __LINE__)
@@ -86,6 +86,8 @@ constexpr auto is_power_of_two(T v) noexcept -> bool
         return "corruption";
     } else if (s.is_invalid_argument()) {
         return "invalid argument";
+    } else if (s.is_busy()) {
+        return "busy";
     }
     CALICODB_EXPECT_TRUE(s.is_ok());
     return "OK";

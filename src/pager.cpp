@@ -90,8 +90,9 @@ auto Pager::open(const Parameters &param, Pager *&out) -> Status
     CALICODB_EXPECT_LE(param.page_size * param.frame_count, kMaxCacheSize);
     const auto exists = param.env->file_exists(param.filename);
 
+    // TODO: See TODO in db_impl.cpp about passing in the file to this constructor.
     File *file;
-    CALICODB_TRY(param.env->new_file(param.filename, file));
+    CALICODB_TRY(param.env->new_file(param.filename, Env::kCreate | Env::kReadWrite, file));
 
     out = new Pager(param, *file);
     auto s = out->initialize_root(!exists);
@@ -358,7 +359,7 @@ auto Pager::ensure_available_buffer() -> Status
                 s = write_page_to_file(*victim);
             }
             if (!s.is_ok()) {
-                // This is an error, regardless of what mode the pager is in. Requires a successful
+                // This is an error, regardless of what lock the pager is in. Requires a successful
                 // rollback and cache purge.
                 set_status(s);
             }

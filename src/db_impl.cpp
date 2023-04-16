@@ -142,7 +142,11 @@ auto DBImpl::open(const Options &sanitized) -> Status
         }
         File *file;
         char buffer[FileHeader::kSize];
-        CALICODB_TRY(m_env->new_file(m_db_filename, file));
+        // TODO: Rather than checking if the file exists, just try to open it without Env::kCreate set.
+        //       If it fails, then the DB does not exist and new_file() can be retried with Env::kCreate
+        //       to create the file. If it does exist, use that file handle to read the header then pass
+        //       it to the pager. It doesn't need to be closed and opened again.
+        CALICODB_TRY(m_env->new_file(m_db_filename, Env::kReadWrite, file));
         auto s = file->read_exact(0, sizeof(buffer), buffer);
         delete file;
         if (!s.is_ok()) {
@@ -259,17 +263,17 @@ DBImpl::~DBImpl()
         }
     }
 
+    delete m_default;
+    delete m_root;
+    delete m_pager;
+    delete m_wal;
+
     if (m_owns_log) {
         delete m_log;
     }
     if (m_owns_env) {
         delete m_env;
     }
-
-    delete m_default;
-    delete m_root;
-    delete m_pager;
-    delete m_wal;
 }
 
 auto DBImpl::repair(const Options &options, const std::string &filename) -> Status

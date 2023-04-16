@@ -11,49 +11,30 @@
 namespace calicodb
 {
 
+// Representation of an open file descriptor
+class PosixFile;
+
+// Simple filesystem path management routines
 [[nodiscard]] auto split_path(const std::string &filename) -> std::pair<std::string, std::string>;
 [[nodiscard]] auto join_paths(const std::string &lhs, const std::string &rhs) -> std::string;
 [[nodiscard]] auto cleanup_path(const std::string &filename) -> std::string;
 
-class PosixFile : public File
+class PosixEnv : public Env
 {
-public:
-    explicit PosixFile(std::string filename, int file);
-    ~PosixFile() override;
-    [[nodiscard]] auto read(std::size_t offset, std::size_t size, char *scratch, Slice *out) -> Status override;
-    [[nodiscard]] auto write(std::size_t offset, const Slice &in) -> Status override;
-    [[nodiscard]] auto sync() -> Status override;
+    friend class PosixFile;
 
-private:
-    friend class EnvPosix;
-    std::string m_filename;
-    int m_file = -1;
-    int m_lock = 0;
-};
+    static auto ref_inode(PosixFile &file) -> int;
+    static auto unref_inode(PosixFile &file) -> void;
+    static auto close_pending_files(PosixFile &file) -> void;
+    static auto set_pending_file(PosixFile &file) -> void;
 
-class PosixLogFile : public LogFile
-{
-public:
-    explicit PosixLogFile(std::string filename, int file);
-    ~PosixLogFile() override;
-    auto write(const Slice &in) -> void override;
-
-private:
-    static constexpr std::size_t kBufferSize = 512;
-    std::string m_buffer;
-    std::string m_filename;
-    int m_file = -1;
-};
-
-class EnvPosix : public Env
-{
     U16 m_rng[3] = {};
     pid_t m_pid;
 
 public:
-    EnvPosix();
-    ~EnvPosix() override = default;
-    [[nodiscard]] auto new_file(const std::string &filename, File *&out) -> Status override;
+    PosixEnv();
+    ~PosixEnv() override;
+    [[nodiscard]] auto new_file(const std::string &filename, OpenMode mode, File *&out) -> Status override;
     [[nodiscard]] auto new_log_file(const std::string &filename, LogFile *&out) -> Status override;
     [[nodiscard]] auto remove_file(const std::string &filename) -> Status override;
     [[nodiscard]] auto resize_file(const std::string &filename, std::size_t size) -> Status override;
@@ -64,7 +45,7 @@ public:
     [[nodiscard]] auto rand() -> unsigned override;
 
     [[nodiscard]] auto lock(File &file, LockMode mode) -> Status override;
-    [[nodiscard]] auto unlock(File &file) -> Status override;
+    [[nodiscard]] auto unlock(File &file, LockMode mode) -> Status override;
 };
 
 } // namespace calicodb

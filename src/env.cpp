@@ -23,12 +23,12 @@ auto File::read_exact(std::size_t offset, std::size_t size, char *scratch) -> St
 
 LogFile::~LogFile() = default;
 
-Env::~Env() = default;
-
 auto Env::default_env() -> Env *
 {
-    return new EnvPosix;
+    return new PosixEnv;
 }
+
+Env::~Env() = default;
 
 EnvWrapper::~EnvWrapper() = default;
 
@@ -47,9 +47,9 @@ auto EnvWrapper::target() const -> const Env *
     return m_target;
 }
 
-auto EnvWrapper::new_file(const std::string &filename, File *&out) -> Status
+auto EnvWrapper::new_file(const std::string &filename, OpenMode mode, File *&out) -> Status
 {
-    return m_target->new_file(filename, out);
+    return m_target->new_file(filename, mode, out);
 }
 
 auto EnvWrapper::new_log_file(const std::string &filename, LogFile *&out) -> Status
@@ -82,9 +82,9 @@ auto EnvWrapper::lock(File &file, LockMode mode) -> Status
     return m_target->lock(file, mode);
 }
 
-auto EnvWrapper::unlock(File &file) -> Status
+auto EnvWrapper::unlock(File &file, LockMode mode) -> Status
 {
-    return m_target->unlock(file);
+    return m_target->unlock(file, mode);
 }
 
 auto EnvWrapper::srand(unsigned seed) -> void

@@ -28,9 +28,9 @@ cmake -DCMAKE_BUILD_TYPE=RelWithAssertions .. && cmake --build .
 
 to build the library and tests.
 Note that the tests must be built with assertions, hence the `RelWithAssertions`.
-To build the library in release mode without tests, the last command would look like:
+To build the library in release lock without tests, the last command would look like:
 ```bash
-cmake -DCMAKE_BUILD_TYPE=Release -DCALICODB_BuildTests=Off .. && cmake --build .
+cmake -DCMAKE_BUILD_TYPE=Release -DCALICODB_Test=Off .. && cmake --build .
 ```
 
 ## API
@@ -202,8 +202,8 @@ if (s.is_ok()) {
 
 ```C++
 calicodb::TableOptions table_options = {
-    // Pass AccessMode::kReadOnly to open in read-only mode.
-    .mode = AccessMode::kReadWrite,
+    // Pass AccessMode::kReadOnly to open in read-only lock.
+    .lock = AccessMode::kReadWrite,
 };
 
 // Open or create a table.

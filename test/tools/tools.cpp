@@ -83,14 +83,14 @@ auto read_file_to_string(Env &env, const std::string &filename) -> std::string
     std::string buffer(file_size, '\0');
 
     File *file;
-    CHECK_OK(env.new_file(filename, file));
+    CHECK_OK(env.new_file(filename, Env::kCreate | Env::kReadWrite, file));
     CHECK_OK(file->read_exact(0, file_size, buffer.data()));
     delete file;
 
     return buffer;
 }
 
-auto write_string_to_file(Env &env, const std::string &filename, std::string buffer, long offset) -> void
+auto write_string_to_file(Env &env, const std::string &filename, const std::string &buffer, long offset) -> void
 {
     std::size_t write_pos;
     if (offset < 0) {
@@ -99,18 +99,24 @@ auto write_string_to_file(Env &env, const std::string &filename, std::string buf
         write_pos = offset;
     }
     File *file;
-    CHECK_OK(env.new_file(filename, file));
+    CHECK_OK(env.new_file(filename, Env::kCreate | Env::kReadWrite, file));
     CHECK_OK(file->write(write_pos, buffer));
     delete file;
 }
 
+auto assign_file_contents(Env &env, const std::string &filename, const std::string &contents) -> void
+{
+    CHECK_OK(env.resize_file(filename, 0));
+    write_string_to_file(env, filename, contents, 0);
+}
+
 auto hexdump_page(const Page &page) -> void
 {
-    std::fprintf(stderr,"%u:\n",page.id().value);
-    for (std::size_t i = 0; i < page.size() / 16; ++i){
+    std::fprintf(stderr, "%u:\n", page.id().value);
+    for (std::size_t i = 0; i < page.size() / 16; ++i) {
         std::fputs("    ", stderr);
-        for(std::size_t j = 0; j < 16; ++j){
-            const auto c=page.data()[i * 16 + j];
+        for (std::size_t j = 0; j < 16; ++j) {
+            const auto c = page.data()[i * 16 + j];
             if (std::isprint(c)) {
                 std::fprintf(stderr, "%2c ", c);
             } else {

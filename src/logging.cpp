@@ -21,7 +21,7 @@ static auto try_write(char *buffer, std::size_t buffer_size, const char *fmt, st
     va_copy(copy, args);
     const auto rc = std::vsnprintf(buffer, buffer_size, fmt, copy);
     va_end(copy);
-        
+
     WriteInfo info;
     if (rc >= 0) {
         info.length = static_cast<std::size_t>(rc);

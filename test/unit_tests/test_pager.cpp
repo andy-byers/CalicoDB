@@ -24,73 +24,73 @@ namespace calicodb
     return {.page_id = Id(id_value)};
 }
 
- class PageCacheTests : public testing::Test
+class PageCacheTests : public testing::Test
 {
- public:
-     explicit PageCacheTests()
-         : mgr(kMinPageSize, kMinFrameCount)
-     {
-     }
+public:
+    explicit PageCacheTests()
+        : mgr(kMinPageSize, kMinFrameCount)
+    {
+    }
 
-     ~PageCacheTests() override = default;
+    ~PageCacheTests() override = default;
 
-     Bufmgr mgr;
- };
+    Bufmgr mgr;
+};
 
- TEST_F(PageCacheTests, EmptyBehavior)
+TEST_F(PageCacheTests, EmptyBehavior)
 {
-     ASSERT_EQ(mgr.size(), 0);
-     ASSERT_EQ(mgr.size(), 0);
-     ASSERT_EQ(mgr.get(Id(2)), nullptr);
-     ASSERT_EQ(mgr.next_victim(), nullptr);
- }
+    ASSERT_EQ(mgr.size(), 0);
+    ASSERT_EQ(mgr.size(), 0);
+    ASSERT_EQ(mgr.get(Id(2)), nullptr);
+    ASSERT_EQ(mgr.next_victim(), nullptr);
+}
 
- TEST_F(PageCacheTests, OldestReferenceIsEvictedFirst)
+TEST_F(PageCacheTests, OldestReferenceIsEvictedFirst)
 {
     (void)mgr.alloc(Id(5));
     (void)mgr.alloc(Id(4));
     (void)mgr.alloc(Id(3));
     (void)mgr.alloc(Id(2));
-     ASSERT_EQ(mgr.size(), 4);
+    ASSERT_EQ(mgr.size(), 4);
 
-     ASSERT_EQ(mgr.get(Id(5))->page_id, Id(5));
-     ASSERT_EQ(mgr.get(Id(4))->page_id, Id(4));
+    ASSERT_EQ(mgr.get(Id(5))->page_id, Id(5));
+    ASSERT_EQ(mgr.get(Id(4))->page_id, Id(4));
 
-     ASSERT_EQ(mgr.next_victim()->page_id, Id(3));
-     mgr.erase(mgr.next_victim()->page_id);
-     ASSERT_EQ(mgr.next_victim()->page_id, Id(2));
-     mgr.erase(mgr.next_victim()->page_id);
-     ASSERT_EQ(mgr.next_victim()->page_id, Id(5));
-     mgr.erase(mgr.next_victim()->page_id);
-     ASSERT_EQ(mgr.next_victim()->page_id, Id(4));
-     mgr.erase(mgr.next_victim()->page_id);
-     ASSERT_EQ(mgr.size(), 0);
- }
+    ASSERT_EQ(mgr.next_victim()->page_id, Id(3));
+    mgr.erase(mgr.next_victim()->page_id);
+    ASSERT_EQ(mgr.next_victim()->page_id, Id(2));
+    mgr.erase(mgr.next_victim()->page_id);
+    ASSERT_EQ(mgr.next_victim()->page_id, Id(5));
+    mgr.erase(mgr.next_victim()->page_id);
+    ASSERT_EQ(mgr.next_victim()->page_id, Id(4));
+    mgr.erase(mgr.next_victim()->page_id);
+    ASSERT_EQ(mgr.size(), 0);
+}
 
- TEST_F(PageCacheTests, ReplacementPolicyIgnoresQuery)
+TEST_F(PageCacheTests, ReplacementPolicyIgnoresQuery)
 {
-     (void)mgr.alloc(Id(3));
-     (void)mgr.alloc(Id(2));
+    (void)mgr.alloc(Id(3));
+    (void)mgr.alloc(Id(2));
 
-     (void)mgr.query(Id(3));
+    (void)mgr.query(Id(3));
 
-     ASSERT_EQ(mgr.next_victim()->page_id, Id(3));
-     mgr.erase(mgr.next_victim()->page_id);
-     ASSERT_EQ(mgr.next_victim()->page_id, Id(2));
-     mgr.erase(mgr.next_victim()->page_id);
- }
+    ASSERT_EQ(mgr.next_victim()->page_id, Id(3));
+    mgr.erase(mgr.next_victim()->page_id);
+    ASSERT_EQ(mgr.next_victim()->page_id, Id(2));
+    mgr.erase(mgr.next_victim()->page_id);
+}
 
- TEST_F(PageCacheTests, RefcountsAreConsideredDuringEviction)
+TEST_F(PageCacheTests, RefcountsAreConsideredDuringEviction)
 {
-     (void)mgr.alloc(Id(3));
-     (void)mgr.alloc(Id(2));
+    (void)mgr.alloc(Id(3));
+    (void)mgr.alloc(Id(2));
 
-     mgr.query(Id(3))->refcount = 2;
+    mgr.query(Id(3))->refcount = 2;
 
-     ASSERT_EQ(mgr.next_victim()->page_id, Id(2));
-     mgr.erase(mgr.next_victim()->page_id);
-     ASSERT_EQ(mgr.next_victim(), nullptr);
- }
+    ASSERT_EQ(mgr.next_victim()->page_id, Id(2));
+    mgr.erase(mgr.next_victim()->page_id);
+    ASSERT_EQ(mgr.next_victim(), nullptr);
+}
 
 auto write_to_page(Page &page, const std::string &message) -> void
 {
@@ -230,7 +230,7 @@ public:
     {
         File *file;
         std::string message(size, '\x00');
-        EXPECT_OK(env->new_file(kDBFilename, file));
+        EXPECT_OK(env->new_file(kDBFilename, Env::kCreate | Env::kReadWrite, file));
         EXPECT_OK(file->read_exact(
             id.value * kPageSize - message.size(),
             message.size(),
@@ -836,8 +836,8 @@ protected:
     auto run_and_validate_checkpoint(bool save_state = true) -> void
     {
         File *real, *fake;
-        ASSERT_OK(env().new_file("real", real));
-        ASSERT_OK(env().new_file("fake", fake));
+        ASSERT_OK(env().new_file("real", Env::kCreate | Env::kReadWrite, real));
+        ASSERT_OK(env().new_file("fake", Env::kCreate | Env::kReadWrite, fake));
         ASSERT_OK(m_wal->checkpoint(*real, nullptr));
         ASSERT_OK(m_fake->checkpoint(*fake, nullptr));
 
