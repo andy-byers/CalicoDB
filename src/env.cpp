@@ -77,9 +77,14 @@ auto EnvWrapper::remove_file(const std::string &filename) -> Status
     return m_target->remove_file(filename);
 }
 
-auto EnvWrapper::lock(File &file, LockMode mode) -> Status
+auto EnvWrapper::set_lock(File &file, LockMode mode) -> Status
 {
-    return m_target->lock(file, mode);
+    return m_target->set_lock(file, mode);
+}
+
+auto EnvWrapper::get_lock(const File &file) const -> LockMode
+{
+    return m_target->get_lock(file);
 }
 
 auto EnvWrapper::unlock(File &file, LockMode mode) -> Status

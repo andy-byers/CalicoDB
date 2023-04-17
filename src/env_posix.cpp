@@ -92,7 +92,7 @@ enum class PosixCode {
 // starting at kSharedFirst. Note that these fields are right next to each other
 // in the DB file.
 //
-//     lock        #  p r s...s
+//     Lock        #  p r s...s
 //    --------------------------
 //     kUnlocked   1  . . . . .
 //     kShared     1  R . . . .
@@ -107,7 +107,48 @@ static constexpr std::size_t kReservedByte = kPendingByte + 1;
 static constexpr std::size_t kSharedFirst = kPendingByte + 2;
 static constexpr std::size_t kSharedSize = 510;
 
-[[nodiscard]] auto file_lock(int file, const struct flock &lock) -> int
+//static auto trace_lock(int file, const struct flock &lock) -> void
+//{
+//    std::fprintf(stderr, "%d ", file);
+//    switch (lock.l_type) {
+//        case F_RDLCK:
+//            std::fputs("RD: ", stderr);
+//            break;
+//        case F_WRLCK:
+//            std::fputs("WR: ", stderr);
+//            break;
+//        case F_UNLCK:
+//            std::fputs("UN: ", stderr);
+//            break;
+//        default:
+//            std::fputs("??: ", stderr);
+//    }
+//    if (lock.l_start == long(kPendingByte)) {
+//        if (lock.l_len == 1) {
+//            std::fputs("kPendingByte\n", stderr);
+//        } else if (lock.l_len == 2) {
+//            std::fputs("kPendingByte && kReservedByte\n", stderr);
+//        } else {
+//            std::fputs("??\n", stderr);
+//        }
+//    } else if (lock.l_start == long(kReservedByte)) {
+//        if (lock.l_len == 1) {
+//            std::fputs("kReserved\n", stderr);
+//        } else {
+//            std::fputs("??\n", stderr);
+//        }
+//    } else if (lock.l_start == long(kSharedFirst)) {
+//        if (lock.l_len == kSharedSize) {
+//            std::fputs("<shared range>\n", stderr);
+//        } else {
+//            std::fputs("???\n", stderr);
+//        }
+//    } else {
+//        std::fprintf(stderr, " %lld/%lld\n", lock.l_start, lock.l_len);
+//    }
+//}
+
+[[nodiscard]] static auto file_lock(int file, const struct flock &lock) -> int
 {
     return fcntl(file, F_SETLK, &lock);
 }
@@ -152,6 +193,11 @@ static constexpr std::size_t kSharedSize = 510;
 [[nodiscard]] static auto posix_file(File &file) -> PosixFile &
 {
     return reinterpret_cast<PosixFile &>(file);
+}
+
+[[nodiscard]] static auto posix_file(const File &file) -> const PosixFile &
+{
+    return reinterpret_cast<const PosixFile &>(file);
 }
 
 [[nodiscard]] static auto file_open(const std::string &name, int mode, int permissions, int &out) -> Status
@@ -209,12 +255,9 @@ static constexpr std::size_t kSharedSize = 510;
     return Status::ok();
 }
 
-[[nodiscard]] static auto file_seek(int fd, long offset, int whence, std::size_t *out) -> Status
+[[nodiscard]] static auto file_seek(int fd, long offset) -> Status
 {
-    if (const auto position = lseek(fd, offset, whence); position != -1) {
-        if (out) {
-            *out = static_cast<std::size_t>(position);
-        }
+    if (const auto position = lseek(fd, offset, SEEK_SET); position != -1) {
         return Status::ok();
     }
     return xlate_last_error(errno);
@@ -312,8 +355,7 @@ auto PosixEnv::ref_inode(PosixFile &file) -> int
     if (ino == nullptr) {
         ino = new INode;
 
-        std::memcpy(&ino->key, &key, sizeof(key));
-
+        ino->key = key;
         ino->refcount = 1;
         ino->next = PosixFs::s_fs.inode;
         ino->prev = nullptr;
@@ -330,7 +372,7 @@ auto PosixEnv::ref_inode(PosixFile &file) -> int
 
 auto PosixEnv::unref_inode(PosixFile &file) -> void
 {
-    auto *&inode = file.m_inode;
+    auto *inode = file.m_inode;
     CALICODB_EXPECT_GT(inode->refcount, 0);
 
     if (--inode->refcount == 0) {
@@ -350,7 +392,6 @@ auto PosixEnv::unref_inode(PosixFile &file) -> void
             inode->next->prev = inode->prev;
         }
         delete inode;
-        inode = nullptr;
     }
 }
 
@@ -432,13 +473,13 @@ PosixFile::~PosixFile()
 
 auto PosixFile::read(std::size_t offset, std::size_t size, char *scratch, Slice *out) -> Status
 {
-    CALICODB_TRY(file_seek(m_file, static_cast<long>(offset), SEEK_SET, nullptr));
+    CALICODB_TRY(file_seek(m_file, static_cast<long>(offset)));
     return file_read(m_file, size, scratch, out);
 }
 
 auto PosixFile::write(std::size_t offset, const Slice &in) -> Status
 {
-    CALICODB_TRY(file_seek(m_file, static_cast<long>(offset), SEEK_SET, nullptr));
+    CALICODB_TRY(file_seek(m_file, static_cast<long>(offset)));
     return file_write(m_file, in);
 }
 
@@ -458,7 +499,6 @@ auto split_path(const std::string &filename) -> std::pair<std::string, std::stri
     std::string dir(dirname(buffer));
 
     delete[] buffer;
-
     return {dir, base};
 }
 
@@ -490,7 +530,12 @@ auto PosixEnv::close_pending_files(PosixFile &file) -> void
     inode->pending.clear();
 }
 
-auto PosixEnv::lock(File &file, LockMode mode) -> Status
+auto PosixEnv::get_lock(const File &file) const -> LockMode
+{
+    return LockMode {posix_file(file).m_lock};
+}
+
+auto PosixEnv::set_lock(File &file, LockMode mode) -> Status
 {
     auto &handle = posix_file(file);
     const auto old_mode = handle.m_lock;
@@ -514,7 +559,7 @@ auto PosixEnv::lock(File &file, LockMode mode) -> Status
 
     if (mode == Env::kShared && (inode->lock == Env::kShared || inode->lock == Env::kReserved)) {
         // Caller wants a shared lock, and a shared or reserved lock is already
-        // held. Grant the request.
+        // held by another thread. Grant the request.
         CALICODB_EXPECT_EQ(mode, Env::kShared);
         CALICODB_EXPECT_EQ(handle.m_lock, kUnlocked);
         CALICODB_EXPECT_GT(inode->nshared, 0);
@@ -523,7 +568,6 @@ auto PosixEnv::lock(File &file, LockMode mode) -> Status
         inode->nlocks++;
         return Status::ok();
     }
-
     struct flock lock = {};
     lock.l_len = 1;
     lock.l_whence = SEEK_SET;
@@ -531,8 +575,8 @@ auto PosixEnv::lock(File &file, LockMode mode) -> Status
         // Attempt to lock the pending byte.
         lock.l_start = kPendingByte;
         lock.l_type = mode == kShared ? F_RDLCK : F_WRLCK;
-        if (const auto rc = file_lock(file_num, lock)) {
-            return xlate_last_error(rc);
+        if (file_lock(file_num, lock)) {
+            return xlate_last_error(errno);
         } else if (mode == kExclusive) {
             handle.m_lock = kPending;
             inode->lock = kPending;
@@ -597,6 +641,7 @@ auto PosixEnv::lock(File &file, LockMode mode) -> Status
 
 auto PosixEnv::unlock(File &file, LockMode mode) -> Status
 {
+    CALICODB_EXPECT_LE(mode, Env::kShared);
     auto &handle = posix_file(file);
     const auto old_mode = handle.m_lock;
     const auto file_num = handle.m_file;
@@ -634,26 +679,21 @@ auto PosixEnv::unlock(File &file, LockMode mode) -> Status
         inode->lock = kShared;
     }
     Status s;
-    auto rc = PosixCode::kOK;
     if (mode == kUnlocked) {
-        --inode->nshared;
-        if (inode->nshared == 0) {
+        if (--inode->nshared == 0) {
             // The last shared lock has been released.
             lock.l_type = F_UNLCK;
             lock.l_whence = SEEK_SET;
             lock.l_len = 0;
             lock.l_start = 0;
             if (file_lock(file_num, lock)) {
-                rc = simplify_error(errno);
+                s = xlate_last_error(errno);
                 // TODO: SQLite seems to set some eFileLocks to NO_LOCK here.
                 //       Look into what kinds of errors fcntl(F_SETLK) can
                 //       encounter and what happens to the lock state in each case.
             }
             inode->lock = kUnlocked;
             handle.m_lock = kUnlocked;
-        }
-        if (rc != PosixCode::kOK) {
-            s = xlate_last_error(errno);
         }
         CALICODB_EXPECT_GT(inode->nlocks, 0);
 
@@ -662,7 +702,7 @@ auto PosixEnv::unlock(File &file, LockMode mode) -> Status
             close_pending_files(handle);
         }
     }
-    if (rc == PosixCode::kOK) {
+    if (s.is_ok()) {
         handle.m_lock = mode;
     }
     return s;

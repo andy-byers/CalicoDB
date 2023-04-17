@@ -27,7 +27,8 @@ public:
         kReadWrite = 4,
     };
 
-    enum LockMode {
+    // File locking modes and semantics are from SQLite.
+    enum LockMode : int {
         kUnlocked,
         kShared,
         kReserved,
@@ -49,11 +50,13 @@ public:
     virtual auto srand(unsigned seed) -> void = 0;
     [[nodiscard]] virtual auto rand() -> unsigned = 0;
 
-    // Take a lock on the given file
+    // Take or upgrade a lock on the given file
     //
     // Return Status::ok() if the lock is granted, Status::busy() if an
     // incompatible lock is already held by a different thread or process,
     // or a Status::io_error() if a system call otherwise fails.
+    //
+    // Compliant Envs support the following state transitions:
     //
     //     Before -> (Intermediate) -> After
     //    ----------------------------------------
@@ -63,7 +66,24 @@ public:
     //     kReserved --> (kPending) -> kExclusive
     //     kPending -----------------> kExclusive
     //
-    [[nodiscard]] virtual auto lock(File &file, LockMode mode) -> Status = 0;
+    [[nodiscard]] virtual auto set_lock(File &file, LockMode mode) -> Status = 0;
+
+    // Return the type of lock held on the given file
+    [[nodiscard]] virtual auto get_lock(const File &file) const -> LockMode = 0;
+
+    // Release or downgrade a lock on the given file
+    //
+    // Compliant Envs support the following state transitions (where "> X"
+    // represents a lock mode with higher-priority than "X"):
+    //
+    //     Before -----------> After
+    //    ------------------------------
+    //     > kUnlocked ------> kUnlocked
+    //     > kShared --------> kShared
+    //
+    // Also note that transitions "Y -> Y", where "Y" <= kShared, are
+    // allowed, but are NOOPs.
+    //
     [[nodiscard]] virtual auto unlock(File &file, LockMode mode) -> Status = 0;
 };
 
@@ -121,7 +141,8 @@ public:
     auto srand(unsigned seed) -> void override;
     [[nodiscard]] auto rand() -> unsigned override;
 
-    [[nodiscard]] auto lock(File &file, LockMode mode) -> Status override;
+    [[nodiscard]] auto set_lock(File &file, LockMode mode) -> Status override;
+    [[nodiscard]] auto get_lock(const File &file) const -> LockMode override;
     [[nodiscard]] auto unlock(File &file, LockMode mode) -> Status override;
 
 private:

@@ -7,14 +7,9 @@
 #include "tools.h"
 #include "unit_tests.h"
 #include "utils.h"
-#include <filesystem>
-#include <fstream>
 #include <gtest/gtest.h>
 #include <mutex>
 #include <thread>
-
-#include <sys/fcntl.h>
-#include <sys/types.h>
 
 namespace calicodb
 {
@@ -60,23 +55,91 @@ TEST(PathParserTests, JoinsComponents)
     ASSERT_EQ(join_paths("dirname", "basename"), "dirname/basename");
 }
 
+static auto make_filename(std::size_t n)
+{
+    return tools::integral_key<10>(n);
+}
+static auto write_out_randomly(tools::RandomGenerator &random, File &writer, const Slice &message) -> void
+{
+    constexpr std::size_t kChunks = 20;
+    ASSERT_GT(message.size(), kChunks) << "File is too small for this test";
+    Slice in(message);
+    std::size_t counter = 0;
+
+    while (!in.is_empty()) {
+        const auto chunk_size = std::min<std::size_t>(in.size(), random.Next(message.size() / kChunks));
+        auto chunk = in.range(0, chunk_size);
+
+        ASSERT_TRUE(writer.write(counter, chunk).is_ok());
+        counter += chunk_size;
+        in.advance(chunk_size);
+    }
+    ASSERT_TRUE(in.is_empty());
+}
+[[nodiscard]] static auto read_back_randomly(tools::RandomGenerator &random, File &reader, std::size_t size) -> std::string
+{
+    static constexpr std::size_t kChunks = 20;
+    EXPECT_GT(size, kChunks) << "File is too small for this test";
+    std::string backing(size, '\x00');
+    auto *out_data = backing.data();
+    std::size_t counter = 0;
+
+    while (counter < size) {
+        const auto chunk_size = std::min<std::size_t>(size - counter, random.Next(size / kChunks));
+        const auto s = reader.read_exact(counter, chunk_size, out_data);
+        EXPECT_TRUE(s.is_ok()) << "Error: " << s.to_string().data();
+        out_data += chunk_size;
+        counter += chunk_size;
+    }
+    return backing;
+}
 struct EnvWithFiles final {
     ~EnvWithFiles()
     {
-        for (const auto *file : files) {
-            delete file;
+        for (std::size_t i = 0; i < files.size(); ++i) {
+            (void)env->remove_file(make_filename(i));
+            delete files[i];
         }
         delete env;
     }
 
+    [[nodiscard]] auto open_file(std::size_t id, Env::OpenMode mode) const -> File *
+    {
+        File *file;
+        EXPECT_OK(env->new_file(
+            make_filename(id),
+            mode,
+            file));
+        return file;
+    }
+
+    enum NextFileName {
+        kSameName,
+        kDifferentName,
+    };
+
+    auto open_unowned_file(NextFileName name, Env::OpenMode mode) -> File *
+    {
+        if (name == kDifferentName) {
+            ++m_last_id;
+        }
+        const auto id = m_last_id;
+        auto *file = open_file(id, mode);
+        files.emplace_back(file);
+        return file;
+    }
+
     std::vector<File *> files;
     Env *env = nullptr;
+
+private:
+    std::size_t m_last_id = 0;
 };
 
-// Helpers for testing files and locking.
 static constexpr std::size_t kVersionOffset = 1024;
 static constexpr std::size_t kVersionLengthInU32 = 128;
 static constexpr auto kVersionLength = kVersionLengthInU32 * sizeof(U32);
+
 // REQUIRES: kShared or greater lock is held on "file"
 static auto read_version(File &file) -> U32
 {
@@ -91,6 +154,7 @@ static auto read_version(File &file) -> U32
     }
     return version;
 }
+
 // REQUIRES: kExclusive lock is held on "file"
 static auto write_version(File &file, U32 version) -> void
 {
@@ -102,53 +166,55 @@ static auto write_version(File &file, U32 version) -> void
         kVersionOffset,
         version_string));
 }
-static auto make_filename(std::size_t n)
-{
-    return tools::integral_key<10>(n);
-}
-class WorkDelegator
-{
-public:
-    explicit WorkDelegator(std::mutex &mutex, std::size_t n)
-        : m_rng(42),
-          m_mutex(&mutex),
-          m_indices(n)
-    {
-        std::iota(begin(m_indices), end(m_indices), 0);
-        m_idx = m_indices.size();
-    }
-
-    auto operator()() -> std::size_t
-    {
-        std::lock_guard lock(*m_mutex);
-        if (m_idx == m_indices.size()) {
-            std::shuffle(begin(m_indices), end(m_indices), m_rng);
-            m_idx = 0;
-        }
-        return m_indices[m_idx++];
-    }
-
-private:
-    std::vector<std::size_t> m_indices;
-    std::default_random_engine m_rng;
-    std::size_t m_idx = 0;
-
-    mutable std::mutex *m_mutex = nullptr;
-};
 
 static constexpr auto kFilename = "./__testfile";
 
-// Env multithreading tests
-//
-// Each Env instance created in a given process communicates with the same global
-// "inode info manager". This is to overcome some shortcomings of POSIX advisory
-// locks. Examples include (a) closing a file descriptor to an inode with locks
-// held on it can cause all locks to be dropped, and (b) POSIX locks don't work
-// between threads in the same process.
-//
-class EnvLockStateTests : public testing::Test
+class FileTests : public testing::TestWithParam<std::size_t>
 {
 public:
+    const std::size_t kCount = GetParam();
+    
+    explicit FileTests()
+    {
+        m_env = Env::default_env();
+        m_helper.env = m_env;
+    }
+    
+    ~FileTests() override = default;
+    
+    auto test_same_inode() -> void
+    {
+        const auto message = m_random.Generate(1'024);
+        auto *original = m_helper.open_unowned_file(EnvWithFiles::kDifferentName, Env::kCreate | Env::kReadWrite);
+        write_out_randomly(m_random, *original, message);
+        for (std::size_t i = 0; i < kCount; ++i) {
+            auto *file = m_helper.open_unowned_file(EnvWithFiles::kSameName, Env::kReadOnly);
+            ASSERT_EQ(message, read_back_randomly(m_random, *file, message.size()));
+        }
+    }
+    
+protected:
+    tools::RandomGenerator m_random;
+    EnvWithFiles m_helper;
+    // Pointer to an object owned by m_helper.
+    Env *m_env;
+};
+
+TEST_P(FileTests, SameINode)
+{
+    test_same_inode();
+}
+
+INSTANTIATE_TEST_SUITE_P(
+    FileTests,
+    FileTests,
+    ::testing::Values(1, 2, 5, 10, 100));
+
+class EnvLockStateTests : public testing::TestWithParam<std::size_t>
+{
+public:
+    const std::size_t kReplicates = GetParam();
+
     explicit EnvLockStateTests()
     {
         m_env = Env::default_env();
@@ -171,438 +237,466 @@ public:
         return file;
     }
 
+    auto test_sequence(bool reserve) -> void
+    {
+        auto *f = new_file(kFilename);
+        ASSERT_OK(m_env->set_lock(*f, Env::kShared));
+        ASSERT_EQ(m_env->get_lock(*f), Env::kShared);
+        if (reserve) {
+            ASSERT_OK(m_env->set_lock(*f, Env::kReserved));
+            ASSERT_EQ(m_env->get_lock(*f), Env::kReserved);
+        }
+        ASSERT_OK(m_env->set_lock(*f, Env::kExclusive));
+        ASSERT_EQ(m_env->get_lock(*f), Env::kExclusive);
+        ASSERT_OK(m_env->unlock(*f, Env::kShared));
+        ASSERT_EQ(m_env->get_lock(*f), Env::kShared);
+        ASSERT_OK(m_env->unlock(*f, Env::kUnlocked));
+        ASSERT_EQ(m_env->get_lock(*f), Env::kUnlocked);
+    }
+
+    auto test_shared() -> void
+    {
+        auto *a = new_file(kFilename);
+        auto *b = new_file(kFilename);
+        auto *c = new_file(kFilename);
+        ASSERT_OK(m_env->set_lock(*a, Env::kShared));
+        ASSERT_OK(m_env->set_lock(*b, Env::kShared));
+        ASSERT_OK(m_env->set_lock(*c, Env::kShared));
+        ASSERT_OK(m_env->unlock(*c, Env::kUnlocked));
+        ASSERT_OK(m_env->unlock(*b, Env::kUnlocked));
+        ASSERT_OK(m_env->unlock(*a, Env::kUnlocked));
+    }
+
+    auto test_exclusive() -> void
+    {
+        auto *a = new_file(kFilename);
+        auto *b = new_file(kFilename);
+
+        ASSERT_OK(m_env->set_lock(*a, Env::kShared));
+        ASSERT_OK(m_env->set_lock(*a, Env::kExclusive));
+
+        // Try to take a shared lock on "b", but fail due to "a"'s exclusive
+        // lock.
+        ASSERT_TRUE(m_env->set_lock(*b, Env::kShared).is_busy());
+
+        // Unlock "a" and let "b" get the exclusive lock.
+        ASSERT_OK(m_env->unlock(*a, Env::kUnlocked));
+        ASSERT_OK(m_env->set_lock(*b, Env::kShared));
+        ASSERT_OK(m_env->set_lock(*b, Env::kExclusive));
+        ASSERT_OK(m_env->unlock(*b, Env::kUnlocked));
+    }
+
+    auto test_reserved(bool shared) -> void
+    {
+        auto *a = new_file(kFilename);
+        auto *b = new_file(kFilename);
+        auto *c = new_file(kFilename);
+
+        if (shared) {
+            ASSERT_OK(m_env->set_lock(*a, Env::kShared));
+            ASSERT_OK(m_env->set_lock(*b, Env::kShared));
+            ASSERT_OK(m_env->set_lock(*c, Env::kShared));
+        }
+
+        // Take a reserved lock on 1 of the files and make sure that the
+        // other file descriptors cannot be locked in a mode greater than
+        // kShared.
+        File *files[] = {a, b, c};
+        for (std::size_t i = 0; i < 3; ++i) {
+            auto *p = files[i];
+            auto *x = files[(i + 1) % 3];
+            auto *y = files[(i + 2) % 3];
+
+            ASSERT_OK(m_env->set_lock(*p, Env::kShared));
+            ASSERT_OK(m_env->set_lock(*p, Env::kReserved));
+
+            ASSERT_OK(m_env->set_lock(*x, Env::kShared));
+            ASSERT_TRUE(m_env->set_lock(*x, Env::kReserved).is_busy());
+            ASSERT_TRUE(m_env->set_lock(*x, Env::kExclusive).is_busy());
+
+            ASSERT_OK(m_env->set_lock(*y, Env::kShared));
+            ASSERT_TRUE(m_env->set_lock(*y, Env::kReserved).is_busy());
+            ASSERT_TRUE(m_env->set_lock(*y, Env::kExclusive).is_busy());
+
+            ASSERT_OK(m_env->unlock(*p, shared ? Env::kShared : Env::kUnlocked));
+            ASSERT_OK(m_env->unlock(*x, shared ? Env::kShared : Env::kUnlocked));
+            ASSERT_OK(m_env->unlock(*y, shared ? Env::kShared : Env::kUnlocked));
+        }
+    }
+
+    auto test_pending(bool reserved) -> void
+    {
+        auto *a = new_file(kFilename);
+        auto *b = new_file(kFilename);
+        auto *c = new_file(kFilename);
+        auto *extra = new_file(kFilename);
+
+        // Used to prevent "p" below from getting an exclusive lock.
+        ASSERT_OK(m_env->set_lock(*extra, Env::kShared));
+
+        // Fail to take an exclusive lock on 1 of the files, leaving it in
+        // pending mode, and make sure that the other file descriptors cannot
+        // be locked.
+        File *files[] = {a, b, c};
+        for (std::size_t i = 0; i < 3; ++i) {
+            auto *p = files[i];
+            auto *x = files[(i + 1) % 3];
+            auto *y = files[(i + 2) % 3];
+
+            ASSERT_OK(m_env->set_lock(*p, Env::kShared));
+            if (reserved) {
+                ASSERT_OK(m_env->set_lock(*p, Env::kReserved));
+            }
+
+            ASSERT_TRUE(m_env->set_lock(*p, Env::kExclusive).is_busy());
+
+            if (reserved) {
+                ASSERT_EQ(m_env->get_lock(*p), Env::kPending);
+                ASSERT_TRUE(m_env->set_lock(*x, Env::kShared).is_busy());
+                ASSERT_TRUE(m_env->set_lock(*y, Env::kShared).is_busy());
+            } else {
+                ASSERT_EQ(m_env->get_lock(*p), Env::kShared);
+                ASSERT_OK(m_env->set_lock(*x, Env::kShared));
+                ASSERT_OK(m_env->set_lock(*y, Env::kShared));
+            }
+
+            ASSERT_OK(m_env->unlock(*p, Env::kUnlocked));
+            ASSERT_OK(m_env->unlock(*x, Env::kUnlocked));
+            ASSERT_OK(m_env->unlock(*y, Env::kUnlocked));
+        }
+    }
+
+    template<class Test>
+    auto run_test(const Test &test)
+    {
+        for (std::size_t i = 0; i < kReplicates; ++i) {
+            test();
+        }
+    }
+
 protected:
     EnvWithFiles m_helper;
-    // Pointer that gets delete'd in ~EnvWithFiles().
+    // Pointer to an object owned by m_helper.
     Env *m_env;
 };
 
-TEST_F(EnvLockStateTests, LockingSequence)
+TEST_P(EnvLockStateTests, Sequence)
+{
+    run_test([this] {test_sequence(false);});
+    run_test([this] {test_sequence(true);});
+}
+
+TEST_P(EnvLockStateTests, Shared)
+{
+    run_test([this] {test_shared();});
+}
+
+TEST_P(EnvLockStateTests, Exclusive)
+{
+    run_test([this] {test_exclusive();});
+}
+
+TEST_P(EnvLockStateTests, Reserved)
+{
+    run_test([this] {test_reserved(false);});
+    run_test([this] {test_reserved(true);});
+}
+
+TEST_P(EnvLockStateTests, Pending)
+{
+    run_test([this] {test_pending(false);});
+    run_test([this] {test_pending(true);});
+}
+
+TEST_P(EnvLockStateTests, NOOPs)
 {
     auto *f = new_file(kFilename);
-    ASSERT_OK(m_env->lock(*f, Env::kShared));
-    ASSERT_OK(m_env->lock(*f, Env::kReserved));
-    ASSERT_OK(m_env->lock(*f, Env::kExclusive));
+
+    ASSERT_OK(m_env->set_lock(*f, Env::kShared));
+    ASSERT_OK(m_env->set_lock(*f, Env::kShared));
+    ASSERT_OK(m_env->set_lock(*f, Env::kUnlocked));
+    ASSERT_EQ(m_env->get_lock(*f), Env::kShared);
+
+    ASSERT_OK(m_env->set_lock(*f, Env::kReserved));
+    ASSERT_OK(m_env->set_lock(*f, Env::kReserved));
+    ASSERT_OK(m_env->set_lock(*f, Env::kShared));
+    ASSERT_OK(m_env->set_lock(*f, Env::kUnlocked));
+    ASSERT_EQ(m_env->get_lock(*f), Env::kReserved);
+
+    ASSERT_OK(m_env->set_lock(*f, Env::kExclusive));
+    ASSERT_OK(m_env->set_lock(*f, Env::kExclusive));
+    ASSERT_OK(m_env->set_lock(*f, Env::kReserved));
+    ASSERT_OK(m_env->set_lock(*f, Env::kShared));
+    ASSERT_OK(m_env->set_lock(*f, Env::kUnlocked));
+    ASSERT_EQ(m_env->get_lock(*f), Env::kExclusive);
+
     ASSERT_OK(m_env->unlock(*f, Env::kShared));
+    ASSERT_OK(m_env->unlock(*f, Env::kShared));
+    ASSERT_EQ(m_env->get_lock(*f), Env::kShared);
     ASSERT_OK(m_env->unlock(*f, Env::kUnlocked));
+    ASSERT_OK(m_env->unlock(*f, Env::kUnlocked));
+    ASSERT_EQ(m_env->get_lock(*f), Env::kUnlocked);
+    ASSERT_OK(m_env->unlock(*f, Env::kShared));
 }
 
-TEST_F(EnvLockStateTests, MultipleSharedLocksAreAllowed)
+#ifndef NDEBUG
+TEST_P(EnvLockStateTests, InvalidRequestDeathTest)
 {
-    auto *a = new_file(kFilename);
-    auto *b = new_file(kFilename);
-    auto *c = new_file(kFilename);
-    ASSERT_OK(m_env->lock(*a, Env::kShared));
-    ASSERT_OK(m_env->lock(*b, Env::kShared));
-    ASSERT_OK(m_env->lock(*c, Env::kShared));
-    ASSERT_OK(m_env->unlock(*c, Env::kUnlocked));
-    ASSERT_OK(m_env->unlock(*b, Env::kUnlocked));
-    ASSERT_OK(m_env->unlock(*a, Env::kUnlocked));
+    auto *f = new_file(kFilename);
+    // kPending cannot be requested directly.
+    ASSERT_DEATH((void)m_env->set_lock(*f, Env::kPending), kExpectationMatcher);
+    // kUnlocked -> kShared is the only allowed transition out of kUnlocked.
+    ASSERT_DEATH((void)m_env->set_lock(*f, Env::kReserved), kExpectationMatcher);
+    ASSERT_DEATH((void)m_env->set_lock(*f, Env::kExclusive), kExpectationMatcher);
+    // unlock() can only be called with kShared or kUnlocked.
+    ASSERT_DEATH((void)m_env->unlock(*f, Env::kReserved), kExpectationMatcher);
+    ASSERT_DEATH((void)m_env->unlock(*f, Env::kPending), kExpectationMatcher);
+    ASSERT_DEATH((void)m_env->unlock(*f, Env::kExclusive), kExpectationMatcher);
 }
+#endif // NDEBUG
 
-TEST_F(EnvLockStateTests, SingleExclusiveLockIsAllowed)
+INSTANTIATE_TEST_SUITE_P(
+    EnvLockStateTests,
+    EnvLockStateTests,
+    ::testing::Values(1, 2, 5, 10, 100));
+
+static auto busy_wait_lock(Env &env, File &file, bool is_writer) -> void
 {
-    auto *a = new_file(kFilename);
-    auto *b = new_file(kFilename);
-
-    ASSERT_OK(m_env->lock(*a, Env::kShared));
-    ASSERT_OK(m_env->lock(*a, Env::kExclusive));
-    ASSERT_TRUE(m_env->lock(*b, Env::kShared).is_busy());
-    ASSERT_OK(m_env->unlock(*a, Env::kUnlocked));
-
-    ASSERT_OK(m_env->lock(*b, Env::kShared));
-    ASSERT_OK(m_env->lock(*b, Env::kExclusive));
-    ASSERT_OK(m_env->unlock(*b, Env::kUnlocked));
-}
-
-TEST_F(EnvLockStateTests, OnlySharedLocksAllowedWhileReserved)
-{
-    auto *a = new_file(kFilename);
-    auto *b = new_file(kFilename);
-    auto *c = new_file(kFilename);
-
-    ASSERT_OK(m_env->lock(*a, Env::kShared));
-    ASSERT_OK(m_env->lock(*a, Env::kReserved));
-
-    ASSERT_OK(m_env->lock(*b, Env::kShared));
-    ASSERT_TRUE(m_env->lock(*b, Env::kReserved).is_busy());
-    ASSERT_TRUE(m_env->lock(*b, Env::kExclusive).is_busy());
-    ASSERT_OK(m_env->lock(*c, Env::kShared));
-    ASSERT_TRUE(m_env->lock(*c, Env::kReserved).is_busy());
-    ASSERT_TRUE(m_env->lock(*c, Env::kExclusive).is_busy());
-
-    ASSERT_OK(m_env->unlock(*a, Env::kUnlocked));
-}
-
-TEST_F(EnvLockStateTests, SharedLocksNotAllowedWhilePending)
-{
-    auto *a = new_file(kFilename);
-    auto *b = new_file(kFilename);
-    auto *c = new_file(kFilename);
-
-    ASSERT_OK(m_env->lock(*a, Env::kShared));
-    ASSERT_OK(m_env->lock(*b, Env::kShared));
-    ASSERT_OK(m_env->lock(*a, Env::kReserved));
-
-    // Fail to get the exclusive lock, leaving the state as kPending.
-    ASSERT_TRUE(m_env->lock(*a, Env::kExclusive).is_busy());
-    ASSERT_TRUE(m_env->lock(*c, Env::kShared).is_busy());
-
-    ASSERT_OK(m_env->unlock(*b, Env::kUnlocked));
-    ASSERT_OK(m_env->lock(*a, Env::kExclusive));
-}
-
-// This first test fixture accesses a given number of files (kNumFiles) through
-// 1 Env instance using a given number of threads (kNumThreads).
-struct SingleEnvTestParam {
-    std::size_t num_threads = 0;
-    std::size_t num_files = 0;
-};
-class SingleEnvTests : public testing::TestWithParam<SingleEnvTestParam>
-{
-public:
-    const std::size_t kNumThreads = GetParam().num_threads;
-    const std::size_t kNumFiles = GetParam().num_files;
-
-    explicit SingleEnvTests()
-        : m_delegator(m_mutex, kNumFiles)
-    {
-        m_env.env = Env::default_env();
-    }
-
-    ~SingleEnvTests() override
-    {
-        for (auto &thread : m_threads) {
-            thread.join();
+    for (auto m = Env::kShared; m <= (is_writer ? Env::kExclusive : Env::kShared); ) {
+        if (m == Env::kPending) {
+            m = Env::kExclusive;
+            continue;
         }
+        auto s = env.set_lock(file, m);
+        if (s.is_ok()) {
+            m = Env::LockMode{m + 1};
+            continue;
+        } else if (!s.is_busy()) {
+            ADD_FAILURE() << s.to_string();
+        } else {
+            // Give up and let some other thread/process try to get an exclusive lock.
+            ASSERT_OK(env.unlock(file, Env::kUnlocked));
+            m = Env::kShared;
+        }
+        std::this_thread::yield();
     }
+}
+static auto reader_writer_test_routine(Env &env, File &file, bool is_writer) -> void
+{
+    Status s;
+    if (is_writer) {
+        busy_wait_lock(env, file, Env::kExclusive);
+        write_version(file, read_version(file) + 1);
+        ASSERT_OK(env.unlock(file, Env::kUnlocked));
+    } else {
+        busy_wait_lock(env, file, Env::kShared);
+        read_version(file); // Could be anything...
+        ASSERT_OK(env.unlock(file, Env::kUnlocked));
+    }
+}
+
+// Env multithreading tests
+//
+// Each Env instance created in a given process communicates with the same global
+// "inode info manager". This is to overcome some shortcomings of POSIX advisory
+// locks. Examples include (a) closing a file descriptor to an inode with locks
+// held on it can cause all locks to be dropped, and (b) POSIX locks don't work
+// between threads in the same process.
+//
+// This test fixture uses multiple processes/threads to access a one or more Envs.
+// The process is forked kNumEnvs times. The Env is not created until after the
+// fork(), so there are kNumEnvs independent Envs, each managing its own inode list.
+// Locking between processes must take place through the actual POSIX advisory locks.
+// Locking between threads in the same process must be coordinated through the
+// global inode list.
+struct MultiEnvMultiProcessTestsParam {
+    std::size_t num_envs = 0;
+    std::size_t num_threads = 0;
+};
+class MultiEnvMultiProcessTests : public testing::TestWithParam<MultiEnvMultiProcessTestsParam> {
+public:
+    const std::size_t kNumEnvs = GetParam().num_envs;
+    const std::size_t kNumThreads = GetParam().num_threads;
+    static constexpr std::size_t kNumRounds = 500;
+
+    ~MultiEnvMultiProcessTests() override = default;
 
     auto SetUp() -> void override
     {
-        ASSERT_GT(kNumThreads, 0) << "REQUIRES: kNumThreads > 0";
-        ASSERT_GT(kNumFiles, 0) << "REQUIRES: kNumFiles > 0";
-        for (std::size_t i = 0; i < kNumFiles; ++i) {
-            const auto filename = make_filename(i);
-            (void)m_env.env->remove_file(filename);
+        // Create the file and zero out the version.
+        auto *tempenv = Env::default_env();
+        File *tempfile;
+        ASSERT_OK(tempenv->new_file(make_filename(0), Env::kCreate | Env::kReadWrite, tempfile));
+        write_version(*tempfile, 0);
+        delete tempfile;
+        delete tempenv;
+    }
 
-            File *file;
-            ASSERT_OK(m_env.env->new_file(
-                filename,
-                Env::kCreate | Env::kReadWrite,
-                file));
-            write_version(*file, 0);
-            m_env.files.emplace_back(file);
+    auto set_up() -> void
+    {
+        if (m_env == nullptr) {
+            m_env = Env::default_env();
+            m_helper.env = m_env;
+        }
+
+        ASSERT_GT(kNumEnvs, 0) << "REQUIRES: kNumEnvs > 0";
+        m_helper.open_unowned_file(
+            EnvWithFiles::kSameName,
+            Env::kCreate | Env::kReadWrite);
+    }
+
+    template<class Test>
+    auto run_test(const Test &test)
+    {
+        for (std::size_t n = 0; n < kNumEnvs; ++n) {
+            if (fork()) {
+                continue;
+            }
+            test(n);
+            std::exit(testing::Test::HasFailure());
+        }
+        for (std::size_t n = 0; n < kNumEnvs; ++n) {
+            int s;
+            const auto pid = wait(&s);
+            ASSERT_NE(pid, -1)
+                << "wait failed: " << strerror(errno);
+            ASSERT_TRUE(WIFEXITED(s) && WEXITSTATUS(s) == 0)
+                << "exited " << (WIFEXITED(s) ? "" : "ab")
+                << "normally with exit status "
+                << WEXITSTATUS(s);
         }
     }
 
-protected:
-    mutable std::mutex m_mutex;
-    WorkDelegator m_delegator;
-    std::vector<std::thread> m_threads;
-    EnvWithFiles m_env;
-};
-
-TEST_P(SingleEnvTests, 1)
-{
-    const auto work = [](auto &e, auto n) -> void {
-        auto *file = e.files[n];
-
-        Status s;
-        for (;;) {
-            s = e.env->lock(*file, Env::kShared);
-            if (!s.is_busy()) {
-                ASSERT_OK(s);
-                break;
+    template<class IsWriter>
+    auto run_reader_writer_test(std::size_t writers_per_thread, const IsWriter &is_writer) -> void
+    {
+        run_test([&is_writer, this](auto) {
+            for (std::size_t i = 0; i < kNumThreads; ++i) {
+                set_up();
             }
-            std::this_thread::yield();
-        }
-
-        const auto version = read_version(*file) + 1;
-
-        for (;;) {
-            s = e.env->lock(*file, Env::kExclusive);
-            if (!s.is_busy()) {
-                ASSERT_OK(s);
-                break;
+            std::vector<std::thread> threads;
+            while (threads.size() < kNumThreads) {
+                const auto t = threads.size();
+                threads.emplace_back([&is_writer, t, this] {
+                    for (std::size_t r = 0; r < kNumRounds; ++r) {
+                        reader_writer_test_routine(*m_env, *m_helper.files[t], is_writer(r));
+                    }
+                });
             }
-            std::this_thread::yield();
-        }
-
-        write_version(*file, version);
-
-        ASSERT_OK(e.env->unlock(*file, Env::kUnlocked));
-    };
-    static constexpr std::size_t kNumRounds = 5;
-    const auto work_size = kNumFiles * kNumRounds;
-    for (std::size_t i = 0; i < kNumThreads; ++i) {
-        m_threads.emplace_back([&] {
-            for (std::size_t r = 0; r < work_size; ++r) {
-                work(m_env, r % kNumFiles);
+            for (auto &thread : threads) {
+                thread.join();
             }
         });
+        set_up();
+        ASSERT_EQ(writers_per_thread * kNumThreads, read_version(*m_helper.files.front()));
     }
 
-    for (auto &thread : m_threads) {
-        thread.join();
-    }
-    m_threads.clear();
-
-    for (auto *file : m_env.files) {
-        ASSERT_EQ(work_size * kNumThreads, read_version(*file));
-    }
-}
-
-INSTANTIATE_TEST_SUITE_P(
-    SingleEnvTests,
-    SingleEnvTests,
-    ::testing::Values(
-        SingleEnvTestParam {1, 1},
-
-        SingleEnvTestParam {1, 2},
-        SingleEnvTestParam {2, 1},
-        //        SingleEnvTestParam {3, 1},
-        //        SingleEnvTestParam {3, 2},
-        //        SingleEnvTestParam {2, 3},
-        //        SingleEnvTestParam {1, 3},
-
-        //        SingleEnvTestParam {5, 1},
-        //        SingleEnvTestParam {5, 2},
-        //        SingleEnvTestParam {5, 3},
-        //        SingleEnvTestParam {5, 4},
-        //        SingleEnvTestParam {5, 5},
-        //        SingleEnvTestParam {5, 6},
-        //        SingleEnvTestParam {5, 7},
-        SingleEnvTestParam {1, 1}));
-
-struct MultiEnvTestParam {
-    std::size_t num_threads = 0;
-    std::size_t num_files = 0;
-    std::size_t num_envs = 0;
+protected:
+    EnvWithFiles m_helper;
+    Env *m_env = nullptr;
 };
-class MultiEnvTest : public testing::TestWithParam<MultiEnvTestParam>
+TEST_P(MultiEnvMultiProcessTests, SingleWriter)
+{
+    run_reader_writer_test(kNumEnvs, [](auto r) {
+        return r == kNumRounds / 2;
+    });
+}
+TEST_P(MultiEnvMultiProcessTests, MultipleWriters)
+{
+    run_reader_writer_test(kNumEnvs * kNumRounds / 2, [](auto r) {
+        return r & 1;
+    });
+}
+TEST_P(MultiEnvMultiProcessTests, Contention)
+{
+    run_reader_writer_test(kNumEnvs * kNumRounds, [](auto) {
+        return true;
+    });
+}
+INSTANTIATE_TEST_SUITE_P(
+    MultiEnvMultiProcessTests,
+    MultiEnvMultiProcessTests,
+    ::testing::Values(
+        MultiEnvMultiProcessTestsParam {1, 1},
+        MultiEnvMultiProcessTestsParam {1, 5},
+        MultiEnvMultiProcessTestsParam {5, 5},
+        MultiEnvMultiProcessTestsParam {5, 5}));
+
+struct MultiEnvSingleProcessTestsParam {
+    std::size_t num_threads = 0;
+};
+class MultiEnvSingleProcessTests : public testing::TestWithParam<MultiEnvSingleProcessTestsParam>
 {
 protected:
-    ~MultiEnvTest() override
-    {
-        for (auto &thread : m_threads) {
-            thread.join();
-        }
-    }
+    const std::size_t kNumThreads = GetParam().num_threads;
+    static constexpr std::size_t kNumRounds = 500;
+
+    ~MultiEnvSingleProcessTests() override = default;
 
     auto SetUp() -> void override
     {
+        m_helpers.resize(kNumThreads);
+        for (auto &h : m_helpers) {
+            h.env = Env::default_env();
+            h.open_unowned_file(
+                EnvWithFiles::kDifferentName,
+                Env::kCreate | Env::kReadWrite);
+        }
+        auto *file = m_helpers.front().files.front();
+        write_version(*file, 0);
     }
-
-    const std::size_t kNumThreads = GetParam().num_threads;
-    const std::size_t kNumFiles = GetParam().num_files;
-    const std::size_t kNumEnvs = GetParam().num_envs;
+    
+    template<class IsWriter>
+    auto run_reader_writer_test(std::size_t writers_per_thread, const IsWriter &is_writer) -> void 
+    {
+        for (std::size_t i = 0; i < kNumThreads; ++i) {
+            auto &env = *m_helpers[i].env;
+            auto &file = *m_helpers[i].files.front();
+            m_threads.emplace_back([&env, &file, &is_writer] {
+                for (std::size_t r = 0; r < kNumRounds; ++r) {
+                    reader_writer_test_routine(env, file, is_writer(r));
+                }
+            });
+        }
+        for (auto &thread : m_threads) {
+            thread.join();
+        }
+        auto *file = m_helpers.front().files.front();
+        ASSERT_EQ(writers_per_thread * kNumThreads, read_version(*file));
+    }
 
     mutable std::mutex m_mutex;
     std::vector<std::thread> m_threads;
-    std::vector<EnvWithFiles> m_envs;
+    std::vector<EnvWithFiles> m_helpers;
 };
-
-TEST_P(MultiEnvTest, 1)
+TEST_P(MultiEnvSingleProcessTests, SingleWriter)
 {
-    for (std::size_t i = 0; i < kNumThreads; ++i) {
-        m_threads.emplace_back();
-    }
+    run_reader_writer_test(1, [](auto r) {
+        return r == kNumRounds / 2;
+    });
 }
-
+TEST_P(MultiEnvSingleProcessTests, MultipleWriters)
+{
+    run_reader_writer_test(kNumRounds / 2, [](auto r) {
+        return r & 1;
+    });
+}
+TEST_P(MultiEnvSingleProcessTests, Contention)
+{
+    run_reader_writer_test(kNumRounds, [](auto) {
+        return true;
+    });
+}
 INSTANTIATE_TEST_SUITE_P(
-    MultiEnvTest,
-    MultiEnvTest,
+    MultiEnvSingleProcessTests,
+    MultiEnvSingleProcessTests,
     ::testing::Values(
-        MultiEnvTestParam {0, 0, 0},
-        MultiEnvTestParam {0, 0, 0},
-        MultiEnvTestParam {0, 0, 0},
-        MultiEnvTestParam {0, 0, 0}));
-
-template <class EnvType>
-[[nodiscard]] auto open_file(EnvType &env, const std::string &filename) -> std::unique_ptr<File>
-{
-    File *temp = nullptr;
-    EXPECT_OK(env.new_file(filename, Env::kCreate | Env::kReadWrite, temp));
-    return std::unique_ptr<File>(temp);
-}
-
-// TODO: Just use tools::assign_file_contents() declared in tools.h.
-auto write_whole_file(const std::string &path, const Slice &message) -> void
-{
-    std::ofstream ofs(path, std::ios::trunc);
-    ofs << message.to_string();
-}
-
-// TODO: Just use tools::read_file_to_string() declared in tools.h.
-[[nodiscard]] auto read_whole_file(const std::string &path) -> std::string
-{
-    std::string message;
-    std::ifstream ifs(path);
-    ifs.seekg(0, std::ios::end);
-    message.resize(ifs.tellg());
-    ifs.seekg(0, std::ios::beg);
-    ifs.read(message.data(), message.size());
-    return message;
-}
-
-auto write_out_randomly(tools::RandomGenerator &random, File &writer, const Slice &message) -> void
-{
-    constexpr std::size_t num_chunks = 20;
-    ASSERT_GT(message.size(), num_chunks) << "File is too small for this test";
-    Slice in(message);
-    std::size_t counter = 0;
-
-    while (!in.is_empty()) {
-        const auto chunk_size = std::min<std::size_t>(in.size(), random.Next(message.size() / num_chunks));
-        auto chunk = in.range(0, chunk_size);
-
-        ASSERT_TRUE(writer.write(counter, chunk).is_ok());
-        counter += chunk_size;
-        in.advance(chunk_size);
-    }
-    ASSERT_TRUE(in.is_empty());
-}
-
-[[nodiscard]] auto read_back_randomly(tools::RandomGenerator &random, File &reader, std::size_t size) -> std::string
-{
-    static constexpr std::size_t num_chunks = 20;
-    EXPECT_GT(size, num_chunks) << "File is too small for this test";
-    std::string backing(size, '\x00');
-    auto *out_data = backing.data();
-    std::size_t counter = 0;
-
-    while (counter < size) {
-        const auto chunk_size = std::min<std::size_t>(size - counter, random.Next(size / num_chunks));
-        const auto s = reader.read_exact(counter, chunk_size, out_data);
-        EXPECT_TRUE(s.is_ok()) << "Error: " << s.to_string().data();
-        out_data += chunk_size;
-        counter += chunk_size;
-    }
-    return backing;
-}
-
-class FileTests
-    : public EnvTestHarness<PosixEnv>,
-      public testing::Test
-{
-public:
-    ~FileTests() override = default;
-
-    tools::RandomGenerator random;
-};
-
-class PosixReaderTests : public FileTests
-{
-public:
-    PosixReaderTests()
-    {
-        write_whole_file(kDBFilename, "");
-        file = open_file(env(), kDBFilename);
-    }
-
-    std::unique_ptr<File> file;
-};
-
-TEST_F(PosixReaderTests, NewFileIsEmpty)
-{
-    std::string backing(8, '\x00');
-    ASSERT_TRUE(file->read_exact(0, 8, backing.data()).is_io_error());
-}
-
-TEST_F(PosixReaderTests, ReadsBackContents)
-{
-    auto data = random.Generate(500);
-    write_whole_file(kDBFilename, data);
-    ASSERT_EQ(read_back_randomly(random, *file, data.size()), data);
-}
-
-class PosixEditorTests : public FileTests
-{
-public:
-    PosixEditorTests()
-        : file(open_file(env(), kDBFilename))
-    {
-        write_whole_file(kDBFilename, "");
-    }
-
-    std::unique_ptr<File> file;
-};
-
-TEST_F(PosixEditorTests, NewFileIsEmpty)
-{
-    std::string backing(8, '\x00');
-    ASSERT_TRUE(file->read_exact(0, 8, backing.data()).is_io_error());
-}
-
-TEST_F(PosixEditorTests, WritesOutAndReadsBackData)
-{
-    auto data = random.Generate(500);
-    write_out_randomly(random, *file, data);
-    ASSERT_EQ(read_back_randomly(random, *file, data.size()), data);
-}
-
-class FakeEnvTests
-    : public EnvTestHarness<tools::FakeEnv>,
-      public testing::Test
-{
-public:
-    ~FakeEnvTests() override = default;
-
-    tools::RandomGenerator random;
-};
-
-TEST_F(FakeEnvTests, ReaderStopsAtEOF)
-{
-    auto ra_editor = open_file(env(), kDBFilename);
-    auto ra_reader = open_file(env(), kDBFilename);
-
-    const auto data = random.Generate(500);
-    write_out_randomly(random, *ra_editor, data);
-
-    Slice slice;
-    std::string buffer(data.size() * 2, '\x00');
-    ASSERT_OK(ra_reader->read(0, buffer.size(), buffer.data(), &slice));
-    ASSERT_EQ(slice.size(), data.size());
-}
-
-class TestEnvTests
-    : public EnvTestHarness<tools::TestEnv>,
-      public testing::Test
-{
-protected:
-    ~TestEnvTests() override = default;
-};
-
-TEST_F(TestEnvTests, OperationsOnUnlinkedFiles)
-{
-    File *file;
-    ASSERT_OK(env().new_file("test", Env::kCreate | Env::kReadWrite, file));
-    ASSERT_OK(env().remove_file("test"));
-    ASSERT_FALSE(env().file_exists("test"));
-
-    std::size_t file_size;
-    ASSERT_TRUE(env().file_size("test", file_size).is_not_found());
-
-    // Read, write, and sync should still work.
-    const Slice message("Hello, world!", 13);
-    ASSERT_OK(file->write(0, message));
-    ASSERT_OK(file->sync());
-    char buffer[13];
-    ASSERT_OK(file->read_exact(0, sizeof(buffer), buffer));
-    ASSERT_EQ(message, Slice(buffer, sizeof(buffer)));
-
-    // Interceptors should work.
-    QUICK_INTERCEPTOR("test", tools::Interceptor::kSync);
-    assert_special_error(file->sync());
-    env().clear_interceptors();
-
-    // The file was unlinked, so it should be empty next time it is opened.
-    delete file;
-    ASSERT_OK(env().new_file("test", Env::kCreate | Env::kReadWrite, file));
-    Slice slice;
-    ASSERT_OK(file->read(0, sizeof(buffer), buffer, &slice));
-    ASSERT_TRUE(slice.is_empty());
-    delete file;
-}
+        MultiEnvSingleProcessTestsParam {1},
+        MultiEnvSingleProcessTestsParam {2},
+        MultiEnvSingleProcessTestsParam {3},
+        MultiEnvSingleProcessTestsParam {4},
+        MultiEnvSingleProcessTestsParam {5},
+        MultiEnvSingleProcessTestsParam {10},
+        MultiEnvSingleProcessTestsParam {15}));
 
 } // namespace calicodb

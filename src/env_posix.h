@@ -44,7 +44,8 @@ public:
     auto srand(unsigned seed) -> void override;
     [[nodiscard]] auto rand() -> unsigned override;
 
-    [[nodiscard]] auto lock(File &file, LockMode mode) -> Status override;
+    [[nodiscard]] auto set_lock(File &file, LockMode mode) -> Status override;
+    [[nodiscard]] auto get_lock(const File &file) const -> LockMode override;
     [[nodiscard]] auto unlock(File &file, LockMode mode) -> Status override;
 };
 
