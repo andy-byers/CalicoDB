@@ -8,9 +8,11 @@
 #include "calicodb/db.h"
 #include "calicodb/env.h"
 #include "db_impl.h"
+#include "env_posix.h"
 #include <climits>
 #include <cstdarg>
 #include <cstdio>
+#include <filesystem>
 #include <functional>
 #include <iostream>
 #include <mutex>
@@ -51,6 +53,36 @@
 
 namespace calicodb::tools
 {
+
+class TestDir final {
+public:
+    static constexpr auto kDirname = "testdir";
+
+    explicit TestDir(const std::string &location)
+        : m_prefix(join_paths(location, kDirname))
+    {
+        reset();
+    }
+
+    ~TestDir()
+    {
+        std::filesystem::remove_all(m_prefix);
+    }
+
+    auto reset() const -> void
+    {
+        std::filesystem::remove_all(m_prefix);
+        std::filesystem::create_directory(m_prefix);
+    }
+
+    [[nodiscard]] auto as_child(const std::string &filename) const -> std::string
+    {
+        return join_paths(m_prefix, filename);
+    }
+
+private:
+    std::string m_prefix;
+};
 
 class WalStub : public Wal
 {

@@ -29,7 +29,7 @@ auto DB::open(const Options &options, const std::string &filename, DB *&db) -> S
     clip_to_range(sanitized.page_size, kMinPageSize, kMaxPageSize);
     clip_to_range(sanitized.cache_size, {}, kMaxCacheSize);
     if (!is_power_of_two(sanitized.page_size)) {
-        sanitized.page_size = Options {}.page_size;
+        sanitized.page_size = Options{}.page_size;
     }
     if (sanitized.wal_filename.empty()) {
         sanitized.wal_filename = clean_filename + kDefaultWalSuffix;

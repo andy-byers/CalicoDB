@@ -52,7 +52,7 @@ auto append_fmt_string(std::string &out, const char *fmt, ...) -> std::size_t
     return info.length;
 }
 
-auto logv(LogFile *log, const char *fmt, ...) -> void
+auto logv(Sink *log, const char *fmt, ...) -> void
 {
     if (log) {
         std::va_list args;
@@ -69,7 +69,7 @@ auto logv(LogFile *log, const char *fmt, ...) -> void
         for (int i = 0; i < 2; ++i) {
             info = try_write(p, info.length, fmt, args);
             if (info.success) {
-                log->write(Slice(p, info.length));
+                log->sink(Slice(p, info.length));
                 break;
             } else if (i == 0) {
                 variable = new char[info.length];

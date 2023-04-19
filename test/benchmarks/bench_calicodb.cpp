@@ -36,7 +36,7 @@ class Benchmark final
 
 public:
     explicit Benchmark(const Parameters &param = {})
-        : m_param {param}
+        : m_param{param}
     {
         m_options.env = calicodb::Env::default_env();
         m_options.page_size = 0x2000;
@@ -197,8 +197,8 @@ private:
     }
 
     Parameters m_param;
-    std::size_t m_counters[2] {};
-    calicodb::tools::RandomGenerator m_random {4'194'304};
+    std::size_t m_counters[2]{};
+    calicodb::tools::RandomGenerator m_random{4'194'304};
     calicodb::Options m_options;
     calicodb::Cursor *m_cursor = nullptr;
     calicodb::DB *m_db = nullptr;
@@ -345,7 +345,7 @@ static auto BM_Write100K(benchmark::State &state) -> void
 {
     state.SetLabel("Write" + access_type_name(state.range(0)) + "100K");
 
-    Benchmark bench {{.value_length = 100'000}};
+    Benchmark bench{{.value_length = 100'000}};
     for (auto _ : state) {
         bench.write(state);
     }
@@ -358,7 +358,7 @@ static auto BM_Read100K(benchmark::State &state) -> void
 {
     state.SetLabel("Read" + access_type_name(state.range(0)) + "100K");
 
-    Benchmark bench {{.value_length = 100'000}};
+    Benchmark bench{{.value_length = 100'000}};
     bench.add_initial_records();
     for (auto _ : state) {
         bench.read(state);
@@ -372,7 +372,7 @@ static auto BM_Exists100K(benchmark::State &state) -> void
 {
     state.SetLabel("Exists" + access_type_name(state.range(0)) + "100K");
 
-    Benchmark bench {{.value_length = 100'000}};
+    Benchmark bench{{.value_length = 100'000}};
     bench.add_initial_records();
     for (auto _ : state) {
         bench.exists(state);

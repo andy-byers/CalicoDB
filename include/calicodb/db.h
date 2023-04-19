@@ -14,7 +14,7 @@ namespace calicodb
 
 class Cursor;
 class Env;
-class LogFile;
+class Sink;
 class Table;
 
 // On-disk collection of tables.
@@ -88,6 +88,15 @@ public:
     //
     // This method destroys the table handle and sets "*table" to nullptr.
     virtual auto close_table(Table *&table) -> void = 0;
+
+//    enum TxnMode {
+//        kReadTxn,
+//        kWriteTxn,
+//    };
+//
+//    [[nodiscard]] virtual auto begin_txn(TxnMode mode) -> Status = 0;
+//    [[nodiscard]] virtual auto commit_txn() -> Status = 0;
+//    [[nodiscard]] virtual auto rollback_txn() -> Status = 0;
 
     // Begin an explicit write transaction.
     //

@@ -92,7 +92,7 @@ auto Pager::open(const Parameters &param, Pager *&out) -> Status
 
     // TODO: See TODO in db_impl.cpp about passing in the file to this constructor.
     File *file;
-    CALICODB_TRY(param.env->new_file(param.filename, Env::kCreate | Env::kReadWrite, file));
+    CALICODB_TRY(param.env->open_file(param.filename, Env::kCreate | Env::kReadWrite, file));
 
     out = new Pager(param, *file);
     auto s = out->initialize_root(!exists);
@@ -500,7 +500,7 @@ static auto entry_offset(Id map_id, Id page_id) -> std::size_t
 static auto decode_entry(const char *data) -> PointerMap::Entry
 {
     PointerMap::Entry entry;
-    entry.type = PointerMap::Type {*data++};
+    entry.type = PointerMap::Type{*data++};
     entry.back_ptr.value = get_u32(data);
     return entry;
 }
@@ -565,8 +565,8 @@ auto PointerMap::write_entry(Pager &pager, Id page_id, Entry entry) -> Status
 }
 
 Freelist::Freelist(Pager &pager, Id &head)
-    : m_pager {&pager},
-      m_head {&head}
+    : m_pager{&pager},
+      m_head{&head}
 {
 }
 

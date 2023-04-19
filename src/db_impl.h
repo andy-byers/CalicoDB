@@ -162,7 +162,7 @@ private:
     mutable unsigned m_txn = 0;
 
     Env *m_env = nullptr;
-    LogFile *m_log = nullptr;
+    Sink *m_log = nullptr;
 
     const std::string m_db_filename;
     const std::string m_wal_filename;

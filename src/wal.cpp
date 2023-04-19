@@ -336,7 +336,7 @@ HashIterator::HashIterator(HashIndex &source)
         (m_num_groups - 1) * sizeof(State::Group) + // Additional groups.
         last_value * sizeof(Hash);                  // Indices to sort.
     m_state = reinterpret_cast<State *>(
-        operator new(state_size, std::align_val_t {alignof(State)}));
+        operator new(state_size, std::align_val_t{alignof(State)}));
     std::memset(m_state, 0, state_size);
 
     // Temporary buffer for the mergesort routine. Freed before returning from this routine.
@@ -369,7 +369,7 @@ HashIterator::HashIterator(HashIndex &source)
 
 HashIterator::~HashIterator()
 {
-    operator delete(m_state, std::align_val_t {alignof(State)});
+    operator delete(m_state, std::align_val_t{alignof(State)});
 }
 
 auto HashIterator::read(Entry &out) -> bool
@@ -486,7 +486,7 @@ private:
 auto Wal::open(const Parameters &param, Wal *&out) -> Status
 {
     File *file;
-    CALICODB_TRY(param.env->new_file(param.filename, Env::kCreate | Env::kReadWrite, file));
+    CALICODB_TRY(param.env->open_file(param.filename, Env::kCreate | Env::kReadWrite, file));
     auto *wal = new WalImpl(param, *file);
     out = wal;
     return wal->open();

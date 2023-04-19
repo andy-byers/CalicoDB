@@ -83,7 +83,7 @@ auto read_file_to_string(Env &env, const std::string &filename) -> std::string
     std::string buffer(file_size, '\0');
 
     File *file;
-    CHECK_OK(env.new_file(filename, Env::kCreate | Env::kReadWrite, file));
+    CHECK_OK(env.open_file(filename, Env::kCreate | Env::kReadWrite, file));
     CHECK_OK(file->read_exact(0, file_size, buffer.data()));
     delete file;
 
@@ -99,7 +99,7 @@ auto write_string_to_file(Env &env, const std::string &filename, const std::stri
         write_pos = offset;
     }
     File *file;
-    CHECK_OK(env.new_file(filename, Env::kCreate | Env::kReadWrite, file));
+    CHECK_OK(env.open_file(filename, Env::kCreate | Env::kReadWrite, file));
     CHECK_OK(file->write(write_pos, buffer));
     delete file;
 }
@@ -231,7 +231,7 @@ auto FakeWal::close() -> Status
 
 auto FakeWal::statistics() const -> WalStatistics
 {
-    return WalStatistics {};
+    return WalStatistics{};
 }
 
 } // namespace calicodb::tools

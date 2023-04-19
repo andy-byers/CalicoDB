@@ -66,7 +66,7 @@ public:
         std::string filename;
         Env *env = nullptr;
         Wal *wal = nullptr;
-        LogFile *log = nullptr;
+        Sink *log = nullptr;
         DBState *state = nullptr;
         std::size_t frame_count = 0;
         std::size_t page_size = 0;
@@ -135,7 +135,7 @@ private:
     // to indicate failure during a checkpoint.
     bool m_in_ckpt = false;
 
-    LogFile *m_log = nullptr;
+    Sink *m_log = nullptr;
     File *m_file = nullptr;
     Env *m_env = nullptr;
     Wal *m_wal = nullptr;

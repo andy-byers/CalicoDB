@@ -909,7 +909,7 @@ auto Tree::split_root(Node root, Node &out) -> Status
         child.gap_size += FileHeader::kSize;
     }
 
-    root.header = NodeHeader {};
+    root.header = NodeHeader{};
     root.header.is_external = false;
     root.header.next_id = child.page.id();
     setup_node(root);
