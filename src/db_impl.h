@@ -6,7 +6,6 @@
 #define CALICODB_DB_IMPL_H
 
 #include "calicodb/db.h"
-#include "calicodb/table.h"
 
 #include "header.h"
 #include "pager.h"

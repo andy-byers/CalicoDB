@@ -2,6 +2,51 @@
 // This source code is licensed under the MIT License, which can be found in
 // LICENSE.md. See AUTHORS.md for a list of contributor names.
 
+// TODO: New API! Really, this is the final change. It makes more sense this way, since read transactions are
+//       required to get a consistent snapshot of the DB while reading, and write transactions have always
+//       been necessary. Prevents us from having to manage transactions when the user doesn't start one.
+
+//class DB
+//{
+//public:
+//    [[nodiscard]] static auto open(const Options &options, const std::string &filename, DB *&db) -> Status;
+//    [[nodiscard]] static auto destroy(const Options &options, const std::string &filename) -> Status;
+//
+//    explicit DB();
+//    virtual ~DB();
+//
+//    // Prevent copies.
+//    DB(const DB &) = delete;
+//    auto operator=(const DB &) -> DB & = delete;
+//
+//    [[nodiscard]] virtual auto get_property(const Slice &name, std::string *out) const -> bool = 0;
+//    [[nodiscard]] virtual auto begin(bool write, Txn *&txn) -> Status = 0;
+//    [[nodiscard]] virtual auto commit(Txn *&txn) -> Status = 0;
+//    virtual auto rollback(Txn *&txn) -> void = 0;
+//};
+//
+//class Txn {
+//public:
+//    virtual ~Txn() = default;
+//    [[nodiscard]] virtual auto status() const -> Status = 0;
+//    [[nodiscard]] virtual auto open_table(const std::string &name) -> Table * = 0;
+//    [[nodiscard]] virtual auto create_table(const std::string &name, Table *&out) -> Status = 0;
+//    [[nodiscard]] virtual auto drop_table(Table *&table) -> Status = 0;
+//    virtual auto close_table(Table *&table) -> void = 0;
+//    [[nodiscard]] virtual auto vacuum() -> Status = 0;
+//};
+//
+//class Table
+//{
+//public:
+//    virtual ~Table();
+//    [[nodiscard]] virtual auto new_cursor() const -> Cursor * = 0;
+//    [[nodiscard]] virtual auto get(const Slice &key, std::string *value) const -> Status = 0;
+//    [[nodiscard]] virtual auto put(const Slice &key, const Slice &value) -> Status = 0;
+//    [[nodiscard]] virtual auto erase(const Slice &key) -> Status = 0;
+//};
+
+
 #ifndef CALICODB_DB_H
 #define CALICODB_DB_H
 
@@ -16,6 +61,15 @@ class Cursor;
 class Env;
 class Sink;
 class Table;
+
+struct TableOptions {
+    // If set to kReadOnly, calls to put() or erase() on the table will return with
+    // an error.
+    AccessMode mode = AccessMode::kReadWrite;
+};
+
+struct TxnOptions {
+};
 
 // On-disk collection of tables.
 class DB
@@ -89,15 +143,6 @@ public:
     // This method destroys the table handle and sets "*table" to nullptr.
     virtual auto close_table(Table *&table) -> void = 0;
 
-//    enum TxnMode {
-//        kReadTxn,
-//        kWriteTxn,
-//    };
-//
-//    [[nodiscard]] virtual auto begin_txn(TxnMode mode) -> Status = 0;
-//    [[nodiscard]] virtual auto commit_txn() -> Status = 0;
-//    [[nodiscard]] virtual auto rollback_txn() -> Status = 0;
-
     // Begin an explicit write transaction.
     //
     // If this method is not called, each modification is wrapped in its own write transaction.
@@ -142,6 +187,18 @@ public:
     [[nodiscard]] virtual auto get(const Slice &key, std::string *value) const -> Status;
     [[nodiscard]] virtual auto put(const Slice &key, const Slice &value) -> Status;
     [[nodiscard]] virtual auto erase(const Slice &key) -> Status;
+};
+
+// Persistent ordered mapping from keys to values within a CalicoDB database.
+//
+// Keys are unique within each table.
+class Table
+{
+public:
+    virtual ~Table();
+
+    // Get the name used to identify this table.
+    [[nodiscard]] virtual auto name() const -> const std::string & = 0;
 };
 
 } // namespace calicodb

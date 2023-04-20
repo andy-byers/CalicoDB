@@ -40,6 +40,7 @@ public:
 
     [[nodiscard]] virtual auto open_file(const std::string &filename, OpenMode mode, File *&out) -> Status = 0;
     [[nodiscard]] virtual auto close_file(File *&file) -> Status = 0;
+
     [[nodiscard]] virtual auto resize_file(const std::string &filename, std::size_t size) -> Status = 0;
     [[nodiscard]] virtual auto file_size(const std::string &filename, std::size_t &out) const -> Status = 0;
     [[nodiscard]] virtual auto remove_file(const std::string &filename) -> Status = 0;
@@ -134,6 +135,7 @@ public:
     // Size of a shared memory region, i.e. the number of bytes pointed to by "out"
     // when map() returns successfully.
     static constexpr std::size_t kRegionSize = 1'024 * 32;
+    static constexpr std::size_t kLockCount = 8;
 
     enum LockFlag : int {
         kUnlock = 1,
@@ -149,7 +151,7 @@ public:
     [[nodiscard]] virtual auto map(std::size_t r, volatile void *&out) -> Status = 0;
 
     [[nodiscard]] virtual auto lock(std::size_t s, std::size_t n, LockFlag flags) -> Status = 0;
-    [[nodiscard]] virtual auto barrier() -> Status = 0;
+    virtual auto barrier() -> void = 0;
 };
 
 class EnvWrapper : public Env
@@ -209,7 +211,7 @@ public:
     [[nodiscard]] auto target() const -> const Shm *;
     [[nodiscard]] auto map(std::size_t r, volatile void *&out) -> Status override;
     [[nodiscard]] auto lock(std::size_t start, std::size_t n, LockFlag flags) -> Status override;
-    [[nodiscard]] auto barrier() -> Status override;
+    auto barrier() -> void override;
 
 private:
     Shm *m_target;

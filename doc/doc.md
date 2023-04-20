@@ -90,185 +90,39 @@ if (!s.is_ok()) {
 }
 ```
 
-### Updating a database
-In CalicoDB, records are stored in tables, which are on-disk mappings from keys to values.
-Keys within each table are unique, however, tables may have overlapping key ranges.
-Errors returned by methods that modify tables are fatal and the database will refuse to perform any more work.
-The next time that the database is opened, recovery will be run to undo any changes that occurred after the last checkpoint (see [Checkpoints](#checkpoints)).
-The database will always keep 1 table open, called the default table.
-Additional tables are managed using methods on the `DB` object (see [Tables](#tables)).
-When naming tables, note that the prefix "calicodb." is reserved for internal use.
+### Read-only transactions
 
 ```C++
-// Insert some key-value pairs into the default table.
-calicodb::Status s = db->put("lilly", "calico");
-if (s.is_io_error()) {
-    // Handle a system-level or I/O error.
+calicodb::Txn *txn;
+
+// Start a read transaction.
+calicodb::Status s = db->begin(false, txn);
+if (!s.is_ok()) {
 }
 
-s = db->put("freya", "orange tabby");
-if (s.is_ok()) {
-    // Record was inserted.
-}
+// Read some data...
 
-// Keys are unique within each table, so inserting a record with a key that already exists will 
-// cause the old value to be overwritten.
-s = db->put("lilly", "sweet calico");
-if (s.is_ok()) {
-    // Value was modified.
-}
-
-// Erase a record.
-s = db->erase("42");
-if (s.is_ok()) {
-    // Record was erased.
-} else if (s.is_not_found()) {
-    // Key does not exist.
-} else {
-    // An error occurred.
-}
+// Finish the transaction. This call will never fail for a read transaction.
+s = db->commit(txn);
+assert(s.is_ok());
 ```
 
-### Querying a database
+### Read-write transactions
 
 ```C++
-// Query a value by key. Note that the "value" parameter is a pointer, indicating 
-// that it is optional. If omitted, the DB will check if the key "lilly" exists, 
-// without attempting to determine its value.
-std::string value;
-calicodb::Status s = db->get("lilly", &value);
-if (s.is_ok()) {
-    // value is populated with the record's value.
-} else if (s.is_not_found()) {
-    // Key does not exist.
-} else {
-    // An error occurred.
+calicodb::Txn *txn;
+
+// Start a write transaction.
+s = db->begin(true, txn);
+if (!s.is_ok()) {
 }
 
-// Allocate a cursor. The cursor will only view records from the table it was
-// created on. Modifications to the table will invalidate the cursor, including
-// calls to DB::vacuum(). Cursors are invalid upon creation. They must have
-// either seek(), seek_first(), or seek_last() called before is_valid() will
-// return true.
-calicodb::Cursor *cursor = db->new_cursor();
+// Write some data...
 
-// Seek to the first record in the default table with a key greater than or equal 
-// to the given key.
-cursor->seek("freya");
-
-if (cursor->is_valid()) {
-    // If the cursor is valid, these calls can be made:
-    calicodb::Slice k = cursor->key();
-    calicodb::Slice v = cursor->value();
-} else if (cursor->status().is_not_found()) {
-    // Key was greater than any key in the table, or the table is empty.
-} else {
-    // Handle a system-level read error. These are not considered fatal errors.
-}
-
-// Iterate through the whole table in order.
-cursor->seek_first();
-for (; cursor->is_valid(); cursor->next()) {
-
-}
-
-// Iterate through in reverse order.
-cursor->seek_last();
-for (; cursor->is_valid(); cursor->previous()) {
-
-}
-
-// Iterate through a half-open range of keys ["freya", "lilly").
-cursor->seek("freya");
-for (; cursor->is_valid() && cursor->key() < "lilly"; cursor->next()) {
-
-}
-
-// Free the cursor.
-delete cursor;
-```
-
-### Vacuuming a database
-
-```C++
-calicodb::Status s = db->vacuum();
-if (s.is_ok()) {
-    // Unused database pages have been reclaimed and the file truncated. At present, vacuum is considered part of a
-    // transaction, even though it doesn't change the logical contents of the database. This may change in the future.
-}
-```
-
-### Tables
-
-```C++
-calicodb::TableOptions table_options = {
-    // Pass AccessMode::kReadOnly to open in read-only lock.
-    .lock = AccessMode::kReadWrite,
-};
-
-// Open or create a table.
-calicodb::Table *table_1, *table_2;
-calicodb::Status s = db->create_table(table_options, "name_1", table_1);
-if (s.is_ok()) {
-    // "table_1" contains a heap-allocated table handle.
-}
-
-// Now, "table_1" can be passed as the first parameter to DB methods that access or modify data. Those calls
-// will be directed to the table represented by "table_1", rather than the default table.
-s = db->put(*table_1, "key", "value");
-assert(s.is_ok());
-
-// Any number of tables may be open at the same time, however, each table can only have 1 handle in existence.
-s = db->create_table(table_options, "name_2", table_2);
-assert(s.is_ok());
-
-// Tables should be closed when they are no longer needed.
-s = db->close_table(table_1);
-assert(s.is_ok());
-
-// Tables can also be dropped, which will erase their records and remove them from the table list. Note that
-// close_table() and drop_table() take ownership of the heap-allocated table handle, as well as NULL-out the
-// pointer. Calling close_table() or drop_table() on a nullptr is a NOOP.
-s = db->drop_table(table_2);
-assert(s.is_ok());
-
-std::vector<std::string> tables;
-s = db->list_tables(tables);
-if (s.is_ok()) {
-    // "tables" contains the name of each table, in unspecified order. The default table is not included.
-}
-```
-
-### Transactions
-
-```C++
-// Start a transaction.
-const TxnOptions txn_options = {
-
-};
-const auto txn = db->begin_txn(txn_options);
-
-// Add some more records.
-calicodb::Status s = db->put("fanny", "persian");
-assert(s.is_ok());
-
-s = db->put("myla", "brown-tabby");
-assert(s.is_ok());
-
-// Perform a checkpoint.
-s = db->commit_txn(txn);
-if (s.is_ok()) {
-    // Changes are safely on disk (in the WAL, and maybe partially in the database). If we crash from 
-    // here on out, the changes will be reapplied from the WAL the next time the database is opened.
-} else {
-    // Something went wrong, most-likely this is an I/O error. rollback_txn() can be called with the
-    // transaction number to attempt to undo changes made since begin_txn() was called. If successful,
-    // in-memory pages will be discarded and the DB status restored to OK.
-    s = db->rollback_txn(txn);
-    if (s.is_ok()) {
-        // The DB must be in a consistent state again.
-        assert(db->status().is_ok());
-    }
+// Commit the transaction.
+s = db->commit(txn);
+if (!s.is_ok()) {
+    // If commit() failed, then there was likely a low-level I/O error.
 }
 ```
 
@@ -289,7 +143,6 @@ To close the database, just `delete` the handle.
 During close, the database is made consistent and the whole WAL is removed.
 If an instance leaves any WAL segments behind after closing, then something has gone wrong.
 CalicoDB will attempt recovery on the next startup.
-It should be noted that all tables opened by the database must be closed before the database itself is closed.
 
 ```C++
 delete db;

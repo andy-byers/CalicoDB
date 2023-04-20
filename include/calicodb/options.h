@@ -18,7 +18,7 @@ enum class AccessMode {
     kReadWrite,
 };
 
-struct Options {
+struct Options final {
     // Size of a database page in bytes. This is the basic unit of I/O for the
     // database file. Data is read/written in page-sized chunks. Must be a power-
     // of-two between 512 and 65536, inclusive.
@@ -46,15 +46,6 @@ struct Options {
     // If true, sync the WAL file on every commit. Hurts performance quite a bit,
     // but provides extra durability.
     bool sync = false;
-};
-
-struct TableOptions {
-    // If set to kReadOnly, calls to put() or erase() on the table will return with
-    // an error.
-    AccessMode mode = AccessMode::kReadWrite;
-};
-
-struct TxnOptions {
 };
 
 } // namespace calicodb

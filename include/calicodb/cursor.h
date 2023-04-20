@@ -21,12 +21,11 @@ public:
     explicit Cursor();
     virtual ~Cursor();
 
-    // Check if the cursor is valid, that is, positioned on a record.
+    // Return true if the cursor is valid (positioned on a record) false otherwise
     //
     // This method must return true before key(), value(), next(), or previous() is
     // called. Those calls will result in unspecified behavior if the cursor is not
-    // valid. Modifying the table this cursor was created from also causes
-    // invalidation.
+    // valid.
     [[nodiscard]] virtual auto is_valid() const -> bool = 0;
 
     // Check the status associated with this cursor.

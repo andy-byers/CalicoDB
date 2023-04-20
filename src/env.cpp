@@ -183,7 +183,7 @@ auto ShmWrapper::lock(std::size_t start, std::size_t n, LockFlag flags) -> Statu
     return m_target->lock(start, n, flags);
 }
 
-auto ShmWrapper::barrier() -> Status
+auto ShmWrapper::barrier() -> void
 {
     return m_target->barrier();
 }
