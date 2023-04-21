@@ -141,7 +141,9 @@ public:
 
     [[nodiscard]] virtual auto needs_checkpoint() const -> bool = 0;
 
-    [[nodiscard]] virtual auto abort() -> Status = 0;
+    [[nodiscard]] virtual auto begin(bool write) -> Status = 0;
+
+    virtual auto rollback() -> void = 0;
 
     [[nodiscard]] virtual auto statistics() const -> WalStatistics = 0;
 

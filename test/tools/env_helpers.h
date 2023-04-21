@@ -2,23 +2,23 @@
 //// This source code is licensed under the MIT License, which can be found in
 //// LICENSE.md. See AUTHORS.md for a list of contributor names.
 //
-//#ifndef CALICODB_TOOLS_TEST_ENV_H
-//#define CALICODB_TOOLS_TEST_ENV_H
+// #ifndef CALICODB_TOOLS_TEST_ENV_H
+// #define CALICODB_TOOLS_TEST_ENV_H
 //
-//#include "tools.h"
+// #include "tools.h"
 //
-//namespace calicodb::tools
+// namespace calicodb::tools
 //{
 //
-//class FakeEnv : public Env
+// class FakeEnv : public Env
 //{
-//public:
+// public:
 //    [[nodiscard]] virtual auto clone() const -> Env *;
 //    [[nodiscard]] virtual auto get_file_contents(const std::string &filename) const -> std::string;
 //    virtual auto put_file_contents(const std::string &filename, std::string contents) -> void;
 //
 //    ~FakeEnv() override = default;
-//    [[nodiscard]] auto new_file(const std::string &filename, OpenMode mode, File *&out) -> Status override;
+//    [[nodiscard]] auto open_file(const std::string &filename, OpenMode mode, File *&out) -> Status override;
 //    [[nodiscard]] auto file_exists(const std::string &filename) const -> bool override;
 //    [[nodiscard]] auto resize_file(const std::string &filename, std::size_t size) -> Status override;
 //    [[nodiscard]] auto file_size(const std::string &filename, std::size_t &out) const -> Status override;
@@ -27,7 +27,7 @@
 //    auto srand(unsigned seed) -> void override;
 //    [[nodiscard]] auto rand() -> unsigned override;
 //
-//protected:
+// protected:
 //    friend class FakeFile;
 //    friend class FakeSink;
 //    friend class TestEnv;
@@ -44,9 +44,9 @@
 //    mutable std::unordered_map<std::string, FileState> m_state;
 //};
 //
-//class FakeFile : public File
+// class FakeFile : public File
 //{
-//public:
+// public:
 //    FakeFile(std::string filename, FakeEnv &env, FakeEnv::FileState &mem)
 //        : m_state(&mem),
 //          m_env(&env),
@@ -74,13 +74,13 @@
 //        return m_filename;
 //    }
 //
-//protected:
+// protected:
 //    FakeEnv::FileState *m_state = nullptr;
 //    FakeEnv *m_env = nullptr;
 //    std::string m_filename;
 //};
 //
-//struct Interceptor {
+// struct Interceptor {
 //    enum Type {
 //        kRead,
 //        kWrite,
@@ -108,9 +108,9 @@
 //    Type type;
 //};
 //
-//class TestEnv : public EnvWrapper
+// class TestEnv : public EnvWrapper
 //{
-//public:
+// public:
 //    explicit TestEnv();
 //    explicit TestEnv(Env &env);
 //    ~TestEnv() override;
@@ -132,7 +132,7 @@
 //    [[nodiscard]] auto resize_file(const std::string &filename, std::size_t file_size) -> Status override;
 //    [[nodiscard]] auto remove_file(const std::string &filename) -> Status override;
 //
-//private:
+// private:
 //    friend class TestFile;
 //    friend class CrashFile;
 //    friend class CrashEnv;
@@ -150,7 +150,7 @@
 //    auto overwrite_file(const std::string &filename, const std::string &contents) -> void;
 //};
 //
-//class TestFile : public File
+// class TestFile : public File
 //{
 //    friend class TestEnv;
 //
@@ -160,7 +160,7 @@
 //
 //    explicit TestFile(std::string filename, File &file, TestEnv &env);
 //
-//public:
+// public:
 //    ~TestFile() override;
 //    [[nodiscard]] auto read(std::size_t offset, std::size_t size, char *scratch, Slice *out) -> Status override;
 //    [[nodiscard]] auto write(std::size_t offset, const Slice &in) -> Status override;
@@ -169,4 +169,4 @@
 //
 //} // namespace calicodb::tools
 //
-//#endif // CALICODB_TOOLS_TEST_ENV_H
+// #endif // CALICODB_TOOLS_TEST_ENV_H

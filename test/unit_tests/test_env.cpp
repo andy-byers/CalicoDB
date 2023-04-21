@@ -109,12 +109,12 @@ struct EnvWithFiles final {
         }
         delete env;
     }
-    
+
     enum NextFileName {
         kSameName,
         kDifferentName,
     };
-    
+
     [[nodiscard]] auto open_file(std::size_t id, Env::OpenMode mode) const -> File *
     {
         File *file;
@@ -168,7 +168,8 @@ struct EnvWithFiles final {
 };
 
 // Helper for testing shared memory
-class SharedBuffer final {
+class SharedBuffer final
+{
 public:
     explicit SharedBuffer(Shm &shm)
         : m_shm(&shm)
@@ -248,7 +249,6 @@ static auto read_version(Shm &shm, std::size_t index) -> U32
     for (std::size_t i = 1; i < kVersionLengthInU32; ++i) {
         EXPECT_EQ(version, get_u32(version_string.data() + sizeof(U32) * i));
     }
-    std::cerr << "RD: " << index << " @ " << offset << '\n';
     return version;
 }
 // REQUIRES: kExclusive lock is held on "file"
@@ -272,8 +272,6 @@ static auto write_version(Shm &shm, U32 version, std::size_t index) -> void
     SharedBuffer sh(shm);
     const auto offset = (index + 1) * Shm::kRegionSize - kVersionLength / 2;
     sh.write(offset, version_string);
-
-    std::cerr << "WR: " << index << " @ " << offset << '\n';
 }
 static auto sum_shm_versions(Shm &shm) -> U32
 {
@@ -365,9 +363,9 @@ public:
         }
         ASSERT_OK(f->lock(File::kExclusive));
         ASSERT_EQ(f->lock_mode(), File::kExclusive);
-        ASSERT_OK(f->unlock(File::kShared));
+        f->unlock();
         ASSERT_EQ(f->lock_mode(), File::kShared);
-        ASSERT_OK(f->unlock(File::kUnlocked));
+        f->unlock();
         ASSERT_EQ(f->lock_mode(), File::kUnlocked);
     }
 
@@ -379,9 +377,9 @@ public:
         ASSERT_OK(a->lock(File::kShared));
         ASSERT_OK(b->lock(File::kShared));
         ASSERT_OK(c->lock(File::kShared));
-        ASSERT_OK(c->unlock(File::kUnlocked));
-        ASSERT_OK(b->unlock(File::kUnlocked));
-        ASSERT_OK(a->unlock(File::kUnlocked));
+        c->unlock();
+        b->unlock();
+        a->unlock();
     }
 
     auto test_exclusive() -> void
@@ -397,10 +395,10 @@ public:
         ASSERT_TRUE(b->lock(File::kShared).is_busy());
 
         // Unlock "a" and let "b" get the exclusive lock.
-        ASSERT_OK(a->unlock(File::kUnlocked));
+        a->unlock();
         ASSERT_OK(b->lock(File::kShared));
         ASSERT_OK(b->lock(File::kExclusive));
-        ASSERT_OK(b->unlock(File::kUnlocked));
+        b->unlock();
     }
 
     auto test_reserved(bool shared) -> void
@@ -435,9 +433,9 @@ public:
             ASSERT_TRUE(y->lock(File::kReserved).is_busy());
             ASSERT_TRUE(y->lock(File::kExclusive).is_busy());
 
-            ASSERT_OK(p->unlock(shared ? File::kShared : File::kUnlocked));
-            ASSERT_OK(x->unlock(shared ? File::kShared : File::kUnlocked));
-            ASSERT_OK(y->unlock(shared ? File::kShared : File::kUnlocked));
+            p->unlock();
+            x->unlock();
+            y->unlock();
         }
     }
 
@@ -477,9 +475,9 @@ public:
                 ASSERT_OK(y->lock(File::kShared));
             }
 
-            ASSERT_OK(p->unlock(File::kUnlocked));
-            ASSERT_OK(x->unlock(File::kUnlocked));
-            ASSERT_OK(y->unlock(File::kUnlocked));
+            p->unlock();
+            x->unlock();
+            y->unlock();
         }
     }
 
@@ -547,13 +545,13 @@ TEST_P(EnvLockStateTests, NOOPs)
     ASSERT_OK(f->lock(File::kUnlocked));
     ASSERT_EQ(f->lock_mode(), File::kExclusive);
 
-    ASSERT_OK(f->unlock(File::kShared));
-    ASSERT_OK(f->unlock(File::kShared));
+    f->unlock();
+    f->unlock();
     ASSERT_EQ(f->lock_mode(), File::kShared);
-    ASSERT_OK(f->unlock(File::kUnlocked));
-    ASSERT_OK(f->unlock(File::kUnlocked));
+    f->unlock();
+    f->unlock();
     ASSERT_EQ(f->lock_mode(), File::kUnlocked);
-    ASSERT_OK(f->unlock(File::kShared));
+    f->unlock();
 }
 
 #ifndef NDEBUG
@@ -566,9 +564,9 @@ TEST_P(EnvLockStateTests, InvalidRequestDeathTest)
     ASSERT_DEATH((void)f->lock(File::kReserved), kExpectationMatcher);
     ASSERT_DEATH((void)f->lock(File::kExclusive), kExpectationMatcher);
     // unlock() can only be called with kShared or kUnlocked.
-    ASSERT_DEATH((void)f->unlock(File::kReserved), kExpectationMatcher);
-    ASSERT_DEATH((void)f->unlock(File::kPending), kExpectationMatcher);
-    ASSERT_DEATH((void)f->unlock(File::kExclusive), kExpectationMatcher);
+    ASSERT_DEATH((void)f->unlock(), kExpectationMatcher);
+    ASSERT_DEATH((void)f->unlock(), kExpectationMatcher);
+    ASSERT_DEATH((void)f->unlock(), kExpectationMatcher);
 }
 #endif // NDEBUG
 
@@ -577,9 +575,9 @@ INSTANTIATE_TEST_SUITE_P(
     EnvLockStateTests,
     ::testing::Values(1, 2, 5, 10, 100));
 
-class EnvShmTests : public testing::Test {
+class EnvShmTests : public testing::Test
+{
 public:
-
     explicit EnvShmTests()
     {
         m_helper.env = Env::default_env();
@@ -694,7 +692,7 @@ TEST_F(EnvShmTests, LockCompatibility)
     ASSERT_OK(b->lock(1, 1, Shm::kUnlock | Shm::kShared));
     ASSERT_OK(b->lock(2, 1, Shm::kUnlock | Shm::kShared));
     ASSERT_OK(b->lock(3, 1, Shm::kUnlock | Shm::kShared));
-    
+
     ASSERT_TRUE(c->lock(0, 5, Shm::kLock | Shm::kExclusive).is_busy());
     ASSERT_OK(c->lock(0, 4, Shm::kLock | Shm::kExclusive));
 }
@@ -715,7 +713,7 @@ static auto busy_wait_file_lock(File &file, bool is_writer) -> void
             ADD_FAILURE() << s.to_string();
         } else {
             // Give up and let some other thread/process try to get an exclusive lock.
-            ASSERT_OK(file.unlock(File::kUnlocked));
+            file.unlock();
             m = File::kShared;
         }
         std::this_thread::yield();
@@ -740,11 +738,11 @@ static auto file_reader_writer_test_routine(Env &env, File &file, bool is_writer
     if (is_writer) {
         busy_wait_file_lock(file, File::kExclusive);
         write_version(file, read_version(file) + 1);
-        ASSERT_OK(file.unlock(File::kUnlocked));
+        file.unlock();
     } else {
         busy_wait_file_lock(file, File::kShared);
         read_version(file); // Could be anything...
-        ASSERT_OK(file.unlock(File::kUnlocked));
+        file.unlock();
     }
 }
 static auto shm_lifetime_test_routine(Env &env, const std::string &filename) -> void
@@ -837,12 +835,6 @@ public:
             const auto pid = wait(&s);
             ASSERT_NE(pid, -1)
                 << "wait failed: " << strerror(errno);
-            if (!WIFEXITED(s) || WEXITSTATUS(s)) {
-                ADD_FAILURE()
-                    << "exited " << (WIFEXITED(s) ? "" : "ab")
-                    << "normally with exit status "
-                    << WEXITSTATUS(s);
-            }
             ASSERT_TRUE(WIFEXITED(s) && WEXITSTATUS(s) == 0)
                 << "exited " << (WIFEXITED(s) ? "" : "ab")
                 << "normally with exit status "
@@ -998,6 +990,7 @@ INSTANTIATE_TEST_SUITE_P(
 
         // Multiple processes
         EnvConcurrencyTestsParam{2, 1},
+        EnvConcurrencyTestsParam{5, 1},
         EnvConcurrencyTestsParam{10, 1},
         EnvConcurrencyTestsParam{15, 1},
 

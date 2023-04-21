@@ -141,9 +141,9 @@ auto FileWrapper::lock_mode() const -> LockMode
     return m_target->lock_mode();
 }
 
-auto FileWrapper::unlock(LockMode mode) -> Status
+auto FileWrapper::unlock() -> void
 {
-    return m_target->unlock(mode);
+    return m_target->unlock();
 }
 
 auto EnvWrapper::open_shm(const std::string &filename, OpenMode mode, Shm *&out) -> Status

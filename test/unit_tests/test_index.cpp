@@ -2,19 +2,19 @@
 //// This source code is licensed under the MIT License, which can be found in
 //// LICENSE.md. See AUTHORS.md for a list of contributor names.
 //
-//#include "calicodb/env.h"
-//#include "calicodb/slice.h"
-//#include "logging.h"
-//#include "tools.h"
-//#include "unit_tests.h"
-//#include <gtest/gtest.h>
+// #include "calicodb/env.h"
+// #include "calicodb/slice.h"
+// #include "logging.h"
+// #include "tools.h"
+// #include "unit_tests.h"
+// #include <gtest/gtest.h>
 //
-//namespace calicodb
+// namespace calicodb
 //{
 //
-//class HashIndexTestBase
+// class HashIndexTestBase
 //{
-//protected:
+// protected:
 //    explicit HashIndexTestBase()
 //        : m_index(m_header)
 //    {
@@ -32,15 +32,15 @@
 //    HashIndex m_index;
 //};
 //
-//class HashIndexTests
+// class HashIndexTests
 //    : public HashIndexTestBase,
 //      public testing::Test
 //{
-//protected:
+// protected:
 //    ~HashIndexTests() override = default;
 //};
 //
-//TEST_F(HashIndexTests, FirstSegmentFrameBounds)
+// TEST_F(HashIndexTests, FirstSegmentFrameBounds)
 //{
 //    append(1);
 //    append(2);
@@ -61,7 +61,7 @@
 //    ASSERT_FALSE(value);
 //}
 //
-//TEST_F(HashIndexTests, SecondSegmentFrameBounds)
+// TEST_F(HashIndexTests, SecondSegmentFrameBounds)
 //{
 //    for (U32 i = 1; i <= 6'000; ++i) {
 //        append(i);
@@ -85,7 +85,7 @@
 //    ASSERT_FALSE(value);
 //}
 //
-//TEST_F(HashIndexTests, Cleanup)
+// TEST_F(HashIndexTests, Cleanup)
 //{
 //    U32 value;
 //    append(1);
@@ -122,7 +122,7 @@
 //    ASSERT_FALSE(value);
 //}
 //
-//TEST_F(HashIndexTests, ReadsAndWrites)
+// TEST_F(HashIndexTests, ReadsAndWrites)
 //{
 //    std::vector<U32> keys;
 //    // Write 2 full index tables + a few extra entries.
@@ -153,7 +153,7 @@
 //    }
 //}
 //
-//TEST_F(HashIndexTests, SimulateUsage)
+// TEST_F(HashIndexTests, SimulateUsage)
 //{
 //    static constexpr std::size_t kNumTestFrames = 10'000;
 //
@@ -193,26 +193,26 @@
 //    }
 //}
 //
-//class HashIteratorTests
+// class HashIteratorTests
 //    : public HashIndexTestBase,
 //      public testing::Test
 //{
-//protected:
+// protected:
 //    ~HashIteratorTests() override = default;
 //};
 //
-//#ifndef NDEBUG
-//TEST_F(HashIteratorTests, EmptyIndexDeathTest)
+// #ifndef NDEBUG
+// TEST_F(HashIteratorTests, EmptyIndexDeathTest)
 //{
 //    ASSERT_DEATH(HashIterator itr(m_index), "expect");
 //}
-//#endif // NDEBUG
+// #endif // NDEBUG
 //
-//class HashIteratorParamTests
+// class HashIteratorParamTests
 //    : public HashIndexTestBase,
 //      public testing::TestWithParam<std::tuple<std::size_t, std::size_t>>
 //{
-//protected:
+// protected:
 //    HashIteratorParamTests()
 //        : m_num_copies(std::get<0>(GetParam())),
 //          m_num_pages(std::get<1>(GetParam()))
@@ -251,14 +251,14 @@
 //    std::size_t m_num_copies = 0;
 //};
 //
-//static constexpr std::size_t kTestEntryCounts[] = {1, 2, 3, 5, 10, 100, 10'000, 100'000};
+// static constexpr std::size_t kTestEntryCounts[] = {1, 2, 3, 5, 10, 100, 10'000, 100'000};
 //
-//TEST_P(HashIteratorParamTests, ReorderingAndDeduplication)
+// TEST_P(HashIteratorParamTests, ReorderingAndDeduplication)
 //{
 //    test_reordering_and_deduplication();
 //}
 //
-//INSTANTIATE_TEST_SUITE_P(
+// INSTANTIATE_TEST_SUITE_P(
 //    HashIteratorParamTests,
 //    HashIteratorParamTests,
 //    ::testing::Values(

@@ -204,6 +204,11 @@ struct INode final {
     }
 }
 
+[[nodiscard]] static auto posix_busy() -> Status
+{
+    return Status::busy(strerror(EBUSY));
+}
+
 // Cast to POSIX-specific derived classes at the interface boundary
 [[nodiscard]] static auto posix_file(File &file) -> PosixFile &
 {
@@ -317,7 +322,7 @@ public:
     [[nodiscard]] auto sync() -> Status override;
     [[nodiscard]] auto lock(LockMode mode) -> Status override;
     [[nodiscard]] auto lock_mode() const -> LockMode override;
-    [[nodiscard]] auto unlock(LockMode mode) -> Status override;
+    auto unlock() -> void override;
 
     const std::string filename;
     INode *inode = nullptr;
@@ -329,7 +334,8 @@ public:
     int lockmode = 0;
 };
 
-class PosixShm : public Shm {
+class PosixShm : public Shm
+{
 public:
     explicit PosixShm();
     ~PosixShm() override;
@@ -344,7 +350,6 @@ public:
     U16 shared_mask = 0;
     U16 exclusive_mask = 0;
 };
-
 
 // Per-process singleton for managing filesystem state
 struct PosixFs final {
@@ -652,7 +657,7 @@ auto PosixFile::close() -> Status
         return Status::ok();
     }
     CALICODB_EXPECT_TRUE(inode);
-    CALICODB_TRY(unlock(kUnlocked));
+    unlock();
 
     PosixFs::s_fs.mutex.lock();
     inode->mutex.lock();
@@ -701,7 +706,6 @@ PosixShm::PosixShm()
 
 PosixShm::~PosixShm()
 {
-
 }
 
 auto PosixShm::map(std::size_t r, volatile void *&out) -> Status
@@ -746,52 +750,50 @@ auto PosixShm::lock(std::size_t r, std::size_t n, LockFlag flags) -> Status
                 }
             }
 
-            int rc = 0;
             if (unlock) {
-                rc = shm_file_lock(*snode, F_UNLCK, r + kShmLock0, n);
-                if (rc == 0) {
-                    std::memset(&state[r], 0, sizeof(int) * n);
+                if (shm_file_lock(*snode, F_UNLCK, r + kShmLock0, n)) {
+                    return posix_error(errno);
                 }
+                std::memset(&state[r], 0, sizeof(int) * n);
             } else {
                 CALICODB_EXPECT_TRUE(shared_mask & (1 << r));
                 CALICODB_EXPECT_TRUE(n == 1 && state[r] > 1);
                 --state[r];
             }
-
-            if (rc == 0) {
-                exclusive_mask &= ~mask;
-                shared_mask &= ~mask;
-            }
+            exclusive_mask &= ~mask;
+            shared_mask &= ~mask;
         }
     } else if (flags & Shm::kShared) {
         CALICODB_EXPECT_EQ(0, exclusive_mask & (1 << r));
         CALICODB_EXPECT_EQ(1, n);
         if ((shared_mask & mask) == 0) {
-            int rc = 0;
             if (state[r] < 0) {
-                return Status::busy("busy");
+                return posix_busy();
             } else if (state[r] == 0) {
-                rc = shm_file_lock(*snode, F_RDLCK, r + kShmLock0, n);
+                if (shm_file_lock(*snode, F_RDLCK, r + kShmLock0, n)) {
+                    return posix_error(errno);
+                }
             }
-            if (rc == 0) {
-                shared_mask |= mask;
-                state[r]++;
-            }
+            shared_mask |= mask;
+            state[r]++;
         }
     } else {
         // Take exclusive locks on bytes s through s + n - 1, inclusive.
         CALICODB_EXPECT_FALSE(shared_mask & mask);
         for (std::size_t i = r; i < r + n; ++i) {
             if ((exclusive_mask & (1 << i)) == 0 && state[i]) {
-                return Status::busy("busy");
+                // Some other thread in this process has a lock.
+                return posix_busy();
             }
         }
 
-        if (shm_file_lock(*snode, F_WRLCK, r + kShmLock0, n) == 0) {
-            CALICODB_EXPECT_FALSE(shared_mask & mask);
-            std::fill(state + r, state + r + n, -1);
-            exclusive_mask |= mask;
+        if (shm_file_lock(*snode, F_WRLCK, r + kShmLock0, n)) {
+            // Some other thread in another process has a lock.
+            return posix_error(errno);
         }
+        CALICODB_EXPECT_FALSE(shared_mask & mask);
+        std::fill(state + r, state + r + n, -1);
+        exclusive_mask |= mask;
     }
     CALICODB_EXPECT_TRUE(snode->check_locks());
     return Status::ok();
@@ -915,7 +917,7 @@ auto ShmNode::check_locks() const -> bool
     // REQUIRES: "snode->mutex" is locked
     int check[Shm::kLockCount] = {};
 
-    for (auto *p = refs; p; p = p->next){
+    for (auto *p = refs; p; p = p->next) {
         for (std::size_t i = 0; i < Shm::kLockCount; ++i) {
             if (p->exclusive_mask & (1 << i)) {
                 CALICODB_EXPECT_FALSE(check[i]);
@@ -977,7 +979,7 @@ auto PosixFile::lock(LockMode mode) -> Status
 
     std::lock_guard guard(inode->mutex);
     if ((lockmode != inode->lock && (inode->lock >= kPending || mode > kShared))) {
-        return Status::busy("busy");
+        return posix_busy();
     }
 
     if (mode == kShared && (inode->lock == kShared || inode->lock == kReserved)) {
@@ -1035,7 +1037,7 @@ auto PosixFile::lock(LockMode mode) -> Status
     } else if (mode == kExclusive && inode->nshared > 1) {
         // Another thread still holds a shared lock, preventing this kExclusive from
         // being taken.
-        return Status::busy("busy");
+        return posix_busy();
     } else {
         // The caller is requesting a kReserved or greater. Require that at least a
         // shared lock be held first.
@@ -1062,69 +1064,48 @@ auto PosixFile::lock(LockMode mode) -> Status
     return s;
 }
 
-auto PosixFile::unlock(LockMode mode) -> Status
+auto PosixFile::unlock() -> void
 {
-    CALICODB_EXPECT_LE(mode, kShared);
     struct flock lock = {};
 
     if (lockmode == kUnlocked) {
-        return Status::ok();
+        return;
     }
     std::lock_guard guard(inode->mutex);
     CALICODB_EXPECT_NE(inode->nshared, 0);
 
     if (lockmode > kShared) {
         CALICODB_EXPECT_EQ(inode->lock, lockmode);
-        if (mode == kShared) {
-            lock.l_type = F_RDLCK;
-            lock.l_whence = SEEK_SET;
-            lock.l_start = kSharedFirst;
-            lock.l_len = kSharedSize;
-            if (file_lock(file, lock)) {
-                return posix_error(errno);
-            }
-        }
         lock.l_type = F_UNLCK;
         lock.l_whence = SEEK_SET;
         lock.l_start = kPendingByte;
         // Clear both byte locks (reserved and pending) in the next system call.
         CALICODB_EXPECT_EQ(kPendingByte + 1, kReservedByte);
         lock.l_len = 2;
-        if (file_lock(file, lock)) {
-            return posix_error(errno);
-        }
+        // I don't think this really can fail, given that "file" is a valid
+        // file descriptor.
+        (void)file_lock(file, lock);
         // "file" represents the only file with an exclusive lock, so the inode
         // lock can be downgraded.
         inode->lock = kShared;
     }
-    Status s;
-    if (mode == kUnlocked) {
-        if (--inode->nshared == 0) {
-            // The last shared lock has been released.
-            lock.l_type = F_UNLCK;
-            lock.l_whence = SEEK_SET;
-            lock.l_len = 0;
-            lock.l_start = 0;
-            if (file_lock(file, lock)) {
-                s = posix_error(errno);
-                // TODO: SQLite seems to set some eFileLocks to NO_LOCK here.
-                //       Look into what kinds of errors fcntl(F_SETLK) can
-                //       encounter and what happens to the lock state in each case.
-            }
-            inode->lock = kUnlocked;
-            lockmode = kUnlocked;
-        }
-        CALICODB_EXPECT_GT(inode->nlocks, 0);
+    if (--inode->nshared == 0) {
+        // The last shared lock has been released.
+        lock.l_type = F_UNLCK;
+        lock.l_whence = SEEK_SET;
+        lock.l_len = 0;
+        lock.l_start = 0;
+        (void)file_lock(file, lock);
+        inode->lock = kUnlocked;
+        lockmode = kUnlocked;
+    }
+    CALICODB_EXPECT_GT(inode->nlocks, 0);
 
-        --inode->nlocks;
-        if (inode->nlocks == 0) {
-            PosixFs::close_pending_files(*inode);
-        }
+    --inode->nlocks;
+    if (inode->nlocks == 0) {
+        PosixFs::close_pending_files(*inode);
     }
-    if (s.is_ok()) {
-        lockmode = mode;
-    }
-    return s;
+    lockmode = kUnlocked;
 }
 
 } // namespace calicodb

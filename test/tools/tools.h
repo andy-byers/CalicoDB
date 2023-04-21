@@ -54,7 +54,8 @@
 namespace calicodb::tools
 {
 
-class TestDir final {
+class TestDir final
+{
 public:
     static constexpr auto kDirname = "testdir";
 
@@ -109,9 +110,8 @@ public:
         return Status::ok();
     }
 
-    [[nodiscard]] auto abort() -> Status override
+    auto rollback() -> void override
     {
-        return Status::ok();
     }
 
     [[nodiscard]] auto close() -> Status override
@@ -140,7 +140,7 @@ public:
     [[nodiscard]] auto write(const PageRef *dirty, std::size_t db_size) -> Status override;
     [[nodiscard]] auto needs_checkpoint() const -> bool override;
     [[nodiscard]] auto checkpoint(File &db_file, std::size_t *) -> Status override;
-    [[nodiscard]] auto abort() -> Status override;
+    auto rollback() -> void override;
     [[nodiscard]] auto close() -> Status override;
     [[nodiscard]] auto sync() -> Status override { return Status::ok(); }
     [[nodiscard]] auto statistics() const -> WalStatistics override;
@@ -233,10 +233,8 @@ auto hexdump_page(const Page &page) -> void;
 auto read_file_to_string(Env &env, const std::string &filename) -> std::string;
 auto write_string_to_file(Env &env, const std::string &filename, const std::string &buffer, long offset = -1) -> void;
 auto assign_file_contents(Env &env, const std::string &filename, const std::string &contents) -> void;
-auto fill_db(DB &db, RandomGenerator &random, std::size_t num_records, std::size_t max_payload_size = 100) -> std::map<std::string, std::string>;
-auto fill_db(DB &db, Table &table, RandomGenerator &random, std::size_t num_records, std::size_t max_payload_size = 100) -> std::map<std::string, std::string>;
-auto expect_db_contains(const DB &db, const std::map<std::string, std::string> &map) -> void;
-auto expect_db_contains(const DB &db, const Table &table, const std::map<std::string, std::string> &map) -> void;
+auto fill_db(Table &table, RandomGenerator &random, std::size_t num_records, std::size_t max_payload_size = 100) -> std::map<std::string, std::string>;
+auto expect_db_contains(const Table &table, const std::map<std::string, std::string> &map) -> void;
 
 } // namespace calicodb::tools
 

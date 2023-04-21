@@ -2,19 +2,19 @@
 //// This source code is licensed under the MIT License, which can be found in
 //// LICENSE.md. See AUTHORS.md for a list of contributor names.
 //
-//#include "env_helpers.h"
+// #include "env_helpers.h"
 //
-//namespace calicodb::tools
+// namespace calicodb::tools
 //{
 //
-//#define TRY_INTERCEPT_FROM(source, type, filename)                                                     \
+// #define TRY_INTERCEPT_FROM(source, type, filename)                                                     \
 //    do {                                                                                               \
 //        if (auto intercept_s = (source).try_intercept_syscall(type, filename); !intercept_s.is_ok()) { \
 //            return intercept_s;                                                                        \
 //        }                                                                                              \
 //    } while (0)
 //
-//auto FakeEnv::get_file_contents(const std::string &filename) const -> std::string
+// auto FakeEnv::get_file_contents(const std::string &filename) const -> std::string
 //{
 //    const auto file = m_state.find(filename);
 //    if (file == end(m_state) || !file->second.created) {
@@ -23,7 +23,7 @@
 //    return file->second.buffer;
 //}
 //
-//auto FakeEnv::put_file_contents(const std::string &filename, std::string contents) -> void
+// auto FakeEnv::put_file_contents(const std::string &filename, std::string contents) -> void
 //{
 //    auto file = m_state.find(filename);
 //    if (file == end(m_state)) {
@@ -33,7 +33,7 @@
 //    file->second.created = true;
 //}
 //
-//auto FakeEnv::read_file_at(const FileState &mem, std::size_t offset, std::size_t size, char *scratch, Slice *out) -> Status
+// auto FakeEnv::read_file_at(const FileState &mem, std::size_t offset, std::size_t size, char *scratch, Slice *out) -> Status
 //{
 //    if (offset < mem.buffer.size()) {
 //        const auto read_size = std::min(size, mem.buffer.size() - offset);
@@ -45,7 +45,7 @@
 //    return Status::ok();
 //}
 //
-//auto FakeEnv::write_file_at(FileState &mem, std::size_t offset, const Slice &in) -> Status
+// auto FakeEnv::write_file_at(FileState &mem, std::size_t offset, const Slice &in) -> Status
 //{
 //    if (const auto write_end = offset + in.size(); mem.buffer.size() < write_end) {
 //        mem.buffer.resize(write_end);
@@ -54,22 +54,22 @@
 //    return Status::ok();
 //}
 //
-//auto FakeFile::read(std::size_t offset, std::size_t size, char *scratch, Slice *out) -> Status
+// auto FakeFile::read(std::size_t offset, std::size_t size, char *scratch, Slice *out) -> Status
 //{
 //    return m_env->read_file_at(*m_state, offset, size, scratch, out);
 //}
 //
-//auto FakeFile::write(std::size_t offset, const Slice &in) -> Status
+// auto FakeFile::write(std::size_t offset, const Slice &in) -> Status
 //{
 //    return m_env->write_file_at(*m_state, offset, in);
 //}
 //
-//auto FakeFile::sync() -> Status
+// auto FakeFile::sync() -> Status
 //{
 //    return Status::ok();
 //}
 //
-//auto FakeEnv::open_or_create_file(const std::string &filename) const -> FileState &
+// auto FakeEnv::open_or_create_file(const std::string &filename) const -> FileState &
 //{
 //    auto itr = m_state.find(filename);
 //    if (itr == end(m_state)) {
@@ -78,7 +78,7 @@
 //    return itr->second;
 //}
 //
-//auto FakeEnv::new_file(const std::string &filename, OpenMode, File *&out) -> Status
+// auto FakeEnv::new_file(const std::string &filename, OpenMode, File *&out) -> Status
 //{
 //    auto &mem = open_or_create_file(filename);
 //    out = new FakeFile(filename, *this, mem);
@@ -89,7 +89,7 @@
 //    return Status::ok();
 //}
 //
-//auto FakeEnv::remove_file(const std::string &filename) -> Status
+// auto FakeEnv::remove_file(const std::string &filename) -> Status
 //{
 //    auto itr = m_state.find(filename);
 //    if (itr == end(m_state)) {
@@ -102,7 +102,7 @@
 //    return Status::ok();
 //}
 //
-//auto FakeEnv::resize_file(const std::string &filename, std::size_t size) -> Status
+// auto FakeEnv::resize_file(const std::string &filename, std::size_t size) -> Status
 //{
 //    auto itr = m_state.find(filename);
 //    if (itr == end(m_state)) {
@@ -112,7 +112,7 @@
 //    return Status::ok();
 //}
 //
-//auto FakeEnv::file_size(const std::string &filename, std::size_t &out) const -> Status
+// auto FakeEnv::file_size(const std::string &filename, std::size_t &out) const -> Status
 //{
 //    auto itr = m_state.find(filename);
 //    if (itr == cend(m_state) || !itr->second.created) {
@@ -122,7 +122,7 @@
 //    return Status::ok();
 //}
 //
-//auto FakeEnv::file_exists(const std::string &filename) const -> bool
+// auto FakeEnv::file_exists(const std::string &filename) const -> bool
 //{
 //    if (const auto &itr = m_state.find(filename); itr != end(m_state)) {
 //        return itr->second.created;
@@ -130,52 +130,52 @@
 //    return false;
 //}
 //
-//auto FakeEnv::srand(unsigned seed) -> void
+// auto FakeEnv::srand(unsigned seed) -> void
 //{
 //    ::srand(seed);
 //}
 //
-//auto FakeEnv::rand() -> unsigned
+// auto FakeEnv::rand() -> unsigned
 //{
 //    return ::rand();
 //}
 //
-//auto FakeEnv::clone() const -> Env *
+// auto FakeEnv::clone() const -> Env *
 //{
 //    auto *env = new FakeEnv;
 //    env->m_state = m_state;
 //    return env;
 //}
 //
-//TestEnv::TestEnv()
+// TestEnv::TestEnv()
 //    : EnvWrapper(*new tools::FakeEnv)
 //{
 //}
 //
-//TestEnv::TestEnv(Env &env)
+// TestEnv::TestEnv(Env &env)
 //    : EnvWrapper(env)
 //{
 //}
 //
-//TestEnv::~TestEnv()
+// TestEnv::~TestEnv()
 //{
 //    delete target();
 //}
 //
-//auto TestEnv::save_file_contents(const std::string &filename) -> void
+// auto TestEnv::save_file_contents(const std::string &filename) -> void
 //{
 //    auto state = m_state.find(filename);
 //    CHECK_TRUE(state != end(m_state));
 //    state->second.saved_state = read_file_to_string(*target(), filename);
 //}
 //
-//auto TestEnv::overwrite_file(const std::string &filename, const std::string &contents) -> void
+// auto TestEnv::overwrite_file(const std::string &filename, const std::string &contents) -> void
 //{
 //    write_string_to_file(*target(), filename, contents, 0);
 //    CHECK_OK(target()->resize_file(filename, contents.size()));
 //}
 //
-//auto TestEnv::clone() -> Env *
+// auto TestEnv::clone() -> Env *
 //{
 //    auto *env = new TestEnv(
 //        *reinterpret_cast<FakeEnv *>(target())->clone());
@@ -186,14 +186,14 @@
 //    return env;
 //}
 //
-//auto TestEnv::drop_after_last_sync() -> void
+// auto TestEnv::drop_after_last_sync() -> void
 //{
 //    for (const auto &[filename, _] : m_state) {
 //        drop_after_last_sync(filename);
 //    }
 //}
 //
-//auto TestEnv::drop_after_last_sync(const std::string &filename) -> void
+// auto TestEnv::drop_after_last_sync(const std::string &filename) -> void
 //{
 //    const auto state = m_state.find(filename);
 //    if (state != end(m_state) && !state->second.unlinked) {
@@ -201,7 +201,7 @@
 //    }
 //}
 //
-//auto TestEnv::new_file(const std::string &filename, OpenMode mode, File *&out) -> Status
+// auto TestEnv::new_file(const std::string &filename, OpenMode mode, File *&out) -> Status
 //{
 //    TRY_INTERCEPT_FROM(*this, Interceptor::kOpen, filename);
 //
@@ -217,13 +217,13 @@
 //    return s;
 //}
 //
-//auto TestEnv::resize_file(const std::string &filename, std::size_t file_size) -> Status
+// auto TestEnv::resize_file(const std::string &filename, std::size_t file_size) -> Status
 //{
 //    TRY_INTERCEPT_FROM(*this, Interceptor::kResize, filename);
 //    return target()->resize_file(filename, file_size);
 //}
 //
-//auto TestEnv::remove_file(const std::string &filename) -> Status
+// auto TestEnv::remove_file(const std::string &filename) -> Status
 //{
 //    TRY_INTERCEPT_FROM(*this, Interceptor::kUnlink, filename);
 //
@@ -236,7 +236,7 @@
 //    return s;
 //}
 //
-//auto TestEnv::try_intercept_syscall(Interceptor::Type type, const std::string &filename) -> Status
+// auto TestEnv::try_intercept_syscall(Interceptor::Type type, const std::string &filename) -> Status
 //{
 //    const auto state = m_state.find(filename);
 //    if (state != end(m_state)) {
@@ -249,7 +249,7 @@
 //    return Status::ok();
 //}
 //
-//auto TestEnv::add_interceptor(const std::string &filename, Interceptor interceptor) -> void
+// auto TestEnv::add_interceptor(const std::string &filename, Interceptor interceptor) -> void
 //{
 //    auto state = m_state.find(filename);
 //    if (state == end(m_state)) {
@@ -258,14 +258,14 @@
 //    state->second.interceptors.emplace_back(std::move(interceptor));
 //}
 //
-//auto TestEnv::clear_interceptors() -> void
+// auto TestEnv::clear_interceptors() -> void
 //{
 //    for (auto &state : m_state) {
 //        state.second.interceptors.clear();
 //    }
 //}
 //
-//auto TestEnv::clear_interceptors(const std::string &filename) -> void
+// auto TestEnv::clear_interceptors(const std::string &filename) -> void
 //{
 //    auto state = m_state.find(filename);
 //    if (state != end(m_state)) {
@@ -273,33 +273,33 @@
 //    }
 //}
 //
-//TestFile::TestFile(std::string filename, File &file, TestEnv &env)
+// TestFile::TestFile(std::string filename, File &file, TestEnv &env)
 //    : m_filename(std::move(filename)),
 //      m_env(&env),
 //      m_file(&file)
 //{
 //}
 //
-//TestFile::~TestFile()
+// TestFile::~TestFile()
 //{
 //    m_env->drop_after_last_sync(m_filename);
 //
 //    delete m_file;
 //}
 //
-//auto TestFile::read(std::size_t offset, std::size_t size, char *scratch, Slice *out) -> Status
+// auto TestFile::read(std::size_t offset, std::size_t size, char *scratch, Slice *out) -> Status
 //{
 //    TRY_INTERCEPT_FROM(*m_env, Interceptor::kRead, m_filename);
 //    return m_file->read(offset, size, scratch, out);
 //}
 //
-//auto TestFile::write(std::size_t offset, const Slice &in) -> Status
+// auto TestFile::write(std::size_t offset, const Slice &in) -> Status
 //{
 //    TRY_INTERCEPT_FROM(*m_env, Interceptor::kWrite, m_filename);
 //    return m_file->write(offset, in);
 //}
 //
-//auto TestFile::sync() -> Status
+// auto TestFile::sync() -> Status
 //{
 //    TRY_INTERCEPT_FROM(*m_env, Interceptor::kSync, m_filename);
 //    auto s = m_file->sync();

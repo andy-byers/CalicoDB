@@ -127,12 +127,7 @@ auto hexdump_page(const Page &page) -> void
     }
 }
 
-auto fill_db(DB &db, RandomGenerator &random, std::size_t num_records, std::size_t max_payload_size) -> std::map<std::string, std::string>
-{
-    return fill_db(db, *db.default_table(), random, num_records, max_payload_size);
-}
-
-auto fill_db(DB &db, Table &table, RandomGenerator &random, std::size_t num_records, std::size_t max_payload_size) -> std::map<std::string, std::string>
+auto fill_db(Table &table, RandomGenerator &random, std::size_t num_records, std::size_t max_payload_size) -> std::map<std::string, std::string>
 {
     CHECK_TRUE(max_payload_size > 0);
     std::map<std::string, std::string> records;
@@ -142,22 +137,17 @@ auto fill_db(DB &db, Table &table, RandomGenerator &random, std::size_t num_reco
         const auto vsize = random.Next(max_payload_size - ksize);
         const auto k = random.Generate(ksize);
         const auto v = random.Generate(vsize);
-        CHECK_OK(db.put(table, k, v));
+        CHECK_OK(table.put(k, v));
         records[k.to_string()] = v.to_string();
     }
     return records;
 }
 
-auto expect_db_contains(const DB &db, const std::map<std::string, std::string> &map) -> void
-{
-    return expect_db_contains(db, *db.default_table(), map);
-}
-
-auto expect_db_contains(const DB &db, const Table &table, const std::map<std::string, std::string> &map) -> void
+auto expect_db_contains(const Table &table, const std::map<std::string, std::string> &map) -> void
 {
     for (const auto &[key, value] : map) {
         std::string result;
-        CHECK_OK(db.get(table, key, &result));
+        CHECK_OK(table.get(key, &result));
         CHECK_EQ(result, value);
     }
 }
@@ -216,10 +206,9 @@ auto FakeWal::checkpoint(File &db_file, std::size_t *db_size) -> Status
     return Status::ok();
 }
 
-auto FakeWal::abort() -> Status
+auto FakeWal::rollback() -> void
 {
     m_pending.clear();
-    return Status::ok();
 }
 
 auto FakeWal::close() -> Status

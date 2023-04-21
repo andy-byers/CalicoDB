@@ -14,8 +14,7 @@ namespace calicodb
 
 class Env;
 class Freelist;
-class BufferManager;
-class TableSet;
+class TableV1Set;
 class Wal;
 
 // Freelist management. The freelist is essentially a linked list that is threaded through the database. Each freelist
@@ -83,9 +82,12 @@ public:
     [[nodiscard]] auto page_count() const -> std::size_t;
     [[nodiscard]] auto page_size() const -> std::size_t;
     [[nodiscard]] auto statistics() const -> const Statistics &;
-    [[nodiscard]] auto begin_txn() -> bool;
-    [[nodiscard]] auto rollback_txn() -> Status;
-    [[nodiscard]] auto commit_txn() -> Status;
+
+    [[nodiscard]] auto begin(bool write) -> Status;
+    [[nodiscard]] auto commit() -> Status;
+    auto rollback() -> void;
+    auto finish() -> void;
+
     [[nodiscard]] auto checkpoint() -> Status;
     [[nodiscard]] auto allocate(Page &page) -> Status;
     [[nodiscard]] auto destroy(Page page) -> Status;
@@ -125,15 +127,15 @@ private:
     mutable Statistics m_statistics;
     mutable DBState *m_state = nullptr;
     mutable Mode m_mode = kOpen;
+    mutable Mode m_save = kOpen;
 
     std::string m_filename;
     Dirtylist m_dirtylist;
     Freelist m_freelist;
     Bufmgr m_bufmgr;
 
-    // True if a checkpoint operation is being run, false otherwise. Used
-    // to indicate failure during a checkpoint.
-    bool m_in_ckpt = false;
+    // True the in-memory root page needs to be refreshed, false otherwise.
+    bool m_needs_root = false;
 
     Sink *m_log = nullptr;
     File *m_file = nullptr;

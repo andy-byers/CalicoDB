@@ -2,19 +2,19 @@
 //// This source code is licensed under the MIT License, which can be found in
 //// LICENSE.md. See AUTHORS.md for a list of contributor names.
 //
-//#include "calicodb/db.h"
-//#include "db_impl.h"
-//#include "logging.h"
-//#include "unit_tests.h"
+// #include "calicodb/db.h"
+// #include "db_impl.h"
+// #include "logging.h"
+// #include "unit_tests.h"
 //
-//namespace calicodb
+// namespace calicodb
 //{
 //
-//class DefaultTableTests
+// class DefaultTableTests
 //    : public EnvTestHarness<tools::FakeEnv>,
 //      public testing::Test
 //{
-//public:
+// public:
 //    DefaultTableTests()
 //    {
 //        options.page_size = kMinPageSize;
@@ -44,21 +44,21 @@
 //    DB *db = nullptr;
 //};
 //
-//#ifndef NDEBUG
-//TEST_F(DefaultTableTests, OpenRootTableDeathTest)
+// #ifndef NDEBUG
+// TEST_F(DefaultTableTests, OpenRootTableDeathTest)
 //{
 //    Table *table;
 //    ASSERT_DEATH((void)db->create_table({}, "calicodb.root", table), "expect") << "not allowed to create root table";
 //}
-//#endif // NDEBUG
+// #endif // NDEBUG
 //
-//TEST_F(DefaultTableTests, SpecialTableBehavior)
+// TEST_F(DefaultTableTests, SpecialTableBehavior)
 //{
 //    auto *default_table = db->default_table();
 //    ASSERT_TRUE(db->drop_table(default_table).is_invalid_argument()) << "not allowed to drop default table";
 //}
 //
-//TEST_F(DefaultTableTests, RootAndDefaultTablesAreAlwaysOpen)
+// TEST_F(DefaultTableTests, RootAndDefaultTablesAreAlwaysOpen)
 //{
 //    ASSERT_NE(db_impl(db)->TEST_tables().get(Id(1)), nullptr);
 //    ASSERT_NE(db_impl(db)->TEST_tables().get(Id(2)), nullptr);
@@ -73,7 +73,7 @@
 //    ASSERT_EQ(v, "v");
 //}
 //
-//TEST_F(DefaultTableTests, DefaultTablePersists)
+// TEST_F(DefaultTableTests, DefaultTablePersists)
 //{
 //    reopen_db();
 //
@@ -81,7 +81,7 @@
 //    ASSERT_OK(db->put("k", "v"));
 //}
 //
-//TEST_F(DefaultTableTests, RecordInDefaultTablePersists)
+// TEST_F(DefaultTableTests, RecordInDefaultTablePersists)
 //{
 //    ASSERT_OK(db->put("k", "v"));
 //
@@ -90,9 +90,9 @@
 //    ASSERT_EQ(v, "v");
 //}
 //
-//class TableTests : public DefaultTableTests
+// class TableTests : public DefaultTableTests
 //{
-//public:
+// public:
 //    ~TableTests() override = default;
 //
 //    auto SetUp() -> void override
@@ -129,20 +129,20 @@
 //    Table *table = nullptr;
 //};
 //
-//TEST_F(TableTests, TablesAreRegistered)
+// TEST_F(TableTests, TablesAreRegistered)
 //{
 //    const auto &tables = db_impl(db)->TEST_tables();
 //    ASSERT_NE(tables.get(Id(1)), nullptr) << "cannot locate root table";
 //    ASSERT_NE(tables.get(Id(2)), nullptr) << "cannot locate non-root table";
 //}
 //
-//TEST_F(TableTests, TablesMustBeUnique)
+// TEST_F(TableTests, TablesMustBeUnique)
 //{
 //    Table *same;
 //    ASSERT_TRUE(db->create_table({}, "table", same).is_invalid_argument());
 //}
 //
-//TEST_F(TableTests, VacuumDroppedTable)
+// TEST_F(TableTests, VacuumDroppedTable)
 //{
 //    ASSERT_EQ(db_impl(db)->TEST_pager().page_count(), 4);
 //    ASSERT_OK(db->drop_table(table));
@@ -152,7 +152,7 @@
 //    ASSERT_EQ(db_impl(db)->TEST_pager().page_count(), 3);
 //}
 //
-//TEST_F(TableTests, TableDestructionIsPartOfTransaction)
+// TEST_F(TableTests, TableDestructionIsPartOfTransaction)
 //{
 //    const auto txn = db->begin_txn(TxnOptions());
 //    ASSERT_OK(db->drop_table(table));
@@ -166,7 +166,7 @@
 //    ASSERT_EQ(db_impl(db)->TEST_tables().get(Id(3)), nullptr);
 //}
 //
-//TEST_F(TableTests, TableDestructionIsAtomic)
+// TEST_F(TableTests, TableDestructionIsAtomic)
 //{
 //    ASSERT_OK(db->drop_table(table));
 //    table = nullptr;
@@ -178,7 +178,7 @@
 //    ASSERT_EQ(db_impl(db)->TEST_tables().get(Id(3)), nullptr);
 //}
 //
-//TEST_F(TableTests, TableCannotBeOpenedTwice)
+// TEST_F(TableTests, TableCannotBeOpenedTwice)
 //{
 //    Table *table_1, *table_2;
 //    TableOptions table_options{AccessMode::kReadOnly};
@@ -188,7 +188,7 @@
 //    table_1 = nullptr;
 //}
 //
-//TEST_F(TableTests, RecordsPersist)
+// TEST_F(TableTests, RecordsPersist)
 //{
 //    tools::RandomGenerator random;
 //    const auto records_0 = tools::fill_db(*db, random, 1'000);
@@ -204,9 +204,9 @@
 //    tools::expect_db_contains(*db, *table, records_1);
 //}
 //
-//class TwoTableTests : public TableTests
+// class TwoTableTests : public TableTests
 //{
-//public:
+// public:
 //    ~TwoTableTests() override = default;
 //
 //    auto SetUp() -> void override
@@ -247,7 +247,7 @@
 //    Table *table_2 = nullptr;
 //};
 //
-//TEST_F(TwoTableTests, TablesHaveIndependentKeys)
+// TEST_F(TwoTableTests, TablesHaveIndependentKeys)
 //{
 //    ASSERT_OK(db->put(*table_1, "key", "1"));
 //    ASSERT_OK(db->put(*table_2, "key", "2"));
@@ -259,7 +259,7 @@
 //    ASSERT_EQ(value, "2");
 //}
 //
-//TEST_F(TwoTableTests, DropTable)
+// TEST_F(TwoTableTests, DropTable)
 //{
 //    ASSERT_OK(db->put(
 //        *table_2,
@@ -278,7 +278,7 @@
 //    ASSERT_EQ(db_impl(db)->TEST_pager().page_count(), 3);
 //}
 //
-//TEST_F(TwoTableTests, CreatedTablesPersist)
+// TEST_F(TwoTableTests, CreatedTablesPersist)
 //{
 //    reopen_db();
 //
@@ -289,7 +289,7 @@
 //    ASSERT_EQ(tables[1], "table_2");
 //}
 //
-//TEST_F(TwoTableTests, FirstAvailableTableIdIsUsed)
+// TEST_F(TwoTableTests, FirstAvailableTableIdIsUsed)
 //{
 //    const auto &tables = db_impl(db)->TEST_tables();
 //    ASSERT_OK(db->drop_table(table));
@@ -301,7 +301,7 @@
 //    ASSERT_NE(tables.get(Id(3)), nullptr) << "first table ID was not reused";
 //}
 //
-//TEST_F(TwoTableTests, FindExistingTables)
+// TEST_F(TwoTableTests, FindExistingTables)
 //{
 //    std::vector<std::string> table_names;
 //    ASSERT_OK(db->list_tables(table_names));
@@ -323,7 +323,7 @@
 //    ASSERT_TRUE(table_names.empty());
 //}
 //
-//TEST_F(TwoTableTests, RecordsPersist)
+// TEST_F(TwoTableTests, RecordsPersist)
 //{
 //    tools::RandomGenerator random;
 //    const auto records_0 = tools::fill_db(*db, random, 1'000);
@@ -342,9 +342,9 @@
 //    tools::expect_db_contains(*db, *table_2, records_2);
 //}
 //
-//class MultiTableVacuumRunner : public EnvTestHarness<tools::FakeEnv>
+// class MultiTableVacuumRunner : public EnvTestHarness<tools::FakeEnv>
 //{
-//public:
+// public:
 //    const std::size_t kRecordCount = 5'000;
 //
 //    explicit MultiTableVacuumRunner(std::size_t num_tables)
@@ -417,7 +417,7 @@
 //        db_impl(m_db)->TEST_validate();
 //    }
 //
-//private:
+// private:
 //    auto initialize(std::size_t num_tables, const Options &options) -> void
 //    {
 //        ASSERT_OK(DB::open(options, kDBFilename, m_db));
@@ -452,11 +452,11 @@
 //    DB *m_db = nullptr;
 //};
 //
-//class MultiTableVacuumTests
+// class MultiTableVacuumTests
 //    : public MultiTableVacuumRunner,
 //      public testing::TestWithParam<std::size_t>
 //{
-//public:
+// public:
 //    explicit MultiTableVacuumTests()
 //        : MultiTableVacuumRunner{GetParam()}
 //    {
@@ -465,38 +465,38 @@
 //    ~MultiTableVacuumTests() override = default;
 //};
 //
-//TEST_P(MultiTableVacuumTests, EmptyTables)
+// TEST_P(MultiTableVacuumTests, EmptyTables)
 //{
 //    run();
 //}
 //
-//TEST_P(MultiTableVacuumTests, FilledTables)
+// TEST_P(MultiTableVacuumTests, FilledTables)
 //{
 //    fill_user_tables(15, 15); // kRecordCount, kRecordCount / 2);
 //    run();
 //}
 //
-//TEST_P(MultiTableVacuumTests, FilledTablesWithInterleavedPages)
+// TEST_P(MultiTableVacuumTests, FilledTablesWithInterleavedPages)
 //{
 //    fill_user_tables(kRecordCount, 10);
 //    run();
 //}
 //
-//TEST_P(MultiTableVacuumTests, PartiallyFilledTables)
+// TEST_P(MultiTableVacuumTests, PartiallyFilledTables)
 //{
 //    fill_user_tables(kRecordCount, kRecordCount / 2);
 //    erase_from_user_tables(kRecordCount / 2);
 //    run();
 //}
 //
-//TEST_P(MultiTableVacuumTests, PartiallyFilledTablesWithInterleavedPages)
+// TEST_P(MultiTableVacuumTests, PartiallyFilledTablesWithInterleavedPages)
 //{
 //    fill_user_tables(kRecordCount, 10);
 //    erase_from_user_tables(kRecordCount / 2);
 //    run();
 //}
 //
-//INSTANTIATE_TEST_SUITE_P(
+// INSTANTIATE_TEST_SUITE_P(
 //    MultiTableVacuumTests,
 //    MultiTableVacuumTests,
 //    ::testing::Values(0, 1, 2, 5, 10));

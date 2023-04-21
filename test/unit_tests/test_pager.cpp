@@ -2,16 +2,16 @@
 //// This source code is licensed under the MIT License, which can be found in
 //// LICENSE.md. See AUTHORS.md for a list of contributor names.
 //
-//#include "bufmgr.h"
-//#include "header.h"
-//#include "logging.h"
-//#include "page.h"
-//#include "pager.h"
-//#include "unit_tests.h"
-//#include <gtest/gtest.h>
-//#include <numeric>
+// #include "bufmgr.h"
+// #include "header.h"
+// #include "logging.h"
+// #include "page.h"
+// #include "pager.h"
+// #include "unit_tests.h"
+// #include <gtest/gtest.h>
+// #include <numeric>
 //
-//namespace calicodb
+// namespace calicodb
 //{
 //
 //[[nodiscard]] static auto make_key(U64 k) -> std::string
@@ -24,9 +24,9 @@
 //    return {.page_id = Id(id_value)};
 //}
 //
-//class PageCacheTests : public testing::Test
+// class PageCacheTests : public testing::Test
 //{
-//public:
+// public:
 //    explicit PageCacheTests()
 //        : mgr(kMinPageSize, kMinFrameCount)
 //    {
@@ -37,7 +37,7 @@
 //    Bufmgr mgr;
 //};
 //
-//TEST_F(PageCacheTests, EmptyBehavior)
+// TEST_F(PageCacheTests, EmptyBehavior)
 //{
 //    ASSERT_EQ(mgr.size(), 0);
 //    ASSERT_EQ(mgr.size(), 0);
@@ -45,7 +45,7 @@
 //    ASSERT_EQ(mgr.next_victim(), nullptr);
 //}
 //
-//TEST_F(PageCacheTests, OldestReferenceIsEvictedFirst)
+// TEST_F(PageCacheTests, OldestReferenceIsEvictedFirst)
 //{
 //    (void)mgr.alloc(Id(5));
 //    (void)mgr.alloc(Id(4));
@@ -67,7 +67,7 @@
 //    ASSERT_EQ(mgr.size(), 0);
 //}
 //
-//TEST_F(PageCacheTests, ReplacementPolicyIgnoresQuery)
+// TEST_F(PageCacheTests, ReplacementPolicyIgnoresQuery)
 //{
 //    (void)mgr.alloc(Id(3));
 //    (void)mgr.alloc(Id(2));
@@ -80,7 +80,7 @@
 //    mgr.erase(mgr.next_victim()->page_id);
 //}
 //
-//TEST_F(PageCacheTests, RefcountsAreConsideredDuringEviction)
+// TEST_F(PageCacheTests, RefcountsAreConsideredDuringEviction)
 //{
 //    (void)mgr.alloc(Id(3));
 //    (void)mgr.alloc(Id(2));
@@ -92,7 +92,7 @@
 //    ASSERT_EQ(mgr.next_victim(), nullptr);
 //}
 //
-//auto write_to_page(Page &page, const std::string &message) -> void
+// auto write_to_page(Page &page, const std::string &message) -> void
 //{
 //    EXPECT_LE(page_offset(page.id()) + message.size(), page.size());
 //    std::memcpy(page.data() + page.size() - message.size(), message.data(), message.size());
@@ -106,9 +106,9 @@
 //    return message;
 //}
 //
-//class PagerWalTestHarness
+// class PagerWalTestHarness
 //{
-//public:
+// public:
 //    static constexpr std::size_t kPagerFrames = kMinFrameCount; // Number of frames available to the pager
 //    static constexpr std::size_t kSomePages = kPagerFrames / 5; // Just a few pages
 //    static constexpr std::size_t kFullCache = kPagerFrames;     // Enough pages to fill the page cache
@@ -137,7 +137,7 @@
 //        ASSERT_OK(Pager::open(pager_param, m_pager));
 //        // Write the freshly-allocated root page to the DB file.
 //        ASSERT_EQ(m_pager->mode(), Pager::kDirty);
-//        ASSERT_OK(m_pager->commit_txn());
+//        ASSERT_OK(m_pager->commit());
 //        m_state.use_wal = true;
 //    }
 //
@@ -253,11 +253,11 @@
 //    Pager *m_pager = nullptr;
 //};
 //
-//class PagerTests
+// class PagerTests
 //    : public PagerWalTestHarness,
 //      public testing::Test
 //{
-//public:
+// public:
 //    const std::string kTestMessage = "Hello, world!";
 //
 //    ~PagerTests() override = default;
@@ -269,16 +269,16 @@
 //    }
 //};
 //
-//TEST_F(PagerTests, NewPagerIsSetUpCorrectly)
+// TEST_F(PagerTests, NewPagerIsSetUpCorrectly)
 //{
 //    ASSERT_EQ(m_pager->page_count(), 1);
 //    ASSERT_EQ(m_pager->statistics().bytes_written, 1'024)
 //        << "test should direct first write to the DB file";
 //}
 //
-//TEST_F(PagerTests, AllocatesPagesAtEOF)
+// TEST_F(PagerTests, AllocatesPagesAtEOF)
 //{
-//    ASSERT_TRUE(m_pager->begin_txn());
+//    ASSERT_TRUE(m_pager->begin());
 //    ASSERT_EQ(m_pager->page_count(), 1);
 //    ASSERT_EQ(allocate_write_release("a"), Id(2));
 //    ASSERT_EQ(m_pager->page_count(), 2);
@@ -286,21 +286,21 @@
 //    ASSERT_EQ(m_pager->page_count(), 3);
 //    ASSERT_EQ(allocate_write_release("c"), Id(4));
 //    ASSERT_EQ(m_pager->page_count(), 4);
-//    ASSERT_OK(m_pager->commit_txn());
+//    ASSERT_OK(m_pager->commit());
 //}
 //
-//TEST_F(PagerTests, AcquireReturnsCorrectPage)
+// TEST_F(PagerTests, AcquireReturnsCorrectPage)
 //{
-//    ASSERT_TRUE(m_pager->begin_txn());
+//    ASSERT_TRUE(m_pager->begin());
 //    (void)allocate_write_release("foo");
 //    const auto page_id = allocate_write_release("foo");
-//    ASSERT_OK(m_pager->commit_txn());
+//    ASSERT_OK(m_pager->commit());
 //
 //    ASSERT_EQ(acquire_read_release(page_id, 3 /* bytes */), "foo");
 //}
 //
-//template <class Test>
-//static auto write_pages(Test &test, std::size_t key_offset, std::size_t num_pages, std::size_t acquire_offset = 0)
+// template <class Test>
+// static auto write_pages(Test &test, std::size_t key_offset, std::size_t num_pages, std::size_t acquire_offset = 0)
 //{
 //    for (std::size_t i = 0; i < num_pages; ++i) {
 //        const auto message = make_key(i + key_offset);
@@ -308,8 +308,8 @@
 //    }
 //}
 //
-//template <class Test>
-//static auto read_and_check(Test &test, std::size_t key_offset, std::size_t num_pages, bool from_file = false)
+// template <class Test>
+// static auto read_and_check(Test &test, std::size_t key_offset, std::size_t num_pages, bool from_file = false)
 //{
 //    for (std::size_t i = 0; i < num_pages; ++i) {
 //        const Id page_id(i + 1);
@@ -324,9 +324,9 @@
 //    }
 //}
 //
-//TEST_F(PagerTests, NormalReadsAndWrites)
+// TEST_F(PagerTests, NormalReadsAndWrites)
 //{
-//    ASSERT_TRUE(m_pager->begin_txn());
+//    ASSERT_TRUE(m_pager->begin());
 //
 //    write_pages(*this, 123, kSomePages);
 //    read_and_check(*this, 123, kSomePages);
@@ -335,78 +335,78 @@
 //    write_pages(*this, 789, kManyPages);
 //    read_and_check(*this, 789, kManyPages);
 //
-//    ASSERT_OK(m_pager->commit_txn());
+//    ASSERT_OK(m_pager->commit());
 //}
 //
-//TEST_F(PagerTests, NormalCommits)
+// TEST_F(PagerTests, NormalCommits)
 //{
-//    ASSERT_TRUE(m_pager->begin_txn());
+//    ASSERT_TRUE(m_pager->begin());
 //    write_pages(*this, 123, kSomePages);
-//    ASSERT_OK(m_pager->commit_txn());
+//    ASSERT_OK(m_pager->commit());
 //    read_and_check(*this, 123, kSomePages);
 //
-//    ASSERT_TRUE(m_pager->begin_txn());
+//    ASSERT_TRUE(m_pager->begin());
 //    write_pages(*this, 456, kFullCache);
-//    ASSERT_OK(m_pager->commit_txn());
+//    ASSERT_OK(m_pager->commit());
 //    read_and_check(*this, 456, kFullCache);
 //
-//    ASSERT_TRUE(m_pager->begin_txn());
+//    ASSERT_TRUE(m_pager->begin());
 //    write_pages(*this, 789, kManyPages);
-//    ASSERT_OK(m_pager->commit_txn());
+//    ASSERT_OK(m_pager->commit());
 //    read_and_check(*this, 789, kManyPages);
 //}
 //
-//TEST_F(PagerTests, BasicRollbacks)
+// TEST_F(PagerTests, BasicRollbacks)
 //{
-//    ASSERT_TRUE(m_pager->begin_txn());
+//    ASSERT_TRUE(m_pager->begin());
 //    write_pages(*this, 123, kManyPages);
-//    ASSERT_OK(m_pager->commit_txn());
+//    ASSERT_OK(m_pager->commit());
 //    read_and_check(*this, 123, kManyPages);
 //
-//    ASSERT_TRUE(m_pager->begin_txn());
+//    ASSERT_TRUE(m_pager->begin());
 //    write_pages(*this, 456, kSomePages);
-//    ASSERT_OK(m_pager->rollback_txn());
+//    m_pager->rollback();
 //    read_and_check(*this, 123, kManyPages);
 //
-//    ASSERT_TRUE(m_pager->begin_txn());
+//    ASSERT_TRUE(m_pager->begin());
 //    write_pages(*this, 789, kFullCache);
-//    ASSERT_OK(m_pager->rollback_txn());
+//    m_pager->rollback();
 //    read_and_check(*this, 123, kManyPages);
 //
-//    ASSERT_TRUE(m_pager->begin_txn());
+//    ASSERT_TRUE(m_pager->begin());
 //    write_pages(*this, 0, kManyPages);
-//    ASSERT_OK(m_pager->rollback_txn());
+//    m_pager->rollback();
 //    read_and_check(*this, 123, kManyPages);
 //}
 //
-//TEST_F(PagerTests, RollbackPageCounts)
+// TEST_F(PagerTests, RollbackPageCounts)
 //{
-//    ASSERT_TRUE(m_pager->begin_txn());
+//    ASSERT_TRUE(m_pager->begin());
 //    write_pages(*this, 0, 10);
 //    ASSERT_EQ(m_pager->page_count(), 10);
-//    ASSERT_OK(m_pager->rollback_txn());
+//    m_pager->rollback();
 //    ASSERT_EQ(m_pager->page_count(), 1);
 //
 //    ASSERT_EQ(m_pager->page_count(), 1);
-//    ASSERT_TRUE(m_pager->begin_txn());
+//    ASSERT_TRUE(m_pager->begin());
 //    write_pages(*this, 123, 10);
 //    ASSERT_EQ(m_pager->page_count(), 10);
-//    ASSERT_OK(m_pager->commit_txn());
+//    ASSERT_OK(m_pager->commit());
 //
-//    ASSERT_TRUE(m_pager->begin_txn());
+//    ASSERT_TRUE(m_pager->begin());
 //    write_pages(*this, 456, 20);
 //    ASSERT_EQ(m_pager->page_count(), 20);
-//    ASSERT_OK(m_pager->rollback_txn());
+//    m_pager->rollback();
 //    ASSERT_EQ(m_pager->page_count(), 10);
 //    read_and_check(*this, 123, 10);
 //}
 //
-//TEST_F(PagerTests, BasicCheckpoints)
+// TEST_F(PagerTests, BasicCheckpoints)
 //{
 //    for (std::size_t i = 0; i < 10; ++i) {
-//        ASSERT_TRUE(m_pager->begin_txn());
+//        ASSERT_TRUE(m_pager->begin());
 //        write_pages(*this, kPagerFrames * i, kPagerFrames * (i + 1));
-//        ASSERT_OK(m_pager->commit_txn());
+//        ASSERT_OK(m_pager->commit());
 //        read_and_check(*this, kPagerFrames * i, kPagerFrames * (i + 1));
 //        ASSERT_OK(m_pager->checkpoint());
 //        // Pages returned by the pager should reflect what is on disk.
@@ -415,77 +415,77 @@
 //    }
 //}
 //
-//TEST_F(PagerTests, SequentialPageUsage)
+// TEST_F(PagerTests, SequentialPageUsage)
 //{
-//    ASSERT_TRUE(m_pager->begin_txn());
+//    ASSERT_TRUE(m_pager->begin());
 //    write_pages(*this, 0, kManyPages);
 //    write_pages(*this, 42, kManyPages);
-//    ASSERT_OK(m_pager->commit_txn());
+//    ASSERT_OK(m_pager->commit());
 //    read_and_check(*this, 42, kManyPages);
 //}
 //
-//TEST_F(PagerTests, ReverseSequentialPageUsage)
+// TEST_F(PagerTests, ReverseSequentialPageUsage)
 //{
-//    ASSERT_TRUE(m_pager->begin_txn());
+//    ASSERT_TRUE(m_pager->begin());
 //    write_pages(*this, 0, kManyPages);
 //
 //    for (std::size_t i = 0; i < kManyPages; ++i) {
 //        const auto j = kManyPages - i - 1;
 //        acquire_write_release(Id(j + 1), make_key(j + 42));
 //    }
-//    ASSERT_OK(m_pager->commit_txn());
+//    ASSERT_OK(m_pager->commit());
 //    read_and_check(*this, 42, kManyPages);
 //}
 //
-//TEST_F(PagerTests, RandomPageUsage)
+// TEST_F(PagerTests, RandomPageUsage)
 //{
 //    std::vector<unsigned> is(kManyPages);
 //    std::iota(begin(is), end(is), 0);
 //    std::default_random_engine rng(42);
 //    std::shuffle(begin(is), end(is), rng);
 //
-//    ASSERT_TRUE(m_pager->begin_txn());
+//    ASSERT_TRUE(m_pager->begin());
 //    write_pages(*this, 0, is.size());
 //    for (auto i : is) {
 //        acquire_write_release(Id(i + 1), make_key(i + 42));
 //    }
-//    ASSERT_OK(m_pager->commit_txn());
+//    ASSERT_OK(m_pager->commit());
 //    read_and_check(*this, 42, is.size());
 //}
 //
-//TEST_F(PagerTests, OnlyWritesBackCommittedWalFrames)
+// TEST_F(PagerTests, OnlyWritesBackCommittedWalFrames)
 //{
-//    ASSERT_TRUE(m_pager->begin_txn());
+//    ASSERT_TRUE(m_pager->begin());
 //    write_pages(*this, 42, kManyPages);
-//    ASSERT_OK(m_pager->commit_txn());
+//    ASSERT_OK(m_pager->commit());
 //
 //    // Modify the first kSomePages frames, then roll back the changes.
-//    ASSERT_TRUE(m_pager->begin_txn());
+//    ASSERT_TRUE(m_pager->begin());
 //    write_pages(*this, 0, kSomePages);
-//    ASSERT_OK(m_pager->rollback_txn());
+//    m_pager->rollback();
 //
 //    ASSERT_OK(m_pager->checkpoint());
 //    read_and_check(*this, 42, kManyPages);
 //}
 //
-//TEST_F(PagerTests, TransactionBehavior)
+// TEST_F(PagerTests, TransactionBehavior)
 //{
 //    // Only able to start a transaction once.
-//    ASSERT_TRUE(m_pager->begin_txn());
-//    ASSERT_FALSE(m_pager->begin_txn());
+//    ASSERT_TRUE(m_pager->begin());
+//    ASSERT_FALSE(m_pager->begin());
 //
 //    // Empty transactions are OK.
-//    ASSERT_OK(m_pager->commit_txn());
-//    ASSERT_TRUE(m_pager->begin_txn());
-//    ASSERT_OK(m_pager->rollback_txn());
+//    ASSERT_OK(m_pager->commit());
+//    ASSERT_TRUE(m_pager->begin());
+//    m_pager->rollback();
 //}
 //
-//TEST_F(PagerTests, AcquirePastEOF)
+// TEST_F(PagerTests, AcquirePastEOF)
 //{
 //    // Create "kManyPages" pages.
-//    ASSERT_TRUE(m_pager->begin_txn());
+//    ASSERT_TRUE(m_pager->begin());
 //    write_pages(*this, 0, kManyPages);
-//    ASSERT_OK(m_pager->commit_txn());
+//    ASSERT_OK(m_pager->commit());
 //
 //    // ID of a page that is way past the logical end of the DB file (the physical
 //    // size is still 0, but conceptually, there are kManyPages pages in existence).
@@ -499,18 +499,18 @@
 //    // written to the WAL, and there will be no indication that the DB size changed.
 //    // Usually, new pages are obtained by calling Pager::allocate(), but this should
 //    // work as well.
-//    ASSERT_TRUE(m_pager->begin_txn());
+//    ASSERT_TRUE(m_pager->begin());
 //    m_pager->upgrade(page);
 //    m_pager->release(std::move(page));
-//    ASSERT_OK(m_pager->commit_txn());
+//    ASSERT_OK(m_pager->commit());
 //
 //    ASSERT_EQ(m_pager->page_count(), kOutOfBounds)
 //        << "DB page count was not updated";
 //
 //    // Cause the out-of-bounds page to be evicted.
-//    ASSERT_TRUE(m_pager->begin_txn());
+//    ASSERT_TRUE(m_pager->begin());
 //    write_pages(*this, 0, kManyPages);
-//    ASSERT_OK(m_pager->commit_txn());
+//    ASSERT_OK(m_pager->commit());
 //
 //    ASSERT_EQ(count_db_pages(), 1)
 //        << "file have 1 page: no checkpoint has occurred";
@@ -522,23 +522,23 @@
 //    // Intervening pages should be usable now. They are not in the WAL, so they must
 //    // be read from the DB file, modified in memory, written back to the WAL, then
 //    // read out of the WAL again.
-//    ASSERT_TRUE(m_pager->begin_txn());
+//    ASSERT_TRUE(m_pager->begin());
 //    write_pages(*this, 42, kOutOfBounds);
-//    ASSERT_OK(m_pager->commit_txn());
+//    ASSERT_OK(m_pager->commit());
 //    read_and_check(*this, 42, kOutOfBounds);
 //}
 //
-//TEST_F(PagerTests, FreelistUsage)
+// TEST_F(PagerTests, FreelistUsage)
 //{
-//    ASSERT_TRUE(m_pager->begin_txn());
+//    ASSERT_TRUE(m_pager->begin());
 //    ASSERT_OK(create_freelist_pages(kSomePages * 2));
 //    write_pages(*this, 123, kSomePages * 2);
-//    ASSERT_OK(m_pager->commit_txn());
+//    ASSERT_OK(m_pager->commit());
 //    read_and_check(*this, 123, kSomePages * 2);
 //
-//    ASSERT_TRUE(m_pager->begin_txn());
+//    ASSERT_TRUE(m_pager->begin());
 //    write_pages(*this, 456, kSomePages);
-//    ASSERT_OK(m_pager->rollback_txn());
+//    m_pager->rollback();
 //    read_and_check(*this, 123, kSomePages * 2);
 //
 //    ASSERT_OK(m_pager->checkpoint());
@@ -546,22 +546,22 @@
 //    read_and_check(*this, 123, kSomePages * 2, true);
 //}
 //
-//#ifndef NDEBUG
-//TEST_F(PagerTests, InvalidModeDeathTest)
+// #ifndef NDEBUG
+// TEST_F(PagerTests, InvalidModeDeathTest)
 //{
 //    ASSERT_EQ(m_pager->mode(), Pager::kOpen);
-//    ASSERT_DEATH((void)m_pager->commit_txn(), "expect");
-//    ASSERT_DEATH((void)m_pager->rollback_txn(), "expect");
+//    ASSERT_DEATH((void)m_pager->commit(), "expect");
+//    ASSERT_DEATH((void)m_pager->rollback(), "expect");
 //
 //    m_pager->set_status(Status::io_error("I/O error"));
 //    ASSERT_EQ(m_pager->mode(), Pager::kError);
-//    ASSERT_DEATH((void)m_pager->begin_txn(), "expect");
+//    ASSERT_DEATH((void)m_pager->begin(), "expect");
 //    ASSERT_DEATH((void)m_pager->checkpoint(), "expect");
 //}
 //
-//TEST_F(PagerTests, DoubleFreeDeathTest)
+// TEST_F(PagerTests, DoubleFreeDeathTest)
 //{
-//    ASSERT_TRUE(m_pager->begin_txn());
+//    ASSERT_TRUE(m_pager->begin());
 //    for (std::size_t i = 0; i < 2; ++i) {
 //        for (std::size_t j = 0; j < 2; ++j) {
 //            Page page;
@@ -580,22 +580,22 @@
 //            }
 //        }
 //    }
-//    ASSERT_OK(m_pager->commit_txn());
+//    ASSERT_OK(m_pager->commit());
 //}
 //
-//TEST_F(PagerTests, DestroyPointerMapPageDeathTest)
+// TEST_F(PagerTests, DestroyPointerMapPageDeathTest)
 //{
-//    ASSERT_TRUE(m_pager->begin_txn());
+//    ASSERT_TRUE(m_pager->begin());
 //    Page page;
 //    ASSERT_OK(m_pager->acquire(Id(2), page));
 //    ASSERT_DEATH((void)m_pager->destroy(std::move(page)), "expect");
-//    ASSERT_OK(m_pager->commit_txn());
+//    ASSERT_OK(m_pager->commit());
 //}
-//#endif // NDEBUG
+// #endif // NDEBUG
 //
-//class TruncationTests : public PagerTests
+// class TruncationTests : public PagerTests
 //{
-//public:
+// public:
 //    static constexpr std::size_t kInitialPageCount = 500;
 //
 //    ~TruncationTests() override = default;
@@ -603,19 +603,19 @@
 //    auto SetUp() -> void override
 //    {
 //        PagerTests::SetUp();
-//        ASSERT_TRUE(m_pager->begin_txn());
+//        ASSERT_TRUE(m_pager->begin());
 //        write_pages(*this, 0, kInitialPageCount);
 //    }
 //
 //    auto TearDown() -> void override
 //    {
 //        if (m_pager->mode() != Pager::kOpen) {
-//            ASSERT_OK(m_pager->commit_txn());
+//            ASSERT_OK(m_pager->commit());
 //        }
 //    }
 //};
 //
-//TEST_F(TruncationTests, AllocationAfterTruncation)
+// TEST_F(TruncationTests, AllocationAfterTruncation)
 //{
 //    m_pager->set_page_count(1);
 //
@@ -623,7 +623,7 @@
 //    read_and_check(*this, 0, kInitialPageCount * 2);
 //}
 //
-//TEST_F(TruncationTests, OnlyValidPagesAreCheckpointed)
+// TEST_F(TruncationTests, OnlyValidPagesAreCheckpointed)
 //{
 //    // Should get rid of cached pages that are out-of-range.
 //    m_pager->set_page_count(kInitialPageCount / 2);
@@ -633,7 +633,7 @@
 //    ASSERT_EQ(file_size, kPageSize)
 //        << "root page was not allocated";
 //
-//    ASSERT_OK(m_pager->commit_txn());
+//    ASSERT_OK(m_pager->commit());
 //
 //    // When the WAL is enabled, the DB file is not written until checkpoint.
 //    ASSERT_OK(env->file_size(kDBFilename, file_size));
@@ -647,16 +647,16 @@
 //    ASSERT_EQ(file_size, kInitialPageCount * kPageSize / 2);
 //}
 //
-//#ifndef NDEBUG
-//TEST_F(TruncationTests, PurgeRootDeathTest)
+// #ifndef NDEBUG
+// TEST_F(TruncationTests, PurgeRootDeathTest)
 //{
 //    ASSERT_DEATH(m_pager->set_page_count(0), "expect");
 //}
-//#endif // NDEBUG
+// #endif // NDEBUG
 //
-//class RandomDirtyListBuilder
+// class RandomDirtyListBuilder
 //{
-//public:
+// public:
 //    explicit RandomDirtyListBuilder(std::size_t page_size)
 //        : m_page_size(page_size),
 //          m_random(page_size * 256)
@@ -697,15 +697,15 @@
 //        return m_pages;
 //    }
 //
-//private:
+// private:
 //    std::string m_pages;
 //    tools::RandomGenerator m_random;
 //    std::size_t m_page_size = 0;
 //};
 //
-//class WalTestBase : public EnvTestHarness<tools::FakeEnv>
+// class WalTestBase : public EnvTestHarness<tools::FakeEnv>
 //{
-//protected:
+// protected:
 //    static constexpr std::size_t kPageSize = kMinPageSize;
 //
 //    WalTestBase()
@@ -733,22 +733,22 @@
 //    Wal::Parameters m_param;
 //};
 //
-//class WalTests
+// class WalTests
 //    : public WalTestBase,
 //      public testing::Test
 //{
-//protected:
+// protected:
 //    ~WalTests() override = default;
 //};
 //
-//TEST_F(WalTests, EmptyWalIsRemovedOnClose)
+// TEST_F(WalTests, EmptyWalIsRemovedOnClose)
 //{
 //    ASSERT_TRUE(env().file_exists(kWalFilename));
 //    close();
 //    ASSERT_FALSE(env().file_exists(kWalFilename));
 //}
 //
-//TEST_F(WalTests, WritingEmptyDirtyListIsNOOP)
+// TEST_F(WalTests, WritingEmptyDirtyListIsNOOP)
 //{
 //    ASSERT_OK(m_wal->write(nullptr, 0));
 //    ASSERT_OK(m_wal->write(nullptr, 0));
@@ -758,12 +758,12 @@
 //    ASSERT_LT(file_size, kPageSize);
 //}
 //
-//class WalParamTests
+// class WalParamTests
 //    : public WalTestBase,
 //      public testing::TestWithParam<
 //          std::tuple<std::size_t, std::size_t, std::size_t>>
 //{
-//protected:
+// protected:
 //    static constexpr std::size_t kPageSize = kMinPageSize;
 //
 //    explicit WalParamTests()
@@ -896,32 +896,32 @@
 //    tools::FakeWal *m_fake = nullptr;
 //};
 //
-//TEST_P(WalParamTests, WriteAndReadBack)
+// TEST_P(WalParamTests, WriteAndReadBack)
 //{
 //    test_write_and_read_back();
 //}
 //
-//TEST_P(WalParamTests, OperationsA)
+// TEST_P(WalParamTests, OperationsA)
 //{
 //    test_operations(true, false);
 //}
 //
-//TEST_P(WalParamTests, OperationsB)
+// TEST_P(WalParamTests, OperationsB)
 //{
 //    test_operations(true, true);
 //}
 //
-//TEST_P(WalParamTests, OperationsC)
+// TEST_P(WalParamTests, OperationsC)
 //{
 //    test_operations(false, false);
 //}
 //
-//TEST_P(WalParamTests, OperationsD)
+// TEST_P(WalParamTests, OperationsD)
 //{
 //    test_operations(false, true);
 //}
 //
-//INSTANTIATE_TEST_SUITE_P(
+// INSTANTIATE_TEST_SUITE_P(
 //    WalParamTests,
 //    WalParamTests,
 //    ::testing::Values(
@@ -959,11 +959,11 @@
 //        std::make_tuple(5, 20, 10),
 //        std::make_tuple(5, 20, 50)));
 //
-//class WalPagerFaultTests
+// class WalPagerFaultTests
 //    : public PagerWalTestHarness,
 //      public testing::TestWithParam<std::tuple<std::size_t, std::string, tools::Interceptor::Type>>
 //{
-//public:
+// public:
 //    explicit WalPagerFaultTests()
 //        : random(1'024 * 1'024 * 8)
 //    {
@@ -1008,7 +1008,7 @@
 //        m_state.use_wal = true;
 //
 //        if (s.is_ok()) {
-//            (void)m_pager->begin_txn();
+//            (void)m_pager->begin();
 //
 //            std::vector<std::size_t> indices(std::get<0>(GetParam()));
 //            std::iota(begin(indices), end(indices), 0);
@@ -1032,7 +1032,7 @@
 //
 //                // Perform a commit every so often and checkpoint at a less frequent interval.
 //                if (i && i % 25 == 0) {
-//                    s = m_pager->commit_txn();
+//                    s = m_pager->commit();
 //                    if (!s.is_ok()) {
 //                        break;
 //                    }
@@ -1042,11 +1042,11 @@
 //                            break;
 //                        }
 //                    }
-//                    ASSERT_TRUE(m_pager->begin_txn());
+//                    ASSERT_TRUE(m_pager->begin());
 //                }
 //            }
 //            if (s.is_ok()) {
-//                s = m_pager->commit_txn();
+//                s = m_pager->commit();
 //                if (s.is_ok()) {
 //                    s = m_pager->checkpoint();
 //                }
@@ -1060,7 +1060,7 @@
 //                m_completed = true;
 //            } else {
 //                // Only 1 interceptor is set, so this should succeed.
-//                ASSERT_OK(m_pager->rollback_txn());
+//                m_pager->rollback();
 //            }
 //        }
 //        close_pager_and_wal();
@@ -1079,7 +1079,7 @@
 //    bool m_completed = false;
 //};
 //
-//TEST_P(WalPagerFaultTests, SetupAndOperations)
+// TEST_P(WalPagerFaultTests, SetupAndOperations)
 //{
 //    const auto [_, filename, type] = GetParam();
 //    reinterpret_cast<tools::TestEnv *>(env)
@@ -1096,7 +1096,7 @@
 //    }
 //}
 //
-//INSTANTIATE_TEST_SUITE_P(
+// INSTANTIATE_TEST_SUITE_P(
 //    WalPagerFaultTests,
 //    WalPagerFaultTests,
 //    ::testing::Values(

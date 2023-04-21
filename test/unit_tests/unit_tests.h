@@ -24,25 +24,15 @@ namespace calicodb
 static constexpr auto kDBFilename = "./_test-db";
 static constexpr auto kWalFilename = "./_test-wal";
 
-[[nodiscard]] static auto db_impl(const DB *db) -> const DBImpl *
-{
-    return reinterpret_cast<const DBImpl *>(db);
-}
-
-[[nodiscard]] static auto db_impl(DB *db) -> DBImpl *
-{
-    return reinterpret_cast<DBImpl *>(db);
-}
-
-[[nodiscard]] static auto table_impl(const Table *table) -> const TableImpl *
-{
-    return reinterpret_cast<const TableImpl *>(table);
-}
-
-[[nodiscard]] static auto table_impl(Table *table) -> TableImpl *
-{
-    return reinterpret_cast<TableImpl *>(table);
-}
+//[[nodiscard]] static auto db_impl(const DB *db) -> const DBImpl *
+//{
+//    return reinterpret_cast<const DBImpl *>(db);
+//}
+//
+//[[nodiscard]] static auto db_impl(DB *db) -> DBImpl *
+//{
+//    return reinterpret_cast<DBImpl *>(db);
+//}
 
 #define CLEAR_INTERCEPTORS()        \
     do {                            \

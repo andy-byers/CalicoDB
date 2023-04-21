@@ -441,13 +441,15 @@ public:
     ~WalImpl() override;
 
     [[nodiscard]] auto open() -> Status;
+
+    [[nodiscard]] auto close() -> Status override;
     [[nodiscard]] auto read(Id page_id, char *&page) -> Status override;
     [[nodiscard]] auto write(const PageRef *dirty, std::size_t db_size) -> Status override;
     [[nodiscard]] auto needs_checkpoint() const -> bool override;
     [[nodiscard]] auto checkpoint(File &db_file, std::size_t *db_size) -> Status override;
     [[nodiscard]] auto sync() -> Status override;
-    [[nodiscard]] auto abort() -> Status override;
-    [[nodiscard]] auto close() -> Status override;
+    [[nodiscard]] auto begin(bool write) -> Status override;
+    auto rollback() -> void override;
 
     [[nodiscard]] auto statistics() const -> WalStatistics override
     {
@@ -495,7 +497,7 @@ auto Wal::open(const Parameters &param, Wal *&out) -> Status
 auto Wal::close(Wal *&wal) -> Status
 {
     Status s;
-    if (wal != nullptr) {
+    if (wal) {
         s = wal->close();
         delete wal;
         wal = nullptr;
@@ -531,7 +533,7 @@ static auto compute_checksum(const Slice &in, const U32 *initial, U32 *out)
 
     U32 s1 = 0;
     U32 s2 = 0;
-    if (initial != nullptr) {
+    if (initial) {
         s1 = initial[0];
         s2 = initial[1];
     }
@@ -833,6 +835,12 @@ auto WalImpl::write(const PageRef *dirty, std::size_t db_size) -> Status
     return Status::ok();
 }
 
+auto WalImpl::begin(bool write) -> Status
+{
+    (void)write;
+    return Status::ok();
+}
+
 auto WalImpl::needs_checkpoint() const -> bool
 {
     return m_hdr.max_frame > 1'000;
@@ -841,7 +849,7 @@ auto WalImpl::needs_checkpoint() const -> bool
 auto WalImpl::checkpoint(File &db_file, std::size_t *db_size) -> Status
 {
     CALICODB_TRY(m_file->sync());
-    if (db_size != nullptr) {
+    if (db_size) {
         *db_size = m_hdr.page_count;
     }
 
@@ -880,13 +888,12 @@ auto WalImpl::sync() -> Status
     return m_file->sync();
 }
 
-auto WalImpl::abort() -> Status
+auto WalImpl::rollback() -> void
 {
     if (m_hdr.max_frame) {
         m_hdr = *m_index.header();
         m_index.cleanup();
     }
-    return Status::ok();
 }
 
 auto WalImpl::close() -> Status

@@ -13,37 +13,6 @@ namespace calicodb
 class Pager;
 struct PageRef;
 
-struct LogicalPageId {
-    [[nodiscard]] static auto with_page(Id pid) -> LogicalPageId
-    {
-        return LogicalPageId(Id::null(), pid);
-    }
-
-    [[nodiscard]] static auto with_table(Id tid) -> LogicalPageId
-    {
-        return LogicalPageId(tid, Id::null());
-    }
-
-    [[nodiscard]] static auto root() -> LogicalPageId
-    {
-        return LogicalPageId(Id::root(), Id::root());
-    }
-
-    // Results in "LogicalPageId(Id::null, Id::null())".
-    explicit LogicalPageId() = default;
-
-    explicit LogicalPageId(Id tid, Id pid)
-        : table_id(tid),
-          page_id(pid)
-    {
-    }
-
-    static constexpr std::size_t kSize = Id::kSize * 2;
-
-    Id table_id;
-    Id page_id;
-};
-
 class Page final
 {
     Pager *m_pager = nullptr;
@@ -54,7 +23,6 @@ class Page final
     bool m_write = false;
 
 public:
-    friend class BufferManager;
     friend class Pager;
     friend struct Node;
 

@@ -4,17 +4,17 @@
 ////
 //// Recovery tests (harness is modified from LevelDB).
 //
-//#include "calicodb/db.h"
-//#include "tools.h"
-//#include "unit_tests.h"
+// #include "calicodb/db.h"
+// #include "tools.h"
+// #include "unit_tests.h"
 //
-//namespace calicodb
+// namespace calicodb
 //{
 //
-//template <class EnvType = tools::TestEnv>
-//class RecoveryTestHarness : public EnvTestHarness<EnvType>
+// template <class EnvType = tools::TestEnv>
+// class RecoveryTestHarness : public EnvTestHarness<EnvType>
 //{
-//public:
+// public:
 //    using Base = EnvTestHarness<EnvType>;
 //    static constexpr auto kPageSize = kMinPageSize;
 //
@@ -100,15 +100,15 @@
 //    DB *db = nullptr;
 //};
 //
-//class RecoveryTests
+// class RecoveryTests
 //    : public RecoveryTestHarness<>,
 //      public testing::Test
 //{
-//protected:
+// protected:
 //    static constexpr std::size_t kN = 500;
 //};
 //
-//TEST_F(RecoveryTests, NormalShutdown)
+// TEST_F(RecoveryTests, NormalShutdown)
 //{
 //    ASSERT_EQ(num_wal_frames(), 0);
 //    // begin_txn() was not called, so there will be 3 implicit transactions,
@@ -122,7 +122,7 @@
 //    ASSERT_FALSE(Base::env().file_exists(kWalFilename));
 //}
 //
-//TEST_F(RecoveryTests, RollbackA)
+// TEST_F(RecoveryTests, RollbackA)
 //{
 //    std::string prefix;
 //    for (std::size_t i = 0; i < kN; ++i) {
@@ -150,7 +150,7 @@
 //    }
 //}
 //
-//TEST_F(RecoveryTests, RollbackB)
+// TEST_F(RecoveryTests, RollbackB)
 //{
 //    for (std::size_t iteration = 0; iteration < 3; ++iteration) {
 //        // Keep these changes.
@@ -188,7 +188,7 @@
 //    }
 //}
 //
-//TEST_F(RecoveryTests, RollbackC)
+// TEST_F(RecoveryTests, RollbackC)
 //{
 //    auto records = tools::fill_db(*db, random, kN);
 //    open();
@@ -202,7 +202,7 @@
 //    }
 //}
 //
-//TEST_F(RecoveryTests, RollbackD)
+// TEST_F(RecoveryTests, RollbackD)
 //{
 //    auto records = tools::fill_db(*db, random, kN);
 //    open();
@@ -231,7 +231,7 @@
 //    }
 //}
 //
-//TEST_F(RecoveryTests, VacuumRecovery)
+// TEST_F(RecoveryTests, VacuumRecovery)
 //{
 //    auto txn = db->begin_txn(TxnOptions());
 //    const auto committed = tools::fill_db(*db, random, 5'000);
@@ -272,7 +272,7 @@
 //    db_impl(db)->TEST_validate();
 //}
 //
-//TEST_F(RecoveryTests, SanityCheck)
+// TEST_F(RecoveryTests, SanityCheck)
 //{
 //    std::map<std::string, std::string> map;
 //
@@ -314,11 +314,11 @@
 //    }
 //}
 //
-//class RecoverySanityCheck
+// class RecoverySanityCheck
 //    : public RecoveryTestHarness<>,
 //      public testing::TestWithParam<std::tuple<std::string, tools::Interceptor::Type, int>>
 //{
-//public:
+// public:
 //    explicit RecoverySanityCheck()
 //        : interceptor_prefix(std::get<0>(GetParam()))
 //    {
@@ -372,7 +372,7 @@
 //    unsigned m_txn = 0;
 //};
 //
-//TEST_P(RecoverySanityCheck, FailureWhileRunning)
+// TEST_P(RecoverySanityCheck, FailureWhileRunning)
 //{
 //    for (const auto &[k, v] : map) {
 //        auto s = db->erase(k);
@@ -392,163 +392,163 @@
 //// TODO: Find some way to determine if an error occurred during the destructor. It happens in each
 ////       instance except for when we attempt to fail due to a WAL write error, since the WAL is not
 ////       written during the erase/recovery routine.
-//TEST_P(RecoverySanityCheck, FailureDuringClose)
+// TEST_P(RecoverySanityCheck, FailureDuringClose)
 //{
-//    // The final transaction committed successfully, so the data we added should persist.
-//    close();
+//     // The final transaction committed successfully, so the data we added should persist.
+//     close();
 //
-//    validate();
-//}
+//     validate();
+// }
 //
-//TEST_P(RecoverySanityCheck, FailureDuringCloseWithUncommittedUpdates)
+// TEST_P(RecoverySanityCheck, FailureDuringCloseWithUncommittedUpdates)
 //{
-//    while (db->status().is_ok()) {
-//        (void)db->put(random.Generate(16), random.Generate(100));
-//    }
+//     while (db->status().is_ok()) {
+//         (void)db->put(random.Generate(16), random.Generate(100));
+//     }
 //
-//    close();
-//    validate();
-//}
+//     close();
+//     validate();
+// }
 //
-//INSTANTIATE_TEST_SUITE_P(
-//    RecoverySanityCheck,
-//    RecoverySanityCheck,
-//    ::testing::Values(
-//        std::make_tuple(kDBFilename, tools::Interceptor::kRead, 0),
-//        std::make_tuple(kDBFilename, tools::Interceptor::kRead, 1),
-//        std::make_tuple(kDBFilename, tools::Interceptor::kRead, 5),
-//        std::make_tuple(kWalFilename, tools::Interceptor::kRead, 0),
-//        std::make_tuple(kWalFilename, tools::Interceptor::kRead, 1),
-//        std::make_tuple(kWalFilename, tools::Interceptor::kRead, 5),
-//        std::make_tuple(kWalFilename, tools::Interceptor::kWrite, 0),
-//        std::make_tuple(kWalFilename, tools::Interceptor::kWrite, 1),
-//        std::make_tuple(kWalFilename, tools::Interceptor::kWrite, 5)));
+// INSTANTIATE_TEST_SUITE_P(
+//     RecoverySanityCheck,
+//     RecoverySanityCheck,
+//     ::testing::Values(
+//         std::make_tuple(kDBFilename, tools::Interceptor::kRead, 0),
+//         std::make_tuple(kDBFilename, tools::Interceptor::kRead, 1),
+//         std::make_tuple(kDBFilename, tools::Interceptor::kRead, 5),
+//         std::make_tuple(kWalFilename, tools::Interceptor::kRead, 0),
+//         std::make_tuple(kWalFilename, tools::Interceptor::kRead, 1),
+//         std::make_tuple(kWalFilename, tools::Interceptor::kRead, 5),
+//         std::make_tuple(kWalFilename, tools::Interceptor::kWrite, 0),
+//         std::make_tuple(kWalFilename, tools::Interceptor::kWrite, 1),
+//         std::make_tuple(kWalFilename, tools::Interceptor::kWrite, 5)));
 //
-//class OpenErrorTests : public RecoverySanityCheck
+// class OpenErrorTests : public RecoverySanityCheck
 //{
-//public:
-//    ~OpenErrorTests() override = default;
+// public:
+//     ~OpenErrorTests() override = default;
 //
-//    auto SetUp() -> void override
-//    {
-//        RecoverySanityCheck::SetUp();
-//        const auto saved_count = interceptor_count;
-//        interceptor_count = 0;
+//     auto SetUp() -> void override
+//     {
+//         RecoverySanityCheck::SetUp();
+//         const auto saved_count = interceptor_count;
+//         interceptor_count = 0;
 //
-//        // Should fail on the first syscall given by "std::get<1>(GetParam())".
-//        close();
+//         // Should fail on the first syscall given by "std::get<1>(GetParam())".
+//         close();
 //
-//        interceptor_count = saved_count;
-//    }
-//};
+//         interceptor_count = saved_count;
+//     }
+// };
 //
-//TEST_P(OpenErrorTests, FailureDuringOpen)
+// TEST_P(OpenErrorTests, FailureDuringOpen)
 //{
-//    assert_special_error(open_with_status());
-//    validate();
-//}
+//     assert_special_error(open_with_status());
+//     validate();
+// }
 //
-//INSTANTIATE_TEST_SUITE_P(
-//    OpenErrorTests,
-//    OpenErrorTests,
-//    ::testing::Values(
-//        std::make_tuple(kDBFilename, tools::Interceptor::kRead, 0),
-//        std::make_tuple(kDBFilename, tools::Interceptor::kRead, 1)));
+// INSTANTIATE_TEST_SUITE_P(
+//     OpenErrorTests,
+//     OpenErrorTests,
+//     ::testing::Values(
+//         std::make_tuple(kDBFilename, tools::Interceptor::kRead, 0),
+//         std::make_tuple(kDBFilename, tools::Interceptor::kRead, 1)));
 //
-//class DataLossTests
-//    : public RecoveryTestHarness<tools::TestEnv>,
-//      public testing::TestWithParam<std::size_t>
+// class DataLossTests
+//     : public RecoveryTestHarness<tools::TestEnv>,
+//       public testing::TestWithParam<std::size_t>
 //{
-//public:
-//    using Base = RecoveryTestHarness<tools::TestEnv>;
-//    const std::size_t kCommitInterval = GetParam();
+// public:
+//     using Base = RecoveryTestHarness<tools::TestEnv>;
+//     const std::size_t kCommitInterval = GetParam();
 //
-//    ~DataLossTests() override = default;
+//     ~DataLossTests() override = default;
 //
-//    auto close() -> void override
-//    {
-//        // Hack to force an error to occur. The DB won't attempt to recover on close()
-//        // in this case. It will have to wait until open().
-//        //        const_cast<DBState &>(db_impl(db)->TEST_state()).status = special_error();
+//     auto close() -> void override
+//     {
+//         // Hack to force an error to occur. The DB won't attempt to recover on close()
+//         // in this case. It will have to wait until open().
+//         //        const_cast<DBState &>(db_impl(db)->TEST_state()).status = special_error();
 //
-//        RecoveryTestHarness::close();
+//         RecoveryTestHarness::close();
 //
-//        drop_unsynced_wal_data();
-//        drop_unsynced_db_data();
-//    }
+//         drop_unsynced_wal_data();
+//         drop_unsynced_db_data();
+//     }
 //
-//    auto drop_unsynced_wal_data() -> void
-//    {
-//        Base::env().drop_after_last_sync(kWalFilename);
-//    }
+//     auto drop_unsynced_wal_data() -> void
+//     {
+//         Base::env().drop_after_last_sync(kWalFilename);
+//     }
 //
-//    auto drop_unsynced_db_data() -> void
-//    {
-//        Base::env().drop_after_last_sync(kDBFilename);
-//    }
-//};
+//     auto drop_unsynced_db_data() -> void
+//     {
+//         Base::env().drop_after_last_sync(kDBFilename);
+//     }
+// };
 //
-//TEST_P(DataLossTests, LossBeforeFirstCheckpoint)
+// TEST_P(DataLossTests, LossBeforeFirstCheckpoint)
 //{
-//    for (std::size_t i = 0; i < kCommitInterval; ++i) {
-//        ASSERT_OK(db->put(tools::integral_key(i), "value"));
-//    }
-//    open();
-//}
+//     for (std::size_t i = 0; i < kCommitInterval; ++i) {
+//         ASSERT_OK(db->put(tools::integral_key(i), "value"));
+//     }
+//     open();
+// }
 //
-//TEST_P(DataLossTests, RecoversLastCheckpoint)
+// TEST_P(DataLossTests, RecoversLastCheckpoint)
 //{
-//    auto txn = db->begin_txn(TxnOptions());
-//    for (std::size_t i = 0; i < kCommitInterval * 10; ++i) {
-//        if (i && i % kCommitInterval == 0) {
-//            // All updates are committed except for the last kCommitInterval writes.
-//            ASSERT_OK(db->commit_txn(txn));
-//            txn = db->begin_txn(TxnOptions());
-//        }
-//        ASSERT_OK(db->put(tools::integral_key(i), tools::integral_key(i)));
-//    }
-//    open();
+//     auto txn = db->begin_txn(TxnOptions());
+//     for (std::size_t i = 0; i < kCommitInterval * 10; ++i) {
+//         if (i && i % kCommitInterval == 0) {
+//             // All updates are committed except for the last kCommitInterval writes.
+//             ASSERT_OK(db->commit_txn(txn));
+//             txn = db->begin_txn(TxnOptions());
+//         }
+//         ASSERT_OK(db->put(tools::integral_key(i), tools::integral_key(i)));
+//     }
+//     open();
 //
-//    for (std::size_t i = 0; i < kCommitInterval * 10; ++i) {
-//        std::string value;
-//        const auto s = db->get(tools::integral_key(i), &value);
-//        if (i < kCommitInterval * 9) {
-//            ASSERT_OK(s);
-//            ASSERT_EQ(value, tools::integral_key(i));
-//        } else {
-//            ASSERT_TRUE(s.is_not_found());
-//        }
-//    }
-//}
+//     for (std::size_t i = 0; i < kCommitInterval * 10; ++i) {
+//         std::string value;
+//         const auto s = db->get(tools::integral_key(i), &value);
+//         if (i < kCommitInterval * 9) {
+//             ASSERT_OK(s);
+//             ASSERT_EQ(value, tools::integral_key(i));
+//         } else {
+//             ASSERT_TRUE(s.is_not_found());
+//         }
+//     }
+// }
 //
-//TEST_P(DataLossTests, LongTransaction)
+// TEST_P(DataLossTests, LongTransaction)
 //{
-//    auto txn = db->begin_txn(TxnOptions());
-//    for (std::size_t i = 0; i < kCommitInterval * 10; ++i) {
-//        ASSERT_OK(db->put(tools::integral_key(i), tools::integral_key(i)));
-//        if (i % kCommitInterval == kCommitInterval - 1) {
-//            ASSERT_OK(db->commit_txn(txn));
-//            txn = db->begin_txn(TxnOptions());
-//        }
-//    }
+//     auto txn = db->begin_txn(TxnOptions());
+//     for (std::size_t i = 0; i < kCommitInterval * 10; ++i) {
+//         ASSERT_OK(db->put(tools::integral_key(i), tools::integral_key(i)));
+//         if (i % kCommitInterval == kCommitInterval - 1) {
+//             ASSERT_OK(db->commit_txn(txn));
+//             txn = db->begin_txn(TxnOptions());
+//         }
+//     }
 //
-//    for (std::size_t i = 0; i < kCommitInterval * 10; ++i) {
-//        ASSERT_OK(db->erase(tools::integral_key(i)));
-//    }
-//    ASSERT_OK(db->vacuum());
+//     for (std::size_t i = 0; i < kCommitInterval * 10; ++i) {
+//         ASSERT_OK(db->erase(tools::integral_key(i)));
+//     }
+//     ASSERT_OK(db->vacuum());
 //
-//    open();
+//     open();
 //
-//    for (std::size_t i = 0; i < kCommitInterval * 10; ++i) {
-//        std::string value;
-//        ASSERT_OK(db->get(tools::integral_key(i), &value));
-//        ASSERT_EQ(value, tools::integral_key(i));
-//    }
-//}
+//     for (std::size_t i = 0; i < kCommitInterval * 10; ++i) {
+//         std::string value;
+//         ASSERT_OK(db->get(tools::integral_key(i), &value));
+//         ASSERT_EQ(value, tools::integral_key(i));
+//     }
+// }
 //
-//INSTANTIATE_TEST_SUITE_P(
-//    DataLossTests,
-//    DataLossTests,
-//    ::testing::Values(1, 10, 100, 1'000, 10'000));
+// INSTANTIATE_TEST_SUITE_P(
+//     DataLossTests,
+//     DataLossTests,
+//     ::testing::Values(1, 10, 100, 1'000, 10'000));
 //
-//} // namespace calicodb
+// } // namespace calicodb

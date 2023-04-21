@@ -117,7 +117,7 @@ public:
     // Also note that transitions "Y -> Y", where "Y" <= kShared, are
     // allowed, but are NOOPs.
     //
-    [[nodiscard]] virtual auto unlock(LockMode mode) -> Status = 0;
+    virtual auto unlock() -> void = 0;
 };
 
 class Sink
@@ -196,7 +196,7 @@ public:
 
     [[nodiscard]] auto lock(LockMode mode) -> Status override;
     [[nodiscard]] auto lock_mode() const -> LockMode override;
-    [[nodiscard]] auto unlock(LockMode mode) -> Status override;
+    auto unlock() -> void override;
 
 private:
     File *m_target;
