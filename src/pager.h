@@ -39,12 +39,12 @@ public:
 //
 //     StateA --> StateB  Method      LockA -------> LockB
 //    ----------------------------------------------------------
-//     kOpen ---> kRead   lock        <none> ------> kShared
+//     kOpen ---> kRead   file_lock        <none> ------> kShared
 //     kRead ---> kWrite  begin       kShared -----> kExclusive
 //     kWrite --> kDirty  mark_dirty  kExclusive --> kExclusive
 //     kDirty --> kWrite  commit      kExclusive --> kExclusive
 //     kDirty --> kWrite  rollback    kExclusive --> kExclusive
-//     ****** --> kOpen   unlock      ****** ------> <none>
+//     ****** --> kOpen   file_unlock      ****** ------> <none>
 //     ****** --> kError  set_state   ****** ------> ******
 //
 class Pager final
@@ -134,8 +134,8 @@ private:
     Freelist m_freelist;
     Bufmgr m_bufmgr;
 
-    // True the in-memory root page needs to be refreshed, false otherwise.
-    bool m_needs_root = false;
+    // True if the in-memory root page needs to be refreshed, false otherwise.
+    bool m_refresh_root = true;
 
     Sink *m_log = nullptr;
     File *m_file = nullptr;

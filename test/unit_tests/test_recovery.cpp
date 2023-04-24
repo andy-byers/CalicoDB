@@ -25,8 +25,8 @@
 //        db_options.cache_size = kMinPageSize * 16;
 //        db_options.env = &Base::env();
 //
-//        // TODO: Running these in sync lock right now, it's easier to tell how the DB should
-//        //       look. Should test not sync lock as well. Will likely lose more than 1 transaction,
+//        // TODO: Running these in sync file_lock right now, it's easier to tell how the DB should
+//        //       look. Should test not sync file_lock as well. Will likely lose more than 1 transaction,
 //        //       but the DB should not become corrupted.
 //        db_options.sync = true;
 //

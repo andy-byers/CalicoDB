@@ -192,6 +192,8 @@ public:
     }
 
 private:
+    friend class Schema;
+
     struct SearchResult {
         Node node;
         std::size_t index = 0;

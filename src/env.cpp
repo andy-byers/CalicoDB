@@ -14,13 +14,13 @@ auto Env::default_env() -> Env *
     return new PosixEnv;
 }
 
+Env::Env() = default;
+
 Env::~Env() = default;
 
 File::~File() = default;
 
 Sink::~Sink() = default;
-
-Shm::~Shm() = default;
 
 auto File::read_exact(std::size_t offset, std::size_t size, char *scratch) -> Status
 {
@@ -49,14 +49,9 @@ auto EnvWrapper::target() const -> const Env *
     return m_target;
 }
 
-auto EnvWrapper::open_file(const std::string &filename, OpenMode mode, File *&out) -> Status
+auto EnvWrapper::new_file(const std::string &filename, OpenMode mode, File *&out) -> Status
 {
-    return m_target->open_file(filename, mode, out);
-}
-
-auto EnvWrapper::close_file(File *&file) -> Status
-{
-    return m_target->close_file(file);
+    return m_target->new_file(filename, mode, out);
 }
 
 auto EnvWrapper::new_sink(const std::string &filename, Sink *&out) -> Status
@@ -131,61 +126,34 @@ auto FileWrapper::sync() -> Status
     return m_target->sync();
 }
 
-auto FileWrapper::lock(LockMode mode) -> Status
+auto FileWrapper::file_lock(FileLockMode mode) -> Status
 {
-    return m_target->lock(mode);
+    return m_target->file_lock(mode);
 }
 
-auto FileWrapper::lock_mode() const -> LockMode
+auto FileWrapper::file_unlock() -> void
 {
-    return m_target->lock_mode();
+    return m_target->file_unlock();
 }
 
-auto FileWrapper::unlock() -> void
+auto FileWrapper::shm_map(std::size_t r, volatile void *&out) -> Status
 {
-    return m_target->unlock();
+    return m_target->shm_map(r, out);
 }
 
-auto EnvWrapper::open_shm(const std::string &filename, OpenMode mode, Shm *&out) -> Status
+auto FileWrapper::shm_lock(std::size_t r, std::size_t n, ShmLockFlag flags) -> Status
 {
-    return m_target->open_shm(filename, mode, out);
+    return m_target->shm_lock(r, n, flags);
 }
 
-auto EnvWrapper::close_shm(Shm *&shm) -> Status
+auto FileWrapper::shm_unmap(bool unlink) -> void
 {
-    return m_target->close_shm(shm);
+    return m_target->shm_unmap(unlink);
 }
 
-ShmWrapper::ShmWrapper(Shm &target)
-    : m_target{&target}
+auto FileWrapper::shm_barrier() -> void
 {
-}
-
-ShmWrapper::~ShmWrapper() = default;
-
-auto ShmWrapper::target() -> Shm *
-{
-    return m_target;
-}
-
-auto ShmWrapper::target() const -> const Shm *
-{
-    return m_target;
-}
-
-auto ShmWrapper::map(std::size_t pgno, volatile void *&out) -> Status
-{
-    return m_target->map(pgno, out);
-}
-
-auto ShmWrapper::lock(std::size_t start, std::size_t n, LockFlag flags) -> Status
-{
-    return m_target->lock(start, n, flags);
-}
-
-auto ShmWrapper::barrier() -> void
-{
-    return m_target->barrier();
+    return m_target->shm_barrier();
 }
 
 SinkWrapper::SinkWrapper(Sink &target)

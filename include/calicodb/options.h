@@ -48,11 +48,6 @@ struct Options final {
     bool sync = false;
 };
 
-struct TxnOptions {
-    bool write = false;
-    bool sync = false;
-};
-
 struct TableOptions {
     bool create_if_missing = true;
     bool error_if_exists = false;

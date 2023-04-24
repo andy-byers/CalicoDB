@@ -35,7 +35,7 @@ auto DBImpl::open(const Options &sanitized) -> Status
         }
         File *file;
         char buffer[FileHeader::kSize];
-        CALICODB_TRY(m_env->open_file(m_db_filename, Env::kReadWrite, file));
+        CALICODB_TRY(m_env->new_file(m_db_filename, Env::kReadWrite, file));
         auto s = file->read_exact(0, sizeof(buffer), buffer);
         delete file;
         if (!s.is_ok()) {
@@ -55,6 +55,7 @@ auto DBImpl::open(const Options &sanitized) -> Status
 
     const Wal::Parameters wal_param = {
         m_wal_filename,
+        "",
         page_size,
         m_env,
     };
@@ -96,6 +97,7 @@ auto DBImpl::open(const Options &sanitized) -> Status
         // to the DB file and call fsync().
         CALICODB_TRY(m_pager->commit());
     }
+    m_pager->finish();
     m_state.use_wal = true;
     return Status::ok();
 }
@@ -115,10 +117,24 @@ DBImpl::DBImpl(const Options &options, const Options &sanitized, std::string fil
 DBImpl::~DBImpl()
 {
     if (m_state.use_wal) {
-        if (const auto s = checkpoint_if_needed(true); !s.is_ok()) {
-            logv(m_log, "failed to checkpoint database: %s", s.to_string().c_str());
+        if (m_pager->mode() != Pager::kWrite) {
+            m_pager->finish();
         }
-        if (const auto s = Wal::close(m_wal); !s.is_ok()) {
+        // If someone else is still reading or writing the database, this call
+        // will return a Status::busy(). The last process to access the database
+        // will run the checkpoint, or if that fails, it will be run on the next
+        // startup.
+        auto s = m_pager->begin(true);
+        if (s.is_ok()) {
+            s = checkpoint_if_needed(true);
+            if (!s.is_ok()) {
+                logv(m_log, "failed to checkpoint database: %s", s.to_string().c_str());
+            }
+        }
+        m_pager->finish();
+
+        s = Wal::close(m_wal);
+        if (!s.is_ok()) {
             logv(m_log, "failed to close WAL: %s", s.to_string().c_str());
         }
     }
@@ -172,126 +188,53 @@ auto DBImpl::destroy(const Options &options, const std::string &filename) -> Sta
 
 auto DBImpl::get_property(const Slice &name, std::string *out) const -> bool
 {
-    (void)name;
-    (void)out;
-    //    if (name.starts_with("calicodb.")) {
-    //        const auto prop = name.range(std::strlen("calicodb."));
-    //        std::string buffer;
-    //
-    //        if (prop == "stats") {
-    //            if (out != nullptr) {
-    //                append_fmt_string(
-    //                    buffer,
-    //                    "Name          Value\n"
-    //                    "-------------------\n"
-    //                    "Pager I/O(MB) %8.4f/%8.4f\n"
-    //                    "WAL I/O(MB)   %8.4f/%8.4f\n"
-    //                    "Cache hits    %ld\n"
-    //                    "Cache misses  %ld\n",
-    //                    static_cast<double>(m_pager->statistics().bytes_read) / 1048576.0,
-    //                    static_cast<double>(m_pager->statistics().bytes_written) / 1048576.0,
-    //                    static_cast<double>(m_wal->statistics().bytes_read) / 1048576.0,
-    //                    static_cast<double>(m_wal->statistics().bytes_written) / 1048576.0,
-    //                    m_pager->hits(),
-    //                    m_pager->misses());
-    //                out->append(buffer);
-    //            }
-    //            return true;
-    //        } else if (prop == "tables") {
-    //            if (out != nullptr) {
-    ////                out->append(
-    ////                    "Name             SMOCount Read(MB) Write(MB)\n"
-    ////                    "--------------------------------------------\n");
-    ////                std::vector<std::string> table_names;
-    ////                std::vector<LogicalPageId> table_roots;
-    ////                (void)get_table_info(table_names, &table_roots);
-    ////                table_names.emplace_back(m_default->name());
-    ////                table_roots.emplace_back(LogicalPageId::with_table(Id(2)));
-    ////                for (std::size_t i = 0; i < table_names.size(); ++i) {
-    ////                    const auto *state = m_tables.get(table_roots[i].table_id);
-    ////                    if (table_names[i].size() > 16) {
-    ////                        table_names[i].resize(13);
-    ////                        table_names[i].append("...");
-    ////                    }
-    ////                    if (state != nullptr && state->open) {
-    ////                        const auto n = append_fmt_string(
-    ////                            buffer,
-    ////                            "%-16s %8u %8.4f %9.4lf\n",
-    ////                            table_names[i].c_str(),
-    ////                            state->stats.smo_count,
-    ////                            static_cast<double>(state->stats.bytes_read) / 1048576.0,
-    ////                            static_cast<double>(state->stats.bytes_written) / 1048576.0);
-    ////                        buffer.resize(n);
-    ////                        out->append(buffer);
-    ////                    }
-    //                }
-    //            }
-    //            return true;
-    //        }
-    //    }
+    if (out) {
+        *out = nullptr;
+    }
+    if (name.starts_with("calicodb.")) {
+        const auto prop = name.range(std::strlen("calicodb."));
+        std::string buffer;
+
+        if (prop == "stats") {
+            if (out != nullptr) {
+                append_fmt_string(
+                    buffer,
+                    "Name          Value\n"
+                    "-------------------\n"
+                    "Pager I/O(MB) %8.4f/%8.4f\n"
+                    "WAL I/O(MB)   %8.4f/%8.4f\n"
+                    "Cache hits    %ld\n"
+                    "Cache misses  %ld\n",
+                    static_cast<double>(m_pager->statistics().bytes_read) / 1048576.0,
+                    static_cast<double>(m_pager->statistics().bytes_written) / 1048576.0,
+                    static_cast<double>(m_wal->statistics().bytes_read) / 1048576.0,
+                    static_cast<double>(m_wal->statistics().bytes_written) / 1048576.0,
+                    m_pager->hits(),
+                    m_pager->misses());
+                out->append(buffer);
+            }
+            return true;
+        }
+    }
     return false;
 }
 
-auto DBImpl::begin(const TxnOptions &options, Txn *&out) -> Status
+auto DBImpl::start(bool write, Txn *&out) -> Status
 {
-    CALICODB_TRY(m_pager->begin(options.write));
+    CALICODB_TRY(m_pager->begin(write));
     CALICODB_TRY(load_file_header());
+    if (write) {
+        CALICODB_TRY(checkpoint_if_needed(false));
+    }
     out = new TxnImpl(*m_pager, m_state);
     return Status::ok();
 }
 
-auto DBImpl::commit(Txn &) -> Status
+auto DBImpl::finish(Txn *&txn) -> void
 {
-    return m_pager->commit();
+    delete txn;
+    txn = nullptr;
 }
-
-auto DBImpl::rollback(Txn &) -> void
-{
-    m_pager->rollback();
-
-    CALICODB_EXPECT_EQ(m_pager->mode(), Pager::kOpen);
-    CALICODB_EXPECT_TRUE(m_state.status.is_ok());
-}
-
-//
-// auto DBImpl::do_vacuum() -> Status
-//{
-//    std::vector<std::string> table_names;
-//    std::vector<LogicalPageId> table_roots;
-//    CALICODB_TRY(get_table_info(table_names, &table_roots));
-//
-//    Id target(m_pager->page_count());
-//    auto &state = table_impl(*m_root).state();
-//    auto *tree = state.tree;
-//
-//    const auto original = target;
-//    for (;; --target.value) {
-//        bool vacuumed;
-//        CALICODB_TRY(tree->vacuum_one(target, m_tables, &vacuumed));
-//        if (!vacuumed) {
-//            break;
-//        }
-//    }
-//    if (target.value == m_pager->page_count()) {
-//        // No pages available to vacuum: database is minimally sized.
-//        return Status::ok();
-//    }
-//
-//    // Update root locations in the name-to-root mapping.
-//    char logical_id[LogicalPageId::kSize];
-//    for (std::size_t i = 0; i < table_names.size(); ++i) {
-//        const auto *root = m_tables.get(table_roots[i].table_id);
-//        CALICODB_EXPECT_NE(root, nullptr);
-//        encode_logical_id(root->root_id, logical_id);
-//        CALICODB_TRY(m_pager->set_status(
-//            put(*m_root, table_names[i], logical_id)));
-//    }
-//    m_pager->set_page_count(target.value);
-//    invalidate_live_cursors();
-//
-//    logv(m_log, "vacuumed %llu pages", original.value - target.value);
-//    return Status::ok();
-//}
 
 auto DBImpl::TEST_wal() const -> const Wal &
 {
@@ -307,15 +250,6 @@ auto DBImpl::TEST_state() const -> const DBState &
 {
     return m_state;
 }
-//
-// auto DBImpl::TEST_validate() const -> void
-//{
-//    for (const auto *state : m_tables) {
-//        if (state != nullptr && state->open) {
-//            state->tree->TEST_validate();
-//        }
-//    }
-//}
 
 auto DBImpl::checkpoint_if_needed(bool force) -> Status
 {

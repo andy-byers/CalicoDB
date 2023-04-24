@@ -180,6 +180,38 @@ struct TreeStatistics {
     std::size_t bytes_written = 0;
 };
 
+class InternalStatus
+{
+public:
+    explicit InternalStatus() = default;
+    explicit InternalStatus(int extra)
+        : m_extra(extra)
+    {
+    }
+    explicit InternalStatus(Status s, int extra = 0)
+        : m_status(std::move(s)),
+          m_extra(extra)
+    {
+    }
+
+    [[nodiscard]] auto is_ok() const -> bool
+    {
+        return m_status.is_ok();
+    }
+    [[nodiscard]] auto extra() const -> int
+    {
+        return m_extra;
+    }
+    [[nodiscard]] auto operator*() const -> const Status &
+    {
+        return m_status;
+    }
+
+private:
+    Status m_status;
+    int m_extra = 0;
+};
+
 } // namespace calicodb
 
 #endif // CALICODB_UTILS_H

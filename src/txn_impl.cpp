@@ -36,10 +36,45 @@ auto TxnImpl::drop_table(const std::string &name) -> Status
     return m_schema.drop_table(name);
 }
 
+auto TxnImpl::commit() -> Status
+{
+    return m_pager->commit();
+}
+
+auto TxnImpl::rollback() -> void
+{
+    m_pager->rollback();
+    m_schema.inform_live_cursors();
+}
+
 auto TxnImpl::vacuum() -> Status
 {
     (void)m_pager;
     return Status::ok();
+}
+
+auto TxnImpl::vacuum_freelist() -> Status
+{
+    Id pgid(m_pager->page_count());
+    for (;; --pgid.value) {
+        bool success;
+        CALICODB_TRY(m_schema.vacuum_page(pgid, success));
+        if (!success) {
+            break;
+        }
+    }
+    if (pgid.value == m_pager->page_count()) {
+        // No pages available to vacuum: database is minimally sized.
+        return Status::ok();
+    }
+
+    m_pager->set_page_count(pgid.value);
+    return m_schema.vacuum_finish();
+}
+
+auto TxnImpl::TEST_validate() const -> void
+{
+    m_schema.TEST_validate();
 }
 
 } // namespace calicodb

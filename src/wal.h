@@ -13,17 +13,18 @@ namespace calicodb
 
 class Env;
 class File;
+class Shm;
 struct PageRef;
 
-struct HashIndexHeader {
+struct HashIndexHdr {
     enum Flags {
         INITIALIZED = 1,
     };
     U32 version;
-    U32 unused;
+    U32 unused0;
     U32 change;
     U16 flags;
-    U16 page_size;
+    U16 unused1;
     U32 max_frame;
     U32 page_count;
     U32 frame_cksum[2];
@@ -31,10 +32,6 @@ struct HashIndexHeader {
     U32 cksum[2];
 };
 
-// TODO: The hash index is meant to be constructed in shared memory. At some point,
-//       the Env needs to provide memory mapping functionality. Pass a memory-mapped
-//       file object in, or just the Env itself. This class should handle writing the
-//       header on the first insert.
 class HashIndex final
 {
 public:
@@ -44,23 +41,28 @@ public:
     using Value = U32;
 
     ~HashIndex();
-    explicit HashIndex(HashIndexHeader &header);
+    explicit HashIndex(HashIndexHdr &header, File *file);
     [[nodiscard]] auto fetch(Value value) -> Key;
     [[nodiscard]] auto lookup(Key key, Value lower, Value &out) -> Status;
     [[nodiscard]] auto assign(Key key, Value value) -> Status;
-    [[nodiscard]] auto header() -> HashIndexHeader *;
+    [[nodiscard]] auto header() -> volatile HashIndexHdr *;
+    [[nodiscard]] auto groups() const -> const std::vector<volatile char *> &;
     auto cleanup() -> void;
 
 private:
-    [[nodiscard]] auto group_data(std::size_t group_number) -> char *;
+    friend class WalImpl;
+
+    [[nodiscard]] auto map_group(std::size_t group_number) -> Status;
 
     // Storage for hash table groups.
-    std::vector<char *> m_groups;
+    std::vector<volatile char *> m_groups;
 
     // Address of the hash table header kept in memory. This version of the header corresponds
     // to the current transaction. The one stored in the first table group corresponds to the
     // most-recently-committed transaction.
-    HashIndexHeader *m_hdr = nullptr;
+    HashIndexHdr *m_hdr = nullptr;
+
+    File *m_file = nullptr;
 };
 
 // Construct for iterating through the hash index.
@@ -79,11 +81,12 @@ public:
 
     // Create an iterator over the contents of the provided hash index.
     explicit HashIterator(HashIndex &index);
+    [[nodiscard]] auto init() -> Status;
 
     // Return the next hash entry.
     //
     // This method should return a key that is greater than the last key returned by this
-    // method, along with its most-recently-set value.
+    // method, along with the most-recently-set value.
     [[nodiscard]] auto read(Entry &out) -> bool;
 
 private:
@@ -112,7 +115,8 @@ class Wal
 {
 public:
     struct Parameters {
-        std::string filename;
+        std::string wal_filename;
+        std::string shm_filename;
         U32 page_size = 0;
         Env *env = nullptr;
     };
@@ -121,8 +125,15 @@ public:
 
     // Open or create a WAL file called "filename".
     [[nodiscard]] static auto open(const Parameters &param, Wal *&out) -> Status;
-
     [[nodiscard]] static auto close(Wal *&wal) -> Status;
+
+    // Write the WAL contents back to the DB. Resets internal counters such
+    // that the next write to the WAL will start at the beginning again.
+    [[nodiscard]] virtual auto checkpoint(File &db_file, std::size_t *db_size) -> Status = 0;
+    [[nodiscard]] virtual auto needs_checkpoint() const -> bool = 0;
+
+    // UNLOCKED -> READER
+    [[nodiscard]] virtual auto start_reader(bool &changed) -> Status = 0;
 
     // Read the most-recent version of page "page_id" from the WAL.
     //
@@ -130,26 +141,27 @@ public:
     // page "page_id" does not exist in the WAL.
     [[nodiscard]] virtual auto read(Id page_id, char *&page) -> Status = 0;
 
+    // READER -> WRITER
+    [[nodiscard]] virtual auto start_writer() -> Status = 0;
+
     // Write new versions of the given pages to the WAL.
     [[nodiscard]] virtual auto write(const PageRef *dirty, std::size_t db_size) -> Status = 0;
-
-    // Write the WAL contents back to the DB. Resets internal counters such
-    // that the next write to the WAL will start at the beginning again.
-    [[nodiscard]] virtual auto checkpoint(File &db_file, std::size_t *db_size) -> Status = 0;
-
     [[nodiscard]] virtual auto sync() -> Status = 0;
-
-    [[nodiscard]] virtual auto needs_checkpoint() const -> bool = 0;
-
-    [[nodiscard]] virtual auto begin(bool write) -> Status = 0;
-
     virtual auto rollback() -> void = 0;
+
+    // WRITER -> READER
+    virtual auto finish_writer() -> void = 0;
+
+    // READER -> UNLOCKED
+    virtual auto finish_reader() -> void = 0;
 
     [[nodiscard]] virtual auto statistics() const -> WalStatistics = 0;
 
 private:
     [[nodiscard]] virtual auto close() -> Status = 0;
 };
+
+auto TEST_print_wal(const Wal &wal) -> void;
 
 } // namespace calicodb
 

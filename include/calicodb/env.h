@@ -12,7 +12,6 @@ namespace calicodb
 
 class File;
 class Sink;
-class Shm;
 
 // CalicoDB storage environment
 //
@@ -31,16 +30,14 @@ public:
     // Return a heap-allocated handle to this platform's default Env implementation
     static auto default_env() -> Env *;
 
+    explicit Env();
     virtual ~Env();
 
+    Env(const Env &) = delete;
+    auto operator=(const Env &) -> Env & = delete;
+
     [[nodiscard]] virtual auto new_sink(const std::string &filename, Sink *&out) -> Status = 0;
-
-    [[nodiscard]] virtual auto open_shm(const std::string &filename, OpenMode mode, Shm *&out) -> Status = 0;
-    [[nodiscard]] virtual auto close_shm(Shm *&shm) -> Status = 0;
-
-    [[nodiscard]] virtual auto open_file(const std::string &filename, OpenMode mode, File *&out) -> Status = 0;
-    [[nodiscard]] virtual auto close_file(File *&file) -> Status = 0;
-
+    [[nodiscard]] virtual auto new_file(const std::string &filename, OpenMode mode, File *&out) -> Status = 0;
     [[nodiscard]] virtual auto resize_file(const std::string &filename, std::size_t size) -> Status = 0;
     [[nodiscard]] virtual auto file_size(const std::string &filename, std::size_t &out) const -> Status = 0;
     [[nodiscard]] virtual auto remove_file(const std::string &filename) -> Status = 0;
@@ -75,7 +72,7 @@ public:
     [[nodiscard]] virtual auto sync() -> Status = 0;
 
     // File locking modes and semantics are from SQLite.
-    enum LockMode : int {
+    enum FileLockMode : int {
         kUnlocked,
         kShared,
         kReserved,
@@ -83,10 +80,10 @@ public:
         kExclusive,
     };
 
-    // Take or upgrade a lock on the file
+    // Take or upgrade a file_lock on the file
     //
-    // Return Status::ok() if the lock is granted, Status::busy() if an
-    // incompatible lock is already held by a different thread or process,
+    // Return Status::ok() if the file_lock is granted, Status::busy() if an
+    // incompatible file_lock is already held by a different thread or process,
     // or a Status::io_error() if a system call otherwise fails.
     //
     // Compliant Envs support the following state transitions:
@@ -99,15 +96,12 @@ public:
     //     kReserved --> (kPending) -> kExclusive
     //     kPending -----------------> kExclusive
     //
-    [[nodiscard]] virtual auto lock(LockMode mode) -> Status = 0;
+    [[nodiscard]] virtual auto file_lock(FileLockMode mode) -> Status = 0;
 
-    // Return the type of lock held on the file
-    [[nodiscard]] virtual auto lock_mode() const -> LockMode = 0;
-
-    // Release or downgrade a lock on the given file
+    // Release or downgrade a file_lock on the given file
     //
     // Compliant Envs support the following state transitions (where "> X"
-    // represents a lock mode with higher-priority than "X"):
+    // represents a file_lock mode with higher-priority than "X"):
     //
     //     Before -----------> After
     //    ------------------------------
@@ -117,7 +111,24 @@ public:
     // Also note that transitions "Y -> Y", where "Y" <= kShared, are
     // allowed, but are NOOPs.
     //
-    virtual auto unlock() -> void = 0;
+    virtual auto file_unlock() -> void = 0;
+
+    // Size of a shared memory region, i.e. the number of bytes pointed to by "out"
+    // when map() returns successfully.
+    static constexpr std::size_t kShmRegionSize = 1'024 * 32;
+    static constexpr std::size_t kShmLockCount = 8;
+
+    enum ShmLockFlag : int {
+        kUnlock = 1,
+        kLock = 2,
+        kReader = 4,
+        kWriter = 8,
+    };
+
+    [[nodiscard]] virtual auto shm_map(std::size_t r, volatile void *&out) -> Status = 0;
+    [[nodiscard]] virtual auto shm_lock(std::size_t r, std::size_t n, ShmLockFlag flags) -> Status = 0;
+    virtual auto shm_unmap(bool unlink) -> void = 0;
+    virtual auto shm_barrier() -> void = 0;
 };
 
 class Sink
@@ -128,31 +139,6 @@ public:
 };
 
 auto logv(Sink *sink, const char *fmt, ...) -> void;
-
-class Shm
-{
-public:
-    // Size of a shared memory region, i.e. the number of bytes pointed to by "out"
-    // when map() returns successfully.
-    static constexpr std::size_t kRegionSize = 1'024 * 32;
-    static constexpr std::size_t kLockCount = 8;
-
-    enum LockFlag : int {
-        kUnlock = 1,
-        kLock = 2,
-        kShared = 4,
-        kExclusive = 8,
-    };
-
-    virtual ~Shm();
-
-    // Map the r'th shared memory region into this process' address space and
-    // return a pointer to the first byte
-    [[nodiscard]] virtual auto map(std::size_t r, volatile void *&out) -> Status = 0;
-
-    [[nodiscard]] virtual auto lock(std::size_t s, std::size_t n, LockFlag flags) -> Status = 0;
-    virtual auto barrier() -> void = 0;
-};
 
 class EnvWrapper : public Env
 {
@@ -169,10 +155,7 @@ public:
     [[nodiscard]] auto remove_file(const std::string &filename) -> Status override;
 
     [[nodiscard]] auto new_sink(const std::string &filename, Sink *&out) -> Status override;
-    [[nodiscard]] auto open_shm(const std::string &filename, OpenMode mode, Shm *&out) -> Status override;
-    [[nodiscard]] auto close_shm(Shm *&shm) -> Status override;
-    [[nodiscard]] auto open_file(const std::string &filename, OpenMode mode, File *&out) -> Status override;
-    [[nodiscard]] auto close_file(File *&file) -> Status override;
+    [[nodiscard]] auto new_file(const std::string &filename, OpenMode mode, File *&out) -> Status override;
 
     auto srand(unsigned seed) -> void override;
     [[nodiscard]] auto rand() -> unsigned override;
@@ -194,27 +177,16 @@ public:
     [[nodiscard]] auto write(std::size_t offset, const Slice &in) -> Status override;
     [[nodiscard]] auto sync() -> Status override;
 
-    [[nodiscard]] auto lock(LockMode mode) -> Status override;
-    [[nodiscard]] auto lock_mode() const -> LockMode override;
-    auto unlock() -> void override;
+    [[nodiscard]] auto file_lock(FileLockMode mode) -> Status override;
+    auto file_unlock() -> void override;
+
+    [[nodiscard]] auto shm_map(std::size_t r, volatile void *&out) -> Status override;
+    [[nodiscard]] auto shm_lock(std::size_t s, std::size_t n, ShmLockFlag flags) -> Status override;
+    auto shm_unmap(bool unlink) -> void override;
+    auto shm_barrier() -> void override;
 
 private:
     File *m_target;
-};
-
-class ShmWrapper : public Shm
-{
-public:
-    explicit ShmWrapper(Shm &target);
-    ~ShmWrapper() override;
-    [[nodiscard]] auto target() -> Shm *;
-    [[nodiscard]] auto target() const -> const Shm *;
-    [[nodiscard]] auto map(std::size_t r, volatile void *&out) -> Status override;
-    [[nodiscard]] auto lock(std::size_t start, std::size_t n, LockFlag flags) -> Status override;
-    auto barrier() -> void override;
-
-private:
-    Shm *m_target;
 };
 
 // For completeness and in case Sink ever gets additional methods.
@@ -239,9 +211,9 @@ inline constexpr auto operator|(Env::OpenMode lhs, Env::OpenMode rhs) -> Env::Op
         static_cast<int>(lhs) |
         static_cast<int>(rhs)};
 }
-inline constexpr auto operator|(Shm::LockFlag lhs, Shm::LockFlag rhs) -> Shm::LockFlag
+inline constexpr auto operator|(File::ShmLockFlag lhs, File::ShmLockFlag rhs) -> File::ShmLockFlag
 {
-    return Shm::LockFlag{
+    return File::ShmLockFlag{
         static_cast<int>(lhs) |
         static_cast<int>(rhs)};
 }

@@ -11,27 +11,17 @@
 namespace calicodb
 {
 
-class PosixFile;
-class PosixShm;
-
 class PosixEnv : public Env
 {
-    friend class PosixFile;
-
     U16 m_rng[3] = {};
-    pid_t m_pid;
 
 public:
     PosixEnv();
     ~PosixEnv() override;
-    [[nodiscard]] auto open_file(const std::string &filename, OpenMode mode, File *&out) -> Status override;
+    [[nodiscard]] auto new_file(const std::string &filename, OpenMode mode, File *&out) -> Status override;
     /* TODO: remove */ [[nodiscard]] auto file_exists(const std::string &filename) const -> bool override;
 
-    [[nodiscard]] auto open_shm(const std::string &filename, OpenMode mode, Shm *&out) -> Status override;
-    [[nodiscard]] auto close_shm(Shm *&shm) -> Status override;
-
     [[nodiscard]] auto new_sink(const std::string &filename, Sink *&out) -> Status override;
-    [[nodiscard]] auto close_file(File *&file) -> Status override;
     [[nodiscard]] auto remove_file(const std::string &filename) -> Status override;
     [[nodiscard]] auto resize_file(const std::string &filename, std::size_t size) -> Status override;
     [[nodiscard]] auto file_size(const std::string &filename, std::size_t &out) const -> Status override;

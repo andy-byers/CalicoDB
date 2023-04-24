@@ -76,4 +76,75 @@ If the parent pointers are embedded in the nodes, splits and merges become very 
 In addition to facilitating the vacuum operation, pointer maps make splits and merges much more efficient by consolidating many parent pointers on a single page.
 
 ### WAL
-[//]: # (TODO)
+CalicoDB uses a simplified version of SQLite's WAL protocol.
+A connection to a CalicoDB database (a `DB` object connected to an `Env`) behaves much like a SQLite database with `PRAGMA journal_mode=WAL` executed.
+
+#### `-wal` file
+As described in [Architecture](#architecture), a database named `~/cats` will store its WAL in a file named `~/cats-wal`.
+This file, hereafter called the WAL file, is opened the first time a transaction is started on the database.
+The WAL file consists of a fixed-length header, followed by 0 or more WAL frames.
+Each WAL frame contains a single database page, along with some metadata.
+
+Most writes to the WAL are sequential, the exception being when a page is written out more than once within a transaction.
+In that case, the old version of the page will be overwritten.
+This lets the number of frames added to the WAL be proportional to the number of pages modified during a given transaction.
+
+#### `-shm` file
+Since the database file is never written during a transaction, its contents quickly become stale.
+Any page that exists in the WAL must be read from the WAL, not the database file.
+The shm file is used to store the WAL index data structure, which provides a way to quickly locate pages in the WAL.
+We also use the shm file to coordinate locks on the WAL.
+
+### NOTES
+
+#### TODO
+1. Startup
+   1. WAL startup
+   2. Pager startup
+2. Transactions
+   1. State/mode transitions
+      + Pager: kOpen -> kRead (-> kWrite -> kDirty -> kWrite) -> kOpen
+      + WAL: 
+3. Checkpoints
+
+#### Startup
+Readonly DB connections should fail if the DB file doesn't exist.
+It's fine if the WAL doesn't exist.
+If the connection is exclusive, an exclusive file_lock is taken on the DB file, and the WAL if it exists.
+If this connection succeeds, i.e. gets exclusive locks, it must be the only connection.
+If there is a WAL, then a checkpoint needs to be run.
+When a normal DB connection is opened on a file named `db`, the following steps are taken:
+1. First, a shared file_lock is taken on the DB file and the file header is read. 
+This version of the header may be outdated, but that's okay. 
+We really just need to make sure the file is a CalicoDB database and determine the database page size.
+2. If the file is empty, then wait on an exclusive file_lock on the DB file.
+Once we have an exclusive file_lock, unlink the WAL file, if it exists.
+Then, write the initial file header and the node header for the root page and drop the file_lock.
+The database is now initialized.
+Notice that the WAL file is not open at this point.
+
+#### Read-only transactions
+We start a read-only transaction by taking a shared file_lock on the DB file.
+Then, we check for a WAL.
+If there isn't a WAL, then all reads will come from the DB file.
+If there is a WAL, we open it along with the shm file (WAL index).
+The shm file is always cleared when the first connection to it is made.
+Find a read mark to use and file_lock it?
+May be able to share a read mark with another reader.
+Should be able to use (a) the current "backfill count", and (b) the current "max frame" value, and (c) the read marks to determine what pages to read from the WAL, and what pages to read from the DB.
+We may have to purge the pager cache if another connection wrote since we last connected.
+When the reader is finished, drop the shm file_lock, then drop the DB file file_lock.
+
+#### Read-write transactions
+Like with read-only transactions, we first take a shared file_lock on the DB file.
+Writing to the database doesn't actually write to the DB file, just the WAL, so we never need more than a shared file_lock.
+Check for a WAL.
+If no WAL exists, create one.
+Either way, file_lock the "writer" byte in the shm file.
+I believe it's fine to connect as a writer while there are still readers.
+Readers stay confined to their predetermined range anyway, so we won't get in their way.
+If a reader attempts to connect while a writer is writing, it will choose a read mark that prevents it from intersecting with new content.
+I suppose writers may need to mess with read marks as well, I'll look into it...
+
+#### Checkpoints
+This is really the only time the DB file is written (besides creation of a new DB file).

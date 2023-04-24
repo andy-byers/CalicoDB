@@ -28,7 +28,7 @@ cmake -DCMAKE_BUILD_TYPE=RelWithAssertions .. && cmake --build .
 
 to build the library and tests.
 Note that the tests must be built with assertions, hence the `RelWithAssertions`.
-To build the library in release lock without tests, the last command would look like:
+To build the library in release file_lock without tests, the last command would look like:
 ```bash
 cmake -DCMAKE_BUILD_TYPE=Release -DCALICODB_Test=Off .. && cmake --build .
 ```
@@ -96,15 +96,14 @@ if (!s.is_ok()) {
 calicodb::Txn *txn;
 
 // Start a read transaction.
-calicodb::Status s = db->begin(false, txn);
+calicodb::Status s = db->new_txn(calicodb::TxnOptions(), txn);
 if (!s.is_ok()) {
 }
 
 // Read some data...
 
-// Finish the transaction. This call will never fail for a read transaction.
-s = db->commit(txn);
-assert(s.is_ok());
+// Finish the transaction.
+delete txn;
 ```
 
 ### Read-write transactions
@@ -113,17 +112,91 @@ assert(s.is_ok());
 calicodb::Txn *txn;
 
 // Start a write transaction.
-s = db->begin(true, txn);
+calicodb::TxnOptions txnopt;
+txnopt.write = true;
+txnopt.sync = true; // persist each commit()
+s = db->new_txn(txnopt, txn);
 if (!s.is_ok()) {
 }
 
 // Write some data...
 
 // Commit the transaction.
-s = db->commit(txn);
+s = txn->commit();
 if (!s.is_ok()) {
     // If commit() failed, then there was likely a low-level I/O error.
 }
+
+// The DB holds all locks until the Txn object is delete'd, so we can
+// continue reading/writing.
+
+// Get rid of everything since commit() was called. If we delete the Txn
+// without calling commit() again, the same thing will happen.
+txn->rollback();
+
+delete txn;
+```
+
+### Tables
+
+```C++
+calicodb::Table *table;
+calicodb::TableOptions tbopt;
+tbopt.error_if_exists = true;
+calicodb::Status s = txn->new_table(tbopt, "cats", table);
+
+std::string value;
+s = table->get("lilly", &value);
+if (s.is_ok()) {
+
+} else if (s.is_not_found()) {
+    
+} else {
+    
+}
+
+s = table->put("lilly", "calico");
+if (s.is_ok()) {
+    
+} else {
+    
+}
+
+s = table->erase("lilly");
+if (s.is_ok()) {
+    
+} else if (s.is_not_found()) {
+    
+}
+
+delete table;
+```
+
+### Cursors
+
+```C++
+calicodb::Cursor *cursor = table->new_cursor();
+
+cursor->seek_first();
+while (cursor->is_valid()) {
+    const calicodb::Slice key = cursor->key();
+    const calicodb::Slice val = cursor->value();
+    cursor->next();
+}
+
+cursor->seek_last();
+while (cursor->is_valid()) {
+    // Use the cursor.
+    cursor->previous();
+}
+
+cursor->seek("freya");
+while (cursor->is_valid() && cursor->key() <= "lilly") {
+    // Key is in [freya,lilly].
+    cursor->next();
+}
+
+delete cursor;
 ```
 
 ### Database properties

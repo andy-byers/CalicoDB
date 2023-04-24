@@ -16,10 +16,10 @@ namespace calicodb
 
 class PosixEnv;
 class PosixFile;
-class PosixShm;
 struct FileId;
 struct INode;
 struct PosixFs;
+struct PosixShm;
 struct ShmNode;
 
 static constexpr int kFilePermissions = 0644; // -rw-r--r--
@@ -50,7 +50,7 @@ static constexpr std::size_t kSharedSize = 510;
 
 // Constants for SQLite-style shared memory locking.
 static constexpr std::size_t kShmLock0 = 120;
-static constexpr std::size_t kShmDMS = kShmLock0 + Shm::kLockCount;
+static constexpr std::size_t kShmDMS = kShmLock0 + File::kShmLockCount;
 
 struct FileId final {
     auto operator==(const FileId &rhs) const -> bool
@@ -88,12 +88,11 @@ struct ShmNode final {
     // Locks held by PosixShm instances in this process. 0 means unlocked, -1 an
     // exclusive lock, and a positive integer N means that N shared locks are
     // held.
-    int locks[Shm::kLockCount] = {};
+    int locks[File::kShmLockCount] = {};
 
     static constexpr int kReadonlyTriedReset = -2;
     [[nodiscard]] auto take_dms_lock() -> int;
     [[nodiscard]] auto map_region(std::size_t r, volatile void *&out) -> int;
-    [[nodiscard]] auto destroy() && -> Status;
 
 #ifdef CALICODB_TEST
     [[nodiscard]] auto check_locks() const -> bool;
@@ -107,8 +106,7 @@ struct INode final {
     unsigned nlocks = 0;
     int lock = File::kUnlocked;
 
-    // List of file descriptors that are waiting to be closed. If a file has an
-    // advisory lock on it, it cannot be closed.
+    // List of file descriptors that are waiting to be closed.
     std::list<int> pending;
 
     // Number of PosixFile instances referencing this inode.
@@ -167,23 +165,23 @@ struct INode final {
 //     }
 // }
 
-[[nodiscard]] static auto file_lock(int file, const struct flock &lock) -> int
+[[nodiscard]] static auto posix_file_lock(int file, const struct flock &lock) -> int
 {
     return fcntl(file, F_SETLK, &lock);
 }
 
-[[nodiscard]] static auto shm_file_lock(ShmNode &snode, short type, std::size_t offset, std::size_t n) -> int
+[[nodiscard]] static auto posix_shm_lock(ShmNode &snode, short type, std::size_t offset, std::size_t n) -> int
 {
     CALICODB_EXPECT_GE(snode.file, 0);
     CALICODB_EXPECT_TRUE(n == 1 || type != F_RDLCK);
-    CALICODB_EXPECT_TRUE(n >= 1 && n <= Shm::kLockCount);
+    CALICODB_EXPECT_TRUE(n >= 1 && n <= File::kShmLockCount);
 
-    struct flock lock = {}; // TODO: PID?
+    struct flock lock = {};
     lock.l_type = type;
     lock.l_whence = SEEK_SET;
     lock.l_start = static_cast<off_t>(offset);
     lock.l_len = static_cast<off_t>(n);
-    return file_lock(snode.file, lock);
+    return posix_file_lock(snode.file, lock);
 }
 
 [[nodiscard]] static auto posix_error(int error) -> Status
@@ -207,16 +205,6 @@ struct INode final {
 [[nodiscard]] static auto posix_busy() -> Status
 {
     return Status::busy(strerror(EBUSY));
-}
-
-// Cast to POSIX-specific derived classes at the interface boundary
-[[nodiscard]] static auto posix_file(File &file) -> PosixFile &
-{
-    return reinterpret_cast<PosixFile &>(file);
-}
-[[nodiscard]] static auto posix_shm(Shm &shm) -> PosixShm &
-{
-    return reinterpret_cast<PosixShm &>(shm);
 }
 
 static constexpr std::size_t kOpenCloseTimeout = 100;
@@ -305,6 +293,15 @@ static constexpr std::size_t kOpenCloseTimeout = 100;
     }
 }
 
+struct PosixShm {
+    [[nodiscard]] auto lock(std::size_t r, std::size_t n, File::ShmLockFlag flags) -> Status;
+
+    ShmNode *snode = nullptr;
+    PosixShm *next = nullptr;
+    U16 shared_mask = 0;
+    U16 exclusive_mask = 0;
+};
+
 class PosixFile : public File
 {
 public:
@@ -320,35 +317,23 @@ public:
     [[nodiscard]] auto read(std::size_t offset, std::size_t size, char *scratch, Slice *out) -> Status override;
     [[nodiscard]] auto write(std::size_t offset, const Slice &in) -> Status override;
     [[nodiscard]] auto sync() -> Status override;
-    [[nodiscard]] auto lock(LockMode mode) -> Status override;
-    [[nodiscard]] auto lock_mode() const -> LockMode override;
-    auto unlock() -> void override;
+    [[nodiscard]] auto file_lock(FileLockMode mode) -> Status override;
+    auto file_unlock() -> void override;
+
+    [[nodiscard]] auto shm_map(std::size_t r, volatile void *&out) -> Status override;
+    [[nodiscard]] auto shm_lock(std::size_t r, std::size_t n, ShmLockFlag flags) -> Status override;
+    auto shm_unmap(bool unlink) -> void override;
+    auto shm_barrier() -> void override;
 
     const std::string filename;
     INode *inode = nullptr;
     PosixEnv *env = nullptr;
+    PosixShm *shm = nullptr;
     Env::OpenMode openmode;
     int file = -1;
 
     // Lock mode for this particular file descriptor.
     int lockmode = 0;
-};
-
-class PosixShm : public Shm
-{
-public:
-    explicit PosixShm();
-    ~PosixShm() override;
-
-    [[nodiscard]] auto map(std::size_t r, volatile void *&out) -> Status override;
-    [[nodiscard]] auto lock(std::size_t r, std::size_t n, LockFlag flags) -> Status override;
-    auto barrier() -> void override;
-
-    PosixFile *file = nullptr;
-    ShmNode *snode = nullptr;
-    PosixShm *next = nullptr;
-    U16 shared_mask = 0;
-    U16 exclusive_mask = 0;
 };
 
 // Per-process singleton for managing filesystem state
@@ -358,10 +343,10 @@ struct PosixFs final {
     explicit PosixFs()
         : page_size(sysconf(_SC_PAGESIZE))
     {
-        if (page_size < Shm::kRegionSize) {
+        if (page_size < File::kShmRegionSize) {
             mmap_scale = 1;
         } else {
-            mmap_scale = page_size / Shm::kRegionSize;
+            mmap_scale = page_size / File::kShmRegionSize;
         }
     }
 
@@ -440,7 +425,7 @@ struct PosixFs final {
         inode = nullptr;
     }
 
-    auto ref_shm(PosixFile &file) -> PosixShm *
+    [[nodiscard]] auto ref_snode(PosixFile &file, PosixShm *&out) const -> Status
     {
         auto *inode = file.inode;
         std::unique_lock main_guard(mutex);
@@ -454,50 +439,54 @@ struct PosixFs final {
             const auto rw_mode = snode->is_readonly ? O_RDONLY : O_RDWR;
             snode->file = posix_open(file.filename, O_CREAT | O_NOFOLLOW | rw_mode);
             if (snode->file < 0) {
-                return nullptr;
+                return posix_error(errno);
             }
-            if (snode->take_dms_lock()) {
-                // TODO: Failure to truncate the file b/c readonly.
-                return nullptr;
+            if (const auto rc = snode->take_dms_lock()) {
+                if (rc == ShmNode::kReadonlyTriedReset) {
+                    return Status::invalid_argument("readonly");
+                }
+                return posix_error(errno);
             }
         }
         CALICODB_EXPECT_GE(snode->file, 0);
         ++snode->refcount;
         main_guard.unlock();
         std::lock_guard node_guard(snode->mutex);
-        auto *shm = new PosixShm();
-        shm->file = &file;
-        shm->snode = snode;
-        shm->next = snode->refs;
-        snode->refs = shm;
-        return shm;
+        out = new PosixShm();
+        out->snode = snode;
+        out->next = snode->refs;
+        snode->refs = out;
+        return Status::ok();
     }
 
-    [[nodiscard]] auto unref_shm(PosixShm *&shm) -> Status
+    auto unref_snode(PosixShm &shm, bool unlink_if_last) const -> void
     {
-        auto *snode = shm->snode;
+        auto *snode = shm.snode;
         auto *inode = snode->inode;
         {
             std::lock_guard guard(snode->mutex);
             auto **pp = &snode->refs;
-            for (; *pp != shm; pp = &(*pp)->next) {
+            for (; *pp != &shm; pp = &(*pp)->next) {
             }
             // Remove "shm" from the list.
-            *pp = shm->next;
+            *pp = shm.next;
         }
 
         std::lock_guard guard(PosixFs::s_fs.mutex);
         CALICODB_EXPECT_GT(snode->refcount, 0);
 
-        Status s;
         if (--snode->refcount == 0) {
-            s = std::move(*inode->snode).destroy();
-            delete inode->snode;
+            const auto interval = mmap_scale;
+            for (std::size_t i = 0; i < snode->regions.size(); i += interval) {
+                munmap(snode->regions[i], File::kShmRegionSize);
+            }
+            if (unlink_if_last) {
+                unlink(snode->filename.c_str());
+            }
+            (void)posix_close(snode->file);
+            delete snode;
             inode->snode = nullptr;
         }
-        delete shm;
-        shm = nullptr;
-        return s;
     }
 
     // Linked list of inodes, protected by a mutex.
@@ -508,7 +497,7 @@ struct PosixFs final {
     std::size_t page_size = 0;
 
     // The OS page size may be greater than the shared memory region
-    // size (Shm::kRegionSize). If so, then mmap() must allocate this
+    // size (File::kShmRegionSize). If so, then mmap() must allocate this
     // number of regions each time it is called.
     std::size_t mmap_scale = 0;
 };
@@ -516,45 +505,11 @@ struct PosixFs final {
 PosixFs PosixFs::s_fs;
 
 PosixEnv::PosixEnv()
-    : m_pid(getpid())
 {
 }
 
 PosixEnv::~PosixEnv()
 {
-}
-
-auto PosixEnv::open_shm(const std::string &filename, OpenMode mode, Shm *&out) -> Status
-{
-    File *file;
-    CALICODB_TRY(open_file(filename, mode, file));
-    out = PosixFs::s_fs.ref_shm(posix_file(*file));
-    return Status::ok();
-}
-
-auto PosixEnv::close_shm(Shm *&shm) -> Status
-{
-    if (shm == nullptr) {
-        return Status::ok();
-    }
-    auto *ptr = &posix_shm(*shm);
-    auto *file = ptr->file;
-    shm = nullptr;
-
-    auto s = PosixFs::s_fs.unref_shm(ptr);
-    auto t = file->close();
-    return s.is_ok() ? t : s;
-}
-
-auto PosixEnv::close_file(File *&file) -> Status
-{
-    Status s;
-    if (file) {
-        s = posix_file(*file).close();
-    }
-    delete file;
-    file = nullptr;
-    return s;
 }
 
 auto PosixEnv::resize_file(const std::string &filename, std::size_t size) -> Status
@@ -588,7 +543,7 @@ auto PosixEnv::file_size(const std::string &filename, std::size_t &out) const ->
     return Status::ok();
 }
 
-auto PosixEnv::open_file(const std::string &filename, OpenMode mode, File *&out) -> Status
+auto PosixEnv::new_file(const std::string &filename, OpenMode mode, File *&out) -> Status
 {
     const auto is_create = mode & kCreate;
     const auto is_readonly = mode & kReadOnly;
@@ -657,7 +612,8 @@ auto PosixFile::close() -> Status
         return Status::ok();
     }
     CALICODB_EXPECT_TRUE(inode);
-    unlock();
+    CALICODB_EXPECT_FALSE(shm);
+    file_unlock();
 
     PosixFs::s_fs.mutex.lock();
     inode->mutex.lock();
@@ -700,32 +656,58 @@ auto PosixFile::sync() -> Status
     return Status::ok();
 }
 
-PosixShm::PosixShm()
+auto PosixFile::shm_unmap(bool unlink) -> void
 {
+    if (shm) {
+        PosixFs::s_fs.unref_snode(*shm, unlink);
+
+        delete shm;
+        shm = nullptr;
+    }
 }
 
-PosixShm::~PosixShm()
+auto PosixFile::shm_map(std::size_t r, volatile void *&out) -> Status
 {
-}
-
-auto PosixShm::map(std::size_t r, volatile void *&out) -> Status
-{
-    if (snode->map_region(r, out)) {
+    if (shm == nullptr) {
+        CALICODB_TRY(PosixFs::s_fs.ref_snode(*this, shm));
+    }
+    CALICODB_EXPECT_TRUE(shm);
+    CALICODB_EXPECT_TRUE(shm->snode);
+    if (const auto rc = shm->snode->map_region(r, out)) {
+        if (rc == ShmNode::kReadonlyTriedReset) {
+            return Status::invalid_argument("readonly");
+        }
         return posix_error(errno);
     }
     return Status::ok();
 }
 
-auto PosixShm::lock(std::size_t r, std::size_t n, LockFlag flags) -> Status
+auto PosixFile::shm_lock(std::size_t r, std::size_t n, ShmLockFlag flags) -> Status
 {
-    CALICODB_EXPECT_LE(r + n, Shm::kLockCount);
+    // shm_map() must have succeeded at least once.
+    CALICODB_EXPECT_TRUE(shm);
+    return shm->lock(r, n, flags);
+}
+
+auto PosixFile::shm_barrier() -> void
+{
+    // TODO: This is what SQLite does, but they also provide the compile option/macro SQLITE_MEMORY_BARRIER
+    //       which allows one to perform some custom action when barrier() is called.
+#if defined(__GNUC__) && GCC_VERSION >= 4001000
+    __sync_synchronize();
+#endif
+}
+
+auto PosixShm::lock(std::size_t r, std::size_t n, File::ShmLockFlag flags) -> Status
+{
+    CALICODB_EXPECT_LE(r + n, File::kShmLockCount);
     CALICODB_EXPECT_GT(n, 0);
     CALICODB_EXPECT_TRUE(
-        flags == (Shm::kLock | Shm::kShared) ||
-        flags == (Shm::kLock | Shm::kExclusive) ||
-        flags == (Shm::kUnlock | Shm::kShared) ||
-        flags == (Shm::kUnlock | Shm::kExclusive));
-    CALICODB_EXPECT_TRUE(n == 1 || (flags & Shm::kExclusive));
+        flags == (File::kLock | File::kReader) ||
+        flags == (File::kLock | File::kWriter) ||
+        flags == (File::kUnlock | File::kReader) ||
+        flags == (File::kUnlock | File::kWriter));
+    CALICODB_EXPECT_TRUE(n == 1 || (flags & File::kWriter));
 
     auto *state = snode->locks;
     const auto mask = (1 << (r + n)) - (1 << r);
@@ -733,7 +715,7 @@ auto PosixShm::lock(std::size_t r, std::size_t n, LockFlag flags) -> Status
     std::lock_guard guard(snode->mutex);
     CALICODB_EXPECT_TRUE(snode->check_locks());
 
-    if (flags & Shm::kUnlock) {
+    if (flags & File::kUnlock) {
         if ((shared_mask | exclusive_mask) & mask) {
             auto unlock = true;
             // Determine whether another thread in this process has a shared lock. Don't
@@ -742,7 +724,7 @@ auto PosixShm::lock(std::size_t r, std::size_t n, LockFlag flags) -> Status
             for (auto i = r; i < r + n; ++i) {
                 // shared_bit is true if this PosixShm has a shared lock on bit i, false
                 // otherwise. If shared_bit is false, then this thread must have an
-                // exclusive lock on bit i, otherwise we are trying to unlock bytes that
+                // exclusive lock on bit i, otherwise we are trying to file_unlock bytes that
                 // are not locked.
                 const bool shared_bit = shared_mask & (1 << i);
                 if (state[i] > shared_bit) {
@@ -751,7 +733,7 @@ auto PosixShm::lock(std::size_t r, std::size_t n, LockFlag flags) -> Status
             }
 
             if (unlock) {
-                if (shm_file_lock(*snode, F_UNLCK, r + kShmLock0, n)) {
+                if (posix_shm_lock(*snode, F_UNLCK, r + kShmLock0, n)) {
                     return posix_error(errno);
                 }
                 std::memset(&state[r], 0, sizeof(int) * n);
@@ -763,14 +745,14 @@ auto PosixShm::lock(std::size_t r, std::size_t n, LockFlag flags) -> Status
             exclusive_mask &= ~mask;
             shared_mask &= ~mask;
         }
-    } else if (flags & Shm::kShared) {
+    } else if (flags & File::kReader) {
         CALICODB_EXPECT_EQ(0, exclusive_mask & (1 << r));
         CALICODB_EXPECT_EQ(1, n);
         if ((shared_mask & mask) == 0) {
             if (state[r] < 0) {
                 return posix_busy();
             } else if (state[r] == 0) {
-                if (shm_file_lock(*snode, F_RDLCK, r + kShmLock0, n)) {
+                if (posix_shm_lock(*snode, F_RDLCK, r + kShmLock0, n)) {
                     return posix_error(errno);
                 }
             }
@@ -787,7 +769,7 @@ auto PosixShm::lock(std::size_t r, std::size_t n, LockFlag flags) -> Status
             }
         }
 
-        if (shm_file_lock(*snode, F_WRLCK, r + kShmLock0, n)) {
+        if (posix_shm_lock(*snode, F_WRLCK, r + kShmLock0, n)) {
             // Some other thread in another process has a lock.
             return posix_error(errno);
         }
@@ -797,15 +779,6 @@ auto PosixShm::lock(std::size_t r, std::size_t n, LockFlag flags) -> Status
     }
     CALICODB_EXPECT_TRUE(snode->check_locks());
     return Status::ok();
-}
-
-auto PosixShm::barrier() -> void
-{
-    // TODO: This is what SQLite does, but they also provide the compile option/macro SQLITE_MEMORY_BARRIER
-    //       which allows one to perform some custom action when barrier() is called.
-#if defined(__GNUC__) && GCC_VERSION >= 4001000
-    __sync_synchronize();
-#endif
 }
 
 auto ShmNode::take_dms_lock() -> int
@@ -825,7 +798,7 @@ auto ShmNode::take_dms_lock() -> int
             is_unlocked = true;
             rc = kReadonlyTriedReset;
         } else {
-            rc = shm_file_lock(*this, F_WRLCK, kShmDMS, 1);
+            rc = posix_shm_lock(*this, F_WRLCK, kShmDMS, 1);
             if (rc == 0) {
                 rc = posix_truncate(filename, 0);
             }
@@ -838,7 +811,7 @@ auto ShmNode::take_dms_lock() -> int
         // Take a read lock on the DMS byte (maybe downgrading from a write
         // lock if this was the first connection). Every process using this
         // shared memory should have a lock on this byte.
-        rc = shm_file_lock(*this, F_RDLCK, kShmDMS, 1);
+        rc = posix_shm_lock(*this, F_RDLCK, kShmDMS, 1);
     }
     return rc;
 }
@@ -864,12 +837,12 @@ auto ShmNode::map_region(std::size_t r, volatile void *&out) -> int
         } else {
             file_size = st.st_size;
         }
-        if (file_size < request * Shm::kRegionSize) {
+        if (file_size < request * File::kShmRegionSize) {
             // Write a '\0' to the end of the highest-addressed region to extend the
             // file. SQLite writes a byte to the end of each OS page, causing the pages
             // to be allocated immediately (to reduce the chance of a later SIGBUS).
             // This should be good enough for now.
-            if (seek_and_write(file, request * Shm::kRegionSize - 1, Slice("", 1))) {
+            if (seek_and_write(file, request * File::kShmRegionSize - 1, Slice("", 1))) {
                 return -1;
             }
         }
@@ -877,16 +850,16 @@ auto ShmNode::map_region(std::size_t r, volatile void *&out) -> int
         while (regions.size() < request) {
             // Map "mmap_scale" shared memory regions into this address space.
             auto *p = mmap(
-                nullptr, Shm::kRegionSize * mmap_scale,
+                nullptr, File::kShmRegionSize * mmap_scale,
                 (is_readonly ? 0 : PROT_WRITE) | PROT_READ,
                 MAP_SHARED, file,
-                static_cast<ssize_t>(Shm::kRegionSize * regions.size()));
+                static_cast<ssize_t>(File::kShmRegionSize * regions.size()));
             if (p == MAP_FAILED) {
                 return -1;
             }
             // Store a pointer to the start of each memory region.
             for (std::size_t i = 0; i < mmap_scale; ++i) {
-                regions.emplace_back(reinterpret_cast<char *>(p) + Shm::kRegionSize * i);
+                regions.emplace_back(reinterpret_cast<char *>(p) + File::kShmRegionSize * i);
             }
         }
     }
@@ -895,30 +868,14 @@ auto ShmNode::map_region(std::size_t r, volatile void *&out) -> int
     return 0;
 }
 
-auto ShmNode::destroy() && -> Status
-{
-    // REQUIRES: PosixFs::s_fs.mutex is locked
-    CALICODB_EXPECT_EQ(refcount, 0);
-    CALICODB_EXPECT_GE(file, 0);
-    const auto interval = PosixFs::s_fs.mmap_scale;
-    for (std::size_t i = 0; i < regions.size(); i += interval) {
-        munmap(regions[i], Shm::kRegionSize);
-    }
-    inode->snode = nullptr;
-    if (posix_close(file)) {
-        return posix_error(errno);
-    }
-    return Status::ok();
-}
-
 #ifdef CALICODB_TEST
 auto ShmNode::check_locks() const -> bool
 {
     // REQUIRES: "snode->mutex" is locked
-    int check[Shm::kLockCount] = {};
+    int check[File::kShmLockCount] = {};
 
     for (auto *p = refs; p; p = p->next) {
-        for (std::size_t i = 0; i < Shm::kLockCount; ++i) {
+        for (std::size_t i = 0; i < File::kShmLockCount; ++i) {
             if (p->exclusive_mask & (1 << i)) {
                 CALICODB_EXPECT_FALSE(check[i]);
                 check[i] = -1;
@@ -960,12 +917,7 @@ auto cleanup_path(const std::string &filename) -> std::string
     return join_paths(dir, base);
 }
 
-auto PosixFile::lock_mode() const -> LockMode
-{
-    return LockMode{lockmode};
-}
-
-auto PosixFile::lock(LockMode mode) -> Status
+auto PosixFile::file_lock(FileLockMode mode) -> Status
 {
     if (mode <= lockmode) {
         // New lock is less restrictive than the one already held.
@@ -983,7 +935,7 @@ auto PosixFile::lock(LockMode mode) -> Status
     }
 
     if (mode == kShared && (inode->lock == kShared || inode->lock == kReserved)) {
-        // Caller wants a shared lock, and a shared or reserved lock is already
+        // Caller wants a shared lock, and a shared or reserved file_lock is already
         // held by another thread. Grant the request.
         CALICODB_EXPECT_EQ(mode, kShared);
         CALICODB_EXPECT_EQ(lockmode, kUnlocked);
@@ -1000,7 +952,7 @@ auto PosixFile::lock(LockMode mode) -> Status
         // Attempt to lock the pending byte.
         lock.l_start = kPendingByte;
         lock.l_type = mode == kShared ? F_RDLCK : F_WRLCK;
-        if (file_lock(file, lock)) {
+        if (posix_file_lock(file, lock)) {
             return posix_error(errno);
         } else if (mode == kExclusive) {
             lockmode = kPending;
@@ -1015,15 +967,15 @@ auto PosixFile::lock(LockMode mode) -> Status
         // Take the shared lock. Type is already set to F_RDLCK in this branch.
         lock.l_start = kSharedFirst;
         lock.l_len = kSharedSize;
-        if (file_lock(file, lock)) {
+        if (posix_file_lock(file, lock)) {
             s = posix_error(errno);
         }
 
-        // Drop the lock on the pending byte.
+        // Drop the file_lock on the pending byte.
         lock.l_start = kPendingByte;
         lock.l_len = 1;
         lock.l_type = F_UNLCK;
-        if (file_lock(file, lock) && s.is_ok()) {
+        if (posix_file_lock(file, lock) && s.is_ok()) {
             // SQLite says this could happen with a network mount. Such configurations
             // are not yet considered in this design.
             s = posix_error(errno);
@@ -1035,25 +987,25 @@ auto PosixFile::lock(LockMode mode) -> Status
             return s;
         }
     } else if (mode == kExclusive && inode->nshared > 1) {
-        // Another thread still holds a shared lock, preventing this kExclusive from
+        // Another thread still holds a shared file_lock, preventing this kExclusive from
         // being taken.
         return posix_busy();
     } else {
         // The caller is requesting a kReserved or greater. Require that at least a
-        // shared lock be held first.
+        // shared file_lock be held first.
         CALICODB_EXPECT_TRUE(mode == kReserved || mode == kExclusive);
         CALICODB_EXPECT_NE(lockmode, kUnlocked);
         lock.l_type = F_WRLCK;
         if (mode == kReserved) {
-            // Lock the reserved byte with a write lock.
+            // Lock the reserved byte with a write file_lock.
             lock.l_start = kReservedByte;
             lock.l_len = 1;
         } else {
-            // Lock the whole shared range with a write lock.
+            // Lock the whole shared range with a write file_lock.
             lock.l_start = kSharedFirst;
             lock.l_len = kSharedSize;
         }
-        if (file_lock(file, lock)) {
+        if (posix_file_lock(file, lock)) {
             s = posix_error(errno);
         }
     }
@@ -1064,7 +1016,7 @@ auto PosixFile::lock(LockMode mode) -> Status
     return s;
 }
 
-auto PosixFile::unlock() -> void
+auto PosixFile::file_unlock() -> void
 {
     struct flock lock = {};
 
@@ -1084,18 +1036,18 @@ auto PosixFile::unlock() -> void
         lock.l_len = 2;
         // I don't think this really can fail, given that "file" is a valid
         // file descriptor.
-        (void)file_lock(file, lock);
-        // "file" represents the only file with an exclusive lock, so the inode
-        // lock can be downgraded.
+        (void)posix_file_lock(file, lock);
+        // "file" represents the only file with an exclusive file_lock, so the inode
+        // file_lock can be downgraded.
         inode->lock = kShared;
     }
     if (--inode->nshared == 0) {
-        // The last shared lock has been released.
+        // The last shared file_lock has been released.
         lock.l_type = F_UNLCK;
         lock.l_whence = SEEK_SET;
         lock.l_len = 0;
         lock.l_start = 0;
-        (void)file_lock(file, lock);
+        (void)posix_file_lock(file, lock);
         inode->lock = kUnlocked;
         lockmode = kUnlocked;
     }

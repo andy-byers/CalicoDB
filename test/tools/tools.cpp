@@ -83,7 +83,7 @@ auto read_file_to_string(Env &env, const std::string &filename) -> std::string
     std::string buffer(file_size, '\0');
 
     File *file;
-    CHECK_OK(env.open_file(filename, Env::kCreate | Env::kReadWrite, file));
+    CHECK_OK(env.new_file(filename, Env::kCreate | Env::kReadWrite, file));
     CHECK_OK(file->read_exact(0, file_size, buffer.data()));
     delete file;
 
@@ -99,7 +99,7 @@ auto write_string_to_file(Env &env, const std::string &filename, const std::stri
         write_pos = offset;
     }
     File *file;
-    CHECK_OK(env.open_file(filename, Env::kCreate | Env::kReadWrite, file));
+    CHECK_OK(env.new_file(filename, Env::kCreate | Env::kReadWrite, file));
     CHECK_OK(file->write(write_pos, buffer));
     delete file;
 }
@@ -127,29 +127,44 @@ auto hexdump_page(const Page &page) -> void
     }
 }
 
-auto fill_db(Table &table, RandomGenerator &random, std::size_t num_records, std::size_t max_payload_size) -> std::map<std::string, std::string>
+auto fill_db(DB &db, const std::string &tablename, RandomGenerator &random, std::size_t num_records, std::size_t max_payload_size) -> std::map<std::string, std::string>
 {
     CHECK_TRUE(max_payload_size > 0);
     std::map<std::string, std::string> records;
+
+    Txn *txn;
+    CHECK_OK(db.start(true, txn));
+    Table *table;
+    CHECK_OK(txn->new_table(TableOptions(), tablename, table));
 
     for (std::size_t i = 0; i < num_records; ++i) {
         const auto ksize = random.Next(1, max_payload_size);
         const auto vsize = random.Next(max_payload_size - ksize);
         const auto k = random.Generate(ksize);
         const auto v = random.Generate(vsize);
-        CHECK_OK(table.put(k, v));
+        CHECK_OK(table->put(k, v));
         records[k.to_string()] = v.to_string();
     }
+    CHECK_OK(txn->commit());
+    delete table;
+    db.finish(txn);
     return records;
 }
 
-auto expect_db_contains(const Table &table, const std::map<std::string, std::string> &map) -> void
+auto expect_db_contains(DB &db, const std::string &tablename, const std::map<std::string, std::string> &map) -> void
 {
+    Txn *txn;
+    CHECK_OK(db.start(false, txn));
+    Table *table;
+    CHECK_OK(txn->new_table(TableOptions(), tablename, table));
+
     for (const auto &[key, value] : map) {
         std::string result;
-        CHECK_OK(table.get(key, &result));
+        CHECK_OK(table->get(key, &result));
         CHECK_EQ(result, value);
     }
+    delete table;
+    db.finish(txn);
 }
 
 FakeWal::FakeWal(const Parameters &param)

@@ -23,6 +23,7 @@ namespace calicodb
 
 static constexpr auto kDBFilename = "./_test-db";
 static constexpr auto kWalFilename = "./_test-wal";
+static constexpr auto kShmFilename = "./_test-shm";
 
 //[[nodiscard]] static auto db_impl(const DB *db) -> const DBImpl *
 //{
@@ -127,6 +128,7 @@ public:
     {
         const Wal::Parameters wal_param = {
             kWalFilename,
+            "",
             kPageSize,
             &Base::env(),
         };

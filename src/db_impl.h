@@ -34,20 +34,17 @@ public:
     [[nodiscard]] auto open(const Options &sanitized) -> Status;
 
     [[nodiscard]] auto get_property(const Slice &name, std::string *out) const -> bool override;
-    [[nodiscard]] auto begin(const TxnOptions &options, Txn *&out) -> Status override;
-    [[nodiscard]] auto commit(Txn &txn) -> Status override;
-    auto rollback(Txn &txn) -> void override;
+    [[nodiscard]] auto start(bool write, Txn *&out) -> Status override;
+    auto finish(Txn *&out) -> void override;
 
     [[nodiscard]] auto TEST_wal() const -> const Wal &;
     [[nodiscard]] auto TEST_pager() const -> const Pager &;
     [[nodiscard]] auto TEST_state() const -> const DBState &;
-    auto TEST_validate() const -> void;
 
 private:
     [[nodiscard]] auto checkpoint_if_needed(bool force = false) -> Status;
+    [[nodiscard]] auto write_initial_header() -> Status;
     [[nodiscard]] auto load_file_header() -> Status;
-    [[nodiscard]] auto do_vacuum() -> Status;
-    auto invalidate_live_cursors() -> void;
 
     DBState m_state;
     Wal *m_wal = nullptr;
@@ -55,7 +52,6 @@ private:
 
     Env *m_env = nullptr;
     Sink *m_log = nullptr;
-    Txn *m_txn = nullptr;
 
     const std::string m_db_filename;
     const std::string m_wal_filename;

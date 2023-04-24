@@ -1,271 +1,268 @@
-//// Copyright (c) 2022, The CalicoDB Authors. All rights reserved.
-//// This source code is licensed under the MIT License, which can be found in
-//// LICENSE.md. See AUTHORS.md for a list of contributor names.
-//
-// #include "db_impl.h"
-// #include "header.h"
-// #include "logging.h"
-// #include "tools.h"
-// #include "tree.h"
-// #include "unit_tests.h"
-// #include "wal.h"
-// #include <array>
-// #include <filesystem>
-// #include <gtest/gtest.h>
-// #include <vector>
-//
-// namespace calicodb
-//{
-//
-// namespace fs = std::filesystem;
-//
-// TEST(LeakTests, DestroysOwnObjects)
-//{
-//    fs::remove_all("__calicodb_test");
-//
-//    DB *db;
-//    Table *table;
-//
-//    ASSERT_OK(DB::open({}, "__calicodb_test", db));
-//    ASSERT_OK(db->create_table({}, "test", table));
-//    auto *cursor = db->new_cursor(*table);
-//
-//    delete cursor;
-//    db->close_table(table);
-//    delete db;
-//
-//    ASSERT_OK(DB::destroy({}, "__calicodb_test"));
-//}
-//
-// TEST(LeakTests, LeavesUserObjects)
-//{
-//    Options options;
-//    options.env = new tools::FakeEnv;
-//    options.info_log = nullptr; // TODO
-//
-//    DB *db;
-//    ASSERT_OK(DB::open(options, "__calicodb_test", db));
-//    delete db;
-//
-//    delete options.info_log;
-//    delete options.env;
-//}
-//
-// TEST(BasicDestructionTests, OnlyDeletesCalicoDatabases)
-//{
-//    std::filesystem::remove_all("./testdb");
-//
-//    Options options;
-//    options.env = Env::default_env();
-//
-//    // "./test" does not exist.
-//    ASSERT_TRUE(DB::destroy(options, "./testdb").is_invalid_argument());
-//    ASSERT_FALSE(options.env->file_exists("./testdb"));
-//
-//    // File is too small to read the header.
-//    File *file;
-//    ASSERT_OK(options.env->new_file("./testdb", Env::kCreate | Env::kReadWrite, file));
-//    ASSERT_TRUE(DB::destroy(options, "./testdb").is_invalid_argument());
-//    ASSERT_TRUE(options.env->file_exists("./testdb"));
-//
-//    // Identifier is incorrect.
-//    char buffer[FileHeader::kSize];
-//    FileHeader header;
-//    header.write(buffer);
-//    ++buffer[0];
-//    ASSERT_OK(file->write(0, Slice(buffer, sizeof(buffer))));
-//    ASSERT_TRUE(DB::destroy(options, "./testdb").is_invalid_argument());
-//
-//    DB *db;
-//    std::filesystem::remove_all("./testdb");
-//    ASSERT_OK(DB::open(options, "./testdb", db));
-//    ASSERT_OK(DB::destroy(options, "./testdb"));
-//
-//    delete db;
-//    delete file;
-//    delete options.env;
-//}
-//
-// TEST(BasicDestructionTests, OnlyDeletesCalicoWals)
-//{
-//    Options options;
-//    options.env = new tools::FakeEnv;
-//    options.wal_filename = "./wal";
-//
-//    DB *db;
-//    ASSERT_OK(DB::open(options, "./test", db));
-//    delete db;
-//
-//    // These files are not part of the DB.
-//    File *editor;
-//    ASSERT_OK(options.env->new_file("./wal_", Env::kCreate | Env::kReadWrite, editor));
-//    delete editor;
-//    ASSERT_OK(options.env->new_file("./test.db", Env::kCreate | Env::kReadWrite, editor));
-//    delete editor;
-//
-//    ASSERT_OK(DB::destroy(options, "./test"));
-//    ASSERT_TRUE(options.env->file_exists("./wal_"));
-//    ASSERT_TRUE(options.env->file_exists("./test.db"));
-//
-//    delete options.env;
-//}
-//
-// class BasicDatabaseTests
-//    : public EnvTestHarness<tools::FakeEnv>,
-//      public testing::Test
-//{
-// public:
-//    BasicDatabaseTests()
-//    {
-//        options.page_size = kMinPageSize;
-//        options.cache_size = options.page_size * frame_count;
-//        options.env = &env();
-//    }
-//
-//    ~BasicDatabaseTests() override
-//    {
-//        delete options.info_log;
-//    }
-//
-//    [[nodiscard]] auto db_page_count() -> std::size_t
-//    {
-//        std::size_t file_size;
-//        EXPECT_OK(m_env->file_size(kDBFilename, file_size));
-//        const auto num_pages = file_size / options.page_size;
-//        EXPECT_EQ(file_size, num_pages * options.page_size)
-//            << "file size is not a multiple of the page size";
-//        return num_pages;
-//    }
-//
-//    std::size_t frame_count = 64;
-//    Options options;
-//};
-//
-// TEST_F(BasicDatabaseTests, OpensAndCloses)
-//{
-//    DB *db;
-//    for (std::size_t i = 0; i < 3; ++i) {
-//        ASSERT_OK(DB::open(options, kDBFilename, db));
-//        delete db;
-//    }
-//    ASSERT_TRUE(env().file_exists(kDBFilename));
-//}
-//
-// TEST_F(BasicDatabaseTests, InitialState)
-//{
-//    DB *db;
-//    ASSERT_OK(DB::open(options, kDBFilename, db));
-//    delete db;
-//
-//    const auto file = tools::read_file_to_string(env(), kDBFilename);
-//    ASSERT_EQ(file.size(), options.page_size * 3)
-//        << "DB should have allocated 3 pages (root and default table roots on pages "
-//           "1 and 3, respectively, and the first pointer map page on page 2)";
-//
-//    FileHeader header;
-//    ASSERT_TRUE(header.read(file.data()))
-//        << "version identifier mismatch";
-//    ASSERT_EQ(header.page_count, 3);
-//    ASSERT_EQ(header.page_size, options.page_size);
-//    ASSERT_EQ(header.freelist_head, 0);
-//}
-//
-// TEST_F(BasicDatabaseTests, IsDestroyed)
-//{
-//    DB *db;
-//    ASSERT_OK(DB::open(options, kDBFilename, db));
-//    delete db;
-//
-//    ASSERT_TRUE(env().file_exists(kDBFilename));
-//    ASSERT_OK(DB::destroy(options, kDBFilename));
-//    ASSERT_FALSE(env().file_exists(kDBFilename));
-//}
-//
-// TEST_F(BasicDatabaseTests, ClampsBadOptionValues)
-//{
-//    const auto open_and_check = [this] {
-//        DB *db;
-//        ASSERT_OK(DB::open(options, kDBFilename, db));
-//        ASSERT_OK(db->status());
-//        delete db;
-//        ASSERT_OK(DB::destroy(options, kDBFilename));
-//    };
-//
-//    options.page_size = kMinPageSize / 2;
-//    open_and_check();
-//    options.page_size = kMaxPageSize * 2;
-//    open_and_check();
-//    options.page_size = kMinPageSize + 1;
-//    open_and_check();
-//
-//    options.page_size = kMinPageSize;
-//    options.cache_size = options.page_size;
-//    open_and_check();
-//    options.cache_size = 1 << 31;
-//    open_and_check();
-//}
-//
-//// CAUTION: PRNG state does not persist between calls.
-// static auto insert_random_groups(DB &db, std::size_t num_groups, std::size_t group_size)
-//{
-//     tools::RandomGenerator random;
-//     for (std::size_t iteration = 0; iteration < num_groups; ++iteration) {
-//         ASSERT_OK(db.status());
-//         const auto txn = db.begin_txn(TxnOptions());
-//         tools::fill_db(db, random, group_size);
-//         ASSERT_OK(db.commit_txn(txn));
-//     }
-//     dynamic_cast<const DBImpl &>(db).TEST_validate();
-// }
-//
-// TEST_F(BasicDatabaseTests, InsertOneGroup)
-//{
-//     DB *db;
-//     ASSERT_OK(DB::open(options, kDBFilename, db));
-//     insert_random_groups(*db, 1, 500);
-//     delete db;
-// }
-//
-// TEST_F(BasicDatabaseTests, InsertMultipleGroups)
-//{
-//     DB *db;
-//     ASSERT_OK(DB::open(options, kDBFilename, db));
-//     insert_random_groups(*db, 5, 500);
-//     delete db;
-// }
-//
-// TEST_F(BasicDatabaseTests, DataPersists)
-//{
-//     static constexpr std::size_t kNumIterations = 5;
-//     static constexpr std::size_t kGroupSize = 10;
-//
-//     auto s = Status::ok();
-//     tools::RandomGenerator random(4 * 1'024 * 1'024);
-//
-//     std::map<std::string, std::string> records;
-//     DB *db;
-//
-//     for (std::size_t iteration = 0; iteration < kNumIterations; ++iteration) {
-//         ASSERT_OK(DB::open(options, kDBFilename, db));
-//         ASSERT_OK(db->status());
-//
-//         const auto txn = db->begin_txn(TxnOptions());
-//         for (const auto &[k, v] : tools::fill_db(*db, random, kGroupSize)) {
-//             records.insert_or_assign(k, v);
-//         }
-//         ASSERT_OK(db->commit_txn(txn));
-//         delete db;
-//     }
-//
-//     ASSERT_OK(DB::open(options, kDBFilename, db));
-//     for (const auto &[key, value] : records) {
-//         std::string value_out;
-//         ASSERT_OK(db->get(key, &value_out));
-//         ASSERT_EQ(value_out, value);
-//     }
-//     delete db;
-// }
-//
+// Copyright (c) 2022, The CalicoDB Authors. All rights reserved.
+// This source code is licensed under the MIT License, which can be found in
+// LICENSE.md. See AUTHORS.md for a list of contributor names.
+
+#include "db_impl.h"
+#include "header.h"
+#include "logging.h"
+#include "tools.h"
+#include "tree.h"
+#include "unit_tests.h"
+#include "wal.h"
+#include <array>
+#include <filesystem>
+#include <gtest/gtest.h>
+#include <vector>
+
+namespace calicodb
+{
+
+namespace fs = std::filesystem;
+
+TEST(LeakTests, DestroysOwnObjects)
+{
+    fs::remove_all("__calicodb_test");
+
+    DB *db;
+    Txn *txn;
+    Table *table;
+
+    ASSERT_OK(DB::open(Options(), "__calicodb_test", db));
+    ASSERT_OK(db->start(true, txn));
+    ASSERT_OK(txn->new_table(TableOptions(), "test", table));
+    auto *cursor = table->new_cursor();
+
+    delete cursor;
+    delete table;
+
+    db->finish(txn);
+
+    delete db;
+
+    ASSERT_OK(DB::destroy({}, "__calicodb_test"));
+}
+
+TEST(LeakTests, LeavesUserObjects)
+{
+    Options options;
+    options.env = new tools::FakeEnv;
+    options.info_log = nullptr; // TODO
+
+    DB *db;
+    ASSERT_OK(DB::open(options, "__calicodb_test", db));
+    delete db;
+
+    delete options.info_log;
+    delete options.env;
+}
+
+TEST(BasicDestructionTests, OnlyDeletesCalicoDatabases)
+{
+    std::filesystem::remove_all("./testdb");
+
+    Options options;
+    options.env = Env::default_env();
+
+    // "./test" does not exist.
+    ASSERT_TRUE(DB::destroy(options, "./testdb").is_invalid_argument());
+    ASSERT_FALSE(options.env->file_exists("./testdb"));
+
+    // File is too small to read the header.
+    File *file;
+    ASSERT_OK(options.env->new_file("./testdb", Env::kCreate | Env::kReadWrite, file));
+    ASSERT_TRUE(DB::destroy(options, "./testdb").is_invalid_argument());
+    ASSERT_TRUE(options.env->file_exists("./testdb"));
+
+    // Identifier is incorrect.
+    char buffer[FileHeader::kSize];
+    FileHeader header;
+    header.write(buffer);
+    ++buffer[0];
+    ASSERT_OK(file->write(0, Slice(buffer, sizeof(buffer))));
+    ASSERT_TRUE(DB::destroy(options, "./testdb").is_invalid_argument());
+
+    DB *db;
+    std::filesystem::remove_all("./testdb");
+    ASSERT_OK(DB::open(options, "./testdb", db));
+    ASSERT_OK(DB::destroy(options, "./testdb"));
+
+    delete db;
+    delete file;
+    delete options.env;
+}
+
+TEST(BasicDestructionTests, OnlyDeletesCalicoWals)
+{
+    Options options;
+    options.env = new tools::FakeEnv;
+    options.wal_filename = "./wal";
+
+    DB *db;
+    ASSERT_OK(DB::open(options, "./test", db));
+    delete db;
+
+    // These files are not part of the DB.
+    File *file;
+    ASSERT_OK(options.env->new_file("./wal_", Env::kCreate | Env::kReadWrite, file));
+    delete file;
+    ASSERT_OK(options.env->new_file("./test.db", Env::kCreate | Env::kReadWrite, file));
+    delete file;
+
+    ASSERT_OK(DB::destroy(options, "./test"));
+    ASSERT_TRUE(options.env->file_exists("./wal_"));
+    ASSERT_TRUE(options.env->file_exists("./test.db"));
+
+    delete options.env;
+}
+
+class BasicDatabaseTests
+    : public EnvTestHarness<tools::FakeEnv>,
+      public testing::Test
+{
+public:
+    BasicDatabaseTests()
+    {
+        options.page_size = kMinPageSize;
+        options.cache_size = options.page_size * frame_count;
+        options.env = &env();
+    }
+
+    ~BasicDatabaseTests() override
+    {
+        delete options.info_log;
+    }
+
+    [[nodiscard]] auto db_page_count() -> std::size_t
+    {
+        std::size_t file_size;
+        EXPECT_OK(m_env->file_size(kDBFilename, file_size));
+        const auto num_pages = file_size / options.page_size;
+        EXPECT_EQ(file_size, num_pages * options.page_size)
+            << "file size is not a multiple of the page size";
+        return num_pages;
+    }
+
+    std::size_t frame_count = 64;
+    Options options;
+};
+
+TEST_F(BasicDatabaseTests, OpensAndCloses)
+{
+    DB *db;
+    for (std::size_t i = 0; i < 3; ++i) {
+        ASSERT_OK(DB::open(options, kDBFilename, db));
+        delete db;
+    }
+    ASSERT_TRUE(env().file_exists(kDBFilename));
+}
+
+TEST_F(BasicDatabaseTests, InitialState)
+{
+    DB *db;
+    ASSERT_OK(DB::open(options, kDBFilename, db));
+    delete db;
+
+    const auto file = tools::read_file_to_string(env(), kDBFilename);
+    ASSERT_EQ(file.size(), options.page_size)
+        << "DB should have allocated 1 page (the root page)";
+
+    FileHeader header;
+    ASSERT_TRUE(header.read(file.data()))
+        << "version identifier mismatch";
+    ASSERT_EQ(header.page_count, 1);
+    ASSERT_EQ(header.page_size, options.page_size);
+    ASSERT_EQ(header.freelist_head, 0);
+}
+
+TEST_F(BasicDatabaseTests, IsDestroyed)
+{
+    DB *db;
+    ASSERT_OK(DB::open(options, kDBFilename, db));
+    delete db;
+
+    ASSERT_TRUE(env().file_exists(kDBFilename));
+    ASSERT_OK(DB::destroy(options, kDBFilename));
+    ASSERT_FALSE(env().file_exists(kDBFilename));
+}
+
+TEST_F(BasicDatabaseTests, ClampsBadOptionValues)
+{
+    const auto open_and_check = [this] {
+        DB *db;
+        ASSERT_OK(DB::open(options, kDBFilename, db));
+        delete db;
+        ASSERT_OK(DB::destroy(options, kDBFilename));
+    };
+
+    options.page_size = kMinPageSize / 2;
+    open_and_check();
+    options.page_size = kMaxPageSize * 2;
+    open_and_check();
+    options.page_size = kMinPageSize + 1;
+    open_and_check();
+
+    options.page_size = kMinPageSize;
+    options.cache_size = options.page_size;
+    open_and_check();
+    options.cache_size = 1 << 31;
+    open_and_check();
+}
+
+// CAUTION: PRNG state does not persist between calls.
+static auto insert_random_groups(DB &db, std::size_t num_groups, std::size_t group_size)
+{
+    tools::RandomGenerator random;
+    std::map<std::string, std::string> map;
+    for (std::size_t iteration = 0; iteration < num_groups; ++iteration) {
+        const auto temp = tools::fill_db(db, "table", random, group_size);
+        for (const auto &[k, v] : temp) {
+            map.insert_or_assign(k, v);
+        }
+    }
+    return map;
+}
+
+TEST_F(BasicDatabaseTests, InsertOneGroup)
+{
+    DB *db;
+    ASSERT_OK(DB::open(options, kDBFilename, db));
+    insert_random_groups(*db, 1, 500);
+    delete db;
+}
+
+TEST_F(BasicDatabaseTests, InsertMultipleGroups)
+{
+    DB *db;
+    ASSERT_OK(DB::open(options, kDBFilename, db));
+    insert_random_groups(*db, 5, 500);
+    delete db;
+}
+
+TEST_F(BasicDatabaseTests, DataPersists)
+{
+    static constexpr std::size_t kNumIterations = 5;
+    static constexpr std::size_t kGroupSize = 10;
+
+    auto s = Status::ok();
+    tools::RandomGenerator random(4 * 1'024 * 1'024);
+
+    std::map<std::string, std::string> records;
+    DB *db;
+
+    for (std::size_t iteration = 0; iteration < kNumIterations; ++iteration) {
+        ASSERT_OK(DB::open(options, kDBFilename, db));
+
+        for (const auto &[k, v] : insert_random_groups(*db, 50, kGroupSize)) {
+            records.insert_or_assign(k, v);
+        }
+        delete db;
+    }
+
+    ASSERT_OK(DB::open(options, kDBFilename, db));
+    tools::expect_db_contains(*db, "table", records);
+    delete db;
+}
+
 // TEST_F(BasicDatabaseTests, HandlesMaximumPageSize)
 //{
 //     DB *db;
@@ -1255,5 +1252,5 @@
 //     options.wal_filename = "./nonexistent/wal";
 //     ASSERT_TRUE(DB::open(options, kDBFilename, db).is_not_found());
 // }
-//
-// } // namespace calicodb
+
+} // namespace calicodb

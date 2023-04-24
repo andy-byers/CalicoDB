@@ -1,14 +1,218 @@
-//// Copyright (c) 2022, The CalicoDB Authors. All rights reserved.
-//// This source code is licensed under the MIT License, which can be found in
-//// LICENSE.md. See AUTHORS.md for a list of contributor names.
-//
-// #include "calicodb/db.h"
-// #include "db_impl.h"
-// #include "logging.h"
-// #include "unit_tests.h"
-//
-// namespace calicodb
-//{
+// Copyright (c) 2022, The CalicoDB Authors. All rights reserved.
+// This source code is licensed under the MIT License, which can be found in
+// LICENSE.md. See AUTHORS.md for a list of contributor names.
+
+#include "calicodb/db.h"
+#include "db_impl.h"
+#include "logging.h"
+#include "unit_tests.h"
+
+namespace calicodb
+{
+
+class TableTestHarness
+{
+public:
+    explicit TableTestHarness(std::size_t n)
+        : m_tables(n),
+          m_maps(n)
+    {
+    }
+
+    ~TableTestHarness()
+    {
+        for (const auto *table : m_tables) {
+            delete table;
+        }
+    }
+
+    auto new_table(Txn &txn, std::size_t i, bool create) -> void
+    {
+        TableOptions tbopt;
+        tbopt.create_if_missing = create;
+        tbopt.error_if_exists = create;
+
+        Table *table;
+        EXPECT_OK(txn.new_table(tbopt, tools::integral_key(i), table));
+        EXPECT_FALSE(m_tables[i]);
+        m_tables[i] = table;
+    }
+
+    auto table_at(std::size_t i) -> Table *
+    {
+        return m_tables[i];
+    }
+
+    auto close_table(std::size_t i) -> void
+    {
+        delete m_tables[i];
+        m_tables[i] = nullptr;
+    }
+
+    auto drop_table(Txn &txn, std::size_t i) -> void
+    {
+        ASSERT_OK(txn.drop_table(tools::integral_key(i)));
+        m_maps[i].clear();
+        close_table(i);
+    }
+
+    auto reopen_tables(Txn &txn) -> void
+    {
+        for (std::size_t i = 0; i < m_tables.size(); ++i) {
+            if (m_tables[i]) {
+                close_table(i);
+                new_table(txn, i, false);
+            }
+        }
+    }
+
+    auto update_after_commit() -> void
+    {
+        m_prev = m_maps;
+    }
+
+    auto update_after_rollback() -> void
+    {
+        m_maps = m_prev;
+    }
+
+    auto validate_open_tables() -> void
+    {
+        ASSERT_EQ(m_tables.size(), m_maps.size()) << "test was incorrectly initialized";
+        for (std::size_t i = 0; i < m_tables.size(); ++i) {
+            if (m_tables[i]) {
+                auto *cur = m_tables[i]->new_cursor();
+                auto itr = begin(m_maps[i]);
+                while (itr != end(m_maps[i])) {
+                    ASSERT_TRUE(cur->is_valid());
+                    ASSERT_EQ(itr->first, cur->key().to_string());
+                    ASSERT_EQ(itr->second, cur->value().to_string());
+                    cur->next();
+                }
+                ASSERT_FALSE(cur->is_valid());
+                delete cur;
+            }
+        }
+    }
+
+private:
+    std::vector<Table *> m_tables;
+    std::vector<std::map<std::string, std::string>> m_maps;
+    std::vector<std::map<std::string, std::string>> m_prev;
+};
+
+class TableTests
+    : public testing::Test,
+      public EnvTestHarness<tools::FakeEnv>
+{
+protected:
+    static constexpr std::size_t kMaxTables = 5;
+
+    ~TableTests() override = default;
+
+    auto SetUp() -> void override
+    {
+        Options dbopt;
+        dbopt.page_size = kMinPageSize;
+        dbopt.cache_size = kMinPageSize * kMinFrameCount;
+        dbopt.env = &env();
+        ASSERT_OK(DB::open(dbopt, kDBFilename, m_db));
+
+        m_harness = std::make_unique<TableTestHarness>(kMaxTables);
+    }
+
+    auto begin_with_status(bool write) -> Status
+    {
+        return m_db->start(write, m_txn);
+    }
+    auto begin(bool write) -> void
+    {
+        ASSERT_OK(begin_with_status(write));
+    }
+
+    auto commit_with_status() -> Status
+    {
+        CALICODB_TRY(m_txn->commit());
+        m_harness->update_after_commit();
+        return Status::ok();
+    }
+    auto commit() -> void
+    {
+        ASSERT_OK(commit_with_status());
+    }
+
+    auto rollback() -> void
+    {
+        m_txn->rollback();
+        m_harness->update_after_rollback();
+    }
+    auto finish() -> void
+    {
+        for (std::size_t i = 0; i < kMaxTables; ++i) {
+            m_harness->close_table(i);
+        }
+
+        // Uncommitted changes are implicitly rolled back when the transaction
+        // is finished.
+        m_harness->update_after_rollback();
+
+        delete m_txn;
+        m_txn = nullptr;
+    }
+
+    DB *m_db = nullptr;
+    Txn *m_txn = nullptr;
+    std::unique_ptr<TableTestHarness> m_harness;
+};
+
+TEST_F(TableTests, NewTables)
+{
+    begin(true);
+
+    Table *table;
+    TableOptions tbopt;
+    tbopt.create_if_missing = false;
+    tbopt.error_if_exists = false;
+    ASSERT_TRUE(m_txn->new_table(tbopt, "table", table).is_invalid_argument());
+
+    tbopt.create_if_missing = true;
+    ASSERT_OK(m_txn->new_table(tbopt, "table", table));
+    delete table;
+    table = nullptr;
+
+    tbopt.error_if_exists = true;
+    ASSERT_TRUE(m_txn->new_table(tbopt, "table", table).is_invalid_argument());
+
+    tbopt.create_if_missing = true;
+    ASSERT_TRUE(m_txn->new_table(tbopt, "table", table).is_invalid_argument());
+
+    finish();
+}
+
+TEST_F(TableTests, TablesHaveUniqueKeyRanges)
+{
+    begin(true);
+
+    m_harness->new_table(*m_txn, 0, true);
+    m_harness->new_table(*m_txn, 1, true);
+    m_harness->new_table(*m_txn, 2, true);
+    ASSERT_OK(m_harness->table_at(0)->put("*", "a"));
+    ASSERT_OK(m_harness->table_at(1)->put("*", "b"));
+    ASSERT_OK(m_harness->table_at(2)->put("*", "c"));
+
+    m_harness->reopen_tables(*m_txn);
+
+    std::string value;
+    ASSERT_OK(m_harness->table_at(0)->get("*", &value));
+    ASSERT_EQ("a", value);
+    ASSERT_OK(m_harness->table_at(1)->get("*", &value));
+    ASSERT_EQ("b", value);
+    ASSERT_OK(m_harness->table_at(2)->get("*", &value));
+    ASSERT_EQ("c", value);
+
+    finish();
+}
+
 //
 // class DefaultTableTests
 //    : public EnvTestHarness<tools::FakeEnv>,
@@ -43,52 +247,6 @@
 //    Options options;
 //    DB *db = nullptr;
 //};
-//
-// #ifndef NDEBUG
-// TEST_F(DefaultTableTests, OpenRootTableDeathTest)
-//{
-//    Table *table;
-//    ASSERT_DEATH((void)db->create_table({}, "calicodb.root", table), "expect") << "not allowed to create root table";
-//}
-// #endif // NDEBUG
-//
-// TEST_F(DefaultTableTests, SpecialTableBehavior)
-//{
-//    auto *default_table = db->default_table();
-//    ASSERT_TRUE(db->drop_table(default_table).is_invalid_argument()) << "not allowed to drop default table";
-//}
-//
-// TEST_F(DefaultTableTests, RootAndDefaultTablesAreAlwaysOpen)
-//{
-//    ASSERT_NE(db_impl(db)->TEST_tables().get(Id(1)), nullptr);
-//    ASSERT_NE(db_impl(db)->TEST_tables().get(Id(2)), nullptr);
-//
-//    std::vector<std::string> names;
-//    ASSERT_OK(db->list_tables(names));
-//    ASSERT_TRUE(names.empty());
-//
-//    std::string v;
-//    ASSERT_OK(db->put("k", "v"));
-//    ASSERT_OK(db->get("k", &v));
-//    ASSERT_EQ(v, "v");
-//}
-//
-// TEST_F(DefaultTableTests, DefaultTablePersists)
-//{
-//    reopen_db();
-//
-//    // May cause problems if the default table wasn't registered properly when it was first constructed.
-//    ASSERT_OK(db->put("k", "v"));
-//}
-//
-// TEST_F(DefaultTableTests, RecordInDefaultTablePersists)
-//{
-//    ASSERT_OK(db->put("k", "v"));
-//
-//    std::string v;
-//    ASSERT_OK(db->get("k", &v));
-//    ASSERT_EQ(v, "v");
-//}
 //
 // class TableTests : public DefaultTableTests
 //{
@@ -500,5 +658,5 @@
 //    MultiTableVacuumTests,
 //    MultiTableVacuumTests,
 //    ::testing::Values(0, 1, 2, 5, 10));
-//
-//} // namespace calicodb
+
+} // namespace calicodb

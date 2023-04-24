@@ -1540,14 +1540,7 @@ auto Tree::vacuum_step(Page &free, Schema &schema, Id last_id) -> Status
             break;
         }
         case PointerMap::kTreeRoot: {
-            (void)schema; // TODO
-                          //            if (auto *state = schema.vacuum_reroot(entry.back_ptr)) {
-                          //                if (state->tree != nullptr) {
-                          //                    // Open tables must have their in-memory root page ID changed.
-                          //                    state->root_id.page_id = free.id();
-                          //                    state->tree->root() = free.id();
-                          //                }
-                          //            }
+            schema.vacuum_reroot(entry.back_ptr, free.id());
             // Tree root pages are also node pages (with no parent page). Handle them the same, but
             // note the guard against updating the parent page's child pointers below.
             [[fallthrough]];
@@ -2237,7 +2230,7 @@ public:
 
         // Find the leftmost external node.
         Node node;
-        CHECK_OK(tree.acquire(*tree.m_root_id, false, node));
+        CHECK_OK(tree.acquire(tree.root(), false, node));
         while (!node.header.is_external) {
             const auto id = read_child_id(node, 0);
             tree.release(std::move(node));
@@ -2265,7 +2258,7 @@ public:
         PrinterData data;
 
         Node root;
-        CHECK_OK(tree.acquire(*tree.m_root_id, false, root));
+        CHECK_OK(tree.acquire(tree.root(), false, root));
         collect_levels(tree, data, std::move(root), 0);
         for (const auto &level : data.levels) {
             repr.append(level + '\n');
