@@ -128,7 +128,7 @@ public:
     {
         const Wal::Parameters wal_param = {
             kWalFilename,
-            "",
+            kShmFilename,
             kPageSize,
             &Base::env(),
         };

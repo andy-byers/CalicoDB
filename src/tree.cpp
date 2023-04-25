@@ -1501,8 +1501,8 @@ auto Tree::vacuum_step(Page &free, Schema &schema, Id last_id) -> Status
 
     switch (entry.type) {
         case PointerMap::kFreelistLink: {
-            if (last_id == *freelist.m_head) {
-                *freelist.m_head = free.id();
+            if (last_id == freelist.m_head) {
+                freelist.m_head = free.id();
             } else if (last_id != free.id()) {
                 // Back pointer points to another freelist page.
                 CALICODB_EXPECT_FALSE(entry.back_ptr.is_null());

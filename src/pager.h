@@ -14,7 +14,6 @@ namespace calicodb
 
 class Env;
 class Freelist;
-class TableV1Set;
 class Wal;
 
 // Freelist management. The freelist is essentially a linked list that is threaded through the database. Each freelist
@@ -23,13 +22,14 @@ class Wal;
 // checked first. Only if it is empty do we allocate a page from the end of the file.
 class Freelist
 {
+    friend class Pager;
     friend class Tree;
 
     Pager *m_pager = nullptr;
-    Id *m_head = nullptr;
+    Id m_head;
 
 public:
-    explicit Freelist(Pager &pager, Id &head);
+    explicit Freelist(Pager &pager, Id head);
     [[nodiscard]] auto is_empty() const -> bool;
     [[nodiscard]] auto pop(Page &page) -> Status;
     [[nodiscard]] auto push(Page page) -> Status;
@@ -96,7 +96,7 @@ public:
     auto release(Page page) -> void;
     auto set_status(const Status &error) const -> Status;
     auto set_page_count(std::size_t page_count) -> void;
-    auto load_state(const FileHeader &header) -> void;
+    [[nodiscard]] auto load_state() -> Status;
 
     [[nodiscard]] auto acquire_root() -> Page;
 
@@ -134,7 +134,9 @@ private:
     Freelist m_freelist;
     Bufmgr m_bufmgr;
 
-    // True if the in-memory root page needs to be refreshed, false otherwise.
+    // True if the in-memory root page needs to be refreshed, false otherwise. Starts
+    // out as true, so the root is read from wherever it is (DB or WAL) on the first
+    // call to acquire().
     bool m_refresh_root = true;
 
     Sink *m_log = nullptr;

@@ -127,10 +127,8 @@ public:
     [[nodiscard]] static auto open(const Parameters &param, Wal *&out) -> Status;
     [[nodiscard]] static auto close(Wal *&wal) -> Status;
 
-    // Write the WAL contents back to the DB. Resets internal counters such
-    // that the next write to the WAL will start at the beginning again.
+    // Write as much of the WAL back to the DB as possible
     [[nodiscard]] virtual auto checkpoint(File &db_file, std::size_t *db_size) -> Status = 0;
-    [[nodiscard]] virtual auto needs_checkpoint() const -> bool = 0;
 
     // UNLOCKED -> READER
     [[nodiscard]] virtual auto start_reader(bool &changed) -> Status = 0;

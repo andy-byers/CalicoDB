@@ -51,11 +51,10 @@ auto DBImpl::open(const Options &sanitized) -> Status
     }
     const auto page_size = decode_page_size(header.page_size);
     const auto cache_size = std::max(sanitized.cache_size, kMinFrameCount * page_size);
-    m_state.freelist_head.value = header.freelist_head;
 
     const Wal::Parameters wal_param = {
         m_wal_filename,
-        "",
+        m_shm_filename,
         page_size,
         m_env,
     };
@@ -75,29 +74,27 @@ auto DBImpl::open(const Options &sanitized) -> Status
     if (db_exists) {
         logv(m_log, "ensuring consistency of an existing database");
 
-        m_pager->load_state(header);
         // This should be a no-op if the database closed normally last time.
-        CALICODB_TRY(checkpoint_if_needed(true));
+        CALICODB_TRY(m_pager->checkpoint());
         m_pager->purge_all_pages();
-        CALICODB_TRY(load_file_header());
+
     } else {
         logv(m_log, "setting up a new database");
-        CALICODB_TRY(m_pager->begin(true));
+        // Write the root database page contents to this buffer. After this buffer is
+        // written to the start of the database file, the database is considered
+        // initialized.
+        std::string initial(page_size, '\0');
+        header.page_count = 1;
+        header.write(initial.data());
 
-        // Create the root table tree manually.
-        CALICODB_TRY(Tree::create(*m_pager, true, nullptr));
+        NodeHeader root_hdr;
+        root_hdr.is_external = true;
+        root_hdr.cell_start = page_size;
+        root_hdr.write(initial.data() + FileHeader::kSize);
 
-        // Write the initial file header containing the page size.
-        auto root = m_pager->acquire_root();
-        m_pager->upgrade(root);
-        header.write(root.data());
-        m_pager->release(std::move(root));
-
-        // Commit the initial transaction. Since the WAL is not enabled, this will write
-        // to the DB file and call fsync().
-        CALICODB_TRY(m_pager->commit());
+        CALICODB_TRY(m_pager->m_file->write(0, initial));
+        CALICODB_TRY(m_pager->m_file->sync());
     }
-    m_pager->finish();
     m_state.use_wal = true;
     return Status::ok();
 }
@@ -107,6 +104,7 @@ DBImpl::DBImpl(const Options &options, const Options &sanitized, std::string fil
       m_log(sanitized.info_log),
       m_db_filename(std::move(filename)),
       m_wal_filename(sanitized.wal_filename),
+      m_shm_filename(sanitized.shm_filename),
       m_log_filename(sanitized.info_log == nullptr ? m_db_filename + kDefaultLogSuffix : ""),
       m_owns_env(options.env == nullptr),
       m_owns_log(options.info_log == nullptr),
@@ -124,14 +122,10 @@ DBImpl::~DBImpl()
         // will return a Status::busy(). The last process to access the database
         // will run the checkpoint, or if that fails, it will be run on the next
         // startup.
-        auto s = m_pager->begin(true);
-        if (s.is_ok()) {
-            s = checkpoint_if_needed(true);
-            if (!s.is_ok()) {
-                logv(m_log, "failed to checkpoint database: %s", s.to_string().c_str());
-            }
+        auto s = m_pager->checkpoint();
+        if (!s.is_ok()) {
+            logv(m_log, "failed to checkpoint database: %s", s.to_string().c_str());
         }
-        m_pager->finish();
 
         s = Wal::close(m_wal);
         if (!s.is_ok()) {
@@ -221,11 +215,10 @@ auto DBImpl::get_property(const Slice &name, std::string *out) const -> bool
 
 auto DBImpl::start(bool write, Txn *&out) -> Status
 {
-    CALICODB_TRY(m_pager->begin(write));
-    CALICODB_TRY(load_file_header());
     if (write) {
-        CALICODB_TRY(checkpoint_if_needed(false));
+        CALICODB_TRY(m_pager->checkpoint()); // TODO: Find somewhere better to put this, maybe even expose a checkpoint() method on DB
     }
+    CALICODB_TRY(m_pager->begin(write));
     out = new TxnImpl(*m_pager, m_state);
     return Status::ok();
 }
@@ -249,28 +242,6 @@ auto DBImpl::TEST_pager() const -> const Pager &
 auto DBImpl::TEST_state() const -> const DBState &
 {
     return m_state;
-}
-
-auto DBImpl::checkpoint_if_needed(bool force) -> Status
-{
-    if (force || m_wal->needs_checkpoint()) {
-        return m_pager->checkpoint();
-    }
-    return Status::ok();
-}
-
-auto DBImpl::load_file_header() -> Status
-{
-    auto root = m_pager->acquire_root();
-
-    FileHeader header;
-    if (!header.read(root.data())) {
-        return Status::corruption("header identifier mismatch");
-    }
-    m_state.freelist_head.value = header.freelist_head;
-    m_pager->load_state(header);
-    m_pager->release(std::move(root));
-    return Status::ok();
 }
 
 } // namespace calicodb

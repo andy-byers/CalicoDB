@@ -15,7 +15,7 @@ namespace calicodb
 static constexpr std::size_t kInitialRecordCount = 100;
 
 class NodeSlotTests
-    : public PagerTestHarness<tools::FakeEnv>,
+    : public PagerTestHarness<PosixEnv>,
       public testing::Test
 {
 };
@@ -24,6 +24,8 @@ TEST_F(NodeSlotTests, SlotsAreConsistent)
 {
     std::string backing(0x200, '\x00');
     std::string scratch(0x200, '\x00');
+
+    ASSERT_OK(m_pager->begin(true));
 
     Id freelist_head;
     Freelist freelist(*m_pager, freelist_head);
@@ -53,6 +55,8 @@ TEST_F(NodeSlotTests, SlotsAreConsistent)
     node.remove_slot(0);
     ASSERT_EQ(node.get_slot(0), 5);
     node.remove_slot(0);
+
+    m_pager->finish();
 }
 
 class ComponentTests
@@ -60,13 +64,18 @@ class ComponentTests
       public testing::Test
 {
 public:
-    ~ComponentTests() override = default;
+    ~ComponentTests() override
+    {
+        m_pager->finish();
+    }
 
     auto SetUp() -> void override
     {
         collect_scratch.resize(kPageSize);
         cell_scratch.resize(kPageSize);
         node_scratch.resize(kPageSize);
+
+        ASSERT_OK(m_pager->begin(true));
 
         Node root;
         ASSERT_OK(NodeManager::acquire(*m_pager, Id::root(), root, node_scratch, true));

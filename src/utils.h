@@ -59,6 +59,7 @@ static constexpr std::size_t kMaxPageSize = 65'536;
 static constexpr std::size_t kMinFrameCount = 16;
 static constexpr std::size_t kMaxCacheSize = 1 << 30;
 static constexpr auto kDefaultWalSuffix = "-wal";
+static constexpr auto kDefaultShmSuffix = "-shm";
 static constexpr auto kDefaultLogSuffix = "-log";
 
 // Fixed-width unsigned integers for use in the database file format.
@@ -170,7 +171,6 @@ inline auto operator!=(Id lhs, Id rhs) -> bool
 struct DBState {
     Status status;
     std::size_t ckpt_number = 0;
-    Id freelist_head;
     bool use_wal = false;
 };
 

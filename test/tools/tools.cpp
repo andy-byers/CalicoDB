@@ -200,11 +200,6 @@ auto FakeWal::write(const PageRef *dirty, std::size_t db_size) -> Status
     return Status::ok();
 }
 
-auto FakeWal::needs_checkpoint() const -> bool
-{
-    return m_committed.size() > 1'000;
-}
-
 auto FakeWal::checkpoint(File &db_file, std::size_t *db_size) -> Status
 {
     // TODO: Need the env to resize the file.

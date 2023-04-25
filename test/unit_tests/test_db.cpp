@@ -116,11 +116,13 @@ TEST(BasicDestructionTests, OnlyDeletesCalicoWals)
 }
 
 class BasicDatabaseTests
-    : public EnvTestHarness<tools::FakeEnv>,
+    : public EnvTestHarness<PosixEnv>,
       public testing::Test
 {
 public:
-    BasicDatabaseTests()
+    explicit BasicDatabaseTests()
+        : m_testdir("."),
+          m_dbname(m_testdir.as_child(kDBFilename))
     {
         options.page_size = kMinPageSize;
         options.cache_size = options.page_size * frame_count;
@@ -135,13 +137,15 @@ public:
     [[nodiscard]] auto db_page_count() -> std::size_t
     {
         std::size_t file_size;
-        EXPECT_OK(m_env->file_size(kDBFilename, file_size));
+        EXPECT_OK(m_env->file_size(m_dbname, file_size));
         const auto num_pages = file_size / options.page_size;
         EXPECT_EQ(file_size, num_pages * options.page_size)
             << "file size is not a multiple of the page size";
         return num_pages;
     }
 
+    tools::TestDir m_testdir;
+    std::string m_dbname;
     std::size_t frame_count = 64;
     Options options;
 };
@@ -150,19 +154,19 @@ TEST_F(BasicDatabaseTests, OpensAndCloses)
 {
     DB *db;
     for (std::size_t i = 0; i < 3; ++i) {
-        ASSERT_OK(DB::open(options, kDBFilename, db));
+        ASSERT_OK(DB::open(options, m_dbname, db));
         delete db;
     }
-    ASSERT_TRUE(env().file_exists(kDBFilename));
+    ASSERT_TRUE(env().file_exists(m_dbname));
 }
 
 TEST_F(BasicDatabaseTests, InitialState)
 {
     DB *db;
-    ASSERT_OK(DB::open(options, kDBFilename, db));
+    ASSERT_OK(DB::open(options, m_dbname, db));
     delete db;
 
-    const auto file = tools::read_file_to_string(env(), kDBFilename);
+    const auto file = tools::read_file_to_string(env(), m_dbname);
     ASSERT_EQ(file.size(), options.page_size)
         << "DB should have allocated 1 page (the root page)";
 
@@ -177,21 +181,21 @@ TEST_F(BasicDatabaseTests, InitialState)
 TEST_F(BasicDatabaseTests, IsDestroyed)
 {
     DB *db;
-    ASSERT_OK(DB::open(options, kDBFilename, db));
+    ASSERT_OK(DB::open(options, m_dbname, db));
     delete db;
 
-    ASSERT_TRUE(env().file_exists(kDBFilename));
-    ASSERT_OK(DB::destroy(options, kDBFilename));
-    ASSERT_FALSE(env().file_exists(kDBFilename));
+    ASSERT_TRUE(env().file_exists(m_dbname));
+    ASSERT_OK(DB::destroy(options, m_dbname));
+    ASSERT_FALSE(env().file_exists(m_dbname));
 }
 
 TEST_F(BasicDatabaseTests, ClampsBadOptionValues)
 {
     const auto open_and_check = [this] {
         DB *db;
-        ASSERT_OK(DB::open(options, kDBFilename, db));
+        ASSERT_OK(DB::open(options, m_dbname, db));
         delete db;
-        ASSERT_OK(DB::destroy(options, kDBFilename));
+        ASSERT_OK(DB::destroy(options, m_dbname));
     };
 
     options.page_size = kMinPageSize / 2;
@@ -225,7 +229,7 @@ static auto insert_random_groups(DB &db, std::size_t num_groups, std::size_t gro
 TEST_F(BasicDatabaseTests, InsertOneGroup)
 {
     DB *db;
-    ASSERT_OK(DB::open(options, kDBFilename, db));
+    ASSERT_OK(DB::open(options, m_dbname, db));
     insert_random_groups(*db, 1, 500);
     delete db;
 }
@@ -233,7 +237,7 @@ TEST_F(BasicDatabaseTests, InsertOneGroup)
 TEST_F(BasicDatabaseTests, InsertMultipleGroups)
 {
     DB *db;
-    ASSERT_OK(DB::open(options, kDBFilename, db));
+    ASSERT_OK(DB::open(options, m_dbname, db));
     insert_random_groups(*db, 5, 500);
     delete db;
 }
@@ -250,7 +254,7 @@ TEST_F(BasicDatabaseTests, DataPersists)
     DB *db;
 
     for (std::size_t iteration = 0; iteration < kNumIterations; ++iteration) {
-        ASSERT_OK(DB::open(options, kDBFilename, db));
+        ASSERT_OK(DB::open(options, m_dbname, db));
 
         for (const auto &[k, v] : insert_random_groups(*db, 50, kGroupSize)) {
             records.insert_or_assign(k, v);
@@ -258,29 +262,29 @@ TEST_F(BasicDatabaseTests, DataPersists)
         delete db;
     }
 
-    ASSERT_OK(DB::open(options, kDBFilename, db));
+    ASSERT_OK(DB::open(options, m_dbname, db));
     tools::expect_db_contains(*db, "table", records);
     delete db;
 }
 
-// TEST_F(BasicDatabaseTests, HandlesMaximumPageSize)
-//{
-//     DB *db;
-//     tools::RandomGenerator random;
-//     options.page_size = kMaxPageSize;
-//     ASSERT_OK(DB::open(options, kDBFilename, db));
-//     const auto records = tools::fill_db(*db, random, 1);
-//     delete db;
-//
-//     ASSERT_OK(DB::open(options, kDBFilename, db));
-//     tools::expect_db_contains(*db, records);
-//     delete db;
-// }
+TEST_F(BasicDatabaseTests, HandlesMaximumPageSize)
+{
+    DB *db;
+    tools::RandomGenerator random;
+    options.page_size = kMaxPageSize;
+    ASSERT_OK(DB::open(options, m_dbname, db));
+    const auto records = tools::fill_db(*db, "table", random, 1);
+    delete db;
+
+    ASSERT_OK(DB::open(options, m_dbname, db));
+    tools::expect_db_contains(*db, "table", records);
+    delete db;
+}
 //
 // TEST_F(BasicDatabaseTests, VacuumShrinksDBFileOnCheckpoint)
 //{
 //     DB *db;
-//     ASSERT_OK(DB::open(options, kDBFilename, db));
+//     ASSERT_OK(DB::open(options, m_dbname, db));
 //     ASSERT_EQ(db_page_count(), 3);
 //
 //     tools::RandomGenerator random;
@@ -295,7 +299,7 @@ TEST_F(BasicDatabaseTests, DataPersists)
 //     ASSERT_GT(saved_page_count, 3)
 //         << "DB file was not written during checkpoint";
 //
-//     ASSERT_OK(DB::open(options, kDBFilename, db));
+//     ASSERT_OK(DB::open(options, m_dbname, db));
 //     txn = db->begin_txn(TxnOptions());
 //     for (const auto &[key, value] : records) {
 //         ASSERT_OK(db->erase(key));
@@ -311,118 +315,124 @@ TEST_F(BasicDatabaseTests, DataPersists)
 //     ASSERT_EQ(db_page_count(), 3)
 //         << "file was not truncated";
 // }
-//
-// class DbVacuumTests
-//     : public EnvTestHarness<tools::FakeEnv>,
-//       public testing::TestWithParam<std::tuple<std::size_t, std::size_t, bool>>
-//{
-// public:
-//     DbVacuumTests()
-//         : random(1'024 * 1'024 * 8),
-//           lower_bounds(std::get<0>(GetParam())),
-//           upper_bounds(std::get<1>(GetParam())),
-//           reopen(std::get<2>(GetParam()))
-//     {
-//         CALICODB_EXPECT_LE(lower_bounds, upper_bounds);
-//         options.page_size = 0x200;
-//         options.cache_size = 0x200 * 16;
-//         options.env = &env();
-//     }
-//
-//     std::unordered_map<std::string, std::string> map;
-//     tools::RandomGenerator random;
-//     DB *db = nullptr;
-//     Options options;
-//     std::size_t lower_bounds = 0;
-//     std::size_t upper_bounds = 0;
-//     bool reopen = false;
-// };
-//
-// TEST_P(DbVacuumTests, SanityCheck)
-//{
-//     ASSERT_OK(DB::open(options, kDBFilename, db));
-//
-//     for (std::size_t iteration = 0; iteration < 4; ++iteration) {
-//         if (reopen) {
-//             delete db;
-//             ASSERT_OK(DB::open(options, kDBFilename, db));
-//         }
-//         auto txn = db->begin_txn(TxnOptions());
-//
-//         for (std::size_t batch = 0; batch < 4; ++batch) {
-//             while (map.size() < upper_bounds) {
-//                 const auto key = random.Generate(10);
-//                 const auto value = random.Generate(options.page_size * 2);
-//                 ASSERT_OK(db->put(key, value));
-//                 map[key.to_string()] = value.to_string();
-//             }
-//             while (map.size() > lower_bounds) {
-//                 const auto key = begin(map)->first;
-//                 map.erase(key);
-//                 ASSERT_OK(db->erase(key));
-//             }
-//             ASSERT_OK(db->vacuum());
-//             db_impl(db)->TEST_validate();
-//         }
-//
-//         ASSERT_OK(db->commit_txn(txn));
-//
-//         std::size_t i = 0;
-//         for (const auto &[key, value] : map) {
-//             ++i;
-//             std::string result;
-//             ASSERT_OK(db->get(key, &result));
-//             ASSERT_EQ(result, value);
-//         }
-//     }
-//     delete db;
-// }
-//
-// INSTANTIATE_TEST_SUITE_P(
-//     DbVacuumTests,
-//     DbVacuumTests,
-//     ::testing::Values(
-//         std::make_tuple(0, 50, false),
-//         std::make_tuple(0, 50, true),
-//         std::make_tuple(10, 50, false),
-//         std::make_tuple(10, 50, true),
-//         std::make_tuple(0, 2'000, false),
-//         std::make_tuple(0, 2'000, true),
-//         std::make_tuple(400, 2'000, false),
-//         std::make_tuple(400, 2'000, true)));
-//
-// class TestDatabase
-//{
-// public:
-//     explicit TestDatabase(Env &env)
-//     {
-//         options.wal_filename = "./wal";
-//         options.page_size = kMinPageSize;
-//         options.cache_size = 32 * options.page_size;
-//         options.env = &env;
-//
-//         EXPECT_OK(reopen());
-//     }
-//
-//     virtual ~TestDatabase()
-//     {
-//         delete db;
-//     }
-//
-//     [[nodiscard]] auto reopen() -> Status
-//     {
-//         delete db;
-//
-//         db = nullptr;
-//
-//         return DB::open(options, "./test", db);
-//     }
-//
-//     Options options;
-//     tools::RandomGenerator random;
-//     DB *db = nullptr;
-// };
-//
+
+class DbVacuumTests
+    : public EnvTestHarness<PosixEnv>,
+      public testing::TestWithParam<std::tuple<std::size_t, std::size_t, bool>>
+{
+public:
+    DbVacuumTests()
+        : m_testdir("."),
+          random(1'024 * 1'024 * 8),
+          lower_bounds(std::get<0>(GetParam())),
+          upper_bounds(std::get<1>(GetParam())),
+          reopen(std::get<2>(GetParam()))
+    {
+        CALICODB_EXPECT_LE(lower_bounds, upper_bounds);
+        options.page_size = 0x200;
+        options.cache_size = 0x200 * 16;
+        options.env = &env();
+    }
+
+    std::unordered_map<std::string, std::string> map;
+    tools::TestDir m_testdir;
+    tools::RandomGenerator random;
+    DB *db = nullptr;
+    Options options;
+    std::size_t lower_bounds = 0;
+    std::size_t upper_bounds = 0;
+    bool reopen = false;
+};
+
+TEST_P(DbVacuumTests, SanityCheck)
+{
+    ASSERT_OK(DB::open(options, m_testdir.as_child(kDBFilename), db));
+
+    for (std::size_t iteration = 0; iteration < 4; ++iteration) {
+        if (reopen) {
+            delete db;
+            ASSERT_OK(DB::open(options, m_testdir.as_child(kDBFilename), db));
+        }
+        Txn *txn;
+        ASSERT_OK(db->start(true, txn));
+        Table *table;
+        ASSERT_OK(txn->new_table(TableOptions(), "table", table));
+
+        for (std::size_t batch = 0; batch < 4; ++batch) {
+            while (map.size() < upper_bounds) {
+                const auto key = random.Generate(10);
+                const auto value = random.Generate(options.page_size * 2);
+                ASSERT_OK(table->put(key, value));
+                map[key.to_string()] = value.to_string();
+            }
+            while (map.size() > lower_bounds) {
+                const auto key = begin(map)->first;
+                map.erase(key);
+                ASSERT_OK(table->erase(key));
+            }
+            ASSERT_OK(txn->vacuum());
+            reinterpret_cast<TxnImpl *>(txn)->TEST_validate();
+        }
+
+        ASSERT_OK(txn->commit());
+
+        std::size_t i = 0;
+        for (const auto &[key, value] : map) {
+            ++i;
+            std::string result;
+            ASSERT_OK(table->get(key, &result));
+            ASSERT_EQ(result, value);
+        }
+        db->finish(txn);
+    }
+    delete db;
+}
+
+INSTANTIATE_TEST_SUITE_P(
+    DbVacuumTests,
+    DbVacuumTests,
+    ::testing::Values(
+        std::make_tuple(0, 50, false),
+        std::make_tuple(0, 50, true),
+        std::make_tuple(10, 50, false),
+        std::make_tuple(10, 50, true),
+        std::make_tuple(0, 2'000, false),
+        std::make_tuple(0, 2'000, true),
+        std::make_tuple(400, 2'000, false),
+        std::make_tuple(400, 2'000, true)));
+
+class TestDatabase
+{
+public:
+    explicit TestDatabase(Env &env)
+    {
+        options.wal_filename = "./wal";
+        options.page_size = kMinPageSize;
+        options.cache_size = 32 * options.page_size;
+        options.env = &env;
+
+        EXPECT_OK(reopen());
+    }
+
+    virtual ~TestDatabase()
+    {
+        delete db;
+    }
+
+    [[nodiscard]] auto reopen() -> Status
+    {
+        delete db;
+
+        db = nullptr;
+
+        return DB::open(options, "./test", db);
+    }
+
+    Options options;
+    tools::RandomGenerator random;
+    DB *db = nullptr;
+};
+
 // class DbRevertTests
 //     : public EnvTestHarness<tools::FakeEnv>,
 //       public testing::Test

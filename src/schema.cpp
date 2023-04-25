@@ -5,6 +5,7 @@
 #include "schema.h"
 #include "encoding.h"
 #include "logging.h"
+#include "scope_guard.h"
 #include "table_impl.h"
 #include "tree.h"
 
@@ -101,12 +102,13 @@ auto Schema::vacuum_reroot(Id old_id, Id new_id) -> void
 
 auto Schema::vacuum_finish() -> Status
 {
-    char buffer[sizeof(U32)];
-    std::unique_ptr<Cursor> cursor(
-        CursorInternal::make_cursor(*m_map));
+    auto *cursor = CursorInternal::make_cursor(*m_map);
+    cursor->seek_first();
+    ScopeGuard guard = [cursor] {
+        delete cursor;
+    };
 
     Status s;
-    cursor->seek_first();
     while (cursor->is_valid()) {
         if (cursor->value().size() != sizeof(U32)) {
             std::string message("root entry for table \"");
@@ -118,7 +120,8 @@ auto Schema::vacuum_finish() -> Status
         const Id old_id(get_u32(cursor->value()));
         const auto root = m_reroot.find(old_id);
         if (root != end(m_reroot)) {
-            // Write a new name-root mapping to the database schema.
+            char buffer[sizeof(U32)];
+            // Update the database schema with the new root page ID for this tree.
             put_u32(buffer, root->second.value);
             const Slice value(buffer, sizeof(U32));
             s = m_map->put(cursor->key(), value);

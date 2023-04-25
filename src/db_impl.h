@@ -42,10 +42,6 @@ public:
     [[nodiscard]] auto TEST_state() const -> const DBState &;
 
 private:
-    [[nodiscard]] auto checkpoint_if_needed(bool force = false) -> Status;
-    [[nodiscard]] auto write_initial_header() -> Status;
-    [[nodiscard]] auto load_file_header() -> Status;
-
     DBState m_state;
     Wal *m_wal = nullptr;
     Pager *m_pager = nullptr;
@@ -55,6 +51,7 @@ private:
 
     const std::string m_db_filename;
     const std::string m_wal_filename;
+    const std::string m_shm_filename;
     const std::string m_log_filename;
     const bool m_owns_env;
     const bool m_owns_log;

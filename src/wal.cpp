@@ -7,7 +7,8 @@
 #include "calicodb/env.h"
 #include "encoding.h"
 #include "logging.h"
-#include <atomic>
+#include "scope_guard.h"
+#include <thread>
 
 namespace calicodb
 {
@@ -79,6 +80,20 @@ static auto too_many_collisions(Key key) -> Status
     std::string message;
     append_fmt_string(message, "too many WAL index collisions for page %u", key);
     return Status::corruption(message);
+}
+
+// TODO: This should be a method on the WAL. Call a user-provided callback while waiting.
+template<class Callback>
+static auto busy_wait(const Callback &cb) -> Status
+{
+    for (;;) {
+        auto s = cb();
+        if (s.is_busy()) {
+            std::this_thread::yield();
+            continue;
+        }
+        return s;
+    }
 }
 
 struct HashGroup {
@@ -520,7 +535,6 @@ public:
 
     [[nodiscard]] auto read(Id page_id, char *&page) -> Status override;
     [[nodiscard]] auto write(const PageRef *dirty, std::size_t db_size) -> Status override;
-    [[nodiscard]] auto needs_checkpoint() const -> bool override;
     [[nodiscard]] auto checkpoint(File &db_file, std::size_t *db_size) -> Status override;
 
     [[nodiscard]] auto sync() -> Status override
@@ -544,7 +558,7 @@ public:
         delete m_shm_file;
         m_shm_file = nullptr;
         if (m_hdr.max_frame == 0) {
-            return m_env->remove_file(m_filename);
+            return m_env->remove_file(m_wal_filename);
         }
         return sync();
     }
@@ -633,6 +647,7 @@ private:
     }
     [[nodiscard]] auto try_index_header(bool &changed) -> bool
     {
+        changed = false;
         HashIndexHdr h1, h2;
         U32 cksum[2];
 
@@ -777,10 +792,15 @@ private:
         CALICODB_EXPECT_TRUE(m_index.groups().front());
         volatile auto *info = get_ckpt_info();
         if (!use_wal && info->backfill == m_hdr.max_frame) {
+            // The whole WAL has been written back to the database file. Take info->readmark[0],
+            // which always has a value of 0 (the reader will see the WAL as empty, causing it to
+            // read from the database file instead).
             s = lock_shared(READ_LOCK(0));
             shm_barrier();
             if (s.is_ok()) {
                 if (0 != std::memcmp(ConstPtr(m_index.header()), &m_hdr, sizeof(m_hdr))) {
+                    // Some reader changed the WAL before we had a read lock. Indicate that the
+                    // user should try again.
                     unlock_shared(READ_LOCK(0));
                     return Status::busy("retry");
                 }
@@ -795,6 +815,8 @@ private:
         std::size_t max_index = 0;
         std::size_t max_frame = m_hdr.max_frame;
 
+        // Attempt to find a readmark that this reader can use to read the most-recently-committed WAL
+        // frames.
         for (std::size_t i = 1; i < kReaderCount; i++) {
             const auto mark = info->readmark[i];
             if (max_readmark <= mark && mark <= max_frame) {
@@ -804,9 +826,11 @@ private:
             }
         }
         if (max_readmark < max_frame || max_index == 0) {
+            // Attempt to increase a readmark to include the most-recent commit.
             for (std::size_t i = 1; i < kReaderCount; ++i) {
                 s = lock_exclusive(READ_LOCK(i), 1);
                 if (s.is_ok()) {
+std::fprintf(stderr,"READMARK(%zu) inc_to %zu\n",i,max_frame);
                     info->readmark[i] = max_frame;
                     max_readmark = max_frame;
                     max_index = i;
@@ -825,10 +849,13 @@ private:
 
         m_min_frame = info->backfill + 1;
         shm_barrier();
-        const auto busy =
+
+        // Make sure there wasn't a writer between the readmark increase and when we took the
+        // shared lock.
+        const auto changed_unexpectedly =
             info->readmark[max_index] != max_readmark ||
             0 != std::memcmp(ConstPtr(m_index.header()), &m_hdr, sizeof(HashIndexHdr));
-        if (busy) {
+        if (changed_unexpectedly) {
             unlock_shared(READ_LOCK(max_index));
             return Status::busy("retry");
         } else {
@@ -853,7 +880,8 @@ private:
     HashIndexHdr m_hdr = {};
     HashIndex m_index;
 
-    std::string m_filename;
+    std::string m_shm_filename;
+    std::string m_wal_filename;
 
     // Storage for a single WAL frame.
     std::string m_frame;
@@ -876,7 +904,7 @@ private:
 
     //    bool m_readonly = false; // TODO: readonly connections
     //    bool m_shm_unreliable = false; // TODO: specific situation where this connection is readonly
-    //       and no writer is connected that can keep the shm file up-to-date
+    //                                            and no writer is connected that can keep the shm file up-to-date
 };
 
 auto Wal::open(const Parameters &param, Wal *&out) -> Status
@@ -890,7 +918,7 @@ auto Wal::open(const Parameters &param, Wal *&out) -> Status
     }
     auto *wal = new WalImpl(param, *wal_file, *shm_file);
     out = wal;
-    return wal->open();
+    return s;
 }
 
 auto Wal::close(Wal *&wal) -> Status
@@ -908,7 +936,8 @@ Wal::~Wal() = default;
 
 WalImpl::WalImpl(const Parameters &param, File &wal_file, File &shm_file)
     : m_index(m_hdr, &shm_file),
-      m_filename(param.wal_filename),
+      m_shm_filename(param.shm_filename),
+      m_wal_filename(param.wal_filename),
       m_frame(WalFrameHdr::kSize + param.page_size, '\0'),
       m_page_size(param.page_size),
       m_env(param.env),
@@ -966,22 +995,19 @@ auto WalImpl::recover_index() -> Status
     CALICODB_EXPECT_EQ(kCkptLock, kNotWriteLock);
     CALICODB_EXPECT_TRUE(m_writer_lock);
 
+    std::memset(&m_hdr, 0, sizeof(m_hdr));
+
     const auto lock = kNotWriteLock + m_ckpt_lock;
     CALICODB_TRY(lock_exclusive(lock, READ_LOCK(0) - lock));
 
     U32 frame_cksum[2] = {};
-    Status s;
 
-    const auto cleanup = [&] {
-        unlock_exclusive(lock, READ_LOCK(0) - lock);
-        return s;
-    };
-
-    const auto finish = [&] {
+    const auto cleanup = [&frame_cksum, lock, this](auto s) {
         if (s.is_ok()) {
             m_hdr.frame_cksum[0] = frame_cksum[0];
             m_hdr.frame_cksum[1] = frame_cksum[1];
             write_index_header();
+            return s;
 
             auto *info = get_ckpt_info();
             info->backfill_attempted = m_hdr.max_frame;
@@ -999,13 +1025,12 @@ auto WalImpl::recover_index() -> Status
                 }
             }
         }
-        return cleanup();
+        unlock_exclusive(lock, READ_LOCK(0) - lock);
+        return s;
     };
 
-    std::memset(&m_hdr, 0, sizeof(m_hdr));
-
     std::size_t file_size;
-    CALICODB_TRY(m_env->file_size(m_filename, file_size));
+    CALICODB_TRY(m_env->file_size(m_wal_filename, file_size));
     if (file_size > kWalHdrSize) {
         char header[kWalHdrSize];
         CALICODB_TRY(m_wal_file->read_exact(0, sizeof(header), header));
@@ -1018,14 +1043,12 @@ auto WalImpl::recover_index() -> Status
             page_size >= kMinPageSize &&
             page_size <= kMaxPageSize;
         if (!is_valid) {
-            s = Status::corruption("WAL header is corrupted");
-            return cleanup();
+            return cleanup(Status::corruption("WAL header is corrupted"));
         }
         if (page_size != m_page_size) {
             std::string message;
             append_fmt_string(message, "WAL and DB page size mismatch (%u != %u)", page_size, m_page_size);
-            s = Status::invalid_argument(message);
-            return cleanup();
+            return cleanup(Status::invalid_argument(message));
         }
         m_ckpt_number = get_u32(&header[12]);
         std::memcpy(m_hdr.salt, &header[16], sizeof(m_hdr.salt));
@@ -1034,40 +1057,42 @@ auto WalImpl::recover_index() -> Status
             Slice(header, kWalHdrSize - 8),
             nullptr,
             m_hdr.frame_cksum);
-        if (m_hdr.frame_cksum[0] != get_u32(&header[24]) ||
-            m_hdr.frame_cksum[1] != get_u32(&header[28])) {
-            return finish();
-        }
-        const auto version = get_u32(&header[4]);
-        if (version != kWalVersion) {
-            s = Status::corruption("unrecognized WAL version");
-            return cleanup();
-        }
+        if (m_hdr.frame_cksum[0] == get_u32(&header[24]) &&
+            m_hdr.frame_cksum[1] == get_u32(&header[28])) {
+            // Checksums match, meaning there is valid WAL data. Reconstruct the hash index from it
+            // if the version number is understood.
+            const auto version = get_u32(&header[4]);
+            if (version != kWalVersion) {
+                std::string message;
+                append_fmt_string(message, "found WAL version %u but expected %u", version, kWalVersion);
+                return cleanup(Status::invalid_argument(message));
+            }
 
-        const auto last_frame = static_cast<U32>((file_size - kWalHdrSize) / m_frame.size());
-        for (U32 n_group = 0; n_group <= index_group_number(last_frame); ++n_group) {
-            const auto last = std::min(last_frame, kNIndexKeys0 + n_group * kNIndexKeys);
-            const auto first = 1 + (n_group == 0 ? 0 : kNIndexKeys0 + (n_group - 1) * kNIndexKeys);
-            for (auto n_frame = first; n_frame <= last; ++n_frame) {
-                const auto offset = frame_offset(n_frame);
-                CALICODB_TRY(m_wal_file->read_exact(offset, m_frame.size(), m_frame.data()));
-                // Decode the frame.
-                WalFrameHdr hdr;
-                if (!decode_frame(m_frame.data(), hdr)) {
-                    break;
-                }
-                CALICODB_TRY(m_index.assign(hdr.pgno, n_frame));
-                if (hdr.db_size) {
-                    m_hdr.max_frame = n_frame;
-                    m_hdr.page_count = hdr.db_size;
-                    frame_cksum[0] = m_hdr.cksum[0];
-                    frame_cksum[1] = m_hdr.cksum[1];
+            const auto last_frame = static_cast<U32>((file_size - kWalHdrSize) / m_frame.size());
+            for (U32 n_group = 0; n_group <= index_group_number(last_frame); ++n_group) {
+                const auto last = std::min(last_frame, kNIndexKeys0 + n_group * kNIndexKeys);
+                const auto first = 1 + (n_group == 0 ? 0 : kNIndexKeys0 + (n_group - 1) * kNIndexKeys);
+                for (auto n_frame = first; n_frame <= last; ++n_frame) {
+                    const auto offset = frame_offset(n_frame);
+                    CALICODB_TRY(m_wal_file->read_exact(offset, m_frame.size(), m_frame.data()));
+                    WalFrameHdr hdr;
+                    if (!decode_frame(m_frame.data(), hdr)) {
+                        break;
+                    }
+                    CALICODB_TRY(m_index.assign(hdr.pgno, n_frame));
+                    if (hdr.db_size) {
+                        // Found a commit frame.
+                        m_hdr.max_frame = n_frame;
+                        m_hdr.page_count = hdr.db_size;
+                        frame_cksum[0] = m_hdr.cksum[0];
+                        frame_cksum[1] = m_hdr.cksum[1];
+                    }
                 }
             }
         }
     }
-
-    return finish();
+    return cleanup(Status::ok());
+//    return Status::ok();
 }
 
 auto WalImpl::encode_frame(const WalFrameHdr &hdr, const char *page, char *out) -> void
@@ -1213,6 +1238,7 @@ auto WalImpl::write(const PageRef *dirty, std::size_t db_size) -> Status
 
     m_hdr.max_frame = next_frame - 1;
     if (is_commit) {
+std::fprintf(stderr,"COMMIT @ %u\n",m_hdr.max_frame);
         // If this is a commit, then at least 1 frame (the commit frame) must be written. The
         // pager has logic to make sure of this (the root page is forcibly written if no pages
         // are dirty).
@@ -1225,11 +1251,6 @@ auto WalImpl::write(const PageRef *dirty, std::size_t db_size) -> Status
     return Status::ok();
 }
 
-auto WalImpl::needs_checkpoint() const -> bool
-{
-    return m_hdr.max_frame > 1'000;
-}
-
 auto WalImpl::checkpoint(File &db_file, std::size_t *db_size) -> Status
 {
     CALICODB_EXPECT_FALSE(m_ckpt_lock);
@@ -1239,6 +1260,9 @@ auto WalImpl::checkpoint(File &db_file, std::size_t *db_size) -> Status
     if (db_size) {
         *db_size = m_hdr.page_count;
     }
+    if (m_hdr.max_frame == 0) {
+        return Status::ok();
+    }
     volatile auto *info = get_ckpt_info();
     auto max_safe_frame = m_hdr.max_frame;
     if (info->backfill < max_safe_frame) {
@@ -1246,11 +1270,15 @@ auto WalImpl::checkpoint(File &db_file, std::size_t *db_size) -> Status
             const auto y = info->readmark[i];
             if (y < max_safe_frame) {
                 CALICODB_EXPECT_LE(y, m_hdr.max_frame);
-                // TODO: Should busy wait w/ a callback
-                auto s = lock_exclusive(READ_LOCK(i), 1);
+                auto s = busy_wait([this, i] {
+                    return lock_exclusive(READ_LOCK(i), 1);
+                });
                 if (s.is_ok()) {
-                    info->readmark[i] =
-                        i == 1 ? max_safe_frame : kReadmarkNotUsed;
+                    if (i == 1) {
+                        info->readmark[i] = max_safe_frame;
+                    } else {
+                        info->readmark[i] = kReadmarkNotUsed;
+                    }
                     unlock_exclusive(READ_LOCK(i), 1);
                 } else if (s.is_busy()) {
                     max_safe_frame = y;
@@ -1263,6 +1291,13 @@ auto WalImpl::checkpoint(File &db_file, std::size_t *db_size) -> Status
         if (info->backfill < max_safe_frame) {
             HashIterator itr(m_index);
             CALICODB_TRY(itr.init());
+
+            CALICODB_TRY(busy_wait([this] {
+                return lock_exclusive(READ_LOCK(0), 1);
+            }));
+            ScopeGuard guard = [this] {
+                unlock_exclusive(READ_LOCK(0), 1);
+            };
 
             info->backfill_attempted = max_safe_frame;
 
@@ -1284,11 +1319,21 @@ auto WalImpl::checkpoint(File &db_file, std::size_t *db_size) -> Status
 
             info->backfill = max_safe_frame;
         }
+
+        if (info->backfill < m_hdr.max_frame) {
+            // Some reader(s) got in the way.
+            return Status::busy("retry");
+        }
         ++m_ckpt_number;
         m_min_frame = 0;
         m_hdr.max_frame = 0;
+
+        CALICODB_TRY(busy_wait([this] {
+            return lock_exclusive(READ_LOCK(1), kReaderCount - 1);
+        }));
         m_index.cleanup();
         restart_header(m_env->rand());
+        unlock_exclusive(READ_LOCK(1), kReaderCount - 1);
     }
     return Status::ok();
 }
@@ -1298,13 +1343,13 @@ auto TEST_print_wal(const Wal &wal) -> void
     auto &impl = reinterpret_cast<WalImpl &>(const_cast<Wal &>(wal));
     const auto *hdr1 = &reinterpret_cast<volatile HashIndexHdr *>(impl.m_index.groups()[0])[0];
     const auto *hdr2 = &reinterpret_cast<volatile HashIndexHdr *>(impl.m_index.groups()[0])[1];
-    std::fputs("Max frame values:\n", stderr);
+    std::fputs("max_frame:\n", stderr);
     std::fputs("  Location   Value\n", stderr);
-    std::fprintf(stderr, "  local      %u\n", impl.m_hdr.max_frame);
+    std::fprintf(stderr, "  m_hdr      %u\n", impl.m_hdr.max_frame);
     std::fprintf(stderr, "  shared[0]  %u\n", hdr1->max_frame);
     std::fprintf(stderr, "  shared[1]  %u\n", hdr2->max_frame);
     auto *info = impl.get_ckpt_info();
-    std::fputs("WAL locks:", stderr);
+    std::fputs("shm locks:\n", stderr);
     std::fputs("  Write ", stderr);
     if (impl.m_writer_lock) {
         std::fputc('*', stderr);

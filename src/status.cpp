@@ -58,8 +58,9 @@ Status::Status(const Status &rhs)
 }
 
 Status::Status(Status &&rhs) noexcept
+    : m_data(rhs.m_data)
 {
-    std::swap(m_data, rhs.m_data);
+    rhs.m_data = nullptr;
 }
 
 Status::~Status()
@@ -70,6 +71,7 @@ Status::~Status()
 auto Status::operator=(const Status &rhs) -> Status &
 {
     if (this != &rhs) {
+        delete[] m_data;
         m_data = copy_status_string(rhs.m_data);
     }
     return *this;
@@ -77,9 +79,7 @@ auto Status::operator=(const Status &rhs) -> Status &
 
 auto Status::operator=(Status &&rhs) noexcept -> Status &
 {
-    if (this != &rhs) {
-        std::swap(m_data, rhs.m_data);
-    }
+    std::swap(m_data, rhs.m_data);
     return *this;
 }
 

@@ -59,9 +59,9 @@ public:
     [[nodiscard]] auto read(std::size_t offset, std::size_t size, char *scratch, Slice *out) -> Status override;
     [[nodiscard]] auto write(std::size_t offset, const Slice &in) -> Status override;
     [[nodiscard]] auto sync() -> Status override;
-    [[nodiscard]] auto file_lock(FileLockMode) -> Status override { return Status::ok(); }
-    [[nodiscard]] auto shm_map(std::size_t r, volatile void *&out) -> Status override { return Status::ok(); }
-    [[nodiscard]] auto shm_lock(std::size_t s, std::size_t n, ShmLockFlag flags) -> Status override { return Status::ok(); }
+    [[nodiscard]] auto file_lock(FileLockMode) -> Status override { return Status::not_supported("<implement me>"); }
+    [[nodiscard]] auto shm_map(std::size_t r, volatile void *&out) -> Status override { return Status::not_supported("<implement me>"); }
+    [[nodiscard]] auto shm_lock(std::size_t s, std::size_t n, ShmLockFlag flags) -> Status override { return Status::not_supported("<implement me>"); }
     auto shm_unmap(bool) -> void override {}
     auto shm_barrier() -> void override {}
     auto file_unlock() -> void override {}

@@ -13,11 +13,6 @@ namespace calicodb
 class Env;
 class Sink;
 
-enum class AccessMode {
-    kReadOnly,
-    kReadWrite,
-};
-
 struct Options final {
     // Size of a database page in bytes. This is the basic unit of I/O for the
     // database file. Data is read/written in page-sized chunks. Must be a power-
@@ -30,6 +25,11 @@ struct Options final {
     // Alternate filename to use for the WAL. If empty, creates the WAL at
     // "dbname-wal", where "dbname" is the name of the database.
     std::string wal_filename;
+
+    // Alternate filename to use for the shared memory WAL index (shm file). If
+    // empty, the shm file is named like the WAL file, but with a suffix of "-shm"
+    // instead of "-wal".
+    std::string shm_filename;
 
     // Destination for info log messages.
     Sink *info_log = nullptr;

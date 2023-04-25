@@ -3,11 +3,24 @@ CalicoDB is designed to be very simple to use.
 The API is based off that of LevelDB, but the backend uses a B<sup>+</sup>-tree rather than a log-structured merge (LSM) tree.
 
 ## Architecture
-CalicoDB uses a B<sup>+</sup>-tree with a write-ahead log (WAL).
+CalicoDB uses a B<sup>+</sup>-tree backed by a write-ahead log (WAL).
 The B<sup>+</sup>-tree containing the record store is located in a file with the same name as the database.
-By default, the WAL file is named the same as the database, but with a suffix of `-wal`.
-The info log file is similarly named, with a suffix of `-log`, unless a custom `InfoLogger *` is passed to the database during creation.
-CalicoDB runs in a single thread.
+Given that a process accessing a CalicoDB database shuts down properly, the tree file is all that is left on disk.
+
+While running, however, 2 additional files are managed:
++ `-wal`: The `-wal` file is named like the database file, but with a suffix of `-wal`.
+Updates to the database are written here, rather than the database file.
+See [`-wal` file](#-wal-file) for details.
++ `-shm`: The `-shm` file is named like the `-wal` file, but with a suffix of `-shm` in place of `-wal`.
+Greatly speeds up the process of locating specific database pages in the WAL.
+See [`-shm` file](#-shm-file) for details.
+
+CalicoDB runs in a single thread, but is designed to support both multithread and multiprocess concurrency, with some caveats.
+First, methods on the `DB` and all objects produced from it are not safe to call in a multithreaded context.
+Each thread must have its own `DB`, but threads in the same process can share an `Env`.
+Second, there can only be a single writer at any given time.
+Multiple simultaneous readers are allowed to run while there is an active writer, however.
+This means that if a database is being accessed by multiple threads or processes, certain calls may return with `Status::busy()`.
 
 ### Env
 The env construct handles platform-specific filesystem operations and I/O.
@@ -47,12 +60,7 @@ This is true even if `L` was 100% full before the overflow.
 Note that this splitting routine is optimal when keys are sequential and decreasing, but has its worst case when keys are sequential and increasing.
 When a node overflows on the rightmost position, `split_nonroot_fast` is called.
 `split_nonroot_fast` allocates a new right sibling and writes the overflow cell to it.
-This makes consecutive sequential writes much faster, as well as sequential writes that are at the top of the key range.
-
-`split_root` is called when a tree root has become overfull.
-It transfers the root's contents into a new node, which is set as the empty root's rightmost child.
-`split_nonroot` is then called on the overfull child, which posts a separator to the empty root.
-This leaves the root with a single cell and 2 children.
+This makes resolving overflows on the rightmost position much faster, which helps sequential write performance.
 
 #### Fixing Underflows
 Sibling nodes are merged together when one of them has become empty.
@@ -76,8 +84,6 @@ If the parent pointers are embedded in the nodes, splits and merges become very 
 In addition to facilitating the vacuum operation, pointer maps make splits and merges much more efficient by consolidating many parent pointers on a single page.
 
 ### WAL
-CalicoDB uses a simplified version of SQLite's WAL protocol.
-A connection to a CalicoDB database (a `DB` object connected to an `Env`) behaves much like a SQLite database with `PRAGMA journal_mode=WAL` executed.
 
 #### `-wal` file
 As described in [Architecture](#architecture), a database named `~/cats` will store its WAL in a file named `~/cats-wal`.
@@ -110,37 +116,37 @@ We also use the shm file to coordinate locks on the WAL.
 #### Startup
 Readonly DB connections should fail if the DB file doesn't exist.
 It's fine if the WAL doesn't exist.
-If the connection is exclusive, an exclusive file_lock is taken on the DB file, and the WAL if it exists.
+If the connection is exclusive, an exclusive lock is taken on the DB file, and the WAL if it exists.
 If this connection succeeds, i.e. gets exclusive locks, it must be the only connection.
 If there is a WAL, then a checkpoint needs to be run.
 When a normal DB connection is opened on a file named `db`, the following steps are taken:
-1. First, a shared file_lock is taken on the DB file and the file header is read. 
+1. First, a shared lock is taken on the DB file and the file header is read. 
 This version of the header may be outdated, but that's okay. 
 We really just need to make sure the file is a CalicoDB database and determine the database page size.
-2. If the file is empty, then wait on an exclusive file_lock on the DB file.
-Once we have an exclusive file_lock, unlink the WAL file, if it exists.
-Then, write the initial file header and the node header for the root page and drop the file_lock.
+2. If the file is empty, then wait on an exclusive lock on the DB file.
+Once we have an exclusive lock, unlink the WAL file, if it exists.
+Then, write the initial file header and the node header for the root page and drop the lock.
 The database is now initialized.
 Notice that the WAL file is not open at this point.
 
 #### Read-only transactions
-We start a read-only transaction by taking a shared file_lock on the DB file.
+We start a read-only transaction by taking a shared lock on the DB file.
 Then, we check for a WAL.
 If there isn't a WAL, then all reads will come from the DB file.
 If there is a WAL, we open it along with the shm file (WAL index).
 The shm file is always cleared when the first connection to it is made.
-Find a read mark to use and file_lock it?
+Find a read mark to use and lock it?
 May be able to share a read mark with another reader.
 Should be able to use (a) the current "backfill count", and (b) the current "max frame" value, and (c) the read marks to determine what pages to read from the WAL, and what pages to read from the DB.
 We may have to purge the pager cache if another connection wrote since we last connected.
-When the reader is finished, drop the shm file_lock, then drop the DB file file_lock.
+When the reader is finished, drop the shm lock, then drop the DB file lock.
 
 #### Read-write transactions
-Like with read-only transactions, we first take a shared file_lock on the DB file.
-Writing to the database doesn't actually write to the DB file, just the WAL, so we never need more than a shared file_lock.
+Like with read-only transactions, we first take a shared lock on the DB file.
+Writing to the database doesn't actually write to the DB file, just the WAL, so we never need more than a shared lock.
 Check for a WAL.
 If no WAL exists, create one.
-Either way, file_lock the "writer" byte in the shm file.
+Either way, lock the "writer" byte in the shm file.
 I believe it's fine to connect as a writer while there are still readers.
 Readers stay confined to their predetermined range anyway, so we won't get in their way.
 If a reader attempts to connect while a writer is writing, it will choose a read mark that prevents it from intersecting with new content.

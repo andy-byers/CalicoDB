@@ -137,9 +137,9 @@ public:
         };
         ASSERT_OK(Pager::open(pager_param, m_pager));
         // Write the freshly-allocated root page to the DB file.
-        ASSERT_EQ(m_pager->mode(), Pager::kDirty);
-        ASSERT_OK(m_pager->commit());
-        m_pager->finish();
+//        ASSERT_EQ(m_pager->mode(), Pager::kDirty);
+//        ASSERT_OK(m_pager->commit());
+//        m_pager->finish();
         m_state.use_wal = true;
     }
 
@@ -808,8 +808,8 @@ protected:
           m_saved(kPageSize),
           m_rng(42),
           m_fake_param{
-              .wal_filename = "fake",
-              .shm_filename = "",
+              .wal_filename = m_testdir.as_child("fake-wal"),
+              .shm_filename = m_testdir.as_child("fake-shm"),
               .page_size = kPageSize,
               .env = &env(),
           },
@@ -837,8 +837,8 @@ protected:
             m_builder.build(pgno, dirty);
             auto db_data = m_builder.data();
             auto db_size = db_data.size() / kPageSize * commit;
-            EXPECT_OK(m_wal->write(&dirty[0], db_size));
-            EXPECT_OK(m_fake->write(&dirty[0], db_size));
+            EXPECT_OK(m_wal->write(&dirty.front(), db_size));
+            EXPECT_OK(m_fake->write(&dirty.front(), db_size));
         }
     }
 
@@ -874,16 +874,14 @@ protected:
 
     auto run_and_validate_checkpoint(bool save_state = true) -> void
     {
-        //        TEST_print_wal(*m_wal);
-
         File *real, *fake;
-        ASSERT_OK(env().new_file("real", Env::kCreate | Env::kReadWrite, real));
-        ASSERT_OK(env().new_file("fake", Env::kCreate | Env::kReadWrite, fake));
+        ASSERT_OK(env().new_file(m_testdir.as_child("realdb"), Env::kCreate | Env::kReadWrite, real));
+        ASSERT_OK(env().new_file(m_testdir.as_child("fakedb"), Env::kCreate | Env::kReadWrite, fake));
         ASSERT_OK(m_wal->checkpoint(*real, nullptr));
         ASSERT_OK(m_fake->checkpoint(*fake, nullptr));
 
         std::size_t file_size;
-        ASSERT_OK(env().file_size("fake", file_size));
+        ASSERT_OK(env().file_size(m_testdir.as_child("fakedb"), file_size));
 
         std::string real_buf(file_size, '\0');
         std::string fake_buf(file_size, '\0');
@@ -912,7 +910,7 @@ protected:
         }
     }
 
-    auto test_operations(bool abort_uncommitted, bool reopen) -> void
+    auto test_operations(bool reopen) -> void
     {
         for (std::size_t iteration = 0; iteration < m_iterations; ++iteration) {
             bool changed;
@@ -921,7 +919,7 @@ protected:
 
             const auto is_commit = m_commit_interval && iteration % m_commit_interval == m_commit_interval - 1;
             write_records(m_pages_per_iter, is_commit);
-            if (abort_uncommitted && !is_commit) {
+            if (!is_commit) {
                 m_wal->rollback();
                 m_fake->rollback();
             }
@@ -929,15 +927,13 @@ protected:
             m_wal->finish_reader();
 
             if (reopen) {
-                //                reopen_wals();
+                reopen_wals();
             }
             ASSERT_OK(m_wal->start_reader(changed));
             read_and_check_records();
             m_wal->finish_reader();
 
-            if (abort_uncommitted || is_commit) {
-                //                run_and_validate_checkpoint(is_commit);
-            }
+            run_and_validate_checkpoint(is_commit);
         }
     }
 
@@ -957,32 +953,20 @@ TEST_P(WalParamTests, WriteAndReadBack)
     test_write_and_read_back();
 }
 
-TEST_P(WalParamTests, OperationsA)
+TEST_P(WalParamTests, Operations1)
 {
-    test_operations(true, false);
+    test_operations(false);
 }
 
-TEST_P(WalParamTests, OperationsB)
+TEST_P(WalParamTests, Operations2)
 {
-    test_operations(true, true);
-}
-
-TEST_P(WalParamTests, OperationsC)
-{
-    test_operations(false, false);
-}
-
-TEST_P(WalParamTests, OperationsD)
-{
-    test_operations(false, true);
+    test_operations(true);
 }
 
 INSTANTIATE_TEST_SUITE_P(
     WalParamTests,
     WalParamTests,
     ::testing::Values(
-        std::make_tuple(0, 2, 1), // TODO: remove
-
         std::make_tuple(0, 1, 1),
         std::make_tuple(0, 1, 2),
         std::make_tuple(0, 1, 3),
@@ -1074,8 +1058,6 @@ public:
             std::default_random_engine rng(42);
             std::shuffle(begin(indices), end(indices), rng);
 
-            // Transaction has already been started, since this is the first time the pager
-            // has been opened.
             for (auto i : indices) {
                 Page page;
                 const Id page_id(i + 1);
