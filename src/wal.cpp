@@ -30,8 +30,8 @@ using Key = HashIndex::Key;
 using Value = HashIndex::Value;
 using Hash = U16;
 
-using Ptr = char *const;
-using ConstPtr = const char *const;
+using Ptr = char *;
+using ConstPtr = const char *;
 
 static constexpr std::size_t kReadmarkNotUsed = 0xFFFFFFFF;
 static constexpr std::size_t kWriteLock = 0;
@@ -39,7 +39,7 @@ static constexpr std::size_t kNotWriteLock = 1;
 static constexpr std::size_t kCkptLock = 1;
 // static constexpr std::size_t kRecoverLock = 2; TODO
 static constexpr std::size_t kReaderCount = File::kShmLockCount - 3;
-#define READ_LOCK(i) ((i) + 3)
+#define READ_LOCK(i) static_cast<std::size_t>((i) + 3)
 
 struct CkptInfo {
     U32 backfill;
@@ -803,7 +803,7 @@ private:
 
         std::size_t max_readmark = 0;
         std::size_t max_index = 0;
-        std::size_t max_frame = m_hdr.max_frame;
+        U32 max_frame = m_hdr.max_frame;
 
         // Attempt to find a readmark that this reader can use to read the most-recently-committed WAL
         // frames.
@@ -887,8 +887,8 @@ private:
     U32 m_min_frame = 0;
 
     int m_reader_lock = -1;
-    int m_writer_lock = 0;
-    int m_ckpt_lock = 0;
+    bool m_writer_lock = false;
+    bool m_ckpt_lock = false;
     bool m_lock_error = false;
 
     //    bool m_readonly = false; // TODO: readonly connections
