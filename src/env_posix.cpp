@@ -822,7 +822,7 @@ auto ShmNode::map_region(std::size_t r, volatile void *&out) -> int
         if (struct stat st; fstat(file, &st)) {
             return -1;
         } else {
-            file_size = st.st_size;
+            file_size = static_cast<std::size_t>(st.st_size);
         }
         if (file_size < request * File::kShmRegionSize) {
             // Write a '\0' to the end of the highest-addressed region to extend the
