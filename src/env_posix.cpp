@@ -702,7 +702,7 @@ auto PosixShm::lock(std::size_t r, std::size_t n, File::ShmLockFlag flags) -> St
     CALICODB_EXPECT_TRUE(n == 1 || (flags & File::kWriter));
 
     auto *state = snode->locks;
-    const U16 mask = (1 << (r + n)) - (1 << r);
+    const auto mask = (1 << (r + n)) - (1 << r);
     CALICODB_EXPECT_TRUE(n > 1 || mask == (1 << r));
     std::lock_guard guard(snode->mutex);
     CALICODB_EXPECT_TRUE(snode->check_locks());
@@ -734,8 +734,8 @@ auto PosixShm::lock(std::size_t r, std::size_t n, File::ShmLockFlag flags) -> St
                 CALICODB_EXPECT_TRUE(n == 1 && state[r] > 1);
                 --state[r];
             }
-            exclusive_mask &= ~mask;
-            shared_mask &= ~mask;
+            exclusive_mask = exclusive_mask & ~mask;
+            shared_mask = shared_mask & ~mask;
         }
     } else if (flags & File::kReader) {
         CALICODB_EXPECT_EQ(0, exclusive_mask & (1 << r));
@@ -748,7 +748,7 @@ auto PosixShm::lock(std::size_t r, std::size_t n, File::ShmLockFlag flags) -> St
                     return posix_error(errno);
                 }
             }
-            shared_mask |= mask;
+            shared_mask = shared_mask | mask;
             state[r]++;
         }
     } else {
@@ -767,7 +767,7 @@ auto PosixShm::lock(std::size_t r, std::size_t n, File::ShmLockFlag flags) -> St
         }
         CALICODB_EXPECT_FALSE(shared_mask & mask);
         std::fill(state + r, state + r + n, -1);
-        exclusive_mask |= mask;
+        exclusive_mask = exclusive_mask | mask;
     }
     CALICODB_EXPECT_TRUE(snode->check_locks());
     return Status::ok();
