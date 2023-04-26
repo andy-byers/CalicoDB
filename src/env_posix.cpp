@@ -702,7 +702,7 @@ auto PosixShm::lock(std::size_t r, std::size_t n, File::ShmLockFlag flags) -> St
     CALICODB_EXPECT_TRUE(n == 1 || (flags & File::kWriter));
 
     auto *state = snode->locks;
-    const auto mask = (1 << (r + n)) - (1 << r);
+    const auto mask = static_cast<U16>((1 << (r + n)) - (1 << r));
     CALICODB_EXPECT_TRUE(n > 1 || mask == (1 << r));
     std::lock_guard guard(snode->mutex);
     CALICODB_EXPECT_TRUE(snode->check_locks());
