@@ -245,7 +245,7 @@ static constexpr std::size_t kOpenCloseTimeout = 100;
             }
             return -1;
         }
-        rest -= n;
+        rest -= static_cast<std::size_t>(n);
     }
     std::memset(scratch + size - rest, 0, rest);
     if (out != nullptr) {
@@ -339,8 +339,13 @@ struct PosixFs final {
     static PosixFs s_fs;
 
     explicit PosixFs()
-        : page_size(sysconf(_SC_PAGESIZE))
     {
+        const auto pgsz = sysconf(_SC_PAGESIZE);
+        if (pgsz < 0) {
+            page_size = 4'096;
+        } else {
+            page_size = static_cast<std::size_t>(pgsz);
+        }
         if (page_size < File::kShmRegionSize) {
             mmap_scale = 1;
         } else {
