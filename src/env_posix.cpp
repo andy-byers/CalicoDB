@@ -562,7 +562,7 @@ auto PosixEnv::new_file(const std::string &filename, OpenMode mode, File *&out) 
     std::lock_guard guard(PosixFs::s_fs.mutex);
     auto *inode = PosixFs::ref_inode(fd);
     if (inode == nullptr) {
-        delete &file;
+        delete file;
         return posix_error(errno);
     }
     file->inode = inode;

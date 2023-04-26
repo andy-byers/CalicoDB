@@ -17,6 +17,13 @@ namespace calicodb
 //       May need to construct atomic integers for some variables, like the CkptInfo
 //       struct. SQLite WAL index seems to work fine without atomic intrinsics though
 //       so we'll see.
+//       .
+//       Luckily, it seems like we only ever write to shm from 1 thread or process, so
+//       we won't ever have to deal with inconsistent values being written. It's more
+//       a matter of determining that we have read consistent header or checkpoint info,
+//       consistent as in it isn't already partially written by another thread when we read it.
+//       This is already handled by reading multiple times, having multiple copies of the header,
+//       and making sure the checksum is correct (see try_index_header()).
 //static_assert(std::atomic<U32>::is_always_lock_free);
 
 using Key = HashIndex::Key;
