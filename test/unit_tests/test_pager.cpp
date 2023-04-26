@@ -848,7 +848,6 @@ protected:
             auto *rp = real, *fp = fake;
             ASSERT_OK(m_wal->read(Id(i + 1), rp));
             ASSERT_OK(m_fake->read(Id(i + 1), fp));
-            TEST_print_wal(*m_wal);
             if (fp) {
                 ASSERT_NE(rp, nullptr);
                 CHECK_EQ(std::string(real, kPageSize),
