@@ -147,10 +147,9 @@ auto Pager::page_size() const -> std::size_t
 
 auto Pager::open_wal() -> Status
 {
-    const U32 page_size = m_bufmgr.page_size();
     const Wal::Parameters param = {
         m_wal_name,
-        page_size,
+        m_bufmgr.page_size(),
         m_env,
         m_file,
     };

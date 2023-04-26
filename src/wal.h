@@ -115,7 +115,7 @@ class Wal
 public:
     struct Parameters {
         std::string filename;
-        U32 page_size = 0;
+        std::size_t page_size = 0;
         Env *env = nullptr;
         File *dbfile = nullptr;
     };

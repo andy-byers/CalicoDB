@@ -923,7 +923,7 @@ WalImpl::WalImpl(const Parameters &param, File &wal_file)
     : m_index(m_hdr, *param.dbfile),
       m_filename(param.filename),
       m_frame(WalFrameHdr::kSize + param.page_size, '\0'),
-      m_page_size(param.page_size),
+      m_page_size(static_cast<U32>(param.page_size)),
       m_env(param.env),
       m_db(param.dbfile),
       m_wal(&wal_file)
