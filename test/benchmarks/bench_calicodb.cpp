@@ -32,23 +32,27 @@ class Benchmark final
     static constexpr auto kFilename = "__bench_db__";
     static constexpr std::size_t kKeyLength = 16;
     static constexpr std::size_t kNumRecords = 10'000;
-    unsigned m_txn;
+    calicodb::Table *m_table;
+    calicodb::Txn *m_txn;
 
 public:
     explicit Benchmark(const Parameters &param = {})
-        : m_param{param}
+        : m_param(param)
     {
         m_options.env = calicodb::Env::default_env();
         m_options.page_size = 0x2000;
         m_options.cache_size = 4'194'304;
         m_options.sync = param.sync;
         CHECK_OK(calicodb::DB::open(m_options, kFilename, m_db));
-        m_txn = m_db->begin_txn(calicodb::TxnOptions());
+        CHECK_OK(m_db->start(true, m_txn));
+        CHECK_OK(m_txn->new_table(calicodb::TableOptions(), "bench", m_table));
     }
 
     ~Benchmark()
     {
         delete m_cursor;
+        delete m_table;
+        m_db->finish(m_txn);
         delete m_db;
 
         CHECK_OK(calicodb::DB::destroy(m_options, kFilename));
@@ -62,7 +66,7 @@ public:
         const auto key = next_key(state.range(0) == kSequential, true);
         state.ResumeTiming();
 
-        CHECK_OK(m_db->get(key, nullptr));
+        CHECK_OK(m_table->get(key, nullptr));
 
         increment_counters();
     }
@@ -74,7 +78,7 @@ public:
         state.ResumeTiming();
 
         std::string value;
-        CHECK_OK(m_db->get(key, &value));
+        CHECK_OK(m_table->get(key, &value));
 
         increment_counters();
     }
@@ -86,7 +90,7 @@ public:
         const auto value = m_random.Generate(m_param.value_length);
         state.ResumeTiming();
 
-        CHECK_OK(m_db->put(key, value));
+        CHECK_OK(m_table->put(key, value));
         maybe_commit();
         increment_counters();
     }
@@ -102,10 +106,10 @@ public:
 
         if (is_read) {
             std::string result;
-            CHECK_OK(m_db->get(key, &result));
+            CHECK_OK(m_table->get(key, &result));
             benchmark::DoNotOptimize(result);
         } else {
-            CHECK_OK(m_db->put(key, value));
+            CHECK_OK(m_table->put(key, value));
             maybe_commit();
         }
         increment_counters();
@@ -149,13 +153,12 @@ public:
     auto add_initial_records() -> void
     {
         for (std::size_t i = 0; i < kNumRecords; ++i) {
-            CHECK_OK(m_db->put(
+            CHECK_OK(m_table->put(
                 calicodb::tools::integral_key<kKeyLength>(i),
                 m_random.Generate(m_param.value_length)));
         }
-        CHECK_OK(m_db->commit_txn(m_txn));
-        m_txn = m_db->begin_txn(calicodb::TxnOptions());
-        m_cursor = m_db->new_cursor();
+        CHECK_OK(m_txn->commit());
+        m_cursor = m_table->new_cursor();
     }
 
 private:
@@ -172,8 +175,7 @@ private:
     auto maybe_commit() -> void
     {
         if (m_counters[0] % m_param.commit_interval == m_param.commit_interval - 1) {
-            CHECK_OK(m_db->commit_txn(m_txn));
-            m_txn = m_db->begin_txn(calicodb::TxnOptions());
+            CHECK_OK(m_txn->commit());
         }
     }
 

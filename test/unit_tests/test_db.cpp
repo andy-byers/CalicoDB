@@ -280,44 +280,51 @@ TEST_F(BasicDatabaseTests, HandlesMaximumPageSize)
     tools::expect_db_contains(*db, "table", records);
     delete db;
 }
-//
-// TEST_F(BasicDatabaseTests, VacuumShrinksDBFileOnCheckpoint)
-//{
-//     DB *db;
-//     ASSERT_OK(DB::open(options, m_dbname, db));
-//     ASSERT_EQ(db_page_count(), 3);
-//
-//     tools::RandomGenerator random;
-//     auto txn = db->begin_txn(TxnOptions());
-//     const auto records = tools::fill_db(*db, random, 1'000);
-//     ASSERT_OK(db->commit_txn(txn));
-//
-//     delete db;
-//     db = nullptr;
-//
-//     const auto saved_page_count = db_page_count();
-//     ASSERT_GT(saved_page_count, 3)
-//         << "DB file was not written during checkpoint";
-//
-//     ASSERT_OK(DB::open(options, m_dbname, db));
-//     txn = db->begin_txn(TxnOptions());
-//     for (const auto &[key, value] : records) {
-//         ASSERT_OK(db->erase(key));
-//     }
-//     ASSERT_OK(db->vacuum());
-//     ASSERT_OK(db->commit_txn(txn));
-//
-//     ASSERT_EQ(saved_page_count, db_page_count())
-//         << "file should not be modified until checkpoint";
-//
-//     delete db;
-//
-//     ASSERT_EQ(db_page_count(), 3)
-//         << "file was not truncated";
-// }
+
+ TEST_F(BasicDatabaseTests, VacuumShrinksDBFileOnCheckpoint)
+{
+     DB *db;
+     ASSERT_OK(DB::open(options, m_dbname, db));
+     ASSERT_EQ(db_page_count(), 1);
+
+     Txn *txn;
+     tools::RandomGenerator random;
+     ASSERT_OK(db->start(true, txn));
+     const auto records = tools::fill_db(*txn, "table", random, 1'000);
+     ASSERT_OK(txn->commit());
+     db->finish(txn);
+
+     delete db;
+     db = nullptr;
+
+     const auto saved_page_count = db_page_count();
+     ASSERT_GT(saved_page_count, 1)
+         << "DB file was not written during checkpoint";
+
+     ASSERT_OK(DB::open(options, m_dbname, db));
+     ASSERT_OK(db->start(true, txn));
+     Table *table;
+     ASSERT_OK(txn->new_table(TableOptions(), "table", table));
+     for (const auto &[key, value] : records) {
+         ASSERT_OK(table->erase(key));
+     }
+     delete table;
+     ASSERT_OK(txn->drop_table("table"));
+     ASSERT_OK(txn->vacuum());
+     ASSERT_OK(txn->commit());
+     db->finish(txn);
+
+     ASSERT_EQ(saved_page_count, db_page_count())
+         << "file should not be modified until checkpoint";
+
+     delete db;
+
+     ASSERT_EQ(db_page_count(), 1)
+         << "file was not truncated";
+ }
 
 class DbVacuumTests
-    : public EnvTestHarness<PosixEnv>,
+    : public EnvTestHarness<tools::FakeEnv>,
       public testing::TestWithParam<std::tuple<std::size_t, std::size_t, bool>>
 {
 public:
@@ -433,107 +440,86 @@ public:
     DB *db = nullptr;
 };
 
-// class DbRevertTests
-//     : public EnvTestHarness<tools::FakeEnv>,
-//       public testing::Test
-//{
-// protected:
-//     DbRevertTests()
-//     {
-//         db = std::make_unique<TestDatabase>(env());
-//     }
-//     ~DbRevertTests() override = default;
-//
-//     std::unique_ptr<TestDatabase> db;
-// };
-//
-// static auto add_records(TestDatabase &test, std::size_t n)
-//{
-//     std::map<std::string, std::string> records;
-//
-//     for (std::size_t i = 0; i < n; ++i) {
-//         const auto key_size = test.random.Next(1, test.options.page_size * 2);
-//         const auto value_size = test.random.Next(test.options.page_size * 2);
-//         const auto key = test.random.Generate(key_size).to_string();
-//         const auto value = test.random.Generate(value_size).to_string();
-//         EXPECT_OK(test.db->put(key, value));
-//         records[key] = value;
-//     }
-//     return records;
-// }
-//
-// static auto expect_contains_records(const DB &db, const std::map<std::string, std::string> &committed)
-//{
-//     for (const auto &[key, value] : committed) {
-//         std::string result;
-//         CHECK_OK(db.get(key, &result));
-//         CHECK_EQ(result, value);
-//     }
-// }
-//
-// static auto run_revert_test(TestDatabase &db)
-//{
-//     auto txn = db.db->begin_txn(TxnOptions());
-//     const auto committed = add_records(db, 1'000);
-//     ASSERT_OK(db.db->commit_txn(txn));
-//
-//     txn = db.db->begin_txn(TxnOptions());
-//     add_records(db, 1'000);
-//     // Explicit BEGIN but no COMMIT.
-//     ASSERT_OK(db.reopen());
-//
-//     expect_contains_records(*db.db, committed);
-// }
-//
-// TEST_F(DbRevertTests, RevertsUncommittedBatch_1)
-//{
-//     run_revert_test(*db);
-// }
-//
-// TEST_F(DbRevertTests, RevertsUncommittedBatch_2)
-//{
-//     ASSERT_EQ(db->db->begin_txn(TxnOptions()), 1);
-//     add_records(*db, 1'000);
-//     ASSERT_OK(db->db->commit_txn(1));
-//     run_revert_test(*db);
-// }
-//
-// TEST_F(DbRevertTests, RevertsUncommittedBatch_3)
-//{
-//     run_revert_test(*db);
-//     add_records(*db, 1'000);
-// }
-//
-// TEST_F(DbRevertTests, RevertsUncommittedBatch_4)
-//{
-//     ASSERT_EQ(db->db->begin_txn(TxnOptions()), 1);
-//     add_records(*db, 1'000);
-//     ASSERT_OK(db->db->commit_txn(1));
-//     run_revert_test(*db);
-//     add_records(*db, 1'000);
-// }
-//
-// TEST_F(DbRevertTests, RevertsUncommittedBatch_5)
-//{
-//     for (std::size_t i = 0; i < 100; ++i) {
-//         ASSERT_EQ(db->db->begin_txn(TxnOptions()), i + 1);
-//         add_records(*db, 100);
-//         ASSERT_OK(db->db->commit_txn(i + 1));
-//     }
-//     run_revert_test(*db);
-//     for (std::size_t i = 0; i < 100; ++i) {
-//         add_records(*db, 100);
-//     }
-// }
-//
+ class DbRevertTests
+    : public EnvTestHarness<tools::FakeEnv>,
+       public testing::Test
+{
+ protected:
+     DbRevertTests()
+     {
+         db = std::make_unique<TestDatabase>(env());
+     }
+     ~DbRevertTests() override = default;
+
+     std::unique_ptr<TestDatabase> db;
+ };
+
+ static auto add_records(TestDatabase &test, std::size_t n, bool commit)
+{
+     Txn *txn;
+     EXPECT_OK(test.db->start(true, txn));
+     auto records = tools::fill_db(*txn, "table", test.random, n);
+     if (commit) {
+         EXPECT_OK(txn->commit());
+     }
+     test.db->finish(txn);
+     return records;
+ }
+
+ static auto expect_contains_records(DB &db, const std::map<std::string, std::string> &committed)
+{
+     tools::expect_db_contains(db, "table", committed);
+ }
+
+ static auto run_revert_test(TestDatabase &db)
+{
+     const auto committed = add_records(db, 1'000, true);
+     add_records(db, 1'000, false);
+
+     ASSERT_OK(db.reopen());
+     expect_contains_records(*db.db, committed);
+ }
+
+ TEST_F(DbRevertTests, RevertsUncommittedBatch_1)
+{
+     run_revert_test(*db);
+ }
+
+ TEST_F(DbRevertTests, RevertsUncommittedBatch_2)
+{
+     add_records(*db, 1'000, true);
+     run_revert_test(*db);
+ }
+
+ TEST_F(DbRevertTests, RevertsUncommittedBatch_3)
+{
+     run_revert_test(*db);
+     add_records(*db, 1'000, false);
+ }
+
+ TEST_F(DbRevertTests, RevertsUncommittedBatch_4)
+{
+     add_records(*db, 1'000, true);
+     run_revert_test(*db);
+     add_records(*db, 1'000, false);
+ }
+
+ TEST_F(DbRevertTests, RevertsUncommittedBatch_5)
+{
+     for (std::size_t i = 0; i < 100; ++i) {
+         add_records(*db, 100, true);
+     }
+     run_revert_test(*db);
+     for (std::size_t i = 0; i < 100; ++i) {
+         add_records(*db, 100, false);
+     }
+ }
+
 // TEST_F(DbRevertTests, RevertsVacuum_1)
 //{
-//     ASSERT_EQ(db->db->begin_txn(TxnOptions()), 1);
-//     const auto committed = add_records(*db, 1'000);
-//     ASSERT_OK(db->db->commit_txn(1));
+//     const auto committed = add_records(*db, 1'000, true);
 //
-//     ASSERT_EQ(db->db->begin_txn(TxnOptions()), 2);
-//     auto uncommitted = add_records(*db, 1'000);
+//     auto uncommitted = add_records(*db, 1'000, false);
 //     for (std::size_t i = 0; i < 500; ++i) {
 //         const auto itr = begin(uncommitted);
 //         ASSERT_OK(db->db->erase(itr->first));
@@ -544,7 +530,7 @@ public:
 //
 //     expect_contains_records(*db->db, committed);
 // }
-//
+
 // TEST_F(DbRevertTests, RevertsVacuum_2)
 //{
 //     ASSERT_EQ(db->db->begin_txn(TxnOptions()), 1);
@@ -585,9 +571,9 @@ public:
 //
 //     expect_contains_records(*db->db, committed);
 // }
-//
+
 // class DbRecoveryTests
-//     : public EnvTestHarness<tools::FakeEnv>,
+//     : public EnvTestHarness<PosixEnv>,
 //       public testing::Test
 //{
 // protected:
@@ -601,9 +587,7 @@ public:
 //
 //     {
 //         TestDatabase db(env());
-//         ASSERT_EQ(db.db->begin_txn(TxnOptions()), 1);
-//         snapshot = add_records(db, 1'234);
-//         ASSERT_OK(db.db->commit_txn(1));
+//         snapshot = add_records(db, 1'234, true);
 //
 //         // Simulate a crash by cloning the database before cleanup has occurred.
 //         clone.reset(env().clone());
@@ -611,10 +595,9 @@ public:
 //     // Create a new database from the cloned data. This database will need to roll the WAL forward to become
 //     // consistent.
 //     TestDatabase clone_db(*clone);
-//     ASSERT_OK(clone_db.db->status());
 //     expect_contains_records(*clone_db.db, snapshot);
 // }
-//
+
 // TEST_F(DbRecoveryTests, RecoversNthBatch)
 //{
 //     std::unique_ptr<Env> clone;

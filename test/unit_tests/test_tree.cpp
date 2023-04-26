@@ -15,7 +15,7 @@ namespace calicodb
 static constexpr std::size_t kInitialRecordCount = 100;
 
 class NodeSlotTests
-    : public PagerTestHarness<PosixEnv>,
+    : public PagerTestHarness<tools::FakeEnv>,
       public testing::Test
 {
 };
@@ -56,6 +56,7 @@ TEST_F(NodeSlotTests, SlotsAreConsistent)
     ASSERT_EQ(node.get_slot(0), 5);
     node.remove_slot(0);
 
+    NodeManager::release(*m_pager, std::move(node));
     m_pager->finish();
 }
 
@@ -224,10 +225,16 @@ class NodeTests
       public testing::Test
 {
 public:
-    NodeTests()
+    explicit NodeTests()
         : node_scratch(kPageSize, '\0'),
           cell_scratch(kPageSize, '\0')
     {
+        EXPECT_OK(m_pager->begin(true));
+    }
+
+    ~NodeTests() override
+    {
+        m_pager->finish();
     }
 
     [[nodiscard]] auto get_node(bool is_external) -> Node
@@ -292,7 +299,10 @@ public:
     {
     }
 
-    ~BlockAllocatorTests() override = default;
+    ~BlockAllocatorTests() override
+    {
+        NodeManager::release(*m_pager, std::move(node));
+    }
 
     auto reserve_for_test(std::size_t n) -> void
     {
@@ -387,6 +397,7 @@ TEST_F(BlockAllocatorTests, ExternalNodesDoNotConsume3ByteFragments)
 
 TEST_F(BlockAllocatorTests, InternalNodesConsume3ByteFragments)
 {
+    NodeManager::release(*m_pager, std::move(node));
     node = get_node(false);
 
     reserve_for_test(11);
@@ -557,8 +568,14 @@ public:
 
     auto SetUp() -> void override
     {
+        ASSERT_OK(m_pager->begin(true));
         ASSERT_OK(Tree::create(*m_pager, true, nullptr));
         tree = std::make_unique<Tree>(*m_pager, nullptr);
+    }
+
+    auto TearDown() -> void override
+    {
+        m_pager->finish();
     }
 
     [[nodiscard]] auto make_long_key(std::size_t value) const
@@ -829,6 +846,14 @@ TEST_P(TreeSanityChecks, SmallRecords)
         tree->TEST_validate();
         records.clear();
     }
+}
+
+TEST_P(TreeSanityChecks, Destruction)
+{
+    for (std::size_t i = 0; i < kInitialRecordCount * 10; ++i) {
+        random_write();
+    }
+    ASSERT_OK(Tree::destroy(*tree));
 }
 
 // "extra" parameter bits:

@@ -69,6 +69,23 @@ auto FakeFile::sync() -> Status
     return Status::ok();
 }
 
+auto FakeFile::shm_map(std::size_t r, volatile void *&out) -> Status
+{
+    while (m_shm.size() <= r) {
+        m_shm.emplace_back();
+        m_shm.back().resize(File::kShmRegionSize);
+    }
+    out = m_shm[r].data();
+    return Status::ok();
+}
+
+auto FakeFile::shm_unmap(bool unlink) -> void
+{
+    if (unlink) {
+        m_shm.clear();
+    }
+}
+
 auto FakeEnv::open_or_create_file(const std::string &filename) const -> FileState &
 {
     auto itr = m_state.find(filename);
@@ -279,35 +296,34 @@ auto TestEnv::clear_interceptors(const std::string &filename) -> void
 }
 
 TestFile::TestFile(std::string filename, File &file, TestEnv &env)
-    : m_filename(std::move(filename)),
-      m_env(&env),
-      m_file(&file)
+    : FileWrapper(file),
+      m_filename(std::move(filename)),
+      m_env(&env)
 {
 }
 
 TestFile::~TestFile()
 {
     m_env->drop_after_last_sync(m_filename);
-
-    delete m_file;
+    delete target();
 }
 
 auto TestFile::read(std::size_t offset, std::size_t size, char *scratch, Slice *out) -> Status
 {
     TRY_INTERCEPT_FROM(*m_env, Interceptor::kRead, m_filename);
-    return m_file->read(offset, size, scratch, out);
+    return FileWrapper::read(offset, size, scratch, out);
 }
 
 auto TestFile::write(std::size_t offset, const Slice &in) -> Status
 {
     TRY_INTERCEPT_FROM(*m_env, Interceptor::kWrite, m_filename);
-    return m_file->write(offset, in);
+    return FileWrapper::write(offset, in);
 }
 
 auto TestFile::sync() -> Status
 {
     TRY_INTERCEPT_FROM(*m_env, Interceptor::kSync, m_filename);
-    auto s = m_file->sync();
+    auto s = FileWrapper::sync();
     if (s.is_ok()) {
         m_env->save_file_contents(m_filename);
     }

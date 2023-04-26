@@ -154,3 +154,4 @@ I suppose writers may need to mess with read marks as well, I'll look into it...
 
 #### Checkpoints
 This is really the only time the DB file is written (besides creation of a new DB file).
+

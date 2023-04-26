@@ -56,9 +56,6 @@ static constexpr U32 kNIndexHashes = 8192;
 static constexpr U32 kNIndexKeys = 4096;
 static constexpr U32 kNIndexKeys0 =
     kNIndexKeys - kIndexHeaderSize / sizeof(U32);
-static constexpr U32 kIndexPageSize =
-    kNIndexKeys * sizeof(U32) +
-    kNIndexHashes * sizeof(U16);
 
 static constexpr auto index_group_number(Value value) -> U32
 {
@@ -113,19 +110,10 @@ struct HashGroup {
     U32 base = 0;
 };
 
-HashIndex::HashIndex(HashIndexHdr &header, File *file)
+HashIndex::HashIndex(HashIndexHdr &header, File &file)
     : m_hdr(&header),
-      m_file(file)
+      m_file(&file)
 {
-}
-
-HashIndex::~HashIndex()
-{
-    if (!m_file) {
-        for (const auto *group : m_groups) {
-            delete[] group;
-        }
-    }
 }
 
 auto HashIndex::header() -> volatile HashIndexHdr *
@@ -250,11 +238,7 @@ auto HashIndex::map_group(std::size_t group_number) -> Status
     }
     if (m_groups[group_number] == nullptr) {
         volatile void *ptr;
-        if (m_file) {
-            CALICODB_TRY(m_file->shm_map(group_number, ptr));
-        } else {
-            ptr = new char[kIndexPageSize]();
-        }
+        CALICODB_TRY(m_file->shm_map(group_number, ptr));
         m_groups[group_number] = Ptr(ptr);
     }
     return Status::ok();
@@ -473,7 +457,7 @@ auto HashIterator::read(Entry &out) -> bool
 //     28      4     Checksum-2
 //
 static constexpr std::size_t kWalHdrSize = 32;
-static constexpr U32 kWalMagic = 1559861749;
+static constexpr U32 kWalMagic = 1'559'861'749;
 static constexpr U32 kWalVersion = 1;
 
 // WAL frame header layout:
@@ -528,7 +512,7 @@ class WalImpl : public Wal
 public:
     friend auto TEST_print_wal(const Wal &) -> void;
 
-    explicit WalImpl(const Parameters &param, File &wal_file, File &shm_file);
+    explicit WalImpl(const Parameters &param, File &wal_file);
     ~WalImpl() override;
 
     [[nodiscard]] auto open() -> Status;
@@ -539,7 +523,7 @@ public:
 
     [[nodiscard]] auto sync() -> Status override
     {
-        return m_wal_file->sync();
+        return m_wal->sync();
     }
 
     auto rollback() -> void override
@@ -554,11 +538,10 @@ public:
 
     [[nodiscard]] auto close() -> Status override
     {
-        m_shm_file->shm_unmap(true);
-        delete m_shm_file;
-        m_shm_file = nullptr;
+        m_db->shm_unmap(true);
+        m_db = nullptr;
         if (m_hdr.max_frame == 0) {
-            return m_env->remove_file(m_wal_filename);
+            return m_env->remove_file(m_filename);
         }
         return sync();
     }
@@ -616,26 +599,26 @@ public:
 private:
     auto shm_barrier() const -> void
     {
-        if (m_shm_file) {
-            m_shm_file->shm_barrier();
+        if (m_db) {
+            m_db->shm_barrier();
         }
     }
     [[nodiscard]] auto lock_shared(std::size_t r) -> Status
     {
-        return m_shm_file->shm_lock(r, 1, File::kLock | File::kReader);
+        return m_db->shm_lock(r, 1, File::kLock | File::kReader);
     }
     auto unlock_shared(std::size_t r) -> void
     {
-        (void)m_shm_file->shm_lock(r, 1, File::kUnlock | File::kReader);
+        (void)m_db->shm_lock(r, 1, File::kUnlock | File::kReader);
     }
 
     [[nodiscard]] auto lock_exclusive(std::size_t r, std::size_t n) -> Status
     {
-        return m_shm_file->shm_lock(r, n, File::kLock | File::kWriter);
+        return m_db->shm_lock(r, n, File::kLock | File::kWriter);
     }
     auto unlock_exclusive(std::size_t r, std::size_t n) -> void
     {
-        (void)m_shm_file->shm_lock(r, n, File::kUnlock | File::kWriter);
+        (void)m_db->shm_lock(r, n, File::kUnlock | File::kWriter);
     }
 
     [[nodiscard]] auto get_ckpt_info() -> volatile CkptInfo *
@@ -830,7 +813,6 @@ private:
             for (std::size_t i = 1; i < kReaderCount; ++i) {
                 s = lock_exclusive(READ_LOCK(i), 1);
                 if (s.is_ok()) {
-std::fprintf(stderr,"READMARK(%zu) inc_to %zu\n",i,max_frame);
                     info->readmark[i] = max_frame;
                     max_readmark = max_frame;
                     max_index = i;
@@ -871,6 +853,7 @@ std::fprintf(stderr,"READMARK(%zu) inc_to %zu\n",i,max_frame);
         return kWalHdrSize + (frame - 1) * (WalFrameHdr::kSize + m_page_size);
     }
 
+    [[nodiscard]] auto transfer_contents(File &db_file, std::size_t *db_size) -> Status;
     [[nodiscard]] auto rewrite_checksums(U32 end) -> Status;
     [[nodiscard]] auto recover_index() -> Status;
     [[nodiscard]] auto decode_frame(const char *frame, WalFrameHdr &out) -> bool;
@@ -880,8 +863,7 @@ std::fprintf(stderr,"READMARK(%zu) inc_to %zu\n",i,max_frame);
     HashIndexHdr m_hdr = {};
     HashIndex m_index;
 
-    std::string m_shm_filename;
-    std::string m_wal_filename;
+    std::string m_filename;
 
     // Storage for a single WAL frame.
     std::string m_frame;
@@ -892,8 +874,8 @@ std::fprintf(stderr,"READMARK(%zu) inc_to %zu\n",i,max_frame);
     U32 m_ckpt_number = 0;
 
     Env *m_env = nullptr;
-    File *m_shm_file = nullptr;
-    File *m_wal_file = nullptr;
+    File *m_db = nullptr;
+    File *m_wal = nullptr;
 
     U32 m_min_frame = 0;
 
@@ -909,15 +891,11 @@ std::fprintf(stderr,"READMARK(%zu) inc_to %zu\n",i,max_frame);
 
 auto Wal::open(const Parameters &param, Wal *&out) -> Status
 {
-    File *wal_file, *shm_file;
-    CALICODB_TRY(param.env->new_file(param.wal_filename, Env::kCreate | Env::kReadWrite, wal_file));
-    auto s = param.env->new_file(param.shm_filename, Env::kCreate | Env::kReadWrite, shm_file);
-    if (!s.is_ok()) {
-        delete wal_file;
-        return s;
+    File *wal_file;
+    auto s = param.env->new_file(param.filename, Env::kCreate | Env::kReadWrite, wal_file);
+    if (s.is_ok()) {
+        out = new WalImpl(param, *wal_file);
     }
-    auto *wal = new WalImpl(param, *wal_file, *shm_file);
-    out = wal;
     return s;
 }
 
@@ -934,22 +912,21 @@ auto Wal::close(Wal *&wal) -> Status
 
 Wal::~Wal() = default;
 
-WalImpl::WalImpl(const Parameters &param, File &wal_file, File &shm_file)
-    : m_index(m_hdr, &shm_file),
-      m_shm_filename(param.shm_filename),
-      m_wal_filename(param.wal_filename),
+WalImpl::WalImpl(const Parameters &param, File &wal_file)
+    : m_index(m_hdr, *param.dbfile),
+      m_filename(param.filename),
       m_frame(WalFrameHdr::kSize + param.page_size, '\0'),
       m_page_size(param.page_size),
       m_env(param.env),
-      m_shm_file(&shm_file),
-      m_wal_file(&wal_file)
+      m_db(param.dbfile),
+      m_wal(&wal_file)
 {
     (void)m_backfill;
 }
 
 WalImpl::~WalImpl()
 {
-    delete m_wal_file;
+    delete m_wal;
 }
 
 auto WalImpl::open() -> Status
@@ -968,7 +945,7 @@ auto WalImpl::rewrite_checksums(U32 end) -> Status
         cksum_offset = frame_offset(m_redo_cksum - 1) + 16;
     }
 
-    CALICODB_TRY(m_wal_file->read_exact(cksum_offset, 2 * sizeof(U32), m_frame.data()));
+    CALICODB_TRY(m_wal->read_exact(cksum_offset, 2 * sizeof(U32), m_frame.data()));
     m_hdr.frame_cksum[0] = get_u32(&m_frame[0]);
     m_hdr.frame_cksum[1] = get_u32(&m_frame[sizeof(U32)]);
 
@@ -977,13 +954,13 @@ auto WalImpl::rewrite_checksums(U32 end) -> Status
 
     for (; redo < end; ++redo) {
         const auto offset = frame_offset(redo);
-        CALICODB_TRY(m_wal_file->read_exact(offset, WalFrameHdr::kSize + m_page_size, m_frame.data()));
+        CALICODB_TRY(m_wal->read_exact(offset, WalFrameHdr::kSize + m_page_size, m_frame.data()));
 
         WalFrameHdr hdr;
         hdr.pgno = get_u32(&m_frame[0]);
         hdr.db_size = get_u32(&m_frame[4]);
         encode_frame(hdr, &m_frame[WalFrameHdr::kSize], m_frame.data());
-        CALICODB_TRY(m_wal_file->write(offset, Slice(m_frame).truncate(WalFrameHdr::kSize)));
+        CALICODB_TRY(m_wal->write(offset, Slice(m_frame).truncate(WalFrameHdr::kSize)));
     }
     return Status::ok();
 }
@@ -995,7 +972,7 @@ auto WalImpl::recover_index() -> Status
     CALICODB_EXPECT_EQ(kCkptLock, kNotWriteLock);
     CALICODB_EXPECT_TRUE(m_writer_lock);
 
-    std::memset(&m_hdr, 0, sizeof(m_hdr));
+    m_hdr = {};
 
     const auto lock = kNotWriteLock + m_ckpt_lock;
     CALICODB_TRY(lock_exclusive(lock, READ_LOCK(0) - lock));
@@ -1007,7 +984,6 @@ auto WalImpl::recover_index() -> Status
             m_hdr.frame_cksum[0] = frame_cksum[0];
             m_hdr.frame_cksum[1] = frame_cksum[1];
             write_index_header();
-            return s;
 
             auto *info = get_ckpt_info();
             info->backfill_attempted = m_hdr.max_frame;
@@ -1030,10 +1006,10 @@ auto WalImpl::recover_index() -> Status
     };
 
     std::size_t file_size;
-    CALICODB_TRY(m_env->file_size(m_wal_filename, file_size));
+    CALICODB_TRY(m_env->file_size(m_filename, file_size));
     if (file_size > kWalHdrSize) {
         char header[kWalHdrSize];
-        CALICODB_TRY(m_wal_file->read_exact(0, sizeof(header), header));
+        CALICODB_TRY(m_wal->read_exact(0, sizeof(header), header));
 
         const auto magic = get_u32(&header[0]);
         const auto page_size = get_u32(&header[8]);
@@ -1074,7 +1050,7 @@ auto WalImpl::recover_index() -> Status
                 const auto first = 1 + (n_group == 0 ? 0 : kNIndexKeys0 + (n_group - 1) * kNIndexKeys);
                 for (auto n_frame = first; n_frame <= last; ++n_frame) {
                     const auto offset = frame_offset(n_frame);
-                    CALICODB_TRY(m_wal_file->read_exact(offset, m_frame.size(), m_frame.data()));
+                    CALICODB_TRY(m_wal->read_exact(offset, m_frame.size(), m_frame.data()));
                     WalFrameHdr hdr;
                     if (!decode_frame(m_frame.data(), hdr)) {
                         break;
@@ -1092,7 +1068,6 @@ auto WalImpl::recover_index() -> Status
         }
     }
     return cleanup(Status::ok());
-//    return Status::ok();
 }
 
 auto WalImpl::encode_frame(const WalFrameHdr &hdr, const char *page, char *out) -> void
@@ -1141,7 +1116,7 @@ auto WalImpl::read(Id page_id, char *&page) -> Status
     CALICODB_TRY(m_index.lookup(page_id.value, m_min_frame, frame));
 
     if (frame) {
-        CALICODB_TRY(m_wal_file->read_exact(
+        CALICODB_TRY(m_wal->read_exact(
             frame_offset(frame) + WalFrameHdr::kSize,
             m_page_size,
             m_frame.data()));
@@ -1158,7 +1133,7 @@ auto WalImpl::write(const PageRef *dirty, std::size_t db_size) -> Status
 {
     const auto is_commit = db_size > 0;
     volatile auto *live = m_index.header();
-    auto first_frame = m_min_frame;
+    U32 first_frame = 0;
 
     // Check if the WAL's copy of the index header differs from what is on the first index page.
     // If it is different, then the WAL has been written since the last commit, with the first
@@ -1190,8 +1165,8 @@ auto WalImpl::write(const PageRef *dirty, std::size_t db_size) -> Status
         m_hdr.frame_cksum[0] = cksum[0];
         m_hdr.frame_cksum[1] = cksum[1];
 
-        CALICODB_TRY(m_wal_file->write(0, Slice(header, sizeof(header))));
-        CALICODB_TRY(m_wal_file->sync());
+        CALICODB_TRY(m_wal->write(0, Slice(header, sizeof(header))));
+        CALICODB_TRY(m_wal->sync());
     }
 
     // Write each dirty page to the WAL.
@@ -1213,7 +1188,7 @@ auto WalImpl::write(const PageRef *dirty, std::size_t db_size) -> Status
                     m_redo_cksum = frame;
                 }
                 const Slice page(p->page, m_page_size);
-                CALICODB_TRY(m_wal_file->write(frame_offset(frame) + WalFrameHdr::kSize, page));
+                CALICODB_TRY(m_wal->write(frame_offset(frame) + WalFrameHdr::kSize, page));
                 continue;
             }
         }
@@ -1223,7 +1198,7 @@ auto WalImpl::write(const PageRef *dirty, std::size_t db_size) -> Status
         header.pgno = p->page_id.value;
         header.db_size = p->next == nullptr ? static_cast<U32>(db_size) : 0;
         encode_frame(header, p->page, m_frame.data());
-        CALICODB_TRY(m_wal_file->write(frame_offset(next_frame), m_frame));
+        CALICODB_TRY(m_wal->write(frame_offset(next_frame), m_frame));
         m_stats.bytes_written += m_frame.size();
 
         // TODO: SQLite does this after the loop finishes, in another loop. They pad out remaining frames to make a full sector
@@ -1238,7 +1213,6 @@ auto WalImpl::write(const PageRef *dirty, std::size_t db_size) -> Status
 
     m_hdr.max_frame = next_frame - 1;
     if (is_commit) {
-std::fprintf(stderr,"COMMIT @ %u\n",m_hdr.max_frame);
         // If this is a commit, then at least 1 frame (the commit frame) must be written. The
         // pager has logic to make sure of this (the root page is forcibly written if no pages
         // are dirty).
@@ -1255,14 +1229,49 @@ auto WalImpl::checkpoint(File &db_file, std::size_t *db_size) -> Status
 {
     CALICODB_EXPECT_FALSE(m_ckpt_lock);
     CALICODB_EXPECT_FALSE(m_writer_lock);
+    if (db_size) {
+        *db_size = 0;
+    }
+    CALICODB_TRY(m_wal->sync());
 
-    CALICODB_TRY(m_wal_file->sync());
+    ScopeGuard guard = [this] {
+        if (m_ckpt_lock) {
+            unlock_exclusive(kCkptLock, 1);
+            m_ckpt_lock = false;
+            finish_writer();
+        }
+    };
+
+    auto s = lock_exclusive(kCkptLock, 1);
+    if (s.is_ok()) {
+        m_ckpt_lock = true;
+
+        CALICODB_TRY(busy_wait([this] {
+            return lock_exclusive(kWriteLock, 1);
+        }));
+        m_writer_lock = true;
+    }
+
+    auto changed = false;
+    if (s.is_ok()) {
+        s = read_index_header(changed);
+    }
+    if (s.is_ok() && m_hdr.max_frame) {
+        s = transfer_contents(db_file, db_size);
+    }
+    if (changed) {
+        m_hdr = {};
+    }
+    return Status::ok();
+}
+
+auto WalImpl::transfer_contents(File &db_file, std::size_t *db_size) -> Status
+{
     if (db_size) {
         *db_size = m_hdr.page_count;
     }
-    if (m_hdr.max_frame == 0) {
-        return Status::ok();
-    }
+    Status s;
+
     volatile auto *info = get_ckpt_info();
     auto max_safe_frame = m_hdr.max_frame;
     if (info->backfill < max_safe_frame) {
@@ -1270,7 +1279,7 @@ auto WalImpl::checkpoint(File &db_file, std::size_t *db_size) -> Status
             const auto y = info->readmark[i];
             if (y < max_safe_frame) {
                 CALICODB_EXPECT_LE(y, m_hdr.max_frame);
-                auto s = busy_wait([this, i] {
+                s = busy_wait([this, i] {
                     return lock_exclusive(READ_LOCK(i), 1);
                 });
                 if (s.is_ok()) {
@@ -1307,7 +1316,7 @@ auto WalImpl::checkpoint(File &db_file, std::size_t *db_size) -> Status
                     break;
                 }
 
-                CALICODB_TRY(m_wal_file->read_exact(
+                CALICODB_TRY(m_wal->read_exact(
                     frame_offset(entry.value) + WalFrameHdr::kSize,
                     m_page_size,
                     m_frame.data()));
@@ -1335,7 +1344,7 @@ auto WalImpl::checkpoint(File &db_file, std::size_t *db_size) -> Status
         restart_header(m_env->rand());
         unlock_exclusive(READ_LOCK(1), kReaderCount - 1);
     }
-    return Status::ok();
+    return s;
 }
 
 auto TEST_print_wal(const Wal &wal) -> void

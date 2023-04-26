@@ -6,6 +6,7 @@
 #include "calicodb/env.h"
 #include "encoding.h"
 #include "logging.h"
+#include "scope_guard.h"
 #include "txn_impl.h"
 
 namespace calicodb
@@ -33,37 +34,40 @@ auto DBImpl::open(const Options &sanitized) -> Status
         if (sanitized.error_if_exists) {
             return Status::invalid_argument("database already exists");
         }
-        File *file;
-        char buffer[FileHeader::kSize];
-        CALICODB_TRY(m_env->new_file(m_db_filename, Env::kReadWrite, file));
-        auto s = file->read_exact(0, sizeof(buffer), buffer);
-        delete file;
-        if (!s.is_ok()) {
-            return s;
-        }
-        if (!header.read(buffer)) {
-            return Status::invalid_argument("file is not a CalicoDB database");
-        }
     } else if (!sanitized.create_if_missing) {
         return Status::invalid_argument("database does not exist");
+    }
+
+    // Open the database file.
+    File *file;
+    CALICODB_TRY(m_env->new_file(
+        m_db_filename,
+        Env::kCreate | Env::kReadWrite,
+        file));
+
+    ScopeGuard guard = [file] {
+        delete file;
+    };
+
+    if (db_exists) {
+        char buffer[FileHeader::kSize];
+        CALICODB_TRY(file->read_exact(0, sizeof(buffer), buffer));
+        if (!header.read(buffer)) {
+            return Status::invalid_argument(
+                "file \"" + m_db_filename + "\" is not a CalicoDB database");
+        }
     } else {
         header.page_size = encode_page_size(sanitized.page_size);
     }
+
     const auto page_size = decode_page_size(header.page_size);
     const auto cache_size = std::max(sanitized.cache_size, kMinFrameCount * page_size);
 
-    const Wal::Parameters wal_param = {
-        m_wal_filename,
-        m_shm_filename,
-        page_size,
-        m_env,
-    };
-    CALICODB_TRY(Wal::open(wal_param, m_wal));
-
     const Pager::Parameters pager_param = {
         m_db_filename,
+        m_wal_filename,
+        file,
         m_env,
-        m_wal,
         m_log,
         &m_state,
         cache_size / page_size,
@@ -96,6 +100,7 @@ auto DBImpl::open(const Options &sanitized) -> Status
         CALICODB_TRY(m_pager->m_file->sync());
     }
     m_state.use_wal = true;
+    std::move(guard).cancel();
     return Status::ok();
 }
 
@@ -104,8 +109,6 @@ DBImpl::DBImpl(const Options &options, const Options &sanitized, std::string fil
       m_log(sanitized.info_log),
       m_db_filename(std::move(filename)),
       m_wal_filename(sanitized.wal_filename),
-      m_shm_filename(sanitized.shm_filename),
-      m_log_filename(sanitized.info_log == nullptr ? m_db_filename + kDefaultLogSuffix : ""),
       m_owns_env(options.env == nullptr),
       m_owns_log(options.info_log == nullptr),
       m_sync(options.sync)
@@ -115,7 +118,7 @@ DBImpl::DBImpl(const Options &options, const Options &sanitized, std::string fil
 DBImpl::~DBImpl()
 {
     if (m_state.use_wal) {
-        if (m_pager->mode() != Pager::kWrite) {
+        if (m_pager->mode() != Pager::kOpen) {
             m_pager->finish();
         }
         // If someone else is still reading or writing the database, this call
@@ -127,14 +130,13 @@ DBImpl::~DBImpl()
             logv(m_log, "failed to checkpoint database: %s", s.to_string().c_str());
         }
 
-        s = Wal::close(m_wal);
+        s = m_pager->close();
         if (!s.is_ok()) {
-            logv(m_log, "failed to close WAL: %s", s.to_string().c_str());
+            logv(m_log, "failed to close pager: %s", s.to_string().c_str());
         }
     }
 
     delete m_pager;
-    delete m_wal;
 
     if (m_owns_log) {
         delete m_log;
@@ -158,7 +160,6 @@ auto DBImpl::destroy(const Options &options, const std::string &filename) -> Sta
 
     const auto *impl = reinterpret_cast<const DBImpl *>(db);
     const auto db_name = impl->m_db_filename;
-    const auto log_name = impl->m_log_filename;
     const auto wal_name = impl->m_wal_filename;
     delete db;
 
@@ -167,9 +168,6 @@ auto DBImpl::destroy(const Options &options, const std::string &filename) -> Sta
         env = Env::default_env();
     }
 
-    if (!log_name.empty()) {
-        (void)env->remove_file(log_name);
-    }
     (void)env->remove_file(db_name);
     (void)env->remove_file(wal_name);
 
@@ -199,10 +197,10 @@ auto DBImpl::get_property(const Slice &name, std::string *out) const -> bool
                     "WAL I/O(MB)   %8.4f/%8.4f\n"
                     "Cache hits    %ld\n"
                     "Cache misses  %ld\n",
-                    static_cast<double>(m_pager->statistics().bytes_read) / 1048576.0,
-                    static_cast<double>(m_pager->statistics().bytes_written) / 1048576.0,
-                    static_cast<double>(m_wal->statistics().bytes_read) / 1048576.0,
-                    static_cast<double>(m_wal->statistics().bytes_written) / 1048576.0,
+                    static_cast<double>(m_pager->statistics().bytes_read) / 1'048'576.0,
+                    static_cast<double>(m_pager->statistics().bytes_written) / 1'048'576.0,
+                    static_cast<double>(m_pager->wal_statistics().bytes_read) / 1'048'576.0,
+                    static_cast<double>(m_pager->wal_statistics().bytes_written) / 1'048'576.0,
                     m_pager->hits(),
                     m_pager->misses());
                 out->append(buffer);
@@ -227,11 +225,6 @@ auto DBImpl::finish(Txn *&txn) -> void
 {
     delete txn;
     txn = nullptr;
-}
-
-auto DBImpl::TEST_wal() const -> const Wal &
-{
-    return *m_wal;
 }
 
 auto DBImpl::TEST_pager() const -> const Pager &

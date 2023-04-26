@@ -126,19 +126,20 @@ public:
 
     PagerTestHarness()
     {
-        const Wal::Parameters wal_param = {
-            kWalFilename,
-            kShmFilename,
-            kPageSize,
-            &Base::env(),
-        };
+        FileHeader header;
+        std::string buffer(kPageSize, '\0');
+        header.page_count = 1;
+        header.write(buffer.data());
+        tools::write_string_to_file(Base::env(), kDBFilename, buffer);
 
-        CHECK_OK(Wal::open(wal_param, m_wal));
+        File *file;
+        EXPECT_OK(Base::env().new_file(kDBFilename, Env::kCreate | Env::kReadWrite, file));
 
         const Pager::Parameters pager_param = {
             kDBFilename,
+            kWalFilename,
+            file,
             &Base::env(),
-            m_wal,
             nullptr,
             &m_state,
             kFrameCount,
@@ -146,23 +147,20 @@ public:
         };
 
         CHECK_OK(Pager::open(pager_param, m_pager));
-
-        // Descendents must opt in to using the WAL.
-        m_state.use_wal = false;
+        m_pager->set_page_count(1);
+        m_state.use_wal = true;
     }
 
     ~PagerTestHarness() override
     {
+        (void)m_pager->close();
         delete m_pager;
         m_pager = nullptr;
-
-        (void)Wal::close(m_wal);
     }
 
 protected:
     DBState m_state;
     Pager *m_pager = nullptr;
-    Wal *m_wal = nullptr;
 };
 
 [[nodiscard]] inline auto special_error()

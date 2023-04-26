@@ -310,7 +310,7 @@
 //        }
 //        close();
 //
-//        ASSERT_OK(DB::destroy(db_options, kDBFilename));
+//        ASSERT_OK(DB::free(db_options, kDBFilename));
 //    }
 //}
 //

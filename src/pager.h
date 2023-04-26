@@ -7,6 +7,7 @@
 
 #include "bufmgr.h"
 #include "calicodb/env.h"
+#include "wal.h"
 #include <unordered_set>
 
 namespace calicodb
@@ -62,9 +63,10 @@ public:
     };
 
     struct Parameters {
-        std::string filename;
+        std::string db_name;
+        std::string wal_name;
+        File *db_file = nullptr;
         Env *env = nullptr;
-        Wal *wal = nullptr;
         Sink *log = nullptr;
         DBState *state = nullptr;
         std::size_t frame_count = 0;
@@ -78,10 +80,12 @@ public:
 
     ~Pager();
     [[nodiscard]] static auto open(const Parameters &param, Pager *&out) -> Status;
+    [[nodiscard]] auto close() -> Status;
     [[nodiscard]] auto mode() const -> Mode;
     [[nodiscard]] auto page_count() const -> std::size_t;
     [[nodiscard]] auto page_size() const -> std::size_t;
     [[nodiscard]] auto statistics() const -> const Statistics &;
+    [[nodiscard]] auto wal_statistics() const -> WalStatistics;
 
     [[nodiscard]] auto begin(bool write) -> Status;
     [[nodiscard]] auto commit() -> Status;
@@ -113,8 +117,8 @@ public:
     auto TEST_validate() const -> void;
 
 private:
-    explicit Pager(const Parameters &param, File &file);
-    [[nodiscard]] auto initialize_root(bool fresh_pager) -> Status;
+    explicit Pager(const Parameters &param);
+    [[nodiscard]] auto open_wal() -> Status;
     [[nodiscard]] auto read_page(PageRef &out) -> Status;
     [[nodiscard]] auto read_page_from_file(PageRef &ref) const -> Status;
     [[nodiscard]] auto write_page_to_file(const PageRef &entry) const -> Status;
@@ -129,7 +133,8 @@ private:
     mutable Mode m_mode = kOpen;
     mutable Mode m_save = kOpen;
 
-    std::string m_filename;
+    std::string m_db_name;
+    std::string m_wal_name;
     Dirtylist m_dirtylist;
     Freelist m_freelist;
     Bufmgr m_bufmgr;

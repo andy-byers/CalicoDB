@@ -12,24 +12,29 @@
 namespace calicodb
 {
 
-class HashIndexTestBase
+class HashIndexTestBase : public EnvTestHarness<tools::FakeEnv>
 {
 protected:
     explicit HashIndexTestBase()
-        : m_index(m_header, nullptr)
     {
-        std::memset(&m_header, 0, sizeof(m_header));
+        EXPECT_OK(m_env->new_file(kShmFilename, Env::kCreate | Env::kReadWrite, m_shm));
+        m_index = new HashIndex(m_header, *m_shm);
     }
 
-    virtual ~HashIndexTestBase() = default;
+    ~HashIndexTestBase() override
+    {
+        delete m_shm;
+        delete m_index;
+    }
 
     auto append(U32 key)
     {
-        ASSERT_OK(m_index.assign(key, ++m_header.max_frame));
+        ASSERT_OK(m_index->assign(key, ++m_header.max_frame));
     }
 
+    File *m_shm = nullptr;
     HashIndexHdr m_header = {};
-    HashIndex m_index;
+    HashIndex *m_index = nullptr;
 };
 
 class HashIndexTests
@@ -51,13 +56,13 @@ TEST_F(HashIndexTests, FirstSegmentFrameBounds)
     m_header.max_frame = 3;
 
     U32 value;
-    ASSERT_OK(m_index.lookup(1, min_frame, value));
+    ASSERT_OK(m_index->lookup(1, min_frame, value));
     ASSERT_FALSE(value);
-    ASSERT_OK(m_index.lookup(2, min_frame, value));
+    ASSERT_OK(m_index->lookup(2, min_frame, value));
     ASSERT_EQ(value, 2);
-    ASSERT_OK(m_index.lookup(3, min_frame, value));
+    ASSERT_OK(m_index->lookup(3, min_frame, value));
     ASSERT_EQ(value, 3);
-    ASSERT_OK(m_index.lookup(4, min_frame, value));
+    ASSERT_OK(m_index->lookup(4, min_frame, value));
     ASSERT_FALSE(value);
 }
 
@@ -71,17 +76,17 @@ TEST_F(HashIndexTests, SecondSegmentFrameBounds)
     m_header.max_frame = 5'500;
 
     U32 value;
-    ASSERT_OK(m_index.lookup(1, min_frame, value));
+    ASSERT_OK(m_index->lookup(1, min_frame, value));
     ASSERT_FALSE(value);
-    ASSERT_OK(m_index.lookup(4'999, min_frame, value));
+    ASSERT_OK(m_index->lookup(4'999, min_frame, value));
     EXPECT_FALSE(value);
-    ASSERT_OK(m_index.lookup(5'000, min_frame, value));
+    ASSERT_OK(m_index->lookup(5'000, min_frame, value));
     ASSERT_EQ(value, 5'000);
-    ASSERT_OK(m_index.lookup(5'500, min_frame, value));
+    ASSERT_OK(m_index->lookup(5'500, min_frame, value));
     ASSERT_EQ(value, 5'500);
-    ASSERT_OK(m_index.lookup(5'501, min_frame, value));
+    ASSERT_OK(m_index->lookup(5'501, min_frame, value));
     ASSERT_FALSE(value);
-    ASSERT_OK(m_index.lookup(10'000, min_frame, value));
+    ASSERT_OK(m_index->lookup(10'000, min_frame, value));
     ASSERT_FALSE(value);
 }
 
@@ -96,29 +101,29 @@ TEST_F(HashIndexTests, Cleanup)
     // Performing cleanup when there are no valid frames is a NOOP. The next person to write the
     // WAL index will do so at frame 1, which automatically causes the WAL index to clear itself.
     m_header.max_frame = 0;
-    m_index.cleanup();
+    m_index->cleanup();
     m_header.max_frame = 4;
 
-    ASSERT_OK(m_index.lookup(1, 1, value));
+    ASSERT_OK(m_index->lookup(1, 1, value));
     ASSERT_EQ(value, 1);
-    ASSERT_OK(m_index.lookup(2, 1, value));
+    ASSERT_OK(m_index->lookup(2, 1, value));
     ASSERT_EQ(value, 2);
-    ASSERT_OK(m_index.lookup(3, 1, value));
+    ASSERT_OK(m_index->lookup(3, 1, value));
     ASSERT_EQ(value, 3);
-    ASSERT_OK(m_index.lookup(4, 1, value));
+    ASSERT_OK(m_index->lookup(4, 1, value));
     ASSERT_EQ(value, 4);
 
     m_header.max_frame = 2;
-    m_index.cleanup();
+    m_index->cleanup();
     m_header.max_frame = 4;
 
-    ASSERT_OK(m_index.lookup(1, 1, value));
+    ASSERT_OK(m_index->lookup(1, 1, value));
     ASSERT_EQ(value, 1);
-    ASSERT_OK(m_index.lookup(2, 1, value));
+    ASSERT_OK(m_index->lookup(2, 1, value));
     ASSERT_EQ(value, 2);
-    ASSERT_OK(m_index.lookup(3, 1, value));
+    ASSERT_OK(m_index->lookup(3, 1, value));
     ASSERT_FALSE(value);
-    ASSERT_OK(m_index.lookup(4, 1, value));
+    ASSERT_OK(m_index->lookup(4, 1, value));
     ASSERT_FALSE(value);
 }
 
@@ -141,9 +146,9 @@ TEST_F(HashIndexTests, ReadsAndWrites)
 
     U32 value = 1;
     for (const auto &key : keys) {
-        ASSERT_EQ(m_index.fetch(value), key);
+        ASSERT_EQ(m_index->fetch(value), key);
         U32 current;
-        ASSERT_OK(m_index.lookup(key, lower, current));
+        ASSERT_OK(m_index->lookup(key, lower, current));
         if (m_header.max_frame < value || value < lower) {
             ASSERT_FALSE(current);
         } else {
@@ -175,7 +180,7 @@ TEST_F(HashIndexTests, SimulateUsage)
                 // in the range "lower" to "m_header.max_frame", inclusive.
                 U32 value;
                 const U32 key = random.Next(1, kNumTestFrames);
-                ASSERT_OK(m_index.lookup(key, lower, value));
+                ASSERT_OK(m_index->lookup(key, lower, value));
                 if (value < lower) {
                     append(key);
                     simulated.insert_or_assign(key, m_header.max_frame);
@@ -184,7 +189,7 @@ TEST_F(HashIndexTests, SimulateUsage)
         }
         U32 result;
         for (const auto &[key, value] : simulated) {
-            ASSERT_OK(m_index.lookup(key, lower, result));
+            ASSERT_OK(m_index->lookup(key, lower, result));
             CHECK_EQ(result, value);
         }
         // Reset the WAL index.
@@ -204,7 +209,7 @@ protected:
 #ifndef NDEBUG
 TEST_F(HashIteratorTests, EmptyIndexDeathTest)
 {
-    HashIterator itr(m_index);
+    HashIterator itr(*m_index);
     ASSERT_DEATH((void)itr.init(), kExpectationMatcher);
 }
 #endif // NDEBUG
@@ -225,14 +230,14 @@ protected:
     auto test_reordering_and_deduplication()
     {
         m_header.max_frame = 0;
-        m_index.cleanup();
+        m_index->cleanup();
 
         for (std::size_t d = 0; d < m_num_copies; ++d) {
             for (std::size_t i = 0; i < m_num_pages; ++i) {
                 append(m_num_pages - i);
             }
         }
-        HashIterator itr(m_index);
+        HashIterator itr(*m_index);
         ASSERT_OK(itr.init());
         HashIterator::Entry entry;
 

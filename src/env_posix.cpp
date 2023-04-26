@@ -75,7 +75,6 @@ struct ShmNode final {
     std::string filename;
     int file = -1;
 
-    bool is_readonly = false;
     bool is_unlocked = false;
 
     // 32-KB blocks of shared memory.
@@ -90,7 +89,6 @@ struct ShmNode final {
     // held.
     int locks[File::kShmLockCount] = {};
 
-    static constexpr int kReadonlyTriedReset = -2;
     [[nodiscard]] auto take_dms_lock() -> int;
     [[nodiscard]] auto map_region(std::size_t r, volatile void *&out) -> int;
 
@@ -434,23 +432,21 @@ struct PosixFs final {
             snode = new ShmNode;
             inode->snode = snode;
             snode->inode = inode;
-            snode->filename = file.filename;
-            snode->is_readonly = (file.openmode & Env::kReadWrite) == 0;
-            const auto rw_mode = snode->is_readonly ? O_RDONLY : O_RDWR;
-            snode->file = posix_open(file.filename, O_CREAT | O_NOFOLLOW | rw_mode);
+            snode->filename = file.filename + kDefaultShmSuffix;
+            snode->file = posix_open(snode->filename, O_CREAT | O_NOFOLLOW | O_RDWR);
             if (snode->file < 0) {
                 return posix_error(errno);
             }
-            if (const auto rc = snode->take_dms_lock()) {
-                if (rc == ShmNode::kReadonlyTriedReset) {
-                    return Status::invalid_argument("readonly");
-                }
+            // WARNING: If another process unlinks the file after we opened it above, the
+            // attempt to take the DMS lock below will fail.
+            if (snode->take_dms_lock()) {
                 return posix_error(errno);
             }
         }
         CALICODB_EXPECT_GE(snode->file, 0);
         ++snode->refcount;
         main_guard.unlock();
+
         std::lock_guard node_guard(snode->mutex);
         out = new PosixShm();
         out->snode = snode;
@@ -472,7 +468,8 @@ struct PosixFs final {
             *pp = shm.next;
         }
 
-        std::lock_guard guard(PosixFs::s_fs.mutex);
+        // Global mutex must be locked when creating or destroying shm nodes.
+        std::lock_guard guard(mutex);
         CALICODB_EXPECT_GT(snode->refcount, 0);
 
         if (--snode->refcount == 0) {
@@ -481,7 +478,12 @@ struct PosixFs final {
                 munmap(snode->regions[i], File::kShmRegionSize);
             }
             if (unlink_if_last) {
-                unlink(snode->filename.c_str());
+                // Take a write lock on the DMS byte to make sure no other processes are
+                // using this shm file.
+                if (0 == posix_shm_lock(*snode, F_WRLCK, kShmDMS, 1)) {
+                    // This should drop the lock we just took.
+                    unlink(snode->filename.c_str());
+                }
             }
             (void)posix_close(snode->file);
             delete snode;
@@ -503,14 +505,6 @@ struct PosixFs final {
 };
 
 PosixFs PosixFs::s_fs;
-
-PosixEnv::PosixEnv()
-{
-}
-
-PosixEnv::~PosixEnv()
-{
-}
 
 auto PosixEnv::resize_file(const std::string &filename, std::size_t size) -> Status
 {
@@ -673,10 +667,7 @@ auto PosixFile::shm_map(std::size_t r, volatile void *&out) -> Status
     }
     CALICODB_EXPECT_TRUE(shm);
     CALICODB_EXPECT_TRUE(shm->snode);
-    if (const auto rc = shm->snode->map_region(r, out)) {
-        if (rc == ShmNode::kReadonlyTriedReset) {
-            return Status::invalid_argument("readonly");
-        }
+    if (shm->snode->map_region(r, out)) {
         return posix_error(errno);
     }
     return Status::ok();
@@ -794,14 +785,9 @@ auto ShmNode::take_dms_lock() -> int
         rc = -1;
     } else if (lock.l_type == F_UNLCK) {
         // The DMS byte is unlocked, meaning this must be the first connection.
-        if (is_readonly) {
-            is_unlocked = true;
-            rc = kReadonlyTriedReset;
-        } else {
-            rc = posix_shm_lock(*this, F_WRLCK, kShmDMS, 1);
-            if (rc == 0) {
-                rc = posix_truncate(filename, 0);
-            }
+        rc = posix_shm_lock(*this, F_WRLCK, kShmDMS, 1);
+        if (rc == 0) {
+            rc = posix_truncate(filename, 0);
         }
     } else if (lock.l_type == F_WRLCK) {
         errno = EAGAIN;
@@ -851,7 +837,7 @@ auto ShmNode::map_region(std::size_t r, volatile void *&out) -> int
             // Map "mmap_scale" shared memory regions into this address space.
             auto *p = mmap(
                 nullptr, File::kShmRegionSize * mmap_scale,
-                (is_readonly ? 0 : PROT_WRITE) | PROT_READ,
+                PROT_READ | PROT_WRITE,
                 MAP_SHARED, file,
                 static_cast<ssize_t>(File::kShmRegionSize * regions.size()));
             if (p == MAP_FAILED) {

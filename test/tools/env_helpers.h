@@ -59,10 +59,10 @@ public:
     [[nodiscard]] auto read(std::size_t offset, std::size_t size, char *scratch, Slice *out) -> Status override;
     [[nodiscard]] auto write(std::size_t offset, const Slice &in) -> Status override;
     [[nodiscard]] auto sync() -> Status override;
-    [[nodiscard]] auto file_lock(FileLockMode) -> Status override { return Status::not_supported("<implement me>"); }
-    [[nodiscard]] auto shm_map(std::size_t r, volatile void *&out) -> Status override { return Status::not_supported("<implement me>"); }
-    [[nodiscard]] auto shm_lock(std::size_t s, std::size_t n, ShmLockFlag flags) -> Status override { return Status::not_supported("<implement me>"); }
-    auto shm_unmap(bool) -> void override {}
+    [[nodiscard]] auto file_lock(FileLockMode) -> Status override { return Status::ok(); }
+    [[nodiscard]] auto shm_map(std::size_t r, volatile void *&out) -> Status override;
+    [[nodiscard]] auto shm_lock(std::size_t, std::size_t, ShmLockFlag) -> Status override { return Status::ok(); }
+    auto shm_unmap(bool unlink) -> void override;
     auto shm_barrier() -> void override {}
     auto file_unlock() -> void override {}
 
@@ -85,6 +85,7 @@ protected:
     FakeEnv::FileState *m_state = nullptr;
     FakeEnv *m_env = nullptr;
     std::string m_filename;
+    std::vector<std::string> m_shm;
 };
 
 struct Interceptor {
@@ -157,13 +158,12 @@ private:
     auto overwrite_file(const std::string &filename, const std::string &contents) -> void;
 };
 
-class TestFile : public File
+class TestFile : public FileWrapper
 {
     friend class TestEnv;
 
     std::string m_filename;
     TestEnv *m_env = nullptr;
-    File *m_file = nullptr;
 
     explicit TestFile(std::string filename, File &file, TestEnv &env);
 
@@ -172,12 +172,6 @@ public:
     [[nodiscard]] auto read(std::size_t offset, std::size_t size, char *scratch, Slice *out) -> Status override;
     [[nodiscard]] auto write(std::size_t offset, const Slice &in) -> Status override;
     [[nodiscard]] auto sync() -> Status override;
-    [[nodiscard]] auto file_lock(FileLockMode) -> Status override { return Status::ok(); }
-    [[nodiscard]] auto shm_map(std::size_t r, volatile void *&out) -> Status override { return Status::ok(); }
-    [[nodiscard]] auto shm_lock(std::size_t s, std::size_t n, ShmLockFlag flags) -> Status override { return Status::ok(); }
-    auto file_unlock() -> void override {}
-    auto shm_unmap(bool) -> void override {}
-    auto shm_barrier() -> void override {}
 };
 
 } // namespace calicodb::tools

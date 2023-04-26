@@ -59,9 +59,7 @@ auto Pager::read_page(PageRef &out) -> Status
     }
 
     if (!s.is_ok()) {
-        if (!out.page_id.is_root()) {
-            m_bufmgr.erase(out.page_id);
-        }
+        m_bufmgr.erase(out.page_id);
         if (m_mode != kOpen) {
             // TODO: Really, an error should only be set if m_mode == kDirty. The tree module will need to be revised a bit
             //       to make sure pages are always released before returning (this always happens on the happy path, but if
@@ -103,24 +101,22 @@ auto Pager::open(const Parameters &param, Pager *&out) -> Status
     CALICODB_EXPECT_GE(param.frame_count, kMinFrameCount);
     CALICODB_EXPECT_LE(param.page_size * param.frame_count, kMaxCacheSize);
 
-    // TODO: See TODO in db_impl.cpp about passing in the file to this constructor.
-    File *file;
-    CALICODB_TRY(param.env->new_file(param.filename, Env::kCreate | Env::kReadWrite, file));
-
-    out = new Pager(param, *file);
+    out = new Pager(param);
     return Status::ok();
 }
 
-Pager::Pager(const Parameters &param, File &file)
+Pager::Pager(const Parameters &param)
     : m_state(param.state),
-      m_filename(param.filename),
+      m_db_name(param.db_name),
+      m_wal_name(param.wal_name),
       m_freelist(*this, Id::null()),
       m_bufmgr(param.page_size, param.frame_count),
       m_log(param.log),
-      m_file(&file),
-      m_env(param.env),
-      m_wal(param.wal)
+      m_file(param.db_file),
+      m_env(param.env)
 {
+    CALICODB_EXPECT_NE(m_env, nullptr);
+    CALICODB_EXPECT_NE(m_file, nullptr);
     CALICODB_EXPECT_NE(m_state, nullptr);
 }
 
@@ -134,6 +130,11 @@ auto Pager::statistics() const -> const Statistics &
     return m_statistics;
 }
 
+auto Pager::wal_statistics() const -> WalStatistics
+{
+    return m_wal ? m_wal->statistics() : WalStatistics {};
+}
+
 auto Pager::page_count() const -> std::size_t
 {
     return m_page_count;
@@ -144,13 +145,36 @@ auto Pager::page_size() const -> std::size_t
     return m_bufmgr.page_size();
 }
 
+auto Pager::open_wal() -> Status
+{
+    const U32 page_size = m_bufmgr.page_size();
+    const Wal::Parameters param = {
+        m_wal_name,
+        page_size,
+        m_env,
+        m_file,
+    };
+    return Wal::open(param, m_wal);
+}
+
+auto Pager::close() -> Status
+{
+    return Wal::close(m_wal);
+}
+
 auto Pager::begin(bool write) -> Status
 {
     CALICODB_EXPECT_NE(m_mode, kError);
+    if (m_wal == nullptr) {
+        CALICODB_TRY(open_wal());
+    }
     ScopeGuard guard = [this] {
         // Make sure the DB file and WAL are not locked if this method fails.
         finish();
     };
+
+    m_wal->finish_reader();
+
     if (m_mode == kOpen) {
         CALICODB_TRY(m_file->file_lock(File::kShared));
 
@@ -174,6 +198,7 @@ auto Pager::begin(bool write) -> Status
         m_save = m_mode;
         return Status::ok();
     }
+    std::move(guard).cancel();
     return Status::not_supported("transaction already started");
 }
 
@@ -269,7 +294,7 @@ auto Pager::checkpoint() -> Status
 {
     CALICODB_EXPECT_EQ(m_mode, kOpen);
     ScopeGuard guard = [this] {
-        finish();
+        m_file->file_unlock();
     };
     CALICODB_TRY(m_file->file_lock(File::kShared));
     CALICODB_TRY(m_file->file_lock(File::kExclusive));
@@ -282,15 +307,17 @@ auto Pager::checkpoint() -> Status
 
 auto Pager::wal_checkpoint() -> Status
 {
-    std::size_t dbsize;
-
+    if (m_wal == nullptr) {
+        return Status::ok();
+    }
     // Transfer the WAL contents back to the DB. Note that this call will sync the WAL
     // file before it starts transferring any data back.
+    std::size_t dbsize;
     CALICODB_TRY(m_wal->checkpoint(*m_file, &dbsize));
 
     if (dbsize) {
         set_page_count(dbsize);
-        CALICODB_TRY(m_env->resize_file(m_filename, dbsize * m_bufmgr.page_size()));
+        CALICODB_TRY(m_env->resize_file(m_db_name, dbsize * m_bufmgr.page_size()));
     }
     return m_file->sync();
 }
@@ -381,9 +408,11 @@ auto Pager::ensure_available_buffer() -> Status
 auto Pager::allocate(Page &page) -> Status
 {
     CALICODB_EXPECT_GE(m_mode, kWrite);
-    static constexpr std::size_t kMaxPageCount = 0xFFFFFFFF - 1;
+    static constexpr std::size_t kMaxPageCount = 0xFF'FF'FF'FE;
     if (m_page_count == kMaxPageCount) {
-        return Status::not_supported("reached the maximum database size");
+        std::string message("reached the maximum allowed DB size (~");
+        append_number(message, kMaxPageCount * m_bufmgr.page_size() / 1'048'576);
+        return Status::not_supported(message + " MB)");
     }
     if (!m_freelist.is_empty()) {
         return m_freelist.pop(page);
@@ -475,11 +504,16 @@ auto Pager::release(Page page) -> void
 auto Pager::load_state() -> Status
 {
     CALICODB_TRY(read_page(*m_bufmgr.root()));
+    auto *root = m_bufmgr.root()->page;
     m_refresh_root = false;
 
     FileHeader header;
-    if (!header.read(m_bufmgr.root()->page)) {
-        return Status::corruption("header identifier mismatch");
+    if (!header.read(root)) {
+        std::string message;
+        const Slice bad_id(root, sizeof(FileHeader::kIdentifier));
+        append_fmt_string(message, R"(expected DB identifier "%s\x00" but got "%s")",
+                          FileHeader::kIdentifier, escape_string(bad_id).c_str());
+        return Status::corruption(message);
     }
     m_freelist.m_head = Id(header.freelist_head);
     m_page_count = header.page_count;

@@ -40,8 +40,7 @@ public:
     using Key = U32;
     using Value = U32;
 
-    ~HashIndex();
-    explicit HashIndex(HashIndexHdr &header, File *file);
+    explicit HashIndex(HashIndexHdr &header, File &file);
     [[nodiscard]] auto fetch(Value value) -> Key;
     [[nodiscard]] auto lookup(Key key, Value lower, Value &out) -> Status;
     [[nodiscard]] auto assign(Key key, Value value) -> Status;
@@ -60,9 +59,9 @@ private:
     // Address of the hash table header kept in memory. This version of the header corresponds
     // to the current transaction. The one stored in the first table group corresponds to the
     // most-recently-committed transaction.
-    HashIndexHdr *m_hdr = nullptr;
+    HashIndexHdr *m_hdr;
 
-    File *m_file = nullptr;
+    File *m_file;
 };
 
 // Construct for iterating through the hash index.
@@ -115,10 +114,10 @@ class Wal
 {
 public:
     struct Parameters {
-        std::string wal_filename;
-        std::string shm_filename;
+        std::string filename;
         U32 page_size = 0;
         Env *env = nullptr;
+        File *dbfile = nullptr;
     };
 
     virtual ~Wal();

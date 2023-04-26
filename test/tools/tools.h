@@ -233,7 +233,11 @@ auto read_file_to_string(Env &env, const std::string &filename) -> std::string;
 auto write_string_to_file(Env &env, const std::string &filename, const std::string &buffer, long offset = -1) -> void;
 auto assign_file_contents(Env &env, const std::string &filename, const std::string &contents) -> void;
 auto fill_db(DB &db, const std::string &tablename, RandomGenerator &random, std::size_t num_records, std::size_t max_payload_size = 100) -> std::map<std::string, std::string>;
+auto fill_db(Txn &txn, const std::string &tablename, RandomGenerator &random, std::size_t num_records, std::size_t max_payload_size = 100) -> std::map<std::string, std::string>;
+auto fill_db(Table &table, RandomGenerator &random, std::size_t num_records, std::size_t max_payload_size = 100) -> std::map<std::string, std::string>;
 auto expect_db_contains(DB &db, const std::string &tablename, const std::map<std::string, std::string> &map) -> void;
+auto expect_db_contains(Txn &txn, const std::string &tablename, const std::map<std::string, std::string> &map) -> void;
+auto expect_db_contains(const Table &table, const std::map<std::string, std::string> &map) -> void;
 
 } // namespace calicodb::tools
 

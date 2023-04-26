@@ -31,25 +31,17 @@ auto Schema::new_table(const TableOptions &options, const std::string &name, Tab
     Id root_id;
     if (s.is_ok()) {
         if (options.error_if_exists) {
-            std::string message("table \"");
-            message.append(name);
-            message.append("\" already exists");
-            return Status::invalid_argument(message);
+            return Status::invalid_argument("table \"" + name + "\" already exists");
         }
         if (value.size() != Id::kSize) {
-            std::string message("root entry for table \"");
-            message.append(name);
-            message.append("\" is corrupted: ");
+            std::string message("root entry for table \"" + name + "\" is corrupted: ");
             message.append(escape_string(value));
             return Status::corruption(message);
         }
         root_id.value = get_u32(value);
     } else if (s.is_not_found()) {
         if (!options.create_if_missing) {
-            std::string message("table \"");
-            message.append(name);
-            message.append("\" does not exist");
-            return Status::invalid_argument(message);
+            return Status::invalid_argument("table \"" + name + "\" does not exist");
         }
         CALICODB_TRY(Tree::create(*m_pager, false, &root_id));
         value.resize(Id::kSize);
@@ -71,13 +63,22 @@ auto Schema::drop_table(const std::string &name) -> Status
     std::string value;
     CALICODB_TRY(m_map->get(name, &value));
     if (value.size() != Id::kSize) {
-        return Status::corruption("root ID is corrupted");
+        std::string message("table \"" + name + "\" has a corrupted root ID: ");
+        append_escaped_string(message, value);
+        return Status::corruption(message);
     }
-    // TODO: Check if the tree is empty, if not, empty it. I was just iterating through
-    //       with a cursor and erasing all the records, but it would be better to do an
-    //       inorder traversal and move all the pages to the freelist.
-    m_trees.erase(Id(get_u32(value)));
-    return m_map->erase(name);
+
+    Id root_id(get_u32(value));
+    auto itr = m_trees.find(root_id);
+    if (itr != end(m_trees) && itr->second.tree) {
+        return Status::invalid_argument(
+            "table \"" + name + "\" is still open");
+    }
+    Tree drop(*m_pager, &root_id);
+    CALICODB_TRY(Tree::destroy(drop));
+    CALICODB_TRY(m_map->erase(name));
+    m_trees.erase(root_id);
+    return Status::ok();
 }
 
 auto Schema::vacuum_reroot(Id old_id, Id new_id) -> void
@@ -140,8 +141,9 @@ auto Schema::vacuum_finish() -> Status
                 // should be removed).
                 m_trees.erase(tree);
             }
+            m_reroot.erase(root);
         }
-        m_reroot.erase(root);
+        cursor->next();
     }
     const auto success = m_reroot.empty();
     m_reroot.clear();

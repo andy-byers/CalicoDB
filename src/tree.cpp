@@ -852,7 +852,7 @@ auto Tree::acquire(Id page_id, bool upgrade, Node &out) const -> Status
     return NodeManager::acquire(*m_pager, page_id, out, m_node_scratch, upgrade);
 }
 
-auto Tree::destroy(Node node) -> Status
+auto Tree::free(Node node) -> Status
 {
     return NodeManager::destroy(*m_pager, std::move(node));
 }
@@ -1138,7 +1138,7 @@ auto Tree::merge_left(Node &left, Node right, Node &parent, std::size_t index) -
         write_child_id(parent, index, left.page.id());
     }
     CALICODB_TRY(fix_links(left));
-    return destroy(std::move(right));
+    return free(std::move(right));
 }
 
 auto Tree::merge_right(Node &left, Node right, Node &parent, std::size_t index) -> Status
@@ -1182,7 +1182,7 @@ auto Tree::merge_right(Node &left, Node right, Node &parent, std::size_t index) 
         }
     }
     CALICODB_TRY(fix_links(left));
-    return destroy(std::move(right));
+    return free(std::move(right));
 }
 
 auto Tree::fix_nonroot(Node node, Node &parent, std::size_t index) -> Status
@@ -1251,7 +1251,7 @@ auto Tree::fix_root(Node node) -> Status
             CALICODB_TRY(acquire(root(), true, node));
         } else {
             merge_root(node, child);
-            CALICODB_TRY(destroy(std::move(child)));
+            CALICODB_TRY(free(std::move(child)));
         }
         CALICODB_TRY(fix_links(node));
     }
@@ -2266,6 +2266,36 @@ public:
         return repr;
     }
 };
+
+auto Tree::destroy_impl(Node node) -> Status
+{
+    if (!node.header.is_external) {
+        for (std::size_t i = 0; i <= node.header.cell_count; ++i) {
+            const auto save_id = node.page.id();
+            const auto next_id = read_child_id(node, i);
+
+            // "node" must be released while we traverse, otherwise we are limited in how long of
+            // a traversal we can perform by the size of the pager cache.
+            release(std::move(node));
+
+            Node next;
+            CALICODB_TRY(acquire(next_id, false, next));
+            CALICODB_TRY(destroy_impl(std::move(next)));
+            CALICODB_TRY(acquire(save_id, false, node));
+        }
+    }
+    if (!node.page.id().is_root()) {
+        return free(std::move(node));
+    }
+    return Status::ok();
+}
+
+auto Tree::destroy(Tree &tree) -> Status
+{
+    Node root;
+    CALICODB_TRY(tree.acquire(tree.root(), false, root));
+    return tree.destroy_impl(std::move(root));
+}
 
 auto Tree::TEST_validate() -> void
 {

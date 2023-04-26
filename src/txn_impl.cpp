@@ -49,8 +49,8 @@ auto TxnImpl::rollback() -> void
 
 auto TxnImpl::vacuum() -> Status
 {
-    (void)m_pager;
-    return Status::ok();
+    m_pager->set_status(vacuum_freelist());
+    return m_state->status;
 }
 
 auto TxnImpl::vacuum_freelist() -> Status

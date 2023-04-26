@@ -37,13 +37,11 @@ public:
     [[nodiscard]] auto start(bool write, Txn *&out) -> Status override;
     auto finish(Txn *&out) -> void override;
 
-    [[nodiscard]] auto TEST_wal() const -> const Wal &;
     [[nodiscard]] auto TEST_pager() const -> const Pager &;
     [[nodiscard]] auto TEST_state() const -> const DBState &;
 
 private:
     DBState m_state;
-    Wal *m_wal = nullptr;
     Pager *m_pager = nullptr;
 
     Env *m_env = nullptr;
@@ -51,8 +49,6 @@ private:
 
     const std::string m_db_filename;
     const std::string m_wal_filename;
-    const std::string m_shm_filename;
-    const std::string m_log_filename;
     const bool m_owns_env;
     const bool m_owns_log;
     const bool m_sync;

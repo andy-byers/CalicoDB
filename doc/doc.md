@@ -4,11 +4,10 @@
 + [API](#api)
     + [Slices](#slices)
     + [Opening a database](#opening-a-database)
-    + [Updating a database](#updating-a-database)
-    + [Querying a database](#querying-a-database)
-    + [Vacuuming a database](#vacuuming-a-database)
+    + [Read-only transactions](#read-only-transactions)
+    + [Read-write transactions](#read-write-transactions)
     + [Tables](#tables)
-    + [Transactions](#transactions)
+    + [Cursors](#cursors)
     + [Database properties](#database-properties)
     + [Closing a database](#closing-a-database)
     + [Destroying a database](#destroying-a-database)
@@ -96,14 +95,14 @@ if (!s.is_ok()) {
 calicodb::Txn *txn;
 
 // Start a read transaction.
-calicodb::Status s = db->new_txn(calicodb::TxnOptions(), txn);
+calicodb::Status s = db->start(false, txn);
 if (!s.is_ok()) {
 }
 
 // Read some data...
 
 // Finish the transaction.
-delete txn;
+db->finish(txn);
 ```
 
 ### Read-write transactions
@@ -112,10 +111,7 @@ delete txn;
 calicodb::Txn *txn;
 
 // Start a write transaction.
-calicodb::TxnOptions txnopt;
-txnopt.write = true;
-txnopt.sync = true; // persist each commit()
-s = db->new_txn(txnopt, txn);
+calicodb::Status s = db->start(true, txn);
 if (!s.is_ok()) {
 }
 
@@ -127,14 +123,14 @@ if (!s.is_ok()) {
     // If commit() failed, then there was likely a low-level I/O error.
 }
 
-// The DB holds all locks until the Txn object is delete'd, so we can
-// continue reading/writing.
+// The DB holds all locks until DB::finish() is called, so we can continue
+// reading/writing.
 
-// Get rid of everything since commit() was called. If we delete the Txn
+// Get rid of everything since commit() was called. If we call DB::finish()
 // without calling commit() again, the same thing will happen.
 txn->rollback();
 
-delete txn;
+db->finish(txn);
 ```
 
 ### Tables
@@ -224,7 +220,7 @@ delete db;
 ### Destroying a database
 
 ```C++
-calicodb::Status s = calicodb::DB::destroy(options, "/tmp/cats");
+calicodb::Status s = calicodb::DB::free(options, "/tmp/cats");
 if (s.is_ok()) {
     // Database has been destroyed.
 } else if (s.is_not_found()) {

@@ -41,8 +41,7 @@ public:
     [[nodiscard]] virtual auto resize_file(const std::string &filename, std::size_t size) -> Status = 0;
     [[nodiscard]] virtual auto file_size(const std::string &filename, std::size_t &out) const -> Status = 0;
     [[nodiscard]] virtual auto remove_file(const std::string &filename) -> Status = 0;
-
-    /* TODO: remove, just use open("name", Env::kReadOnly, ptr) */ [[nodiscard]] virtual auto file_exists(const std::string &filename) const -> bool = 0;
+    [[nodiscard]] virtual auto file_exists(const std::string &filename) const -> bool = 0;
 
     virtual auto srand(unsigned seed) -> void = 0;
     [[nodiscard]] virtual auto rand() -> unsigned = 0;
@@ -148,14 +147,13 @@ public:
     [[nodiscard]] auto target() const -> const Env *;
 
     ~EnvWrapper() override;
-    /* TODO: remove */ [[nodiscard]] auto file_exists(const std::string &filename) const -> bool override;
-
-    [[nodiscard]] auto resize_file(const std::string &filename, std::size_t size) -> Status override;
-    [[nodiscard]] auto file_size(const std::string &filename, std::size_t &out) const -> Status override;
-    [[nodiscard]] auto remove_file(const std::string &filename) -> Status override;
 
     [[nodiscard]] auto new_sink(const std::string &filename, Sink *&out) -> Status override;
     [[nodiscard]] auto new_file(const std::string &filename, OpenMode mode, File *&out) -> Status override;
+    [[nodiscard]] auto resize_file(const std::string &filename, std::size_t size) -> Status override;
+    [[nodiscard]] auto file_size(const std::string &filename, std::size_t &out) const -> Status override;
+    [[nodiscard]] auto remove_file(const std::string &filename) -> Status override;
+    [[nodiscard]] auto file_exists(const std::string &filename) const -> bool override;
 
     auto srand(unsigned seed) -> void override;
     [[nodiscard]] auto rand() -> unsigned override;

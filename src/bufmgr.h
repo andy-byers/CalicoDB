@@ -41,7 +41,7 @@ struct PageRef final {
 class Bufmgr final
 {
 public:
-    Bufmgr(std::size_t page_size, std::size_t frame_count);
+    explicit Bufmgr(std::size_t page_size, std::size_t frame_count);
     ~Bufmgr();
 
     // Return the number of entries in the cache
@@ -105,7 +105,7 @@ public:
     }
 
     // Disable move and copy.
-    auto operator=(Bufmgr &) -> void = delete;
+    void operator=(Bufmgr &) = delete;
     Bufmgr(Bufmgr &) = delete;
 
     [[nodiscard]] auto hits() const -> U64;
@@ -127,9 +127,9 @@ private:
     std::unordered_map<Id, MapEntry, Id::Hash> m_map;
     std::list<PageRef> m_list;
 
-    // Keep the root page state information separate since it always stays in-
-    // memory. The root page may be accessed repeatedly depending on how the
-    // DB is being used.
+    // Root page is stored separately. It is accessed very often, so it makes
+    // sense to keep it in a dedicated location rather than having to find it
+    // in the hash map each time.
     PageRef m_root;
 
     // Storage for cached pages. Aligned to the page size.

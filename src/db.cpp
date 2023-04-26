@@ -34,9 +34,6 @@ auto DB::open(const Options &options, const std::string &filename, DB *&db) -> S
     if (sanitized.wal_filename.empty()) {
         sanitized.wal_filename = clean_filename + kDefaultWalSuffix;
     }
-    if (sanitized.shm_filename.empty()) {
-        sanitized.shm_filename = clean_filename + kDefaultShmSuffix;
-    }
     if (sanitized.env == nullptr) {
         sanitized.env = Env::default_env();
     }

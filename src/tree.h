@@ -168,13 +168,14 @@ public:
     explicit Tree(Pager &pager, Id *root_id);
     ~Tree();
     [[nodiscard]] static auto create(Pager &pager, bool is_root, Id *out) -> Status;
+    [[nodiscard]] static auto destroy(Tree &tree) -> Status;
     [[nodiscard]] auto put(const Slice &key, const Slice &value, bool *exists = nullptr) -> Status;
     [[nodiscard]] auto get(const Slice &key, std::string *value) const -> Status;
     [[nodiscard]] auto erase(const Slice &key) -> Status;
     [[nodiscard]] auto vacuum_one(Id target, Schema &schema, bool *success = nullptr) -> Status;
     [[nodiscard]] auto allocate(bool is_external, Node &out) -> Status;
     [[nodiscard]] auto acquire(Id page_id, bool upgrade, Node &out) const -> Status;
-    [[nodiscard]] auto destroy(Node node) -> Status;
+    [[nodiscard]] auto free(Node node) -> Status;
     auto upgrade(Node &node) const -> void;
     auto release(Node node) const -> void;
 
@@ -200,6 +201,7 @@ private:
         bool exact = false;
     };
 
+    [[nodiscard]] auto destroy_impl(Node node) -> Status;
     [[nodiscard]] auto vacuum_step(Page &free, Schema &schema, Id last_id) -> Status;
     [[nodiscard]] auto resolve_overflow(Node node) -> Status;
     [[nodiscard]] auto resolve_underflow(Node node, const Slice &anchor) -> Status;

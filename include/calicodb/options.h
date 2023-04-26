@@ -26,11 +26,6 @@ struct Options final {
     // "dbname-wal", where "dbname" is the name of the database.
     std::string wal_filename;
 
-    // Alternate filename to use for the shared memory WAL index (shm file). If
-    // empty, the shm file is named like the WAL file, but with a suffix of "-shm"
-    // instead of "-wal".
-    std::string shm_filename;
-
     // Destination for info log messages.
     Sink *info_log = nullptr;
 

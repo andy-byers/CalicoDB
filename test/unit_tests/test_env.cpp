@@ -595,11 +595,13 @@ TEST_F(EnvShmTests, ShmIsTruncated)
         SharedBuffer sh(*shm);
         sh.write(0, "hello");
     }
+    shm->shm_unmap(false);
     delete shm;
     shm = m_helper.open_file(EnvWithFiles::kSameName, Env::kCreate | Env::kReadWrite);
 
     SharedBuffer sh(*shm);
     ASSERT_EQ(sh.read(0, 5), std::string("\0\0\0\0\0", 5));
+    shm->shm_unmap(true);
     delete shm;
 }
 
@@ -614,6 +616,7 @@ TEST_F(EnvShmTests, WriteToShmReadBackFromFile)
             SharedBuffer sh(*shm);
             sh.write(0, word);
         }
+        shm->shm_unmap(false);
         delete shm;
         auto *file = m_helper.open_unowned_file(EnvWithFiles::kSameName, Env::kCreate | Env::kReadWrite);
 
@@ -661,6 +664,10 @@ TEST_F(EnvShmTests, LockCompatibility)
 
     ASSERT_TRUE(c->shm_lock(0, 5, File::kLock | File::kWriter).is_busy());
     ASSERT_OK(c->shm_lock(0, 4, File::kLock | File::kWriter));
+
+    a->shm_unmap(true);
+    b->shm_unmap(true);
+    c->shm_unmap(true);
 }
 
 static auto busy_wait_file_lock(File &file, bool is_writer) -> void
@@ -711,10 +718,21 @@ static auto file_reader_writer_test_routine(Env &env, File &file, bool is_writer
         file.file_unlock();
     }
 }
-static auto shm_lifetime_test_routine(Env &env, const std::string &filename) -> void
+static auto shm_lifetime_test_routine(Env &env, const std::string &filename, bool unlink) -> void
 {
     File *file;
     ASSERT_OK(env.new_file(filename, Env::kCreate | Env::kReadWrite, file));
+
+    Status s;
+    volatile void *ptr;
+    while (!(s = file->shm_map(0, ptr)).is_ok()) {
+        // NOTE: This call may return either Status::busy() or Status::not_found() on failure.
+        // Status::not_found() means someone else unlinked the shm before we could get the DMS
+        // lock.
+    }
+    ASSERT_OK(s);
+    file->shm_unmap(unlink);
+
     delete file;
 }
 static auto shm_reader_writer_test_routine(File &file, std::size_t r, std::size_t n, bool is_writer) -> void
@@ -832,19 +850,19 @@ public:
         ASSERT_EQ(writers_per_thread * kNumThreads, read_file_version(*m_helper.files.front()));
     }
 
-    auto run_shm_lifetime_test() -> void
+    auto run_shm_lifetime_test(bool unlink) -> void
     {
-        run_test([this](auto) {
+        run_test([this, unlink](auto) {
             for (std::size_t i = 0; i < kNumThreads; ++i) {
                 set_up();
             }
             std::vector<std::thread> threads;
             while (threads.size() < kNumThreads) {
                 const auto t = threads.size();
-                threads.emplace_back([this] {
+                threads.emplace_back([this, unlink] {
                     for (std::size_t r = 0; r < kNumRounds; ++r) {
                         shm_lifetime_test_routine(
-                            *m_helper.env, m_helper.testdir.as_child(make_filename(0)));
+                            *m_helper.env, m_helper.testdir.as_child(make_filename(0)), unlink);
                     }
                 });
             }
@@ -926,9 +944,13 @@ TEST_P(EnvConcurrencyTests, Contention)
         return true;
     });
 }
-TEST_P(EnvConcurrencyTests, ShmLifetime)
+TEST_P(EnvConcurrencyTests, ShmLifetime1)
 {
-    run_shm_lifetime_test();
+    run_shm_lifetime_test(false);
+}
+TEST_P(EnvConcurrencyTests, ShmLifetime2)
+{
+    run_shm_lifetime_test(true);
 }
 TEST_P(EnvConcurrencyTests, SingleShmWriter1)
 {

@@ -79,11 +79,12 @@ auto Bufmgr::alloc(Id page_id) -> PageRef *
 
 auto Bufmgr::erase(Id page_id) -> bool
 {
-    CALICODB_EXPECT_FALSE(page_id.is_root());
     const auto itr = m_map.find(page_id);
     if (itr == end(m_map)) {
         return false;
     }
+    // Root page is not stored in the cache.
+    CALICODB_EXPECT_FALSE(page_id.is_root());
     unpin(*itr->second);
     m_list.erase(itr->second);
     m_map.erase(itr);
