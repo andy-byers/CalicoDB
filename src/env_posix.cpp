@@ -304,7 +304,7 @@ struct PosixShm {
 class PosixFile : public File
 {
 public:
-    explicit PosixFile(PosixEnv &env, std::string filename, Env::OpenMode mode, int file);
+    explicit PosixFile(std::string filename, Env::OpenMode mode, int file);
 
     ~PosixFile() override
     {
@@ -326,13 +326,12 @@ public:
 
     const std::string filename;
     INode *inode = nullptr;
-    PosixEnv *env = nullptr;
     PosixShm *shm = nullptr;
-    Env::OpenMode openmode;
+    Env::OpenMode open_mode;
     int file = -1;
 
     // Lock mode for this particular file descriptor.
-    int lockmode = 0;
+    int lock_mode = 0;
 };
 
 // Per-process singleton for managing filesystem state
@@ -557,7 +556,7 @@ auto PosixEnv::new_file(const std::string &filename, OpenMode mode, File *&out) 
     if (fd < 0) {
         return posix_error(errno);
     }
-    auto *file = new PosixFile(*this, filename, mode, fd);
+    auto *file = new PosixFile(filename, mode, fd);
     // Search the global inode info list. This requires locking the global mutex.
     std::lock_guard guard(PosixFs::s_fs.mutex);
     auto *inode = PosixFs::ref_inode(fd);
@@ -587,13 +586,11 @@ auto PosixEnv::rand() -> unsigned
     return static_cast<unsigned>(nrand48(m_rng));
 }
 
-PosixFile::PosixFile(PosixEnv &env, std::string filename, Env::OpenMode mode, int file)
-    : filename(std::move(filename)),
-      env(&env),
-      openmode(mode),
-      file(file)
+PosixFile::PosixFile(std::string filename_, Env::OpenMode open_mode_, int file_)
+    : filename(std::move(filename_)),
+      open_mode(open_mode_),
+      file(file_)
 {
-    (void)env;
     CALICODB_EXPECT_GE(file, 0);
 }
 
@@ -762,7 +759,7 @@ auto PosixShm::lock(std::size_t r, std::size_t n, File::ShmLockFlag flags) -> St
         }
 
         if (posix_shm_lock(*snode, F_WRLCK, r + kShmLock0, n)) {
-            // Some other thread in another process has a lock.
+            // Some thread in another process has a lock.
             return posix_error(errno);
         }
         CALICODB_EXPECT_FALSE(shared_mask & mask);
@@ -906,18 +903,18 @@ auto cleanup_path(const std::string &filename) -> std::string
 
 auto PosixFile::file_lock(FileLockMode mode) -> Status
 {
-    if (mode <= lockmode) {
+    if (mode <= lock_mode) {
         // New lock is less restrictive than the one already held.
         return Status::ok();
     }
     // First lock taken on a file descriptor must be kShared. If a reserved lock
     // is being requested, a shared lock must already be held by the caller.
-    CALICODB_EXPECT_TRUE(lockmode != kUnlocked || mode == kShared);
-    CALICODB_EXPECT_TRUE(mode != kReserved || lockmode == kShared);
+    CALICODB_EXPECT_TRUE(lock_mode != kUnlocked || mode == kShared);
+    CALICODB_EXPECT_TRUE(mode != kReserved || lock_mode == kShared);
     CALICODB_EXPECT_NE(mode, kPending);
 
     std::lock_guard guard(inode->mutex);
-    if ((lockmode != inode->lock && (inode->lock >= kPending || mode > kShared))) {
+    if ((lock_mode != inode->lock && (inode->lock >= kPending || mode > kShared))) {
         return posix_busy();
     }
 
@@ -925,9 +922,9 @@ auto PosixFile::file_lock(FileLockMode mode) -> Status
         // Caller wants a shared lock, and a shared or reserved file_lock is already
         // held by another thread. Grant the request.
         CALICODB_EXPECT_EQ(mode, kShared);
-        CALICODB_EXPECT_EQ(lockmode, kUnlocked);
+        CALICODB_EXPECT_EQ(lock_mode, kUnlocked);
         CALICODB_EXPECT_GT(inode->nshared, 0);
-        lockmode = kShared;
+        lock_mode = kShared;
         inode->nshared++;
         inode->nlocks++;
         return Status::ok();
@@ -935,14 +932,14 @@ auto PosixFile::file_lock(FileLockMode mode) -> Status
     struct flock lock = {};
     lock.l_len = 1;
     lock.l_whence = SEEK_SET;
-    if (mode == kShared || (mode == kExclusive && lockmode == kReserved)) {
+    if (mode == kShared || (mode == kExclusive && lock_mode == kReserved)) {
         // Attempt to lock the pending byte.
         lock.l_start = kPendingByte;
         lock.l_type = mode == kShared ? F_RDLCK : F_WRLCK;
         if (posix_file_lock(file, lock)) {
             return posix_error(errno);
         } else if (mode == kExclusive) {
-            lockmode = kPending;
+            lock_mode = kPending;
             inode->lock = kPending;
         }
     }
@@ -981,7 +978,7 @@ auto PosixFile::file_lock(FileLockMode mode) -> Status
         // The caller is requesting a kReserved or greater. Require that at least a
         // shared file_lock be held first.
         CALICODB_EXPECT_TRUE(mode == kReserved || mode == kExclusive);
-        CALICODB_EXPECT_NE(lockmode, kUnlocked);
+        CALICODB_EXPECT_NE(lock_mode, kUnlocked);
         lock.l_type = F_WRLCK;
         if (mode == kReserved) {
             // Lock the reserved byte with a write file_lock.
@@ -997,7 +994,7 @@ auto PosixFile::file_lock(FileLockMode mode) -> Status
         }
     }
     if (s.is_ok()) {
-        lockmode = mode;
+        lock_mode = mode;
         inode->lock = mode;
     }
     return s;
@@ -1007,14 +1004,14 @@ auto PosixFile::file_unlock() -> void
 {
     struct flock lock = {};
 
-    if (lockmode == kUnlocked) {
+    if (lock_mode == kUnlocked) {
         return;
     }
     std::lock_guard guard(inode->mutex);
     CALICODB_EXPECT_NE(inode->nshared, 0);
 
-    if (lockmode > kShared) {
-        CALICODB_EXPECT_EQ(inode->lock, lockmode);
+    if (lock_mode > kShared) {
+        CALICODB_EXPECT_EQ(inode->lock, lock_mode);
         lock.l_type = F_UNLCK;
         lock.l_whence = SEEK_SET;
         lock.l_start = kPendingByte;
@@ -1036,7 +1033,7 @@ auto PosixFile::file_unlock() -> void
         lock.l_start = 0;
         (void)posix_file_lock(file, lock);
         inode->lock = kUnlocked;
-        lockmode = kUnlocked;
+        lock_mode = kUnlocked;
     }
     CALICODB_EXPECT_GT(inode->nlocks, 0);
 
@@ -1044,7 +1041,7 @@ auto PosixFile::file_unlock() -> void
     if (inode->nlocks == 0) {
         PosixFs::close_pending_files(*inode);
     }
-    lockmode = kUnlocked;
+    lock_mode = kUnlocked;
 }
 
 } // namespace calicodb
