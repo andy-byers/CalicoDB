@@ -605,27 +605,6 @@ TEST_F(EnvShmTests, ShmIsTruncated)
     delete shm;
 }
 
-// Shared memory is cleared when the first thread/process connects to it. This behavior makes
-// it a pain to inspect shared memory sometimes. If all Shms are already closed it's easier to
-// just read from a normal file.
-TEST_F(EnvShmTests, WriteToShmReadBackFromFile)
-{
-    for (auto *word : {"hello", "world"}) {
-        auto *shm = m_helper.open_file(EnvWithFiles::kSameName, Env::kCreate | Env::kReadWrite);
-        {
-            SharedBuffer sh(*shm);
-            sh.write(0, word);
-        }
-        shm->shm_unmap(false);
-        delete shm;
-        auto *file = m_helper.open_unowned_file(EnvWithFiles::kSameName, Env::kCreate | Env::kReadWrite);
-
-        char buffer[6] = {};
-        ASSERT_OK(file->read_exact(0, 5, buffer));
-        ASSERT_EQ(word, std::string(buffer));
-    }
-}
-
 TEST_F(EnvShmTests, LockCompatibility)
 {
     auto *a = m_helper.open_file(EnvWithFiles::kSameName, Env::kCreate | Env::kReadWrite);

@@ -220,7 +220,7 @@ delete db;
 ### Destroying a database
 
 ```C++
-calicodb::Status s = calicodb::DB::free(options, "/tmp/cats");
+calicodb::Status s = calicodb::DB::destroy(options, "/tmp/cats");
 if (s.is_ok()) {
     // Database has been destroyed.
 } else if (s.is_not_found()) {

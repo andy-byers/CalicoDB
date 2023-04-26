@@ -1643,6 +1643,39 @@ auto Tree::vacuum_one(Id target, Schema &schema, bool *success) -> Status
     return Status::ok();
 }
 
+auto Tree::destroy_impl(Node node) -> Status
+{
+    for (std::size_t i = 0; i <= node.header.cell_count; ++i) {
+        if (i < node.header.cell_count) {
+            if (const auto cell = read_cell(node, i); cell.has_remote) {
+                CALICODB_TRY(OverflowList::erase(*m_pager, read_overflow_id(cell)));
+            }
+        }
+        if (!node.header.is_external) {
+            const auto save_id = node.page.id();
+            const auto next_id = read_child_id(node, i);
+            release(std::move(node));
+
+            Node next;
+            CALICODB_TRY(acquire(next_id, false, next));
+            CALICODB_TRY(destroy_impl(std::move(next)));
+            CALICODB_TRY(acquire(save_id, false, node));
+        }
+    }
+
+    if (!node.page.id().is_root()) {
+        return free(std::move(node));
+    }
+    return Status::ok();
+}
+
+auto Tree::destroy(Tree &tree) -> Status
+{
+    Node root;
+    CALICODB_TRY(tree.acquire(tree.root(), false, root));
+    return tree.destroy_impl(std::move(root));
+}
+
 static constexpr auto kLinkContentOffset = Id::kSize;
 
 [[nodiscard]] static auto get_readable_content(const Page &page, std::size_t size_limit) -> Slice
@@ -1732,7 +1765,9 @@ auto OverflowList::write(Pager &pager, Id &out, const Slice &key, const Slice &v
         Page page;
         CALICODB_TRY(pager.allocate(page));
 
-        auto content_size = std::min(first.size() + value.size(), page.size() - kLinkContentOffset);
+        auto content_size = std::min(
+            first.size() + second.size(),
+            page.size() - kLinkContentOffset);
         auto content_data = page.data() + kLinkContentOffset;
         auto limit = std::min(first.size(), content_size);
         std::memcpy(content_data, first.data(), limit);
@@ -2266,36 +2301,6 @@ public:
         return repr;
     }
 };
-
-auto Tree::destroy_impl(Node node) -> Status
-{
-    if (!node.header.is_external) {
-        for (std::size_t i = 0; i <= node.header.cell_count; ++i) {
-            const auto save_id = node.page.id();
-            const auto next_id = read_child_id(node, i);
-
-            // "node" must be released while we traverse, otherwise we are limited in how long of
-            // a traversal we can perform by the size of the pager cache.
-            release(std::move(node));
-
-            Node next;
-            CALICODB_TRY(acquire(next_id, false, next));
-            CALICODB_TRY(destroy_impl(std::move(next)));
-            CALICODB_TRY(acquire(save_id, false, node));
-        }
-    }
-    if (!node.page.id().is_root()) {
-        return free(std::move(node));
-    }
-    return Status::ok();
-}
-
-auto Tree::destroy(Tree &tree) -> Status
-{
-    Node root;
-    CALICODB_TRY(tree.acquire(tree.root(), false, root));
-    return tree.destroy_impl(std::move(root));
-}
 
 auto Tree::TEST_validate() -> void
 {

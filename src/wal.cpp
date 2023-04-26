@@ -1262,7 +1262,7 @@ auto WalImpl::checkpoint(File &db_file, std::size_t *db_size) -> Status
     if (changed) {
         m_hdr = {};
     }
-    return Status::ok();
+    return s;
 }
 
 auto WalImpl::transfer_contents(File &db_file, std::size_t *db_size) -> Status

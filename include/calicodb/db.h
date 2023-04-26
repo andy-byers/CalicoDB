@@ -13,7 +13,6 @@ namespace calicodb
 {
 
 class Cursor;
-class Env;
 class Table;
 class Txn;
 
@@ -24,7 +23,8 @@ public:
     // Open or create a CalicoDB database with the given "filename"
     //
     // On success, store a pointer to the heap-allocated database in "db" and return OK. On
-    // failure, set "db" to nullptr and return a non-OK status.
+    // failure, set "db" to nullptr and return a non-OK status. The user is responsible for
+    // calling delete on the database handle when it is no longer needed.
     [[nodiscard]] static auto open(const Options &options, const std::string &filename, DB *&db) -> Status;
 
     // Delete the contents of the specified database from stable storage
@@ -54,18 +54,19 @@ public:
 
     // Finish a transaction
     //
-    // Takes ownership of the transaction handle. Transaction handles obtained through
-    // DB::read() or DB::write() must be passed to this method before the DB is closed.
+    // Takes ownership of the transaction handle. A transaction handle obtained through
+    // DB::start() must be passed to this method before (a) another transaction can be
+    // started, or (b) the DB is closed.
     virtual auto finish(Txn *&txn) -> void = 0;
 };
 
 // Transaction on a CalicoDB database
 //
 // The lifetime of a transaction is the same as that of the Txn object representing it.
-// The transaction starts when DB::start() is called, and finishes when DB::finish() is
-// called with the address of the transaction object received from DB::start(). The
-// methods Txn::commit() and Txn::rollback() can be called multiple times to perform
-// multiple batches of updates while the Txn is live.
+// The transaction starts when DB::start() is called to obtain a transaction handle, and
+// finishes when the handle is passed back to DB::finish(). The methods Txn::commit() and
+// Txn::rollback() can be called multiple times to perform multiple batches of updates
+// while the Txn is live.
 class Txn
 {
 public:

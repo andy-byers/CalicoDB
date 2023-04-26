@@ -7,6 +7,7 @@
 #include "logging.h"
 #include "page.h"
 #include "pager.h"
+#include "scope_guard.h"
 #include "unit_tests.h"
 #include <gtest/gtest.h>
 #include <numeric>
@@ -154,7 +155,9 @@ public:
 
     virtual ~PagerWalTestHarness()
     {
-        (void)m_pager->close();
+        if (m_pager) {
+            (void)m_pager->close();
+        }
         delete m_pager;
         delete env;
     }
@@ -1027,6 +1030,10 @@ public:
 
         CALICODB_TRY(m_pager->begin(true));
 
+        ScopeGuard guard = [this] {
+            return m_pager->finish();
+        };
+
         std::vector<std::size_t> indices(std::get<0>(GetParam()));
         std::iota(begin(indices), end(indices), 0);
         std::default_random_engine rng(42);
@@ -1048,7 +1055,7 @@ public:
             }
         }
         CALICODB_TRY(m_pager->commit());
-        m_pager->finish();
+        std::move(guard).invoke();
         CALICODB_TRY(m_pager->checkpoint());
 
         m_counter = -1;
@@ -1080,7 +1087,10 @@ TEST_P(WalPagerFaultTests, SetupAndOperations)
         ->add_interceptor(filename, tools::Interceptor(
                                         type,
                                         [this] {
-                                            return m_counter-- == 0 ? special_error() : Status::ok();
+                                            if (m_counter-- == 0) {
+                                                return special_error();
+                                            }
+                                            return Status::ok();
                                         }));
 
     Status s;
@@ -1092,7 +1102,6 @@ TEST_P(WalPagerFaultTests, SetupAndOperations)
             break;
         } else {
             assert_special_error(s);
-            m_pager->finish();
         }
     }
 }
@@ -1101,7 +1110,7 @@ INSTANTIATE_TEST_SUITE_P(
     WalPagerFaultTests,
     WalPagerFaultTests,
     ::testing::Values(
-        std::make_tuple(1, kDBFilename, tools::Interceptor::kRead),
+        std::make_tuple(10, kDBFilename, tools::Interceptor::kRead),
         std::make_tuple(10, kDBFilename, tools::Interceptor::kWrite),
         std::make_tuple(10, kWalFilename, tools::Interceptor::kRead),
         std::make_tuple(10, kWalFilename, tools::Interceptor::kWrite),
