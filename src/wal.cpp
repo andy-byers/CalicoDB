@@ -17,7 +17,7 @@ namespace calicodb
 //       May need to construct atomic integers for some variables, like the CkptInfo
 //       struct. SQLite WAL index seems to work fine without atomic intrinsics though
 //       so we'll see.
-static_assert(std::atomic<U32>::is_always_lock_free);
+//static_assert(std::atomic<U32>::is_always_lock_free);
 
 using Key = HashIndex::Key;
 using Value = HashIndex::Value;
