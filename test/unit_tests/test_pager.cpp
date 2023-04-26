@@ -7,6 +7,7 @@
 #include "logging.h"
 #include "page.h"
 #include "pager.h"
+#include "scope_guard.h"
 #include "unit_tests.h"
 #include <gtest/gtest.h>
 #include <numeric>
@@ -24,103 +25,73 @@ namespace calicodb
     return {.page_id = Id(id_value)};
 }
 
-// class PageCacheTests : public testing::Test
-//{
-// public:
-//     PageCache cache;
-// };
-//
-// TEST_F(PageCacheTests, EmptyCacheBehavior)
-//{
-//     ASSERT_EQ(cache.size(), 0);
-//     ASSERT_EQ(cache.size(), 0);
-//     ASSERT_EQ(cache.get(Id::root()), nullptr);
-//     ASSERT_EQ(cache.next_victim(), nullptr);
-// }
-//
-// TEST_F(PageCacheTests, OldestEntryIsEvictedFirst)
-//{
-//     (void)cache.alloc(Id(4));
-//     (void)cache.alloc(Id(3));
-//     (void)cache.alloc(Id(2));
-//     (void)cache.alloc(Id(1));
-//     ASSERT_EQ(cache.size(), 4);
-//
-//     ASSERT_EQ(cache.get(Id(4))->page_id, Id(4));
-//     ASSERT_EQ(cache.get(Id(3))->page_id, Id(3));
-//
-//     ASSERT_EQ(cache.next_victim()->page_id, Id(2));
-//     cache.erase(cache.next_victim()->page_id);
-//     ASSERT_EQ(cache.next_victim()->page_id, Id(1));
-//     cache.erase(cache.next_victim()->page_id);
-//     ASSERT_EQ(cache.next_victim()->page_id, Id(4));
-//     cache.erase(cache.next_victim()->page_id);
-//     ASSERT_EQ(cache.next_victim()->page_id, Id(3));
-//     cache.erase(cache.next_victim()->page_id);
-//     ASSERT_EQ(cache.size(), 0);
-// }
-//
-// TEST_F(PageCacheTests, ReplacementPolicyIgnoresQuery)
-//{
-//     (void)cache.alloc(Id(2));
-//     (void)cache.alloc(Id(1));
-//
-//     (void)cache.query(Id(2));
-//
-//     ASSERT_EQ(cache.next_victim()->page_id, Id(2));
-//     cache.erase(cache.next_victim()->page_id);
-//     ASSERT_EQ(cache.next_victim()->page_id, Id(1));
-//     cache.erase(cache.next_victim()->page_id);
-// }
-//
-// TEST_F(PageCacheTests, ReferencedEntriesAreIgnoredDuringEviction)
-//{
-//     (void)cache.alloc(Id(2));
-//     (void)cache.alloc(Id(1));
-//
-//     cache.query(Id(2))->refcount = 1;
-//
-//     ASSERT_EQ(cache.next_victim()->page_id, Id(1));
-//     cache.erase(cache.next_victim()->page_id);
-//     ASSERT_EQ(cache.next_victim(), nullptr);
-// }
-//
-// class FrameManagerTests
-//     : public EnvTestHarness<tools::FakeEnv>,
-//       public testing::Test
-//{
-// public:
-//     static constexpr auto kPageSize = kMinPageSize;
-//     static constexpr auto kPagerFrames = kMinFrameCount;
-//
-//     explicit FrameManagerTests()
-//     {
-//         frames = std::make_unique<BufferManager>(kPageSize, kPagerFrames);
-//     }
-//
-//     ~FrameManagerTests() override = default;
-//
-//     std::unique_ptr<BufferManager> frames;
-//     PageCache cache;
-// };
-//
-// TEST_F(FrameManagerTests, NewFrameManagerIsSetUpCorrectly)
-//{
-//     ASSERT_EQ(frames->available(), kPagerFrames);
-// }
-//
-//#ifndef NDEBUG
-// TEST_F(FrameManagerTests, OutOfFramesDeathTest)
-//{
-//     for (std::size_t i = 0; i < kPagerFrames; ++i) {
-//         auto *entry = cache.alloc(Id(i + 1));
-//         (void)frames->pin(*entry);
-//     }
-//     auto *entry = cache.alloc(Id(kPagerFrames + 1));
-//     ASSERT_EQ(frames->available(), 0);
-//     ASSERT_DEATH((void)frames->pin(*entry), "expect");
-// }
-//#endif // NDEBUG
+class PageCacheTests : public testing::Test
+{
+public:
+    explicit PageCacheTests()
+        : mgr(kMinPageSize, kMinFrameCount)
+    {
+    }
+
+    ~PageCacheTests() override = default;
+
+    Bufmgr mgr;
+};
+
+TEST_F(PageCacheTests, EmptyBehavior)
+{
+    ASSERT_EQ(mgr.size(), 0);
+    ASSERT_EQ(mgr.size(), 0);
+    ASSERT_EQ(mgr.get(Id(2)), nullptr);
+    ASSERT_EQ(mgr.next_victim(), nullptr);
+}
+
+TEST_F(PageCacheTests, OldestReferenceIsEvictedFirst)
+{
+    (void)mgr.alloc(Id(5));
+    (void)mgr.alloc(Id(4));
+    (void)mgr.alloc(Id(3));
+    (void)mgr.alloc(Id(2));
+    ASSERT_EQ(mgr.size(), 4);
+
+    ASSERT_EQ(mgr.get(Id(5))->page_id, Id(5));
+    ASSERT_EQ(mgr.get(Id(4))->page_id, Id(4));
+
+    ASSERT_EQ(mgr.next_victim()->page_id, Id(3));
+    mgr.erase(mgr.next_victim()->page_id);
+    ASSERT_EQ(mgr.next_victim()->page_id, Id(2));
+    mgr.erase(mgr.next_victim()->page_id);
+    ASSERT_EQ(mgr.next_victim()->page_id, Id(5));
+    mgr.erase(mgr.next_victim()->page_id);
+    ASSERT_EQ(mgr.next_victim()->page_id, Id(4));
+    mgr.erase(mgr.next_victim()->page_id);
+    ASSERT_EQ(mgr.size(), 0);
+}
+
+TEST_F(PageCacheTests, ReplacementPolicyIgnoresQuery)
+{
+    (void)mgr.alloc(Id(3));
+    (void)mgr.alloc(Id(2));
+
+    (void)mgr.query(Id(3));
+
+    ASSERT_EQ(mgr.next_victim()->page_id, Id(3));
+    mgr.erase(mgr.next_victim()->page_id);
+    ASSERT_EQ(mgr.next_victim()->page_id, Id(2));
+    mgr.erase(mgr.next_victim()->page_id);
+}
+
+TEST_F(PageCacheTests, RefcountsAreConsideredDuringEviction)
+{
+    (void)mgr.alloc(Id(3));
+    (void)mgr.alloc(Id(2));
+
+    mgr.query(Id(3))->refcount = 2;
+
+    ASSERT_EQ(mgr.next_victim()->page_id, Id(2));
+    mgr.erase(mgr.next_victim()->page_id);
+    ASSERT_EQ(mgr.next_victim(), nullptr);
+}
 
 auto write_to_page(Page &page, const std::string &message) -> void
 {
@@ -145,36 +116,49 @@ public:
     static constexpr std::size_t kManyPages = kPagerFrames * 5; // Lots of pages, enough to cause many evictions
     static constexpr U32 kPageSize = kMinPageSize;
 
-    auto init() -> void
+    auto write_db_header() -> void
     {
-        ASSERT_NE(env, nullptr);
+        FileHeader header;
+        std::string buffer(kPageSize, '\0');
+        header.page_count = 1;
+        header.write(buffer.data());
+        tools::write_string_to_file(*env, kDBFilename, buffer);
+    }
 
-        const Wal::Parameters wal_param = {
-            kWalFilename,
-            kPageSize,
-            env};
-        ASSERT_OK(Wal::open(wal_param, m_wal));
+    [[nodiscard]] auto init_with_status() -> Status
+    {
+        CALICODB_EXPECT_NE(env, nullptr);
+        File *file;
+        CALICODB_TRY(env->new_file(kDBFilename, Env::kCreate | Env::kReadWrite, file));
 
         const Pager::Parameters pager_param = {
             kDBFilename,
+            kWalFilename,
+            file,
             env,
-            m_wal,
             nullptr,
             &m_state,
             kPagerFrames,
             kPageSize,
         };
-        ASSERT_OK(Pager::open(pager_param, m_pager));
-        // Write the freshly-allocated root page to the DB file.
-        ASSERT_EQ(m_pager->mode(), Pager::kDirty);
-        ASSERT_OK(m_pager->commit_txn());
+        CALICODB_TRY(Pager::open(pager_param, m_pager));
+        m_pager->set_page_count(1);
         m_state.use_wal = true;
+        return Status::ok();
+    }
+
+    auto write_header_and_init() -> void
+    {
+        write_db_header();
+        ASSERT_OK(init_with_status());
     }
 
     virtual ~PagerWalTestHarness()
     {
+        if (m_pager) {
+            (void)m_pager->close();
+        }
         delete m_pager;
-        delete m_wal;
         delete env;
     }
 
@@ -242,7 +226,7 @@ public:
         for (std::size_t i = 0; i < n; ++i) {
             Page page;
             // Use the real allocate method (not fake_allocate()), which doesn't hand out pointer map pages.
-            // We should not destroy pointer map pages; doing so indicates a programming error. Pointer map
+            // We should not free pointer map pages; doing so indicates a programming error. Pointer map
             // pages are destroyed naturally when the file shrinks (and the last page is never a pointer map
             // page, unless the DB was unable to allocate the page following it: a state which requires a
             // rollback anyway).
@@ -260,7 +244,7 @@ public:
     {
         File *file;
         std::string message(size, '\x00');
-        EXPECT_OK(env->new_file(kDBFilename, file));
+        EXPECT_OK(env->new_file(kDBFilename, Env::kCreate | Env::kReadWrite, file));
         EXPECT_OK(file->read_exact(
             id.value * kPageSize - message.size(),
             message.size(),
@@ -279,7 +263,6 @@ public:
 
     DBState m_state;
     Env *env = nullptr;
-    Wal *m_wal = nullptr;
     Pager *m_pager = nullptr;
 };
 
@@ -294,21 +277,19 @@ public:
 
     auto SetUp() -> void override
     {
-        env = new tools::FakeEnv;
-        init();
+        env = new tools::FakeEnv();
+        write_header_and_init();
     }
 };
 
 TEST_F(PagerTests, NewPagerIsSetUpCorrectly)
 {
     ASSERT_EQ(m_pager->page_count(), 1);
-    ASSERT_EQ(m_pager->statistics().bytes_written, 1'024)
-        << "test should direct first write to the DB file";
 }
 
 TEST_F(PagerTests, AllocatesPagesAtEOF)
 {
-    ASSERT_TRUE(m_pager->begin_txn());
+    ASSERT_OK(m_pager->begin(true));
     ASSERT_EQ(m_pager->page_count(), 1);
     ASSERT_EQ(allocate_write_release("a"), Id(2));
     ASSERT_EQ(m_pager->page_count(), 2);
@@ -316,15 +297,15 @@ TEST_F(PagerTests, AllocatesPagesAtEOF)
     ASSERT_EQ(m_pager->page_count(), 3);
     ASSERT_EQ(allocate_write_release("c"), Id(4));
     ASSERT_EQ(m_pager->page_count(), 4);
-    ASSERT_OK(m_pager->commit_txn());
+    ASSERT_OK(m_pager->commit());
 }
 
 TEST_F(PagerTests, AcquireReturnsCorrectPage)
 {
-    ASSERT_TRUE(m_pager->begin_txn());
+    ASSERT_OK(m_pager->begin(true));
     (void)allocate_write_release("foo");
     const auto page_id = allocate_write_release("foo");
-    ASSERT_OK(m_pager->commit_txn());
+    ASSERT_OK(m_pager->commit());
 
     ASSERT_EQ(acquire_read_release(page_id, 3 /* bytes */), "foo");
 }
@@ -356,7 +337,7 @@ static auto read_and_check(Test &test, std::size_t key_offset, std::size_t num_p
 
 TEST_F(PagerTests, NormalReadsAndWrites)
 {
-    ASSERT_TRUE(m_pager->begin_txn());
+    ASSERT_OK(m_pager->begin(true));
 
     write_pages(*this, 123, kSomePages);
     read_and_check(*this, 123, kSomePages);
@@ -365,106 +346,121 @@ TEST_F(PagerTests, NormalReadsAndWrites)
     write_pages(*this, 789, kManyPages);
     read_and_check(*this, 789, kManyPages);
 
-    ASSERT_OK(m_pager->commit_txn());
+    ASSERT_OK(m_pager->commit());
 }
 
 TEST_F(PagerTests, NormalCommits)
 {
-    ASSERT_TRUE(m_pager->begin_txn());
+    ASSERT_OK(m_pager->begin(true));
     write_pages(*this, 123, kSomePages);
-    ASSERT_OK(m_pager->commit_txn());
+    ASSERT_OK(m_pager->commit());
     read_and_check(*this, 123, kSomePages);
+    m_pager->finish();
 
-    ASSERT_TRUE(m_pager->begin_txn());
+    ASSERT_OK(m_pager->begin(true));
     write_pages(*this, 456, kFullCache);
-    ASSERT_OK(m_pager->commit_txn());
+    ASSERT_OK(m_pager->commit());
     read_and_check(*this, 456, kFullCache);
+    m_pager->finish();
 
-    ASSERT_TRUE(m_pager->begin_txn());
+    ASSERT_OK(m_pager->begin(true));
     write_pages(*this, 789, kManyPages);
-    ASSERT_OK(m_pager->commit_txn());
+    ASSERT_OK(m_pager->commit());
     read_and_check(*this, 789, kManyPages);
+    m_pager->finish();
 }
 
-TEST_F(PagerTests, BasicRollbacks)
+TEST_F(PagerTests, NormalRollbacks)
 {
-    ASSERT_TRUE(m_pager->begin_txn());
+    ASSERT_OK(m_pager->begin(true));
     write_pages(*this, 123, kManyPages);
-    ASSERT_OK(m_pager->commit_txn());
+    ASSERT_OK(m_pager->commit());
     read_and_check(*this, 123, kManyPages);
+    m_pager->finish();
 
-    ASSERT_TRUE(m_pager->begin_txn());
+    ASSERT_OK(m_pager->begin(true));
     write_pages(*this, 456, kSomePages);
-    ASSERT_OK(m_pager->rollback_txn());
+    m_pager->rollback();
     read_and_check(*this, 123, kManyPages);
+    m_pager->finish();
 
-    ASSERT_TRUE(m_pager->begin_txn());
+    ASSERT_OK(m_pager->begin(true));
     write_pages(*this, 789, kFullCache);
-    ASSERT_OK(m_pager->rollback_txn());
+    m_pager->rollback();
     read_and_check(*this, 123, kManyPages);
+    m_pager->finish();
 
-    ASSERT_TRUE(m_pager->begin_txn());
+    ASSERT_OK(m_pager->begin(true));
     write_pages(*this, 0, kManyPages);
-    ASSERT_OK(m_pager->rollback_txn());
+    m_pager->rollback();
     read_and_check(*this, 123, kManyPages);
+    m_pager->finish();
 }
 
 TEST_F(PagerTests, RollbackPageCounts)
 {
-    ASSERT_TRUE(m_pager->begin_txn());
+    ASSERT_OK(m_pager->begin(true));
     write_pages(*this, 0, 10);
     ASSERT_EQ(m_pager->page_count(), 10);
-    ASSERT_OK(m_pager->rollback_txn());
+    m_pager->rollback();
     ASSERT_EQ(m_pager->page_count(), 1);
+    m_pager->finish();
 
     ASSERT_EQ(m_pager->page_count(), 1);
-    ASSERT_TRUE(m_pager->begin_txn());
+    ASSERT_OK(m_pager->begin(true));
     write_pages(*this, 123, 10);
     ASSERT_EQ(m_pager->page_count(), 10);
-    ASSERT_OK(m_pager->commit_txn());
+    ASSERT_OK(m_pager->commit());
+    m_pager->finish();
 
-    ASSERT_TRUE(m_pager->begin_txn());
+    ASSERT_OK(m_pager->begin(true));
     write_pages(*this, 456, 20);
     ASSERT_EQ(m_pager->page_count(), 20);
-    ASSERT_OK(m_pager->rollback_txn());
+    m_pager->rollback();
     ASSERT_EQ(m_pager->page_count(), 10);
     read_and_check(*this, 123, 10);
+    m_pager->finish();
 }
 
 TEST_F(PagerTests, BasicCheckpoints)
 {
     for (std::size_t i = 0; i < 10; ++i) {
-        ASSERT_TRUE(m_pager->begin_txn());
+        ASSERT_OK(m_pager->begin(true));
         write_pages(*this, kPagerFrames * i, kPagerFrames * (i + 1));
-        ASSERT_OK(m_pager->commit_txn());
+        ASSERT_OK(m_pager->commit());
         read_and_check(*this, kPagerFrames * i, kPagerFrames * (i + 1));
+        m_pager->finish();
         ASSERT_OK(m_pager->checkpoint());
         // Pages returned by the pager should reflect what is on disk.
+        ASSERT_OK(m_pager->begin(false));
         read_and_check(*this, kPagerFrames * i, kPagerFrames * (i + 1));
         read_and_check(*this, kPagerFrames * i, kPagerFrames * (i + 1), true);
+        m_pager->finish();
     }
 }
 
 TEST_F(PagerTests, SequentialPageUsage)
 {
-    ASSERT_TRUE(m_pager->begin_txn());
+    ASSERT_OK(m_pager->begin(true));
     write_pages(*this, 0, kManyPages);
     write_pages(*this, 42, kManyPages);
-    ASSERT_OK(m_pager->commit_txn());
+    ASSERT_OK(m_pager->commit());
     read_and_check(*this, 42, kManyPages);
+    m_pager->finish();
 }
 
 TEST_F(PagerTests, ReverseSequentialPageUsage)
 {
-    ASSERT_TRUE(m_pager->begin_txn());
+    ASSERT_OK(m_pager->begin(true));
     write_pages(*this, 0, kManyPages);
 
     for (std::size_t i = 0; i < kManyPages; ++i) {
         const auto j = kManyPages - i - 1;
         acquire_write_release(Id(j + 1), make_key(j + 42));
     }
-    ASSERT_OK(m_pager->commit_txn());
+    ASSERT_OK(m_pager->commit());
     read_and_check(*this, 42, kManyPages);
+    m_pager->finish();
 }
 
 TEST_F(PagerTests, RandomPageUsage)
@@ -474,54 +470,72 @@ TEST_F(PagerTests, RandomPageUsage)
     std::default_random_engine rng(42);
     std::shuffle(begin(is), end(is), rng);
 
-    ASSERT_TRUE(m_pager->begin_txn());
+    ASSERT_OK(m_pager->begin(true));
     write_pages(*this, 0, is.size());
     for (auto i : is) {
         acquire_write_release(Id(i + 1), make_key(i + 42));
     }
-    ASSERT_OK(m_pager->commit_txn());
+    ASSERT_OK(m_pager->commit());
     read_and_check(*this, 42, is.size());
+    m_pager->finish();
 }
 
 TEST_F(PagerTests, OnlyWritesBackCommittedWalFrames)
 {
-    ASSERT_TRUE(m_pager->begin_txn());
+    ASSERT_OK(m_pager->begin(true));
     write_pages(*this, 42, kManyPages);
-    ASSERT_OK(m_pager->commit_txn());
+    ASSERT_OK(m_pager->commit());
+    m_pager->finish();
 
     // Modify the first kSomePages frames, then roll back the changes.
-    ASSERT_TRUE(m_pager->begin_txn());
+    ASSERT_OK(m_pager->begin(true));
     write_pages(*this, 0, kSomePages);
-    ASSERT_OK(m_pager->rollback_txn());
+    m_pager->rollback();
+    m_pager->finish();
 
     ASSERT_OK(m_pager->checkpoint());
+
+    ASSERT_OK(m_pager->begin(false));
     read_and_check(*this, 42, kManyPages);
+    m_pager->finish();
 }
 
 TEST_F(PagerTests, TransactionBehavior)
 {
-    // Only able to start a transaction once.
-    ASSERT_TRUE(m_pager->begin_txn());
-    ASSERT_FALSE(m_pager->begin_txn());
+    // Only able to start a write transaction once.
+    ASSERT_OK(m_pager->begin(true));
+    ASSERT_FALSE(m_pager->begin(true).is_ok());
 
     // Empty transactions are OK.
-    ASSERT_OK(m_pager->commit_txn());
-    ASSERT_TRUE(m_pager->begin_txn());
-    ASSERT_OK(m_pager->rollback_txn());
+    ASSERT_OK(m_pager->commit());
+
+    // commit() doesn't end the transaction. finish() must be called.
+    ASSERT_TRUE(m_pager->begin(true).is_not_supported());
+    m_pager->finish();
+
+    ASSERT_OK(m_pager->begin(true));
+    m_pager->rollback();
+    m_pager->finish();
+
+    // Only able to start a read transaction once.
+    ASSERT_OK(m_pager->begin(false));
+    ASSERT_FALSE(m_pager->begin(false).is_ok());
 }
 
 TEST_F(PagerTests, AcquirePastEOF)
 {
     // Create "kManyPages" pages.
-    ASSERT_TRUE(m_pager->begin_txn());
+    ASSERT_OK(m_pager->begin(true));
     write_pages(*this, 0, kManyPages);
-    ASSERT_OK(m_pager->commit_txn());
+    ASSERT_OK(m_pager->commit());
+    m_pager->finish();
 
     // ID of a page that is way past the logical end of the DB file (the physical
     // size is still 0, but conceptually, there are kManyPages pages in existence).
     const auto kOutOfBounds = kManyPages * 10;
 
     Page page;
+    ASSERT_OK(m_pager->begin(true));
     ASSERT_OK(m_pager->acquire(Id(kOutOfBounds), page));
     ASSERT_EQ(page.id(), Id(kOutOfBounds));
 
@@ -529,22 +543,20 @@ TEST_F(PagerTests, AcquirePastEOF)
     // written to the WAL, and there will be no indication that the DB size changed.
     // Usually, new pages are obtained by calling Pager::allocate(), but this should
     // work as well.
-    ASSERT_TRUE(m_pager->begin_txn());
     m_pager->upgrade(page);
     m_pager->release(std::move(page));
-    ASSERT_OK(m_pager->commit_txn());
 
     ASSERT_EQ(m_pager->page_count(), kOutOfBounds)
         << "DB page count was not updated";
 
     // Cause the out-of-bounds page to be evicted.
-    ASSERT_TRUE(m_pager->begin_txn());
     write_pages(*this, 0, kManyPages);
-    ASSERT_OK(m_pager->commit_txn());
 
     ASSERT_EQ(count_db_pages(), 1)
         << "file have 1 page: no checkpoint has occurred";
 
+    ASSERT_OK(m_pager->commit());
+    m_pager->finish();
     ASSERT_OK(m_pager->checkpoint());
     ASSERT_EQ(m_pager->page_count(), kOutOfBounds);
     ASSERT_EQ(count_db_pages(), kOutOfBounds);
@@ -552,46 +564,51 @@ TEST_F(PagerTests, AcquirePastEOF)
     // Intervening pages should be usable now. They are not in the WAL, so they must
     // be read from the DB file, modified in memory, written back to the WAL, then
     // read out of the WAL again.
-    ASSERT_TRUE(m_pager->begin_txn());
+    ASSERT_OK(m_pager->begin(true));
     write_pages(*this, 42, kOutOfBounds);
-    ASSERT_OK(m_pager->commit_txn());
+    ASSERT_OK(m_pager->commit());
     read_and_check(*this, 42, kOutOfBounds);
+    m_pager->finish();
 }
 
 TEST_F(PagerTests, FreelistUsage)
 {
-    ASSERT_TRUE(m_pager->begin_txn());
+    ASSERT_OK(m_pager->begin(true));
     ASSERT_OK(create_freelist_pages(kSomePages * 2));
     write_pages(*this, 123, kSomePages * 2);
-    ASSERT_OK(m_pager->commit_txn());
+    ASSERT_OK(m_pager->commit());
     read_and_check(*this, 123, kSomePages * 2);
+    m_pager->finish();
 
-    ASSERT_TRUE(m_pager->begin_txn());
+    ASSERT_OK(m_pager->begin(true));
     write_pages(*this, 456, kSomePages);
-    ASSERT_OK(m_pager->rollback_txn());
+    m_pager->rollback();
     read_and_check(*this, 123, kSomePages * 2);
+    m_pager->finish();
 
     ASSERT_OK(m_pager->checkpoint());
+    ASSERT_OK(m_pager->begin(false));
     read_and_check(*this, 123, kSomePages * 2);
     read_and_check(*this, 123, kSomePages * 2, true);
+    m_pager->finish();
 }
 
 #ifndef NDEBUG
 TEST_F(PagerTests, InvalidModeDeathTest)
 {
     ASSERT_EQ(m_pager->mode(), Pager::kOpen);
-    ASSERT_DEATH((void)m_pager->commit_txn(), "expect");
-    ASSERT_DEATH((void)m_pager->rollback_txn(), "expect");
+    ASSERT_DEATH((void)m_pager->commit(), kExpectationMatcher);
+    ASSERT_DEATH((void)m_pager->rollback(), kExpectationMatcher);
 
     m_pager->set_status(Status::io_error("I/O error"));
     ASSERT_EQ(m_pager->mode(), Pager::kError);
-    ASSERT_DEATH((void)m_pager->begin_txn(), "expect");
-    ASSERT_DEATH((void)m_pager->checkpoint(), "expect");
+    ASSERT_DEATH((void)m_pager->begin(true), kExpectationMatcher);
+    ASSERT_DEATH((void)m_pager->checkpoint(), kExpectationMatcher);
 }
 
 TEST_F(PagerTests, DoubleFreeDeathTest)
 {
-    ASSERT_TRUE(m_pager->begin_txn());
+    ASSERT_OK(m_pager->begin(true));
     for (std::size_t i = 0; i < 2; ++i) {
         for (std::size_t j = 0; j < 2; ++j) {
             Page page;
@@ -604,22 +621,22 @@ TEST_F(PagerTests, DoubleFreeDeathTest)
             }
 
             if (j) {
-                ASSERT_DEATH(m_pager->release(std::move(page)), "expect");
+                ASSERT_DEATH(m_pager->release(std::move(page)), kExpectationMatcher);
             } else {
-                ASSERT_DEATH((void)m_pager->destroy(std::move(page)), "expect");
+                ASSERT_DEATH((void)m_pager->destroy(std::move(page)), kExpectationMatcher);
             }
         }
     }
-    ASSERT_OK(m_pager->commit_txn());
+    ASSERT_OK(m_pager->commit());
 }
 
 TEST_F(PagerTests, DestroyPointerMapPageDeathTest)
 {
-    ASSERT_TRUE(m_pager->begin_txn());
+    ASSERT_OK(m_pager->begin(true));
     Page page;
     ASSERT_OK(m_pager->acquire(Id(2), page));
-    ASSERT_DEATH((void)m_pager->destroy(std::move(page)), "expect");
-    ASSERT_OK(m_pager->commit_txn());
+    ASSERT_DEATH((void)m_pager->destroy(std::move(page)), kExpectationMatcher);
+    ASSERT_OK(m_pager->commit());
 }
 #endif // NDEBUG
 
@@ -628,17 +645,19 @@ class TruncationTests : public PagerTests
 public:
     static constexpr std::size_t kInitialPageCount = 500;
 
+    ~TruncationTests() override = default;
+
     auto SetUp() -> void override
     {
         PagerTests::SetUp();
-        ASSERT_TRUE(m_pager->begin_txn());
+        ASSERT_OK(m_pager->begin(true));
         write_pages(*this, 0, kInitialPageCount);
     }
 
     auto TearDown() -> void override
     {
         if (m_pager->mode() != Pager::kOpen) {
-            ASSERT_OK(m_pager->commit_txn());
+            ASSERT_OK(m_pager->commit());
         }
     }
 };
@@ -661,7 +680,8 @@ TEST_F(TruncationTests, OnlyValidPagesAreCheckpointed)
     ASSERT_EQ(file_size, kPageSize)
         << "root page was not allocated";
 
-    ASSERT_OK(m_pager->commit_txn());
+    ASSERT_OK(m_pager->commit());
+    m_pager->finish();
 
     // When the WAL is enabled, the DB file is not written until checkpoint.
     ASSERT_OK(env->file_size(kDBFilename, file_size));
@@ -678,7 +698,7 @@ TEST_F(TruncationTests, OnlyValidPagesAreCheckpointed)
 #ifndef NDEBUG
 TEST_F(TruncationTests, PurgeRootDeathTest)
 {
-    ASSERT_DEATH(m_pager->set_page_count(0), "expect");
+    ASSERT_DEATH(m_pager->set_page_count(0), kExpectationMatcher);
 }
 #endif // NDEBUG
 
@@ -731,24 +751,30 @@ private:
     std::size_t m_page_size = 0;
 };
 
-class WalTestBase : public EnvTestHarness<tools::FakeEnv>
+class WalTestBase : public EnvTestHarness<PosixEnv>
 {
 protected:
     static constexpr std::size_t kPageSize = kMinPageSize;
 
     WalTestBase()
+        : m_testdir(".")
     {
+        File *file;
+        EXPECT_OK(env().new_file(kDBFilename, Env::kCreate | Env::kReadWrite, file));
+
         m_param = {
-            .filename = kWalFilename,
+            .filename = m_testdir.as_child(kWalFilename),
             .page_size = kPageSize,
             .env = &env(),
+            .dbfile = file,
         };
         EXPECT_OK(Wal::open(m_param, m_wal));
     }
 
-    virtual ~WalTestBase()
+    ~WalTestBase() override
     {
         close();
+        delete m_db;
     }
 
     auto close() -> void
@@ -757,34 +783,11 @@ protected:
         ASSERT_EQ(m_wal, nullptr);
     }
 
+    File *m_db = nullptr;
     Wal *m_wal = nullptr;
     Wal::Parameters m_param;
+    tools::TestDir m_testdir;
 };
-
-class WalTests
-    : public WalTestBase,
-      public testing::Test
-{
-protected:
-    ~WalTests() override = default;
-};
-
-TEST_F(WalTests, EmptyWalIsRemovedOnClose)
-{
-    ASSERT_TRUE(env().file_exists(kWalFilename));
-    close();
-    ASSERT_FALSE(env().file_exists(kWalFilename));
-}
-
-TEST_F(WalTests, WritingEmptyDirtyListIsNOOP)
-{
-    ASSERT_OK(m_wal->write(nullptr, 0));
-    ASSERT_OK(m_wal->write(nullptr, 0));
-
-    std::size_t file_size;
-    ASSERT_OK(env().file_size(kWalFilename, file_size));
-    ASSERT_LT(file_size, kPageSize);
-}
 
 class WalParamTests
     : public WalTestBase,
@@ -798,10 +801,11 @@ protected:
         : m_builder(kPageSize),
           m_saved(kPageSize),
           m_rng(42),
-          m_fake_param {
-              .filename = "fake",
+          m_fake_param{
+              .filename = m_testdir.as_child("fake-wal"),
               .page_size = kPageSize,
               .env = &env(),
+              nullptr,
           },
           m_fake(new tools::FakeWal(m_fake_param))
     {
@@ -827,8 +831,8 @@ protected:
             m_builder.build(pgno, dirty);
             auto db_data = m_builder.data();
             auto db_size = db_data.size() / kPageSize * commit;
-            EXPECT_OK(m_wal->write(&dirty[0], db_size));
-            EXPECT_OK(m_fake->write(&dirty[0], db_size));
+            EXPECT_OK(m_wal->write(&dirty.front(), db_size));
+            EXPECT_OK(m_fake->write(&dirty.front(), db_size));
         }
     }
 
@@ -858,19 +862,19 @@ protected:
     {
         ASSERT_OK(Wal::close(m_wal));
         ASSERT_OK(Wal::open(m_param, m_wal));
-        ASSERT_OK(m_fake->abort());
+        m_fake->rollback();
     }
 
     auto run_and_validate_checkpoint(bool save_state = true) -> void
     {
         File *real, *fake;
-        ASSERT_OK(env().new_file("real", real));
-        ASSERT_OK(env().new_file("fake", fake));
+        ASSERT_OK(env().new_file(m_testdir.as_child("realdb"), Env::kCreate | Env::kReadWrite, real));
+        ASSERT_OK(env().new_file(m_testdir.as_child("fakedb"), Env::kCreate | Env::kReadWrite, fake));
         ASSERT_OK(m_wal->checkpoint(*real, nullptr));
         ASSERT_OK(m_fake->checkpoint(*fake, nullptr));
 
         std::size_t file_size;
-        ASSERT_OK(env().file_size("fake", file_size));
+        ASSERT_OK(env().file_size(m_testdir.as_child("fakedb"), file_size));
 
         std::string real_buf(file_size, '\0');
         std::string fake_buf(file_size, '\0');
@@ -889,27 +893,40 @@ protected:
     auto test_write_and_read_back() -> void
     {
         for (std::size_t iteration = 0; iteration < m_iterations; ++iteration) {
+            bool changed;
+            ASSERT_OK(m_wal->start_reader(changed));
+            ASSERT_OK(m_wal->start_writer());
             write_records(m_pages_per_iter, m_commit_interval != 0);
             read_and_check_records();
+            m_wal->finish_writer();
+            m_wal->finish_reader();
         }
     }
 
-    auto test_operations(bool abort_uncommitted, bool reopen) -> void
+    auto test_operations(bool reopen) -> void
     {
         for (std::size_t iteration = 0; iteration < m_iterations; ++iteration) {
+            bool changed;
+            ASSERT_OK(m_wal->start_reader(changed));
+            ASSERT_OK(m_wal->start_writer());
+
             const auto is_commit = m_commit_interval && iteration % m_commit_interval == m_commit_interval - 1;
             write_records(m_pages_per_iter, is_commit);
-            if (abort_uncommitted && !is_commit) {
-                ASSERT_OK(m_wal->abort());
-                ASSERT_OK(m_fake->abort());
+            if (!is_commit) {
+                m_wal->rollback();
+                m_fake->rollback();
             }
+            m_wal->finish_writer();
+            m_wal->finish_reader();
+
             if (reopen) {
                 reopen_wals();
             }
+            ASSERT_OK(m_wal->start_reader(changed));
             read_and_check_records();
-            if (abort_uncommitted || is_commit) {
-                run_and_validate_checkpoint(is_commit);
-            }
+            m_wal->finish_reader();
+
+            run_and_validate_checkpoint(is_commit);
         }
     }
 
@@ -929,24 +946,14 @@ TEST_P(WalParamTests, WriteAndReadBack)
     test_write_and_read_back();
 }
 
-TEST_P(WalParamTests, OperationsA)
+TEST_P(WalParamTests, Operations1)
 {
-    test_operations(true, false);
+    test_operations(false);
 }
 
-TEST_P(WalParamTests, OperationsB)
+TEST_P(WalParamTests, Operations2)
 {
-    test_operations(true, true);
-}
-
-TEST_P(WalParamTests, OperationsC)
-{
-    test_operations(false, false);
-}
-
-TEST_P(WalParamTests, OperationsD)
-{
-    test_operations(false, true);
+    test_operations(true);
 }
 
 INSTANTIATE_TEST_SUITE_P(
@@ -1007,104 +1014,69 @@ public:
         env = new tools::TestEnv;
     }
 
-    auto run_setup_and_operations()
+    [[nodiscard]] auto run_setup_and_operations() -> Status
     {
         (void)env->remove_file(kDBFilename);
         (void)env->remove_file(kWalFilename);
+        const auto saved_counter = std::exchange(m_counter, -1);
+        write_db_header();
+        m_counter = saved_counter;
 
-        const Wal::Parameters wal_param = {
-            kWalFilename,
-            kPageSize,
-            env,
-        };
-        auto s = Wal::open(wal_param, m_wal);
-        if (!s.is_ok()) {
-            return;
-        }
+        CALICODB_TRY(init_with_status());
 
-        const Pager::Parameters pager_param = {
-            kDBFilename,
-            env,
-            m_wal,
-            nullptr,
-            &m_state,
-            kPagerFrames,
-            kPageSize,
+        auto str = tools::read_file_to_string(*env, kDBFilename);
+        std::cerr << "FILE = " << escape_string(str.substr(0, 18)) << '\n';
+
+        CALICODB_TRY(m_pager->begin(true));
+
+        ScopeGuard guard = [this] {
+            return m_pager->finish();
         };
 
-        s = Pager::open(pager_param, m_pager);
-        m_state.use_wal = true;
+        std::vector<std::size_t> indices(std::get<0>(GetParam()));
+        std::iota(begin(indices), end(indices), 0);
+        std::default_random_engine rng(42);
+        std::shuffle(begin(indices), end(indices), rng);
 
-        if (s.is_ok()) {
-            (void)m_pager->begin_txn();
+        for (auto i : indices) {
+            Page page;
+            const Id page_id(i + 1);
+            const auto message = make_key(i);
+            CALICODB_TRY(m_pager->acquire(page_id, page));
 
-            std::vector<std::size_t> indices(std::get<0>(GetParam()));
-            std::iota(begin(indices), end(indices), 0);
-            std::default_random_engine rng(42);
-            std::shuffle(begin(indices), end(indices), rng);
+            m_pager->upgrade(page);
+            std::memcpy(page.data() + page.size() - message.size(), message.data(), message.size());
+            m_pager->release(std::move(page));
 
-            // Transaction has already been started, since this is the first time the pager
-            // has been opened.
-            for (auto i : indices) {
-                Page page;
-                const Id page_id(i + 1);
-                const auto message = make_key(i);
-                s = m_pager->acquire(page_id, page);
-                if (!s.is_ok()) {
-                    break;
-                }
-
-                m_pager->upgrade(page);
-                std::memcpy(page.data() + page.size() - message.size(), message.data(), message.size());
-                m_pager->release(std::move(page));
-
-                // Perform a commit every so often and checkpoint at a less frequent interval.
-                if (i && i % 25 == 0) {
-                    s = m_pager->commit_txn();
-                    if (!s.is_ok()) {
-                        break;
-                    }
-                    if (i % 5 == 0) {
-                        s = m_pager->checkpoint();
-                        if (!s.is_ok()) {
-                            break;
-                        }
-                    }
-                    ASSERT_TRUE(m_pager->begin_txn());
-                }
-            }
-            if (s.is_ok()) {
-                s = m_pager->commit_txn();
-                if (s.is_ok()) {
-                    s = m_pager->checkpoint();
-                }
-            }
-
-            if (s.is_ok()) {
-                m_counter = -1;
-                // Should have written monotonically increasing integers back to the DB file.
-                read_and_check(*this, 0, indices.size());
-                read_and_check(*this, 0, indices.size(), true);
-                m_completed = true;
-            } else {
-                // Only 1 interceptor is set, so this should succeed.
-                ASSERT_OK(m_pager->rollback_txn());
+            // Perform a commit every so often.
+            if (i && i % 25 == 0) {
+                CALICODB_TRY(m_pager->commit());
             }
         }
-        close_pager_and_wal();
+        CALICODB_TRY(m_pager->commit());
+        std::move(guard).invoke();
+        CALICODB_TRY(m_pager->checkpoint());
+
+        m_counter = -1;
+
+        // Should have written monotonically increasing integers back to the DB file.
+        CALICODB_TRY(m_pager->begin(false));
+        read_and_check(*this, 0, indices.size());
+        read_and_check(*this, 0, indices.size(), true);
+        m_pager->finish();
+
+        return Status::ok();
     }
 
     auto close_pager_and_wal() -> void
     {
-        (void)Wal::close(m_wal);
+        (void)m_pager->close();
         delete m_pager;
         m_pager = nullptr;
-        m_wal = nullptr;
     }
 
     tools::RandomGenerator random;
     int m_counter = 0;
-    bool m_completed = false;
 };
 
 TEST_P(WalPagerFaultTests, SetupAndOperations)
@@ -1114,13 +1086,22 @@ TEST_P(WalPagerFaultTests, SetupAndOperations)
         ->add_interceptor(filename, tools::Interceptor(
                                         type,
                                         [this] {
-                                            return m_counter-- == 0 ? special_error() : Status::ok();
+                                            if (m_counter-- == 0) {
+                                                return special_error();
+                                            }
+                                            return Status::ok();
                                         }));
 
+    Status s;
     int count = 0;
-    while (!m_completed) {
+    for (;;) {
         m_counter = count++;
-        run_setup_and_operations();
+        s = run_setup_and_operations();
+        if (s.is_ok()) {
+            break;
+        } else {
+            assert_special_error(s);
+        }
     }
 }
 

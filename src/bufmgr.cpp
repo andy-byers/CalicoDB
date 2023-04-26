@@ -12,7 +12,7 @@ namespace calicodb
 {
 
 Bufmgr::Bufmgr(std::size_t page_size, std::size_t frame_count)
-    : m_buffer(new (std::align_val_t {page_size}) char[page_size * frame_count]()),
+    : m_buffer(new(std::align_val_t{page_size}) char[page_size * frame_count]()),
       m_frame_count(frame_count),
       m_page_size(page_size)
 {
@@ -30,7 +30,7 @@ Bufmgr::Bufmgr(std::size_t page_size, std::size_t frame_count)
 
 Bufmgr::~Bufmgr()
 {
-    operator delete[] (m_buffer, std::align_val_t {m_page_size});
+    operator delete[](m_buffer, std::align_val_t{m_page_size});
 }
 
 auto Bufmgr::size() const -> std::size_t
@@ -79,11 +79,12 @@ auto Bufmgr::alloc(Id page_id) -> PageRef *
 
 auto Bufmgr::erase(Id page_id) -> bool
 {
-    CALICODB_EXPECT_FALSE(page_id.is_root());
     const auto itr = m_map.find(page_id);
     if (itr == end(m_map)) {
         return false;
     }
+    // Root page is not stored in the cache.
+    CALICODB_EXPECT_FALSE(page_id.is_root());
     unpin(*itr->second);
     m_list.erase(itr->second);
     m_map.erase(itr);

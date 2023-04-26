@@ -21,12 +21,14 @@ public:
     explicit Cursor();
     virtual ~Cursor();
 
-    // Check if the cursor is valid, that is, positioned on a record.
+    Cursor(const Cursor &) = delete;
+    auto operator=(const Cursor &) -> Cursor & = delete;
+
+    // Return true if the cursor is valid (positioned on a record) false otherwise
     //
     // This method must return true before key(), value(), next(), or previous() is
     // called. Those calls will result in unspecified behavior if the cursor is not
-    // valid. Modifying the table this cursor was created from also causes
-    // invalidation.
+    // valid.
     [[nodiscard]] virtual auto is_valid() const -> bool = 0;
 
     // Check the status associated with this cursor.
@@ -38,12 +40,12 @@ public:
 
     // Get the current record key.
     //
-    // Expects a valid cursor.
+    // REQUIRES: is_valid()
     [[nodiscard]] virtual auto key() const -> Slice = 0;
 
     // Get the current record value.
     //
-    // Expects a valid cursor.
+    // REQUIRES: is_valid()
     [[nodiscard]] virtual auto value() const -> Slice = 0;
 
     // Move the cursor to the record with a key that is greater than or equal to
@@ -66,14 +68,18 @@ public:
 
     // Move the cursor to the next record.
     //
-    // The cursor is invalidated if it was at the same position as a cursor that
-    // had seek_last() called on it. Expects a valid cursor.
+    // The cursor is invalidated if it was on the last record, i.e. at the same
+    // position as a cursor that had seek_last() called on it.
+    //
+    // REQUIRES: is_valid()
     virtual auto next() -> void = 0;
 
     // Move the cursor to the previous record.
     //
-    // The cursor is invalidated if it was at the same position as a cursor that
-    // had seek_first() called on it. Expects a valid cursor.
+    // The cursor is invalidated if it was on the first record, i.e. at the same
+    // position as a cursor that had seek_first() called on it.
+    //
+    // REQUIRES: is_valid()
     virtual auto previous() -> void = 0;
 };
 

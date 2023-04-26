@@ -11,14 +11,9 @@ namespace calicodb
 {
 
 class Env;
-class LogFile;
+class Sink;
 
-enum class AccessMode {
-    kReadOnly,
-    kReadWrite,
-};
-
-struct Options {
+struct Options final {
     // Size of a database page in bytes. This is the basic unit of I/O for the
     // database file. Data is read/written in page-sized chunks. Must be a power-
     // of-two between 512 and 65536, inclusive.
@@ -31,10 +26,8 @@ struct Options {
     // "dbname-wal", where "dbname" is the name of the database.
     std::string wal_filename;
 
-    // Custom destination for info log messages. Defaults to writing to a file
-    // called "dbname-log", where "dbname" is the name of the database. See env.h
-    // for details.
-    LogFile *info_log = nullptr;
+    // Destination for info log messages.
+    Sink *info_log = nullptr;
 
     // Custom storage environment. See env.h for details.
     Env *env = nullptr;
@@ -51,12 +44,8 @@ struct Options {
 };
 
 struct TableOptions {
-    // If set to kReadOnly, calls to put() or erase() on the table will return with
-    // an error.
-    AccessMode mode = AccessMode::kReadWrite;
-};
-
-struct TxnOptions {
+    bool create_if_missing = true;
+    bool error_if_exists = false;
 };
 
 } // namespace calicodb

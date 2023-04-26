@@ -9,6 +9,7 @@
 #include "calicodb/slice.h"
 #include "encoding.h"
 #include "logging.h"
+#include "scope_guard.h"
 #include "unit_tests.h"
 #include "utils.h"
 
@@ -45,8 +46,8 @@ TEST(TestUtils, EncodingIsConsistent)
 class SliceTests : public testing::Test
 {
 protected:
-    std::string test_string {"Hello, world!"};
-    Slice slice {test_string};
+    std::string test_string{"Hello, world!"};
+    Slice slice{test_string};
 };
 
 TEST_F(SliceTests, EqualsSelf)
@@ -56,7 +57,7 @@ TEST_F(SliceTests, EqualsSelf)
 
 TEST_F(SliceTests, StringLiteralSlice)
 {
-    ASSERT_TRUE(Slice(test_string) == Slice {"Hello, world!"});
+    ASSERT_TRUE(Slice(test_string) == Slice{"Hello, world!"});
 }
 
 TEST_F(SliceTests, StartsWith)
@@ -167,7 +168,7 @@ TEST_F(SliceTests, WithCppString)
 TEST_F(SliceTests, WithCString)
 {
     // Construct from and compare with C-style strings.
-    char a[4] {"123"}; // Null-terminated
+    char a[4]{"123"}; // Null-terminated
     Slice bv1(a);
     ASSERT_TRUE(bv1 == a);
 
@@ -211,14 +212,14 @@ TEST(UtilsTest, PowerOfTwoComputationIsCorrect)
 
 TEST(NonPrintableSliceTests, UsesStringSize)
 {
-    const std::string u {"\x00\x01", 2};
+    const std::string u{"\x00\x01", 2};
     ASSERT_EQ(Slice(u).size(), 2);
 }
 
 TEST(NonPrintableSliceTests, NullcharsAreEqual)
 {
-    const std::string u {"\x00", 1};
-    const std::string v {"\x00", 1};
+    const std::string u{"\x00", 1};
+    const std::string v{"\x00", 1};
     ASSERT_EQ(Slice(u).compare(v), 0);
 }
 
@@ -255,7 +256,7 @@ TEST(NonPrintableSliceTests, Conversions)
 TEST(NonPrintableSliceTests, CStyleStringLengths)
 {
     const auto a = "ab";
-    const char b[] {'4', '2', '\x00'};
+    const char b[]{'4', '2', '\x00'};
     ASSERT_EQ(Slice(a).size(), 2);
     ASSERT_EQ(Slice(b).size(), 2);
 }
@@ -263,7 +264,7 @@ TEST(NonPrintableSliceTests, CStyleStringLengths)
 TEST(NonPrintableSliceTests, NullByteInMiddleOfLiteralGivesIncorrectLength)
 {
     const auto a = "\x12\x00\x34";
-    const char b[] {'4', '\x00', '2', '\x00'};
+    const char b[]{'4', '\x00', '2', '\x00'};
 
     ASSERT_EQ(std::char_traits<char>::length(a), 1);
     ASSERT_EQ(std::char_traits<char>::length(b), 1);
@@ -434,20 +435,20 @@ TEST(StatusTests, MessageIsNullTerminated)
 
 TEST(StatusTests, ExpectedStatusNames)
 {
-    ASSERT_EQ(get_status_name(Status::ok()), std::string {"OK"});
-    ASSERT_EQ(get_status_name(Status::not_found("")), std::string {"not found"});
-    ASSERT_EQ(get_status_name(Status::invalid_argument("")), std::string {"invalid argument"});
-    ASSERT_EQ(get_status_name(Status::corruption("")), std::string {"corruption"});
-    ASSERT_EQ(get_status_name(Status::not_supported("")), std::string {"not supported"});
-    ASSERT_EQ(get_status_name(Status::io_error("")), std::string {"I/O error"});
+    ASSERT_EQ(get_status_name(Status::ok()), std::string{"OK"});
+    ASSERT_EQ(get_status_name(Status::not_found("")), std::string{"not found"});
+    ASSERT_EQ(get_status_name(Status::invalid_argument("")), std::string{"invalid argument"});
+    ASSERT_EQ(get_status_name(Status::corruption("")), std::string{"corruption"});
+    ASSERT_EQ(get_status_name(Status::not_supported("")), std::string{"not supported"});
+    ASSERT_EQ(get_status_name(Status::io_error("")), std::string{"I/O error"});
 }
 
 TEST(MiscTests, StringsUsesSizeParameterForComparisons)
 {
-    std::vector<std::string> v {
-        std::string {"\x11\x00\x33", 3},
-        std::string {"\x11\x00\x22", 3},
-        std::string {"\x11\x00\x11", 3},
+    std::vector<std::string> v{
+        std::string{"\x11\x00\x33", 3},
+        std::string{"\x11\x00\x22", 3},
+        std::string{"\x11\x00\x11", 3},
     };
     std::sort(begin(v), end(v));
     ASSERT_EQ(v[0][2], '\x11');
@@ -457,7 +458,7 @@ TEST(MiscTests, StringsUsesSizeParameterForComparisons)
 
 [[nodiscard]] auto describe_size(std::size_t size, int precision = 4) -> std::string
 {
-    static constexpr std::size_t KiB {1'024};
+    static constexpr std::size_t KiB{1'024};
     static constexpr auto MiB = KiB * KiB;
     static constexpr auto GiB = MiB * KiB;
 
@@ -504,8 +505,8 @@ TEST_F(InterceptorTests, RespectsPrefix)
     QUICK_INTERCEPTOR("./test", tools::Interceptor::kOpen);
 
     File *editor;
-    assert_special_error(env().new_file("./test", editor));
-    ASSERT_OK(env().new_file("./wal", editor));
+    assert_special_error(env().new_file("./test", Env::kCreate | Env::kReadWrite, editor));
+    ASSERT_OK(env().new_file("./wal", Env::kCreate | Env::kReadWrite, editor));
     delete editor;
 }
 
@@ -514,7 +515,7 @@ TEST_F(InterceptorTests, RespectsSyscallType)
     QUICK_INTERCEPTOR("./test", tools::Interceptor::kWrite);
 
     File *editor;
-    ASSERT_OK(env().new_file("./test", editor));
+    ASSERT_OK(env().new_file("./test", Env::kCreate | Env::kReadWrite, editor));
     assert_special_error(editor->write(0, {}));
     delete editor;
 }
@@ -523,22 +524,6 @@ TEST(Logging, WriteFormattedString)
 {
     std::string s;
     append_fmt_string(s, "%s %d %f", "abc", 42, 1.0);
-}
-
-TEST(Logging, Logv)
-{
-    LogFile *log;
-    tools::FakeEnv env;
-    ASSERT_OK(env.new_log_file("test", log));
-
-    std::string message("Hello, world!");
-    logv(nullptr, "%s", message.c_str());
-    logv(log, "%s", message.c_str());
-
-    message.resize(1'024, '.');
-    logv(log, "%s", message.c_str());
-
-    delete log;
 }
 
 TEST(LevelDB_Logging, NumberToString)
@@ -736,6 +721,51 @@ TEST(LevelDB_Coding, Varint64Overflow)
     uint64_t result;
     std::string input("\x81\x82\x83\x84\x85\x81\x82\x83\x84\x85\x11");
     ASSERT_TRUE(decode_varint(input.data(), result) == nullptr);
+}
+
+class ScopeGuardTests : public testing::Test
+{
+protected:
+    ScopeGuardTests()
+    {
+        m_callback = [this] {
+            ++m_calls;
+        };
+    }
+
+    ~ScopeGuardTests() override = default;
+
+    std::function<void()> m_callback;
+    int m_calls = 0;
+};
+
+TEST_F(ScopeGuardTests, CallbackIsCalledOnceOnScopeExit)
+{
+    {
+        ASSERT_EQ(m_calls, 0);
+        ScopeGuard guard(m_callback);
+    }
+    ASSERT_EQ(m_calls, 1);
+}
+
+TEST_F(ScopeGuardTests, CallbackIsNotCalledIfCancelled)
+{
+    {
+        ASSERT_EQ(m_calls, 0);
+        ScopeGuard guard(m_callback);
+        std::move(guard).cancel();
+    }
+    ASSERT_EQ(m_calls, 0);
+}
+
+TEST_F(ScopeGuardTests, CallbackIsNotCalledAgainIfInvoked)
+{
+    {
+        ASSERT_EQ(m_calls, 0);
+        ScopeGuard guard(m_callback);
+        std::move(guard).invoke();
+    }
+    ASSERT_EQ(m_calls, 1);
 }
 
 } // namespace calicodb

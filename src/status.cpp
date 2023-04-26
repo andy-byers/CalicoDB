@@ -16,6 +16,7 @@ enum Code : char {
     kNotSupported,
     kCorruption,
     kNotFound,
+    kBusy,
 };
 
 static auto new_status_string(const char *data, Code code) -> char *
@@ -47,7 +48,7 @@ static auto copy_status_string(const char *data) -> char *
 }
 
 Status::Status(char code, const Slice &what)
-    : m_data(new_status_string(what.data(), Code {code}))
+    : m_data(new_status_string(what.data(), Code{code}))
 {
 }
 
@@ -57,8 +58,9 @@ Status::Status(const Status &rhs)
 }
 
 Status::Status(Status &&rhs) noexcept
+    : m_data(rhs.m_data)
 {
-    std::swap(m_data, rhs.m_data);
+    rhs.m_data = nullptr;
 }
 
 Status::~Status()
@@ -69,6 +71,7 @@ Status::~Status()
 auto Status::operator=(const Status &rhs) -> Status &
 {
     if (this != &rhs) {
+        delete[] m_data;
         m_data = copy_status_string(rhs.m_data);
     }
     return *this;
@@ -76,10 +79,13 @@ auto Status::operator=(const Status &rhs) -> Status &
 
 auto Status::operator=(Status &&rhs) noexcept -> Status &
 {
-    if (this != &rhs) {
-        std::swap(m_data, rhs.m_data);
-    }
+    std::swap(m_data, rhs.m_data);
     return *this;
+}
+
+auto Status::busy(const Slice &what) -> Status
+{
+    return Status(kBusy, what);
 }
 
 auto Status::not_found(const Slice &what) -> Status
@@ -109,27 +115,32 @@ auto Status::corruption(const Slice &what) -> Status
 
 auto Status::is_invalid_argument() const -> bool
 {
-    return !is_ok() && Code {m_data[0]} == kInvalidArgument;
+    return !is_ok() && Code{m_data[0]} == kInvalidArgument;
 }
 
 auto Status::is_io_error() const -> bool
 {
-    return !is_ok() && Code {m_data[0]} == kIOError;
+    return !is_ok() && Code{m_data[0]} == kIOError;
 }
 
 auto Status::is_not_supported() const -> bool
 {
-    return !is_ok() && Code {m_data[0]} == kNotSupported;
+    return !is_ok() && Code{m_data[0]} == kNotSupported;
 }
 
 auto Status::is_corruption() const -> bool
 {
-    return !is_ok() && Code {m_data[0]} == kCorruption;
+    return !is_ok() && Code{m_data[0]} == kCorruption;
 }
 
 auto Status::is_not_found() const -> bool
 {
-    return !is_ok() && Code {m_data[0]} == kNotFound;
+    return !is_ok() && Code{m_data[0]} == kNotFound;
+}
+
+auto Status::is_busy() const -> bool
+{
+    return !is_ok() && Code{m_data[0]} == kBusy;
 }
 
 auto Status::to_string() const -> std::string

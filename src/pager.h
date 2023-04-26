@@ -7,6 +7,7 @@
 
 #include "bufmgr.h"
 #include "calicodb/env.h"
+#include "wal.h"
 #include <unordered_set>
 
 namespace calicodb
@@ -14,8 +15,6 @@ namespace calicodb
 
 class Env;
 class Freelist;
-class BufferManager;
-class TableSet;
 class Wal;
 
 // Freelist management. The freelist is essentially a linked list that is threaded through the database. Each freelist
@@ -24,18 +23,31 @@ class Wal;
 // checked first. Only if it is empty do we allocate a page from the end of the file.
 class Freelist
 {
+    friend class Pager;
     friend class Tree;
 
     Pager *m_pager = nullptr;
-    Id *m_head = nullptr;
+    Id m_head;
 
 public:
-    explicit Freelist(Pager &pager, Id &head);
+    explicit Freelist(Pager &pager, Id head);
     [[nodiscard]] auto is_empty() const -> bool;
     [[nodiscard]] auto pop(Page &page) -> Status;
     [[nodiscard]] auto push(Page page) -> Status;
 };
 
+// Pager state transitions:
+//
+//     StateA --> StateB  Method      LockA -------> LockB
+//    ----------------------------------------------------------
+//     kOpen ---> kRead   file_lock        <none> ------> kShared
+//     kRead ---> kWrite  begin       kShared -----> kExclusive
+//     kWrite --> kDirty  mark_dirty  kExclusive --> kExclusive
+//     kDirty --> kWrite  commit      kExclusive --> kExclusive
+//     kDirty --> kWrite  rollback    kExclusive --> kExclusive
+//     ****** --> kOpen   file_unlock      ****** ------> <none>
+//     ****** --> kError  set_state   ****** ------> ******
+//
 class Pager final
 {
 public:
@@ -44,16 +56,18 @@ public:
 
     enum Mode {
         kOpen,
+        kRead,
         kWrite,
         kDirty,
         kError,
     };
 
     struct Parameters {
-        std::string filename;
+        std::string db_name;
+        std::string wal_name;
+        File *db_file = nullptr;
         Env *env = nullptr;
-        Wal *wal = nullptr;
-        LogFile *log = nullptr;
+        Sink *log = nullptr;
         DBState *state = nullptr;
         std::size_t frame_count = 0;
         std::size_t page_size = 0;
@@ -66,13 +80,18 @@ public:
 
     ~Pager();
     [[nodiscard]] static auto open(const Parameters &param, Pager *&out) -> Status;
+    [[nodiscard]] auto close() -> Status;
     [[nodiscard]] auto mode() const -> Mode;
     [[nodiscard]] auto page_count() const -> std::size_t;
     [[nodiscard]] auto page_size() const -> std::size_t;
     [[nodiscard]] auto statistics() const -> const Statistics &;
-    [[nodiscard]] auto begin_txn() -> bool;
-    [[nodiscard]] auto rollback_txn() -> Status;
-    [[nodiscard]] auto commit_txn() -> Status;
+    [[nodiscard]] auto wal_statistics() const -> WalStatistics;
+
+    [[nodiscard]] auto begin(bool write) -> Status;
+    [[nodiscard]] auto commit() -> Status;
+    auto rollback() -> void;
+    auto finish() -> void;
+
     [[nodiscard]] auto checkpoint() -> Status;
     [[nodiscard]] auto allocate(Page &page) -> Status;
     [[nodiscard]] auto destroy(Page page) -> Status;
@@ -81,7 +100,7 @@ public:
     auto release(Page page) -> void;
     auto set_status(const Status &error) const -> Status;
     auto set_page_count(std::size_t page_count) -> void;
-    auto load_state(const FileHeader &header) -> void;
+    [[nodiscard]] auto load_state() -> Status;
 
     [[nodiscard]] auto acquire_root() -> Page;
 
@@ -98,8 +117,8 @@ public:
     auto TEST_validate() const -> void;
 
 private:
-    explicit Pager(const Parameters &param, File &file);
-    [[nodiscard]] auto initialize_root(bool fresh_pager) -> Status;
+    explicit Pager(const Parameters &param);
+    [[nodiscard]] auto open_wal() -> Status;
     [[nodiscard]] auto read_page(PageRef &out) -> Status;
     [[nodiscard]] auto read_page_from_file(PageRef &ref) const -> Status;
     [[nodiscard]] auto write_page_to_file(const PageRef &entry) const -> Status;
@@ -112,17 +131,20 @@ private:
     mutable Statistics m_statistics;
     mutable DBState *m_state = nullptr;
     mutable Mode m_mode = kOpen;
+    mutable Mode m_save = kOpen;
 
-    std::string m_filename;
+    std::string m_db_name;
+    std::string m_wal_name;
     Dirtylist m_dirtylist;
     Freelist m_freelist;
     Bufmgr m_bufmgr;
 
-    // True if a checkpoint operation is being run, false otherwise. Used
-    // to indicate failure during a checkpoint.
-    bool m_in_ckpt = false;
+    // True if the in-memory root page needs to be refreshed, false otherwise. Starts
+    // out as true, so the root is read from wherever it is (DB or WAL) on the first
+    // call to acquire().
+    bool m_refresh_root = true;
 
-    LogFile *m_log = nullptr;
+    Sink *m_log = nullptr;
     File *m_file = nullptr;
     Env *m_env = nullptr;
     Wal *m_wal = nullptr;

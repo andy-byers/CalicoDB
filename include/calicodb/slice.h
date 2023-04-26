@@ -12,7 +12,7 @@
 namespace calicodb
 {
 
-class Slice
+class Slice final
 {
 public:
     constexpr Slice() noexcept = default;

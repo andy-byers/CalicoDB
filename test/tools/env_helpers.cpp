@@ -1,10 +1,10 @@
-//
-// Created by andy-byers on 4/12/23.
-//
+// Copyright (c) 2022, The CalicoDB Authors. All rights reserved.
+// This source code is licensed under the MIT License, which can be found in
+// LICENSE.md. See AUTHORS.md for a list of contributor names.
 
 #include "env_helpers.h"
 
-namespace calicodb::tools 
+namespace calicodb::tools
 {
 
 #define TRY_INTERCEPT_FROM(source, type, filename)                                                     \
@@ -13,7 +13,6 @@ namespace calicodb::tools
             return intercept_s;                                                                        \
         }                                                                                              \
     } while (0)
-
 
 auto FakeEnv::get_file_contents(const std::string &filename) const -> std::string
 {
@@ -70,6 +69,23 @@ auto FakeFile::sync() -> Status
     return Status::ok();
 }
 
+auto FakeFile::shm_map(std::size_t r, volatile void *&out) -> Status
+{
+    while (m_shm.size() <= r) {
+        m_shm.emplace_back();
+        m_shm.back().resize(File::kShmRegionSize);
+    }
+    out = m_shm[r].data();
+    return Status::ok();
+}
+
+auto FakeFile::shm_unmap(bool unlink) -> void
+{
+    if (unlink) {
+        m_shm.clear();
+    }
+}
+
 auto FakeEnv::open_or_create_file(const std::string &filename) const -> FileState &
 {
     auto itr = m_state.find(filename);
@@ -79,7 +95,12 @@ auto FakeEnv::open_or_create_file(const std::string &filename) const -> FileStat
     return itr->second;
 }
 
-auto FakeEnv::new_file(const std::string &filename, File *&out) -> Status
+auto FakeEnv::new_sink(const std::string &, Sink *&) -> Status
+{
+    return Status::ok();
+}
+
+auto FakeEnv::new_file(const std::string &filename, OpenMode, File *&out) -> Status
 {
     auto &mem = open_or_create_file(filename);
     out = new FakeFile(filename, *this, mem);
@@ -87,12 +108,6 @@ auto FakeEnv::new_file(const std::string &filename, File *&out) -> Status
         mem.created = true;
         mem.buffer.clear();
     }
-    return Status::ok();
-}
-
-auto FakeEnv::new_log_file(const std::string &, LogFile *&out) -> Status
-{
-    out = new FakeLogFile;
     return Status::ok();
 }
 
@@ -135,6 +150,16 @@ auto FakeEnv::file_exists(const std::string &filename) const -> bool
         return itr->second.created;
     }
     return false;
+}
+
+auto FakeEnv::srand(unsigned seed) -> void
+{
+    ::srand(seed);
+}
+
+auto FakeEnv::rand() -> unsigned
+{
+    return ::rand();
 }
 
 auto FakeEnv::clone() const -> Env *
@@ -198,11 +223,11 @@ auto TestEnv::drop_after_last_sync(const std::string &filename) -> void
     }
 }
 
-auto TestEnv::new_file(const std::string &filename, File *&out) -> Status
+auto TestEnv::new_file(const std::string &filename, OpenMode mode, File *&out) -> Status
 {
     TRY_INTERCEPT_FROM(*this, Interceptor::kOpen, filename);
 
-    auto s = target()->new_file(filename, out);
+    auto s = target()->new_file(filename, mode, out);
     if (s.is_ok()) {
         auto state = m_state.find(filename);
         if (state == end(m_state)) {
@@ -271,35 +296,34 @@ auto TestEnv::clear_interceptors(const std::string &filename) -> void
 }
 
 TestFile::TestFile(std::string filename, File &file, TestEnv &env)
-    : m_filename(std::move(filename)),
-      m_env(&env),
-      m_file(&file)
+    : FileWrapper(file),
+      m_filename(std::move(filename)),
+      m_env(&env)
 {
 }
 
 TestFile::~TestFile()
 {
     m_env->drop_after_last_sync(m_filename);
-
-    delete m_file;
+    delete target();
 }
 
 auto TestFile::read(std::size_t offset, std::size_t size, char *scratch, Slice *out) -> Status
 {
     TRY_INTERCEPT_FROM(*m_env, Interceptor::kRead, m_filename);
-    return m_file->read(offset, size, scratch, out);
+    return FileWrapper::read(offset, size, scratch, out);
 }
 
 auto TestFile::write(std::size_t offset, const Slice &in) -> Status
 {
     TRY_INTERCEPT_FROM(*m_env, Interceptor::kWrite, m_filename);
-    return m_file->write(offset, in);
+    return FileWrapper::write(offset, in);
 }
 
 auto TestFile::sync() -> Status
 {
     TRY_INTERCEPT_FROM(*m_env, Interceptor::kSync, m_filename);
-    auto s = m_file->sync();
+    auto s = FileWrapper::sync();
     if (s.is_ok()) {
         m_env->save_file_contents(m_filename);
     }

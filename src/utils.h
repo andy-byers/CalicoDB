@@ -12,12 +12,12 @@
 #include <limits>
 
 #if NDEBUG
-#  define CALICODB_EXPECT_(expr, file, line)
+#define CALICODB_EXPECT_(expr, file, line)
 #else
 #define CALICODB_EXPECT_(expr, file, line) impl::expect(expr, #expr, file, line)
-#  ifdef CALICODB_BUILD_TESTS
-#    define CALICODB_EXPENSIVE_CHECKS
-#  endif // CALICODB_BUILD_TESTS
+#ifdef CALICODB_TEST
+#define CALICODB_EXPENSIVE_CHECKS
+#endif // CALICODB_TEST
 #endif // NDEBUG
 
 #define CALICODB_EXPECT_TRUE(expr) CALICODB_EXPECT_(expr, __FILE__, __LINE__)
@@ -59,6 +59,7 @@ static constexpr std::size_t kMaxPageSize = 65'536;
 static constexpr std::size_t kMinFrameCount = 16;
 static constexpr std::size_t kMaxCacheSize = 1 << 30;
 static constexpr auto kDefaultWalSuffix = "-wal";
+static constexpr auto kDefaultShmSuffix = "-shm";
 static constexpr auto kDefaultLogSuffix = "-log";
 
 // Fixed-width unsigned integers for use in the database file format.
@@ -86,6 +87,8 @@ constexpr auto is_power_of_two(T v) noexcept -> bool
         return "corruption";
     } else if (s.is_invalid_argument()) {
         return "invalid argument";
+    } else if (s.is_busy()) {
+        return "busy";
     }
     CALICODB_EXPECT_TRUE(s.is_ok());
     return "OK";
@@ -168,7 +171,6 @@ inline auto operator!=(Id lhs, Id rhs) -> bool
 struct DBState {
     Status status;
     std::size_t ckpt_number = 0;
-    Id freelist_head;
     bool use_wal = false;
 };
 
@@ -176,6 +178,38 @@ struct TreeStatistics {
     std::size_t smo_count = 0;
     std::size_t bytes_read = 0;
     std::size_t bytes_written = 0;
+};
+
+class InternalStatus
+{
+public:
+    explicit InternalStatus() = default;
+    explicit InternalStatus(int extra)
+        : m_extra(extra)
+    {
+    }
+    explicit InternalStatus(Status s, int extra = 0)
+        : m_status(std::move(s)),
+          m_extra(extra)
+    {
+    }
+
+    [[nodiscard]] auto is_ok() const -> bool
+    {
+        return m_status.is_ok();
+    }
+    [[nodiscard]] auto extra() const -> int
+    {
+        return m_extra;
+    }
+    [[nodiscard]] auto operator*() const -> const Status &
+    {
+        return m_status;
+    }
+
+private:
+    Status m_status;
+    int m_extra = 0;
 };
 
 } // namespace calicodb

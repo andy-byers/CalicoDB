@@ -83,34 +83,42 @@ auto read_file_to_string(Env &env, const std::string &filename) -> std::string
     std::string buffer(file_size, '\0');
 
     File *file;
-    CHECK_OK(env.new_file(filename, file));
+    CHECK_OK(env.new_file(filename, Env::kCreate | Env::kReadWrite, file));
     CHECK_OK(file->read_exact(0, file_size, buffer.data()));
     delete file;
 
     return buffer;
 }
 
-auto write_string_to_file(Env &env, const std::string &filename, std::string buffer, long offset) -> void
+auto write_string_to_file(Env &env, const std::string &filename, const std::string &buffer, long offset) -> void
 {
+    File *file;
+    CHECK_OK(env.new_file(filename, Env::kCreate | Env::kReadWrite, file));
+
     std::size_t write_pos;
     if (offset < 0) {
         CHECK_OK(env.file_size(filename, write_pos));
     } else {
         write_pos = offset;
     }
-    File *file;
-    CHECK_OK(env.new_file(filename, file));
     CHECK_OK(file->write(write_pos, buffer));
+    CHECK_OK(file->sync());
     delete file;
+}
+
+auto assign_file_contents(Env &env, const std::string &filename, const std::string &contents) -> void
+{
+    CHECK_OK(env.resize_file(filename, 0));
+    write_string_to_file(env, filename, contents, 0);
 }
 
 auto hexdump_page(const Page &page) -> void
 {
-    std::fprintf(stderr,"%u:\n",page.id().value);
-    for (std::size_t i = 0; i < page.size() / 16; ++i){
+    std::fprintf(stderr, "%u:\n", page.id().value);
+    for (std::size_t i = 0; i < page.size() / 16; ++i) {
         std::fputs("    ", stderr);
-        for(std::size_t j = 0; j < 16; ++j){
-            const auto c=page.data()[i * 16 + j];
+        for (std::size_t j = 0; j < 16; ++j) {
+            const auto c = page.data()[i * 16 + j];
             if (std::isprint(c)) {
                 std::fprintf(stderr, "%2c ", c);
             } else {
@@ -121,12 +129,26 @@ auto hexdump_page(const Page &page) -> void
     }
 }
 
-auto fill_db(DB &db, RandomGenerator &random, std::size_t num_records, std::size_t max_payload_size) -> std::map<std::string, std::string>
+auto fill_db(DB &db, const std::string &tablename, RandomGenerator &random, std::size_t num_records, std::size_t max_payload_size) -> std::map<std::string, std::string>
 {
-    return fill_db(db, *db.default_table(), random, num_records, max_payload_size);
+    Txn *txn;
+    CHECK_OK(db.start(true, txn));
+    auto records = fill_db(*txn, tablename, random, num_records, max_payload_size);
+    CHECK_OK(txn->commit());
+    db.finish(txn);
+    return records;
 }
 
-auto fill_db(DB &db, Table &table, RandomGenerator &random, std::size_t num_records, std::size_t max_payload_size) -> std::map<std::string, std::string>
+auto fill_db(Txn &txn, const std::string &tablename, RandomGenerator &random, std::size_t num_records, std::size_t max_payload_size) -> std::map<std::string, std::string>
+{
+    Table *table;
+    CHECK_OK(txn.new_table(TableOptions(), tablename, table));
+    auto records = fill_db(*table, random, num_records, max_payload_size);
+    delete table;
+    return records;
+}
+
+auto fill_db(Table &table, RandomGenerator &random, std::size_t num_records, std::size_t max_payload_size) -> std::map<std::string, std::string>
 {
     CHECK_TRUE(max_payload_size > 0);
     std::map<std::string, std::string> records;
@@ -136,22 +158,33 @@ auto fill_db(DB &db, Table &table, RandomGenerator &random, std::size_t num_reco
         const auto vsize = random.Next(max_payload_size - ksize);
         const auto k = random.Generate(ksize);
         const auto v = random.Generate(vsize);
-        CHECK_OK(db.put(table, k, v));
+        CHECK_OK(table.put(k, v));
         records[k.to_string()] = v.to_string();
     }
     return records;
 }
 
-auto expect_db_contains(const DB &db, const std::map<std::string, std::string> &map) -> void
+auto expect_db_contains(DB &db, const std::string &tablename, const std::map<std::string, std::string> &map) -> void
 {
-    return expect_db_contains(db, *db.default_table(), map);
+    Txn *txn;
+    CHECK_OK(db.start(false, txn));
+    expect_db_contains(*txn, tablename, map);
+    db.finish(txn);
 }
 
-auto expect_db_contains(const DB &db, const Table &table, const std::map<std::string, std::string> &map) -> void
+auto expect_db_contains(Txn &txn, const std::string &tablename, const std::map<std::string, std::string> &map) -> void
+{
+    Table *table;
+    CHECK_OK(txn.new_table(TableOptions(), tablename, table));
+    expect_db_contains(*table, map);
+    delete table;
+}
+
+auto expect_db_contains(const Table &table, const std::map<std::string, std::string> &map) -> void
 {
     for (const auto &[key, value] : map) {
         std::string result;
-        CHECK_OK(db.get(table, key, &result));
+        CHECK_OK(table.get(key, &result));
         CHECK_EQ(result, value);
     }
 }
@@ -189,11 +222,6 @@ auto FakeWal::write(const PageRef *dirty, std::size_t db_size) -> Status
     return Status::ok();
 }
 
-auto FakeWal::needs_checkpoint() const -> bool
-{
-    return m_committed.size() > 1'000;
-}
-
 auto FakeWal::checkpoint(File &db_file, std::size_t *db_size) -> Status
 {
     // TODO: Need the env to resize the file.
@@ -210,10 +238,9 @@ auto FakeWal::checkpoint(File &db_file, std::size_t *db_size) -> Status
     return Status::ok();
 }
 
-auto FakeWal::abort() -> Status
+auto FakeWal::rollback() -> void
 {
     m_pending.clear();
-    return Status::ok();
 }
 
 auto FakeWal::close() -> Status
@@ -225,7 +252,7 @@ auto FakeWal::close() -> Status
 
 auto FakeWal::statistics() const -> WalStatistics
 {
-    return WalStatistics {};
+    return WalStatistics{};
 }
 
 } // namespace calicodb::tools

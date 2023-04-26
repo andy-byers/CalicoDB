@@ -7,12 +7,12 @@
 
 #include "calicodb/status.h"
 #include "db_impl.h"
+#include "env_helpers.h"
 #include "env_posix.h"
 #include "page.h"
 #include "tools.h"
 #include "utils.h"
 #include "wal.h"
-#include "env_helpers.h"
 #include <filesystem>
 #include <gtest/gtest.h>
 #include <iomanip>
@@ -23,47 +23,38 @@ namespace calicodb
 
 static constexpr auto kDBFilename = "./_test-db";
 static constexpr auto kWalFilename = "./_test-wal";
+static constexpr auto kShmFilename = "./_test-shm";
 
-[[nodiscard]] static auto db_impl(const DB *db) -> const DBImpl *
-{
-    return reinterpret_cast<const DBImpl *>(db);
-}
-
-[[nodiscard]] static auto db_impl(DB *db) -> DBImpl *
-{
-    return reinterpret_cast<DBImpl *>(db);
-}
-
-[[nodiscard]] static auto table_impl(const Table *table) -> const TableImpl *
-{
-    return reinterpret_cast<const TableImpl *>(table);
-}
-
-[[nodiscard]] static auto table_impl(Table *table) -> TableImpl *
-{
-    return reinterpret_cast<TableImpl *>(table);
-}
+//[[nodiscard]] static auto db_impl(const DB *db) -> const DBImpl *
+//{
+//    return reinterpret_cast<const DBImpl *>(db);
+//}
+//
+//[[nodiscard]] static auto db_impl(DB *db) -> DBImpl *
+//{
+//    return reinterpret_cast<DBImpl *>(db);
+//}
 
 #define CLEAR_INTERCEPTORS()        \
     do {                            \
         env().clear_interceptors(); \
     } while (0)
 
-#define QUICK_INTERCEPTOR(filename__, type__)                                             \
-    do {                                                                                  \
-        env().add_interceptor(filename__, tools::Interceptor {(type__), [] {              \
-                                                                  return special_error(); \
-                                                              }});                        \
+#define QUICK_INTERCEPTOR(filename__, type__)                                            \
+    do {                                                                                 \
+        env().add_interceptor(filename__, tools::Interceptor{(type__), [] {              \
+                                                                 return special_error(); \
+                                                             }});                        \
     } while (0)
 
-#define COUNTING_INTERCEPTOR(filename__, type__, n__)                                         \
-    do {                                                                                      \
-        env().add_interceptor(filename__, tools::Interceptor {(type__), [&n = (n__)] {        \
-                                                                  if (n-- <= 0) {             \
-                                                                      return special_error(); \
-                                                                  }                           \
-                                                                  return Status::ok();        \
-                                                              }});                            \
+#define COUNTING_INTERCEPTOR(filename__, type__, n__)                                        \
+    do {                                                                                     \
+        env().add_interceptor(filename__, tools::Interceptor{(type__), [&n = (n__)] {        \
+                                                                 if (n-- <= 0) {             \
+                                                                     return special_error(); \
+                                                                 }                           \
+                                                                 return Status::ok();        \
+                                                             }});                            \
     } while (0)
 
 static constexpr auto kExpectationMatcher = "^expectation";
@@ -96,8 +87,12 @@ class EnvTestHarness
 {
 public:
     explicit EnvTestHarness()
-        : m_env(new EnvType())
     {
+        if constexpr (std::is_same_v<EnvType, PosixEnv>) {
+            m_env = Env::default_env();
+        } else {
+            m_env = new EnvType();
+        }
         (void)m_env->remove_file(kDBFilename);
         (void)m_env->remove_file(kWalFilename);
     }
@@ -131,18 +126,20 @@ public:
 
     PagerTestHarness()
     {
-        const Wal::Parameters wal_param = {
-            kWalFilename,
-            kPageSize,
-            &Base::env(),
-        };
+        FileHeader header;
+        std::string buffer(kPageSize, '\0');
+        header.page_count = 1;
+        header.write(buffer.data());
+        tools::write_string_to_file(Base::env(), kDBFilename, buffer);
 
-        CHECK_OK(Wal::open(wal_param, m_wal));
+        File *file;
+        EXPECT_OK(Base::env().new_file(kDBFilename, Env::kCreate | Env::kReadWrite, file));
 
         const Pager::Parameters pager_param = {
             kDBFilename,
+            kWalFilename,
+            file,
             &Base::env(),
-            m_wal,
             nullptr,
             &m_state,
             kFrameCount,
@@ -150,23 +147,20 @@ public:
         };
 
         CHECK_OK(Pager::open(pager_param, m_pager));
-
-        // Descendents must opt in to using the WAL.
-        m_state.use_wal = false;
+        m_pager->set_page_count(1);
+        m_state.use_wal = true;
     }
 
     ~PagerTestHarness() override
     {
+        (void)m_pager->close();
         delete m_pager;
         m_pager = nullptr;
-
-        (void)Wal::close(m_wal);
     }
 
 protected:
     DBState m_state;
     Pager *m_pager = nullptr;
-    Wal *m_wal = nullptr;
 };
 
 [[nodiscard]] inline auto special_error()

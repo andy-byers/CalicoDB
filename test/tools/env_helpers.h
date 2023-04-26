@@ -18,16 +18,19 @@ public:
     virtual auto put_file_contents(const std::string &filename, std::string contents) -> void;
 
     ~FakeEnv() override = default;
-    [[nodiscard]] auto new_file(const std::string &filename, File *&out) -> Status override;
-    [[nodiscard]] auto new_log_file(const std::string &filename, LogFile *&out) -> Status override;
+    [[nodiscard]] auto new_sink(const std::string &filename, Sink *&out) -> Status override;
+    [[nodiscard]] auto new_file(const std::string &filename, OpenMode mode, File *&out) -> Status override;
     [[nodiscard]] auto file_exists(const std::string &filename) const -> bool override;
     [[nodiscard]] auto resize_file(const std::string &filename, std::size_t size) -> Status override;
     [[nodiscard]] auto file_size(const std::string &filename, std::size_t &out) const -> Status override;
     [[nodiscard]] auto remove_file(const std::string &filename) -> Status override;
 
+    auto srand(unsigned seed) -> void override;
+    [[nodiscard]] auto rand() -> unsigned override;
+
 protected:
     friend class FakeFile;
-    friend class FakeLogFile;
+    friend class FakeSink;
     friend class TestEnv;
 
     struct FileState {
@@ -56,6 +59,12 @@ public:
     [[nodiscard]] auto read(std::size_t offset, std::size_t size, char *scratch, Slice *out) -> Status override;
     [[nodiscard]] auto write(std::size_t offset, const Slice &in) -> Status override;
     [[nodiscard]] auto sync() -> Status override;
+    [[nodiscard]] auto file_lock(FileLockMode) -> Status override { return Status::ok(); }
+    [[nodiscard]] auto shm_map(std::size_t r, volatile void *&out) -> Status override;
+    [[nodiscard]] auto shm_lock(std::size_t, std::size_t, ShmLockFlag) -> Status override { return Status::ok(); }
+    auto shm_unmap(bool unlink) -> void override;
+    auto shm_barrier() -> void override {}
+    auto file_unlock() -> void override {}
 
     [[nodiscard]] auto env() -> FakeEnv &
     {
@@ -76,13 +85,7 @@ protected:
     FakeEnv::FileState *m_state = nullptr;
     FakeEnv *m_env = nullptr;
     std::string m_filename;
-};
-
-class FakeLogFile : public LogFile
-{
-public:
-    ~FakeLogFile() override = default;
-    auto write(const Slice &) -> void override {}
+    std::vector<std::string> m_shm;
 };
 
 struct Interceptor {
@@ -133,7 +136,7 @@ public:
     virtual auto clear_interceptors() -> void;
     virtual auto clear_interceptors(const std::string &filename) -> void;
 
-    [[nodiscard]] auto new_file(const std::string &filename, File *&out) -> Status override;
+    [[nodiscard]] auto new_file(const std::string &filename, OpenMode mode, File *&out) -> Status override;
     [[nodiscard]] auto resize_file(const std::string &filename, std::size_t file_size) -> Status override;
     [[nodiscard]] auto remove_file(const std::string &filename) -> Status override;
 
@@ -155,13 +158,12 @@ private:
     auto overwrite_file(const std::string &filename, const std::string &contents) -> void;
 };
 
-class TestFile : public File
+class TestFile : public FileWrapper
 {
     friend class TestEnv;
 
     std::string m_filename;
     TestEnv *m_env = nullptr;
-    File *m_file = nullptr;
 
     explicit TestFile(std::string filename, File &file, TestEnv &env);
 
@@ -170,28 +172,6 @@ public:
     [[nodiscard]] auto read(std::size_t offset, std::size_t size, char *scratch, Slice *out) -> Status override;
     [[nodiscard]] auto write(std::size_t offset, const Slice &in) -> Status override;
     [[nodiscard]] auto sync() -> Status override;
-};
-
-class TestLogFile : public LogFile
-{
-public:
-    ~TestLogFile() override = default;
-    auto write(const Slice &) -> void override {}
-};
-
-class StderrLog : public LogFile
-{
-public:
-    ~StderrLog() override = default;
-
-    auto write(const Slice &in) -> void override
-    {
-        std::fputs(in.to_string().c_str(), stderr);
-        if (in.data()[in.size() - 1] != '\n') {
-            std::fputc('\n', stderr);
-        }
-        std::fflush(stderr);
-    }
 };
 
 } // namespace calicodb::tools

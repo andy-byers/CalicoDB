@@ -8,9 +8,12 @@
 #include "calicodb/db.h"
 #include "calicodb/env.h"
 #include "db_impl.h"
+#include "env_posix.h"
+#include "txn_impl.h"
 #include <climits>
 #include <cstdarg>
 #include <cstdio>
+#include <filesystem>
 #include <functional>
 #include <iostream>
 #include <mutex>
@@ -52,6 +55,37 @@
 namespace calicodb::tools
 {
 
+class TestDir final
+{
+public:
+    static constexpr auto kDirname = "testdir";
+
+    explicit TestDir(const std::string &location)
+        : m_prefix(join_paths(location, kDirname))
+    {
+        reset();
+    }
+
+    ~TestDir()
+    {
+        std::filesystem::remove_all(m_prefix);
+    }
+
+    auto reset() const -> void
+    {
+        std::filesystem::remove_all(m_prefix);
+        std::filesystem::create_directory(m_prefix);
+    }
+
+    [[nodiscard]] auto as_child(const std::string &filename) const -> std::string
+    {
+        return join_paths(m_prefix, filename);
+    }
+
+private:
+    std::string m_prefix;
+};
+
 class WalStub : public Wal
 {
 public:
@@ -62,14 +96,9 @@ public:
         return Status::not_found("");
     }
 
-    [[nodiscard]] auto write(const PageRef *dirty, std::size_t) -> Status override
+    [[nodiscard]] auto write(const PageRef *, std::size_t) -> Status override
     {
         return Status::ok();
-    }
-
-    [[nodiscard]] auto needs_checkpoint() const -> bool override
-    {
-        return false;
     }
 
     [[nodiscard]] auto checkpoint(File &, std::size_t *) -> Status override
@@ -77,9 +106,8 @@ public:
         return Status::ok();
     }
 
-    [[nodiscard]] auto abort() -> Status override
+    auto rollback() -> void override
     {
-        return Status::ok();
     }
 
     [[nodiscard]] auto close() -> Status override
@@ -106,12 +134,15 @@ public:
 
     [[nodiscard]] auto read(Id page_id, char *&out) -> Status override;
     [[nodiscard]] auto write(const PageRef *dirty, std::size_t db_size) -> Status override;
-    [[nodiscard]] auto needs_checkpoint() const -> bool override;
     [[nodiscard]] auto checkpoint(File &db_file, std::size_t *) -> Status override;
-    [[nodiscard]] auto abort() -> Status override;
-    [[nodiscard]] auto close() -> Status override;
-    [[nodiscard]] auto sync() -> Status override { return Status::ok(); }
     [[nodiscard]] auto statistics() const -> WalStatistics override;
+    [[nodiscard]] auto sync() -> Status override { return Status::ok(); }
+    [[nodiscard]] auto close() -> Status override;
+    [[nodiscard]] auto start_reader(bool &) -> Status override { return Status::ok(); }
+    [[nodiscard]] auto start_writer() -> Status override { return Status::ok(); }
+    auto finish_reader() -> void override {}
+    auto finish_writer() -> void override {}
+    auto rollback() -> void override;
 };
 
 template <std::size_t Length = 12>
@@ -127,9 +158,9 @@ static auto integral_key(std::size_t key) -> std::string
     }
 }
 
-inline auto validate_db(const DB &db)
+inline auto validate_txn(const Txn &txn)
 {
-    reinterpret_cast<const DBImpl &>(db).TEST_validate();
+    reinterpret_cast<const TxnImpl &>(txn).TEST_validate();
 }
 
 // Modified from LevelDB.
@@ -199,11 +230,14 @@ auto print_wals(Env &env, std::size_t page_size, const std::string &prefix) -> v
 auto hexdump_page(const Page &page) -> void;
 
 auto read_file_to_string(Env &env, const std::string &filename) -> std::string;
-auto write_string_to_file(Env &env, const std::string &filename, std::string buffer, long offset = -1) -> void;
-auto fill_db(DB &db, RandomGenerator &random, std::size_t num_records, std::size_t max_payload_size = 100) -> std::map<std::string, std::string>;
-auto fill_db(DB &db, Table &table, RandomGenerator &random, std::size_t num_records, std::size_t max_payload_size = 100) -> std::map<std::string, std::string>;
-auto expect_db_contains(const DB &db, const std::map<std::string, std::string> &map) -> void;
-auto expect_db_contains(const DB &db, const Table &table, const std::map<std::string, std::string> &map) -> void;
+auto write_string_to_file(Env &env, const std::string &filename, const std::string &buffer, long offset = -1) -> void;
+auto assign_file_contents(Env &env, const std::string &filename, const std::string &contents) -> void;
+auto fill_db(DB &db, const std::string &tablename, RandomGenerator &random, std::size_t num_records, std::size_t max_payload_size = 100) -> std::map<std::string, std::string>;
+auto fill_db(Txn &txn, const std::string &tablename, RandomGenerator &random, std::size_t num_records, std::size_t max_payload_size = 100) -> std::map<std::string, std::string>;
+auto fill_db(Table &table, RandomGenerator &random, std::size_t num_records, std::size_t max_payload_size = 100) -> std::map<std::string, std::string>;
+auto expect_db_contains(DB &db, const std::string &tablename, const std::map<std::string, std::string> &map) -> void;
+auto expect_db_contains(Txn &txn, const std::string &tablename, const std::map<std::string, std::string> &map) -> void;
+auto expect_db_contains(const Table &table, const std::map<std::string, std::string> &map) -> void;
 
 } // namespace calicodb::tools
 

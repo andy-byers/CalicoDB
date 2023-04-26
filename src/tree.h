@@ -15,7 +15,7 @@ namespace calicodb
 {
 
 class CursorImpl;
-class TableSet;
+class Schema;
 struct Node;
 
 // Maintains a list of available memory regions within a node, called the free
@@ -162,32 +162,47 @@ struct PayloadManager {
     [[nodiscard]] static auto collect_value(Pager &pager, std::string &scratch, const Cell &cell, Slice *value) -> Status;
 };
 
-class Tree
+class Tree final
 {
 public:
-    explicit Tree(Pager &pager, Id root_id, TreeStatistics *stats);
-    [[nodiscard]] static auto create(Pager &pager, Id table_id, Id *out) -> Status;
+    explicit Tree(Pager &pager, Id *root_id);
+    ~Tree();
+    [[nodiscard]] static auto create(Pager &pager, bool is_root, Id *out) -> Status;
+    [[nodiscard]] static auto destroy(Tree &tree) -> Status;
     [[nodiscard]] auto put(const Slice &key, const Slice &value, bool *exists = nullptr) -> Status;
     [[nodiscard]] auto get(const Slice &key, std::string *value) const -> Status;
     [[nodiscard]] auto erase(const Slice &key) -> Status;
-    [[nodiscard]] auto vacuum_one(Id target, TableSet &tables, bool *success = nullptr) -> Status;
+    [[nodiscard]] auto vacuum_one(Id target, Schema &schema, bool *success = nullptr) -> Status;
     [[nodiscard]] auto allocate(bool is_external, Node &out) -> Status;
     [[nodiscard]] auto acquire(Id page_id, bool upgrade, Node &out) const -> Status;
-    [[nodiscard]] auto destroy(Node node) -> Status;
+    [[nodiscard]] auto free(Node node) -> Status;
     auto upgrade(Node &node) const -> void;
     auto release(Node node) const -> void;
 
     [[nodiscard]] auto TEST_to_string() -> std::string;
     auto TEST_validate() -> void;
 
+    [[nodiscard]] auto root() const -> Id
+    {
+        return m_root_id ? *m_root_id : Id::root();
+    }
+
+    [[nodiscard]] auto statistics() const -> const TreeStatistics &
+    {
+        return m_stats;
+    }
+
 private:
+    friend class Schema;
+
     struct SearchResult {
         Node node;
         std::size_t index = 0;
         bool exact = false;
     };
 
-    [[nodiscard]] auto vacuum_step(Page &free, TableSet &tables, Id last_id) -> Status;
+    [[nodiscard]] auto destroy_impl(Node node) -> Status;
+    [[nodiscard]] auto vacuum_step(Page &free, Schema &schema, Id last_id) -> Status;
     [[nodiscard]] auto resolve_overflow(Node node) -> Status;
     [[nodiscard]] auto resolve_underflow(Node node, const Slice &anchor) -> Status;
     [[nodiscard]] auto split_root(Node root, Node &out) -> Status;
@@ -226,6 +241,7 @@ private:
 
     auto report_stats(ReportType type, std::size_t increment) const -> void;
 
+    friend class DBImpl;
     friend class CursorInternal;
     friend class CursorImpl;
     friend class TreeValidator;
@@ -233,13 +249,13 @@ private:
     // List of active cursors.
     CursorImpl *m_cursors = nullptr;
 
-    mutable TreeStatistics *m_stats = nullptr;
+    mutable TreeStatistics m_stats;
     mutable std::string m_key_scratch[2];
     mutable std::string m_node_scratch;
     mutable std::string m_cell_scratch;
     mutable std::string m_anchor;
     Pager *m_pager = nullptr;
-    Id m_root_id;
+    Id *m_root_id = nullptr;
 };
 
 class CursorImpl : public Cursor
@@ -259,7 +275,6 @@ class CursorImpl : public Cursor
 
     CursorImpl *m_prev = nullptr;
     CursorImpl *m_next = nullptr;
-    bool m_needs_repos = false;
 
     auto seek_to(Node node, std::size_t index) -> void;
     auto fetch_payload() -> Status;

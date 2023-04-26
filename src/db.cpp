@@ -5,7 +5,6 @@
 #include "calicodb/db.h"
 #include "db_impl.h"
 #include "env_posix.h"
-#include "logging.h"
 #include "utils.h"
 
 namespace calicodb
@@ -30,20 +29,13 @@ auto DB::open(const Options &options, const std::string &filename, DB *&db) -> S
     clip_to_range(sanitized.page_size, kMinPageSize, kMaxPageSize);
     clip_to_range(sanitized.cache_size, {}, kMaxCacheSize);
     if (!is_power_of_two(sanitized.page_size)) {
-        sanitized.page_size = Options {}.page_size;
+        sanitized.page_size = Options{}.page_size;
     }
     if (sanitized.wal_filename.empty()) {
         sanitized.wal_filename = clean_filename + kDefaultWalSuffix;
     }
     if (sanitized.env == nullptr) {
         sanitized.env = Env::default_env();
-    }
-    if (sanitized.info_log == nullptr) {
-        const auto log_filename = clean_filename + kDefaultLogSuffix;
-        auto s = sanitized.env->new_log_file(log_filename, sanitized.info_log);
-        if (!s.is_ok()) {
-            sanitized.info_log = nullptr;
-        }
     }
 
     auto *impl = new DBImpl(options, sanitized, clean_filename);
@@ -58,36 +50,16 @@ auto DB::open(const Options &options, const std::string &filename, DB *&db) -> S
 }
 
 DB::DB() = default;
+
 DB::~DB() = default;
 
-auto DB::repair(const Options &options, const std::string &filename) -> Status
-{
-    return DBImpl::repair(options, filename);
-}
+Table::~Table() = default;
+
+Txn::~Txn() = default;
 
 auto DB::destroy(const Options &options, const std::string &filename) -> Status
 {
     return DBImpl::destroy(options, filename);
-}
-
-auto DB::new_cursor() const -> Cursor *
-{
-    return new_cursor(*default_table());
-}
-
-auto DB::get(const Slice &key, std::string *value) const -> Status
-{
-    return get(*default_table(), key, value);
-}
-
-auto DB::put(const Slice &key, const Slice &value) -> Status
-{
-    return put(*default_table(), key, value);
-}
-
-auto DB::erase(const Slice &key) -> Status
-{
-    return erase(*default_table(), key);
 }
 
 } // namespace calicodb
