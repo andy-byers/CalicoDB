@@ -77,41 +77,13 @@ public:
     enum FileLockMode : int {
         kUnlocked, // TODO: May end up adding a FileLockMode parameter to file_unlock(), which would then support downgrading to either kUnlocked or kShared. Otherwise, this can be removed.
         kShared, // Any number of threads can hold a kShared lock
-        kReserved, // Compatible with 1+ kShared, but incompatible with other kReserved
-        kPending, // Compatible with 1+ kShared, but excludes new kShared
         kExclusive, // Excludes all locks
     };
 
-    // Take or upgrade a file_lock on the file
-    // Return Status::ok() if the file_lock is granted, Status::busy() if an
-    // incompatible file_lock is already held by a different thread or process,
-    // or a Status::io_error() if a system call otherwise fails. Compliant File
-    // implementations must support the following state transitions:
-    //     before -> (intermediate) -> after
-    //    ----------------------------------------
-    //     kUnlocked ----------------> kShared
-    //     kShared ------------------> kReserved
-    //     kShared ------------------> kExclusive
-    //     kReserved --> (kPending) -> kExclusive
-    //     kPending -----------------> kExclusive
-    // NOTE: The result of a failure to transition from kReserved to kExclusive
-    // always results in the caller being left in kPending. Attempting to lock a
-    // file with a lower-priority lock is a NOOP.
+    // Take or upgrade a lock on the file
     [[nodiscard]] virtual auto file_lock(FileLockMode mode) -> Status = 0;
 
-    // Release or downgrade a file_lock on the given file
-    //
-    // Compliant Envs support the following state transitions (where "> X"
-    // represents a file_lock mode with higher-priority than "X"):
-    //
-    //     Before -----------> After
-    //    ------------------------------
-    //     > kUnlocked ------> kUnlocked
-    //     > kShared --------> kShared
-    //
-    // Also note that transitions "Y -> Y", where "Y" <= kShared, are
-    // allowed, but are NOOPs.
-    //
+    // Release a lock on the file
     virtual auto file_unlock() -> void = 0;
 
     // Size of a shared memory region, i.e. the number of bytes pointed to by "out"

@@ -5,6 +5,7 @@
 #include "db_impl.h"
 #include "header.h"
 #include "logging.h"
+#include "scope_guard.h"
 #include "tools.h"
 #include "tree.h"
 #include "unit_tests.h"
@@ -63,13 +64,14 @@ TEST(BasicDestructionTests, OnlyDeletesCalicoDatabases)
     Options options;
     options.env = Env::default_env();
 
-    // "./test" does not exist.
+    // "./testdb" does not exist.
     ASSERT_TRUE(DB::destroy(options, "./testdb").is_invalid_argument());
     ASSERT_FALSE(options.env->file_exists("./testdb"));
 
-    // File is too small to read the header.
+    // File is too small to read the first page.
     File *file;
     ASSERT_OK(options.env->new_file("./testdb", Env::kCreate, file));
+    ASSERT_OK(file->write(0, "CalicoDB format"));
     ASSERT_TRUE(DB::destroy(options, "./testdb").is_invalid_argument());
     ASSERT_TRUE(options.env->file_exists("./testdb"));
 
@@ -195,7 +197,7 @@ TEST_F(BasicDatabaseTests, ClampsBadOptionValues)
         delete db;
         ASSERT_OK(DB::destroy(options, m_dbname));
     };
-    
+
     options.cache_size = kPageSize;
     open_and_check();
     options.cache_size = 1 << 31;
@@ -270,47 +272,47 @@ TEST_F(BasicDatabaseTests, HandlesMaximumPageSize)
     delete db;
 }
 
- TEST_F(BasicDatabaseTests, VacuumShrinksDBFileOnCheckpoint)
+TEST_F(BasicDatabaseTests, VacuumShrinksDBFileOnCheckpoint)
 {
-     DB *db;
-     ASSERT_OK(DB::open(options, m_dbname, db));
-     ASSERT_EQ(db_page_count(), 1);
+    DB *db;
+    ASSERT_OK(DB::open(options, m_dbname, db));
+    ASSERT_EQ(db_page_count(), 1);
 
-     Txn *txn;
-     tools::RandomGenerator random;
-     ASSERT_OK(db->start(true, txn));
-     const auto records = tools::fill_db(*txn, "table", random, 1'000);
-     ASSERT_OK(txn->commit());
-     db->finish(txn);
+    Txn *txn;
+    tools::RandomGenerator random;
+    ASSERT_OK(db->start(true, txn));
+    const auto records = tools::fill_db(*txn, "table", random, 1'000);
+    ASSERT_OK(txn->commit());
+    db->finish(txn);
 
-     delete db;
-     db = nullptr;
+    delete db;
+    db = nullptr;
 
-     const auto saved_page_count = db_page_count();
-     ASSERT_GT(saved_page_count, 1)
-         << "DB file was not written during checkpoint";
+    const auto saved_page_count = db_page_count();
+    ASSERT_GT(saved_page_count, 1)
+        << "DB file was not written during checkpoint";
 
-     ASSERT_OK(DB::open(options, m_dbname, db));
-     ASSERT_OK(db->start(true, txn));
-     Table *table;
-     ASSERT_OK(txn->new_table(TableOptions(), "table", table));
-     for (const auto &[key, value] : records) {
-         ASSERT_OK(table->erase(key));
-     }
-     delete table;
-     ASSERT_OK(txn->drop_table("table"));
-     ASSERT_OK(txn->vacuum());
-     ASSERT_OK(txn->commit());
-     db->finish(txn);
+    ASSERT_OK(DB::open(options, m_dbname, db));
+    ASSERT_OK(db->start(true, txn));
+    Table *table;
+    ASSERT_OK(txn->new_table(TableOptions(), "table", table));
+    for (const auto &[key, value] : records) {
+        ASSERT_OK(table->erase(key));
+    }
+    delete table;
+    ASSERT_OK(txn->drop_table("table"));
+    ASSERT_OK(txn->vacuum());
+    ASSERT_OK(txn->commit());
+    db->finish(txn);
 
-     ASSERT_EQ(saved_page_count, db_page_count())
-         << "file should not be modified until checkpoint";
+    ASSERT_EQ(saved_page_count, db_page_count())
+        << "file should not be modified until checkpoint";
 
-     delete db;
+    delete db;
 
-     ASSERT_EQ(db_page_count(), 1)
-         << "file was not truncated";
- }
+    ASSERT_EQ(db_page_count(), 1)
+        << "file was not truncated";
+}
 
 class DbVacuumTests
     : public EnvTestHarness<tools::FakeEnv>,
@@ -319,7 +321,7 @@ class DbVacuumTests
 public:
     DbVacuumTests()
         : m_testdir("."),
-          random(1'024 * 1'024 * 8),
+          random(1'024 * 1'024 * 16),
           lower_bounds(std::get<0>(GetParam())),
           upper_bounds(std::get<1>(GetParam())),
           reopen(std::get<2>(GetParam()))
@@ -358,7 +360,7 @@ TEST_P(DbVacuumTests, SanityCheck)
                 const auto key = random.Generate(10);
                 const auto value = random.Generate(kPageSize * 2);
                 ASSERT_OK(table->put(key, value));
-                map[key.to_string()] = value.to_string();
+                map.insert_or_assign(key.to_string(), value.to_string());
             }
             while (map.size() > lower_bounds) {
                 const auto key = begin(map)->first;
@@ -427,80 +429,80 @@ public:
     DB *db = nullptr;
 };
 
- class DbRevertTests
+class DbRevertTests
     : public EnvTestHarness<tools::FakeEnv>,
-       public testing::Test
+      public testing::Test
 {
- protected:
-     DbRevertTests()
-     {
-         db = std::make_unique<TestDatabase>(env());
-     }
-     ~DbRevertTests() override = default;
+protected:
+    DbRevertTests()
+    {
+        db = std::make_unique<TestDatabase>(env());
+    }
+    ~DbRevertTests() override = default;
 
-     std::unique_ptr<TestDatabase> db;
- };
+    std::unique_ptr<TestDatabase> db;
+};
 
- static auto add_records(TestDatabase &test, std::size_t n, bool commit)
+static auto add_records(TestDatabase &test, std::size_t n, bool commit)
 {
-     Txn *txn;
-     EXPECT_OK(test.db->start(true, txn));
-     auto records = tools::fill_db(*txn, "table", test.random, n);
-     if (commit) {
-         EXPECT_OK(txn->commit());
-     }
-     test.db->finish(txn);
-     return records;
- }
+    Txn *txn;
+    EXPECT_OK(test.db->start(true, txn));
+    auto records = tools::fill_db(*txn, "table", test.random, n);
+    if (commit) {
+        EXPECT_OK(txn->commit());
+    }
+    test.db->finish(txn);
+    return records;
+}
 
- static auto expect_contains_records(DB &db, const std::map<std::string, std::string> &committed)
+static auto expect_contains_records(DB &db, const std::map<std::string, std::string> &committed)
 {
-     tools::expect_db_contains(db, "table", committed);
- }
+    tools::expect_db_contains(db, "table", committed);
+}
 
- static auto run_revert_test(TestDatabase &db)
+static auto run_revert_test(TestDatabase &db)
 {
-     const auto committed = add_records(db, 1'000, true);
-     add_records(db, 1'000, false);
+    const auto committed = add_records(db, 1'000, true);
+    add_records(db, 1'000, false);
 
-     ASSERT_OK(db.reopen());
-     expect_contains_records(*db.db, committed);
- }
+    ASSERT_OK(db.reopen());
+    expect_contains_records(*db.db, committed);
+}
 
- TEST_F(DbRevertTests, RevertsUncommittedBatch_1)
+TEST_F(DbRevertTests, RevertsUncommittedBatch_1)
 {
-     run_revert_test(*db);
- }
+    run_revert_test(*db);
+}
 
- TEST_F(DbRevertTests, RevertsUncommittedBatch_2)
+TEST_F(DbRevertTests, RevertsUncommittedBatch_2)
 {
-     add_records(*db, 1'000, true);
-     run_revert_test(*db);
- }
+    add_records(*db, 1'000, true);
+    run_revert_test(*db);
+}
 
- TEST_F(DbRevertTests, RevertsUncommittedBatch_3)
+TEST_F(DbRevertTests, RevertsUncommittedBatch_3)
 {
-     run_revert_test(*db);
-     add_records(*db, 1'000, false);
- }
+    run_revert_test(*db);
+    add_records(*db, 1'000, false);
+}
 
- TEST_F(DbRevertTests, RevertsUncommittedBatch_4)
+TEST_F(DbRevertTests, RevertsUncommittedBatch_4)
 {
-     add_records(*db, 1'000, true);
-     run_revert_test(*db);
-     add_records(*db, 1'000, false);
- }
+    add_records(*db, 1'000, true);
+    run_revert_test(*db);
+    add_records(*db, 1'000, false);
+}
 
- TEST_F(DbRevertTests, RevertsUncommittedBatch_5)
+TEST_F(DbRevertTests, RevertsUncommittedBatch_5)
 {
-     for (std::size_t i = 0; i < 100; ++i) {
-         add_records(*db, 100, true);
-     }
-     run_revert_test(*db);
-     for (std::size_t i = 0; i < 100; ++i) {
-         add_records(*db, 100, false);
-     }
- }
+    for (std::size_t i = 0; i < 100; ++i) {
+        add_records(*db, 100, true);
+    }
+    run_revert_test(*db);
+    for (std::size_t i = 0; i < 100; ++i) {
+        add_records(*db, 100, false);
+    }
+}
 
 // TEST_F(DbRevertTests, RevertsVacuum_1)
 //{
@@ -1232,5 +1234,125 @@ public:
 //     options.wal_filename = "./nonexistent/wal";
 //     ASSERT_TRUE(DB::open(options, kDBFilename, db).is_not_found());
 // }
+
+class DBTests
+    : public testing::TestWithParam<ConcurrencyTestParam>,
+      public ConcurrencyTestHarness<PosixEnv>
+{
+protected:
+    explicit DBTests()
+    {
+        m_options.cache_size = kMinFrameCount * kPageSize;
+        m_options.env = &env();
+    }
+
+    ~DBTests() override = default;
+
+    Options m_options;
+};
+
+TEST_P(DBTests, Open)
+{
+    run_test(GetParam(), [this](auto &, auto, auto) {
+        DB *db;
+        EXPECT_OK(DB::open(m_options, kDBFilename, db));
+        delete db;
+        return false;
+    });
+}
+TEST_P(DBTests, StartReading)
+{
+    run_test(GetParam(), [this](auto &, auto, auto) {
+        DB *db;
+        EXPECT_OK(DB::open(m_options, kDBFilename, db));
+
+        Txn *txn;
+        EXPECT_OK(db->start(false, txn));
+        db->finish(txn);
+
+        delete db;
+        return false;
+    });
+}
+TEST_P(DBTests, StartWriting)
+{
+    run_test(GetParam(), [this](auto &, auto, auto t) {
+        // Create 1 writer in each process.
+        const auto is_writer = t == 0;
+        Txn *txn = nullptr;
+        DB *db = nullptr;
+
+        EXPECT_OK(DB::open(m_options, kDBFilename, db));
+
+        ScopeGuard guard = [&db, &txn] {
+            db->finish(txn);
+            delete db;
+        };
+
+        if (is_writer) {
+            Status s;
+            do {
+                s = db->start(true, txn);
+            } while (s.is_busy());
+            EXPECT_OK(s);
+        } else {
+            EXPECT_OK(db->start(false, txn));
+        }
+
+        Table *table;
+        auto s = txn->new_table(TableOptions(), "table", table);
+        if (s.is_invalid_argument() && !is_writer) {
+            // Loop until a writer creates the table.
+            return true;
+        }
+        EXPECT_OK(s);
+        std::string buffer;
+        s = table->get("key", &buffer);
+        EXPECT_TRUE(s.is_ok() || s.is_not_found())
+            << get_status_name(s) << ": " << s.to_string();
+        Slice value(buffer);
+
+        if (is_writer) {
+            if (s.is_ok()) {
+                U64 number;
+                EXPECT_TRUE(consume_decimal_number(value, &number))
+                    << "corrupted read: " << escape_string(value);
+                value = number_to_string(number + 1);
+            } else {
+                value = "1";
+            }
+            EXPECT_OK(table->put("key", value));
+            EXPECT_OK(txn->commit());
+        }
+        delete table;
+        return false;
+    });
+
+    DB *db;
+    ASSERT_OK(DB::open(m_options, kDBFilename, db));
+
+    Txn *txn;
+    ASSERT_OK(db->start(false, txn));
+
+    Table *table;
+    ASSERT_OK(txn->new_table(TableOptions(), "table", table));
+
+    std::string buffer;
+    ASSERT_OK(table->get("key", &buffer));
+
+    U64 number;
+    Slice value(buffer);
+    ASSERT_TRUE(consume_decimal_number(value, &number));
+
+    db->finish(txn);
+    delete db;
+
+    ASSERT_EQ(GetParam().num_processes, number);
+}
+
+INSTANTIATE_TEST_SUITE_P(DBTests_SanityCheck, DBTests, kConcurrencySanityCheckValues);
+INSTANTIATE_TEST_SUITE_P(DBTests_MT, DBTests, kMultiThreadConcurrencyValues);
+INSTANTIATE_TEST_SUITE_P(DBTests_MP, DBTests, kMultiProcessConcurrencyValues);
+INSTANTIATE_TEST_SUITE_P(DBTests_MX, DBTests, kMultiProcessMultiThreadConcurrencyValues);
 
 } // namespace calicodb

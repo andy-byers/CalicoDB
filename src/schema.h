@@ -19,7 +19,7 @@ class Tree;
 class Schema final
 {
 public:
-    explicit Schema(Pager &pager);
+    explicit Schema(Pager &pager, bool write);
     ~Schema();
 
     [[nodiscard]] auto new_table(const TableOptions &options, const std::string &name, Table *&out) -> Status;
@@ -52,6 +52,7 @@ private:
     HashMap<Id> m_reroot;
     Pager *m_pager;
     Tree *m_map;
+    bool m_write = false;
 };
 
 } // namespace calicodb

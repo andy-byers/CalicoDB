@@ -166,6 +166,87 @@ protected:
     Pager *m_pager = nullptr;
 };
 
+struct ConcurrencyTestParam {
+    std::size_t num_processes = 0;
+    std::size_t num_threads = 0;
+};
+template<class EnvType>
+class ConcurrencyTestHarness : public EnvTestHarness<EnvType>
+{
+    using Base = EnvTestHarness<EnvType>;
+public:
+    explicit ConcurrencyTestHarness() = default;
+    ~ConcurrencyTestHarness() override = default;
+
+    // Run a test in multiple threads/processes
+    // Each instance of the test is passed "env", an instance of the Env type that
+    // this class template was instantiated with, "n" and "t", indices in the range
+    // [0,param.num_processes-1] and [0,param.num_threads-1], respectively,
+    // representing the process and thread running the test instance. The test
+    // callback should return true if it should continue running, false otherwise.
+    using TestInstance = std::function<bool(Env &env, std::size_t n, std::size_t t)>;
+    auto run_test(const ConcurrencyTestParam &param, const TestInstance &test_instance) -> void
+    {
+        // Spawn "param.num_processes-1" processes (1 test runs in this process to help
+        // with debugging).
+        for (std::size_t n = 0; n < param.num_processes; ++n) {
+            if (n) {
+                const auto pid = fork();
+                ASSERT_NE(-1, pid)
+                    << "fork(): " << strerror(errno);
+                if (pid) {
+                    continue;
+                }
+            }
+            // For each process, spawn "param.num_threads" threads.
+            std::vector<std::thread> threads;
+            for (std::size_t t = 0; t < param.num_threads; ++t) {
+                threads.emplace_back([n, t, test_instance, this] {
+                    // Run the test callback for each thread.
+                    while (test_instance(Base::env(), n, t)) {
+                        break;
+                    }
+                });
+            }
+            for (auto &thread : threads) {
+                thread.join();
+            }
+            if (n) {
+                std::exit(testing::Test::HasFailure());
+            }
+        }
+        for (std::size_t n = 1; n < param.num_processes; ++n) {
+            int s;
+            const auto pid = wait(&s);
+            ASSERT_NE(pid, -1)
+                << "wait(): " << strerror(errno);
+            ASSERT_TRUE(WIFEXITED(s) && WEXITSTATUS(s) == 0)
+                << "exited " << (WIFEXITED(s) ? "" : "ab")
+                << "normally with exit status "
+                << WEXITSTATUS(s);
+        }
+    }
+};
+
+static const auto kConcurrencySanityCheckValues = ::testing::Values(
+    ConcurrencyTestParam{1, 1});
+
+static const auto kMultiThreadConcurrencyValues = ::testing::Values(
+    ConcurrencyTestParam{1, 2},
+    ConcurrencyTestParam{1, 4},
+    ConcurrencyTestParam{1, 6});
+
+static const auto kMultiProcessConcurrencyValues = ::testing::Values(
+    ConcurrencyTestParam{2, 1},
+    ConcurrencyTestParam{4, 1},
+    ConcurrencyTestParam{6, 1});
+
+static const auto kMultiProcessMultiThreadConcurrencyValues = ::testing::Values(
+    ConcurrencyTestParam{2, 2},
+    ConcurrencyTestParam{3, 3},
+    ConcurrencyTestParam{4, 4});
+
+
 [[nodiscard]] inline auto special_error()
 {
     return Status::io_error("42");

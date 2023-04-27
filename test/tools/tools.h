@@ -110,7 +110,7 @@ public:
     {
     }
 
-    [[nodiscard]] auto close() -> Status override
+    [[nodiscard]] auto close(std::size_t &) -> Status override
     {
         return Status::ok();
     }
@@ -138,7 +138,7 @@ public:
     [[nodiscard]] auto checkpoint(std::size_t *) -> Status override;
     [[nodiscard]] auto statistics() const -> WalStatistics override;
     [[nodiscard]] auto sync() -> Status override { return Status::ok(); }
-    [[nodiscard]] auto close() -> Status override;
+    [[nodiscard]] auto close(std::size_t &) -> Status override;
     [[nodiscard]] auto start_reader(bool &) -> Status override { return Status::ok(); }
     [[nodiscard]] auto start_writer() -> Status override { return Status::ok(); }
     auto finish_reader() -> void override {}

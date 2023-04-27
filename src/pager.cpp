@@ -83,9 +83,9 @@ auto Pager::read_page_from_file(PageRef &ref) const -> Status
 auto Pager::write_page_to_file(const PageRef &ref) const -> Status
 {
     const Slice data(ref.page, kPageSize);
-    auto s = m_file->write(ref.page_id.as_index() * data.size(), data);
+    auto s = m_file->write(ref.page_id.as_index() * kPageSize, data);
     if (s.is_ok()) {
-        m_statistics.bytes_written += data.size();
+        m_statistics.bytes_written += kPageSize;
     }
     return s;
 }
@@ -127,12 +127,27 @@ auto Pager::statistics() const -> const Statistics &
 
 auto Pager::wal_statistics() const -> WalStatistics
 {
-    return m_wal ? m_wal->statistics() : WalStatistics {};
+    return m_wal ? m_wal->statistics() : WalStatistics{};
 }
 
 auto Pager::page_count() const -> std::size_t
 {
     return m_page_count;
+}
+
+auto Pager::lock_db(File::FileLockMode mode) -> Status
+{
+    auto s = m_file->file_lock(mode);
+    if (s.is_ok()) {
+        m_lock = mode;
+    }
+    return s;
+}
+
+auto Pager::unlock_db() -> void
+{
+    m_file->file_unlock();
+    m_lock = File::kUnlocked;
 }
 
 auto Pager::open_wal() -> Status
@@ -147,7 +162,12 @@ auto Pager::open_wal() -> Status
 
 auto Pager::close() -> Status
 {
-    auto s = Wal::close(m_wal);
+    std::size_t page_count;
+    auto s = Wal::close(m_wal, page_count);
+    if (s.is_ok() && page_count) {
+        s = m_env->resize_file(m_db_name, page_count * kPageSize);
+        m_page_count = page_count;
+    }
     m_file->file_unlock();
     return s;
 }
@@ -155,21 +175,22 @@ auto Pager::close() -> Status
 auto Pager::start_reader() -> Status
 {
     CALICODB_EXPECT_NE(m_mode, kError);
+
     if (m_mode == kOpen) {
         // Wait for a shared lock on the database file. Operations that take exclusive
         // locks should complete in a bounded amount of time.
         CALICODB_TRY(busy_wait(m_busy, [this] {
-            return m_file->file_lock(File::kShared);
+            return lock_db(File::kShared);
         }));
+        ScopeGuard guard = [this] {
+            finish();
+        };
 
         if (m_wal == nullptr) {
             CALICODB_TRY(open_wal());
         } else {
             m_wal->finish_reader();
         }
-        ScopeGuard guard = [this] {
-            finish();
-        };
 
         bool changed;
         CALICODB_TRY(m_wal->start_reader(changed));
@@ -179,6 +200,7 @@ auto Pager::start_reader() -> Status
             CALICODB_TRY(refresh_state());
         }
 
+        std::move(guard).cancel();
         m_mode = kRead;
         m_save = kRead;
     }
@@ -189,54 +211,15 @@ auto Pager::start_writer() -> Status
 {
     CALICODB_EXPECT_NE(m_mode, kOpen);
     CALICODB_EXPECT_NE(m_mode, kError);
+    CALICODB_EXPECT_EQ(m_lock, File::kShared);
     CALICODB_EXPECT_TRUE(m_wal);
-    if (m_mode < kWrite) {
+
+    if (m_mode == kRead) {
         CALICODB_TRY(m_wal->start_writer());
         m_mode = kWrite;
         m_save = kWrite;
     }
     return Status::ok();
-}
-
-auto Pager::begin(bool write) -> Status
-{
-    CALICODB_EXPECT_NE(m_mode, kError);
-    if (m_wal == nullptr) {
-        CALICODB_TRY(open_wal());
-    }
-    ScopeGuard guard = [this] {
-        // Make sure the DB file and WAL are not locked if this method fails.
-        finish();
-    };
-
-    m_wal->finish_reader();
-
-    if (m_mode == kOpen) {
-        CALICODB_TRY(m_file->file_lock(File::kShared));
-
-        bool changed;
-        CALICODB_TRY(busy_wait(m_busy, [&changed, this] {
-            return m_wal->start_reader(changed);
-        }));
-
-        if (changed) {
-            purge_cached_pages();
-        }
-
-        if (write) {
-            CALICODB_TRY(busy_wait(m_busy, [this] {
-                return m_wal->start_writer();
-            }));
-        }
-        CALICODB_TRY(refresh_state());
-
-        std::move(guard).cancel();
-        m_mode = write ? kWrite : kRead;
-        m_save = m_mode;
-        return Status::ok();
-    }
-    std::move(guard).cancel();
-    return Status::not_supported("transaction already started");
 }
 
 auto Pager::commit() -> Status
@@ -295,19 +278,18 @@ auto Pager::rollback() -> void
 
 auto Pager::finish() -> void
 {
-    if (m_mode >= kDirty) {
-        rollback();
-    }
-    if (m_mode == kWrite) {
-        m_wal->finish_writer();
-        m_mode = kRead;
-    }
-    if (m_mode == kRead) {
+    // If WAL has not yet been opened, then the pager must not be in a
+    // transaction.
+    CALICODB_EXPECT_TRUE(m_wal || m_mode == kOpen);
+    if (m_wal) {
+        if (m_mode >= kDirty) {
+            rollback();
+        }
         m_wal->finish_reader();
-        m_file->file_unlock();
-        m_mode = kOpen;
     }
-    m_save = m_mode;
+    m_mode = kOpen;
+    m_save = kOpen;
+    unlock_db();
 }
 
 auto Pager::purge_cached_pages() -> void

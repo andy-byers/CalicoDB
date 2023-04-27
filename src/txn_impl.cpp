@@ -9,10 +9,11 @@
 namespace calicodb
 {
 
-TxnImpl::TxnImpl(Pager &pager, Status &status)
-    : m_schema(pager),
+TxnImpl::TxnImpl(Pager &pager, Status &status, bool write)
+    : m_schema(pager, write),
       m_pager(&pager),
-      m_status(&status)
+      m_status(&status),
+      m_write(write)
 {
 }
 
@@ -28,27 +29,38 @@ auto TxnImpl::status() const -> Status
 
 auto TxnImpl::new_table(const TableOptions &options, const std::string &name, Table *&out) -> Status
 {
+    // Schema object prevents creating new tables during readonly transactions (existing
+    // tables can be opened).
     return m_schema.new_table(options, name, out);
 }
 
 auto TxnImpl::drop_table(const std::string &name) -> Status
 {
+    // Schema object disallows dropping tables during readonly transactions.
     return m_schema.drop_table(name);
 }
 
 auto TxnImpl::commit() -> Status
 {
+    if (!m_write) {
+        return readonly_transaction();
+    }
     return m_pager->commit();
 }
 
 auto TxnImpl::rollback() -> void
 {
-    m_pager->rollback();
-    m_schema.inform_live_cursors();
+    if (m_write) {
+        m_pager->rollback();
+        m_schema.inform_live_cursors();
+    }
 }
 
 auto TxnImpl::vacuum() -> Status
 {
+    if (!m_write) {
+        return readonly_transaction();
+    }
     m_pager->set_status(vacuum_freelist());
     return *m_status;
 }

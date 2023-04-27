@@ -16,10 +16,12 @@ auto DBImpl::open(const Options &sanitized) -> Status
 {
     File *file = nullptr;
     auto exists = false;
-    ScopeGuard guard = [file] {
+    ScopeGuard guard = [&file, this] {
         if (file) {
             file->file_unlock();
-            delete file;
+            if (m_pager == nullptr) {
+                delete file;
+            }
         }
     };
 
@@ -35,15 +37,22 @@ auto DBImpl::open(const Options &sanitized) -> Status
     } else {
         return s;
     }
-    CALICODB_TRY(busy_wait(m_busy, [file] {
-        return file->file_lock(File::kShared);
-    }));
+    CALICODB_TRY(file->file_lock(File::kShared));
 
     FileHeader header;
     if (exists) {
-        char buffer[FileHeader::kSize];
-        CALICODB_TRY(file->read_exact(0, sizeof(buffer), buffer));
-        exists = header.read(buffer);
+        Slice read;
+        char buffer[kPageSize];
+        CALICODB_TRY(file->read(0, kPageSize, buffer, &read));
+        if (read.size() == kPageSize) {
+            exists = header.read(buffer);
+        } else if (read.is_empty()) {
+            exists = false;
+        } else {
+            std::string message("root page is incomplete: read ");
+            append_fmt_string(message, "%zu/%zu bytes", read.size(), kPageSize);
+            return Status::corruption(message);
+        }
     }
 
     const auto cache_size = std::max(
@@ -74,7 +83,10 @@ auto DBImpl::open(const Options &sanitized) -> Status
             "database \"" + m_db_filename + "\" already exists");
     } else {
         // This should be a no-op if the database closed normally last time.
-        CALICODB_TRY(m_pager->checkpoint());
+        s = m_pager->checkpoint();
+        if (s.is_busy()) {
+            s = Status::ok();
+        }
         m_pager->purge_cached_pages();
     }
     std::move(guard).cancel();
@@ -97,12 +109,11 @@ DBImpl::DBImpl(const Options &options, const Options &sanitized, std::string fil
 
 DBImpl::~DBImpl()
 {
-    if (m_state.use_wal) {
-        if (m_pager->mode() != Pager::kOpen) {
-            m_pager->finish();
-        }
+    if (m_pager) {
+        m_pager->finish();
+
         auto s = busy_wait(m_busy, [this] {
-            return m_pager->begin(false);
+            return m_pager->m_file->file_lock(File::kShared);
         });
         if (s.is_ok()) {
             s = m_pager->close();
@@ -131,7 +142,8 @@ auto DBImpl::destroy(const Options &options, const std::string &filename) -> Sta
     DB *db;
     auto s = DB::open(copy, filename, db);
     if (!s.is_ok()) {
-        return Status::invalid_argument(filename + " is not a CalicoDB database");
+        return Status::invalid_argument(
+            '"' + filename + "\" is not a CalicoDB database");
     }
 
     const auto *impl = reinterpret_cast<const DBImpl *>(db);
@@ -190,11 +202,20 @@ auto DBImpl::get_property(const Slice &name, std::string *out) const -> bool
 auto DBImpl::start(bool write, Txn *&out) -> Status
 {
     if (write) {
+        m_pager->finish();
         CALICODB_TRY(m_pager->checkpoint()); // TODO: Find somewhere better to put this, maybe even expose a checkpoint() method on DB
     }
-    CALICODB_TRY(m_pager->begin(write));
-    out = new TxnImpl(*m_pager, m_state.status);
-    return Status::ok();
+
+    auto s = m_pager->start_reader();
+    if (s.is_ok() && write) {
+        s = m_pager->start_writer();
+    }
+    if (s.is_ok()) {
+        out = new TxnImpl(*m_pager, m_state.status, write);
+    } else {
+        m_pager->finish();
+    }
+    return s;
 }
 
 auto DBImpl::finish(Txn *&txn) -> void

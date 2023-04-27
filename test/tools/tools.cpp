@@ -191,7 +191,7 @@ auto expect_db_contains(const Table &table, const std::map<std::string, std::str
 
 FakeWal::FakeWal(const Parameters &param)
     : m_param(param),
-      m_db_file(param.dbfile)
+      m_db_file(param.db_file)
 {
 }
 
@@ -244,7 +244,7 @@ auto FakeWal::rollback() -> void
     m_pending.clear();
 }
 
-auto FakeWal::close() -> Status
+auto FakeWal::close(std::size_t &) -> Status
 {
     m_pending.clear();
     m_committed.clear();

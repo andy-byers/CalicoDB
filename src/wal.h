@@ -117,7 +117,7 @@ public:
     struct Parameters {
         std::string filename;
         Env *env = nullptr;
-        File *dbfile = nullptr;
+        File *db_file = nullptr;
         BusyHandler *busy = nullptr;
     };
 
@@ -125,7 +125,7 @@ public:
 
     // Open or create a WAL file called "filename".
     [[nodiscard]] static auto open(const Parameters &param, Wal *&out) -> Status;
-    [[nodiscard]] static auto close(Wal *&wal) -> Status;
+    [[nodiscard]] static auto close(Wal *&wal, std::size_t &db_size) -> Status;
 
     // Write as much of the WAL back to the DB as possible
     [[nodiscard]] virtual auto checkpoint(std::size_t *db_size) -> Status = 0;
@@ -156,7 +156,7 @@ public:
     [[nodiscard]] virtual auto statistics() const -> WalStatistics = 0;
 
 private:
-    [[nodiscard]] virtual auto close() -> Status = 0;
+    [[nodiscard]] virtual auto close(std::size_t &db_size) -> Status = 0;
 };
 
 template<class Callback>

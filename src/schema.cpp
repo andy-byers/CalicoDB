@@ -8,13 +8,15 @@
 #include "scope_guard.h"
 #include "table_impl.h"
 #include "tree.h"
+#include "txn_impl.h"
 
 namespace calicodb
 {
 
-Schema::Schema(Pager &pager)
+Schema::Schema(Pager &pager, bool write)
     : m_pager(&pager),
-      m_map(new Tree(pager, nullptr))
+      m_map(new Tree(pager, nullptr)),
+      m_write(write)
 {
 }
 
@@ -40,7 +42,7 @@ auto Schema::new_table(const TableOptions &options, const std::string &name, Tab
         }
         root_id.value = get_u32(value);
     } else if (s.is_not_found()) {
-        if (!options.create_if_missing) {
+        if (!m_write || !options.create_if_missing) {
             return Status::invalid_argument("table \"" + name + "\" does not exist");
         }
         CALICODB_TRY(Tree::create(*m_pager, false, &root_id));
@@ -60,6 +62,9 @@ auto Schema::new_table(const TableOptions &options, const std::string &name, Tab
 
 auto Schema::drop_table(const std::string &name) -> Status
 {
+    if (!m_write) {
+        return readonly_transaction();
+    }
     std::string value;
     CALICODB_TRY(m_map->get(name, &value));
     if (value.size() != Id::kSize) {

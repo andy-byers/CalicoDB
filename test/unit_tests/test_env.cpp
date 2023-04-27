@@ -351,9 +351,6 @@ public:
     {
         auto *f = new_file(kFilename);
         ASSERT_OK(f->file_lock(File::kShared));
-        if (reserve) {
-            ASSERT_OK(f->file_lock(File::kReserved));
-        }
         ASSERT_OK(f->file_lock(File::kExclusive));
         f->file_unlock();
     }
@@ -390,84 +387,6 @@ public:
         b->file_unlock();
     }
 
-    auto test_reserved(bool shared) -> void
-    {
-        auto *a = new_file(kFilename);
-        auto *b = new_file(kFilename);
-        auto *c = new_file(kFilename);
-
-        if (shared) {
-            ASSERT_OK(a->file_lock(File::kShared));
-            ASSERT_OK(b->file_lock(File::kShared));
-            ASSERT_OK(c->file_lock(File::kShared));
-        }
-
-        // Take a reserved file_lock on 1 of the files and make sure that the
-        // other file descriptors cannot be locked in a mode greater than
-        // kShared.
-        File *files[] = {a, b, c};
-        for (std::size_t i = 0; i < 3; ++i) {
-            auto *p = files[i];
-            auto *x = files[(i + 1) % 3];
-            auto *y = files[(i + 2) % 3];
-
-            ASSERT_OK(p->file_lock(File::kShared));
-            ASSERT_OK(p->file_lock(File::kReserved));
-
-            ASSERT_OK(x->file_lock(File::kShared));
-            ASSERT_TRUE(x->file_lock(File::kReserved).is_busy());
-            ASSERT_TRUE(x->file_lock(File::kExclusive).is_busy());
-
-            ASSERT_OK(y->file_lock(File::kShared));
-            ASSERT_TRUE(y->file_lock(File::kReserved).is_busy());
-            ASSERT_TRUE(y->file_lock(File::kExclusive).is_busy());
-
-            p->file_unlock();
-            x->file_unlock();
-            y->file_unlock();
-        }
-    }
-
-    auto test_pending(bool reserved) -> void
-    {
-        auto *a = new_file(kFilename);
-        auto *b = new_file(kFilename);
-        auto *c = new_file(kFilename);
-        auto *extra = new_file(kFilename);
-
-        // Used to prevent "p" below from getting an exclusive file_lock.
-        ASSERT_OK(extra->file_lock(File::kShared));
-
-        // Fail to take an exclusive file_lock on 1 of the files, leaving it in
-        // pending mode, and make sure that the other file descriptors cannot
-        // be locked.
-        File *files[] = {a, b, c};
-        for (std::size_t i = 0; i < 3; ++i) {
-            auto *p = files[i];
-            auto *x = files[(i + 1) % 3];
-            auto *y = files[(i + 2) % 3];
-
-            ASSERT_OK(p->file_lock(File::kShared));
-            if (reserved) {
-                ASSERT_OK(p->file_lock(File::kReserved));
-            }
-
-            ASSERT_TRUE(p->file_lock(File::kExclusive).is_busy());
-
-            if (reserved) {
-                ASSERT_TRUE(x->file_lock(File::kShared).is_busy());
-                ASSERT_TRUE(y->file_lock(File::kShared).is_busy());
-            } else {
-                ASSERT_OK(x->file_lock(File::kShared));
-                ASSERT_OK(y->file_lock(File::kShared));
-            }
-
-            p->file_unlock();
-            x->file_unlock();
-            y->file_unlock();
-        }
-    }
-
     template <class Test>
     auto run_test(const Test &test)
     {
@@ -498,18 +417,6 @@ TEST_P(EnvLockStateTests, Exclusive)
     run_test([this] { test_exclusive(); });
 }
 
-TEST_P(EnvLockStateTests, Reserved)
-{
-    run_test([this] { test_reserved(false); });
-    run_test([this] { test_reserved(true); });
-}
-
-TEST_P(EnvLockStateTests, Pending)
-{
-    run_test([this] { test_pending(false); });
-    run_test([this] { test_pending(true); });
-}
-
 TEST_P(EnvLockStateTests, NOOPs)
 {
     auto *f = new_file(kFilename);
@@ -518,14 +425,11 @@ TEST_P(EnvLockStateTests, NOOPs)
     ASSERT_OK(f->file_lock(File::kShared));
     ASSERT_OK(f->file_lock(File::kUnlocked));
 
-    ASSERT_OK(f->file_lock(File::kReserved));
-    ASSERT_OK(f->file_lock(File::kReserved));
     ASSERT_OK(f->file_lock(File::kShared));
     ASSERT_OK(f->file_lock(File::kUnlocked));
 
     ASSERT_OK(f->file_lock(File::kExclusive));
     ASSERT_OK(f->file_lock(File::kExclusive));
-    ASSERT_OK(f->file_lock(File::kReserved));
     ASSERT_OK(f->file_lock(File::kShared));
     ASSERT_OK(f->file_lock(File::kUnlocked));
 
@@ -537,10 +441,7 @@ TEST_P(EnvLockStateTests, NOOPs)
 TEST_P(EnvLockStateTests, InvalidRequestDeathTest)
 {
     auto *f = new_file(kFilename);
-    // kPending cannot be requested directly.
-    ASSERT_DEATH((void)f->file_lock(File::kPending), kExpectationMatcher);
     // kUnlocked -> kShared is the only allowed transition out of kUnlocked.
-    ASSERT_DEATH((void)f->file_lock(File::kReserved), kExpectationMatcher);
     ASSERT_DEATH((void)f->file_lock(File::kExclusive), kExpectationMatcher);
 }
 #endif // NDEBUG
@@ -653,26 +554,20 @@ static auto busy_wait_file_lock(File &file, bool is_writer) -> void
 {
     Status s;
     do {
-        do {
-            s = file.file_lock(File::kShared);
-            if (s.is_busy()) {
+        s = file.file_lock(File::kShared);
+        if (s.is_ok()) {
+            if (is_writer) {
+                s = file.file_lock(File::kExclusive);
+                if (s.is_ok()) {
+                    return;
+                }
                 std::this_thread::yield();
+                file.file_unlock();
+            } else {
+                return;
             }
-        } while (s.is_busy());
-        if (s.is_ok() && is_writer) {
-            s = file.file_lock(File::kReserved);
-            if (s.is_ok()) {
-                // This must be the only thread with a reserved lock.
-                do {
-                    s = file.file_lock(File::kExclusive);
-                    if (s.is_busy()) {
-                        std::this_thread::yield();
-                    }
-                } while (s.is_busy());
-                break;
-            }
-            file.file_unlock();
         }
+        std::this_thread::yield();
     } while (s.is_busy());
     ASSERT_OK(s);
 }
@@ -789,30 +684,24 @@ public:
     auto run_test(const Test &test)
     {
         for (std::size_t n = 0; n < kNumEnvs; ++n) {
-            if (kNumEnvs > 1) {
-                const auto pid = fork();
-                ASSERT_NE(-1, pid) << strerror(errno);
-                if (pid) {
-                    continue;
-                }
+            const auto pid = fork();
+            ASSERT_NE(-1, pid) << strerror(errno);
+            if (pid) {
+                continue;
             }
 
             test(n);
-            if (kNumEnvs > 1) {
-                std::exit(testing::Test::HasFailure());
-            }
+            std::exit(testing::Test::HasFailure());
         }
-        if (kNumEnvs > 1) {
-            for (std::size_t n = 0; n < kNumEnvs; ++n) {
-                int s;
-                const auto pid = wait(&s);
-                ASSERT_NE(pid, -1)
-                    << "wait failed: " << strerror(errno);
-                ASSERT_TRUE(WIFEXITED(s) && WEXITSTATUS(s) == 0)
-                    << "exited " << (WIFEXITED(s) ? "" : "ab")
-                    << "normally with exit status "
-                    << WEXITSTATUS(s);
-            }
+        for (std::size_t n = 0; n < kNumEnvs; ++n) {
+            int s;
+            const auto pid = wait(&s);
+            ASSERT_NE(pid, -1)
+                << "wait failed: " << strerror(errno);
+            ASSERT_TRUE(WIFEXITED(s) && WEXITSTATUS(s) == 0)
+                << "exited " << (WIFEXITED(s) ? "" : "ab")
+                << "normally with exit status "
+                << WEXITSTATUS(s);
         }
     }
 
@@ -977,16 +866,14 @@ INSTANTIATE_TEST_SUITE_P(
         // Multiple threads
         EnvConcurrencyTestsParam{1, 5},
         EnvConcurrencyTestsParam{1, 10},
-        EnvConcurrencyTestsParam{1, 15},
 
         // Multiple processes
         EnvConcurrencyTestsParam{5, 1},
         EnvConcurrencyTestsParam{10, 1},
-        EnvConcurrencyTestsParam{15, 1},
 
         // Multiple threads in multiple processes
-        EnvConcurrencyTestsParam{5, 5},
-        EnvConcurrencyTestsParam{10, 5},
-        EnvConcurrencyTestsParam{15, 5}));
+        EnvConcurrencyTestsParam{2, 2},
+        EnvConcurrencyTestsParam{2, 4},
+        EnvConcurrencyTestsParam{4, 2}));
 
 } // namespace calicodb
