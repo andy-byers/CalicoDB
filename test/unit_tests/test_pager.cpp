@@ -29,7 +29,7 @@ class PageCacheTests : public testing::Test
 {
 public:
     explicit PageCacheTests()
-        : mgr(kMinPageSize, kMinFrameCount)
+        : mgr(kMinFrameCount)
     {
     }
 
@@ -95,15 +95,15 @@ TEST_F(PageCacheTests, RefcountsAreConsideredDuringEviction)
 
 auto write_to_page(Page &page, const std::string &message) -> void
 {
-    EXPECT_LE(page_offset(page.id()) + message.size(), page.size());
-    std::memcpy(page.data() + page.size() - message.size(), message.data(), message.size());
+    EXPECT_LE(page_offset(page.id()) + message.size(), kPageSize);
+    std::memcpy(page.data() + kPageSize - message.size(), message.data(), message.size());
 }
 
 [[nodiscard]] auto read_from_page(const Page &page, std::size_t size) -> std::string
 {
-    EXPECT_LE(page_offset(page.id()) + size, page.size());
+    EXPECT_LE(page_offset(page.id()) + size, kPageSize);
     std::string message(size, '\x00');
-    std::memcpy(message.data(), page.data() + page.size() - message.size(), message.size());
+    std::memcpy(message.data(), page.data() + kPageSize - message.size(), message.size());
     return message;
 }
 
@@ -114,7 +114,6 @@ public:
     static constexpr std::size_t kSomePages = kPagerFrames / 5; // Just a few pages
     static constexpr std::size_t kFullCache = kPagerFrames;     // Enough pages to fill the page cache
     static constexpr std::size_t kManyPages = kPagerFrames * 5; // Lots of pages, enough to cause many evictions
-    static constexpr U32 kPageSize = kMinPageSize;
 
     auto write_db_header() -> void
     {
@@ -129,7 +128,7 @@ public:
     {
         CALICODB_EXPECT_NE(env, nullptr);
         File *file;
-        CALICODB_TRY(env->new_file(kDBFilename, Env::kCreate | Env::kReadWrite, file));
+        CALICODB_TRY(env->new_file(kDBFilename, Env::kCreate, file));
 
         const Pager::Parameters pager_param = {
             kDBFilename,
@@ -138,8 +137,8 @@ public:
             env,
             nullptr,
             &m_state,
+            nullptr,
             kPagerFrames,
-            kPageSize,
         };
         CALICODB_TRY(Pager::open(pager_param, m_pager));
         m_pager->set_page_count(1);
@@ -168,7 +167,7 @@ public:
         // won't skip pointer map pages or attempt to get a page from the freelist.
         auto s = m_pager->acquire(Id(m_pager->page_count() + 1), page);
         if (s.is_ok()) {
-            m_pager->upgrade(page);
+            m_pager->mark_dirty(page);
         }
         return s;
     }
@@ -199,7 +198,7 @@ public:
     {
         Page page;
         EXPECT_OK(m_pager->acquire(id, page));
-        m_pager->upgrade(page);
+        m_pager->mark_dirty(page);
         write_to_page(page, message);
         return page;
     }
@@ -244,7 +243,7 @@ public:
     {
         File *file;
         std::string message(size, '\x00');
-        EXPECT_OK(env->new_file(kDBFilename, Env::kCreate | Env::kReadWrite, file));
+        EXPECT_OK(env->new_file(kDBFilename, Env::kCreate, file));
         EXPECT_OK(file->read_exact(
             id.value * kPageSize - message.size(),
             message.size(),
@@ -253,7 +252,7 @@ public:
         return message;
     }
 
-    [[nodiscard]] auto count_db_pages() -> std::size_t
+    [[nodiscard]] auto count_db_pages() const -> std::size_t
     {
         std::size_t file_size;
         EXPECT_OK(env->file_size(kDBFilename, file_size));
@@ -289,7 +288,8 @@ TEST_F(PagerTests, NewPagerIsSetUpCorrectly)
 
 TEST_F(PagerTests, AllocatesPagesAtEOF)
 {
-    ASSERT_OK(m_pager->begin(true));
+    ASSERT_OK(m_pager->start_reader());
+    ASSERT_OK(m_pager->start_writer());
     ASSERT_EQ(m_pager->page_count(), 1);
     ASSERT_EQ(allocate_write_release("a"), Id(2));
     ASSERT_EQ(m_pager->page_count(), 2);
@@ -543,7 +543,7 @@ TEST_F(PagerTests, AcquirePastEOF)
     // written to the WAL, and there will be no indication that the DB size changed.
     // Usually, new pages are obtained by calling Pager::allocate(), but this should
     // work as well.
-    m_pager->upgrade(page);
+    m_pager->mark_dirty(page);
     m_pager->release(std::move(page));
 
     ASSERT_EQ(m_pager->page_count(), kOutOfBounds)
@@ -754,19 +754,14 @@ private:
 class WalTestBase : public EnvTestHarness<PosixEnv>
 {
 protected:
-    static constexpr std::size_t kPageSize = kMinPageSize;
-
     WalTestBase()
-        : m_testdir(".")
     {
-        File *file;
-        EXPECT_OK(env().new_file(kDBFilename, Env::kCreate | Env::kReadWrite, file));
+        EXPECT_OK(env().new_file(kDBFilename, Env::kCreate, m_db));
 
         m_param = {
-            .filename = m_testdir.as_child(kWalFilename),
-            .page_size = kPageSize,
+            .filename = kWalFilename,
             .env = &env(),
-            .dbfile = file,
+            .dbfile = m_db,
         };
         EXPECT_OK(Wal::open(m_param, m_wal));
     }
@@ -774,20 +769,54 @@ protected:
     ~WalTestBase() override
     {
         close();
-        delete m_db;
     }
 
     auto close() -> void
     {
         ASSERT_OK(Wal::close(m_wal));
         ASSERT_EQ(m_wal, nullptr);
+        delete m_db;
     }
 
     File *m_db = nullptr;
     Wal *m_wal = nullptr;
     Wal::Parameters m_param;
-    tools::TestDir m_testdir;
 };
+
+class WalTests
+    : public WalTestBase,
+      public testing::Test
+{
+public:
+    ~WalTests() override = default;
+};
+
+TEST_F(WalTests, EmptyWal)
+{
+    ASSERT_OK(m_db->file_lock(File::kShared));
+
+    bool changed;
+    ASSERT_OK(m_wal->start_reader(changed));
+    ASSERT_TRUE(changed);
+
+    std::size_t db_size;
+    ASSERT_OK(m_wal->checkpoint(&db_size));
+    ASSERT_EQ(0, db_size);
+
+    char *page;
+    ASSERT_OK(m_wal->read(Id(1), page));
+    ASSERT_FALSE(page);
+    ASSERT_OK(m_wal->read(Id(2), page));
+    ASSERT_FALSE(page);
+    ASSERT_OK(m_wal->read(Id(3), page));
+    ASSERT_FALSE(page);
+
+    ASSERT_OK(m_wal->checkpoint(&db_size));
+    ASSERT_EQ(0, db_size);
+
+    ASSERT_OK(m_env->file_size(kDBFilename, db_size));
+    ASSERT_EQ(0, db_size);
+}
 
 class WalParamTests
     : public WalTestBase,
@@ -795,20 +824,19 @@ class WalParamTests
           std::tuple<std::size_t, std::size_t, std::size_t>>
 {
 protected:
-    static constexpr std::size_t kPageSize = kMinPageSize;
-
     explicit WalParamTests()
         : m_builder(kPageSize),
           m_saved(kPageSize),
-          m_rng(42),
-          m_fake_param{
-              .filename = m_testdir.as_child("fake-wal"),
-              .page_size = kPageSize,
-              .env = &env(),
-              nullptr,
-          },
-          m_fake(new tools::FakeWal(m_fake_param))
+          m_rng(42)
     {
+        File *file;
+        EXPECT_OK(env().new_file(kDBFilename, Env::kCreate, file));
+        m_fake_param = Wal::Parameters {
+            "fake-wal",
+            &env(),
+            file,
+        };
+        m_fake = new tools::FakeWal(m_fake_param);
     }
 
     ~WalParamTests() override
@@ -868,13 +896,13 @@ protected:
     auto run_and_validate_checkpoint(bool save_state = true) -> void
     {
         File *real, *fake;
-        ASSERT_OK(env().new_file(m_testdir.as_child("realdb"), Env::kCreate | Env::kReadWrite, real));
-        ASSERT_OK(env().new_file(m_testdir.as_child("fakedb"), Env::kCreate | Env::kReadWrite, fake));
-        ASSERT_OK(m_wal->checkpoint(*real, nullptr));
-        ASSERT_OK(m_fake->checkpoint(*fake, nullptr));
+        ASSERT_OK(env().new_file("realdb", Env::kCreate, real));
+        ASSERT_OK(env().new_file("fakedb", Env::kCreate, fake));
+        ASSERT_OK(m_wal->checkpoint(nullptr));
+        ASSERT_OK(m_fake->checkpoint(nullptr));
 
         std::size_t file_size;
-        ASSERT_OK(env().file_size(m_testdir.as_child("fakedb"), file_size));
+        ASSERT_OK(env().file_size("fakedb", file_size));
 
         std::string real_buf(file_size, '\0');
         std::string fake_buf(file_size, '\0');
@@ -1044,8 +1072,8 @@ public:
             const auto message = make_key(i);
             CALICODB_TRY(m_pager->acquire(page_id, page));
 
-            m_pager->upgrade(page);
-            std::memcpy(page.data() + page.size() - message.size(), message.data(), message.size());
+            m_pager->mark_dirty(page);
+            std::memcpy(page.data() + kPageSize - message.size(), message.data(), message.size());
             m_pager->release(std::move(page));
 
             // Perform a commit every so often.

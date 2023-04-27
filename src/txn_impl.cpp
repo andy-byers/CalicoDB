@@ -9,10 +9,10 @@
 namespace calicodb
 {
 
-TxnImpl::TxnImpl(Pager &pager, DBState &state)
+TxnImpl::TxnImpl(Pager &pager, Status &status)
     : m_schema(pager),
       m_pager(&pager),
-      m_state(&state)
+      m_status(&status)
 {
 }
 
@@ -23,7 +23,7 @@ TxnImpl::~TxnImpl()
 
 auto TxnImpl::status() const -> Status
 {
-    return m_state->status;
+    return *m_status;
 }
 
 auto TxnImpl::new_table(const TableOptions &options, const std::string &name, Table *&out) -> Status
@@ -50,7 +50,7 @@ auto TxnImpl::rollback() -> void
 auto TxnImpl::vacuum() -> Status
 {
     m_pager->set_status(vacuum_freelist());
-    return m_state->status;
+    return *m_status;
 }
 
 auto TxnImpl::vacuum_freelist() -> Status

@@ -297,14 +297,14 @@ struct PosixShm {
 
     ShmNode *snode = nullptr;
     PosixShm *next = nullptr;
-    U16 shared_mask = 0;
-    U16 exclusive_mask = 0;
+    U16 reader_mask = 0;
+    U16 writer_mask = 0;
 };
 
 class PosixFile : public File
 {
 public:
-    explicit PosixFile(std::string filename, Env::OpenMode mode, int file);
+    explicit PosixFile(std::string filename_, Env::OpenMode mode_, int file_);
 
     ~PosixFile() override
     {
@@ -327,7 +327,6 @@ public:
     const std::string filename;
     INode *inode = nullptr;
     PosixShm *shm = nullptr;
-    Env::OpenMode open_mode;
     int file = -1;
 
     // Lock mode for this particular file descriptor.
@@ -376,7 +375,7 @@ struct PosixFs final {
         // REQUIRES: "s_fs.mutex" is locked by the caller
 
         FileId key;
-        if (struct stat st; fstat(fd, &st)) {
+        if (struct stat st = {}; fstat(fd, &st)) {
             return nullptr;
         } else {
             key.device = st.st_dev;
@@ -534,7 +533,7 @@ auto PosixEnv::file_exists(const std::string &filename) const -> bool
 
 auto PosixEnv::file_size(const std::string &filename, std::size_t &out) const -> Status
 {
-    struct stat st;
+    struct stat st = {};
     if (stat(filename.c_str(), &st)) {
         return posix_error(errno);
     }
@@ -546,11 +545,6 @@ auto PosixEnv::new_file(const std::string &filename, OpenMode mode, File *&out) 
 {
     const auto is_create = mode & kCreate;
     const auto is_readonly = mode & kReadOnly;
-    const auto is_readwrite = mode & kReadWrite;
-
-    // kReadOnly and kReadWrite are mutually exclusive, and files must be created in kReadWrite.
-    CALICODB_EXPECT_NE(is_readonly, is_readwrite);
-    CALICODB_EXPECT_TRUE(!is_create || is_readwrite);
 
     const auto flags =
         (is_create ? O_CREAT : 0) |
@@ -591,9 +585,8 @@ auto PosixEnv::rand() -> unsigned
     return static_cast<unsigned>(nrand48(m_rng));
 }
 
-PosixFile::PosixFile(std::string filename_, Env::OpenMode open_mode_, int file_)
+PosixFile::PosixFile(std::string filename_, Env::OpenMode, int file_)
     : filename(std::move(filename_)),
-      open_mode(open_mode_),
       file(file_)
 {
     CALICODB_EXPECT_GE(file, 0);
@@ -679,8 +672,10 @@ auto PosixFile::shm_map(std::size_t r, volatile void *&out) -> Status
 auto PosixFile::shm_lock(std::size_t r, std::size_t n, ShmLockFlag flags) -> Status
 {
     // shm_map() must have succeeded at least once.
-    CALICODB_EXPECT_TRUE(shm);
-    return shm->lock(r, n, flags);
+    if (shm) {
+        return shm->lock(r, n, flags);
+    }
+    return Status::io_error("unmapped");
 }
 
 auto PosixFile::shm_barrier() -> void
@@ -710,7 +705,7 @@ auto PosixShm::lock(std::size_t r, std::size_t n, File::ShmLockFlag flags) -> St
     CALICODB_EXPECT_TRUE(snode->check_locks());
 
     if (flags & File::kUnlock) {
-        if ((shared_mask | exclusive_mask) & mask) {
+        if ((reader_mask | writer_mask) & mask) {
             auto unlock = true;
             // Determine whether another thread in this process has a shared lock. Don't
             // worry about exclusive locks here: if there is one, then it must be ours,
@@ -720,7 +715,7 @@ auto PosixShm::lock(std::size_t r, std::size_t n, File::ShmLockFlag flags) -> St
                 // otherwise. If shared_bit is false, then this thread must have an
                 // exclusive lock on bit i, otherwise we are trying to file_unlock bytes that
                 // are not locked.
-                const bool shared_bit = shared_mask & (1 << i);
+                const bool shared_bit = reader_mask & (1 << i);
                 if (state[i] > shared_bit) {
                     unlock = false;
                 }
@@ -732,17 +727,17 @@ auto PosixShm::lock(std::size_t r, std::size_t n, File::ShmLockFlag flags) -> St
                 }
                 std::memset(&state[r], 0, sizeof(int) * n);
             } else {
-                CALICODB_EXPECT_TRUE(shared_mask & (1 << r));
+                CALICODB_EXPECT_TRUE(reader_mask & (1 << r));
                 CALICODB_EXPECT_TRUE(n == 1 && state[r] > 1);
                 --state[r];
             }
-            exclusive_mask = exclusive_mask & ~mask;
-            shared_mask = shared_mask & ~mask;
+            writer_mask &= ~mask;
+            reader_mask &= ~mask;
         }
     } else if (flags & File::kReader) {
-        CALICODB_EXPECT_EQ(0, exclusive_mask & (1 << r));
+        CALICODB_EXPECT_EQ(0, writer_mask & (1 << r));
         CALICODB_EXPECT_EQ(1, n);
-        if ((shared_mask & mask) == 0) {
+        if ((reader_mask & mask) == 0) {
             if (state[r] < 0) {
                 return posix_busy();
             } else if (state[r] == 0) {
@@ -750,14 +745,14 @@ auto PosixShm::lock(std::size_t r, std::size_t n, File::ShmLockFlag flags) -> St
                     return posix_error(errno);
                 }
             }
-            shared_mask = shared_mask | mask;
+            reader_mask |= mask;
             state[r]++;
         }
     } else {
         // Take exclusive locks on bytes s through s + n - 1, inclusive.
-        CALICODB_EXPECT_FALSE(shared_mask & mask);
+        CALICODB_EXPECT_FALSE(reader_mask & mask);
         for (std::size_t i = r; i < r + n; ++i) {
-            if ((exclusive_mask & (1 << i)) == 0 && state[i]) {
+            if ((writer_mask & (1 << i)) == 0 && state[i]) {
                 // Some other thread in this process has a lock.
                 return posix_busy();
             }
@@ -767,9 +762,9 @@ auto PosixShm::lock(std::size_t r, std::size_t n, File::ShmLockFlag flags) -> St
             // Some thread in another process has a lock.
             return posix_error(errno);
         }
-        CALICODB_EXPECT_FALSE(shared_mask & mask);
+        CALICODB_EXPECT_FALSE(reader_mask & mask);
         std::fill(state + r, state + r + n, -1);
-        exclusive_mask = exclusive_mask | mask;
+        writer_mask |= mask;
     }
     CALICODB_EXPECT_TRUE(snode->check_locks());
     return Status::ok();
@@ -821,7 +816,7 @@ auto ShmNode::map_region(std::size_t r, volatile void *&out) -> int
 
     if (regions.size() < request) {
         std::size_t file_size;
-        if (struct stat st; fstat(file, &st)) {
+        if (struct stat st = {}; fstat(file, &st)) {
             return -1;
         } else {
             file_size = static_cast<std::size_t>(st.st_size);
@@ -865,10 +860,10 @@ auto ShmNode::check_locks() const -> bool
 
     for (auto *p = refs; p; p = p->next) {
         for (std::size_t i = 0; i < File::kShmLockCount; ++i) {
-            if (p->exclusive_mask & (1 << i)) {
+            if (p->writer_mask & (1 << i)) {
                 CALICODB_EXPECT_FALSE(check[i]);
                 check[i] = -1;
-            } else if (p->shared_mask & (1 << i)) {
+            } else if (p->reader_mask & (1 << i)) {
                 CALICODB_EXPECT_GE(check[i], 0);
                 ++check[i];
             }

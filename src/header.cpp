@@ -15,9 +15,6 @@ auto FileHeader::read(const char *data) -> bool
     }
     data += sizeof(kIdentifier);
 
-    page_size = get_u16(data);
-    data += sizeof(U16);
-
     page_count = get_u32(data);
     data += sizeof(U32);
 
@@ -32,9 +29,6 @@ auto FileHeader::write(char *data) const -> void
 {
     std::memcpy(data, kIdentifier, sizeof(kIdentifier));
     data += sizeof(kIdentifier);
-
-    put_u16(data, page_size);
-    data += sizeof(U16);
 
     put_u32(data, page_count);
     data += sizeof(U32);

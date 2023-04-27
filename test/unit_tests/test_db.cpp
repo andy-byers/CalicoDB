@@ -69,7 +69,7 @@ TEST(BasicDestructionTests, OnlyDeletesCalicoDatabases)
 
     // File is too small to read the header.
     File *file;
-    ASSERT_OK(options.env->new_file("./testdb", Env::kCreate | Env::kReadWrite, file));
+    ASSERT_OK(options.env->new_file("./testdb", Env::kCreate, file));
     ASSERT_TRUE(DB::destroy(options, "./testdb").is_invalid_argument());
     ASSERT_TRUE(options.env->file_exists("./testdb"));
 
@@ -103,9 +103,9 @@ TEST(BasicDestructionTests, OnlyDeletesCalicoWals)
 
     // These files are not part of the DB.
     File *file;
-    ASSERT_OK(options.env->new_file("./wal_", Env::kCreate | Env::kReadWrite, file));
+    ASSERT_OK(options.env->new_file("./wal_", Env::kCreate, file));
     delete file;
-    ASSERT_OK(options.env->new_file("./test.db", Env::kCreate | Env::kReadWrite, file));
+    ASSERT_OK(options.env->new_file("./test.db", Env::kCreate, file));
     delete file;
 
     ASSERT_OK(DB::destroy(options, "./test"));
@@ -124,8 +124,7 @@ public:
         : m_testdir("."),
           m_dbname(m_testdir.as_child(kDBFilename))
     {
-        options.page_size = kMinPageSize;
-        options.cache_size = options.page_size * frame_count;
+        options.cache_size = kPageSize * frame_count;
         options.env = &env();
     }
 
@@ -138,8 +137,8 @@ public:
     {
         std::size_t file_size;
         EXPECT_OK(m_env->file_size(m_dbname, file_size));
-        const auto num_pages = file_size / options.page_size;
-        EXPECT_EQ(file_size, num_pages * options.page_size)
+        const auto num_pages = file_size / kPageSize;
+        EXPECT_EQ(file_size, num_pages * kPageSize)
             << "file size is not a multiple of the page size";
         return num_pages;
     }
@@ -167,14 +166,13 @@ TEST_F(BasicDatabaseTests, InitialState)
     delete db;
 
     const auto file = tools::read_file_to_string(env(), m_dbname);
-    ASSERT_EQ(file.size(), options.page_size)
+    ASSERT_EQ(file.size(), kPageSize)
         << "DB should have allocated 1 page (the root page)";
 
     FileHeader header;
     ASSERT_TRUE(header.read(file.data()))
         << "version identifier mismatch";
     ASSERT_EQ(header.page_count, 1);
-    ASSERT_EQ(header.page_size, options.page_size);
     ASSERT_EQ(header.freelist_head, 0);
 }
 
@@ -197,16 +195,8 @@ TEST_F(BasicDatabaseTests, ClampsBadOptionValues)
         delete db;
         ASSERT_OK(DB::destroy(options, m_dbname));
     };
-
-    options.page_size = kMinPageSize / 2;
-    open_and_check();
-    options.page_size = kMaxPageSize * 2;
-    open_and_check();
-    options.page_size = kMinPageSize + 1;
-    open_and_check();
-
-    options.page_size = kMinPageSize;
-    options.cache_size = options.page_size;
+    
+    options.cache_size = kPageSize;
     open_and_check();
     options.cache_size = 1 << 31;
     open_and_check();
@@ -271,7 +261,6 @@ TEST_F(BasicDatabaseTests, HandlesMaximumPageSize)
 {
     DB *db;
     tools::RandomGenerator random;
-    options.page_size = kMaxPageSize;
     ASSERT_OK(DB::open(options, m_dbname, db));
     const auto records = tools::fill_db(*db, "table", random, 1);
     delete db;
@@ -336,7 +325,6 @@ public:
           reopen(std::get<2>(GetParam()))
     {
         CALICODB_EXPECT_LE(lower_bounds, upper_bounds);
-        options.page_size = 0x200;
         options.cache_size = 0x200 * 16;
         options.env = &env();
     }
@@ -368,7 +356,7 @@ TEST_P(DbVacuumTests, SanityCheck)
         for (std::size_t batch = 0; batch < 4; ++batch) {
             while (map.size() < upper_bounds) {
                 const auto key = random.Generate(10);
-                const auto value = random.Generate(options.page_size * 2);
+                const auto value = random.Generate(kPageSize * 2);
                 ASSERT_OK(table->put(key, value));
                 map[key.to_string()] = value.to_string();
             }
@@ -414,8 +402,7 @@ public:
     explicit TestDatabase(Env &env)
     {
         options.wal_filename = "./wal";
-        options.page_size = kMinPageSize;
-        options.cache_size = 32 * options.page_size;
+        options.cache_size = 32 * kPageSize;
         options.env = &env;
 
         EXPECT_OK(reopen());
@@ -740,7 +727,7 @@ public:
 //     {
 //         const auto txn = db->db->begin_txn(TxnOptions());
 //         tools::RandomGenerator random;
-//         for (const auto &[k, v] : tools::fill_db(*db->db, random, 1'000, db->options.page_size * 10)) {
+//         for (const auto &[k, v] : tools::fill_db(*db->db, random, 1'000, db->kPageSize * 10)) {
 //             ASSERT_OK(db->db->erase(k));
 //         }
 //         ASSERT_OK(db->db->commit_txn(txn));
@@ -802,7 +789,7 @@ public:
 //
 //     std::size_t file_size;
 //     ASSERT_OK(env().file_size("./test", file_size));
-//     ASSERT_EQ(file_size, db_impl(db->db)->TEST_pager().page_count() * db->options.page_size);
+//     ASSERT_EQ(file_size, db_impl(db->db)->TEST_pager().page_count() * db->kPageSize);
 // }
 //
 // INSTANTIATE_TEST_SUITE_P(
@@ -1046,11 +1033,11 @@ public:
 //
 // TEST_F(ApiTests, HandlesLargeKeys)
 //{
-//     tools::RandomGenerator random(options.page_size * 100 * 3);
+//     tools::RandomGenerator random(kPageSize * 100 * 3);
 //
-//     const auto key_1 = '\x01' + random.Generate(options.page_size * 100).to_string();
-//     const auto key_2 = '\x02' + random.Generate(options.page_size * 100).to_string();
-//     const auto key_3 = '\x03' + random.Generate(options.page_size * 100).to_string();
+//     const auto key_1 = '\x01' + random.Generate(kPageSize * 100).to_string();
+//     const auto key_2 = '\x02' + random.Generate(kPageSize * 100).to_string();
+//     const auto key_3 = '\x03' + random.Generate(kPageSize * 100).to_string();
 //
 //     auto txn = db->begin_txn(TxnOptions());
 //     ASSERT_OK(db->put(key_1, "1"));
@@ -1126,7 +1113,7 @@ public:
 //{
 // public:
 //     explicit LargePayloadTests()
-//         : random(options.page_size * 500)
+//         : random(kPageSize * 500)
 //     {
 //     }
 //
@@ -1161,17 +1148,17 @@ public:
 //
 // TEST_F(LargePayloadTests, LargeKeys)
 //{
-//     run_test(100 * options.page_size, 100);
+//     run_test(100 * kPageSize, 100);
 // }
 //
 // TEST_F(LargePayloadTests, LargeValues)
 //{
-//     run_test(100, 100 * options.page_size);
+//     run_test(100, 100 * kPageSize);
 // }
 //
 // TEST_F(LargePayloadTests, LargePayloads)
 //{
-//     run_test(100 * options.page_size, 100 * options.page_size);
+//     run_test(100 * kPageSize, 100 * kPageSize);
 // }
 //
 // class CommitFailureTests : public ApiTests

@@ -18,7 +18,6 @@ class Page final
     Pager *m_pager = nullptr;
     PageRef *m_ref = nullptr;
     char *m_data = nullptr;
-    std::size_t m_size = 0;
     Id m_id;
     bool m_write = false;
 
@@ -35,7 +34,6 @@ public:
     [[nodiscard]] auto view() const -> Slice;
     [[nodiscard]] auto data() -> char *;
     [[nodiscard]] auto data() const -> const char *;
-    [[nodiscard]] auto size() const -> std::size_t;
 
     // Disable copies.
     Page(const Page &) = delete;

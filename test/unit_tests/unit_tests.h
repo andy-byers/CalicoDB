@@ -95,10 +95,14 @@ public:
         }
         (void)m_env->remove_file(kDBFilename);
         (void)m_env->remove_file(kWalFilename);
+        (void)m_env->remove_file(kShmFilename);
     }
 
     virtual ~EnvTestHarness()
     {
+        (void)m_env->remove_file(kDBFilename);
+        (void)m_env->remove_file(kWalFilename);
+        (void)m_env->remove_file(kShmFilename);
         delete m_env;
     }
 
@@ -121,7 +125,6 @@ class PagerTestHarness : public EnvTestHarness<EnvType>
 {
 public:
     using Base = EnvTestHarness<EnvType>;
-    static constexpr auto kPageSize = kMinPageSize;
     static constexpr auto kFrameCount = kMinFrameCount;
 
     PagerTestHarness()
@@ -133,7 +136,7 @@ public:
         tools::write_string_to_file(Base::env(), kDBFilename, buffer);
 
         File *file;
-        EXPECT_OK(Base::env().new_file(kDBFilename, Env::kCreate | Env::kReadWrite, file));
+        EXPECT_OK(Base::env().new_file(kDBFilename, Env::kCreate, file));
 
         const Pager::Parameters pager_param = {
             kDBFilename,
@@ -142,8 +145,8 @@ public:
             &Base::env(),
             nullptr,
             &m_state,
+            nullptr,
             kFrameCount,
-            kPageSize,
         };
 
         CHECK_OK(Pager::open(pager_param, m_pager));

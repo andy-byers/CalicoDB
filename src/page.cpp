@@ -15,7 +15,6 @@ Page::Page(Pager &pager, PageRef &ref)
     : m_pager(&pager),
       m_ref(&ref),
       m_data(ref.page),
-      m_size(pager.page_size()),
       m_id(ref.page_id)
 {
 }
@@ -40,7 +39,6 @@ auto Page::operator=(Page &&rhs) noexcept -> Page &
 
         m_ref = rhs.m_ref;
         m_data = rhs.m_data;
-        m_size = rhs.m_size;
         m_id = rhs.m_id;
         m_write = rhs.m_write;
     }
@@ -59,7 +57,7 @@ auto Page::id() const -> Id
 
 auto Page::view() const -> Slice
 {
-    return Slice(m_data, m_size);
+    return Slice(m_data, kPageSize);
 }
 
 auto Page::data() -> char *
@@ -70,11 +68,6 @@ auto Page::data() -> char *
 auto Page::data() const -> const char *
 {
     return m_data;
-}
-
-auto Page::size() const -> std::size_t
-{
-    return m_size;
 }
 
 [[nodiscard]] auto page_offset(Id page_id) -> std::size_t

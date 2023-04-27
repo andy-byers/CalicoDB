@@ -22,6 +22,11 @@ class Env;
 class TxnImpl;
 class Wal;
 
+struct DBState {
+    Status status;
+    bool use_wal = false;
+};
+
 class DBImpl : public DB
 {
 public:
@@ -44,8 +49,9 @@ private:
     DBState m_state;
     Pager *m_pager = nullptr;
 
-    Env *m_env = nullptr;
-    Sink *m_log = nullptr;
+    Env *const m_env = nullptr;
+    Sink *const m_log = nullptr;
+    BusyHandler *const m_busy = nullptr;
 
     const std::string m_db_filename;
     const std::string m_wal_filename;

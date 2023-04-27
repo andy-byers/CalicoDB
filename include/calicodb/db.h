@@ -21,14 +21,12 @@ class DB
 {
 public:
     // Open or create a CalicoDB database with the given "filename"
-    //
     // On success, store a pointer to the heap-allocated database in "db" and return OK. On
     // failure, set "db" to nullptr and return a non-OK status. The user is responsible for
     // calling delete on the database handle when it is no longer needed.
     [[nodiscard]] static auto open(const Options &options, const std::string &filename, DB *&db) -> Status;
 
     // Delete the contents of the specified database from stable storage
-    //
     // Deletes every file associated with the database named "filename" and returns OK on
     // success. Returns a non-OK status on failure.
     [[nodiscard]] static auto destroy(const Options &options, const std::string &filename) -> Status;
@@ -36,24 +34,21 @@ public:
     explicit DB();
     virtual ~DB();
 
-    DB(const DB &) = delete;
-    auto operator=(const DB &) -> void = delete;
+    DB(DB &) = delete;
+    void operator=(DB &) = delete;
 
-    // Get a human-readable string describing a named property
-    //
+    // Get a human-readable string describing a named database property
     // If the property named "name" exists, returns true and stores the property value in "*out".
     // Otherwise, false is returned and "*out" is set to nullptr. The out parameter is optional:
     // if passed a nullptr, this method performs an existence check.
     [[nodiscard]] virtual auto get_property(const Slice &name, std::string *out) const -> bool = 0;
 
     // Start a transaction
-    //
     // Stores a pointer to the heap-allocated transaction object in "txn" and returns OK on
     // success. Stores nullptr in "txn" and returns a non-OK status on failure.
     [[nodiscard]] virtual auto start(bool write, Txn *&txn) -> Status = 0;
 
     // Finish a transaction
-    //
     // Takes ownership of the transaction handle. A transaction handle obtained through
     // DB::start() must be passed to this method before (a) another transaction can be
     // started, or (b) the DB is closed.
@@ -61,28 +56,40 @@ public:
 };
 
 // Transaction on a CalicoDB database
-//
-// The lifetime of a transaction is the same as that of the Txn object representing it.
-// The transaction starts when DB::start() is called to obtain a transaction handle, and
-// finishes when the handle is passed back to DB::finish(). The methods Txn::commit() and
-// Txn::rollback() can be called multiple times to perform multiple batches of updates
-// while the Txn is live.
+// The lifetime of a transaction is the same as that of the Txn object representing it
+// (see DB::start() and DB::finish()).
 class Txn
 {
 public:
+    explicit Txn();
     virtual ~Txn();
+
+    Txn(Txn &) = delete;
+    void operator=(Txn &) = delete;
+
     [[nodiscard]] virtual auto status() const -> Status = 0;
     [[nodiscard]] virtual auto new_table(const TableOptions &options, const std::string &name, Table *&out) -> Status = 0;
     [[nodiscard]] virtual auto drop_table(const std::string &name) -> Status = 0;
     [[nodiscard]] virtual auto vacuum() -> Status = 0;
+
+    // Commit pending changes to the database
+    // Return an OK status if the commit operation was successful, and a non-OK status
+    // on failure.
     [[nodiscard]] virtual auto commit() -> Status = 0;
+
+    // Rollback pending changes to the database
     virtual auto rollback() -> void = 0;
 };
 
 class Table
 {
 public:
+    explicit Table();
     virtual ~Table();
+
+    Table(Table &) = delete;
+    void operator=(Table &) = delete;
+
     [[nodiscard]] virtual auto new_cursor() const -> Cursor * = 0;
     [[nodiscard]] virtual auto get(const Slice &key, std::string *value) const -> Status = 0;
     [[nodiscard]] virtual auto put(const Slice &key, const Slice &value) -> Status = 0;

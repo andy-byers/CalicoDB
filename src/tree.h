@@ -73,11 +73,9 @@ struct Cell {
 };
 
 struct NodeMeta {
-    using ParseCell = Cell (*)(const NodeMeta &, char *);
+    using ParseCell = Cell (*)(char *);
 
     ParseCell parse_cell = nullptr;
-    std::size_t min_local = 0;
-    std::size_t max_local = 0;
 };
 
 struct Node {
@@ -160,6 +158,12 @@ struct PayloadManager {
     [[nodiscard]] static auto promote(Pager &pager, char *scratch, Cell &cell, Id parent_id) -> Status;
     [[nodiscard]] static auto collect_key(Pager &pager, std::string &scratch, const Cell &cell, Slice *key) -> Status;
     [[nodiscard]] static auto collect_value(Pager &pager, std::string &scratch, const Cell &cell, Slice *value) -> Status;
+};
+
+struct TreeStatistics {
+    std::size_t smo_count = 0;
+    std::size_t bytes_read = 0;
+    std::size_t bytes_written = 0;
 };
 
 class Tree final

@@ -41,7 +41,7 @@ struct PageRef final {
 class Bufmgr final
 {
 public:
-    explicit Bufmgr(std::size_t page_size, std::size_t frame_count);
+    explicit Bufmgr(std::size_t frame_count);
     ~Bufmgr();
 
     // Return the number of entries in the cache
@@ -85,12 +85,6 @@ public:
     // Decrement the reference count (which must not already be 0) associated with
     // a page reference
     auto unref(PageRef &ref) -> void;
-
-    // Return the size of a database page in bytes
-    [[nodiscard]] auto page_size() const -> std::size_t
-    {
-        return m_page_size;
-    }
 
     // Return the number of available buffers
     [[nodiscard]] auto available() const -> std::size_t
@@ -139,7 +133,6 @@ private:
     std::list<char *> m_available;
 
     std::size_t m_frame_count = 0;
-    std::size_t m_page_size = 0;
     unsigned m_refsum = 0;
     U64 m_misses = 0;
     U64 m_hits = 0;

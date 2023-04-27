@@ -5,7 +5,9 @@
 #ifndef CALICODB_WAL_H
 #define CALICODB_WAL_H
 
+#include "calicodb/options.h"
 #include "utils.h"
+#include <thread>
 #include <vector>
 
 namespace calicodb
@@ -13,7 +15,6 @@ namespace calicodb
 
 class Env;
 class File;
-class Shm;
 struct PageRef;
 
 struct HashIndexHdr {
@@ -115,9 +116,9 @@ class Wal
 public:
     struct Parameters {
         std::string filename;
-        std::size_t page_size = 0;
         Env *env = nullptr;
         File *dbfile = nullptr;
+        BusyHandler *busy = nullptr;
     };
 
     virtual ~Wal();
@@ -127,7 +128,7 @@ public:
     [[nodiscard]] static auto close(Wal *&wal) -> Status;
 
     // Write as much of the WAL back to the DB as possible
-    [[nodiscard]] virtual auto checkpoint(File &db_file, std::size_t *db_size) -> Status = 0;
+    [[nodiscard]] virtual auto checkpoint(std::size_t *db_size) -> Status = 0;
 
     // UNLOCKED -> READER
     [[nodiscard]] virtual auto start_reader(bool &changed) -> Status = 0;
@@ -157,6 +158,21 @@ public:
 private:
     [[nodiscard]] virtual auto close() -> Status = 0;
 };
+
+template<class Callback>
+static auto busy_wait(BusyHandler *handler, const Callback &callback) -> Status
+{
+    for (unsigned n = 0;; ++n) {
+        auto s = callback();
+        if (s.is_busy()) {
+            if (handler == nullptr || handler->exec(n)) {
+                std::this_thread::yield();
+                continue;
+            }
+        }
+        return s;
+    }
+}
 
 auto TEST_print_wal(const Wal &wal) -> void;
 

@@ -281,7 +281,7 @@ public:
     auto test_same_inode() -> void
     {
         const auto message = m_random.Generate(1'024);
-        auto *original = m_helper.open_unowned_file(EnvWithFiles::kDifferentName, Env::kCreate | Env::kReadWrite);
+        auto *original = m_helper.open_unowned_file(EnvWithFiles::kDifferentName, Env::kCreate);
         write_out_randomly(m_random, *original, message);
         for (std::size_t i = 0; i < kCount; ++i) {
             auto *file = m_helper.open_unowned_file(EnvWithFiles::kSameName, Env::kReadOnly);
@@ -301,9 +301,9 @@ TEST_P(FileTests, OpenAndClose)
     for (std::size_t i = 0; i < 2; ++i) {
         auto *file = m_helper.open_unowned_file(
             EnvWithFiles::kSameName,
-            Env::kCreate | Env::kReadWrite);
+            Env::kCreate);
         for (std::size_t j = 0; j < 2; ++j) {
-            ASSERT_OK(m_helper.env->new_file("shmfile", Env::kCreate | Env::kReadWrite, file));
+            ASSERT_OK(m_helper.env->new_file("shmfile", Env::kCreate, file));
             ASSERT_NE(file, nullptr);
             delete file;
         }
@@ -341,7 +341,7 @@ public:
         File *file;
         EXPECT_OK(m_env->new_file(
             filename,
-            Env::kCreate | Env::kReadWrite,
+            Env::kCreate,
             file));
         m_helper.files.emplace_back(file);
         return file;
@@ -564,7 +564,7 @@ public:
     {
         return m_helper.open_unowned_file(
             EnvWithFiles::kSameName,
-            (is_readonly ? Env::kReadOnly : Env::kCreate | Env::kReadWrite));
+            (is_readonly ? Env::kReadOnly : Env::kCreate));
     }
 
 protected:
@@ -573,8 +573,8 @@ protected:
 
 TEST_F(EnvShmTests, MemoryIsShared)
 {
-    auto *file_a = m_helper.open_unowned_file(EnvWithFiles::kSameName, Env::kCreate | Env::kReadWrite);
-    auto *file_b = m_helper.open_unowned_file(EnvWithFiles::kSameName, Env::kCreate | Env::kReadWrite);
+    auto *file_a = m_helper.open_unowned_file(EnvWithFiles::kSameName, Env::kCreate);
+    auto *file_b = m_helper.open_unowned_file(EnvWithFiles::kSameName, Env::kCreate);
 
     SharedBuffer a(*file_a);
     SharedBuffer b(*file_b);
@@ -590,14 +590,14 @@ TEST_F(EnvShmTests, MemoryIsShared)
 
 TEST_F(EnvShmTests, ShmIsTruncated)
 {
-    auto *shm = m_helper.open_file(EnvWithFiles::kSameName, Env::kCreate | Env::kReadWrite);
+    auto *shm = m_helper.open_file(EnvWithFiles::kSameName, Env::kCreate);
     {
         SharedBuffer sh(*shm);
         sh.write(0, "hello");
     }
     shm->shm_unmap(false);
     delete shm;
-    shm = m_helper.open_file(EnvWithFiles::kSameName, Env::kCreate | Env::kReadWrite);
+    shm = m_helper.open_file(EnvWithFiles::kSameName, Env::kCreate);
 
     SharedBuffer sh(*shm);
     ASSERT_EQ(sh.read(0, 5), std::string("\0\0\0\0\0", 5));
@@ -607,9 +607,9 @@ TEST_F(EnvShmTests, ShmIsTruncated)
 
 TEST_F(EnvShmTests, LockCompatibility)
 {
-    auto *a = m_helper.open_file(EnvWithFiles::kSameName, Env::kCreate | Env::kReadWrite);
-    auto *b = m_helper.open_file(EnvWithFiles::kSameName, Env::kCreate | Env::kReadWrite);
-    auto *c = m_helper.open_file(EnvWithFiles::kSameName, Env::kCreate | Env::kReadWrite);
+    auto *a = m_helper.open_file(EnvWithFiles::kSameName, Env::kCreate);
+    auto *b = m_helper.open_file(EnvWithFiles::kSameName, Env::kCreate);
+    auto *c = m_helper.open_file(EnvWithFiles::kSameName, Env::kCreate);
 
     // Shm must be created before locks can be taken.
     volatile void *ptr;
@@ -651,25 +651,30 @@ TEST_F(EnvShmTests, LockCompatibility)
 
 static auto busy_wait_file_lock(File &file, bool is_writer) -> void
 {
-    for (auto m = File::kShared; m <= (is_writer ? File::kExclusive : File::kShared);) {
-        if (m == File::kPending) {
-            // Don't request kPending mode.
-            m = File::kExclusive;
-            continue;
-        }
-        const auto s = file.file_lock(m);
-        if (s.is_ok()) {
-            m = File::FileLockMode{m + 1};
-            continue;
-        } else if (!s.is_busy()) {
-            ADD_FAILURE() << s.to_string();
-        } else {
-            // Give up and let some other thread/process try to get an exclusive file_lock.
+    Status s;
+    do {
+        do {
+            s = file.file_lock(File::kShared);
+            if (s.is_busy()) {
+                std::this_thread::yield();
+            }
+        } while (s.is_busy());
+        if (s.is_ok() && is_writer) {
+            s = file.file_lock(File::kReserved);
+            if (s.is_ok()) {
+                // This must be the only thread with a reserved lock.
+                do {
+                    s = file.file_lock(File::kExclusive);
+                    if (s.is_busy()) {
+                        std::this_thread::yield();
+                    }
+                } while (s.is_busy());
+                break;
+            }
             file.file_unlock();
-            m = File::kShared;
         }
-        std::this_thread::yield();
-    }
+    } while (s.is_busy());
+    ASSERT_OK(s);
 }
 static auto busy_wait_shm_lock(File &file, std::size_t r, std::size_t n, File::ShmLockFlag flags) -> void
 {
@@ -700,7 +705,7 @@ static auto file_reader_writer_test_routine(Env &env, File &file, bool is_writer
 static auto shm_lifetime_test_routine(Env &env, const std::string &filename, bool unlink) -> void
 {
     File *file;
-    ASSERT_OK(env.new_file(filename, Env::kCreate | Env::kReadWrite, file));
+    ASSERT_OK(env.new_file(filename, Env::kCreate, file));
 
     Status s;
     volatile void *ptr;
@@ -761,7 +766,7 @@ public:
         // Create the file and zero out the version.
         auto *tempenv = Env::default_env();
         File *tempfile;
-        ASSERT_OK(tempenv->new_file("./testdir/0000000000", Env::kCreate | Env::kReadWrite, tempfile));
+        ASSERT_OK(tempenv->new_file("./testdir/0000000000", Env::kCreate, tempfile));
         write_file_version(*tempfile, 0);
         delete tempfile;
         delete tempenv;
@@ -777,31 +782,37 @@ public:
         ASSERT_GT(kNumEnvs, 0) << "REQUIRES: kNumEnvs > 0";
         m_helper.open_unowned_file(
             EnvWithFiles::kSameName,
-            Env::kCreate | Env::kReadWrite);
+            Env::kCreate);
     }
 
     template <class Test>
     auto run_test(const Test &test)
     {
         for (std::size_t n = 0; n < kNumEnvs; ++n) {
-            const auto pid = fork();
-            ASSERT_NE(-1, pid) << strerror(errno);
-            if (pid) {
-                continue;
+            if (kNumEnvs > 1) {
+                const auto pid = fork();
+                ASSERT_NE(-1, pid) << strerror(errno);
+                if (pid) {
+                    continue;
+                }
             }
 
             test(n);
-            std::exit(testing::Test::HasFailure());
+            if (kNumEnvs > 1) {
+                std::exit(testing::Test::HasFailure());
+            }
         }
-        for (std::size_t n = 0; n < kNumEnvs; ++n) {
-            int s;
-            const auto pid = wait(&s);
-            ASSERT_NE(pid, -1)
-                << "wait failed: " << strerror(errno);
-            ASSERT_TRUE(WIFEXITED(s) && WEXITSTATUS(s) == 0)
-                << "exited " << (WIFEXITED(s) ? "" : "ab")
-                << "normally with exit status "
-                << WEXITSTATUS(s);
+        if (kNumEnvs > 1) {
+            for (std::size_t n = 0; n < kNumEnvs; ++n) {
+                int s;
+                const auto pid = wait(&s);
+                ASSERT_NE(pid, -1)
+                    << "wait failed: " << strerror(errno);
+                ASSERT_TRUE(WIFEXITED(s) && WEXITSTATUS(s) == 0)
+                    << "exited " << (WIFEXITED(s) ? "" : "ab")
+                    << "normally with exit status "
+                    << WEXITSTATUS(s);
+            }
         }
     }
 
@@ -865,14 +876,14 @@ public:
         }
 
         auto *env = Env::default_env();
-        File *file; // Keep this Shm open to read from at the end...
-        ASSERT_OK(env->new_file("./testdir/0000000000", Env::kCreate | Env::kReadWrite, file));
+        File *file; // Keep this shm open to read from at the end...
+        ASSERT_OK(env->new_file("./testdir/0000000000", Env::kCreate, file));
         volatile void *ptr;
         ASSERT_OK(file->shm_map(0, ptr));
         run_test([&](auto) {
             for (std::size_t i = 0; i < kNumThreads; ++i) {
                 set_up();
-                m_helper.open_unowned_file(EnvWithFiles::kSameName, Env::kCreate | Env::kReadWrite);
+                m_helper.open_unowned_file(EnvWithFiles::kSameName, Env::kCreate);
                 volatile void *ptr;
                 ASSERT_OK(m_helper.files[i]->shm_map(0, ptr));
             }
@@ -960,6 +971,7 @@ INSTANTIATE_TEST_SUITE_P(
     EnvConcurrencyTests,
     EnvConcurrencyTests,
     ::testing::Values(
+        // Sanity check: single thread/process
         EnvConcurrencyTestsParam{1, 1},
 
         // Multiple threads
@@ -968,7 +980,6 @@ INSTANTIATE_TEST_SUITE_P(
         EnvConcurrencyTestsParam{1, 15},
 
         // Multiple processes
-        EnvConcurrencyTestsParam{2, 1},
         EnvConcurrencyTestsParam{5, 1},
         EnvConcurrencyTestsParam{10, 1},
         EnvConcurrencyTestsParam{15, 1},

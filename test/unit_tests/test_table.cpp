@@ -113,8 +113,7 @@ protected:
     auto SetUp() -> void override
     {
         Options dbopt;
-        dbopt.page_size = kMinPageSize;
-        dbopt.cache_size = kMinPageSize * kMinFrameCount;
+        dbopt.cache_size = kPageSize * kMinFrameCount;
         dbopt.env = &env();
         ASSERT_OK(DB::open(dbopt, kDBFilename, m_db));
 

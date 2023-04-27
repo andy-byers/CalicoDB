@@ -16,7 +16,6 @@
 //{
 // public:
 //    using Base = EnvTestHarness<EnvType>;
-//    static constexpr auto kPageSize = kMinPageSize;
 //
 //    RecoveryTestHarness()
 //    {

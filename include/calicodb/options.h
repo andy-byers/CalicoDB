@@ -10,17 +10,16 @@
 namespace calicodb
 {
 
+class BusyHandler;
 class Env;
 class Sink;
 
-struct Options final {
-    // Size of a database page in bytes. This is the basic unit of I/O for the
-    // database file. Data is read/written in page-sized chunks. Must be a power-
-    // of-two between 512 and 65536, inclusive.
-    std::size_t page_size = 16'384; // 16 KB
+// Size of a database page in bytes.
+static constexpr std::size_t kPageSize = 4'096;
 
-    // Size of the page cache in bytes. Must be at least 16 pages (see above).
-    std::size_t cache_size = 4'194'304; // 4 MB
+struct Options final {
+    // Size of the page cache in bytes. Must be at least 16 pages.
+    std::size_t cache_size = 1'024 * kPageSize; // 4 MB
 
     // Alternate filename to use for the WAL. If empty, creates the WAL at
     // "dbname-wal", where "dbname" is the name of the database.
@@ -31,6 +30,9 @@ struct Options final {
 
     // Custom storage environment. See env.h for details.
     Env *env = nullptr;
+
+    // Action to take while waiting on a file lock.
+    BusyHandler *busy = nullptr;
 
     // If true, create the database if it is missing.
     bool create_if_missing = true;
@@ -46,6 +48,14 @@ struct Options final {
 struct TableOptions {
     bool create_if_missing = true;
     bool error_if_exists = false;
+};
+
+class BusyHandler {
+public:
+    explicit BusyHandler();
+    virtual ~BusyHandler();
+
+    virtual auto exec(unsigned attempts) -> bool = 0;
 };
 
 } // namespace calicodb

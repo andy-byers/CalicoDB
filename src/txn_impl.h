@@ -14,7 +14,7 @@ namespace calicodb
 class TxnImpl : public Txn
 {
 public:
-    explicit TxnImpl(Pager &pager, DBState &state);
+    explicit TxnImpl(Pager &pager, Status &status);
     ~TxnImpl() override;
     [[nodiscard]] auto status() const -> Status override;
     [[nodiscard]] auto new_table(const TableOptions &options, const std::string &name, Table *&out) -> Status override;
@@ -30,7 +30,7 @@ private:
 
     Schema m_schema;
     Pager *m_pager;
-    DBState *m_state;
+    Status *m_status;
 };
 
 } // namespace calicodb

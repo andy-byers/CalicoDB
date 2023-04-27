@@ -21,8 +21,6 @@ class Env
 public:
     enum OpenMode : int {
         kCreate = 1,
-
-        // These 2 flags are mutually exclusive: only 1 may be set when opening a file.
         kReadOnly = 2,
         kReadWrite = 4,
     };
@@ -33,8 +31,8 @@ public:
     explicit Env();
     virtual ~Env();
 
-    Env(const Env &) = delete;
-    auto operator=(const Env &) -> Env & = delete;
+    Env(Env &) = delete;
+    void operator=(Env &) = delete;
 
     [[nodiscard]] virtual auto new_sink(const std::string &filename, Sink *&out) -> Status = 0;
     [[nodiscard]] virtual auto new_file(const std::string &filename, OpenMode mode, File *&out) -> Status = 0;
@@ -50,7 +48,11 @@ public:
 class File
 {
 public:
+    explicit File();
     virtual ~File();
+
+    File(File &) = delete;
+    void operator=(File &) = delete;
 
     // Attempt to read "size" bytes from the file at the given offset.
     //
@@ -70,31 +72,31 @@ public:
     // Synchronize with the underlying filesystem.
     [[nodiscard]] virtual auto sync() -> Status = 0;
 
-    // File locking modes and semantics are from SQLite.
+    // Available modes for the file locking API
+    // NOTE: File locking modes and semantics are from SQLite.
     enum FileLockMode : int {
-        kUnlocked,
-        kShared,
-        kReserved,
-        kPending,
-        kExclusive,
+        kUnlocked, // TODO: May end up adding a FileLockMode parameter to file_unlock(), which would then support downgrading to either kUnlocked or kShared. Otherwise, this can be removed.
+        kShared, // Any number of threads can hold a kShared lock
+        kReserved, // Compatible with 1+ kShared, but incompatible with other kReserved
+        kPending, // Compatible with 1+ kShared, but excludes new kShared
+        kExclusive, // Excludes all locks
     };
 
     // Take or upgrade a file_lock on the file
-    //
     // Return Status::ok() if the file_lock is granted, Status::busy() if an
     // incompatible file_lock is already held by a different thread or process,
-    // or a Status::io_error() if a system call otherwise fails.
-    //
-    // Compliant Envs support the following state transitions:
-    //
-    //     Before -> (Intermediate) -> After
+    // or a Status::io_error() if a system call otherwise fails. Compliant File
+    // implementations must support the following state transitions:
+    //     before -> (intermediate) -> after
     //    ----------------------------------------
     //     kUnlocked ----------------> kShared
     //     kShared ------------------> kReserved
     //     kShared ------------------> kExclusive
     //     kReserved --> (kPending) -> kExclusive
     //     kPending -----------------> kExclusive
-    //
+    // NOTE: The result of a failure to transition from kReserved to kExclusive
+    // always results in the caller being left in kPending. Attempting to lock a
+    // file with a lower-priority lock is a NOOP.
     [[nodiscard]] virtual auto file_lock(FileLockMode mode) -> Status = 0;
 
     // Release or downgrade a file_lock on the given file
@@ -133,7 +135,12 @@ public:
 class Sink
 {
 public:
+    explicit Sink();
     virtual ~Sink();
+
+    Sink(Sink &) = delete;
+    void operator=(Sink &) = delete;
+
     virtual auto sink(const Slice &in) -> void = 0;
 };
 

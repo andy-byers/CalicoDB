@@ -306,10 +306,10 @@ public:
 
     auto reserve_for_test(std::size_t n) -> void
     {
-        ASSERT_LT(n, node.page.size() - FileHeader::kSize - NodeHeader::kSize)
+        ASSERT_LT(n, kPageSize - FileHeader::kSize - NodeHeader::kSize)
             << "reserve_for_test(" << n << ") leaves no room for possible headers";
         size = n;
-        base = node.page.size() - n;
+        base = kPageSize - n;
     }
 
     std::size_t size = 0;
@@ -550,7 +550,6 @@ TEST_F(NodeTests, Defragmentation)
 }
 
 struct TreeTestParameters {
-    std::size_t page_size = 0;
     std::size_t extra = 0;
 };
 
@@ -561,7 +560,7 @@ class TreeTests
 public:
     TreeTests()
         : param(GetParam()),
-          collect_scratch(param.page_size, '\x00'),
+          collect_scratch(kPageSize, '\x00'),
           root_id(Id::root())
     {
     }
@@ -581,13 +580,13 @@ public:
     [[nodiscard]] auto make_long_key(std::size_t value) const
     {
         const auto suffix = tools::integral_key<6>(value);
-        const std::string key(param.page_size * 2 - suffix.size(), '0');
+        const std::string key(kPageSize * 2 - suffix.size(), '0');
         return key + suffix;
     }
 
     [[nodiscard]] auto make_value(char c, bool overflow = false) const
     {
-        std::size_t size{param.page_size};
+        std::size_t size{kPageSize};
         if (overflow) {
             size /= 3;
         } else {
@@ -737,7 +736,7 @@ TEST_P(TreeTests, SplitWithShortAndLongKeys)
         ASSERT_OK(tree->put({key, 2}, "v"));
     }
     for (unsigned i = 0; i < kInitialRecordCount; ++i) {
-        const auto key = random.Generate(GetParam().page_size);
+        const auto key = random.Generate(kPageSize);
         ASSERT_OK(tree->put(key, "v"));
     }
     tree->TEST_validate();
@@ -762,17 +761,14 @@ INSTANTIATE_TEST_SUITE_P(
     TreeTests,
     TreeTests,
     ::testing::Values(
-        TreeTestParameters{kMinPageSize},
-        TreeTestParameters{kMinPageSize * 2},
-        TreeTestParameters{kMaxPageSize / 2},
-        TreeTestParameters{kMaxPageSize}));
+        TreeTestParameters{}));
 
 class TreeSanityChecks : public TreeTests
 {
 public:
     auto random_chunk(bool overflow, bool nonzero = true)
     {
-        return random.Generate(random.Next(nonzero, param.page_size * overflow + 12));
+        return random.Generate(random.Next(nonzero, kPageSize * overflow + 12));
     }
 
     auto random_write() -> std::pair<std::string, std::string>
@@ -863,14 +859,14 @@ INSTANTIATE_TEST_SUITE_P(
     TreeSanityChecks,
     TreeSanityChecks,
     ::testing::Values(
-        TreeTestParameters{kMinPageSize, 0b00},
-        TreeTestParameters{kMinPageSize, 0b01},
-        TreeTestParameters{kMinPageSize, 0b10},
-        TreeTestParameters{kMinPageSize, 0b11},
-        TreeTestParameters{kMaxPageSize, 0b00},
-        TreeTestParameters{kMaxPageSize, 0b01},
-        TreeTestParameters{kMaxPageSize, 0b10},
-        TreeTestParameters{kMaxPageSize, 0b11}));
+        TreeTestParameters{0b00},
+        TreeTestParameters{0b01},
+        TreeTestParameters{0b10},
+        TreeTestParameters{0b11},
+        TreeTestParameters{0b00},
+        TreeTestParameters{0b01},
+        TreeTestParameters{0b10},
+        TreeTestParameters{0b11}));
 
 class EmptyTreeCursorTests : public TreeTests
 {
@@ -895,7 +891,7 @@ TEST_P(EmptyTreeCursorTests, KeyAndValueUseSeparateMemory)
 INSTANTIATE_TEST_SUITE_P(
     EmptyTreeCursorTests,
     EmptyTreeCursorTests,
-    ::testing::Values(TreeTestParameters{kMinPageSize}));
+    ::testing::Values(TreeTestParameters{}));
 
 class CursorTests : public TreeTests
 {
@@ -1080,27 +1076,24 @@ INSTANTIATE_TEST_SUITE_P(
     CursorTests,
     CursorTests,
     ::testing::Values(
-        TreeTestParameters{kMinPageSize},
-        TreeTestParameters{kMinPageSize * 2},
-        TreeTestParameters{kMaxPageSize / 2},
-        TreeTestParameters{kMaxPageSize}));
+        TreeTestParameters{}));
 
 class PointerMapTests : public TreeTests
 {
 public:
     [[nodiscard]] auto map_size() -> std::size_t
     {
-        return m_pager->page_size() / (sizeof(char) + Id::kSize);
+        return kPageSize / (sizeof(char) + Id::kSize);
     }
 };
 
 TEST_P(PointerMapTests, FirstPointerMapIsPage2)
 {
-    ASSERT_EQ(PointerMap::lookup(*m_pager, Id(1)), Id(0));
-    ASSERT_EQ(PointerMap::lookup(*m_pager, Id(2)), Id(2));
-    ASSERT_EQ(PointerMap::lookup(*m_pager, Id(3)), Id(2));
-    ASSERT_EQ(PointerMap::lookup(*m_pager, Id(4)), Id(2));
-    ASSERT_EQ(PointerMap::lookup(*m_pager, Id(5)), Id(2));
+    ASSERT_EQ(PointerMap::lookup(Id(1)), Id(0));
+    ASSERT_EQ(PointerMap::lookup(Id(2)), Id(2));
+    ASSERT_EQ(PointerMap::lookup(Id(3)), Id(2));
+    ASSERT_EQ(PointerMap::lookup(Id(4)), Id(2));
+    ASSERT_EQ(PointerMap::lookup(Id(5)), Id(2));
 }
 
 TEST_P(PointerMapTests, ReadsAndWritesEntries)
@@ -1152,13 +1145,13 @@ TEST_P(PointerMapTests, PointerMapCanFitAllPointers)
 TEST_P(PointerMapTests, MapPagesAreRecognized)
 {
     Id id(2);
-    ASSERT_EQ(PointerMap::lookup(*m_pager, id), id);
+    ASSERT_EQ(PointerMap::lookup(id), id);
 
     // Back pointers for the next "map.map_size()" pages are stored on page 2. The next pointermap page is
     // the page following the last page whose back pointer is on page 2. This pattern continues forever.
     for (std::size_t i = 0; i < 1'000'000; ++i) {
         id.value += map_size() + 1;
-        ASSERT_EQ(PointerMap::lookup(*m_pager, id), id);
+        ASSERT_EQ(PointerMap::lookup(id), id);
     }
 }
 
@@ -1174,7 +1167,7 @@ TEST_P(PointerMapTests, FindsCorrectMapPages)
             map_id.value += map_size() + 1;
             counter = 0;
         } else {
-            ASSERT_EQ(PointerMap::lookup(*m_pager, page_id), map_id);
+            ASSERT_EQ(PointerMap::lookup(page_id), map_id);
         }
     }
 }
@@ -1182,8 +1175,8 @@ TEST_P(PointerMapTests, FindsCorrectMapPages)
 #ifndef NDEBUG
 TEST_P(PointerMapTests, LookupNullIdDeathTest)
 {
-    ASSERT_DEATH((void)PointerMap::lookup(*m_pager, Id(0)), kExpectationMatcher);
-    ASSERT_DEATH((void)PointerMap::is_map(*m_pager, Id(0)), kExpectationMatcher);
+    ASSERT_DEATH((void)PointerMap::lookup(Id(0)), kExpectationMatcher);
+    ASSERT_DEATH((void)PointerMap::is_map(Id(0)), kExpectationMatcher);
 }
 #endif // NDEBUG
 
@@ -1191,10 +1184,7 @@ INSTANTIATE_TEST_SUITE_P(
     PointerMapTests,
     PointerMapTests,
     ::testing::Values(
-        TreeTestParameters{kMinPageSize},
-        TreeTestParameters{kMinPageSize * 2},
-        TreeTestParameters{kMaxPageSize / 2},
-        TreeTestParameters{kMaxPageSize}));
+        TreeTestParameters{}));
 
 class VacuumTests : public TreeTests
 {
@@ -1244,7 +1234,7 @@ public:
             if (!exists) {
                 keys.emplace_back(key.to_string());
             }
-            ASSERT_NE(PointerMap::lookup(*m_pager, Id(m_pager->page_count())), Id(m_pager->page_count()));
+            ASSERT_NE(PointerMap::lookup(Id(m_pager->page_count())), Id(m_pager->page_count()));
         }
         for (const auto &key : keys) {
             ASSERT_OK(tree->erase(key));
@@ -1790,10 +1780,7 @@ INSTANTIATE_TEST_SUITE_P(
     VacuumTests,
     VacuumTests,
     ::testing::Values(
-        TreeTestParameters{kMinPageSize},
-        TreeTestParameters{kMinPageSize * 2},
-        TreeTestParameters{kMaxPageSize / 2},
-        TreeTestParameters{kMaxPageSize}));
+        TreeTestParameters{}));
 
 class MultiTreeTests : public TreeTests
 {
@@ -1915,7 +1902,7 @@ INSTANTIATE_TEST_SUITE_P(
     MultiTreeTests,
     MultiTreeTests,
     ::testing::Values(
-        TreeTestParameters{kMinPageSize}));
+        TreeTestParameters{}));
 
 template <class T>
 class PermutationGenerator
@@ -2050,8 +2037,6 @@ INSTANTIATE_TEST_SUITE_P(
     RebalanceTests,
     RebalanceTests,
     ::testing::Values(
-        TreeTestParameters{kMinPageSize, 1},
-        TreeTestParameters{kMinPageSize, 5},
-        TreeTestParameters{kMinPageSize, 10}));
+        TreeTestParameters{1}));
 
 } // namespace calicodb

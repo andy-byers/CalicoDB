@@ -17,7 +17,7 @@ class HashIndexTestBase : public EnvTestHarness<tools::FakeEnv>
 protected:
     explicit HashIndexTestBase()
     {
-        EXPECT_OK(m_env->new_file(kShmFilename, Env::kCreate | Env::kReadWrite, m_shm));
+        EXPECT_OK(m_env->new_file(kShmFilename, Env::kCreate, m_shm));
         m_index = new HashIndex(m_header, *m_shm);
     }
 

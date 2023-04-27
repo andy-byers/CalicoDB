@@ -18,7 +18,11 @@ Env::Env() = default;
 
 Env::~Env() = default;
 
+File::File() = default;
+
 File::~File() = default;
+
+Sink::Sink() = default;
 
 Sink::~Sink() = default;
 

@@ -4,6 +4,7 @@
 
 #include "bufmgr.h"
 #include "calicodb/env.h"
+#include "calicodb/options.h"
 #include "encoding.h"
 #include "header.h"
 #include "page.h"
@@ -11,14 +12,12 @@
 namespace calicodb
 {
 
-Bufmgr::Bufmgr(std::size_t page_size, std::size_t frame_count)
-    : m_buffer(new(std::align_val_t{page_size}) char[page_size * frame_count]()),
-      m_frame_count(frame_count),
-      m_page_size(page_size)
+Bufmgr::Bufmgr(std::size_t frame_count)
+    : m_buffer(new(std::align_val_t{kPageSize}) char[kPageSize * frame_count]()),
+      m_frame_count(frame_count)
 {
-    // The buffer should be aligned to the power-of-2 page size.
-    CALICODB_EXPECT_TRUE(is_power_of_two(page_size));
-    CALICODB_EXPECT_EQ(reinterpret_cast<std::uintptr_t>(m_buffer) % page_size, 0);
+    // The buffer should be aligned to the page size.
+    CALICODB_EXPECT_EQ(reinterpret_cast<std::uintptr_t>(m_buffer) % kPageSize, 0);
 
     while (m_available.size() + 1 < frame_count) {
         m_available.emplace_back(buffer_slot(m_available.size() + 1));
@@ -30,7 +29,7 @@ Bufmgr::Bufmgr(std::size_t page_size, std::size_t frame_count)
 
 Bufmgr::~Bufmgr()
 {
-    operator delete[](m_buffer, std::align_val_t{m_page_size});
+    operator delete[](m_buffer, std::align_val_t{kPageSize});
 }
 
 auto Bufmgr::size() const -> std::size_t
@@ -120,9 +119,9 @@ auto Bufmgr::unpin(PageRef &ref) -> void
 
     // The pointer put back into the available pool must (a) not belong to the root
     // page, and (b) point to the start of a page in the buffer.
-    CALICODB_EXPECT_GE(ref.page, m_buffer + m_page_size);
-    CALICODB_EXPECT_LE(ref.page, m_buffer + (m_frame_count - 1) * m_page_size);
-    CALICODB_EXPECT_EQ(reinterpret_cast<std::uintptr_t>(ref.page) % m_page_size, 0);
+    CALICODB_EXPECT_GE(ref.page, m_buffer + kPageSize);
+    CALICODB_EXPECT_LE(ref.page, m_buffer + (m_frame_count - 1) * kPageSize);
+    CALICODB_EXPECT_EQ(reinterpret_cast<std::uintptr_t>(ref.page) % kPageSize, 0);
 
     m_available.emplace_back(ref.page);
 }
@@ -148,7 +147,7 @@ auto Bufmgr::unref(PageRef &ref) -> void
 auto Bufmgr::buffer_slot(std::size_t index) -> char *
 {
     CALICODB_EXPECT_LT(index, m_frame_count);
-    return m_buffer + index * m_page_size;
+    return m_buffer + index * kPageSize;
 }
 
 auto Bufmgr::hits() const -> U64
