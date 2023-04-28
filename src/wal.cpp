@@ -9,23 +9,21 @@
 #include "encoding.h"
 #include "logging.h"
 #include "scope_guard.h"
-#include <thread>
+#include <atomic>
 
 namespace calicodb
 {
 
-// TODO: See https://stackoverflow.com/questions/8759429/atomic-access-to-shared-memory
-//       May need to construct atomic integers for some variables, like the CkptInfo
-//       struct. SQLite WAL index seems to work fine without atomic intrinsics though
-//       so we'll see.
-//       .
-//       Luckily, it seems like we only ever write to shm from 1 thread or process, so
-//       we won't ever have to deal with inconsistent values being written. It's more
-//       a matter of determining that we have read consistent header or checkpoint info,
-//       consistent as in it isn't already partially written by another thread when we read it.
-//       This is already handled by reading multiple times, having multiple copies of the header,
-//       and making sure the checksum is correct (see try_index_header()).
-//static_assert(std::atomic<U32>::is_always_lock_free);
+// See https://stackoverflow.com/questions/8759429/atomic-access-to-shared-memory
+static_assert(std::atomic<U32>::is_always_lock_free);
+
+#if GCC_VERSION >= 4007000
+#  define ATOMIC_LOAD(p, i) __atomic_load_n(p, __ATOMIC_RELAXED)
+#  define ATOMIC_STORE(p, i, v) __atomic_store_n(p, x, __ATOMIC_RELAXED)
+#else
+#  define ATOMIC_LOAD(p) (*(p))
+#  define ATOMIC_STORE(p, v) (*(p) = (v))
+#endif
 
 using Key = HashIndex::Key;
 using Value = HashIndex::Value;
@@ -43,12 +41,13 @@ static constexpr std::size_t kReaderCount = File::kShmLockCount - 3;
 #define READ_LOCK(i) static_cast<std::size_t>((i) + 3)
 
 struct CkptInfo {
-    U32 backfill;
-    U32 readmark[kReaderCount];
+    std::atomic<U32> backfill;
+    std::atomic<U32> readmark[kReaderCount];
     U8 locks[File::kShmLockCount];
     U32 backfill_attempted;
     U32 reserved;
 };
+static_assert(std::is_pod_v<CkptInfo>);
 
 // static constexpr std::size_t kIndexLockOffset = sizeof(HashIndexHdr) * 2 + offsetof(CkptInfo, locks);
 static constexpr std::size_t kIndexHeaderSize = sizeof(HashIndexHdr) * 2 + sizeof(CkptInfo);
@@ -74,7 +73,6 @@ static auto index_hash(Key key) -> Hash
 {
     return key * kHashPrime & (kNIndexHashes - 1);
 }
-
 static constexpr auto next_index_hash(Hash hash) -> Hash
 {
     return (hash + 1) & (kNIndexHashes - 1);
@@ -142,7 +140,7 @@ auto HashIndex::lookup(Key key, Value lower, Value &out) -> Status
 
         // Find the WAL frame containing the given page. Limit the search to the set of
         // valid frames (in the range "lower" to "m_hdr->max_frame", inclusive).
-        while ((relative = group.hash[key_hash])) {
+        while ((relative = ATOMIC_LOAD(&group.hash[key_hash]))) {
             if (collisions-- == 0) {
                 return too_many_collisions(key);
             }
@@ -150,7 +148,7 @@ auto HashIndex::lookup(Key key, Value lower, Value &out) -> Status
             const auto found =
                 absolute >= lower &&
                 absolute <= upper &&
-                group.keys[relative - 1] == key;
+                ATOMIC_LOAD(&group.keys[relative - 1]) == key;
             if (found) {
                 out = absolute;
             }
@@ -173,9 +171,9 @@ auto HashIndex::fetch(Value value) -> Key
     CALICODB_EXPECT_TRUE(m_groups[n]);
     const HashGroup group(n, m_groups[n]);
     if (group.base) {
-        return group.keys[(value - kNIndexKeys0 - 1) % kNIndexKeys];
+        return ATOMIC_LOAD(&group.keys[(value - kNIndexKeys0 - 1) % kNIndexKeys]);
     } else {
-        return group.keys[value - 1];
+        return ATOMIC_LOAD(&group.keys[value - 1]);
     }
 }
 
@@ -501,6 +499,12 @@ static auto compute_checksum(const Slice &in, const U32 *initial, U32 *out)
     out[1] = s2;
 }
 
+#if defined(__clang__)
+#  define DISABLE_TSAN __attribute__((no_sanitize_thread))
+#else // defined(__clang__)
+#  define DISABLE_TSAN
+#endif // !defined(__clang__)
+
 class WalImpl : public Wal
 {
 public:
@@ -530,14 +534,14 @@ public:
         }
     }
 
-    [[nodiscard]] auto close() -> Status override
+    [[nodiscard]] auto close(std::size_t &db_size) -> Status override
     {
         // NOTE: Caller will unlock the database file.
         auto s = m_db->file_lock(File::kExclusive);
         if (s.is_ok()) {
             // If this returns OK, then it must have written everything back (there are
             // no other connections since we have an exclusive lock on the database file).
-            s = checkpoint(nullptr);
+            s = checkpoint(&db_size);
             if (s.is_ok()) {
                 s = m_env->remove_file(m_filename);
             }
@@ -577,6 +581,9 @@ public:
         m_writer_lock = true;
 
         if (0 != std::memcmp(&m_hdr, ConstPtr(m_index.header()), sizeof(HashIndexHdr))) {
+            // Another connection has written since this read transaction was started. This
+            // is not allowed (this connection now has an outdated snapshot, meaning the local
+            // "max frame" value is no longer correct).
             unlock_exclusive(kWriteLock, 1);
             m_writer_lock = false;
             return Status::busy("retry");
@@ -629,13 +636,12 @@ private:
         return reinterpret_cast<volatile CkptInfo *>(
             &m_index.groups().front()[sizeof(HashIndexHdr) * 2]);
     }
-    [[nodiscard]] auto try_index_header(bool &changed) -> bool
+    [[nodiscard]] DISABLE_TSAN auto try_index_header(bool &changed) -> bool
     {
         changed = false;
         HashIndexHdr h1, h2;
         U32 cksum[2];
 
-        // TODO: SQLite has this marked as a TSan false positive. May need to tag this method with some attribute for the compiler.
         const auto *hdr = m_index.header();
         std::memcpy(&h1, ConstPtr(&hdr[0]), sizeof(h1));
         shm_barrier();
@@ -693,7 +699,7 @@ private:
         }
         return s;
     }
-    auto write_index_header() -> void
+    DISABLE_TSAN auto write_index_header() -> void
     {
         m_hdr.flags = HashIndexHdr::INITIALIZED;
         m_hdr.version = kWalVersion;
@@ -889,6 +895,8 @@ private:
     //                                            and no writer is connected that can keep the shm file up-to-date
 };
 
+#undef DISABLE_TSAN
+
 auto Wal::open(const Parameters &param, Wal *&out) -> Status
 {
     File *wal_file;
@@ -899,11 +907,14 @@ auto Wal::open(const Parameters &param, Wal *&out) -> Status
     return s;
 }
 
-auto Wal::close(Wal *&wal) -> Status
+auto Wal::close(Wal *&wal, std::size_t &db_size) -> Status
 {
+    // Indicates that a commit frame was not located.
+    db_size = 0;
+
     Status s;
     if (wal) {
-        s = wal->close();
+        s = wal->close(db_size);
         delete wal;
         wal = nullptr;
     }
@@ -913,11 +924,11 @@ auto Wal::close(Wal *&wal) -> Status
 Wal::~Wal() = default;
 
 WalImpl::WalImpl(const Parameters &param, File &wal_file)
-    : m_index(m_hdr, *param.dbfile),
+    : m_index(m_hdr, *param.db_file),
       m_filename(param.filename),
       m_frame(WalFrameHdr::kSize + kPageSize, '\0'),
       m_env(param.env),
-      m_db(param.dbfile),
+      m_db(param.db_file),
       m_wal(&wal_file),
       m_busy(param.busy)
 {
@@ -1358,7 +1369,7 @@ auto TEST_print_wal(const Wal &wal) -> void
     std::fputc('\n', stderr);
     std::fputs("  Rcvr ?\n", stderr);
     for (std::size_t i = 0; i < kReaderCount; ++i) {
-        std::fprintf(stderr, "  Read%zu (%d)", i, info->readmark[i]);
+        std::fprintf(stderr, "  Read%zu (%u)", i, info->readmark[i].load());
         if (impl.m_reader_lock == int(i)) {
             std::fputs(" *", stderr);
         }
@@ -1368,5 +1379,8 @@ auto TEST_print_wal(const Wal &wal) -> void
 }
 
 #undef READ_LOCK
+
+#undef ATOMIC_LOAD
+#undef ATOMIC_STORE
 
 } // namespace calicodb
