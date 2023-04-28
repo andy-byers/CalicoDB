@@ -1152,4 +1152,12 @@ static auto read_and_check(Test &test, std::size_t key_offset, std::size_t num_p
 //        std::make_tuple(100, kWalFilename, tools::Interceptor::kRead),
 //        std::make_tuple(100, kWalFilename, tools::Interceptor::kWrite)));
 
+class WalConcurrencyTests
+    : public testing::TestWithParam<ConcurrencyTestParam>
+    , public ConcurrencyTestHarness<PosixEnv>
+{
+protected:
+
+};
+
 } // namespace calicodb

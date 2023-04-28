@@ -212,14 +212,14 @@ auto HashIndex::assign(Key key, Value value) -> Status
     // Find the first unused hash slot. Collisions are handled by incrementing the key until an
     // unused slot is found, wrapping back to the start if the end is hit. There are always more
     // hash slots than frames, so this search will always terminate.
-    for (; group.hash[key_hash]; key_hash = next_index_hash(key_hash)) {
+    for (; ATOMIC_LOAD(&group.hash[key_hash]); key_hash = next_index_hash(key_hash)) {
         if (collisions-- == 0) {
             return too_many_collisions(key);
         }
     }
 
-    group.hash[key_hash] = static_cast<Hash>(relative);
-    group.keys[relative - 1] = key;
+    ATOMIC_STORE(&group.hash[key_hash], static_cast<Hash>(relative));
+    ATOMIC_STORE(&group.keys[relative - 1], key);
     return Status::ok();
 }
 
@@ -537,7 +537,7 @@ public:
     [[nodiscard]] auto close(std::size_t &db_size) -> Status override
     {
         // NOTE: Caller will unlock the database file.
-        auto s = m_db->file_lock(File::kExclusive);
+        auto s = m_db->file_lock(kLockExclusive);
         if (s.is_ok()) {
             // If this returns OK, then it must have written everything back (there are
             // no other connections since we have an exclusive lock on the database file).
@@ -613,20 +613,20 @@ private:
     }
     [[nodiscard]] auto lock_shared(std::size_t r) -> Status
     {
-        return m_db->shm_lock(r, 1, File::kLock | File::kReader);
+        return m_db->shm_lock(r, 1, kShmLock | kShmReader);
     }
     auto unlock_shared(std::size_t r) -> void
     {
-        (void)m_db->shm_lock(r, 1, File::kUnlock | File::kReader);
+        (void)m_db->shm_lock(r, 1, kShmUnlock | kShmReader);
     }
 
     [[nodiscard]] auto lock_exclusive(std::size_t r, std::size_t n) -> Status
     {
-        return m_db->shm_lock(r, n, File::kLock | File::kWriter);
+        return m_db->shm_lock(r, n, kShmLock | kShmWriter);
     }
     auto unlock_exclusive(std::size_t r, std::size_t n) -> void
     {
-        (void)m_db->shm_lock(r, n, File::kUnlock | File::kWriter);
+        (void)m_db->shm_lock(r, n, kShmUnlock | kShmWriter);
     }
 
     [[nodiscard]] auto get_ckpt_info() -> volatile CkptInfo *

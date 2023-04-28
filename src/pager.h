@@ -98,7 +98,7 @@ public:
 
 private:
     explicit Pager(const Parameters &param);
-    [[nodiscard]] auto lock_db(File::FileLockMode mode) -> Status;
+    [[nodiscard]] auto lock_db(FileLockMode mode) -> Status;
     auto unlock_db() -> void;
     [[nodiscard]] auto open_wal() -> Status;
     [[nodiscard]] auto read_page(PageRef &out) -> Status;
@@ -134,7 +134,7 @@ private:
     BusyHandler *m_busy = nullptr;
     std::size_t m_page_count = 0;
     std::size_t m_saved_count = 0;
-    File::FileLockMode m_lock = File::kUnlocked;
+    int m_lock = kLockUnlocked;
 };
 
 struct PointerMap {

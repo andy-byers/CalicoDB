@@ -60,11 +60,14 @@ static constexpr auto kDefaultWalSuffix = "-wal";
 static constexpr auto kDefaultShmSuffix = "-shm";
 static constexpr auto kDefaultLogSuffix = "-log";
 
-// Fixed-width unsigned integers for use in the database file format.
+// Fixed-width unsigned integers for use in the database file format
 using U8 = std::uint8_t;
 using U16 = std::uint16_t;
 using U32 = std::uint32_t;
 using U64 = std::uint64_t;
+
+// Additional file locking modes that cannot be requested directly
+enum : int {kLockUnlocked = 0};
 
 [[nodiscard]] inline auto get_status_name(const Status &s) noexcept -> const char *
 {

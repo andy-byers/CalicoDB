@@ -1339,6 +1339,7 @@ TEST_P(DBTests, StartWriting)
 
     std::string buffer;
     ASSERT_OK(table->get("key", &buffer));
+    delete table;
 
     U64 number;
     Slice value(buffer);
@@ -1351,8 +1352,8 @@ TEST_P(DBTests, StartWriting)
 }
 
 INSTANTIATE_TEST_SUITE_P(DBTests_SanityCheck, DBTests, kConcurrencySanityCheckValues);
-INSTANTIATE_TEST_SUITE_P(DBTests_MT, DBTests, kMultiThreadConcurrencyValues);
-INSTANTIATE_TEST_SUITE_P(DBTests_MP, DBTests, kMultiProcessConcurrencyValues);
-INSTANTIATE_TEST_SUITE_P(DBTests_MX, DBTests, kMultiProcessMultiThreadConcurrencyValues);
+INSTANTIATE_TEST_SUITE_P(DBTests_ConcurrencyMT, DBTests, kMultiThreadConcurrencyValues);
+INSTANTIATE_TEST_SUITE_P(DBTests_ConcurrencyMP, DBTests, kMultiProcessConcurrencyValues);
+INSTANTIATE_TEST_SUITE_P(DBTests_ConcurrencyMX, DBTests, kMultiProcessMultiThreadConcurrencyValues);
 
 } // namespace calicodb

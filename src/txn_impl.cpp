@@ -43,7 +43,7 @@ auto TxnImpl::drop_table(const std::string &name) -> Status
 auto TxnImpl::commit() -> Status
 {
     if (!m_write) {
-        return readonly_transaction();
+        return Status::ok();
     }
     return m_pager->commit();
 }

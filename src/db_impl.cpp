@@ -37,7 +37,7 @@ auto DBImpl::open(const Options &sanitized) -> Status
     } else {
         return s;
     }
-    CALICODB_TRY(file->file_lock(File::kShared));
+    CALICODB_TRY(file->file_lock(kLockShared));
 
     FileHeader header;
     if (exists) {
@@ -72,7 +72,7 @@ auto DBImpl::open(const Options &sanitized) -> Status
 
     if (!exists) {
         logv(m_log, "setting up a new database");
-        CALICODB_TRY(file->file_lock(File::kExclusive));
+        CALICODB_TRY(file->file_lock(kLockExclusive));
         m_pager->initialize_root();
         const auto *root = m_pager->m_bufmgr.root();
         CALICODB_TRY(m_pager->write_page_to_file(*root));
@@ -113,7 +113,7 @@ DBImpl::~DBImpl()
         m_pager->finish();
 
         auto s = busy_wait(m_busy, [this] {
-            return m_pager->m_file->file_lock(File::kShared);
+            return m_pager->m_file->file_lock(kLockShared);
         });
         if (s.is_ok()) {
             s = m_pager->close();

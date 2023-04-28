@@ -135,7 +135,7 @@ auto Pager::page_count() const -> std::size_t
     return m_page_count;
 }
 
-auto Pager::lock_db(File::FileLockMode mode) -> Status
+auto Pager::lock_db(FileLockMode mode) -> Status
 {
     auto s = m_file->file_lock(mode);
     if (s.is_ok()) {
@@ -147,7 +147,7 @@ auto Pager::lock_db(File::FileLockMode mode) -> Status
 auto Pager::unlock_db() -> void
 {
     m_file->file_unlock();
-    m_lock = File::kUnlocked;
+    m_lock = kLockUnlocked;
 }
 
 auto Pager::open_wal() -> Status
@@ -180,7 +180,7 @@ auto Pager::start_reader() -> Status
         // Wait for a shared lock on the database file. Operations that take exclusive
         // locks should complete in a bounded amount of time.
         CALICODB_TRY(busy_wait(m_busy, [this] {
-            return lock_db(File::kShared);
+            return lock_db(kLockShared);
         }));
         ScopeGuard guard = [this] {
             finish();
@@ -211,7 +211,7 @@ auto Pager::start_writer() -> Status
 {
     CALICODB_EXPECT_NE(m_mode, kOpen);
     CALICODB_EXPECT_NE(m_mode, kError);
-    CALICODB_EXPECT_EQ(m_lock, File::kShared);
+    CALICODB_EXPECT_EQ(m_lock, kLockShared);
     CALICODB_EXPECT_TRUE(m_wal);
 
     if (m_mode == kRead) {
@@ -316,9 +316,9 @@ auto Pager::checkpoint() -> Status
         m_file->file_unlock();
     };
     CALICODB_TRY(busy_wait(m_busy, [this] {
-        return m_file->file_lock(File::kShared);
+        return m_file->file_lock(kLockShared);
     }));
-    CALICODB_TRY(m_file->file_lock(File::kExclusive));
+    CALICODB_TRY(m_file->file_lock(kLockExclusive));
     return set_status(wal_checkpoint());
 }
 

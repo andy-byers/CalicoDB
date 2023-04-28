@@ -19,12 +19,6 @@ class Sink;
 class Env
 {
 public:
-    enum OpenMode : int {
-        kCreate = 1,
-        kReadOnly = 2,
-        kReadWrite = 4,
-    };
-
     // Return a heap-allocated handle to this platform's default Env implementation
     static auto default_env() -> Env *;
 
@@ -34,8 +28,13 @@ public:
     Env(Env &) = delete;
     void operator=(Env &) = delete;
 
-    [[nodiscard]] virtual auto new_sink(const std::string &filename, Sink *&out) -> Status = 0;
+    enum OpenMode : int {
+        kCreate = 1,
+        kReadOnly = 2,
+        kReadWrite = 4,
+    };
     [[nodiscard]] virtual auto new_file(const std::string &filename, OpenMode mode, File *&out) -> Status = 0;
+    [[nodiscard]] virtual auto new_sink(const std::string &filename, Sink *&out) -> Status = 0;
     [[nodiscard]] virtual auto resize_file(const std::string &filename, std::size_t size) -> Status = 0;
     [[nodiscard]] virtual auto file_size(const std::string &filename, std::size_t &out) const -> Status = 0;
     [[nodiscard]] virtual auto remove_file(const std::string &filename) -> Status = 0;
@@ -43,6 +42,18 @@ public:
 
     virtual auto srand(unsigned seed) -> void = 0;
     [[nodiscard]] virtual auto rand() -> unsigned = 0;
+};
+
+enum FileLockMode : int {
+    kLockShared = 1, // Any number of threads can hold a kShared lock
+    kLockExclusive = 2, // Excludes all other locks
+};
+
+enum ShmLockFlag : int {
+    kShmUnlock = 1,
+    kShmLock = 2,
+    kShmReader = 4,
+    kShmWriter = 8,
 };
 
 class File
@@ -74,11 +85,7 @@ public:
 
     // Available modes for the file locking API
     // NOTE: File locking modes and semantics are from SQLite.
-    enum FileLockMode : int {
-        kUnlocked, // TODO: May end up adding a FileLockMode parameter to file_unlock(), which would then support downgrading to either kUnlocked or kShared. Otherwise, this can be removed.
-        kShared, // Any number of threads can hold a kShared lock
-        kExclusive, // Excludes all locks
-    };
+
 
     // Take or upgrade a lock on the file
     [[nodiscard]] virtual auto file_lock(FileLockMode mode) -> Status = 0;
@@ -90,13 +97,6 @@ public:
     // when map() returns successfully.
     static constexpr std::size_t kShmRegionSize = 1'024 * 32;
     static constexpr std::size_t kShmLockCount = 8;
-
-    enum ShmLockFlag : int {
-        kUnlock = 1,
-        kLock = 2,
-        kReader = 4,
-        kWriter = 8,
-    };
 
     [[nodiscard]] virtual auto shm_map(std::size_t r, volatile void *&out) -> Status = 0;
     [[nodiscard]] virtual auto shm_lock(std::size_t r, std::size_t n, ShmLockFlag flags) -> Status = 0;
@@ -188,9 +188,9 @@ inline constexpr auto operator|(Env::OpenMode lhs, Env::OpenMode rhs) -> Env::Op
         static_cast<int>(lhs) |
         static_cast<int>(rhs)};
 }
-inline constexpr auto operator|(File::ShmLockFlag lhs, File::ShmLockFlag rhs) -> File::ShmLockFlag
+inline constexpr auto operator|(ShmLockFlag lhs, ShmLockFlag rhs) -> ShmLockFlag
 {
-    return File::ShmLockFlag{
+    return ShmLockFlag{
         static_cast<int>(lhs) |
         static_cast<int>(rhs)};
 }
