@@ -309,7 +309,7 @@ auto Pager::purge_cached_pages() -> void
     }
 }
 
-auto Pager::checkpoint() -> Status
+auto Pager::checkpoint(bool force) -> Status
 {
     CALICODB_EXPECT_EQ(m_mode, kOpen);
     ScopeGuard guard = [this] {
@@ -319,10 +319,10 @@ auto Pager::checkpoint() -> Status
         return m_file->file_lock(kLockShared);
     }));
     CALICODB_TRY(m_file->file_lock(kLockExclusive));
-    return set_status(wal_checkpoint());
+    return set_status(wal_checkpoint(force));
 }
 
-auto Pager::wal_checkpoint() -> Status
+auto Pager::wal_checkpoint(bool force) -> Status
 {
     if (m_wal == nullptr) {
         return Status::ok();
@@ -330,7 +330,7 @@ auto Pager::wal_checkpoint() -> Status
     // Transfer the WAL contents back to the DB. Note that this call will sync the WAL
     // file before it starts transferring any data back.
     std::size_t dbsize;
-    CALICODB_TRY(m_wal->checkpoint(&dbsize));
+    CALICODB_TRY(m_wal->checkpoint(force, &dbsize));
 
     if (dbsize) {
         set_page_count(dbsize);

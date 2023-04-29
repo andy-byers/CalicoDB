@@ -83,7 +83,7 @@ auto DBImpl::open(const Options &sanitized) -> Status
             "database \"" + m_db_filename + "\" already exists");
     } else {
         // This should be a no-op if the database closed normally last time.
-        s = m_pager->checkpoint();
+        s = m_pager->checkpoint(true);
         if (s.is_busy()) {
             s = Status::ok();
         }
@@ -203,7 +203,7 @@ auto DBImpl::start(bool write, Txn *&out) -> Status
 {
     if (write) {
         m_pager->finish();
-        CALICODB_TRY(m_pager->checkpoint()); // TODO: Find somewhere better to put this, maybe even expose a checkpoint() method on DB
+        CALICODB_TRY(m_pager->checkpoint(false));
     }
 
     auto s = m_pager->start_reader();

@@ -81,7 +81,7 @@ public:
     auto rollback() -> void;
     auto finish() -> void;
 
-    [[nodiscard]] auto checkpoint() -> Status;
+    [[nodiscard]] auto checkpoint(bool force) -> Status;
     [[nodiscard]] auto allocate(Page &page) -> Status;
     [[nodiscard]] auto destroy(Page page) -> Status;
     [[nodiscard]] auto acquire(Id page_id, Page &page) -> Status;
@@ -105,7 +105,7 @@ private:
     [[nodiscard]] auto read_page_from_file(PageRef &ref) const -> Status;
     [[nodiscard]] auto write_page_to_file(const PageRef &entry) const -> Status;
     [[nodiscard]] auto ensure_available_buffer() -> Status;
-    [[nodiscard]] auto wal_checkpoint() -> Status;
+    [[nodiscard]] auto wal_checkpoint(bool force) -> Status;
     [[nodiscard]] auto flush_all_pages() -> Status;
     auto initialize_root() -> void;
     auto purge_page(PageRef &victim) -> void;

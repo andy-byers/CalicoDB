@@ -517,7 +517,7 @@ public:
 
     [[nodiscard]] auto read(Id page_id, char *&page) -> Status override;
     [[nodiscard]] auto write(const PageRef *dirty, std::size_t db_size) -> Status override;
-    [[nodiscard]] auto checkpoint(std::size_t *db_size) -> Status override;
+    [[nodiscard]] auto checkpoint(bool force, std::size_t *db_size) -> Status override;
 
     [[nodiscard]] auto sync() -> Status override
     {
@@ -541,7 +541,7 @@ public:
         if (s.is_ok()) {
             // If this returns OK, then it must have written everything back (there are
             // no other connections since we have an exclusive lock on the database file).
-            s = checkpoint(&db_size);
+            s = checkpoint(true, &db_size);
             if (s.is_ok()) {
                 s = m_env->remove_file(m_filename);
             }
@@ -1224,12 +1224,16 @@ auto WalImpl::write(const PageRef *dirty, std::size_t db_size) -> Status
     return Status::ok();
 }
 
-auto WalImpl::checkpoint(std::size_t *db_size) -> Status
+auto WalImpl::checkpoint(bool force, std::size_t *db_size) -> Status
 {
     CALICODB_EXPECT_FALSE(m_ckpt_lock);
     CALICODB_EXPECT_FALSE(m_writer_lock);
     if (db_size) {
         *db_size = 0;
+    }
+    static constexpr std::size_t kCkptSize = 1'000;
+    if (!force && m_hdr.max_frame < kCkptSize) {
+        return Status::ok();
     }
     CALICODB_TRY(m_wal->sync());
 

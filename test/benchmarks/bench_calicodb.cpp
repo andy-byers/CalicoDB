@@ -40,7 +40,6 @@ public:
         : m_param(param)
     {
         m_options.env = calicodb::Env::default_env();
-        m_options.page_size = 0x2000;
         m_options.cache_size = 4'194'304;
         m_options.sync = param.sync;
         CHECK_OK(calicodb::DB::open(m_options, kFilename, m_db));
@@ -176,7 +175,20 @@ private:
     {
         if (m_counters[0] % m_param.commit_interval == m_param.commit_interval - 1) {
             CHECK_OK(m_txn->commit());
+
+            // TODO: Need to start new transactions every so often so that checkpoints can occur. Otherwise,
+            //       these benchmarks are misleading (they run way too fast). It may be worthwhile to
+            //       benchmark running multiple commits before starting a new transaction.
+            restart_txn();
         }
+    }
+
+    auto restart_txn() -> void
+    {
+        delete m_table;
+        m_db->finish(m_txn);
+        CHECK_OK(m_db->start(true, m_txn));
+        CHECK_OK(m_txn->new_table(calicodb::TableOptions(), "bench", m_table));
     }
 
     auto increment_counters() -> void
@@ -214,6 +226,31 @@ static auto set_modification_benchmark_label(benchmark::State &state)
         access_type_name(state.range(0)) +
         (state.range(2) == 1 ? "" : "Batch"));
 }
+
+//static auto BM_XYZ(benchmark::State &state) -> void
+//{
+//    calicodb::DB *db;
+//    calicodb::Txn *tx;
+//    calicodb::Table *tb;
+//    CHECK_OK(calicodb::DB::open(calicodb::Options(), "benchmark_db", db));
+//
+//    std::size_t i = 0;
+//    for (auto _ : state) {
+//        CHECK_OK(db->start(true, tx));
+//        state.PauseTiming();
+//        const auto k = calicodb::tools::integral_key(++i);
+//        const auto v = calicodb::tools::integral_key(++i);
+//        state.ResumeTiming();
+//        CHECK_OK(tx->new_table(calicodb::TableOptions(), "benchmark_table", tb));
+//        CHECK_OK(tb->put(k, v));
+//        CHECK_OK(tx->commit());
+//        delete tb;
+//        db->finish(tx);
+//    }
+//
+//    delete db;
+//}
+//BENCHMARK(BM_XYZ);
 
 static auto BM_Write(benchmark::State &state) -> void
 {

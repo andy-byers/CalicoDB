@@ -128,7 +128,7 @@ public:
     [[nodiscard]] static auto close(Wal *&wal, std::size_t &db_size) -> Status;
 
     // Write as much of the WAL back to the DB as possible
-    [[nodiscard]] virtual auto checkpoint(std::size_t *db_size) -> Status = 0;
+    [[nodiscard]] virtual auto checkpoint(bool force, std::size_t *db_size) -> Status = 0;
 
     // UNLOCKED -> READER
     [[nodiscard]] virtual auto start_reader(bool &changed) -> Status = 0;

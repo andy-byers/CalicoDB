@@ -15,6 +15,7 @@ namespace calicodb
 class Cursor;
 class Table;
 class Txn;
+class TxnHandler;
 
 // On-disk collection of tables
 class DB
