@@ -23,6 +23,8 @@ public:
     ~Schema();
 
     [[nodiscard]] auto new_table(const TableOptions &options, const std::string &name, Table *&out) -> Status;
+    [[nodiscard]] auto open_table(const std::string &name, Table *&out) -> Status;
+    [[nodiscard]] auto create_or_open_table(const std::string &name, Table *&out) -> Status;
     [[nodiscard]] auto drop_table(const std::string &name) -> Status;
 
     [[nodiscard]] auto vacuum_page(Id page_id, bool &success) -> Status;
@@ -36,6 +38,9 @@ public:
     auto TEST_validate() const -> void;
 
 private:
+    [[nodiscard]] auto decode_root_id(const std::string &value, Id &root_id) -> bool;
+    [[nodiscard]] auto construct_table_state(const std::string &name, Id root_id, Table *&out) -> Status;
+
     template <class T>
     using HashMap = std::unordered_map<Id, T, Id::Hash>;
 

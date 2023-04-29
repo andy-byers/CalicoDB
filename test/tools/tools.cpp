@@ -256,27 +256,4 @@ auto FakeWal::statistics() const -> WalStatistics
     return WalStatistics{};
 }
 
-auto open_with_txn(const TxnOpenOptions &options, TxnOpenResult &out) -> Status
-{
-    DB *db;
-    CALICODB_TRY(DB::open(options.options, options.filename, db));
-
-    const auto is_writer = options.mode >= TxnOpenOptions::kWriter;
-    const auto needs_wait = options.mode == TxnOpenOptions::kWriterWait;
-
-    Txn *txn;
-    Status s;
-    do {
-        s = db->start(is_writer, txn);
-    } while (needs_wait && s.is_busy());
-
-    if (s.is_ok()) {
-        out.db = db;
-        out.txn = txn;
-    } else {
-        delete db;
-    }
-    return s;
-}
-
 } // namespace calicodb::tools

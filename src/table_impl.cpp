@@ -4,12 +4,14 @@
 
 #include "table_impl.h"
 #include "tree.h"
+#include "txn_impl.h"
 
 namespace calicodb
 {
 
-TableImpl::TableImpl(Tree *&tree)
-    : m_tree(&tree)
+TableImpl::TableImpl(Tree *&tree, bool write)
+    : m_tree(&tree),
+      m_readonly(!write)
 {
 }
 
@@ -31,11 +33,17 @@ auto TableImpl::get(const Slice &key, std::string *value) const -> Status
 
 auto TableImpl::put(const Slice &key, const Slice &value) -> Status
 {
+    if (m_readonly) {
+        return readonly_transaction();
+    }
     return (*m_tree)->put(key, value);
 }
 
 auto TableImpl::erase(const Slice &key) -> Status
 {
+    if (m_readonly) {
+        return readonly_transaction();
+    }
     return (*m_tree)->erase(key);
 }
 

@@ -14,6 +14,7 @@
 namespace calicodb
 {
 
+// TODO: Use ATOMIC_*() for CkptInfo fields. I think it's weird to mix those and C++11 atomics...
 // See https://stackoverflow.com/questions/8759429/atomic-access-to-shared-memory
 static_assert(std::atomic<U32>::is_always_lock_free);
 
@@ -188,7 +189,7 @@ auto HashIndex::assign(Key key, Value value) -> Status
         const auto group_size =
             key_capacity * sizeof *group.keys +
             kNIndexHashes * sizeof *group.hash;
-        std::memset(const_cast<Key *>(group.keys), 0, group_size);
+        std::memset(Ptr(group.keys), 0, group_size);
     }
 
     if (group.keys[relative - 1]) {
@@ -213,8 +214,8 @@ auto HashIndex::assign(Key key, Value value) -> Status
         }
     }
 
+    group.keys[relative - 1] = key;
     ATOMIC_STORE(&group.hash[key_hash], static_cast<Hash>(relative));
-    ATOMIC_STORE(&group.keys[relative - 1], key);
     return Status::ok();
 }
 
@@ -242,6 +243,9 @@ auto HashIndex::cleanup() -> void
         const auto n = index_group_number(m_hdr->max_frame);
         CALICODB_EXPECT_TRUE(m_groups[n]); // Must already be mapped
         HashGroup group(n, m_groups[n]);
+        // Clear obsolete hash slots. No other connections should be using these slots,
+        // since this connection must be the only writer, and other readers are excluded
+        // from this range by their "max frame" values.
         const auto max_hash = m_hdr->max_frame - group.base;
         for (std::size_t i = 0; i < kNIndexHashes; ++i) {
             if (group.hash[i] > max_hash) {
@@ -252,7 +256,7 @@ auto HashIndex::cleanup() -> void
         const auto rest_size = static_cast<std::uintptr_t>(
             ConstPtr(group.hash) -
             ConstPtr(group.keys + max_hash));
-        std::memset(const_cast<Key *>(group.keys + max_hash), 0, rest_size);
+        std::memset(Ptr(group.keys + max_hash), 0, rest_size);
     }
 }
 

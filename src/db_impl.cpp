@@ -199,29 +199,32 @@ auto DBImpl::get_property(const Slice &name, std::string *out) const -> bool
     return false;
 }
 
-auto DBImpl::start(bool write, Txn *&out) -> Status
+auto DBImpl::new_txn(Txn *&out) const -> Status
 {
-    if (write) {
+    ScopeGuard guard = [this] {
         m_pager->finish();
-        CALICODB_TRY(m_pager->checkpoint(false));
-    }
-
-    auto s = m_pager->start_reader();
-    if (s.is_ok() && write) {
-        s = m_pager->start_writer();
-    }
-    if (s.is_ok()) {
-        out = new TxnImpl(*m_pager, m_state.status, write);
-    } else {
-        m_pager->finish();
-    }
-    return s;
+    };
+    m_pager->finish();
+    CALICODB_TRY(m_pager->start_reader());
+    CALICODB_TRY(m_pager->start_writer());
+    out = new TxnImpl(*m_pager, nullptr);
+    std::move(guard).cancel();
+    return Status::ok();
 }
 
-auto DBImpl::finish(Txn *&txn) -> void
+auto DBImpl::new_txn(WriteTag, Txn *&out) -> Status
 {
-    delete txn;
-    txn = nullptr;
+    m_pager->finish();
+    CALICODB_TRY(m_pager->checkpoint(false));
+
+    ScopeGuard guard = [this] {
+        m_pager->finish();
+    };
+    CALICODB_TRY(m_pager->start_reader());
+    CALICODB_TRY(m_pager->start_writer());
+    out = new TxnImpl(*m_pager, &m_state.status);
+    std::move(guard).cancel();
+    return Status::ok();
 }
 
 auto DBImpl::TEST_pager() const -> const Pager &

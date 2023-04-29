@@ -67,27 +67,27 @@ TxnHandler::TxnHandler() = default;
 
 TxnHandler::~TxnHandler() = default;
 
-auto DB::view(TxnHandler &handler) -> Status
+auto DB::view(TxnHandler &handler) const -> Status
 {
     Txn *txn;
-    CALICODB_TRY(start(false, txn));
+    CALICODB_TRY(new_txn(txn));
 
-    auto s = handler.exec(*txn);
-    finish(txn);
+    auto s = handler.read(*txn);
+    delete txn;
     return s;
 }
 
 auto DB::update(TxnHandler &handler) -> Status
 {
     Txn *txn;
-    CALICODB_TRY(start(true, txn));
+    CALICODB_TRY(new_txn(WriteTag(), txn));
 
-    auto s = handler.exec(*txn);
+    auto s = handler.write(*txn);
     if (s.is_ok()) {
         s = txn->commit();
     }
     // Implicit rollback of all uncommitted changes.
-    finish(txn);
+    delete txn;
     return s;
 }
 

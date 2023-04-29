@@ -19,7 +19,7 @@ class TableImpl : public Table
 public:
     friend class TxnImpl;
 
-    explicit TableImpl(Tree *&tree);
+    explicit TableImpl(Tree *&tree, bool write);
     ~TableImpl() override;
     [[nodiscard]] auto new_cursor() const -> Cursor * override;
     [[nodiscard]] auto get(const Slice &key, std::string *value) const -> Status override;
@@ -28,6 +28,7 @@ public:
 
 public:
     Tree **m_tree;
+    bool m_readonly;
 };
 
 } // namespace calicodb
