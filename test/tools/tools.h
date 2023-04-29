@@ -240,6 +240,26 @@ auto expect_db_contains(DB &db, const std::string &tablename, const std::map<std
 auto expect_db_contains(Txn &txn, const std::string &tablename, const std::map<std::string, std::string> &map) -> void;
 auto expect_db_contains(const Table &table, const std::map<std::string, std::string> &map) -> void;
 
+using TxnHandler = std::function<Status(Txn &)>;
+auto db_view(DB &db, TxnHandler &handler) -> Status;
+auto db_update(DB &db, TxnHandler &handler) -> Status;
+
+struct TxnOpenOptions {
+    enum Mode {
+        kReader, // Start a read-only transaction
+        kWriter, // Start a read-write transaction
+        kWriterWait, // Like kWriter, but retry on busy statuses
+    };
+    Options options;
+    std::string filename;
+    Mode mode;
+};
+struct TxnOpenResult {
+    DB *db = nullptr;
+    Txn *txn = nullptr;
+};
+[[nodiscard]] auto open_with_txn(const TxnOpenOptions &options, TxnOpenResult &out) -> Status;
+
 } // namespace calicodb::tools
 
 #endif // CALICODB_TOOLS_H

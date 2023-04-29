@@ -17,13 +17,8 @@ namespace calicodb
 // See https://stackoverflow.com/questions/8759429/atomic-access-to-shared-memory
 static_assert(std::atomic<U32>::is_always_lock_free);
 
-#if GCC_VERSION >= 4007000
-#  define ATOMIC_LOAD(p, i) __atomic_load_n(p, __ATOMIC_RELAXED)
-#  define ATOMIC_STORE(p, i, v) __atomic_store_n(p, x, __ATOMIC_RELAXED)
-#else
-#  define ATOMIC_LOAD(p) (*(p))
-#  define ATOMIC_STORE(p, v) (*(p) = (v))
-#endif
+#define ATOMIC_LOAD(p) __atomic_load_n(p, __ATOMIC_RELAXED)
+#define ATOMIC_STORE(p, v) __atomic_store_n(p, v, __ATOMIC_RELAXED)
 
 using Key = HashIndex::Key;
 using Value = HashIndex::Value;
@@ -500,9 +495,9 @@ static auto compute_checksum(const Slice &in, const U32 *initial, U32 *out)
 }
 
 #if defined(__clang__)
-#  define DISABLE_TSAN __attribute__((no_sanitize_thread))
+#define DISABLE_TSAN __attribute__((no_sanitize_thread))
 #else // defined(__clang__)
-#  define DISABLE_TSAN
+#define DISABLE_TSAN
 #endif // !defined(__clang__)
 
 class WalImpl : public Wal
@@ -1383,7 +1378,6 @@ auto TEST_print_wal(const Wal &wal) -> void
 }
 
 #undef READ_LOCK
-
 #undef ATOMIC_LOAD
 #undef ATOMIC_STORE
 

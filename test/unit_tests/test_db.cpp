@@ -1260,7 +1260,7 @@ TEST_P(DBTests, Open)
         return false;
     });
 }
-TEST_P(DBTests, StartReading)
+TEST_P(DBTests, ReaderContention)
 {
     run_test(GetParam(), [this](auto &, auto, auto) {
         DB *db;
@@ -1274,7 +1274,7 @@ TEST_P(DBTests, StartReading)
         return false;
     });
 }
-TEST_P(DBTests, StartWriting)
+TEST_P(DBTests, WriterContention)
 {
     run_test(GetParam(), [this](auto &, auto, auto t) {
         // Create 1 writer in each process.

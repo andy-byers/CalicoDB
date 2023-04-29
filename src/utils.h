@@ -67,7 +67,7 @@ using U32 = std::uint32_t;
 using U64 = std::uint64_t;
 
 // Additional file locking modes that cannot be requested directly
-enum : int {kLockUnlocked = 0};
+enum : int { kLockUnlocked = 0 };
 
 [[nodiscard]] inline auto get_status_name(const Status &s) noexcept -> const char *
 {

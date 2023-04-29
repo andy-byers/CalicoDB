@@ -50,7 +50,8 @@ struct TableOptions {
     bool error_if_exists = false;
 };
 
-class BusyHandler {
+class BusyHandler
+{
 public:
     explicit BusyHandler();
     virtual ~BusyHandler();

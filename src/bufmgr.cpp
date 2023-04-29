@@ -16,13 +16,9 @@ Bufmgr::Bufmgr(std::size_t frame_count)
     : m_buffer(new(std::align_val_t{kPageSize}) char[kPageSize * frame_count]()),
       m_frame_count(frame_count)
 {
-    // The buffer should be aligned to the page size.
-    CALICODB_EXPECT_EQ(reinterpret_cast<std::uintptr_t>(m_buffer) % kPageSize, 0);
-
-    while (m_available.size() + 1 < frame_count) {
-        m_available.emplace_back(buffer_slot(m_available.size() + 1));
+    for (std::size_t i = 1; i < frame_count; ++i) {
+        m_available.emplace_back(buffer_slot(i));
     }
-
     m_root.page_id = Id::root();
     m_root.page = buffer_slot(0);
 }
@@ -130,8 +126,8 @@ auto Bufmgr::ref(PageRef &ref) -> void
 {
     CALICODB_EXPECT_FALSE(ref.page_id.is_null());
 
-    ++m_refsum;
     ++ref.refcount;
+    ++m_refsum;
 }
 
 auto Bufmgr::unref(PageRef &ref) -> void

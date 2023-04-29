@@ -63,6 +63,34 @@ BusyHandler::BusyHandler() = default;
 
 BusyHandler::~BusyHandler() = default;
 
+TxnHandler::TxnHandler() = default;
+
+TxnHandler::~TxnHandler() = default;
+
+auto DB::view(TxnHandler &handler) -> Status
+{
+    Txn *txn;
+    CALICODB_TRY(start(false, txn));
+
+    auto s = handler.exec(*txn);
+    finish(txn);
+    return s;
+}
+
+auto DB::update(TxnHandler &handler) -> Status
+{
+    Txn *txn;
+    CALICODB_TRY(start(true, txn));
+
+    auto s = handler.exec(*txn);
+    if (s.is_ok()) {
+        s = txn->commit();
+    }
+    // Implicit rollback of all uncommitted changes.
+    finish(txn);
+    return s;
+}
+
 auto DB::destroy(const Options &options, const std::string &filename) -> Status
 {
     return DBImpl::destroy(options, filename);

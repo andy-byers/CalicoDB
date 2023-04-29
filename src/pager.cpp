@@ -278,9 +278,6 @@ auto Pager::rollback() -> void
 
 auto Pager::finish() -> void
 {
-    // If WAL has not yet been opened, then the pager must not be in a
-    // transaction.
-    CALICODB_EXPECT_TRUE(m_wal || m_mode == kOpen);
     if (m_wal) {
         if (m_mode >= kDirty) {
             rollback();

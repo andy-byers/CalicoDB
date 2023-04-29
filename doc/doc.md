@@ -64,8 +64,7 @@ assert(s2.starts_with("ab"));
 ```C++
 // Set some initialization options.
 const calicodb::Options options = {
-    // Use pages of size 2 KB and a 2 MB page cache.
-    .page_size = 0x2000,
+    // Size of the page cache in bytes.
     .cache_size = 0x200000,
     
     // Store the WAL segments in a separate location. The directory "location" must already exist.
@@ -94,7 +93,7 @@ if (!s.is_ok()) {
 ```C++
 calicodb::Txn *txn;
 
-// Start a read transaction.
+// Start a read-only transaction.
 calicodb::Status s = db->start(false, txn);
 if (!s.is_ok()) {
 }
@@ -137,6 +136,8 @@ db->finish(txn);
 
 ```C++
 calicodb::Table *table;
+
+// Set some initialization options.
 calicodb::TableOptions tbopt;
 tbopt.error_if_exists = true;
 calicodb::Status s = txn->new_table(tbopt, "cats", table);

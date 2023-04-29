@@ -369,12 +369,10 @@ auto BlockAllocator::defragment(Node &node, int skip) -> void
 }
 
 static constexpr NodeMeta kExternalMeta = {
-    parse_external_cell
-};
+    parse_external_cell};
 
 static constexpr NodeMeta kInternalMeta = {
-    parse_internal_cell
-};
+    parse_internal_cell};
 
 static auto setup_node(Node &node) -> void
 {
@@ -1421,7 +1419,7 @@ auto Tree::erase(const Slice &key) -> Status
         return resolve_underflow(std::move(node), anchor);
     }
     release(std::move(node));
-    return Status::not_found("not found");
+    return Status::ok();
 }
 
 auto Tree::find_lowest(Node &out) const -> Status

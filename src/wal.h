@@ -159,7 +159,7 @@ private:
     [[nodiscard]] virtual auto close(std::size_t &db_size) -> Status = 0;
 };
 
-template<class Callback>
+template <class Callback>
 static auto busy_wait(BusyHandler *handler, const Callback &callback) -> Status
 {
     for (unsigned n = 0;; ++n) {

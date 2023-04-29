@@ -7,10 +7,10 @@
 #include <libgen.h>
 #include <list>
 #include <mutex>
-#include <vector>
 #include <sys/mman.h>
 #include <sys/stat.h>
 #include <unistd.h>
+#include <vector>
 
 namespace calicodb
 {
@@ -351,7 +351,7 @@ struct PosixFs final {
     [[nodiscard]] static auto ref_inode(int fd) -> INode *
     {
         // REQUIRES: "s_fs.mutex" is locked by the caller
-s_x++;
+        s_x++;
         FileId key;
         if (struct stat st = {}; fstat(fd, &st)) {
             return nullptr;

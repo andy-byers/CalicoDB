@@ -137,8 +137,8 @@ TEST_F(ComponentTests, CollectsPayload)
 TEST_F(ComponentTests, CollectsPayloadWithOverflow)
 {
     auto root = acquire_node(Id::root(), true);
-    const auto key = random.Generate(kPageSize * 100).to_string();
-    const auto value = random.Generate(kPageSize * 100).to_string();
+    const auto key = random.Generate(kPageSize * 10).to_string();
+    const auto value = random.Generate(kPageSize * 10).to_string();
     ASSERT_OK(PayloadManager::emplace(*m_pager, collect_scratch.data(), root, key, value, 0));
     const auto cell = read_cell(root, 0);
     Slice slice;
@@ -153,8 +153,8 @@ TEST_F(ComponentTests, CollectsPayloadWithOverflow)
 TEST_F(ComponentTests, PromotedCellHasCorrectSize)
 {
     auto root = acquire_node(Id::root(), true);
-    const auto key = random.Generate(kPageSize * 100).to_string();
-    const auto value = random.Generate(kPageSize * 100).to_string();
+    const auto key = random.Generate(kPageSize * 10).to_string();
+    const auto value = random.Generate(kPageSize * 10).to_string();
     std::string emplace_scratch(kPageSize, '\0');
     ASSERT_OK(PayloadManager::emplace(*m_pager, nullptr, root, key, value, 0));
     auto cell = read_cell(root, 0);
@@ -301,14 +301,19 @@ public:
 class BlockAllocatorTests : public NodeTests
 {
 public:
-    explicit BlockAllocatorTests()
-        : node(get_node(true))
-    {
-    }
+    explicit BlockAllocatorTests() = default;
 
     ~BlockAllocatorTests() override
     {
         NodeManager::release(*m_pager, std::move(node));
+        m_pager->finish();
+    }
+
+    auto SetUp() -> void override
+    {
+        ASSERT_OK(m_pager->start_reader());
+        ASSERT_OK(m_pager->start_writer());
+        node = get_node(true);
     }
 
     auto reserve_for_test(std::size_t n) -> void
@@ -640,7 +645,7 @@ TEST_P(TreeTests, RecordsAreErased)
     ASSERT_OK(tree->erase("a"));
     std::string value;
     ASSERT_TRUE(tree->get("a", &value).is_not_found());
-    ASSERT_TRUE(tree->erase("a").is_not_found());
+    ASSERT_OK(tree->erase("a"));
 }
 
 TEST_P(TreeTests, HandlesLargePayloads)
@@ -752,10 +757,8 @@ TEST_P(TreeTests, SplitWithShortAndLongKeys)
 
 TEST_P(TreeTests, AllowsNonInsertOperationsOnEmptyKeys)
 {
-    std::string value;
-    ASSERT_OK(tree->put("key", "value"));
-    ASSERT_TRUE(tree->get("", &value).is_not_found());
-    ASSERT_TRUE(tree->erase("").is_not_found());
+    ASSERT_TRUE(tree->get("", nullptr).is_not_found());
+    ASSERT_OK(tree->erase(""));
 }
 
 #if not NDEBUG

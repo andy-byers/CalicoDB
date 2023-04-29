@@ -14,7 +14,6 @@ class File;
 class Sink;
 
 // CalicoDB storage environment
-//
 // Handles platform-specific filesystem manipulations and file locking.
 class Env
 {
@@ -45,7 +44,7 @@ public:
 };
 
 enum FileLockMode : int {
-    kLockShared = 1, // Any number of threads can hold a kShared lock
+    kLockShared = 1,    // Any number of threads can hold a kShared lock
     kLockExclusive = 2, // Excludes all other locks
 };
 
@@ -85,7 +84,6 @@ public:
 
     // Available modes for the file locking API
     // NOTE: File locking modes and semantics are from SQLite.
-
 
     // Take or upgrade a lock on the file
     [[nodiscard]] virtual auto file_lock(FileLockMode mode) -> Status = 0;

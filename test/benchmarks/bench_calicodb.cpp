@@ -59,25 +59,18 @@ public:
         delete m_options.env;
     }
 
-    auto exists(benchmark::State &state) -> void
+    auto read(benchmark::State &state, std::string *out) -> void
     {
         state.PauseTiming();
         const auto key = next_key(state.range(0) == kSequential, true);
+        if (out) {
+            // Allocate new memory for the value each round.
+            out->clear();
+        }
         state.ResumeTiming();
 
-        CHECK_OK(m_table->get(key, nullptr));
-
-        increment_counters();
-    }
-
-    auto read(benchmark::State &state) -> void
-    {
-        state.PauseTiming();
-        const auto key = next_key(state.range(0) == kSequential, true);
-        state.ResumeTiming();
-
-        std::string value;
-        CHECK_OK(m_table->get(key, &value));
+        CHECK_OK(m_table->get(key, out));
+        benchmark::DoNotOptimize(out);
 
         increment_counters();
     }
@@ -175,10 +168,6 @@ private:
     {
         if (m_counters[0] % m_param.commit_interval == m_param.commit_interval - 1) {
             CHECK_OK(m_txn->commit());
-
-            // TODO: Need to start new transactions every so often so that checkpoints can occur. Otherwise,
-            //       these benchmarks are misleading (they run way too fast). It may be worthwhile to
-            //       benchmark running multiple commits before starting a new transaction.
             restart_txn();
         }
     }
@@ -226,31 +215,6 @@ static auto set_modification_benchmark_label(benchmark::State &state)
         access_type_name(state.range(0)) +
         (state.range(2) == 1 ? "" : "Batch"));
 }
-
-//static auto BM_XYZ(benchmark::State &state) -> void
-//{
-//    calicodb::DB *db;
-//    calicodb::Txn *tx;
-//    calicodb::Table *tb;
-//    CHECK_OK(calicodb::DB::open(calicodb::Options(), "benchmark_db", db));
-//
-//    std::size_t i = 0;
-//    for (auto _ : state) {
-//        CHECK_OK(db->start(true, tx));
-//        state.PauseTiming();
-//        const auto k = calicodb::tools::integral_key(++i);
-//        const auto v = calicodb::tools::integral_key(++i);
-//        state.ResumeTiming();
-//        CHECK_OK(tx->new_table(calicodb::TableOptions(), "benchmark_table", tb));
-//        CHECK_OK(tb->put(k, v));
-//        CHECK_OK(tx->commit());
-//        delete tb;
-//        db->finish(tx);
-//    }
-//
-//    delete db;
-//}
-//BENCHMARK(BM_XYZ);
 
 static auto BM_Write(benchmark::State &state) -> void
 {
@@ -306,7 +270,7 @@ static auto BM_Exists(benchmark::State &state) -> void
     Benchmark bench;
     bench.add_initial_records();
     for (auto _ : state) {
-        bench.exists(state);
+        bench.read(state, nullptr);
     }
 }
 BENCHMARK(BM_Exists)
@@ -316,11 +280,13 @@ BENCHMARK(BM_Exists)
 static auto BM_Read(benchmark::State &state) -> void
 {
     state.SetLabel("Read" + access_type_name(state.range(0)));
+    std::string value;
 
     Benchmark bench;
     bench.add_initial_records();
     for (auto _ : state) {
-        bench.read(state);
+        bench.read(state, &value);
+        benchmark::DoNotOptimize(value);
     }
 }
 BENCHMARK(BM_Read)
@@ -396,11 +362,13 @@ BENCHMARK(BM_Write100K)
 static auto BM_Read100K(benchmark::State &state) -> void
 {
     state.SetLabel("Read" + access_type_name(state.range(0)) + "100K");
+    std::string value;
 
     Benchmark bench{{.value_length = 100'000}};
     bench.add_initial_records();
     for (auto _ : state) {
-        bench.read(state);
+        bench.read(state, &value);
+        benchmark::DoNotOptimize(value);
     }
 }
 BENCHMARK(BM_Read100K)
@@ -414,7 +382,7 @@ static auto BM_Exists100K(benchmark::State &state) -> void
     Benchmark bench{{.value_length = 100'000}};
     bench.add_initial_records();
     for (auto _ : state) {
-        bench.exists(state);
+        bench.read(state, nullptr);
     }
 }
 BENCHMARK(BM_Exists100K)
