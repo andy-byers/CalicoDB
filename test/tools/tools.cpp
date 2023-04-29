@@ -132,10 +132,10 @@ auto hexdump_page(const Page &page) -> void
 auto fill_db(DB &db, const std::string &tablename, RandomGenerator &random, std::size_t num_records, std::size_t max_payload_size) -> std::map<std::string, std::string>
 {
     Txn *txn;
-    CHECK_OK(db.start(true, txn));
+    CHECK_OK(db.new_txn(true, txn));
     auto records = fill_db(*txn, tablename, random, num_records, max_payload_size);
     CHECK_OK(txn->commit());
-    db.finish(txn);
+    delete txn;
     return records;
 }
 
@@ -167,9 +167,9 @@ auto fill_db(Table &table, RandomGenerator &random, std::size_t num_records, std
 auto expect_db_contains(DB &db, const std::string &tablename, const std::map<std::string, std::string> &map) -> void
 {
     Txn *txn;
-    CHECK_OK(db.start(false, txn));
+    CHECK_OK(db.new_txn(false, txn));
     expect_db_contains(*txn, tablename, map);
-    db.finish(txn);
+    delete txn;
 }
 
 auto expect_db_contains(Txn &txn, const std::string &tablename, const std::map<std::string, std::string> &map) -> void

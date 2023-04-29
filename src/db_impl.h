@@ -39,8 +39,7 @@ public:
     [[nodiscard]] auto open(const Options &sanitized) -> Status;
 
     [[nodiscard]] auto get_property(const Slice &name, std::string *out) const -> bool override;
-    [[nodiscard]] auto new_txn(WriteTag, Txn *&txn) -> Status override;
-    [[nodiscard]] auto new_txn(Txn *&txn) const -> Status override;
+    [[nodiscard]] auto new_txn(bool write, Txn *&txn) -> Status override;
 
     [[nodiscard]] auto TEST_pager() const -> const Pager &;
     [[nodiscard]] auto TEST_state() const -> const DBState &;

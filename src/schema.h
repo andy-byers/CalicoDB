@@ -23,8 +23,6 @@ public:
     ~Schema();
 
     [[nodiscard]] auto new_table(const TableOptions &options, const std::string &name, Table *&out) -> Status;
-    [[nodiscard]] auto open_table(const std::string &name, Table *&out) -> Status;
-    [[nodiscard]] auto create_or_open_table(const std::string &name, Table *&out) -> Status;
     [[nodiscard]] auto drop_table(const std::string &name) -> Status;
 
     [[nodiscard]] auto vacuum_page(Id page_id, bool &success) -> Status;

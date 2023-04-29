@@ -122,7 +122,7 @@ protected:
 
     auto begin_with_status(bool write) -> Status
     {
-        return m_db->start(write, m_txn);
+        return m_db->new_txn(write, m_txn);
     }
     auto begin(bool write) -> void
     {

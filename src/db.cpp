@@ -67,12 +67,12 @@ TxnHandler::TxnHandler() = default;
 
 TxnHandler::~TxnHandler() = default;
 
-auto DB::view(TxnHandler &handler) const -> Status
+auto DB::view(TxnHandler &handler) -> Status
 {
     Txn *txn;
-    CALICODB_TRY(new_txn(txn));
+    CALICODB_TRY(new_txn(false, txn));
 
-    auto s = handler.read(*txn);
+    auto s = handler.exec(*txn);
     delete txn;
     return s;
 }
@@ -80,9 +80,9 @@ auto DB::view(TxnHandler &handler) const -> Status
 auto DB::update(TxnHandler &handler) -> Status
 {
     Txn *txn;
-    CALICODB_TRY(new_txn(WriteTag(), txn));
+    CALICODB_TRY(new_txn(true, txn));
 
-    auto s = handler.write(*txn);
+    auto s = handler.exec(*txn);
     if (s.is_ok()) {
         s = txn->commit();
     }

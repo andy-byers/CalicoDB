@@ -110,16 +110,9 @@ DBImpl::DBImpl(const Options &options, const Options &sanitized, std::string fil
 DBImpl::~DBImpl()
 {
     if (m_pager) {
-        m_pager->finish();
-
-        auto s = busy_wait(m_busy, [this] {
-            return m_pager->m_file->file_lock(kLockShared);
-        });
-        if (s.is_ok()) {
-            s = m_pager->close();
-            if (!s.is_ok()) {
-                logv(m_log, "failed to close pager: %s", s.to_string().c_str());
-            }
+        auto s = m_pager->close();
+        if (!s.is_ok()) {
+            logv(m_log, "failed to close pager: %s", s.to_string().c_str());
         }
     }
 
@@ -199,30 +192,17 @@ auto DBImpl::get_property(const Slice &name, std::string *out) const -> bool
     return false;
 }
 
-auto DBImpl::new_txn(Txn *&out) const -> Status
+auto DBImpl::new_txn(bool write, Txn *&out) -> Status
 {
     ScopeGuard guard = [this] {
         m_pager->finish();
     };
     m_pager->finish();
     CALICODB_TRY(m_pager->start_reader());
-    CALICODB_TRY(m_pager->start_writer());
-    out = new TxnImpl(*m_pager, nullptr);
-    std::move(guard).cancel();
-    return Status::ok();
-}
-
-auto DBImpl::new_txn(WriteTag, Txn *&out) -> Status
-{
-    m_pager->finish();
-    CALICODB_TRY(m_pager->checkpoint(false));
-
-    ScopeGuard guard = [this] {
-        m_pager->finish();
-    };
-    CALICODB_TRY(m_pager->start_reader());
-    CALICODB_TRY(m_pager->start_writer());
-    out = new TxnImpl(*m_pager, &m_state.status);
+    if (write) {
+        CALICODB_TRY(m_pager->start_writer());
+    }
+    out = new TxnImpl(*m_pager, m_state.status, write);
     std::move(guard).cancel();
     return Status::ok();
 }

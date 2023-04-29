@@ -535,13 +535,14 @@ public:
 
     [[nodiscard]] auto close(std::size_t &db_size) -> Status override
     {
-        // NOTE: Caller will unlock the database file.
+        // NOTE: Caller will unlock the database file. Only remove the WAL if this is the last
+        // connection.
         auto s = m_db->file_lock(kLockExclusive);
         if (s.is_ok()) {
             // If this returns OK, then it must have written everything back (there are
             // no other connections since we have an exclusive lock on the database file).
             s = checkpoint(true, &db_size);
-            if (s.is_ok()) {
+            if (s.is_ok() && m_hdr.max_frame == 0) {
                 s = m_env->remove_file(m_filename);
             }
         }
@@ -1244,17 +1245,22 @@ auto WalImpl::checkpoint(bool force, std::size_t *db_size) -> Status
         }
     };
 
+    // Take exclusive locks on the checkpoint and writer bytes. This prevents ensures
+    // that no other connection will attempt a checkpoint or write new frames.
     auto s = lock_exclusive(kCkptLock, 1);
     if (s.is_ok()) {
         m_ckpt_lock = true;
-        CALICODB_TRY(busy_wait(m_busy, [this] {
+        s = busy_wait(m_busy, [this] {
             return lock_exclusive(kWriteLock, 1);
-        }));
-        m_writer_lock = true;
+        });
+        m_writer_lock = s.is_ok();
     }
 
     auto changed = false;
     if (s.is_ok()) {
+        // This thread has an exclusive writer lock, so no other connection should be
+        // writing new frames. This version of the header's `max_frame` field should
+        // point to the last frame written to the WAL by any connection.
         s = read_index_header(changed);
     }
     if (s.is_ok() && m_hdr.max_frame) {

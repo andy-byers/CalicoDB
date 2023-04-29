@@ -9,10 +9,11 @@
 namespace calicodb
 {
 
-TxnImpl::TxnImpl(Pager &pager, Status *status)
-    : m_schema(pager, status != nullptr),
+TxnImpl::TxnImpl(Pager &pager, Status &status, bool write)
+    : m_schema(pager, write),
       m_pager(&pager),
-      m_status(status)
+      m_status(&status),
+      m_write(write)
 {
 }
 
@@ -23,17 +24,12 @@ TxnImpl::~TxnImpl()
 
 auto TxnImpl::status() const -> Status
 {
-    return m_status ? *m_status : Status::ok();
+    return *m_status;
 }
 
-auto TxnImpl::new_table(CreateTag, const std::string &name, Table *&out) -> Status
+auto TxnImpl::new_table(const TableOptions &options, const std::string &name, Table *&out) -> Status
 {
-    return m_schema.create_or_open_table(name, out);
-}
-
-auto TxnImpl::new_table(const std::string &name, Table *&out) const -> Status
-{
-    return m_schema.open_table(name, out);
+    return m_schema.new_table(options, name, out);
 }
 
 auto TxnImpl::drop_table(const std::string &name) -> Status
@@ -44,7 +40,7 @@ auto TxnImpl::drop_table(const std::string &name) -> Status
 
 auto TxnImpl::commit() -> Status
 {
-    if (!m_status) {
+    if (!m_write) {
         return Status::ok();
     }
     return m_pager->commit();
@@ -52,7 +48,7 @@ auto TxnImpl::commit() -> Status
 
 auto TxnImpl::rollback() -> void
 {
-    if (m_status) {
+    if (m_write) {
         m_pager->rollback();
         m_schema.inform_live_cursors();
     }
@@ -60,7 +56,7 @@ auto TxnImpl::rollback() -> void
 
 auto TxnImpl::vacuum() -> Status
 {
-    if (!m_status) {
+    if (!m_write) {
         return readonly_transaction();
     }
     m_pager->set_status(vacuum_freelist());

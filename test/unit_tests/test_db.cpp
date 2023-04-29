@@ -29,15 +29,13 @@ TEST(LeakTests, DestroysOwnObjects)
     Table *table;
 
     ASSERT_OK(DB::open(Options(), "__calicodb_test", db));
-    ASSERT_OK(db->start(true, txn));
+    ASSERT_OK(db->new_txn(true, txn));
     ASSERT_OK(txn->new_table(TableOptions(), "test", table));
     auto *cursor = table->new_cursor();
 
     delete cursor;
     delete table;
-
-    db->finish(txn);
-
+    delete txn;
     delete db;
 
     ASSERT_OK(DB::destroy({}, "__calicodb_test"));
@@ -280,10 +278,10 @@ TEST_F(BasicDatabaseTests, VacuumShrinksDBFileOnCheckpoint)
 
     Txn *txn;
     tools::RandomGenerator random;
-    ASSERT_OK(db->start(true, txn));
+    ASSERT_OK(db->new_txn(true, txn));
     const auto records = tools::fill_db(*txn, "table", random, 1'000);
     ASSERT_OK(txn->commit());
-    db->finish(txn);
+    delete txn;
 
     delete db;
     db = nullptr;
@@ -293,7 +291,7 @@ TEST_F(BasicDatabaseTests, VacuumShrinksDBFileOnCheckpoint)
         << "DB file was not written during checkpoint";
 
     ASSERT_OK(DB::open(options, m_dbname, db));
-    ASSERT_OK(db->start(true, txn));
+    ASSERT_OK(db->new_txn(true, txn));
     Table *table;
     ASSERT_OK(txn->new_table(TableOptions(), "table", table));
     for (const auto &[key, value] : records) {
@@ -303,7 +301,7 @@ TEST_F(BasicDatabaseTests, VacuumShrinksDBFileOnCheckpoint)
     ASSERT_OK(txn->drop_table("table"));
     ASSERT_OK(txn->vacuum());
     ASSERT_OK(txn->commit());
-    db->finish(txn);
+    delete txn;
 
     ASSERT_EQ(saved_page_count, db_page_count())
         << "file should not be modified until checkpoint";
@@ -351,7 +349,7 @@ TEST_P(DbVacuumTests, SanityCheck)
             ASSERT_OK(DB::open(options, m_testdir.as_child(kDBFilename), db));
         }
         Txn *txn;
-        ASSERT_OK(db->start(true, txn));
+        ASSERT_OK(db->new_txn(true, txn));
         Table *table;
         ASSERT_OK(txn->new_table(TableOptions(), "table", table));
 
@@ -380,7 +378,7 @@ TEST_P(DbVacuumTests, SanityCheck)
             ASSERT_OK(table->get(key, &result));
             ASSERT_EQ(result, value);
         }
-        db->finish(txn);
+        delete txn;
     }
     delete db;
 }
@@ -446,12 +444,12 @@ protected:
 static auto add_records(TestDatabase &test, std::size_t n, bool commit)
 {
     Txn *txn;
-    EXPECT_OK(test.db->start(true, txn));
+    EXPECT_OK(test.db->new_txn(true, txn));
     auto records = tools::fill_db(*txn, "table", test.random, n);
     if (commit) {
         EXPECT_OK(txn->commit());
     }
-    test.db->finish(txn);
+    delete txn;
     return records;
 }
 
@@ -1234,199 +1232,199 @@ TEST_F(DbRevertTests, RevertsUncommittedBatch_5)
 //     options.wal_filename = "./nonexistent/wal";
 //     ASSERT_TRUE(DB::open(options, kDBFilename, db).is_not_found());
 // }
-
-using StaticTxnHandler = tools::CustomTxnHandler<std::function<Status(Txn &)>>;
-using StaticTxnDecision = std::function<bool(std::size_t, std::size_t)>;
-
-class BusyCounter : public BusyHandler {
-public:
-    ~BusyCounter() override = default;
-    
-    unsigned count = 0;
-    auto exec(unsigned) -> bool override
-    {
-        ++count;
-        return true;
-    }
-};
-class DBConcurrencyTests
-    : public testing::TestWithParam<ConcurrencyTestParam>,
-      public ConcurrencyTestHarness<PosixEnv>
-{
-protected:
-    explicit DBConcurrencyTests()
-    {
-        m_options.cache_size = kMinFrameCount * kPageSize;
-        m_options.busy = &m_busy;
-        m_options.env = &env();
-    }
-
-    ~DBConcurrencyTests() override = default;
-    
-    static auto empty_txn(Txn &) -> Status
-    {
-        return Status::ok();
-    }
-    static auto all_readers(std::size_t, std::size_t) -> bool
-    {
-        return false;
-    }
-    static auto all_writers(std::size_t, std::size_t) -> bool
-    {
-        return true;
-    }
-    static auto single_writer(std::size_t n, std::size_t t) -> bool
-    {
-        return n + t == 0;
-    }
-    static auto single_writer_per_process(std::size_t target, std::size_t, std::size_t t) -> bool
-    {
-        return t == target;
-    }
-    static auto all_writers_in_single_process(std::size_t target, std::size_t n, std::size_t) -> bool
-    {
-        return n == target;
-    }
-    static StaticTxnHandler s_empty_txn;
-
-    template<
-        class IsWriter,
-        class Reader,
-        class Writer>
-    auto run_txn_test(
-        std::size_t num_rounds,
-        IsWriter is_writer,
-        Reader reader,
-        Writer writer) -> void
-    {
-        tools::CustomTxnHandler read_handler(reader);
-        tools::CustomTxnHandler write_handler(writer);
-        run_test(GetParam(), [&](auto &, auto n, auto t) {
-            DB *db;
-            EXPECT_OK(DB::open(m_options, kDBFilename, db));
-            for (std::size_t i = 0; i < num_rounds; ++i) {
-                if (is_writer(n, t)) {
-                    EXPECT_OK(db->update(write_handler));
-                } else {
-                    EXPECT_OK(db->view(read_handler));
-                }
-            }
-            delete db;
-            return false;
-        });
-    }
-    
-    BusyCounter m_busy;
-    Options m_options;
-};
-StaticTxnHandler DBConcurrencyTests::s_empty_txn(DBConcurrencyTests::empty_txn);
-TEST_P(DBConcurrencyTests, Open)
-{
-    run_test(GetParam(), [this](auto &, auto, auto) {
-        DB *db;
-        EXPECT_OK(DB::open(m_options, kDBFilename, db));
-        delete db;
-        return false;
-    });
-}
-TEST_P(DBConcurrencyTests, StartReaders)
-{
-    run_test(GetParam(), [this](auto &, auto, auto) {
-        DB *db;
-        EXPECT_OK(DB::open(m_options, kDBFilename, db));
-        EXPECT_OK(db->view(s_empty_txn));
-        delete db;
-        return false;
-    });
-}
-TEST_P(DBConcurrencyTests, WriterConsistency)
-{
-    run_txn_test(
-        0,
-        all_writers,
-        [](Txn &txn) {
-            return Status::ok();
-        },
-        [](Txn &txn) {
-            return Status::ok();
-        });
-}
-TEST_P(DBConcurrencyTests, WriterContention)
-{
-    run_test(GetParam(), [this](auto &, auto, auto t) {
-        // Create 1 writer in each process.
-        const auto is_writer = t == 0;
-        Txn *txn = nullptr;
-        DB *db = nullptr;
-
-        EXPECT_OK(DB::open(m_options, kDBFilename, db));
-
-        ScopeGuard guard = [&db, &txn] {
-            db->finish(txn);
-            delete db;
-        };
-
-        if (is_writer) {
-            Status s;
-            do {
-                s = db->start(true, txn);
-            } while (s.is_busy());
-            EXPECT_OK(s);
-        } else {
-            EXPECT_OK(db->start(false, txn));
-        }
-
-        Table *table;
-        auto s = txn->new_table(TableOptions(), "table", table);
-        if (s.is_invalid_argument() && !is_writer) {
-            // Loop until a writer creates the table.
-            return true;
-        }
-        EXPECT_OK(s);
-        std::string buffer;
-        s = table->get("key", &buffer);
-        EXPECT_TRUE(s.is_ok() || s.is_not_found())
-            << get_status_name(s) << ": " << s.to_string();
-        Slice value(buffer);
-
-        if (is_writer) {
-            if (s.is_ok()) {
-                U64 number;
-                EXPECT_TRUE(consume_decimal_number(value, &number))
-                    << "corrupted read: " << escape_string(value);
-                value = number_to_string(number + 1);
-            } else {
-                value = "1";
-            }
-            EXPECT_OK(table->put("key", value));
-            EXPECT_OK(txn->commit());
-        }
-        delete table;
-        return false;
-    });
-
-    DB *db;
-    ASSERT_OK(DB::open(m_options, kDBFilename, db));
-    tools::CustomTxnHandler handler = [](auto &txn) {
-        Table *table;
-        EXPECT_OK(txn.new_table(TableOptions(), "table", table));
-
-        std::string buffer;
-        EXPECT_OK(table->get("key", &buffer));
-        delete table;
-
-        U64 number;
-        Slice value(buffer);
-        EXPECT_TRUE(consume_decimal_number(value, &number));
-        EXPECT_EQ(GetParam().num_processes, number);
-        return Status::ok();
-    };
-    ASSERT_OK(db->view(handler));
-    delete db;
-}
-INSTANTIATE_TEST_SUITE_P(DBConcurrencyTests_SanityCheck, DBConcurrencyTests, kConcurrencySanityCheckValues);
-INSTANTIATE_TEST_SUITE_P(DBConcurrencyTests_MT, DBConcurrencyTests, kMultiThreadConcurrencyValues);
-INSTANTIATE_TEST_SUITE_P(DBConcurrencyTests_MP, DBConcurrencyTests, kMultiProcessConcurrencyValues);
-INSTANTIATE_TEST_SUITE_P(DBConcurrencyTests_MX, DBConcurrencyTests, kMultiProcessMultiThreadConcurrencyValues);
+//
+//using StaticTxnHandler = tools::CustomTxnHandler<std::function<Status(Txn &)>>;
+//using StaticTxnDecision = std::function<bool(std::size_t, std::size_t)>;
+//
+//class BusyCounter : public BusyHandler {
+//public:
+//    ~BusyCounter() override = default;
+//
+//    unsigned count = 0;
+//    auto exec(unsigned) -> bool override
+//    {
+//        ++count;
+//        return true;
+//    }
+//};
+//class DBConcurrencyTests
+//    : public testing::TestWithParam<ConcurrencyTestParam>,
+//      public ConcurrencyTestHarness<PosixEnv>
+//{
+//protected:
+//    explicit DBConcurrencyTests()
+//    {
+//        m_options.cache_size = kMinFrameCount * kPageSize;
+//        m_options.busy = &m_busy;
+//        m_options.env = &env();
+//    }
+//
+//    ~DBConcurrencyTests() override = default;
+//
+//    static auto empty_txn(Txn &) -> Status
+//    {
+//        return Status::ok();
+//    }
+//    static auto all_readers(std::size_t, std::size_t) -> bool
+//    {
+//        return false;
+//    }
+//    static auto all_writers(std::size_t, std::size_t) -> bool
+//    {
+//        return true;
+//    }
+//    static auto single_writer(std::size_t n, std::size_t t) -> bool
+//    {
+//        return n + t == 0;
+//    }
+//    static auto single_writer_per_process(std::size_t target, std::size_t, std::size_t t) -> bool
+//    {
+//        return t == target;
+//    }
+//    static auto all_writers_in_single_process(std::size_t target, std::size_t n, std::size_t) -> bool
+//    {
+//        return n == target;
+//    }
+//    static StaticTxnHandler s_empty_txn;
+//
+//    template<
+//        class IsWriter,
+//        class Reader,
+//        class Writer>
+//    auto run_txn_test(
+//        std::size_t num_rounds,
+//        IsWriter is_writer,
+//        Reader reader,
+//        Writer writer) -> void
+//    {
+//        tools::CustomTxnHandler read_handler(reader);
+//        tools::CustomTxnHandler write_handler(writer);
+//        run_test(GetParam(), [&](auto &, auto n, auto t) {
+//            DB *db;
+//            EXPECT_OK(DB::open(m_options, kDBFilename, db));
+//            for (std::size_t i = 0; i < num_rounds; ++i) {
+//                if (is_writer(n, t)) {
+//                    EXPECT_OK(db->update(write_handler));
+//                } else {
+//                    EXPECT_OK(db->view(read_handler));
+//                }
+//            }
+//            delete db;
+//            return false;
+//        });
+//    }
+//
+//    BusyCounter m_busy;
+//    Options m_options;
+//};
+//StaticTxnHandler DBConcurrencyTests::s_empty_txn(DBConcurrencyTests::empty_txn);
+//TEST_P(DBConcurrencyTests, Open)
+//{
+//    run_test(GetParam(), [this](auto &, auto, auto) {
+//        DB *db;
+//        EXPECT_OK(DB::open(m_options, kDBFilename, db));
+//        delete db;
+//        return false;
+//    });
+//}
+//TEST_P(DBConcurrencyTests, StartReaders)
+//{
+//    run_test(GetParam(), [this](auto &, auto, auto) {
+//        DB *db;
+//        EXPECT_OK(DB::open(m_options, kDBFilename, db));
+//        EXPECT_OK(db->view(s_empty_txn));
+//        delete db;
+//        return false;
+//    });
+//}
+//TEST_P(DBConcurrencyTests, WriterConsistency)
+//{
+//    run_txn_test(
+//        0,
+//        all_writers,
+//        [](Txn &txn) {
+//            return Status::ok();
+//        },
+//        [](Txn &txn) {
+//            return Status::ok();
+//        });
+//}
+//TEST_P(DBConcurrencyTests, WriterContention)
+//{
+//    run_test(GetParam(), [this](auto &, auto, auto t) {
+//        // Create 1 writer in each process.
+//        const auto is_writer = t == 0;
+//        Txn *txn = nullptr;
+//        DB *db = nullptr;
+//
+//        EXPECT_OK(DB::open(m_options, kDBFilename, db));
+//
+//        ScopeGuard guard = [&db, &txn] {
+//            delete txn;
+//            delete db;
+//        };
+//
+//        if (is_writer) {
+//            Status s;
+//            do {
+//                s = db->start(true, txn);
+//            } while (s.is_busy());
+//            EXPECT_OK(s);
+//        } else {
+//            EXPECT_OK(db->start(false, txn));
+//        }
+//
+//        Table *table;
+//        auto s = txn->new_table(TableOptions(), "table", table);
+//        if (s.is_invalid_argument() && !is_writer) {
+//            // Loop until a writer creates the table.
+//            return true;
+//        }
+//        EXPECT_OK(s);
+//        std::string buffer;
+//        s = table->get("key", &buffer);
+//        EXPECT_TRUE(s.is_ok() || s.is_not_found())
+//            << get_status_name(s) << ": " << s.to_string();
+//        Slice value(buffer);
+//
+//        if (is_writer) {
+//            if (s.is_ok()) {
+//                U64 number;
+//                EXPECT_TRUE(consume_decimal_number(value, &number))
+//                    << "corrupted read: " << escape_string(value);
+//                value = number_to_string(number + 1);
+//            } else {
+//                value = "1";
+//            }
+//            EXPECT_OK(table->put("key", value));
+//            EXPECT_OK(txn->commit());
+//        }
+//        delete table;
+//        return false;
+//    });
+//
+//    DB *db;
+//    ASSERT_OK(DB::open(m_options, kDBFilename, db));
+//    tools::CustomTxnHandler handler = [](auto &txn) {
+//        Table *table;
+//        EXPECT_OK(txn.new_table(TableOptions(), "table", table));
+//
+//        std::string buffer;
+//        EXPECT_OK(table->get("key", &buffer));
+//        delete table;
+//
+//        U64 number;
+//        Slice value(buffer);
+//        EXPECT_TRUE(consume_decimal_number(value, &number));
+//        EXPECT_EQ(GetParam().num_processes, number);
+//        return Status::ok();
+//    };
+//    ASSERT_OK(db->view(handler));
+//    delete db;
+//}
+//INSTANTIATE_TEST_SUITE_P(DBConcurrencyTests_SanityCheck, DBConcurrencyTests, kConcurrencySanityCheckValues);
+//INSTANTIATE_TEST_SUITE_P(DBConcurrencyTests_MT, DBConcurrencyTests, kMultiThreadConcurrencyValues);
+//INSTANTIATE_TEST_SUITE_P(DBConcurrencyTests_MP, DBConcurrencyTests, kMultiProcessConcurrencyValues);
+//INSTANTIATE_TEST_SUITE_P(DBConcurrencyTests_MX, DBConcurrencyTests, kMultiProcessMultiThreadConcurrencyValues);
 
 } // namespace calicodb

@@ -253,12 +253,7 @@ public:
 
     ~CustomTxnHandler() override = default;
 
-    [[nodiscard]] auto write(Txn &txn) -> Status override
-    {
-        return m_callback(txn);
-    }
-
-    [[nodiscard]] auto read(const Txn &txn) -> Status override
+    [[nodiscard]] auto exec(Txn &txn) -> Status override
     {
         return m_callback(txn);
     }

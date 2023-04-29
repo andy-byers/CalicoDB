@@ -42,12 +42,9 @@ auto Schema::new_table(const TableOptions &options, const std::string &name, Tab
         if (options.error_if_exists) {
             return Status::invalid_argument("table \"" + name + "\" already exists");
         }
-        if (value.size() != Id::kSize) {
-            std::string message("root entry for table \"" + name + "\" is corrupted: ");
-            message.append(escape_string(value));
-            return Status::corruption(message);
+        if (!decode_root_id(value, root_id)) {
+            return corrupted_root_id(name, value);
         }
-        root_id.value = get_u32(value);
     } else if (s.is_not_found()) {
         if (!m_write || !options.create_if_missing) {
             return Status::invalid_argument("table \"" + name + "\" does not exist");
@@ -56,54 +53,6 @@ auto Schema::new_table(const TableOptions &options, const std::string &name, Tab
         value.resize(Id::kSize);
         put_u32(value.data(), root_id.value);
         CALICODB_TRY(m_map->put(name, value));
-    }
-    auto itr = m_trees.find(root_id);
-    if (itr == end(m_trees) || itr->second.tree == nullptr) {
-        itr = m_trees.insert(itr, {root_id, {}});
-        itr->second.root = root_id;
-        itr->second.tree = new Tree(*m_pager, &itr->second.root);
-    }
-    out = new TableImpl(itr->second.tree, m_write);
-    return Status::ok();
-}
-
-auto Schema::open_table(const std::string &name, Table *&out) -> Status
-{
-    std::string value;
-    auto s = m_map->get(name, &value);
-
-    Id root_id;
-    if (s.is_ok()) {
-        if (!decode_root_id(value, root_id)) {
-            return corrupted_root_id(name, value);
-        }
-    } else if (s.is_not_found()) {
-        return Status::invalid_argument("table \"" + name + "\" does not exist");
-    } else {
-        return s;
-    }
-    return construct_table_state(name, root_id, out);
-}
-
-auto Schema::create_or_open_table(const std::string &name, Table *&out) -> Status
-{
-    CALICODB_EXPECT_TRUE(m_write);
-
-    std::string value;
-    auto s = m_map->get(name, &value);
-
-    Id root_id;
-    if (s.is_not_found()) {
-        CALICODB_TRY(Tree::create(*m_pager, false, &root_id));
-        value.resize(Id::kSize);
-        put_u32(value.data(), root_id.value);
-        CALICODB_TRY(m_map->put(name, value));
-    } else if (s.is_not_found()) {
-        if (!decode_root_id(value, root_id)) {
-            return corrupted_root_id(name, value);
-        }
-    } else {
-        return s;
     }
     return construct_table_state(name, root_id, out);
 }
@@ -123,7 +72,7 @@ auto Schema::construct_table_state(const std::string &name, Id root_id, Table *&
     if (itr != end(m_trees) && itr->second.tree) {
         return Status::invalid_argument("table \"" + name + "\" is already open");
     }
-    itr = m_trees.insert(itr, {Id::null(), {}});
+    itr = m_trees.insert(itr, {root_id, {}});
     itr->second.root = root_id;
     itr->second.tree = new Tree(*m_pager, &itr->second.root);
     out = new TableImpl(itr->second.tree, m_write);

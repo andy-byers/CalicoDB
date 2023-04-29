@@ -16,9 +16,6 @@ class Table;
 class Txn;
 class TxnHandler;
 
-struct CreateTag {};
-struct WriteTag {};
-
 // On-disk collection of tables
 class DB
 {
@@ -51,21 +48,16 @@ public:
 
     // Start a transaction
     // Stores a pointer to the heap-allocated transaction object in "txn" and returns OK on
-    // success. Stores nullptr in "txn" and returns a non-OK status on failure. Consider running
-    // transactions through the DB::view()/DB::update() interface, which passes appropriately-
-    // qualified Txn* to the relevant TxnHandler method.
-    // This overload starts a readonly transaction, which cannot modify the database contents.
-    [[nodiscard]] virtual auto new_txn(Txn *&txn) const -> Status = 0;
-    [[nodiscard]] virtual auto new_txn(WriteTag, Txn *&txn) -> Status = 0;
+    // success. Stores nullptr in "txn" and returns a non-OK status on failure.
+    [[nodiscard]] virtual auto new_txn(bool write, Txn *&txn) -> Status = 0;
 
     // Convenience wrapper that runs a read-only transaction
-    // Calls TxnHandler::read() on `handler` and forwards the returned status object.
-    [[nodiscard]] virtual auto view(TxnHandler &handler) const -> Status;
+    // Forwards the status returned by `handler`.
+    [[nodiscard]] virtual auto view(TxnHandler &handler) -> Status;
 
     // Convenience wrapper that runs a read-write transaction
-    // Calls TxnHandler::write() on `handler`. If an OK status is returned, the
-    // transaction is committed. Otherwise, the transaction is rolled back. Forwards this status
-    // to the caller.
+    // If `handler` returns an OK status, the transaction is committed. Otherwise, the
+    // transaction is rolled back.
     [[nodiscard]] virtual auto update(TxnHandler &handler) -> Status;
 };
 
@@ -75,11 +67,7 @@ public:
     explicit TxnHandler();
     virtual ~TxnHandler();
 
-    // Action to take during a readonly transaction
-    [[nodiscard]] virtual auto read(const Txn &txn) -> Status = 0;
-
-    // Action to take during a read-write transaction
-    [[nodiscard]] virtual auto write(Txn &txn) -> Status;
+    [[nodiscard]] virtual auto exec(Txn &txn) -> Status = 0;
 };
 
 // Transaction on a CalicoDB database
@@ -102,9 +90,9 @@ public:
     [[nodiscard]] virtual auto status() const -> Status = 0;
 
     // Create or open a table on the database
-    // REQUIRES: Transaction is writable if the table does not exist
-    [[nodiscard]] virtual auto new_table(const std::string &name, Table *&out) const -> Status = 0;
-    [[nodiscard]] virtual auto new_table(CreateTag, const std::string &name, Table *&out) -> Status = 0;
+    // Note that tables cannot be created during readonly transactions. A
+    // non-OK status is returned in this case.
+    [[nodiscard]] virtual auto new_table(const TableOptions &options, const std::string &name, Table *&out) -> Status = 0;
 
     // Remove a table from the database
     // REQUIRES: Transaction is writable

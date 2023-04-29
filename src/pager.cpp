@@ -162,13 +162,17 @@ auto Pager::open_wal() -> Status
 
 auto Pager::close() -> Status
 {
+    finish();
     std::size_t page_count;
-    auto s = Wal::close(m_wal, page_count);
+    auto s = busy_wait(m_busy, [this] {
+        return m_file->file_lock(kLockShared);
+    });
+    CALICODB_TRY(Wal::close(m_wal, page_count));
     if (s.is_ok() && page_count) {
         s = m_env->resize_file(m_db_name, page_count * kPageSize);
         m_page_count = page_count;
     }
-    m_file->file_unlock();
+    finish();
     return s;
 }
 

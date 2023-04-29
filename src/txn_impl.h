@@ -20,11 +20,10 @@ inline auto readonly_transaction() -> Status
 class TxnImpl : public Txn
 {
 public:
-    explicit TxnImpl(Pager &pager, Status *status);
+    explicit TxnImpl(Pager &pager, Status &status, bool write);
     ~TxnImpl() override;
     [[nodiscard]] auto status() const -> Status override;
-    [[nodiscard]] auto new_table(CreateTag, const std::string &name, Table *&out) -> Status override;
-    [[nodiscard]] auto new_table(const std::string &name, Table *&out) const -> Status override;
+    [[nodiscard]] auto new_table(const TableOptions &options, const std::string &name, Table *&out) -> Status override;
     [[nodiscard]] auto drop_table(const std::string &name) -> Status override;
     [[nodiscard]] auto vacuum() -> Status override;
     [[nodiscard]] auto commit() -> Status override;
@@ -38,6 +37,7 @@ private:
     mutable Schema m_schema;
     Pager *m_pager;
     Status *m_status;
+    bool m_write = false;
 };
 
 } // namespace calicodb
