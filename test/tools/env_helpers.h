@@ -170,6 +170,7 @@ class TestFile : public FileWrapper
 public:
     ~TestFile() override;
     [[nodiscard]] auto read(std::size_t offset, std::size_t size, char *scratch, Slice *out) -> Status override;
+    [[nodiscard]] auto read_exact(std::size_t offset, std::size_t size, char *out) -> Status override;
     [[nodiscard]] auto write(std::size_t offset, const Slice &in) -> Status override;
     [[nodiscard]] auto sync() -> Status override;
 };

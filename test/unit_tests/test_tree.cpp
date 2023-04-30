@@ -1205,7 +1205,7 @@ public:
         TreeTests::SetUp();
         cell_scratch.resize(kPageSize);
         node_scratch.resize(kPageSize);
-        schema = std::make_unique<Schema>(*m_pager, true);
+        schema = std::make_unique<Schema>(*m_pager, m_state.status, true);
     }
 
     auto acquire_node(Id pid, bool is_writable = false)

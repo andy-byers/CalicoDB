@@ -19,7 +19,7 @@ class TableImpl : public Table
 public:
     friend class TxnImpl;
 
-    explicit TableImpl(Tree *&tree, bool write);
+    explicit TableImpl(Tree *&tree, Status &status, bool write);
     ~TableImpl() override;
     [[nodiscard]] auto new_cursor() const -> Cursor * override;
     [[nodiscard]] auto get(const Slice &key, std::string *value) const -> Status override;
@@ -27,6 +27,7 @@ public:
     [[nodiscard]] auto erase(const Slice &key) -> Status override;
 
 public:
+    const Status *m_status;
     Tree **m_tree;
     bool m_readonly;
 };

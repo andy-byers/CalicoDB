@@ -9,6 +9,7 @@
 #include "calicodb/env.h"
 #include "db_impl.h"
 #include "env_posix.h"
+#include "logging.h"
 #include "txn_impl.h"
 #include <climits>
 #include <cstdarg>
@@ -240,7 +241,7 @@ auto expect_db_contains(DB &db, const std::string &tablename, const std::map<std
 auto expect_db_contains(Txn &txn, const std::string &tablename, const std::map<std::string, std::string> &map) -> void;
 auto expect_db_contains(const Table &table, const std::map<std::string, std::string> &map) -> void;
 
-template<class Callback>
+template <class Callback>
 class CustomTxnHandler : public TxnHandler
 {
     Callback m_callback;
@@ -256,6 +257,80 @@ public:
     [[nodiscard]] auto exec(Txn &txn) -> Status override
     {
         return m_callback(txn);
+    }
+};
+
+template <std::size_t Length = 16>
+class NumericKey
+{
+    std::string m_value;
+
+public:
+    explicit NumericKey()
+        : m_value("0")
+    {
+    }
+
+    explicit NumericKey(U64 number)
+        : m_value(integral_key<Length>(number))
+    {
+    }
+
+    explicit NumericKey(std::string string)
+        : m_value(std::move(string))
+    {
+        // Make sure the string is a valid number.
+        (void)number();
+    }
+
+    auto operator==(const NumericKey &rhs) const -> bool
+    {
+        return m_value == rhs.m_value;
+    }
+
+    auto operator!=(const NumericKey &rhs) const -> bool
+    {
+        return !(*this == rhs);
+    }
+
+    [[nodiscard]] auto number() const -> U64
+    {
+        U64 value;
+        Slice slice(m_value);
+        consume_decimal_number(slice, &value);
+        return value;
+    }
+
+    [[nodiscard]] auto string() const -> const std::string &
+    {
+        return m_value;
+    }
+
+    auto operator++() -> NumericKey &
+    {
+        m_value = integral_key<Length>(number() + 1);
+        return *this;
+    }
+
+    auto operator--() -> NumericKey &
+    {
+        CALICODB_EXPECT_GT(number(), 0);
+        m_value = integral_key<Length>(number() - 1);
+        return *this;
+    }
+
+    auto operator++(int) -> NumericKey
+    {
+        auto prev = *this;
+        ++*this;
+        return prev;
+    }
+
+    auto operator--(int) -> NumericKey
+    {
+        auto prev = *this;
+        --*this;
+        return prev;
     }
 };
 

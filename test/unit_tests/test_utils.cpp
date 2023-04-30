@@ -513,6 +513,14 @@ TEST(Logging, WriteFormattedString)
     append_fmt_string(s, "%s %d %f", "abc", 42, 1.0);
 }
 
+TEST(Logging, ConsumeDecimalNumberIgnoresLeadingZeros)
+{
+    U64 v;
+    Slice slice("0000000123");
+    consume_decimal_number(slice, &v);
+    ASSERT_EQ(v, 123);
+}
+
 TEST(LevelDB_Logging, NumberToString)
 {
     ASSERT_EQ("0", number_to_string(0));

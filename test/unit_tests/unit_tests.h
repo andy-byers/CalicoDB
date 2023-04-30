@@ -25,16 +25,6 @@ static constexpr auto kDBFilename = "./_test-db";
 static constexpr auto kWalFilename = "./_test-wal";
 static constexpr auto kShmFilename = "./_test-shm";
 
-//[[nodiscard]] static auto db_impl(const DB *db) -> const DBImpl *
-//{
-//    return reinterpret_cast<const DBImpl *>(db);
-//}
-//
-//[[nodiscard]] static auto db_impl(DB *db) -> DBImpl *
-//{
-//    return reinterpret_cast<DBImpl *>(db);
-//}
-
 #define CLEAR_INTERCEPTORS()        \
     do {                            \
         env().clear_interceptors(); \
@@ -170,10 +160,11 @@ struct ConcurrencyTestParam {
     std::size_t num_processes = 0;
     std::size_t num_threads = 0;
 };
-template<class EnvType>
+template <class EnvType>
 class ConcurrencyTestHarness : public EnvTestHarness<EnvType>
 {
     using Base = EnvTestHarness<EnvType>;
+
 public:
     explicit ConcurrencyTestHarness() = default;
     ~ConcurrencyTestHarness() override = default;
@@ -245,7 +236,6 @@ static const auto kMultiProcessMultiThreadConcurrencyValues = ::testing::Values(
     ConcurrencyTestParam{2, 2},
     ConcurrencyTestParam{3, 3},
     ConcurrencyTestParam{4, 4});
-
 
 [[nodiscard]] inline auto special_error()
 {

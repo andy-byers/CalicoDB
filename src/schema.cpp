@@ -13,15 +13,9 @@
 namespace calicodb
 {
 
-static auto corrupted_root_id(const std::string &table_name, const Slice &value) -> Status
-{
-    std::string message("root entry for table \"" + table_name + "\" is corrupted: ");
-    message.append(escape_string(value));
-    return Status::corruption(message);
-}
-
-Schema::Schema(Pager &pager, bool write)
-    : m_pager(&pager),
+Schema::Schema(Pager &pager, Status &status, bool write)
+    : m_status(&status),
+      m_pager(&pager),
       m_map(new Tree(pager, nullptr)),
       m_write(write)
 {
@@ -30,6 +24,18 @@ Schema::Schema(Pager &pager, bool write)
 Schema::~Schema()
 {
     delete m_map;
+}
+
+auto Schema::corrupted_root_id(const std::string &table_name, const Slice &value) -> Status
+{
+    std::string message("root entry for table \"" + table_name + "\" is corrupted: ");
+    message.append(escape_string(value));
+    auto s = Status::corruption(message);
+    if (m_status->is_ok()) {
+        //
+        *m_status = s;
+    }
+    return s;
 }
 
 auto Schema::new_table(const TableOptions &options, const std::string &name, Table *&out) -> Status
@@ -75,7 +81,7 @@ auto Schema::construct_table_state(const std::string &name, Id root_id, Table *&
     itr = m_trees.insert(itr, {root_id, {}});
     itr->second.root = root_id;
     itr->second.tree = new Tree(*m_pager, &itr->second.root);
-    out = new TableImpl(itr->second.tree, m_write);
+    out = new TableImpl(itr->second.tree, *m_status, m_write);
     return Status::ok();
 }
 

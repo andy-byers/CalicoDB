@@ -169,7 +169,7 @@ struct TreeStatistics {
 class Tree final
 {
 public:
-    explicit Tree(Pager &pager, Id *root_id);
+    explicit Tree(Pager &pager, const Id *root_id);
     ~Tree();
     [[nodiscard]] static auto create(Pager &pager, bool is_root, Id *out) -> Status;
     [[nodiscard]] static auto destroy(Tree &tree) -> Status;
@@ -259,7 +259,7 @@ private:
     mutable std::string m_cell_scratch;
     mutable std::string m_anchor;
     Pager *m_pager = nullptr;
-    Id *m_root_id = nullptr;
+    const Id *m_root_id = nullptr;
 };
 
 class CursorImpl : public Cursor

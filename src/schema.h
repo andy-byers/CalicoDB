@@ -19,7 +19,7 @@ class Tree;
 class Schema final
 {
 public:
-    explicit Schema(Pager &pager, bool write);
+    explicit Schema(Pager &pager, Status &status, bool write);
     ~Schema();
 
     [[nodiscard]] auto new_table(const TableOptions &options, const std::string &name, Table *&out) -> Status;
@@ -36,6 +36,7 @@ public:
     auto TEST_validate() const -> void;
 
 private:
+    [[nodiscard]] auto corrupted_root_id(const std::string &table_name, const Slice &value) -> Status;
     [[nodiscard]] auto decode_root_id(const std::string &value, Id &root_id) -> bool;
     [[nodiscard]] auto construct_table_state(const std::string &name, Id root_id, Table *&out) -> Status;
 
@@ -53,9 +54,10 @@ private:
 
     HashMap<RootedTree> m_trees;
     HashMap<Id> m_reroot;
+    Status *m_status;
     Pager *m_pager;
     Tree *m_map;
-    bool m_write = false;
+    bool m_write;
 };
 
 } // namespace calicodb

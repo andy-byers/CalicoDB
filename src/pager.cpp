@@ -40,12 +40,13 @@ auto Pager::purge_page(PageRef &victim) -> void
 
 auto Pager::read_page(PageRef &out) -> Status
 {
+    CALICODB_EXPECT_NE(m_lock, kLockUnlocked);
+
     char *page = nullptr;
     Status s;
 
     if (m_state->use_wal) {
-        // Try to read the page from the WAL. Nulls out "page" if it cannot find the
-        // page.
+        // Try to read the page from the WAL.
         page = out.page;
         s = m_wal->read(out.page_id, page);
     }
@@ -57,11 +58,7 @@ auto Pager::read_page(PageRef &out) -> Status
 
     if (!s.is_ok()) {
         m_bufmgr.erase(out.page_id);
-        if (m_mode != kOpen) {
-            // TODO: Really, an error should only be set if m_mode == kDirty. The tree module will need to be revised a bit
-            //       to make sure pages are always released before returning (this always happens on the happy path, but if
-            //       there was an error, it may not happen). For now, just be a bit more strict than necessary, setting an
-            //       error so the cache can be purged to fix the reference counts.
+        if (m_mode > kRead) {
             set_status(s);
         }
     }
@@ -165,7 +162,7 @@ auto Pager::close() -> Status
     finish();
     std::size_t page_count;
     auto s = busy_wait(m_busy, [this] {
-        return m_file->file_lock(kLockShared);
+        return lock_db(kLockShared);
     });
     CALICODB_TRY(Wal::close(m_wal, page_count));
     if (s.is_ok() && page_count) {
@@ -314,12 +311,11 @@ auto Pager::checkpoint(bool force) -> Status
 {
     CALICODB_EXPECT_EQ(m_mode, kOpen);
     ScopeGuard guard = [this] {
-        m_file->file_unlock();
+        unlock_db();
     };
     CALICODB_TRY(busy_wait(m_busy, [this] {
-        return m_file->file_lock(kLockShared);
+        return lock_db(kLockShared);
     }));
-    CALICODB_TRY(m_file->file_lock(kLockExclusive));
     return set_status(wal_checkpoint(force));
 }
 
@@ -334,8 +330,8 @@ auto Pager::wal_checkpoint(bool force) -> Status
     CALICODB_TRY(m_wal->checkpoint(force, &dbsize));
 
     if (dbsize) {
-        set_page_count(dbsize);
         CALICODB_TRY(m_env->resize_file(m_db_name, dbsize * kPageSize));
+        set_page_count(dbsize);
     }
     return m_file->sync();
 }

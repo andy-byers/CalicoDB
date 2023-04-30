@@ -52,12 +52,23 @@ private:
     Sink *const m_log = nullptr;
     BusyHandler *const m_busy = nullptr;
 
+    TxnImpl *m_txn = nullptr;
+
     const std::string m_db_filename;
     const std::string m_wal_filename;
     const bool m_owns_env;
     const bool m_owns_log;
     const bool m_sync;
 };
+
+inline auto db_impl(DB *db) -> DBImpl *
+{
+    return reinterpret_cast<DBImpl *>(db);
+}
+inline auto db_impl(const DB *db) -> const DBImpl *
+{
+    return reinterpret_cast<const DBImpl *>(db);
+}
 
 } // namespace calicodb
 

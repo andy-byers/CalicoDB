@@ -473,7 +473,7 @@ TEST_F(PagerTests, SequentialPageUsage)
 
 TEST_F(PagerTests, ReverseSequentialPageUsage)
 {
-        ASSERT_OK(m_pager->start_reader());
+    ASSERT_OK(m_pager->start_reader());
     ASSERT_OK(m_pager->start_writer());
     write_pages(*this, 0, kManyPages);
 
@@ -493,7 +493,7 @@ TEST_F(PagerTests, RandomPageUsage)
     std::default_random_engine rng(42);
     std::shuffle(begin(is), end(is), rng);
 
-        ASSERT_OK(m_pager->start_reader());
+    ASSERT_OK(m_pager->start_reader());
     ASSERT_OK(m_pager->start_writer());
     write_pages(*this, 0, is.size());
     for (auto i : is) {
@@ -506,14 +506,14 @@ TEST_F(PagerTests, RandomPageUsage)
 
 TEST_F(PagerTests, OnlyWritesBackCommittedWalFrames)
 {
-        ASSERT_OK(m_pager->start_reader());
+    ASSERT_OK(m_pager->start_reader());
     ASSERT_OK(m_pager->start_writer());
     write_pages(*this, 42, kManyPages);
     ASSERT_OK(m_pager->commit());
     m_pager->finish();
 
     // Modify the first kSomePages frames, then roll back the changes.
-        ASSERT_OK(m_pager->start_reader());
+    ASSERT_OK(m_pager->start_reader());
     ASSERT_OK(m_pager->start_writer());
     write_pages(*this, 0, kSomePages);
     m_pager->rollback();
@@ -873,7 +873,7 @@ protected:
     {
         File *file;
         EXPECT_OK(env().new_file(kDBFilename, Env::kCreate, file));
-        m_fake_param = Wal::Parameters {
+        m_fake_param = Wal::Parameters{
             "fake-wal",
             &env(),
             file,
@@ -931,12 +931,17 @@ protected:
     auto reopen_wals() -> void
     {
         ASSERT_OK(m_db->file_lock(kLockShared));
-        ASSERT_OK(m_db->file_lock(kLockExclusive));
         std::size_t db_size;
         ASSERT_OK(Wal::close(m_wal, db_size));
+
+        // These tests use a single connection. This means that, since Wal::close()
+        // returned OK, the whole WAL was written back to the database and the WAL
+        // unlinked.
         m_db->file_unlock();
         ASSERT_OK(Wal::open(m_param, m_wal));
-        m_fake->rollback();
+
+        delete m_fake;
+        m_fake = new tools::FakeWal(m_fake_param);
     }
 
     auto run_and_validate_checkpoint(bool save_state = true) -> void
@@ -1068,137 +1073,133 @@ INSTANTIATE_TEST_SUITE_P(
         std::make_tuple(5, 20, 10),
         std::make_tuple(5, 20, 50)));
 
-//class WalPagerFaultTests
-//    : public PagerWalTestHarness,
-//      public testing::TestWithParam<std::tuple<std::size_t, std::string, tools::Interceptor::Type>>
-//{
-//public:
-//    explicit WalPagerFaultTests()
-//        : random(1'024 * 1'024 * 8)
-//    {
-//    }
-//
-//    ~WalPagerFaultTests() override
-//    {
-//        close_pager_and_wal();
-//    }
-//
-//    auto SetUp() -> void override
-//    {
-//        env = new tools::TestEnv;
-//    }
-//
-//    [[nodiscard]] auto run_setup_and_operations() -> Status
-//    {
-//        (void)env->remove_file(kDBFilename);
-//        (void)env->remove_file(kWalFilename);
-//        const auto saved_counter = std::exchange(m_counter, -1);
-//        write_db_header();
-//        m_counter = saved_counter;
-//
-//        CALICODB_TRY(init_with_status());
-//
-//        auto str = tools::read_file_to_string(*env, kDBFilename);
-//        std::cerr << "FILE = " << escape_string(str.substr(0, 18)) << '\n';
-//
-//        CALICODB_TRY(m_pager->begin(true));
-//
-//        ScopeGuard guard = [this] {
-//            return m_pager->finish();
-//        };
-//
-//        std::vector<std::size_t> indices(std::get<0>(GetParam()));
-//        std::iota(begin(indices), end(indices), 0);
-//        std::default_random_engine rng(42);
-//        std::shuffle(begin(indices), end(indices), rng);
-//
-//        for (auto i : indices) {
-//            Page page;
-//            const Id page_id(i + 1);
-//            const auto message = make_key(i);
-//            CALICODB_TRY(m_pager->acquire(page_id, page));
-//
-//            m_pager->mark_dirty(page);
-//            std::memcpy(page.data() + kPageSize - message.size(), message.data(), message.size());
-//            m_pager->release(std::move(page));
-//
-//            // Perform a commit every so often.
-//            if (i && i % 25 == 0) {
-//                CALICODB_TRY(m_pager->commit());
-//            }
-//        }
-//        CALICODB_TRY(m_pager->commit());
-//        std::move(guard).invoke();
-//        CALICODB_TRY(m_pager->checkpoint());
-//
-//        m_counter = -1;
-//
-//        // Should have written monotonically increasing integers back to the DB file.
-//        CALICODB_TRY(m_pager->begin(false));
-//        read_and_check(*this, 0, indices.size());
-//        read_and_check(*this, 0, indices.size(), true);
-//        m_pager->finish();
-//
-//        return Status::ok();
-//    }
-//
-//    auto close_pager_and_wal() -> void
-//    {
-//        (void)m_pager->close();
-//        delete m_pager;
-//        m_pager = nullptr;
-//    }
-//
-//    tools::RandomGenerator random;
-//    int m_counter = 0;
-//};
-//
-//TEST_P(WalPagerFaultTests, SetupAndOperations)
-//{
-//    const auto [_, filename, type] = GetParam();
-//    reinterpret_cast<tools::TestEnv *>(env)
-//        ->add_interceptor(filename, tools::Interceptor(
-//                                        type,
-//                                        [this] {
-//                                            if (m_counter-- == 0) {
-//                                                return special_error();
-//                                            }
-//                                            return Status::ok();
-//                                        }));
-//
-//    Status s;
-//    int count = 0;
-//    for (;;) {
-//        m_counter = count++;
-//        s = run_setup_and_operations();
-//        if (s.is_ok()) {
-//            break;
-//        } else {
-//            assert_special_error(s);
-//        }
-//    }
-//}
-//
-//INSTANTIATE_TEST_SUITE_P(
-//    WalPagerFaultTests,
-//    WalPagerFaultTests,
-//    ::testing::Values(
-//        std::make_tuple(10, kDBFilename, tools::Interceptor::kRead),
-//        std::make_tuple(10, kDBFilename, tools::Interceptor::kWrite),
-//        std::make_tuple(10, kWalFilename, tools::Interceptor::kRead),
-//        std::make_tuple(10, kWalFilename, tools::Interceptor::kWrite),
-//
-//        std::make_tuple(100, kDBFilename, tools::Interceptor::kRead),
-//        std::make_tuple(100, kDBFilename, tools::Interceptor::kWrite),
-//        std::make_tuple(100, kWalFilename, tools::Interceptor::kRead),
-//        std::make_tuple(100, kWalFilename, tools::Interceptor::kWrite)));
+class WalPagerFaultTests
+    : public PagerWalTestHarness,
+      public testing::TestWithParam<std::tuple<std::size_t, std::string, tools::Interceptor::Type>>
+{
+public:
+    explicit WalPagerFaultTests()
+        : random(1'024 * 1'024 * 8)
+    {
+    }
+
+    ~WalPagerFaultTests() override
+    {
+        close_pager_and_wal();
+    }
+
+    auto SetUp() -> void override
+    {
+        env = new tools::TestEnv;
+    }
+
+    [[nodiscard]] auto run_setup_and_operations() -> Status
+    {
+        (void)env->remove_file(kDBFilename);
+        (void)env->remove_file(kWalFilename);
+        const auto saved_counter = std::exchange(m_counter, -1);
+        write_db_header();
+        m_counter = saved_counter;
+
+        CALICODB_TRY(init_with_status());
+        CALICODB_TRY(m_pager->start_reader());
+        CALICODB_TRY(m_pager->start_writer());
+
+        ScopeGuard guard = [this] {
+            return m_pager->finish();
+        };
+
+        std::vector<std::size_t> indices(std::get<0>(GetParam()));
+        std::iota(begin(indices), end(indices), 0);
+        std::default_random_engine rng(42);
+        std::shuffle(begin(indices), end(indices), rng);
+
+        for (auto i : indices) {
+            Page page;
+            const Id page_id(i + 1);
+            const auto message = make_key(i);
+            CALICODB_TRY(m_pager->acquire(page_id, page));
+
+            m_pager->mark_dirty(page);
+            std::memcpy(page.data() + kPageSize - message.size(), message.data(), message.size());
+            m_pager->release(std::move(page));
+
+            // Perform a commit every so often.
+            if (i && i % 25 == 0) {
+                CALICODB_TRY(m_pager->commit());
+            }
+        }
+        CALICODB_TRY(m_pager->commit());
+        std::move(guard).invoke();
+        CALICODB_TRY(m_pager->checkpoint(true));
+
+        m_counter = -1;
+
+        // Should have written monotonically increasing integers back to the DB file.
+        CALICODB_TRY(m_pager->start_reader());
+        read_and_check(*this, 0, indices.size());
+        read_and_check(*this, 0, indices.size(), true);
+        m_pager->finish();
+
+        return Status::ok();
+    }
+
+    auto close_pager_and_wal() -> void
+    {
+        (void)m_pager->close();
+        delete m_pager;
+        m_pager = nullptr;
+    }
+
+    tools::RandomGenerator random;
+    int m_counter = 0;
+};
+
+TEST_P(WalPagerFaultTests, SetupAndOperations)
+{
+    const auto [_, filename, type] = GetParam();
+    reinterpret_cast<tools::TestEnv *>(env)
+        ->add_interceptor(filename, tools::Interceptor(
+                                        type,
+                                        [this] {
+                                            if (m_counter-- == 0) {
+                                                return special_error();
+                                            }
+                                            return Status::ok();
+                                        }));
+
+    Status s;
+    int count = 0;
+    for (;;) {
+        m_counter = count++;
+        s = run_setup_and_operations();
+        if (s.is_ok()) {
+            break;
+        } else {
+            assert_special_error(s);
+        }
+    }
+}
+
+INSTANTIATE_TEST_SUITE_P(
+    WalPagerFaultTests,
+    WalPagerFaultTests,
+    ::testing::Values(
+        std::make_tuple(10, kDBFilename, tools::Interceptor::kRead),
+        std::make_tuple(10, kDBFilename, tools::Interceptor::kWrite),
+        std::make_tuple(10, kWalFilename, tools::Interceptor::kRead),
+        std::make_tuple(10, kWalFilename, tools::Interceptor::kWrite),
+
+        std::make_tuple(100, kDBFilename, tools::Interceptor::kRead),
+        std::make_tuple(100, kDBFilename, tools::Interceptor::kWrite),
+        std::make_tuple(100, kWalFilename, tools::Interceptor::kRead),
+        std::make_tuple(100, kWalFilename, tools::Interceptor::kWrite)));
 
 class WalConcurrencyTests
-    : public testing::TestWithParam<ConcurrencyTestParam>
-    , public ConcurrencyTestHarness<PosixEnv>
+    : public testing::TestWithParam<ConcurrencyTestParam>,
+      public ConcurrencyTestHarness<PosixEnv>
 {
 protected:
-
 };
 
 } // namespace calicodb

@@ -314,6 +314,12 @@ auto TestFile::read(std::size_t offset, std::size_t size, char *scratch, Slice *
     return FileWrapper::read(offset, size, scratch, out);
 }
 
+auto TestFile::read_exact(std::size_t offset, std::size_t size, char *out) -> Status
+{
+    TRY_INTERCEPT_FROM(*m_env, Interceptor::kRead, m_filename);
+    return FileWrapper::read_exact(offset, size, out);
+}
+
 auto TestFile::write(std::size_t offset, const Slice &in) -> Status
 {
     TRY_INTERCEPT_FROM(*m_env, Interceptor::kWrite, m_filename);

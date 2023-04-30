@@ -1319,7 +1319,7 @@ auto Tree::rotate_right(Node &parent, Node &left, Node &right, std::size_t index
     return Status::ok();
 }
 
-Tree::Tree(Pager &pager, Id *root_id)
+Tree::Tree(Pager &pager, const Id *root_id)
     : m_node_scratch(kPageSize, '\0'),
       m_cell_scratch(kPageSize, '\0'),
       m_pager(&pager),

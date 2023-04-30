@@ -25,8 +25,9 @@ using Key = HashIndex::Key;
 using Value = HashIndex::Value;
 using Hash = U16;
 
-using Ptr = char *;
-using ConstPtr = const char *;
+// Non-volatile pointer types.
+using StablePtr = char *;
+using ConstStablePtr = const char *;
 
 static constexpr std::size_t kReadmarkNotUsed = 0xFFFFFFFF;
 static constexpr std::size_t kWriteLock = 0;
@@ -45,20 +46,19 @@ struct CkptInfo {
 };
 static_assert(std::is_pod_v<CkptInfo>);
 
-// static constexpr std::size_t kIndexLockOffset = sizeof(HashIndexHdr) * 2 + offsetof(CkptInfo, locks);
-static constexpr std::size_t kIndexHeaderSize = sizeof(HashIndexHdr) * 2 + sizeof(CkptInfo);
+static constexpr std::size_t kIndexHdrSize = sizeof(HashIndexHdr) * 2 + sizeof(CkptInfo);
 
 // Header is stored at the start of the first index group. std::memcpy() is used
 // on the struct, so it needs to be a POD (or at least trivially copiable). Its
 // size should be a multiple of 4 to prevent misaligned accesses.
 static_assert(std::is_pod_v<HashIndexHdr>);
-static_assert((kIndexHeaderSize & 0b11) == 0);
+static_assert((kIndexHdrSize & 0b11) == 0);
 
 static constexpr U32 kHashPrime = 383;
 static constexpr U32 kNIndexHashes = 8192;
 static constexpr U32 kNIndexKeys = 4096;
 static constexpr U32 kNIndexKeys0 =
-    kNIndexKeys - kIndexHeaderSize / sizeof(U32);
+    kNIndexKeys - kIndexHdrSize / sizeof(U32);
 
 static constexpr auto index_group_number(Value value) -> U32
 {
@@ -89,7 +89,7 @@ struct HashGroup {
         if (group_number) {
             base = kNIndexKeys0 + (kNIndexKeys * (group_number - 1));
         } else {
-            keys += kIndexHeaderSize / sizeof *keys;
+            keys += kIndexHdrSize / sizeof *keys;
         }
     }
 
@@ -189,7 +189,7 @@ auto HashIndex::assign(Key key, Value value) -> Status
         const auto group_size =
             key_capacity * sizeof *group.keys +
             kNIndexHashes * sizeof *group.hash;
-        std::memset(Ptr(group.keys), 0, group_size);
+        std::memset(StablePtr(group.keys), 0, group_size);
     }
 
     if (group.keys[relative - 1]) {
@@ -227,7 +227,7 @@ auto HashIndex::map_group(std::size_t group_number) -> Status
     if (m_groups[group_number] == nullptr) {
         volatile void *ptr;
         CALICODB_TRY(m_file->shm_map(group_number, ptr));
-        m_groups[group_number] = Ptr(ptr);
+        m_groups[group_number] = StablePtr(ptr);
     }
     return Status::ok();
 }
@@ -254,9 +254,9 @@ auto HashIndex::cleanup() -> void
         }
         // Clear the keys that correspond to cleared hash slots.
         const auto rest_size = static_cast<std::uintptr_t>(
-            ConstPtr(group.hash) -
-            ConstPtr(group.keys + max_hash));
-        std::memset(Ptr(group.keys + max_hash), 0, rest_size);
+            ConstStablePtr(group.hash) -
+            ConstStablePtr(group.keys + max_hash));
+        std::memset(StablePtr(group.keys + max_hash), 0, rest_size);
     }
 }
 
@@ -535,8 +535,9 @@ public:
 
     [[nodiscard]] auto close(std::size_t &db_size) -> Status override
     {
-        // NOTE: Caller will unlock the database file. Only remove the WAL if this is the last
-        // connection.
+        // NOTE: Caller will unlock the database file. Only consider removing the WAL if this
+        // is the last active connection. If there are other connections not currently running
+        // transactions, the next read-write transaction will create a new WAL.
         auto s = m_db->file_lock(kLockExclusive);
         if (s.is_ok()) {
             // If this returns OK, then it must have written everything back (there are
@@ -580,7 +581,9 @@ public:
         CALICODB_TRY(lock_exclusive(kWriteLock, 1));
         m_writer_lock = true;
 
-        if (0 != std::memcmp(&m_hdr, ConstPtr(m_index.header()), sizeof(HashIndexHdr))) {
+        // We have the writer lock, so no other connection will write the index header while
+        // std::memcmp() is running here.
+        if (0 != std::memcmp(&m_hdr, ConstStablePtr(m_index.header()), sizeof(HashIndexHdr))) {
             // Another connection has written since this read transaction was started. This
             // is not allowed (this connection now has an outdated snapshot, meaning the local
             // "max frame" value is no longer correct).
@@ -643,9 +646,9 @@ private:
         U32 cksum[2];
 
         const auto *hdr = m_index.header();
-        std::memcpy(&h1, ConstPtr(&hdr[0]), sizeof(h1));
+        std::memcpy(&h1, ConstStablePtr(&hdr[0]), sizeof(h1));
         shm_barrier();
-        std::memcpy(&h2, ConstPtr(&hdr[1]), sizeof(h2));
+        std::memcpy(&h2, ConstStablePtr(&hdr[1]), sizeof(h2));
 
         if (0 != std::memcmp(&h1, &h2, sizeof(h1))) {
             return false;
@@ -653,7 +656,7 @@ private:
         if (h1.flags == 0) {
             return false;
         }
-        const Slice target(ConstPtr(&h1), sizeof(h1) - sizeof(h1.cksum));
+        const Slice target(ConstStablePtr(&h1), sizeof(h1) - sizeof(h1.cksum));
         compute_checksum(target, nullptr, cksum);
 
         if (cksum[0] != h1.cksum[0] || cksum[1] != h1.cksum[1]) {
@@ -704,7 +707,7 @@ private:
         m_hdr.flags = HashIndexHdr::INITIALIZED;
         m_hdr.version = kWalVersion;
 
-        const Slice target(Ptr(&m_hdr), offsetof(HashIndexHdr, cksum));
+        const Slice target(StablePtr(&m_hdr), offsetof(HashIndexHdr, cksum));
         compute_checksum(target, nullptr, m_hdr.cksum);
 
         volatile auto *hdr = m_index.header();
@@ -788,7 +791,7 @@ private:
             s = lock_shared(READ_LOCK(0));
             shm_barrier();
             if (s.is_ok()) {
-                if (0 != std::memcmp(ConstPtr(m_index.header()), &m_hdr, sizeof(m_hdr))) {
+                if (0 != std::memcmp(ConstStablePtr(m_index.header()), &m_hdr, sizeof(m_hdr))) {
                     // Some reader changed the WAL before we had a read lock. Indicate that the
                     // user should try again.
                     unlock_shared(READ_LOCK(0));
@@ -843,7 +846,7 @@ private:
         // shared lock.
         const auto changed_unexpectedly =
             info->readmark[max_index] != max_readmark ||
-            0 != std::memcmp(ConstPtr(m_index.header()), &m_hdr, sizeof(HashIndexHdr));
+            0 != std::memcmp(ConstStablePtr(m_index.header()), &m_hdr, sizeof(HashIndexHdr));
         if (changed_unexpectedly) {
             unlock_shared(READ_LOCK(max_index));
             return Status::busy("retry");
@@ -1130,6 +1133,9 @@ auto WalImpl::read(Id page_id, char *&page) -> Status
 
 auto WalImpl::write(const PageRef *dirty, std::size_t db_size) -> Status
 {
+    CALICODB_EXPECT_TRUE(m_writer_lock);
+    CALICODB_EXPECT_TRUE(dirty);
+
     const auto is_commit = db_size > 0;
     volatile auto *live = m_index.header();
     U32 first_frame = 0;
@@ -1137,7 +1143,7 @@ auto WalImpl::write(const PageRef *dirty, std::size_t db_size) -> Status
     // Check if the WAL's copy of the index header differs from what is on the first index page.
     // If it is different, then the WAL has been written since the last commit, with the first
     // record located at frame number "first_frame".
-    if (0 != std::memcmp(&m_hdr, ConstPtr(live), sizeof(m_hdr))) {
+    if (0 != std::memcmp(&m_hdr, ConstStablePtr(live), sizeof(m_hdr))) {
         first_frame = live->max_frame + 1;
     }
 
@@ -1274,9 +1280,6 @@ auto WalImpl::checkpoint(bool force, std::size_t *db_size) -> Status
 
 auto WalImpl::transfer_contents(File &db_file, std::size_t *db_size) -> Status
 {
-    if (db_size) {
-        *db_size = m_hdr.page_count;
-    }
     Status s;
 
     volatile auto *info = get_ckpt_info();
@@ -1309,9 +1312,15 @@ auto WalImpl::transfer_contents(File &db_file, std::size_t *db_size) -> Status
             CALICODB_TRY(itr.init());
 
             CALICODB_TRY(busy_wait(m_busy, [this] {
+                // Lock reader lock 0. This prevents other connections from ignoring the WAL and
+                // reading all pages from the database file. New readers should find a readmark
+                // so they know which pages to get from the WAL, since this connection is about
+                // to overwrite some pages in the database file (readers would otherwise risk
+                // reading pages that are in the process of being written).
                 return lock_exclusive(READ_LOCK(0), 1);
             }));
             ScopeGuard guard = [this] {
+                // Release the read lock after backfilling is finished.
                 unlock_exclusive(READ_LOCK(0), 1);
             };
 
@@ -1336,20 +1345,21 @@ auto WalImpl::transfer_contents(File &db_file, std::size_t *db_size) -> Status
             info->backfill = max_safe_frame;
         }
 
-        if (info->backfill < m_hdr.max_frame) {
-            // Some reader(s) got in the way.
-            return Status::busy("retry");
-        }
-        ++m_ckpt_number;
-        m_min_frame = 0;
-        m_hdr.max_frame = 0;
+        if (info->backfill == m_hdr.max_frame) {
+            if (db_size) {
+                *db_size = m_hdr.page_count;
+            }
+            ++m_ckpt_number;
+            m_min_frame = 0;
+            m_hdr.max_frame = 0;
 
-        CALICODB_TRY(busy_wait(m_busy, [this] {
-            return lock_exclusive(READ_LOCK(1), kReaderCount - 1);
-        }));
-        m_index.cleanup();
-        restart_header(m_env->rand());
-        unlock_exclusive(READ_LOCK(1), kReaderCount - 1);
+            CALICODB_TRY(busy_wait(m_busy, [this] {
+                return lock_exclusive(READ_LOCK(1), kReaderCount - 1);
+            }));
+            m_index.cleanup();
+            restart_header(m_env->rand());
+            unlock_exclusive(READ_LOCK(1), kReaderCount - 1);
+        }
     }
     return s;
 }

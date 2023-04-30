@@ -81,13 +81,6 @@ auto DBImpl::open(const Options &sanitized) -> Status
     } else if (sanitized.error_if_exists) {
         return Status::invalid_argument(
             "database \"" + m_db_filename + "\" already exists");
-    } else {
-        // This should be a no-op if the database closed normally last time.
-        s = m_pager->checkpoint(true);
-        if (s.is_busy()) {
-            s = Status::ok();
-        }
-        m_pager->purge_cached_pages();
     }
     std::move(guard).cancel();
     m_state.use_wal = true;
@@ -194,15 +187,31 @@ auto DBImpl::get_property(const Slice &name, std::string *out) const -> bool
 
 auto DBImpl::new_txn(bool write, Txn *&out) -> Status
 {
+    if (m_txn) {
+        std::string message("another transaction (read");
+        message.append(m_txn->m_write ? "-write" : "only");
+        message.append(") is already running");
+        return Status::not_supported(message);
+    }
     ScopeGuard guard = [this] {
         m_pager->finish();
     };
-    m_pager->finish();
+
+    // Forward error statuses. If an error is set at this point, then something
+    // has gone very wrong.
+    CALICODB_TRY(m_state.status);
+    if (write) {
+        // Run a checkpoint if the WAL is grown past some fixed size. May not
+        // run to completion.
+        CALICODB_TRY(m_pager->checkpoint(false));
+    }
     CALICODB_TRY(m_pager->start_reader());
     if (write) {
         CALICODB_TRY(m_pager->start_writer());
     }
-    out = new TxnImpl(*m_pager, m_state.status, write);
+    m_txn = new TxnImpl(*m_pager, m_state.status, write);
+    m_txn->m_backref = &m_txn;
+    out = m_txn;
     std::move(guard).cancel();
     return Status::ok();
 }
