@@ -155,7 +155,7 @@ auto DBImpl::destroy(const Options &options, const std::string &filename) -> Sta
 auto DBImpl::get_property(const Slice &name, std::string *out) const -> bool
 {
     if (out) {
-        *out = nullptr;
+        out->clear();
     }
     if (name.starts_with("calicodb.")) {
         const auto prop = name.range(std::strlen("calicodb."));
@@ -200,11 +200,6 @@ auto DBImpl::new_txn(bool write, Txn *&out) -> Status
     // Forward error statuses. If an error is set at this point, then something
     // has gone very wrong.
     CALICODB_TRY(m_state.status);
-    if (write) {
-        // Run a checkpoint if the WAL is grown past some fixed size. May not
-        // run to completion.
-        CALICODB_TRY(m_pager->checkpoint(false));
-    }
     CALICODB_TRY(m_pager->start_reader());
     if (write) {
         CALICODB_TRY(m_pager->start_writer());

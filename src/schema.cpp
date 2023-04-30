@@ -142,11 +142,7 @@ auto Schema::vacuum_finish() -> Status
     Status s;
     while (cursor->is_valid()) {
         if (cursor->value().size() != sizeof(U32)) {
-            std::string message("root entry for table \"");
-            message.append(cursor->key().to_string());
-            message.append("\" is corrupted: ");
-            message.append(escape_string(cursor->value()));
-            return Status::corruption(message);
+            return corrupted_root_id(cursor->key().to_string(), cursor->value());
         }
         const Id old_id(get_u32(cursor->value()));
         const auto root = m_reroot.find(old_id);
@@ -175,13 +171,14 @@ auto Schema::vacuum_finish() -> Status
         }
         cursor->next();
     }
-    const auto success = m_reroot.empty();
+    const auto missed_roots = m_reroot.size();
     m_reroot.clear();
 
-    if (s.is_ok() && !success) {
+    if (s.is_ok() && missed_roots) {
         std::string message("missing ");
-        append_number(message, m_reroot.size());
-        message.append(" root entries");
+        append_number(message, missed_roots);
+        message.append(" root entr");
+        message.append(missed_roots == 1 ? "y" : "ies");
         return Status::corruption(message);
     }
     inform_live_cursors();

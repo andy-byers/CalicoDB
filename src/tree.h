@@ -280,6 +280,10 @@ class CursorImpl : public Cursor
     CursorImpl *m_prev = nullptr;
     CursorImpl *m_next = nullptr;
 
+    bool m_needs_reposition = false;
+
+    [[nodiscard]] auto reposition() -> std::string;
+
     auto seek_to(Node node, std::size_t index) -> void;
     auto fetch_payload() -> Status;
 

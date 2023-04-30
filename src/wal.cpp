@@ -1250,6 +1250,8 @@ auto WalImpl::checkpoint(bool force, std::size_t *db_size) -> Status
             finish_writer();
         }
     };
+    // Ensure that the shm header is mapped.
+    CALICODB_TRY(m_index.map_group(0));
 
     // Take exclusive locks on the checkpoint and writer bytes. This prevents ensures
     // that no other connection will attempt a checkpoint or write new frames.

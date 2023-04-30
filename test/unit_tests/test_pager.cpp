@@ -127,6 +127,8 @@ public:
     [[nodiscard]] auto init_with_status() -> Status
     {
         CALICODB_EXPECT_NE(env, nullptr);
+        CALICODB_EXPECT_FALSE(m_pager);
+
         File *file;
         CALICODB_TRY(env->new_file(kDBFilename, Env::kCreate, file));
 
@@ -1073,9 +1075,15 @@ INSTANTIATE_TEST_SUITE_P(
         std::make_tuple(5, 20, 10),
         std::make_tuple(5, 20, 50)));
 
+struct WalPagerFaultTestParam {
+    std::size_t test_size;
+    std::string target_file;
+    tools::Interceptor::Type target_type;
+    bool flag = false;
+};
 class WalPagerFaultTests
     : public PagerWalTestHarness,
-      public testing::TestWithParam<std::tuple<std::size_t, std::string, tools::Interceptor::Type>>
+      public testing::TestWithParam<WalPagerFaultTestParam>
 {
 public:
     explicit WalPagerFaultTests()
@@ -1091,45 +1099,72 @@ public:
     auto SetUp() -> void override
     {
         env = new tools::TestEnv;
+
+        const auto [_, filename, type, flag] = m_param;
+        reinterpret_cast<tools::TestEnv *>(env)->add_interceptor(
+            filename, tools::Interceptor(type, [this] {
+                if (m_counter-- == 0) {
+                    return special_error();
+                }
+                return Status::ok();
+            }));
     }
 
-    [[nodiscard]] auto run_setup_and_operations() -> Status
+    bool m_sao_reenter = false;
+    bool m_sao_needs_init = true;
+    std::size_t m_sao_index = 0;
+    std::size_t m_sao_commit_interval = 0;
+    std::vector<std::size_t> m_sao_indices;
+    auto setup_and_operations_init(bool reentrant) -> void
     {
-        (void)env->remove_file(kDBFilename);
-        (void)env->remove_file(kWalFilename);
-        const auto saved_counter = std::exchange(m_counter, -1);
-        write_db_header();
-        m_counter = saved_counter;
+        static constexpr std::size_t kSAOCommitDivisor = 10;
+        m_sao_commit_interval = m_param.test_size / kSAOCommitDivisor;
+        ASSERT_LT(0, m_sao_commit_interval)
+            << "REQUIRES: m_param.test_size >= " << kSAOCommitDivisor;
 
+        m_sao_reenter = reentrant;
+        m_sao_indices.resize(m_param.test_size);
+        std::iota(begin(m_sao_indices), end(m_sao_indices), 0);
+        std::shuffle(begin(m_sao_indices), end(m_sao_indices), m_rng);
+    }
+    [[nodiscard]] auto setup_and_operations_test() -> Status
+    {
+        if (!m_sao_reenter || m_sao_index == 0) {
+            (void)env->remove_file(kDBFilename);
+            (void)env->remove_file(kWalFilename);
+            const auto saved = std::exchange(m_counter, -1);
+            write_db_header();
+            m_counter = saved;
+            m_sao_index = 0;
+        }
+        if (m_pager) {
+            // Do not call Pager::close().
+            delete m_pager;
+            m_pager = nullptr;
+        }
         CALICODB_TRY(init_with_status());
-        CALICODB_TRY(m_pager->start_reader());
-        CALICODB_TRY(m_pager->start_writer());
-
         ScopeGuard guard = [this] {
             return m_pager->finish();
         };
+        CALICODB_TRY(m_pager->start_reader());
+        CALICODB_TRY(m_pager->start_writer());
+        for (std::size_t i = m_sao_index; i < m_sao_indices.size(); ++i) {
+            const auto index = m_sao_indices[i];
 
-        std::vector<std::size_t> indices(std::get<0>(GetParam()));
-        std::iota(begin(indices), end(indices), 0);
-        std::default_random_engine rng(42);
-        std::shuffle(begin(indices), end(indices), rng);
-
-        for (auto i : indices) {
             Page page;
-            const Id page_id(i + 1);
-            const auto message = make_key(i);
+            const Id page_id(index + 1);
+            const auto message = make_key(index);
             CALICODB_TRY(m_pager->acquire(page_id, page));
 
             m_pager->mark_dirty(page);
             std::memcpy(page.data() + kPageSize - message.size(), message.data(), message.size());
             m_pager->release(std::move(page));
 
-            // Perform a commit every so often.
-            if (i && i % 25 == 0) {
+            if (i == m_sao_indices.size() - 1 || index % m_sao_commit_interval == m_sao_commit_interval - 1) {
                 CALICODB_TRY(m_pager->commit());
+                m_sao_index = i;
             }
         }
-        CALICODB_TRY(m_pager->commit());
         std::move(guard).invoke();
         CALICODB_TRY(m_pager->checkpoint(true));
 
@@ -1137,8 +1172,8 @@ public:
 
         // Should have written monotonically increasing integers back to the DB file.
         CALICODB_TRY(m_pager->start_reader());
-        read_and_check(*this, 0, indices.size());
-        read_and_check(*this, 0, indices.size(), true);
+        read_and_check(*this, 0, m_sao_indices.size());
+        read_and_check(*this, 0, m_sao_indices.size(), true);
         m_pager->finish();
 
         return Status::ok();
@@ -1151,49 +1186,54 @@ public:
         m_pager = nullptr;
     }
 
+    template <class Callback>
+    auto run_test(const Callback &callback) -> void
+    {
+        Status s;
+        int count = 0;
+        for (;;) {
+            m_counter = count++;
+            s = callback();
+            if (s.is_ok()) {
+                break;
+            } else {
+                assert_special_error(s);
+            }
+        }
+    }
+
+    WalPagerFaultTestParam m_param = GetParam();
+    std::default_random_engine m_rng;
     tools::RandomGenerator random;
     int m_counter = 0;
 };
-
 TEST_P(WalPagerFaultTests, SetupAndOperations)
 {
-    const auto [_, filename, type] = GetParam();
-    reinterpret_cast<tools::TestEnv *>(env)
-        ->add_interceptor(filename, tools::Interceptor(
-                                        type,
-                                        [this] {
-                                            if (m_counter-- == 0) {
-                                                return special_error();
-                                            }
-                                            return Status::ok();
-                                        }));
-
-    Status s;
-    int count = 0;
-    for (;;) {
-        m_counter = count++;
-        s = run_setup_and_operations();
-        if (s.is_ok()) {
-            break;
-        } else {
-            assert_special_error(s);
-        }
-    }
+    setup_and_operations_init(m_param.flag);
+    run_test([this] {
+        return setup_and_operations_test();
+    });
 }
-
 INSTANTIATE_TEST_SUITE_P(
     WalPagerFaultTests,
     WalPagerFaultTests,
     ::testing::Values(
-        std::make_tuple(10, kDBFilename, tools::Interceptor::kRead),
-        std::make_tuple(10, kDBFilename, tools::Interceptor::kWrite),
-        std::make_tuple(10, kWalFilename, tools::Interceptor::kRead),
-        std::make_tuple(10, kWalFilename, tools::Interceptor::kWrite),
-
-        std::make_tuple(100, kDBFilename, tools::Interceptor::kRead),
-        std::make_tuple(100, kDBFilename, tools::Interceptor::kWrite),
-        std::make_tuple(100, kWalFilename, tools::Interceptor::kRead),
-        std::make_tuple(100, kWalFilename, tools::Interceptor::kWrite)));
+        WalPagerFaultTestParam{10, kDBFilename, tools::Interceptor::kRead, false},
+        WalPagerFaultTestParam{10, kDBFilename, tools::Interceptor::kWrite, false},
+        WalPagerFaultTestParam{10, kWalFilename, tools::Interceptor::kRead, false},
+        WalPagerFaultTestParam{10, kWalFilename, tools::Interceptor::kWrite, false},
+        WalPagerFaultTestParam{100, kDBFilename, tools::Interceptor::kRead, false},
+        WalPagerFaultTestParam{100, kDBFilename, tools::Interceptor::kWrite, false},
+        WalPagerFaultTestParam{100, kWalFilename, tools::Interceptor::kRead, false},
+        WalPagerFaultTestParam{100, kWalFilename, tools::Interceptor::kWrite, false},
+        WalPagerFaultTestParam{10, kDBFilename, tools::Interceptor::kRead, true},
+        WalPagerFaultTestParam{10, kDBFilename, tools::Interceptor::kWrite, true},
+        WalPagerFaultTestParam{10, kWalFilename, tools::Interceptor::kRead, true},
+        WalPagerFaultTestParam{10, kWalFilename, tools::Interceptor::kWrite, true},
+        WalPagerFaultTestParam{100, kDBFilename, tools::Interceptor::kRead, true},
+        WalPagerFaultTestParam{100, kDBFilename, tools::Interceptor::kWrite, true},
+        WalPagerFaultTestParam{100, kWalFilename, tools::Interceptor::kRead, true},
+        WalPagerFaultTestParam{100, kWalFilename, tools::Interceptor::kWrite, true}));
 
 class WalConcurrencyTests
     : public testing::TestWithParam<ConcurrencyTestParam>,

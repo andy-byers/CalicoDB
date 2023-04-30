@@ -94,7 +94,7 @@ public:
     [[nodiscard]] auto hits() const -> U64;
     [[nodiscard]] auto misses() const -> U64;
 
-    auto TEST_validate() const -> void;
+    auto assert_state() const -> bool;
 
 private:
     explicit Pager(const Parameters &param);

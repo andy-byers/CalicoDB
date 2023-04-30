@@ -615,9 +615,9 @@ INSTANTIATE_TEST_SUITE_P(
     DbErrorTests,
     DbErrorTests,
     ::testing::Values(
-        ErrorWrapper{kWalFilename, tools::Interceptor::kRead, 0},
-        ErrorWrapper{kWalFilename, tools::Interceptor::kRead, 1},
-        ErrorWrapper{kWalFilename, tools::Interceptor::kRead, 10}));
+        ErrorWrapper{kDBFilename, tools::Interceptor::kRead, 0},
+        ErrorWrapper{kDBFilename, tools::Interceptor::kRead, 1},
+        ErrorWrapper{kDBFilename, tools::Interceptor::kRead, 10}));
 
 class DbFatalErrorTests : public DbErrorTests
 {
@@ -685,11 +685,19 @@ TEST_P(DbFatalErrorTests, RecoversFromVacuumFailure)
     counter = saved;
 
     assert_special_error(txn->vacuum());
+    table.reset();
+    txn.reset();
     delete db->db;
     db->db = nullptr;
 
     env().clear_interceptors();
     ASSERT_OK(DB::open(db->options, kDBFilename, db->db));
+    Txn *txn_ptr;
+    ASSERT_OK(db->db->new_txn(true, txn_ptr));
+    txn.reset(txn_ptr);
+    Table *table_ptr;
+    ASSERT_OK(txn->new_table(TableOptions(), "table", table_ptr));
+    table.reset(table_ptr);
 
     for (const auto &[key, value] : committed) {
         std::string result;
@@ -762,7 +770,7 @@ class ApiTests
       public EnvTestHarness<tools::TestEnv>
 {
 protected:
-    ApiTests()
+    explicit ApiTests()
     {
         options.env = &env();
         options.wal_filename = kWalFilename;
@@ -770,19 +778,24 @@ protected:
 
     ~ApiTests() override
     {
+        delete table;
+        delete txn;
         delete db;
     }
 
     auto SetUp() -> void override
     {
-        ApiTests::reopen();
+        ApiTests::reopen(true);
     }
 
     virtual auto reopen(bool write = true) -> void
     {
         delete table;
+        table = nullptr;
         delete txn;
+        txn = nullptr;
         delete db;
+        db = nullptr;
 
         ASSERT_OK(DB::open(options, kDBFilename, db));
         ASSERT_OK(db->new_txn(write, txn));
@@ -799,22 +812,21 @@ TEST_F(ApiTests, OnlyReturnsValidProperties)
 {
     // Check for existence.
     ASSERT_TRUE(db->get_property("calicodb.stats", nullptr));
-    ASSERT_TRUE(db->get_property("calicodb.tables", nullptr));
     ASSERT_FALSE(db->get_property("Calicodb.stats", nullptr));
     ASSERT_FALSE(db->get_property("calicodb.nonexistent", nullptr));
 
-    std::string stats, tables, scratch;
+    std::string stats, scratch;
     ASSERT_TRUE(db->get_property("calicodb.stats", &stats));
-    ASSERT_TRUE(db->get_property("calicodb.tables", &tables));
     ASSERT_FALSE(db->get_property("Calicodb.stats", &scratch));
     ASSERT_FALSE(db->get_property("calicodb.nonexistent", &scratch));
     ASSERT_FALSE(stats.empty());
-    ASSERT_FALSE(tables.empty());
     ASSERT_TRUE(scratch.empty());
 }
 
 TEST_F(ApiTests, IsConstCorrect)
 {
+    ASSERT_OK(table->put("key", "value"));
+    ASSERT_OK(txn->commit());
     reopen(false);
 
     ASSERT_OK(txn->status());
@@ -1008,8 +1020,14 @@ public:
 
 TEST_F(AlternateWalFilenameTests, WalDirectoryMustExist)
 {
+    // TODO: It would be nice if this produced an error during DB::open(), rather
+    //       than when the first transaction is started.
     options.wal_filename = "./nonexistent/wal";
-    ASSERT_TRUE(DB::open(options, kDBFilename, db).is_not_found());
+    ASSERT_OK(DB::open(options, kDBFilename, db));
+    Txn *txn;
+    const auto s = db->new_txn(false, txn);
+    ASSERT_TRUE(s.is_not_found())
+        << get_status_name(s) << ": " << s.to_string();
 }
 
 using TestTxnHandler = tools::CustomTxnHandler<std::function<Status(Txn &)>>;
@@ -1083,28 +1101,30 @@ protected:
         Reader reader,
         Writer writer) -> void
     {
-        run_test(GetParam(), [=](auto &, auto n, auto t) {
-            DB *db;
-            tools::CustomTxnHandler read_handler(reader);
-            tools::CustomTxnHandler write_handler(writer);
-            auto s = busy_wait(nullptr, [&db, this] {
-                return DB::open(m_options, kDBFilename, db);
-            });
-            for (std::size_t i = 0; s.is_ok() && i < num_rounds; ++i) {
-                if (is_writer(n, t)) {
-                    do {
-                        // NOTE: If DB::update() returns a status for which Status::is_busy() is true,
-                        // the write handler will not have run.
-                        s = db->update(write_handler);
-                    } while (s.is_busy());
-                } else {
-                    s = db->view(read_handler);
+        register_test_callback(
+            [=](auto &, auto n, auto t) {
+                DB *db;
+                tools::CustomTxnHandler read_handler(reader);
+                tools::CustomTxnHandler write_handler(writer);
+                auto s = busy_wait(nullptr, [&db, this] {
+                    return DB::open(m_options, kDBFilename, db);
+                });
+                for (std::size_t i = 0; s.is_ok() && i < num_rounds; ++i) {
+                    if (is_writer(n, t)) {
+                        do {
+                            // NOTE: If DB::update() returns a status for which Status::is_busy() is true,
+                            // the write handler will not have run.
+                            s = db->update(write_handler);
+                        } while (s.is_busy());
+                    } else {
+                        s = db->view(read_handler);
+                    }
                 }
-            }
-            delete db;
-            EXPECT_OK(s);
-            return false;
-        });
+                delete db;
+                EXPECT_OK(s);
+                return false;
+            });
+        run_test(GetParam());
     }
 
     BusyCounter m_busy;
@@ -1112,23 +1132,27 @@ protected:
 };
 TEST_P(DBConcurrencyTests, Open)
 {
-    run_test(GetParam(), [this](auto &, auto, auto) {
-        DB *db;
-        EXPECT_OK(DB::open(m_options, kDBFilename, db));
-        delete db;
-        return false;
-    });
+    register_test_callback(
+        [this](auto &, auto, auto) {
+            DB *db;
+            EXPECT_OK(DB::open(m_options, kDBFilename, db));
+            delete db;
+            return false;
+        });
+    run_test(GetParam());
 }
 TEST_P(DBConcurrencyTests, StartReaders)
 {
-    run_test(GetParam(), [this](auto &, auto, auto) {
-        DB *db;
-        EXPECT_OK(DB::open(m_options, kDBFilename, db));
-        TestTxnHandler handler(empty_txn);
-        EXPECT_OK(db->view(handler));
-        delete db;
-        return false;
-    });
+    register_test_callback(
+        [this](auto &, auto, auto) {
+            DB *db;
+            EXPECT_OK(DB::open(m_options, kDBFilename, db));
+            TestTxnHandler handler(empty_txn);
+            EXPECT_OK(db->view(handler));
+            delete db;
+            return false;
+        });
+    run_test(GetParam());
 }
 TEST_P(DBConcurrencyTests, ReaderWriterConsistency)
 {
@@ -1188,57 +1212,59 @@ TEST_P(DBConcurrencyTests, ReaderWriterConsistency)
 }
 TEST_P(DBConcurrencyTests, WriterContention)
 {
-    run_test(GetParam(), [this](auto &, auto, auto t) {
-        // Create 1 writer in each process.
-        const auto is_writer = t == 0;
-        Txn *txn = nullptr;
-        DB *db = nullptr;
+    register_test_callback(
+        [this](auto &, auto, auto t) {
+            // Create 1 writer in each process.
+            const auto is_writer = t == 0;
+            Txn *txn = nullptr;
+            DB *db = nullptr;
 
-        EXPECT_OK(DB::open(m_options, kDBFilename, db));
+            EXPECT_OK(DB::open(m_options, kDBFilename, db));
 
-        ScopeGuard guard = [&db, &txn] {
-            delete txn;
-            delete db;
-        };
+            ScopeGuard guard = [&db, &txn] {
+                delete txn;
+                delete db;
+            };
 
-        if (is_writer) {
-            Status s;
-            do {
-                s = db->new_txn(true, txn);
-            } while (s.is_busy());
-            EXPECT_OK(s);
-        } else {
-            EXPECT_OK(db->new_txn(false, txn));
-        }
-
-        Table *table;
-        auto s = txn->new_table(TableOptions(), "table", table);
-        if (s.is_invalid_argument() && !is_writer) {
-            // Loop until a writer creates the table.
-            return true;
-        }
-        EXPECT_OK(s);
-        std::string buffer;
-        s = table->get("key", &buffer);
-        EXPECT_TRUE(s.is_ok() || s.is_not_found())
-            << get_status_name(s) << ": " << s.to_string();
-        Slice value(buffer);
-
-        if (is_writer) {
-            if (s.is_ok()) {
-                U64 number;
-                EXPECT_TRUE(consume_decimal_number(value, &number))
-                    << "corrupted read: " << escape_string(value);
-                value = number_to_string(number + 1);
+            if (is_writer) {
+                Status s;
+                do {
+                    s = db->new_txn(true, txn);
+                } while (s.is_busy());
+                EXPECT_OK(s);
             } else {
-                value = "1";
+                EXPECT_OK(db->new_txn(false, txn));
             }
-            EXPECT_OK(table->put("key", value));
-            EXPECT_OK(txn->commit());
-        }
-        delete table;
-        return false;
-    });
+
+            Table *table;
+            auto s = txn->new_table(TableOptions(), "table", table);
+            if (s.is_invalid_argument() && !is_writer) {
+                // Loop until a writer creates the table.
+                return true;
+            }
+            EXPECT_OK(s);
+            std::string buffer;
+            s = table->get("key", &buffer);
+            EXPECT_TRUE(s.is_ok() || s.is_not_found())
+                << get_status_name(s) << ": " << s.to_string();
+            Slice value(buffer);
+
+            if (is_writer) {
+                if (s.is_ok()) {
+                    U64 number;
+                    EXPECT_TRUE(consume_decimal_number(value, &number))
+                        << "corrupted read: " << escape_string(value);
+                    value = number_to_string(number + 1);
+                } else {
+                    value = "1";
+                }
+                EXPECT_OK(table->put("key", value));
+                EXPECT_OK(txn->commit());
+            }
+            delete table;
+            return false;
+        });
+    run_test(GetParam());
 
     DB *db;
     ASSERT_OK(DB::open(m_options, kDBFilename, db));

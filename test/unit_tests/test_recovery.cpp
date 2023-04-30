@@ -194,6 +194,7 @@ TEST_F(RecoveryTests, RollbackB)
 TEST_F(RecoveryTests, RollbackC)
 {
     auto records = tools::fill_db(*table, random, kN);
+    ASSERT_OK(txn->commit());
     open();
 
     tools::fill_db(*table, random, kN);
@@ -220,13 +221,9 @@ TEST_F(RecoveryTests, RollbackD)
         }
         txn->rollback();
 
-        const auto before = tools::read_file_to_string(*m_env, kDBFilename).substr(kPageSize * 2, kPageSize);
-
         if (iteration & 1) {
             open();
         }
-        const auto after = tools::read_file_to_string(*m_env, kDBFilename).substr(kPageSize * 2, kPageSize);
-
         for (const auto &[key, value] : records) {
             ASSERT_EQ(get(key), value);
         }
@@ -334,8 +331,6 @@ public:
 
     auto SetUp() -> void override
     {
-        ASSERT_OK(db->new_txn(true, txn));
-        ASSERT_OK(txn->new_table(TableOptions(), "table", table));
         auto record = begin(map);
         for (std::size_t index = 0; record != end(map); ++index, ++record) {
             ASSERT_OK(table->put(record->first, record->second));
@@ -407,9 +402,6 @@ INSTANTIATE_TEST_SUITE_P(
     RecoverySanityCheck,
     RecoverySanityCheck,
     ::testing::Values(
-        std::make_tuple(kDBFilename, tools::Interceptor::kRead, 0),
-        std::make_tuple(kDBFilename, tools::Interceptor::kRead, 1),
-        std::make_tuple(kDBFilename, tools::Interceptor::kRead, 5),
         std::make_tuple(kWalFilename, tools::Interceptor::kRead, 0),
         std::make_tuple(kWalFilename, tools::Interceptor::kRead, 1),
         std::make_tuple(kWalFilename, tools::Interceptor::kRead, 5),

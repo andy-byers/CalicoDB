@@ -268,6 +268,7 @@ public:
         // Make sure all of this stuff can be reverted with the WAL and that the
         // default table isn't messed up.
         ASSERT_OK(DB::open(m_options, kDBFilename, m_db));
+        ASSERT_OK(m_db->new_txn(true, m_txn));
         tools::expect_db_contains(*m_txn, "default", m_committed);
 
         // The database would get confused if the root mapping wasn't updated.
@@ -281,7 +282,7 @@ public:
             tools::expect_db_contains(*m_tables[i], m_records[i]);
         }
 
-        reinterpret_cast<DBImpl *>(m_db)->TEST_pager().TEST_validate();
+        reinterpret_cast<DBImpl *>(m_db)->TEST_pager().assert_state();
     }
 
 private:
@@ -289,7 +290,7 @@ private:
     {
         ASSERT_OK(DB::open(options, kDBFilename, m_db));
 
-        // Create some pages before the 2 user tables.
+        // Create some pages in a "default table" before the user tables.
         ASSERT_OK(m_db->new_txn(true, m_txn));
         m_committed = tools::fill_db(*m_txn, "default", m_random, kRecordCount);
         ASSERT_OK(m_txn->commit());
@@ -304,7 +305,7 @@ private:
         // Move the filler pages from the default table to the freelist.
         Table *table;
         ASSERT_OK(m_txn->new_table(TableOptions(), "default", table));
-        auto itr = begin(m_committed);
+        auto itr = cbegin(m_committed);
         for (int i = 0; i < kRecordCount / 2; ++i, ++itr) {
             ASSERT_OK(table->erase(itr->first));
         }

@@ -166,8 +166,33 @@ class ConcurrencyTestHarness : public EnvTestHarness<EnvType>
     using Base = EnvTestHarness<EnvType>;
 
 public:
-    explicit ConcurrencyTestHarness() = default;
+    explicit ConcurrencyTestHarness()
+    {
+        register_main_callback(
+            [](auto &) {
+                // Main callback is optional. Defaults to falling through and waiting
+                // on child processes to complete.
+                return false;
+            });
+        register_test_callback(
+            [](auto &, auto, auto) {
+                ADD_FAILURE() << "test instance was not registered";
+                return false;
+            });
+    }
+
     ~ConcurrencyTestHarness() override = default;
+
+    using MainRoutine = std::function<bool(Env &)>;
+    using TestInstance = std::function<bool(Env &, std::size_t, std::size_t)>;
+    auto register_main_callback(MainRoutine main) -> void
+    {
+        m_main = std::move(main);
+    }
+    auto register_test_callback(TestInstance test) -> void
+    {
+        m_test = std::move(test);
+    }
 
     // Run a test in multiple threads/processes
     // Each instance of the test is passed "env", an instance of the Env type that
@@ -175,26 +200,24 @@ public:
     // [0,param.num_processes-1] and [0,param.num_threads-1], respectively,
     // representing the process and thread running the test instance. The test
     // callback should return true if it should continue running, false otherwise.
-    using TestInstance = std::function<bool(Env &env, std::size_t n, std::size_t t)>;
-    auto run_test(const ConcurrencyTestParam &param, const TestInstance &test_instance) -> void
+    auto run_test(const ConcurrencyTestParam &param) -> void
     {
+        ASSERT_TRUE(m_test) << "REQUIRES: register_test_callback() was called";
         // Spawn "param.num_processes-1" processes (1 test runs in this process to help
         // with debugging).
         for (std::size_t n = 0; n < param.num_processes; ++n) {
-            if (n) {
-                const auto pid = fork();
-                ASSERT_NE(-1, pid)
-                    << "fork(): " << strerror(errno);
-                if (pid) {
-                    continue;
-                }
+            const auto pid = fork();
+            ASSERT_NE(-1, pid)
+                << "fork(): " << strerror(errno);
+            if (pid) {
+                continue;
             }
             // For each process, spawn "param.num_threads" threads.
             std::vector<std::thread> threads;
             for (std::size_t t = 0; t < param.num_threads; ++t) {
-                threads.emplace_back([n, t, test_instance, this] {
+                threads.emplace_back([n, t, this] {
                     // Run the test callback for each thread.
-                    while (test_instance(Base::env(), n, t)) {
+                    while (m_test(Base::env(), n, t)) {
                         break;
                     }
                 });
@@ -202,9 +225,9 @@ public:
             for (auto &thread : threads) {
                 thread.join();
             }
-            if (n) {
-                std::exit(testing::Test::HasFailure());
-            }
+            std::exit(testing::Test::HasFailure());
+        }
+        while (m_main(Base::env())) {
         }
         for (std::size_t n = 1; n < param.num_processes; ++n) {
             int s;
@@ -217,6 +240,10 @@ public:
                 << WEXITSTATUS(s);
         }
     }
+
+private:
+    MainRoutine m_main;
+    TestInstance m_test;
 };
 
 static const auto kConcurrencySanityCheckValues = ::testing::Values(

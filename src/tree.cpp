@@ -698,7 +698,7 @@ auto Tree::forget_cursor(CursorImpl &cursor) -> void
 auto Tree::inform_cursors() -> void
 {
     for (auto *c = m_cursors; c; c = c->m_next) {
-        CursorInternal::invalidate(*c, default_cursor_status());
+        c->m_needs_reposition = true;
     }
 }
 
@@ -1376,9 +1376,17 @@ auto Tree::get(const Slice &key, std::string *value) const -> Status
     return s;
 }
 
+static auto ensure_nonempty_key(const Slice &key) -> Status
+{
+    if (key.is_empty()) {
+        return Status::invalid_argument("key is empty");
+    }
+    return Status::ok();
+}
+
 auto Tree::put(const Slice &key, const Slice &value, bool *exists) -> Status
 {
-    CALICODB_EXPECT_FALSE(key.is_empty());
+    CALICODB_TRY(ensure_nonempty_key(key));
 
     SearchResult slot;
     CALICODB_TRY(find_external(key, slot));
@@ -1402,6 +1410,7 @@ auto Tree::put(const Slice &key, const Slice &value, bool *exists) -> Status
 
 auto Tree::erase(const Slice &key) -> Status
 {
+    CALICODB_TRY(ensure_nonempty_key(key));
     SearchResult slot;
 
     CALICODB_TRY(find_external(key, slot));
@@ -2312,6 +2321,18 @@ auto CursorImpl::status() const -> Status
     return m_status;
 }
 
+auto CursorImpl::reposition() -> std::string
+{
+    CALICODB_EXPECT_TRUE(m_needs_reposition);
+    m_needs_reposition = false;
+
+    CALICODB_EXPECT_LT(0, m_key_size);
+    CALICODB_EXPECT_LT(m_key_size, m_key.size());
+    auto key = m_key.substr(0, m_key_size);
+    seek(key);
+    return key;
+}
+
 auto CursorImpl::fetch_payload() -> Status
 {
     CALICODB_EXPECT_EQ(m_key_size, 0);
@@ -2385,6 +2406,12 @@ auto CursorImpl::seek_last() -> void
 auto CursorImpl::next() -> void
 {
     CALICODB_EXPECT_TRUE(is_valid());
+    if (m_needs_reposition) {
+        const auto prev = reposition();
+        if (!is_valid() || prev < key()) {
+            return;
+        }
+    }
     m_key_size = 0;
     m_value_size = 0;
 
@@ -2416,6 +2443,12 @@ auto CursorImpl::next() -> void
 auto CursorImpl::previous() -> void
 {
     CALICODB_EXPECT_TRUE(is_valid());
+    if (m_needs_reposition) {
+        const auto prev = reposition();
+        if (!is_valid() || key() < prev) {
+            return;
+        }
+    }
     m_key_size = 0;
     m_value_size = 0;
 
