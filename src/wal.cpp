@@ -214,7 +214,7 @@ auto HashIndex::assign(Key key, Value value) -> Status
         }
     }
 
-    group.keys[relative - 1] = key;
+    ATOMIC_STORE(&group.keys[relative - 1], key);
     ATOMIC_STORE(&group.hash[key_hash], static_cast<Hash>(relative));
     return Status::ok();
 }

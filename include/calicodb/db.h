@@ -21,8 +21,8 @@ class DB
 {
 public:
     // Open or create a CalicoDB database with the given filename
-    // On success, stores a pointer to the heap-allocated database in `db` and returns OK. On
-    // failure, sets `db` to nullptr and returns a non-OK status. The user is responsible for
+    // On success, stores a pointer to the heap-allocated database in `*db` and returns OK. On
+    // failure, sets `*db` to nullptr and returns a non-OK status. The user is responsible for
     // calling delete on the database handle when it is no longer needed.
     [[nodiscard]] static auto open(const Options &options, const std::string &filename, DB *&db) -> Status;
 
@@ -47,8 +47,8 @@ public:
     virtual auto get_property(const Slice &name, std::string *out) const -> bool = 0;
 
     // Start a transaction
-    // Stores a pointer to the heap-allocated transaction object in "txn" and returns OK on
-    // success. Stores nullptr in "txn" and returns a non-OK status on failure.
+    // Stores a pointer to the heap-allocated transaction object in `*txn` and returns OK on
+    // success. Stores nullptr in `*txn` and returns a non-OK status on failure.
     [[nodiscard]] virtual auto new_txn(bool write, Txn *&txn) -> Status = 0;
 
     // Convenience wrapper that runs a read-only transaction

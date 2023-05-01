@@ -1376,18 +1376,11 @@ auto Tree::get(const Slice &key, std::string *value) const -> Status
     return s;
 }
 
-static auto ensure_nonempty_key(const Slice &key) -> Status
+auto Tree::put(const Slice &key, const Slice &value, bool *exists) -> Status
 {
     if (key.is_empty()) {
         return Status::invalid_argument("key is empty");
     }
-    return Status::ok();
-}
-
-auto Tree::put(const Slice &key, const Slice &value, bool *exists) -> Status
-{
-    CALICODB_TRY(ensure_nonempty_key(key));
-
     SearchResult slot;
     CALICODB_TRY(find_external(key, slot));
     auto [node, index, exact] = std::move(slot);
@@ -1410,7 +1403,6 @@ auto Tree::put(const Slice &key, const Slice &value, bool *exists) -> Status
 
 auto Tree::erase(const Slice &key) -> Status
 {
-    CALICODB_TRY(ensure_nonempty_key(key));
     SearchResult slot;
 
     CALICODB_TRY(find_external(key, slot));
@@ -1511,7 +1503,7 @@ auto Tree::vacuum_step(Page &free, Schema &schema, Id last_id) -> Status
             break;
         }
         case PointerMap::kTreeRoot: {
-            schema.vacuum_reroot(entry.back_ptr, free.id());
+            schema.vacuum_reroot(last_id, free.id());
             // Tree root pages are also node pages (with no parent page). Handle them the same, but
             // note the guard against updating the parent page's child pointers below.
             [[fallthrough]];
@@ -2326,8 +2318,8 @@ auto CursorImpl::reposition() -> std::string
     CALICODB_EXPECT_TRUE(m_needs_reposition);
     m_needs_reposition = false;
 
-    CALICODB_EXPECT_LT(0, m_key_size);
-    CALICODB_EXPECT_LT(m_key_size, m_key.size());
+    CALICODB_EXPECT_GT(m_key_size, 0);
+    CALICODB_EXPECT_LE(m_key_size, m_key.size());
     auto key = m_key.substr(0, m_key_size);
     seek(key);
     return key;

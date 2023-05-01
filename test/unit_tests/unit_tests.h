@@ -229,9 +229,17 @@ public:
         }
         while (m_main(Base::env())) {
         }
-        for (std::size_t n = 1; n < param.num_processes; ++n) {
+        struct Result {
+            pid_t pid;
             int s;
-            const auto pid = wait(&s);
+        };
+        std::vector<Result> results;
+        for (std::size_t n = 0; n < param.num_processes; ++n) {
+            Result r;
+            r.pid = wait(&r.s);
+            results.emplace_back(r);
+        }
+        for (auto [pid, s] : results) {
             ASSERT_NE(pid, -1)
                 << "wait(): " << strerror(errno);
             ASSERT_TRUE(WIFEXITED(s) && WEXITSTATUS(s) == 0)

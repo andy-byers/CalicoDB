@@ -755,18 +755,12 @@ TEST_P(TreeTests, SplitWithShortAndLongKeys)
     tree->TEST_validate();
 }
 
-TEST_P(TreeTests, AllowsNonInsertOperationsOnEmptyKeys)
+TEST_P(TreeTests, EmptyKeyBehavior)
 {
+    ASSERT_TRUE(tree->put("", "").is_invalid_argument());
     ASSERT_TRUE(tree->get("", nullptr).is_not_found());
     ASSERT_OK(tree->erase(""));
 }
-
-#if not NDEBUG
-TEST_P(TreeTests, InsertEmptyKeyDeathTest)
-{
-    ASSERT_DEATH((void)tree->put("", "value"), kExpectationMatcher);
-}
-#endif // NDEBUG
 
 INSTANTIATE_TEST_SUITE_P(
     TreeTests,

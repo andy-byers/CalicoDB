@@ -166,7 +166,6 @@ static auto busy_wait(BusyHandler *handler, const Callback &callback) -> Status
         auto s = callback();
         if (s.is_busy()) {
             if (handler == nullptr || handler->exec(n)) {
-                std::this_thread::yield();
                 continue;
             }
         }

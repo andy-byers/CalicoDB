@@ -1046,7 +1046,7 @@ public:
     }
 };
 class DBConcurrencyTests
-    : public testing::TestWithParam<ConcurrencyTestParam>,
+    : public testing::TestWithParam<std::tuple<std::size_t, std::size_t>>,
       public ConcurrencyTestHarness<PosixEnv>
 {
 protected:
@@ -1055,8 +1055,9 @@ protected:
         m_options.cache_size = kMinFrameCount * kPageSize;
         m_options.busy = &m_busy;
         m_options.env = &env();
+        m_param.num_processes = std::get<0>(GetParam());
+        m_param.num_threads = std::get<1>(GetParam());
     }
-
     ~DBConcurrencyTests() override = default;
 
     static auto empty_txn(Txn &) -> Status
@@ -1124,9 +1125,10 @@ protected:
                 EXPECT_OK(s);
                 return false;
             });
-        run_test(GetParam());
+        run_test(m_param);
     }
 
+    ConcurrencyTestParam m_param;
     BusyCounter m_busy;
     Options m_options;
 };
@@ -1139,7 +1141,7 @@ TEST_P(DBConcurrencyTests, Open)
             delete db;
             return false;
         });
-    run_test(GetParam());
+    run_test(m_param);
 }
 TEST_P(DBConcurrencyTests, StartReaders)
 {
@@ -1152,7 +1154,7 @@ TEST_P(DBConcurrencyTests, StartReaders)
             delete db;
             return false;
         });
-    run_test(GetParam());
+    run_test(m_param);
 }
 TEST_P(DBConcurrencyTests, ReaderWriterConsistency)
 {
@@ -1264,13 +1266,15 @@ TEST_P(DBConcurrencyTests, WriterContention)
             delete table;
             return false;
         });
-    run_test(GetParam());
+    run_test(m_param);
 
     DB *db;
     ASSERT_OK(DB::open(m_options, kDBFilename, db));
-    tools::CustomTxnHandler handler = [](auto &txn) {
+    tools::CustomTxnHandler handler = [this](auto &txn) {
         Table *table;
-        EXPECT_OK(txn.new_table(TableOptions(), "table", table));
+        TableOptions tbopt;
+        tbopt.create_if_missing = false;
+        EXPECT_OK(txn.new_table(tbopt, "table", table));
 
         std::string buffer;
         EXPECT_OK(table->get("key", &buffer));
@@ -1279,15 +1283,25 @@ TEST_P(DBConcurrencyTests, WriterContention)
         U64 number;
         Slice value(buffer);
         EXPECT_TRUE(consume_decimal_number(value, &number));
-        EXPECT_EQ(GetParam().num_processes, number);
+        EXPECT_EQ(m_param.num_processes, number);
         return Status::ok();
     };
     ASSERT_OK(db->view(handler));
     delete db;
 }
-INSTANTIATE_TEST_SUITE_P(DBConcurrencyTests_SanityCheck, DBConcurrencyTests, kConcurrencySanityCheckValues);
-INSTANTIATE_TEST_SUITE_P(DBConcurrencyTests_MT, DBConcurrencyTests, kMultiThreadConcurrencyValues);
-INSTANTIATE_TEST_SUITE_P(DBConcurrencyTests_MP, DBConcurrencyTests, kMultiProcessConcurrencyValues);
-INSTANTIATE_TEST_SUITE_P(DBConcurrencyTests_MX, DBConcurrencyTests, kMultiProcessMultiThreadConcurrencyValues);
+INSTANTIATE_TEST_SUITE_P(
+    DBConcurrencyTests,
+    DBConcurrencyTests,
+    testing::Combine(
+        testing::Values(1, 2, 3, 4, 5),
+        testing::Values(1, 2, 3, 4, 5)),
+    [](const testing::TestParamInfo<std::tuple<std::size_t, std::size_t>> &info) {
+        std::string name;
+        name.append("DBConcurrencyTests_");
+        append_number(name, std::get<0>(info.param));
+        name.append("P_");
+        append_number(name, std::get<1>(info.param));
+        return name + 'T';
+    });
 
 } // namespace calicodb
