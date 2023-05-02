@@ -93,6 +93,11 @@ auto EnvWrapper::rand() -> unsigned
     return m_target->rand();
 }
 
+auto EnvWrapper::sleep(unsigned micros) -> void
+{
+    m_target->sleep(micros);
+}
+
 FileWrapper::FileWrapper(File &target)
     : m_target{&target}
 {

@@ -41,6 +41,8 @@ public:
 
     virtual auto srand(unsigned seed) -> void = 0;
     [[nodiscard]] virtual auto rand() -> unsigned = 0;
+
+    virtual auto sleep(unsigned micros) -> void = 0;
 };
 
 enum FileLockMode : int {
@@ -134,6 +136,8 @@ public:
 
     auto srand(unsigned seed) -> void override;
     [[nodiscard]] auto rand() -> unsigned override;
+
+    auto sleep(unsigned micros) -> void override;
 
 private:
     Env *m_target;

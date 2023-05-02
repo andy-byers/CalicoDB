@@ -13,6 +13,7 @@
 #include "tools.h"
 #include "utils.h"
 #include "wal.h"
+#include <atomic>
 #include <filesystem>
 #include <gtest/gtest.h>
 #include <iomanip>
@@ -203,8 +204,7 @@ public:
     auto run_test(const ConcurrencyTestParam &param) -> void
     {
         ASSERT_TRUE(m_test) << "REQUIRES: register_test_callback() was called";
-        // Spawn "param.num_processes-1" processes (1 test runs in this process to help
-        // with debugging).
+        // Spawn "param.num_processes" processes.
         for (std::size_t n = 0; n < param.num_processes; ++n) {
             const auto pid = fork();
             ASSERT_NE(-1, pid)
@@ -218,7 +218,6 @@ public:
                 threads.emplace_back([n, t, this] {
                     // Run the test callback for each thread.
                     while (m_test(Base::env(), n, t)) {
-                        break;
                     }
                 });
             }
@@ -253,24 +252,54 @@ private:
     MainRoutine m_main;
     TestInstance m_test;
 };
+inline auto label_concurrency_test(std::string base, const testing::TestParamInfo<std::tuple<std::size_t, std::size_t>> &info) -> std::string
+{
+    append_number(base, std::get<0>(info.param));
+    base.append("P_");
+    append_number(base, std::get<1>(info.param));
+    return base + 'T';
+}
 
-static const auto kConcurrencySanityCheckValues = ::testing::Values(
-    ConcurrencyTestParam{1, 1});
+class SharedCount
+{
+    volatile U32 *m_ptr = nullptr;
+    File *m_file = nullptr;
 
-static const auto kMultiThreadConcurrencyValues = ::testing::Values(
-    ConcurrencyTestParam{1, 2},
-    ConcurrencyTestParam{1, 4},
-    ConcurrencyTestParam{1, 6});
+public:
+    explicit SharedCount(Env &env, const std::string &name)
+    {
+        volatile void *ptr;
+        CHECK_OK(env.new_file(name, Env::kCreate | Env::kReadWrite, m_file));
+        CHECK_OK(m_file->shm_map(0, ptr));
+        m_ptr = reinterpret_cast<volatile U32 *>(ptr);
+    }
 
-static const auto kMultiProcessConcurrencyValues = ::testing::Values(
-    ConcurrencyTestParam{2, 1},
-    ConcurrencyTestParam{4, 1},
-    ConcurrencyTestParam{6, 1});
+    ~SharedCount()
+    {
+        m_file->shm_unmap(true);
+        delete m_file;
+    }
 
-static const auto kMultiProcessMultiThreadConcurrencyValues = ::testing::Values(
-    ConcurrencyTestParam{2, 2},
-    ConcurrencyTestParam{3, 3},
-    ConcurrencyTestParam{4, 4});
+    enum MemoryOrder : int {
+        kRelaxed = __ATOMIC_RELAXED,
+        kAcquire = __ATOMIC_ACQUIRE,
+        kRelease = __ATOMIC_RELEASE,
+        kAcqRel = __ATOMIC_ACQ_REL,
+        kSeqCst = __ATOMIC_SEQ_CST,
+    };
+    auto load(MemoryOrder order = kAcquire) const -> U32
+    {
+        return __atomic_load_n(m_ptr, order);
+    }
+    auto store(U32 value, MemoryOrder order = kRelease) -> void
+    {
+        __atomic_store_n(m_ptr, value, order);
+    }
+    auto increase(U32 n, MemoryOrder order = kRelaxed) -> U32
+    {
+        return __atomic_add_fetch(m_ptr, n, order);
+    }
+};
 
 [[nodiscard]] inline auto special_error()
 {

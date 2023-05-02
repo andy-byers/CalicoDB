@@ -798,6 +798,33 @@ public:
         delete env;
     }
 
+    auto run_shm_atomic_test(std::size_t num_writes) -> void
+    {
+        ASSERT_LE(num_writes, kNumRounds);
+        auto *env = Env::default_env();
+        SharedCount count(*env, "shared_count");
+
+        run_test([&](auto) {
+            auto *env = Env::default_env();
+            std::vector<std::thread> threads;
+            while (threads.size() < kNumThreads) {
+                const auto t = threads.size();
+                threads.emplace_back([env, num_writes] {
+                    for (std::size_t r = 0; r < kNumRounds; ++r) {
+                        SharedCount count(*env, "shared_count");
+                        if (r < num_writes) {
+                            count.increase(1);
+                        }
+                    }
+                });
+            }
+            for (auto &thread : threads) {
+                thread.join();
+            }
+        });
+        ASSERT_EQ(count.load(), kNumEnvs * kNumThreads * num_writes);
+    }
+
 protected:
     EnvWithFiles m_helper;
     Env *m_env = nullptr;
@@ -852,6 +879,15 @@ TEST_P(EnvConcurrencyTests, MultipleShmWriters)
     run_shm_reader_writer_test(1, 15);
     run_shm_reader_writer_test(2, 15);
     run_shm_reader_writer_test(3, 15);
+}
+TEST_P(EnvConcurrencyTests, ShmAtomic)
+{
+    run_shm_atomic_test(1);
+    run_shm_atomic_test(2);
+    run_shm_atomic_test(3);
+    run_shm_atomic_test(10);
+    run_shm_atomic_test(20);
+    run_shm_atomic_test(30);
 }
 INSTANTIATE_TEST_SUITE_P(
     EnvConcurrencyTests,

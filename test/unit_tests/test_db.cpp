@@ -1033,18 +1033,6 @@ TEST_F(AlternateWalFilenameTests, WalDirectoryMustExist)
 using TestTxnHandler = tools::CustomTxnHandler<std::function<Status(Txn &)>>;
 using TestTxnDecision = std::function<bool(std::size_t, std::size_t)>;
 
-class BusyCounter : public BusyHandler
-{
-public:
-    ~BusyCounter() override = default;
-
-    std::atomic<unsigned> count = 0;
-    auto exec(unsigned) -> bool override
-    {
-        count.fetch_add(1);
-        return true;
-    }
-};
 class DBConcurrencyTests
     : public testing::TestWithParam<std::tuple<std::size_t, std::size_t>>,
       public ConcurrencyTestHarness<PosixEnv>
@@ -1129,7 +1117,7 @@ protected:
     }
 
     ConcurrencyTestParam m_param;
-    BusyCounter m_busy;
+    tools::BusyCounter m_busy;
     Options m_options;
 };
 TEST_P(DBConcurrencyTests, Open)
@@ -1295,13 +1283,8 @@ INSTANTIATE_TEST_SUITE_P(
     testing::Combine(
         testing::Values(1, 2, 3, 4, 5),
         testing::Values(1, 2, 3, 4, 5)),
-    [](const testing::TestParamInfo<std::tuple<std::size_t, std::size_t>> &info) {
-        std::string name;
-        name.append("DBConcurrencyTests_");
-        append_number(name, std::get<0>(info.param));
-        name.append("P_");
-        append_number(name, std::get<1>(info.param));
-        return name + 'T';
+    [](const auto &info) {
+        return label_concurrency_test("DBConcurrencyTests", info);
     });
 
 } // namespace calicodb

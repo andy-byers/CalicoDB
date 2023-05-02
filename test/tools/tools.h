@@ -260,6 +260,19 @@ public:
     }
 };
 
+class BusyCounter : public BusyHandler
+{
+public:
+    ~BusyCounter() override = default;
+
+    std::atomic<unsigned> count = 0;
+    auto exec(unsigned) -> bool override
+    {
+        count.fetch_add(1);
+        return true;
+    }
+};
+
 template <std::size_t Length = 16>
 class NumericKey
 {

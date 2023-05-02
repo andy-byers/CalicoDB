@@ -28,6 +28,8 @@ public:
 
     auto srand(unsigned seed) -> void override;
     [[nodiscard]] auto rand() -> unsigned override;
+
+    auto sleep(unsigned micros) -> void override;
 };
 
 // Simple filesystem path management routines

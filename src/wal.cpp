@@ -14,10 +14,6 @@
 namespace calicodb
 {
 
-// TODO: Use ATOMIC_*() for CkptInfo fields. I think it's weird to mix those and C++11 atomics...
-// See https://stackoverflow.com/questions/8759429/atomic-access-to-shared-memory
-static_assert(std::atomic<U32>::is_always_lock_free);
-
 #define ATOMIC_LOAD(p) __atomic_load_n(p, __ATOMIC_RELAXED)
 #define ATOMIC_STORE(p, v) __atomic_store_n(p, v, __ATOMIC_RELAXED)
 
@@ -38,8 +34,8 @@ static constexpr std::size_t kReaderCount = File::kShmLockCount - 3;
 #define READ_LOCK(i) static_cast<std::size_t>((i) + 3)
 
 struct CkptInfo {
-    std::atomic<U32> backfill;
-    std::atomic<U32> readmark[kReaderCount];
+    U32 backfill;
+    U32 readmark[kReaderCount];
     U8 locks[File::kShmLockCount];
     U32 backfill_attempted;
     U32 reserved;
@@ -547,6 +543,8 @@ public:
                 s = m_env->remove_file(m_filename);
             }
         }
+        delete m_wal;
+        m_wal = nullptr;
         m_db->shm_unmap(true);
         m_db = nullptr;
         return s;
@@ -608,12 +606,6 @@ public:
     }
 
 private:
-    auto shm_barrier() const -> void
-    {
-        if (m_db) {
-            m_db->shm_barrier();
-        }
-    }
     [[nodiscard]] auto lock_shared(std::size_t r) -> Status
     {
         return m_db->shm_lock(r, 1, kShmLock | kShmReader);
@@ -643,19 +635,19 @@ private:
     {
         changed = false;
         HashIndexHdr h1, h2;
-        U32 cksum[2];
 
         const auto *hdr = m_index.header();
         std::memcpy(&h1, ConstStablePtr(&hdr[0]), sizeof(h1));
-        shm_barrier();
+        m_db->shm_barrier();
         std::memcpy(&h2, ConstStablePtr(&hdr[1]), sizeof(h2));
 
         if (0 != std::memcmp(&h1, &h2, sizeof(h1))) {
             return false;
         }
-        if (h1.flags == 0) {
+        if (!h1.is_init) {
             return false;
         }
+        U32 cksum[2];
         const Slice target(ConstStablePtr(&h1), sizeof(h1) - sizeof(h1.cksum));
         compute_checksum(target, nullptr, cksum);
 
@@ -663,8 +655,8 @@ private:
             return false;
         }
         if (0 != std::memcmp(&m_hdr, &h1, sizeof(m_hdr))) {
-            std::memcpy(&m_hdr, &h1, sizeof(m_hdr));
             changed = true;
+            m_hdr = h1;
         }
         return true;
     }
@@ -704,41 +696,44 @@ private:
     }
     DISABLE_TSAN auto write_index_header() -> void
     {
-        m_hdr.flags = HashIndexHdr::INITIALIZED;
+        m_hdr.is_init = true;
         m_hdr.version = kWalVersion;
 
         const Slice target(StablePtr(&m_hdr), offsetof(HashIndexHdr, cksum));
         compute_checksum(target, nullptr, m_hdr.cksum);
 
         volatile auto *hdr = m_index.header();
-        std::memcpy(const_cast<HashIndexHdr *>(&hdr[1]), &m_hdr, sizeof(m_hdr));
-        shm_barrier();
-        std::memcpy(const_cast<HashIndexHdr *>(&hdr[0]), &m_hdr, sizeof(m_hdr));
+        std::memcpy(StablePtr(&hdr[1]), &m_hdr, sizeof(m_hdr));
+        m_db->shm_barrier();
+        std::memcpy(StablePtr(&hdr[0]), &m_hdr, sizeof(m_hdr));
     }
 
     auto restart_header(U32 salt_1) -> void
     {
         ++m_ckpt_number;
         m_hdr.max_frame = 0;
-        auto *salt = reinterpret_cast<char *>(m_hdr.salt);
+        auto *salt = StablePtr(m_hdr.salt);
         put_u32(salt, get_u32(salt) + 1);
         std::memcpy(salt + sizeof(U32), &salt_1, sizeof(salt_1));
         write_index_header();
 
-        auto *info = get_ckpt_info();
+        volatile auto *info = get_ckpt_info();
         CALICODB_EXPECT_EQ(info->readmark[0], 0);
-        info->backfill_attempted = 0;
-        info->backfill = 0;
-        info->readmark[1] = 0;
+        ATOMIC_STORE(&info->backfill, 0);
+        ATOMIC_STORE(&info->backfill_attempted, 0);
+        ATOMIC_STORE(&info->readmark[1], 0);
         for (std::size_t i = 2; i < kReaderCount; ++i) {
-            info->readmark[i] = kReadmarkNotUsed;
+            ATOMIC_STORE(&info->readmark[i], kReadmarkNotUsed);
         }
     }
     [[nodiscard]] auto restart_log() -> Status
     {
         Status s;
         if (m_reader_lock == 0) {
-            const auto *info = get_ckpt_info();
+            // If this connection has READ_LOCK(0) locked, then no other connection is
+            // currently in the process of running a checkpoint (`backfill` field will
+            // not change).
+            const volatile auto *info = get_ckpt_info();
             CALICODB_EXPECT_EQ(info->backfill, m_hdr.max_frame);
             if (info->backfill) {
                 const auto salt_1 = m_env->rand();
@@ -764,7 +759,6 @@ private:
     [[nodiscard]] auto try_reader(bool use_wal, unsigned tries, bool &changed) -> Status
     {
         CALICODB_EXPECT_LT(m_reader_lock, 0);
-        Status s;
         if (tries > 5) {
             if (tries > 100) {
                 m_lock_error = true;
@@ -774,7 +768,7 @@ private:
             if (tries >= 10) {
                 delay = (tries - 9) * (tries - 9) * 39;
             }
-            (void)delay; // TODO: m_env->sleep(delay);
+            m_env->sleep(delay);
         }
 
         if (!use_wal) {
@@ -783,13 +777,15 @@ private:
 
         CALICODB_EXPECT_FALSE(m_index.groups().empty());
         CALICODB_EXPECT_TRUE(m_index.groups().front());
+        Status s;
+
         volatile auto *info = get_ckpt_info();
-        if (!use_wal && info->backfill == m_hdr.max_frame) {
+        if (!use_wal && ATOMIC_LOAD(&info->backfill) == m_hdr.max_frame) {
             // The whole WAL has been written back to the database file. Take info->readmark[0],
             // which always has a value of 0 (the reader will see the WAL as empty, causing it to
             // read from the database file instead).
             s = lock_shared(READ_LOCK(0));
-            shm_barrier();
+            m_db->shm_barrier();
             if (s.is_ok()) {
                 if (0 != std::memcmp(ConstStablePtr(m_index.header()), &m_hdr, sizeof(m_hdr))) {
                     // Some reader changed the WAL before we had a read lock. Indicate that the
@@ -811,7 +807,7 @@ private:
         // Attempt to find a readmark that this reader can use to read the most-recently-committed WAL
         // frames.
         for (std::size_t i = 1; i < kReaderCount; i++) {
-            const auto mark = info->readmark[i];
+            const auto mark = ATOMIC_LOAD(&info->readmark[i]);
             if (max_readmark <= mark && mark <= max_frame) {
                 CALICODB_EXPECT_NE(mark, kReadmarkNotUsed);
                 max_readmark = mark;
@@ -823,7 +819,7 @@ private:
             for (std::size_t i = 1; i < kReaderCount; ++i) {
                 s = lock_exclusive(READ_LOCK(i), 1);
                 if (s.is_ok()) {
-                    info->readmark[i] = max_frame;
+                    ATOMIC_STORE(&info->readmark[i], max_frame);
                     max_readmark = max_frame;
                     max_index = i;
                     unlock_exclusive(READ_LOCK(i), 1);
@@ -839,13 +835,13 @@ private:
 
         CALICODB_TRY(lock_shared(READ_LOCK(max_index)));
 
-        m_min_frame = info->backfill + 1;
-        shm_barrier();
+        m_min_frame = ATOMIC_LOAD(&info->backfill) + 1;
+        m_db->shm_barrier();
 
         // Make sure there wasn't a writer between the readmark increase and when we took the
         // shared lock.
         const auto changed_unexpectedly =
-            info->readmark[max_index] != max_readmark ||
+            ATOMIC_LOAD(&info->readmark[max_index]) != max_readmark ||
             0 != std::memcmp(ConstStablePtr(m_index.header()), &m_hdr, sizeof(HashIndexHdr));
         if (changed_unexpectedly) {
             unlock_shared(READ_LOCK(max_index));
@@ -997,18 +993,17 @@ auto WalImpl::recover_index() -> Status
             m_hdr.frame_cksum[0] = frame_cksum[0];
             m_hdr.frame_cksum[1] = frame_cksum[1];
             write_index_header();
-
-            auto *info = get_ckpt_info();
-            info->backfill_attempted = m_hdr.max_frame;
-            info->backfill = 0;
-            info->readmark[0] = 0;
+            volatile auto *info = get_ckpt_info();
+            ATOMIC_STORE(&info->backfill_attempted, m_hdr.max_frame);
+            ATOMIC_STORE(&info->backfill, 0);
+            ATOMIC_STORE(&info->readmark[0], 0);
             for (std::size_t i = 1; i < kReaderCount; ++i) {
                 s = lock_exclusive(READ_LOCK(i), 1);
                 if (s.is_ok()) {
                     if (i == 1 && m_hdr.max_frame) {
-                        info->readmark[i] = m_hdr.max_frame;
+                        ATOMIC_STORE(&info->readmark[i], m_hdr.max_frame);
                     } else {
-                        info->readmark[i] = kReadmarkNotUsed;
+                        ATOMIC_STORE(&info->readmark[i], kReadmarkNotUsed);
                     }
                     unlock_exclusive(READ_LOCK(i), 1);
                 }
@@ -1253,8 +1248,8 @@ auto WalImpl::checkpoint(bool force, std::size_t *db_size) -> Status
     // Ensure that the shm header is mapped.
     CALICODB_TRY(m_index.map_group(0));
 
-    // Take exclusive locks on the checkpoint and writer bytes. This prevents ensures
-    // that no other connection will attempt a checkpoint or write new frames.
+    // Take exclusive locks on the checkpoint and writer bytes. This ensures that no other
+    // connection will attempt a checkpoint or write new frames.
     auto s = lock_exclusive(kCkptLock, 1);
     if (s.is_ok()) {
         m_ckpt_lock = true;
@@ -1286,20 +1281,18 @@ auto WalImpl::transfer_contents(File &db_file, std::size_t *db_size) -> Status
 
     volatile auto *info = get_ckpt_info();
     auto max_safe_frame = m_hdr.max_frame;
-    if (info->backfill < max_safe_frame) {
+    if (ATOMIC_LOAD(&info->backfill) < max_safe_frame) {
         for (std::size_t i = 1; i < kReaderCount; ++i) {
-            const auto y = info->readmark[i];
+            const auto y = ATOMIC_LOAD(&info->readmark[i]);
             if (y < max_safe_frame) {
                 CALICODB_EXPECT_LE(y, m_hdr.max_frame);
                 s = busy_wait(m_busy, [this, i] {
                     return lock_exclusive(READ_LOCK(i), 1);
                 });
                 if (s.is_ok()) {
-                    if (i == 1) {
-                        info->readmark[i] = max_safe_frame;
-                    } else {
-                        info->readmark[i] = kReadmarkNotUsed;
-                    }
+                    ATOMIC_STORE(
+                        &info->readmark[i],
+                        i == 1 ? max_safe_frame : kReadmarkNotUsed);
                     unlock_exclusive(READ_LOCK(i), 1);
                 } else if (s.is_busy()) {
                     max_safe_frame = y;
@@ -1309,7 +1302,7 @@ auto WalImpl::transfer_contents(File &db_file, std::size_t *db_size) -> Status
             }
         }
 
-        if (info->backfill < max_safe_frame) {
+        if (ATOMIC_LOAD(&info->backfill) < max_safe_frame) {
             HashIterator itr(m_index);
             CALICODB_TRY(itr.init());
 
@@ -1326,7 +1319,7 @@ auto WalImpl::transfer_contents(File &db_file, std::size_t *db_size) -> Status
                 unlock_exclusive(READ_LOCK(0), 1);
             };
 
-            info->backfill_attempted = max_safe_frame;
+            ATOMIC_STORE(&info->backfill_attempted, max_safe_frame);
 
             for (;;) {
                 HashIterator::Entry entry;
@@ -1344,10 +1337,10 @@ auto WalImpl::transfer_contents(File &db_file, std::size_t *db_size) -> Status
                     Slice(m_frame.data(), kPageSize)));
             }
 
-            info->backfill = max_safe_frame;
+            ATOMIC_STORE(&info->backfill, max_safe_frame);
         }
 
-        if (info->backfill == m_hdr.max_frame) {
+        if (max_safe_frame == m_hdr.max_frame) {
             if (db_size) {
                 *db_size = m_hdr.page_count;
             }
@@ -1390,7 +1383,7 @@ auto TEST_print_wal(const Wal &wal) -> void
     std::fputc('\n', stderr);
     std::fputs("  Rcvr ?\n", stderr);
     for (std::size_t i = 0; i < kReaderCount; ++i) {
-        std::fprintf(stderr, "  Read%zu (%u)", i, info->readmark[i].load());
+        std::fprintf(stderr, "  Read%zu (%u)", i, ATOMIC_LOAD(&info->readmark[i]));
         if (impl.m_reader_lock == int(i)) {
             std::fputs(" *", stderr);
         }

@@ -565,6 +565,17 @@ auto PosixEnv::rand() -> unsigned
     return static_cast<unsigned>(nrand48(m_rng));
 }
 
+auto PosixEnv::sleep(unsigned micros) -> void
+{
+    static constexpr unsigned kMicrosPerSecond = 1'000'000;
+    if (micros >= kMicrosPerSecond) {
+        ::sleep(micros / kMicrosPerSecond);
+    }
+    if (micros % kMicrosPerSecond) {
+        ::usleep(micros % kMicrosPerSecond);
+    }
+}
+
 PosixFile::PosixFile(std::string filename_, Env::OpenMode, int file_)
     : filename(std::move(filename_)),
       file(file_)
@@ -664,11 +675,7 @@ auto PosixFile::shm_lock(std::size_t r, std::size_t n, ShmLockFlag flags) -> Sta
 
 auto PosixFile::shm_barrier() -> void
 {
-    // TODO: This is what SQLite does, but they also provide the compile option/macro SQLITE_MEMORY_BARRIER
-    //       which allows one to perform some custom action when barrier() is called.
-#if defined(__GNUC__) && GCC_VERSION >= 4001000
     __sync_synchronize();
-#endif
 }
 
 auto PosixShm::lock(std::size_t r, std::size_t n, ShmLockFlag flags) -> Status

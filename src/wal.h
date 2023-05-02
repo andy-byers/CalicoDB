@@ -18,13 +18,10 @@ class File;
 struct PageRef;
 
 struct HashIndexHdr {
-    enum Flags {
-        INITIALIZED = 1,
-    };
     U32 version;
     U32 unused0;
     U32 change;
-    U16 flags;
+    U16 is_init;
     U16 unused1;
     U32 max_frame;
     U32 page_count;

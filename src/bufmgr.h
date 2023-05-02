@@ -129,7 +129,9 @@ private:
     // List of pointers to available buffer slots.
     std::list<char *> m_available;
 
-    std::size_t m_frame_count = 0;
+    // Used to perform bounds checking in assertions.
+    [[maybe_unused]] std::size_t m_frame_count = 0;
+
     unsigned m_refsum = 0;
     U64 m_misses = 0;
     U64 m_hits = 0;
