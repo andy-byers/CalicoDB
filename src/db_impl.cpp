@@ -187,6 +187,7 @@ auto DBImpl::get_property(const Slice &name, std::string *out) const -> bool
 
 auto DBImpl::new_txn(bool write, Txn *&out) -> Status
 {
+    out = nullptr;
     if (m_txn) {
         std::string message("another transaction (read");
         message.append(m_txn->m_write ? "-write" : "only");

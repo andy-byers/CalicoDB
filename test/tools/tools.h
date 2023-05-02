@@ -11,6 +11,7 @@
 #include "env_posix.h"
 #include "logging.h"
 #include "txn_impl.h"
+#include <atomic>
 #include <climits>
 #include <cstdarg>
 #include <cstdio>

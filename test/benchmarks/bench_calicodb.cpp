@@ -34,6 +34,9 @@ class Benchmark final
     static constexpr std::size_t kNumRecords = 10'000;
     calicodb::Table *m_table;
     calicodb::Txn *m_txn;
+    // This simulates normal transaction behavior, where m_txn is destroyed and DB::new_txn() is called after
+    // each commit. This is what happens if the DB::view()/DB::update() API is used.
+    bool m_restart_on_commit = true;
 
 public:
     explicit Benchmark(const Parameters &param = {})
@@ -43,7 +46,7 @@ public:
         m_options.cache_size = 4'194'304;
         m_options.sync = param.sync;
         CHECK_OK(calicodb::DB::open(m_options, kFilename, m_db));
-        CHECK_OK(m_db->start(true, m_txn));
+        CHECK_OK(m_db->new_txn(true, m_txn));
         CHECK_OK(m_txn->new_table(calicodb::TableOptions(), "bench", m_table));
     }
 
@@ -51,7 +54,7 @@ public:
     {
         delete m_cursor;
         delete m_table;
-        m_db->finish(m_txn);
+        delete m_txn;
         delete m_db;
 
         CHECK_OK(calicodb::DB::destroy(m_options, kFilename));
@@ -168,15 +171,17 @@ private:
     {
         if (m_counters[0] % m_param.commit_interval == m_param.commit_interval - 1) {
             CHECK_OK(m_txn->commit());
-            restart_txn();
+            if (m_restart_on_commit) {
+                restart_txn();
+            }
         }
     }
 
     auto restart_txn() -> void
     {
         delete m_table;
-        m_db->finish(m_txn);
-        CHECK_OK(m_db->start(true, m_txn));
+        delete m_txn;
+        CHECK_OK(m_db->new_txn(true, m_txn));
         CHECK_OK(m_txn->new_table(calicodb::TableOptions(), "bench", m_table));
     }
 

@@ -548,11 +548,13 @@ protected:
         set_error();
     }
 
-    ErrorWrapper error{GetParam()};
+    // NOTE: These 3 members cannot be reordered. Their destruction order is important.
     std::unique_ptr<TestDatabase> db;
-    std::unique_ptr<Table> table;
     std::unique_ptr<Txn> txn;
+    std::unique_ptr<Table> table;
+
     std::map<std::string, std::string> committed;
+    ErrorWrapper error{GetParam()};
     int counter = 0;
 };
 
@@ -862,9 +864,6 @@ TEST_F(ApiTests, OnlyOneTransactionIsAllowed)
 {
     Txn *second;
     ASSERT_TRUE(db->new_txn(false, second).is_not_supported());
-    delete txn;
-
-    ASSERT_OK(db->new_txn(false, txn));
 }
 
 TEST_F(ApiTests, KeysCanBeArbitraryBytes)

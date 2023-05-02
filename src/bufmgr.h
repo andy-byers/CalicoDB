@@ -130,7 +130,7 @@ private:
     std::list<char *> m_available;
 
     // Used to perform bounds checking in assertions.
-    [[maybe_unused]] std::size_t m_frame_count = 0;
+    std::size_t m_frame_count = 0;
 
     unsigned m_refsum = 0;
     U64 m_misses = 0;

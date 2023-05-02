@@ -595,8 +595,8 @@ public:
     {
         if (m_writer_lock) {
             unlock_exclusive(kWriteLock, 1);
-            m_redo_cksum = 0;
             m_writer_lock = false;
+            m_redo_cksum = 0;
         }
     }
 

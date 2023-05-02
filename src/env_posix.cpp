@@ -666,7 +666,6 @@ auto PosixFile::shm_map(std::size_t r, volatile void *&out) -> Status
 
 auto PosixFile::shm_lock(std::size_t r, std::size_t n, ShmLockFlag flags) -> Status
 {
-    // shm_map() must have succeeded at least once.
     if (shm) {
         return shm->lock(r, n, flags);
     }

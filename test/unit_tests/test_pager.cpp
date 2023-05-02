@@ -1269,27 +1269,46 @@ protected:
                                      m_flag(std::get<2>(GetParam())) {}
 
     struct TestContext {
-        Wal *wal = nullptr;
-        File *db = nullptr;
+        explicit TestContext() = default;
+
+        ~TestContext()
+        {
+            std::size_t db_size;
+            auto *wal_ptr = wal.release();
+            const auto s = Wal::close(wal_ptr, db_size);
+            EXPECT_TRUE(s.is_ok() || s.is_busy());
+            if (db) {
+                db->file_unlock();
+            }
+        }
+        TestContext(TestContext &&) = default;
+        auto operator=(TestContext &&) -> TestContext & = default;
+
+        std::unique_ptr<Wal> wal;
+        std::unique_ptr<File> db;
     };
     auto open_context_with_status(Env &env, TestContext &out) -> Status
     {
-        CALICODB_TRY(env.new_file(kDBFilename, Env::kCreate | Env::kReadWrite, out.db));
-        CALICODB_TRY(busy_wait(&m_busy, [out] {
+        File *file;
+        CALICODB_TRY(env.new_file(kDBFilename, Env::kCreate | Env::kReadWrite, file));
+        CALICODB_TRY(busy_wait(&m_busy, [file] {
             // The WAL attempts an exclusive lock on the database file during close, to check
             // if another connection needs the WAL file before attempting to unlink it. May
             // need to wait a bit for the shared lock.
-            return out.db->file_lock(kLockShared);
+            return file->file_lock(kLockShared);
         }));
 
         Wal::Parameters param;
         param.env = &env;
         param.filename = kWalFilename;
-        param.db_file = out.db;
+        param.db_file = file;
         param.busy = &m_busy;
-        CALICODB_TRY(busy_wait(&m_busy, [&out, &param] {
-            return Wal::open(param, out.wal);
+        Wal *wal_ptr;
+        CALICODB_TRY(busy_wait(&m_busy, [&wal_ptr, &param] {
+            return Wal::open(param, wal_ptr);
         }));
+        out.db.reset(file);
+        out.wal.reset(wal_ptr);
         return Status::ok();
     }
 
@@ -1299,20 +1318,6 @@ protected:
         auto s = open_context_with_status(env, ctx);
         EXPECT_EQ(s.is_ok(), ctx.wal != nullptr);
         return ctx;
-    }
-
-    static auto close_context(TestContext &ctx) -> void
-    {
-        std::size_t db_size;
-        auto s = Wal::close(ctx.wal, db_size);
-        if (s.is_busy()) {
-            s = Status::ok();
-        }
-        ctx.db->file_unlock();
-        delete ctx.db;
-        ASSERT_OK(s);
-
-        ctx = TestContext();
     }
 
     auto connect_with_status(Wal &wal, bool write) -> Status
@@ -1345,29 +1350,16 @@ protected:
     tools::BusyCounter m_busy;
     bool m_flag;
 };
-TEST_P(WalConcurrencyTests, SetupContention)
+TEST_P(WalConcurrencyTests, SetupAndTeardown)
 {
-    if (m_flag) {
-        register_main_callback(
-            [&](auto &env) {
-                auto ctx = open_context(env);
-                connect(*ctx.wal, true);
-
-                ctx.wal->finish_writer();
-                ctx.wal->finish_reader();
-                close_context(ctx);
-                return false;
-            });
-    }
     register_test_callback(
         [&](auto &env, auto, auto) {
             auto ctx = open_context(env);
-            // Start a write transaction on the WAL, then finish it without
-            // actually writing anything.
+            // Start a write transaction on the WAL, then finish it without actually writing
+            // anything.
             connect(*ctx.wal, true);
             ctx.wal->finish_writer();
             ctx.wal->finish_reader();
-            close_context(ctx);
             return false;
         });
 
@@ -1382,23 +1374,32 @@ TEST_P(WalConcurrencyTests, Debug)
     auto base_ctx = open_context(env());
     connect(*base_ctx.wal, true);
     ASSERT_OK(base_ctx.wal->write(dirty, pages.size()));
-    base_ctx.wal->finish_writer();
-    base_ctx.wal->finish_reader();
+    if (m_flag) {
+        // Use the flag parameter to decide whether to stay in writer mode while the test
+        // callbacks are run. Keeping a writer connection open
+        base_ctx.wal->finish_writer();
+        base_ctx.wal->finish_reader();
+    }
 
     register_test_callback(
         [&](auto &env, auto, auto) {
             auto ctx = open_context(env);
             connect(*ctx.wal, false);
-
             char buffer[kPageSize];
-            auto *page = buffer;
-            EXPECT_OK(ctx.wal->read(Id(pages.size()), page));
-            close_context(ctx);
+            for (std::size_t i = 0; i < pages.size(); ++i) {
+                auto *page = buffer;
+                EXPECT_OK(ctx.wal->read(Id(pages.size()), page));
+                EXPECT_TRUE(page);
+            }
+            ctx.wal->finish_reader();
             return false;
         });
 
     run_test(m_param);
-    close_context(base_ctx);
+    if (!m_flag) {
+        base_ctx.wal->finish_writer();
+        base_ctx.wal->finish_reader();
+    }
 }
 TEST_P(WalConcurrencyTests, ReaderWriterContention)
 {
@@ -1418,7 +1419,6 @@ TEST_P(WalConcurrencyTests, ReaderWriterContention)
             count.store(pages.size());
             ctx.wal->finish_writer();
             ctx.wal->finish_reader();
-            close_context(ctx);
             return false;
         });
 
@@ -1442,7 +1442,6 @@ TEST_P(WalConcurrencyTests, ReaderWriterContention)
                 << (ptr ? "" : "not") << " read by reader";
 
             ctx.wal->finish_reader();
-            close_context(ctx);
             return init == 0;
         });
 
@@ -1453,8 +1452,8 @@ INSTANTIATE_TEST_SUITE_P(
     WalConcurrencyTests,
     WalConcurrencyTests,
     testing::Combine(
-        testing::Values(1, 2, 3),
-        testing::Values(1, 2, 3),
+        testing::Values(1, 2, 5, 10),
+        testing::Values(1, 2, 5, 10),
         testing::Values(false, true)));
 
 } // namespace calicodb

@@ -16,7 +16,7 @@ Bufmgr::Bufmgr(std::size_t frame_count)
     : m_buffer(new(std::align_val_t{kPageSize}) char[kPageSize * frame_count]()),
       m_frame_count(frame_count)
 {
-    for (std::size_t i = 1; i < frame_count; ++i) {
+    for (std::size_t i = 1; i < m_frame_count; ++i) {
         m_available.emplace_back(buffer_slot(i));
     }
     m_root.page_id = Id::root();
