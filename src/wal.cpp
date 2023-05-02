@@ -79,9 +79,9 @@ static auto too_many_collisions(Key key) -> Status
 
 struct HashGroup {
     explicit HashGroup(U32 group_number, volatile char *data)
+        : keys(reinterpret_cast<volatile Key *>(data)),
+          hash(reinterpret_cast<volatile Hash *>(keys + kNIndexKeys))
     {
-        keys = reinterpret_cast<volatile Key *>(data);
-        hash = reinterpret_cast<volatile Hash *>(keys + kNIndexKeys);
         if (group_number) {
             base = kNIndexKeys0 + (kNIndexKeys * (group_number - 1));
         } else {
@@ -89,8 +89,8 @@ struct HashGroup {
         }
     }
 
-    volatile Key *keys = nullptr;
-    volatile Hash *hash = nullptr;
+    volatile Key *keys;
+    volatile Hash *hash;
     U32 base = 0;
 };
 
@@ -235,7 +235,7 @@ auto HashIndex::groups() const -> const std::vector<volatile char *> &
 
 auto HashIndex::cleanup() -> void
 {
-    if (m_hdr->max_frame != 0) {
+    if (m_hdr->max_frame) {
         const auto n = index_group_number(m_hdr->max_frame);
         CALICODB_EXPECT_TRUE(m_groups[n]); // Must already be mapped
         HashGroup group(n, m_groups[n]);
