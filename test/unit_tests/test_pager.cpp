@@ -1376,7 +1376,7 @@ TEST_P(WalConcurrencyTests, Debug)
     ASSERT_OK(base_ctx.wal->write(dirty, pages.size()));
     if (m_flag) {
         // Use the flag parameter to decide whether to stay in writer mode while the test
-        // callbacks are run. Keeping a writer connection open
+        // callbacks are run.
         base_ctx.wal->finish_writer();
         base_ctx.wal->finish_reader();
     }

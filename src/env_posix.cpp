@@ -67,7 +67,13 @@ struct ShmNode final {
     // held.
     int locks[File::kShmLockCount] = {};
 
+    // Lock the DMS ("dead man switch") byte
+    // A reader lock is held on the DMS byte by each shared memory connection.
+    // When a connection is dropped, the reader lock is released. A connection
+    // knows it is the first connection if it can get a writer lock on the DMS
+    // byte.
     [[nodiscard]] auto take_dms_lock() -> int;
+
     [[nodiscard]] auto map_region(std::size_t r, volatile void *&out) -> int;
 
 #ifdef CALICODB_TEST
@@ -423,7 +429,7 @@ struct PosixFs final {
             // WARNING: If another process unlinks the file after we opened it above, the
             // attempt to take the DMS lock here will fail.
             if (snode->take_dms_lock()) {
-                return posix_error(errno);
+                return Status::busy("retry");
             }
         }
         CALICODB_EXPECT_GE(snode->file, 0);
@@ -659,6 +665,9 @@ auto PosixFile::shm_map(std::size_t r, volatile void *&out) -> Status
     CALICODB_EXPECT_TRUE(shm);
     CALICODB_EXPECT_TRUE(shm->snode);
     if (shm->snode->map_region(r, out)) {
+        if (errno == EAGAIN) {
+            return Status::busy("retry");
+        }
         return posix_error(errno);
     }
     return Status::ok();
@@ -781,6 +790,8 @@ auto ShmNode::take_dms_lock() -> int
             rc = posix_truncate(filename, 0);
         }
     } else if (lock.l_type == F_WRLCK) {
+        // A different connection was the first connection, and is in the
+        // process of truncating the file.
         errno = EAGAIN;
         rc = -1;
     }
@@ -798,6 +809,7 @@ auto ShmNode::map_region(std::size_t r, volatile void *&out) -> int
     std::lock_guard guard(mutex);
     if (is_unlocked) {
         if (auto rc = take_dms_lock()) {
+            errno = EAGAIN;
             return rc;
         }
         is_unlocked = false;
@@ -894,23 +906,23 @@ auto cleanup_path(const std::string &filename) -> std::string
     return join_paths(dir, base);
 }
 
-auto PosixFile::file_lock(FileLockMode request) -> Status
+auto PosixFile::file_lock(FileLockMode mode) -> Status
 {
-    if (request <= local_lock) {
+    if (mode <= local_lock) {
         return Status::ok();
     }
     // First lock taken on a file must be kShared.
-    CALICODB_EXPECT_TRUE(local_lock != kLockUnlocked || request == kLockShared);
+    CALICODB_EXPECT_TRUE(local_lock != kLockUnlocked || mode == kLockShared);
 
     std::lock_guard guard(inode->mutex);
-    if ((local_lock != inode->lock && (inode->lock == kLockExclusive || request == kLockExclusive))) {
+    if ((local_lock != inode->lock && (inode->lock == kLockExclusive || mode == kLockExclusive))) {
         // Some other thread in this process has an incompatible lock.
         return posix_busy();
     }
 
-    if (request == kLockShared && inode->lock == kLockShared) {
+    if (mode == kLockShared && inode->lock == kLockShared) {
         // Caller wants a shared lock, and a shared lock is already held by another thread.
-        // Grant the request. This block is just to avoid actually calling out to fcntl(),
+        // Grant the mode. This block is just to avoid actually calling out to fcntl(),
         // since we already know this lock is compatible.
         CALICODB_EXPECT_EQ(local_lock, kLockUnlocked);
         CALICODB_EXPECT_GT(inode->nlocks, 0);
@@ -924,7 +936,7 @@ auto PosixFile::file_lock(FileLockMode request) -> Status
     lock.l_whence = SEEK_SET;
 
     Status s;
-    if (request == kLockShared) {
+    if (mode == kLockShared) {
         // Requesting a shared lock, but didn't hit the above block. This means
         // no other thread in this process holds a lock, so we need to check to
         // see if another process holds one that is incompatible.
@@ -936,7 +948,7 @@ auto PosixFile::file_lock(FileLockMode request) -> Status
         } else {
             inode->nlocks = 1;
         }
-    } else if (request == kLockExclusive && inode->nlocks > 1) {
+    } else if (mode == kLockExclusive && inode->nlocks > 1) {
         // Another thread in this process still holds a shared lock, preventing
         // this kExclusive from being taken. Note that this thread should already
         // have a shared lock (guarded for by an assert).
@@ -944,7 +956,7 @@ auto PosixFile::file_lock(FileLockMode request) -> Status
     } else {
         // The caller is requesting an exclusive lock, and no other thread in
         // this process already holds a lock.
-        CALICODB_EXPECT_EQ(request, kLockExclusive);
+        CALICODB_EXPECT_EQ(mode, kLockExclusive);
         CALICODB_EXPECT_NE(local_lock, kLockUnlocked);
         CALICODB_EXPECT_EQ(inode->nlocks, 1);
         lock.l_type = F_WRLCK;
@@ -953,8 +965,8 @@ auto PosixFile::file_lock(FileLockMode request) -> Status
         }
     }
     if (s.is_ok()) {
-        local_lock = request;
-        inode->lock = request;
+        local_lock = mode;
+        inode->lock = mode;
     }
     return s;
 }
