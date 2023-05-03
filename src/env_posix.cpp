@@ -3,6 +3,7 @@
 // LICENSE.md. See AUTHORS.md for a list of contributor names.
 
 #include "env_posix.h"
+#include "scope_guard.h"
 #include <fcntl.h>
 #include <libgen.h>
 #include <list>
@@ -74,7 +75,7 @@ struct ShmNode final {
     // byte.
     [[nodiscard]] auto take_dms_lock() -> int;
 
-    [[nodiscard]] auto map_region(std::size_t r, volatile void *&out) -> int;
+    [[nodiscard]] auto map_region(std::size_t r, bool extend, volatile void *&out) -> int;
 
 #ifdef CALICODB_TEST
     [[nodiscard]] auto check_locks() const -> bool;
@@ -169,8 +170,6 @@ struct INode final {
 {
     CALICODB_EXPECT_NE(error, 0);
     switch (error) {
-        case ENOENT:
-            return Status::not_found(std::strerror(error));
         case EACCES:
         case EAGAIN:
         case EBUSY:
@@ -301,7 +300,7 @@ public:
     [[nodiscard]] auto file_lock(FileLockMode mode) -> Status override;
     auto file_unlock() -> void override;
 
-    [[nodiscard]] auto shm_map(std::size_t r, volatile void *&out) -> Status override;
+    [[nodiscard]] auto shm_map(std::size_t r, bool extend, volatile void *&out) -> Status override;
     [[nodiscard]] auto shm_lock(std::size_t r, std::size_t n, ShmLockFlag flags) -> Status override;
     auto shm_unmap(bool unlink) -> void override;
     auto shm_barrier() -> void override;
@@ -429,7 +428,7 @@ struct PosixFs final {
             // WARNING: If another process unlinks the file after we opened it above, the
             // attempt to take the DMS lock here will fail.
             if (snode->take_dms_lock()) {
-                return Status::busy("retry");
+                return make_retry_status();
             }
         }
         CALICODB_EXPECT_GE(snode->file, 0);
@@ -657,16 +656,16 @@ auto PosixFile::shm_unmap(bool unlink) -> void
     }
 }
 
-auto PosixFile::shm_map(std::size_t r, volatile void *&out) -> Status
+auto PosixFile::shm_map(std::size_t r, bool extend, volatile void *&out) -> Status
 {
     if (shm == nullptr) {
         CALICODB_TRY(PosixFs::s_fs.ref_snode(*this, shm));
     }
     CALICODB_EXPECT_TRUE(shm);
     CALICODB_EXPECT_TRUE(shm->snode);
-    if (shm->snode->map_region(r, out)) {
+    if (shm->snode->map_region(r, extend, out)) {
         if (errno == EAGAIN) {
-            return Status::busy("retry");
+            return make_retry_status();
         }
         return posix_error(errno);
     }
@@ -804,7 +803,7 @@ auto ShmNode::take_dms_lock() -> int
     return rc;
 }
 
-auto ShmNode::map_region(std::size_t r, volatile void *&out) -> int
+auto ShmNode::map_region(std::size_t r, bool extend, volatile void *&out) -> int
 {
     std::lock_guard guard(mutex);
     if (is_unlocked) {
@@ -818,8 +817,15 @@ auto ShmNode::map_region(std::size_t r, volatile void *&out) -> int
     // request for region "r".
     const auto mmap_scale = PosixFs::s_fs.mmap_scale;
     const auto request = (r + mmap_scale) / mmap_scale * mmap_scale;
+    ScopeGuard scope = [&out, r, this] {
+        if (r < regions.size()) {
+            out = regions[r];
+        } else {
+            out = nullptr;
+        }
+    };
 
-    if (regions.size() < request) {
+    if (regions.size() < request && extend) {
         std::size_t file_size;
         if (struct stat st = {}; fstat(file, &st)) {
             return -1;
@@ -852,8 +858,6 @@ auto ShmNode::map_region(std::size_t r, volatile void *&out) -> int
             }
         }
     }
-    CALICODB_EXPECT_LT(r, regions.size());
-    out = regions[r];
     return 0;
 }
 

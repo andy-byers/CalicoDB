@@ -309,7 +309,7 @@ TEST_F(RecoveryTests, SanityCheck)
 
 class RecoverySanityCheck
     : public RecoveryTestHarness<>,
-      public testing::TestWithParam<std::tuple<std::string, tools::Interceptor::Type, int>>
+      public testing::TestWithParam<std::tuple<std::string, tools::SyscallType, int>>
 {
 public:
     explicit RecoverySanityCheck()
@@ -355,7 +355,7 @@ public:
     }
 
     std::string interceptor_prefix;
-    tools::Interceptor::Type interceptor_type = std::get<1>(GetParam());
+    tools::SyscallType interceptor_type = std::get<1>(GetParam());
     int interceptor_count = std::get<2>(GetParam());
     std::map<std::string, std::string> map;
 };
@@ -402,12 +402,12 @@ INSTANTIATE_TEST_SUITE_P(
     RecoverySanityCheck,
     RecoverySanityCheck,
     ::testing::Values(
-        std::make_tuple(kWalFilename, tools::Interceptor::kRead, 0),
-        std::make_tuple(kWalFilename, tools::Interceptor::kRead, 1),
-        std::make_tuple(kWalFilename, tools::Interceptor::kRead, 5),
-        std::make_tuple(kWalFilename, tools::Interceptor::kWrite, 0),
-        std::make_tuple(kWalFilename, tools::Interceptor::kWrite, 1),
-        std::make_tuple(kWalFilename, tools::Interceptor::kWrite, 5)));
+        std::make_tuple(kWalFilename, tools::kSyscallRead, 0),
+        std::make_tuple(kWalFilename, tools::kSyscallRead, 1),
+        std::make_tuple(kWalFilename, tools::kSyscallRead, 5),
+        std::make_tuple(kWalFilename, tools::kSyscallWrite, 0),
+        std::make_tuple(kWalFilename, tools::kSyscallWrite, 1),
+        std::make_tuple(kWalFilename, tools::kSyscallWrite, 5)));
 
 class OpenErrorTests : public RecoverySanityCheck
 {
@@ -437,7 +437,7 @@ INSTANTIATE_TEST_SUITE_P(
     OpenErrorTests,
     OpenErrorTests,
     ::testing::Values(
-        std::make_tuple(kDBFilename, tools::Interceptor::kRead, 0),
-        std::make_tuple(kDBFilename, tools::Interceptor::kRead, 1)));
+        std::make_tuple(kDBFilename, tools::kSyscallRead, 0),
+        std::make_tuple(kDBFilename, tools::kSyscallRead, 1)));
 
 } // namespace calicodb

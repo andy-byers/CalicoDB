@@ -28,7 +28,7 @@ auto DBImpl::open(const Options &sanitized) -> Status
     auto s = m_env->new_file(m_db_filename, Env::kReadWrite, file);
     if (s.is_ok()) {
         exists = true;
-    } else if (s.is_not_found()) {
+    } else if (s.is_io_error()) {
         if (!sanitized.create_if_missing) {
             return Status::invalid_argument(
                 "database \"" + m_db_filename + "\" does not exist");

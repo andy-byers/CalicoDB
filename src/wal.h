@@ -49,7 +49,7 @@ public:
 private:
     friend class WalImpl;
 
-    [[nodiscard]] auto map_group(std::size_t group_number) -> Status;
+    [[nodiscard]] auto map_group(std::size_t group_number, bool extend) -> Status;
 
     // Storage for hash table groups.
     std::vector<volatile char *> m_groups;

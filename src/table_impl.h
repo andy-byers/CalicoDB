@@ -26,11 +26,29 @@ public:
     [[nodiscard]] auto put(const Slice &key, const Slice &value) -> Status override;
     [[nodiscard]] auto erase(const Slice &key) -> Status override;
 
+    [[nodiscard]] auto tree() -> Tree *
+    {
+        return *m_tree;
+    }
+    [[nodiscard]] auto tree() const -> const Tree *
+    {
+        return *m_tree;
+    }
+
 public:
     const Status *m_status;
     Tree **m_tree;
     bool m_readonly;
 };
+
+inline auto table_impl(Table *table) -> TableImpl *
+{
+    return reinterpret_cast<TableImpl *>(table);
+}
+inline auto table_impl(const Table *table) -> const TableImpl *
+{
+    return reinterpret_cast<const TableImpl *>(table);
+}
 
 } // namespace calicodb
 

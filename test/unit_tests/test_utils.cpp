@@ -489,7 +489,7 @@ class InterceptorTests
 
 TEST_F(InterceptorTests, RespectsPrefix)
 {
-    QUICK_INTERCEPTOR("./test", tools::Interceptor::kOpen);
+    QUICK_INTERCEPTOR("./test", tools::kSyscallOpen);
 
     File *editor;
     assert_special_error(env().new_file("./test", Env::kCreate, editor));
@@ -499,7 +499,7 @@ TEST_F(InterceptorTests, RespectsPrefix)
 
 TEST_F(InterceptorTests, RespectsSyscallType)
 {
-    QUICK_INTERCEPTOR("./test", tools::Interceptor::kWrite);
+    QUICK_INTERCEPTOR("./test", tools::kSyscallWrite);
 
     File *editor;
     ASSERT_OK(env().new_file("./test", Env::kCreate, editor));

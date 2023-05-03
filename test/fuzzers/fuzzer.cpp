@@ -13,29 +13,46 @@ DbFuzzer::DbFuzzer(std::string path, Options *options)
     if (options != nullptr) {
         m_options = *options;
     }
-    CHECK_OK(DB::open(m_options, m_path, m_db));
+    CHECK_OK(reopen_impl());
+    // Commit creation of the table so rollback() doesn't cause it to get invalidated.
+    // Normally, this problem is mitigated by using the view()/update() API.
+    CHECK_OK(m_txn->commit());
 }
 
 DbFuzzer::~DbFuzzer()
 {
-    tools::validate_db(*m_db);
+    CHECK_TRUE(reinterpret_cast<const DBImpl &>(*m_db).TEST_pager().assert_state());
 
+    delete m_table;
+    delete m_txn;
     delete m_db;
 
     CHECK_OK(DB::destroy(m_options, m_path));
 }
 
-auto DbFuzzer::reopen() -> Status
+auto DbFuzzer::reopen_impl() -> Status
 {
+    delete m_table;
+    delete m_txn;
     delete m_db;
+
+    m_table = nullptr;
+    m_txn = nullptr;
     m_db = nullptr;
 
-    return DB::open(m_options, m_path, m_db);
+    CALICODB_TRY(DB::open(m_options, m_path, m_db));
+    CALICODB_TRY(m_db->new_txn(true, m_txn));
+    return m_txn->new_table(TableOptions(), "default", m_table);
+}
+
+auto DbFuzzer::reopen() -> Status
+{
+    return reopen_impl();
 }
 
 auto DbFuzzer::validate() -> void
 {
-    tools::validate_db(*m_db);
+    CHECK_TRUE(reinterpret_cast<const DBImpl &>(*m_db).TEST_pager().assert_state());
 }
 
 } // namespace calicodb

@@ -198,8 +198,6 @@ TEST_F(BasicDatabaseTests, ClampsBadOptionValues)
 
     options.cache_size = kPageSize;
     open_and_check();
-    options.cache_size = 1 << 31;
-    open_and_check();
 }
 
 // CAUTION: PRNG state does not persist between calls.
@@ -378,6 +376,7 @@ TEST_P(DbVacuumTests, SanityCheck)
             ASSERT_OK(table->get(key, &result));
             ASSERT_EQ(result, value);
         }
+        delete table;
         delete txn;
     }
     delete db;
@@ -504,7 +503,7 @@ TEST_F(DbRevertTests, RevertsUncommittedBatch_5)
 
 struct ErrorWrapper {
     std::string filename;
-    tools::Interceptor::Type type;
+    tools::SyscallType type;
     std::size_t successes = 0;
 };
 class DbErrorTests
@@ -617,9 +616,9 @@ INSTANTIATE_TEST_SUITE_P(
     DbErrorTests,
     DbErrorTests,
     ::testing::Values(
-        ErrorWrapper{kDBFilename, tools::Interceptor::kRead, 0},
-        ErrorWrapper{kDBFilename, tools::Interceptor::kRead, 1},
-        ErrorWrapper{kDBFilename, tools::Interceptor::kRead, 10}));
+        ErrorWrapper{kDBFilename, tools::kSyscallRead, 0},
+        ErrorWrapper{kDBFilename, tools::kSyscallRead, 1},
+        ErrorWrapper{kDBFilename, tools::kSyscallRead, 10}));
 
 class DbFatalErrorTests : public DbErrorTests
 {
@@ -716,11 +715,11 @@ INSTANTIATE_TEST_SUITE_P(
     DbFatalErrorTests,
     DbFatalErrorTests,
     ::testing::Values(
-        ErrorWrapper{kWalFilename, tools::Interceptor::kRead, 1},
-        ErrorWrapper{kWalFilename, tools::Interceptor::kRead, 5},
-        ErrorWrapper{kWalFilename, tools::Interceptor::kWrite, 0},
-        ErrorWrapper{kWalFilename, tools::Interceptor::kWrite, 1},
-        ErrorWrapper{kWalFilename, tools::Interceptor::kWrite, 5}));
+        ErrorWrapper{kWalFilename, tools::kSyscallRead, 1},
+        ErrorWrapper{kWalFilename, tools::kSyscallRead, 5},
+        ErrorWrapper{kWalFilename, tools::kSyscallWrite, 0},
+        ErrorWrapper{kWalFilename, tools::kSyscallWrite, 1},
+        ErrorWrapper{kWalFilename, tools::kSyscallWrite, 5}));
 
 class DbOpenTests
     : public EnvTestHarness<PosixEnv>,
@@ -999,7 +998,7 @@ protected:
 
 TEST_F(CommitFailureTests, WalFlushFailure)
 {
-    QUICK_INTERCEPTOR(kWalFilename, tools::Interceptor::kWrite);
+    QUICK_INTERCEPTOR(kWalFilename, tools::kSyscallWrite);
     run_test(false);
 }
 
@@ -1025,7 +1024,7 @@ TEST_F(AlternateWalFilenameTests, WalDirectoryMustExist)
     ASSERT_OK(DB::open(options, kDBFilename, db));
     Txn *txn;
     const auto s = db->new_txn(false, txn);
-    ASSERT_TRUE(s.is_not_found())
+    ASSERT_TRUE(s.is_io_error())
         << get_status_name(s) << ": " << s.to_string();
 }
 

@@ -145,9 +145,9 @@ auto FileWrapper::file_unlock() -> void
     return m_target->file_unlock();
 }
 
-auto FileWrapper::shm_map(std::size_t r, volatile void *&out) -> Status
+auto FileWrapper::shm_map(std::size_t r, bool extend, volatile void *&out) -> Status
 {
-    return m_target->shm_map(r, out);
+    return m_target->shm_map(r, extend, out);
 }
 
 auto FileWrapper::shm_lock(std::size_t r, std::size_t n, ShmLockFlag flags) -> Status

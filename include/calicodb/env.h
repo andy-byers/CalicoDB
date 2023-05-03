@@ -98,7 +98,7 @@ public:
     static constexpr std::size_t kShmRegionSize = 1'024 * 32;
     static constexpr std::size_t kShmLockCount = 8;
 
-    [[nodiscard]] virtual auto shm_map(std::size_t r, volatile void *&out) -> Status = 0;
+    [[nodiscard]] virtual auto shm_map(std::size_t r, bool extend, volatile void *&out) -> Status = 0;
     [[nodiscard]] virtual auto shm_lock(std::size_t r, std::size_t n, ShmLockFlag flags) -> Status = 0;
     virtual auto shm_unmap(bool unlink) -> void = 0;
     virtual auto shm_barrier() -> void = 0;
@@ -159,7 +159,7 @@ public:
     [[nodiscard]] auto file_lock(FileLockMode mode) -> Status override;
     auto file_unlock() -> void override;
 
-    [[nodiscard]] auto shm_map(std::size_t r, volatile void *&out) -> Status override;
+    [[nodiscard]] auto shm_map(std::size_t r, bool extend, volatile void *&out) -> Status override;
     [[nodiscard]] auto shm_lock(std::size_t s, std::size_t n, ShmLockFlag flags) -> Status override;
     auto shm_unmap(bool unlink) -> void override;
     auto shm_barrier() -> void override;

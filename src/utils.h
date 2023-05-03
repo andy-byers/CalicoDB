@@ -88,6 +88,15 @@ enum : int { kLockUnlocked = 0 };
     return "OK";
 }
 
+[[nodiscard]] inline auto make_retry_status() -> Status
+{
+    return Status::busy("retry");
+}
+[[nodiscard]] inline auto is_retry_status(const Status &s) -> bool
+{
+    return s.is_busy() && s.to_string() == "retry";
+}
+
 struct Id {
     static constexpr U32 kNull = 0;
     static constexpr U32 kRoot = 1;

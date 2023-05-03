@@ -62,7 +62,7 @@ public:
     [[nodiscard]] auto write(std::size_t offset, const Slice &in) -> Status override;
     [[nodiscard]] auto sync() -> Status override;
     [[nodiscard]] auto file_lock(FileLockMode) -> Status override { return Status::ok(); }
-    [[nodiscard]] auto shm_map(std::size_t r, volatile void *&out) -> Status override;
+    [[nodiscard]] auto shm_map(std::size_t r, bool extend, volatile void *&out) -> Status override;
     [[nodiscard]] auto shm_lock(std::size_t, std::size_t, ShmLockFlag) -> Status override { return Status::ok(); }
     auto shm_unmap(bool unlink) -> void override;
     auto shm_barrier() -> void override {}
@@ -90,20 +90,20 @@ protected:
     std::vector<std::string> m_shm;
 };
 
-struct Interceptor {
-    enum Type {
-        kRead,
-        kWrite,
-        kOpen,
-        kSync,
-        kUnlink,
-        kResize,
-        kTypeCount
-    };
+enum SyscallType : std::size_t {
+    kSyscallRead,
+    kSyscallWrite,
+    kSyscallOpen,
+    kSyscallSync,
+    kSyscallUnlink,
+    kSyscallResize,
+    kNumSyscalls
+};
 
+struct Interceptor {
     using Callback = std::function<Status()>;
 
-    explicit Interceptor(Type t, Callback c)
+    explicit Interceptor(SyscallType t, Callback c)
         : callback(std::move(c)),
           type(t)
     {
@@ -115,7 +115,11 @@ struct Interceptor {
     }
 
     Callback callback;
-    Type type;
+    SyscallType type;
+};
+
+struct FileCounters {
+    std::size_t values[kNumSyscalls] = {};
 };
 
 class TestEnv : public EnvWrapper
@@ -142,6 +146,8 @@ public:
     [[nodiscard]] auto resize_file(const std::string &filename, std::size_t file_size) -> Status override;
     [[nodiscard]] auto remove_file(const std::string &filename) -> Status override;
 
+    [[nodiscard]] auto find_counters(const std::string &filename) -> const FileCounters *;
+
 private:
     friend class TestFile;
     friend class CrashFile;
@@ -149,13 +155,15 @@ private:
 
     struct FileState {
         std::vector<Interceptor> interceptors;
+        FileCounters counters;
         std::string saved_state;
         bool unlinked = false;
     };
 
     mutable std::unordered_map<std::string, FileState> m_state;
+    mutable std::mutex m_mutex;
 
-    [[nodiscard]] auto try_intercept_syscall(Interceptor::Type type, const std::string &filename) -> Status;
+    [[nodiscard]] auto try_intercept_syscall(SyscallType type, const std::string &filename) -> Status;
     auto save_file_contents(const std::string &filename) -> void;
     auto overwrite_file(const std::string &filename, const std::string &contents) -> void;
 };

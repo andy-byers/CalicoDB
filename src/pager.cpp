@@ -35,6 +35,7 @@ auto Pager::purge_page(PageRef &victim) -> void
     if (victim.dirty) {
         m_dirtylist.remove(victim);
     }
+    CALICODB_EXPECT_FALSE(dirtylist_contains(victim));
     m_bufmgr.erase(victim.page_id);
 }
 
@@ -57,6 +58,10 @@ auto Pager::read_page(PageRef &out) -> Status
     }
 
     if (!s.is_ok()) {
+        if (out.dirty) {
+            m_dirtylist.remove(out);
+        }
+        CALICODB_EXPECT_FALSE(dirtylist_contains(out));
         m_bufmgr.erase(out.page_id);
         if (m_mode > kRead) {
             set_status(s);
@@ -94,21 +99,21 @@ auto Pager::open(const Parameters &param, Pager *&out) -> Status
 
     Status s;
     auto *p = new Pager(param);
-    if (param.env->file_exists(param.wal_name)) {
-        // If a WAL exists, open it now and attempt a checkpoint. The first connection to
-        // open the database after a failed checkpoint will need to run it to completion
-        // before any other pages are read from the database file (we don't necessarily
-        // know if some writes made it to disk already, so we could end up reading a
-        // corrupted database image).
-        s = p->open_wal();
-        if (s.is_ok()) {
-            s = p->wal_checkpoint(true);
-            if (s.is_busy()) {
-                // Checkpoint may be blocked by other connections.
-                s = Status::ok();
-            }
-        }
-    }
+//    if (param.env->file_exists(param.wal_name)) {
+//        // If a WAL exists, open it now and attempt a checkpoint. The first connection to
+//        // open the database after a failed checkpoint will need to run it to completion
+//        // before any other pages are read from the database file (we don't necessarily
+//        // know if some writes made it to disk already, so we could end up reading a
+//        // corrupted database image).
+//        s = p->open_wal();
+//        if (s.is_ok()) {
+//            s = p->wal_checkpoint(true);
+//            if (s.is_busy()) {
+//                // Checkpoint may be blocked by other connections.
+//                s = Status::ok();
+//            }
+//        }
+//    }
     if (s.is_ok()) {
         out = p;
     } else {
@@ -176,7 +181,15 @@ auto Pager::open_wal() -> Status
         m_env,
         m_file,
     };
-    return Wal::open(param, m_wal);
+    auto s = Wal::open(param, m_wal);
+    if (s.is_ok()) {
+        bool changed;
+        s = m_wal->start_reader(changed);
+        if (s.is_ok()) {
+            m_wal->finish_reader();
+        }
+    }
+    return s;
 }
 
 auto Pager::close() -> Status
@@ -215,9 +228,8 @@ auto Pager::start_reader() -> Status
 
         if (m_wal == nullptr) {
             CALICODB_TRY(open_wal());
-        } else {
-            m_wal->finish_reader();
         }
+        m_wal->finish_reader();
 
         // Run a checkpoint if the WAL has grown past some fixed size. May not
         // run to completion.
@@ -284,7 +296,7 @@ auto Pager::commit() -> Status
 
         if (m_dirtylist.head == nullptr) {
             // Ensure that there is always a WAL frame to store the DB size.
-            m_dirtylist.head = m_bufmgr.root();
+            m_dirtylist.add(*m_bufmgr.root());
         }
 
         s = flush_all_pages();
@@ -379,7 +391,8 @@ auto Pager::flush_all_pages() -> Status
 {
     if (m_state->use_wal) {
         auto *p = m_dirtylist.head;
-        for (; p; p = p->next) {
+        while (p) {
+            CALICODB_EXPECT_TRUE(p->dirty);
             if (p->page_id.value > m_page_count) {
                 // This page is past the current end of the file due to a vacuum operation
                 // decreasing the page count. Just remove the page from the dirty list. It
@@ -388,6 +401,7 @@ auto Pager::flush_all_pages() -> Status
                 p = m_dirtylist.remove(*p);
             } else {
                 p->dirty = false;
+                p = p->next;
             }
         }
         p = m_dirtylist.head;
@@ -431,28 +445,26 @@ auto Pager::ensure_available_buffer() -> Status
     Status s;
     if (!m_bufmgr.available()) {
         // There are no available frames, so the cache must be full. "next_victim()" will not find
-        // an ref to evict if all pages are referenced, which should never happen.
+        // a page to evict if all pages are referenced, which should never happen.
         auto *victim = m_bufmgr.next_victim();
         CALICODB_EXPECT_NE(victim, nullptr);
 
         if (victim->dirty) {
+            CALICODB_EXPECT_EQ(m_mode, kDirty);
             m_dirtylist.remove(*victim);
 
             if (m_state->use_wal) {
                 // Write just this page to the WAL. DB page count is 0 here because this write
                 // is not part of a commit.
-                s = m_wal->write(&*victim, 0);
+                s = m_wal->write(victim, 0);
             } else {
-                // WAL is not enabled, meaning this code is called from either recovery, checkpoint,
-                // or initialization.
                 s = write_page_to_file(*victim);
             }
             if (!s.is_ok()) {
-                // This is an error, regardless of what file_lock the pager is in. Requires a successful
-                // rollback and cache purge.
                 set_status(s);
             }
         }
+        CALICODB_EXPECT_FALSE(dirtylist_contains(*victim));
         m_bufmgr.erase(victim->page_id);
     }
     return s;
@@ -612,9 +624,22 @@ auto Pager::assert_state() const -> bool
             CALICODB_EXPECT_FALSE(m_state->status.is_ok());
             break;
         default:
-            CALICODB_EXPECT_FALSE("unrecognized Pager::Mode");
+            CALICODB_EXPECT_FALSE(false && "unrecognized Pager::Mode");
     }
     return true;
+}
+
+auto Pager::dirtylist_contains(const PageRef &ref) const -> bool
+{
+    auto found = false;
+    for (auto *p = m_dirtylist.head; p; p = p->next) {
+        CALICODB_EXPECT_TRUE(p->next == nullptr || p->next->prev == p);
+        if (p->page_id == ref.page_id) {
+            CALICODB_EXPECT_FALSE(found);
+            found = true;
+        }
+    }
+    return found;
 }
 
 // The first pointer map page is always on page 2, right after the root page.

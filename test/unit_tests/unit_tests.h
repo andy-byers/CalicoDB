@@ -80,9 +80,11 @@ public:
     explicit EnvTestHarness()
     {
         if constexpr (std::is_same_v<EnvType, PosixEnv>) {
-            m_env = Env::default_env();
+            m_env = new tools::TestEnv(*Env::default_env());
+        } else if constexpr (!std::is_same_v<EnvType, tools::TestEnv>) {
+            m_env = new tools::TestEnv(*new EnvType());
         } else {
-            m_env = new EnvType();
+            m_env = new tools::TestEnv;
         }
         (void)m_env->remove_file(kDBFilename);
         (void)m_env->remove_file(kWalFilename);
@@ -94,21 +96,22 @@ public:
         (void)m_env->remove_file(kDBFilename);
         (void)m_env->remove_file(kWalFilename);
         (void)m_env->remove_file(kShmFilename);
+        // tools::TestEnv deletes the wrapped Env.
         delete m_env;
     }
 
     [[nodiscard]] auto env() -> EnvType &
     {
-        return reinterpret_cast<EnvType &>(*m_env);
+        return reinterpret_cast<EnvType &>(*m_env->target());
     }
 
     [[nodiscard]] auto env() const -> const EnvType &
     {
-        return reinterpret_cast<const EnvType &>(*m_env);
+        return reinterpret_cast<const EnvType &>(*m_env->target());
     }
 
 protected:
-    Env *m_env;
+    tools::TestEnv *m_env;
 };
 
 template <class EnvType>
@@ -221,6 +224,7 @@ public:
                     }
                 });
             }
+
             for (auto &thread : threads) {
                 thread.join();
             }
@@ -270,7 +274,7 @@ public:
     {
         volatile void *ptr;
         CHECK_OK(env.new_file(name, Env::kCreate | Env::kReadWrite, m_file));
-        CHECK_OK(m_file->shm_map(0, ptr));
+        CHECK_OK(m_file->shm_map(0, false, ptr));
         m_ptr = reinterpret_cast<volatile U32 *>(ptr);
     }
 

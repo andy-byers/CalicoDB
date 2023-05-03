@@ -17,7 +17,7 @@ namespace calicodb
 
 inline auto extract_fuzzer_value(const U8 *&data, std::size_t &size) -> std::string
 {
-    static constexpr auto max_fuzzer_value_size = kMinPageSize * 2;
+    static constexpr auto max_fuzzer_value_size = kPageSize * 2;
 
     const auto extract = [&data, &size] {
         std::size_t result = 0;
@@ -66,9 +66,13 @@ public:
     virtual auto validate() -> void;
 
 protected:
+    [[nodiscard]] auto reopen_impl() -> Status;
+
     std::string m_path;
     Options m_options;
     DB *m_db = nullptr;
+    Txn *m_txn = nullptr;
+    Table *m_table = nullptr;
 };
 
 } // namespace calicodb

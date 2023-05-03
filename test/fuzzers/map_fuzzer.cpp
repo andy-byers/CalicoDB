@@ -20,7 +20,6 @@ using namespace calicodb::tools;
 enum OperationType {
     kPut,
     kErase,
-    kBeginTxn,
     kRollbackTxn,
     kCommitTxn,
     kReopen,
@@ -40,7 +39,7 @@ auto MapFuzzer::step(const U8 *&data, std::size_t &size) -> Status
     CHECK_TRUE(size >= 2);
 
     const auto expect_equal_contents = [this] {
-        auto *cursor = m_db->new_cursor();
+        auto *cursor = m_table->new_cursor();
         cursor->seek_first();
         for (const auto &[key, value] : m_map) {
             CHECK_TRUE(cursor->is_valid());
@@ -54,7 +53,6 @@ auto MapFuzzer::step(const U8 *&data, std::size_t &size) -> Status
     };
 
     const auto discard_pending = [this, &expect_equal_contents] {
-        m_txn = 0;
         m_added.clear();
         m_erased.clear();
         expect_equal_contents();
@@ -86,7 +84,7 @@ auto MapFuzzer::step(const U8 *&data, std::size_t &size) -> Status
         case kPut:
             key = extract_fuzzer_key(data, size);
             value = extract_fuzzer_value(data, size);
-            CALICODB_TRY(m_db->put(key, value));
+            CALICODB_TRY(m_table->put(key, value));
             if (const auto itr = m_erased.find(key); itr != end(m_erased)) {
                 m_erased.erase(itr);
             }
@@ -97,10 +95,10 @@ auto MapFuzzer::step(const U8 *&data, std::size_t &size) -> Status
             break;
         case kErase: {
             key = extract_fuzzer_key(data, size);
-            auto *cursor = m_db->new_cursor();
+            auto *cursor = m_table->new_cursor();
             cursor->seek(key);
             if (cursor->is_valid()) {
-                CALICODB_TRY(m_db->erase(cursor->key()));
+                CALICODB_TRY(m_table->erase(cursor->key()));
                 key = cursor->key().to_string();
                 if (const auto itr = m_added.find(key); itr != end(m_added)) {
                     m_added.erase(itr);
@@ -114,41 +112,34 @@ auto MapFuzzer::step(const U8 *&data, std::size_t &size) -> Status
             break;
         }
         case kVacuum:
-            CALICODB_TRY(m_db->vacuum());
-            break;
-        case kBeginTxn:
-            m_txn = m_db->begin_txn(TxnOptions());
+            CALICODB_TRY(m_txn->vacuum());
             break;
         case kRollbackTxn:
             if (m_txn) {
-                CALICODB_TRY(m_db->rollback_txn(m_txn));
+                m_txn->rollback();
                 discard_pending();
                 expect_equal_contents();
             }
             break;
         case kCommitTxn:
-            if (m_txn) {
-                CALICODB_TRY(m_db->commit_txn(m_txn));
-                commit_pending();
-                expect_equal_contents();
-            }
+            CALICODB_TRY(m_txn->commit());
+            commit_pending();
+            expect_equal_contents();
             break;
         default: // kReopen
-            m_txn = 0;
             m_added.clear();
             m_erased.clear();
             CALICODB_TRY(reopen());
             expect_equal_contents();
     }
-    return m_db->status();
+    return m_txn->status();
 }
 
 extern "C" int LLVMFuzzerTestOneInput(const U8 *data, std::size_t size)
 {
     Options options;
     options.env = new tools::FakeEnv;
-    options.page_size = kMinPageSize;
-    options.cache_size = kMinPageSize * 16;
+    options.cache_size = kPageSize * kMinFrameCount;
 
     {
         MapFuzzer fuzzer("map_db", &options);

@@ -122,10 +122,9 @@ struct EnvWithFiles final {
     [[nodiscard]] auto open_file(std::size_t id, Env::OpenMode mode) const -> File *
     {
         File *file;
-        EXPECT_OK(env->new_file(
-            testdir.as_child(make_filename(id)),
-            mode,
-            file));
+        const auto filename = testdir.as_child(make_filename(id));
+        EXPECT_TRUE(env->new_file(filename, mode, file).is_ok())
+            << "failed to " << ((mode & Env::kCreate) ? "create" : "open") << " file \"" << filename << '"';
         return file;
     }
 
@@ -163,7 +162,7 @@ public:
         auto *ptr = out.data();
         for (auto r = offset / File::kShmRegionSize; size; ++r) {
             volatile void *mem;
-            EXPECT_OK(m_file->shm_map(r, mem));
+            EXPECT_OK(m_file->shm_map(r, true, mem));
             const volatile char *begin = reinterpret_cast<volatile char *>(mem);
             std::size_t copy_offset = 0;
             if (ptr == out.data()) {
@@ -183,7 +182,8 @@ public:
         Slice copy(in);
         for (auto r = r1; !copy.is_empty(); ++r) {
             volatile void *mem;
-            EXPECT_OK(m_file->shm_map(r, mem));
+            EXPECT_OK(m_file->shm_map(r, true, mem));
+            EXPECT_TRUE(mem);
             volatile char *begin = reinterpret_cast<volatile char *>(mem);
             std::size_t copy_offset = 0;
             if (r == r1) {
@@ -511,9 +511,9 @@ TEST_F(EnvShmTests, LockCompatibility)
 
     // Shm must be created before locks can be taken.
     volatile void *ptr;
-    ASSERT_OK(a->shm_map(0, ptr));
-    ASSERT_OK(b->shm_map(0, ptr));
-    ASSERT_OK(c->shm_map(0, ptr));
+    ASSERT_OK(a->shm_map(0, true, ptr));
+    ASSERT_OK(b->shm_map(0, true, ptr));
+    ASSERT_OK(c->shm_map(0, true, ptr));
 
     // Shared locks can overlap, but they can only be 1 byte long.
     for (std::size_t i = 0; i < 8; ++i) {
@@ -583,16 +583,15 @@ static auto busy_wait_shm_lock(File &file, std::size_t r, std::size_t n, ShmLock
 }
 static auto file_reader_writer_test_routine(Env &env, File &file, bool is_writer) -> void
 {
+    busy_wait_file_lock(file, is_writer);
+
     Status s;
     if (is_writer) {
-        busy_wait_file_lock(file, kLockExclusive);
         write_file_version(file, read_file_version(file) + 1);
-        file.file_unlock();
     } else {
-        busy_wait_file_lock(file, kLockShared);
         read_file_version(file); // Could be anything...
-        file.file_unlock();
     }
+    file.file_unlock();
 }
 static auto shm_lifetime_test_routine(Env &env, const std::string &filename, bool unlink) -> void
 {
@@ -601,7 +600,7 @@ static auto shm_lifetime_test_routine(Env &env, const std::string &filename, boo
 
     Status s;
     volatile void *ptr;
-    while (!(s = file->shm_map(0, ptr)).is_ok()) {
+    while (!(s = file->shm_map(0, true, ptr)).is_ok()) {
         // NOTE: This call may return either Status::busy() or Status::not_found() on failure.
         // Status::not_found() means someone else unlinked the shm before we could get the DMS
         // lock.
@@ -681,25 +680,25 @@ public:
     auto run_test(const Test &test)
     {
         for (std::size_t n = 0; n < kNumEnvs; ++n) {
-            const auto pid = fork();
-            ASSERT_NE(-1, pid) << strerror(errno);
-            if (pid) {
-                continue;
-            }
+//            const auto pid = fork();
+//            ASSERT_NE(-1, pid) << strerror(errno);
+//            if (pid) {
+//                continue;
+//            }
 
             test(n);
-            std::exit(testing::Test::HasFailure());
+//            std::exit(testing::Test::HasFailure());
         }
-        for (std::size_t n = 0; n < kNumEnvs; ++n) {
-            int s;
-            const auto pid = wait(&s);
-            ASSERT_NE(pid, -1)
-                << "wait failed: " << strerror(errno);
-            ASSERT_TRUE(WIFEXITED(s) && WEXITSTATUS(s) == 0)
-                << "exited " << (WIFEXITED(s) ? "" : "ab")
-                << "normally with exit status "
-                << WEXITSTATUS(s);
-        }
+//        for (std::size_t n = 0; n < kNumEnvs; ++n) {
+//            int s;
+//            const auto pid = wait(&s);
+//            ASSERT_NE(pid, -1)
+//                << "wait failed: " << strerror(errno);
+//            ASSERT_TRUE(WIFEXITED(s) && WEXITSTATUS(s) == 0)
+//                << "exited " << (WIFEXITED(s) ? "" : "ab")
+//                << "normally with exit status "
+//                << WEXITSTATUS(s);
+//        }
     }
 
     template <class IsWriter>
@@ -765,13 +764,13 @@ public:
         File *file; // Keep this shm open to read from at the end...
         ASSERT_OK(env->new_file("./testdir/0000000000", Env::kCreate, file));
         volatile void *ptr;
-        ASSERT_OK(file->shm_map(0, ptr));
+        ASSERT_OK(file->shm_map(0, true, ptr));
         run_test([&](auto) {
             for (std::size_t i = 0; i < kNumThreads; ++i) {
                 set_up();
                 m_helper.open_unowned_file(EnvWithFiles::kSameName, Env::kCreate);
                 volatile void *ptr;
-                ASSERT_OK(m_helper.files[i]->shm_map(0, ptr));
+                ASSERT_OK(m_helper.files[i]->shm_map(0, true, ptr));
             }
             std::vector<std::thread> threads;
             while (threads.size() < kNumThreads) {

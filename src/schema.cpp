@@ -181,6 +181,7 @@ auto Schema::vacuum_finish() -> Status
         message.append(missed_roots == 1 ? "y" : "ies");
         return Status::corruption(message);
     }
+    m_pager->purge_cached_pages();
     inform_live_cursors();
     return s;
 }

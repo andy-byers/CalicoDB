@@ -96,8 +96,11 @@ public:
 
     auto assert_state() const -> bool;
 
+    auto purge_cached_pages() -> void;
+
 private:
     explicit Pager(const Parameters &param);
+    [[nodiscard]] auto dirtylist_contains(const PageRef &ref) const -> bool;
     [[nodiscard]] auto lock_db(FileLockMode mode) -> Status;
     auto unlock_db() -> void;
     [[nodiscard]] auto open_wal() -> Status;
@@ -109,7 +112,6 @@ private:
     [[nodiscard]] auto flush_all_pages() -> Status;
     auto initialize_root() -> void;
     auto purge_page(PageRef &victim) -> void;
-    auto purge_cached_pages() -> void;
 
     mutable Statistics m_statistics;
     mutable DBState *m_state = nullptr;

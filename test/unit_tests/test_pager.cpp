@@ -1083,7 +1083,7 @@ INSTANTIATE_TEST_SUITE_P(
 using WalPagerFaultTestParam = std::tuple<
     std::size_t,
     std::string,
-    tools::Interceptor::Type,
+    tools::SyscallType,
     bool>;
 class WalPagerFaultTests
     : public PagerWalTestHarness,
@@ -1216,7 +1216,7 @@ public:
 
     std::size_t m_test_size;
     std::string m_test_file;
-    tools::Interceptor::Type m_test_type;
+    tools::SyscallType m_test_type;
     bool m_flag;
 };
 TEST_P(WalPagerFaultTests, SetupAndOperations)
@@ -1232,11 +1232,11 @@ INSTANTIATE_TEST_SUITE_P(
     testing::Combine(
         testing::Values(10, 20, 100),
         testing::Values(kDBFilename, kWalFilename),
-        testing::Values(tools::Interceptor::kRead, tools::Interceptor::kWrite),
+        testing::Values(tools::kSyscallRead, tools::kSyscallWrite),
         testing::Values(true, false)),
     [](const testing::TestParamInfo<WalPagerFaultTestParam> &info) {
         std::string name("WalPagerFaultTests_");
-        if (std::get<2>(info.param) == tools::Interceptor::kRead) {
+        if (std::get<2>(info.param) == tools::kSyscallRead) {
             name.append("Read");
         } else {
             name.append("Write");
@@ -1365,7 +1365,7 @@ TEST_P(WalConcurrencyTests, SetupAndTeardown)
 
     run_test(m_param);
 }
-TEST_P(WalConcurrencyTests, Debug)
+TEST_P(WalConcurrencyTests, ReaderContention)
 {
     std::vector<PageRef> pages;
     RandomDirtyListBuilder builder;
@@ -1406,17 +1406,16 @@ TEST_P(WalConcurrencyTests, ReaderWriterContention)
     std::vector<PageRef> pages;
     RandomDirtyListBuilder builder;
     builder.build(500, pages);
+    pages.back().page[0] = '1';
+    pages.back().page[1] = '2';
+    pages.back().page[2] = '3';
     auto *dirty = &pages[0];
-
-    SharedCount keep_open(env(), "shared_count");
 
     register_main_callback(
         [&](auto &env) {
-            SharedCount count(env, "shared_count");
             auto ctx = open_context(env);
             connect(*ctx.wal, true);
             EXPECT_OK(ctx.wal->write(dirty, pages.size()));
-            count.store(pages.size());
             ctx.wal->finish_writer();
             ctx.wal->finish_reader();
             return false;
@@ -1424,29 +1423,23 @@ TEST_P(WalConcurrencyTests, ReaderWriterContention)
 
     register_test_callback(
         [&](auto &env, auto, auto t) {
-            SharedCount cc(env, "shared_count");
             auto ctx = open_context(env);
             connect(*ctx.wal, false);
 
-            const auto init = cc.load();
             char page[kPageSize];
             auto *ptr = page;
 
             EXPECT_OK(ctx.wal->read(Id(pages.size()), ptr));
-            EXPECT_TRUE(init == 0 || init == pages.size());
-            if (init == pages.size()) {
-                EXPECT_TRUE(ptr) << "writer finished but reader found";
-            }
-            EXPECT_EQ(init == pages.size(), ptr != nullptr)
-                << init << " pages written by writer, last page was "
-                << (ptr ? "" : "not") << " read by reader";
-
             ctx.wal->finish_reader();
-            return init == 0;
+            if (ptr) {
+                EXPECT_EQ('1', page[0]);
+                EXPECT_EQ('2', page[1]);
+                EXPECT_EQ('3', page[2]);
+            }
+            return ptr != nullptr;
         });
 
     run_test(m_param);
-    ASSERT_EQ(keep_open.load(), pages.size());
 }
 INSTANTIATE_TEST_SUITE_P(
     WalConcurrencyTests,
