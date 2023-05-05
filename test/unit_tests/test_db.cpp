@@ -1100,6 +1100,7 @@ TEST_F(AlternateWalFilenameTests, WalDirectoryMustExist)
     const auto s = db->new_txn(false, txn);
     ASSERT_TRUE(s.is_io_error())
         << get_status_name(s) << ": " << s.to_string();
+    delete db;
 }
 
 using TestTxnHandler = tools::CustomTxnHandler<std::function<Status(Txn &)>>;

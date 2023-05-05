@@ -108,7 +108,10 @@ class TableTests
 protected:
     static constexpr std::size_t kMaxTables = 5;
 
-    ~TableTests() override = default;
+    ~TableTests() override
+    {
+        delete m_db;
+    }
 
     auto SetUp() -> void override
     {
