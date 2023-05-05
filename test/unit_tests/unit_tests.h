@@ -274,7 +274,8 @@ public:
     {
         volatile void *ptr;
         CHECK_OK(env.new_file(name, Env::kCreate | Env::kReadWrite, m_file));
-        CHECK_OK(m_file->shm_map(0, false, ptr));
+        CHECK_OK(m_file->shm_map(0, true, ptr));
+        CHECK_TRUE(ptr);
         m_ptr = reinterpret_cast<volatile U32 *>(ptr);
     }
 

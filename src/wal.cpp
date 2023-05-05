@@ -655,10 +655,11 @@ private:
     }
     [[nodiscard]] DISABLE_TSAN auto try_index_header(bool &changed) -> bool
     {
+        HashIndexHdr h1 = {};
+        HashIndexHdr h2 = {};
         changed = false;
-        HashIndexHdr h1, h2;
 
-        const auto *hdr = m_index.header();
+        const volatile auto *hdr = m_index.header();
         std::memcpy(&h1, ConstStablePtr(&hdr[0]), sizeof(h1));
         m_db->shm_barrier();
         std::memcpy(&h2, ConstStablePtr(&hdr[1]), sizeof(h2));
