@@ -74,7 +74,7 @@ auto TxnImpl::vacuum_freelist() -> Status
 {
     CALICODB_TRY(m_pager->refresh_state());
     Id pgid(m_pager->page_count());
-    for (;; --pgid.value) {
+    for (; Id::root() < pgid; --pgid.value) {
         bool success;
         CALICODB_TRY(m_schema.vacuum_page(pgid, success));
         if (!success) {

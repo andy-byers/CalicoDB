@@ -4,7 +4,7 @@ The API is based off that of LevelDB, but the backend uses a B<sup>+</sup>-tree 
 
 ## Architecture
 CalicoDB uses a B<sup>+</sup>-tree backed by a write-ahead log (WAL).
-The record store consists of 1 or more B<sup>+</sup>-trees and is located in a file with the same name as the database.
+The record store consists of 0 or more B<sup>+</sup>-trees and is located in a file with the same name as the database.
 Given that a process accessing a CalicoDB database shuts down properly, the record store is all that is left on disk.
 
 While running, however, 2 additional files are maintained:
@@ -94,6 +94,15 @@ This means that pages that exist in the WAL must be read from the WAL, not the d
 The shm file is used to store the WAL index data structure, which provides a way to quickly locate pages in the WAL.
 We also use the shm file to coordinate locks on the WAL.
 
+## Database file format
+The database file consists of 0 or more fixed-size pages.
+A freshly-created database is just an empty database file.
+When the first table is created, the first 3 database pages are initialized in-memory.
+The first page in the file, called the root page, contains the file header and serves as the [schema tree's][#schema] root node.
+The second page is always a [pointer map](#pointer-map) page.
+The third page is the root node of the tree representing the user-created table.
+As the database is modified, additional pages are created by extending the database file.
+
 ## Performance
 CalicoDB runs in a single thread, and is very much I/O-bound as a result.
 In order to make the library fast enough to be useful, several layers of caching and buffering are used.
@@ -105,9 +114,33 @@ When this happens, each unique page in the WAL is written back to the database e
 The pages are also sorted by page number, so each write during the checkpoint is sequential.
 
 ## Concurrency
+Concurrency in CalicoDB is heavily based off of WAL mode SQLite.
+The language used here is similar to that of their WAL documentation, but is likely to differ in some places.
+
 CalicoDB is designed to support both multithread and multiprocess concurrency, with some caveats.
 First, methods on the `DB` and all objects produced from it are not safe to call in a multithreaded context.
 Each thread must have its own `DB`, but threads in the same process can share an `Env`.
 Second, there can only be a single writer at any given time.
 Multiple simultaneous readers are allowed to run while there is an active writer, however.
 This means that if a database is being accessed by multiple threads or processes, certain calls may return with `Status::busy()`.
+
+Concurrency control in CalicoDB relies on a few key mechanisms described here.
+First, locking is coordinated on the shm file, using the `File::shm_lock()` API.
+There are 8 lock bytes available:
+
+| 0       | 1      | 2      | 3       | 4       | 5       | 6       | 7       |
+|:--------|:-------|:-------|:--------|:--------|:--------|:--------|:--------|
+| `Write` | `Ckpt` | `Rcvr` | `Read0` | `Read1` | `Read2` | `Read3` | `Read4` |
+
+Each lock byte can be locked in either `kShmReader` or `kShmWriter` mode.
+As the names imply, `kShmWriter` is an exclusive lock, and `kShmReader` is a shared lock.
+
+Once a new connection has obtained a valid copy of the WAL index header (described below), it will attempt to find a "readmark" to use.
+There are 5 readmarks, each protected by one of the 5 read locks (`Read*` above).
+Readmarks are used by connections to store their current "max frame" value, which is found in the index header.
+New connections may use an existing readmark by taking a reader lock on the corresponding read lock byte.
+, or they will (after taking a writer lock on)
+This indicates to other connections what portion of the WAL is being read by readers attached to that readmark.
+The first readmark always has a value of 0, indicating that readers are ignoring the WAL completely.
+If a connection finds that the WAL is empty, it will attempt to use the first readmark.
+

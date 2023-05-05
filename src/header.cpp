@@ -4,6 +4,7 @@
 
 #include "header.h"
 #include "encoding.h"
+#include "logging.h"
 
 namespace calicodb
 {
@@ -87,6 +88,15 @@ auto NodeHeader::write(char *data) const -> void
     data += sizeof(U16);
 
     *data = static_cast<char>(frag_count);
+}
+
+auto bad_identifier_error(const Slice &bad_identifier) -> Status
+{
+    const auto good_id = FileHeader::kIdentifier;
+    const auto bad_id = bad_identifier.range(0, std::min(bad_identifier.size(), sizeof(good_id)));
+    std::string message("not a CalicoDB database (expected identifier ");
+    append_fmt_string(message, R"("%s\00" but read "%s"))", good_id, escape_string(bad_id).c_str());
+    return Status::invalid_argument(message);
 }
 
 } // namespace calicodb

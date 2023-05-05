@@ -39,29 +39,25 @@ auto DBImpl::open(const Options &sanitized) -> Status
     FileHeader header;
     if (exists) {
         Slice read;
-        char buffer[kPageSize];
+        char buffer[kPageSize] = {};
         CALICODB_TRY(file->read(0, kPageSize, buffer, &read));
         if (read.size() == kPageSize) {
-            exists = header.read(buffer);
-        } else if (read.is_empty()) {
-            exists = false;
-        } else {
-            std::string message("root page is incomplete: read ");
-            append_fmt_string(message, "%zu/%zu bytes", read.size(), kPageSize);
-            return Status::corruption(message);
+            if (!header.read(buffer)) {
+                return bad_identifier_error(read);
+            }
+        } else if (!read.is_empty()) {
+            std::string message("not a CalicoDB database (file is ");
+            append_fmt_string(message, "%zu bytes but should be 0 or a multiple of %zu)", read.size(), kPageSize);
+            return Status::invalid_argument(message);
         }
-    }
-
-    if (!exists) {
-        CALICODB_TRY(file->file_lock(kLockExclusive));
     }
 
     const auto cache_size = std::max(
         sanitized.cache_size, kMinFrameCount * kPageSize);
 
     const Pager::Parameters pager_param = {
-        m_db_filename,
-        m_wal_filename,
+        m_db_filename.c_str(),
+        m_wal_filename.c_str(),
         file,
         m_env,
         m_log,
@@ -74,14 +70,10 @@ auto DBImpl::open(const Options &sanitized) -> Status
 
     if (!exists) {
         logv(m_log, "setting up a new database");
-        if (m_env->remove_file(m_wal_filename).is_ok()) {
+        s = file->file_lock(kLockExclusive);
+        if (s.is_ok() && m_env->remove_file(m_wal_filename).is_ok()) {
             logv(m_log, R"(removed old WAL file at "%s")", m_wal_filename.c_str());
         }
-        m_pager->initialize_root();
-        const auto *root = m_pager->m_bufmgr.root();
-        CALICODB_TRY(m_pager->write_page_to_file(*root));
-        CALICODB_TRY(file->sync());
-
     } else if (sanitized.error_if_exists) {
         return Status::invalid_argument(
             "database \"" + m_db_filename + "\" already exists");

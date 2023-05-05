@@ -39,7 +39,7 @@ auto Pager::purge_page(PageRef &victim) -> void
     m_bufmgr.erase(victim.page_id);
 }
 
-auto Pager::read_page(PageRef &out) -> Status
+auto Pager::read_page(PageRef &out, std::size_t *size_out) -> Status
 {
     CALICODB_EXPECT_NE(m_lock, kLockUnlocked);
 
@@ -52,9 +52,13 @@ auto Pager::read_page(PageRef &out) -> Status
         s = m_wal->read(out.page_id, page);
     }
 
-    if (s.is_ok() && page == nullptr) {
-        // Read the page from the DB file.
-        s = read_page_from_file(out);
+    if (s.is_ok()) {
+        if (page == nullptr) {
+            // Read the page from the DB file.
+            s = read_page_from_file(out, size_out);
+        } else if (size_out) {
+            *size_out = kPageSize;
+        }
     }
 
     if (!s.is_ok()) {
@@ -70,7 +74,7 @@ auto Pager::read_page(PageRef &out) -> Status
     return s;
 }
 
-auto Pager::read_page_from_file(PageRef &ref) const -> Status
+auto Pager::read_page_from_file(PageRef &ref, std::size_t *size_out) const -> Status
 {
     Slice slice;
     const auto offset = ref.page_id.as_index() * kPageSize;
@@ -78,6 +82,9 @@ auto Pager::read_page_from_file(PageRef &ref) const -> Status
     if (s.is_ok()) {
         m_statistics.bytes_read += slice.size();
         std::memset(ref.page + slice.size(), 0, kPageSize - slice.size());
+        if (size_out) {
+            *size_out = slice.size();
+        }
     }
     return s;
 }
@@ -158,6 +165,7 @@ auto Pager::open_wal() -> Status
 {
     const Wal::Parameters param = {
         m_wal_name,
+        m_db_name,
         m_env,
         m_file,
         m_log,
@@ -216,7 +224,10 @@ auto Pager::start_reader() -> Status
 
         // Run a checkpoint if the WAL has grown past some fixed size. May not
         // run to completion.
-        CALICODB_TRY(wal_checkpoint(false));
+        auto s = wal_checkpoint(kCkptPassive);
+        if (!s.is_ok() && !s.is_busy()) {
+            return s;
+        }
 
         bool changed;
         CALICODB_TRY(m_wal->start_reader(changed));
@@ -351,7 +362,7 @@ auto Pager::purge_cached_pages() -> void
     }
 }
 
-auto Pager::checkpoint(bool force) -> Status
+auto Pager::checkpoint(CkptFlags flags) -> Status
 {
     CALICODB_EXPECT_EQ(m_mode, kOpen);
     CALICODB_EXPECT_TRUE(assert_state());
@@ -361,20 +372,19 @@ auto Pager::checkpoint(bool force) -> Status
     CALICODB_TRY(busy_wait(m_busy, [this] {
         return lock_db(kLockShared);
     }));
-    return wal_checkpoint(force);
+    return wal_checkpoint(flags);
 }
 
-auto Pager::wal_checkpoint(bool force) -> Status
+auto Pager::wal_checkpoint(CkptFlags flags) -> Status
 {
     CALICODB_EXPECT_TRUE(m_wal);
 
     // Transfer the WAL contents back to the DB. Note that this call will sync the WAL
     // file before it starts transferring any data back.
     std::size_t dbsize;
-    CALICODB_TRY(m_wal->checkpoint(force, &dbsize));
+    CALICODB_TRY(m_wal->checkpoint(flags, &dbsize));
 
     if (dbsize) {
-        CALICODB_TRY(m_env->resize_file(m_db_name, dbsize * kPageSize));
         set_page_count(dbsize);
     }
     return Status::ok();
@@ -559,11 +569,16 @@ auto Pager::release(Page page) -> void
 
 auto Pager::initialize_root() -> void
 {
+    CALICODB_EXPECT_EQ(0, m_page_count);
+    m_page_count = 1;
+
     FileHeader header;
     auto *root = m_bufmgr.root();
     header.page_count = 1;
     header.write(root->page);
 
+    // TODO: Probably shouldn't have stuff from the tree layer down here. This code serves to initialize
+    //       the root tree.
     NodeHeader root_hdr;
     root_hdr.is_external = true;
     root_hdr.cell_start = U32(kPageSize);
@@ -573,22 +588,26 @@ auto Pager::initialize_root() -> void
 auto Pager::refresh_state() -> Status
 {
     if (m_refresh_root) {
-        CALICODB_TRY(read_page(*m_bufmgr.root()));
+        // Read the most-recent version of the database root page. This copy of the root may be located in
+        // either the WAL, or the database file. If the database file is empty, and the WAL has never been
+        // written, then a blank page is obtained here.
+        std::size_t read_size;
+        CALICODB_TRY(read_page(*m_bufmgr.root(), &read_size));
         auto *root = m_bufmgr.root()->page;
         m_refresh_root = false;
 
         FileHeader header;
-        if (!header.read(root)) {
-            std::string message;
-            const Slice bad_id(root, sizeof(FileHeader::kIdentifier));
-            append_fmt_string(message, R"(expected identifier string "%s\x00" but got "%s")",
-                              FileHeader::kIdentifier, escape_string(bad_id).c_str());
-            return Status::corruption(message);
+        if (header.read(root)) {
+            m_freelist.m_head = Id(header.freelist_head);
+            m_page_count = header.page_count;
+        } else if (read_size == 0) {
+            m_freelist.m_head = Id::null();
+            m_page_count = 0;
+        } else {
+            return bad_identifier_error(Slice(root, kPageSize));
         }
-        m_freelist.m_head = Id(header.freelist_head);
-        m_page_count = header.page_count;
-        //        m_save.freelist_head = m_freelist.m_head;
-        //        m_save.page_count = m_page_count;
+        m_save.freelist_head = m_freelist.m_head;
+        m_save.page_count = m_page_count;
     }
     return Status::ok();
 }

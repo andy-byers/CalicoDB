@@ -53,15 +53,15 @@ public:
     };
 
     struct Parameters {
-        std::string db_name;
-        std::string wal_name;
-        File *db_file = nullptr;
-        Env *env = nullptr;
-        Sink *log = nullptr;
-        DBState *state = nullptr;
-        BusyHandler *busy = nullptr;
-        std::size_t frame_count = 0;
-        bool sync = false;
+        const char *db_name;
+        const char *wal_name;
+        File *db_file;
+        Env *env;
+        Sink *log;
+        DBState *state;
+        BusyHandler *busy;
+        std::size_t frame_count;
+        bool sync;
     };
 
     struct Statistics {
@@ -83,7 +83,7 @@ public:
     auto rollback() -> void;
     auto finish() -> void;
 
-    [[nodiscard]] auto checkpoint(bool force) -> Status;
+    [[nodiscard]] auto checkpoint(CkptFlags flags) -> Status;
     [[nodiscard]] auto allocate(Page &page) -> Status;
     [[nodiscard]] auto destroy(Page page) -> Status;
     [[nodiscard]] auto acquire(Id page_id, Page &page) -> Status;
@@ -91,7 +91,6 @@ public:
     auto release(Page page) -> void;
     auto set_status(const Status &error) const -> Status;
     auto set_page_count(std::size_t page_count) -> void;
-    [[nodiscard]] auto ensure_state() -> Status;
     [[nodiscard]] auto acquire_root() -> Page;
     [[nodiscard]] auto hits() const -> U64;
     [[nodiscard]] auto misses() const -> U64;
@@ -100,6 +99,8 @@ public:
 
     auto purge_cached_pages() -> void;
 
+    auto initialize_root() -> void;
+
 private:
     explicit Pager(const Parameters &param);
     [[nodiscard]] auto dirtylist_contains(const PageRef &ref) const -> bool;
@@ -107,13 +108,12 @@ private:
     [[nodiscard]] auto refresh_state() -> Status;
     auto unlock_db() -> void;
     [[nodiscard]] auto open_wal() -> Status;
-    [[nodiscard]] auto read_page(PageRef &out) -> Status;
-    [[nodiscard]] auto read_page_from_file(PageRef &ref) const -> Status;
+    [[nodiscard]] auto read_page(PageRef &out, std::size_t *size_out = nullptr) -> Status;
+    [[nodiscard]] auto read_page_from_file(PageRef &ref, std::size_t *size_out) const -> Status;
     [[nodiscard]] auto write_page_to_file(const PageRef &entry) const -> Status;
     [[nodiscard]] auto ensure_available_buffer() -> Status;
-    [[nodiscard]] auto wal_checkpoint(bool force) -> Status;
+    [[nodiscard]] auto wal_checkpoint(CkptFlags flags) -> Status;
     [[nodiscard]] auto flush_all_pages() -> Status;
-    auto initialize_root() -> void;
     auto purge_page(PageRef &victim) -> void;
 
     struct SaveState {
@@ -127,8 +127,8 @@ private:
     mutable Mode m_mode = kOpen;
     mutable SaveState m_save;
 
-    const std::string m_db_name;
-    const std::string m_wal_name;
+    const char *m_db_name;
+    const char *m_wal_name;
     const bool m_sync;
 
     Dirtylist m_dirtylist;

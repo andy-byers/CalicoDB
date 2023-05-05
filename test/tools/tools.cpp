@@ -208,7 +208,7 @@ auto FakeWal::read(Id page_id, char *&out) -> Status
     return Status::ok();
 }
 
-auto FakeWal::write(const PageRef *dirty, std::size_t db_size) -> Status
+auto FakeWal::write(PageRef *dirty, std::size_t db_size) -> Status
 {
     for (auto *p = dirty; p; p = p->next) {
         m_pending.insert_or_assign(p->page_id, std::string(p->page, kPageSize));
@@ -223,7 +223,7 @@ auto FakeWal::write(const PageRef *dirty, std::size_t db_size) -> Status
     return Status::ok();
 }
 
-auto FakeWal::checkpoint(bool, std::size_t *db_size) -> Status
+auto FakeWal::checkpoint(CkptFlags, std::size_t *db_size) -> Status
 {
     // TODO: Need the env to resize the file.
     CALICODB_EXPECT_TRUE(m_pending.empty());

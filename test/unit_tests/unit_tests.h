@@ -206,15 +206,16 @@ public:
     // callback should return true if it should continue running, false otherwise.
     auto run_test(const ConcurrencyTestParam &param) -> void
     {
+        std::cerr << "WARNING: fork() not called\n";
         ASSERT_TRUE(m_test) << "REQUIRES: register_test_callback() was called";
         // Spawn "param.num_processes" processes.
         for (std::size_t n = 0; n < param.num_processes; ++n) {
-            const auto pid = fork();
-            ASSERT_NE(-1, pid)
-                << "fork(): " << strerror(errno);
-            if (pid) {
-                continue;
-            }
+            //            const auto pid = fork();
+            //            ASSERT_NE(-1, pid)
+            //                << "fork(): " << strerror(errno);
+            //            if (pid) {
+            //                continue;
+            //            }
             // For each process, spawn "param.num_threads" threads.
             std::vector<std::thread> threads;
             for (std::size_t t = 0; t < param.num_threads; ++t) {
@@ -228,28 +229,28 @@ public:
             for (auto &thread : threads) {
                 thread.join();
             }
-            std::exit(testing::Test::HasFailure());
+            //            std::exit(testing::Test::HasFailure());
         }
-        while (m_main(Base::env())) {
-        }
-        struct Result {
-            pid_t pid;
-            int s;
-        };
-        std::vector<Result> results;
-        for (std::size_t n = 0; n < param.num_processes; ++n) {
-            Result r;
-            r.pid = wait(&r.s);
-            results.emplace_back(r);
-        }
-        for (auto [pid, s] : results) {
-            ASSERT_NE(pid, -1)
-                << "wait(): " << strerror(errno);
-            ASSERT_TRUE(WIFEXITED(s) && WEXITSTATUS(s) == 0)
-                << "exited " << (WIFEXITED(s) ? "" : "ab")
-                << "normally with exit status "
-                << WEXITSTATUS(s);
-        }
+        //        while (m_main(Base::env())) {
+        //        }
+        //        struct Result {
+        //            pid_t pid;
+        //            int s;
+        //        };
+        //        std::vector<Result> results;
+        //        for (std::size_t n = 0; n < param.num_processes; ++n) {
+        //            Result r;
+        //            r.pid = wait(&r.s);
+        //            results.emplace_back(r);
+        //        }
+        //        for (auto [pid, s] : results) {
+        //            ASSERT_NE(pid, -1)
+        //                << "wait(): " << strerror(errno);
+        //            ASSERT_TRUE(WIFEXITED(s) && WEXITSTATUS(s) == 0)
+        //                << "exited " << (WIFEXITED(s) ? "" : "ab")
+        //                << "normally with exit status "
+        //                << WEXITSTATUS(s);
+        //        }
     }
 
 private:

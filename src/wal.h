@@ -17,6 +17,18 @@ class Env;
 class File;
 struct PageRef;
 
+enum CkptFlags {
+    kCkptPassive = 0,
+    kCkptForce = 1,
+    kCkptReset = 2,
+};
+inline auto operator|(CkptFlags lhs, CkptFlags rhs) -> CkptFlags
+{
+    return static_cast<CkptFlags>(
+        static_cast<unsigned>(lhs) |
+        static_cast<unsigned>(rhs));
+}
+
 struct HashIndexHdr {
     U32 version;
     U32 unused0;
@@ -112,12 +124,13 @@ class Wal
 {
 public:
     struct Parameters {
-        std::string filename;
-        Env *env = nullptr;
-        File *db_file = nullptr;
-        Sink *info_log = nullptr;
-        BusyHandler *busy = nullptr;
-        bool sync = false;
+        const char *wal_name;
+        const char *db_name;
+        Env *env;
+        File *db_file;
+        Sink *info_log;
+        BusyHandler *busy;
+        bool sync;
     };
 
     virtual ~Wal();
@@ -127,7 +140,7 @@ public:
     [[nodiscard]] virtual auto close(std::size_t &db_size) -> Status = 0;
 
     // Write as much of the WAL back to the DB as possible
-    [[nodiscard]] virtual auto checkpoint(bool force, std::size_t *db_size) -> Status = 0;
+    [[nodiscard]] virtual auto checkpoint(CkptFlags flags, std::size_t *db_size) -> Status = 0;
 
     // UNLOCKED -> READER
     [[nodiscard]] virtual auto start_reader(bool &changed) -> Status = 0;
@@ -142,7 +155,7 @@ public:
     [[nodiscard]] virtual auto start_writer() -> Status = 0;
 
     // Write new versions of the given pages to the WAL.
-    [[nodiscard]] virtual auto write(const PageRef *dirty, std::size_t db_size) -> Status = 0;
+    [[nodiscard]] virtual auto write(PageRef *dirty, std::size_t db_size) -> Status = 0;
     virtual auto rollback() -> void = 0;
 
     // WRITER -> READER

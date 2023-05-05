@@ -65,6 +65,8 @@ struct NodeHeader {
     bool is_external = false;
 };
 
+auto bad_identifier_error(const Slice &bad_identifier) -> Status;
+
 } // namespace calicodb
 
 #endif // CALICODB_HEADER_H

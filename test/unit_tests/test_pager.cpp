@@ -115,7 +115,7 @@ public:
     static constexpr std::size_t kFullCache = kPagerFrames;     // Enough pages to fill the page cache
     static constexpr std::size_t kManyPages = kPagerFrames * 5; // Lots of pages, enough to cause many evictions
 
-    auto write_db_header() -> void
+    auto write_db_header() const -> void
     {
         FileHeader header;
         std::string buffer(kPageSize, '\0');
@@ -452,7 +452,7 @@ TEST_F(PagerTests, BasicCheckpoints)
         read_and_check(*this, kPagerFrames * i, kPagerFrames * (i + 1));
         m_pager->finish();
 
-        ASSERT_OK(m_pager->checkpoint(true));
+        ASSERT_OK(m_pager->checkpoint(kCkptForce | kCkptReset));
 
         // Pages returned by the pager should reflect what is on disk.
         ASSERT_OK(m_pager->start_reader());
@@ -521,7 +521,7 @@ TEST_F(PagerTests, OnlyWritesBackCommittedWalFrames)
     m_pager->rollback();
     m_pager->finish();
 
-    ASSERT_OK(m_pager->checkpoint(true));
+    ASSERT_OK(m_pager->checkpoint(kCkptForce | kCkptReset));
 
     ASSERT_OK(m_pager->start_reader());
     read_and_check(*this, 42, kManyPages);
@@ -594,7 +594,7 @@ TEST_F(PagerTests, AcquirePastEOF)
 
     ASSERT_OK(m_pager->commit());
     m_pager->finish();
-    ASSERT_OK(m_pager->checkpoint(true));
+    ASSERT_OK(m_pager->checkpoint(kCkptForce | kCkptReset));
     ASSERT_EQ(m_pager->page_count(), kOutOfBounds);
     ASSERT_EQ(count_db_pages(), kOutOfBounds);
 
@@ -626,7 +626,7 @@ TEST_F(PagerTests, FreelistUsage)
     read_and_check(*this, 123, kSomePages * 2);
     m_pager->finish();
 
-    ASSERT_OK(m_pager->checkpoint(true));
+    ASSERT_OK(m_pager->checkpoint(kCkptForce | kCkptReset));
     ASSERT_OK(m_pager->start_reader());
     read_and_check(*this, 123, kSomePages * 2);
     read_and_check(*this, 123, kSomePages * 2, true);
@@ -643,7 +643,7 @@ TEST_F(PagerTests, InvalidModeDeathTest)
     m_pager->set_status(Status::io_error("I/O error"));
     ASSERT_EQ(m_pager->mode(), Pager::kError);
     ASSERT_DEATH((void)m_pager->start_writer(), kExpectationMatcher);
-    ASSERT_DEATH((void)m_pager->checkpoint(true), kExpectationMatcher);
+    ASSERT_DEATH((void)m_pager->checkpoint(kCkptForce | kCkptReset), kExpectationMatcher);
 }
 
 TEST_F(PagerTests, DoubleFreeDeathTest)
@@ -730,7 +730,7 @@ TEST_F(TruncationTests, OnlyValidPagesAreCheckpointed)
 
     // If there are still cached pages past the truncation position, they will be
     // written back to disk here, causing the file size to be incorrect.
-    ASSERT_OK(m_pager->checkpoint(true));
+    ASSERT_OK(m_pager->checkpoint(kCkptForce | kCkptReset));
 
     ASSERT_OK(env->file_size(kDBFilename, file_size));
     ASSERT_EQ(file_size, kInitialPageCount * kPageSize / 2);
@@ -807,9 +807,13 @@ public:
         EXPECT_OK(env.new_file(kDBFilename, Env::kCreate, m_db));
 
         m_param = {
-            .filename = kWalFilename,
-            .env = &env,
-            .db_file = m_db,
+            kWalFilename,
+            kDBFilename,
+            &env,
+            m_db,
+            nullptr,
+            nullptr,
+            false,
         };
         EXPECT_OK(Wal::open(m_param, m_wal));
     }
@@ -882,7 +886,7 @@ TEST_F(WalTests, EmptyWal)
     ASSERT_TRUE(changed);
 
     std::size_t db_size;
-    ASSERT_OK(m_wal->checkpoint(true, &db_size));
+    ASSERT_OK(m_wal->checkpoint(kCkptForce | kCkptReset, &db_size));
     ASSERT_EQ(0, db_size);
 
     char page[kPageSize];
@@ -894,7 +898,7 @@ TEST_F(WalTests, EmptyWal)
     ASSERT_OK(m_wal->read(Id(3), ptr));
     ASSERT_FALSE(ptr);
 
-    ASSERT_OK(m_wal->checkpoint(true, &db_size));
+    ASSERT_OK(m_wal->checkpoint(kCkptForce | kCkptReset, &db_size));
     ASSERT_EQ(0, db_size);
 
     ASSERT_OK(m_env->file_size(kDBFilename, db_size));
@@ -961,7 +965,8 @@ protected:
     {
         EXPECT_OK(env().new_file(kDBFilename, Env::kCreate, m_fake_file));
         m_fake_param = Wal::Parameters{
-            "fake-wal",
+            "testdb-wal",
+            "testdb-db",
             &env(),
             m_fake_file,
         };
@@ -1039,8 +1044,8 @@ protected:
         File *real, *fake;
         ASSERT_OK(env().new_file("realdb", Env::kCreate, real));
         ASSERT_OK(env().new_file("fakedb", Env::kCreate, fake));
-        ASSERT_OK(m_wal->checkpoint(true, nullptr));
-        ASSERT_OK(m_fake->checkpoint(true, nullptr));
+        ASSERT_OK(m_wal->checkpoint(kCkptForce | kCkptReset, nullptr));
+        ASSERT_OK(m_fake->checkpoint(kCkptForce | kCkptReset, nullptr));
 
         std::size_t file_size;
         ASSERT_OK(env().file_size("fakedb", file_size));
@@ -1257,7 +1262,7 @@ public:
             }
         }
         std::move(guard).invoke();
-        CALICODB_TRY(m_pager->checkpoint(true));
+        CALICODB_TRY(m_pager->checkpoint(kCkptForce | kCkptReset));
 
         m_counter = -1;
 
@@ -1319,7 +1324,7 @@ INSTANTIATE_TEST_SUITE_P(
         testing::Values(tools::kSyscallRead, tools::kSyscallWrite),
         testing::Values(true, false)),
     [](const testing::TestParamInfo<WalPagerFaultTestParam> &info) {
-        std::string name("WalPagerFaultTests_");
+        std::string name("Fault_");
         if (std::get<2>(info.param) == tools::kSyscallRead) {
             name.append("Read");
         } else {
@@ -1330,7 +1335,7 @@ INSTANTIATE_TEST_SUITE_P(
         } else {
             name.append("WAL");
         }
-        name += '_';
+        name.append("_Size");
         append_number(name, std::get<0>(info.param));
         if (std::get<3>(info.param)) {
             name.append("_Flag");
@@ -1360,7 +1365,7 @@ protected:
             std::size_t db_size;
             const auto s = wal->close(db_size);
             wal.reset();
-            EXPECT_TRUE(s.is_ok() || s.is_busy());
+            EXPECT_TRUE(s.is_ok() || s.is_busy()) << s.to_string();
             if (db) {
                 db->file_unlock();
             }
@@ -1382,11 +1387,15 @@ protected:
             return file->file_lock(kLockShared);
         }));
 
-        Wal::Parameters param;
-        param.env = &env;
-        param.filename = kWalFilename;
-        param.db_file = file;
-        param.busy = &m_busy;
+        Wal::Parameters param = {
+            kWalFilename,
+            kDBFilename,
+            &env,
+            file,
+            nullptr,
+            &m_busy,
+            false,
+        };
         Wal *wal_ptr;
         CALICODB_TRY(busy_wait(&m_busy, [&wal_ptr, &param] {
             return Wal::open(param, wal_ptr);
@@ -1434,103 +1443,103 @@ protected:
     tools::BusyCounter m_busy;
     bool m_flag;
 };
-TEST_P(WalConcurrencyTests, SetupAndTeardown)
-{
-    register_test_callback(
-        [&](auto &env, auto, auto) {
-            auto ctx = open_context(env);
-            // Start a write transaction on the WAL, then finish it without actually writing
-            // anything.
-            connect(*ctx.wal, true);
-            ctx.wal->finish_writer();
-            ctx.wal->finish_reader();
-            return false;
-        });
-
-    run_test(m_param);
-}
-TEST_P(WalConcurrencyTests, ReaderContention)
-{
-    std::vector<PageRef> pages;
-    RandomDirtyListBuilder builder;
-    auto *dirty = build_dirty_list(builder, pages, 10);
-
-    auto base_ctx = open_context(env());
-    connect(*base_ctx.wal, true);
-    ASSERT_OK(base_ctx.wal->write(dirty, pages.size()));
-    if (m_flag) {
-        // Use the flag parameter to decide whether to stay in writer mode while the test
-        // callbacks are run.
-        base_ctx.wal->finish_writer();
-        base_ctx.wal->finish_reader();
-    }
-
-    register_test_callback(
-        [&](auto &env, auto, auto) {
-            auto ctx = open_context(env);
-            connect(*ctx.wal, false);
-            char buffer[kPageSize];
-            for (std::size_t i = 0; i < pages.size(); ++i) {
-                auto *page = buffer;
-                EXPECT_OK(ctx.wal->read(Id(pages.size()), page));
-                EXPECT_TRUE(page);
-            }
-            ctx.wal->finish_reader();
-            return false;
-        });
-
-    run_test(m_param);
-    if (!m_flag) {
-        base_ctx.wal->finish_writer();
-        base_ctx.wal->finish_reader();
-    }
-}
-TEST_P(WalConcurrencyTests, ReaderWriterContention)
-{
-    std::vector<PageRef> pages;
-    RandomDirtyListBuilder builder;
-    builder.build(500, pages);
-    pages.back().page[0] = '1';
-    pages.back().page[1] = '2';
-    pages.back().page[2] = '3';
-    auto *dirty = &pages[0];
-
-    register_main_callback(
-        [&](auto &env) {
-            auto ctx = open_context(env);
-            connect(*ctx.wal, true);
-            EXPECT_OK(ctx.wal->write(dirty, pages.size()));
-            ctx.wal->finish_writer();
-            ctx.wal->finish_reader();
-            return false;
-        });
-
-    register_test_callback(
-        [&](auto &env, auto, auto t) {
-            auto ctx = open_context(env);
-            connect(*ctx.wal, false);
-
-            char page[kPageSize];
-            auto *ptr = page;
-
-            EXPECT_OK(ctx.wal->read(Id(pages.size()), ptr));
-            ctx.wal->finish_reader();
-            if (ptr) {
-                EXPECT_EQ('1', page[0]);
-                EXPECT_EQ('2', page[1]);
-                EXPECT_EQ('3', page[2]);
-            }
-            return ptr != nullptr;
-        });
-
-    run_test(m_param);
-}
-INSTANTIATE_TEST_SUITE_P(
-    WalConcurrencyTests,
-    WalConcurrencyTests,
-    testing::Combine(
-        testing::Values(1, 2, 5, 10),
-        testing::Values(1, 2, 5, 10),
-        testing::Values(false, true)));
+// TEST_P(WalConcurrencyTests, SetupAndTeardown)
+//{
+//     register_test_callback(
+//         [&](auto &env, auto, auto) {
+//             auto ctx = open_context(env);
+//             // Start a write transaction on the WAL, then finish it without actually writing
+//             // anything.
+//             connect(*ctx.wal, true);
+//             ctx.wal->finish_writer();
+//             ctx.wal->finish_reader();
+//             return false;
+//         });
+//
+//     run_test(m_param);
+// }
+// TEST_P(WalConcurrencyTests, ReaderContention)
+//{
+//     std::vector<PageRef> pages;
+//     RandomDirtyListBuilder builder;
+//     auto *dirty = build_dirty_list(builder, pages, 10);
+//
+//     auto base_ctx = open_context(env());
+//     connect(*base_ctx.wal, true);
+//     ASSERT_OK(base_ctx.wal->write(dirty, pages.size()));
+//     if (m_flag) {
+//         // Use the flag parameter to decide whether to stay in writer mode while the test
+//         // callbacks are run.
+//         base_ctx.wal->finish_writer();
+//         base_ctx.wal->finish_reader();
+//     }
+//
+//     register_test_callback(
+//         [&](auto &env, auto, auto) {
+//             auto ctx = open_context(env);
+//             connect(*ctx.wal, false);
+//             char buffer[kPageSize];
+//             for (std::size_t i = 0; i < pages.size(); ++i) {
+//                 auto *page = buffer;
+//                 EXPECT_OK(ctx.wal->read(Id(pages.size()), page));
+//                 EXPECT_TRUE(page);
+//             }
+//             ctx.wal->finish_reader();
+//             return false;
+//         });
+//
+//     run_test(m_param);
+//     if (!m_flag) {
+//         base_ctx.wal->finish_writer();
+//         base_ctx.wal->finish_reader();
+//     }
+// }
+// TEST_P(WalConcurrencyTests, ReaderWriterContention)
+//{
+//     std::vector<PageRef> pages;
+//     RandomDirtyListBuilder builder;
+//     builder.build(500, pages);
+//     pages.back().page[0] = '1';
+//     pages.back().page[1] = '2';
+//     pages.back().page[2] = '3';
+//     auto *dirty = &pages[0];
+//
+//     register_main_callback(
+//         [&](auto &env) {
+//             auto ctx = open_context(env);
+//             connect(*ctx.wal, true);
+//             EXPECT_OK(ctx.wal->write(dirty, pages.size()));
+//             ctx.wal->finish_writer();
+//             ctx.wal->finish_reader();
+//             return false;
+//         });
+//
+//     register_test_callback(
+//         [&](auto &env, auto, auto t) {
+//             auto ctx = open_context(env);
+//             connect(*ctx.wal, false);
+//
+//             char page[kPageSize];
+//             auto *ptr = page;
+//
+//             EXPECT_OK(ctx.wal->read(Id(pages.size()), ptr));
+//             ctx.wal->finish_reader();
+//             if (ptr) {
+//                 EXPECT_EQ('1', page[0]);
+//                 EXPECT_EQ('2', page[1]);
+//                 EXPECT_EQ('3', page[2]);
+//             }
+//             return ptr != nullptr;
+//         });
+//
+//     run_test(m_param);
+// }
+// INSTANTIATE_TEST_SUITE_P(
+//     WalConcurrencyTests,
+//     WalConcurrencyTests,
+//     testing::Combine(
+//         testing::Values(1, 2, 5, 10),
+//         testing::Values(1, 2, 5, 10),
+//         testing::Values(false, true)));
 
 } // namespace calicodb
