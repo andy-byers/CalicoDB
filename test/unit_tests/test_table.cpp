@@ -229,6 +229,7 @@ public:
         for (auto *table : m_tables) {
             delete table;
         }
+        delete m_txn;
         delete m_db;
     }
 
@@ -262,6 +263,8 @@ public:
             tools::expect_db_contains(*m_tables[i], m_records[i]);
             delete m_tables[i];
         }
+        delete m_txn;
+        m_txn = nullptr;
         delete m_db;
         m_db = nullptr;
 

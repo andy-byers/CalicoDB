@@ -13,7 +13,7 @@ namespace calicodb
 {
 
 Bufmgr::Bufmgr(std::size_t frame_count)
-    : m_buffer(new(std::align_val_t{kPageSize}) char[kPageSize * frame_count]()),
+    : m_buffer(new (std::align_val_t{kPageSize}) char[kPageSize * frame_count]()),
       m_frame_count(frame_count)
 {
     for (std::size_t i = 1; i < m_frame_count; ++i) {
@@ -25,7 +25,7 @@ Bufmgr::Bufmgr(std::size_t frame_count)
 
 Bufmgr::~Bufmgr()
 {
-    operator delete[](m_buffer, std::align_val_t{kPageSize});
+    operator delete[] (m_buffer, std::align_val_t{kPageSize});
 }
 
 auto Bufmgr::size() const -> std::size_t

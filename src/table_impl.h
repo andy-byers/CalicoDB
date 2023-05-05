@@ -35,7 +35,7 @@ public:
         return *m_tree;
     }
 
-public:
+private:
     const Status *m_status;
     Tree **m_tree;
     bool m_readonly;

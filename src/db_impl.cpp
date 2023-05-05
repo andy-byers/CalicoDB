@@ -17,11 +17,8 @@ auto DBImpl::open(const Options &sanitized) -> Status
     File *file = nullptr;
     auto exists = false;
     ScopeGuard guard = [&file, this] {
-        if (file) {
-            file->file_unlock();
-            if (m_pager == nullptr) {
-                delete file;
-            }
+        if (m_pager == nullptr) {
+            delete file;
         }
     };
 
@@ -55,6 +52,10 @@ auto DBImpl::open(const Options &sanitized) -> Status
         }
     }
 
+    if (!exists) {
+        CALICODB_TRY(file->file_lock(kLockExclusive));
+    }
+
     const auto cache_size = std::max(
         sanitized.cache_size, kMinFrameCount * kPageSize);
 
@@ -65,14 +66,17 @@ auto DBImpl::open(const Options &sanitized) -> Status
         m_env,
         m_log,
         &m_state,
-        nullptr,
+        m_busy,
         (cache_size + kPageSize - 1) / kPageSize,
+        sanitized.sync,
     };
     CALICODB_TRY(Pager::open(pager_param, m_pager));
 
     if (!exists) {
         logv(m_log, "setting up a new database");
-        CALICODB_TRY(file->file_lock(kLockExclusive));
+        if (m_env->remove_file(m_wal_filename).is_ok()) {
+            logv(m_log, R"(removed old WAL file at "%s")", m_wal_filename.c_str());
+        }
         m_pager->initialize_root();
         const auto *root = m_pager->m_bufmgr.root();
         CALICODB_TRY(m_pager->write_page_to_file(*root));
@@ -95,20 +99,18 @@ DBImpl::DBImpl(const Options &options, const Options &sanitized, std::string fil
       m_db_filename(std::move(filename)),
       m_wal_filename(sanitized.wal_filename),
       m_owns_env(options.env == nullptr),
-      m_owns_log(options.info_log == nullptr),
-      m_sync(options.sync)
+      m_owns_log(options.info_log == nullptr)
 {
 }
 
 DBImpl::~DBImpl()
 {
     if (m_pager) {
-        auto s = m_pager->close();
+        const auto s = m_pager->close();
         if (!s.is_ok()) {
             logv(m_log, "failed to close pager: %s", s.to_string().c_str());
         }
     }
-
     delete m_pager;
 
     if (m_owns_log) {

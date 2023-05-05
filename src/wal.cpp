@@ -10,7 +10,6 @@
 #include "logging.h"
 #include "scope_guard.h"
 #include <atomic>
-#include <mutex>
 
 namespace calicodb
 {
@@ -30,15 +29,36 @@ static constexpr std::size_t kReadmarkNotUsed = 0xFFFFFFFF;
 static constexpr std::size_t kWriteLock = 0;
 static constexpr std::size_t kNotWriteLock = 1;
 static constexpr std::size_t kCkptLock = 1;
-// static constexpr std::size_t kRecoverLock = 2; TODO
 static constexpr std::size_t kReaderCount = File::kShmLockCount - 3;
 #define READ_LOCK(i) static_cast<std::size_t>((i) + 3)
 
 struct CkptInfo {
+    // Maximum frame number that has been written back to the database file. Readers
+    // act like frames below this number do not exist.
     U32 backfill;
+
+    // 5 "readmarks" corresponding to the 5 read locks in the following field. The
+    // first readmark always has a value of 0. The remaining readmarks store maximum
+    // frame numbers for the various readers attached to the WAL. If a reader is
+    // using readmark 0, it will ignore the WAL and read pages directly from the
+    // database. This implementation allows 5 versions of the database to be viewed
+    // at any given time. More than 1 reader can attach to each readmark.
     U32 readmark[kReaderCount];
+
+    // 8 lock bytes (never read or written):
+    //    +-------+-------+-------+-------+
+    //    | Write | Ckpt  | Rcvr  | Read0 |
+    //    +-------+-------+-------+-------+
+    //    | Read1 | Read2 | Read3 | Read4 |
+    //    +-------+-------+-------+-------+
     U8 locks[File::kShmLockCount];
+
+    // Maximum frame number that a checkpointer attempted to write back to the
+    // database file. This value is set before the `backfill` field, so that
+    // checkpointer failures can be detected.
     U32 backfill_attempted;
+
+    // Reserved for future expansion.
     U32 reserved;
 };
 static_assert(std::is_pod_v<CkptInfo>);
@@ -51,7 +71,6 @@ static constexpr std::size_t kIndexHdrSize = sizeof(HashIndexHdr) * 2 + sizeof(C
 static_assert(std::is_pod_v<HashIndexHdr>);
 static_assert((kIndexHdrSize & 0b11) == 0);
 
-static constexpr U32 kHashPrime = 383;
 static constexpr U32 kNIndexHashes = 8192;
 static constexpr U32 kNIndexKeys = 4096;
 static constexpr U32 kNIndexKeys0 =
@@ -64,6 +83,7 @@ static constexpr auto index_group_number(Value value) -> U32
 
 static auto index_hash(Key key) -> Hash
 {
+    static constexpr U32 kHashPrime = 383;
     return key * kHashPrime & (kNIndexHashes - 1);
 }
 static constexpr auto next_index_hash(Hash hash) -> Hash
@@ -203,7 +223,7 @@ auto HashIndex::assign(Key key, Value value) -> Status
     // works because frames are written in monotonically increasing order.
     auto collisions = relative;
 
-    // Find the first unused hash slot. Collisions are handled by incrementing the key until an
+    // Find the first unused hash slot. Collisions are handled by incrementing the hash until an
     // unused slot is found, wrapping back to the start if the end is hit. There are always more
     // hash slots than frames, so this search will always terminate.
     for (; ATOMIC_LOAD(&group.hash[key_hash]); key_hash = next_index_hash(key_hash)) {
@@ -211,8 +231,7 @@ auto HashIndex::assign(Key key, Value value) -> Status
             return too_many_collisions(key);
         }
     }
-
-    ATOMIC_STORE(&group.keys[relative - 1], key);
+    group.keys[relative - 1] = key;
     ATOMIC_STORE(&group.hash[key_hash], static_cast<Hash>(relative));
     return Status::ok();
 }
@@ -349,10 +368,10 @@ HashIterator::HashIterator(HashIndex &source)
 
 HashIterator::~HashIterator()
 {
-    operator delete(m_state, std::align_val_t{alignof(State)});
+    operator delete (m_state, std::align_val_t{alignof(State)});
 }
 
-auto HashIterator::init() -> Status
+auto HashIterator::init(U32 backfill) -> Status
 {
     const auto *const hdr = m_source->m_hdr;
 
@@ -374,14 +393,18 @@ auto HashIterator::init() -> Status
         (m_num_groups - 1) * sizeof(State::Group) + // Additional groups.
         last_value * sizeof(Hash);                  // Indices to sort.
     m_state = reinterpret_cast<State *>(
-        operator new(state_size, std::align_val_t{alignof(State)}));
+        operator new (state_size, std::align_val_t{alignof(State)}));
     std::memset(m_state, 0, state_size);
 
     // Temporary buffer for the mergesort routine. Freed before returning from this routine.
     auto *temp = new Hash[last_value < kNIndexKeys ? last_value : kNIndexKeys]();
 
-    for (U32 i = 0; i < m_num_groups; ++i) {
-        CALICODB_TRY(m_source->map_group(i, true));
+    Status s;
+    for (U32 i = index_group_number(backfill + 1); i < m_num_groups; ++i) {
+        s = m_source->map_group(i, true);
+        if (!s.is_ok()) {
+            break;
+        }
         HashGroup group(i, m_source->m_groups[i]);
 
         U32 group_size = kNIndexKeys;
@@ -404,7 +427,7 @@ auto HashIterator::init() -> Status
         m_state->groups[i].index = index;
     }
     delete[] temp;
-    return Status::ok();
+    return s;
 }
 
 auto HashIterator::read(Entry &out) -> bool
@@ -516,11 +539,6 @@ public:
     [[nodiscard]] auto write(const PageRef *dirty, std::size_t db_size) -> Status override;
     [[nodiscard]] auto checkpoint(bool force, std::size_t *db_size) -> Status override;
 
-    [[nodiscard]] auto sync() -> Status override
-    {
-        return m_wal->sync();
-    }
-
     auto rollback() -> void override
     {
         CALICODB_EXPECT_TRUE(m_writer_lock);
@@ -533,6 +551,7 @@ public:
 
     [[nodiscard]] auto close(std::size_t &db_size) -> Status override
     {
+        db_size = 0;
         // NOTE: Caller will unlock the database file. Only consider removing the WAL if this
         // is the last active connection. If there are other connections not currently running
         // transactions, the next read-write transaction will create a new WAL.
@@ -543,12 +562,13 @@ public:
             s = checkpoint(true, &db_size);
             if (s.is_ok() && m_hdr.max_frame == 0) {
                 s = m_env->remove_file(m_filename);
+                m_db->shm_unmap(true);
+                m_db = nullptr;
+                logv(m_log, "unlink WAL: %s", get_status_name(s));
             }
+        } else if (s.is_busy()) {
+            return Status::ok();
         }
-        delete m_wal;
-        m_wal = nullptr;
-        m_db->shm_unmap(true);
-        m_db = nullptr;
         return s;
     }
 
@@ -584,12 +604,12 @@ public:
         // We have the writer lock, so no other connection will write the index header while
         // std::memcmp() is running here.
         if (0 != std::memcmp(&m_hdr, ConstStablePtr(m_index.header()), sizeof(HashIndexHdr))) {
-            // Another connection has written since this read transaction was started. This
-            // is not allowed (this connection now has an outdated snapshot, meaning the local
-            // "max frame" value is no longer correct).
+            // Another connection has written since the read transaction was started. This
+            // is not allowed (this connection now has an outdated snapshot, meaning the
+            // local "max frame" value is no longer correct).
             unlock_exclusive(kWriteLock, 1);
             m_writer_lock = false;
-            return make_retry_status();
+            return Status::busy("stale snapshot");
         }
         return Status::ok();
     }
@@ -665,8 +685,6 @@ private:
     [[nodiscard]] auto read_index_header(bool &changed) -> Status
     {
         CALICODB_TRY(m_index.map_group(0, m_writer_lock));
-
-        // If map_group(0) succeeds, then
         CALICODB_EXPECT_FALSE(m_index.m_groups.empty());
         CALICODB_EXPECT_TRUE(m_index.m_groups[0] || !m_writer_lock);
 
@@ -868,7 +886,7 @@ private:
         return kWalHdrSize + (frame - 1) * (WalFrameHdr::kSize + kPageSize);
     }
 
-    [[nodiscard]] auto transfer_contents(File &db_file, std::size_t *db_size) -> Status;
+    [[nodiscard]] auto transfer_contents(std::size_t *db_size) -> Status;
     [[nodiscard]] auto rewrite_checksums(U32 end) -> Status;
     [[nodiscard]] auto recover_index() -> Status;
     [[nodiscard]] auto decode_frame(const char *frame, WalFrameHdr &out) -> bool;
@@ -879,6 +897,7 @@ private:
     HashIndex m_index;
 
     std::string m_filename;
+    bool m_sync_on_commit = false;
 
     // Storage for a single WAL frame.
     std::string m_frame;
@@ -888,6 +907,7 @@ private:
 
     Env *m_env = nullptr;
     File *m_db = nullptr;
+    Sink *m_log = nullptr;
     File *m_wal = nullptr;
     BusyHandler *m_busy = nullptr;
 
@@ -910,21 +930,8 @@ auto Wal::open(const Parameters &param, Wal *&out) -> Status
     File *wal_file;
     auto s = param.env->new_file(param.filename, Env::kCreate, wal_file);
     if (s.is_ok()) {
+        logv(param.info_log, R"(opened WAL at "%s")", param.filename.c_str());
         out = new WalImpl(param, *wal_file);
-    }
-    return s;
-}
-
-auto Wal::close(Wal *&wal, std::size_t &db_size) -> Status
-{
-    // Indicates that a commit frame was not located.
-    db_size = 0;
-
-    Status s;
-    if (wal) {
-        s = wal->close(db_size);
-        delete wal;
-        wal = nullptr;
     }
     return s;
 }
@@ -934,9 +941,11 @@ Wal::~Wal() = default;
 WalImpl::WalImpl(const Parameters &param, File &wal_file)
     : m_index(m_hdr, *param.db_file),
       m_filename(param.filename),
+      m_sync_on_commit(param.sync),
       m_frame(WalFrameHdr::kSize + kPageSize, '\0'),
       m_env(param.env),
       m_db(param.db_file),
+      m_log(param.info_log),
       m_wal(&wal_file),
       m_busy(param.busy)
 {
@@ -945,6 +954,9 @@ WalImpl::WalImpl(const Parameters &param, File &wal_file)
 WalImpl::~WalImpl()
 {
     delete m_wal;
+    if (m_db) {
+        m_db->shm_unmap(false);
+    }
 }
 
 auto WalImpl::open() -> Status
@@ -985,13 +997,12 @@ auto WalImpl::rewrite_checksums(U32 end) -> Status
 
 auto WalImpl::recover_index() -> Status
 {
-    CALICODB_EXPECT_TRUE(m_ckpt_lock == 0 || m_ckpt_lock == 1);
     CALICODB_EXPECT_EQ(kNotWriteLock, kWriteLock + 1);
     CALICODB_EXPECT_EQ(kCkptLock, kNotWriteLock);
     CALICODB_EXPECT_TRUE(m_writer_lock);
-
     m_hdr = {};
 
+    // Lock bytes
     const auto lock = kNotWriteLock + m_ckpt_lock;
     CALICODB_TRY(lock_exclusive(lock, READ_LOCK(0) - lock));
 
@@ -1230,11 +1241,13 @@ auto WalImpl::write(const PageRef *dirty, std::size_t db_size) -> Status
         // pager has logic to make sure of this (the root page is forcibly written if no pages
         // are dirty).
         CALICODB_EXPECT_TRUE(dirty);
+        if (m_sync_on_commit) {
+            CALICODB_TRY(m_wal->sync());
+        }
         m_hdr.page_count = static_cast<U32>(db_size);
         ++m_hdr.change;
         write_index_header();
     }
-
     return Status::ok();
 }
 
@@ -1250,14 +1263,6 @@ auto WalImpl::checkpoint(bool force, std::size_t *db_size) -> Status
         return Status::ok();
     }
     CALICODB_TRY(m_wal->sync());
-
-    ScopeGuard guard = [this] {
-        if (m_ckpt_lock) {
-            unlock_exclusive(kCkptLock, 1);
-            m_ckpt_lock = false;
-            finish_writer();
-        }
-    };
 
     // Take exclusive locks on the checkpoint and writer bytes. This ensures that no other
     // connection will attempt a checkpoint or write new frames.
@@ -1278,21 +1283,29 @@ auto WalImpl::checkpoint(bool force, std::size_t *db_size) -> Status
         s = read_index_header(changed);
     }
     if (s.is_ok() && m_hdr.max_frame) {
-        s = transfer_contents(*m_db, db_size);
+        s = transfer_contents(db_size);
     }
     if (changed) {
         m_hdr = {};
     }
+    finish_writer();
+    if (m_ckpt_lock) {
+        unlock_exclusive(kCkptLock, 1);
+        m_ckpt_lock = false;
+    }
     return s;
 }
 
-auto WalImpl::transfer_contents(File &db_file, std::size_t *db_size) -> Status
+auto WalImpl::transfer_contents(std::size_t *db_size) -> Status
 {
+    CALICODB_EXPECT_TRUE(m_writer_lock);
+    CALICODB_EXPECT_TRUE(m_ckpt_lock);
     Status s;
 
     volatile auto *info = get_ckpt_info();
     auto max_safe_frame = m_hdr.max_frame;
-    if (ATOMIC_LOAD(&info->backfill) < max_safe_frame) {
+    auto max_pgno = m_hdr.page_count;
+    if (info->backfill < max_safe_frame) {
         for (std::size_t i = 1; i < kReaderCount; ++i) {
             const auto y = ATOMIC_LOAD(&info->readmark[i]);
             if (y < max_safe_frame) {
@@ -1301,9 +1314,8 @@ auto WalImpl::transfer_contents(File &db_file, std::size_t *db_size) -> Status
                     return lock_exclusive(READ_LOCK(i), 1);
                 });
                 if (s.is_ok()) {
-                    ATOMIC_STORE(
-                        &info->readmark[i],
-                        i == 1 ? max_safe_frame : kReadmarkNotUsed);
+                    const U32 mark = i == 1 ? max_safe_frame : kReadmarkNotUsed;
+                    ATOMIC_STORE(&info->readmark[i], mark);
                     unlock_exclusive(READ_LOCK(i), 1);
                 } else if (s.is_busy()) {
                     max_safe_frame = y;
@@ -1313,10 +1325,9 @@ auto WalImpl::transfer_contents(File &db_file, std::size_t *db_size) -> Status
             }
         }
 
-        if (ATOMIC_LOAD(&info->backfill) < max_safe_frame) {
+        if (info->backfill < max_safe_frame) {
             HashIterator itr(m_index);
-            CALICODB_TRY(itr.init());
-
+            CALICODB_TRY(itr.init(info->backfill));
             CALICODB_TRY(busy_wait(m_busy, [this] {
                 // Lock reader lock 0. This prevents other connections from ignoring the WAL and
                 // reading all pages from the database file. New readers should find a readmark
@@ -1330,12 +1341,17 @@ auto WalImpl::transfer_contents(File &db_file, std::size_t *db_size) -> Status
                 unlock_exclusive(READ_LOCK(0), 1);
             };
 
-            ATOMIC_STORE(&info->backfill_attempted, max_safe_frame);
+            const auto backfill = info->backfill;
+            info->backfill_attempted = max_safe_frame;
 
             for (;;) {
                 HashIterator::Entry entry;
                 if (!itr.read(entry)) {
                     break;
+                }
+                if (entry.value <= backfill || entry.value > max_safe_frame || entry.key > max_pgno) {
+                    // already_backfilled || still_needed_by_reader || truncated
+                    continue;
                 }
 
                 CALICODB_TRY(m_wal->read_exact(
@@ -1343,7 +1359,7 @@ auto WalImpl::transfer_contents(File &db_file, std::size_t *db_size) -> Status
                     kPageSize,
                     m_frame.data()));
 
-                CALICODB_TRY(db_file.write(
+                CALICODB_TRY(m_db->write(
                     (entry.key - 1) * kPageSize,
                     Slice(m_frame.data(), kPageSize)));
             }
@@ -1358,7 +1374,6 @@ auto WalImpl::transfer_contents(File &db_file, std::size_t *db_size) -> Status
             ++m_ckpt_number;
             m_min_frame = 0;
             m_hdr.max_frame = 0;
-
             CALICODB_TRY(busy_wait(m_busy, [this] {
                 return lock_exclusive(READ_LOCK(1), kReaderCount - 1);
             }));

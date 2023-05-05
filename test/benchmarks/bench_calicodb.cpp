@@ -6,6 +6,12 @@
 #include "tools.h"
 #include <benchmark/benchmark.h>
 
+// This simulates normal transaction behavior, where m_txn is destroyed and DB::new_txn() is called after
+// each commit. This is what happens if the DB::view()/DB::update() API is used. It's much faster to keep
+// the transaction object around and just call Txn::commit() and Txn::rollback() as needed, but this is
+// bad for concurrency.
+#define RESTART_ON_COMMIT 0
+
 enum AccessType : int64_t {
     kSequential,
     kRandom,
@@ -34,9 +40,6 @@ class Benchmark final
     static constexpr std::size_t kNumRecords = 10'000;
     calicodb::Table *m_table;
     calicodb::Txn *m_txn;
-    // This simulates normal transaction behavior, where m_txn is destroyed and DB::new_txn() is called after
-    // each commit. This is what happens if the DB::view()/DB::update() API is used.
-    bool m_restart_on_commit = true;
 
 public:
     explicit Benchmark(const Parameters &param = {})
@@ -171,9 +174,9 @@ private:
     {
         if (m_counters[0] % m_param.commit_interval == m_param.commit_interval - 1) {
             CHECK_OK(m_txn->commit());
-            if (m_restart_on_commit) {
-                restart_txn();
-            }
+#if RESTART_ON_COMMIT
+            restart_txn();
+#endif
         }
     }
 

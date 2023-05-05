@@ -18,7 +18,7 @@
 #ifdef CALICODB_TEST
 #define CALICODB_EXPENSIVE_CHECKS
 #endif // CALICODB_TEST
-#endif // NDEBUG
+#endif // !NDEBUG
 
 #define CALICODB_EXPECT_TRUE(expr) CALICODB_EXPECT_(expr, __FILE__, __LINE__)
 #define CALICODB_EXPECT_FALSE(expr) CALICODB_EXPECT_TRUE(!(expr))
@@ -88,13 +88,13 @@ enum : int { kLockUnlocked = 0 };
     return "OK";
 }
 
-[[nodiscard]] inline auto make_retry_status() -> Status
+[[nodiscard]] inline auto make_retry_status(const std::string &reason = "") -> Status
 {
-    return Status::busy("retry");
+    return Status::busy("retry" + (reason.empty() ? "" : " (" + reason + ')'));
 }
 [[nodiscard]] inline auto is_retry_status(const Status &s) -> bool
 {
-    return s.is_busy() && s.to_string() == "retry";
+    return s.is_busy() && s.to_string().find("retry") == 0;
 }
 
 struct Id {

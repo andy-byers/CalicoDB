@@ -799,22 +799,22 @@ private:
     std::default_random_engine m_rng;
 };
 
-class WalTestBase : public EnvTestHarness<PosixEnv>
+class WalTestBase
 {
-protected:
-    WalTestBase()
+public:
+    explicit WalTestBase(Env &env)
     {
-        EXPECT_OK(env().new_file(kDBFilename, Env::kCreate, m_db));
+        EXPECT_OK(env.new_file(kDBFilename, Env::kCreate, m_db));
 
         m_param = {
             .filename = kWalFilename,
-            .env = &env(),
+            .env = &env,
             .db_file = m_db,
         };
         EXPECT_OK(Wal::open(m_param, m_wal));
     }
 
-    ~WalTestBase() override
+    virtual ~WalTestBase()
     {
         close();
     }
@@ -822,24 +822,55 @@ protected:
     auto close() -> void
     {
         ASSERT_OK(m_db->file_lock(kLockShared));
-        ASSERT_OK(m_db->file_lock(kLockExclusive));
         std::size_t db_size;
-        ASSERT_OK(Wal::close(m_wal, db_size));
-        ASSERT_EQ(m_wal, nullptr);
+        ASSERT_OK(m_wal->close(db_size));
+        delete m_wal;
         delete m_db;
+        m_wal = nullptr;
+        m_db = nullptr;
     }
 
-    File *m_db = nullptr;
+    auto wal() -> Wal &
+    {
+        return *m_wal;
+    }
+    auto db() -> File &
+    {
+        return *m_db;
+    }
+
+protected:
     Wal *m_wal = nullptr;
+    File *m_db = nullptr;
     Wal::Parameters m_param;
 };
 
 class WalTests
-    : public WalTestBase,
+    : public EnvTestHarness<PosixEnv>,
+      public WalTestBase,
       public testing::Test
 {
-public:
+protected:
+    explicit WalTests()
+        : WalTestBase(env())
+    {
+    }
+
     ~WalTests() override = default;
+
+    auto write_pages(std::size_t n) -> void
+    {
+        std::vector<PageRef> dirty;
+        m_builder.build(n, dirty);
+        ASSERT_OK(m_wal->write(&dirty.front(), n));
+    }
+
+    auto open_connection() -> WalTestBase
+    {
+        return WalTestBase(env());
+    }
+
+    RandomDirtyListBuilder m_builder;
 };
 
 TEST_F(WalTests, EmptyWal)
@@ -854,13 +885,14 @@ TEST_F(WalTests, EmptyWal)
     ASSERT_OK(m_wal->checkpoint(true, &db_size));
     ASSERT_EQ(0, db_size);
 
-    char *page;
-    ASSERT_OK(m_wal->read(Id(1), page));
-    ASSERT_FALSE(page);
-    ASSERT_OK(m_wal->read(Id(2), page));
-    ASSERT_FALSE(page);
-    ASSERT_OK(m_wal->read(Id(3), page));
-    ASSERT_FALSE(page);
+    char page[kPageSize];
+    auto *ptr = page;
+    ASSERT_OK(m_wal->read(Id(1), ptr));
+    ASSERT_FALSE(ptr);
+    ASSERT_OK(m_wal->read(Id(2), ptr));
+    ASSERT_FALSE(ptr);
+    ASSERT_OK(m_wal->read(Id(3), ptr));
+    ASSERT_FALSE(ptr);
 
     ASSERT_OK(m_wal->checkpoint(true, &db_size));
     ASSERT_EQ(0, db_size);
@@ -869,21 +901,69 @@ TEST_F(WalTests, EmptyWal)
     ASSERT_EQ(0, db_size);
 }
 
+TEST_F(WalTests, RecoversIndex)
+{
+    ASSERT_OK(m_db->file_lock(kLockShared));
+
+    bool changed;
+    ASSERT_OK(m_wal->start_reader(changed));
+    ASSERT_TRUE(changed);
+
+    ASSERT_OK(m_wal->start_writer());
+    write_pages(100);
+    m_wal->finish_writer();
+    m_wal->finish_reader();
+
+    // Writing frames from this connection won't cause a change to be reported.
+    ASSERT_OK(m_wal->start_reader(changed));
+    ASSERT_FALSE(changed);
+    m_wal->finish_reader();
+
+    // Make the 2 WAL index headers not equal.
+    volatile void *void_ptr;
+    ASSERT_OK(m_db->shm_map(0, false, void_ptr));
+    auto *ptr = reinterpret_cast<volatile char *>(void_ptr);
+    ++ptr[0];
+
+    // The index header was corrupted, so it had to be recovered. This is considered
+    // a change.
+    ASSERT_OK(m_wal->start_reader(changed));
+    ASSERT_TRUE(changed);
+    m_wal->finish_reader();
+
+    // Invalidate the checksums.
+    ++ptr[0];
+    ++ptr[48];
+
+    ASSERT_OK(m_wal->start_reader(changed));
+    ASSERT_TRUE(changed);
+
+    char pages[kPageSize * 100];
+    for (std::size_t i = 0; i < 100; ++i) {
+        auto *p = pages + kPageSize * i;
+        ASSERT_OK(m_wal->read(Id(i + 1), p));
+        ASSERT_TRUE(p);
+    }
+    ASSERT_EQ(Slice(pages, m_builder.data().size()), m_builder.data());
+    m_wal->finish_reader();
+}
+
 class WalParamTests
-    : public WalTestBase,
+    : public EnvTestHarness<PosixEnv>,
+      public WalTestBase,
       public testing::TestWithParam<
           std::tuple<std::size_t, std::size_t, std::size_t>>
 {
 protected:
     explicit WalParamTests()
-        : m_rng(42)
+        : WalTestBase(env()),
+          m_rng(42)
     {
-        File *file;
-        EXPECT_OK(env().new_file(kDBFilename, Env::kCreate, file));
+        EXPECT_OK(env().new_file(kDBFilename, Env::kCreate, m_fake_file));
         m_fake_param = Wal::Parameters{
             "fake-wal",
             &env(),
-            file,
+            m_fake_file,
         };
         m_fake = new tools::FakeWal(m_fake_param);
     }
@@ -891,6 +971,7 @@ protected:
     ~WalParamTests() override
     {
         delete m_fake;
+        delete m_fake_file;
     }
 
     auto write_records(std::size_t num_pages, bool commit)
@@ -939,7 +1020,9 @@ protected:
     {
         ASSERT_OK(m_db->file_lock(kLockShared));
         std::size_t db_size;
-        ASSERT_OK(Wal::close(m_wal, db_size));
+        ASSERT_OK(m_wal->close(db_size));
+        delete m_wal;
+        m_wal = nullptr;
 
         // These tests use a single connection. This means that, since Wal::close()
         // returned OK, the whole WAL was written back to the database and the WAL
@@ -1025,6 +1108,7 @@ protected:
     RandomDirtyListBuilder m_builder;
     RandomDirtyListBuilder m_saved;
     tools::FakeWal *m_fake = nullptr;
+    File *m_fake_file = nullptr;
 };
 
 TEST_P(WalParamTests, WriteAndReadBack)
@@ -1274,8 +1358,8 @@ protected:
         ~TestContext()
         {
             std::size_t db_size;
-            auto *wal_ptr = wal.release();
-            const auto s = Wal::close(wal_ptr, db_size);
+            const auto s = wal->close(db_size);
+            wal.reset();
             EXPECT_TRUE(s.is_ok() || s.is_busy());
             if (db) {
                 db->file_unlock();

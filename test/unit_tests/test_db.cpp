@@ -200,6 +200,79 @@ TEST_F(BasicDatabaseTests, ClampsBadOptionValues)
     open_and_check();
 }
 
+TEST_F(BasicDatabaseTests, WritesToFiles)
+{
+    ASSERT_FALSE(env().file_exists(m_dbname));
+    ASSERT_FALSE(env().file_exists(m_dbname + kDefaultWalSuffix));
+    ASSERT_FALSE(env().file_exists(m_dbname + kDefaultShmSuffix));
+
+    DB *db;
+    ASSERT_OK(DB::open(options, m_dbname, db));
+
+    // Database file exists and is 1 page in size.
+    ASSERT_TRUE(env().file_exists(m_dbname));
+    auto data = tools::read_file_to_string(env(), m_dbname);
+    ASSERT_EQ(kPageSize, data.size());
+
+    // WAL and shm are not opened until the first transaction starts.
+    ASSERT_FALSE(env().file_exists(m_dbname + kDefaultWalSuffix));
+    ASSERT_FALSE(env().file_exists(m_dbname + kDefaultShmSuffix));
+
+    Txn *txn;
+    ASSERT_OK(db->new_txn(false, txn));
+
+    // WAL and shm are created when the first transaction starts, even if it is read-only. The shm file
+    // is needed to coordinate locks.
+    ASSERT_TRUE(env().file_exists(m_dbname + kDefaultWalSuffix));
+    ASSERT_TRUE(env().file_exists(m_dbname + kDefaultShmSuffix));
+
+    delete txn;
+    ASSERT_OK(db->new_txn(true, txn));
+
+    ASSERT_TRUE(env().file_exists(m_dbname + kDefaultWalSuffix));
+    ASSERT_TRUE(env().file_exists(m_dbname + kDefaultShmSuffix));
+
+    std::size_t wal_size;
+    ASSERT_OK(env().file_size(m_dbname + kDefaultWalSuffix, wal_size));
+    ASSERT_EQ(wal_size, 0);
+
+    Table *table;
+    ASSERT_OK(txn->new_table(TableOptions(), "table", table));
+    // These writes get put on the same WAL frame as the new table root.
+    ASSERT_OK(table->put("k1", "val"));
+    ASSERT_OK(table->put("k2", "val"));
+    ASSERT_OK(table->put("k3", "val"));
+    ASSERT_OK(txn->commit());
+
+    ASSERT_OK(env().file_size(m_dbname + kDefaultWalSuffix, wal_size));
+    ASSERT_EQ(wal_size, 32 + (kPageSize + 24) * 3);
+
+    // These writes need to go on a new frame, so that readers can access
+    // the version of page 3 at the last commit.
+    ASSERT_OK(table->put("k4", "val"));
+    ASSERT_OK(table->put("k5", "val"));
+    ASSERT_OK(table->put("k6", "val"));
+    ASSERT_OK(txn->commit());
+
+    ASSERT_OK(env().file_size(m_dbname + kDefaultWalSuffix, wal_size));
+    ASSERT_EQ(wal_size, 32 + (kPageSize + 24) * 4);
+
+    // Transactions that get rolled back shouldn't cause writes to the WAL
+    // (unless a page had to be evicted from the page cache, which doesn't
+    // happen here).
+    ASSERT_OK(table->put("k7", "val"));
+    ASSERT_OK(table->put("k8", "val"));
+    ASSERT_OK(table->put("k9", "val"));
+    txn->rollback();
+
+    ASSERT_OK(env().file_size(m_dbname + kDefaultWalSuffix, wal_size));
+    ASSERT_EQ(wal_size, 32 + (kPageSize + 24) * 4);
+
+    delete table;
+    delete txn;
+    delete db;
+}
+
 // CAUTION: PRNG state does not persist between calls.
 static auto insert_random_groups(DB &db, std::size_t num_groups, std::size_t group_size)
 {
@@ -683,6 +756,7 @@ TEST_P(DbFatalErrorTests, RecoversFromVacuumFailure)
         CHECK_OK(table->erase(cursor->key()));
         cursor->seek_first();
     }
+    delete cursor;
     counter = saved;
 
     assert_special_error(txn->vacuum());
@@ -708,7 +782,7 @@ TEST_P(DbFatalErrorTests, RecoversFromVacuumFailure)
 
     std::size_t file_size;
     ASSERT_OK(env().file_size(kDBFilename, file_size));
-    ASSERT_EQ(file_size, reinterpret_cast<const DBImpl *>(db->db)->TEST_pager().page_count() * kPageSize);
+    ASSERT_EQ(file_size, db_impl(db->db)->TEST_pager().page_count() * kPageSize);
 }
 
 INSTANTIATE_TEST_SUITE_P(
@@ -1122,7 +1196,7 @@ TEST_P(DBConcurrencyTests, Open)
 {
     register_test_callback(
         [this](auto &, auto, auto) {
-            DB *db;
+            DB *db = nullptr;
             EXPECT_OK(DB::open(m_options, kDBFilename, db));
             delete db;
             return false;
@@ -1133,7 +1207,7 @@ TEST_P(DBConcurrencyTests, StartReaders)
 {
     register_test_callback(
         [this](auto &, auto, auto) {
-            DB *db;
+            DB *db = nullptr;
             EXPECT_OK(DB::open(m_options, kDBFilename, db));
             TestTxnHandler handler(empty_txn);
             EXPECT_OK(db->view(handler));
@@ -1162,7 +1236,7 @@ TEST_P(DBConcurrencyTests, ReaderWriterConsistency)
                     // written. Each value should be identical.
                     EXPECT_OK(table_get(*table, i, u));
                     EXPECT_GT(u.number(), 0);
-                    EXPECT_EQ(u, v);
+                    EXPECT_EQ(u, v) << u.number() << " != " << v.number();
                 }
             }
 
@@ -1195,6 +1269,7 @@ TEST_P(DBConcurrencyTests, ReaderWriterConsistency)
                 const tools::NumericKey<> key(i);
                 EXPECT_OK(table->put(key.string(), value.string()));
             }
+            delete table;
             return Status::ok();
         });
 }

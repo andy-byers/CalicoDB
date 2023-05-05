@@ -100,14 +100,14 @@ public:
         delete m_env;
     }
 
-    [[nodiscard]] auto env() -> EnvType &
+    [[nodiscard]] auto env() -> tools::TestEnv &
     {
-        return reinterpret_cast<EnvType &>(*m_env->target());
+        return *m_env;
     }
 
-    [[nodiscard]] auto env() const -> const EnvType &
+    [[nodiscard]] auto env() const -> const tools::TestEnv &
     {
-        return reinterpret_cast<const EnvType &>(*m_env->target());
+        return *m_env;
     }
 
 protected:

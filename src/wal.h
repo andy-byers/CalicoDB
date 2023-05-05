@@ -78,7 +78,7 @@ public:
 
     // Create an iterator over the contents of the provided hash index.
     explicit HashIterator(HashIndex &index);
-    [[nodiscard]] auto init() -> Status;
+    [[nodiscard]] auto init(U32 backfill = 0) -> Status;
 
     // Return the next hash entry.
     //
@@ -115,14 +115,16 @@ public:
         std::string filename;
         Env *env = nullptr;
         File *db_file = nullptr;
+        Sink *info_log = nullptr;
         BusyHandler *busy = nullptr;
+        bool sync = false;
     };
 
     virtual ~Wal();
 
     // Open or create a WAL file called "filename".
     [[nodiscard]] static auto open(const Parameters &param, Wal *&out) -> Status;
-    [[nodiscard]] static auto close(Wal *&wal, std::size_t &db_size) -> Status;
+    [[nodiscard]] virtual auto close(std::size_t &db_size) -> Status = 0;
 
     // Write as much of the WAL back to the DB as possible
     [[nodiscard]] virtual auto checkpoint(bool force, std::size_t *db_size) -> Status = 0;
@@ -141,7 +143,6 @@ public:
 
     // Write new versions of the given pages to the WAL.
     [[nodiscard]] virtual auto write(const PageRef *dirty, std::size_t db_size) -> Status = 0;
-    [[nodiscard]] virtual auto sync() -> Status = 0;
     virtual auto rollback() -> void = 0;
 
     // WRITER -> READER
@@ -151,9 +152,6 @@ public:
     virtual auto finish_reader() -> void = 0;
 
     [[nodiscard]] virtual auto statistics() const -> WalStatistics = 0;
-
-private:
-    [[nodiscard]] virtual auto close(std::size_t &db_size) -> Status = 0;
 };
 
 template <class Callback>

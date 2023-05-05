@@ -23,35 +23,35 @@
 #include <string>
 #include <unordered_map>
 
-#define CHECK_TRUE(cond)                             \
-    do {                                             \
-        if (!(cond)) {                               \
-            std::fputs(#cond " is false\n", stderr); \
-            std::abort();                            \
-        }                                            \
+#define CHECK_TRUE(cond)                                 \
+    do {                                                 \
+        if (!(cond)) {                                   \
+            std::cerr << "expected `" << #cond << "`\n"; \
+            std::abort();                                \
+        }                                                \
     } while (0)
 
 #define CHECK_FALSE(cond) \
     CHECK_TRUE(!(cond))
 
-#define CHECK_OK(expr)                                                         \
-    do {                                                                       \
-        if (auto assert_s = (expr); !assert_s.is_ok()) {                       \
-            std::fprintf(                                                      \
-                stderr,                                                        \
-                "expected \"" #expr " == Status::ok()\" but got \"%s\": %s\n", \
-                get_status_name(assert_s),                                     \
-                assert_s.to_string().c_str());                                 \
-            std::abort();                                                      \
-        }                                                                      \
+#define CHECK_OK(expr)                                                                        \
+    do {                                                                                      \
+        if (auto assert_s = (expr); !assert_s.is_ok()) {                                      \
+            std::fprintf(                                                                     \
+                stderr,                                                                       \
+                "expected `(" #expr ").is_ok()` but got \"%s\" status with message \"%s\"\n", \
+                get_status_name(assert_s),                                                    \
+                assert_s.to_string().c_str());                                                \
+            std::abort();                                                                     \
+        }                                                                                     \
     } while (0)
 
-#define CHECK_EQ(lhs, rhs)                        \
-    do {                                          \
-        if ((lhs) != (rhs)) {                     \
-            std::fputs(#lhs " != " #rhs, stderr); \
-            std::abort();                         \
-        }                                         \
+#define CHECK_EQ(lhs, rhs)                                                                             \
+    do {                                                                                               \
+        if ((lhs) != (rhs)) {                                                                          \
+            std::cerr << "expected `" << #lhs "` (" << (lhs) << ") == `" #rhs "` (" << (rhs) << ")\n"; \
+            std::abort();                                                                              \
+        }                                                                                              \
     } while (0)
 
 namespace calicodb::tools
@@ -139,7 +139,6 @@ public:
     [[nodiscard]] auto write(const PageRef *dirty, std::size_t db_size) -> Status override;
     [[nodiscard]] auto checkpoint(bool, std::size_t *) -> Status override;
     [[nodiscard]] auto statistics() const -> WalStatistics override;
-    [[nodiscard]] auto sync() -> Status override { return Status::ok(); }
     [[nodiscard]] auto close(std::size_t &) -> Status override;
     [[nodiscard]] auto start_reader(bool &) -> Status override { return Status::ok(); }
     [[nodiscard]] auto start_writer() -> Status override { return Status::ok(); }
@@ -241,6 +240,30 @@ auto fill_db(Table &table, RandomGenerator &random, std::size_t num_records, std
 auto expect_db_contains(DB &db, const std::string &tablename, const std::map<std::string, std::string> &map) -> void;
 auto expect_db_contains(Txn &txn, const std::string &tablename, const std::map<std::string, std::string> &map) -> void;
 auto expect_db_contains(const Table &table, const std::map<std::string, std::string> &map) -> void;
+
+[[nodiscard]] inline auto view_db(const std::string &filename, calicodb::TxnHandler &handler, const Options &options = {}) -> calicodb::Status
+{
+    calicodb::DB *db;
+    auto s = calicodb::DB::open(options, filename, db);
+    if (s.is_ok()) {
+        s = db->view(handler);
+        delete db;
+    }
+    return s;
+}
+
+[[nodiscard]] inline auto update_db(const std::string &filename, calicodb::TxnHandler &handler, const Options &options = {}) -> calicodb::Status
+{
+    calicodb::DB *db;
+    auto s = calicodb::DB::open(options, filename, db);
+    if (s.is_ok()) {
+        do {
+            s = db->update(handler);
+        } while (s.is_busy());
+        delete db;
+    }
+    return s;
+}
 
 template <class Callback>
 class CustomTxnHandler : public TxnHandler

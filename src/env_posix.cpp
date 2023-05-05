@@ -926,7 +926,7 @@ auto PosixFile::file_lock(FileLockMode mode) -> Status
 
     if (mode == kLockShared && inode->lock == kLockShared) {
         // Caller wants a shared lock, and a shared lock is already held by another thread.
-        // Grant the mode. This block is just to avoid actually calling out to fcntl(),
+        // Grant the lock. This block is just to avoid actually calling out to fcntl(),
         // since we already know this lock is compatible.
         CALICODB_EXPECT_EQ(local_lock, kLockUnlocked);
         CALICODB_EXPECT_GT(inode->nlocks, 0);

@@ -97,36 +97,15 @@ auto Pager::open(const Parameters &param, Pager *&out) -> Status
     CALICODB_EXPECT_GE(param.frame_count, kMinFrameCount);
     CALICODB_EXPECT_LE(param.frame_count * kPageSize, kMaxCacheSize);
 
-    Status s;
-    auto *p = new Pager(param);
-//    if (param.env->file_exists(param.wal_name)) {
-//        // If a WAL exists, open it now and attempt a checkpoint. The first connection to
-//        // open the database after a failed checkpoint will need to run it to completion
-//        // before any other pages are read from the database file (we don't necessarily
-//        // know if some writes made it to disk already, so we could end up reading a
-//        // corrupted database image).
-//        s = p->open_wal();
-//        if (s.is_ok()) {
-//            s = p->wal_checkpoint(true);
-//            if (s.is_busy()) {
-//                // Checkpoint may be blocked by other connections.
-//                s = Status::ok();
-//            }
-//        }
-//    }
-    if (s.is_ok()) {
-        out = p;
-    } else {
-        out = nullptr;
-        delete p;
-    }
-    return s;
+    out = new Pager(param);
+    return Status::ok();
 }
 
 Pager::Pager(const Parameters &param)
     : m_state(param.state),
       m_db_name(param.db_name),
       m_wal_name(param.wal_name),
+      m_sync(param.sync),
       m_freelist(*this, Id::null()),
       m_bufmgr(param.frame_count),
       m_log(param.log),
@@ -141,6 +120,7 @@ Pager::Pager(const Parameters &param)
 
 Pager::~Pager()
 {
+    delete m_wal;
     delete m_file;
 }
 
@@ -180,6 +160,9 @@ auto Pager::open_wal() -> Status
         m_wal_name,
         m_env,
         m_file,
+        m_log,
+        m_busy,
+        m_sync,
     };
     auto s = Wal::open(param, m_wal);
     if (s.is_ok()) {
@@ -195,18 +178,18 @@ auto Pager::open_wal() -> Status
 auto Pager::close() -> Status
 {
     finish();
-    std::size_t page_count;
-    auto s = busy_wait(m_busy, [this] {
+    CALICODB_TRY(busy_wait(m_busy, [this] {
         return lock_db(kLockShared);
-    });
-    CALICODB_TRY(Wal::close(m_wal, page_count));
-    if (s.is_ok() && page_count) {
-        s = m_env->resize_file(m_db_name, page_count * kPageSize);
+    }));
+    std::size_t page_count = 0;
+    if (m_wal) {
+        CALICODB_TRY(m_wal->close(page_count));
+    }
+    if (page_count) {
+        CALICODB_TRY(m_env->resize_file(m_db_name, page_count * kPageSize));
         m_page_count = page_count;
     }
-    if (s.is_ok()) {
-        s = m_file->sync();
-    }
+    auto s = m_file->sync();
     finish();
     return s;
 }
@@ -240,12 +223,14 @@ auto Pager::start_reader() -> Status
 
         if (changed) {
             purge_cached_pages();
-            CALICODB_TRY(refresh_state());
         }
-
-        std::move(guard).cancel();
         m_mode = kRead;
-        m_save = kRead;
+        m_refresh_root = true;
+        CALICODB_TRY(refresh_state());
+        std::move(guard).cancel();
+        m_save.mode = kRead;
+        m_save.page_count = m_page_count;
+        m_save.freelist_head = m_freelist.m_head;
     }
     return Status::ok();
 }
@@ -260,7 +245,7 @@ auto Pager::start_writer() -> Status
     if (m_mode == kRead) {
         CALICODB_TRY(m_wal->start_writer());
         m_mode = kWrite;
-        m_save = kWrite;
+        m_save.mode = kWrite;
     }
     return Status::ok();
 }
@@ -269,10 +254,7 @@ auto Pager::commit() -> Status
 {
     CALICODB_EXPECT_NE(m_mode, kOpen);
     CALICODB_EXPECT_TRUE(assert_state());
-
-    if (m_refresh_root) {
-        set_status(refresh_state());
-    }
+    set_status(refresh_state());
 
     // Report prior errors again.
     CALICODB_TRY(m_state->status);
@@ -302,12 +284,13 @@ auto Pager::commit() -> Status
         s = flush_all_pages();
         if (s.is_ok()) {
             CALICODB_EXPECT_FALSE(m_dirtylist.head);
-            m_saved_count = m_page_count;
+            m_save.freelist_head = m_freelist.m_head;
+            m_save.page_count = m_page_count;
         }
         set_status(s);
     }
     if (s.is_ok()) {
-        m_mode = m_save;
+        m_mode = m_save.mode;
     }
     return s;
 }
@@ -320,12 +303,20 @@ auto Pager::rollback() -> void
 
     if (m_mode >= kDirty) {
         m_wal->rollback();
-        m_page_count = m_saved_count;
         m_state->status = Status::ok();
+        m_freelist.m_head = m_save.freelist_head;
+        m_page_count = m_save.page_count;
+        m_mode = m_save.mode;
         purge_cached_pages();
     }
     m_refresh_root = true;
-    m_mode = m_save;
+
+    // State variables values should match what they were at the start of the
+    // transaction, or after the last commit. If this is a read-only transaction,
+    // none of these values are allowed to change.
+    CALICODB_EXPECT_EQ(m_freelist.m_head, m_save.freelist_head);
+    CALICODB_EXPECT_EQ(m_page_count, m_save.page_count);
+    CALICODB_EXPECT_EQ(m_mode, m_save.mode);
 }
 
 auto Pager::finish() -> void
@@ -337,12 +328,14 @@ auto Pager::finish() -> void
         m_wal->finish_reader();
     }
     m_mode = kOpen;
-    m_save = kOpen;
+    m_save = {};
     unlock_db();
 }
 
 auto Pager::purge_cached_pages() -> void
 {
+    logv(m_log, "pager purge");
+
     PageRef *victim;
     while ((victim = m_bufmgr.next_victim())) {
         CALICODB_EXPECT_NE(victim, nullptr);
@@ -384,7 +377,7 @@ auto Pager::wal_checkpoint(bool force) -> Status
         CALICODB_TRY(m_env->resize_file(m_db_name, dbsize * kPageSize));
         set_page_count(dbsize);
     }
-    return m_file->sync();
+    return Status::ok();
 }
 
 auto Pager::flush_all_pages() -> Status
@@ -506,9 +499,7 @@ auto Pager::acquire(Id page_id, Page &page) -> Status
 {
     CALICODB_EXPECT_GE(m_mode, kRead);
     CALICODB_EXPECT_FALSE(page_id.is_null());
-    if (m_refresh_root) {
-        CALICODB_TRY(refresh_state());
-    }
+    CALICODB_TRY(refresh_state());
 
     PageRef *ref;
     if (page_id.is_root()) {
@@ -581,21 +572,24 @@ auto Pager::initialize_root() -> void
 
 auto Pager::refresh_state() -> Status
 {
-    CALICODB_TRY(read_page(*m_bufmgr.root()));
-    auto *root = m_bufmgr.root()->page;
-    m_refresh_root = false;
+    if (m_refresh_root) {
+        CALICODB_TRY(read_page(*m_bufmgr.root()));
+        auto *root = m_bufmgr.root()->page;
+        m_refresh_root = false;
 
-    FileHeader header;
-    if (!header.read(root)) {
-        std::string message;
-        const Slice bad_id(root, sizeof(FileHeader::kIdentifier));
-        append_fmt_string(message, R"(expected identifier string "%s\x00" but got "%s")",
-                          FileHeader::kIdentifier, escape_string(bad_id).c_str());
-        return Status::corruption(message);
+        FileHeader header;
+        if (!header.read(root)) {
+            std::string message;
+            const Slice bad_id(root, sizeof(FileHeader::kIdentifier));
+            append_fmt_string(message, R"(expected identifier string "%s\x00" but got "%s")",
+                              FileHeader::kIdentifier, escape_string(bad_id).c_str());
+            return Status::corruption(message);
+        }
+        m_freelist.m_head = Id(header.freelist_head);
+        m_page_count = header.page_count;
+        //        m_save.freelist_head = m_freelist.m_head;
+        //        m_save.page_count = m_page_count;
     }
-    m_freelist.m_head = Id(header.freelist_head);
-    m_page_count = header.page_count;
-    m_saved_count = header.page_count;
     return Status::ok();
 }
 

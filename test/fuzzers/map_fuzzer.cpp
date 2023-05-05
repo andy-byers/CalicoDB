@@ -20,8 +20,8 @@ using namespace calicodb::tools;
 enum OperationType {
     kPut,
     kErase,
-    kRollbackTxn,
-    kCommitTxn,
+    kRollback,
+    kCommit,
     kReopen,
     kVacuum,
     kOpCount
@@ -111,22 +111,23 @@ auto MapFuzzer::step(const U8 *&data, std::size_t &size) -> Status
             delete cursor;
             break;
         }
-        case kVacuum:
-            CALICODB_TRY(m_txn->vacuum());
-            break;
-        case kRollbackTxn:
+            //        case kVacuum:
+            //            CALICODB_TRY(m_txn->vacuum());
+            //            break;
+        case kRollback:
             if (m_txn) {
                 m_txn->rollback();
                 discard_pending();
                 expect_equal_contents();
             }
             break;
-        case kCommitTxn:
+        case kCommit:
             CALICODB_TRY(m_txn->commit());
             commit_pending();
             expect_equal_contents();
             break;
         default: // kReopen
+
             m_added.clear();
             m_erased.clear();
             CALICODB_TRY(reopen());

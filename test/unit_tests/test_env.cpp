@@ -485,7 +485,6 @@ TEST_F(EnvShmTests, MemoryIsShared)
     b.write(File::kShmRegionSize - 1, "bar");
     ASSERT_EQ("bar", b.read(File::kShmRegionSize - 1, 3));
 }
-
 TEST_F(EnvShmTests, ShmIsTruncated)
 {
     auto *shm = m_helper.open_file(EnvWithFiles::kSameName, Env::kCreate);
@@ -502,7 +501,6 @@ TEST_F(EnvShmTests, ShmIsTruncated)
     shm->shm_unmap(true);
     delete shm;
 }
-
 TEST_F(EnvShmTests, LockCompatibility)
 {
     auto *a = m_helper.open_file(EnvWithFiles::kSameName, Env::kCreate);
@@ -545,6 +543,10 @@ TEST_F(EnvShmTests, LockCompatibility)
     a->shm_unmap(true);
     b->shm_unmap(true);
     c->shm_unmap(true);
+
+    delete a;
+    delete b;
+    delete c;
 }
 
 static auto busy_wait_file_lock(File &file, bool is_writer) -> void
@@ -561,6 +563,7 @@ static auto busy_wait_file_lock(File &file, bool is_writer) -> void
                 std::this_thread::yield();
                 file.file_unlock();
             } else {
+                std::this_thread::sleep_for(std::chrono::microseconds{100});
                 return;
             }
         }
@@ -680,25 +683,25 @@ public:
     auto run_test(const Test &test)
     {
         for (std::size_t n = 0; n < kNumEnvs; ++n) {
-//            const auto pid = fork();
-//            ASSERT_NE(-1, pid) << strerror(errno);
-//            if (pid) {
-//                continue;
-//            }
+            //            const auto pid = fork();
+            //            ASSERT_NE(-1, pid) << strerror(errno);
+            //            if (pid) {
+            //                continue;
+            //            }
 
             test(n);
-//            std::exit(testing::Test::HasFailure());
+            //            std::exit(testing::Test::HasFailure());
         }
-//        for (std::size_t n = 0; n < kNumEnvs; ++n) {
-//            int s;
-//            const auto pid = wait(&s);
-//            ASSERT_NE(pid, -1)
-//                << "wait failed: " << strerror(errno);
-//            ASSERT_TRUE(WIFEXITED(s) && WEXITSTATUS(s) == 0)
-//                << "exited " << (WIFEXITED(s) ? "" : "ab")
-//                << "normally with exit status "
-//                << WEXITSTATUS(s);
-//        }
+        //        for (std::size_t n = 0; n < kNumEnvs; ++n) {
+        //            int s;
+        //            const auto pid = wait(&s);
+        //            ASSERT_NE(pid, -1)
+        //                << "wait failed: " << strerror(errno);
+        //            ASSERT_TRUE(WIFEXITED(s) && WEXITSTATUS(s) == 0)
+        //                << "exited " << (WIFEXITED(s) ? "" : "ab")
+        //                << "normally with exit status "
+        //                << WEXITSTATUS(s);
+        //        }
     }
 
     template <class IsWriter>

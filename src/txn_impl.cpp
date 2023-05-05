@@ -72,6 +72,7 @@ auto TxnImpl::vacuum() -> Status
 
 auto TxnImpl::vacuum_freelist() -> Status
 {
+    CALICODB_TRY(m_pager->refresh_state());
     Id pgid(m_pager->page_count());
     for (;; --pgid.value) {
         bool success;

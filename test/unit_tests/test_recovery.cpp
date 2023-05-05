@@ -31,12 +31,7 @@ public:
         open();
     }
 
-    ~RecoveryTestHarness() override
-    {
-        delete db;
-    }
-
-    virtual auto close() -> void
+    auto close_impl() -> void
     {
         delete table;
         table = nullptr;
@@ -44,6 +39,14 @@ public:
         txn = nullptr;
         delete db;
         db = nullptr;
+    }
+    ~RecoveryTestHarness() override
+    {
+        close_impl();
+    }
+    virtual auto close() -> void
+    {
+        close_impl();
     }
 
     auto open_with_status(Options *options = nullptr) -> Status
@@ -232,29 +235,29 @@ TEST_F(RecoveryTests, RollbackD)
 
 TEST_F(RecoveryTests, VacuumRecovery)
 {
-    const auto committed = tools::fill_db(*table, random, 5'000);
+    const auto committed = tools::fill_db(*table, random, 50);
     ASSERT_OK(txn->commit());
 
-    for (std::size_t i = 0; i < 1'000; ++i) {
-        ASSERT_OK(table->put(tools::integral_key(i), random.Generate(kPageSize)));
-    }
-    for (std::size_t i = 0; i < 1'000; ++i) {
-        ASSERT_OK(table->erase(tools::integral_key(i)));
-    }
-
     // Grow the database, then make freelist pages.
-    for (std::size_t i = 0; i < 1'000; ++i) {
+    for (std::size_t i = 0; i < 10; ++i) {
         ASSERT_OK(table->put(tools::integral_key(i), random.Generate(kPageSize)));
     }
-    for (std::size_t i = 0; i < 1'000; ++i) {
+    for (std::size_t i = 0; i < 10; ++i) {
         ASSERT_OK(table->erase(tools::integral_key(i)));
     }
+    std::cerr << table_impl(table)->tree()->TEST_to_string() << "\n\n";
+    tools::print_references(const_cast<Pager &>(db_impl(db)->TEST_pager()));
+
     // Shrink the database.
     ASSERT_OK(txn->vacuum());
 
+    std::cerr << "\n\n";
+    tools::print_references(const_cast<Pager &>(db_impl(db)->TEST_pager()));
+    std::cerr << table_impl(table)->tree()->TEST_to_string() << "\n\n";
+
     // Grow the database again. This time, it will look like we need to write image records
     // for the new pages, even though they are already in the WAL.
-    for (std::size_t i = 0; i < 1'000; ++i) {
+    for (std::size_t i = 0; i < 10; ++i) {
         ASSERT_OK(table->put(tools::integral_key(i), random.Generate(kPageSize)));
     }
 

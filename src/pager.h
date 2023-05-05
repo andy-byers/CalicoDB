@@ -42,6 +42,7 @@ class Pager final
 public:
     friend class DBImpl;
     friend class Tree;
+    friend class TxnImpl;
 
     enum Mode {
         kOpen,
@@ -60,6 +61,7 @@ public:
         DBState *state = nullptr;
         BusyHandler *busy = nullptr;
         std::size_t frame_count = 0;
+        bool sync = false;
     };
 
     struct Statistics {
@@ -89,7 +91,7 @@ public:
     auto release(Page page) -> void;
     auto set_status(const Status &error) const -> Status;
     auto set_page_count(std::size_t page_count) -> void;
-    [[nodiscard]] auto refresh_state() -> Status;
+    [[nodiscard]] auto ensure_state() -> Status;
     [[nodiscard]] auto acquire_root() -> Page;
     [[nodiscard]] auto hits() const -> U64;
     [[nodiscard]] auto misses() const -> U64;
@@ -102,6 +104,7 @@ private:
     explicit Pager(const Parameters &param);
     [[nodiscard]] auto dirtylist_contains(const PageRef &ref) const -> bool;
     [[nodiscard]] auto lock_db(FileLockMode mode) -> Status;
+    [[nodiscard]] auto refresh_state() -> Status;
     auto unlock_db() -> void;
     [[nodiscard]] auto open_wal() -> Status;
     [[nodiscard]] auto read_page(PageRef &out) -> Status;
@@ -113,21 +116,27 @@ private:
     auto initialize_root() -> void;
     auto purge_page(PageRef &victim) -> void;
 
+    struct SaveState {
+        Id freelist_head;
+        std::size_t page_count = 0;
+        Mode mode = kOpen;
+    };
+
     mutable Statistics m_statistics;
     mutable DBState *m_state = nullptr;
     mutable Mode m_mode = kOpen;
-    mutable Mode m_save = kOpen;
+    mutable SaveState m_save;
 
-    std::string m_db_name;
-    std::string m_wal_name;
+    const std::string m_db_name;
+    const std::string m_wal_name;
+    const bool m_sync;
+
     Dirtylist m_dirtylist;
     Freelist m_freelist;
     Bufmgr m_bufmgr;
 
-    // True if the in-memory root page needs to be refreshed, false otherwise. Starts
-    // out as true, so the root is read from wherever it is (DB or WAL) on the first
-    // call to acquire().
-    bool m_refresh_root = true;
+    // True if the in-memory root page needs to be refreshed, false otherwise.
+    bool m_refresh_root = false;
 
     Sink *m_log = nullptr;
     File *m_file = nullptr;
@@ -135,7 +144,6 @@ private:
     Wal *m_wal = nullptr;
     BusyHandler *m_busy = nullptr;
     std::size_t m_page_count = 0;
-    std::size_t m_saved_count = 0;
     int m_lock = kLockUnlocked;
 };
 

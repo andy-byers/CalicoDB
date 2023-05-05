@@ -58,7 +58,6 @@ private:
     const std::string m_wal_filename;
     const bool m_owns_env;
     const bool m_owns_log;
-    const bool m_sync;
 };
 
 inline auto db_impl(DB *db) -> DBImpl *

@@ -76,14 +76,14 @@ auto read_file_to_string(Env &env, const std::string &filename) -> std::string
 {
     std::size_t file_size;
     const auto s = env.file_size(filename, file_size);
-    if (s.is_not_found()) {
+    if (s.is_io_error()) {
         // File was unlinked.
         return "";
     }
     std::string buffer(file_size, '\0');
 
     File *file;
-    CHECK_OK(env.new_file(filename, Env::kCreate, file));
+    CHECK_OK(env.new_file(filename, Env::kReadOnly, file));
     CHECK_OK(file->read_exact(0, file_size, buffer.data()));
     delete file;
 

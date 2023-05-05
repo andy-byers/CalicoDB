@@ -10,6 +10,35 @@
 namespace calicodb::tools
 {
 
+class StreamSink : public Sink
+{
+    mutable std::mutex *m_mu;
+    std::ostream *m_os;
+
+    auto sink_and_flush(const Slice &in) -> void
+    {
+        m_os->write(in.data(), static_cast<std::streamsize>(in.size()));
+        m_os->flush();
+    }
+
+public:
+    explicit StreamSink(std::ostream &os, std::mutex *mu = nullptr)
+        : m_os(&os),
+          m_mu(mu)
+    {
+    }
+
+    auto sink(const Slice &in) -> void override
+    {
+        if (m_mu) {
+            std::lock_guard lock(*m_mu);
+            sink_and_flush(in);
+        } else {
+            sink_and_flush(in);
+        }
+    }
+};
+
 class FakeEnv : public Env
 {
 public:

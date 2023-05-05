@@ -5,7 +5,6 @@
 // Runs normal database operations.
 
 #include "ops_fuzzer.h"
-#include "db_impl.h"
 #include "tree.h"
 
 namespace calicodb
