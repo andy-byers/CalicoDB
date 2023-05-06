@@ -32,7 +32,6 @@ auto Schema::corrupted_root_id(const std::string &table_name, const Slice &value
     message.append(escape_string(value));
     auto s = Status::corruption(message);
     if (m_status->is_ok()) {
-        //
         *m_status = s;
     }
     return s;
@@ -40,6 +39,13 @@ auto Schema::corrupted_root_id(const std::string &table_name, const Slice &value
 
 auto Schema::new_table(const TableOptions &options, const std::string &name, Table *&out) -> Status
 {
+    if (m_pager->page_count() == 0) {
+        if (m_write) {
+            m_pager->initialize_root();
+        } else {
+            return Status::invalid_argument("table \"" + name + "\" does not exist");
+        }
+    }
     std::string value;
     auto s = m_map->get(name, &value);
 
