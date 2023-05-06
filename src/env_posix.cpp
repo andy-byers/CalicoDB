@@ -351,12 +351,9 @@ struct PosixFs final {
         inode.pending.clear();
     }
 
-    static int s_x;
-
     [[nodiscard]] static auto ref_inode(int fd) -> INode *
     {
         // REQUIRES: "s_fs.mutex" is locked by the caller
-        s_x++;
         FileId key;
         if (struct stat st = {}; fstat(fd, &st)) {
             return nullptr;
@@ -493,7 +490,17 @@ struct PosixFs final {
 };
 
 PosixFs PosixFs::s_fs;
-int PosixFs::s_x = 0;
+
+static auto seed_prng_state(U16 *state, U32 seed) -> void
+{
+    state[0] = 0x330E;
+    std::memcpy(&state[1], &seed, sizeof(seed));
+}
+
+PosixEnv::PosixEnv()
+{
+    seed_prng_state(m_rng, static_cast<U32>(time(nullptr)));
+}
 
 auto PosixEnv::resize_file(const std::string &filename, std::size_t size) -> Status
 {
@@ -561,8 +568,7 @@ auto PosixEnv::new_sink(const std::string &filename, Sink *&out) -> Status
 
 auto PosixEnv::srand(unsigned seed) -> void
 {
-    m_rng[0] = 0x330E;
-    std::memcpy(&m_rng[1], &seed, sizeof(seed));
+    seed_prng_state(m_rng, seed);
 }
 
 auto PosixEnv::rand() -> unsigned

@@ -16,7 +16,7 @@ class PosixEnv : public Env
     U16 m_rng[3] = {};
 
 public:
-    explicit PosixEnv() = default;
+    explicit PosixEnv();
     ~PosixEnv() override = default;
 
     [[nodiscard]] auto new_sink(const std::string &filename, Sink *&out) -> Status override;

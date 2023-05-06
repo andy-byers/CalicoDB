@@ -316,6 +316,9 @@ public:
     explicit NumericKey(std::string string)
         : m_value(std::move(string))
     {
+        if (m_value.empty()) {
+            m_value = "0";
+        }
         // Make sure the string is a valid number.
         (void)number();
     }

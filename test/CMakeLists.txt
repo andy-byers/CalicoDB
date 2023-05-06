@@ -18,4 +18,3 @@ if(CALICODB_BuildBenchmarks)
     add_subdirectory(benchmarks)
 endif()
 
-

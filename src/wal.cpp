@@ -860,7 +860,7 @@ private:
         if (max_index == 0) {
             return make_retry_status();
         }
-
+        // Will return a busy status if another connection is resetting the WAL.
         CALICODB_TRY(lock_shared(READ_LOCK(max_index)));
 
         m_min_frame = ATOMIC_LOAD(&info->backfill) + 1;
@@ -1005,7 +1005,9 @@ auto WalImpl::recover_index() -> Status
     CALICODB_EXPECT_TRUE(m_writer_lock);
     m_hdr = {};
 
-    // Lock bytes
+    // Lock the recover "Rcvr" lock. Lock the checkpoint ("Ckpt") lock as well, if this
+    // code isn't being called from the checkpoint routine. In that case, the checkpoint
+    // lock is already held.
     const auto lock = kNotWriteLock + m_ckpt_lock;
     CALICODB_TRY(lock_exclusive(lock, READ_LOCK(0) - lock));
 
@@ -1017,16 +1019,16 @@ auto WalImpl::recover_index() -> Status
             m_hdr.frame_cksum[1] = frame_cksum[1];
             write_index_header();
             volatile auto *info = get_ckpt_info();
-            ATOMIC_STORE(&info->backfill_attempted, m_hdr.max_frame);
-            ATOMIC_STORE(&info->backfill, 0);
-            ATOMIC_STORE(&info->readmark[0], 0);
+            info->backfill_attempted = m_hdr.max_frame;
+            info->backfill = 0;
+            info->readmark[0] = 0;
             for (std::size_t i = 1; i < kReaderCount; ++i) {
                 s = lock_exclusive(READ_LOCK(i), 1);
                 if (s.is_ok()) {
                     if (i == 1 && m_hdr.max_frame) {
-                        ATOMIC_STORE(&info->readmark[i], m_hdr.max_frame);
+                        info->readmark[i] = m_hdr.max_frame;
                     } else {
-                        ATOMIC_STORE(&info->readmark[i], kReadmarkNotUsed);
+                        info->readmark[i] = kReadmarkNotUsed;
                     }
                     unlock_exclusive(READ_LOCK(i), 1);
                 }
@@ -1318,6 +1320,11 @@ auto WalImpl::transfer_contents(CkptFlags flags, std::size_t *db_size) -> Status
     auto max_safe_frame = m_hdr.max_frame;
     auto max_pgno = m_hdr.page_count;
     if (info->backfill < max_safe_frame) {
+        // Determine the range of frames that are available to write back to the database
+        // file. This range starts at the frame after the last frame backfilled by another
+        // checkpointer and ends at either the last frame in the WAL (m_hdr.max_frame is the
+        // last frame written, since this connection has the write lock), or the most-recent
+        // frame still needed by a reader, whichever is smaller.
         for (std::size_t i = 1; i < kReaderCount; ++i) {
             const auto y = ATOMIC_LOAD(&info->readmark[i]);
             if (y < max_safe_frame) {
@@ -1342,7 +1349,7 @@ auto WalImpl::transfer_contents(CkptFlags flags, std::size_t *db_size) -> Status
             CALICODB_TRY(itr.init(info->backfill));
             CALICODB_TRY(busy_wait(m_busy, [this] {
                 // Lock reader lock 0. This prevents other connections from ignoring the WAL and
-                // reading all pages from the database file. New readers should find a readmark
+                // reading all pages from the database file. New readers should find a readmark,
                 // so they know which pages to get from the WAL, since this connection is about
                 // to overwrite some pages in the database file (readers would otherwise risk
                 // reading pages that are in the process of being written).
@@ -1355,7 +1362,6 @@ auto WalImpl::transfer_contents(CkptFlags flags, std::size_t *db_size) -> Status
 
             const auto backfill = info->backfill;
             info->backfill_attempted = max_safe_frame;
-
             CALICODB_TRY(m_wal->sync());
 
             for (;;) {
@@ -1368,7 +1374,6 @@ auto WalImpl::transfer_contents(CkptFlags flags, std::size_t *db_size) -> Status
                     entry.key > max_pgno) {
                     continue;
                 }
-
                 CALICODB_TRY(m_wal->read_exact(
                     frame_offset(entry.value) + WalFrameHdr::kSize,
                     kPageSize,
@@ -1378,7 +1383,6 @@ auto WalImpl::transfer_contents(CkptFlags flags, std::size_t *db_size) -> Status
                     (entry.key - 1) * kPageSize,
                     Slice(m_frame.data(), kPageSize)));
             }
-
             ATOMIC_STORE(&info->backfill, max_safe_frame);
         }
 
