@@ -51,6 +51,8 @@ public:
     // success. Stores nullptr in `*txn` and returns a non-OK status on failure.
     [[nodiscard]] virtual auto new_txn(bool write, Txn *&txn) -> Status = 0;
 
+    [[nodiscard]] virtual auto checkpoint(bool reset) -> Status = 0;
+
     // Convenience wrapper that runs a read-only transaction
     // Forwards the status returned by `handler`.
     [[nodiscard]] virtual auto view(TxnHandler &handler) -> Status;

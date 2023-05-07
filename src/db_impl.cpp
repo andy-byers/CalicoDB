@@ -179,14 +179,30 @@ auto DBImpl::get_property(const Slice &name, std::string *out) const -> bool
     return false;
 }
 
+static auto already_running_error(bool write) -> Status
+{
+    std::string message("a transaction (read");
+    message.append(write ? "-write" : "only");
+    message.append(") is running");
+    return Status::not_supported(message);
+}
+
+auto DBImpl::checkpoint(bool reset) -> Status
+{
+    if (m_txn) {
+        return already_running_error(m_txn->m_write);
+    }
+    if (!m_pager->m_wal) {
+        CALICODB_TRY(m_pager->open_wal());
+    }
+    return m_pager->checkpoint(reset);
+}
+
 auto DBImpl::new_txn(bool write, Txn *&out) -> Status
 {
     out = nullptr;
     if (m_txn) {
-        std::string message("another transaction (read");
-        message.append(m_txn->m_write ? "-write" : "only");
-        message.append(") is already running");
-        return Status::not_supported(message);
+        return already_running_error(m_txn->m_write);
     }
     ScopeGuard guard = [this] {
         m_pager->finish();

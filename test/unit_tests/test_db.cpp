@@ -690,9 +690,9 @@ INSTANTIATE_TEST_SUITE_P(
     DbErrorTests,
     DbErrorTests,
     ::testing::Values(
-        ErrorWrapper{kDBFilename, tools::kSyscallRead, 0},
-        ErrorWrapper{kDBFilename, tools::kSyscallRead, 1},
-        ErrorWrapper{kDBFilename, tools::kSyscallRead, 10}));
+        ErrorWrapper{kWalFilename, tools::kSyscallRead, 0},
+        ErrorWrapper{kWalFilename, tools::kSyscallRead, 1},
+        ErrorWrapper{kWalFilename, tools::kSyscallRead, 10}));
 
 class DbFatalErrorTests : public DbErrorTests
 {
@@ -780,6 +780,9 @@ TEST_P(DbFatalErrorTests, RecoversFromVacuumFailure)
         ASSERT_OK(table->get(key, &result));
         ASSERT_EQ(result, value);
     }
+    table.reset();
+    txn.reset();
+    ASSERT_OK(db->db->checkpoint(true));
 
     std::size_t file_size;
     ASSERT_OK(env().file_size(kDBFilename, file_size));
@@ -801,7 +804,7 @@ class DbOpenTests
       public testing::Test
 {
 protected:
-    DbOpenTests()
+    explicit DbOpenTests()
     {
         options.env = &env();
     }

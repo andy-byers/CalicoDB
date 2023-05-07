@@ -222,13 +222,6 @@ auto Pager::start_reader() -> Status
         }
         m_wal->finish_reader();
 
-        // Run a checkpoint if the WAL has grown past some fixed size. May not
-        // run to completion.
-        auto s = wal_checkpoint(kCkptPassive);
-        if (!s.is_ok() && !s.is_busy()) {
-            return s;
-        }
-
         bool changed;
         CALICODB_TRY(m_wal->start_reader(changed));
 
@@ -362,7 +355,7 @@ auto Pager::purge_cached_pages() -> void
     }
 }
 
-auto Pager::checkpoint(CkptFlags flags) -> Status
+auto Pager::checkpoint(bool reset) -> Status
 {
     CALICODB_EXPECT_EQ(m_mode, kOpen);
     CALICODB_EXPECT_TRUE(assert_state());
@@ -372,22 +365,17 @@ auto Pager::checkpoint(CkptFlags flags) -> Status
     CALICODB_TRY(busy_wait(m_busy, [this] {
         return lock_db(kLockShared);
     }));
-    return wal_checkpoint(flags);
+    return wal_checkpoint(reset);
 }
 
-auto Pager::wal_checkpoint(CkptFlags flags) -> Status
+auto Pager::wal_checkpoint(bool reset) -> Status
 {
     CALICODB_EXPECT_TRUE(m_wal);
 
     // Transfer the WAL contents back to the DB. Note that this call will sync the WAL
-    // file before it starts transferring any data back.
-    std::size_t dbsize;
-    CALICODB_TRY(m_wal->checkpoint(flags, &dbsize));
-
-    if (dbsize) {
-        set_page_count(dbsize);
-    }
-    return Status::ok();
+    // file before it starts transferring any data back. Once the transfer is finished,
+    // the database file is sync'd.
+    return m_wal->checkpoint(reset);
 }
 
 auto Pager::flush_all_pages() -> Status

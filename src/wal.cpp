@@ -143,6 +143,7 @@ auto HashIndex::lookup(Key key, Value lower, Value &out) -> Status
 
     for (auto n = index_group_number(m_hdr->max_frame);; --n) {
         CALICODB_TRY(map_group(n, false));
+        CALICODB_EXPECT_TRUE(m_groups[n]);
         HashGroup group(n, m_groups[n]);
         // The guard above prevents considering groups that haven't been allocated yet.
         // Such groups would start past the current "max_frame".
@@ -537,7 +538,7 @@ public:
 
     [[nodiscard]] auto read(Id page_id, char *&page) -> Status override;
     [[nodiscard]] auto write(PageRef *dirty, std::size_t db_size) -> Status override;
-    [[nodiscard]] auto checkpoint(CkptFlags flags, std::size_t *db_size) -> Status override;
+    [[nodiscard]] auto checkpoint(bool reset) -> Status override;
 
     auto rollback() -> void override
     {
@@ -557,9 +558,9 @@ public:
         // transactions, the next read-write transaction will create a new WAL.
         auto s = m_db->file_lock(kLockExclusive);
         if (s.is_ok()) {
-            // If this returns OK, then it must have written everything back (there are
-            // no other connections since we have an exclusive lock on the database file).
-            s = checkpoint(kCkptForce | kCkptReset, &db_size);
+            // This will not block. This connection has an exclusive lock on the database file,
+            // so no other connections are active right now.
+            s = checkpoint(true);
             if (s.is_ok() && m_hdr.max_frame == 0) {
                 s = m_env->remove_file(m_wal_name);
                 m_db->shm_unmap(true);
@@ -698,7 +699,7 @@ private:
             const auto prev_lock = m_writer_lock;
             if (prev_lock || (s = lock_exclusive(kWriteLock, 1)).is_ok()) {
                 m_writer_lock = true;
-                if ((s = m_index.map_group(0, m_writer_lock)).is_ok()) {
+                if ((s = m_index.map_group(0, true)).is_ok()) {
                     success = try_index_header(changed);
                     if (!success) {
                         s = recover_index();
@@ -887,7 +888,7 @@ private:
         return kWalHdrSize + (frame - 1) * (WalFrameHdr::kSize + kPageSize);
     }
 
-    [[nodiscard]] auto transfer_contents(CkptFlags flags, std::size_t *db_size) -> Status;
+    [[nodiscard]] auto transfer_contents(bool reset) -> Status;
     [[nodiscard]] auto rewrite_checksums(U32 end) -> Status;
     [[nodiscard]] auto recover_index() -> Status;
     [[nodiscard]] auto decode_frame(const char *frame, WalFrameHdr &out) -> bool;
@@ -1267,26 +1268,23 @@ auto WalImpl::write(PageRef *dirty, std::size_t db_size) -> Status
     return Status::ok();
 }
 
-auto WalImpl::checkpoint(CkptFlags flags, std::size_t *db_size) -> Status
+auto WalImpl::checkpoint(bool reset) -> Status
 {
     CALICODB_EXPECT_FALSE(m_ckpt_lock);
     CALICODB_EXPECT_FALSE(m_writer_lock);
-    if (db_size) {
-        *db_size = 0;
-    }
-    static constexpr std::size_t kCkptSize = 1'000;
-    if (!(flags & kCkptForce) && m_hdr.max_frame < kCkptSize) {
-        return Status::ok();
-    }
-    // Take exclusive locks on the checkpoint and writer bytes. This ensures that no other
-    // connection will attempt a checkpoint or write new frames.
+
+    // Exclude other connections from running a checkpoint. If the `reset` flag is set,
+    // also exclude writers. If this connection is to reset the log, there must be no
+    // frames written after the
     auto s = lock_exclusive(kCkptLock, 1);
     if (s.is_ok()) {
         m_ckpt_lock = true;
-        s = busy_wait(m_busy, [this] {
-            return lock_exclusive(kWriteLock, 1);
-        });
-        m_writer_lock = s.is_ok();
+        if (reset) {
+            s = busy_wait(m_busy, [this] {
+                return lock_exclusive(kWriteLock, 1);
+            });
+            m_writer_lock = s.is_ok();
+        }
     }
 
     auto changed = false;
@@ -1297,7 +1295,7 @@ auto WalImpl::checkpoint(CkptFlags flags, std::size_t *db_size) -> Status
         s = read_index_header(changed);
     }
     if (s.is_ok() && m_hdr.max_frame) {
-        s = transfer_contents(flags, db_size);
+        s = transfer_contents(reset);
     }
     if (changed) {
         m_hdr = {};
@@ -1310,21 +1308,20 @@ auto WalImpl::checkpoint(CkptFlags flags, std::size_t *db_size) -> Status
     return s;
 }
 
-auto WalImpl::transfer_contents(CkptFlags flags, std::size_t *db_size) -> Status
+auto WalImpl::transfer_contents(bool reset) -> Status
 {
-    CALICODB_EXPECT_TRUE(m_writer_lock);
     CALICODB_EXPECT_TRUE(m_ckpt_lock);
-    Status s;
+    CALICODB_EXPECT_TRUE(!reset || m_writer_lock);
 
+    Status s;
     volatile auto *info = get_ckpt_info();
     auto max_safe_frame = m_hdr.max_frame;
     auto max_pgno = m_hdr.page_count;
     if (info->backfill < max_safe_frame) {
         // Determine the range of frames that are available to write back to the database
         // file. This range starts at the frame after the last frame backfilled by another
-        // checkpointer and ends at either the last frame in the WAL (m_hdr.max_frame is the
-        // last frame written, since this connection has the write lock), or the most-recent
-        // frame still needed by a reader, whichever is smaller.
+        // checkpointer and ends at either the last WAL frame this connection knows about,
+        // or the most-recent frame still needed by a reader, whichever is smaller.
         for (std::size_t i = 1; i < kReaderCount; ++i) {
             const auto y = ATOMIC_LOAD(&info->readmark[i]);
             if (y < max_safe_frame) {
@@ -1396,10 +1393,7 @@ auto WalImpl::transfer_contents(CkptFlags flags, std::size_t *db_size) -> Status
     if (s.is_ok()) {
         if (info->backfill < m_hdr.max_frame) {
             s = make_retry_status("blocked by reader");
-        } else if (flags & kCkptReset) {
-            if (db_size) {
-                *db_size = m_hdr.page_count;
-            }
+        } else if (reset) {
             CALICODB_TRY(busy_wait(m_busy, [this] {
                 return lock_exclusive(READ_LOCK(1), kReaderCount - 1);
             }));

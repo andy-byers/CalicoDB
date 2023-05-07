@@ -452,7 +452,7 @@ TEST_F(PagerTests, BasicCheckpoints)
         read_and_check(*this, kPagerFrames * i, kPagerFrames * (i + 1));
         m_pager->finish();
 
-        ASSERT_OK(m_pager->checkpoint(kCkptForce | kCkptReset));
+        ASSERT_OK(m_pager->checkpoint(true));
 
         // Pages returned by the pager should reflect what is on disk.
         ASSERT_OK(m_pager->start_reader());
@@ -521,7 +521,7 @@ TEST_F(PagerTests, OnlyWritesBackCommittedWalFrames)
     m_pager->rollback();
     m_pager->finish();
 
-    ASSERT_OK(m_pager->checkpoint(kCkptForce | kCkptReset));
+    ASSERT_OK(m_pager->checkpoint(true));
 
     ASSERT_OK(m_pager->start_reader());
     read_and_check(*this, 42, kManyPages);
@@ -594,7 +594,7 @@ TEST_F(PagerTests, AcquirePastEOF)
 
     ASSERT_OK(m_pager->commit());
     m_pager->finish();
-    ASSERT_OK(m_pager->checkpoint(kCkptForce | kCkptReset));
+    ASSERT_OK(m_pager->checkpoint(true));
     ASSERT_EQ(m_pager->page_count(), kOutOfBounds);
     ASSERT_EQ(count_db_pages(), kOutOfBounds);
 
@@ -626,7 +626,7 @@ TEST_F(PagerTests, FreelistUsage)
     read_and_check(*this, 123, kSomePages * 2);
     m_pager->finish();
 
-    ASSERT_OK(m_pager->checkpoint(kCkptForce | kCkptReset));
+    ASSERT_OK(m_pager->checkpoint(true));
     ASSERT_OK(m_pager->start_reader());
     read_and_check(*this, 123, kSomePages * 2);
     read_and_check(*this, 123, kSomePages * 2, true);
@@ -643,7 +643,7 @@ TEST_F(PagerTests, InvalidModeDeathTest)
     m_pager->set_status(Status::io_error("I/O error"));
     ASSERT_EQ(m_pager->mode(), Pager::kError);
     ASSERT_DEATH((void)m_pager->start_writer(), kExpectationMatcher);
-    ASSERT_DEATH((void)m_pager->checkpoint(kCkptForce | kCkptReset), kExpectationMatcher);
+    ASSERT_DEATH((void)m_pager->checkpoint(true), kExpectationMatcher);
 }
 
 TEST_F(PagerTests, DoubleFreeDeathTest)
@@ -730,7 +730,7 @@ TEST_F(TruncationTests, OnlyValidPagesAreCheckpointed)
 
     // If there are still cached pages past the truncation position, they will be
     // written back to disk here, causing the file size to be incorrect.
-    ASSERT_OK(m_pager->checkpoint(kCkptForce | kCkptReset));
+    ASSERT_OK(m_pager->checkpoint(true));
 
     ASSERT_OK(env->file_size(kDBFilename, file_size));
     ASSERT_EQ(file_size, kInitialPageCount * kPageSize / 2);
@@ -886,7 +886,7 @@ TEST_F(WalTests, EmptyWal)
     ASSERT_TRUE(changed);
 
     std::size_t db_size;
-    ASSERT_OK(m_wal->checkpoint(kCkptForce | kCkptReset, &db_size));
+    ASSERT_OK(m_wal->checkpoint(true));
     ASSERT_EQ(0, db_size);
 
     char page[kPageSize];
@@ -898,7 +898,7 @@ TEST_F(WalTests, EmptyWal)
     ASSERT_OK(m_wal->read(Id(3), ptr));
     ASSERT_FALSE(ptr);
 
-    ASSERT_OK(m_wal->checkpoint(kCkptForce | kCkptReset, &db_size));
+    ASSERT_OK(m_wal->checkpoint(true));
     ASSERT_EQ(0, db_size);
 
     ASSERT_OK(m_env->file_size(kDBFilename, db_size));
@@ -1044,8 +1044,8 @@ protected:
         File *real, *fake;
         ASSERT_OK(env().new_file("realdb", Env::kCreate, real));
         ASSERT_OK(env().new_file("fakedb", Env::kCreate, fake));
-        ASSERT_OK(m_wal->checkpoint(kCkptForce | kCkptReset, nullptr));
-        ASSERT_OK(m_fake->checkpoint(kCkptForce | kCkptReset, nullptr));
+        ASSERT_OK(m_wal->checkpoint(true));
+        ASSERT_OK(m_fake->checkpoint(true));
 
         std::size_t file_size;
         ASSERT_OK(env().file_size("fakedb", file_size));
@@ -1262,7 +1262,7 @@ public:
             }
         }
         std::move(guard).invoke();
-        CALICODB_TRY(m_pager->checkpoint(kCkptForce | kCkptReset));
+        CALICODB_TRY(m_pager->checkpoint(true));
 
         m_counter = -1;
 

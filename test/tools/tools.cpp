@@ -223,7 +223,7 @@ auto FakeWal::write(PageRef *dirty, std::size_t db_size) -> Status
     return Status::ok();
 }
 
-auto FakeWal::checkpoint(CkptFlags, std::size_t *db_size) -> Status
+auto FakeWal::checkpoint(bool reset) -> Status
 {
     // TODO: Need the env to resize the file.
     CALICODB_EXPECT_TRUE(m_pending.empty());
@@ -231,9 +231,6 @@ auto FakeWal::checkpoint(CkptFlags, std::size_t *db_size) -> Status
     for (const auto &[page_id, page] : m_committed) {
         const auto offset = page_id.as_index() * kPageSize;
         CALICODB_TRY(m_db_file->write(offset, page));
-    }
-    if (db_size != nullptr) {
-        *db_size = m_db_size;
     }
     m_committed.clear();
     return Status::ok();

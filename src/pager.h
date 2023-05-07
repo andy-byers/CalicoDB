@@ -83,7 +83,7 @@ public:
     auto rollback() -> void;
     auto finish() -> void;
 
-    [[nodiscard]] auto checkpoint(CkptFlags flags) -> Status;
+    [[nodiscard]] auto checkpoint(bool reset) -> Status;
     [[nodiscard]] auto allocate(Page &page) -> Status;
     [[nodiscard]] auto destroy(Page page) -> Status;
     [[nodiscard]] auto acquire(Id page_id, Page &page) -> Status;
@@ -112,7 +112,7 @@ private:
     [[nodiscard]] auto read_page_from_file(PageRef &ref, std::size_t *size_out) const -> Status;
     [[nodiscard]] auto write_page_to_file(const PageRef &entry) const -> Status;
     [[nodiscard]] auto ensure_available_buffer() -> Status;
-    [[nodiscard]] auto wal_checkpoint(CkptFlags flags) -> Status;
+    [[nodiscard]] auto wal_checkpoint(bool reset) -> Status;
     [[nodiscard]] auto flush_all_pages() -> Status;
     auto purge_page(PageRef &victim) -> void;
 

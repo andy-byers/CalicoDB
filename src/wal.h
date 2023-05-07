@@ -17,18 +17,6 @@ class Env;
 class File;
 struct PageRef;
 
-enum CkptFlags {
-    kCkptPassive = 0,
-    kCkptForce = 1,
-    kCkptReset = 2,
-};
-inline auto operator|(CkptFlags lhs, CkptFlags rhs) -> CkptFlags
-{
-    return static_cast<CkptFlags>(
-        static_cast<unsigned>(lhs) |
-        static_cast<unsigned>(rhs));
-}
-
 struct HashIndexHdr {
     U32 version;
     U32 unused0;
@@ -140,7 +128,7 @@ public:
     [[nodiscard]] virtual auto close(std::size_t &db_size) -> Status = 0;
 
     // Write as much of the WAL back to the DB as possible
-    [[nodiscard]] virtual auto checkpoint(CkptFlags flags, std::size_t *db_size) -> Status = 0;
+    [[nodiscard]] virtual auto checkpoint(bool reset) -> Status = 0;
 
     // UNLOCKED -> READER
     [[nodiscard]] virtual auto start_reader(bool &changed) -> Status = 0;
@@ -173,7 +161,7 @@ static auto busy_wait(BusyHandler *handler, const Callback &callback) -> Status
     for (unsigned n = 0;; ++n) {
         auto s = callback();
         if (s.is_busy()) {
-            if (handler == nullptr || handler->exec(n)) {
+            if (handler && handler->exec(n)) {
                 continue;
             }
         }

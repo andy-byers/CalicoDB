@@ -103,7 +103,7 @@ public:
         return Status::ok();
     }
 
-    [[nodiscard]] auto checkpoint(CkptFlags, std::size_t *) -> Status override
+    [[nodiscard]] auto checkpoint(bool) -> Status override
     {
         return Status::ok();
     }
@@ -137,7 +137,7 @@ public:
 
     [[nodiscard]] auto read(Id page_id, char *&out) -> Status override;
     [[nodiscard]] auto write(PageRef *dirty, std::size_t db_size) -> Status override;
-    [[nodiscard]] auto checkpoint(CkptFlags, std::size_t *) -> Status override;
+    [[nodiscard]] auto checkpoint(bool) -> Status override;
     [[nodiscard]] auto statistics() const -> WalStatistics override;
     [[nodiscard]] auto close(std::size_t &) -> Status override;
     [[nodiscard]] auto start_reader(bool &) -> Status override { return Status::ok(); }

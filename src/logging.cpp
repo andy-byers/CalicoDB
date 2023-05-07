@@ -43,12 +43,14 @@ auto append_fmt_string(std::string &out, const char *fmt, ...) -> std::size_t
 {
     std::va_list args;
     va_start(args, fmt);
-    auto info = try_write(out.data(), out.size(), fmt, args);
+    std::string buffer(32, '\0');
+    auto info = try_write(buffer.data(), buffer.size(), fmt, args);
     if (!info.success) {
-        out.resize(info.length);
-        info = try_write(out.data(), out.size(), fmt, args);
+        buffer.resize(info.length);
+        info = try_write(buffer.data(), buffer.size(), fmt, args);
     }
     va_end(args);
+    out.append(buffer);
     return info.length;
 }
 

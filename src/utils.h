@@ -14,7 +14,7 @@
 #if NDEBUG
 #define CALICODB_EXPECT_(expr, file, line)
 #else
-#define CALICODB_EXPECT_(expr, file, line) impl::expect(expr, #expr, file, line)
+#define CALICODB_EXPECT_(expr, file, line) calicodb::expect_impl(expr, #expr, file, line)
 #ifdef CALICODB_TEST
 #define CALICODB_EXPENSIVE_CHECKS
 #endif // CALICODB_TEST
@@ -41,18 +41,13 @@
 namespace calicodb
 {
 
-namespace impl
-{
-
-inline constexpr auto expect(bool cond, const char *repr, const char *file, int line) noexcept -> void
+inline constexpr auto expect_impl(bool cond, const char *repr, const char *file, int line) noexcept -> void
 {
     if (!cond) {
         std::fprintf(stderr, "expectation (%s) failed at %s:%d\n", repr, file, line);
         std::abort();
     }
 }
-
-} // namespace impl
 
 static constexpr std::size_t kMinFrameCount = 16;
 static constexpr std::size_t kMaxCacheSize = 1 << 30;
