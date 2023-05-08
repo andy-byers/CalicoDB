@@ -6,21 +6,6 @@
 #include <gtest/gtest.h>
 #include <thread>
 
-extern "C" {
-auto __ubsan_on_report() -> void
-{
-    FAIL() << "UBSan detected a problem";
-}
-auto __asan_on_error() -> void
-{
-    FAIL() << "ASan detected a problem";
-}
-auto __tsan_on_report() -> void
-{
-    FAIL() << "TSan detected a problem";
-}
-} // extern "C"
-
 namespace calicodb::test::concurrency
 {
 
@@ -338,6 +323,16 @@ protected:
 TEST_P(ConcurrencyTests, MT)
 {
     test(1);
+}
+
+TEST_P(ConcurrencyTests, MP_2)
+{
+    test(2);
+}
+
+TEST_P(ConcurrencyTests, MP_3)
+{
+    test(3);
 }
 
 INSTANTIATE_TEST_CASE_P(

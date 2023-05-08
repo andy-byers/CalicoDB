@@ -255,8 +255,7 @@ TEST_F(RecoveryTests, VacuumRecovery)
     tools::print_references(const_cast<Pager &>(db_impl(db)->TEST_pager()));
     std::cerr << table_impl(table)->tree()->TEST_to_string() << "\n\n";
 
-    // Grow the database again. This time, it will look like we need to write image records
-    // for the new pages, even though they are already in the WAL.
+    // Grow the database again.
     for (std::size_t i = 0; i < 10; ++i) {
         ASSERT_OK(table->put(tools::integral_key(i), random.Generate(kPageSize)));
     }

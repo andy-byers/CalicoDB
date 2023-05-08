@@ -283,10 +283,19 @@ auto TestEnv::try_intercept_syscall(SyscallType type, const std::string &filenam
     std::lock_guard lock(m_mutex);
     const auto state = m_state.find(filename);
     if (state != end(m_state)) {
-        CALICODB_EXPECT_LE(type, kNumSyscalls);
-        ++state->second.counters.values[type];
+        // Need the position of the set bit to index the syscall counters array.
+        std::size_t type_index = kNumSyscalls;
+        for (std::size_t i = 0; i < kNumSyscalls; ++i) {
+            if (type & (1 << i)) {
+                type_index = i;
+                break;
+            }
+        }
+        CALICODB_EXPECT_NE(kNumSyscalls, type_index);
+        ++state->second.counters.values[type_index];
+
         for (const auto &interceptor : state->second.interceptors) {
-            if (interceptor.type == type) {
+            if (interceptor.type & type) {
                 return interceptor.callback();
             }
         }
@@ -300,6 +309,7 @@ auto TestEnv::add_interceptor(const std::string &filename, Interceptor intercept
     if (state == end(m_state)) {
         state = m_state.insert(state, {filename, FileState()});
     }
+    // TODO: Combine with another interceptor if possible.
     state->second.interceptors.emplace_back(std::move(interceptor));
 }
 

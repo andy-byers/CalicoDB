@@ -15,7 +15,7 @@ struct WriteInfo {
     bool success = false;
 };
 
-static auto try_write(char *buffer, std::size_t buffer_size, const char *fmt, std::va_list args) -> WriteInfo
+static auto try_write(char *buffer, std::size_t buffer_size, bool add_newline, const char *fmt, std::va_list args) -> WriteInfo
 {
     std::va_list copy;
     va_copy(copy, args);
@@ -31,7 +31,7 @@ static auto try_write(char *buffer, std::size_t buffer_size, const char *fmt, st
         }
         info.success = true;
         // Add a newline if necessary.
-        if (buffer[info.length - 1] != '\n') {
+        if (add_newline && buffer[info.length - 1] != '\n') {
             buffer[info.length] = '\n';
             ++info.length;
         }
@@ -44,10 +44,10 @@ auto append_fmt_string(std::string &out, const char *fmt, ...) -> std::size_t
     std::va_list args;
     va_start(args, fmt);
     std::string buffer(32, '\0');
-    auto info = try_write(buffer.data(), buffer.size(), fmt, args);
+    auto info = try_write(buffer.data(), buffer.size(), false, fmt, args);
+    buffer.resize(info.length);
     if (!info.success) {
-        buffer.resize(info.length);
-        info = try_write(buffer.data(), buffer.size(), fmt, args);
+        info = try_write(buffer.data(), buffer.size(), false, fmt, args);
     }
     va_end(args);
     out.append(buffer);
@@ -69,7 +69,7 @@ auto logv(Sink *log, const char *fmt, ...) -> void
         WriteInfo info;
         info.length = sizeof(fixed);
         for (int i = 0; i < 2; ++i) {
-            info = try_write(p, info.length, fmt, args);
+            info = try_write(p, info.length, true, fmt, args);
             if (info.success) {
                 log->sink(Slice(p, info.length));
                 break;

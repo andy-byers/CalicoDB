@@ -357,6 +357,7 @@ auto Pager::purge_cached_pages() -> void
 
 auto Pager::checkpoint(bool reset) -> Status
 {
+    CALICODB_EXPECT_TRUE(m_wal);
     CALICODB_EXPECT_EQ(m_mode, kOpen);
     CALICODB_EXPECT_TRUE(assert_state());
     ScopeGuard guard = [this] {
@@ -365,16 +366,6 @@ auto Pager::checkpoint(bool reset) -> Status
     CALICODB_TRY(busy_wait(m_busy, [this] {
         return lock_db(kLockShared);
     }));
-    return wal_checkpoint(reset);
-}
-
-auto Pager::wal_checkpoint(bool reset) -> Status
-{
-    CALICODB_EXPECT_TRUE(m_wal);
-
-    // Transfer the WAL contents back to the DB. Note that this call will sync the WAL
-    // file before it starts transferring any data back. Once the transfer is finished,
-    // the database file is sync'd.
     return m_wal->checkpoint(reset);
 }
 
@@ -571,6 +562,8 @@ auto Pager::initialize_root() -> void
     root_hdr.is_external = true;
     root_hdr.cell_start = U32(kPageSize);
     root_hdr.write(root->page + FileHeader::kSize);
+
+    m_refresh_root = false;
 }
 
 auto Pager::refresh_state() -> Status
@@ -736,20 +729,18 @@ Freelist::Freelist(Pager &pager, Id head)
 
 auto Freelist::pop(Page &page) -> Status
 {
-    if (!m_head.is_null()) {
-        CALICODB_TRY(m_pager->acquire(m_head, page));
-        m_pager->mark_dirty(page);
-        m_head = read_next_id(page);
+    CALICODB_EXPECT_FALSE(m_head.is_null());
+    CALICODB_TRY(m_pager->acquire(m_head, page));
+    m_pager->mark_dirty(page);
+    m_head = read_next_id(page);
 
-        if (!m_head.is_null()) {
-            // Only clear the back pointer for the new freelist head. Callers must make sure to update the returned
-            // node's back pointer at some point.
-            const PointerMap::Entry entry = {Id::null(), PointerMap::kFreelistLink};
-            CALICODB_TRY(PointerMap::write_entry(*m_pager, m_head, entry));
-        }
-        return Status::ok();
+    if (!m_head.is_null()) {
+        // Only clear the back pointer for the new freelist head. Callers must make sure to update the returned
+        // node's back pointer at some point.
+        const PointerMap::Entry entry = {Id::null(), PointerMap::kFreelistLink};
+        CALICODB_TRY(PointerMap::write_entry(*m_pager, m_head, entry));
     }
-    return Status::not_supported("free list is empty");
+    return Status::ok();
 }
 
 auto Freelist::push(Page page) -> Status

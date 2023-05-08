@@ -119,15 +119,14 @@ protected:
     std::vector<std::string> m_shm;
 };
 
-enum SyscallType : std::size_t {
-    kSyscallRead,
-    kSyscallWrite,
-    kSyscallOpen,
-    kSyscallSync,
-    kSyscallUnlink,
-    kSyscallResize,
-    kNumSyscalls
-};
+using SyscallType = U64;
+static constexpr SyscallType kSyscallRead = 1;
+static constexpr SyscallType kSyscallWrite = kSyscallRead << 1;
+static constexpr SyscallType kSyscallOpen = kSyscallWrite << 1;
+static constexpr SyscallType kSyscallSync = kSyscallOpen << 1;
+static constexpr SyscallType kSyscallUnlink = kSyscallSync << 1;
+static constexpr SyscallType kSyscallResize = kSyscallUnlink << 1;
+static constexpr std::size_t kNumSyscalls = 6;
 
 struct Interceptor {
     using Callback = std::function<Status()>;

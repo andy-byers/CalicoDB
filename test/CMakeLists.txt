@@ -16,6 +16,8 @@ include(GoogleTest)
 set(CALICODB_TOOLS_DIR "${PROJECT_SOURCE_DIR}/test/tools")
 add_subdirectory(tools)
 
+add_subdirectory(tests)
+
 if(CALICODB_BuildFuzzers)
     add_subdirectory(fuzzers)
 endif()
@@ -27,6 +29,3 @@ endif()
 if(CALICODB_BuildBenchmarks)
     add_subdirectory(benchmarks)
 endif()
-
-#add_subdirectory(debug)
-

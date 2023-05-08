@@ -1289,9 +1289,6 @@ auto WalImpl::checkpoint(bool reset) -> Status
 
     auto changed = false;
     if (s.is_ok()) {
-        // This thread has an exclusive writer lock, so no other connection should be
-        // writing new frames. This version of the header's `max_frame` field should
-        // point to the last frame written to the WAL by any connection.
         s = read_index_header(changed);
     }
     if (s.is_ok() && m_hdr.max_frame) {
