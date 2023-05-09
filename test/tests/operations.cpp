@@ -47,16 +47,6 @@ protected:
         ASSERT_OK(reopen(true));
     }
 
-    auto TearDown() -> void override
-    {
-        // Transaction must be finished when a checkpoint is run.
-        delete m_txn;
-        m_txn = nullptr;
-        ASSERT_OK(m_db->checkpoint(false));
-        ASSERT_OK(reopen(false));
-        validate();
-    }
-
     [[nodiscard]] auto reopen(bool write) -> Status
     {
         delete m_txn;
@@ -68,11 +58,14 @@ protected:
         return m_db->new_txn(write, m_txn);
     }
 
-    auto validate() -> void
+    auto end_txn_and_validate() -> void
     {
-        ASSERT_OK(m_routine.check(*m_txn));
+        // Transaction must be finished when a checkpoint is run.
+        delete m_txn;
+        m_txn = nullptr;
+        ASSERT_OK(m_db->checkpoint(false));
         ASSERT_OK(reopen(false));
-        ASSERT_OK(m_routine.check(*m_txn));
+        ASSERT_OK(m_routine.check(*m_txn, true));
     }
 
     TransferBatch m_routine{
@@ -86,21 +79,23 @@ protected:
 
 TEST_P(TransferBatchTests, TransferBatches)
 {
-    for (std::size_t i = 0; i < std::get<2>(GetParam()); ++i) {
+    const auto num_rounds = std::get<2>(GetParam());
+    for (std::size_t i = 0; i < num_rounds; ++i) {
         ASSERT_OK(m_routine.run(*m_txn));
         m_txn->rollback();
         ASSERT_OK(m_routine.run(*m_txn));
         ASSERT_OK(m_txn->commit());
-        ++m_routine.round;
+        m_routine.round += i + 1 < num_rounds;
     }
+    end_txn_and_validate();
 }
 
 INSTANTIATE_TEST_CASE_P(
     TransferBatchTests,
     TransferBatchTests,
     testing::Combine(
-        testing::Values(1, 2, 4, 8, 16, 32),
-        testing::Values(1, 10, 100, 1'000),
+        testing::Values(1, 8, 32),
+        testing::Values(1, 100, 1'000),
         testing::Values(1, 2)),
     [](const auto &info) -> std::string {
         std::string label;

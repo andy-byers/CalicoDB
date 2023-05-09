@@ -349,7 +349,7 @@ TEST_P(MultiTableVacuumTests, EmptyTables)
 
 TEST_P(MultiTableVacuumTests, FilledTables)
 {
-    fill_user_tables(15, 15); // kRecordCount, kRecordCount / 2);
+    fill_user_tables(kRecordCount, kRecordCount / 2);
     run();
 }
 

@@ -11,3 +11,7 @@ endfunction()
 build_test(concurrency)
 build_test(crashes)
 build_test(operations)
+
+add_executable(debug debug.cpp)
+target_link_libraries(debug
+        PRIVATE calicodb_tools)

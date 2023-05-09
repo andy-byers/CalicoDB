@@ -172,15 +172,7 @@ auto Pager::open_wal() -> Status
         m_busy,
         m_sync,
     };
-    auto s = Wal::open(param, m_wal);
-    if (s.is_ok()) {
-        bool changed;
-        s = m_wal->start_reader(changed);
-        if (s.is_ok()) {
-            m_wal->finish_reader();
-        }
-    }
-    return s;
+    return Wal::open(param, m_wal);
 }
 
 auto Pager::close() -> Status
@@ -366,7 +358,7 @@ auto Pager::checkpoint(bool reset) -> Status
     CALICODB_TRY(busy_wait(m_busy, [this] {
         return lock_db(kLockShared);
     }));
-    return m_wal->checkpoint(reset);
+    return set_status(m_wal->checkpoint(reset));
 }
 
 auto Pager::flush_all_pages() -> Status

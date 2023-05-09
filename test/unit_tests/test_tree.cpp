@@ -879,6 +879,7 @@ INSTANTIATE_TEST_SUITE_P(
 class EmptyTreeCursorTests : public TreeTests
 {
 protected:
+    ~EmptyTreeCursorTests() override = default;
     auto SetUp() -> void override
     {
         TreeTests::SetUp();
@@ -904,6 +905,7 @@ INSTANTIATE_TEST_SUITE_P(
 class CursorTests : public TreeTests
 {
 protected:
+    ~CursorTests() override = default;
     auto SetUp() -> void override
     {
         TreeTests::SetUp();

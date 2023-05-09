@@ -225,8 +225,8 @@ class ConcurrencyTests
       public TestHarness
 {
 protected:
-    const std::size_t kNumReaders = std::get<0>(GetParam());
-    const std::size_t kNumWriters = std::get<1>(GetParam());
+    const std::size_t kNumWriters = std::get<0>(GetParam());
+    const std::size_t kNumReaders = std::get<1>(GetParam());
     const std::size_t kExtraInfo = std::get<2>(GetParam());
     const std::size_t kNumRecords = 1'000;
     const std::size_t kNumRounds = 1'000;
@@ -264,6 +264,7 @@ protected:
                 db = nullptr;
 
                 Options dbopt;
+                dbopt.busy = &m_busy;
                 dbopt.create_if_missing = false;
                 s = DB::open(dbopt, kDBName, db);
                 reopen = kExtraInfo;
@@ -275,7 +276,6 @@ protected:
                 }
             } else if (s.is_invalid_argument()) {
                 // Forgive readers that couldn't create the file.
-                s = Status::ok();
                 reopen = true;
                 continue;
             }
@@ -300,7 +300,9 @@ protected:
                 delete db;
                 db = nullptr;
 
-                s = DB::open(Options(), kDBName, db);
+                Options dbopt;
+                dbopt.busy = &m_busy;
+                s = DB::open(dbopt, kDBName, db);
                 reopen = kExtraInfo;
                 is_open = s.is_ok();
             }
@@ -316,8 +318,9 @@ protected:
         delete db;
     }
 
-    TestRoutine m_reader;
     TestRoutine m_writer;
+    TestRoutine m_reader;
+    tools::BusyCounter m_busy;
 };
 
 TEST_P(ConcurrencyTests, MT)
@@ -345,13 +348,13 @@ INSTANTIATE_TEST_CASE_P(
     [](const auto &info) {
         std::string label;
         append_number(label, std::get<0>(info.param));
-        label.append("Reader");
+        label.append("Writer");
         if (std::get<0>(info.param) > 1) {
             label += 's';
         }
         label += '_';
         append_number(label, std::get<1>(info.param));
-        label.append("Writer");
+        label.append("Reader");
         if (std::get<1>(info.param) > 1) {
             label += 's';
         }
@@ -362,9 +365,3 @@ INSTANTIATE_TEST_CASE_P(
     });
 
 } // namespace calicodb::test::concurrency
-
-auto main(int argc, char **argv) -> int
-{
-    testing::InitGoogleTest(&argc, argv);
-    return RUN_ALL_TESTS();
-}

@@ -137,10 +137,9 @@ As the names imply, `kShmWriter` is an exclusive lock, and `kShmReader` is a sha
 
 Once a new connection has obtained a valid copy of the WAL index header (described below), it will attempt to find a "readmark" to use.
 There are 5 readmarks, each protected by one of the 5 read locks (`Read*` above).
-Readmarks are used by connections to store their current "max frame" value, which is found in the index header.
-New connections may use an existing readmark by taking a reader lock on the corresponding read lock byte.
-, or they will (after taking a writer lock on)
+Readmarks are used by connections to store their current "max frame" value, which is found in the local copy of the index header.
+New connections may use an existing readmark by taking a read lock on the corresponding read lock byte.
 This indicates to other connections what portion of the WAL is being read by readers attached to that readmark.
 The first readmark always has a value of 0, indicating that readers are ignoring the WAL completely.
-If a connection finds that the WAL is empty, it will attempt to use the first readmark.
+If a new connection finds that the WAL is empty, it will attempt to use the first readmark.
 

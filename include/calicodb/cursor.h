@@ -23,24 +23,24 @@ public:
     Cursor(const Cursor &) = delete;
     auto operator=(const Cursor &) -> Cursor & = delete;
 
-    // Return true if the cursor is valid (positioned on a record) false otherwise
-    // This method must return true before key(), value(), next(), or previous() is
-    // called. Those calls will result in unspecified behavior if the cursor is not
-    // valid.
+    // Return true if the cursor is valid (positioned on a record), false otherwise
+    // This method must return true before any of the methods `key()`, `value()`,
+    // `next()`, or previous() are called. Those calls will result in unspecified
+    // behavior if the cursor is not valid.
     [[nodiscard]] virtual auto is_valid() const -> bool = 0;
 
     // Return the status associated with this cursor
-    // If is_valid() returns true, this method will always return an OK status.
+    // If `is_valid()` returns true, this method will always return an OK status.
     // Otherwise, the returned status will indicate the reason why the cursor is
     // invalid. If the status is "not found", then the cursor is out of bounds.
     [[nodiscard]] virtual auto status() const -> Status = 0;
 
     // Get the current record key
-    // REQUIRES: is_valid()
+    // REQUIRES: `is_valid()`
     [[nodiscard]] virtual auto key() const -> Slice = 0;
 
     // Get the current record value
-    // REQUIRES: is_valid()
+    // REQUIRES: `is_valid()`
     [[nodiscard]] virtual auto value() const -> Slice = 0;
 
     // Move the cursor to the record with a key that is greater than or equal to

@@ -10,7 +10,9 @@
 // each commit. This is what happens if the DB::view()/DB::update() API is used. It's much faster to keep
 // the transaction object around and just call Txn::commit() and Txn::rollback() as needed, but this is
 // bad for concurrency.
-#define RESTART_ON_COMMIT 0
+//
+// NOTE: I'm also adding a checkpoint call right before the restart, to be run once every 1'000 restarts.
+#define RESTART_ON_COMMIT 1
 
 enum AccessType : int64_t {
     kSequential,
@@ -184,6 +186,9 @@ private:
     {
         delete m_table;
         delete m_txn;
+        if (m_counters[0] % 1'000 == 999) {
+            CHECK_OK(m_db->checkpoint(true));
+        }
         CHECK_OK(m_db->new_txn(true, m_txn));
         CHECK_OK(m_txn->new_table(calicodb::TableOptions(), "bench", m_table));
     }

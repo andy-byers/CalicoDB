@@ -43,8 +43,8 @@ auto MapFuzzer::step(const U8 *&data, std::size_t &size) -> Status
         cursor->seek_first();
         for (const auto &[key, value] : m_map) {
             CHECK_TRUE(cursor->is_valid());
-            CHECK_EQ(cursor->key(), key);
-            CHECK_EQ(cursor->value(), value);
+            CHECK_EQ(cursor->key().to_string(), key);
+            CHECK_EQ(cursor->value().to_string(), value);
             cursor->next();
         }
         CHECK_FALSE(cursor->is_valid());

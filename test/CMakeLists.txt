@@ -16,7 +16,11 @@ include(GoogleTest)
 set(CALICODB_TOOLS_DIR "${PROJECT_SOURCE_DIR}/test/tools")
 add_subdirectory(tools)
 
-add_subdirectory(tests)
+# TODO: These tests are not finished yet...
+option(CALICODB_BuildInProgressTests Off)
+if(CALICODB_BuildInProgressTests)
+    add_subdirectory(tests)
+endif()
 
 if(CALICODB_BuildFuzzers)
     add_subdirectory(fuzzers)

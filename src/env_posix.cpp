@@ -75,8 +75,6 @@ struct ShmNode final {
     // byte.
     [[nodiscard]] auto take_dms_lock() -> int;
 
-    [[nodiscard]] auto map_region(std::size_t r, bool extend, volatile void *&out) -> int;
-
 #ifdef CALICODB_TEST
     [[nodiscard]] auto check_locks() const -> bool;
 #endif // CALICODB_TEST
@@ -668,12 +666,62 @@ auto PosixFile::shm_map(std::size_t r, bool extend, volatile void *&out) -> Stat
         CALICODB_TRY(PosixFs::s_fs.ref_snode(*this, shm));
     }
     CALICODB_EXPECT_TRUE(shm);
-    CALICODB_EXPECT_TRUE(shm->snode);
-    if (shm->snode->map_region(r, extend, out)) {
-        if (errno == EAGAIN) {
-            return make_retry_status();
+    auto *snode = shm->snode;
+    CALICODB_EXPECT_TRUE(snode);
+    std::lock_guard guard(snode->mutex);
+    if (snode->is_unlocked) {
+        if (snode->take_dms_lock()) {
+            return posix_error(EAGAIN);
         }
-        return posix_error(errno);
+        snode->is_unlocked = false;
+    }
+    // Determine the file size (in shared memory regions) needed to satisfy the
+    // request for region "r".
+    const auto mmap_scale = PosixFs::s_fs.mmap_scale;
+    const auto request = (r + mmap_scale) / mmap_scale * mmap_scale;
+    ScopeGuard scope = [&out, r, snode] {
+        if (r < snode->regions.size()) {
+            out = snode->regions[r];
+        } else {
+            out = nullptr;
+        }
+    };
+
+    if (snode->regions.size() < request) {
+        std::size_t file_size;
+        if (struct stat st = {}; fstat(snode->file, &st)) {
+            return posix_error(errno);
+        } else {
+            file_size = static_cast<std::size_t>(st.st_size);
+        }
+        if (file_size < request * File::kShmRegionSize) {
+            if (!extend) {
+                return Status::ok();
+            }
+            // Write a '\0' to the end of the highest-addressed region to extend the
+            // file. SQLite writes a byte to the end of each OS page, causing the pages
+            // to be allocated immediately (to reduce the chance of a later SIGBUS).
+            // This should be good enough for now.
+            if (seek_and_write(snode->file, request * File::kShmRegionSize - 1, Slice("", 1))) {
+                return posix_error(errno);
+            }
+        }
+
+        while (snode->regions.size() < request) {
+            // Map "mmap_scale" shared memory regions into this address space.
+            auto *p = mmap(
+                nullptr, File::kShmRegionSize * mmap_scale,
+                PROT_READ | PROT_WRITE,
+                MAP_SHARED, snode->file,
+                static_cast<ssize_t>(File::kShmRegionSize * snode->regions.size()));
+            if (p == MAP_FAILED) {
+                return posix_error(errno);
+            }
+            // Store a pointer to the start of each memory region.
+            for (std::size_t i = 0; i < mmap_scale; ++i) {
+                snode->regions.emplace_back(reinterpret_cast<char *>(p) + File::kShmRegionSize * i);
+            }
+        }
     }
     return Status::ok();
 }
@@ -807,64 +855,6 @@ auto ShmNode::take_dms_lock() -> int
         rc = posix_shm_lock(*this, F_RDLCK, kShmDMS, 1);
     }
     return rc;
-}
-
-auto ShmNode::map_region(std::size_t r, bool extend, volatile void *&out) -> int
-{
-    std::lock_guard guard(mutex);
-    if (is_unlocked) {
-        if (auto rc = take_dms_lock()) {
-            errno = EAGAIN;
-            return rc;
-        }
-        is_unlocked = false;
-    }
-    // Determine the file size (in shared memory regions) needed to satisfy the
-    // request for region "r".
-    const auto mmap_scale = PosixFs::s_fs.mmap_scale;
-    const auto request = (r + mmap_scale) / mmap_scale * mmap_scale;
-    ScopeGuard scope = [&out, r, this] {
-        if (r < regions.size()) {
-            out = regions[r];
-        } else {
-            out = nullptr;
-        }
-    };
-
-    if (regions.size() < request && extend) {
-        std::size_t file_size;
-        if (struct stat st = {}; fstat(file, &st)) {
-            return -1;
-        } else {
-            file_size = static_cast<std::size_t>(st.st_size);
-        }
-        if (file_size < request * File::kShmRegionSize) {
-            // Write a '\0' to the end of the highest-addressed region to extend the
-            // file. SQLite writes a byte to the end of each OS page, causing the pages
-            // to be allocated immediately (to reduce the chance of a later SIGBUS).
-            // This should be good enough for now.
-            if (seek_and_write(file, request * File::kShmRegionSize - 1, Slice("", 1))) {
-                return -1;
-            }
-        }
-
-        while (regions.size() < request) {
-            // Map "mmap_scale" shared memory regions into this address space.
-            auto *p = mmap(
-                nullptr, File::kShmRegionSize * mmap_scale,
-                PROT_READ | PROT_WRITE,
-                MAP_SHARED, file,
-                static_cast<ssize_t>(File::kShmRegionSize * regions.size()));
-            if (p == MAP_FAILED) {
-                return -1;
-            }
-            // Store a pointer to the start of each memory region.
-            for (std::size_t i = 0; i < mmap_scale; ++i) {
-                regions.emplace_back(reinterpret_cast<char *>(p) + File::kShmRegionSize * i);
-            }
-        }
-    }
-    return 0;
 }
 
 #ifdef CALICODB_TEST

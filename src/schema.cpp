@@ -39,6 +39,7 @@ auto Schema::corrupted_root_id(const std::string &table_name, const Slice &value
 
 auto Schema::new_table(const TableOptions &options, const std::string &name, Table *&out) -> Status
 {
+    CALICODB_EXPECT_FALSE(out);
     if (m_pager->page_count() == 0) {
         if (m_write) {
             m_pager->initialize_root();

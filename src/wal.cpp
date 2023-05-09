@@ -556,12 +556,11 @@ public:
         // NOTE: Caller will unlock the database file. Only consider removing the WAL if this
         // is the last active connection. If there are other connections not currently running
         // transactions, the next read-write transaction will create a new WAL.
-        auto s = m_db->file_lock(kLockExclusive);
-        if (s.is_ok()) {
+        Status s;
+        if ((s = m_db->file_lock(kLockExclusive)).is_ok()) {
             // This will not block. This connection has an exclusive lock on the database file,
             // so no other connections are active right now.
-            s = checkpoint(true);
-            if (s.is_ok() && m_hdr.max_frame == 0) {
+            if ((s = checkpoint(true)).is_ok()) {
                 s = m_env->remove_file(m_wal_name);
                 m_db->shm_unmap(true);
                 m_db = nullptr;
@@ -749,10 +748,10 @@ private:
         volatile auto *info = get_ckpt_info();
         CALICODB_EXPECT_EQ(info->readmark[0], 0);
         ATOMIC_STORE(&info->backfill, 0);
-        ATOMIC_STORE(&info->backfill_attempted, 0);
-        ATOMIC_STORE(&info->readmark[1], 0);
+        info->backfill_attempted = 0;
+        info->readmark[1] = 0;
         for (std::size_t i = 2; i < kReaderCount; ++i) {
-            ATOMIC_STORE(&info->readmark[i], kReadmarkNotUsed);
+            info->readmark[i] = kReadmarkNotUsed;
         }
     }
     [[nodiscard]] auto restart_log() -> Status
@@ -1391,14 +1390,13 @@ auto WalImpl::transfer_contents(bool reset) -> Status
         if (info->backfill < m_hdr.max_frame) {
             s = make_retry_status("blocked by reader");
         } else if (reset) {
+            // Wait on other connections that are still reading from the WAL. This is
+            // what SQLite does for `SQLITE_CHECKPOINT_RESTART`. New connections will
+            // take readmark 0 and read directly from the database file, and the next
+            // writer will reset the log.
             CALICODB_TRY(busy_wait(m_busy, [this] {
                 return lock_exclusive(READ_LOCK(1), kReaderCount - 1);
             }));
-            ++m_ckpt_number;
-            m_min_frame = 0;
-            m_hdr.max_frame = 0;
-            m_index.cleanup();
-            restart_header(m_env->rand());
             unlock_exclusive(READ_LOCK(1), kReaderCount - 1);
         }
     }

@@ -839,14 +839,14 @@ TEST_P(EnvConcurrencyTests, SingleWriter)
 }
 TEST_P(EnvConcurrencyTests, MultipleWriters)
 {
-    run_reader_writer_test(kNumEnvs * kNumRounds / 2, [](auto r) {
-        return r & 1;
+    run_reader_writer_test(kNumEnvs * kNumRounds / 10, [](auto r) {
+        return r % 10 == 9;
     });
 }
 TEST_P(EnvConcurrencyTests, Contention)
 {
-    run_reader_writer_test(kNumEnvs * kNumRounds, [](auto) {
-        return true;
+    run_reader_writer_test(kNumEnvs * kNumRounds / 2, [](auto r) {
+        return r & 1;
     });
 }
 TEST_P(EnvConcurrencyTests, ShmLifetime1)

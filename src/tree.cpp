@@ -2372,7 +2372,7 @@ auto CursorImpl::seek_first() -> void
         seek_to(std::move(lowest), 0);
     } else {
         m_tree->release(std::move(lowest));
-        m_status = Status::not_found("database is empty");
+        m_status = Status::not_found("table is empty");
     }
 }
 

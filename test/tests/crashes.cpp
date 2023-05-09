@@ -141,12 +141,16 @@ protected:
         return m_db->new_txn(write, m_txn);
     }
 
-    auto validate() -> void
+    auto end_txn_and_validate() -> void
     {
         clear_faults();
-        ASSERT_OK(m_routine.check(*m_txn));
+
+        // Transaction must be finished when a checkpoint is run.
+        delete m_txn;
+        m_txn = nullptr;
+        ASSERT_OK(m_db->checkpoint(false));
         ASSERT_OK(reopen(false));
-        ASSERT_OK(m_routine.check(*m_txn));
+        ASSERT_OK(m_routine.check(*m_txn, true));
     }
 
     std::map<std::string, std::string> m_constant;
@@ -171,7 +175,7 @@ TEST_P(CrashTests, CrashRollback)
         }
         return s;
     }));
-    validate();
+    end_txn_and_validate();
 }
 
 TEST_P(CrashTests, CrashRecovery)
@@ -186,7 +190,7 @@ TEST_P(CrashTests, CrashRecovery)
         }
         return s;
     }));
-    validate();
+    end_txn_and_validate();
 }
 
 static auto label_testcase(const testing::TestParamInfo<CrashTestParam> &info) -> std::string
@@ -227,17 +231,11 @@ INSTANTIATE_TEST_CASE_P(
             kDBName,
             kWalName),
         testing::Values(
+            tools::kSyscallOpen,
             tools::kSyscallRead,
             tools::kSyscallWrite,
-            tools::kSyscallOpen,
             tools::kSyscallSync,
             tools::kSyscallResize)),
     label_testcase);
 
 } // namespace calicodb::test::crashes
-
-auto main(int argc, char **argv) -> int
-{
-    testing::InitGoogleTest(&argc, argv);
-    return RUN_ALL_TESTS();
-}

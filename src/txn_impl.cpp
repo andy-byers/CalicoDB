@@ -32,6 +32,7 @@ auto TxnImpl::status() const -> Status
 
 auto TxnImpl::new_table(const TableOptions &options, const std::string &name, Table *&out) -> Status
 {
+    out = nullptr;
     CALICODB_TRY(*m_status);
     return m_schema.new_table(options, name, out);
 }
