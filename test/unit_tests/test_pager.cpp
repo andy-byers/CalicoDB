@@ -885,9 +885,7 @@ TEST_F(WalTests, EmptyWal)
     ASSERT_OK(m_wal->start_reader(changed));
     ASSERT_TRUE(changed);
 
-    std::size_t db_size;
     ASSERT_OK(m_wal->checkpoint(true));
-    ASSERT_EQ(0, db_size);
 
     char page[kPageSize];
     auto *ptr = page;
@@ -899,8 +897,8 @@ TEST_F(WalTests, EmptyWal)
     ASSERT_FALSE(ptr);
 
     ASSERT_OK(m_wal->checkpoint(true));
-    ASSERT_EQ(0, db_size);
 
+    std::size_t db_size;
     ASSERT_OK(m_env->file_size(kDBFilename, db_size));
     ASSERT_EQ(0, db_size);
 }
