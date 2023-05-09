@@ -41,20 +41,18 @@ struct PageRef final {
 class Bufmgr final
 {
 public:
-    explicit Bufmgr(std::size_t page_size, std::size_t frame_count);
+    explicit Bufmgr(std::size_t frame_count);
     ~Bufmgr();
 
     // Return the number of entries in the cache
     [[nodiscard]] auto size() const -> std::size_t;
 
     // Return a pointer to a specific cache entry, if it exists, nullptr otherwise
-    //
     // This method may alter the cache ordering.
     [[nodiscard]] auto get(Id page_id) -> PageRef *;
 
     // Get a reference to the root page, which is always in-memory, but is not
     // addressable in the cache
-    //
     // Note that it is a logic error to attempt to get a reference to the root page
     // using a different method. This method must be used.
     [[nodiscard]] auto root() -> PageRef *;
@@ -66,14 +64,13 @@ public:
     // cache replacement policy
     [[nodiscard]] auto next_victim() -> PageRef *;
 
-    // Create a new cache entry for page "page_id" which must not already exist
-    //
+    // Create a new cache entry for page `page_id` which must not already exist
     // Returns the address of the cache entry, which is guaranteed to remain constant
-    // as long the entry exists in the cache.
+    // as long the entry exists in the cache (until Bufmgr::erase() is called on
+    // `page_id`).
     [[nodiscard]] auto alloc(Id page_id) -> PageRef *;
 
     // Erase a specific entry, if it exists
-    //
     // This is the only way that an entry can be removed from the cache. Eviction
     // works by first calling "next_victim()" and then erasing the returned entry.
     // Returns true if the entry was erased, false otherwise.
@@ -82,15 +79,9 @@ public:
     // Increment the reference count associated with a page reference
     auto ref(PageRef &ref) -> void;
 
-    // Decrement the reference count (which must not already be 0) associated with
-    // a page reference
+    // Decrement the reference count associated with a page reference
+    // REQUIRES: Refcount of `ref` is not already 0
     auto unref(PageRef &ref) -> void;
-
-    // Return the size of a database page in bytes
-    [[nodiscard]] auto page_size() const -> std::size_t
-    {
-        return m_page_size;
-    }
 
     // Return the number of available buffers
     [[nodiscard]] auto available() const -> std::size_t
@@ -138,8 +129,9 @@ private:
     // List of pointers to available buffer slots.
     std::list<char *> m_available;
 
+    // Used to perform bounds checking in assertions.
     std::size_t m_frame_count = 0;
-    std::size_t m_page_size = 0;
+
     unsigned m_refsum = 0;
     U64 m_misses = 0;
     U64 m_hits = 0;

@@ -17,7 +17,7 @@ class HashIndexTestBase : public EnvTestHarness<tools::FakeEnv>
 protected:
     explicit HashIndexTestBase()
     {
-        EXPECT_OK(m_env->new_file(kShmFilename, Env::kCreate | Env::kReadWrite, m_shm));
+        EXPECT_OK(m_env->new_file(kShmFilename, Env::kCreate, m_shm));
         m_index = new HashIndex(m_header, *m_shm);
     }
 
@@ -171,7 +171,7 @@ TEST_F(HashIndexTests, SimulateUsage)
             if (const auto r = random.Next(10); r == 0) {
                 // Run a commit. The calls that validate the page-frame mapping below
                 // will ignore frames below "lower". This is not exactly how the WAL works,
-                // we actually use 2 index headers, 1 in the index, and 1 in memory. The
+                // we actually use 3 index headers, 2 in the index, and 1 in memory. The
                 // in-index header's max_frame is used as the position of the last commit.
                 lower = m_header.max_frame + 1;
                 simulated.clear();

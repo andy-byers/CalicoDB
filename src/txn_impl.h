@@ -11,10 +11,16 @@
 namespace calicodb
 {
 
+inline auto readonly_transaction() -> Status
+{
+    // TODO: Status::readonly("...")/Status::is_readonly()?
+    return Status::not_supported("transaction is readonly");
+}
+
 class TxnImpl : public Txn
 {
 public:
-    explicit TxnImpl(Pager &pager, DBState &state);
+    explicit TxnImpl(Pager &pager, Status &status, bool write);
     ~TxnImpl() override;
     [[nodiscard]] auto status() const -> Status override;
     [[nodiscard]] auto new_table(const TableOptions &options, const std::string &name, Table *&out) -> Status override;
@@ -26,12 +32,25 @@ public:
     auto TEST_validate() const -> void;
 
 private:
+    friend class DBImpl;
+
     [[nodiscard]] auto vacuum_freelist() -> Status;
 
-    Schema m_schema;
+    mutable Schema m_schema;
+    TxnImpl **m_backref = nullptr;
     Pager *m_pager;
-    DBState *m_state;
+    Status *m_status;
+    bool m_write = false;
 };
+
+inline auto txn_impl(Txn *txn) -> TxnImpl *
+{
+    return reinterpret_cast<TxnImpl *>(txn);
+}
+inline auto txn_impl(const Txn *txn) -> const TxnImpl *
+{
+    return reinterpret_cast<const TxnImpl *>(txn);
+}
 
 } // namespace calicodb
 

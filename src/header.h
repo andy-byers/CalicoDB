@@ -25,14 +25,10 @@ class Page;
 //     Offset  Size  Name
 //    ----------------------------
 //     0       18    Identifier string
-//     18      2     Page size
-//     20      4     Number of pages in the DB
-//     24      4     Freelist head
-//     28      1     File format version
-//     29      35    Reserved
-//
-// NOTE: The "page_size" field contains 0 if the maximum page size of 65,536 is used, since this
-// value cannot be represented by a 16-bit unsigned integer.
+//     18      4     Number of pages in the DB
+//     22      4     Freelist head
+//     26      1     File format version
+//     27      37    Reserved
 struct FileHeader {
     static constexpr char kIdentifier[18] = "CalicoDB format 1";
     static constexpr std::size_t kSize = 64;
@@ -40,7 +36,6 @@ struct FileHeader {
     auto read(const char *data) -> bool;
     auto write(char *data) const -> void;
 
-    U16 page_size = 0;
     U32 page_count = 0;
     U32 freelist_head = 0;
     char format_version = 0;
@@ -69,6 +64,8 @@ struct NodeHeader {
     unsigned frag_count = 0;
     bool is_external = false;
 };
+
+auto bad_identifier_error(const Slice &bad_identifier) -> Status;
 
 } // namespace calicodb
 

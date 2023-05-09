@@ -14,30 +14,26 @@ class File;
 class Sink;
 
 // CalicoDB storage environment
-//
 // Handles platform-specific filesystem manipulations and file locking.
 class Env
 {
 public:
-    enum OpenMode : int {
-        kCreate = 1,
-
-        // These 2 flags are mutually exclusive: only 1 may be set when opening a file.
-        kReadOnly = 2,
-        kReadWrite = 4,
-    };
-
     // Return a heap-allocated handle to this platform's default Env implementation
     static auto default_env() -> Env *;
 
     explicit Env();
     virtual ~Env();
 
-    Env(const Env &) = delete;
-    auto operator=(const Env &) -> Env & = delete;
+    Env(Env &) = delete;
+    void operator=(Env &) = delete;
 
-    [[nodiscard]] virtual auto new_sink(const std::string &filename, Sink *&out) -> Status = 0;
+    enum OpenMode : int {
+        kCreate = 1,
+        kReadOnly = 2,
+        kReadWrite = 4,
+    };
     [[nodiscard]] virtual auto new_file(const std::string &filename, OpenMode mode, File *&out) -> Status = 0;
+    [[nodiscard]] virtual auto new_sink(const std::string &filename, Sink *&out) -> Status = 0;
     [[nodiscard]] virtual auto resize_file(const std::string &filename, std::size_t size) -> Status = 0;
     [[nodiscard]] virtual auto file_size(const std::string &filename, std::size_t &out) const -> Status = 0;
     [[nodiscard]] virtual auto remove_file(const std::string &filename) -> Status = 0;
@@ -45,12 +41,30 @@ public:
 
     virtual auto srand(unsigned seed) -> void = 0;
     [[nodiscard]] virtual auto rand() -> unsigned = 0;
+
+    virtual auto sleep(unsigned micros) -> void = 0;
+};
+
+enum FileLockMode : int {
+    kLockShared = 1,    // Any number of threads can hold a kShared lock
+    kLockExclusive = 2, // Excludes all other locks
+};
+
+enum ShmLockFlag : int {
+    kShmUnlock = 1,
+    kShmLock = 2,
+    kShmReader = 4,
+    kShmWriter = 8,
 };
 
 class File
 {
 public:
+    explicit File();
     virtual ~File();
+
+    File(File &) = delete;
+    void operator=(File &) = delete;
 
     // Attempt to read "size" bytes from the file at the given offset.
     //
@@ -70,46 +84,13 @@ public:
     // Synchronize with the underlying filesystem.
     [[nodiscard]] virtual auto sync() -> Status = 0;
 
-    // File locking modes and semantics are from SQLite.
-    enum FileLockMode : int {
-        kUnlocked,
-        kShared,
-        kReserved,
-        kPending,
-        kExclusive,
-    };
+    // Available modes for the file locking API
+    // NOTE: File locking modes and semantics are from SQLite.
 
-    // Take or upgrade a file_lock on the file
-    //
-    // Return Status::ok() if the file_lock is granted, Status::busy() if an
-    // incompatible file_lock is already held by a different thread or process,
-    // or a Status::io_error() if a system call otherwise fails.
-    //
-    // Compliant Envs support the following state transitions:
-    //
-    //     Before -> (Intermediate) -> After
-    //    ----------------------------------------
-    //     kUnlocked ----------------> kShared
-    //     kShared ------------------> kReserved
-    //     kShared ------------------> kExclusive
-    //     kReserved --> (kPending) -> kExclusive
-    //     kPending -----------------> kExclusive
-    //
+    // Take or upgrade a lock on the file
     [[nodiscard]] virtual auto file_lock(FileLockMode mode) -> Status = 0;
 
-    // Release or downgrade a file_lock on the given file
-    //
-    // Compliant Envs support the following state transitions (where "> X"
-    // represents a file_lock mode with higher-priority than "X"):
-    //
-    //     Before -----------> After
-    //    ------------------------------
-    //     > kUnlocked ------> kUnlocked
-    //     > kShared --------> kShared
-    //
-    // Also note that transitions "Y -> Y", where "Y" <= kShared, are
-    // allowed, but are NOOPs.
-    //
+    // Release a lock on the file
     virtual auto file_unlock() -> void = 0;
 
     // Size of a shared memory region, i.e. the number of bytes pointed to by "out"
@@ -117,14 +98,7 @@ public:
     static constexpr std::size_t kShmRegionSize = 1'024 * 32;
     static constexpr std::size_t kShmLockCount = 8;
 
-    enum ShmLockFlag : int {
-        kUnlock = 1,
-        kLock = 2,
-        kReader = 4,
-        kWriter = 8,
-    };
-
-    [[nodiscard]] virtual auto shm_map(std::size_t r, volatile void *&out) -> Status = 0;
+    [[nodiscard]] virtual auto shm_map(std::size_t r, bool extend, volatile void *&out) -> Status = 0;
     [[nodiscard]] virtual auto shm_lock(std::size_t r, std::size_t n, ShmLockFlag flags) -> Status = 0;
     virtual auto shm_unmap(bool unlink) -> void = 0;
     virtual auto shm_barrier() -> void = 0;
@@ -133,7 +107,12 @@ public:
 class Sink
 {
 public:
+    explicit Sink();
     virtual ~Sink();
+
+    Sink(Sink &) = delete;
+    void operator=(Sink &) = delete;
+
     virtual auto sink(const Slice &in) -> void = 0;
 };
 
@@ -158,6 +137,8 @@ public:
     auto srand(unsigned seed) -> void override;
     [[nodiscard]] auto rand() -> unsigned override;
 
+    auto sleep(unsigned micros) -> void override;
+
 private:
     Env *m_target;
 };
@@ -178,7 +159,7 @@ public:
     [[nodiscard]] auto file_lock(FileLockMode mode) -> Status override;
     auto file_unlock() -> void override;
 
-    [[nodiscard]] auto shm_map(std::size_t r, volatile void *&out) -> Status override;
+    [[nodiscard]] auto shm_map(std::size_t r, bool extend, volatile void *&out) -> Status override;
     [[nodiscard]] auto shm_lock(std::size_t s, std::size_t n, ShmLockFlag flags) -> Status override;
     auto shm_unmap(bool unlink) -> void override;
     auto shm_barrier() -> void override;
@@ -209,9 +190,9 @@ inline constexpr auto operator|(Env::OpenMode lhs, Env::OpenMode rhs) -> Env::Op
         static_cast<int>(lhs) |
         static_cast<int>(rhs)};
 }
-inline constexpr auto operator|(File::ShmLockFlag lhs, File::ShmLockFlag rhs) -> File::ShmLockFlag
+inline constexpr auto operator|(ShmLockFlag lhs, ShmLockFlag rhs) -> ShmLockFlag
 {
-    return File::ShmLockFlag{
+    return ShmLockFlag{
         static_cast<int>(lhs) |
         static_cast<int>(rhs)};
 }

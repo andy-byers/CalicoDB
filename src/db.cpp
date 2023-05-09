@@ -26,11 +26,7 @@ auto DB::open(const Options &options, const std::string &filename, DB *&db) -> S
     const auto clean_filename = cleanup_path(filename);
 
     auto sanitized = options;
-    clip_to_range(sanitized.page_size, kMinPageSize, kMaxPageSize);
     clip_to_range(sanitized.cache_size, {}, kMaxCacheSize);
-    if (!is_power_of_two(sanitized.page_size)) {
-        sanitized.page_size = Options{}.page_size;
-    }
     if (sanitized.wal_filename.empty()) {
         sanitized.wal_filename = clean_filename + kDefaultWalSuffix;
     }
@@ -39,7 +35,9 @@ auto DB::open(const Options &options, const std::string &filename, DB *&db) -> S
     }
 
     auto *impl = new DBImpl(options, sanitized, clean_filename);
-    auto s = impl->open(sanitized);
+    auto s = busy_wait(sanitized.busy, [impl, &sanitized] {
+        return impl->open(sanitized);
+    });
 
     if (!s.is_ok()) {
         delete impl;
@@ -53,9 +51,45 @@ DB::DB() = default;
 
 DB::~DB() = default;
 
+Table::Table() = default;
+
 Table::~Table() = default;
 
+Txn::Txn() = default;
+
 Txn::~Txn() = default;
+
+BusyHandler::BusyHandler() = default;
+
+BusyHandler::~BusyHandler() = default;
+
+TxnHandler::TxnHandler() = default;
+
+TxnHandler::~TxnHandler() = default;
+
+auto DB::view(TxnHandler &handler) -> Status
+{
+    Txn *txn;
+    CALICODB_TRY(new_txn(false, txn));
+
+    auto s = handler.exec(*txn);
+    delete txn;
+    return s;
+}
+
+auto DB::update(TxnHandler &handler) -> Status
+{
+    Txn *txn;
+    CALICODB_TRY(new_txn(true, txn));
+
+    auto s = handler.exec(*txn);
+    if (s.is_ok()) {
+        s = txn->commit();
+    }
+    // Implicit rollback of all uncommitted changes.
+    delete txn;
+    return s;
+}
 
 auto DB::destroy(const Options &options, const std::string &filename) -> Status
 {

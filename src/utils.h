@@ -14,11 +14,11 @@
 #if NDEBUG
 #define CALICODB_EXPECT_(expr, file, line)
 #else
-#define CALICODB_EXPECT_(expr, file, line) impl::expect(expr, #expr, file, line)
+#define CALICODB_EXPECT_(expr, file, line) calicodb::expect_impl(expr, #expr, file, line)
 #ifdef CALICODB_TEST
 #define CALICODB_EXPENSIVE_CHECKS
 #endif // CALICODB_TEST
-#endif // NDEBUG
+#endif // !NDEBUG
 
 #define CALICODB_EXPECT_TRUE(expr) CALICODB_EXPECT_(expr, __FILE__, __LINE__)
 #define CALICODB_EXPECT_FALSE(expr) CALICODB_EXPECT_TRUE(!(expr))
@@ -41,10 +41,7 @@
 namespace calicodb
 {
 
-namespace impl
-{
-
-inline constexpr auto expect(bool cond, const char *repr, const char *file, int line) noexcept -> void
+inline constexpr auto expect_impl(bool cond, const char *repr, const char *file, int line) noexcept -> void
 {
     if (!cond) {
         std::fprintf(stderr, "expectation (%s) failed at %s:%d\n", repr, file, line);
@@ -52,28 +49,20 @@ inline constexpr auto expect(bool cond, const char *repr, const char *file, int 
     }
 }
 
-} // namespace impl
-
-static constexpr std::size_t kMinPageSize = 1'024;
-static constexpr std::size_t kMaxPageSize = 65'536;
 static constexpr std::size_t kMinFrameCount = 16;
 static constexpr std::size_t kMaxCacheSize = 1 << 30;
 static constexpr auto kDefaultWalSuffix = "-wal";
 static constexpr auto kDefaultShmSuffix = "-shm";
 static constexpr auto kDefaultLogSuffix = "-log";
 
-// Fixed-width unsigned integers for use in the database file format.
+// Fixed-width unsigned integers for use in the database file format
 using U8 = std::uint8_t;
 using U16 = std::uint16_t;
 using U32 = std::uint32_t;
 using U64 = std::uint64_t;
 
-// Source: http://graphics.stanford.edu/~seander/bithacks.html#DetermineIfPowerOf2
-template <class T>
-constexpr auto is_power_of_two(T v) noexcept -> bool
-{
-    return v && !(v & (v - 1));
-}
+// Additional file locking modes that cannot be requested directly
+enum : int { kLockUnlocked = 0 };
 
 [[nodiscard]] inline auto get_status_name(const Status &s) noexcept -> const char *
 {
@@ -92,6 +81,15 @@ constexpr auto is_power_of_two(T v) noexcept -> bool
     }
     CALICODB_EXPECT_TRUE(s.is_ok());
     return "OK";
+}
+
+[[nodiscard]] inline auto make_retry_status(const std::string &reason = "") -> Status
+{
+    return Status::busy("retry" + (reason.empty() ? "" : " (" + reason + ')'));
+}
+[[nodiscard]] inline auto is_retry_status(const Status &s) -> bool
+{
+    return s.is_busy() && s.to_string().find("retry") == 0;
 }
 
 struct Id {
@@ -167,50 +165,6 @@ inline auto operator!=(Id lhs, Id rhs) -> bool
 {
     return lhs.value != rhs.value;
 }
-
-struct DBState {
-    Status status;
-    std::size_t ckpt_number = 0;
-    bool use_wal = false;
-};
-
-struct TreeStatistics {
-    std::size_t smo_count = 0;
-    std::size_t bytes_read = 0;
-    std::size_t bytes_written = 0;
-};
-
-class InternalStatus
-{
-public:
-    explicit InternalStatus() = default;
-    explicit InternalStatus(int extra)
-        : m_extra(extra)
-    {
-    }
-    explicit InternalStatus(Status s, int extra = 0)
-        : m_status(std::move(s)),
-          m_extra(extra)
-    {
-    }
-
-    [[nodiscard]] auto is_ok() const -> bool
-    {
-        return m_status.is_ok();
-    }
-    [[nodiscard]] auto extra() const -> int
-    {
-        return m_extra;
-    }
-    [[nodiscard]] auto operator*() const -> const Status &
-    {
-        return m_status;
-    }
-
-private:
-    Status m_status;
-    int m_extra = 0;
-};
 
 } // namespace calicodb
 

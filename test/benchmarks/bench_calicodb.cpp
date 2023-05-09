@@ -6,6 +6,14 @@
 #include "tools.h"
 #include <benchmark/benchmark.h>
 
+// This simulates normal transaction behavior, where m_txn is destroyed and DB::new_txn() is called after
+// each commit. This is what happens if the DB::view()/DB::update() API is used. It's much faster to keep
+// the transaction object around and just call Txn::commit() and Txn::rollback() as needed, but this is
+// bad for concurrency.
+//
+// NOTE: I'm also adding a checkpoint call right before the restart, to be run once every 1'000 restarts.
+#define RESTART_ON_COMMIT 1
+
 enum AccessType : int64_t {
     kSequential,
     kRandom,
@@ -40,11 +48,10 @@ public:
         : m_param(param)
     {
         m_options.env = calicodb::Env::default_env();
-        m_options.page_size = 0x2000;
         m_options.cache_size = 4'194'304;
         m_options.sync = param.sync;
         CHECK_OK(calicodb::DB::open(m_options, kFilename, m_db));
-        CHECK_OK(m_db->start(true, m_txn));
+        CHECK_OK(m_db->new_txn(true, m_txn));
         CHECK_OK(m_txn->new_table(calicodb::TableOptions(), "bench", m_table));
     }
 
@@ -52,7 +59,7 @@ public:
     {
         delete m_cursor;
         delete m_table;
-        m_db->finish(m_txn);
+        delete m_txn;
         delete m_db;
 
         CHECK_OK(calicodb::DB::destroy(m_options, kFilename));
@@ -60,25 +67,18 @@ public:
         delete m_options.env;
     }
 
-    auto exists(benchmark::State &state) -> void
+    auto read(benchmark::State &state, std::string *out) -> void
     {
         state.PauseTiming();
         const auto key = next_key(state.range(0) == kSequential, true);
+        if (out) {
+            // Allocate new memory for the value each round.
+            out->clear();
+        }
         state.ResumeTiming();
 
-        CHECK_OK(m_table->get(key, nullptr));
-
-        increment_counters();
-    }
-
-    auto read(benchmark::State &state) -> void
-    {
-        state.PauseTiming();
-        const auto key = next_key(state.range(0) == kSequential, true);
-        state.ResumeTiming();
-
-        std::string value;
-        CHECK_OK(m_table->get(key, &value));
+        CHECK_OK(m_table->get(key, out));
+        benchmark::DoNotOptimize(out);
 
         increment_counters();
     }
@@ -176,7 +176,21 @@ private:
     {
         if (m_counters[0] % m_param.commit_interval == m_param.commit_interval - 1) {
             CHECK_OK(m_txn->commit());
+#if RESTART_ON_COMMIT
+            restart_txn();
+#endif
         }
+    }
+
+    auto restart_txn() -> void
+    {
+        delete m_table;
+        delete m_txn;
+        if (m_counters[0] % 1'000 == 999) {
+            CHECK_OK(m_db->checkpoint(true));
+        }
+        CHECK_OK(m_db->new_txn(true, m_txn));
+        CHECK_OK(m_txn->new_table(calicodb::TableOptions(), "bench", m_table));
     }
 
     auto increment_counters() -> void
@@ -269,7 +283,7 @@ static auto BM_Exists(benchmark::State &state) -> void
     Benchmark bench;
     bench.add_initial_records();
     for (auto _ : state) {
-        bench.exists(state);
+        bench.read(state, nullptr);
     }
 }
 BENCHMARK(BM_Exists)
@@ -279,11 +293,13 @@ BENCHMARK(BM_Exists)
 static auto BM_Read(benchmark::State &state) -> void
 {
     state.SetLabel("Read" + access_type_name(state.range(0)));
+    std::string value;
 
     Benchmark bench;
     bench.add_initial_records();
     for (auto _ : state) {
-        bench.read(state);
+        bench.read(state, &value);
+        benchmark::DoNotOptimize(value);
     }
 }
 BENCHMARK(BM_Read)
@@ -359,11 +375,13 @@ BENCHMARK(BM_Write100K)
 static auto BM_Read100K(benchmark::State &state) -> void
 {
     state.SetLabel("Read" + access_type_name(state.range(0)) + "100K");
+    std::string value;
 
     Benchmark bench{{.value_length = 100'000}};
     bench.add_initial_records();
     for (auto _ : state) {
-        bench.read(state);
+        bench.read(state, &value);
+        benchmark::DoNotOptimize(value);
     }
 }
 BENCHMARK(BM_Read100K)
@@ -377,7 +395,7 @@ static auto BM_Exists100K(benchmark::State &state) -> void
     Benchmark bench{{.value_length = 100'000}};
     bench.add_initial_records();
     for (auto _ : state) {
-        bench.exists(state);
+        bench.read(state, nullptr);
     }
 }
 BENCHMARK(BM_Exists100K)

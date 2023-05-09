@@ -69,7 +69,7 @@ auto FakeFile::sync() -> Status
     return Status::ok();
 }
 
-auto FakeFile::shm_map(std::size_t r, volatile void *&out) -> Status
+auto FakeFile::shm_map(std::size_t r, bool extend, volatile void *&out) -> Status
 {
     while (m_shm.size() <= r) {
         m_shm.emplace_back();
@@ -186,6 +186,7 @@ TestEnv::~TestEnv()
 
 auto TestEnv::save_file_contents(const std::string &filename) -> void
 {
+    std::lock_guard lock(m_mutex);
     auto state = m_state.find(filename);
     CHECK_TRUE(state != end(m_state));
     state->second.saved_state = read_file_to_string(*target(), filename);
@@ -199,6 +200,7 @@ auto TestEnv::overwrite_file(const std::string &filename, const std::string &con
 
 auto TestEnv::clone() -> Env *
 {
+    std::lock_guard lock(m_mutex);
     auto *env = new TestEnv(
         *reinterpret_cast<FakeEnv *>(target())->clone());
     for (const auto &state : m_state) {
@@ -210,25 +212,40 @@ auto TestEnv::clone() -> Env *
 
 auto TestEnv::drop_after_last_sync() -> void
 {
-    for (const auto &[filename, _] : m_state) {
-        drop_after_last_sync(filename);
+    std::lock_guard lock(m_mutex);
+    for (const auto &[filename, state] : m_state) {
+        if (!state.unlinked) {
+            overwrite_file(filename, state.saved_state);
+        }
     }
 }
 
 auto TestEnv::drop_after_last_sync(const std::string &filename) -> void
 {
+    std::lock_guard lock(m_mutex);
     const auto state = m_state.find(filename);
     if (state != end(m_state) && !state->second.unlinked) {
         overwrite_file(filename, state->second.saved_state);
     }
 }
 
+auto TestEnv::find_counters(const std::string &filename) -> const FileCounters *
+{
+    std::lock_guard lock(m_mutex);
+    auto itr = m_state.find(filename);
+    if (itr != end(m_state)) {
+        return &itr->second.counters;
+    }
+    return nullptr;
+}
+
 auto TestEnv::new_file(const std::string &filename, OpenMode mode, File *&out) -> Status
 {
-    TRY_INTERCEPT_FROM(*this, Interceptor::kOpen, filename);
+    TRY_INTERCEPT_FROM(*this, kSyscallOpen, filename);
 
     auto s = target()->new_file(filename, mode, out);
     if (s.is_ok()) {
+        std::lock_guard lock(m_mutex);
         auto state = m_state.find(filename);
         if (state == end(m_state)) {
             state = m_state.insert(state, {filename, FileState()});
@@ -241,29 +258,44 @@ auto TestEnv::new_file(const std::string &filename, OpenMode mode, File *&out) -
 
 auto TestEnv::resize_file(const std::string &filename, std::size_t file_size) -> Status
 {
-    TRY_INTERCEPT_FROM(*this, Interceptor::kResize, filename);
+    TRY_INTERCEPT_FROM(*this, kSyscallResize, filename);
     return target()->resize_file(filename, file_size);
 }
 
 auto TestEnv::remove_file(const std::string &filename) -> Status
 {
-    TRY_INTERCEPT_FROM(*this, Interceptor::kUnlink, filename);
+    TRY_INTERCEPT_FROM(*this, kSyscallUnlink, filename);
 
     auto s = target()->remove_file(filename);
     if (s.is_ok()) {
         auto state = m_state.find(filename);
-        CHECK_TRUE(state != end(m_state));
-        state->second.unlinked = true;
+        if (state != end(m_state)) {
+            state->second.unlinked = true;
+        } else {
+            s = Status::io_error("no such file or directory");
+        }
     }
     return s;
 }
 
-auto TestEnv::try_intercept_syscall(Interceptor::Type type, const std::string &filename) -> Status
+auto TestEnv::try_intercept_syscall(SyscallType type, const std::string &filename) -> Status
 {
+    std::lock_guard lock(m_mutex);
     const auto state = m_state.find(filename);
     if (state != end(m_state)) {
+        // Need the position of the set bit to index the syscall counters array.
+        std::size_t type_index = kNumSyscalls;
+        for (std::size_t i = 0; i < kNumSyscalls; ++i) {
+            if (type & (1 << i)) {
+                type_index = i;
+                break;
+            }
+        }
+        CALICODB_EXPECT_NE(kNumSyscalls, type_index);
+        ++state->second.counters.values[type_index];
+
         for (const auto &interceptor : state->second.interceptors) {
-            if (interceptor.type == type) {
+            if (interceptor.type & type) {
                 return interceptor.callback();
             }
         }
@@ -277,6 +309,7 @@ auto TestEnv::add_interceptor(const std::string &filename, Interceptor intercept
     if (state == end(m_state)) {
         state = m_state.insert(state, {filename, FileState()});
     }
+    // TODO: Combine with another interceptor if possible.
     state->second.interceptors.emplace_back(std::move(interceptor));
 }
 
@@ -310,19 +343,25 @@ TestFile::~TestFile()
 
 auto TestFile::read(std::size_t offset, std::size_t size, char *scratch, Slice *out) -> Status
 {
-    TRY_INTERCEPT_FROM(*m_env, Interceptor::kRead, m_filename);
+    TRY_INTERCEPT_FROM(*m_env, kSyscallRead, m_filename);
     return FileWrapper::read(offset, size, scratch, out);
+}
+
+auto TestFile::read_exact(std::size_t offset, std::size_t size, char *out) -> Status
+{
+    TRY_INTERCEPT_FROM(*m_env, kSyscallRead, m_filename);
+    return FileWrapper::read_exact(offset, size, out);
 }
 
 auto TestFile::write(std::size_t offset, const Slice &in) -> Status
 {
-    TRY_INTERCEPT_FROM(*m_env, Interceptor::kWrite, m_filename);
+    TRY_INTERCEPT_FROM(*m_env, kSyscallWrite, m_filename);
     return FileWrapper::write(offset, in);
 }
 
 auto TestFile::sync() -> Status
 {
-    TRY_INTERCEPT_FROM(*m_env, Interceptor::kSync, m_filename);
+    TRY_INTERCEPT_FROM(*m_env, kSyscallSync, m_filename);
     auto s = FileWrapper::sync();
     if (s.is_ok()) {
         m_env->save_file_contents(m_filename);

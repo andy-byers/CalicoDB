@@ -197,19 +197,6 @@ TEST_F(SliceTests, ConstantExpressions)
     constexpr_test_read(bv, "42");
 }
 
-TEST(UtilsTest, ZeroIsNotAPowerOfTwo)
-{
-    ASSERT_FALSE(is_power_of_two(0));
-}
-
-TEST(UtilsTest, PowerOfTwoComputationIsCorrect)
-{
-    ASSERT_TRUE(is_power_of_two(1 << 1));
-    ASSERT_TRUE(is_power_of_two(1 << 2));
-    ASSERT_TRUE(is_power_of_two(1 << 10));
-    ASSERT_TRUE(is_power_of_two(1 << 20));
-}
-
 TEST(NonPrintableSliceTests, UsesStringSize)
 {
     const std::string u{"\x00\x01", 2};
@@ -502,20 +489,20 @@ class InterceptorTests
 
 TEST_F(InterceptorTests, RespectsPrefix)
 {
-    QUICK_INTERCEPTOR("./test", tools::Interceptor::kOpen);
+    QUICK_INTERCEPTOR("./test", tools::kSyscallOpen);
 
     File *editor;
-    assert_special_error(env().new_file("./test", Env::kCreate | Env::kReadWrite, editor));
-    ASSERT_OK(env().new_file("./wal", Env::kCreate | Env::kReadWrite, editor));
+    assert_special_error(env().new_file("./test", Env::kCreate, editor));
+    ASSERT_OK(env().new_file("./wal", Env::kCreate, editor));
     delete editor;
 }
 
 TEST_F(InterceptorTests, RespectsSyscallType)
 {
-    QUICK_INTERCEPTOR("./test", tools::Interceptor::kWrite);
+    QUICK_INTERCEPTOR("./test", tools::kSyscallWrite);
 
     File *editor;
-    ASSERT_OK(env().new_file("./test", Env::kCreate | Env::kReadWrite, editor));
+    ASSERT_OK(env().new_file("./test", Env::kCreate, editor));
     assert_special_error(editor->write(0, {}));
     delete editor;
 }
@@ -524,6 +511,14 @@ TEST(Logging, WriteFormattedString)
 {
     std::string s;
     append_fmt_string(s, "%s %d %f", "abc", 42, 1.0);
+}
+
+TEST(Logging, ConsumeDecimalNumberIgnoresLeadingZeros)
+{
+    U64 v;
+    Slice slice("0000000123");
+    consume_decimal_number(slice, &v);
+    ASSERT_EQ(v, 123);
 }
 
 TEST(LevelDB_Logging, NumberToString)

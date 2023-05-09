@@ -22,6 +22,11 @@ class Env;
 class TxnImpl;
 class Wal;
 
+struct DBState {
+    Status status;
+    bool use_wal = false;
+};
+
 class DBImpl : public DB
 {
 public:
@@ -34,8 +39,8 @@ public:
     [[nodiscard]] auto open(const Options &sanitized) -> Status;
 
     [[nodiscard]] auto get_property(const Slice &name, std::string *out) const -> bool override;
-    [[nodiscard]] auto start(bool write, Txn *&out) -> Status override;
-    auto finish(Txn *&out) -> void override;
+    [[nodiscard]] auto new_txn(bool write, Txn *&txn) -> Status override;
+    [[nodiscard]] auto checkpoint(bool reset) -> Status override;
 
     [[nodiscard]] auto TEST_pager() const -> const Pager &;
     [[nodiscard]] auto TEST_state() const -> const DBState &;
@@ -44,15 +49,26 @@ private:
     DBState m_state;
     Pager *m_pager = nullptr;
 
-    Env *m_env = nullptr;
-    Sink *m_log = nullptr;
+    Env *const m_env = nullptr;
+    Sink *const m_log = nullptr;
+    BusyHandler *const m_busy = nullptr;
+
+    TxnImpl *m_txn = nullptr;
 
     const std::string m_db_filename;
     const std::string m_wal_filename;
     const bool m_owns_env;
     const bool m_owns_log;
-    const bool m_sync;
 };
+
+inline auto db_impl(DB *db) -> DBImpl *
+{
+    return reinterpret_cast<DBImpl *>(db);
+}
+inline auto db_impl(const DB *db) -> const DBImpl *
+{
+    return reinterpret_cast<const DBImpl *>(db);
+}
 
 } // namespace calicodb
 

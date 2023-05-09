@@ -5,7 +5,9 @@
 #ifndef CALICODB_WAL_H
 #define CALICODB_WAL_H
 
+#include "calicodb/options.h"
 #include "utils.h"
+#include <thread>
 #include <vector>
 
 namespace calicodb
@@ -13,17 +15,13 @@ namespace calicodb
 
 class Env;
 class File;
-class Shm;
 struct PageRef;
 
 struct HashIndexHdr {
-    enum Flags {
-        INITIALIZED = 1,
-    };
     U32 version;
     U32 unused0;
     U32 change;
-    U16 flags;
+    U16 is_init;
     U16 unused1;
     U32 max_frame;
     U32 page_count;
@@ -51,7 +49,7 @@ public:
 private:
     friend class WalImpl;
 
-    [[nodiscard]] auto map_group(std::size_t group_number) -> Status;
+    [[nodiscard]] auto map_group(std::size_t group_number, bool extend) -> Status;
 
     // Storage for hash table groups.
     std::vector<volatile char *> m_groups;
@@ -80,7 +78,7 @@ public:
 
     // Create an iterator over the contents of the provided hash index.
     explicit HashIterator(HashIndex &index);
-    [[nodiscard]] auto init() -> Status;
+    [[nodiscard]] auto init(U32 backfill = 0) -> Status;
 
     // Return the next hash entry.
     //
@@ -114,20 +112,23 @@ class Wal
 {
 public:
     struct Parameters {
-        std::string filename;
-        std::size_t page_size = 0;
-        Env *env = nullptr;
-        File *dbfile = nullptr;
+        const char *wal_name;
+        const char *db_name;
+        Env *env;
+        File *db_file;
+        Sink *info_log;
+        BusyHandler *busy;
+        bool sync;
     };
 
     virtual ~Wal();
 
     // Open or create a WAL file called "filename".
     [[nodiscard]] static auto open(const Parameters &param, Wal *&out) -> Status;
-    [[nodiscard]] static auto close(Wal *&wal) -> Status;
+    [[nodiscard]] virtual auto close(std::size_t &db_size) -> Status = 0;
 
     // Write as much of the WAL back to the DB as possible
-    [[nodiscard]] virtual auto checkpoint(File &db_file, std::size_t *db_size) -> Status = 0;
+    [[nodiscard]] virtual auto checkpoint(bool reset) -> Status = 0;
 
     // UNLOCKED -> READER
     [[nodiscard]] virtual auto start_reader(bool &changed) -> Status = 0;
@@ -142,8 +143,7 @@ public:
     [[nodiscard]] virtual auto start_writer() -> Status = 0;
 
     // Write new versions of the given pages to the WAL.
-    [[nodiscard]] virtual auto write(const PageRef *dirty, std::size_t db_size) -> Status = 0;
-    [[nodiscard]] virtual auto sync() -> Status = 0;
+    [[nodiscard]] virtual auto write(PageRef *dirty, std::size_t db_size) -> Status = 0;
     virtual auto rollback() -> void = 0;
 
     // WRITER -> READER
@@ -153,10 +153,21 @@ public:
     virtual auto finish_reader() -> void = 0;
 
     [[nodiscard]] virtual auto statistics() const -> WalStatistics = 0;
-
-private:
-    [[nodiscard]] virtual auto close() -> Status = 0;
 };
+
+template <class Callback>
+static auto busy_wait(BusyHandler *handler, const Callback &callback) -> Status
+{
+    for (unsigned n = 0;; ++n) {
+        auto s = callback();
+        if (s.is_busy()) {
+            if (handler && handler->exec(n)) {
+                continue;
+            }
+        }
+        return s;
+    }
+}
 
 auto TEST_print_wal(const Wal &wal) -> void;
 

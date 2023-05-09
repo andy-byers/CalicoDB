@@ -73,11 +73,9 @@ struct Cell {
 };
 
 struct NodeMeta {
-    using ParseCell = Cell (*)(const NodeMeta &, char *);
+    using ParseCell = Cell (*)(char *);
 
     ParseCell parse_cell = nullptr;
-    std::size_t min_local = 0;
-    std::size_t max_local = 0;
 };
 
 struct Node {
@@ -162,10 +160,16 @@ struct PayloadManager {
     [[nodiscard]] static auto collect_value(Pager &pager, std::string &scratch, const Cell &cell, Slice *value) -> Status;
 };
 
+struct TreeStatistics {
+    std::size_t smo_count = 0;
+    std::size_t bytes_read = 0;
+    std::size_t bytes_written = 0;
+};
+
 class Tree final
 {
 public:
-    explicit Tree(Pager &pager, Id *root_id);
+    explicit Tree(Pager &pager, const Id *root_id);
     ~Tree();
     [[nodiscard]] static auto create(Pager &pager, bool is_root, Id *out) -> Status;
     [[nodiscard]] static auto destroy(Tree &tree) -> Status;
@@ -255,7 +259,7 @@ private:
     mutable std::string m_cell_scratch;
     mutable std::string m_anchor;
     Pager *m_pager = nullptr;
-    Id *m_root_id = nullptr;
+    const Id *m_root_id = nullptr;
 };
 
 class CursorImpl : public Cursor
@@ -275,6 +279,10 @@ class CursorImpl : public Cursor
 
     CursorImpl *m_prev = nullptr;
     CursorImpl *m_next = nullptr;
+
+    bool m_needs_reposition = false;
+
+    [[nodiscard]] auto reposition() -> std::string;
 
     auto seek_to(Node node, std::size_t index) -> void;
     auto fetch_payload() -> Status;

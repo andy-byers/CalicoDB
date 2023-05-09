@@ -9,7 +9,9 @@
 #include "calicodb/env.h"
 #include "db_impl.h"
 #include "env_posix.h"
+#include "logging.h"
 #include "txn_impl.h"
+#include <atomic>
 #include <climits>
 #include <cstdarg>
 #include <cstdio>
@@ -21,35 +23,35 @@
 #include <string>
 #include <unordered_map>
 
-#define CHECK_TRUE(cond)                             \
-    do {                                             \
-        if (!(cond)) {                               \
-            std::fputs(#cond " is false\n", stderr); \
-            std::abort();                            \
-        }                                            \
+#define CHECK_TRUE(cond)                                 \
+    do {                                                 \
+        if (!(cond)) {                                   \
+            std::cerr << "expected `" << #cond << "`\n"; \
+            std::abort();                                \
+        }                                                \
     } while (0)
 
 #define CHECK_FALSE(cond) \
     CHECK_TRUE(!(cond))
 
-#define CHECK_OK(expr)                                                         \
-    do {                                                                       \
-        if (auto assert_s = (expr); !assert_s.is_ok()) {                       \
-            std::fprintf(                                                      \
-                stderr,                                                        \
-                "expected \"" #expr " == Status::ok()\" but got \"%s\": %s\n", \
-                get_status_name(assert_s),                                     \
-                assert_s.to_string().c_str());                                 \
-            std::abort();                                                      \
-        }                                                                      \
+#define CHECK_OK(expr)                                                                        \
+    do {                                                                                      \
+        if (auto assert_s = (expr); !assert_s.is_ok()) {                                      \
+            std::fprintf(                                                                     \
+                stderr,                                                                       \
+                "expected `(" #expr ").is_ok()` but got \"%s\" status with message \"%s\"\n", \
+                get_status_name(assert_s),                                                    \
+                assert_s.to_string().c_str());                                                \
+            std::abort();                                                                     \
+        }                                                                                     \
     } while (0)
 
-#define CHECK_EQ(lhs, rhs)                        \
-    do {                                          \
-        if ((lhs) != (rhs)) {                     \
-            std::fputs(#lhs " != " #rhs, stderr); \
-            std::abort();                         \
-        }                                         \
+#define CHECK_EQ(lhs, rhs)                                                                             \
+    do {                                                                                               \
+        if ((lhs) != (rhs)) {                                                                          \
+            std::cerr << "expected `" << #lhs "` (" << (lhs) << ") == `" #rhs "` (" << (rhs) << ")\n"; \
+            std::abort();                                                                              \
+        }                                                                                              \
     } while (0)
 
 namespace calicodb::tools
@@ -96,12 +98,12 @@ public:
         return Status::not_found("");
     }
 
-    [[nodiscard]] auto write(const PageRef *, std::size_t) -> Status override
+    [[nodiscard]] auto write(PageRef *, std::size_t) -> Status override
     {
         return Status::ok();
     }
 
-    [[nodiscard]] auto checkpoint(File &, std::size_t *) -> Status override
+    [[nodiscard]] auto checkpoint(bool) -> Status override
     {
         return Status::ok();
     }
@@ -110,7 +112,7 @@ public:
     {
     }
 
-    [[nodiscard]] auto close() -> Status override
+    [[nodiscard]] auto close(std::size_t &) -> Status override
     {
         return Status::ok();
     }
@@ -126,6 +128,7 @@ class FakeWal : public Wal
     std::map<Id, std::string> m_committed;
     std::map<Id, std::string> m_pending;
     std::size_t m_db_size = 0;
+    File *m_db_file;
     Parameters m_param;
 
 public:
@@ -133,11 +136,10 @@ public:
     ~FakeWal() override = default;
 
     [[nodiscard]] auto read(Id page_id, char *&out) -> Status override;
-    [[nodiscard]] auto write(const PageRef *dirty, std::size_t db_size) -> Status override;
-    [[nodiscard]] auto checkpoint(File &db_file, std::size_t *) -> Status override;
+    [[nodiscard]] auto write(PageRef *dirty, std::size_t db_size) -> Status override;
+    [[nodiscard]] auto checkpoint(bool) -> Status override;
     [[nodiscard]] auto statistics() const -> WalStatistics override;
-    [[nodiscard]] auto sync() -> Status override { return Status::ok(); }
-    [[nodiscard]] auto close() -> Status override;
+    [[nodiscard]] auto close(std::size_t &) -> Status override;
     [[nodiscard]] auto start_reader(bool &) -> Status override { return Status::ok(); }
     [[nodiscard]] auto start_writer() -> Status override { return Status::ok(); }
     auto finish_reader() -> void override {}
@@ -238,6 +240,139 @@ auto fill_db(Table &table, RandomGenerator &random, std::size_t num_records, std
 auto expect_db_contains(DB &db, const std::string &tablename, const std::map<std::string, std::string> &map) -> void;
 auto expect_db_contains(Txn &txn, const std::string &tablename, const std::map<std::string, std::string> &map) -> void;
 auto expect_db_contains(const Table &table, const std::map<std::string, std::string> &map) -> void;
+
+[[nodiscard]] inline auto view_db(const std::string &filename, calicodb::TxnHandler &handler, const Options &options = {}) -> calicodb::Status
+{
+    calicodb::DB *db;
+    auto s = calicodb::DB::open(options, filename, db);
+    if (s.is_ok()) {
+        s = db->view(handler);
+        delete db;
+    }
+    return s;
+}
+
+[[nodiscard]] inline auto update_db(const std::string &filename, calicodb::TxnHandler &handler, const Options &options = {}) -> calicodb::Status
+{
+    calicodb::DB *db;
+    auto s = calicodb::DB::open(options, filename, db);
+    if (s.is_ok()) {
+        do {
+            s = db->update(handler);
+        } while (s.is_busy());
+        delete db;
+    }
+    return s;
+}
+
+template <class Callback>
+class CustomTxnHandler : public TxnHandler
+{
+    Callback m_callback;
+
+public:
+    CustomTxnHandler(Callback callback)
+        : m_callback(std::move(callback))
+    {
+    }
+
+    ~CustomTxnHandler() override = default;
+
+    [[nodiscard]] auto exec(Txn &txn) -> Status override
+    {
+        return m_callback(txn);
+    }
+};
+
+class BusyCounter : public BusyHandler
+{
+public:
+    ~BusyCounter() override = default;
+
+    std::atomic<unsigned> count = 0;
+    auto exec(unsigned) -> bool override
+    {
+        count.fetch_add(1);
+        return true;
+    }
+};
+
+template <std::size_t Length = 16>
+class NumericKey
+{
+    std::string m_value;
+
+public:
+    explicit NumericKey()
+        : m_value("0")
+    {
+    }
+
+    explicit NumericKey(U64 number)
+        : m_value(integral_key<Length>(number))
+    {
+    }
+
+    explicit NumericKey(std::string string)
+        : m_value(std::move(string))
+    {
+        if (m_value.empty()) {
+            m_value = "0";
+        }
+        // Make sure the string is a valid number.
+        (void)number();
+    }
+
+    auto operator==(const NumericKey &rhs) const -> bool
+    {
+        return m_value == rhs.m_value;
+    }
+
+    auto operator!=(const NumericKey &rhs) const -> bool
+    {
+        return !(*this == rhs);
+    }
+
+    [[nodiscard]] auto number() const -> U64
+    {
+        U64 value;
+        Slice slice(m_value);
+        consume_decimal_number(slice, &value);
+        return value;
+    }
+
+    [[nodiscard]] auto string() const -> const std::string &
+    {
+        return m_value;
+    }
+
+    auto operator++() -> NumericKey &
+    {
+        m_value = integral_key<Length>(number() + 1);
+        return *this;
+    }
+
+    auto operator--() -> NumericKey &
+    {
+        CALICODB_EXPECT_GT(number(), 0);
+        m_value = integral_key<Length>(number() - 1);
+        return *this;
+    }
+
+    auto operator++(int) -> NumericKey
+    {
+        auto prev = *this;
+        ++*this;
+        return prev;
+    }
+
+    auto operator--(int) -> NumericKey
+    {
+        auto prev = *this;
+        --*this;
+        return prev;
+    }
+};
 
 } // namespace calicodb::tools
 

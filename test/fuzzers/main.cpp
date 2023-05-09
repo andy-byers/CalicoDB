@@ -18,7 +18,7 @@ auto main(int argc, const char *argv[]) -> int
         std::fprintf(stderr, "Running: %s\n", filename);
 
         auto *fp = std::fopen(filename, "r");
-        CHECK_TRUE(fp != nullptr);
+        CHECK_TRUE(fp);
 
         std::fseek(fp, 0, SEEK_END);
         const auto file_size = std::ftell(fp);

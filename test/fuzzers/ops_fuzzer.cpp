@@ -5,7 +5,7 @@
 // Runs normal database operations.
 
 #include "ops_fuzzer.h"
-#include "db_impl.h"
+#include "tree.h"
 
 namespace calicodb
 {
@@ -45,7 +45,7 @@ auto OpsFuzzer::step(const U8 *&data, std::size_t &size) -> Status
 
     switch (operation_type) {
         case kGet:
-            s = m_db->get(extract_fuzzer_key(data, size), &value);
+            s = m_table->get(extract_fuzzer_key(data, size), &value);
             if (s.is_not_found()) {
                 s = Status::ok();
             }
@@ -53,14 +53,14 @@ auto OpsFuzzer::step(const U8 *&data, std::size_t &size) -> Status
             break;
         case kPut:
             key = extract_fuzzer_key(data, size);
-            CALICODB_TRY(m_db->put(key, extract_fuzzer_value(data, size)));
+            CALICODB_TRY(m_table->put(key, extract_fuzzer_value(data, size)));
             break;
         case kErase:
             key = extract_fuzzer_key(data, size);
-            cursor.reset(m_db->new_cursor());
+            cursor.reset(m_table->new_cursor());
             cursor->seek(key);
             if (cursor->is_valid()) {
-                s = m_db->erase(cursor->key());
+                s = m_table->erase(cursor->key());
                 // Cursor is valid, so the record must exist.
                 CHECK_FALSE(s.is_not_found());
             }
@@ -68,7 +68,7 @@ auto OpsFuzzer::step(const U8 *&data, std::size_t &size) -> Status
             break;
         case kSeekIter:
             key = extract_fuzzer_key(data, size);
-            cursor.reset(m_db->new_cursor());
+            cursor.reset(m_table->new_cursor());
             cursor->seek(key);
             while (cursor->is_valid()) {
                 if (key.front() & 1) {
@@ -79,49 +79,42 @@ auto OpsFuzzer::step(const U8 *&data, std::size_t &size) -> Status
             }
             break;
         case kIterForward:
-            cursor.reset(m_db->new_cursor());
+            cursor.reset(m_table->new_cursor());
             cursor->seek_first();
             while (cursor->is_valid()) {
                 cursor->next();
             }
             break;
         case kIterReverse:
-            cursor.reset(m_db->new_cursor());
+            cursor.reset(m_table->new_cursor());
             cursor->seek_last();
             while (cursor->is_valid()) {
                 cursor->previous();
             }
             break;
         case kVacuum:
-            CALICODB_TRY(m_db->vacuum());
-            break;
-        case kBeginTxn:
-            m_txn = m_db->begin_txn(TxnOptions());
+            CALICODB_TRY(m_txn->vacuum());
             break;
         case kCommitTxn:
-            s = m_db->commit_txn(m_txn);
+            s = m_txn->commit();
             if (!s.is_ok() && !s.is_invalid_argument()) {
                 return s;
             }
             break;
         case kRollbackTxn:
-            s = m_db->rollback_txn(m_txn);
-            if (!s.is_ok() && !s.is_invalid_argument()) {
-                return s;
-            }
+            m_txn->rollback();
             break;
         default: // kReopen
             CALICODB_TRY(reopen());
     }
-    return m_db->status();
+    return m_txn->status();
 }
 
 extern "C" int LLVMFuzzerTestOneInput(const U8 *data, std::size_t size)
 {
     Options options;
     options.env = new tools::FakeEnv;
-    options.page_size = kMinPageSize;
-    options.cache_size = kMinPageSize * 16;
+    options.cache_size = kPageSize * kMinFrameCount;
 
     {
         OpsFuzzer fuzzer("ops_db", &options);

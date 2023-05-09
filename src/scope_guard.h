@@ -7,15 +7,16 @@
 
 #include "utils.h"
 
-namespace calicodb {
+namespace calicodb
+{
 
-template<class Callback>
+template <class Callback>
 class ScopeGuard final
 {
 public:
     ScopeGuard(Callback cb)
     {
-        new(m_callback) Callback(std::move(cb));
+        new (m_callback) Callback(std::move(cb));
         m_constructed = true;
     }
 
@@ -49,7 +50,7 @@ private:
         callback().~Callback();
         m_constructed = false;
     }
-    
+
     [[nodiscard]] auto callback() -> Callback &
     {
         return *reinterpret_cast<Callback *>(m_callback);

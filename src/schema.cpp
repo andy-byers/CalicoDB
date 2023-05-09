@@ -8,13 +8,16 @@
 #include "scope_guard.h"
 #include "table_impl.h"
 #include "tree.h"
+#include "txn_impl.h"
 
 namespace calicodb
 {
 
-Schema::Schema(Pager &pager)
-    : m_pager(&pager),
-      m_map(new Tree(pager, nullptr))
+Schema::Schema(Pager &pager, Status &status, bool write)
+    : m_status(&status),
+      m_pager(&pager),
+      m_map(new Tree(pager, nullptr)),
+      m_write(write)
 {
 }
 
@@ -23,8 +26,27 @@ Schema::~Schema()
     delete m_map;
 }
 
+auto Schema::corrupted_root_id(const std::string &table_name, const Slice &value) -> Status
+{
+    std::string message("root entry for table \"" + table_name + "\" is corrupted: ");
+    message.append(escape_string(value));
+    auto s = Status::corruption(message);
+    if (m_status->is_ok()) {
+        *m_status = s;
+    }
+    return s;
+}
+
 auto Schema::new_table(const TableOptions &options, const std::string &name, Table *&out) -> Status
 {
+    CALICODB_EXPECT_FALSE(out);
+    if (m_pager->page_count() == 0) {
+        if (m_write) {
+            m_pager->initialize_root();
+        } else {
+            return Status::invalid_argument("table \"" + name + "\" does not exist");
+        }
+    }
     std::string value;
     auto s = m_map->get(name, &value);
 
@@ -33,14 +55,11 @@ auto Schema::new_table(const TableOptions &options, const std::string &name, Tab
         if (options.error_if_exists) {
             return Status::invalid_argument("table \"" + name + "\" already exists");
         }
-        if (value.size() != Id::kSize) {
-            std::string message("root entry for table \"" + name + "\" is corrupted: ");
-            message.append(escape_string(value));
-            return Status::corruption(message);
+        if (!decode_root_id(value, root_id)) {
+            return corrupted_root_id(name, value);
         }
-        root_id.value = get_u32(value);
     } else if (s.is_not_found()) {
-        if (!options.create_if_missing) {
+        if (!m_write || !options.create_if_missing) {
             return Status::invalid_argument("table \"" + name + "\" does not exist");
         }
         CALICODB_TRY(Tree::create(*m_pager, false, &root_id));
@@ -48,18 +67,36 @@ auto Schema::new_table(const TableOptions &options, const std::string &name, Tab
         put_u32(value.data(), root_id.value);
         CALICODB_TRY(m_map->put(name, value));
     }
-    auto itr = m_trees.find(root_id);
-    if (itr == end(m_trees) || itr->second.tree == nullptr) {
-        itr = m_trees.insert(itr, {root_id, {}});
-        itr->second.root = root_id;
-        itr->second.tree = new Tree(*m_pager, &itr->second.root);
+    return construct_table_state(name, root_id, out);
+}
+
+auto Schema::decode_root_id(const std::string &value, Id &root_id) -> bool
+{
+    if (value.size() != Id::kSize) {
+        return false;
     }
-    out = new TableImpl(itr->second.tree);
+    root_id.value = get_u32(value);
+    return root_id.value <= m_pager->page_count();
+}
+
+auto Schema::construct_table_state(const std::string &name, Id root_id, Table *&out) -> Status
+{
+    auto itr = m_trees.find(root_id);
+    if (itr != end(m_trees) && itr->second.tree) {
+        return Status::invalid_argument("table \"" + name + "\" is already open");
+    }
+    itr = m_trees.insert(itr, {root_id, {}});
+    itr->second.root = root_id;
+    itr->second.tree = new Tree(*m_pager, &itr->second.root);
+    out = new TableImpl(itr->second.tree, *m_status, m_write);
     return Status::ok();
 }
 
 auto Schema::drop_table(const std::string &name) -> Status
 {
+    if (!m_write) {
+        return readonly_transaction();
+    }
     std::string value;
     CALICODB_TRY(m_map->get(name, &value));
     if (value.size() != Id::kSize) {
@@ -112,11 +149,7 @@ auto Schema::vacuum_finish() -> Status
     Status s;
     while (cursor->is_valid()) {
         if (cursor->value().size() != sizeof(U32)) {
-            std::string message("root entry for table \"");
-            message.append(cursor->key().to_string());
-            message.append("\" is corrupted: ");
-            message.append(escape_string(cursor->value()));
-            return Status::corruption(message);
+            return corrupted_root_id(cursor->key().to_string(), cursor->value());
         }
         const Id old_id(get_u32(cursor->value()));
         const auto root = m_reroot.find(old_id);
@@ -145,13 +178,14 @@ auto Schema::vacuum_finish() -> Status
         }
         cursor->next();
     }
-    const auto success = m_reroot.empty();
+    const auto missed_roots = m_reroot.size();
     m_reroot.clear();
 
-    if (s.is_ok() && !success) {
+    if (s.is_ok() && missed_roots) {
         std::string message("missing ");
-        append_number(message, m_reroot.size());
-        message.append(" root entries");
+        append_number(message, missed_roots);
+        message.append(" root entr");
+        message.append(missed_roots == 1 ? "y" : "ies");
         return Status::corruption(message);
     }
     inform_live_cursors();

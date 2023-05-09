@@ -4,38 +4,31 @@ The API is based off that of LevelDB, but the backend uses a B<sup>+</sup>-tree 
 
 ## Architecture
 CalicoDB uses a B<sup>+</sup>-tree backed by a write-ahead log (WAL).
-The B<sup>+</sup>-tree containing the record store is located in a file with the same name as the database.
-Given that a process accessing a CalicoDB database shuts down properly, the tree file is all that is left on disk.
+The record store consists of 0 or more B<sup>+</sup>-trees and is located in a file with the same name as the database.
+Given that a process accessing a CalicoDB database shuts down properly, the record store is all that is left on disk.
 
-While running, however, 2 additional files are managed:
+While running, however, 2 additional files are maintained:
 + `-wal`: The `-wal` file is named like the database file, but with a suffix of `-wal`.
-Updates to the database are written here, rather than the database file.
+Updates to database pages are written here, rather than the database file.
 See [`-wal` file](#-wal-file) for details.
 + `-shm`: The `-shm` file is named like the `-wal` file, but with a suffix of `-shm` in place of `-wal`.
 Greatly speeds up the process of locating specific database pages in the WAL.
 See [`-shm` file](#-shm-file) for details.
 
-CalicoDB runs in a single thread, but is designed to support both multithread and multiprocess concurrency, with some caveats.
-First, methods on the `DB` and all objects produced from it are not safe to call in a multithreaded context.
-Each thread must have its own `DB`, but threads in the same process can share an `Env`.
-Second, there can only be a single writer at any given time.
-Multiple simultaneous readers are allowed to run while there is an active writer, however.
-This means that if a database is being accessed by multiple threads or processes, certain calls may return with `Status::busy()`.
-
 ### Env
 The env construct handles platform-specific filesystem operations and I/O.
 Users can override classes in [`calicodb/env.h`](../include/calicodb/env.h).
 Then, a pointer to the custom `Env` object can be passed to the database when it is opened.
-See [`test/tools`](../test/tools) for an example that stores the database files in memory.
+See [`env_helpers.h`](../test/tools/env_helpers.h) for an example that stores the database files in memory.
 
 ### Pager
 The pager module provides in-memory caching for database pages read by the `Env`.
 It is the pager's job to maintain consistency between database pages on disk and in memory, and to coordinate with the WAL.
 
 ### Tree
-CalicoDB trees are similar to slot B-trees in SQLite3.
+CalicoDB trees are similar to table B-trees in SQLite3.
 Every tree is rooted on some database page, called its root page.
-The root tree is the tree that is rooted on the first database page.
+The tree that is rooted on the first database page is called the schema tree.
 It is used to store a name-to-root mapping for the other trees, if any exist.
 Additional trees will be rooted on pages after the second database page, which is always a pointer map page (see [Pointer Map](#pointer-map)).
 Trees are of variable order, so splits are performed when nodes (pages that are part of a tree) have run out of physical space.
@@ -97,61 +90,56 @@ This lets the number of frames added to the WAL be proportional to the number of
 
 #### `-shm` file
 Since the database file is never written during a transaction, its contents quickly become stale.
-Any page that exists in the WAL must be read from the WAL, not the database file.
+This means that pages that exist in the WAL must be read from the WAL, not the database file.
 The shm file is used to store the WAL index data structure, which provides a way to quickly locate pages in the WAL.
 We also use the shm file to coordinate locks on the WAL.
 
-### NOTES
+## Database file format
+The database file consists of 0 or more fixed-size pages.
+A freshly-created database is just an empty database file.
+When the first table is created, the first 3 database pages are initialized in-memory.
+The first page in the file, called the root page, contains the file header and serves as the [schema tree's][#schema] root node.
+The second page is always a [pointer map](#pointer-map) page.
+The third page is the root node of the tree representing the user-created table.
+As the database is modified, additional pages are created by extending the database file.
 
-#### TODO
-1. Startup
-   1. WAL startup
-   2. Pager startup
-2. Transactions
-   1. State/mode transitions
-      + Pager: kOpen -> kRead (-> kWrite -> kDirty -> kWrite) -> kOpen
-      + WAL: 
-3. Checkpoints
+## Performance
+CalicoDB runs in a single thread, and is very much I/O-bound as a result.
+In order to make the library fast enough to be useful, several layers of caching and buffering are used.
+First, there is the pager layer, which caches database pages in memory.
+Dirty pages are written to the WAL on commit or eviction from the cache.
+This lets a running transaction modify a given page multiple times before it needs to be written out.
+As mentioned in [Checkpoints](#checkpoints), the WAL eventually needs to be written back to the database file.
+When this happens, each unique page in the WAL is written back to the database exactly once.
+The pages are also sorted by page number, so each write during the checkpoint is sequential.
 
-#### Startup
-Readonly DB connections should fail if the DB file doesn't exist.
-It's fine if the WAL doesn't exist.
-If the connection is exclusive, an exclusive lock is taken on the DB file, and the WAL if it exists.
-If this connection succeeds, i.e. gets exclusive locks, it must be the only connection.
-If there is a WAL, then a checkpoint needs to be run.
-When a normal DB connection is opened on a file named `db`, the following steps are taken:
-1. First, a shared lock is taken on the DB file and the file header is read. 
-This version of the header may be outdated, but that's okay. 
-We really just need to make sure the file is a CalicoDB database and determine the database page size.
-2. If the file is empty, then wait on an exclusive lock on the DB file.
-Once we have an exclusive lock, unlink the WAL file, if it exists.
-Then, write the initial file header and the node header for the root page and drop the lock.
-The database is now initialized.
-Notice that the WAL file is not open at this point.
+## Concurrency
+Concurrency in CalicoDB is heavily based off of WAL mode SQLite.
+The language used here is similar to that of their WAL documentation, but is likely to differ in some places.
 
-#### Read-only transactions
-We start a read-only transaction by taking a shared lock on the DB file.
-Then, we check for a WAL.
-If there isn't a WAL, then all reads will come from the DB file.
-If there is a WAL, we open it along with the shm file (WAL index).
-The shm file is always cleared when the first connection to it is made.
-Find a read mark to use and lock it?
-May be able to share a read mark with another reader.
-Should be able to use (a) the current "backfill count", and (b) the current "max frame" value, and (c) the read marks to determine what pages to read from the WAL, and what pages to read from the DB.
-We may have to purge the pager cache if another connection wrote since we last connected.
-When the reader is finished, drop the shm lock, then drop the DB file lock.
+CalicoDB is designed to support both multithread and multiprocess concurrency, with some caveats.
+First, methods on the `DB` and all objects produced from it are not safe to call in a multithreaded context.
+Each thread must have its own `DB`, but threads in the same process can share an `Env`.
+Second, there can only be a single writer at any given time.
+Multiple simultaneous readers are allowed to run while there is an active writer, however.
+This means that if a database is being accessed by multiple threads or processes, certain calls may return with `Status::busy()`.
 
-#### Read-write transactions
-Like with read-only transactions, we first take a shared lock on the DB file.
-Writing to the database doesn't actually write to the DB file, just the WAL, so we never need more than a shared lock.
-Check for a WAL.
-If no WAL exists, create one.
-Either way, lock the "writer" byte in the shm file.
-I believe it's fine to connect as a writer while there are still readers.
-Readers stay confined to their predetermined range anyway, so we won't get in their way.
-If a reader attempts to connect while a writer is writing, it will choose a read mark that prevents it from intersecting with new content.
-I suppose writers may need to mess with read marks as well, I'll look into it...
+Concurrency control in CalicoDB relies on a few key mechanisms described here.
+First, locking is coordinated on the shm file, using the `File::shm_lock()` API.
+There are 8 lock bytes available:
 
-#### Checkpoints
-This is really the only time the DB file is written (besides creation of a new DB file).
+| 0       | 1      | 2      | 3       | 4       | 5       | 6       | 7       |
+|:--------|:-------|:-------|:--------|:--------|:--------|:--------|:--------|
+| `Write` | `Ckpt` | `Rcvr` | `Read0` | `Read1` | `Read2` | `Read3` | `Read4` |
+
+Each lock byte can be locked in either `kShmReader` or `kShmWriter` mode.
+As the names imply, `kShmWriter` is an exclusive lock, and `kShmReader` is a shared lock.
+
+Once a new connection has obtained a valid copy of the WAL index header (described below), it will attempt to find a "readmark" to use.
+There are 5 readmarks, each protected by one of the 5 read locks (`Read*` above).
+Readmarks are used by connections to store their current "max frame" value, which is found in the local copy of the index header.
+New connections may use an existing readmark by taking a read lock on the corresponding read lock byte.
+This indicates to other connections what portion of the WAL is being read by readers attached to that readmark.
+The first readmark always has a value of 0, indicating that readers are ignoring the WAL completely.
+If a new connection finds that the WAL is empty, it will attempt to use the first readmark.
 

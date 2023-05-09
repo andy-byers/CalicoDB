@@ -16,6 +16,7 @@ namespace calicodb
 class Env;
 class Freelist;
 class Wal;
+struct DBState;
 
 // Freelist management. The freelist is essentially a linked list that is threaded through the database. Each freelist
 // link page contains a pointer to the next freelist link page, or to Id::null() if it is the last link. Pages that are
@@ -36,23 +37,12 @@ public:
     [[nodiscard]] auto push(Page page) -> Status;
 };
 
-// Pager state transitions:
-//
-//     StateA --> StateB  Method      LockA -------> LockB
-//    ----------------------------------------------------------
-//     kOpen ---> kRead   file_lock        <none> ------> kShared
-//     kRead ---> kWrite  begin       kShared -----> kExclusive
-//     kWrite --> kDirty  mark_dirty  kExclusive --> kExclusive
-//     kDirty --> kWrite  commit      kExclusive --> kExclusive
-//     kDirty --> kWrite  rollback    kExclusive --> kExclusive
-//     ****** --> kOpen   file_unlock      ****** ------> <none>
-//     ****** --> kError  set_state   ****** ------> ******
-//
 class Pager final
 {
 public:
     friend class DBImpl;
     friend class Tree;
+    friend class TxnImpl;
 
     enum Mode {
         kOpen,
@@ -63,14 +53,15 @@ public:
     };
 
     struct Parameters {
-        std::string db_name;
-        std::string wal_name;
-        File *db_file = nullptr;
-        Env *env = nullptr;
-        Sink *log = nullptr;
-        DBState *state = nullptr;
-        std::size_t frame_count = 0;
-        std::size_t page_size = 0;
+        const char *db_name;
+        const char *wal_name;
+        File *db_file;
+        Env *env;
+        Sink *log;
+        DBState *state;
+        BusyHandler *busy;
+        std::size_t frame_count;
+        bool sync;
     };
 
     struct Statistics {
@@ -83,73 +74,73 @@ public:
     [[nodiscard]] auto close() -> Status;
     [[nodiscard]] auto mode() const -> Mode;
     [[nodiscard]] auto page_count() const -> std::size_t;
-    [[nodiscard]] auto page_size() const -> std::size_t;
     [[nodiscard]] auto statistics() const -> const Statistics &;
     [[nodiscard]] auto wal_statistics() const -> WalStatistics;
 
-    [[nodiscard]] auto begin(bool write) -> Status;
+    [[nodiscard]] auto start_reader() -> Status;
+    [[nodiscard]] auto start_writer() -> Status;
     [[nodiscard]] auto commit() -> Status;
     auto rollback() -> void;
     auto finish() -> void;
 
-    [[nodiscard]] auto checkpoint() -> Status;
+    [[nodiscard]] auto checkpoint(bool reset) -> Status;
     [[nodiscard]] auto allocate(Page &page) -> Status;
     [[nodiscard]] auto destroy(Page page) -> Status;
     [[nodiscard]] auto acquire(Id page_id, Page &page) -> Status;
-    auto upgrade(Page &page) -> void;
+    auto mark_dirty(Page &page) -> void;
     auto release(Page page) -> void;
     auto set_status(const Status &error) const -> Status;
     auto set_page_count(std::size_t page_count) -> void;
-    [[nodiscard]] auto load_state() -> Status;
-
     [[nodiscard]] auto acquire_root() -> Page;
-
-    [[nodiscard]] auto hits() const -> U64
-    {
-        return m_bufmgr.hits();
-    }
-
-    [[nodiscard]] auto misses() const -> U64
-    {
-        return m_bufmgr.misses();
-    }
-
-    auto TEST_validate() const -> void;
+    [[nodiscard]] auto hits() const -> U64;
+    [[nodiscard]] auto misses() const -> U64;
+    auto assert_state() const -> bool;
+    auto purge_cached_pages() -> void;
+    auto initialize_root() -> void;
 
 private:
     explicit Pager(const Parameters &param);
+    [[nodiscard]] auto dirtylist_contains(const PageRef &ref) const -> bool;
+    [[nodiscard]] auto lock_db(FileLockMode mode) -> Status;
+    [[nodiscard]] auto refresh_state() -> Status;
+    auto unlock_db() -> void;
     [[nodiscard]] auto open_wal() -> Status;
-    [[nodiscard]] auto read_page(PageRef &out) -> Status;
-    [[nodiscard]] auto read_page_from_file(PageRef &ref) const -> Status;
+    [[nodiscard]] auto read_page(PageRef &out, std::size_t *size_out = nullptr) -> Status;
+    [[nodiscard]] auto read_page_from_file(PageRef &ref, std::size_t *size_out) const -> Status;
     [[nodiscard]] auto write_page_to_file(const PageRef &entry) const -> Status;
     [[nodiscard]] auto ensure_available_buffer() -> Status;
-    [[nodiscard]] auto wal_checkpoint() -> Status;
     [[nodiscard]] auto flush_all_pages() -> Status;
     auto purge_page(PageRef &victim) -> void;
-    auto purge_all_pages() -> void;
+
+    struct SaveState {
+        Id freelist_head;
+        std::size_t page_count = 0;
+        Mode mode = kOpen;
+    };
 
     mutable Statistics m_statistics;
     mutable DBState *m_state = nullptr;
     mutable Mode m_mode = kOpen;
-    mutable Mode m_save = kOpen;
+    mutable SaveState m_save;
 
-    std::string m_db_name;
-    std::string m_wal_name;
+    const char *m_db_name;
+    const char *m_wal_name;
+    const bool m_sync;
+
     Dirtylist m_dirtylist;
     Freelist m_freelist;
     Bufmgr m_bufmgr;
 
-    // True if the in-memory root page needs to be refreshed, false otherwise. Starts
-    // out as true, so the root is read from wherever it is (DB or WAL) on the first
-    // call to acquire().
-    bool m_refresh_root = true;
+    // True if the in-memory root page needs to be refreshed, false otherwise.
+    bool m_refresh_root = false;
 
     Sink *m_log = nullptr;
     File *m_file = nullptr;
     Env *m_env = nullptr;
     Wal *m_wal = nullptr;
+    BusyHandler *m_busy = nullptr;
     std::size_t m_page_count = 0;
-    std::size_t m_saved_count = 0;
+    int m_lock = kLockUnlocked;
 };
 
 struct PointerMap {
@@ -163,15 +154,15 @@ struct PointerMap {
 
     struct Entry {
         Id back_ptr;
-        Type type;
+        Type type = kTreeNode;
     };
 
     // Return the page ID of the pointer map page that holds the back pointer for page "page_id",
     // Id::null() otherwise.
-    [[nodiscard]] static auto lookup(const Pager &pager, Id page_id) -> Id;
+    [[nodiscard]] static auto lookup(Id page_id) -> Id;
 
     // Return true if page "page_id" is a pointer map page, false otherwise.
-    [[nodiscard]] static auto is_map(const Pager &pager, Id page_id) -> bool;
+    [[nodiscard]] static auto is_map(Id page_id) -> bool;
 
     // Read an entry from the pointer map.
     [[nodiscard]] static auto read_entry(Pager &pager, Id page_id, Entry &entry) -> Status;

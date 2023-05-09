@@ -35,7 +35,7 @@ auto print_references(Pager &pager) -> void
 {
     for (auto page_id = Id::root(); page_id.value <= pager.page_count(); ++page_id.value) {
         std::cerr << std::setw(6) << page_id.value << ": ";
-        if (PointerMap::lookup(pager, page_id) == page_id) {
+        if (PointerMap::lookup(page_id) == page_id) {
             std::cerr << "pointer map\n";
             continue;
         }
@@ -76,14 +76,14 @@ auto read_file_to_string(Env &env, const std::string &filename) -> std::string
 {
     std::size_t file_size;
     const auto s = env.file_size(filename, file_size);
-    if (s.is_not_found()) {
+    if (s.is_io_error()) {
         // File was unlinked.
         return "";
     }
     std::string buffer(file_size, '\0');
 
     File *file;
-    CHECK_OK(env.new_file(filename, Env::kCreate | Env::kReadWrite, file));
+    CHECK_OK(env.new_file(filename, Env::kReadOnly, file));
     CHECK_OK(file->read_exact(0, file_size, buffer.data()));
     delete file;
 
@@ -93,7 +93,7 @@ auto read_file_to_string(Env &env, const std::string &filename) -> std::string
 auto write_string_to_file(Env &env, const std::string &filename, const std::string &buffer, long offset) -> void
 {
     File *file;
-    CHECK_OK(env.new_file(filename, Env::kCreate | Env::kReadWrite, file));
+    CHECK_OK(env.new_file(filename, Env::kCreate, file));
 
     std::size_t write_pos;
     if (offset < 0) {
@@ -115,7 +115,7 @@ auto assign_file_contents(Env &env, const std::string &filename, const std::stri
 auto hexdump_page(const Page &page) -> void
 {
     std::fprintf(stderr, "%u:\n", page.id().value);
-    for (std::size_t i = 0; i < page.size() / 16; ++i) {
+    for (std::size_t i = 0; i < kPageSize / 16; ++i) {
         std::fputs("    ", stderr);
         for (std::size_t j = 0; j < 16; ++j) {
             const auto c = page.data()[i * 16 + j];
@@ -132,10 +132,10 @@ auto hexdump_page(const Page &page) -> void
 auto fill_db(DB &db, const std::string &tablename, RandomGenerator &random, std::size_t num_records, std::size_t max_payload_size) -> std::map<std::string, std::string>
 {
     Txn *txn;
-    CHECK_OK(db.start(true, txn));
+    CHECK_OK(db.new_txn(true, txn));
     auto records = fill_db(*txn, tablename, random, num_records, max_payload_size);
     CHECK_OK(txn->commit());
-    db.finish(txn);
+    delete txn;
     return records;
 }
 
@@ -167,9 +167,9 @@ auto fill_db(Table &table, RandomGenerator &random, std::size_t num_records, std
 auto expect_db_contains(DB &db, const std::string &tablename, const std::map<std::string, std::string> &map) -> void
 {
     Txn *txn;
-    CHECK_OK(db.start(false, txn));
+    CHECK_OK(db.new_txn(false, txn));
     expect_db_contains(*txn, tablename, map);
-    db.finish(txn);
+    delete txn;
 }
 
 auto expect_db_contains(Txn &txn, const std::string &tablename, const std::map<std::string, std::string> &map) -> void
@@ -190,7 +190,8 @@ auto expect_db_contains(const Table &table, const std::map<std::string, std::str
 }
 
 FakeWal::FakeWal(const Parameters &param)
-    : m_param(param)
+    : m_param(param),
+      m_db_file(param.db_file)
 {
 }
 
@@ -199,7 +200,7 @@ auto FakeWal::read(Id page_id, char *&out) -> Status
     for (const auto &map : {m_pending, m_committed}) {
         const auto itr = map.find(page_id);
         if (itr != end(map)) {
-            std::memcpy(out, itr->second.c_str(), m_param.page_size);
+            std::memcpy(out, itr->second.c_str(), kPageSize);
             return Status::ok();
         }
     }
@@ -207,10 +208,10 @@ auto FakeWal::read(Id page_id, char *&out) -> Status
     return Status::ok();
 }
 
-auto FakeWal::write(const PageRef *dirty, std::size_t db_size) -> Status
+auto FakeWal::write(PageRef *dirty, std::size_t db_size) -> Status
 {
     for (auto *p = dirty; p; p = p->next) {
-        m_pending.insert_or_assign(p->page_id, std::string(p->page, m_param.page_size));
+        m_pending.insert_or_assign(p->page_id, std::string(p->page, kPageSize));
     }
     if (db_size) {
         for (const auto &[k, v] : m_pending) {
@@ -222,17 +223,14 @@ auto FakeWal::write(const PageRef *dirty, std::size_t db_size) -> Status
     return Status::ok();
 }
 
-auto FakeWal::checkpoint(File &db_file, std::size_t *db_size) -> Status
+auto FakeWal::checkpoint(bool reset) -> Status
 {
     // TODO: Need the env to resize the file.
     CALICODB_EXPECT_TRUE(m_pending.empty());
     // Write back to the DB sequentially.
     for (const auto &[page_id, page] : m_committed) {
-        const auto offset = page_id.as_index() * m_param.page_size;
-        CALICODB_TRY(db_file.write(offset, page));
-    }
-    if (db_size != nullptr) {
-        *db_size = m_db_size;
+        const auto offset = page_id.as_index() * kPageSize;
+        CALICODB_TRY(m_db_file->write(offset, page));
     }
     m_committed.clear();
     return Status::ok();
@@ -243,7 +241,7 @@ auto FakeWal::rollback() -> void
     m_pending.clear();
 }
 
-auto FakeWal::close() -> Status
+auto FakeWal::close(std::size_t &) -> Status
 {
     m_pending.clear();
     m_committed.clear();
