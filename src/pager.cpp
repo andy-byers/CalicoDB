@@ -32,7 +32,7 @@ auto Pager::mode() const -> Mode
 
 auto Pager::purge_page(PageRef &victim) -> void
 {
-    if (victim.dirty) {
+    if (victim.flag & PageRef::kDirty) {
         m_dirtylist.remove(victim);
     }
     CALICODB_EXPECT_FALSE(dirtylist_contains(victim));
@@ -62,7 +62,7 @@ auto Pager::read_page(PageRef &out, std::size_t *size_out) -> Status
     }
 
     if (!s.is_ok()) {
-        if (out.dirty) {
+        if (out.flag & PageRef::kDirty) {
             m_dirtylist.remove(out);
         }
         CALICODB_EXPECT_FALSE(dirtylist_contains(out));
@@ -178,9 +178,7 @@ auto Pager::open_wal() -> Status
 auto Pager::close() -> Status
 {
     finish();
-    CALICODB_TRY(busy_wait(m_busy, [this] {
-        return lock_db(kLockShared);
-    }));
+    CALICODB_TRY(busy_wait(kLockShared));
     std::size_t page_count = 0;
     if (m_wal) {
         CALICODB_TRY(m_wal->close(page_count));
@@ -194,41 +192,45 @@ auto Pager::close() -> Status
     return s;
 }
 
+auto Pager::busy_wait(FileLockMode mode) -> Status
+{
+    return ::calicodb::busy_wait(m_busy, [mode, this] {
+        return lock_db(mode);
+    });
+}
+
 auto Pager::start_reader() -> Status
 {
     CALICODB_EXPECT_NE(m_mode, kError);
     CALICODB_EXPECT_TRUE(assert_state());
 
-    if (m_mode == kOpen) {
-        // Wait for a shared lock on the database file. Operations that take exclusive
-        // locks should complete in a bounded amount of time.
-        CALICODB_TRY(busy_wait(m_busy, [this] {
-            return lock_db(kLockShared);
-        }));
-        ScopeGuard guard = [this] {
-            finish();
-        };
-
+    Status s;
+    if (m_mode == kOpen && (s = busy_wait(kLockShared)).is_ok()) {
         if (m_wal == nullptr) {
-            CALICODB_TRY(open_wal());
+            s = open_wal();
         }
-        m_wal->finish_reader();
+        if (s.is_ok()) {
+            m_wal->finish_reader();
 
-        bool changed;
-        CALICODB_TRY(m_wal->start_reader(changed));
-
-        if (changed) {
-            purge_cached_pages();
+            bool changed;
+            if ((s = m_wal->start_reader(changed)).is_ok()) {
+                if (changed) {
+                    purge_cached_pages();
+                }
+                m_mode = kRead;
+                m_refresh_root = true;
+                if ((s = refresh_state()).is_ok()) {
+                    m_save.mode = kRead;
+                    m_save.page_count = m_page_count;
+                    m_save.freelist_head = m_freelist.m_head;
+                }
+            }
         }
-        m_mode = kRead;
-        m_refresh_root = true;
-        CALICODB_TRY(refresh_state());
-        std::move(guard).cancel();
-        m_save.mode = kRead;
-        m_save.page_count = m_page_count;
-        m_save.freelist_head = m_freelist.m_head;
+        if (!s.is_ok()) {
+            finish();
+        }
     }
-    return Status::ok();
+    return s;
 }
 
 auto Pager::start_writer() -> Status
@@ -330,8 +332,6 @@ auto Pager::finish() -> void
 
 auto Pager::purge_cached_pages() -> void
 {
-    logv(m_log, "pager purge");
-
     PageRef *victim;
     while ((victim = m_bufmgr.next_victim())) {
         CALICODB_EXPECT_NE(victim, nullptr);
@@ -342,7 +342,7 @@ auto Pager::purge_cached_pages() -> void
         CALICODB_EXPECT_EQ(m_dirtylist.head, m_bufmgr.root());
         CALICODB_EXPECT_FALSE(m_dirtylist.head->prev);
         CALICODB_EXPECT_FALSE(m_dirtylist.head->next);
-        m_dirtylist.head->dirty = false;
+        m_dirtylist.head->flag = PageRef::kNormal;
         m_dirtylist.head = nullptr;
     }
 }
@@ -351,14 +351,19 @@ auto Pager::checkpoint(bool reset) -> Status
 {
     CALICODB_EXPECT_TRUE(m_wal);
     CALICODB_EXPECT_EQ(m_mode, kOpen);
+    CALICODB_EXPECT_EQ(m_lock, kLockUnlocked);
     CALICODB_EXPECT_TRUE(assert_state());
-    ScopeGuard guard = [this] {
+    Status s;
+    if (!m_wal) {
+        s = open_wal();
+    }
+    if (s.is_ok() && (s = busy_wait(kLockShared)).is_ok()) {
+        if (!(s = m_wal->checkpoint(reset)).is_ok()) {
+            set_status(s);
+        }
         unlock_db();
-    };
-    CALICODB_TRY(busy_wait(m_busy, [this] {
-        return lock_db(kLockShared);
-    }));
-    return set_status(m_wal->checkpoint(reset));
+    }
+    return s;
 }
 
 auto Pager::flush_all_pages() -> Status
@@ -366,7 +371,7 @@ auto Pager::flush_all_pages() -> Status
     if (m_state->use_wal) {
         auto *p = m_dirtylist.head;
         while (p) {
-            CALICODB_EXPECT_TRUE(p->dirty);
+            CALICODB_EXPECT_TRUE(p->flag & PageRef::kDirty);
             if (p->page_id.value > m_page_count) {
                 // This page is past the current end of the file due to a vacuum operation
                 // decreasing the page count. Just remove the page from the dirty list. It
@@ -374,7 +379,7 @@ auto Pager::flush_all_pages() -> Status
                 // out of bounds.
                 p = m_dirtylist.remove(*p);
             } else {
-                p->dirty = false;
+                p->flag = PageRef::kNormal;
                 p = p->next;
             }
         }
@@ -423,7 +428,7 @@ auto Pager::ensure_available_buffer() -> Status
         auto *victim = m_bufmgr.next_victim();
         CALICODB_EXPECT_NE(victim, nullptr);
 
-        if (victim->dirty) {
+        if (victim->flag & PageRef::kDirty) {
             CALICODB_EXPECT_EQ(m_mode, kDirty);
             m_dirtylist.remove(*victim);
 
@@ -520,7 +525,7 @@ auto Pager::acquire_root() -> Page
 auto Pager::mark_dirty(Page &page) -> void
 {
     CALICODB_EXPECT_GE(m_mode, kWrite);
-    if (!page.m_ref->dirty) {
+    if (!(page.m_ref->flag & PageRef::kDirty)) {
         m_dirtylist.add(*page.m_ref);
         if (m_mode == kWrite) {
             m_mode = kDirty;
@@ -610,7 +615,7 @@ auto Pager::assert_state() const -> bool
             CALICODB_EXPECT_FALSE(m_state->status.is_ok());
             break;
         default:
-            CALICODB_EXPECT_FALSE(false && "unrecognized Pager::Mode");
+            CALICODB_EXPECT_TRUE(false && "unrecognized Pager::Mode");
     }
     return true;
 }

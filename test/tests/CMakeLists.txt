@@ -3,7 +3,7 @@ function(build_test NAME)
     add_executable("${NAME}"
             "${NAME}.cpp" common.cpp common.h test.cpp)
     target_link_libraries("${NAME}"
-            PRIVATE calicodb_tools gtest_main)
+            PRIVATE calicodb_tools gtest)
     add_test(NAME "${NAME}"
             COMMAND "${NAME}")
 endfunction()

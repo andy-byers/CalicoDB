@@ -34,16 +34,15 @@
 #define CHECK_FALSE(cond) \
     CHECK_TRUE(!(cond))
 
-#define CHECK_OK(expr)                                                                        \
-    do {                                                                                      \
-        if (auto assert_s = (expr); !assert_s.is_ok()) {                                      \
-            std::fprintf(                                                                     \
-                stderr,                                                                       \
-                "expected `(" #expr ").is_ok()` but got \"%s\" status with message \"%s\"\n", \
-                get_status_name(assert_s),                                                    \
-                assert_s.to_string().c_str());                                                \
-            std::abort();                                                                     \
-        }                                                                                     \
+#define CHECK_OK(expr)                                             \
+    do {                                                           \
+        if (auto assert_s = (expr); !assert_s.is_ok()) {           \
+            std::fprintf(                                          \
+                stderr,                                            \
+                "expected `(" #expr ").is_ok()` but got \"%s\"\n", \
+                assert_s.to_string().c_str());                     \
+            std::abort();                                          \
+        }                                                          \
     } while (0)
 
 #define CHECK_EQ(lhs, rhs)                                                                             \

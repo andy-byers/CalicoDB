@@ -95,7 +95,7 @@ auto Schema::construct_table_state(const std::string &name, Id root_id, Table *&
 auto Schema::drop_table(const std::string &name) -> Status
 {
     if (!m_write) {
-        return readonly_transaction();
+        return Status::readonly();
     }
     std::string value;
     CALICODB_TRY(m_map->get(name, &value));

@@ -18,3 +18,10 @@ auto __tsan_on_report() -> void
     FAIL() << "TSan detected a problem";
 }
 } // extern "C"
+
+auto main(int argc, char **argv) -> int
+{
+    std::cerr << "test process ID (PID): " << getpid() << '\n';
+    testing::InitGoogleTest(&argc, argv);
+    return RUN_ALL_TESTS();
+}

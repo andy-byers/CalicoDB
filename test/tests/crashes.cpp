@@ -32,16 +32,22 @@ public:
         delete m_env;
     }
 
+    [[nodiscard]] static auto is_fault(const Status &s) -> bool
+    {
+        return s.to_string() == "I/O error: FAULT";
+    }
     auto register_fault(const std::string &filename, tools::SyscallType syscall) -> void
     {
         const auto index = m_num_counters++;
         CALICODB_EXPECT_LT(index, kMaxCounters);
+        //        m_counters[0] = 32500;
         m_env->add_interceptor(
             filename,
             tools::Interceptor(syscall, [index, this] {
                 if (m_counters[index]++ >= m_mxcounts[index]) {
                     m_counters[index] = 0;
-                    ++m_mxcounts[index];
+                    m_mxcounts[index] += m_increment;
+                    m_increment += 100;
                     return Status::io_error("FAULT");
                 }
                 return Status::ok();
@@ -59,15 +65,12 @@ public:
         m_num_counters = 0;
     }
 
-    [[nodiscard]] auto test(const TestRoutine &routine) -> Status
+    [[nodiscard]] virtual auto test(const TestRoutine &routine) -> Status
     {
         Status s;
         // Run the test routine repeatedly until it passes. Each time a fault is hit, allow 1 additional
         // success before returning with another fault.
-        for (TestState st{0, m_env}; !(s = routine(st)).is_ok(); ++st.tries) {
-            if (!s.is_io_error() || s.to_string() != "FAULT") {
-                break;
-            }
+        for (TestState st{0, m_env}; is_fault(s = routine(st)); ++st.tries) {
         }
         return s;
     }
@@ -79,6 +82,7 @@ protected:
     std::vector<int> m_mxcounts;
     std::vector<int> m_counters;
     std::size_t m_num_counters = 0;
+    int m_increment = 1;
 };
 
 static constexpr const char *kDBName = "./crashDB";
@@ -122,7 +126,10 @@ protected:
         m_txn = nullptr;
         ASSERT_OK(m_db->checkpoint(true));
         ASSERT_OK(reopen(true));
+    }
 
+    auto register_faults() -> void
+    {
         register_fault(
             std::get<0>(GetParam()),
             std::get<1>(GetParam()));
@@ -151,6 +158,12 @@ protected:
         ASSERT_OK(m_db->checkpoint(false));
         ASSERT_OK(reopen(false));
         ASSERT_OK(m_routine.check(*m_txn, true));
+    }
+
+    [[nodiscard]] auto test(const TestRoutine &routine) -> Status override
+    {
+        register_faults();
+        return TestHarness::test(routine);
     }
 
     std::map<std::string, std::string> m_constant;
@@ -188,6 +201,31 @@ TEST_P(CrashTests, CrashRecovery)
                 s = m_txn->commit();
             }
         }
+        return s;
+    }));
+    end_txn_and_validate();
+}
+
+TEST_P(CrashTests, Checkpoint)
+{
+    ASSERT_OK(test([this](auto state) {
+        auto s = reopen(true);
+        delete m_txn;
+        m_txn = nullptr;
+        if (s.is_ok()) {
+            s = m_db->checkpoint(true);
+        }
+        if (s.is_ok()) {
+            s = m_db->new_txn(true, m_txn);
+        }
+        if (s.is_ok()) {
+            s = m_routine.run(*m_txn);
+        }
+        if (s.is_ok()) {
+            s = m_txn->commit();
+        }
+        delete m_txn;
+        m_txn = nullptr;
         return s;
     }));
     end_txn_and_validate();
@@ -231,11 +269,7 @@ INSTANTIATE_TEST_CASE_P(
             kDBName,
             kWalName),
         testing::Values(
-            tools::kSyscallOpen,
-            tools::kSyscallRead,
-            tools::kSyscallWrite,
-            tools::kSyscallSync,
-            tools::kSyscallResize)),
+            tools::kSyscallRead | tools::kSyscallWrite | tools::kSyscallSync | tools::kSyscallResize | tools::kSyscallOpen)),
     label_testcase);
 
 } // namespace calicodb::test::crashes

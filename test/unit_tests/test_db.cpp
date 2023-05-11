@@ -1102,8 +1102,7 @@ TEST_F(AlternateWalFilenameTests, WalDirectoryMustExist)
     ASSERT_OK(DB::open(options, kDBFilename, db));
     Txn *txn;
     const auto s = db->new_txn(false, txn);
-    ASSERT_TRUE(s.is_io_error())
-        << get_status_name(s) << ": " << s.to_string();
+    ASSERT_TRUE(s.is_io_error()) << s.to_string();
     delete db;
 }
 

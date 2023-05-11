@@ -23,7 +23,7 @@ auto TransferBatch::run(Txn &txn) -> Status
         if (s.is_ok()) {
             s = put_random(txn, tools::integral_key(t), num_records, round);
         }
-        if (t) {
+        if (t && s.is_ok()) {
             s = erase_all(txn, tools::integral_key(t - 1), true);
         }
         if (s.is_ok()) {
@@ -88,7 +88,7 @@ auto put_random(Table &table, std::size_t num_records, U32 iteration) -> Status
 
 auto put_sequential(Txn &txn, const std::string &tbname, std::size_t num_records, U32 iteration) -> Status
 {
-    return with_table(txn, tbname, [iteration, num_records, &txn](auto &table) {
+    return with_table(txn, tbname, [iteration, num_records](auto &table) {
         return put_sequential(table, num_records, iteration);
     });
 }

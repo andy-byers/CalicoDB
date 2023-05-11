@@ -160,8 +160,8 @@ auto Dirtylist::remove(PageRef &ref) -> PageRef *
 {
     CALICODB_EXPECT_TRUE(head);
     CALICODB_EXPECT_FALSE(head->prev);
-    CALICODB_EXPECT_TRUE(ref.dirty);
-    ref.dirty = false;
+    CALICODB_EXPECT_TRUE(ref.flag & PageRef::kDirty);
+    ref.flag = PageRef::kNormal;
 
     if (ref.prev) {
         ref.prev->next = ref.next;
@@ -180,12 +180,12 @@ auto Dirtylist::remove(PageRef &ref) -> PageRef *
 
 auto Dirtylist::add(PageRef &ref) -> void
 {
-    CALICODB_EXPECT_FALSE(ref.dirty);
+    CALICODB_EXPECT_FALSE(ref.flag & PageRef::kDirty);
     if (head) {
         CALICODB_EXPECT_FALSE(head->prev);
         head->prev = &ref;
     }
-    ref.dirty = true;
+    ref.flag = PageRef::kDirty;
     ref.prev = nullptr;
     ref.next = head;
     head = &ref;

@@ -34,7 +34,12 @@ struct PageRef final {
     // Dirty list fields.
     PageRef *prev = nullptr;
     PageRef *next = nullptr;
-    bool dirty = false;
+
+    enum Flag {
+        kNormal = 0,
+        kDirty = 1,
+        kExtra = 2,
+    } flag = kNormal;
 };
 
 // Manages database pages that have been read from stable storage

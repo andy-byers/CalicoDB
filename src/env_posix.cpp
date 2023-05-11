@@ -423,7 +423,7 @@ struct PosixFs final {
             // WARNING: If another process unlinks the file after we opened it above, the
             // attempt to take the DMS lock here will fail.
             if (snode->take_dms_lock()) {
-                return make_retry_status();
+                return Status::busy();
             }
         }
         CALICODB_EXPECT_GE(snode->file, 0);
@@ -737,6 +737,9 @@ auto PosixFile::shm_lock(std::size_t r, std::size_t n, ShmLockFlag flags) -> Sta
 auto PosixFile::shm_barrier() -> void
 {
     __sync_synchronize();
+
+    PosixFs::s_fs.mutex.lock();
+    PosixFs::s_fs.mutex.unlock();
 }
 
 auto PosixShm::lock(std::size_t r, std::size_t n, ShmLockFlag flags) -> Status

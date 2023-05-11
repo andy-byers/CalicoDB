@@ -14,6 +14,7 @@
 namespace calicodb
 {
 
+// Compiler intrinsics for atomic loads and stores
 #define ATOMIC_LOAD(p) __atomic_load_n(p, __ATOMIC_RELAXED)
 #define ATOMIC_STORE(p, v) __atomic_store_n(p, v, __ATOMIC_RELAXED)
 
@@ -25,10 +26,48 @@ using Hash = U16;
 using StablePtr = char *;
 using ConstStablePtr = const char *;
 
+// Simple routines for working with the hash index header. The volatile-qualified
+// parameter should always be a pointer to the start of one of the copies of the
+// index header in shared memory. The other parameter should be a pointer to a
+// local copy of the header.
+template <class Src, class Dst>
+static auto read_hdr(const volatile Src *src, Dst *dst) -> void
+{
+    const volatile auto *src64 = reinterpret_cast<const volatile U64 *>(src);
+    auto *dst64 = reinterpret_cast<U64 *>(dst);
+    for (std::size_t i = 0; i < sizeof(HashIndexHdr) / sizeof *src64; ++i) {
+        dst64[i] = ATOMIC_LOAD(&src64[i]);
+    }
+}
+template <class Src, class Dst>
+static auto write_hdr(const Src *src, volatile Dst *dst) -> void
+{
+    const auto *src64 = reinterpret_cast<const U64 *>(src);
+    volatile auto *dst64 = reinterpret_cast<volatile U64 *>(dst);
+    for (std::size_t i = 0; i < sizeof(HashIndexHdr) / sizeof *src64; ++i) {
+        ATOMIC_STORE(&dst64[i], src64[i]);
+    }
+}
+template <class Shared, class Local>
+static auto compare_hdr(const volatile Shared *shared, const Local *local) -> bool
+{
+    const volatile auto *shared64 = reinterpret_cast<const volatile U64 *>(shared);
+    const auto *local64 = reinterpret_cast<const U64 *>(local);
+    for (std::size_t i = 0; i < sizeof(HashIndexHdr) / sizeof *shared64; ++i) {
+        if (ATOMIC_LOAD(&shared64[i]) != local64[i]) {
+            return false;
+        }
+    }
+    return true;
+}
+// Must be true for the above routines to work properly.
+static_assert(0 == sizeof(HashIndexHdr) % sizeof(U64));
+
 static constexpr std::size_t kReadmarkNotUsed = 0xFFFFFFFF;
 static constexpr std::size_t kWriteLock = 0;
 static constexpr std::size_t kNotWriteLock = 1;
-static constexpr std::size_t kCkptLock = 1;
+static constexpr std::size_t kCheckpointLock = 1;
+static constexpr std::size_t kRecoveryLock = 2;
 static constexpr std::size_t kReaderCount = File::kShmLockCount - 3;
 #define READ_LOCK(i) static_cast<std::size_t>((i) + 3)
 
@@ -153,16 +192,17 @@ auto HashIndex::lookup(Key key, Value lower, Value &out) -> Status
         Hash relative;
 
         // Find the WAL frame containing the given page. Limit the search to the set of
-        // valid frames (in the range "lower" to "m_hdr->max_frame", inclusive).
+        // valid frames for this connection (in the range `lower` to `m_hdr->max_frame`,
+        // inclusive).
         while ((relative = ATOMIC_LOAD(&group.hash[key_hash]))) {
             if (collisions-- == 0) {
                 return too_many_collisions(key);
             }
             const auto absolute = relative + group.base;
             const auto found =
-                absolute >= lower &&
                 absolute <= upper &&
-                ATOMIC_LOAD(&group.keys[relative - 1]) == key;
+                absolute >= lower &&
+                group.keys[relative - 1] == key;
             if (found) {
                 out = absolute;
             }
@@ -185,9 +225,9 @@ auto HashIndex::fetch(Value value) -> Key
     CALICODB_EXPECT_TRUE(m_groups[n]);
     const HashGroup group(n, m_groups[n]);
     if (group.base) {
-        return ATOMIC_LOAD(&group.keys[(value - kNIndexKeys0 - 1) % kNIndexKeys]);
+        return group.keys[(value - kNIndexKeys0 - 1) % kNIndexKeys];
     } else {
-        return ATOMIC_LOAD(&group.keys[value - 1]);
+        return group.keys[value - 1];
     }
 }
 
@@ -245,7 +285,7 @@ auto HashIndex::map_group(std::size_t group_number, bool extend) -> Status
     if (m_groups[group_number] == nullptr) {
         volatile void *ptr;
         CALICODB_TRY(m_file->shm_map(group_number, extend, ptr));
-        m_groups[group_number] = StablePtr(ptr);
+        m_groups[group_number] = reinterpret_cast<volatile char *>(ptr);
     }
     return Status::ok();
 }
@@ -520,12 +560,6 @@ static auto compute_checksum(const Slice &in, const U32 *initial, U32 *out)
     out[1] = s2;
 }
 
-#if defined(__clang__)
-#define DISABLE_TSAN __attribute__((no_sanitize_thread))
-#else // defined(__clang__)
-#define DISABLE_TSAN
-#endif // !defined(__clang__)
-
 class WalImpl : public Wal
 {
 public:
@@ -564,7 +598,11 @@ public:
                 s = m_env->remove_file(m_wal_name);
                 m_db->shm_unmap(true);
                 m_db = nullptr;
-                logv(m_log, "unlink WAL: %s", get_status_name(s));
+                if (!s.is_ok()) {
+                    logv(m_log, R"(failed to unlink WAL at "%s")"
+                                "\n%s",
+                         m_wal_name, s.to_string().c_str());
+                }
             }
         } else if (s.is_busy()) {
             return Status::ok();
@@ -574,11 +612,13 @@ public:
 
     [[nodiscard]] auto start_reader(bool &changed) -> Status override
     {
+        CALICODB_EXPECT_FALSE(m_ckpt_lock);
+
         Status s;
         unsigned tries = 0;
         do {
             s = try_reader(false, tries++, changed);
-        } while (is_retry_status(s));
+        } while (s.is_retry());
         return s;
     }
     auto finish_reader() -> void override
@@ -653,16 +693,16 @@ private:
         return reinterpret_cast<volatile CkptInfo *>(
             &m_index.groups().front()[sizeof(HashIndexHdr) * 2]);
     }
-    [[nodiscard]] DISABLE_TSAN auto try_index_header(bool &changed) -> bool
+    [[nodiscard]] auto try_index_header(bool &changed) -> bool
     {
         HashIndexHdr h1 = {};
         HashIndexHdr h2 = {};
         changed = false;
 
         const volatile auto *hdr = m_index.header();
-        std::memcpy(&h1, ConstStablePtr(&hdr[0]), sizeof(h1));
+        read_hdr(&hdr[0], &h1);
         m_db->shm_barrier();
-        std::memcpy(&h2, ConstStablePtr(&hdr[1]), sizeof(h2));
+        read_hdr(&hdr[1], &h2);
 
         if (0 != std::memcmp(&h1, &h2, sizeof(h1))) {
             return false;
@@ -722,7 +762,7 @@ private:
         }
         return s;
     }
-    DISABLE_TSAN auto write_index_header() -> void
+    auto write_index_header() -> void
     {
         m_hdr.is_init = true;
         m_hdr.version = kWalVersion;
@@ -731,9 +771,9 @@ private:
         compute_checksum(target, nullptr, m_hdr.cksum);
 
         volatile auto *hdr = m_index.header();
-        std::memcpy(StablePtr(&hdr[1]), &m_hdr, sizeof(m_hdr));
+        write_hdr(&m_hdr, &hdr[1]);
         m_db->shm_barrier();
-        std::memcpy(StablePtr(&hdr[0]), &m_hdr, sizeof(m_hdr));
+        write_hdr(&m_hdr, &hdr[0]);
     }
 
     auto restart_header(U32 salt_1) -> void
@@ -779,7 +819,7 @@ private:
             do {
                 bool unused;
                 s = try_reader(true, tries, unused);
-            } while (is_retry_status(s));
+            } while (s.is_retry());
         }
         return s;
     }
@@ -799,13 +839,23 @@ private:
             m_env->sleep(delay);
         }
 
+        Status s;
         if (!use_wal) {
-            CALICODB_TRY(read_index_header(changed));
+            if ((s = read_index_header(changed)).is_busy()) {
+                if (!m_index.m_groups[0]) {
+                    s = Status::retry();
+                } else if ((s = lock_shared(kRecoveryLock)).is_ok()) {
+                    unlock_shared(kRecoveryLock);
+                    s = Status::retry();
+                }
+            }
+            if (!s.is_ok()) {
+                return s;
+            }
         }
 
         CALICODB_EXPECT_FALSE(m_index.groups().empty());
         CALICODB_EXPECT_TRUE(m_index.groups().front());
-        Status s;
 
         volatile auto *info = get_ckpt_info();
         if (!use_wal && ATOMIC_LOAD(&info->backfill) == m_hdr.max_frame) {
@@ -815,11 +865,11 @@ private:
             s = lock_shared(READ_LOCK(0));
             m_db->shm_barrier();
             if (s.is_ok()) {
-                if (0 != std::memcmp(ConstStablePtr(m_index.header()), &m_hdr, sizeof(m_hdr))) {
+                if (!compare_hdr(m_index.header(), &m_hdr)) {
                     // The WAL has been written since the index header was last read. Indicate
                     // that the user should try again.
                     unlock_shared(READ_LOCK(0));
-                    return make_retry_status();
+                    return Status::retry();
                 }
                 m_reader_lock = 0;
                 return Status::ok();
@@ -858,9 +908,12 @@ private:
             }
         }
         if (max_index == 0) {
-            return make_retry_status();
+            return Status::retry();
         }
-        // Will return a busy status if another connection is resetting the WAL.
+        // Will return a busy status if another connection is resetting the WAL. After this call,
+        // this connection will have a lock on a nonzero readmark. This connection will read pages
+        // from the WAL between the current backfill count and integer stored in readmark number
+        // `max_index`, inclusive.
         CALICODB_TRY(lock_shared(READ_LOCK(max_index)));
 
         m_min_frame = ATOMIC_LOAD(&info->backfill) + 1;
@@ -870,11 +923,14 @@ private:
         // shared lock.
         const auto changed_unexpectedly =
             ATOMIC_LOAD(&info->readmark[max_index]) != max_readmark ||
-            0 != std::memcmp(ConstStablePtr(m_index.header()), &m_hdr, sizeof(HashIndexHdr));
+            !compare_hdr(m_index.header(), &m_hdr);
         if (changed_unexpectedly) {
             unlock_shared(READ_LOCK(max_index));
-            return make_retry_status();
+            return Status::retry();
         } else {
+            // It's possible that this connection wasn't able to find (or increase a readmark
+            // to equal) the `max_frame` value read from the index header. This is fine, it
+            // just may restrict how many frames can be backfilled while this reader is live.
             CALICODB_EXPECT_LE(max_readmark, m_hdr.max_frame);
             m_reader_lock = static_cast<int>(max_index);
         }
@@ -924,8 +980,6 @@ private:
     //    bool m_shm_unreliable = false; // TODO: specific situation where this connection is readonly
     //                                            and no writer is connected that can keep the shm file up-to-date
 };
-
-#undef DISABLE_TSAN
 
 auto Wal::open(const Parameters &param, Wal *&out) -> Status
 {
@@ -1001,10 +1055,13 @@ auto WalImpl::rewrite_checksums(U32 end) -> Status
 auto WalImpl::recover_index() -> Status
 {
     CALICODB_EXPECT_EQ(kNotWriteLock, kWriteLock + 1);
-    CALICODB_EXPECT_EQ(kCkptLock, kNotWriteLock);
+    CALICODB_EXPECT_EQ(kCheckpointLock, kNotWriteLock);
     CALICODB_EXPECT_TRUE(m_writer_lock);
     m_hdr = {};
 
+    // TODO: This code is not being called from checkpoint anymore. It would be necessary if
+    //       we wanted to support a "truncate" checkpoint mode like SQLite. If not, this code
+    //       can be simplified to just taking the recovery lock.
     // Lock the recover "Rcvr" lock. Lock the checkpoint ("Ckpt") lock as well, if this
     // code isn't being called from the checkpoint routine. In that case, the checkpoint
     // lock is already held.
@@ -1018,9 +1075,15 @@ auto WalImpl::recover_index() -> Status
             m_hdr.frame_cksum[0] = frame_cksum[0];
             m_hdr.frame_cksum[1] = frame_cksum[1];
             write_index_header();
+            // NOTE: This code can run while readers are trying to connect (`start_reader()`).
+            //
             volatile auto *info = get_ckpt_info();
+            // TODO: It seems that this store races with connections that are attempting to
+            //       start reading. Making it atomic for now. When readers read the backfill
+            //       count to see if they can get read lock 0, they are not under any lock...
+            //            info->backfill = 0;
+            ATOMIC_STORE(&info->backfill, 0);
             info->backfill_attempted = m_hdr.max_frame;
-            info->backfill = 0;
             info->readmark[0] = 0;
             for (std::size_t i = 1; i < kReaderCount; ++i) {
                 s = lock_exclusive(READ_LOCK(i), 1);
@@ -1230,7 +1293,7 @@ auto WalImpl::write(PageRef *dirty, std::size_t db_size) -> Status
         encode_frame(header, p->page, m_frame.data());
         CALICODB_TRY(m_wal->write(offset, m_frame));
         m_stats.bytes_written += m_frame.size();
-        p->dirty = true;
+        p->flag = PageRef::kExtra;
 
         CALICODB_EXPECT_EQ(offset, frame_offset(next_frame));
         offset += m_frame.size();
@@ -1244,9 +1307,9 @@ auto WalImpl::write(PageRef *dirty, std::size_t db_size) -> Status
     Status s;
     next_frame = m_hdr.max_frame + 1;
     for (auto *p = dirty; s.is_ok() && p; p = p->next) {
-        if (p->dirty) {
+        if (p->flag & PageRef::kExtra) {
             s = m_index.assign(p->page_id.value, next_frame++);
-            p->dirty = false;
+            p->flag = PageRef::kNormal;
         }
     }
     if (s.is_ok()) {
@@ -1275,7 +1338,7 @@ auto WalImpl::checkpoint(bool reset) -> Status
     // Exclude other connections from running a checkpoint. If the `reset` flag is set,
     // also exclude writers. If this connection is to reset the log, there must be no
     // frames written after the
-    auto s = lock_exclusive(kCkptLock, 1);
+    auto s = lock_exclusive(kCheckpointLock, 1);
     if (s.is_ok()) {
         m_ckpt_lock = true;
         if (reset) {
@@ -1298,12 +1361,20 @@ auto WalImpl::checkpoint(bool reset) -> Status
     }
     finish_writer();
     if (m_ckpt_lock) {
-        unlock_exclusive(kCkptLock, 1);
+        unlock_exclusive(kCheckpointLock, 1);
         m_ckpt_lock = false;
     }
     return s;
 }
 
+// Write as much of the WAL back to the database file as possible
+// This method is run under an exclusive checkpoint lock, and possibly an exclusive writer
+// lock. Writes to the "backfill count" variable stored in the checkpoint header must be
+// atomic here, but reads need not be. This is the only connection allowed to change the
+// backfill count right now. Note that the backfill count is also set during both WAL reset
+// and index recovery, however, connections performing either of these actions are excluded
+// by shm locks (other checkpointers by the checkpoint lock, and connections seeking to
+// restart the log by the writer lock).
 auto WalImpl::transfer_contents(bool reset) -> Status
 {
     CALICODB_EXPECT_TRUE(m_ckpt_lock);
@@ -1388,7 +1459,8 @@ auto WalImpl::transfer_contents(bool reset) -> Status
     }
     if (s.is_ok()) {
         if (info->backfill < m_hdr.max_frame) {
-            s = make_retry_status("blocked by reader");
+            // Some other connection got in the way.
+            s = Status::retry();
         } else if (reset) {
             // Wait on other connections that are still reading from the WAL. This is
             // what SQLite does for `SQLITE_CHECKPOINT_RESTART`. New connections will

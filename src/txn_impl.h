@@ -11,12 +11,6 @@
 namespace calicodb
 {
 
-inline auto readonly_transaction() -> Status
-{
-    // TODO: Status::readonly("...")/Status::is_readonly()?
-    return Status::not_supported("transaction is readonly");
-}
-
 class TxnImpl : public Txn
 {
 public:

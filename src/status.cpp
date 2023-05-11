@@ -1,151 +1,133 @@
 // Copyright (c) 2022, The CalicoDB Authors. All rights reserved.
-// This source code is licensed under the MIT License, which can be found in
+// This source Status::Code is licensed under the MIT License, which can be found in
 // LICENSE.md. See AUTHORS.md for a list of contributor names.
 
 #include "calicodb/status.h"
 #include "calicodb/slice.h"
+#include "logging.h"
 #include "utils.h"
 
 namespace calicodb
 {
 
-enum Code : char {
-    kOK,
-    kInvalidArgument,
-    kIOError,
-    kNotSupported,
-    kCorruption,
-    kNotFound,
-    kBusy,
-};
-
-static auto new_status_string(const char *data, Code code) -> char *
+static auto new_status_string(const Slice &msg) -> const char *
 {
-    CALICODB_EXPECT_TRUE(data);
-    // "data" doesn't need to be null-terminated, since it may come from a slice. It
-    // should point to a human-readable message to store in the status.
-    const auto data_size =
-        sizeof(Code) + std::char_traits<char>::length(data) + 1;
-    auto *p = new char[data_size]();
-    std::memcpy(p + sizeof(Code), data, data_size - 1);
-    p[0] = code;
+    auto *p = new char[msg.size() + 1];
+    std::memcpy(p, msg.data(), msg.size());
+    p[msg.size()] = '\0';
     return p;
 }
 
 static auto copy_status_string(const char *data) -> char *
 {
     if (data) {
-        // Allocate memory for the copied message/status code. "data" should be the
-        // "m_data" member of another Status, meaning it points to a null-terminated
-        // string which includes the status code at the front.
-        const auto data_size =
-            std::char_traits<char>::length(data) + 1;
-        auto *p = new char[data_size]();
-        std::memcpy(p, data, data_size - 1);
+        const auto length =
+            std::char_traits<char>::length(data);
+        auto *p = new char[length + 1];
+        std::memcpy(p, data, length);
+        p[length] = '\0';
         return p;
     }
     return nullptr;
 }
 
-Status::Status(char code, const Slice &what)
-    : m_data(new_status_string(what.data(), Code{code}))
+static constexpr const char *kMessages[Status::kMaxSubCode] = {
+    "",         // kNone
+    "readonly", // kReadonly
+};
+
+Status::Status(Code code, const Slice &msg)
+    : m_state(new_status_string(msg)),
+      m_code(code)
 {
 }
 
 Status::Status(const Status &rhs)
-    : m_data(copy_status_string(rhs.m_data))
+    : m_state(copy_status_string(rhs.m_state)),
+      m_code(rhs.m_code),
+      m_subc(rhs.m_subc)
 {
 }
 
 Status::Status(Status &&rhs) noexcept
-    : m_data(rhs.m_data)
+    : m_state(rhs.m_state),
+      m_code(rhs.m_code),
+      m_subc(rhs.m_subc)
 {
-    rhs.m_data = nullptr;
+    rhs.m_state = nullptr;
+    rhs.m_code = kOK;
+    rhs.m_subc = kNone;
 }
 
 Status::~Status()
 {
-    delete[] m_data;
+    delete[] m_state;
 }
 
 auto Status::operator=(const Status &rhs) -> Status &
 {
     if (this != &rhs) {
-        delete[] m_data;
-        m_data = copy_status_string(rhs.m_data);
+        delete[] m_state;
+        m_state = copy_status_string(rhs.m_state);
+        m_code = rhs.m_code;
+        m_subc = rhs.m_subc;
     }
     return *this;
 }
 
 auto Status::operator=(Status &&rhs) noexcept -> Status &
 {
-    std::swap(m_data, rhs.m_data);
+    std::swap(m_state, rhs.m_state);
+    std::swap(m_code, rhs.m_code);
+    std::swap(m_subc, rhs.m_subc);
     return *this;
-}
-
-auto Status::busy(const Slice &what) -> Status
-{
-    return Status(kBusy, what);
-}
-
-auto Status::not_found(const Slice &what) -> Status
-{
-    return Status(kNotFound, what);
-}
-
-auto Status::invalid_argument(const Slice &what) -> Status
-{
-    return Status(kInvalidArgument, what);
-}
-
-auto Status::io_error(const Slice &what) -> Status
-{
-    return Status(kIOError, what);
-}
-
-auto Status::not_supported(const Slice &what) -> Status
-{
-    return Status(kNotSupported, what);
-}
-
-auto Status::corruption(const Slice &what) -> Status
-{
-    return Status(kCorruption, what);
-}
-
-auto Status::is_invalid_argument() const -> bool
-{
-    return !is_ok() && Code{m_data[0]} == kInvalidArgument;
-}
-
-auto Status::is_io_error() const -> bool
-{
-    return !is_ok() && Code{m_data[0]} == kIOError;
-}
-
-auto Status::is_not_supported() const -> bool
-{
-    return !is_ok() && Code{m_data[0]} == kNotSupported;
-}
-
-auto Status::is_corruption() const -> bool
-{
-    return !is_ok() && Code{m_data[0]} == kCorruption;
-}
-
-auto Status::is_not_found() const -> bool
-{
-    return !is_ok() && Code{m_data[0]} == kNotFound;
-}
-
-auto Status::is_busy() const -> bool
-{
-    return !is_ok() && Code{m_data[0]} == kBusy;
 }
 
 auto Status::to_string() const -> std::string
 {
-    return {m_data ? m_data + sizeof(Code) : "OK"};
+    const char *type_name;
+    switch (m_code) {
+        case kOK:
+            return "OK";
+        case kInvalidArgument:
+            type_name = "invalid argument: ";
+            break;
+        case kIOError:
+            type_name = "I/O error: ";
+            break;
+        case kNotSupported:
+            type_name = "not supported: ";
+            break;
+        case kCorruption:
+            type_name = "corruption: ";
+            break;
+        case kNotFound:
+            type_name = "not found: ";
+            break;
+        case kBusy:
+            type_name = "busy: ";
+            break;
+        case kRetry:
+            type_name = "retry: ";
+            break;
+        default:
+            type_name = nullptr;
+    }
+    std::string result;
+    if (type_name) {
+        result = type_name;
+    } else {
+        append_fmt_string(
+            result, "unrecognized code (%d)", static_cast<int>(m_code));
+    }
+    CALICODB_EXPECT_TRUE(m_subc != kNone || m_state);
+    if (m_subc != kNone) {
+        CALICODB_EXPECT_LT(m_subc, kMaxSubCode);
+        result.append(kMessages[m_subc]);
+    } else if (m_state) {
+        result.append(m_state);
+    }
+    return result;
 }
 
 } // namespace calicodb

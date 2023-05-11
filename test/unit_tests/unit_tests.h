@@ -50,11 +50,9 @@ static constexpr auto kShmFilename = "./_test-shm";
 
 static constexpr auto kExpectationMatcher = "^expectation";
 
-#define STREAM_MESSAGE(expr) #expr                                    \
-                                 << " == Status::ok()\" but got \""   \
-                                 << get_status_name(expect_ok_status) \
-                                 << "\" status with message \""       \
-                                 << expect_ok_status.to_string()      \
+#define STREAM_MESSAGE(expr) #expr                                  \
+                                 << " == Status::ok()\" but got \"" \
+                                 << expect_ok_status.to_string()    \
                                  << "\"\n";
 
 #define EXPECT_OK(expr)                        \
@@ -315,7 +313,7 @@ public:
 inline auto assert_special_error(const Status &s)
 {
     if (!s.is_io_error() || s.to_string() != special_error().to_string()) {
-        std::fprintf(stderr, "error: unexpected %s status: %s", get_status_name(s), s.is_ok() ? "NULL" : s.to_string().data());
+        std::fprintf(stderr, "error expected special error: %s", s.is_ok() ? "OK" : s.to_string().data());
         std::abort();
     }
 }

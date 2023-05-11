@@ -18,7 +18,7 @@ namespace calicodb
 
 [[nodiscard]] static auto default_cursor_status() -> Status
 {
-    return Status::not_found("cursor is invalid");
+    return Status::not_found();
 }
 
 static constexpr auto kMaxCellHeaderSize =
@@ -1361,7 +1361,7 @@ auto Tree::get(const Slice &key, std::string *value) const -> Status
 
     if (!exact) {
         release(std::move(node));
-        return Status::not_found("not found");
+        return Status::not_found();
     }
 
     Status s;
@@ -1920,13 +1920,13 @@ auto PayloadManager::collect_value(Pager &pager, std::string &result, const Cell
 
 #if CALICODB_TEST
 
-#define CHECK_OK(expr)                                                                     \
-    do {                                                                                   \
-        if (const auto check_s = (expr); !check_s.is_ok()) {                               \
-            std::fprintf(stderr, "error: encountered %s status \"%s\" on line %d\n",       \
-                         get_status_name(check_s), check_s.to_string().c_str(), __LINE__); \
-            std::abort();                                                                  \
-        }                                                                                  \
+#define CHECK_OK(expr)                                           \
+    do {                                                         \
+        if (const auto check_s = (expr); !check_s.is_ok()) {     \
+            std::fprintf(stderr, "error(line %d): %s\n",         \
+                         __LINE__, check_s.to_string().c_str()); \
+            std::abort();                                        \
+        }                                                        \
     } while (0)
 
 #define CHECK_TRUE(expr)                                                                   \
@@ -2101,7 +2101,7 @@ class TreeValidator
         CHECK_TRUE(data.levels.size() == data.spaces.size());
     }
 
-    static auto collect_levels(Tree &tree, PrinterData &data, Node node, std::size_t level) -> void
+    static auto collect_levels(const Tree &tree, PrinterData &data, Node node, std::size_t level) -> void
     {
         const auto &header = node.header;
         ensure_level_exists(data, level);
@@ -2246,7 +2246,7 @@ public:
         tree.release(std::move(node));
     }
 
-    [[nodiscard]] static auto to_string(Tree &tree) -> std::string
+    [[nodiscard]] static auto to_string(const Tree &tree) -> std::string
     {
         std::string repr;
         PrinterData data;
@@ -2261,13 +2261,13 @@ public:
     }
 };
 
-auto Tree::TEST_validate() -> void
+auto Tree::TEST_validate() const -> void
 {
     //    TreeValidator::validate_freelist(*this, *freelist.m_head);
     TreeValidator::validate_tree(*this);
 }
 
-auto Tree::TEST_to_string() -> std::string
+auto Tree::TEST_to_string() const -> std::string
 {
     return TreeValidator::to_string(*this);
 }
@@ -2282,7 +2282,7 @@ auto Node::TEST_validate() -> void
 {
 }
 
-auto Tree::TEST_to_string() -> std::string
+auto Tree::TEST_to_string() const -> std::string
 {
     return "";
 }
@@ -2372,7 +2372,7 @@ auto CursorImpl::seek_first() -> void
         seek_to(std::move(lowest), 0);
     } else {
         m_tree->release(std::move(lowest));
-        m_status = Status::not_found("table is empty");
+        m_status = Status::not_found();
     }
 }
 
@@ -2391,7 +2391,7 @@ auto CursorImpl::seek_last() -> void
         seek_to(std::move(highest), count - 1);
     } else {
         m_tree->release(std::move(highest));
-        m_status = Status::not_found("database is empty");
+        m_status = Status::not_found();
     }
 }
 

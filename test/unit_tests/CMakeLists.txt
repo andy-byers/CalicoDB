@@ -11,7 +11,7 @@ add_executable(unit_tests
         unit_tests.cpp
         unit_tests.h )
 target_link_libraries(unit_tests
-        PUBLIC calicodb_tools gtest_main)
+        PUBLIC calicodb_tools gtest)
 add_test(NAME unit_tests
         COMMAND unit_tests)
 

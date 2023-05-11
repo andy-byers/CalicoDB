@@ -14,11 +14,9 @@ namespace calicodb::test
 
 static constexpr auto kExpectationMatcher = "^expectation";
 
-#define STREAM_MESSAGE(expr) #expr                                    \
-                                 << " == Status::ok()` but got \""    \
-                                 << get_status_name(expect_ok_status) \
-                                 << "\" status with message \""       \
-                                 << expect_ok_status.to_string()      \
+#define STREAM_MESSAGE(expr) #expr                                 \
+                                 << " == Status::ok()` but got \"" \
+                                 << expect_ok_status.to_string()   \
                                  << "\"\n";
 
 #define EXPECT_OK(expr)                        \

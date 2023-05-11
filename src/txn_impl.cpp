@@ -64,7 +64,7 @@ auto TxnImpl::rollback() -> void
 auto TxnImpl::vacuum() -> Status
 {
     if (!m_write) {
-        return readonly_transaction();
+        return Status::readonly();
     }
     CALICODB_TRY(*m_status);
     m_pager->set_status(vacuum_freelist());

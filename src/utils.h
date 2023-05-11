@@ -10,6 +10,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <limits>
+#include <ostream>
 
 #if NDEBUG
 #define CALICODB_EXPECT_(expr, file, line)
@@ -64,34 +65,6 @@ using U64 = std::uint64_t;
 // Additional file locking modes that cannot be requested directly
 enum : int { kLockUnlocked = 0 };
 
-[[nodiscard]] inline auto get_status_name(const Status &s) noexcept -> const char *
-{
-    if (s.is_not_found()) {
-        return "not found";
-    } else if (s.is_io_error()) {
-        return "I/O error";
-    } else if (s.is_not_supported()) {
-        return "not supported";
-    } else if (s.is_corruption()) {
-        return "corruption";
-    } else if (s.is_invalid_argument()) {
-        return "invalid argument";
-    } else if (s.is_busy()) {
-        return "busy";
-    }
-    CALICODB_EXPECT_TRUE(s.is_ok());
-    return "OK";
-}
-
-[[nodiscard]] inline auto make_retry_status(const std::string &reason = "") -> Status
-{
-    return Status::busy("retry" + (reason.empty() ? "" : " (" + reason + ')'));
-}
-[[nodiscard]] inline auto is_retry_status(const Status &s) -> bool
-{
-    return s.is_busy() && s.to_string().find("retry") == 0;
-}
-
 struct Id {
     static constexpr U32 kNull = 0;
     static constexpr U32 kRoot = 1;
@@ -145,6 +118,12 @@ struct Id {
 
     U32 value = kNull;
 };
+
+template <class T>
+auto operator<<(std::ostream &os, Id id) -> std::ostream &
+{
+    return os << id.value;
+}
 
 inline auto operator<(Id lhs, Id rhs) -> bool
 {

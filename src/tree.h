@@ -183,8 +183,8 @@ public:
     auto upgrade(Node &node) const -> void;
     auto release(Node node) const -> void;
 
-    [[nodiscard]] auto TEST_to_string() -> std::string;
-    auto TEST_validate() -> void;
+    [[nodiscard]] auto TEST_to_string() const -> std::string;
+    auto TEST_validate() const -> void;
 
     [[nodiscard]] auto root() const -> Id
     {
