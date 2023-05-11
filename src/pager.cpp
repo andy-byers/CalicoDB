@@ -39,22 +39,19 @@ auto Pager::purge_page(PageRef &victim) -> void
     m_bufmgr.erase(victim.page_id);
 }
 
-auto Pager::read_page(PageRef &out, std::size_t *size_out) -> Status
+auto Pager::read_page(PageRef &out, size_t *size_out) -> Status
 {
     CALICODB_EXPECT_NE(m_lock, kLockUnlocked);
 
     char *page = nullptr;
     Status s;
 
-    if (m_state->use_wal) {
-        // Try to read the page from the WAL.
-        page = out.page;
-        s = m_wal->read(out.page_id, page);
-    }
-
-    if (s.is_ok()) {
+    // Try to read the page from the WAL.
+    page = out.page;
+    if ((s = m_wal->read(out.page_id, page)).is_ok()) {
         if (page == nullptr) {
-            // Read the page from the DB file.
+            // No error, but the page could not be located in the WAL. Read the page
+            // from the DB file instead.
             s = read_page_from_file(out, size_out);
         } else if (size_out) {
             *size_out = kPageSize;
@@ -295,7 +292,6 @@ auto Pager::commit() -> Status
 
 auto Pager::rollback() -> void
 {
-    CALICODB_EXPECT_TRUE(m_state->use_wal);
     CALICODB_EXPECT_NE(m_mode, kOpen);
     CALICODB_EXPECT_TRUE(assert_state());
 
@@ -368,35 +364,28 @@ auto Pager::checkpoint(bool reset) -> Status
 
 auto Pager::flush_all_pages() -> Status
 {
-    if (m_state->use_wal) {
-        auto *p = m_dirtylist.head;
-        while (p) {
-            CALICODB_EXPECT_TRUE(p->flag & PageRef::kDirty);
-            if (p->page_id.value > m_page_count) {
-                // This page is past the current end of the file due to a vacuum operation
-                // decreasing the page count. Just remove the page from the dirty list. It
-                // wouldn't be transferred back to the DB on checkpoint anyway since it is
-                // out of bounds.
-                p = m_dirtylist.remove(*p);
-            } else {
-                p->flag = PageRef::kNormal;
-                p = p->next;
-            }
+    auto *p = m_dirtylist.head;
+    while (p) {
+        CALICODB_EXPECT_TRUE(p->flag & PageRef::kDirty);
+        if (p->page_id.value > m_page_count) {
+            // This page is past the current end of the file due to a vacuum operation
+            // decreasing the page count. Just remove the page from the dirty list. It
+            // wouldn't be transferred back to the DB on checkpoint anyway since it is
+            // out of bounds.
+            p = m_dirtylist.remove(*p);
+        } else {
+            p->flag = PageRef::kNormal;
+            p = p->next;
         }
-        p = m_dirtylist.head;
-        m_dirtylist.head = nullptr;
-
-        // The DB page count is specified here. This indicates that the writes are part of
-        // a commit, which is always the case if this method is called while the WAL is
-        // enabled.
-        CALICODB_EXPECT_NE(p, nullptr);
-        return m_wal->write(p, m_page_count);
     }
+    p = m_dirtylist.head;
+    m_dirtylist.head = nullptr;
+    CALICODB_EXPECT_NE(p, nullptr);
 
-    for (auto *p = m_dirtylist.head; p; p = m_dirtylist.remove(*p)) {
-        CALICODB_TRY(write_page_to_file(*p));
-    }
-    return m_file->sync();
+    // The DB page count is specified here. This indicates that the writes are part of
+    // a commit, which is always the case if this method is called while the WAL is
+    // enabled.
+    return m_wal->write(p, m_page_count);
 }
 
 auto Pager::set_status(const Status &error) const -> Status
@@ -432,14 +421,9 @@ auto Pager::ensure_available_buffer() -> Status
             CALICODB_EXPECT_EQ(m_mode, kDirty);
             m_dirtylist.remove(*victim);
 
-            if (m_state->use_wal) {
-                // Write just this page to the WAL. DB page count is 0 here because this write
-                // is not part of a commit.
-                s = m_wal->write(victim, 0);
-            } else {
-                s = write_page_to_file(*victim);
-            }
-            if (!s.is_ok()) {
+            // Write just this page to the WAL. DB page count is 0 here because this write
+            // is not part of a commit.
+            if (!(s = m_wal->write(victim, 0)).is_ok()) {
                 set_status(s);
             }
         }
@@ -496,7 +480,7 @@ auto Pager::acquire(Id page_id, Page &page) -> Status
             CALICODB_TRY(ensure_available_buffer());
             ref = m_bufmgr.alloc(page_id);
             if (page_id.as_index() < m_page_count) {
-                CALICODB_TRY(read_page(*ref));
+                CALICODB_TRY(read_page(*ref, nullptr));
             } else {
                 std::memset(ref->page, 0, kPageSize);
                 m_page_count = page_id.value;

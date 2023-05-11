@@ -79,7 +79,6 @@ auto DBImpl::open(const Options &sanitized) -> Status
             "database \"" + m_db_filename + "\" already exists");
     }
     std::move(guard).cancel();
-    m_state.use_wal = true;
     file->file_unlock();
     return Status::ok();
 }

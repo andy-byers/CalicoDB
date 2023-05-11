@@ -144,7 +144,6 @@ public:
         };
         CALICODB_TRY(Pager::open(pager_param, m_pager));
         m_pager->set_page_count(1);
-        m_state.use_wal = true;
         return Status::ok();
     }
 

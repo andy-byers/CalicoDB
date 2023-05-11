@@ -24,7 +24,6 @@ class Wal;
 
 struct DBState {
     Status status;
-    bool use_wal = false;
 };
 
 class DBImpl : public DB
