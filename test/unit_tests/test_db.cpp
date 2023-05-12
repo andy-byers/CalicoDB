@@ -75,10 +75,7 @@ TEST(BasicDestructionTests, OnlyDeletesCalicoDatabases)
 
     // Identifier is incorrect.
     char buffer[FileHeader::kSize];
-    FileHeader header;
-    header.write(buffer);
-    ++buffer[0];
-    ASSERT_OK(file->write(0, Slice(buffer, sizeof(buffer))));
+    ASSERT_OK(file->write(0, "CalicoDB format 0"));
     ASSERT_TRUE(DB::destroy(options, "./testdb").is_invalid_argument());
 
     DB *db;
@@ -164,6 +161,38 @@ TEST_F(BasicDatabaseTests, OpensAndCloses)
     std::size_t file_size;
     ASSERT_OK(env().file_size(m_dbname, file_size));
     ASSERT_EQ(0, file_size);
+}
+
+TEST_F(BasicDatabaseTests, RemovesOldWalFile)
+{
+    File *oldwal;
+    options.wal_filename = m_testdir.as_child("oldwal");
+    ASSERT_OK(env().new_file(options.wal_filename, Env::kCreate, oldwal));
+    delete oldwal;
+
+    ASSERT_TRUE(env().file_exists(options.wal_filename));
+
+    DB *db;
+    ASSERT_OK(DB::open(options, m_dbname, db));
+    delete db;
+
+    ASSERT_FALSE(env().file_exists(options.wal_filename));
+}
+
+TEST_F(BasicDatabaseTests, CheckpointBehavior)
+{
+    // Attempt to checkpoint 0 WAL frames. Should be a NOOP.
+    DB *db;
+    ASSERT_OK(DB::open(options, m_dbname, db));
+    ASSERT_OK(db->checkpoint(true));
+
+    // Attempt to checkpoint while this connection has an active transaction.
+    Txn *txn;
+    ASSERT_OK(db->new_txn(true, txn));
+    ASSERT_TRUE(db->checkpoint(true).is_not_supported());
+    delete txn;
+
+    ASSERT_OK(db->checkpoint(true));
 }
 
 TEST_F(BasicDatabaseTests, VacuumEmptyDB)
@@ -925,6 +954,34 @@ TEST_F(ApiTests, IsConstCorrect)
     const auto *const_db = db;
     std::string property;
     ASSERT_TRUE(const_db->get_property("calicodb.stats", &property));
+}
+
+TEST_F(ApiTests, EnforcesReadonlyTransactions)
+{
+    ASSERT_OK(txn->commit());
+    reopen(false);
+    ASSERT_TRUE(txn->vacuum().is_readonly());
+
+    // NOOPs
+    ASSERT_OK(txn->commit());
+    txn->rollback();
+
+    ASSERT_TRUE(table->put("key", "value").is_readonly());
+    ASSERT_TRUE(table->erase("key").is_readonly());
+}
+
+TEST_F(ApiTests, TableBehavior)
+{
+    Table *tb;
+    // Table is already open (`table` member).
+    ASSERT_TRUE(txn->new_table(TableOptions(), "table", tb).is_invalid_argument());
+    ASSERT_TRUE(txn->drop_table("table").is_invalid_argument());
+
+    // Commit so that `table` exists after reopen.
+    ASSERT_OK(txn->commit());
+    reopen(false);
+    // `txn` is readonly now.
+    ASSERT_TRUE(txn->drop_table("table").is_readonly());
 }
 
 TEST_F(ApiTests, EmptyKeysAreNotAllowed)

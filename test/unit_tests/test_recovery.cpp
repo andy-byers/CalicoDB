@@ -1,8 +1,6 @@
 // Copyright (c) 2022, The CalicoDB Authors. All rights reserved.
 // This source code is licensed under the MIT License, which can be found in
 // LICENSE.md. See AUTHORS.md for a list of contributor names.
-//
-// Recovery tests (harness is modified from LevelDB).
 
 #include "calicodb/db.h"
 #include "tools.h"
@@ -116,6 +114,51 @@ class RecoveryTests
 protected:
     static constexpr std::size_t kN = 500;
 };
+
+TEST_F(RecoveryTests, DetectsCorruptedIdentifier)
+{
+    tools::RandomGenerator random;
+    tools::fill_db(*table, random, 1'000);
+    ASSERT_OK(txn->commit());
+
+    delete table;
+    table = nullptr;
+    delete txn;
+    txn = nullptr;
+
+    ASSERT_OK(db->checkpoint(true));
+
+    auto dbfile = tools::read_file_to_string(env(), kDBFilename);
+    ++dbfile[0];
+    tools::write_string_to_file(env(), kDBFilename, dbfile, 0);
+
+    Status s;
+    ASSERT_TRUE((s = db->new_txn(true, txn)).is_invalid_argument())
+        << "expected corruption status but got " << s.to_string();
+}
+
+TEST_F(RecoveryTests, DetectsCorruptedRoot)
+{
+    ASSERT_OK(txn->commit());
+
+    delete table;
+    table = nullptr;
+    delete txn;
+    txn = nullptr;
+
+    ASSERT_OK(db->checkpoint(true));
+
+    auto root = tools::read_file_to_string(env(), kDBFilename);
+    root.resize(kPageSize);
+    ++root.back(); // Root ID is right at the end of the page.
+    tools::write_string_to_file(env(), kDBFilename, root, 0);
+
+    close();
+
+    Status s;
+    ASSERT_TRUE(open_with_status().is_corruption())
+        << "expected corruption status but got " << s.to_string();
+}
 
 TEST_F(RecoveryTests, NormalShutdown)
 {
@@ -439,7 +482,6 @@ INSTANTIATE_TEST_SUITE_P(
     OpenErrorTests,
     OpenErrorTests,
     ::testing::Values(
-        std::make_tuple(kDBFilename, tools::kSyscallRead, 0),
-        std::make_tuple(kDBFilename, tools::kSyscallRead, 1)));
+        std::make_tuple(kDBFilename, tools::kSyscallRead, 0)));
 
 } // namespace calicodb

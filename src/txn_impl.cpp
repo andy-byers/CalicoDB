@@ -33,15 +33,21 @@ auto TxnImpl::status() const -> Status
 auto TxnImpl::new_table(const TableOptions &options, const std::string &name, Table *&out) -> Status
 {
     out = nullptr;
-    CALICODB_TRY(*m_status);
-    return m_schema.new_table(options, name, out);
+    auto s = *m_status;
+    if (s.is_ok()) {
+        s = m_schema.new_table(options, name, out);
+    }
+    return s;
 }
 
 auto TxnImpl::drop_table(const std::string &name) -> Status
 {
-    CALICODB_TRY(*m_status);
-    // Schema object disallows dropping tables during readonly transactions.
-    return m_schema.drop_table(name);
+    auto s = *m_status;
+    if (s.is_ok()) {
+        // Schema class disallows dropping tables during readonly transactions.
+        s = m_schema.drop_table(name);
+    }
+    return s;
 }
 
 auto TxnImpl::commit() -> Status
@@ -49,8 +55,11 @@ auto TxnImpl::commit() -> Status
     if (!m_write) {
         return Status::ok();
     }
-    CALICODB_TRY(*m_status);
-    return m_pager->commit();
+    auto s = *m_status;
+    if (s.is_ok()) {
+        s = m_pager->commit();
+    }
+    return s;
 }
 
 auto TxnImpl::rollback() -> void
@@ -66,9 +75,13 @@ auto TxnImpl::vacuum() -> Status
     if (!m_write) {
         return Status::readonly();
     }
-    CALICODB_TRY(*m_status);
-    m_pager->set_status(vacuum_freelist());
-    return *m_status;
+    auto s = *m_status;
+    if (s.is_ok()) {
+        if (!(s = vacuum_freelist()).is_ok()) {
+            m_pager->set_status(s);
+        }
+    }
+    return s;
 }
 
 auto TxnImpl::vacuum_freelist() -> Status
@@ -87,8 +100,11 @@ auto TxnImpl::vacuum_freelist() -> Status
         return Status::ok();
     }
 
-    m_pager->set_page_count(pgid.value);
-    return m_schema.vacuum_finish();
+    auto s = m_schema.vacuum_finish();
+    if (s.is_ok()) {
+        m_pager->set_page_count(pgid.value);
+    }
+    return s;
 }
 
 auto TxnImpl::TEST_validate() const -> void

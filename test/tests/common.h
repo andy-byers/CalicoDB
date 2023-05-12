@@ -46,17 +46,17 @@ struct TransferBatch {
     std::size_t round = 0;
 };
 
-[[nodiscard]] static auto make_record(U32 id, U32 iteration = 0) -> std::pair<std::string, std::string>;
-[[nodiscard]] static auto put_random(Txn &txn, const std::string &tbname, std::size_t num_records, U32 iteration = 0) -> Status;
-[[nodiscard]] static auto put_random(Table &table, std::size_t num_records, U32 iteration = 0) -> Status;
-[[nodiscard]] static auto put_sequential(Txn &txn, const std::string &tbname, std::size_t num_records, U32 iteration = 0) -> Status;
-[[nodiscard]] static auto put_sequential(Table &table, std::size_t num_records, U32 iteration = 0) -> Status;
-[[nodiscard]] static auto erase_all(Txn &txn, const std::string &tbname, bool drop_table) -> Status;
-[[nodiscard]] static auto erase_all(Table &table) -> Status;
-[[nodiscard]] static auto check_records(Txn &txn, const std::string &tbname, std::size_t num_records, U32 iteration = 0) -> Status;
-[[nodiscard]] static auto check_records(Table &table, std::size_t num_records, U32 iteration = 0) -> Status;
-[[nodiscard]] static auto is_empty(Txn &txn, const std::string &tbname) -> bool;
-[[nodiscard]] static auto is_empty(Table &table) -> bool;
+[[nodiscard]] auto make_record(U32 id, U32 iteration = 0) -> std::pair<std::string, std::string>;
+[[nodiscard]] auto put_random(Txn &txn, const std::string &tbname, std::size_t num_records, U32 iteration = 0) -> Status;
+[[nodiscard]] auto put_random(Table &table, std::size_t num_records, U32 iteration = 0) -> Status;
+[[nodiscard]] auto put_sequential(Txn &txn, const std::string &tbname, std::size_t num_records, U32 iteration = 0) -> Status;
+[[nodiscard]] auto put_sequential(Table &table, std::size_t num_records, U32 iteration = 0) -> Status;
+[[nodiscard]] auto erase_all(Txn &txn, const std::string &tbname, bool drop_table) -> Status;
+[[nodiscard]] auto erase_all(Table &table) -> Status;
+[[nodiscard]] auto check_records(Txn &txn, const std::string &tbname, std::size_t num_records, U32 iteration = 0) -> Status;
+[[nodiscard]] auto check_records(Table &table, std::size_t num_records, U32 iteration = 0) -> Status;
+[[nodiscard]] auto is_empty(Txn &txn, const std::string &tbname) -> bool;
+[[nodiscard]] auto is_empty(Table &table) -> bool;
 
 template <class Callback>
 [[nodiscard]] auto with_txn(DB &db, bool write, const std::string &tbname, const Callback &callback) -> Status

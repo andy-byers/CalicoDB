@@ -101,7 +101,7 @@ if (!s.is_ok()) {
 // Read some data...
 
 // Finish the transaction.
-db->finish(txn);
+delete txn;
 ```
 
 ### Read-write transactions
@@ -125,11 +125,11 @@ if (!s.is_ok()) {
 // The DB holds all locks until DB::finish() is called, so we can continue
 // reading/writing.
 
-// Get rid of everything since commit() was called. If we call DB::finish()
+// Get rid of everything since commit() was called. If we delete the Txn
 // without calling commit() again, the same thing will happen.
 txn->rollback();
 
-db->finish(txn);
+delete txn;
 ```
 
 ### Tables

@@ -259,12 +259,26 @@ public:
         }
     }
 
+    auto ensure_tables_open() -> void
+    {
+        for (std::size_t i = 0; i < m_tables.size(); ++i) {
+            if (!m_tables[i]) {
+                const auto name = "table_" + tools::integral_key(i);
+                ASSERT_OK(m_txn->new_table(TableOptions(), name, m_tables[i]));
+                m_records[i].clear();
+            }
+        }
+    }
+
     auto run() -> void
     {
         ASSERT_OK(m_txn->vacuum());
+
+        ensure_tables_open();
         for (std::size_t i = 0; i < m_tables.size(); ++i) {
             tools::expect_db_contains(*m_tables[i], m_records[i]);
             delete m_tables[i];
+            m_tables[i] = nullptr;
         }
         delete m_txn;
         m_txn = nullptr;
@@ -278,11 +292,7 @@ public:
         tools::expect_db_contains(*m_txn, "default", m_committed);
 
         // The database would get confused if the root mapping wasn't updated.
-        for (std::size_t i = 0; i < m_tables.size(); ++i) {
-            const auto name = "table_" + tools::integral_key(i);
-            ASSERT_OK(m_txn->new_table(TableOptions(), name, m_tables[i]));
-            m_records[i].clear();
-        }
+        ensure_tables_open();
         fill_user_tables(kRecordCount, kRecordCount);
         for (std::size_t i = 0; i < m_tables.size(); ++i) {
             tools::expect_db_contains(*m_tables[i], m_records[i]);
@@ -291,7 +301,7 @@ public:
         reinterpret_cast<DBImpl *>(m_db)->TEST_pager().assert_state();
     }
 
-private:
+protected:
     auto initialize(std::size_t num_tables, const Options &options) -> void
     {
         ASSERT_OK(DB::open(options, kDBFilename, m_db));
@@ -370,6 +380,16 @@ TEST_P(MultiTableVacuumTests, PartiallyFilledTablesWithInterleavedPages)
 {
     fill_user_tables(kRecordCount, 10);
     erase_from_user_tables(kRecordCount / 2);
+    run();
+}
+
+TEST_P(MultiTableVacuumTests, ClosedTables)
+{
+    fill_user_tables(kRecordCount, kRecordCount / 2);
+    for (auto *&table : m_tables) {
+        delete table;
+        table = nullptr;
+    }
     run();
 }
 

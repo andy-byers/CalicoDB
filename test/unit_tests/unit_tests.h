@@ -7,6 +7,7 @@
 
 #include "calicodb/status.h"
 #include "db_impl.h"
+#include "encoding.h"
 #include "env_helpers.h"
 #include "env_posix.h"
 #include "page.h"
@@ -121,10 +122,10 @@ public:
 
     PagerTestHarness()
     {
-        FileHeader header;
         std::string buffer(kPageSize, '\0');
-        header.page_count = 1;
-        header.write(buffer.data());
+        std::memcpy(buffer.data(), FileHeader::kFmtString, sizeof(FileHeader::kFmtString));
+        buffer[FileHeader::kFmtVersionOfs] = FileHeader::kFmtVersion;
+        put_u32(buffer.data() + FileHeader::kPageCountOffset, 1);
         tools::write_string_to_file(Base::env(), kDBFilename, buffer);
 
         File *file;

@@ -40,15 +40,23 @@ auto Schema::corrupted_root_id(const std::string &table_name, const Slice &value
 auto Schema::new_table(const TableOptions &options, const std::string &name, Table *&out) -> Status
 {
     CALICODB_EXPECT_FALSE(out);
+
+    Status s;
     if (m_pager->page_count() == 0) {
         if (m_write) {
             m_pager->initialize_root();
         } else {
-            return Status::invalid_argument("table \"" + name + "\" does not exist");
+            // Read-only transaction cannot create a new table, and there are no tables
+            // created yet in this database (the schema table hasn't even been created).
+            // This code path ends up returning an invalid argument status.
+            s = Status::not_found();
         }
     }
+
     std::string value;
-    auto s = m_map->get(name, &value);
+    if (s.is_ok()) {
+        s = m_map->get(name, &value);
+    }
 
     Id root_id;
     if (s.is_ok()) {
@@ -63,20 +71,32 @@ auto Schema::new_table(const TableOptions &options, const std::string &name, Tab
             return Status::invalid_argument("table \"" + name + "\" does not exist");
         }
         CALICODB_TRY(Tree::create(*m_pager, false, &root_id));
-        value.resize(Id::kSize);
-        put_u32(value.data(), root_id.value);
+        encode_root_id(root_id, value);
         CALICODB_TRY(m_map->put(name, value));
     }
     return construct_table_state(name, root_id, out);
 }
 
-auto Schema::decode_root_id(const std::string &value, Id &root_id) -> bool
+auto Schema::decode_root_id(const Slice &data, Id &out) -> bool
 {
-    if (value.size() != Id::kSize) {
-        return false;
+    U64 num;
+    if (decode_varint(data.data(), data.data() + data.size(), num)) {
+        if (num <= m_pager->page_count()) {
+            out.value = static_cast<U32>(num);
+            return true;
+        }
     }
-    root_id.value = get_u32(value);
-    return root_id.value <= m_pager->page_count();
+    return false;
+}
+
+auto Schema::encode_root_id(Id id, std::string &out) -> void
+{
+    if (out.size() < kVarintMaxLength) {
+        // More than enough for a U32.
+        out.resize(kVarintMaxLength);
+    }
+    const auto *end = encode_varint(out.data(), id.value);
+    out.resize(static_cast<std::uintptr_t>(end - out.data()));
 }
 
 auto Schema::construct_table_state(const std::string &name, Id root_id, Table *&out) -> Status
@@ -99,13 +119,11 @@ auto Schema::drop_table(const std::string &name) -> Status
     }
     std::string value;
     CALICODB_TRY(m_map->get(name, &value));
-    if (value.size() != Id::kSize) {
-        std::string message("table \"" + name + "\" has a corrupted root ID: ");
-        append_escaped_string(message, value);
-        return Status::corruption(message);
-    }
 
-    Id root_id(get_u32(value));
+    Id root_id;
+    if (!decode_root_id(value, root_id)) {
+        return corrupted_root_id(name, value);
+    }
     auto itr = m_trees.find(root_id);
     if (itr != end(m_trees) && itr->second.tree) {
         return Status::invalid_argument(
@@ -148,16 +166,15 @@ auto Schema::vacuum_finish() -> Status
 
     Status s;
     while (cursor->is_valid()) {
-        if (cursor->value().size() != sizeof(U32)) {
+        Id old_id;
+        if (!decode_root_id(cursor->value(), old_id)) {
             return corrupted_root_id(cursor->key().to_string(), cursor->value());
         }
-        const Id old_id(get_u32(cursor->value()));
         const auto root = m_reroot.find(old_id);
         if (root != end(m_reroot)) {
-            char buffer[sizeof(U32)];
+            std::string value;
+            encode_root_id(root->second, value);
             // Update the database schema with the new root page ID for this tree.
-            put_u32(buffer, root->second.value);
-            const Slice value(buffer, sizeof(U32));
             s = m_map->put(cursor->key(), value);
             if (!s.is_ok()) {
                 break;

@@ -122,6 +122,22 @@ inline auto decode_varint(const char *in, U64 &value) -> const char *
     }
     return nullptr;
 }
+// TODO: Use this one instead.
+inline auto decode_varint(const char *in, const char *end, U64 &value) -> const char *
+{
+    value = 0;
+    for (U32 shift = 0; shift < 64 && in < end; shift += 7) {
+        U64 c = *reinterpret_cast<const U8 *>(in);
+        ++in;
+        if (c & 0x80) {
+            value |= (c & 0x7F) << shift;
+        } else {
+            value |= c << shift;
+            return in;
+        }
+    }
+    return nullptr;
+}
 
 } // namespace calicodb
 

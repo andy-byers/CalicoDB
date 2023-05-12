@@ -563,8 +563,6 @@ static auto compute_checksum(const Slice &in, const U32 *initial, U32 *out)
 class WalImpl : public Wal
 {
 public:
-    friend auto TEST_print_wal(const Wal &) -> void;
-
     explicit WalImpl(const Parameters &param, File &wal_file);
     ~WalImpl() override;
 
@@ -1473,39 +1471,6 @@ auto WalImpl::transfer_contents(bool reset) -> Status
         }
     }
     return s;
-}
-
-auto TEST_print_wal(const Wal &wal) -> void
-{
-    auto &impl = reinterpret_cast<WalImpl &>(const_cast<Wal &>(wal));
-    const auto *hdr1 = &reinterpret_cast<volatile HashIndexHdr *>(impl.m_index.groups()[0])[0];
-    const auto *hdr2 = &reinterpret_cast<volatile HashIndexHdr *>(impl.m_index.groups()[0])[1];
-    std::fputs("max_frame:\n", stderr);
-    std::fputs("  Location   Value\n", stderr);
-    std::fprintf(stderr, "  m_hdr      %u\n", impl.m_hdr.max_frame);
-    std::fprintf(stderr, "  shared[0]  %u\n", hdr1->max_frame);
-    std::fprintf(stderr, "  shared[1]  %u\n", hdr2->max_frame);
-    auto *info = impl.get_ckpt_info();
-    std::fputs("shm locks:\n", stderr);
-    std::fputs("  Write ", stderr);
-    if (impl.m_writer_lock) {
-        std::fputc('*', stderr);
-    }
-    std::fputc('\n', stderr);
-    std::fputs("  Ckpt ", stderr);
-    if (impl.m_ckpt_lock) {
-        std::fputs(" *", stderr);
-    }
-    std::fputc('\n', stderr);
-    std::fputs("  Rcvr ?\n", stderr);
-    for (std::size_t i = 0; i < kReaderCount; ++i) {
-        std::fprintf(stderr, "  Read%zu (%u)", i, ATOMIC_LOAD(&info->readmark[i]));
-        if (impl.m_reader_lock == int(i)) {
-            std::fputs(" *", stderr);
-        }
-        std::fputc('\n', stderr);
-    }
-    std::fputc('\n', stderr);
 }
 
 #undef READ_LOCK

@@ -86,16 +86,6 @@ auto Pager::read_page_from_file(PageRef &ref, std::size_t *size_out) const -> St
     return s;
 }
 
-auto Pager::write_page_to_file(const PageRef &ref) const -> Status
-{
-    const Slice data(ref.page, kPageSize);
-    auto s = m_file->write(ref.page_id.as_index() * kPageSize, data);
-    if (s.is_ok()) {
-        m_statistics.bytes_written += kPageSize;
-    }
-    return s;
-}
-
 auto Pager::open(const Parameters &param, Pager *&out) -> Status
 {
     CALICODB_EXPECT_GE(param.frame_count, kMinFrameCount);
@@ -174,7 +164,9 @@ auto Pager::open_wal() -> Status
 
 auto Pager::close() -> Status
 {
+    m_mode = kOpen;
     finish();
+
     CALICODB_TRY(busy_wait(kLockShared));
     std::size_t page_count = 0;
     if (m_wal) {
@@ -257,17 +249,14 @@ auto Pager::commit() -> Status
     Status s;
     if (m_mode == kDirty) {
         // Write the file header to the root page if anything has changed.
-        FileHeader header;
         auto root = acquire_root();
-        header.read(root.data());
         const auto needs_new_header =
-            header.page_count != m_page_count ||
-            header.freelist_head != m_freelist.m_head.value;
+            m_page_count != get_u32(root.data() + FileHeader::kPageCountOffset) ||
+            m_freelist.m_head.value != get_u32(root.data() + FileHeader::kFreelistHeadOffset);
         if (needs_new_header) {
             mark_dirty(root);
-            header.page_count = static_cast<U32>(m_page_count);
-            header.freelist_head = m_freelist.m_head.value;
-            header.write(root.data());
+            put_u32(root.data() + FileHeader::kPageCountOffset, static_cast<U32>(m_page_count));
+            put_u32(root.data() + FileHeader::kFreelistHeadOffset, m_freelist.m_head.value);
         }
         release(std::move(root));
 
@@ -345,13 +334,16 @@ auto Pager::purge_cached_pages() -> void
 
 auto Pager::checkpoint(bool reset) -> Status
 {
-    CALICODB_EXPECT_TRUE(m_wal);
     CALICODB_EXPECT_EQ(m_mode, kOpen);
     CALICODB_EXPECT_EQ(m_lock, kLockUnlocked);
     CALICODB_EXPECT_TRUE(assert_state());
     Status s;
     if (!m_wal) {
-        s = open_wal();
+        if ((s = start_reader()).is_ok()) {
+            finish();
+        } else {
+            return s;
+        }
     }
     if (s.is_ok() && (s = busy_wait(kLockShared)).is_ok()) {
         if (!(s = m_wal->checkpoint(reset)).is_ok()) {
@@ -474,17 +466,14 @@ auto Pager::acquire(Id page_id, Page &page) -> Status
     PageRef *ref;
     if (page_id.is_root()) {
         ref = m_bufmgr.root();
-    } else {
-        ref = m_bufmgr.get(page_id);
-        if (!ref) {
-            CALICODB_TRY(ensure_available_buffer());
-            ref = m_bufmgr.alloc(page_id);
-            if (page_id.as_index() < m_page_count) {
-                CALICODB_TRY(read_page(*ref, nullptr));
-            } else {
-                std::memset(ref->page, 0, kPageSize);
-                m_page_count = page_id.value;
-            }
+    } else if (!(ref = m_bufmgr.get(page_id))) {
+        CALICODB_TRY(ensure_available_buffer());
+        ref = m_bufmgr.alloc(page_id);
+        if (page_id.as_index() < m_page_count) {
+            CALICODB_TRY(read_page(*ref, nullptr));
+        } else {
+            std::memset(ref->page, 0, kPageSize);
+            m_page_count = page_id.value;
         }
     }
     m_bufmgr.ref(*ref);
@@ -532,10 +521,10 @@ auto Pager::initialize_root() -> void
     CALICODB_EXPECT_EQ(0, m_page_count);
     m_page_count = 1;
 
-    FileHeader header;
+    // Initialize the file header.
     auto *root = m_bufmgr.root();
-    header.page_count = 1;
-    header.write(root->page);
+    std::memcpy(root->page, FileHeader::kFmtString, sizeof(FileHeader::kFmtString));
+    put_u32(root->page + FileHeader::kPageCountOffset, 1);
 
     // TODO: Probably shouldn't have stuff from the tree layer down here. This code serves to initialize
     //       the root tree.
@@ -555,18 +544,31 @@ auto Pager::refresh_state() -> Status
         // written, then a blank page is obtained here.
         std::size_t read_size;
         CALICODB_TRY(read_page(*m_bufmgr.root(), &read_size));
-        auto *root = m_bufmgr.root()->page;
         m_refresh_root = false;
 
-        FileHeader header;
-        if (header.read(root)) {
-            m_freelist.m_head = Id(header.freelist_head);
-            m_page_count = header.page_count;
-        } else if (read_size == 0) {
-            m_freelist.m_head = Id::null();
-            m_page_count = 0;
-        } else {
-            return bad_identifier_error(Slice(root, kPageSize));
+        if (read_size) {
+            // Make sure the file is a CalicoDB database, and that the database can be understood by this
+            // version of the library.
+            const auto *root_page = m_bufmgr.root()->page;
+            const Slice fmt_string(root_page, sizeof(FileHeader::kFmtString));
+            const auto bad_fmt_string = std::memcmp(
+                fmt_string.data(), FileHeader::kFmtString, fmt_string.size());
+            const auto bad_fmt_version =
+                root_page[FileHeader::kFmtVersionOfs] > FileHeader::kFmtVersion;
+            if (bad_fmt_string || bad_fmt_version) {
+                std::string message("not a CalicoDB database (expected ");
+                if (bad_fmt_string) {
+                    append_fmt_string(message, R"(identifier "%s\00" but got "%s"))",
+                                      FileHeader::kFmtString, escape_string(fmt_string).c_str());
+                } else {
+                    append_fmt_string(message, R"(format version "%d" but got "%d"))",
+                                      FileHeader::kFmtVersion, root_page[FileHeader::kFmtVersionOfs]);
+                }
+                return Status::invalid_argument(message);
+            }
+            // Decode the file header fields necessary for execution.
+            m_page_count = get_u32(root_page + FileHeader::kPageCountOffset);
+            m_freelist.m_head.value = get_u32(root_page + FileHeader::kFreelistHeadOffset);
         }
         m_save.freelist_head = m_freelist.m_head;
         m_save.page_count = m_page_count;

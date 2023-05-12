@@ -40,14 +40,13 @@ public:
     {
         const auto index = m_num_counters++;
         CALICODB_EXPECT_LT(index, kMaxCounters);
-        //        m_counters[0] = 32500;
         m_env->add_interceptor(
             filename,
             tools::Interceptor(syscall, [index, this] {
                 if (m_counters[index]++ >= m_mxcounts[index]) {
                     m_counters[index] = 0;
                     m_mxcounts[index] += m_increment;
-                    m_increment += 100;
+                    ++m_increment;
                     return Status::io_error("FAULT");
                 }
                 return Status::ok();
@@ -144,6 +143,7 @@ protected:
 
         Options dbopt;
         dbopt.env = m_env;
+        dbopt.sync = true;
         CALICODB_TRY(DB::open(dbopt, kDBName, m_db));
         return m_db->new_txn(write, m_txn);
     }
@@ -210,14 +210,6 @@ TEST_P(CrashTests, Checkpoint)
 {
     ASSERT_OK(test([this](auto state) {
         auto s = reopen(true);
-        delete m_txn;
-        m_txn = nullptr;
-        if (s.is_ok()) {
-            s = m_db->checkpoint(true);
-        }
-        if (s.is_ok()) {
-            s = m_db->new_txn(true, m_txn);
-        }
         if (s.is_ok()) {
             s = m_routine.run(*m_txn);
         }
@@ -226,6 +218,9 @@ TEST_P(CrashTests, Checkpoint)
         }
         delete m_txn;
         m_txn = nullptr;
+        if (s.is_ok()) {
+            s = m_db->checkpoint(true);
+        }
         return s;
     }));
     end_txn_and_validate();
@@ -262,14 +257,15 @@ static auto label_testcase(const testing::TestParamInfo<CrashTestParam> &info) -
     return label;
 }
 INSTANTIATE_TEST_CASE_P(
-    SingleFile,
+    CrashTests,
     CrashTests,
     testing::Combine(
         testing::Values(
             kDBName,
             kWalName),
         testing::Values(
-            tools::kSyscallRead | tools::kSyscallWrite | tools::kSyscallSync | tools::kSyscallResize | tools::kSyscallOpen)),
+            tools::kSyscallRead | tools::kSyscallWrite,
+            tools::kSyscallSync | tools::kSyscallResize | tools::kSyscallOpen)),
     label_testcase);
 
 } // namespace calicodb::test::crashes

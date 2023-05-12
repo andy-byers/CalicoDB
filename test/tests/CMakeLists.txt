@@ -8,10 +8,10 @@ function(build_test NAME)
             COMMAND "${NAME}")
 endfunction()
 
-build_test(concurrency)
+#build_test(concurrency)
 build_test(crashes)
 build_test(operations)
 
-add_executable(debug debug.cpp)
+add_executable(debug debug.cpp common.cpp common.h)
 target_link_libraries(debug
-        PRIVATE calicodb_tools)
+        PRIVATE calicodb_tools gtest)

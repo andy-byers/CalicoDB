@@ -45,11 +45,15 @@ public:
     virtual auto sleep(unsigned micros) -> void = 0;
 };
 
+// Available modes for the file locking API
+// NOTE: File locking modes and semantics are from SQLite.
 enum FileLockMode : int {
     kLockShared = 1,    // Any number of threads can hold a kShared lock
     kLockExclusive = 2, // Excludes all other locks
 };
 
+// Available flags for the shared memory locking API
+// NOTE: shm locking modes and semantics are from SQLite.
 enum ShmLockFlag : int {
     kShmUnlock = 1,
     kShmLock = 2,
@@ -83,9 +87,6 @@ public:
 
     // Synchronize with the underlying filesystem.
     [[nodiscard]] virtual auto sync() -> Status = 0;
-
-    // Available modes for the file locking API
-    // NOTE: File locking modes and semantics are from SQLite.
 
     // Take or upgrade a lock on the file
     [[nodiscard]] virtual auto file_lock(FileLockMode mode) -> Status = 0;

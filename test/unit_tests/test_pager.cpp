@@ -11,6 +11,7 @@
 #include "unit_tests.h"
 #include <gtest/gtest.h>
 #include <numeric>
+#include <thread>
 
 namespace calicodb
 {
@@ -117,10 +118,10 @@ public:
 
     auto write_db_header() const -> void
     {
-        FileHeader header;
         std::string buffer(kPageSize, '\0');
-        header.page_count = 1;
-        header.write(buffer.data());
+        std::memcpy(buffer.data(), FileHeader::kFmtString, sizeof(FileHeader::kFmtString));
+        buffer[FileHeader::kFmtVersionOfs] = FileHeader::kFmtVersion;
+        put_u32(buffer.data() + FileHeader::kPageCountOffset, 1);
         tools::write_string_to_file(*env, kDBFilename, buffer);
     }
 
@@ -868,9 +869,47 @@ protected:
         ASSERT_OK(m_wal->write(&dirty.front(), n));
     }
 
-    auto open_connection() -> WalTestBase
+    auto start_reader_routine(std::size_t r, std::size_t n, Status::Code outcome) -> void
     {
-        return WalTestBase(env());
+        bool unused;
+        ASSERT_OK(m_db->file_lock(kLockShared));
+
+        std::atomic<bool> flag(false);
+        std::thread thread([this, &flag, r, n] {
+            File *db;
+            ASSERT_OK(m_env->new_file(kDBFilename, Env::kReadWrite, db));
+
+            volatile void *ptr;
+            ASSERT_OK(db->shm_map(0, true, ptr));
+
+            ASSERT_OK(db->shm_lock(r, n, kShmLock | kShmWriter));
+            flag.store(true, std::memory_order_release);
+            while (flag.load(std::memory_order_acquire)) {
+            }
+            ASSERT_OK(db->shm_lock(r, n, kShmUnlock | kShmWriter));
+            db->shm_unmap(true);
+            delete db;
+        });
+
+        // Wait on the background thread to finish setting up.
+        while (!flag.load(std::memory_order_acquire)) {
+        }
+
+        // There is nothing in the WAL, so this connection must take readmark 0 and get
+        // pages from the database file. This is not possible, because the background
+        // thread has the
+        Status s;
+        ASSERT_EQ((s = m_wal->start_reader(unused)).code(), outcome)
+            << "expected " << int(outcome) << " but got " << int(s.code())
+            << ": " << s.to_string();
+        m_wal->finish_reader();
+
+        flag.store(false, std::memory_order_release);
+        thread.join();
+
+        ASSERT_OK(m_wal->start_reader(unused));
+        m_wal->finish_reader();
+        m_db->file_unlock();
     }
 
     RandomDirtyListBuilder m_builder;
@@ -946,6 +985,57 @@ TEST_F(WalTests, RecoversIndex)
         ASSERT_TRUE(p);
     }
     ASSERT_EQ(Slice(pages, m_builder.data().size()), m_builder.data());
+    m_wal->finish_reader();
+}
+
+TEST_F(WalTests, ReportsProtocolError)
+{
+    // Write lock is already held, so the connection cannot initialize the index
+    // header.
+    start_reader_routine(0, 1, Status::kCorruption);
+}
+
+TEST_F(WalTests, FindsNonzeroReadmark)
+{
+    // No frames in the WAL, so connection seeks readmark 0. Readmark 0 is already
+    // locked with a writer lock by the background thread, so the connection must
+    // use readmark 1.
+    start_reader_routine(3, 1, Status::kOK);
+}
+
+TEST_F(WalTests, NonzeroReadmarkAlreadyWriterLocked)
+{
+    // Here, readmarks 0 and 1 already have writer locks. The connection won't keep
+    // looking for another readmark, it just returns busy, as it appears that index
+    // recovery is running.
+    start_reader_routine(3, 2, Status::kBusy);
+}
+
+TEST_F(WalTests, StartWriter)
+{
+    ASSERT_OK(m_db->file_lock(kLockShared));
+
+    bool changed;
+    ASSERT_OK(m_wal->start_reader(changed));
+    ASSERT_TRUE(changed);
+
+    // Change the header while this connection has a read transaction, before it
+    // starts the write transaction.
+    volatile void *ptr;
+    ASSERT_OK(m_db->shm_map(0, false, ptr));
+    ++reinterpret_cast<volatile char *>(ptr)[0];
+    // Writer should report a busy status, since it looks like another writer is
+    // active right now, and it may block for a long time.
+    ASSERT_TRUE(m_wal->start_writer().is_busy());
+    m_wal->finish_reader();
+
+    ASSERT_OK(m_wal->start_reader(changed));
+    ASSERT_TRUE(changed);
+    ASSERT_OK(m_wal->start_writer());
+    // Write transaction already started, additional calls are NOOPs.
+    ASSERT_OK(m_wal->start_writer());
+
+    m_wal->finish_writer();
     m_wal->finish_reader();
 }
 

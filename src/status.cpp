@@ -31,7 +31,7 @@ static auto copy_status_string(const char *data) -> char *
     return nullptr;
 }
 
-static constexpr const char *kMessages[Status::kMaxSubCode] = {
+static constexpr const char *kSubCodeMessages[Status::kMaxSubCode] = {
     "",         // kNone
     "readonly", // kReadonly
 };
@@ -111,21 +111,19 @@ auto Status::to_string() const -> std::string
             type_name = "retry: ";
             break;
         default:
-            type_name = nullptr;
+            // This is not possible, so long as the constructors that take a `Code`
+            // are never exposed (and the static method "constructors" are correct).
+            CALICODB_EXPECT_TRUE(false && "unrecognized code");
     }
-    std::string result;
-    if (type_name) {
-        result = type_name;
-    } else {
-        append_fmt_string(
-            result, "unrecognized code (%d)", static_cast<int>(m_code));
-    }
-    CALICODB_EXPECT_TRUE(m_subc != kNone || m_state);
+    std::string result(type_name);
     if (m_subc != kNone) {
         CALICODB_EXPECT_LT(m_subc, kMaxSubCode);
-        result.append(kMessages[m_subc]);
+        result.append(kSubCodeMessages[m_subc]);
     } else if (m_state) {
         result.append(m_state);
+    } else {
+        // Clip off the ": " if there is no message.
+        result.resize(result.size() - 2);
     }
     return result;
 }

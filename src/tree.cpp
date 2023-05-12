@@ -133,43 +133,53 @@ static auto write_child_id(Cell &cell, Id child_id) -> void
     put_u32(cell.ptr, child_id.value);
 }
 
-static auto parse_external_cell(char *data) -> Cell
+static auto parse_external_cell(char *data, const char *limit) -> Cell
 {
     U64 key_size, value_size;
     const auto *ptr = data;
-    ptr = decode_varint(ptr, value_size);
-    ptr = decode_varint(ptr, key_size);
-    const auto header_size = static_cast<std::uintptr_t>(ptr - data);
+    if ((ptr = decode_varint(ptr, limit, value_size))) {
+        if ((ptr = decode_varint(ptr, limit, key_size))) {
+            const auto header_size = static_cast<std::uintptr_t>(ptr - data);
 
-    Cell cell;
-    cell.ptr = data;
-    cell.key = data + header_size;
-    cell.key_size = key_size;
-    cell.local_size = compute_local_size(key_size, value_size);
-    cell.has_remote = cell.local_size < key_size + value_size;
-    cell.size = header_size + cell.local_size + cell.has_remote * Id::kSize;
-    return cell;
+            Cell cell;
+            cell.ptr = data;
+            cell.key = data + header_size;
+            cell.key_size = key_size;
+            cell.local_size = compute_local_size(key_size, value_size);
+            cell.has_remote = cell.local_size < key_size + value_size;
+            cell.size = header_size + cell.local_size + cell.has_remote * Id::kSize;
+            return cell;
+        }
+    }
+    // TODO: Allow this function to fail. Should report corruption if it is clear that a
+    //       varint is messed up. Other indicators of corruption should also be used!
+    CALICODB_EXPECT_TRUE(false && "not implemented");
+    return Cell{};
 }
 
-static auto parse_internal_cell(char *data) -> Cell
+static auto parse_internal_cell(char *data, const char *limit) -> Cell
 {
     U64 key_size;
-    const auto *ptr = decode_varint(data + Id::kSize, key_size);
-    const auto header_size = static_cast<std::uintptr_t>(ptr - data);
+    if (const auto *ptr = decode_varint(data + Id::kSize, limit, key_size)) {
+        const auto header_size = static_cast<std::uintptr_t>(ptr - data);
 
-    Cell cell;
-    cell.ptr = data;
-    cell.key = data + header_size;
-    cell.key_size = key_size;
-    cell.local_size = compute_local_size(key_size, 0);
-    cell.has_remote = cell.local_size < key_size;
-    cell.size = header_size + cell.local_size + cell.has_remote * Id::kSize;
-    return cell;
+        Cell cell;
+        cell.ptr = data;
+        cell.key = data + header_size;
+        cell.key_size = key_size;
+        cell.local_size = compute_local_size(key_size, 0);
+        cell.has_remote = cell.local_size < key_size;
+        cell.size = header_size + cell.local_size + cell.has_remote * Id::kSize;
+        return cell;
+    }
+    // TODO: See parse_external_cell().
+    CALICODB_EXPECT_TRUE(false && "not implemented");
+    return Cell{};
 }
 
 static auto read_cell_at(Node &node, std::size_t offset)
 {
-    return node.meta->parse_cell(node.page.data() + offset);
+    return node.meta->parse_cell(node.page.data() + offset, node.page.data() + kPageSize);
 }
 
 auto read_cell(Node &node, std::size_t index) -> Cell
@@ -1826,7 +1836,7 @@ auto PayloadManager::emplace(Pager &pager, char *scratch, Node &node, const Slic
     } else {
         // The node has overflowed. Write the cell to scratch memory.
         emplace(scratch);
-        node.overflow = parse_external_cell(scratch);
+        node.overflow = parse_external_cell(scratch, scratch + kPageSize);
         node.overflow->is_free = true;
     }
     return Status::ok();

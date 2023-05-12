@@ -73,7 +73,7 @@ struct Cell {
 };
 
 struct NodeMeta {
-    using ParseCell = Cell (*)(char *);
+    using ParseCell = Cell (*)(char *, const char *);
 
     ParseCell parse_cell = nullptr;
 };

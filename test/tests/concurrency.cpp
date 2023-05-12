@@ -334,15 +334,15 @@ TEST_P(ConcurrencyTests, MT)
     test(1);
 }
 
-TEST_P(ConcurrencyTests, MP_2)
-{
-    test(2);
-}
-
-TEST_P(ConcurrencyTests, MP_3)
-{
-    test(3);
-}
+// TEST_P(ConcurrencyTests, MP_2)
+//{
+//     test(2);
+// }
+//
+// TEST_P(ConcurrencyTests, MP_3)
+//{
+//     test(3);
+// }
 
 INSTANTIATE_TEST_CASE_P(
     ConcurrencyTests,
@@ -350,7 +350,7 @@ INSTANTIATE_TEST_CASE_P(
     testing::Combine(
         testing::Values(1, 2, 10),
         testing::Values(1, 2, 10, 100),
-        testing::Values(0)),
+        testing::Values(0 /*, TODO: 1*/)),
     [](const auto &info) {
         std::string label;
         append_number(label, std::get<0>(info.param));

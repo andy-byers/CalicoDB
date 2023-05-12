@@ -30,28 +30,11 @@ auto DBImpl::open(const Options &sanitized) -> Status
             return Status::invalid_argument(
                 "database \"" + m_db_filename + "\" does not exist");
         }
-        CALICODB_TRY(m_env->new_file(m_db_filename, Env::kCreate, file));
-    } else {
+        s = m_env->new_file(m_db_filename, Env::kCreate, file);
+    }
+    if (!s.is_ok()) {
         return s;
     }
-    CALICODB_TRY(file->file_lock(kLockShared));
-
-    FileHeader header;
-    if (exists) {
-        Slice read;
-        char buffer[kPageSize] = {};
-        CALICODB_TRY(file->read(0, kPageSize, buffer, &read));
-        if (read.size() == kPageSize) {
-            if (!header.read(buffer)) {
-                return bad_identifier_error(read);
-            }
-        } else if (!read.is_empty()) {
-            std::string message("not a CalicoDB database (file is ");
-            append_fmt_string(message, "%zu bytes but should be 0 or a multiple of %zu)", read.size(), kPageSize);
-            return Status::invalid_argument(message);
-        }
-    }
-
     const auto cache_size = std::max(
         sanitized.cache_size, kMinFrameCount * kPageSize);
 
@@ -68,19 +51,22 @@ auto DBImpl::open(const Options &sanitized) -> Status
     };
     CALICODB_TRY(Pager::open(pager_param, m_pager));
 
-    if (!exists) {
+    if (exists) {
+        if (sanitized.error_if_exists) {
+            return Status::invalid_argument(
+                "database \"" + m_db_filename + "\" already exists");
+        }
+        if (m_env->file_exists(m_wal_filename)) {
+            s = m_pager->checkpoint(false);
+        }
+    } else {
         logv(m_log, "setting up a new database");
-        s = file->file_lock(kLockExclusive);
-        if (s.is_ok() && m_env->remove_file(m_wal_filename).is_ok()) {
+        if (m_env->remove_file(m_wal_filename).is_ok()) {
             logv(m_log, R"(removed old WAL file at "%s")", m_wal_filename.c_str());
         }
-    } else if (sanitized.error_if_exists) {
-        return Status::invalid_argument(
-            "database \"" + m_db_filename + "\" already exists");
     }
     std::move(guard).cancel();
-    file->file_unlock();
-    return Status::ok();
+    return s;
 }
 
 DBImpl::DBImpl(const Options &options, const Options &sanitized, std::string filename)
@@ -119,30 +105,38 @@ auto DBImpl::destroy(const Options &options, const std::string &filename) -> Sta
     copy.create_if_missing = false;
 
     DB *db;
-    auto s = DB::open(copy, filename, db);
-    if (!s.is_ok()) {
-        return Status::invalid_argument(
-            '"' + filename + "\" is not a CalicoDB database");
+    Txn *txn;
+    Status s;
+
+    // Determine the WAL filename, and make sure `filename` refers to a CalicoDB
+    // database. The file identifier is not checked until a transaction is started.
+    std::string wal_name;
+    if ((s = DB::open(copy, filename, db)).is_ok()) {
+        wal_name = db_impl(db)->m_wal_filename;
+        if ((s = db->new_txn(false, txn)).is_ok()) {
+            delete txn;
+        }
+        delete db;
     }
 
-    const auto *impl = reinterpret_cast<const DBImpl *>(db);
-    const auto db_name = impl->m_db_filename;
-    const auto wal_name = impl->m_wal_filename;
-    delete db;
-
-    auto *env = options.env;
-    if (env == nullptr) {
-        env = Env::default_env();
+    // Remove the database files from the Env.
+    Status t;
+    if (s.is_ok()) {
+        auto *env = options.env;
+        if (env == nullptr) {
+            env = Env::default_env();
+        }
+        s = env->remove_file(filename);
+        if (env->file_exists(wal_name)) {
+            // Delete the WAL file if it wasn't properly cleaned up when the database
+            // was closed above. Under normal conditions, this branch is not hit.
+            t = env->remove_file(wal_name);
+        }
+        if (env != options.env) {
+            delete env;
+        }
     }
-
-    (void)env->remove_file(db_name);
-    (void)env->remove_file(wal_name);
-
-    if (env != options.env) {
-        delete env;
-    }
-
-    return Status::ok();
+    return s.is_ok() ? t : s;
 }
 
 auto DBImpl::get_property(const Slice &name, std::string *out) const -> bool
@@ -190,9 +184,6 @@ auto DBImpl::checkpoint(bool reset) -> Status
 {
     if (m_txn) {
         return already_running_error(m_txn->m_write);
-    }
-    if (!m_pager->m_wal) {
-        CALICODB_TRY(m_pager->open_wal());
     }
     return m_pager->checkpoint(reset);
 }

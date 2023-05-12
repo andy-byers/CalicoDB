@@ -3,6 +3,7 @@
 // LICENSE.md. See AUTHORS.md for a list of contributor names.
 
 #include <array>
+#include <fstream>
 #include <gtest/gtest.h>
 #include <vector>
 
@@ -317,10 +318,26 @@ TEST(IdTests, IdentifiersAreOrderable)
     run_ordering_comparisons<Id>();
 }
 
-TEST(StatusTests, OkStatusMessage)
+TEST(StatusTests, StatusMessages)
 {
-    auto s = Status::ok();
-    ASSERT_EQ(s.to_string(), "OK");
+    ASSERT_EQ("OK", Status::ok().to_string());
+    ASSERT_EQ("I/O error", Status::io_error().to_string());
+    ASSERT_EQ("I/O error: msg", Status::io_error("msg").to_string());
+    ASSERT_EQ("corruption", Status::corruption().to_string());
+    ASSERT_EQ("corruption: msg", Status::corruption("msg").to_string());
+    ASSERT_EQ("invalid argument", Status::invalid_argument().to_string());
+    ASSERT_EQ("invalid argument: msg", Status::invalid_argument("msg").to_string());
+    ASSERT_EQ("not supported", Status::not_supported().to_string());
+    ASSERT_EQ("not supported: msg", Status::not_supported("msg").to_string());
+    ASSERT_EQ("busy", Status::busy().to_string());
+    ASSERT_EQ("busy: msg", Status::busy("msg").to_string());
+    ASSERT_EQ("retry", Status::retry().to_string());
+    ASSERT_EQ("retry: msg", Status::retry("msg").to_string());
+    // Choice of `Status::invalid_argument()` is arbitrary, any `Code-SubCode` combo
+    // is technically legal, but may not be semantically valid (for example, it makes
+    // no sense to retry when a read-only transaction attempts to write: repeating that
+    // action will surely fail next time as well).
+    ASSERT_EQ("invalid argument: readonly", Status::invalid_argument(Status::kReadonly).to_string());
 }
 
 TEST(StatusTests, NonOkStatusSavesMessage)
@@ -469,6 +486,15 @@ TEST(Logging, WriteFormattedString)
 {
     std::string s;
     append_fmt_string(s, "%s %d %f", "abc", 42, 1.0);
+}
+
+TEST(Logging, LogMessage)
+{
+    tools::TestDir testdir(".");
+    std::ofstream ofs(testdir.as_child("output"));
+    std::string str(1'024, '0');
+    tools::StreamSink sink(ofs);
+    logv(&sink, "%s", str.c_str());
 }
 
 TEST(Logging, ConsumeDecimalNumberIgnoresLeadingZeros)
