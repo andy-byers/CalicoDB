@@ -111,6 +111,7 @@ auto Status::to_string() const -> std::string
             type_name = "retry: ";
             break;
         default:
+            type_name = nullptr;
             // This is not possible, so long as the constructors that take a `Code`
             // are never exposed (and the static method "constructors" are correct).
             CALICODB_EXPECT_TRUE(false && "unrecognized code");
