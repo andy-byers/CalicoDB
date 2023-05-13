@@ -181,7 +181,9 @@ TestEnv::TestEnv(Env &env)
 
 TestEnv::~TestEnv()
 {
-    delete target();
+    if (target() != Env::default_env()) {
+        delete target();
+    }
 }
 
 auto TestEnv::save_file_contents(const std::string &filename) -> void

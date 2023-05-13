@@ -19,7 +19,7 @@ class Tree;
 class Schema final
 {
 public:
-    explicit Schema(Pager &pager, Status &status, bool write);
+    explicit Schema(Pager &pager, Status &status);
     ~Schema();
 
     [[nodiscard]] auto new_table(const TableOptions &options, const std::string &name, Table *&out) -> Status;
@@ -58,7 +58,6 @@ private:
     Status *m_status;
     Pager *m_pager;
     Tree *m_map;
-    bool m_write;
 };
 
 } // namespace calicodb

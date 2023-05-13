@@ -13,11 +13,10 @@
 namespace calicodb
 {
 
-Schema::Schema(Pager &pager, Status &status, bool write)
+Schema::Schema(Pager &pager, Status &status)
     : m_status(&status),
       m_pager(&pager),
-      m_map(new Tree(pager, nullptr)),
-      m_write(write)
+      m_map(new Tree(pager, nullptr))
 {
 }
 
@@ -43,7 +42,8 @@ auto Schema::new_table(const TableOptions &options, const std::string &name, Tab
 
     Status s;
     if (m_pager->page_count() == 0) {
-        if (m_write) {
+        if (options.create_if_missing) {
+            // Initialize the database file header, as well as the schema tree's root page.
             m_pager->initialize_root();
         } else {
             // Read-only transaction cannot create a new table, and there are no tables
@@ -67,7 +67,7 @@ auto Schema::new_table(const TableOptions &options, const std::string &name, Tab
             return corrupted_root_id(name, value);
         }
     } else if (s.is_not_found()) {
-        if (!m_write || !options.create_if_missing) {
+        if (!options.create_if_missing) {
             return Status::invalid_argument("table \"" + name + "\" does not exist");
         }
         CALICODB_TRY(Tree::create(*m_pager, false, &root_id));
@@ -108,15 +108,12 @@ auto Schema::construct_table_state(const std::string &name, Id root_id, Table *&
     itr = m_trees.insert(itr, {root_id, {}});
     itr->second.root = root_id;
     itr->second.tree = new Tree(*m_pager, &itr->second.root);
-    out = new TableImpl(itr->second.tree, *m_status, m_write);
+    out = new TableImpl(itr->second.tree, *m_status);
     return Status::ok();
 }
 
 auto Schema::drop_table(const std::string &name) -> Status
 {
-    if (!m_write) {
-        return Status::readonly();
-    }
     std::string value;
     CALICODB_TRY(m_map->get(name, &value));
 

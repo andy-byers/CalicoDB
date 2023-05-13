@@ -8,7 +8,6 @@
 #include "header.h"
 #include "logging.h"
 #include "page.h"
-#include "scope_guard.h"
 #include "wal.h"
 #include <thread>
 
@@ -518,62 +517,41 @@ auto Pager::release(Page page) -> void
 
 auto Pager::initialize_root() -> void
 {
+    CALICODB_EXPECT_FALSE(m_refresh_root);
     CALICODB_EXPECT_EQ(0, m_page_count);
     m_page_count = 1;
 
     // Initialize the file header.
     auto *root = m_bufmgr.root();
-    std::memcpy(root->page, FileHeader::kFmtString, sizeof(FileHeader::kFmtString));
-    put_u32(root->page + FileHeader::kPageCountOffset, 1);
-
-    // TODO: Probably shouldn't have stuff from the tree layer down here. This code serves to initialize
-    //       the root tree.
-    NodeHeader root_hdr;
-    root_hdr.is_external = true;
-    root_hdr.cell_start = U32(kPageSize);
-    root_hdr.write(root->page + FileHeader::kSize);
-
-    m_refresh_root = false;
+    FileHeader::make_supported_db(root->page);
 }
 
 auto Pager::refresh_state() -> Status
 {
+    Status s;
     if (m_refresh_root) {
         // Read the most-recent version of the database root page. This copy of the root may be located in
         // either the WAL, or the database file. If the database file is empty, and the WAL has never been
         // written, then a blank page is obtained here.
         std::size_t read_size;
-        CALICODB_TRY(read_page(*m_bufmgr.root(), &read_size));
-        m_refresh_root = false;
+        if ((s = read_page(*m_bufmgr.root(), &read_size)).is_ok()) {
+            m_refresh_root = false;
 
-        if (read_size) {
-            // Make sure the file is a CalicoDB database, and that the database can be understood by this
-            // version of the library.
-            const auto *root_page = m_bufmgr.root()->page;
-            const Slice fmt_string(root_page, sizeof(FileHeader::kFmtString));
-            const auto bad_fmt_string = std::memcmp(
-                fmt_string.data(), FileHeader::kFmtString, fmt_string.size());
-            const auto bad_fmt_version =
-                root_page[FileHeader::kFmtVersionOfs] > FileHeader::kFmtVersion;
-            if (bad_fmt_string || bad_fmt_version) {
-                std::string message("not a CalicoDB database (expected ");
-                if (bad_fmt_string) {
-                    append_fmt_string(message, R"(identifier "%s\00" but got "%s"))",
-                                      FileHeader::kFmtString, escape_string(fmt_string).c_str());
-                } else {
-                    append_fmt_string(message, R"(format version "%d" but got "%d"))",
-                                      FileHeader::kFmtVersion, root_page[FileHeader::kFmtVersionOfs]);
+            if (read_size) {
+                // Make sure the file is a CalicoDB database, and that the database file format can be
+                // understood by this version of the library.
+                const auto *root = m_bufmgr.root()->page;
+                if ((s = FileHeader::check_db_support(root)).is_ok()) {
+                    // Decode the file header fields necessary for execution.
+                    m_page_count = get_u32(root + FileHeader::kPageCountOffset);
+                    m_freelist.m_head.value = get_u32(root + FileHeader::kFreelistHeadOffset);
                 }
-                return Status::invalid_argument(message);
             }
-            // Decode the file header fields necessary for execution.
-            m_page_count = get_u32(root_page + FileHeader::kPageCountOffset);
-            m_freelist.m_head.value = get_u32(root_page + FileHeader::kFreelistHeadOffset);
+            m_save.freelist_head = m_freelist.m_head;
+            m_save.page_count = m_page_count;
         }
-        m_save.freelist_head = m_freelist.m_head;
-        m_save.page_count = m_page_count;
     }
-    return Status::ok();
+    return s;
 }
 
 auto Pager::assert_state() const -> bool

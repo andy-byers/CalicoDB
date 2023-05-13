@@ -28,15 +28,12 @@ static constexpr auto kMaxCellHeaderSize =
 
 static constexpr std::size_t kPointerSize = 2;
 
-static constexpr std::size_t kMinLocal =
-    (kPageSize - NodeHeader::kSize) * 32 / 256 -
-    kMaxCellHeaderSize - kPointerSize;
-static constexpr std::size_t kMaxLocal =
-    (kPageSize - NodeHeader::kSize) * 64 / 256 -
-    kMaxCellHeaderSize - kPointerSize;
-
 inline constexpr auto compute_local_size(std::size_t key_size, std::size_t value_size) -> std::size_t
 {
+    constexpr const std::size_t kMinLocal =
+        (kPageSize - NodeHeader::kSize) * 32 / 256 - kMaxCellHeaderSize - kPointerSize;
+    constexpr const std::size_t kMaxLocal =
+        (kPageSize - NodeHeader::kSize) * 64 / 256 - kMaxCellHeaderSize - kPointerSize;
     if (key_size + value_size <= kMaxLocal) {
         return key_size + value_size;
     } else if (key_size > kMaxLocal) {
@@ -1650,10 +1647,53 @@ auto Tree::destroy(Tree &tree) -> Status
 }
 
 static constexpr auto kLinkContentOffset = Id::kSize;
+static constexpr auto kLinkContentSize = kPageSize - kLinkContentOffset;
 
 [[nodiscard]] static auto get_readable_content(const Page &page, std::size_t size_limit) -> Slice
 {
-    return page.view().range(kLinkContentOffset, std::min(size_limit, kPageSize - kLinkContentOffset));
+    return page.view().range(kLinkContentOffset, std::min(size_limit, kLinkContentSize));
+}
+
+ChainIterator::ChainIterator(Pager &pager, Id head, std::size_t length)
+    : m_length(length),
+      m_pager(&pager),
+      m_next(head)
+{
+}
+
+ChainIterator::~ChainIterator()
+{
+    if (m_page) {
+        m_pager->release(std::move(*m_page));
+    }
+}
+
+auto ChainIterator::status() const -> Status
+{
+    return m_status;
+}
+
+auto ChainIterator::next() -> Slice
+{
+    CALICODB_EXPECT_TRUE(m_status.is_ok());
+    if (m_length == 0) {
+        return Slice();
+    }
+    Page page;
+    auto s = m_pager->acquire(m_next, page);
+    if (s.is_ok()) {
+        // Returned slice is at most `kPageSize - 4` bytes.
+        const auto output = get_readable_content(page, m_length);
+        if (m_page) {
+            m_pager->release(std::move(*m_page));
+        }
+        m_length -= output.size();
+        m_next = read_next_id(page);
+        m_page = std::move(page);
+        return output;
+    }
+    m_status = s;
+    return Slice();
 }
 
 auto NodeManager::allocate(Pager &pager, Node &out, std::string &scratch, bool is_external) -> Status
@@ -1700,26 +1740,19 @@ auto NodeManager::destroy(Pager &pager, Node node) -> Status
 
 auto OverflowList::read(Pager &pager, Id head_id, std::size_t offset, std::size_t payload_size, char *buffer) -> Status
 {
-    while (payload_size != 0) {
-        Page page;
-        CALICODB_TRY(pager.acquire(head_id, page));
-        auto content = get_readable_content(page, kPageSize);
+    ChainIterator itr(pager, head_id, offset + payload_size);
 
+    Slice chunk;
+    while (!(chunk = itr.next()).is_empty()) {
         if (offset) {
-            const auto max = std::min(offset, content.size());
-            content.advance(max);
-            offset -= max;
+            const auto skip = std::min(offset, chunk.size());
+            chunk.advance(skip);
+            offset -= skip;
         }
-        if (!content.is_empty()) {
-            const auto size = std::min(payload_size, content.size());
-            std::memcpy(buffer, content.data(), size);
-            payload_size -= size;
-            buffer += size;
-        }
-        head_id = read_next_id(page);
-        pager.release(std::move(page));
+        std::memcpy(buffer, chunk.data(), chunk.size());
+        buffer += chunk.size();
     }
-    return Status::ok();
+    return itr.status();
 }
 
 auto OverflowList::write(Pager &pager, Id &out, const Slice &key, const Slice &value) -> Status

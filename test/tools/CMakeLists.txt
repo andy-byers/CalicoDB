@@ -2,6 +2,8 @@
 add_library(calicodb_tools
         STATIC tools.cpp
                tools.h
+               harness.cpp
+               harness.h
                env_helpers.cpp
                env_helpers.h)
 # These options are needed by all executables linking to this helper library.

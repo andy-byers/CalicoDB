@@ -19,7 +19,7 @@ class TableImpl : public Table
 public:
     friend class TxnImpl;
 
-    explicit TableImpl(Tree *&tree, Status &status, bool write);
+    explicit TableImpl(Tree *&tree, Status &status);
     ~TableImpl() override;
     [[nodiscard]] auto new_cursor() const -> Cursor * override;
     [[nodiscard]] auto get(const Slice &key, std::string *value) const -> Status override;
@@ -38,7 +38,9 @@ public:
 private:
     const Status *m_status;
     Tree **m_tree;
-    bool m_readonly;
+
+    // NOTE: This field must be set by `TxnImpl` after the table object is allocated.
+    bool m_readonly = true;
 };
 
 inline auto table_impl(Table *table) -> TableImpl *

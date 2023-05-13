@@ -3,11 +3,49 @@
 // LICENSE.md. See AUTHORS.md for a list of contributor names.
 
 #include "header.h"
+#include "calicodb/options.h"
 #include "encoding.h"
 #include "logging.h"
 
 namespace calicodb
 {
+
+auto FileHeader::check_db_support(const char *root) -> Status
+{
+    Status s;
+    const Slice fmt_string(root, sizeof(kFmtString));
+    const auto bad_fmt_string = std::memcmp(
+        fmt_string.data(), kFmtString, fmt_string.size());
+    if (bad_fmt_string) {
+        std::string message("not a CalicoDB database (expected ");
+        append_fmt_string(message, R"(identifier "%s\00" but got "%s"))",
+                          kFmtString, escape_string(fmt_string).c_str());
+        s = Status::invalid_argument(message);
+    }
+    const auto bad_fmt_version =
+        root[kFmtVersionOfs] > kFmtVersion;
+    if (s.is_ok() && bad_fmt_version) {
+        std::string message("CalicoDB version is not supported (expected ");
+        append_fmt_string(message, R"(format version "%d" but got "%d"))",
+                          kFmtVersion, root[kFmtVersionOfs]);
+        s = Status::invalid_argument(message);
+    }
+    return s;
+}
+
+auto FileHeader::make_supported_db(char *root) -> void
+{
+    // Initialize the file header.
+    std::memcpy(root, kFmtString, sizeof(kFmtString));
+    root[kFmtVersionOfs] = kFmtVersion;
+    put_u32(root + kPageCountOffset, 1);
+
+    // Initialize the root page of the schema tree.
+    NodeHeader root_hdr;
+    root_hdr.is_external = true;
+    root_hdr.cell_start = kPageSize;
+    root_hdr.write(root + kSize);
+}
 
 auto NodeHeader::read(const char *data) -> void
 {

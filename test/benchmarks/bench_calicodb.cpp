@@ -63,8 +63,6 @@ public:
         delete m_db;
 
         CHECK_OK(calicodb::DB::destroy(m_options, kFilename));
-
-        delete m_options.env;
     }
 
     auto read(benchmark::State &state, std::string *out) -> void
@@ -213,7 +211,7 @@ private:
     }
 
     Parameters m_param;
-    std::size_t m_counters[2]{};
+    std::size_t m_counters[2] = {};
     calicodb::tools::RandomGenerator m_random{4'194'304};
     calicodb::Options m_options;
     calicodb::Cursor *m_cursor = nullptr;

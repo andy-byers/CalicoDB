@@ -240,48 +240,31 @@ auto expect_db_contains(DB &db, const std::string &tablename, const std::map<std
 auto expect_db_contains(Txn &txn, const std::string &tablename, const std::map<std::string, std::string> &map) -> void;
 auto expect_db_contains(const Table &table, const std::map<std::string, std::string> &map) -> void;
 
-[[nodiscard]] inline auto view_db(const std::string &filename, calicodb::TxnHandler &handler, const Options &options = {}) -> calicodb::Status
+template <class Fn>
+[[nodiscard]] inline auto view_db(const std::string &filename, Fn &fn, const Options &options = {}) -> calicodb::Status
 {
     calicodb::DB *db;
     auto s = calicodb::DB::open(options, filename, db);
     if (s.is_ok()) {
-        s = db->view(handler);
+        s = db->view(fn);
         delete db;
     }
     return s;
 }
 
-[[nodiscard]] inline auto update_db(const std::string &filename, calicodb::TxnHandler &handler, const Options &options = {}) -> calicodb::Status
+template <class Fn>
+[[nodiscard]] inline auto update_db(const std::string &filename, Fn &fn, const Options &options = {}) -> calicodb::Status
 {
     calicodb::DB *db;
     auto s = calicodb::DB::open(options, filename, db);
     if (s.is_ok()) {
         do {
-            s = db->update(handler);
+            s = db->update(fn);
         } while (s.is_busy());
         delete db;
     }
     return s;
 }
-
-template <class Callback>
-class CustomTxnHandler : public TxnHandler
-{
-    Callback m_callback;
-
-public:
-    CustomTxnHandler(Callback callback)
-        : m_callback(std::move(callback))
-    {
-    }
-
-    ~CustomTxnHandler() override = default;
-
-    [[nodiscard]] auto exec(Txn &txn) -> Status override
-    {
-        return m_callback(txn);
-    }
-};
 
 class BusyCounter : public BusyHandler
 {

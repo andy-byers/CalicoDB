@@ -111,9 +111,9 @@ auto MapFuzzer::step(const U8 *&data, std::size_t &size) -> Status
             delete cursor;
             break;
         }
-            //        case kVacuum:
-            //            CALICODB_TRY(m_txn->vacuum());
-            //            break;
+        case kVacuum:
+            CALICODB_TRY(m_txn->vacuum());
+            break;
         case kRollback:
             if (m_txn) {
                 m_txn->rollback();

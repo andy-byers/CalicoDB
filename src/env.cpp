@@ -9,11 +9,6 @@
 namespace calicodb
 {
 
-auto Env::default_env() -> Env *
-{
-    return new PosixEnv;
-}
-
 Env::Env() = default;
 
 Env::~Env() = default;

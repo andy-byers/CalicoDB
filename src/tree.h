@@ -112,6 +112,21 @@ auto write_cell(Node &node, std::size_t index, const Cell &cell) -> std::size_t;
 // Erase a cell from the node at the specified index.
 auto erase_cell(Node &node, std::size_t index) -> void;
 
+class ChainIterator final
+{
+    std::optional<Page> m_page;
+    Status m_status;
+    std::size_t m_length;
+    Pager *m_pager;
+    Id m_next;
+
+public:
+    explicit ChainIterator(Pager &pager, Id head, std::size_t length);
+    ~ChainIterator();
+    [[nodiscard]] auto status() const -> Status;
+    [[nodiscard]] auto next() -> Slice;
+};
+
 // TODO: This implementation takes a shortcut and reads fragmented keys into a temporary buffer.
 //       This isn't necessary: we could iterate through, page by page, and compare bytes as we encounter
 //       them. It's just a bit more complicated.

@@ -102,7 +102,9 @@ struct EnvWithFiles final {
     ~EnvWithFiles()
     {
         cleanup_files();
-        delete env;
+        if (env != Env::default_env()) {
+            delete env;
+        }
     }
 
     auto cleanup_files() -> void
@@ -663,7 +665,6 @@ public:
         ASSERT_OK(tempenv->new_file("./testdir/0000000000", Env::kCreate, tempfile));
         write_file_version(*tempfile, 0);
         delete tempfile;
-        delete tempenv;
     }
 
     auto set_up() -> void
@@ -797,7 +798,6 @@ public:
         delete file;
         // Get rid of the shm for the next round.
         m_helper.cleanup_files();
-        delete env;
     }
 
     auto run_shm_atomic_test(std::size_t num_writes) -> void
@@ -823,10 +823,8 @@ public:
             for (auto &thread : threads) {
                 thread.join();
             }
-            delete env;
         });
         ASSERT_EQ(count.load(), kNumEnvs * kNumThreads * num_writes);
-        delete env;
     }
 
 protected:

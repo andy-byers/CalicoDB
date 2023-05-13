@@ -56,7 +56,6 @@ private:
 
     const std::string m_db_filename;
     const std::string m_wal_filename;
-    const bool m_owns_env;
     const bool m_owns_log;
 };
 

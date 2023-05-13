@@ -39,7 +39,7 @@ public:
     auto register_fault(const std::string &filename, tools::SyscallType syscall) -> void
     {
         const auto index = m_num_counters++;
-        CALICODB_EXPECT_LT(index, kMaxCounters);
+        ASSERT_LT(index, kMaxCounters);
         m_env->add_interceptor(
             filename,
             tools::Interceptor(syscall, [index, this] {

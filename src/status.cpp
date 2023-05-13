@@ -10,7 +10,7 @@
 namespace calicodb
 {
 
-static auto new_status_string(const Slice &msg) -> const char *
+static auto new_status_string(const Slice &msg) -> char *
 {
     auto *p = new char[msg.size() + 1];
     std::memcpy(p, msg.data(), msg.size());
@@ -23,10 +23,7 @@ static auto copy_status_string(const char *data) -> char *
     if (data) {
         const auto length =
             std::char_traits<char>::length(data);
-        auto *p = new char[length + 1];
-        std::memcpy(p, data, length);
-        p[length] = '\0';
-        return p;
+        return new_status_string(Slice(data, length));
     }
     return nullptr;
 }

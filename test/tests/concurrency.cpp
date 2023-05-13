@@ -132,9 +132,7 @@ private:
 // The first writer to run will create a table named `tbname` and insert `count` records. At first,
 // each record value is identical. Each subsequent writer iterates through the records and increases
 // each value by 1.
-class WriterRoutine
-    : public TxnHandler,
-      private Tracker
+class WriterRoutine : private Tracker
 {
     const std::string m_tbname;
     const std::size_t m_count;
@@ -147,9 +145,7 @@ public:
     {
     }
 
-    ~WriterRoutine() override = default;
-
-    [[nodiscard]] auto exec(Txn &txn) -> Status override
+    [[nodiscard]] auto operator()(Txn &txn) -> Status
     {
         Table *table;
         CALICODB_TRY(txn.new_table(TableOptions(), m_tbname, table));
@@ -176,9 +172,7 @@ public:
 // Reader instances spin until a writer creates and populates the table `tbname` with `count` records.
 // Readers read through each record and (a) make sure that each value is the same, and (b) make sure that
 // the record value is greater than or equal to the record value encountered on the last round.
-class ReaderRoutine
-    : public TxnHandler,
-      private Tracker
+class ReaderRoutine : private Tracker
 {
     const std::string m_tbname;
     const std::size_t m_count;
@@ -191,9 +185,7 @@ public:
     {
     }
 
-    ~ReaderRoutine() override = default;
-
-    [[nodiscard]] auto exec(Txn &txn) -> Status override
+    [[nodiscard]] auto operator()(Txn &txn) -> Status
     {
         Table *table;
         auto s = txn.new_table(TableOptions(), m_tbname, table);

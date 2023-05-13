@@ -10,6 +10,7 @@
 #include "encoding.h"
 #include "env_helpers.h"
 #include "env_posix.h"
+#include "harness.h"
 #include "page.h"
 #include "tools.h"
 #include "utils.h"
@@ -51,27 +52,6 @@ static constexpr auto kShmFilename = "./_test-shm";
 
 static constexpr auto kExpectationMatcher = "^expectation";
 
-#define STREAM_MESSAGE(expr) #expr                                  \
-                                 << " == Status::ok()\" but got \"" \
-                                 << expect_ok_status.to_string()    \
-                                 << "\"\n";
-
-#define EXPECT_OK(expr)                        \
-    do {                                       \
-        const auto &expect_ok_status = (expr); \
-        EXPECT_TRUE(expect_ok_status.is_ok())  \
-            << "expected \""                   \
-            << STREAM_MESSAGE(expr);           \
-    } while (0)
-
-#define ASSERT_OK(expr)                        \
-    do {                                       \
-        const auto &expect_ok_status = (expr); \
-        ASSERT_TRUE(expect_ok_status.is_ok())  \
-            << "asserted \""                   \
-            << STREAM_MESSAGE(expr);           \
-    } while (0)
-
 template <class EnvType>
 class EnvTestHarness
 {
@@ -95,7 +75,6 @@ public:
         (void)m_env->remove_file(kDBFilename);
         (void)m_env->remove_file(kWalFilename);
         (void)m_env->remove_file(kShmFilename);
-        // tools::TestEnv deletes the wrapped Env.
         delete m_env;
     }
 

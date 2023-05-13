@@ -18,7 +18,9 @@ class Sink;
 class Env
 {
 public:
-    // Return a heap-allocated handle to this platform's default Env implementation
+    // Return a handle to this platform's default `Env` implementation
+    // The returned handle belongs to CalicoDB and must not be `delete`d. Note that this method
+    // always returns the same address for a given process.
     static auto default_env() -> Env *;
 
     explicit Env();
@@ -70,19 +72,19 @@ public:
     File(File &) = delete;
     void operator=(File &) = delete;
 
-    // Attempt to read "size" bytes from the file at the given offset.
+    // Attempt to read `size` bytes from the file at the given offset.
     //
-    // Reads into "scratch", which must point to at least "size" bytes of available
+    // Reads into `scratch`, which must point to at least `size` bytes of available
     // memory. On success, sets "*out" to point to the data that was read, which may
-    // be less than what was requested, but only if "out" is not nullptr.
+    // be less than what was requested, but only if `out` is not nullptr.
     [[nodiscard]] virtual auto read(std::size_t offset, std::size_t size, char *scratch, Slice *out) -> Status = 0;
 
-    // Read exactly "size" bytes from the file at the given offset.
+    // Read exactly `size` bytes from the file at the given offset.
     //
     // Return a "not found" status if there is not enough data remaining in the file.
     [[nodiscard]] virtual auto read_exact(std::size_t offset, std::size_t size, char *scratch) -> Status;
 
-    // Write "in" to the file at the given offset.
+    // Write `in` to the file at the given offset.
     [[nodiscard]] virtual auto write(std::size_t offset, const Slice &in) -> Status = 0;
 
     // Synchronize with the underlying filesystem.
@@ -94,8 +96,8 @@ public:
     // Release a lock on the file
     virtual auto file_unlock() -> void = 0;
 
-    // Size of a shared memory region, i.e. the number of bytes pointed to by "out"
-    // when map() returns successfully.
+    // Size of a shared memory region, i.e. the number of bytes pointed to by `out`
+    // when `shm_map()` returns successfully.
     static constexpr std::size_t kShmRegionSize = 1'024 * 32;
     static constexpr std::size_t kShmLockCount = 8;
 

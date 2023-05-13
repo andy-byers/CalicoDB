@@ -9,16 +9,16 @@
 namespace calicodb
 {
 
-TableImpl::TableImpl(Tree *&tree, Status &status, bool write)
+TableImpl::TableImpl(Tree *&tree, Status &status)
     : m_status(&status),
-      m_tree(&tree),
-      m_readonly(!write)
+      m_tree(&tree)
 {
 }
 
 TableImpl::~TableImpl()
 {
     delete *m_tree;
+    // NULL-out the tree pointer contained in the schema object.
     *m_tree = nullptr;
 }
 

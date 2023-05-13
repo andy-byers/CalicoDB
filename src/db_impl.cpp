@@ -75,7 +75,6 @@ DBImpl::DBImpl(const Options &options, const Options &sanitized, std::string fil
       m_busy(sanitized.busy),
       m_db_filename(std::move(filename)),
       m_wal_filename(sanitized.wal_filename),
-      m_owns_env(options.env == nullptr),
       m_owns_log(options.info_log == nullptr)
 {
 }
@@ -92,9 +91,6 @@ DBImpl::~DBImpl()
 
     if (m_owns_log) {
         delete m_log;
-    }
-    if (m_owns_env) {
-        delete m_env;
     }
 }
 
@@ -131,9 +127,6 @@ auto DBImpl::destroy(const Options &options, const std::string &filename) -> Sta
             // Delete the WAL file if it wasn't properly cleaned up when the database
             // was closed above. Under normal conditions, this branch is not hit.
             t = env->remove_file(wal_name);
-        }
-        if (env != options.env) {
-            delete env;
         }
     }
     return s.is_ok() ? t : s;

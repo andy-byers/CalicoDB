@@ -27,7 +27,7 @@ struct ShmNode;
 static constexpr int kFilePermissions = 0644; // -rw-r--r--
 
 // Constants for SQLite-style shared memory locking
-// There are "File::kShmLockCount" lock bytes available. Each byte can be locked
+// There are "File::kShmLockCount" lock bytes available. See include/.../env.h for more details.
 static constexpr std::size_t kShmLock0 = 120;
 static constexpr std::size_t kShmDMS = kShmLock0 + File::kShmLockCount;
 
@@ -918,7 +918,7 @@ auto PosixFile::file_lock(FileLockMode mode) -> Status
     CALICODB_EXPECT_TRUE(local_lock != kLockUnlocked || mode == kLockShared);
 
     std::lock_guard guard(inode->mutex);
-    if ((local_lock != inode->lock && (inode->lock == kLockExclusive || mode == kLockExclusive))) {
+    if (local_lock != inode->lock && (inode->lock == kLockExclusive || mode == kLockExclusive)) {
         // Some other thread in this process has an incompatible lock.
         return posix_busy();
     }
@@ -996,6 +996,12 @@ auto PosixFile::file_unlock() -> void
         inode->lock = kLockUnlocked;
     }
     local_lock = kLockUnlocked;
+}
+
+auto Env::default_env() -> Env *
+{
+    static PosixEnv s_env;
+    return &s_env;
 }
 
 } // namespace calicodb
