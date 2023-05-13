@@ -18,7 +18,7 @@ namespace calicodb
 
 [[nodiscard]] static auto default_cursor_status() -> Status
 {
-    return Status::not_found("cursor is invalid");
+    return Status::not_found();
 }
 
 static constexpr auto kMaxCellHeaderSize =
@@ -28,15 +28,12 @@ static constexpr auto kMaxCellHeaderSize =
 
 static constexpr std::size_t kPointerSize = 2;
 
-static constexpr std::size_t kMinLocal =
-    (kPageSize - NodeHeader::kSize) * 32 / 256 -
-    kMaxCellHeaderSize - kPointerSize;
-static constexpr std::size_t kMaxLocal =
-    (kPageSize - NodeHeader::kSize) * 64 / 256 -
-    kMaxCellHeaderSize - kPointerSize;
-
 inline constexpr auto compute_local_size(std::size_t key_size, std::size_t value_size) -> std::size_t
 {
+    constexpr const std::size_t kMinLocal =
+        (kPageSize - NodeHeader::kSize) * 32 / 256 - kMaxCellHeaderSize - kPointerSize;
+    constexpr const std::size_t kMaxLocal =
+        (kPageSize - NodeHeader::kSize) * 64 / 256 - kMaxCellHeaderSize - kPointerSize;
     if (key_size + value_size <= kMaxLocal) {
         return key_size + value_size;
     } else if (key_size > kMaxLocal) {
@@ -133,43 +130,53 @@ static auto write_child_id(Cell &cell, Id child_id) -> void
     put_u32(cell.ptr, child_id.value);
 }
 
-static auto parse_external_cell(char *data) -> Cell
+static auto parse_external_cell(char *data, const char *limit) -> Cell
 {
     U64 key_size, value_size;
     const auto *ptr = data;
-    ptr = decode_varint(ptr, value_size);
-    ptr = decode_varint(ptr, key_size);
-    const auto header_size = static_cast<std::uintptr_t>(ptr - data);
+    if ((ptr = decode_varint(ptr, limit, value_size))) {
+        if ((ptr = decode_varint(ptr, limit, key_size))) {
+            const auto header_size = static_cast<std::uintptr_t>(ptr - data);
 
-    Cell cell;
-    cell.ptr = data;
-    cell.key = data + header_size;
-    cell.key_size = key_size;
-    cell.local_size = compute_local_size(key_size, value_size);
-    cell.has_remote = cell.local_size < key_size + value_size;
-    cell.size = header_size + cell.local_size + cell.has_remote * Id::kSize;
-    return cell;
+            Cell cell;
+            cell.ptr = data;
+            cell.key = data + header_size;
+            cell.key_size = key_size;
+            cell.local_size = compute_local_size(key_size, value_size);
+            cell.has_remote = cell.local_size < key_size + value_size;
+            cell.size = header_size + cell.local_size + cell.has_remote * Id::kSize;
+            return cell;
+        }
+    }
+    // TODO: Allow this function to fail. Should report corruption if it is clear that a
+    //       varint is messed up. Other indicators of corruption should also be used!
+    CALICODB_EXPECT_TRUE(false && "not implemented");
+    return Cell{};
 }
 
-static auto parse_internal_cell(char *data) -> Cell
+static auto parse_internal_cell(char *data, const char *limit) -> Cell
 {
     U64 key_size;
-    const auto *ptr = decode_varint(data + Id::kSize, key_size);
-    const auto header_size = static_cast<std::uintptr_t>(ptr - data);
+    if (const auto *ptr = decode_varint(data + Id::kSize, limit, key_size)) {
+        const auto header_size = static_cast<std::uintptr_t>(ptr - data);
 
-    Cell cell;
-    cell.ptr = data;
-    cell.key = data + header_size;
-    cell.key_size = key_size;
-    cell.local_size = compute_local_size(key_size, 0);
-    cell.has_remote = cell.local_size < key_size;
-    cell.size = header_size + cell.local_size + cell.has_remote * Id::kSize;
-    return cell;
+        Cell cell;
+        cell.ptr = data;
+        cell.key = data + header_size;
+        cell.key_size = key_size;
+        cell.local_size = compute_local_size(key_size, 0);
+        cell.has_remote = cell.local_size < key_size;
+        cell.size = header_size + cell.local_size + cell.has_remote * Id::kSize;
+        return cell;
+    }
+    // TODO: See parse_external_cell().
+    CALICODB_EXPECT_TRUE(false && "not implemented");
+    return Cell{};
 }
 
 static auto read_cell_at(Node &node, std::size_t offset)
 {
-    return node.meta->parse_cell(node.page.data() + offset);
+    return node.meta->parse_cell(node.page.data() + offset, node.page.data() + kPageSize);
 }
 
 auto read_cell(Node &node, std::size_t index) -> Cell
@@ -1361,7 +1368,7 @@ auto Tree::get(const Slice &key, std::string *value) const -> Status
 
     if (!exact) {
         release(std::move(node));
-        return Status::not_found("not found");
+        return Status::not_found();
     }
 
     Status s;
@@ -1640,10 +1647,53 @@ auto Tree::destroy(Tree &tree) -> Status
 }
 
 static constexpr auto kLinkContentOffset = Id::kSize;
+static constexpr auto kLinkContentSize = kPageSize - kLinkContentOffset;
 
 [[nodiscard]] static auto get_readable_content(const Page &page, std::size_t size_limit) -> Slice
 {
-    return page.view().range(kLinkContentOffset, std::min(size_limit, kPageSize - kLinkContentOffset));
+    return page.view().range(kLinkContentOffset, std::min(size_limit, kLinkContentSize));
+}
+
+ChainIterator::ChainIterator(Pager &pager, Id head, std::size_t length)
+    : m_length(length),
+      m_pager(&pager),
+      m_next(head)
+{
+}
+
+ChainIterator::~ChainIterator()
+{
+    if (m_page) {
+        m_pager->release(std::move(*m_page));
+    }
+}
+
+auto ChainIterator::status() const -> Status
+{
+    return m_status;
+}
+
+auto ChainIterator::next() -> Slice
+{
+    CALICODB_EXPECT_TRUE(m_status.is_ok());
+    if (m_length == 0) {
+        return Slice();
+    }
+    Page page;
+    auto s = m_pager->acquire(m_next, page);
+    if (s.is_ok()) {
+        // Returned slice is at most `kPageSize - 4` bytes.
+        const auto output = get_readable_content(page, m_length);
+        if (m_page) {
+            m_pager->release(std::move(*m_page));
+        }
+        m_length -= output.size();
+        m_next = read_next_id(page);
+        m_page = std::move(page);
+        return output;
+    }
+    m_status = s;
+    return Slice();
 }
 
 auto NodeManager::allocate(Pager &pager, Node &out, std::string &scratch, bool is_external) -> Status
@@ -1690,26 +1740,19 @@ auto NodeManager::destroy(Pager &pager, Node node) -> Status
 
 auto OverflowList::read(Pager &pager, Id head_id, std::size_t offset, std::size_t payload_size, char *buffer) -> Status
 {
-    while (payload_size != 0) {
-        Page page;
-        CALICODB_TRY(pager.acquire(head_id, page));
-        auto content = get_readable_content(page, kPageSize);
+    ChainIterator itr(pager, head_id, offset + payload_size);
 
+    Slice chunk;
+    while (!(chunk = itr.next()).is_empty()) {
         if (offset) {
-            const auto max = std::min(offset, content.size());
-            content.advance(max);
-            offset -= max;
+            const auto skip = std::min(offset, chunk.size());
+            chunk.advance(skip);
+            offset -= skip;
         }
-        if (!content.is_empty()) {
-            const auto size = std::min(payload_size, content.size());
-            std::memcpy(buffer, content.data(), size);
-            payload_size -= size;
-            buffer += size;
-        }
-        head_id = read_next_id(page);
-        pager.release(std::move(page));
+        std::memcpy(buffer, chunk.data(), chunk.size());
+        buffer += chunk.size();
     }
-    return Status::ok();
+    return itr.status();
 }
 
 auto OverflowList::write(Pager &pager, Id &out, const Slice &key, const Slice &value) -> Status
@@ -1826,7 +1869,7 @@ auto PayloadManager::emplace(Pager &pager, char *scratch, Node &node, const Slic
     } else {
         // The node has overflowed. Write the cell to scratch memory.
         emplace(scratch);
-        node.overflow = parse_external_cell(scratch);
+        node.overflow = parse_external_cell(scratch, scratch + kPageSize);
         node.overflow->is_free = true;
     }
     return Status::ok();
@@ -1920,13 +1963,13 @@ auto PayloadManager::collect_value(Pager &pager, std::string &result, const Cell
 
 #if CALICODB_TEST
 
-#define CHECK_OK(expr)                                                                     \
-    do {                                                                                   \
-        if (const auto check_s = (expr); !check_s.is_ok()) {                               \
-            std::fprintf(stderr, "error: encountered %s status \"%s\" on line %d\n",       \
-                         get_status_name(check_s), check_s.to_string().c_str(), __LINE__); \
-            std::abort();                                                                  \
-        }                                                                                  \
+#define CHECK_OK(expr)                                           \
+    do {                                                         \
+        if (const auto check_s = (expr); !check_s.is_ok()) {     \
+            std::fprintf(stderr, "error(line %d): %s\n",         \
+                         __LINE__, check_s.to_string().c_str()); \
+            std::abort();                                        \
+        }                                                        \
     } while (0)
 
 #define CHECK_TRUE(expr)                                                                   \
@@ -2101,7 +2144,7 @@ class TreeValidator
         CHECK_TRUE(data.levels.size() == data.spaces.size());
     }
 
-    static auto collect_levels(Tree &tree, PrinterData &data, Node node, std::size_t level) -> void
+    static auto collect_levels(const Tree &tree, PrinterData &data, Node node, std::size_t level) -> void
     {
         const auto &header = node.header;
         ensure_level_exists(data, level);
@@ -2246,7 +2289,7 @@ public:
         tree.release(std::move(node));
     }
 
-    [[nodiscard]] static auto to_string(Tree &tree) -> std::string
+    [[nodiscard]] static auto to_string(const Tree &tree) -> std::string
     {
         std::string repr;
         PrinterData data;
@@ -2261,13 +2304,13 @@ public:
     }
 };
 
-auto Tree::TEST_validate() -> void
+auto Tree::TEST_validate() const -> void
 {
     //    TreeValidator::validate_freelist(*this, *freelist.m_head);
     TreeValidator::validate_tree(*this);
 }
 
-auto Tree::TEST_to_string() -> std::string
+auto Tree::TEST_to_string() const -> std::string
 {
     return TreeValidator::to_string(*this);
 }
@@ -2282,7 +2325,7 @@ auto Node::TEST_validate() -> void
 {
 }
 
-auto Tree::TEST_to_string() -> std::string
+auto Tree::TEST_to_string() const -> std::string
 {
     return "";
 }
@@ -2372,7 +2415,7 @@ auto CursorImpl::seek_first() -> void
         seek_to(std::move(lowest), 0);
     } else {
         m_tree->release(std::move(lowest));
-        m_status = Status::not_found("table is empty");
+        m_status = Status::not_found();
     }
 }
 
@@ -2391,7 +2434,7 @@ auto CursorImpl::seek_last() -> void
         seek_to(std::move(highest), count - 1);
     } else {
         m_tree->release(std::move(highest));
-        m_status = Status::not_found("database is empty");
+        m_status = Status::not_found();
     }
 }
 

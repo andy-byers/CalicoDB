@@ -30,27 +30,30 @@ class Page;
 //     26      1     File format version
 //     27      37    Reserved
 struct FileHeader {
-    static constexpr char kIdentifier[18] = "CalicoDB format 1";
-    static constexpr std::size_t kSize = 64;
+    static constexpr char kFmtString[18] = "CalicoDB format 1";
+    static constexpr char kFmtVersion = 1;
 
-    auto read(const char *data) -> bool;
-    auto write(char *data) const -> void;
+    [[nodiscard]] static auto check_db_support(const char *root) -> Status;
+    static auto make_supported_db(char *root) -> void;
 
-    U32 page_count = 0;
-    U32 freelist_head = 0;
-    char format_version = 0;
+    enum FieldOffset {
+        kPageCountOffset = 18,
+        kFreelistHeadOffset = 22,
+        kFmtVersionOfs = 26,
+        kSize = 64
+    };
 };
 
 // Node Header Format:
 //     Offset  Size  Name
 //    --------------------------
 //     0       1     Flags byte (1 = external, internal otherwise)
-//     1       4     next_id
-//     5       4     prev_id
-//     9       2     cell_count
-//     11      2     cell_start
-//     13      2     free_start
-//     15      1     frag_count
+//     1       4     Next ID
+//     5       4     Previous ID
+//     9       2     Cell count
+//     11      2     Cell area start
+//     13      2     Freelist start
+//     15      1     Fragment count
 struct NodeHeader {
     static constexpr std::size_t kSize = 16;
     auto read(const char *data) -> void;
@@ -64,8 +67,6 @@ struct NodeHeader {
     unsigned frag_count = 0;
     bool is_external = false;
 };
-
-auto bad_identifier_error(const Slice &bad_identifier) -> Status;
 
 } // namespace calicodb
 

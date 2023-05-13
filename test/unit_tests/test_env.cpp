@@ -102,7 +102,9 @@ struct EnvWithFiles final {
     ~EnvWithFiles()
     {
         cleanup_files();
-        delete env;
+        if (env != Env::default_env()) {
+            delete env;
+        }
     }
 
     auto cleanup_files() -> void
@@ -663,7 +665,6 @@ public:
         ASSERT_OK(tempenv->new_file("./testdir/0000000000", Env::kCreate, tempfile));
         write_file_version(*tempfile, 0);
         delete tempfile;
-        delete tempenv;
     }
 
     auto set_up() -> void
@@ -797,7 +798,6 @@ public:
         delete file;
         // Get rid of the shm for the next round.
         m_helper.cleanup_files();
-        delete env;
     }
 
     auto run_shm_atomic_test(std::size_t num_writes) -> void
@@ -910,5 +910,53 @@ INSTANTIATE_TEST_SUITE_P(
         EnvConcurrencyTestsParam{2, 2},
         EnvConcurrencyTestsParam{2, 4},
         EnvConcurrencyTestsParam{4, 2}));
+
+TEST(EnvWrappers, WrapperObjectsWorkAsExpected)
+{
+    tools::FakeEnv env;
+    EnvWrapper w_env(env);
+    ASSERT_EQ(&env, w_env.target());
+    ASSERT_EQ(&env, const_cast<const EnvWrapper &>(w_env).target());
+    File *file;
+    Sink *sink;
+    ASSERT_OK(w_env.new_file("file", Env::kCreate, file));
+    ASSERT_OK(w_env.new_sink("sink", sink));
+    ASSERT_TRUE(w_env.file_exists("file"));
+    FileWrapper w_file(*file);
+    tools::StreamSink fake_sink(std::cout);
+    SinkWrapper w_sink(fake_sink);
+    Slice slice;
+    char buffer[14] = {};
+    std::size_t size = 13;
+    ASSERT_OK(w_file.write(0, Slice("Hello, world!", size)));
+    ASSERT_OK(w_file.read(0, size, buffer, &slice));
+    ASSERT_EQ(slice, "Hello, world!");
+    ASSERT_OK(w_file.write(0, Slice("hello, world.", size)));
+    ASSERT_OK(w_file.read_exact(0, size, buffer));
+    ASSERT_EQ(Slice(buffer, size), "hello, world.");
+    ASSERT_OK(w_env.resize_file("file", 0));
+    ASSERT_TRUE(w_file.read_exact(0, size, buffer).is_io_error());
+    ASSERT_OK(w_file.sync());
+    ASSERT_OK(w_file.file_lock(kLockShared));
+    w_file.file_unlock();
+    volatile void *ptr;
+    ASSERT_OK(w_file.shm_map(0, true, ptr));
+    w_file.shm_barrier();
+    ASSERT_OK(w_file.shm_lock(0, 1, kShmLock | kShmReader));
+    ASSERT_OK(w_file.shm_lock(0, 1, kShmUnlock | kShmReader));
+    w_file.shm_unmap(true);
+    logv(&w_sink, "Hello, world!");
+    ASSERT_EQ(&fake_sink, w_sink.target());
+    ASSERT_EQ(&fake_sink, const_cast<const SinkWrapper &>(w_sink).target());
+    ASSERT_EQ(file, w_file.target());
+    ASSERT_EQ(file, const_cast<const FileWrapper &>(w_file).target());
+    delete file;
+    ASSERT_OK(w_env.file_size("file", size));
+    ASSERT_EQ(size, 0);
+    w_env.srand(123);
+    (void)w_env.rand();
+    w_env.sleep(0);
+    ASSERT_OK(w_env.remove_file("file"));
+}
 
 } // namespace calicodb

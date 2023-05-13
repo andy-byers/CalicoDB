@@ -27,7 +27,7 @@ struct ShmNode;
 static constexpr int kFilePermissions = 0644; // -rw-r--r--
 
 // Constants for SQLite-style shared memory locking
-// There are "File::kShmLockCount" lock bytes available. Each byte can be locked
+// There are "File::kShmLockCount" lock bytes available. See include/.../env.h for more details.
 static constexpr std::size_t kShmLock0 = 120;
 static constexpr std::size_t kShmDMS = kShmLock0 + File::kShmLockCount;
 
@@ -423,7 +423,7 @@ struct PosixFs final {
             // WARNING: If another process unlinks the file after we opened it above, the
             // attempt to take the DMS lock here will fail.
             if (snode->take_dms_lock()) {
-                return make_retry_status();
+                return Status::busy();
             }
         }
         CALICODB_EXPECT_GE(snode->file, 0);
@@ -737,6 +737,9 @@ auto PosixFile::shm_lock(std::size_t r, std::size_t n, ShmLockFlag flags) -> Sta
 auto PosixFile::shm_barrier() -> void
 {
     __sync_synchronize();
+
+    PosixFs::s_fs.mutex.lock();
+    PosixFs::s_fs.mutex.unlock();
 }
 
 auto PosixShm::lock(std::size_t r, std::size_t n, ShmLockFlag flags) -> Status
@@ -915,7 +918,7 @@ auto PosixFile::file_lock(FileLockMode mode) -> Status
     CALICODB_EXPECT_TRUE(local_lock != kLockUnlocked || mode == kLockShared);
 
     std::lock_guard guard(inode->mutex);
-    if ((local_lock != inode->lock && (inode->lock == kLockExclusive || mode == kLockExclusive))) {
+    if (local_lock != inode->lock && (inode->lock == kLockExclusive || mode == kLockExclusive)) {
         // Some other thread in this process has an incompatible lock.
         return posix_busy();
     }
@@ -993,6 +996,12 @@ auto PosixFile::file_unlock() -> void
         inode->lock = kLockUnlocked;
     }
     local_lock = kLockUnlocked;
+}
+
+auto Env::default_env() -> Env *
+{
+    static PosixEnv s_env;
+    return &s_env;
 }
 
 } // namespace calicodb

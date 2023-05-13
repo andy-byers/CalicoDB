@@ -14,7 +14,6 @@ namespace calicodb
 class Cursor;
 class Table;
 class Txn;
-class TxnHandler;
 
 // On-disk collection of tables
 class DB
@@ -47,34 +46,35 @@ public:
     virtual auto get_property(const Slice &name, std::string *out) const -> bool = 0;
 
     // Start a transaction
-    // Stores a pointer to the heap-allocated transaction object in `*txn` and returns OK on
-    // success. Stores nullptr in `*txn` and returns a non-OK status on failure.
-    [[nodiscard]] virtual auto new_txn(bool write, Txn *&txn) -> Status = 0;
+    // Stores a pointer to the heap-allocated transaction object in `*out` and returns OK on
+    // success. Stores nullptr in `*out` and returns a non-OK status on failure. If `write` is `true`,
+    // then the transaction is a read-write transaction, otherwise it is a readonly transaction.
+    [[nodiscard]] virtual auto new_txn(bool write, Txn *&out) -> Status = 0;
 
+    // Write modified pages from the write-ahead log (WAL) back to the database file
+    // If `reset` is `true`, the connection will take steps to make sure that the next writer will
+    // reset the WAL (start writing from the beginning of the file again). Additional checkpoints are
+    // run (a) when the database is closed, and (b) when a database is opened that has a WAL on disk.
+    // Note that in the case of (b), a non-reset checkpoint is run.
     [[nodiscard]] virtual auto checkpoint(bool reset) -> Status = 0;
 
     // Convenience wrapper that runs a read-only transaction
-    // Forwards the status returned by `handler`.
-    [[nodiscard]] virtual auto view(TxnHandler &handler) -> Status;
+    // Forwards the `Status` returned by the callable `fn`.
+    // REQUIRES: `Fn` implements `Status operator()(Txn &)`.
+    template <class Fn>
+    [[nodiscard]] auto view(Fn &&fn) -> Status;
 
     // Convenience wrapper that runs a read-write transaction
-    // If `handler` returns an OK status, the transaction is committed. Otherwise, the
-    // transaction is rolled back.
-    [[nodiscard]] virtual auto update(TxnHandler &handler) -> Status;
-};
-
-class TxnHandler
-{
-public:
-    explicit TxnHandler();
-    virtual ~TxnHandler();
-
-    [[nodiscard]] virtual auto exec(Txn &txn) -> Status = 0;
+    // If the callable `fn` returns an OK status, the transaction is committed. Otherwise,
+    // the transaction is rolled back.
+    // REQUIRES: `Fn` implements `Status operator()(Txn &)`.
+    template <class Fn>
+    [[nodiscard]] auto update(Fn &&fn) -> Status;
 };
 
 // Transaction on a CalicoDB database
 // The lifetime of a transaction is the same as that of the Txn object representing it
-// (see DB::start() and DB::finish()).
+// (see `DB::new_txn()`).
 class Txn
 {
 public:
@@ -147,6 +147,33 @@ public:
     // error if the record does not exist.
     [[nodiscard]] virtual auto erase(const Slice &key) -> Status = 0;
 };
+
+template <class Fn>
+auto DB::view(Fn &&fn) -> Status
+{
+    Txn *txn;
+    auto s = new_txn(false, txn);
+    if (s.is_ok()) {
+        s = fn(*txn);
+        delete txn;
+    }
+    return s;
+}
+
+template <class Fn>
+auto DB::update(Fn &&fn) -> Status
+{
+    Txn *txn;
+    auto s = new_txn(true, txn);
+    if (s.is_ok()) {
+        if ((s = fn(*txn)).is_ok()) {
+            s = txn->commit();
+        }
+        // Implicit rollback of all uncommitted changes.
+        delete txn;
+    }
+    return s;
+}
 
 } // namespace calicodb
 

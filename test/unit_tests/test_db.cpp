@@ -75,10 +75,7 @@ TEST(BasicDestructionTests, OnlyDeletesCalicoDatabases)
 
     // Identifier is incorrect.
     char buffer[FileHeader::kSize];
-    FileHeader header;
-    header.write(buffer);
-    ++buffer[0];
-    ASSERT_OK(file->write(0, Slice(buffer, sizeof(buffer))));
+    ASSERT_OK(file->write(0, "CalicoDB format 0"));
     ASSERT_TRUE(DB::destroy(options, "./testdb").is_invalid_argument());
 
     DB *db;
@@ -88,7 +85,6 @@ TEST(BasicDestructionTests, OnlyDeletesCalicoDatabases)
 
     delete db;
     delete file;
-    delete options.env;
 }
 
 TEST(BasicDestructionTests, OnlyDeletesCalicoWals)
@@ -166,14 +162,46 @@ TEST_F(BasicDatabaseTests, OpensAndCloses)
     ASSERT_EQ(0, file_size);
 }
 
+TEST_F(BasicDatabaseTests, RemovesOldWalFile)
+{
+    File *oldwal;
+    options.wal_filename = m_testdir.as_child("oldwal");
+    ASSERT_OK(env().new_file(options.wal_filename, Env::kCreate, oldwal));
+    delete oldwal;
+
+    ASSERT_TRUE(env().file_exists(options.wal_filename));
+
+    DB *db;
+    ASSERT_OK(DB::open(options, m_dbname, db));
+    delete db;
+
+    ASSERT_FALSE(env().file_exists(options.wal_filename));
+}
+
+TEST_F(BasicDatabaseTests, CheckpointBehavior)
+{
+    // Attempt to checkpoint 0 WAL frames. Should be a NOOP.
+    DB *db;
+    ASSERT_OK(DB::open(options, m_dbname, db));
+    ASSERT_OK(db->checkpoint(true));
+
+    // Attempt to checkpoint while this connection has an active transaction.
+    Txn *txn;
+    ASSERT_OK(db->new_txn(true, txn));
+    ASSERT_TRUE(db->checkpoint(true).is_not_supported());
+    delete txn;
+
+    ASSERT_OK(db->checkpoint(true));
+    delete db;
+}
+
 TEST_F(BasicDatabaseTests, VacuumEmptyDB)
 {
     DB *db;
     ASSERT_OK(DB::open(options, m_dbname, db));
-    tools::CustomTxnHandler handler = [](auto &txn) {
+    ASSERT_OK(db->update([](auto &txn) {
         return txn.vacuum();
-    };
-    ASSERT_OK(db->update(handler));
+    }));
     delete db;
 }
 
@@ -274,10 +302,9 @@ TEST_F(BasicDatabaseTests, WritesToFiles)
     delete db;
 }
 
-// CAUTION: PRNG state does not persist between calls.
 static auto insert_random_groups(DB &db, std::size_t num_groups, std::size_t group_size)
 {
-    tools::RandomGenerator random;
+    static tools::RandomGenerator random;
     std::map<std::string, std::string> map;
     for (std::size_t iteration = 0; iteration < num_groups; ++iteration) {
         const auto temp = tools::fill_db(db, "table", random, group_size);
@@ -927,6 +954,61 @@ TEST_F(ApiTests, IsConstCorrect)
     ASSERT_TRUE(const_db->get_property("calicodb.stats", &property));
 }
 
+TEST_F(ApiTests, EnforcesReadonlyTransactions)
+{
+    ASSERT_OK(txn->commit());
+    reopen(false);
+    ASSERT_TRUE(txn->vacuum().is_readonly());
+
+    // NOOPs
+    ASSERT_OK(txn->commit());
+    txn->rollback();
+
+    ASSERT_TRUE(table->put("key", "value").is_readonly());
+    ASSERT_TRUE(table->erase("key").is_readonly());
+}
+
+TEST_F(ApiTests, TableBehavior)
+{
+    Table *tb;
+    // Table is already open (`table` member).
+    ASSERT_TRUE(txn->new_table(TableOptions(), "table", tb).is_invalid_argument());
+    ASSERT_TRUE(txn->drop_table("table").is_invalid_argument());
+
+    // Commit so that `table` exists after reopen.
+    ASSERT_OK(txn->commit());
+    reopen(false);
+    // `txn` is readonly now.
+    ASSERT_TRUE(txn->drop_table("table").is_readonly());
+}
+
+TEST_F(ApiTests, UpdateAndView)
+{
+    delete table;
+    table = nullptr;
+    delete txn;
+    txn = nullptr;
+
+    class Callable
+    {
+    public:
+        int counter = 0;
+        auto operator()(Txn &txn) -> Status
+        {
+            ++counter;
+            return Status::ok();
+        }
+    } lvalue;
+
+    ASSERT_OK(db->view(lvalue));
+    ASSERT_OK(db->update(lvalue));
+    ASSERT_EQ(2, lvalue.counter);
+    ASSERT_OK(db->view(Callable()));
+    ASSERT_OK(db->update(Callable()));
+    ASSERT_OK(db->view([](auto &) { return Status::ok(); }));
+    ASSERT_OK(db->update([](auto &) { return Status::ok(); }));
+}
+
 TEST_F(ApiTests, EmptyKeysAreNotAllowed)
 {
     ASSERT_TRUE(table->put("", "value").is_invalid_argument());
@@ -1102,280 +1184,8 @@ TEST_F(AlternateWalFilenameTests, WalDirectoryMustExist)
     ASSERT_OK(DB::open(options, kDBFilename, db));
     Txn *txn;
     const auto s = db->new_txn(false, txn);
-    ASSERT_TRUE(s.is_io_error())
-        << get_status_name(s) << ": " << s.to_string();
+    ASSERT_TRUE(s.is_io_error()) << s.to_string();
     delete db;
 }
-
-using TestTxnHandler = tools::CustomTxnHandler<std::function<Status(Txn &)>>;
-using TestTxnDecision = std::function<bool(std::size_t, std::size_t)>;
-
-class DBConcurrencyTests
-    : public testing::TestWithParam<std::tuple<std::size_t, std::size_t>>,
-      public ConcurrencyTestHarness<PosixEnv>
-{
-protected:
-    explicit DBConcurrencyTests()
-    {
-        m_options.cache_size = kMinFrameCount * kPageSize;
-        m_options.busy = &m_busy;
-        m_options.env = &env();
-        m_param.num_processes = std::get<0>(GetParam());
-        m_param.num_threads = std::get<1>(GetParam());
-    }
-    ~DBConcurrencyTests() override = default;
-
-    static auto empty_txn(Txn &) -> Status
-    {
-        return Status::ok();
-    }
-    static auto all_readers(std::size_t, std::size_t) -> bool
-    {
-        return false;
-    }
-    static auto all_writers(std::size_t, std::size_t) -> bool
-    {
-        return true;
-    }
-    static auto single_writer(std::size_t n, std::size_t t) -> bool
-    {
-        return n + t == 0;
-    }
-    static auto single_writer_per_process(std::size_t target, std::size_t, std::size_t t) -> bool
-    {
-        return t == target;
-    }
-    static auto all_writers_in_single_process(std::size_t target, std::size_t n, std::size_t) -> bool
-    {
-        return n == target;
-    }
-    [[nodiscard]] static auto table_get(const Table &table, U64 k, tools::NumericKey<> &out) -> Status
-    {
-        std::string buffer;
-        const tools::NumericKey<> key(k);
-        CALICODB_TRY(table.get(key.string(), &buffer));
-        out = tools::NumericKey<>(buffer);
-        return Status::ok();
-    }
-    template <
-        class IsWriter,
-        class Reader,
-        class Writer>
-    auto run_txn_test(
-        std::size_t num_rounds,
-        IsWriter is_writer,
-        Reader reader,
-        Writer writer) -> void
-    {
-        register_test_callback(
-            [=](auto &, auto n, auto t) {
-                DB *db;
-                tools::CustomTxnHandler read_handler(reader);
-                tools::CustomTxnHandler write_handler(writer);
-                auto s = busy_wait(nullptr, [&db, this] {
-                    return DB::open(m_options, kDBFilename, db);
-                });
-                for (std::size_t i = 0; s.is_ok() && i < num_rounds; ++i) {
-                    if (is_writer(n, t)) {
-                        do {
-                            // NOTE: If DB::update() returns a status for which Status::is_busy() is true,
-                            // the write handler will not have run.
-                            s = db->update(write_handler);
-                        } while (s.is_busy());
-                    } else {
-                        s = db->view(read_handler);
-                    }
-                }
-                delete db;
-                EXPECT_OK(s);
-                return false;
-            });
-        run_test(m_param);
-    }
-
-    ConcurrencyTestParam m_param;
-    tools::BusyCounter m_busy;
-    Options m_options;
-};
-// TEST_P(DBConcurrencyTests, Open)
-//{
-//     register_test_callback(
-//         [this](auto &, auto, auto) {
-//             DB *db = nullptr;
-//             EXPECT_OK(DB::open(m_options, kDBFilename, db));
-//             delete db;
-//             return false;
-//         });
-//     run_test(m_param);
-// }
-// TEST_P(DBConcurrencyTests, StartReaders)
-//{
-//     register_test_callback(
-//         [this](auto &, auto, auto) {
-//             DB *db = nullptr;
-//             EXPECT_OK(DB::open(m_options, kDBFilename, db));
-//             TestTxnHandler handler(empty_txn);
-//             EXPECT_OK(db->view(handler));
-//             delete db;
-//             return false;
-//         });
-//     run_test(m_param);
-// }
-// TEST_P(DBConcurrencyTests, StartReadersWhileWriting)
-//{
-//     register_test_callback(
-//         [this](auto &, auto, auto) {
-//             DB *db = nullptr;
-//             EXPECT_OK(DB::open(m_options, kDBFilename, db));
-//             TestTxnHandler handler(empty_txn);
-//             EXPECT_OK(db->view(handler));
-//             delete db;
-//             return false;
-//         });
-//     run_test(m_param);
-// }
-// TEST_P(DBConcurrencyTests, ReaderWriterConsistency)
-//{
-//     static constexpr std::size_t kNumRecords = 500;
-//     const auto reader = [](auto &txn, tools::NumericKey<> *value) {
-//         TableOptions tbopt;
-//         tbopt.create_if_missing = false;
-//
-//         Table *table = nullptr;
-//         auto s = txn.new_table(tbopt, "table", table);
-//
-//         tools::NumericKey<> v;
-//         if (s.is_ok()) {
-//             s = table_get(*table, 0, v);
-//             if (s.is_ok()) {
-//                 for (std::size_t i = 1; i < kNumRecords; ++i) {
-//                     tools::NumericKey<> u;
-//                     // If the table exists, there should be kNumRecords nonzero values
-//                     // written. Each value should be identical.
-//                     EXPECT_OK(table_get(*table, i, u));
-//                     EXPECT_GT(u.number(), 0);
-//                     EXPECT_EQ(u, v) << u.number() << " != " << v.number();
-//                 }
-//             }
-//
-//         } else if (s.is_invalid_argument()) {
-//             // Table has not been created yet.
-//             s = Status::ok();
-//         }
-//         if (value) {
-//             *value = v;
-//         }
-//         delete table;
-//         return s;
-//     };
-//
-//     run_txn_test(
-//         1,
-//         all_writers,
-//         [&reader](Txn &txn) {
-//             return reader(txn, nullptr);
-//         },
-//         [&reader](Txn &txn) {
-//             // Determine what value to write next.
-//             tools::NumericKey<> value;
-//             EXPECT_OK(reader(txn, &value));
-//             ++value;
-//
-//             Table *table;
-//             EXPECT_OK(txn.new_table(TableOptions(), "table", table));
-//             for (std::size_t i = 0; i < kNumRecords; ++i) {
-//                 const tools::NumericKey<> key(i);
-//                 EXPECT_OK(table->put(key.string(), value.string()));
-//             }
-//             delete table;
-//             return Status::ok();
-//         });
-// }
-// TEST_P(DBConcurrencyTests, WriterContention)
-//{
-//     register_test_callback(
-//         [this](auto &, auto, auto t) {
-//             // Create 1 writer in each process.
-//             const auto is_writer = t == 0;
-//             Txn *txn = nullptr;
-//             DB *db = nullptr;
-//
-//             EXPECT_OK(DB::open(m_options, kDBFilename, db));
-//
-//             ScopeGuard guard = [&db, &txn] {
-//                 delete txn;
-//                 delete db;
-//             };
-//
-//             if (is_writer) {
-//                 Status s;
-//                 do {
-//                     s = db->new_txn(true, txn);
-//                 } while (s.is_busy());
-//                 EXPECT_OK(s);
-//             } else {
-//                 EXPECT_OK(db->new_txn(false, txn));
-//             }
-//
-//             Table *table;
-//             auto s = txn->new_table(TableOptions(), "table", table);
-//             if (s.is_invalid_argument() && !is_writer) {
-//                 // Loop until a writer creates the table.
-//                 return true;
-//             }
-//             EXPECT_OK(s);
-//             std::string buffer;
-//             s = table->get("key", &buffer);
-//             EXPECT_TRUE(s.is_ok() || s.is_not_found())
-//                 << get_status_name(s) << ": " << s.to_string();
-//             Slice value(buffer);
-//
-//             if (is_writer) {
-//                 if (s.is_ok()) {
-//                     U64 number;
-//                     EXPECT_TRUE(consume_decimal_number(value, &number))
-//                         << "corrupted read: " << escape_string(value);
-//                     value = number_to_string(number + 1);
-//                 } else {
-//                     value = "1";
-//                 }
-//                 EXPECT_OK(table->put("key", value));
-//                 EXPECT_OK(txn->commit());
-//             }
-//             delete table;
-//             return false;
-//         });
-//     run_test(m_param);
-//
-//     DB *db;
-//     ASSERT_OK(DB::open(m_options, kDBFilename, db));
-//     tools::CustomTxnHandler handler = [this](auto &txn) {
-//         Table *table;
-//         TableOptions tbopt;
-//         tbopt.create_if_missing = false;
-//         EXPECT_OK(txn.new_table(tbopt, "table", table));
-//
-//         std::string buffer;
-//         EXPECT_OK(table->get("key", &buffer));
-//         delete table;
-//
-//         U64 number;
-//         Slice value(buffer);
-//         EXPECT_TRUE(consume_decimal_number(value, &number));
-//         EXPECT_EQ(m_param.num_processes, number);
-//         return Status::ok();
-//     };
-//     ASSERT_OK(db->view(handler));
-//     delete db;
-// }
-// INSTANTIATE_TEST_SUITE_P(
-//     DBConcurrencyTests,
-//     DBConcurrencyTests,
-//     testing::Combine(
-//         testing::Values(1, 2, 3, 4, 5),
-//         testing::Values(1, 2, 3, 4, 5)),
-//     [](const auto &info) {
-//         return label_concurrency_test("DBConcurrencyTests", info);
-//     });
 
 } // namespace calicodb

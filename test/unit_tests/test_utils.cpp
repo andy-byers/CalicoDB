@@ -3,6 +3,7 @@
 // LICENSE.md. See AUTHORS.md for a list of contributor names.
 
 #include <array>
+#include <fstream>
 #include <gtest/gtest.h>
 #include <vector>
 
@@ -317,29 +318,45 @@ TEST(IdTests, IdentifiersAreOrderable)
     run_ordering_comparisons<Id>();
 }
 
-TEST(StatusTests, OkStatusMessage)
+TEST(StatusTests, StatusMessages)
 {
-    auto s = Status::ok();
-    ASSERT_EQ(s.to_string(), "OK");
+    ASSERT_EQ("OK", Status::ok().to_string());
+    ASSERT_EQ("I/O error", Status::io_error().to_string());
+    ASSERT_EQ("I/O error: msg", Status::io_error("msg").to_string());
+    ASSERT_EQ("corruption", Status::corruption().to_string());
+    ASSERT_EQ("corruption: msg", Status::corruption("msg").to_string());
+    ASSERT_EQ("invalid argument", Status::invalid_argument().to_string());
+    ASSERT_EQ("invalid argument: msg", Status::invalid_argument("msg").to_string());
+    ASSERT_EQ("not supported", Status::not_supported().to_string());
+    ASSERT_EQ("not supported: msg", Status::not_supported("msg").to_string());
+    ASSERT_EQ("busy", Status::busy().to_string());
+    ASSERT_EQ("busy: msg", Status::busy("msg").to_string());
+    ASSERT_EQ("retry", Status::retry().to_string());
+    ASSERT_EQ("retry: msg", Status::retry("msg").to_string());
+    // Choice of `Status::invalid_argument()` is arbitrary, any `Code-SubCode` combo
+    // is technically legal, but may not be semantically valid (for example, it makes
+    // no sense to retry when a read-only transaction attempts to write: repeating that
+    // action will surely fail next time as well).
+    ASSERT_EQ("invalid argument: readonly", Status::invalid_argument(Status::kReadonly).to_string());
 }
 
 TEST(StatusTests, NonOkStatusSavesMessage)
 {
     static constexpr auto message = "status message";
     auto s = Status::invalid_argument(message);
-    ASSERT_EQ(s.to_string(), message);
+    ASSERT_EQ(s.to_string(), std::string("invalid argument: ") + message);
     ASSERT_TRUE(s.is_invalid_argument());
 }
 
 TEST(StatusTests, StatusCanBeCopied)
 {
-    const auto s = Status::invalid_argument("invalid argument");
+    const auto s = Status::invalid_argument("status message");
     const auto t = s;
     ASSERT_TRUE(t.is_invalid_argument());
-    ASSERT_EQ(t.to_string(), "invalid argument");
+    ASSERT_EQ(t.to_string(), std::string("invalid argument: ") + "status message");
 
     ASSERT_TRUE(s.is_invalid_argument());
-    ASSERT_EQ(s.to_string(), "invalid argument");
+    ASSERT_EQ(s.to_string(), std::string("invalid argument: ") + "status message");
 }
 
 TEST(StatusTests, StatusCanBeReassigned)
@@ -347,13 +364,13 @@ TEST(StatusTests, StatusCanBeReassigned)
     auto s = Status::ok();
     ASSERT_TRUE(s.is_ok());
 
-    s = Status::invalid_argument("invalid argument");
+    s = Status::invalid_argument("status message");
     ASSERT_TRUE(s.is_invalid_argument());
-    ASSERT_EQ(s.to_string(), "invalid argument");
+    ASSERT_EQ(s.to_string(), "invalid argument: status message");
 
-    s = Status::not_supported("logic error");
+    s = Status::not_supported("status message");
     ASSERT_TRUE(s.is_not_supported());
-    ASSERT_EQ(s.to_string(), "logic error");
+    ASSERT_EQ(s.to_string(), "not supported: status message");
 
     s = Status::ok();
     ASSERT_TRUE(s.is_ok());
@@ -361,12 +378,22 @@ TEST(StatusTests, StatusCanBeReassigned)
 
 TEST(StatusTests, StatusCodesAreCorrect)
 {
-    ASSERT_TRUE(Status::invalid_argument("invalid argument").is_invalid_argument());
-    ASSERT_TRUE(Status::io_error("system error").is_io_error());
-    ASSERT_TRUE(Status::not_supported("logic error").is_not_supported());
-    ASSERT_TRUE(Status::corruption("corruption").is_corruption());
-    ASSERT_TRUE(Status::not_found("not found").is_not_found());
+    ASSERT_TRUE(Status::invalid_argument().is_invalid_argument());
+    ASSERT_EQ(Status::invalid_argument().code(), Status::kInvalidArgument);
+    ASSERT_TRUE(Status::io_error().is_io_error());
+    ASSERT_EQ(Status::io_error().code(), Status::kIOError);
+    ASSERT_TRUE(Status::not_supported().is_not_supported());
+    ASSERT_EQ(Status::not_supported().code(), Status::kNotSupported);
+    ASSERT_TRUE(Status::corruption().is_corruption());
+    ASSERT_EQ(Status::corruption().code(), Status::kCorruption);
+    ASSERT_TRUE(Status::not_found().is_not_found());
+    ASSERT_EQ(Status::not_found().code(), Status::kNotFound);
+    ASSERT_TRUE(Status::busy().is_busy());
+    ASSERT_EQ(Status::busy().code(), Status::kBusy);
+    ASSERT_TRUE(Status::retry().is_retry());
+    ASSERT_EQ(Status::retry().code(), Status::kRetry);
     ASSERT_TRUE(Status::ok().is_ok());
+    ASSERT_EQ(Status::ok().code(), Status::kOK);
 }
 
 TEST(StatusTests, OkStatusCanBeCopied)
@@ -381,12 +408,19 @@ TEST(StatusTests, OkStatusCanBeCopied)
 
 TEST(StatusTests, NonOkStatusCanBeCopied)
 {
-    const auto src = Status::invalid_argument("status message");
-    const auto dst = src;
-    ASSERT_TRUE(src.is_invalid_argument());
-    ASSERT_TRUE(dst.is_invalid_argument());
-    ASSERT_EQ(src.to_string(), "status message");
-    ASSERT_EQ(dst.to_string(), "status message");
+    const auto src1 = Status::invalid_argument("status message");
+    const auto src2 = Status::invalid_argument(Status::kReadonly);
+    const auto dst1 = src1;
+    const auto dst2 = src2;
+    ASSERT_TRUE(src1.is_invalid_argument());
+    ASSERT_TRUE(src2.is_invalid_argument());
+    ASSERT_TRUE(dst1.is_invalid_argument());
+    ASSERT_TRUE(dst2.is_invalid_argument());
+    ASSERT_EQ(src1.to_string(), "invalid argument: status message");
+    ASSERT_EQ(src2.to_string(), "invalid argument: readonly");
+    ASSERT_EQ(dst1.to_string(), "invalid argument: status message");
+    ASSERT_EQ(dst2.to_string(), "invalid argument: readonly");
+    ASSERT_EQ(dst2.subcode(), Status::kReadonly);
 }
 
 TEST(StatusTests, OkStatusCanBeMoved)
@@ -406,28 +440,7 @@ TEST(StatusTests, NonOkStatusCanBeMoved)
     ASSERT_TRUE(src.is_ok());
     ASSERT_TRUE(dst.is_invalid_argument());
     ASSERT_EQ(src.to_string(), "OK");
-    ASSERT_EQ(dst.to_string(), "status message");
-}
-
-TEST(StatusTests, MessageIsNullTerminated)
-{
-    auto s = Status::io_error("hello");
-    const auto msg = s.to_string();
-    ASSERT_EQ(msg, "hello");
-    ASSERT_EQ(msg.size(), 5);
-
-    // This byte is not technically part of the slice, but should be owned by the Status object.
-    ASSERT_EQ(msg.data()[5], '\0');
-}
-
-TEST(StatusTests, ExpectedStatusNames)
-{
-    ASSERT_EQ(get_status_name(Status::ok()), std::string{"OK"});
-    ASSERT_EQ(get_status_name(Status::not_found("")), std::string{"not found"});
-    ASSERT_EQ(get_status_name(Status::invalid_argument("")), std::string{"invalid argument"});
-    ASSERT_EQ(get_status_name(Status::corruption("")), std::string{"corruption"});
-    ASSERT_EQ(get_status_name(Status::not_supported("")), std::string{"not supported"});
-    ASSERT_EQ(get_status_name(Status::io_error("")), std::string{"I/O error"});
+    ASSERT_EQ(dst.to_string(), "invalid argument: status message");
 }
 
 TEST(MiscTests, StringsUsesSizeParameterForComparisons)
@@ -441,44 +454,6 @@ TEST(MiscTests, StringsUsesSizeParameterForComparisons)
     ASSERT_EQ(v[0][2], '\x11');
     ASSERT_EQ(v[1][2], '\x22');
     ASSERT_EQ(v[2][2], '\x33');
-}
-
-[[nodiscard]] auto describe_size(std::size_t size, int precision = 4) -> std::string
-{
-    static constexpr std::size_t KiB{1'024};
-    static constexpr auto MiB = KiB * KiB;
-    static constexpr auto GiB = MiB * KiB;
-
-    std::ostringstream oss;
-    oss.precision(precision);
-
-    if (size < KiB) {
-        oss << size << " B";
-    } else if (size < MiB) {
-        oss << static_cast<double>(size) / KiB << " KiB";
-    } else if (size < GiB) {
-        oss << static_cast<double>(size) / MiB << " MiB";
-    } else {
-        oss << static_cast<double>(size) / GiB << " GiB";
-    }
-    return oss.str();
-}
-
-TEST(SizeDescriptorTests, ProducesSensibleResults)
-{
-    const auto high_precision = 13;
-    ASSERT_EQ(describe_size(1ULL, high_precision), "1 B");
-    ASSERT_EQ(describe_size(1'024ULL, high_precision), "1 KiB");
-    ASSERT_EQ(describe_size(1'048'576ULL, high_precision), "1 MiB");
-    ASSERT_EQ(describe_size(1'073'741'824ULL, high_precision), "1 GiB");
-
-    ASSERT_EQ(describe_size(11 * 1ULL, high_precision), "11 B");
-    ASSERT_EQ(describe_size(22 * 1'024ULL, high_precision), "22 KiB");
-    ASSERT_EQ(describe_size(33 * 1'048'576ULL, high_precision), "33 MiB");
-    ASSERT_EQ(describe_size(44 * 1'073'741'824ULL, high_precision), "44 GiB");
-
-    ASSERT_EQ(describe_size(1'000ULL, 1), "1000 B");
-    ASSERT_EQ(describe_size(10'000ULL, 3), "9.77 KiB");
 }
 
 class InterceptorTests
@@ -511,6 +486,15 @@ TEST(Logging, WriteFormattedString)
 {
     std::string s;
     append_fmt_string(s, "%s %d %f", "abc", 42, 1.0);
+}
+
+TEST(Logging, LogMessage)
+{
+    tools::TestDir testdir(".");
+    std::ofstream ofs(testdir.as_child("output"));
+    std::string str(1'024, '0');
+    tools::StreamSink sink(ofs);
+    logv(&sink, "%s", str.c_str());
 }
 
 TEST(Logging, ConsumeDecimalNumberIgnoresLeadingZeros)

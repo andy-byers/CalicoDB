@@ -178,8 +178,6 @@ public:
 
 private:
     friend class TestFile;
-    friend class CrashFile;
-    friend class CrashEnv;
 
     struct FileState {
         std::vector<Interceptor> interceptors;

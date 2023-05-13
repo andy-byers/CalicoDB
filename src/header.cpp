@@ -3,41 +3,48 @@
 // LICENSE.md. See AUTHORS.md for a list of contributor names.
 
 #include "header.h"
+#include "calicodb/options.h"
 #include "encoding.h"
 #include "logging.h"
 
 namespace calicodb
 {
 
-auto FileHeader::read(const char *data) -> bool
+auto FileHeader::check_db_support(const char *root) -> Status
 {
-    if (std::memcmp(data, kIdentifier, sizeof(kIdentifier)) != 0) {
-        return false;
+    Status s;
+    const Slice fmt_string(root, sizeof(kFmtString));
+    const auto bad_fmt_string = std::memcmp(
+        fmt_string.data(), kFmtString, fmt_string.size());
+    if (bad_fmt_string) {
+        std::string message("not a CalicoDB database (expected ");
+        append_fmt_string(message, R"(identifier "%s\00" but got "%s"))",
+                          kFmtString, escape_string(fmt_string).c_str());
+        s = Status::invalid_argument(message);
     }
-    data += sizeof(kIdentifier);
-
-    page_count = get_u32(data);
-    data += sizeof(U32);
-
-    freelist_head = get_u32(data);
-    data += sizeof(U32);
-
-    format_version = *data++;
-    return true;
+    const auto bad_fmt_version =
+        root[kFmtVersionOfs] > kFmtVersion;
+    if (s.is_ok() && bad_fmt_version) {
+        std::string message("CalicoDB version is not supported (expected ");
+        append_fmt_string(message, R"(format version "%d" but got "%d"))",
+                          kFmtVersion, root[kFmtVersionOfs]);
+        s = Status::invalid_argument(message);
+    }
+    return s;
 }
 
-auto FileHeader::write(char *data) const -> void
+auto FileHeader::make_supported_db(char *root) -> void
 {
-    std::memcpy(data, kIdentifier, sizeof(kIdentifier));
-    data += sizeof(kIdentifier);
+    // Initialize the file header.
+    std::memcpy(root, kFmtString, sizeof(kFmtString));
+    root[kFmtVersionOfs] = kFmtVersion;
+    put_u32(root + kPageCountOffset, 1);
 
-    put_u32(data, page_count);
-    data += sizeof(U32);
-
-    put_u32(data, freelist_head);
-    data += sizeof(U32);
-
-    *data++ = format_version;
+    // Initialize the root page of the schema tree.
+    NodeHeader root_hdr;
+    root_hdr.is_external = true;
+    root_hdr.cell_start = kPageSize;
+    root_hdr.write(root + kSize);
 }
 
 auto NodeHeader::read(const char *data) -> void
@@ -88,15 +95,6 @@ auto NodeHeader::write(char *data) const -> void
     data += sizeof(U16);
 
     *data = static_cast<char>(frag_count);
-}
-
-auto bad_identifier_error(const Slice &bad_identifier) -> Status
-{
-    const auto good_id = FileHeader::kIdentifier;
-    const auto bad_id = bad_identifier.range(0, std::min(bad_identifier.size(), sizeof(good_id)));
-    std::string message("not a CalicoDB database (expected identifier ");
-    append_fmt_string(message, R"("%s\00" but read "%s"))", good_id, escape_string(bad_id).c_str());
-    return Status::invalid_argument(message);
 }
 
 } // namespace calicodb

@@ -7,8 +7,10 @@
 
 #include "calicodb/status.h"
 #include "db_impl.h"
+#include "encoding.h"
 #include "env_helpers.h"
 #include "env_posix.h"
+#include "harness.h"
 #include "page.h"
 #include "tools.h"
 #include "utils.h"
@@ -50,29 +52,6 @@ static constexpr auto kShmFilename = "./_test-shm";
 
 static constexpr auto kExpectationMatcher = "^expectation";
 
-#define STREAM_MESSAGE(expr) #expr                                    \
-                                 << " == Status::ok()\" but got \""   \
-                                 << get_status_name(expect_ok_status) \
-                                 << "\" status with message \""       \
-                                 << expect_ok_status.to_string()      \
-                                 << "\"\n";
-
-#define EXPECT_OK(expr)                        \
-    do {                                       \
-        const auto &expect_ok_status = (expr); \
-        EXPECT_TRUE(expect_ok_status.is_ok())  \
-            << "expected \""                   \
-            << STREAM_MESSAGE(expr);           \
-    } while (0)
-
-#define ASSERT_OK(expr)                        \
-    do {                                       \
-        const auto &expect_ok_status = (expr); \
-        ASSERT_TRUE(expect_ok_status.is_ok())  \
-            << "asserted \""                   \
-            << STREAM_MESSAGE(expr);           \
-    } while (0)
-
 template <class EnvType>
 class EnvTestHarness
 {
@@ -96,7 +75,6 @@ public:
         (void)m_env->remove_file(kDBFilename);
         (void)m_env->remove_file(kWalFilename);
         (void)m_env->remove_file(kShmFilename);
-        // tools::TestEnv deletes the wrapped Env.
         delete m_env;
     }
 
@@ -123,10 +101,10 @@ public:
 
     PagerTestHarness()
     {
-        FileHeader header;
         std::string buffer(kPageSize, '\0');
-        header.page_count = 1;
-        header.write(buffer.data());
+        std::memcpy(buffer.data(), FileHeader::kFmtString, sizeof(FileHeader::kFmtString));
+        buffer[FileHeader::kFmtVersionOfs] = FileHeader::kFmtVersion;
+        put_u32(buffer.data() + FileHeader::kPageCountOffset, 1);
         tools::write_string_to_file(Base::env(), kDBFilename, buffer);
 
         File *file;
@@ -145,7 +123,6 @@ public:
 
         CHECK_OK(Pager::open(pager_param, m_pager));
         m_pager->set_page_count(1);
-        m_state.use_wal = true;
     }
 
     ~PagerTestHarness() override
@@ -315,7 +292,7 @@ public:
 inline auto assert_special_error(const Status &s)
 {
     if (!s.is_io_error() || s.to_string() != special_error().to_string()) {
-        std::fprintf(stderr, "error: unexpected %s status: %s", get_status_name(s), s.is_ok() ? "NULL" : s.to_string().data());
+        std::fprintf(stderr, "error expected special error: %s", s.is_ok() ? "OK" : s.to_string().data());
         std::abort();
     }
 }

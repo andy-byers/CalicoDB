@@ -4,7 +4,7 @@
 + [API](#api)
     + [Slices](#slices)
     + [Opening a database](#opening-a-database)
-    + [Read-only transactions](#read-only-transactions)
+    + [Readonly transactions](#readonly-transactions)
     + [Read-write transactions](#read-write-transactions)
     + [Tables](#tables)
     + [Cursors](#cursors)
@@ -88,20 +88,27 @@ if (!s.is_ok()) {
 }
 ```
 
-### Read-only transactions
+### Readonly transactions
 
 ```C++
 calicodb::Txn *txn;
 
 // Start a read-only transaction.
-calicodb::Status s = db->start(false, txn);
+calicodb::Status s = db->new_txn(false, txn);
 if (!s.is_ok()) {
 }
 
-// Read some data...
+// Read some data (see #tables).
 
 // Finish the transaction.
-db->finish(txn);
+delete txn;
+
+// Readonly transactions can also be run through the `DB::view()` API.
+s = db->view([](calicodb::Txn &txn) {
+    // Read some data. The `Txn` object is managed by the database. `DB::view()`
+    // will return the status this callable returns.
+    return Status::ok();
+});
 ```
 
 ### Read-write transactions
@@ -110,7 +117,7 @@ db->finish(txn);
 calicodb::Txn *txn;
 
 // Start a write transaction.
-calicodb::Status s = db->start(true, txn);
+calicodb::Status s = db->new_txn(true, txn);
 if (!s.is_ok()) {
 }
 
@@ -122,14 +129,25 @@ if (!s.is_ok()) {
     // If commit() failed, then there was likely a low-level I/O error.
 }
 
-// The DB holds all locks until DB::finish() is called, so we can continue
+// The DB holds all locks until `Txn::~Txn()` is called, so we can continue
 // reading/writing.
 
-// Get rid of everything since commit() was called. If we call DB::finish()
+// Get rid of everything since commit() was called. If we delete the Txn
 // without calling commit() again, the same thing will happen.
 txn->rollback();
 
-db->finish(txn);
+// Finish the transaction and give up file locks.
+delete txn;
+
+// There is also the `DB::update()` API, which is similar to `DB::view()`.
+// `DB::update()` accepts a callable that runs a read-write transaction.
+s = db->update([](auto &txn) {
+    // Read and/or write some records. If this callable returns an OK status,
+    // `Txn::commit()` is called on `txn` and the resulting status returned.
+    // Otherwise, `Txn::rollback()` is called and the original non-OK status
+    // forwarded to the caller.
+    return Status::ok();
+});
 ```
 
 ### Tables
@@ -137,36 +155,52 @@ db->finish(txn);
 ```C++
 calicodb::Table *table;
 
-// Set some initialization options.
+// Set some initialization options. Enforces that the table "cats" must
+// not exist. Note that readonly transactions cannot create new tables.
 calicodb::TableOptions tbopt;
 tbopt.error_if_exists = true;
+tbopt.create_if_missing = true;
+
+// Create the table. Note that this table will not persist in the database 
+// unless `Txn::commit()` is called prior to the transaction ending.
 calicodb::Status s = txn->new_table(tbopt, "cats", table);
+if (s.is_ok()) {
+    // `table` holds the address of the open table "cats". "cats" will be
+    // open until `delete table` is called.
+}
 
 std::string value;
 s = table->get("lilly", &value);
 if (s.is_ok()) {
-
+    // `value` holds the value associated with the key "lilly".
 } else if (s.is_not_found()) {
-    
+    // The key "lilly" does not exist in "cats".
 } else {
-    
+    // An I/O error occurred.
 }
 
 s = table->put("lilly", "calico");
 if (s.is_ok()) {
-    
+    // The value for key "lilly" in table "cats" has been set to "calico".
 } else {
-    
+    // An I/O error occurred.
 }
 
 s = table->erase("lilly");
 if (s.is_ok()) {
-    
-} else if (s.is_not_found()) {
-    
+    // Table "cats" is guaranteed to not have a record with key "lilly".
+} else {
+    // An I/O error occurred. It is not an error if the key does not exist.
 }
 
+// Close the table.
 delete table;
+
+// Remove the table named "cats" from the database.
+s = txn->drop_table("cats");
+if (s.is_ok()) {
+    
+}
 ```
 
 ### Cursors
@@ -210,8 +244,8 @@ exists = db->get_property("calicodb.stats", nullptr);
 
 ### Closing a database
 To close the database, just `delete` the handle.
-During close, the database is made consistent and the whole WAL is removed.
-If an instance leaves any WAL segments behind after closing, then something has gone wrong.
+The last connection to a particular database to close will unlink the WAL.
+If a WAL is left behind after closing, then something has gone wrong.
 CalicoDB will attempt recovery on the next startup.
 
 ```C++
@@ -224,10 +258,6 @@ delete db;
 calicodb::Status s = calicodb::DB::destroy(options, "/tmp/cats");
 if (s.is_ok()) {
     // Database has been destroyed.
-} else if (s.is_not_found()) {
-    // The database does not exist.
-} else if (s.is_io_error()) {
-    // A system-level error has occurred.
 }
 ```
 

@@ -24,7 +24,6 @@ class Wal;
 
 struct DBState {
     Status status;
-    bool use_wal = false;
 };
 
 class DBImpl : public DB
@@ -57,7 +56,6 @@ private:
 
     const std::string m_db_filename;
     const std::string m_wal_filename;
-    const bool m_owns_env;
     const bool m_owns_log;
 };
 

@@ -88,6 +88,9 @@ auto Bufmgr::erase(Id page_id) -> bool
 
 auto Bufmgr::next_victim() -> PageRef *
 {
+    // NOTE: If this method is being called repeatedly (i.e. to evict all cached pages),
+    // then there shouldn't be any outstanding references. The first page in the list
+    // should be returned each time this method is called in that case.
     for (auto &ref : m_list) {
         if (ref.refcount == 0) {
             return &ref;
@@ -160,8 +163,8 @@ auto Dirtylist::remove(PageRef &ref) -> PageRef *
 {
     CALICODB_EXPECT_TRUE(head);
     CALICODB_EXPECT_FALSE(head->prev);
-    CALICODB_EXPECT_TRUE(ref.dirty);
-    ref.dirty = false;
+    CALICODB_EXPECT_TRUE(ref.flag & PageRef::kDirty);
+    ref.flag = PageRef::kNormal;
 
     if (ref.prev) {
         ref.prev->next = ref.next;
@@ -180,12 +183,12 @@ auto Dirtylist::remove(PageRef &ref) -> PageRef *
 
 auto Dirtylist::add(PageRef &ref) -> void
 {
-    CALICODB_EXPECT_FALSE(ref.dirty);
+    CALICODB_EXPECT_FALSE(ref.flag & PageRef::kDirty);
     if (head) {
         CALICODB_EXPECT_FALSE(head->prev);
         head->prev = &ref;
     }
-    ref.dirty = true;
+    ref.flag = PageRef::kDirty;
     ref.prev = nullptr;
     ref.next = head;
     head = &ref;

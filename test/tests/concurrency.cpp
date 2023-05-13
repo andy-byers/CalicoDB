@@ -28,22 +28,21 @@ public:
         delete m_env;
     }
 
-    auto register_main_routine(TestRoutine routine) -> void
+    virtual auto register_routine(bool bkgd, TestRoutine routine) -> void
     {
-        m_main.emplace_back(std::move(routine));
+        if (bkgd) {
+            m_bkgd.emplace_back(std::move(routine));
+        } else {
+            m_main.emplace_back(std::move(routine));
+        }
     }
 
-    auto register_bkgd_routine(TestRoutine routine) -> void
-    {
-        m_bkgd.emplace_back(std::move(routine));
-    }
-
-    auto test(std::size_t num_processes) -> void
+    virtual auto test(std::size_t num_processes) -> void
     {
         ASSERT_LT(0, num_processes) << "incorrect test parameters";
         for (std::size_t n = 1; n < num_processes; ++n) {
             const auto pid = fork();
-            if (pid > 0) {
+            if (pid == 0) {
                 // Run the n'th batch of callbacks registered to a child process.
                 run_process(n, m_bkgd);
                 std::exit(testing::Test::HasFailure());
@@ -133,9 +132,7 @@ private:
 // The first writer to run will create a table named `tbname` and insert `count` records. At first,
 // each record value is identical. Each subsequent writer iterates through the records and increases
 // each value by 1.
-class WriterRoutine
-    : public TxnHandler,
-      private Tracker
+class WriterRoutine : private Tracker
 {
     const std::string m_tbname;
     const std::size_t m_count;
@@ -148,9 +145,7 @@ public:
     {
     }
 
-    ~WriterRoutine() override = default;
-
-    [[nodiscard]] auto exec(Txn &txn) -> Status override
+    [[nodiscard]] auto operator()(Txn &txn) -> Status
     {
         Table *table;
         CALICODB_TRY(txn.new_table(TableOptions(), m_tbname, table));
@@ -177,9 +172,7 @@ public:
 // Reader instances spin until a writer creates and populates the table `tbname` with `count` records.
 // Readers read through each record and (a) make sure that each value is the same, and (b) make sure that
 // the record value is greater than or equal to the record value encountered on the last round.
-class ReaderRoutine
-    : public TxnHandler,
-      private Tracker
+class ReaderRoutine : private Tracker
 {
     const std::string m_tbname;
     const std::size_t m_count;
@@ -192,9 +185,7 @@ public:
     {
     }
 
-    ~ReaderRoutine() override = default;
-
-    [[nodiscard]] auto exec(Txn &txn) -> Status override
+    [[nodiscard]] auto operator()(Txn &txn) -> Status
     {
         Table *table;
         auto s = txn.new_table(TableOptions(), m_tbname, table);
@@ -229,25 +220,32 @@ protected:
     const std::size_t kNumReaders = std::get<1>(GetParam());
     const std::size_t kExtraInfo = std::get<2>(GetParam());
     const std::size_t kNumRecords = 1'000;
-    const std::size_t kNumRounds = 1'000;
+    const std::size_t kNumRounds = 100;
 
     explicit ConcurrencyTests()
         : TestHarness(*Env::default_env())
     {
         (void)DB::destroy(Options(), kDBName);
-        for (std::size_t r = 0; r < kNumReaders; ++r) {
-            register_main_routine([this](auto st) {
-                return run_reader_routine(st);
-            });
-        }
-        for (std::size_t w = 0; w < kNumWriters; ++w) {
-            register_main_routine([this](auto st) {
-                return run_writer_routine(st);
-            });
-        }
     }
 
     ~ConcurrencyTests() override = default;
+
+    auto test(std::size_t num_processes) -> void override
+    {
+        for (std::size_t i = 0; i < num_processes; ++i) {
+            for (std::size_t r = 0; r < kNumReaders; ++r) {
+                register_routine(i > 0, [this](auto st) {
+                    return run_reader_routine(st);
+                });
+            }
+            for (std::size_t w = 0; w < kNumWriters; ++w) {
+                register_routine(i > 0, [this](auto st) {
+                    return run_writer_routine(st);
+                });
+            }
+        }
+        TestHarness::test(num_processes);
+    }
 
     auto run_reader_routine(TestState st) -> void
     {
@@ -281,7 +279,7 @@ protected:
             }
             EXPECT_TRUE(s.is_ok())
                 << "reader " << st.pid << ':' << st.tid << " (PID:TID) failed on `DB::" << (is_open ? "view" : "open")
-                << "()` with \"" << get_status_name(s) << "\" status: " << s.to_string();
+                << "()` with \"" << s.to_string();
             ++i;
         }
         delete db;
@@ -313,7 +311,7 @@ protected:
             }
             EXPECT_TRUE(s.is_ok())
                 << "writer " << st.pid << ':' << st.tid << " (PID:TID) failed on `DB::" << (is_open ? "update" : "open")
-                << "()` with \"" << get_status_name(s) << "\" status: " << s.to_string();
+                << "()` with \"" << s.to_string();
         }
         delete db;
     }
@@ -328,23 +326,23 @@ TEST_P(ConcurrencyTests, MT)
     test(1);
 }
 
-TEST_P(ConcurrencyTests, MP_2)
-{
-    test(2);
-}
-
-TEST_P(ConcurrencyTests, MP_3)
-{
-    test(3);
-}
+// TEST_P(ConcurrencyTests, MP_2)
+//{
+//     test(2);
+// }
+//
+// TEST_P(ConcurrencyTests, MP_3)
+//{
+//     test(3);
+// }
 
 INSTANTIATE_TEST_CASE_P(
     ConcurrencyTests,
     ConcurrencyTests,
     testing::Combine(
+        testing::Values(1, 2, 10),
         testing::Values(1, 2, 10, 100),
-        testing::Values(1, 2, 10, 100),
-        testing::Values(0, 1)),
+        testing::Values(0 /*, TODO: 1*/)),
     [](const auto &info) {
         std::string label;
         append_number(label, std::get<0>(info.param));

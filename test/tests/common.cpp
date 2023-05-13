@@ -23,7 +23,7 @@ auto TransferBatch::run(Txn &txn) -> Status
         if (s.is_ok()) {
             s = put_random(txn, tools::integral_key(t), num_records, round);
         }
-        if (t) {
+        if (t && s.is_ok()) {
             s = erase_all(txn, tools::integral_key(t - 1), true);
         }
         if (s.is_ok()) {
@@ -66,12 +66,6 @@ auto make_record(U32 id, U32 iteration) -> std::pair<std::string, std::string>
     return {key, value};
 }
 
-auto put_random(Txn &txn, const std::string &tbname, std::size_t num_records, U32 iteration) -> Status
-{
-    return with_table(txn, tbname, [num_records, iteration, &txn](auto &table) {
-        return put_random(table, num_records, iteration);
-    });
-}
 auto put_random(Table &table, std::size_t num_records, U32 iteration) -> Status
 {
     std::default_random_engine rng(iteration);
@@ -85,13 +79,13 @@ auto put_random(Table &table, std::size_t num_records, U32 iteration) -> Status
     }
     return Status::ok();
 }
-
-auto put_sequential(Txn &txn, const std::string &tbname, std::size_t num_records, U32 iteration) -> Status
+auto put_random(Txn &txn, const std::string &tbname, std::size_t num_records, U32 iteration) -> Status
 {
-    return with_table(txn, tbname, [iteration, num_records, &txn](auto &table) {
-        return put_sequential(table, num_records, iteration);
+    return with_table(txn, tbname, [num_records, iteration](auto &table) {
+        return put_random(table, num_records, iteration);
     });
 }
+
 auto put_sequential(Table &table, std::size_t num_records, U32 iteration) -> Status
 {
     for (U32 k = 0; k < num_records; ++k) {
@@ -101,17 +95,13 @@ auto put_sequential(Table &table, std::size_t num_records, U32 iteration) -> Sta
     }
     return Status::ok();
 }
-
-auto erase_all(Txn &txn, const std::string &tbname, bool drop_table) -> Status
+auto put_sequential(Txn &txn, const std::string &tbname, std::size_t num_records, U32 iteration) -> Status
 {
-    CALICODB_TRY(with_table(txn, tbname, [](auto &table) {
-        return erase_all(table);
-    }));
-    if (drop_table) {
-        CALICODB_TRY(txn.drop_table(tbname));
-    }
-    return Status::ok();
+    return with_table(txn, tbname, [iteration, num_records](auto &table) {
+        return put_sequential(table, num_records, iteration);
+    });
 }
+
 auto erase_all(Table &table) -> Status
 {
     Status s;
@@ -134,13 +124,17 @@ auto erase_all(Table &table) -> Status
     }
     return s;
 }
-
-auto check_records(Txn &txn, const std::string &tbname, std::size_t num_records, U32 iteration) -> Status
+auto erase_all(Txn &txn, const std::string &tbname, bool drop_table) -> Status
 {
-    return with_table(txn, tbname, [iteration, num_records](auto &table) {
-        return check_records(table, num_records, iteration);
-    });
+    CALICODB_TRY(with_table(txn, tbname, [](auto &table) {
+        return erase_all(table);
+    }));
+    if (drop_table) {
+        CALICODB_TRY(txn.drop_table(tbname));
+    }
+    return Status::ok();
 }
+
 auto check_records(Table &table, std::size_t num_records, U32 iteration) -> Status
 {
     for (U32 k = 0; k < num_records; ++k) {
@@ -152,7 +146,21 @@ auto check_records(Table &table, std::size_t num_records, U32 iteration) -> Stat
     }
     return Status::ok();
 }
+auto check_records(Txn &txn, const std::string &tbname, std::size_t num_records, U32 iteration) -> Status
+{
+    return with_table(txn, tbname, [iteration, num_records](auto &table) {
+        return check_records(table, num_records, iteration);
+    });
+}
 
+auto is_empty(Table &table) -> bool
+{
+    auto *c = table.new_cursor();
+    c->seek_first();
+    const auto nonempty = c->is_valid();
+    delete c;
+    return !nonempty;
+}
 auto is_empty(Txn &txn, const std::string &tbname) -> bool
 {
     bool nonempty;
@@ -160,14 +168,6 @@ auto is_empty(Txn &txn, const std::string &tbname) -> bool
         nonempty = is_empty(table);
         return Status::ok();
     }));
-    return !nonempty;
-}
-auto is_empty(Table &table) -> bool
-{
-    auto *c = table.new_cursor();
-    c->seek_first();
-    const auto nonempty = c->is_valid();
-    delete c;
     return !nonempty;
 }
 

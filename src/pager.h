@@ -103,9 +103,10 @@ private:
     [[nodiscard]] auto dirtylist_contains(const PageRef &ref) const -> bool;
     [[nodiscard]] auto lock_db(FileLockMode mode) -> Status;
     [[nodiscard]] auto refresh_state() -> Status;
+    [[nodiscard]] auto busy_wait(FileLockMode mode) -> Status;
     auto unlock_db() -> void;
     [[nodiscard]] auto open_wal() -> Status;
-    [[nodiscard]] auto read_page(PageRef &out, std::size_t *size_out = nullptr) -> Status;
+    [[nodiscard]] auto read_page(PageRef &out, size_t *size_out) -> Status;
     [[nodiscard]] auto read_page_from_file(PageRef &ref, std::size_t *size_out) const -> Status;
     [[nodiscard]] auto write_page_to_file(const PageRef &entry) const -> Status;
     [[nodiscard]] auto ensure_available_buffer() -> Status;

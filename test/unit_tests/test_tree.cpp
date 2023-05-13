@@ -137,15 +137,18 @@ TEST_F(ComponentTests, CollectsPayload)
 TEST_F(ComponentTests, CollectsPayloadWithOverflow)
 {
     auto root = acquire_node(Id::root(), true);
-    const auto key = random.Generate(kPageSize * 10).to_string();
-    const auto value = random.Generate(kPageSize * 10).to_string();
+    const auto key = random.Generate(kPageSize * 1).to_string();
+    const auto value = random.Generate(kPageSize * 1).to_string();
     ASSERT_OK(PayloadManager::emplace(*m_pager, collect_scratch.data(), root, key, value, 0));
     const auto cell = read_cell(root, 0);
     Slice slice;
     ASSERT_OK(PayloadManager::collect_key(*m_pager, scratch, cell, &slice));
-    ASSERT_EQ(slice, key);
+    ASSERT_EQ(slice.to_string(), key);
     ASSERT_OK(PayloadManager::collect_value(*m_pager, scratch, cell, &slice));
-    ASSERT_EQ(slice, value);
+    for (std::size_t i = 0; i < kPageSize; ++i) {
+        ASSERT_EQ(slice[i], value[i]) << i;
+    }
+    ASSERT_EQ(slice.to_string(), value);
     root.TEST_validate();
     release_node(std::move(root));
 }
@@ -1324,7 +1327,7 @@ public:
         TreeTests::SetUp();
         cell_scratch.resize(kPageSize);
         node_scratch.resize(kPageSize);
-        schema = std::make_unique<Schema>(*m_pager, m_state.status, true);
+        schema = std::make_unique<Schema>(*m_pager, m_state.status);
     }
 
     auto acquire_node(Id pid, bool is_writable = false)

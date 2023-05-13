@@ -169,8 +169,6 @@ static auto busy_wait(BusyHandler *handler, const Callback &callback) -> Status
     }
 }
 
-auto TEST_print_wal(const Wal &wal) -> void;
-
 } // namespace calicodb
 
 #endif // CALICODB_WAL_H

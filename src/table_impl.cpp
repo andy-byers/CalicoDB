@@ -9,16 +9,16 @@
 namespace calicodb
 {
 
-TableImpl::TableImpl(Tree *&tree, Status &status, bool write)
+TableImpl::TableImpl(Tree *&tree, Status &status)
     : m_status(&status),
-      m_tree(&tree),
-      m_readonly(!write)
+      m_tree(&tree)
 {
 }
 
 TableImpl::~TableImpl()
 {
     delete *m_tree;
+    // NULL-out the tree pointer contained in the schema object.
     *m_tree = nullptr;
 }
 
@@ -40,7 +40,7 @@ auto TableImpl::get(const Slice &key, std::string *value) const -> Status
 auto TableImpl::put(const Slice &key, const Slice &value) -> Status
 {
     if (m_readonly) {
-        return readonly_transaction();
+        return Status::readonly();
     }
     CALICODB_TRY(*m_status);
     return (*m_tree)->put(key, value);
@@ -49,7 +49,7 @@ auto TableImpl::put(const Slice &key, const Slice &value) -> Status
 auto TableImpl::erase(const Slice &key) -> Status
 {
     if (m_readonly) {
-        return readonly_transaction();
+        return Status::readonly();
     }
     CALICODB_TRY(*m_status);
     return (*m_tree)->erase(key);
