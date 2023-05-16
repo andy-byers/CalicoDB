@@ -5,7 +5,6 @@
 #include "db_impl.h"
 #include "header.h"
 #include "logging.h"
-#include "scope_guard.h"
 #include "tools.h"
 #include "tree.h"
 #include "unit_tests.h"
@@ -13,49 +12,524 @@
 #include <array>
 #include <filesystem>
 #include <gtest/gtest.h>
-#include <vector>
 
 namespace calicodb
 {
 
-namespace fs = std::filesystem;
-
-TEST(LeakTests, DestroysOwnObjects)
+class DBTests : public testing::Test
 {
-    fs::remove_all("__calicodb_test");
+protected:
+    static constexpr auto kDBDir = "/tmp/calicodb_test";
+    static constexpr auto kDBName = "/tmp/calicodb_test/testdb";
+    static constexpr auto kWALName = "/tmp/calicodb_test/testdb-wal";
+    static constexpr auto kShmName = "/tmp/calicodb_test/testdb-shm";
+    static constexpr auto kAltWALName = "/tmp/calicodb_test/testwal";
+    static constexpr std::size_t kMaxRounds = 1'000;
 
-    DB *db;
-    Txn *txn;
-    Table *table;
+    explicit DBTests()
+        : m_env(new tools::TestEnv(*Env::default_env()))
+    {
+        std::filesystem::remove_all(kDBDir);
+        std::filesystem::create_directory(kDBDir);
+    }
 
-    ASSERT_OK(DB::open(Options(), "__calicodb_test", db));
-    ASSERT_OK(db->new_txn(true, txn));
-    ASSERT_OK(txn->new_table(TableOptions(), "table", table));
-    auto *cursor = table->new_cursor();
+    ~DBTests() override
+    {
+        delete m_db;
+        delete m_env;
+        std::filesystem::remove_all(kDBDir);
+    }
 
-    delete cursor;
-    delete table;
-    delete txn;
-    delete db;
+    auto SetUp() -> void override
+    {
+        ASSERT_OK(reopen_db(false));
+    }
 
-    ASSERT_OK(DB::destroy({}, "__calicodb_test"));
+    [[nodiscard]] static auto make_kv(int kv, int round = 0) -> std::pair<std::string, std::string>
+    {
+        EXPECT_LE(0, kv);
+        EXPECT_LE(0, round);
+        static constexpr std::size_t kMaxKV = kPageSize * 2;
+        const auto key_length = (round + 1) * kMaxKV / kMaxRounds;
+        auto key_str = tools::integral_key(kv);
+        const auto val_length = kMaxKV - key_length;
+        auto val_str = number_to_string(kv);
+        if (val_str.size() < val_length) {
+            val_str.resize(kPageSize / 4 - val_str.size(), '0');
+        }
+        return {key_str, val_str};
+    }
+
+    [[nodiscard]] static auto put(Table &table, int kv, int round = 0) -> Status
+    {
+        const auto [k, v] = make_kv(kv, round);
+        return table.put(k, v);
+    }
+    [[nodiscard]] static auto put(Txn &txn, const TableOptions &options, const std::string &tbname, int kv, int round = 0) -> Status
+    {
+        Table *table;
+        auto s = txn.new_table(options, tbname, table);
+        if (s.is_ok()) {
+            s = put(*table, kv, round);
+            delete table;
+        }
+        return s;
+    }
+
+    [[nodiscard]] static auto put_range(Table &table, int kv1, int kv2, int round = 0) -> Status
+    {
+        Status s;
+        for (int kv = kv1; s.is_ok() && kv < kv2; ++kv) {
+            s = put(table, kv, round);
+        }
+        return s;
+    }
+    [[nodiscard]] static auto put_range(Txn &txn, const TableOptions &options, const std::string &tbname, int kv1, int kv2, int round = 0) -> Status
+    {
+        Table *table;
+        auto s = txn.new_table(options, tbname, table);
+        if (s.is_ok()) {
+            s = put_range(*table, kv1, kv2, round);
+            delete table;
+        }
+        return s;
+    }
+
+    [[nodiscard]] static auto erase(Table &table, int kv, int round = 0) -> Status
+    {
+        const auto [k, _] = make_kv(kv, round);
+        return table.erase(k);
+    }
+    [[nodiscard]] static auto erase(Txn &txn, const TableOptions &options, const std::string &tbname, int kv, int round = 0) -> Status
+    {
+        Table *table;
+        auto s = txn.new_table(options, tbname, table);
+        if (s.is_ok()) {
+            s = erase(*table, kv, round);
+            delete table;
+        }
+        return s;
+    }
+
+    [[nodiscard]] static auto erase_range(Table &table, int kv1, int kv2, int round = 0) -> Status
+    {
+        Status s;
+        for (int kv = kv1; s.is_ok() && kv < kv2; ++kv) {
+            s = erase(table, kv, round);
+        }
+        return s;
+    }
+    [[nodiscard]] static auto erase_range(Txn &txn, const TableOptions &options, const std::string &tbname, int kv1, int kv2, int round = 0) -> Status
+    {
+        Table *table;
+        auto s = txn.new_table(options, tbname, table);
+        if (s.is_ok()) {
+            s = erase_range(*table, kv1, kv2, round);
+            delete table;
+        }
+        return s;
+    }
+
+    [[nodiscard]] static auto check(Table &table, int kv, bool exists, int round = 0) -> Status
+    {
+        std::string result;
+        const auto [k, v] = make_kv(kv, round);
+        auto s = table.get(k, &result);
+        if (s.is_ok()) {
+            EXPECT_TRUE(exists);
+            U64 n;
+            Slice slice(result);
+            EXPECT_TRUE(consume_decimal_number(slice, &n));
+            EXPECT_EQ(kv, n);
+        } else if (s.is_not_found()) {
+            EXPECT_FALSE(exists);
+        }
+        return s;
+    }
+    [[nodiscard]] static auto check(Txn &txn, const TableOptions &options, const std::string &tbname, int kv, bool exists, int round = 0) -> Status
+    {
+        Table *table;
+        auto s = txn.new_table(options, tbname, table);
+        if (s.is_ok()) {
+            s = check(*table, kv, exists, round);
+            delete table;
+        }
+        return s;
+    }
+
+    [[nodiscard]] static auto check_range(Table &table, int kv1, int kv2, bool exists, int round = 0) -> Status
+    {
+        auto *c = table.new_cursor();
+        // Run some extra seek*() calls.
+        if (kv1 & 1) {
+            c->seek_first();
+        } else {
+            c->seek_last();
+        }
+        if (c->status().is_io_error()) {
+            return c->status();
+        }
+        if (exists) {
+            for (int kv = kv1; kv < kv2; ++kv) {
+                const auto [k, v] = make_kv(kv, round);
+                if (kv == kv1) {
+                    c->seek(k);
+                }
+                if (c->is_valid()) {
+                    EXPECT_EQ(k, c->key().to_string());
+                    EXPECT_EQ(v, c->value().to_string());
+                } else {
+                    EXPECT_TRUE((c->status().is_io_error()));
+                    return c->status();
+                }
+                c->next();
+            }
+            for (int kv = kv2 - 1; kv >= kv1; --kv) {
+                const auto [k, v] = make_kv(kv, round);
+                if (kv == kv2 - 1) {
+                    c->seek(k);
+                }
+                if (c->is_valid()) {
+                    EXPECT_EQ(k, c->key());
+                    EXPECT_EQ(v, c->value());
+                } else {
+                    EXPECT_TRUE((c->status().is_io_error()));
+                    return c->status();
+                }
+                c->previous();
+            }
+        } else {
+            for (int kv = kv1; kv < kv2; ++kv) {
+                const auto [k, v] = make_kv(kv, round);
+                c->seek(k);
+                if (c->is_valid()) {
+                    EXPECT_NE(k, c->key().to_string());
+                } else if (!c->status().is_not_found()) {
+                    EXPECT_TRUE((c->status().is_io_error()));
+                    return c->status();
+                }
+                ++kv;
+            }
+        }
+        return Status::ok();
+    }
+    [[nodiscard]] static auto check_range(Txn &txn, const TableOptions &options, const std::string &tbname, int kv1, int kv2, bool exists, int round = 0) -> Status
+    {
+        Table *table;
+        auto s = txn.new_table(options, tbname, table);
+        if (s.is_ok()) {
+            s = check_range(*table, kv1, kv2, exists, round);
+            delete table;
+        }
+        return s;
+    }
+
+    enum Config {
+        kDefault,
+        kSyncMode,
+        kUseAltWAL,
+        kSmallCache,
+        kMaxConfig,
+    };
+    [[nodiscard]] auto reopen_db(bool clear) -> Status
+    {
+        close_db();
+        if (clear) {
+            (void)DB::destroy(Options(), kDBName);
+        }
+        Options options;
+        options.busy = &m_busy;
+        options.env = m_env;
+        switch (m_config) {
+            case kDefault:
+                break;
+            case kSyncMode:
+                options.sync = true;
+                break;
+            case kUseAltWAL:
+                options.wal_filename = kAltWALName;
+                break;
+            case kSmallCache:
+                options.cache_size = 0;
+                break;
+            default:
+                return Status::ok();
+        }
+        return DB::open(options, kDBName, m_db);
+    }
+    auto close_db() -> void
+    {
+        delete m_db;
+        m_db = nullptr;
+    }
+    auto change_options(bool clear = false) -> bool
+    {
+        m_config = Config(m_config + 1);
+        EXPECT_OK(reopen_db(clear));
+        return kMaxConfig <= m_config;
+    }
+
+    [[nodiscard]] auto file_size(const std::string &filename) const -> std::size_t
+    {
+        std::size_t file_size;
+        EXPECT_OK(m_env->file_size(filename, file_size));
+        return file_size;
+    }
+
+    static constexpr std::size_t kMaxTables = 12;
+    static constexpr const char kTableStr[kMaxTables + 2] = "TABLE_NAMING_";
+    Config m_config = kDefault;
+    tools::TestEnv *m_env = nullptr;
+    DB *m_db = nullptr;
+
+    class BusyHandlerStub : public BusyHandler
+    {
+    public:
+        ~BusyHandlerStub() override = default;
+        auto exec(unsigned) -> bool override
+        {
+            return false;
+        }
+    } m_busy;
+};
+
+TEST_F(DBTests, GetProperty)
+{
+    std::string value;
+    ASSERT_TRUE(m_db->get_property("calicodb.stats", nullptr));
+    ASSERT_TRUE(m_db->get_property("calicodb.stats", &value));
+    ASSERT_FALSE(value.empty());
+    ASSERT_FALSE(m_db->get_property("nonexistent", nullptr));
+    ASSERT_FALSE(m_db->get_property("nonexistent", &value));
+    ASSERT_TRUE(value.empty());
 }
 
-TEST(LeakTests, LeavesUserObjects)
+TEST_F(DBTests, ConvenienceFunctions)
 {
-    Options options;
-    options.env = new tools::FakeEnv;
-    options.info_log = nullptr; // TODO
-
-    DB *db;
-    ASSERT_OK(DB::open(options, "__calicodb_test", db));
-    delete db;
-
-    delete options.info_log;
-    delete options.env;
+    const auto *const_db = m_db;
+    db_impl(m_db);
+    db_impl(const_db);
+    ASSERT_OK(m_db->update([](auto &txn) {
+        const auto &const_txn = txn;
+        txn_impl(&txn);
+        txn_impl(&const_txn);
+        Table *tbl;
+        EXPECT_OK(txn.new_table(TableOptions(), "TABLE", tbl));
+        const auto *const_tbl = tbl;
+        table_impl(tbl);
+        table_impl(const_tbl);
+        return Status::ok();
+    }));
 }
 
-TEST(BasicDestructionTests, OnlyDeletesCalicoDatabases)
+TEST_F(DBTests, NewTxn)
+{
+    for (int i = 0; i < 2; ++i) {
+        for (int j = 0; j < 2; ++j) {
+            Txn *txn1, *txn2 = reinterpret_cast<Txn *>(42);
+            ASSERT_OK(m_db->new_txn(i == 0, txn1));
+            ASSERT_NOK(m_db->new_txn(j == 0, txn2));
+            ASSERT_EQ(nullptr, txn2);
+            delete txn1;
+        }
+    }
+}
+
+TEST_F(DBTests, NewTable)
+{
+    ASSERT_OK(m_db->update([](auto &txn) {
+        Table *table;
+        TableOptions tbopt;
+        tbopt.create_if_missing = false;
+        EXPECT_NOK(txn.new_table(tbopt, "TABLE", table));
+        tbopt.create_if_missing = true;
+        EXPECT_OK(txn.new_table(tbopt, "TABLE", table));
+        delete table;
+        tbopt.error_if_exists = true;
+        EXPECT_NOK(txn.new_table(tbopt, "TABLE", table));
+        return Status::ok();
+    }));
+}
+
+TEST_F(DBTests, TableBehavior)
+{
+    ASSERT_OK(m_db->update([](auto &txn) {
+        Table *table;
+        EXPECT_OK(txn.new_table(TableOptions(), "TABLE", table));
+        // Table::put() should not accept an empty key.
+        EXPECT_TRUE(table->put("", "value").is_invalid_argument());
+        return Status::ok();
+    }));
+}
+
+TEST_F(DBTests, ReadonlyTxn)
+{
+    ASSERT_OK(m_db->view([](auto &txn) {
+        Table *table;
+        // Cannot create a new table in a readonly transaction.
+        EXPECT_NOK(txn.new_table(TableOptions(), "TABLE", table));
+        return Status::ok();
+    }));
+    ASSERT_OK(m_db->update([](auto &txn) {
+        Table *table;
+        EXPECT_OK(txn.new_table(TableOptions(), "TABLE", table));
+        delete table;
+        return Status::ok();
+    }));
+    ASSERT_OK(m_db->view([](auto &txn) {
+        EXPECT_TRUE(txn.vacuum().is_readonly());
+        EXPECT_OK(txn.commit()); // NOOP, no changes to commit
+        Table *table;
+        EXPECT_OK(txn.new_table(TableOptions(), "TABLE", table));
+        EXPECT_TRUE(table->put("k", "v").is_readonly());
+        EXPECT_TRUE(table->erase("k").is_readonly());
+        delete table;
+        return Status::ok();
+    }));
+}
+
+TEST_F(DBTests, UpdateThenView)
+{
+    int round = 0;
+    do {
+        TableOptions tbopt;
+        tbopt.error_if_exists = true;
+        for (int i = 0; i < 3; ++i) {
+            ASSERT_OK(m_db->update([i, tbopt, round](auto &txn) {
+                Table *table;
+                auto s = txn.new_table(tbopt, kTableStr + i, table);
+                if (s.is_ok()) {
+                    s = put_range(*table, 0, 1'000, round);
+                    if (s.is_ok()) {
+                        s = erase_range(*table, 250, 750, round);
+                    }
+                }
+                return s;
+            }));
+        }
+        tbopt.error_if_exists = false;
+        tbopt.create_if_missing = false;
+        for (int i = 0; i < 3; ++i) {
+            ASSERT_OK(m_db->view([round, i, tbopt](auto &txn) {
+                Table *table;
+                auto s = txn.new_table(tbopt, kTableStr + i, table);
+                if (s.is_ok()) {
+                    EXPECT_OK(check_range(*table, 0, 250, true, round));
+                    EXPECT_OK(check_range(*table, 250, 750, false, round));
+                    EXPECT_OK(check_range(*table, 750, 1'000, true, round));
+                }
+                return s;
+            }));
+        }
+        ASSERT_OK(m_db->update([](auto &txn) {
+            return txn.vacuum();
+        }));
+        ASSERT_OK(m_db->checkpoint(false));
+        ++round;
+    } while (change_options());
+}
+
+TEST_F(DBTests, RollbackUpdate)
+{
+    int round = 0;
+    do {
+        for (int i = 0; i < 3; ++i) {
+            ASSERT_TRUE(m_db->update([i, round](auto &txn) {
+                                Table *table;
+                                auto s = txn.new_table(TableOptions(), kTableStr + i, table);
+                                if (s.is_ok()) {
+                                    s = put_range(*table, 0, 500, round);
+                                    if (s.is_ok()) {
+                                        // We have access to the Txn here, so we can actually call
+                                        // Txn::commit() as many times as we want before we return.
+                                        // The returned status determines whether to perform a final
+                                        // commit before calling delete on the Txn.
+                                        s = txn.commit();
+                                        if (s.is_ok()) {
+                                            s = put_range(*table, 500, 1'000, round);
+                                            if (s.is_ok()) {
+                                                // Cause the rest of the changes to be rolled back.
+                                                return Status::not_found("42");
+                                            }
+                                        }
+                                    }
+                                }
+                                return s;
+                            })
+                            .to_string() == "not found: 42");
+        }
+        for (int i = 0; i < 3; ++i) {
+            ASSERT_OK(m_db->view([round, i](auto &txn) {
+                Table *table;
+                auto s = txn.new_table(TableOptions(), kTableStr + i, table);
+                if (s.is_ok()) {
+                    EXPECT_OK(check_range(*table, 0, 500, true, round));
+                    EXPECT_OK(check_range(*table, 500, 1'000, false, round));
+                }
+                return s;
+            }));
+        }
+        ASSERT_OK(m_db->checkpoint(false));
+        ++round;
+    } while (change_options());
+}
+
+TEST_F(DBTests, VacuumEmptyDB)
+{
+    ASSERT_OK(m_db->update([](auto &txn) {
+        return txn.vacuum();
+    }));
+}
+
+TEST_F(DBTests, CheckpointResize)
+{
+    ASSERT_OK(m_db->update([](auto &txn) {
+        Table *table;
+        auto s = txn.new_table(TableOptions(), "TABLE", table);
+        if (s.is_ok()) {
+            delete table;
+        }
+        return s;
+    }));
+    ASSERT_EQ(0, file_size(kDBName));
+
+    ASSERT_OK(m_db->checkpoint(true));
+    ASSERT_EQ(kPageSize * 3, file_size(kDBName));
+
+    ASSERT_OK(m_db->update([](auto &txn) {
+        auto s = txn.drop_table("TABLE");
+        if (s.is_ok()) {
+            s = txn.vacuum();
+        }
+        return s;
+    }));
+    ASSERT_EQ(kPageSize * 3, file_size(kDBName));
+
+    // Txn::vacuum() never gets rid of the root database page, even if the whole database
+    // is empty.
+    ASSERT_OK(m_db->checkpoint(true));
+    ASSERT_EQ(kPageSize, file_size(kDBName));
+}
+
+TEST(OldWalTests, RemovesOldWalFile)
+{
+    File *oldwal;
+    tools::FakeEnv env;
+    ASSERT_OK(env.new_file("./testwal", Env::kCreate, oldwal));
+    delete oldwal;
+
+    DB *db;
+    Options dbopt;
+    dbopt.env = &env;
+    dbopt.wal_filename = "./testwal";
+    ASSERT_OK(DB::open(dbopt, "./testdb", db));
+
+    ASSERT_TRUE(env.file_exists("./testdb"));
+    ASSERT_FALSE(env.file_exists("./testwal"));
+    delete db;
+}
+
+TEST(DestructionTests, OnlyDeletesCalicoDatabases)
 {
     std::filesystem::remove_all("./testdb");
 
@@ -74,7 +548,6 @@ TEST(BasicDestructionTests, OnlyDeletesCalicoDatabases)
     ASSERT_TRUE(options.env->file_exists("./testdb"));
 
     // Identifier is incorrect.
-    char buffer[FileHeader::kSize];
     ASSERT_OK(file->write(0, "CalicoDB format 0"));
     ASSERT_TRUE(DB::destroy(options, "./testdb").is_invalid_argument());
 
@@ -87,7 +560,7 @@ TEST(BasicDestructionTests, OnlyDeletesCalicoDatabases)
     delete file;
 }
 
-TEST(BasicDestructionTests, OnlyDeletesCalicoWals)
+TEST(DestructionTests, OnlyDeletesCalicoWals)
 {
     Options options;
     options.env = new tools::FakeEnv;
@@ -111,1081 +584,192 @@ TEST(BasicDestructionTests, OnlyDeletesCalicoWals)
     delete options.env;
 }
 
-class BasicDatabaseTests
-    : public EnvTestHarness<PosixEnv>,
-      public testing::Test
-{
-public:
-    explicit BasicDatabaseTests()
-        : m_testdir("."),
-          m_dbname(m_testdir.as_child(kDBFilename))
-    {
-        options.cache_size = kPageSize * frame_count;
-        options.env = &env();
-    }
-
-    ~BasicDatabaseTests() override
-    {
-        delete options.info_log;
-    }
-
-    [[nodiscard]] auto db_page_count() -> std::size_t
-    {
-        std::size_t file_size;
-        EXPECT_OK(m_env->file_size(m_dbname, file_size));
-        const auto num_pages = file_size / kPageSize;
-        EXPECT_EQ(file_size, num_pages * kPageSize)
-            << "file size is not a multiple of the page size";
-        return num_pages;
-    }
-
-    tools::TestDir m_testdir;
-    std::string m_dbname;
-    std::size_t frame_count = 64;
-    Options options;
-};
-
-TEST_F(BasicDatabaseTests, OpensAndCloses)
-{
-    DB *db;
-    for (std::size_t i = 0; i < 3; ++i) {
-        ASSERT_OK(DB::open(options, m_dbname, db));
-        std::size_t file_size;
-        ASSERT_OK(env().file_size(m_dbname, file_size));
-        ASSERT_EQ(0, file_size);
-        delete db;
-    }
-    ASSERT_TRUE(env().file_exists(m_dbname));
-
-    std::size_t file_size;
-    ASSERT_OK(env().file_size(m_dbname, file_size));
-    ASSERT_EQ(0, file_size);
-}
-
-TEST_F(BasicDatabaseTests, RemovesOldWalFile)
-{
-    File *oldwal;
-    options.wal_filename = m_testdir.as_child("oldwal");
-    ASSERT_OK(env().new_file(options.wal_filename, Env::kCreate, oldwal));
-    delete oldwal;
-
-    ASSERT_TRUE(env().file_exists(options.wal_filename));
-
-    DB *db;
-    ASSERT_OK(DB::open(options, m_dbname, db));
-    delete db;
-
-    ASSERT_FALSE(env().file_exists(options.wal_filename));
-}
-
-TEST_F(BasicDatabaseTests, CheckpointBehavior)
-{
-    // Attempt to checkpoint 0 WAL frames. Should be a NOOP.
-    DB *db;
-    ASSERT_OK(DB::open(options, m_dbname, db));
-    ASSERT_OK(db->checkpoint(true));
-
-    // Attempt to checkpoint while this connection has an active transaction.
-    Txn *txn;
-    ASSERT_OK(db->new_txn(true, txn));
-    ASSERT_TRUE(db->checkpoint(true).is_not_supported());
-    delete txn;
-
-    ASSERT_OK(db->checkpoint(true));
-    delete db;
-}
-
-TEST_F(BasicDatabaseTests, VacuumEmptyDB)
-{
-    DB *db;
-    ASSERT_OK(DB::open(options, m_dbname, db));
-    ASSERT_OK(db->update([](auto &txn) {
-        return txn.vacuum();
-    }));
-    delete db;
-}
-
-TEST_F(BasicDatabaseTests, IsDestroyed)
-{
-    DB *db;
-    ASSERT_OK(DB::open(options, m_dbname, db));
-    delete db;
-
-    ASSERT_TRUE(env().file_exists(m_dbname));
-    ASSERT_OK(DB::destroy(options, m_dbname));
-    ASSERT_FALSE(env().file_exists(m_dbname));
-}
-
-TEST_F(BasicDatabaseTests, ClampsBadOptionValues)
-{
-    const auto open_and_check = [this] {
-        DB *db;
-        ASSERT_OK(DB::open(options, m_dbname, db));
-        delete db;
-        ASSERT_OK(DB::destroy(options, m_dbname));
-    };
-
-    options.cache_size = kPageSize;
-    open_and_check();
-}
-
-TEST_F(BasicDatabaseTests, WritesToFiles)
-{
-    ASSERT_FALSE(env().file_exists(m_dbname));
-    ASSERT_FALSE(env().file_exists(m_dbname + kDefaultWalSuffix));
-    ASSERT_FALSE(env().file_exists(m_dbname + kDefaultShmSuffix));
-
-    DB *db;
-    ASSERT_OK(DB::open(options, m_dbname, db));
-
-    // Database file exists and empty.
-    ASSERT_TRUE(env().file_exists(m_dbname));
-    auto data = tools::read_file_to_string(env(), m_dbname);
-    ASSERT_EQ(0, data.size());
-
-    // WAL and shm are not opened until the first transaction starts.
-    ASSERT_FALSE(env().file_exists(m_dbname + kDefaultWalSuffix));
-    ASSERT_FALSE(env().file_exists(m_dbname + kDefaultShmSuffix));
-
-    Txn *txn;
-    ASSERT_OK(db->new_txn(false, txn));
-
-    // WAL and shm are created when the first transaction starts, even if it is read-only. The shm file
-    // is needed to coordinate locks.
-    ASSERT_TRUE(env().file_exists(m_dbname + kDefaultWalSuffix));
-    ASSERT_TRUE(env().file_exists(m_dbname + kDefaultShmSuffix));
-
-    delete txn;
-    ASSERT_OK(db->new_txn(true, txn));
-
-    ASSERT_TRUE(env().file_exists(m_dbname + kDefaultWalSuffix));
-    ASSERT_TRUE(env().file_exists(m_dbname + kDefaultShmSuffix));
-
-    std::size_t wal_size;
-    ASSERT_OK(env().file_size(m_dbname + kDefaultWalSuffix, wal_size));
-    ASSERT_EQ(wal_size, 0);
-
-    Table *table;
-    ASSERT_OK(txn->new_table(TableOptions(), "table", table));
-    // These writes get put on the same WAL frame as the new table root.
-    ASSERT_OK(table->put("k1", "val"));
-    ASSERT_OK(table->put("k2", "val"));
-    ASSERT_OK(table->put("k3", "val"));
-    ASSERT_OK(txn->commit());
-
-    ASSERT_OK(env().file_size(m_dbname + kDefaultWalSuffix, wal_size));
-    ASSERT_EQ(wal_size, 32 + (kPageSize + 24) * 3);
-
-    // These writes need to go on a new frame, so that readers can access
-    // the version of page 3 at the last commit.
-    ASSERT_OK(table->put("k4", "val"));
-    ASSERT_OK(table->put("k5", "val"));
-    ASSERT_OK(table->put("k6", "val"));
-    ASSERT_OK(txn->commit());
-
-    ASSERT_OK(env().file_size(m_dbname + kDefaultWalSuffix, wal_size));
-    ASSERT_EQ(wal_size, 32 + (kPageSize + 24) * 4);
-
-    // Transactions that get rolled back shouldn't cause writes to the WAL
-    // (unless a page had to be evicted from the page cache, which doesn't
-    // happen here).
-    ASSERT_OK(table->put("k7", "val"));
-    ASSERT_OK(table->put("k8", "val"));
-    ASSERT_OK(table->put("k9", "val"));
-    txn->rollback();
-
-    ASSERT_OK(env().file_size(m_dbname + kDefaultWalSuffix, wal_size));
-    ASSERT_EQ(wal_size, 32 + (kPageSize + 24) * 4);
-
-    delete table;
-    delete txn;
-    delete db;
-}
-
-static auto insert_random_groups(DB &db, std::size_t num_groups, std::size_t group_size)
-{
-    static tools::RandomGenerator random;
-    std::map<std::string, std::string> map;
-    for (std::size_t iteration = 0; iteration < num_groups; ++iteration) {
-        const auto temp = tools::fill_db(db, "table", random, group_size);
-        for (const auto &[k, v] : temp) {
-            map.insert_or_assign(k, v);
-        }
-    }
-    return map;
-}
-
-TEST_F(BasicDatabaseTests, InsertOneGroup)
-{
-    DB *db;
-    ASSERT_OK(DB::open(options, m_dbname, db));
-    insert_random_groups(*db, 1, 500);
-    delete db;
-}
-
-TEST_F(BasicDatabaseTests, InsertMultipleGroups)
-{
-    DB *db;
-    ASSERT_OK(DB::open(options, m_dbname, db));
-    insert_random_groups(*db, 5, 500);
-    delete db;
-}
-
-TEST_F(BasicDatabaseTests, DataPersists)
-{
-    static constexpr std::size_t kNumIterations = 5;
-    static constexpr std::size_t kGroupSize = 10;
-
-    auto s = Status::ok();
-    tools::RandomGenerator random(4 * 1'024 * 1'024);
-
-    std::map<std::string, std::string> records;
-    DB *db;
-
-    for (std::size_t iteration = 0; iteration < kNumIterations; ++iteration) {
-        ASSERT_OK(DB::open(options, m_dbname, db));
-
-        for (const auto &[k, v] : insert_random_groups(*db, 50, kGroupSize)) {
-            records.insert_or_assign(k, v);
-        }
-        delete db;
-    }
-
-    ASSERT_OK(DB::open(options, m_dbname, db));
-    tools::expect_db_contains(*db, "table", records);
-    delete db;
-}
-
-TEST_F(BasicDatabaseTests, HandlesMaximumPageSize)
-{
-    DB *db;
-    tools::RandomGenerator random;
-    ASSERT_OK(DB::open(options, m_dbname, db));
-    const auto records = tools::fill_db(*db, "table", random, 1);
-    delete db;
-
-    ASSERT_OK(DB::open(options, m_dbname, db));
-    tools::expect_db_contains(*db, "table", records);
-    delete db;
-}
-
-TEST_F(BasicDatabaseTests, VacuumShrinksDBFileOnCheckpoint)
-{
-    DB *db;
-    ASSERT_OK(DB::open(options, m_dbname, db));
-    ASSERT_EQ(db_page_count(), 0);
-
-    Txn *txn;
-    tools::RandomGenerator random;
-    ASSERT_OK(db->new_txn(true, txn));
-    const auto records = tools::fill_db(*txn, "table", random, 1'000);
-    ASSERT_OK(txn->commit());
-    delete txn;
-
-    delete db;
-    db = nullptr;
-
-    const auto saved_page_count = db_page_count();
-    ASSERT_GT(saved_page_count, 1)
-        << "DB file was not written during checkpoint";
-
-    ASSERT_OK(DB::open(options, m_dbname, db));
-    ASSERT_OK(db->new_txn(true, txn));
-    Table *table;
-    ASSERT_OK(txn->new_table(TableOptions(), "table", table));
-    for (const auto &[key, value] : records) {
-        ASSERT_OK(table->erase(key));
-    }
-    delete table;
-    ASSERT_OK(txn->drop_table("table"));
-    ASSERT_OK(txn->vacuum());
-    ASSERT_OK(txn->commit());
-    delete txn;
-
-    ASSERT_EQ(saved_page_count, db_page_count())
-        << "file should not be modified until checkpoint";
-
-    delete db;
-
-    ASSERT_EQ(db_page_count(), 1)
-        << "file was not truncated";
-}
-
-class DbVacuumTests
-    : public EnvTestHarness<tools::FakeEnv>,
-      public testing::TestWithParam<std::tuple<std::size_t, std::size_t, bool>>
-{
-public:
-    DbVacuumTests()
-        : m_testdir("."),
-          random(1'024 * 1'024 * 16),
-          lower_bounds(std::get<0>(GetParam())),
-          upper_bounds(std::get<1>(GetParam())),
-          reopen(std::get<2>(GetParam()))
-    {
-        CALICODB_EXPECT_LE(lower_bounds, upper_bounds);
-        options.cache_size = 0x200 * 16;
-        options.env = &env();
-    }
-
-    std::unordered_map<std::string, std::string> map;
-    tools::TestDir m_testdir;
-    tools::RandomGenerator random;
-    DB *db = nullptr;
-    Options options;
-    std::size_t lower_bounds = 0;
-    std::size_t upper_bounds = 0;
-    bool reopen = false;
-};
-
-TEST_P(DbVacuumTests, SanityCheck)
-{
-    ASSERT_OK(DB::open(options, m_testdir.as_child(kDBFilename), db));
-
-    for (std::size_t iteration = 0; iteration < 4; ++iteration) {
-        if (reopen) {
-            delete db;
-            ASSERT_OK(DB::open(options, m_testdir.as_child(kDBFilename), db));
-        }
-        Txn *txn;
-        ASSERT_OK(db->new_txn(true, txn));
-        Table *table;
-        ASSERT_OK(txn->new_table(TableOptions(), "table", table));
-
-        for (std::size_t batch = 0; batch < 4; ++batch) {
-            while (map.size() < upper_bounds) {
-                const auto key = random.Generate(10);
-                const auto value = random.Generate(kPageSize * 2);
-                ASSERT_OK(table->put(key, value));
-                map.insert_or_assign(key.to_string(), value.to_string());
-            }
-            while (map.size() > lower_bounds) {
-                const auto key = begin(map)->first;
-                map.erase(key);
-                ASSERT_OK(table->erase(key));
-            }
-            ASSERT_OK(txn->vacuum());
-            reinterpret_cast<TxnImpl *>(txn)->TEST_validate();
-        }
-
-        ASSERT_OK(txn->commit());
-
-        std::size_t i = 0;
-        for (const auto &[key, value] : map) {
-            ++i;
-            std::string result;
-            ASSERT_OK(table->get(key, &result));
-            ASSERT_EQ(result, value);
-        }
-        delete table;
-        delete txn;
-    }
-    delete db;
-}
-
-INSTANTIATE_TEST_SUITE_P(
-    DbVacuumTests,
-    DbVacuumTests,
-    ::testing::Values(
-        std::make_tuple(0, 50, false),
-        std::make_tuple(0, 50, true),
-        std::make_tuple(10, 50, false),
-        std::make_tuple(10, 50, true),
-        std::make_tuple(0, 2'000, false),
-        std::make_tuple(0, 2'000, true),
-        std::make_tuple(400, 2'000, false),
-        std::make_tuple(400, 2'000, true)));
-
-class TestDatabase
-{
-public:
-    explicit TestDatabase(Env &env)
-    {
-        options.wal_filename = kWalFilename;
-        options.cache_size = 32 * kPageSize;
-        options.env = &env;
-
-        EXPECT_OK(reopen());
-    }
-
-    virtual ~TestDatabase()
-    {
-        delete db;
-    }
-
-    [[nodiscard]] auto reopen() -> Status
-    {
-        delete db;
-
-        db = nullptr;
-
-        return DB::open(options, kDBFilename, db);
-    }
-
-    Options options;
-    tools::RandomGenerator random;
-    DB *db = nullptr;
-};
-
-class DbRevertTests
-    : public EnvTestHarness<tools::FakeEnv>,
-      public testing::Test
+class DBErrorTests : public DBTests
 {
 protected:
-    DbRevertTests()
-    {
-        db = std::make_unique<TestDatabase>(env());
-    }
-    ~DbRevertTests() override = default;
+    static constexpr auto kErrorMessage = "I/O error: 42";
+    static constexpr auto kAllSyscalls = (1 << tools::kNumSyscalls) - 1;
+    static constexpr std::size_t kSavedCount = 1'000;
 
-    std::unique_ptr<TestDatabase> db;
-};
-
-static auto add_records(TestDatabase &test, std::size_t n, bool commit)
-{
-    Txn *txn;
-    EXPECT_OK(test.db->new_txn(true, txn));
-    auto records = tools::fill_db(*txn, "table", test.random, n);
-    if (commit) {
-        EXPECT_OK(txn->commit());
-    }
-    delete txn;
-    return records;
-}
-
-static auto expect_contains_records(DB &db, const std::map<std::string, std::string> &committed)
-{
-    tools::expect_db_contains(db, "table", committed);
-}
-
-static auto run_revert_test(TestDatabase &db)
-{
-    const auto committed = add_records(db, 1'000, true);
-    add_records(db, 1'000, false);
-
-    ASSERT_OK(db.reopen());
-    expect_contains_records(*db.db, committed);
-}
-
-TEST_F(DbRevertTests, RevertsUncommittedBatch_1)
-{
-    run_revert_test(*db);
-}
-
-TEST_F(DbRevertTests, RevertsUncommittedBatch_2)
-{
-    add_records(*db, 1'000, true);
-    run_revert_test(*db);
-}
-
-TEST_F(DbRevertTests, RevertsUncommittedBatch_3)
-{
-    run_revert_test(*db);
-    add_records(*db, 1'000, false);
-}
-
-TEST_F(DbRevertTests, RevertsUncommittedBatch_4)
-{
-    add_records(*db, 1'000, true);
-    run_revert_test(*db);
-    add_records(*db, 1'000, false);
-}
-
-TEST_F(DbRevertTests, RevertsUncommittedBatch_5)
-{
-    for (std::size_t i = 0; i < 100; ++i) {
-        add_records(*db, 100, true);
-    }
-    run_revert_test(*db);
-    for (std::size_t i = 0; i < 100; ++i) {
-        add_records(*db, 100, false);
-    }
-}
-
-struct ErrorWrapper {
-    std::string filename;
-    tools::SyscallType type;
-    std::size_t successes = 0;
-};
-class DbErrorTests
-    : public testing::TestWithParam<ErrorWrapper>,
-      public EnvTestHarness<tools::TestEnv>
-{
-protected:
-    using Base = EnvTestHarness<tools::TestEnv>;
-
-    DbErrorTests()
-    {
-        db = std::make_unique<TestDatabase>(Base::env());
-        committed = add_records(*db, 20'000, true);
-    }
-    ~DbErrorTests() override = default;
-
-    auto set_error() -> void
-    {
-        env().add_interceptor(
-            error.filename,
-            tools::Interceptor(
-                error.type,
-                [this] {
-                    if (counter >= 0 && counter++ >= error.successes) {
-                        return special_error();
-                    }
-                    return Status::ok();
-                }));
-    }
+    ~DBErrorTests() override = default;
 
     auto SetUp() -> void override
     {
-        Txn *txn_ptr;
-        EXPECT_OK(db->db->new_txn(false, txn_ptr));
-        txn.reset(txn_ptr);
-
-        Table *table_ptr;
-        EXPECT_OK(txn->new_table(TableOptions(), "table", table_ptr));
-        table.reset(table_ptr);
-
-        set_error();
+        // Don't call DBTests::SetUp(). Defer calling DB::open() until try_reopen() is called.
     }
 
-    // NOTE: These 3 members cannot be reordered. Their destruction order is important.
-    std::unique_ptr<TestDatabase> db;
-    std::unique_ptr<Txn> txn;
-    std::unique_ptr<Table> table;
+    [[nodiscard]] auto try_reopen(bool prefill, bool sync_mode = false) -> Status
+    {
+        if (sync_mode) {
+            m_config = kSyncMode;
+        } else {
+            m_config = kDefault;
+        }
+        auto s = reopen_db(false);
+        if (prefill && m_max_count == 0) {
+            // The first time the DB is opened, add kSavedCount records to the WAL and
+            // commit.
+            s = m_db->update([](auto &txn) {
+                return put_range(txn, TableOptions(), "saved", 0, kSavedCount);
+            });
+        }
+        return s;
+    }
 
-    std::map<std::string, std::string> committed;
-    ErrorWrapper error{GetParam()};
-    int counter = 0;
+    auto set_error(tools::SyscallType type) -> void
+    {
+        const tools::Interceptor interceptor(type, [this] {
+            if (m_counter >= 0 && m_counter++ >= m_max_count) {
+                return Status::io_error("42");
+            }
+            return Status::ok();
+        });
+        // Include system calls on every possible file.
+        m_env->add_interceptor(kDBName, interceptor);
+        m_env->add_interceptor(kWALName, interceptor);
+        m_env->add_interceptor(kShmName, interceptor);
+        m_env->add_interceptor(kAltWALName, interceptor);
+    }
+    auto reset_error(int max_count = -1) -> void
+    {
+        m_counter = 0;
+        if (max_count >= 0) {
+            m_max_count = max_count;
+        } else {
+            ++m_max_count;
+        }
+    }
+
+    Options m_options;
+    int m_counter = 0;
+    int m_max_count = 0;
 };
 
-TEST_P(DbErrorTests, HandlesReadErrorDuringQuery)
+TEST_F(DBErrorTests, Reads)
 {
-    for (std::size_t iteration = 0; iteration < 2; ++iteration) {
-        for (const auto &[k, v] : committed) {
-            std::string value;
-            const auto s = table->get(k, &value);
+    ASSERT_OK(try_reopen(true));
+    set_error(tools::kSyscallRead);
 
-            if (!s.is_ok()) {
-                assert_special_error(s);
+    for (;;) {
+        auto s = m_db->view([](auto &txn) {
+            auto s = check(txn, TableOptions(), "saved", 0, true);
+            if (s.is_ok()) {
+                s = check_range(txn, TableOptions(), "saved", 0, kSavedCount, true);
+                if (s.is_ok()) {
+                    s = check_range(txn, TableOptions(), "saved", kSavedCount, 2 * kSavedCount, false);
+                }
+            }
+            EXPECT_OK(txn.status());
+            return s;
+        });
+        if (s.is_ok()) {
+            break;
+        } else {
+            ASSERT_EQ(kErrorMessage, s.to_string());
+            reset_error();
+        }
+    }
+    ASSERT_LT(0, m_max_count);
+}
+
+TEST_F(DBErrorTests, Writes)
+{
+    ASSERT_OK(try_reopen(true));
+    set_error(tools::kSyscallWrite | tools::kSyscallSync);
+
+    for (;;) {
+        auto s = try_reopen(false);
+        if (s.is_ok()) {
+            s = m_db->update([](auto &txn) {
+                auto s = put_range(txn, TableOptions(), "TABLE", 0, 1'000);
+                EXPECT_EQ(s.to_string(), txn.status().to_string());
+                return s;
+            });
+        }
+        if (s.is_ok()) {
+            break;
+        } else {
+            ASSERT_EQ(kErrorMessage, s.to_string());
+            reset_error();
+        }
+    }
+    m_env->clear_interceptors();
+    ASSERT_OK(try_reopen(false));
+    ASSERT_OK(m_db->view([](auto &txn) {
+        return check_range(txn, TableOptions(), "TABLE", 0, kSavedCount, true);
+    }));
+    ASSERT_LT(0, m_max_count);
+}
+
+TEST_F(DBErrorTests, Checkpoint)
+{
+    // Add some records to the WAL and set the next syscall to fail. The checkpoint during
+    // the close routine will fail.
+    ASSERT_OK(try_reopen(true, true));
+    set_error(kAllSyscalls);
+
+    for (Status s;;) {
+        s = try_reopen(false, true);
+        if (s.is_ok()) {
+            s = m_db->checkpoint(true);
+            if (s.is_ok()) {
+                m_env->clear_interceptors();
                 break;
             }
         }
-        ASSERT_OK(txn->status());
-        counter = 0;
+        ASSERT_EQ(kErrorMessage, s.to_string());
+        reset_error();
     }
+
+    ASSERT_OK(reopen_db(false));
+    ASSERT_OK(m_db->view([](auto &txn) {
+        return check_range(txn, TableOptions(), "saved", 0, kSavedCount, true);
+    }));
+    ASSERT_LT(0, m_max_count);
 }
 
-TEST_P(DbErrorTests, HandlesReadErrorDuringIteration)
-{
-    std::unique_ptr<Cursor> cursor(table->new_cursor());
-
-    cursor->seek_first();
-    while (cursor->is_valid()) {
-        (void)cursor->key();
-        (void)cursor->value();
-        cursor->next();
-    }
-    assert_special_error(cursor->status());
-    ASSERT_OK(txn->status());
-    counter = 0;
-
-    cursor->seek_last();
-    while (cursor->is_valid()) {
-        (void)cursor->key();
-        (void)cursor->value();
-        cursor->previous();
-    }
-    assert_special_error(cursor->status());
-    ASSERT_OK(txn->status());
-}
-
-TEST_P(DbErrorTests, HandlesReadErrorDuringSeek)
-{
-    std::unique_ptr<Cursor> cursor(table->new_cursor());
-
-    for (const auto &[k, v] : committed) {
-        cursor->seek(k);
-        if (!cursor->is_valid()) {
-            break;
-        }
-    }
-    assert_special_error(cursor->status());
-    ASSERT_OK(txn->status());
-}
-
-INSTANTIATE_TEST_SUITE_P(
-    DbErrorTests,
-    DbErrorTests,
-    ::testing::Values(
-        ErrorWrapper{kWalFilename, tools::kSyscallRead, 0},
-        ErrorWrapper{kWalFilename, tools::kSyscallRead, 1},
-        ErrorWrapper{kWalFilename, tools::kSyscallRead, 10}));
-
-class DbFatalErrorTests : public DbErrorTests
+class DBOpenTests : public DBTests
 {
 protected:
-    ~DbFatalErrorTests() override = default;
+    ~DBOpenTests() override = default;
 
     auto SetUp() -> void override
     {
-        txn.reset();
-
-        Txn *txn_ptr;
-        EXPECT_OK(db->db->new_txn(true, txn_ptr));
-        txn.reset(txn_ptr);
-
-        Table *table_ptr;
-        EXPECT_OK(txn->new_table(TableOptions(), "table", table_ptr));
-        table.reset(table_ptr);
-
-        set_error();
+        // Don't call DBTests::SetUp(). DB is opened in test body.
     }
 };
 
-TEST_P(DbFatalErrorTests, ErrorsDuringModificationsAreFatal)
+TEST_F(DBOpenTests, CreatesMissingDb)
 {
-    while (txn->status().is_ok()) {
-        auto itr = begin(committed);
-        for (std::size_t i = 0; i < committed.size() && table->erase((itr++)->first).is_ok(); ++i)
-            ;
-        for (std::size_t i = 0; i < committed.size() && table->put((itr++)->first, "value").is_ok(); ++i)
-            ;
-        assert_special_error(txn->commit());
-    }
-    assert_special_error(txn->status());
-    assert_special_error(table->put("key", "value"));
-}
-
-TEST_P(DbFatalErrorTests, OperationsAreNotPermittedAfterFatalError)
-{
-    auto itr = begin(committed);
-    while (table->erase(itr++->first).is_ok()) {
-        ASSERT_NE(itr, end(committed));
-    }
-    assert_special_error(txn->status());
-    assert_special_error(txn->commit());
-    assert_special_error(table->put("key", "value"));
-    std::string value;
-    assert_special_error(table->get("key", &value));
-    auto *cursor = table->new_cursor();
-    assert_special_error(cursor->status());
-    delete cursor;
-}
-
-// TODO: This doesn't exercise much of what can go wrong here. Need a test for failure to truncate the file, so the
-//       header page count is left incorrect. We should be able to recover from that.
-TEST_P(DbFatalErrorTests, RecoversFromVacuumFailure)
-{
-    const auto saved = counter;
-    counter = -1;
-    auto *cursor = table->new_cursor();
-    cursor->seek_first();
-    while (cursor->is_valid()) {
-        CHECK_OK(table->erase(cursor->key()));
-        cursor->seek_first();
-    }
-    delete cursor;
-    counter = saved;
-
-    assert_special_error(txn->vacuum());
-    table.reset();
-    txn.reset();
-    delete db->db;
-    db->db = nullptr;
-
-    env().clear_interceptors();
-    ASSERT_OK(DB::open(db->options, kDBFilename, db->db));
-    Txn *txn_ptr;
-    ASSERT_OK(db->db->new_txn(true, txn_ptr));
-    txn.reset(txn_ptr);
-    Table *table_ptr;
-    ASSERT_OK(txn->new_table(TableOptions(), "table", table_ptr));
-    table.reset(table_ptr);
-
-    for (const auto &[key, value] : committed) {
-        std::string result;
-        ASSERT_OK(table->get(key, &result));
-        ASSERT_EQ(result, value);
-    }
-    table.reset();
-    txn.reset();
-    ASSERT_OK(db->db->checkpoint(true));
-
-    std::size_t file_size;
-    ASSERT_OK(env().file_size(kDBFilename, file_size));
-    ASSERT_EQ(file_size, db_impl(db->db)->TEST_pager().page_count() * kPageSize);
-}
-
-INSTANTIATE_TEST_SUITE_P(
-    DbFatalErrorTests,
-    DbFatalErrorTests,
-    ::testing::Values(
-        ErrorWrapper{kWalFilename, tools::kSyscallRead, 1},
-        ErrorWrapper{kWalFilename, tools::kSyscallRead, 5},
-        ErrorWrapper{kWalFilename, tools::kSyscallWrite, 0},
-        ErrorWrapper{kWalFilename, tools::kSyscallWrite, 1},
-        ErrorWrapper{kWalFilename, tools::kSyscallWrite, 5}));
-
-class DbOpenTests
-    : public EnvTestHarness<PosixEnv>,
-      public testing::Test
-{
-protected:
-    explicit DbOpenTests()
-    {
-        options.env = &env();
-    }
-
-    ~DbOpenTests() override = default;
-
     Options options;
-    DB *db;
-};
-
-TEST_F(DbOpenTests, CreatesMissingDb)
-{
     options.error_if_exists = false;
     options.create_if_missing = true;
-    ASSERT_OK(DB::open(options, kDBFilename, db));
-    delete db;
+    ASSERT_OK(DB::open(options, kDBName, m_db));
+    delete m_db;
+    m_db = nullptr;
 
     options.create_if_missing = false;
-    ASSERT_OK(DB::open(options, kDBFilename, db));
-    delete db;
+    ASSERT_OK(DB::open(options, kDBName, m_db));
 }
 
-TEST_F(DbOpenTests, FailsIfMissingDb)
+TEST_F(DBOpenTests, FailsIfMissingDb)
 {
+    Options options;
     options.create_if_missing = false;
-    ASSERT_TRUE(DB::open(options, kDBFilename, db).is_invalid_argument());
+    ASSERT_TRUE(DB::open(options, kDBName, m_db).is_invalid_argument());
 }
 
-TEST_F(DbOpenTests, FailsIfDbExists)
+TEST_F(DBOpenTests, FailsIfDbExists)
 {
+    Options options;
     options.create_if_missing = true;
     options.error_if_exists = true;
-    ASSERT_OK(DB::open(options, kDBFilename, db));
-    delete db;
+    ASSERT_OK(DB::open(options, kDBName, m_db));
+    delete m_db;
+    m_db = nullptr;
 
     options.create_if_missing = false;
-    ASSERT_TRUE(DB::open(options, kDBFilename, db).is_invalid_argument());
-}
-
-class ApiTests
-    : public testing::Test,
-      public EnvTestHarness<tools::TestEnv>
-{
-protected:
-    explicit ApiTests()
-    {
-        options.env = &env();
-        options.wal_filename = kWalFilename;
-    }
-
-    ~ApiTests() override
-    {
-        delete table;
-        delete txn;
-        delete db;
-    }
-
-    auto SetUp() -> void override
-    {
-        ApiTests::reopen(true);
-    }
-
-    virtual auto reopen(bool write = true) -> void
-    {
-        delete table;
-        table = nullptr;
-        delete txn;
-        txn = nullptr;
-        delete db;
-        db = nullptr;
-
-        ASSERT_OK(DB::open(options, kDBFilename, db));
-        ASSERT_OK(db->new_txn(write, txn));
-        ASSERT_OK(txn->new_table(TableOptions(), "table", table));
-    }
-
-    Options options;
-    DB *db = nullptr;
-    Txn *txn = nullptr;
-    Table *table = nullptr;
-};
-
-TEST_F(ApiTests, OnlyReturnsValidProperties)
-{
-    // Check for existence.
-    ASSERT_TRUE(db->get_property("calicodb.stats", nullptr));
-    ASSERT_FALSE(db->get_property("Calicodb.stats", nullptr));
-    ASSERT_FALSE(db->get_property("calicodb.nonexistent", nullptr));
-
-    std::string stats, scratch;
-    ASSERT_TRUE(db->get_property("calicodb.stats", &stats));
-    ASSERT_FALSE(db->get_property("Calicodb.stats", &scratch));
-    ASSERT_FALSE(db->get_property("calicodb.nonexistent", &scratch));
-    ASSERT_FALSE(stats.empty());
-    ASSERT_TRUE(scratch.empty());
-}
-
-TEST_F(ApiTests, IsConstCorrect)
-{
-    ASSERT_OK(table->put("key", "value"));
-    ASSERT_OK(txn->commit());
-    reopen(false);
-
-    ASSERT_OK(txn->status());
-    const auto *const_table = table;
-
-    ASSERT_OK(const_table->get("key", nullptr));
-    auto *cursor = const_table->new_cursor();
-    cursor->seek_first();
-
-    const auto *const_cursor = cursor;
-    ASSERT_TRUE(const_cursor->is_valid());
-    ASSERT_OK(const_cursor->status());
-    ASSERT_EQ(const_cursor->key(), "key");
-    ASSERT_EQ(const_cursor->value(), "value");
-    delete const_cursor;
-
-    const auto *const_db = db;
-    std::string property;
-    ASSERT_TRUE(const_db->get_property("calicodb.stats", &property));
-}
-
-TEST_F(ApiTests, EnforcesReadonlyTransactions)
-{
-    ASSERT_OK(txn->commit());
-    reopen(false);
-    ASSERT_TRUE(txn->vacuum().is_readonly());
-
-    // NOOPs
-    ASSERT_OK(txn->commit());
-    txn->rollback();
-
-    ASSERT_TRUE(table->put("key", "value").is_readonly());
-    ASSERT_TRUE(table->erase("key").is_readonly());
-}
-
-TEST_F(ApiTests, TableBehavior)
-{
-    Table *tb;
-    // Table is already open (`table` member).
-    ASSERT_TRUE(txn->new_table(TableOptions(), "table", tb).is_invalid_argument());
-    ASSERT_TRUE(txn->drop_table("table").is_invalid_argument());
-
-    // Commit so that `table` exists after reopen.
-    ASSERT_OK(txn->commit());
-    reopen(false);
-    // `txn` is readonly now.
-    ASSERT_TRUE(txn->drop_table("table").is_readonly());
-}
-
-TEST_F(ApiTests, UpdateAndView)
-{
-    delete table;
-    table = nullptr;
-    delete txn;
-    txn = nullptr;
-
-    class Callable
-    {
-    public:
-        int counter = 0;
-        auto operator()(Txn &txn) -> Status
-        {
-            ++counter;
-            return Status::ok();
-        }
-    } lvalue;
-
-    ASSERT_OK(db->view(lvalue));
-    ASSERT_OK(db->update(lvalue));
-    ASSERT_EQ(2, lvalue.counter);
-    ASSERT_OK(db->view(Callable()));
-    ASSERT_OK(db->update(Callable()));
-    ASSERT_OK(db->view([](auto &) { return Status::ok(); }));
-    ASSERT_OK(db->update([](auto &) { return Status::ok(); }));
-}
-
-TEST_F(ApiTests, EmptyKeysAreNotAllowed)
-{
-    ASSERT_TRUE(table->put("", "value").is_invalid_argument());
-}
-
-TEST_F(ApiTests, EmptyTransactionsAreOk)
-{
-    ASSERT_OK(txn->commit());
-}
-
-TEST_F(ApiTests, OnlyOneTransactionIsAllowed)
-{
-    Txn *second;
-    ASSERT_TRUE(db->new_txn(false, second).is_not_supported());
-}
-
-TEST_F(ApiTests, KeysCanBeArbitraryBytes)
-{
-    const std::string key_1("\x00\x00", 2);
-    const std::string key_2("\x00\x01", 2);
-    const std::string key_3("\x01\x00", 2);
-
-    ASSERT_OK(table->put(key_1, "1"));
-    ASSERT_OK(table->put(key_2, "2"));
-    ASSERT_OK(table->put(key_3, "3"));
-    ASSERT_OK(txn->commit());
-
-    auto *cursor = table->new_cursor();
-    cursor->seek_first();
-
-    ASSERT_OK(cursor->status());
-    ASSERT_EQ(cursor->key(), key_1);
-    ASSERT_EQ(cursor->value(), "1");
-    cursor->next();
-
-    ASSERT_OK(cursor->status());
-    ASSERT_EQ(cursor->key(), key_2);
-    ASSERT_EQ(cursor->value(), "2");
-    cursor->next();
-
-    ASSERT_OK(cursor->status());
-    ASSERT_EQ(cursor->key(), key_3);
-    ASSERT_EQ(cursor->value(), "3");
-    cursor->next();
-    delete cursor;
-}
-
-TEST_F(ApiTests, CheckIfKeyExists)
-{
-    ASSERT_TRUE(table->get("k", nullptr).is_not_found());
-    ASSERT_OK(table->put("k", "v"));
-    ASSERT_OK(table->get("k", nullptr));
-}
-
-class LargePayloadTests : public ApiTests
-{
-public:
-    explicit LargePayloadTests()
-        : random(kPageSize * 500)
-    {
-    }
-
-    [[nodiscard]] auto random_string(std::size_t max_size) const -> std::string
-    {
-        return random.Generate(random.Next(1, max_size)).to_string();
-    }
-
-    auto run_test(std::size_t max_key_size, std::size_t max_value_size)
-    {
-        std::unordered_map<std::string, std::string> map;
-        for (std::size_t i = 0; i < 100; ++i) {
-            const auto key = random_string(max_key_size);
-            const auto value = random_string(max_value_size);
-            ASSERT_OK(table->put(key, value));
-        }
-        ASSERT_OK(txn->commit());
-
-        for (const auto &[key, value] : map) {
-            std::string result;
-            ASSERT_OK(table->get(key, &result));
-            ASSERT_EQ(result, value);
-            ASSERT_OK(table->erase(key));
-        }
-        ASSERT_OK(txn->commit());
-    }
-
-    tools::RandomGenerator random;
-};
-
-TEST_F(LargePayloadTests, LargeKeys)
-{
-    run_test(100 * kPageSize, 100);
-}
-
-TEST_F(LargePayloadTests, LargeValues)
-{
-    run_test(100, 100 * kPageSize);
-}
-
-TEST_F(LargePayloadTests, LargePayloads)
-{
-    run_test(100 * kPageSize, 100 * kPageSize);
-}
-
-class CommitFailureTests : public ApiTests
-{
-protected:
-    ~CommitFailureTests() override = default;
-
-    auto SetUp() -> void override
-    {
-        ApiTests::SetUp();
-
-        tools::RandomGenerator random;
-        commits[false] = tools::fill_db(*table, random, 5'000);
-        ASSERT_OK(txn->commit());
-
-        commits[true] = tools::fill_db(*table, random, 5'678);
-        for (const auto &record : commits[false]) {
-            commits[true].insert(record);
-        }
-    }
-
-    auto reopen(bool write = true) -> void override
-    {
-        env().clear_interceptors();
-        ApiTests::reopen(write);
-    }
-
-    auto run_test(bool persisted) -> void
-    {
-        ASSERT_OK(txn->status());
-        const auto s = txn->commit();
-        ASSERT_EQ(s.is_ok(), persisted);
-
-        reopen();
-
-        for (const auto &[key, value] : commits[persisted]) {
-            std::string result;
-            ASSERT_OK(table->get(key, &result));
-            ASSERT_EQ(value, result);
-        }
-    }
-
-    std::map<std::string, std::string> commits[2];
-};
-
-TEST_F(CommitFailureTests, WalFlushFailure)
-{
-    QUICK_INTERCEPTOR(kWalFilename, tools::kSyscallWrite);
-    run_test(false);
-}
-
-class AlternateWalFilenameTests
-    : public EnvTestHarness<PosixEnv>,
-      public testing::Test
-{
-public:
-    AlternateWalFilenameTests()
-    {
-        options.env = &env();
-    }
-
-    Options options;
-    DB *db = nullptr;
-};
-
-TEST_F(AlternateWalFilenameTests, WalDirectoryMustExist)
-{
-    // TODO: It would be nice if this produced an error during DB::open(), rather
-    //       than when the first transaction is started.
-    options.wal_filename = "./nonexistent/wal";
-    ASSERT_OK(DB::open(options, kDBFilename, db));
-    Txn *txn;
-    const auto s = db->new_txn(false, txn);
-    ASSERT_TRUE(s.is_io_error()) << s.to_string();
-    delete db;
+    ASSERT_TRUE(DB::open(options, kDBName, m_db).is_invalid_argument());
 }
 
 } // namespace calicodb

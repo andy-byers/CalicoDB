@@ -112,19 +112,24 @@ auto write_cell(Node &node, std::size_t index, const Cell &cell) -> std::size_t;
 // Erase a cell from the node at the specified index.
 auto erase_cell(Node &node, std::size_t index) -> void;
 
-class ChainIterator final
+class BufferLocalizer final
 {
-    std::optional<Page> m_page;
+    Page m_page;
     Status m_status;
-    std::size_t m_length;
     Pager *m_pager;
-    Id m_next;
+
+    // True if this object has ownership of a database page in `m_page`,
+    // false otherwise. If this variable is false, the contents of `m_page`
+    // are unspecified.
+    bool m_has_page;
 
 public:
-    explicit ChainIterator(Pager &pager, Id head, std::size_t length);
-    ~ChainIterator();
+    explicit BufferLocalizer(Pager &pager, Id remote);
+    ~BufferLocalizer();
+    [[nodiscard]] auto is_valid() const -> bool;
     [[nodiscard]] auto status() const -> Status;
-    [[nodiscard]] auto next() -> Slice;
+    [[nodiscard]] auto value() const -> Slice;
+    auto next() -> Id;
 };
 
 // TODO: This implementation takes a shortcut and reads fragmented keys into a temporary buffer.
@@ -168,7 +173,6 @@ struct OverflowList {
 };
 
 struct PayloadManager {
-
     [[nodiscard]] static auto emplace(Pager &pager, char *scratch, Node &node, const Slice &key, const Slice &value, std::size_t index) -> Status;
     [[nodiscard]] static auto promote(Pager &pager, char *scratch, Cell &cell, Id parent_id) -> Status;
     [[nodiscard]] static auto collect_key(Pager &pager, std::string &scratch, const Cell &cell, Slice *key) -> Status;

@@ -409,7 +409,7 @@ HashIterator::HashIterator(HashIndex &source)
 
 HashIterator::~HashIterator()
 {
-    operator delete (m_state, std::align_val_t{alignof(State)});
+    operator delete(m_state, std::align_val_t{alignof(State)});
 }
 
 auto HashIterator::init(U32 backfill) -> Status
@@ -434,7 +434,7 @@ auto HashIterator::init(U32 backfill) -> Status
         (m_num_groups - 1) * sizeof(State::Group) + // Additional groups.
         last_value * sizeof(Hash);                  // Indices to sort.
     m_state = reinterpret_cast<State *>(
-        operator new (state_size, std::align_val_t{alignof(State)}));
+        operator new(state_size, std::align_val_t{alignof(State)}));
     std::memset(m_state, 0, state_size);
 
     // Temporary buffer for the mergesort routine. Freed before returning from this routine.

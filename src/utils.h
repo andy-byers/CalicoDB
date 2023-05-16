@@ -50,7 +50,7 @@ inline constexpr auto expect_impl(bool cond, const char *repr, const char *file,
     }
 }
 
-static constexpr std::size_t kMinFrameCount = 16;
+static constexpr std::size_t kMinFrameCount = 8;
 static constexpr std::size_t kMaxCacheSize = 1 << 30;
 static constexpr auto kDefaultWalSuffix = "-wal";
 static constexpr auto kDefaultShmSuffix = "-shm";
@@ -143,6 +143,12 @@ inline auto operator==(Id lhs, Id rhs) -> bool
 inline auto operator!=(Id lhs, Id rhs) -> bool
 {
     return lhs.value != rhs.value;
+}
+
+template <class T>
+auto operator<<(std::ostream &os, const Slice &slice) -> std::ostream &
+{
+    return os << slice.to_string();
 }
 
 } // namespace calicodb

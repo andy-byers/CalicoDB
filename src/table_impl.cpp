@@ -33,8 +33,11 @@ auto TableImpl::new_cursor() const -> Cursor *
 
 auto TableImpl::get(const Slice &key, std::string *value) const -> Status
 {
-    CALICODB_TRY(*m_status);
-    return (*m_tree)->get(key, value);
+    auto s = *m_status;
+    if (s.is_ok()) {
+        s = (*m_tree)->get(key, value);
+    }
+    return s;
 }
 
 auto TableImpl::put(const Slice &key, const Slice &value) -> Status
@@ -42,8 +45,11 @@ auto TableImpl::put(const Slice &key, const Slice &value) -> Status
     if (m_readonly) {
         return Status::readonly();
     }
-    CALICODB_TRY(*m_status);
-    return (*m_tree)->put(key, value);
+    auto s = *m_status;
+    if (s.is_ok()) {
+        s = (*m_tree)->put(key, value);
+    }
+    return s;
 }
 
 auto TableImpl::erase(const Slice &key) -> Status
@@ -51,8 +57,11 @@ auto TableImpl::erase(const Slice &key) -> Status
     if (m_readonly) {
         return Status::readonly();
     }
-    CALICODB_TRY(*m_status);
-    return (*m_tree)->erase(key);
+    auto s = *m_status;
+    if (s.is_ok()) {
+        s = (*m_tree)->erase(key);
+    }
+    return s;
 }
 
 } // namespace calicodb

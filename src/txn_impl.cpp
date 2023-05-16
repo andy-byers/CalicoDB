@@ -71,14 +71,6 @@ auto TxnImpl::commit() -> Status
     return s;
 }
 
-auto TxnImpl::rollback() -> void
-{
-    if (m_write) {
-        m_pager->rollback();
-        m_schema.inform_live_cursors();
-    }
-}
-
 auto TxnImpl::vacuum() -> Status
 {
     if (!m_write) {

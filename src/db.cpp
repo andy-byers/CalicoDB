@@ -11,7 +11,7 @@ namespace calicodb
 {
 
 template <class T, class V>
-static auto clip_to_range(T &t, V min, V max) -> void
+static constexpr auto clip_to_range(T &t, V min, V max) -> void
 {
     if (static_cast<V>(t) > max) {
         t = max;
@@ -29,6 +29,8 @@ auto DB::open(const Options &options, const std::string &filename, DB *&db) -> S
     clip_to_range(sanitized.cache_size, {}, kMaxCacheSize);
     if (sanitized.wal_filename.empty()) {
         sanitized.wal_filename = clean_filename + kDefaultWalSuffix;
+    } else {
+        sanitized.wal_filename = cleanup_path(sanitized.wal_filename);
     }
     if (sanitized.env == nullptr) {
         sanitized.env = Env::default_env();

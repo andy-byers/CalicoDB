@@ -67,14 +67,14 @@ const calicodb::Options options = {
     // Size of the page cache in bytes.
     .cache_size = 0x200000,
     
-    // Store the WAL segments in a separate location. The directory "location" must already exist.
-    // WAL segments will look like "/location/calicodb_wal_#", where # is the segment ID.
-    .wal_prefix = "/location/calicodb_wal_",
+    // Store the WAL file in a nonstandard location. The directory "location" must already exist.
+    .wal_filename = "/location/calicodb_wal",
     
+    // Write info log messages to this calicodb::Sink *.
     .info_log = nullptr,
     
     // This can be used to inject a custom Env implementation. (see the tools::FakeEnv class in
-    // tools/tools.h for an example that stores its files in memory).
+    // tools/env_helpers.h for an example that stores its files in memory).
     .env = nullptr,
 };
 
@@ -89,12 +89,21 @@ if (!s.is_ok()) {
 ```
 
 ### Readonly transactions
+Readonly transactions are typically run through the `DB::view()` API.
+```C++
+calicodb::Status s = db->view([](calicodb::Txn &txn) {
+    // Open tables (see #tables) and read some data. The `Txn` object is managed by the 
+    // database. DB::view() will forward the status returned by this callable.
+    return Status::ok();
+});
+```
 
+Readonly transactions can also be run manually, however, the caller is responsible for `delete`ing the `Txn` handle when it is no longer needed.
 ```C++
 calicodb::Txn *txn;
 
-// Start a read-only transaction.
-calicodb::Status s = db->new_txn(false, txn);
+// Start a readonly transaction.
+s = db->new_txn(false, txn);
 if (!s.is_ok()) {
 }
 
@@ -102,21 +111,32 @@ if (!s.is_ok()) {
 
 // Finish the transaction.
 delete txn;
+```
 
-// Readonly transactions can also be run through the `DB::view()` API.
-s = db->view([](calicodb::Txn &txn) {
-    // Read some data. The `Txn` object is managed by the database. `DB::view()`
-    // will return the status this callable returns.
+### Read-write transactions
+Read-write transactions can be run using `DB::update()`.
+`DB::update()` accepts a callable that runs a read-write transaction.
+If an error is encountered during a read-write transaction, the transaction status (queried with `Txn::status()`) may be set.
+If this happens, the transaction object, and any tables created from it, will return immediately with this same error whenever a read/write method is called.
+The only possible course-of-action in this case is to `delete` the transaction handle and possibly try again.
+
+```C++
+s = db->update([](auto &txn) {
+    // Read and/or write some records. If this callable returns an OK status,
+    // `Txn::commit()` is called on `txn` and the resulting status returned.
+    // Otherwise, the transaction is rolled back and the original non-OK 
+    // status is forwarded to the caller. Note that Txn::commit() does not 
+    // invalidate the transaction handle. This allows one to perform multiple 
+    // batches of writes per DB::update().
     return Status::ok();
 });
 ```
 
-### Read-write transactions
-
+Like readonly transactions, read-write transactions can be run manually.
 ```C++
 calicodb::Txn *txn;
 
-// Start a write transaction.
+// Start a read-write transaction.
 calicodb::Status s = db->new_txn(true, txn);
 if (!s.is_ok()) {
 }
@@ -126,31 +146,19 @@ if (!s.is_ok()) {
 // Commit the transaction.
 s = txn->commit();
 if (!s.is_ok()) {
-    // If commit() failed, then there was likely a low-level I/O error.
+    // If commit() failed, then there was likely a low-level I/O error. There
+    // are no changes made to the database in this case.
 }
 
-// The DB holds all locks until `Txn::~Txn()` is called, so we can continue
-// reading/writing.
-
-// Get rid of everything since commit() was called. If we delete the Txn
-// without calling commit() again, the same thing will happen.
-txn->rollback();
-
-// Finish the transaction and give up file locks.
+// Clean up the transaction handle. If Txn::commit() was not called, all changes
+// made during this transaction will be dropped.
 delete txn;
-
-// There is also the `DB::update()` API, which is similar to `DB::view()`.
-// `DB::update()` accepts a callable that runs a read-write transaction.
-s = db->update([](auto &txn) {
-    // Read and/or write some records. If this callable returns an OK status,
-    // `Txn::commit()` is called on `txn` and the resulting status returned.
-    // Otherwise, `Txn::rollback()` is called and the original non-OK status
-    // forwarded to the caller.
-    return Status::ok();
-});
 ```
 
 ### Tables
+Tables are managed by live `Txn` objects.
+This means that all table handles opened by a given `Txn` must be closed by the time the `Txn` object is destroyed.
+When using the `DB::view()`/`DB::update()` API, one just needs to make sure all `Table` handles are `delete`d by the time the callable returns.
 
 ```C++
 calicodb::Table *table;
@@ -165,8 +173,8 @@ tbopt.create_if_missing = true;
 // unless `Txn::commit()` is called prior to the transaction ending.
 calicodb::Status s = txn->new_table(tbopt, "cats", table);
 if (s.is_ok()) {
-    // `table` holds the address of the open table "cats". "cats" will be
-    // open until `delete table` is called.
+    // `table` holds the address of the handle for the open table "cats". 
+    // "cats" will be open until the handle is delete'd.
 }
 
 std::string value;
@@ -196,7 +204,7 @@ if (s.is_ok()) {
 // Close the table.
 delete table;
 
-// Remove the table named "cats" from the database.
+// Remove the table named "cats" from the database. "cats" must be closed.
 s = txn->drop_table("cats");
 if (s.is_ok()) {
     

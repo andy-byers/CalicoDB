@@ -26,13 +26,9 @@ public:
     [[nodiscard]] auto put(const Slice &key, const Slice &value) -> Status override;
     [[nodiscard]] auto erase(const Slice &key) -> Status override;
 
-    [[nodiscard]] auto tree() -> Tree *
+    [[nodiscard]] auto TEST_tree() const -> const Tree &
     {
-        return *m_tree;
-    }
-    [[nodiscard]] auto tree() const -> const Tree *
-    {
-        return *m_tree;
+        return **m_tree;
     }
 
 private:

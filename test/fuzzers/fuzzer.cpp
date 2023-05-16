@@ -7,52 +7,45 @@
 namespace calicodb
 {
 
-DbFuzzer::DbFuzzer(std::string path, Options *options)
-    : m_path(std::move(path))
+auto extract_fuzzer_value(const U8 *&data_ptr, std::size_t &size_ref) -> std::string
 {
-    if (options != nullptr) {
-        m_options = *options;
+    static constexpr auto kMaxValueSize = kPageSize * 2;
+
+    const auto extract = [&data_ptr, &size_ref] {
+        std::size_t result = 0;
+        if (size_ref == 1) {
+            result = data_ptr[0];
+            ++data_ptr;
+            --size_ref;
+        } else if (size_ref >= 2) {
+            result = data_ptr[0] << 8 | data_ptr[1];
+            data_ptr += 2;
+            size_ref -= 2;
+        }
+        result %= kMaxValueSize;
+        return result + !result;
+    };
+
+    if (size_ref == 0) {
+        return "";
     }
-    CHECK_OK(reopen_impl());
-    // Commit creation of the table so rollback() doesn't cause it to get invalidated.
-    // Normally, this problem is mitigated by using the view()/update() API.
-    CHECK_OK(m_txn->commit());
+    const auto result_size = extract();
+    const auto result_data = extract();
+
+    std::string result;
+    if (result_size) {
+        append_number(result, result_data);
+        result.append(std::string(result_size, '0'));
+    }
+    return result;
 }
 
-DbFuzzer::~DbFuzzer()
+auto extract_fuzzer_key(const U8 *&data_ptr, std::size_t &size_ref) -> std::string
 {
-    CHECK_TRUE(reinterpret_cast<const DBImpl &>(*m_db).TEST_pager().assert_state());
-
-    delete m_table;
-    delete m_txn;
-    delete m_db;
-
-    CHECK_OK(DB::destroy(m_options, m_path));
-}
-
-auto DbFuzzer::reopen_impl() -> Status
-{
-    delete m_table;
-    delete m_txn;
-    delete m_db;
-
-    m_table = nullptr;
-    m_txn = nullptr;
-    m_db = nullptr;
-
-    CALICODB_TRY(DB::open(m_options, m_path, m_db));
-    CALICODB_TRY(m_db->new_txn(true, m_txn));
-    return m_txn->new_table(TableOptions(), "default", m_table);
-}
-
-auto DbFuzzer::reopen() -> Status
-{
-    return reopen_impl();
-}
-
-auto DbFuzzer::validate() -> void
-{
-    CHECK_TRUE(reinterpret_cast<const DBImpl &>(*m_db).TEST_pager().assert_state());
+    if (size_ref) {
+        return extract_fuzzer_value(data_ptr, size_ref);
+    }
+    return "0";
 }
 
 } // namespace calicodb
