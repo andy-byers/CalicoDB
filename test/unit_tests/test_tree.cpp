@@ -564,13 +564,9 @@ TEST_F(NodeTests, Defragmentation)
     ASSERT_EQ(read_record(node, "e"), "5");
 }
 
-struct TreeTestParameters {
-    std::size_t extra = 0;
-};
-
 class TreeTests
     : public PagerTestHarness<tools::FakeEnv>,
-      public testing::TestWithParam<TreeTestParameters>
+      public testing::TestWithParam<std::size_t>
 {
 public:
     TreeTests()
@@ -612,7 +608,7 @@ public:
     }
 
     tools::RandomGenerator random;
-    TreeTestParameters param;
+    std::size_t param;
     std::string collect_scratch;
     std::unique_ptr<Tree> tree;
     Id root_id;
@@ -668,6 +664,15 @@ TEST_P(TreeTests, HandlesLargePayloads)
     ASSERT_OK(tree->erase(make_long_key('a')));
     ASSERT_OK(tree->erase("b"));
     ASSERT_OK(tree->erase(make_long_key('c')));
+}
+
+TEST_P(TreeTests, GetOutOfRange)
+{
+    for (std::size_t i = 1; i < 100; ++i) {
+        ASSERT_OK(tree->put(make_long_key(i), make_value('0', true)));
+    }
+    ASSERT_NOK(tree->get(make_long_key(0), nullptr));
+    ASSERT_NOK(tree->get(make_long_key(100), nullptr));
 }
 
 TEST_P(TreeTests, ResolvesOverflowsOnLeftmostPosition)
@@ -768,8 +773,7 @@ TEST_P(TreeTests, EmptyKeyBehavior)
 INSTANTIATE_TEST_SUITE_P(
     TreeTests,
     TreeTests,
-    ::testing::Values(
-        TreeTestParameters{}));
+    ::testing::Values(0));
 
 class TreeSanityChecks : public TreeTests
 {
@@ -787,8 +791,8 @@ public:
         return {key.to_string(), val.to_string()};
     }
 
-    bool overflow_keys = GetParam().extra & 0b10;
-    bool overflow_values = GetParam().extra & 0b01;
+    bool overflow_keys = GetParam() & 0b10;
+    bool overflow_values = GetParam() & 0b01;
 };
 
 TEST_P(TreeSanityChecks, Insert)
@@ -863,21 +867,17 @@ TEST_P(TreeSanityChecks, Destruction)
     ASSERT_OK(Tree::destroy(*tree));
 }
 
-// "extra" parameter bits:
+// Parameter bits:
 //     0b01: Use overflowing values
 //     0b10: Use overflowing keys
 INSTANTIATE_TEST_SUITE_P(
     TreeSanityChecks,
     TreeSanityChecks,
     ::testing::Values(
-        TreeTestParameters{0b00},
-        TreeTestParameters{0b01},
-        TreeTestParameters{0b10},
-        TreeTestParameters{0b11},
-        TreeTestParameters{0b00},
-        TreeTestParameters{0b01},
-        TreeTestParameters{0b10},
-        TreeTestParameters{0b11}));
+        0b00,
+        0b01,
+        0b10,
+        0b11));
 
 class EmptyTreeCursorTests : public TreeTests
 {
@@ -903,7 +903,7 @@ TEST_P(EmptyTreeCursorTests, KeyAndValueUseSeparateMemory)
 INSTANTIATE_TEST_SUITE_P(
     EmptyTreeCursorTests,
     EmptyTreeCursorTests,
-    ::testing::Values(TreeTestParameters{}));
+    ::testing::Values(0));
 
 class CursorTests : public TreeTests
 {
@@ -916,14 +916,25 @@ protected:
     }
 };
 
-TEST_P(CursorTests, KeyAndValueUseSeparateMemory)
+TEST_P(CursorTests, AccountsForNodeBoundaries)
 {
+    for (std::size_t i = 0; i + 5 < kInitialRecordCount; i += 5) {
+        ASSERT_OK(tree->erase(make_long_key(i + 1)));
+        ASSERT_OK(tree->erase(make_long_key(i + 2)));
+        ASSERT_OK(tree->erase(make_long_key(i + 3)));
+        ASSERT_OK(tree->erase(make_long_key(i + 4)));
+    }
     std::unique_ptr<Cursor> cursor{CursorInternal::make_cursor(*tree)};
-    cursor->seek_first();
-    ASSERT_TRUE(cursor->is_valid());
-    const auto k = cursor->key();
-    const auto v = cursor->value();
-    ASSERT_NE(k, v);
+    for (std::size_t i = 0; i + 10 < kInitialRecordCount; i += 5) {
+        cursor->seek(make_long_key(i + 1));
+        ASSERT_EQ(make_long_key(i + 5), cursor->key());
+        cursor->seek(make_long_key(i + 2));
+        ASSERT_EQ(make_long_key(i + 5), cursor->key());
+        cursor->seek(make_long_key(i + 3));
+        ASSERT_EQ(make_long_key(i + 5), cursor->key());
+        cursor->seek(make_long_key(i + 4));
+        ASSERT_EQ(make_long_key(i + 5), cursor->key());
+    }
 }
 
 TEST_P(CursorTests, SeeksForward)
@@ -1194,6 +1205,19 @@ TEST_P(CursorTests, SanityCheck_Backward)
     }
 }
 
+TEST_P(CursorTests, SeekOutOfRange)
+{
+    ASSERT_OK(tree->erase(make_long_key(0)));
+    std::unique_ptr<Cursor> cursor(CursorInternal::make_cursor(*tree));
+
+    cursor->seek(make_long_key(0));
+    ASSERT_TRUE(cursor->is_valid());
+    ASSERT_EQ(cursor->key(), make_long_key(1));
+
+    cursor->seek(make_long_key(kInitialRecordCount));
+    ASSERT_FALSE(cursor->is_valid());
+}
+
 #if not NDEBUG
 TEST_P(CursorTests, InvalidCursorDeathTest)
 {
@@ -1208,8 +1232,7 @@ TEST_P(CursorTests, InvalidCursorDeathTest)
 INSTANTIATE_TEST_SUITE_P(
     CursorTests,
     CursorTests,
-    ::testing::Values(
-        TreeTestParameters{}));
+    ::testing::Values(0));
 
 class PointerMapTests : public TreeTests
 {
@@ -1316,8 +1339,7 @@ TEST_P(PointerMapTests, LookupNullIdDeathTest)
 INSTANTIATE_TEST_SUITE_P(
     PointerMapTests,
     PointerMapTests,
-    ::testing::Values(
-        TreeTestParameters{}));
+    ::testing::Values(0));
 
 class VacuumTests : public TreeTests
 {
@@ -1912,8 +1934,7 @@ TEST_P(VacuumTests, SanityCheck_NodesWithOverflowPayloads)
 INSTANTIATE_TEST_SUITE_P(
     VacuumTests,
     VacuumTests,
-    ::testing::Values(
-        TreeTestParameters{}));
+    ::testing::Values(0));
 
 class MultiTreeTests : public TreeTests
 {
@@ -2034,8 +2055,7 @@ TEST_P(MultiTreeTests, MultipleSplitsAndMerges_2)
 INSTANTIATE_TEST_SUITE_P(
     MultiTreeTests,
     MultiTreeTests,
-    ::testing::Values(
-        TreeTestParameters{}));
+    ::testing::Values(0));
 
 template <class T>
 class PermutationGenerator
@@ -2116,7 +2136,7 @@ public:
         PermutationGenerator<RecordInfo> generator(info);
         while (generator(info)) {
             std::size_t iteration = 0;
-            for (std::size_t i = 0; i < GetParam().extra; ++i) {
+            for (std::size_t i = 0; i < GetParam(); ++i) {
                 for (const auto &[k, value_size] : info) {
                     ASSERT_OK(tree->put(
                         tools::integral_key(iteration * info.size() + k),
@@ -2128,7 +2148,7 @@ public:
             tree->TEST_validate();
 
             iteration = 0;
-            for (std::size_t i = 0; i < GetParam().extra; ++i) {
+            for (std::size_t i = 0; i < GetParam(); ++i) {
                 for (const auto &[k, _] : info) {
                     ASSERT_OK(tree->erase(tools::integral_key(iteration * info.size() + k)));
                 }
@@ -2143,36 +2163,32 @@ protected:
 
 TEST_P(RebalanceTests, A)
 {
-    run({10, 10, 10, 10, 10, 10, 10, 10});
+    run({500, 500, 500, 500, 500, 500});
 }
 
 TEST_P(RebalanceTests, B)
 {
-    run({10, 10, 10, 10, 10, 10, 10, 10});
+    run({1'000, 500, 500, 500, 500, 500});
 }
 
 TEST_P(RebalanceTests, C)
 {
-    run({200, 200, 200, 200, 10, 10, 10, 10});
+    run({500, 500, 500, 1'000, 1'000, 1'000});
 }
 
 TEST_P(RebalanceTests, D)
 {
-    run({200, 200, 200, 200, 200, 200, 200, 10});
+    run({500, 1'000, 1'000, 1'000, 1'000, 1'000});
 }
 
 TEST_P(RebalanceTests, E)
 {
-    run({200, 200, 200, 200, 200, 200, 200, 200});
+    run({1'000, 1'000, 1'000, 1'000, 1'000, 1'000});
 }
 
 INSTANTIATE_TEST_SUITE_P(
     RebalanceTests,
     RebalanceTests,
-    ::testing::Values(
-        TreeTestParameters{1},
-        TreeTestParameters{2},
-        TreeTestParameters{5},
-        TreeTestParameters{10}));
+    ::testing::Values(1, 2, 5));
 
 } // namespace calicodb

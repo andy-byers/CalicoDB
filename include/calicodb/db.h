@@ -40,34 +40,34 @@ public:
     void operator=(DB &) = delete;
 
     // Get a human-readable string describing a named database property
-    // If the property named "name" exists, returns true and stores the property value in "*out".
-    // Otherwise, false is returned and "*out" is set to nullptr. The out parameter is optional:
+    // If the property named `name` exists, returns true and stores the property value in `*out`.
+    // Otherwise, false is returned and `*out` is set to nullptr. The `out` parameter is optional:
     // if passed a nullptr, this method performs an existence check.
     virtual auto get_property(const Slice &name, std::string *out) const -> bool = 0;
 
     // Start a transaction
     // Stores a pointer to the heap-allocated transaction object in `*out` and returns OK on
-    // success. Stores nullptr in `*out` and returns a non-OK status on failure. If `write` is `true`,
+    // success. Stores nullptr in `*out` and returns a non-OK status on failure. If `write` is true,
     // then the transaction is a read-write transaction, otherwise it is a readonly transaction.
     [[nodiscard]] virtual auto new_txn(bool write, Txn *&out) -> Status = 0;
 
     // Write modified pages from the write-ahead log (WAL) back to the database file
-    // If `reset` is `true`, the connection will take steps to make sure that the next writer will
+    // If `reset` is true, the connection will take steps to make sure that the next writer will
     // reset the WAL (start writing from the beginning of the file again). Additional checkpoints are
     // run (a) when the database is closed, and (b) when a database is opened that has a WAL on disk.
     // Note that in the case of (b), a non-reset checkpoint is run.
     [[nodiscard]] virtual auto checkpoint(bool reset) -> Status = 0;
 
     // Convenience wrapper that runs a read-only transaction
-    // Forwards the `Status` returned by the callable `fn`.
-    // REQUIRES: `Fn` implements `Status operator()(Txn &)`.
+    // Forwards the Status returned by the callable `fn`.
+    // REQUIRES: Status Fn::operator()(Txn &) is implemented.
     template <class Fn>
     [[nodiscard]] auto view(Fn &&fn) -> Status;
 
     // Convenience wrapper that runs a read-write transaction
     // If the callable `fn` returns an OK status, the transaction is committed. Otherwise,
     // the transaction is rolled back.
-    // REQUIRES: `Fn` implements `Status operator()(Txn &)`.
+    // REQUIRES: Status Fn::operator()(Txn &) is implemented.
     template <class Fn>
     [[nodiscard]] auto update(Fn &&fn) -> Status;
 };
@@ -88,7 +88,6 @@ public:
     // On creation, a Txn will always have an OK status. Only read-write
     // transactions can have a non-OK status. The status may be set when a
     // non-const method fails on this object, or any Table created from it.
-    // The rollback() method always clears the status (sets it to OK).
     [[nodiscard]] virtual auto status() const -> Status = 0;
 
     // Create or open a table on the database
@@ -97,7 +96,9 @@ public:
     [[nodiscard]] virtual auto new_table(const TableOptions &options, const std::string &name, Table *&out) -> Status = 0;
 
     // Remove a table from the database
-    // REQUIRES: Transaction is writable
+    // REQUIRES: Transaction is writable and table `name` is not open
+    // If a table named `name` exists, this method drops it and returns an OK status. If
+    // `name` does not exist, returns a status for which Status::is_not_found() is true.
     [[nodiscard]] virtual auto drop_table(const std::string &name) -> Status = 0;
 
     // Defragment the database
@@ -106,15 +107,16 @@ public:
 
     // Commit pending changes to the database
     // Returns an OK status if the commit operation was successful, and a non-OK status
-    // on failure. Calling this method on a read-only transaction is a NOOP.
+    // on failure. Calling this method on a read-only transaction is a NOOP. If this
+    // method is not called before the Txn object is destroyed, all pending changes will
+    // be dropped. This method can be called more than once for a given Txn: file locks
+    // are held until the Txn handle is delete'd.
     [[nodiscard]] virtual auto commit() -> Status = 0;
-
-    // Rollback pending changes to the database
-    // Calling this method on a read-only transaction is a NOOP.
-    virtual auto rollback() -> void = 0;
 };
 
 // Persistent, ordered mapping between keys and values
+// NOTE: All Table objects created from a Txn must be closed (with operator delete())
+// before the transaction is finished (see Txn::commit()).
 class Table
 {
 public:
@@ -144,7 +146,7 @@ public:
 
     // Erase a record from the table
     // Returns a non-OK status if an error was encountered. It is not an
-    // error if the record does not exist.
+    // error if `key` does not exist.
     [[nodiscard]] virtual auto erase(const Slice &key) -> Status = 0;
 };
 

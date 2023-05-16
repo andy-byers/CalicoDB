@@ -3,15 +3,14 @@ option(CALICODB_FuzzerStandalone "Build with the standalone main() for reproduci
 
 # Based off of the fuzzer CMakeLists.txt in fmt.
 function(build_fuzzer NAME)
-    add_executable(${NAME}
-            ${NAME}.cpp ${NAME}.h fuzzer.cpp fuzzer.h)
+    set(TARGET "${NAME}_fuzzer")
+    add_executable(${TARGET} ${TARGET}.cpp fuzzer.cpp fuzzer.h)
     if(CALICODB_FuzzerStandalone)
-        target_sources(${NAME}
+        target_sources(${TARGET}
                 PRIVATE main.cpp)
     endif()
-    target_link_libraries(${NAME}
+    target_link_libraries(${TARGET}
             PRIVATE calicodb_tools)
 endfunction()
 
-build_fuzzer(ops_fuzzer)
-build_fuzzer(map_fuzzer)
+build_fuzzer(db)

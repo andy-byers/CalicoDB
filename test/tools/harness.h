@@ -5,19 +5,19 @@
 #ifndef CALICODB_TEST_TOOLS_HARNESS_H
 #define CALICODB_TEST_TOOLS_HARNESS_H
 
-#include "calicodb/status.h"
+#include "model.h"
 #include <gtest/gtest.h>
 
-namespace calicodb
+namespace calicodb::tools
 {
 
-#define ASSERT_OK(s) ASSERT_PRED_FORMAT1(check_status, s)
+#define ASSERT_OK(s) ASSERT_PRED_FORMAT1(calicodb::tools::check_status, s)
 #define ASSERT_NOK(s) ASSERT_FALSE((s).is_ok())
-#define EXPECT_OK(s) EXPECT_PRED_FORMAT1(check_status, s)
+#define EXPECT_OK(s) EXPECT_PRED_FORMAT1(calicodb::tools::check_status, s)
 #define EXPECT_NOK(s) EXPECT_FALSE((s).is_ok())
 
 auto check_status(const char *expr, const Status &s) -> testing::AssertionResult;
 
-} // namespace calicodb
+} // namespace calicodb::tools
 
 #endif // CALICODB_TEST_TOOLS_HARNESS_H

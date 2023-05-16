@@ -144,6 +144,7 @@ public:
 
     // Write new versions of the given pages to the WAL.
     [[nodiscard]] virtual auto write(PageRef *dirty, std::size_t db_size) -> Status = 0;
+
     virtual auto rollback() -> void = 0;
 
     // WRITER -> READER
@@ -156,7 +157,7 @@ public:
 };
 
 template <class Callback>
-static auto busy_wait(BusyHandler *handler, const Callback &callback) -> Status
+auto busy_wait(BusyHandler *handler, const Callback &callback) -> Status
 {
     for (unsigned n = 0;; ++n) {
         auto s = callback();

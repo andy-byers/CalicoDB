@@ -8,7 +8,6 @@
 #include "unit_tests.h"
 #include "utils.h"
 #include <gtest/gtest.h>
-#include <mutex>
 #include <thread>
 
 namespace calicodb

@@ -163,20 +163,22 @@ auto Pager::open_wal() -> Status
 
 auto Pager::close() -> Status
 {
-    m_mode = kOpen;
     finish();
+    if (m_mode == kError) {
+        // Skip the checkpoint if this connection encountered a fatal error.
+        return m_state->status;
+    }
 
-    CALICODB_TRY(busy_wait(kLockShared));
-    std::size_t page_count = 0;
-    if (m_wal) {
-        CALICODB_TRY(m_wal->close(page_count));
+    auto s = busy_wait(kLockShared);
+    if (s.is_ok()) {
+        if (m_wal) {
+            // Ignore the page count output by Wal::close(). The DB is being closed, so
+            // it isn't necessary to set.
+            std::size_t unused;
+            s = m_wal->close(unused);
+        }
+        finish();
     }
-    if (page_count) {
-        CALICODB_TRY(m_env->resize_file(m_db_name, page_count * kPageSize));
-        m_page_count = page_count;
-    }
-    auto s = m_file->sync();
-    finish();
     return s;
 }
 
@@ -344,10 +346,8 @@ auto Pager::checkpoint(bool reset) -> Status
             return s;
         }
     }
-    if (s.is_ok() && (s = busy_wait(kLockShared)).is_ok()) {
-        if (!(s = m_wal->checkpoint(reset)).is_ok()) {
-            set_status(s);
-        }
+    if ((s = busy_wait(kLockShared)).is_ok()) {
+        s = m_wal->checkpoint(reset);
         unlock_db();
     }
     return s;

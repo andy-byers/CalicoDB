@@ -21,7 +21,6 @@ public:
     [[nodiscard]] auto drop_table(const std::string &name) -> Status override;
     [[nodiscard]] auto vacuum() -> Status override;
     [[nodiscard]] auto commit() -> Status override;
-    auto rollback() -> void override;
 
     auto TEST_validate() const -> void;
 

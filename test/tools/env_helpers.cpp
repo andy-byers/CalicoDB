@@ -86,28 +86,26 @@ auto FakeFile::shm_unmap(bool unlink) -> void
     }
 }
 
-auto FakeEnv::open_or_create_file(const std::string &filename) const -> FileState &
-{
-    auto itr = m_state.find(filename);
-    if (itr == end(m_state)) {
-        itr = m_state.insert(itr, {filename, {}});
-    }
-    return itr->second;
-}
-
 auto FakeEnv::new_sink(const std::string &, Sink *&) -> Status
 {
     return Status::ok();
 }
 
-auto FakeEnv::new_file(const std::string &filename, OpenMode, File *&out) -> Status
+auto FakeEnv::new_file(const std::string &filename, OpenMode mode, File *&out) -> Status
 {
-    auto &mem = open_or_create_file(filename);
-    out = new FakeFile(filename, *this, mem);
-    if (!mem.created) {
-        mem.created = true;
-        mem.buffer.clear();
+    auto itr = m_state.find(filename);
+    if (itr == end(m_state)) {
+        itr = m_state.insert(itr, {filename, {}});
     }
+    if (!itr->second.created) {
+        if (mode & Env::kCreate) {
+            itr->second.created = true;
+            itr->second.buffer.clear();
+        } else {
+            return Status::io_error();
+        }
+    }
+    out = new FakeFile(filename, *this, itr->second);
     return Status::ok();
 }
 

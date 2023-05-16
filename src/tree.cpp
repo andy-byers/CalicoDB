@@ -1654,63 +1654,64 @@ static constexpr auto kLinkContentSize = kPageSize - kLinkContentOffset;
     return page.view().range(kLinkContentOffset, std::min(size_limit, kLinkContentSize));
 }
 
-ChainIterator::ChainIterator(Pager &pager, Id head, std::size_t length)
-    : m_length(length),
+BufferLocalizer::BufferLocalizer(Pager &pager, Id remote)
+    : m_status(pager.acquire(remote, m_page)),
       m_pager(&pager),
-      m_next(head)
+      m_has_page(true)
 {
 }
 
-ChainIterator::~ChainIterator()
+BufferLocalizer::~BufferLocalizer()
 {
-    if (m_page) {
-        m_pager->release(std::move(*m_page));
+    if (is_valid()) {
+        m_pager->release(std::move(m_page));
     }
 }
 
-auto ChainIterator::status() const -> Status
+auto BufferLocalizer::status() const -> Status
 {
     return m_status;
 }
 
-auto ChainIterator::next() -> Slice
+auto BufferLocalizer::is_valid() const -> bool
 {
-    CALICODB_EXPECT_TRUE(m_status.is_ok());
-    if (m_length == 0) {
-        return Slice();
+    return m_status.is_ok() && m_has_page;
+}
+
+auto BufferLocalizer::value() const -> Slice
+{
+    CALICODB_EXPECT_TRUE(is_valid());
+    return m_page.view().advance(Id::kSize);
+}
+
+auto BufferLocalizer::next() -> Id
+{
+    CALICODB_EXPECT_TRUE(is_valid());
+    const auto id = read_next_id(m_page);
+    m_pager->release(std::move(m_page));
+    if (id.is_null()) {
+        m_has_page = false;
+    } else {
+        m_status = m_pager->acquire(id, m_page);
     }
-    Page page;
-    auto s = m_pager->acquire(m_next, page);
-    if (s.is_ok()) {
-        // Returned slice is at most `kPageSize - 4` bytes.
-        const auto output = get_readable_content(page, m_length);
-        if (m_page) {
-            m_pager->release(std::move(*m_page));
-        }
-        m_length -= output.size();
-        m_next = read_next_id(page);
-        m_page = std::move(page);
-        return output;
-    }
-    m_status = s;
-    return Slice();
+    return id;
 }
 
 auto NodeManager::allocate(Pager &pager, Node &out, std::string &scratch, bool is_external) -> Status
 {
-    CALICODB_TRY(pager.allocate(out.page));
-
-    // Should not be a pointer map page.
-    CALICODB_EXPECT_FALSE(PointerMap::is_map(out.page.id()));
-
-    out.header.is_external = is_external;
-    out.scratch = scratch.data();
-    setup_node(out);
-    return Status::ok();
+    auto s = pager.allocate(out.page);
+    if (s.is_ok()) {
+        CALICODB_EXPECT_FALSE(PointerMap::is_map(out.page.id()));
+        out.header.is_external = is_external;
+        out.scratch = scratch.data();
+        setup_node(out);
+    }
+    return s;
 }
 
 auto NodeManager::acquire(Pager &pager, Id page_id, Node &out, std::string &scratch, bool upgrade_node) -> Status
 {
+    CALICODB_EXPECT_FALSE(PointerMap::is_map(page_id));
     auto s = pager.acquire(page_id, out.page);
     if (s.is_ok()) {
         out.scratch = scratch.data();
@@ -1740,19 +1741,23 @@ auto NodeManager::destroy(Pager &pager, Node node) -> Status
 
 auto OverflowList::read(Pager &pager, Id head_id, std::size_t offset, std::size_t payload_size, char *buffer) -> Status
 {
-    ChainIterator itr(pager, head_id, offset + payload_size);
-
-    Slice chunk;
-    while (!(chunk = itr.next()).is_empty()) {
+    BufferLocalizer loc(pager, head_id);
+    while (payload_size && loc.is_valid()) {
+        auto chunk = loc.value();
         if (offset) {
             const auto skip = std::min(offset, chunk.size());
             chunk.advance(skip);
             offset -= skip;
         }
+        if (payload_size < chunk.size()) {
+            chunk.truncate(payload_size);
+        }
         std::memcpy(buffer, chunk.data(), chunk.size());
+        payload_size -= chunk.size();
         buffer += chunk.size();
+        loc.next();
     }
-    return itr.status();
+    return loc.status();
 }
 
 auto OverflowList::write(Pager &pager, Id &out, const Slice &key, const Slice &value) -> Status
@@ -2515,16 +2520,29 @@ auto CursorImpl::previous() -> void
 
 auto CursorImpl::seek_to(Node node, std::size_t index) -> void
 {
-    const auto &header = node.header;
-    CALICODB_EXPECT_TRUE(header.is_external);
+    const auto *hdr = &node.header;
+    CALICODB_EXPECT_TRUE(hdr->is_external);
+    m_status = default_cursor_status();
+    if (!hdr->cell_count) {
+        // Table is empty.
+        return;
+    }
 
-    if (header.cell_count && index < header.cell_count) {
+    if (index == hdr->cell_count && !hdr->next_id.is_null()) {
+        m_tree->release(std::move(node));
+        auto s = m_tree->acquire(hdr->next_id, false, node);
+        if (!s.is_ok()) {
+            m_status = s;
+            return;
+        }
+        hdr = &node.header;
+        index = 0;
+    }
+    if (index < hdr->cell_count) {
         m_loc.index = static_cast<unsigned>(index);
-        m_loc.count = header.cell_count;
+        m_loc.count = hdr->cell_count;
         m_loc.page_id = node.page.id();
         m_status = fetch_payload();
-    } else {
-        m_status = default_cursor_status();
     }
     m_tree->release(std::move(node));
 }

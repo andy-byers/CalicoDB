@@ -1,6 +1,7 @@
 # CalicoDB Design
 CalicoDB is designed to be very simple to use.
 The API is based off that of LevelDB, but the backend uses a B<sup>+</sup>-tree rather than a log-structured merge (LSM) tree.
+The concurrency model is based off SQLite in WAL mode.
 
 ## Architecture
 CalicoDB uses a B<sup>+</sup>-tree backed by a write-ahead log (WAL).
