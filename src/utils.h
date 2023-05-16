@@ -119,6 +119,12 @@ struct Id {
     U32 value = kNull;
 };
 
+template <class T>
+auto operator<<(std::ostream &os, Id id) -> std::ostream &
+{
+    return os << id.value;
+}
+
 inline auto operator<(Id lhs, Id rhs) -> bool
 {
     return lhs.value < rhs.value;
