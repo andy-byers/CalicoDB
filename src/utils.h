@@ -146,12 +146,6 @@ inline auto operator!=(Id lhs, Id rhs) -> bool
 }
 
 template <class T>
-auto operator<<(std::ostream &os, Id id) -> std::ostream &
-{
-    return os << id.value;
-}
-
-template <class T>
 auto operator<<(std::ostream &os, const Slice &slice) -> std::ostream &
 {
     return os << slice.to_string();
