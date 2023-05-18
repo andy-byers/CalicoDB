@@ -159,11 +159,6 @@ static auto integral_key(std::size_t key) -> std::string
     }
 }
 
-inline auto validate_txn(const Txn &txn)
-{
-    reinterpret_cast<const TxnImpl &>(txn).TEST_validate();
-}
-
 // Modified from LevelDB.
 class RandomGenerator
 {

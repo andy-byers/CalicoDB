@@ -43,8 +43,9 @@ else()
     list(APPEND CALICODB_OPTIONS -Wcast-align)
     list(APPEND CALICODB_OPTIONS -Wunused)
     list(APPEND CALICODB_OPTIONS -Woverloaded-virtual)
-#        list(APPEND CALICODB_OPTIONS -Wformat=2)# TODO: Attribute to suppress warning from posix_env.cpp.
     list(APPEND CALICODB_OPTIONS -Wdouble-promotion)
+    list(APPEND CALICODB_OPTIONS -Wimplicit-fallthrough)
+    list(APPEND CALICODB_OPTIONS -Wno-unused-variable)
 
     if(COMPILER_VENDOR STREQUAL GNU)
         list(APPEND CALICODB_OPTIONS -Wconversion)
@@ -52,10 +53,8 @@ else()
         list(APPEND CALICODB_OPTIONS -Wduplicated-cond)
         list(APPEND CALICODB_OPTIONS -Wduplicated-branches)
         list(APPEND CALICODB_OPTIONS -Wlogical-op)
-        #        list(APPEND CALICODB_OPTIONS -Wnull-dereference)
-        #        list(APPEND CALICODB_OPTIONS -Wuseless-cast) # TODO: Problems on Apple Clang
-    else()
-        list(APPEND CALICODB_OPTIONS -Wimplicit-fallthrough)
+        list(APPEND CALICODB_OPTIONS -Wnull-dereference)
+        list(APPEND CALICODB_OPTIONS -Wuseless-cast)
     endif()
 endif()
 

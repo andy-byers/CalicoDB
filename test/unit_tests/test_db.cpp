@@ -27,7 +27,7 @@ protected:
     static constexpr std::size_t kMaxRounds = 1'000;
 
     explicit DBTests()
-        : m_env(new tools::TestEnv(*Env::default_env()))
+        : m_env(Env::default_env())
     {
         std::filesystem::remove_all(kDBDir);
         std::filesystem::create_directory(kDBDir);
@@ -36,7 +36,6 @@ protected:
     ~DBTests() override
     {
         delete m_db;
-        delete m_env;
         std::filesystem::remove_all(kDBDir);
     }
 
@@ -231,7 +230,7 @@ protected:
         kSmallCache,
         kMaxConfig,
     };
-    [[nodiscard]] auto reopen_db(bool clear) -> Status
+    [[nodiscard]] auto reopen_db(bool clear, Env *env = nullptr) -> Status
     {
         close_db();
         if (clear) {
@@ -239,7 +238,7 @@ protected:
         }
         Options options;
         options.busy = &m_busy;
-        options.env = m_env;
+        options.env = env ? env : m_env;
         switch (m_config) {
             case kDefault:
                 break;
@@ -279,7 +278,7 @@ protected:
     static constexpr std::size_t kMaxTables = 12;
     static constexpr const char kTableStr[kMaxTables + 2] = "TABLE_NAMING_";
     Config m_config = kDefault;
-    tools::TestEnv *m_env = nullptr;
+    Env *m_env = nullptr;
     DB *m_db = nullptr;
 
     class BusyHandlerStub : public BusyHandler
@@ -511,21 +510,28 @@ TEST_F(DBTests, CheckpointResize)
     ASSERT_EQ(kPageSize, file_size(kDBName));
 }
 
-TEST(OldWalTests, RemovesOldWalFile)
+TEST(OldWalTests, HandlesOldWalFile)
 {
+    static constexpr auto kOldWal = "./testwal";
+
     File *oldwal;
     tools::FakeEnv env;
-    ASSERT_OK(env.new_file("./testwal", Env::kCreate, oldwal));
+    ASSERT_OK(env.new_file(kOldWal, Env::kCreate, oldwal));
+    ASSERT_OK(oldwal->write(42, ":3"));
+
+    std::size_t file_size;
+    ASSERT_OK(env.file_size(kOldWal, file_size));
+    ASSERT_NE(0, file_size);
     delete oldwal;
 
     DB *db;
     Options dbopt;
     dbopt.env = &env;
-    dbopt.wal_filename = "./testwal";
+    dbopt.wal_filename = kOldWal;
     ASSERT_OK(DB::open(dbopt, "./testdb", db));
 
-    ASSERT_TRUE(env.file_exists("./testdb"));
-    ASSERT_FALSE(env.file_exists("./testwal"));
+    ASSERT_OK(env.file_size(kOldWal, file_size));
+    ASSERT_EQ(0, file_size);
     delete db;
 }
 
@@ -591,7 +597,17 @@ protected:
     static constexpr auto kAllSyscalls = (1 << tools::kNumSyscalls) - 1;
     static constexpr std::size_t kSavedCount = 1'000;
 
-    ~DBErrorTests() override = default;
+    explicit DBErrorTests()
+    {
+        m_test_env = new tools::TestEnv(*Env::default_env());
+    }
+
+    ~DBErrorTests() override
+    {
+        delete m_db;
+        m_db = nullptr;
+        delete m_test_env;
+    }
 
     auto SetUp() -> void override
     {
@@ -605,7 +621,7 @@ protected:
         } else {
             m_config = kDefault;
         }
-        auto s = reopen_db(false);
+        auto s = reopen_db(false, m_test_env);
         if (prefill && m_max_count == 0) {
             // The first time the DB is opened, add kSavedCount records to the WAL and
             // commit.
@@ -625,10 +641,10 @@ protected:
             return Status::ok();
         });
         // Include system calls on every possible file.
-        m_env->add_interceptor(kDBName, interceptor);
-        m_env->add_interceptor(kWALName, interceptor);
-        m_env->add_interceptor(kShmName, interceptor);
-        m_env->add_interceptor(kAltWALName, interceptor);
+        m_test_env->add_interceptor(kDBName, interceptor);
+        m_test_env->add_interceptor(kWALName, interceptor);
+        m_test_env->add_interceptor(kShmName, interceptor);
+        m_test_env->add_interceptor(kAltWALName, interceptor);
     }
     auto reset_error(int max_count = -1) -> void
     {
@@ -640,6 +656,7 @@ protected:
         }
     }
 
+    tools::TestEnv *m_test_env;
     Options m_options;
     int m_counter = 0;
     int m_max_count = 0;
@@ -693,7 +710,7 @@ TEST_F(DBErrorTests, Writes)
             reset_error();
         }
     }
-    m_env->clear_interceptors();
+    m_test_env->clear_interceptors();
     ASSERT_OK(try_reopen(false));
     ASSERT_OK(m_db->view([](auto &txn) {
         return check_range(txn, TableOptions(), "TABLE", 0, kSavedCount, true);
@@ -713,7 +730,7 @@ TEST_F(DBErrorTests, Checkpoint)
         if (s.is_ok()) {
             s = m_db->checkpoint(true);
             if (s.is_ok()) {
-                m_env->clear_interceptors();
+                m_test_env->clear_interceptors();
                 break;
             }
         }
@@ -770,6 +787,192 @@ TEST_F(DBOpenTests, FailsIfDbExists)
 
     options.create_if_missing = false;
     ASSERT_TRUE(DB::open(options, kDBName, m_db).is_invalid_argument());
+}
+
+class DBConcurrencyTests : public DBTests
+{
+protected:
+    static constexpr std::size_t kRecordCount = 8;
+
+    ~DBConcurrencyTests() override = default;
+
+    auto SetUp() -> void override
+    {
+    }
+
+    // Reader task invariants:
+    // 1. If the table named "TABLE" exists, it contains kRecordCount records
+    // 2. Record keys are monotonically increasing integers starting from 0, serialized
+    //    using tools::integral_key()
+    // 3. Each record value is another such serialized integer, however, each value is
+    //    identical
+    // 4. The record value read by a reader must never decrease between runs
+    [[nodiscard]] static auto reader(DB &db, U64 &latest) -> Status
+    {
+        return db.view([&latest](auto &txn) {
+            Table *tbl;
+            auto s = txn.new_table(TableOptions(), "TABLE", tbl);
+            if (s.is_invalid_argument()) {
+                // Writer hasn't created the table yet.
+                return Status::ok();
+            } else if (!s.is_ok()) {
+                return s;
+            }
+            for (std::size_t i = 0; i < kRecordCount; ++i) {
+                std::string value;
+                // If the table exists, then it must contain kRecordCount records (the first writer to run
+                // makes sure of this).
+                s = tbl->get(tools::integral_key(i), &value);
+                if (s.is_ok()) {
+                    U64 result;
+                    Slice slice(value);
+                    EXPECT_TRUE(consume_decimal_number(slice, &result));
+                    if (i) {
+                        EXPECT_EQ(latest, result);
+                    } else {
+                        if (latest>result){
+                            std::cerr<<table_impl(tbl)->TEST_tree().TEST_to_string() << '\n';
+                        }
+                        CHECK_TRUE(latest<= result);
+                        latest = result;
+                    }
+                } else {
+                    break;
+                }
+            }
+            delete tbl;
+            return s;
+        });
+    }
+
+    // Writer tasks set up invariants on the DB for the reader to check. Each writer
+    // either creates or increases kRecordCount records in a table named "TABLE". The
+    // first writer to run creates the table.
+    [[nodiscard]] static auto writer(DB &db) -> Status
+    {
+        return db.update([](auto &txn) {
+            Table *tbl = nullptr;
+            auto s = txn.new_table(TableOptions(), "TABLE", tbl);
+            for (std::size_t i = 0; s.is_ok() && i < kRecordCount; ++i) {
+                U64 result = 0;
+                std::string value;
+                s = tbl->get(tools::integral_key(i), &value);
+                if (s.is_not_found()) {
+                    s = Status::ok();
+                } else if (s.is_ok()) {
+                    Slice slice(value);
+                    EXPECT_TRUE(consume_decimal_number(slice, &result));
+                    ++result;
+                } else {
+                    break;
+                }
+                s = tbl->put(tools::integral_key(i), tools::integral_key(result));
+            }
+            EXPECT_OK(s);
+            delete tbl;
+            return s;
+        });
+    }
+
+    // Checkpointers just run a single checkpoint on the DB. This should not interfere with the
+    // logical contents of the database in any way.
+    [[nodiscard]] static auto checkpointer(DB &db, bool reset = false) -> Status
+    {
+        return db.checkpoint(reset);
+    }
+
+    [[nodiscard]] auto new_connection(bool sync, DB *&db_out) -> Status
+    {
+        Options options;
+        options.env = m_env;
+        options.sync = sync;
+        options.busy = &m_busy;
+
+        return DB::open(options, kDBName, db_out);
+    }
+
+    auto validate(U64 num_writers) -> void
+    {
+        ASSERT_LT(0, num_writers--);
+        ASSERT_OK(reader(*m_db, num_writers));
+    }
+
+    struct ConsistencyCheckParam {
+        std::size_t num_readers = 0;
+        std::size_t num_writers = 0;
+        std::size_t num_checkpointers = 0;
+        bool ckpt_reset = false;
+    };
+    auto run_consistency_check(const ConsistencyCheckParam &param) -> void
+    {
+        ASSERT_OK(reopen_db(true));
+        ASSERT_OK(writer(*m_db));
+
+        std::atomic<bool> flag(false);
+        std::vector<std::thread> threads;
+        std::vector<U64> latest(param.num_readers);
+        const auto total = param.num_readers + param.num_writers + param.num_checkpointers;
+        for (std::size_t i = 0; i < total; ++i) {
+            threads.emplace_back([this, i, param, &flag, &latest] {
+                const auto &[nrd, nwr, nck, reset] = param;
+                DB *db;
+                ASSERT_OK(new_connection(false, db));
+
+                while (!flag.load(std::memory_order_acquire)) {
+                }
+
+                if (i < nrd) {
+                    ASSERT_OK(reader(*db, latest[i])) << "reader (" << i << ") failed";
+                } else if (i < nrd + nwr) {
+                    Status s;
+                    while ((s = writer(*db)).is_busy()) {
+                    }
+                    ASSERT_OK(s) << "writer (" << i << ") failed";
+                } else {
+                    Status s;
+                    while ((s = checkpointer(*db, reset)).is_busy()) {
+                    }
+                    ASSERT_OK(s) << (reset ? "reset" : "passive") << " checkpointer (" << i << ") failed";
+                }
+                delete db;
+            });
+        }
+        flag.store(true, std::memory_order_release);
+        for (auto &thread : threads) {
+            thread.join();
+        }
+        validate(param.num_writers + 1 /* write to m_db */);
+    }
+};
+
+TEST_F(DBConcurrencyTests, A1)
+{
+    run_consistency_check({100, 0, 0});
+}
+
+TEST_F(DBConcurrencyTests, B1)
+{
+    run_consistency_check({100, 0, 1});
+}
+
+TEST_F(DBConcurrencyTests, A2)
+{
+    run_consistency_check({100, 1, 0});
+}
+
+TEST_F(DBConcurrencyTests, B2)
+{
+    run_consistency_check({100, 1, 1});
+}
+
+TEST_F(DBConcurrencyTests, A3)
+{
+    run_consistency_check({100, 10, 0});
+}
+
+TEST_F(DBConcurrencyTests, B3)
+{
+    run_consistency_check({100, 10, 1});
 }
 
 } // namespace calicodb

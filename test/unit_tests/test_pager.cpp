@@ -156,9 +156,6 @@ public:
 
     virtual ~PagerWalTestHarness()
     {
-        if (m_pager) {
-            (void)m_pager->close();
-        }
         delete m_pager;
         delete env;
     }
@@ -280,11 +277,6 @@ public:
     {
         env = new tools::FakeEnv();
         write_header_and_init();
-    }
-
-    auto TearDown() -> void override
-    {
-        m_pager->finish();
     }
 };
 

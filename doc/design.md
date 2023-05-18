@@ -115,7 +115,7 @@ When this happens, each unique page in the WAL is written back to the database e
 The pages are also sorted by page number, so each write during the checkpoint is sequential.
 
 ## Concurrency
-Concurrency in CalicoDB is heavily based off of WAL mode SQLite.
+Concurrency in CalicoDB is based off of WAL mode SQLite.
 The language used here is similar to that of their WAL documentation, but is likely to differ in some places.
 
 CalicoDB is designed to support both multithread and multiprocess concurrency, with some caveats.
