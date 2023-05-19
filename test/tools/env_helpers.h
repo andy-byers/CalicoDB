@@ -128,9 +128,9 @@ static constexpr SyscallType kSyscallUnlink = kSyscallSync << 1;
 static constexpr SyscallType kSyscallResize = kSyscallUnlink << 1;
 static constexpr std::size_t kNumSyscalls = 6;
 
-struct Interceptor {
-    using Callback = std::function<Status()>;
+using Callback = std::function<Status()>;
 
+struct Interceptor {
     explicit Interceptor(SyscallType t, Callback c)
         : callback(std::move(c)),
           type(t)
@@ -161,6 +161,8 @@ public:
     //       the wrapped Env was empty when passed to the constructor.
     [[nodiscard]] virtual auto clone() -> Env *;
 
+    virtual auto copy_file(const std::string &source, const std::string &target) -> void;
+
     // The TestFile wrapper reads the whole file and saves it in memory after a
     // successful call to sync().
     virtual auto drop_after_last_sync(const std::string &filename) -> void;
@@ -180,7 +182,7 @@ private:
     friend class TestFile;
 
     struct FileState {
-        std::vector<Interceptor> interceptors;
+        std::list<Interceptor> interceptors;
         FileCounters counters;
         std::string saved_state;
         bool unlinked = false;
@@ -190,6 +192,7 @@ private:
     mutable std::mutex m_mutex;
 
     [[nodiscard]] auto try_intercept_syscall(SyscallType type, const std::string &filename) -> Status;
+    auto get_state(const std::string &filename) -> FileState &;
     auto save_file_contents(const std::string &filename) -> void;
     auto overwrite_file(const std::string &filename, const std::string &contents) -> void;
 };
@@ -199,9 +202,10 @@ class TestFile : public FileWrapper
     friend class TestEnv;
 
     std::string m_filename;
-    TestEnv *m_env = nullptr;
+    TestEnv *m_env;
+    TestEnv::FileState *m_state;
 
-    explicit TestFile(std::string filename, File &file, TestEnv &env);
+    explicit TestFile(std::string filename, File &file, TestEnv &env, TestEnv::FileState &state);
 
 public:
     ~TestFile() override;

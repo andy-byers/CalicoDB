@@ -21,13 +21,13 @@ public:
         kCorruption,
         kNotFound,
         kBusy,
-        kRetry,
         kMaxCode
     };
 
     enum SubCode : char {
         kNone,
         kReadonly,
+        kRetry,
         kMaxSubCode
     };
 
@@ -107,13 +107,9 @@ public:
     {
         return Status(kBusy, msg);
     }
-    [[nodiscard]] static auto retry(SubCode msg = kNone) -> Status
+    [[nodiscard]] static auto retry() -> Status
     {
-        return Status(kRetry, msg);
-    }
-    [[nodiscard]] static auto retry(const Slice &msg) -> Status
-    {
-        return Status(kRetry, msg);
+        return Status(kBusy, kRetry);
     }
     [[nodiscard]] static auto readonly() -> Status
     {
@@ -146,7 +142,7 @@ public:
     }
     [[nodiscard]] auto is_retry() const -> bool
     {
-        return m_code == kRetry;
+        return m_code == kBusy && m_subc == kRetry;
     }
     [[nodiscard]] auto is_readonly() const -> bool
     {

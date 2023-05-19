@@ -181,7 +181,9 @@ auto Pager::start_reader() -> Status
         m_wal->finish_reader();
 
         bool changed;
-        s = m_wal->start_reader(changed);
+        s = busy_wait(m_busy, [this, &changed] {
+            return m_wal->start_reader(changed);
+        });
         if (s.is_ok()) {
             if (changed) {
                 purge_cached_pages();

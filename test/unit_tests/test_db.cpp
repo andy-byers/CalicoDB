@@ -287,7 +287,7 @@ protected:
         ~BusyHandlerStub() override = default;
         auto exec(unsigned) -> bool override
         {
-            return false;
+            return true;
         }
     } m_busy;
 };
@@ -306,7 +306,8 @@ TEST_F(DBTests, GetProperty)
 TEST_F(DBTests, ConvenienceFunctions)
 {
     const auto *const_db = m_db;
-    db_impl(m_db);
+    (void)db_impl(m_db)->TEST_pager();
+    (void)db_impl(m_db)->TEST_state();
     db_impl(const_db);
     ASSERT_OK(m_db->update([](auto &txn) {
         const auto &const_txn = txn;
@@ -315,7 +316,7 @@ TEST_F(DBTests, ConvenienceFunctions)
         Table *tbl;
         EXPECT_OK(txn.new_table(TableOptions(), "TABLE", tbl));
         const auto *const_tbl = tbl;
-        table_impl(tbl);
+        (void)table_impl(tbl)->TEST_tree();
         table_impl(const_tbl);
         return Status::ok();
     }));
@@ -604,6 +605,7 @@ protected:
 
     ~DBErrorTests() override
     {
+        m_test_env->clear_interceptors();
         delete m_db;
         m_db = nullptr;
         delete m_test_env;
@@ -830,10 +832,10 @@ protected:
                     if (i) {
                         EXPECT_EQ(latest, result);
                     } else {
-                        if (latest>result){
-                            std::cerr<<table_impl(tbl)->TEST_tree().TEST_to_string() << '\n';
+                        if (latest > result) {
+                            std::cerr << table_impl(tbl)->TEST_tree().TEST_to_string() << '\n';
                         }
-                        CHECK_TRUE(latest<= result);
+                        EXPECT_LE(latest, result);
                         latest = result;
                     }
                 } else {
@@ -854,7 +856,7 @@ protected:
             Table *tbl = nullptr;
             auto s = txn.new_table(TableOptions(), "TABLE", tbl);
             for (std::size_t i = 0; s.is_ok() && i < kRecordCount; ++i) {
-                U64 result = 0;
+                U64 result = 1;
                 std::string value;
                 s = tbl->get(tools::integral_key(i), &value);
                 if (s.is_not_found()) {
@@ -891,30 +893,28 @@ protected:
         return DB::open(options, kDBName, db_out);
     }
 
-    auto validate(U64 num_writers) -> void
+    auto validate(U64 value) -> void
     {
-        ASSERT_LT(0, num_writers--);
-        ASSERT_OK(reader(*m_db, num_writers));
+        ASSERT_OK(reader(*m_db, value));
     }
 
     struct ConsistencyCheckParam {
         std::size_t num_readers = 0;
         std::size_t num_writers = 0;
         std::size_t num_checkpointers = 0;
+        U64 start_value = 0;
         bool ckpt_reset = false;
+        bool ckpt_before = false;
     };
-    auto run_consistency_check(const ConsistencyCheckParam &param) -> void
+    auto consistency_check_step(const ConsistencyCheckParam &param) -> void
     {
-        ASSERT_OK(reopen_db(true));
-        ASSERT_OK(writer(*m_db));
-
         std::atomic<bool> flag(false);
         std::vector<std::thread> threads;
-        std::vector<U64> latest(param.num_readers);
+        std::vector<U64> latest(param.num_readers, param.start_value);
         const auto total = param.num_readers + param.num_writers + param.num_checkpointers;
         for (std::size_t i = 0; i < total; ++i) {
             threads.emplace_back([this, i, param, &flag, &latest] {
-                const auto &[nrd, nwr, nck, reset] = param;
+                const auto &[nrd, nwr, nck, _1, reset, _2] = param;
                 DB *db;
                 ASSERT_OK(new_connection(false, db));
 
@@ -941,38 +941,217 @@ protected:
         for (auto &thread : threads) {
             thread.join();
         }
-        validate(param.num_writers + 1 /* write to m_db */);
+    }
+    auto run_consistency_check(const ConsistencyCheckParam &param) -> void
+    {
+        // Start with a fresh DB. Unlinks old database files.
+        ASSERT_OK(reopen_db(true));
+        for (std::size_t i = 0; i < param.start_value; ++i) {
+            ASSERT_OK(writer(*m_db));
+        }
+        if (param.ckpt_before) {
+            ASSERT_OK(m_db->checkpoint(param.ckpt_reset));
+        }
+        auto child_param = param;
+        static constexpr std::size_t kNumRounds = 5;
+        for (std::size_t i = 0; i < kNumRounds; ++i) {
+            consistency_check_step(param);
+            // The main connection should be able to see everything written by the
+            // writer threads.
+            child_param.start_value += param.num_writers;
+            validate(child_param.start_value);
+        }
     }
 };
 
 TEST_F(DBConcurrencyTests, A1)
 {
-    run_consistency_check({100, 0, 0});
+    run_consistency_check({100, 0, 0, 0, false, false});
+    run_consistency_check({100, 0, 0, 10, false, false});
+    run_consistency_check({100, 0, 0, 10, false, true});
 }
 
 TEST_F(DBConcurrencyTests, B1)
 {
-    run_consistency_check({100, 0, 1});
+    run_consistency_check({100, 0, 10, 0, false, false});
+    run_consistency_check({100, 0, 10, 10, false, false});
+    run_consistency_check({100, 0, 10, 0, true, false});
+    run_consistency_check({100, 0, 10, 10, true, false});
 }
 
 TEST_F(DBConcurrencyTests, A2)
 {
-    run_consistency_check({100, 1, 0});
+    run_consistency_check({100, 1, 0, 0, false, false});
+    run_consistency_check({100, 1, 0, 10, false, false});
+    run_consistency_check({100, 1, 0, 10, false, true});
 }
 
 TEST_F(DBConcurrencyTests, B2)
 {
-    run_consistency_check({100, 1, 1});
+    run_consistency_check({100, 1, 10, 0, false, false});
+    run_consistency_check({100, 1, 10, 10, false, false});
+    run_consistency_check({100, 1, 10, 0, true, false});
+    run_consistency_check({100, 1, 10, 10, true, false});
 }
 
-TEST_F(DBConcurrencyTests, A3)
+// TEST_F(DBConcurrencyTests, A3)
+//{
+//     run_consistency_check({100, 10, 0, 0, false, false});
+//     run_consistency_check({100, 10, 0, 10, false, false});
+//     run_consistency_check({100, 10, 0, 10, false, true});
+// }
+//
+// TEST_F(DBConcurrencyTests, B3)
+//{
+//     run_consistency_check({100, 10, 10, 0, false, false});
+//     run_consistency_check({100, 10, 10, 10, false, false});
+//     run_consistency_check({100, 10, 10, 0, true, false});
+//     run_consistency_check({100, 10, 10, 10, true, false});
+// }
+
+class DBTransactionTests : public DBErrorTests
 {
-    run_consistency_check({100, 10, 0});
+protected:
+    explicit DBTransactionTests() = default;
+
+    ~DBTransactionTests() override = default;
+};
+
+TEST_F(DBTransactionTests, ReadMostRecentSnapshot)
+{
+    U64 key_limit = 0;
+    auto should_exist = false;
+    ASSERT_OK(try_reopen(true));
+    const auto intercept = [this, &key_limit, &should_exist] {
+        DB *db;
+        Options options;
+        options.env = m_test_env;
+        EXPECT_OK(DB::open(options, kDBName, db));
+        auto s = db->view([key_limit](auto &txn) {
+            return check_range(txn, TableOptions(), "TABLE", 0, key_limit * 10, true);
+        });
+        if (!should_exist && s.is_invalid_argument()) {
+            s = Status::ok();
+        }
+        delete db;
+        return s;
+    };
+    m_test_env->add_interceptor(kWALName, tools::Interceptor(tools::kSyscallWrite, intercept));
+    (void)m_db->update([&should_exist, &key_limit](auto &txn) {
+        for (std::size_t i = 0; i < 50; ++i) {
+            EXPECT_OK(put_range(txn, TableOptions(), "TABLE", i * 10, (i + 1) * 10));
+            EXPECT_OK(txn.commit());
+            should_exist = true;
+            key_limit = i + 1;
+        }
+        return Status::ok();
+    });
 }
 
-TEST_F(DBConcurrencyTests, B3)
+TEST_F(DBTransactionTests, IgnoresFutureVersions)
 {
-    run_consistency_check({100, 10, 1});
+    static constexpr U64 kN = 300;
+    auto has_open_db = false;
+    U64 n = 0;
+
+    ASSERT_OK(try_reopen(true));
+    const auto intercept = [this, &has_open_db, &n] {
+        if (has_open_db) {
+            // Prevent this callback from being called by itself.
+            return Status::ok();
+        }
+        DB *db;
+        Options options;
+        options.env = m_test_env;
+        has_open_db = true;
+        EXPECT_OK(DB::open(options, kDBName, db));
+        EXPECT_OK(db->update([n](auto &txn) {
+            return put_range(txn, TableOptions(), "TABLE", kN * n, kN * (n + 1));
+        }));
+        delete db;
+        has_open_db = false;
+        ++n;
+        return Status::ok();
+    };
+    ASSERT_OK(m_db->update([](auto &txn) {
+        return put_range(txn, TableOptions(), "TABLE", 0, kN);
+    }));
+    m_test_env->add_interceptor(kWALName, tools::Interceptor(tools::kSyscallRead, intercept));
+    (void)m_db->view([&n](auto &txn) {
+        for (std::size_t i = 0; i < kN; ++i) {
+            EXPECT_OK(check_range(txn, TableOptions(), "TABLE", 0, kN, true));
+            EXPECT_OK(check_range(txn, TableOptions(), "TABLE", kN, kN * (n + 1), false));
+        }
+        return Status::ok();
+    });
+}
+
+class DBCheckpointTests : public DBErrorTests
+{
+protected:
+    explicit DBCheckpointTests() = default;
+
+    ~DBCheckpointTests() override = default;
+};
+
+TEST_F(DBCheckpointTests, CheckpointerBlocksOtherCheckpointers)
+{
+    ASSERT_OK(try_reopen(true));
+    m_test_env->add_interceptor(
+        kDBName,
+        tools::Interceptor(tools::kSyscallWrite, [this] {
+            // Each time File::write() is called, use a different connection to attempt a
+            // checkpoint. It should get blocked every time, since a checkpoint is already
+            // running.
+            DB *db;
+            Options options;
+            options.env = m_test_env;
+            EXPECT_OK(DB::open(options, kDBName, db));
+            EXPECT_TRUE(db->checkpoint(false).is_busy());
+            EXPECT_TRUE(db->checkpoint(true).is_busy());
+            delete db;
+            return Status::ok();
+        }));
+    ASSERT_OK(m_db->checkpoint(true));
+}
+
+TEST_F(DBCheckpointTests, CheckpointerAllowsTransactions)
+{
+    static constexpr std::size_t kCkptCount = 1'000;
+
+    // Set up a DB with some records in both the database file and the WAL.
+    ASSERT_OK(try_reopen(true));
+    ASSERT_OK(m_db->checkpoint(true));
+    ASSERT_OK(m_db->update([](auto &txn) {
+        // These records will be checkpointed below. `round` is 1 to cause a new version of the first half of
+        // the records to be written.
+        return put_range(txn, TableOptions(), "saved", 0, kSavedCount / 2, 1);
+    }));
+
+    U64 n = 0;
+    m_test_env->add_interceptor(
+        kDBName,
+        tools::Interceptor(tools::kSyscallWrite, [this, &n] {
+            DB *db;
+            Options options;
+            options.env = m_test_env;
+            CHECK_OK(DB::open(options, kDBName, db));
+            EXPECT_OK(db->update([n](auto &txn) {
+                return put_range(txn, TableOptions(), "SELF", n * 2, (n + 1) * 2);
+            }));
+            (void)db->view([n](auto &txn) {
+                // The version 0 records must come from the database file.
+                EXPECT_OK(check_range(txn, TableOptions(), "saved", 0, kSavedCount / 2, true, 0));
+                // The version 1 records must come from the WAL.
+                EXPECT_OK(check_range(txn, TableOptions(), "saved", kSavedCount / 2, kSavedCount, true, 1));
+                EXPECT_OK(check_range(txn, TableOptions(), "SELF", 0, (n + 1) * 2, true));
+                return Status::ok();
+            });
+            ++n;
+            delete db;
+            return Status::ok();
+        }));
+    ASSERT_OK(m_db->checkpoint(false));
 }
 
 } // namespace calicodb

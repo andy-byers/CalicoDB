@@ -980,13 +980,6 @@ TEST_F(WalTests, RecoversIndex)
     m_wal->finish_reader();
 }
 
-TEST_F(WalTests, ReportsProtocolError)
-{
-    // Write lock is already held, so the connection cannot initialize the index
-    // header.
-    start_reader_routine(0, 1, Status::kCorruption);
-}
-
 TEST_F(WalTests, FindsNonzeroReadmark)
 {
     // No frames in the WAL, so connection seeks readmark 0. Readmark 0 is already
@@ -995,12 +988,12 @@ TEST_F(WalTests, FindsNonzeroReadmark)
     start_reader_routine(3, 1, Status::kOK);
 }
 
-TEST_F(WalTests, NonzeroReadmarkAlreadyWriterLocked)
+TEST_F(WalTests, ReportsProtocolError)
 {
     // Here, readmarks 0 and 1 already have writer locks. The connection won't keep
     // looking for another readmark, it just returns busy, as it appears that index
     // recovery is running.
-    start_reader_routine(3, 2, Status::kBusy);
+    start_reader_routine(3, 2, Status::kIOError);
 }
 
 TEST_F(WalTests, StartWriter)

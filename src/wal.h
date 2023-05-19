@@ -5,7 +5,7 @@
 #ifndef CALICODB_WAL_H
 #define CALICODB_WAL_H
 
-#include "calicodb/options.h"
+#include "calicodb/db.h"
 #include "utils.h"
 #include <thread>
 #include <vector>

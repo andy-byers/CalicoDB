@@ -45,31 +45,35 @@ public:
     // if passed a nullptr, this method performs an existence check.
     virtual auto get_property(const Slice &name, std::string *out) const -> bool = 0;
 
-    // Start a transaction
-    // Stores a pointer to the heap-allocated transaction object in `*out` and returns OK on
-    // success. Stores nullptr in `*out` and returns a non-OK status on failure. If `write` is true,
-    // then the transaction is a read-write transaction, otherwise it is a readonly transaction.
-    [[nodiscard]] virtual auto new_txn(bool write, Txn *&out) -> Status = 0;
-
     // Write modified pages from the write-ahead log (WAL) back to the database file
-    // If `reset` is true, the connection will take steps to make sure that the next writer will
-    // reset the WAL (start writing from the beginning of the file again). Additional checkpoints are
-    // run (a) when the database is closed, and (b) when a database is opened that has a WAL on disk.
-    // Note that in the case of (b), a non-reset checkpoint is run.
+    // If `reset` is true, steps are taken to make sure that the next writer will reset the WAL
+    // (start writing from the beginning of the file again). This includes blocking until all
+    // other connections are finished using the WAL. Additional checkpoints are run (a) when
+    // the database is closed, and (b) when a database is opened that has a WAL on disk. Note
+    // that in the case of (b), `reset` is false.
     [[nodiscard]] virtual auto checkpoint(bool reset) -> Status = 0;
 
-    // Convenience wrapper that runs a read-only transaction
+    // Run a read-only transaction
     // Forwards the Status returned by the callable `fn`.
     // REQUIRES: Status Fn::operator()(Txn &) is implemented.
     template <class Fn>
     [[nodiscard]] auto view(Fn &&fn) -> Status;
 
-    // Convenience wrapper that runs a read-write transaction
+    // Run a read-write transaction
     // If the callable `fn` returns an OK status, the transaction is committed. Otherwise,
     // the transaction is rolled back.
     // REQUIRES: Status Fn::operator()(Txn &) is implemented.
     template <class Fn>
     [[nodiscard]] auto update(Fn &&fn) -> Status;
+
+    // Start a transaction manually
+    // Stores a pointer to the heap-allocated transaction object in `*out` and returns OK on
+    // success. Stores nullptr in `*out` and returns a non-OK status on failure. If `write` is true,
+    // then the transaction is a read-write transaction, otherwise it is a readonly transaction.
+    // The caller is responsible for calling delete on the Txn pointer when it is no longer needed.
+    // NOTE: Consider using the DB::view()/DB::update() APIs instead of managing transactions
+    // manually.
+    [[nodiscard]] virtual auto new_txn(bool write, Txn *&out) -> Status = 0;
 };
 
 // Transaction on a CalicoDB database
@@ -150,6 +154,15 @@ public:
     [[nodiscard]] virtual auto erase(const Slice &key) -> Status = 0;
 };
 
+class BusyHandler
+{
+public:
+    explicit BusyHandler();
+    virtual ~BusyHandler();
+
+    virtual auto exec(unsigned attempts) -> bool = 0;
+};
+
 template <class Fn>
 auto DB::view(Fn &&fn) -> Status
 {
@@ -168,7 +181,8 @@ auto DB::update(Fn &&fn) -> Status
     Txn *txn;
     auto s = new_txn(true, txn);
     if (s.is_ok()) {
-        if ((s = fn(*txn)).is_ok()) {
+        s = fn(*txn);
+        if (s.is_ok()) {
             s = txn->commit();
         }
         // Implicit rollback of all uncommitted changes.

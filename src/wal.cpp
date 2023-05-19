@@ -609,6 +609,10 @@ public:
         Status s;
         unsigned tries = 0;
         do {
+            // Actions taken by other connections that cause readers to wait will mostly
+            // complete in a bounded amount of time. The exception is when a checkpointer
+            // thread wants to restart the WAL, and will block until all readers are done.
+            // Otherwise, try_reader() should indicate that we can retry.
             s = try_reader(false, tries++, changed);
         } while (s.is_retry());
         return s;
@@ -822,7 +826,7 @@ private:
         if (tries > 5) {
             if (tries > 100) {
                 m_lock_error = true;
-                return Status::corruption("protocol error");
+                return Status::io_error("protocol error");
             }
             unsigned delay = 1;
             if (tries >= 10) {
@@ -833,8 +837,10 @@ private:
 
         Status s;
         if (!use_wal) {
-            if ((s = read_index_header(changed)).is_busy()) {
-                if (!m_index.m_groups[0]) {
+            s = read_index_header(changed);
+            if (s.is_busy()) {
+                if (!m_index.m_groups.front()) {
+                    // First shm region has not been mapped.
                     s = Status::retry();
                 } else if ((s = lock_shared(kRecoveryLock)).is_ok()) {
                     unlock_shared(kRecoveryLock);
@@ -906,8 +912,10 @@ private:
         // this connection will have a lock on a nonzero readmark. This connection will read pages
         // from the WAL between the current backfill count and integer stored in readmark number
         // `max_index`, inclusive.
-        CALICODB_TRY(lock_shared(READ_LOCK(max_index)));
-
+        s = lock_shared(READ_LOCK(max_index));
+        if (!s.is_ok()) {
+            return s.is_busy() ? Status::retry() : s;
+        }
         m_min_frame = ATOMIC_LOAD(&info->backfill) + 1;
         m_db->shm_barrier();
 
