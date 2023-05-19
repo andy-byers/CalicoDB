@@ -54,7 +54,6 @@ else()
         list(APPEND CALICODB_OPTIONS -Wduplicated-branches)
         list(APPEND CALICODB_OPTIONS -Wlogical-op)
         list(APPEND CALICODB_OPTIONS -Wnull-dereference)
-        list(APPEND CALICODB_OPTIONS -Wuseless-cast)
     endif()
 endif()
 
