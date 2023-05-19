@@ -31,6 +31,7 @@ static auto copy_status_string(const char *data) -> char *
 static constexpr const char *kSubCodeMessages[Status::kMaxSubCode] = {
     "",         // kNone
     "readonly", // kReadonly
+    "retry",    // kRetry
 };
 
 Status::Status(Code code, const Slice &msg)
@@ -103,9 +104,6 @@ auto Status::to_string() const -> std::string
             break;
         case kBusy:
             type_name = "busy: ";
-            break;
-        case kRetry:
-            type_name = "retry: ";
             break;
         default:
             type_name = nullptr;

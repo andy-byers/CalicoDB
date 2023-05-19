@@ -331,8 +331,7 @@ TEST(StatusTests, StatusMessages)
     ASSERT_EQ("not supported: msg", Status::not_supported("msg").to_string());
     ASSERT_EQ("busy", Status::busy().to_string());
     ASSERT_EQ("busy: msg", Status::busy("msg").to_string());
-    ASSERT_EQ("retry", Status::retry().to_string());
-    ASSERT_EQ("retry: msg", Status::retry("msg").to_string());
+    ASSERT_EQ("busy: retry", Status::retry().to_string());
     // Choice of `Status::invalid_argument()` is arbitrary, any `Code-SubCode` combo
     // is technically legal, but may not be semantically valid (for example, it makes
     // no sense to retry when a read-only transaction attempts to write: repeating that
@@ -391,7 +390,8 @@ TEST(StatusTests, StatusCodesAreCorrect)
     ASSERT_TRUE(Status::busy().is_busy());
     ASSERT_EQ(Status::busy().code(), Status::kBusy);
     ASSERT_TRUE(Status::retry().is_retry());
-    ASSERT_EQ(Status::retry().code(), Status::kRetry);
+    ASSERT_EQ(Status::retry().code(), Status::kBusy);
+    ASSERT_EQ(Status::retry().subcode(), Status::kRetry);
     ASSERT_TRUE(Status::ok().is_ok());
     ASSERT_EQ(Status::ok().code(), Status::kOK);
 }

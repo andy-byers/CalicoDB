@@ -13,34 +13,37 @@ namespace calicodb
 
 // Cursor for iterating over the records in a table
 // Cursors must be obtained through a Table object. It should be noted that a freshly-
-// allocated cursor is not considered valid until one of its seek*() methods is called.
+// allocated cursor is not considered valid (is_valid() returns false) until one of
+// its seek*() methods is called.
 class Cursor
 {
 public:
     explicit Cursor();
     virtual ~Cursor();
 
-    Cursor(const Cursor &) = delete;
-    auto operator=(const Cursor &) -> Cursor & = delete;
+    Cursor(Cursor &) = delete;
+    void operator=(Cursor &) = delete;
 
     // Return true if the cursor is valid (positioned on a record), false otherwise
-    // This method must return true before any of the methods `key()`, `value()`,
-    // `next()`, or previous() are called. Those calls will result in unspecified
+    // This method must return true before any of the methods key(), value(),
+    // next(), or previous() are called. Those calls will result in unspecified
     // behavior if the cursor is not valid.
     [[nodiscard]] virtual auto is_valid() const -> bool = 0;
 
     // Return the status associated with this cursor
-    // If `is_valid()` returns true, this method will always return an OK status.
+    // If is_valid() returns true, this method will always return an OK status.
     // Otherwise, the returned status will indicate the reason why the cursor is
-    // invalid. If the status is "not found", then the cursor is out of bounds.
+    // invalid. If the status returns true when Status::is_not_found() is called,
+    // the cursor is out of bounds. Cursors in this state can call, one of the
+    // seek*() to put themselves back on a valid record.
     [[nodiscard]] virtual auto status() const -> Status = 0;
 
     // Get the current record key
-    // REQUIRES: `is_valid()`
+    // REQUIRES: is_valid()
     [[nodiscard]] virtual auto key() const -> Slice = 0;
 
     // Get the current record value
-    // REQUIRES: `is_valid()`
+    // REQUIRES: is_valid()
     [[nodiscard]] virtual auto value() const -> Slice = 0;
 
     // Move the cursor to the record with a key that is greater than or equal to
@@ -61,13 +64,13 @@ public:
     // Move the cursor to the next record
     // REQUIRES: is_valid()
     // The cursor is invalidated if it was on the last record, i.e. at the same
-    // position as a cursor that had seek_last() called on it.
+    // position as a cursor that just had seek_last() called on it.
     virtual auto next() -> void = 0;
 
     // Move the cursor to the previous record
     // REQUIRES: is_valid()
     // The cursor is invalidated if it was on the first record, i.e. at the same
-    // position as a cursor that had seek_first() called on it.
+    // position as a cursor that just had seek_first() called on it.
     virtual auto previous() -> void = 0;
 };
 

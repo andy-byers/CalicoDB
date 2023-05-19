@@ -566,8 +566,6 @@ public:
     explicit WalImpl(const Parameters &param, File &wal_file);
     ~WalImpl() override;
 
-    [[nodiscard]] auto open() -> Status;
-
     [[nodiscard]] auto read(Id page_id, char *&page) -> Status override;
     [[nodiscard]] auto write(PageRef *dirty, std::size_t db_size) -> Status override;
     [[nodiscard]] auto checkpoint(bool reset) -> Status override;
@@ -588,22 +586,18 @@ public:
         // NOTE: Caller will unlock the database file. Only consider removing the WAL if this
         // is the last active connection. If there are other connections not currently running
         // transactions, the next read-write transaction will create a new WAL.
-        Status s;
-        if ((s = m_db->file_lock(kLockExclusive)).is_ok()) {
-            // This will not block. This connection has an exclusive lock on the database file,
-            // so no other connections are active right now.
-            if ((s = checkpoint(true)).is_ok()) {
-                s = m_env->remove_file(m_wal_name);
-                m_db->shm_unmap(true);
-                m_db = nullptr;
-                if (!s.is_ok()) {
-                    logv(m_log, R"(failed to unlink WAL at "%s")"
-                                "\n%s",
-                         m_wal_name, s.to_string().c_str());
-                }
+        auto s = checkpoint(true);
+        // This will not block. This connection has an exclusive lock on the database file,
+        // so no other connections are active right now.
+        if (s.is_ok()) {
+            s = m_env->remove_file(m_wal_name);
+            m_db->shm_unmap(true);
+            m_db = nullptr;
+            if (!s.is_ok()) {
+                logv(m_log, R"(failed to unlink WAL at "%s")"
+                            "\n%s",
+                     m_wal_name, s.to_string().c_str());
             }
-        } else if (s.is_busy()) {
-            return Status::ok();
         }
         return s;
     }
@@ -615,6 +609,10 @@ public:
         Status s;
         unsigned tries = 0;
         do {
+            // Actions taken by other connections that cause readers to wait will mostly
+            // complete in a bounded amount of time. The exception is when a checkpointer
+            // thread wants to restart the WAL, and will block until all readers are done.
+            // Otherwise, try_reader() should indicate that we can retry.
             s = try_reader(false, tries++, changed);
         } while (s.is_retry());
         return s;
@@ -828,7 +826,7 @@ private:
         if (tries > 5) {
             if (tries > 100) {
                 m_lock_error = true;
-                return Status::corruption("protocol error");
+                return Status::io_error("protocol error");
             }
             unsigned delay = 1;
             if (tries >= 10) {
@@ -839,8 +837,10 @@ private:
 
         Status s;
         if (!use_wal) {
-            if ((s = read_index_header(changed)).is_busy()) {
-                if (!m_index.m_groups[0]) {
+            s = read_index_header(changed);
+            if (s.is_busy()) {
+                if (!m_index.m_groups.front()) {
+                    // First shm region has not been mapped.
                     s = Status::retry();
                 } else if ((s = lock_shared(kRecoveryLock)).is_ok()) {
                     unlock_shared(kRecoveryLock);
@@ -912,8 +912,10 @@ private:
         // this connection will have a lock on a nonzero readmark. This connection will read pages
         // from the WAL between the current backfill count and integer stored in readmark number
         // `max_index`, inclusive.
-        CALICODB_TRY(lock_shared(READ_LOCK(max_index)));
-
+        s = lock_shared(READ_LOCK(max_index));
+        if (!s.is_ok()) {
+            return s.is_busy() ? Status::retry() : s;
+        }
         m_min_frame = ATOMIC_LOAD(&info->backfill) + 1;
         m_db->shm_barrier();
 
@@ -1012,11 +1014,6 @@ WalImpl::~WalImpl()
     if (m_db) {
         m_db->shm_unmap(false);
     }
-}
-
-auto WalImpl::open() -> Status
-{
-    return Status::ok();
 }
 
 auto WalImpl::rewrite_checksums(U32 end) -> Status

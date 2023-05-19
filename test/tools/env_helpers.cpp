@@ -14,6 +14,21 @@ namespace calicodb::tools
         }                                                                                              \
     } while (0)
 
+template <class Container>
+static auto try_intercept(const Container &interceptors, SyscallType type) -> Status
+{
+    Status s;
+    for (const auto &interceptor : interceptors) {
+        if (interceptor.type & type) {
+            s = interceptor();
+            if (!s.is_ok()) {
+                break;
+            }
+        }
+    }
+    return s;
+}
+
 auto FakeEnv::get_file_contents(const std::string &filename) const -> std::string
 {
     const auto file = m_state.find(filename);
@@ -251,7 +266,7 @@ auto TestEnv::new_file(const std::string &filename, OpenMode mode, File *&out) -
             state = m_state.insert(state, {filename, FileState()});
         }
         state->second.unlinked = false;
-        out = new TestFile(filename, *out, *this);
+        out = new TestFile(filename, *out, *this, state->second);
     }
     return s;
 }
@@ -291,7 +306,7 @@ auto TestEnv::try_intercept_syscall(SyscallType type, const std::string &filenam
                 break;
             }
         }
-        CALICODB_EXPECT_NE(kNumSyscalls, type_index);
+        CALICODB_EXPECT_LT(type_index, kNumSyscalls);
         ++state->second.counters.values[type_index];
 
         for (const auto &interceptor : state->second.interceptors) {
@@ -303,14 +318,37 @@ auto TestEnv::try_intercept_syscall(SyscallType type, const std::string &filenam
     return Status::ok();
 }
 
-auto TestEnv::add_interceptor(const std::string &filename, Interceptor interceptor) -> void
+auto TestEnv::copy_file(const std::string &source, const std::string &target) -> void
+{
+    std::size_t src_size;
+    CALICODB_EXPECT_TRUE(file_size(source, src_size).is_ok());
+
+    File *src_file;
+    CALICODB_EXPECT_TRUE(new_file(source, kReadOnly, src_file).is_ok());
+    File *dst_file;
+    CALICODB_EXPECT_TRUE(new_file(target, kCreate | kReadWrite, dst_file).is_ok());
+
+    std::string buffer(src_size, '\0');
+    CALICODB_EXPECT_TRUE(src_file->read_exact(0, src_size, buffer.data()).is_ok());
+    CALICODB_EXPECT_TRUE(dst_file->write(0, buffer).is_ok());
+    CALICODB_EXPECT_TRUE(dst_file->sync().is_ok());
+
+    delete src_file;
+    delete dst_file;
+}
+
+auto TestEnv::get_state(const std::string &filename) -> FileState &
 {
     auto state = m_state.find(filename);
     if (state == end(m_state)) {
         state = m_state.insert(state, {filename, FileState()});
     }
-    // TODO: Combine with another interceptor if possible.
-    state->second.interceptors.emplace_back(std::move(interceptor));
+    return state->second;
+}
+
+auto TestEnv::add_interceptor(const std::string &filename, Interceptor interceptor) -> void
+{
+    get_state(filename).interceptors.emplace_back(std::move(interceptor));
 }
 
 auto TestEnv::clear_interceptors() -> void
@@ -328,43 +366,57 @@ auto TestEnv::clear_interceptors(const std::string &filename) -> void
     }
 }
 
-TestFile::TestFile(std::string filename, File &file, TestEnv &env)
+TestFile::TestFile(std::string filename, File &file, TestEnv &env, TestEnv::FileState &state)
     : FileWrapper(file),
       m_filename(std::move(filename)),
-      m_env(&env)
+      m_env(&env),
+      m_state(&state)
 {
 }
 
 TestFile::~TestFile()
 {
-    m_env->drop_after_last_sync(m_filename);
     delete target();
 }
 
 auto TestFile::read(std::size_t offset, std::size_t size, char *scratch, Slice *out) -> Status
 {
-    TRY_INTERCEPT_FROM(*m_env, kSyscallRead, m_filename);
-    return FileWrapper::read(offset, size, scratch, out);
+    auto s = try_intercept(m_state->interceptors, kSyscallRead);
+    if (s.is_ok()) {
+        s = FileWrapper::read(offset, size, scratch, out);
+    }
+    return s;
 }
 
 auto TestFile::read_exact(std::size_t offset, std::size_t size, char *out) -> Status
 {
-    TRY_INTERCEPT_FROM(*m_env, kSyscallRead, m_filename);
-    return FileWrapper::read_exact(offset, size, out);
+    auto s = try_intercept(m_state->interceptors, kSyscallRead);
+    if (s.is_ok()) {
+        s = FileWrapper::read_exact(offset, size, out);
+    }
+    return s;
 }
 
 auto TestFile::write(std::size_t offset, const Slice &in) -> Status
 {
-    TRY_INTERCEPT_FROM(*m_env, kSyscallWrite, m_filename);
-    return FileWrapper::write(offset, in);
+    auto s = try_intercept(m_state->interceptors, kSyscallWrite);
+    if (s.is_ok()) {
+        s = FileWrapper::write(offset, in);
+    }
+    return s;
 }
 
 auto TestFile::sync() -> Status
 {
-    TRY_INTERCEPT_FROM(*m_env, kSyscallSync, m_filename);
-    auto s = FileWrapper::sync();
+    auto s = try_intercept(m_state->interceptors, kSyscallSync);
     if (s.is_ok()) {
-        m_env->save_file_contents(m_filename);
+        s = FileWrapper::sync();
+        if (s.is_ok()) {
+            m_env->save_file_contents(m_filename);
+        }
+    } else {
+        // Only drop data due to a non-OK status from an interceptor.
+        m_env->drop_after_last_sync(m_filename);
     }
     return s;
 }

@@ -37,9 +37,7 @@ auto DB::open(const Options &options, const std::string &filename, DB *&db) -> S
     }
 
     auto *impl = new DBImpl(options, sanitized, clean_filename);
-    auto s = busy_wait(sanitized.busy, [impl, &sanitized] {
-        return impl->open(sanitized);
-    });
+    auto s = impl->open(sanitized);
 
     if (!s.is_ok()) {
         delete impl;

@@ -16,7 +16,6 @@
 namespace calicodb
 {
 
-struct FileHeader_;
 class Page;
 class Pager;
 class File;

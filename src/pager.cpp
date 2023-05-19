@@ -40,8 +40,6 @@ auto Pager::purge_page(PageRef &victim) -> void
 
 auto Pager::read_page(PageRef &out, size_t *size_out) -> Status
 {
-    CALICODB_EXPECT_NE(m_lock, kLockUnlocked);
-
     char *page = nullptr;
     Status s;
 
@@ -91,7 +89,7 @@ auto Pager::open(const Parameters &param, Pager *&out) -> Status
     CALICODB_EXPECT_LE(param.frame_count * kPageSize, kMaxCacheSize);
 
     out = new Pager(param);
-    return Status::ok();
+    return out->open_wal();
 }
 
 Pager::Pager(const Parameters &param)
@@ -132,21 +130,6 @@ auto Pager::page_count() const -> std::size_t
     return m_page_count;
 }
 
-auto Pager::lock_db(FileLockMode mode) -> Status
-{
-    auto s = m_file->file_lock(mode);
-    if (s.is_ok()) {
-        m_lock = mode;
-    }
-    return s;
-}
-
-auto Pager::unlock_db() -> void
-{
-    m_file->file_unlock();
-    m_lock = kLockUnlocked;
-}
-
 auto Pager::open_wal() -> Status
 {
     const Wal::Parameters param = {
@@ -169,7 +152,9 @@ auto Pager::close() -> Status
         return m_state->status;
     }
 
-    auto s = busy_wait(kLockShared);
+    // This connection already has a shared lock on the DB file. Attempt to upgrade to an
+    // exclusive lock, which, if successful would indicate that this is the only connection.
+    auto s = m_file->file_lock(kLockExclusive);
     if (s.is_ok()) {
         if (m_wal) {
             // Ignore the page count output by Wal::close(). The DB is being closed, so
@@ -177,48 +162,44 @@ auto Pager::close() -> Status
             std::size_t unused;
             s = m_wal->close(unused);
         }
-        finish();
+        m_file->file_unlock();
     }
     return s;
 }
 
-auto Pager::busy_wait(FileLockMode mode) -> Status
-{
-    return ::calicodb::busy_wait(m_busy, [mode, this] {
-        return lock_db(mode);
-    });
-}
-
 auto Pager::start_reader() -> Status
 {
-    CALICODB_EXPECT_NE(m_mode, kError);
+    CALICODB_EXPECT_NE(kError, m_mode);
+    CALICODB_EXPECT_NE(nullptr, m_wal);
     CALICODB_EXPECT_TRUE(assert_state());
 
     Status s;
-    if (m_mode == kOpen && (s = busy_wait(kLockShared)).is_ok()) {
-        if (m_wal == nullptr) {
-            s = open_wal();
-        }
-        if (s.is_ok()) {
-            m_wal->finish_reader();
+    if (m_mode != kOpen) {
+        return s;
+    }
+    if (s.is_ok()) {
+        m_wal->finish_reader();
 
-            bool changed;
-            if ((s = m_wal->start_reader(changed)).is_ok()) {
-                if (changed) {
-                    purge_cached_pages();
-                }
-                m_mode = kRead;
-                m_refresh_root = true;
-                if ((s = refresh_state()).is_ok()) {
-                    m_save.mode = kRead;
-                    m_save.page_count = m_page_count;
-                    m_save.freelist_head = m_freelist.m_head;
-                }
+        bool changed;
+        s = busy_wait(m_busy, [this, &changed] {
+            return m_wal->start_reader(changed);
+        });
+        if (s.is_ok()) {
+            if (changed) {
+                purge_cached_pages();
+            }
+            m_mode = kRead;
+            m_refresh_root = true;
+            s = refresh_state();
+            if (s.is_ok()) {
+                m_save.mode = kRead;
+                m_save.page_count = m_page_count;
+                m_save.freelist_head = m_freelist.m_head;
             }
         }
-        if (!s.is_ok()) {
-            finish();
-        }
+    }
+    if (!s.is_ok()) {
+        finish();
     }
     return s;
 }
@@ -227,15 +208,17 @@ auto Pager::start_writer() -> Status
 {
     CALICODB_EXPECT_NE(m_mode, kOpen);
     CALICODB_EXPECT_NE(m_mode, kError);
-    CALICODB_EXPECT_EQ(m_lock, kLockShared);
     CALICODB_EXPECT_TRUE(assert_state());
 
+    Status s;
     if (m_mode == kRead) {
-        CALICODB_TRY(m_wal->start_writer());
-        m_mode = kWrite;
-        m_save.mode = kWrite;
+        s = m_wal->start_writer();
+        if (s.is_ok()) {
+            m_mode = kWrite;
+            m_save.mode = kWrite;
+        }
     }
-    return Status::ok();
+    return s;
 }
 
 auto Pager::commit() -> Status
@@ -313,7 +296,6 @@ auto Pager::finish() -> void
     }
     m_mode = kOpen;
     m_save = {};
-    unlock_db();
 }
 
 auto Pager::purge_cached_pages() -> void
@@ -336,21 +318,15 @@ auto Pager::purge_cached_pages() -> void
 auto Pager::checkpoint(bool reset) -> Status
 {
     CALICODB_EXPECT_EQ(m_mode, kOpen);
-    CALICODB_EXPECT_EQ(m_lock, kLockUnlocked);
     CALICODB_EXPECT_TRUE(assert_state());
-    Status s;
-    if (!m_wal) {
-        if ((s = start_reader()).is_ok()) {
-            finish();
-        } else {
-            return s;
-        }
+    bool ignore;
+    auto s = m_wal->start_reader(ignore);
+    if (s.is_ok()) {
+        m_wal->finish_reader();
+    } else if (!s.is_busy()) {
+        return s;
     }
-    if ((s = busy_wait(kLockShared)).is_ok()) {
-        s = m_wal->checkpoint(reset);
-        unlock_db();
-    }
-    return s;
+    return m_wal->checkpoint(reset);
 }
 
 auto Pager::flush_all_pages() -> Status
@@ -564,15 +540,12 @@ auto Pager::assert_state() const -> bool
             break;
         case kRead:
             CALICODB_EXPECT_TRUE(m_state->status.is_ok());
-            CALICODB_EXPECT_GE(m_lock, kLockShared);
             CALICODB_EXPECT_FALSE(m_dirtylist.head);
             break;
         case kWrite:
-            CALICODB_EXPECT_GE(m_lock, kLockShared);
             CALICODB_EXPECT_TRUE(m_wal);
             break;
         case kDirty:
-            CALICODB_EXPECT_GE(m_lock, kLockShared);
             CALICODB_EXPECT_TRUE(m_wal);
             break;
         case kError:

@@ -15,7 +15,6 @@ namespace calicodb
 auto DBImpl::open(const Options &sanitized) -> Status
 {
     File *file = nullptr;
-    auto exists = false;
     ScopeGuard guard = [&file, this] {
         if (m_pager == nullptr) {
             delete file;
@@ -24,13 +23,24 @@ auto DBImpl::open(const Options &sanitized) -> Status
 
     auto s = m_env->new_file(m_db_filename, Env::kReadWrite, file);
     if (s.is_ok()) {
-        exists = true;
+        if (sanitized.error_if_exists) {
+            return Status::invalid_argument(
+                "database \"" + m_db_filename + "\" already exists");
+        }
     } else if (s.is_io_error()) {
         if (!sanitized.create_if_missing) {
             return Status::invalid_argument(
                 "database \"" + m_db_filename + "\" does not exist");
         }
+        if (m_env->remove_file(m_wal_filename).is_ok()) {
+            logv(m_log, R"(removed old WAL file at "%s")", m_wal_filename.c_str());
+        }
         s = m_env->new_file(m_db_filename, Env::kCreate, file);
+    }
+    if (s.is_ok()) {
+        s = busy_wait(m_busy, [file] {
+            return file->file_lock(kLockShared);
+        });
     }
     if (!s.is_ok()) {
         return s;
@@ -49,20 +59,14 @@ auto DBImpl::open(const Options &sanitized) -> Status
         (cache_size + kPageSize - 1) / kPageSize,
         sanitized.sync,
     };
-    CALICODB_TRY(Pager::open(pager_param, m_pager));
+    m_pager = new Pager(pager_param);
 
-    if (exists) {
-        if (sanitized.error_if_exists) {
-            return Status::invalid_argument(
-                "database \"" + m_db_filename + "\" already exists");
-        }
-        if (m_env->file_exists(m_wal_filename)) {
-            s = m_pager->checkpoint(false);
-        }
-    } else {
-        logv(m_log, "setting up a new database");
-        if (m_env->remove_file(m_wal_filename).is_ok()) {
-            logv(m_log, R"(removed old WAL file at "%s")", m_wal_filename.c_str());
+    const auto needs_ckpt = m_env->file_exists(m_wal_filename);
+    s = m_pager->open_wal();
+    if (s.is_ok() && needs_ckpt) {
+        s = m_pager->checkpoint(false);
+        if (s.is_busy()) {
+            s = Status::ok();
         }
     }
     std::move(guard).cancel();
@@ -102,14 +106,15 @@ auto DBImpl::destroy(const Options &options, const std::string &filename) -> Sta
 
     DB *db;
     Txn *txn;
-    Status s;
 
     // Determine the WAL filename, and make sure `filename` refers to a CalicoDB
     // database. The file identifier is not checked until a transaction is started.
     std::string wal_name;
-    if ((s = DB::open(copy, filename, db)).is_ok()) {
+    auto s = DB::open(copy, filename, db);
+    if (s.is_ok()) {
         wal_name = db_impl(db)->m_wal_filename;
-        if ((s = db->new_txn(false, txn)).is_ok()) {
+        s = db->new_txn(false, txn);
+        if (s.is_ok()) {
             delete txn;
         }
         delete db;
@@ -187,22 +192,25 @@ auto DBImpl::new_txn(bool write, Txn *&out) -> Status
     if (m_txn) {
         return already_running_error(m_txn->m_write);
     }
-    ScopeGuard guard = [this] {
-        m_pager->finish();
-    };
 
     // Forward error statuses. If an error is set at this point, then something
     // has gone very wrong.
-    CALICODB_TRY(m_state.status);
-    CALICODB_TRY(m_pager->start_reader());
-    if (write) {
-        CALICODB_TRY(m_pager->start_writer());
+    auto s = m_state.status;
+    if (!s.is_ok()) {
+        return s;
     }
-    m_txn = new TxnImpl(*m_pager, m_state.status, write);
-    m_txn->m_backref = &m_txn;
-    out = m_txn;
-    std::move(guard).cancel();
-    return Status::ok();
+    s = m_pager->start_reader();
+    if (s.is_ok() && write) {
+        s = m_pager->start_writer();
+    }
+    if (s.is_ok()) {
+        m_txn = new TxnImpl(*m_pager, m_state.status, write);
+        m_txn->m_backref = &m_txn;
+        out = m_txn;
+    } else {
+        m_pager->finish();
+    }
+    return s;
 }
 
 auto DBImpl::TEST_pager() const -> const Pager &

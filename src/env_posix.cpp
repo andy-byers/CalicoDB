@@ -182,7 +182,7 @@ struct INode final {
 
 [[nodiscard]] static auto posix_busy() -> Status
 {
-    return Status::busy(strerror(EBUSY));
+    return Status::busy(std::strerror(EBUSY));
 }
 
 static constexpr std::size_t kOpenCloseTimeout = 100;
