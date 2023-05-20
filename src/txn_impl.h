@@ -17,8 +17,9 @@ public:
     explicit TxnImpl(Pager &pager, Status &status, bool write);
     ~TxnImpl() override;
     [[nodiscard]] auto status() const -> Status override;
-    [[nodiscard]] auto new_table(const TableOptions &options, const std::string &name, Table *&out) -> Status override;
-    [[nodiscard]] auto drop_table(const std::string &name) -> Status override;
+    [[nodiscard]] auto schema() const -> Cursor & override;
+    [[nodiscard]] auto new_table(const TableOptions &options, const Slice &name, Table *&out) -> Status override;
+    [[nodiscard]] auto drop_table(const Slice &name) -> Status override;
     [[nodiscard]] auto vacuum() -> Status override;
     [[nodiscard]] auto commit() -> Status override;
 
@@ -29,8 +30,9 @@ private:
 
     [[nodiscard]] auto vacuum_freelist() -> Status;
 
-    mutable Schema m_schema;
+    mutable Schema m_schema_obj;
     TxnImpl **m_backref = nullptr;
+    Cursor *m_schema;
     Pager *m_pager;
     Status *m_status;
     bool m_write = false;

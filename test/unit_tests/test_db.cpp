@@ -511,6 +511,44 @@ TEST_F(DBTests, CheckpointResize)
     ASSERT_EQ(kPageSize, file_size(kDBName));
 }
 
+TEST_F(DBTests, ListTables)
+{
+    ASSERT_OK(m_db->update([](auto &txn) {
+        Table *tables[5] = {};
+        EXPECT_OK(txn.new_table(TableOptions(), "a", tables[0]));
+        EXPECT_OK(txn.new_table(TableOptions(), "b", tables[1]));
+        EXPECT_OK(txn.new_table(TableOptions(), "c", tables[2]));
+        EXPECT_OK(txn.new_table(TableOptions(), "d", tables[3]));
+        EXPECT_OK(txn.new_table(TableOptions(), "e", tables[4]));
+        for (const auto &p : tables) {
+            delete p;
+        }
+        EXPECT_OK(txn.drop_table("a"));
+        EXPECT_OK(txn.drop_table("b"));
+        EXPECT_OK(txn.drop_table("d"));
+        return Status::ok();
+    }));
+    ASSERT_OK(m_db->view([](auto &txn) {
+        Table *c, *e;
+        TableOptions tbopt;
+        tbopt.create_if_missing = false;
+        auto &schema = txn.schema();
+        schema.seek_first();
+        EXPECT_TRUE(schema.is_valid());
+        EXPECT_EQ("c", schema.key());
+        EXPECT_OK(txn.new_table(tbopt, schema.key().to_string(), c));
+        schema.next();
+        EXPECT_TRUE(schema.is_valid());
+        EXPECT_EQ("e", schema.key());
+        EXPECT_OK(txn.new_table(tbopt, schema.key().to_string(), e));
+        schema.next();
+        EXPECT_FALSE(schema.is_valid());
+        delete c;
+        delete e;
+        return Status::ok();
+    }));
+}
+
 TEST(OldWalTests, HandlesOldWalFile)
 {
     static constexpr auto kOldWal = "./testwal";
@@ -820,11 +858,12 @@ protected:
             } else if (!s.is_ok()) {
                 return s;
             }
-            for (std::size_t i = 0; i < kRecordCount; ++i) {
+            // Iterate through the records twice. The same value should be read each time.
+            for (std::size_t i = 0; i < kRecordCount * 2; ++i) {
                 std::string value;
                 // If the table exists, then it must contain kRecordCount records (the first writer to run
                 // makes sure of this).
-                s = tbl->get(tools::integral_key(i), &value);
+                s = tbl->get(tools::integral_key(i % kRecordCount), &value);
                 if (s.is_ok()) {
                     U64 result;
                     Slice slice(value);
@@ -832,9 +871,6 @@ protected:
                     if (i) {
                         EXPECT_EQ(latest, result);
                     } else {
-                        if (latest > result) {
-                            std::cerr << table_impl(tbl)->TEST_tree().TEST_to_string() << '\n';
-                        }
                         EXPECT_LE(latest, result);
                         latest = result;
                     }
@@ -920,20 +956,21 @@ protected:
                 DB *db;
                 ASSERT_OK(new_connection(false, db));
 
-                ++count;
+                count.fetch_add(1);
                 while (count.load() < total) {
                     std::this_thread::yield();
                 }
 
+                Status s;
                 if (i < nrd) {
+                    // Readers should never block. Anything that would block a reader resolves in a
+                    // bounded amount of time, so the implementation just waits.
                     ASSERT_OK(reader(*db, latest[i])) << "reader (" << i << ") failed";
                 } else if (i < nrd + nwr) {
-                    Status s;
                     while ((s = writer(*db)).is_busy()) {
                     }
                     ASSERT_OK(s) << "writer (" << i << ") failed";
                 } else {
-                    Status s;
                     while ((s = checkpointer(*db, reset)).is_busy()) {
                     }
                     ASSERT_OK(s) << (reset ? "reset" : "passive") << " checkpointer (" << i << ") failed";

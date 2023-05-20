@@ -89,21 +89,30 @@ public:
     void operator=(Txn &) = delete;
 
     // Return the status associated with this transaction
-    // On creation, a Txn will always have an OK status. Only read-write
-    // transactions can have a non-OK status. The status may be set when a
-    // non-const method fails on this object, or any Table created from it.
+    // On creation, a Txn will always have an OK status. Only read-write transactions
+    // can have a non-OK status. The status may be set when a non-const method fails
+    // on this object, or any Table created from it.
     [[nodiscard]] virtual auto status() const -> Status = 0;
+
+    // Return a reference to a cursor that iterates over the database schema
+    // NOTE: The returned cursor must not be used after the Txn itself is delete'd. The
+    // underlying storage for this object is freed at that point.
+    // The database schema is a special table stores the name and location of every
+    // other table in the database. Calling Cursor::key() on the returned cursor gives a
+    // table name, and calling Cursor::value() gives a (non-readable) variable-length
+    // integer. See cursor.h for additional requirements pertaining to cursor use.
+    [[nodiscard]] virtual auto schema() const -> Cursor & = 0;
 
     // Create or open a table on the database
     // Note that tables cannot be created during readonly transactions. A
     // non-OK status is returned in this case.
-    [[nodiscard]] virtual auto new_table(const TableOptions &options, const std::string &name, Table *&out) -> Status = 0;
+    [[nodiscard]] virtual auto new_table(const TableOptions &options, const Slice &name, Table *&out) -> Status = 0;
 
     // Remove a table from the database
     // REQUIRES: Transaction is writable and table `name` is not open
     // If a table named `name` exists, this method drops it and returns an OK status. If
     // `name` does not exist, returns a status for which Status::is_not_found() is true.
-    [[nodiscard]] virtual auto drop_table(const std::string &name) -> Status = 0;
+    [[nodiscard]] virtual auto drop_table(const Slice &name) -> Status = 0;
 
     // Defragment the database
     // REQUIRES: Transaction is writable

@@ -672,43 +672,6 @@ auto Tree::create(Pager &pager, bool is_root, Id *out) -> Status
     return Status::ok();
 }
 
-auto Tree::track_cursor(CursorImpl &cursor) -> void
-{
-    if (m_cursors) {
-        CALICODB_EXPECT_FALSE(m_cursors->m_prev);
-        m_cursors->m_prev = &cursor;
-    }
-    cursor.m_prev = nullptr;
-    cursor.m_next = m_cursors;
-    m_cursors = &cursor;
-}
-
-auto Tree::forget_cursor(CursorImpl &cursor) -> void
-{
-    CALICODB_EXPECT_TRUE(m_cursors);
-    CALICODB_EXPECT_FALSE(m_cursors->m_prev);
-
-    if (cursor.m_prev) {
-        cursor.m_prev->m_next = cursor.m_next;
-    } else {
-        CALICODB_EXPECT_EQ(&cursor, m_cursors);
-        m_cursors = cursor.m_next;
-    }
-    auto *next = cursor.m_next;
-    if (next) {
-        next->m_prev = cursor.m_prev;
-        cursor.m_next = nullptr;
-    }
-    cursor.m_prev = nullptr;
-}
-
-auto Tree::inform_cursors() -> void
-{
-    for (auto *c = m_cursors; c; c = c->m_next) {
-        c->m_needs_reposition = true;
-    }
-}
-
 auto Tree::node_iterator(Node &node) const -> NodeIterator
 {
     const NodeIterator::Parameters param = {
@@ -1334,13 +1297,7 @@ Tree::Tree(Pager &pager, const Id *root_id)
 {
 }
 
-Tree::~Tree()
-{
-    for (auto *c = m_cursors; c; c = c->m_next) {
-        c->m_tree = nullptr;
-    }
-    inform_cursors();
-}
+Tree::~Tree() = default;
 
 auto Tree::report_stats(ReportType type, std::size_t increment) const -> void
 {
@@ -1400,7 +1357,6 @@ auto Tree::put(const Slice &key, const Slice &value, bool *exists) -> Status
     CALICODB_TRY(PayloadManager::emplace(*m_pager, cell_scratch(), node, key, value, index));
     CALICODB_TRY(resolve_overflow(std::move(node)));
     report_stats(kBytesWritten, key.size() + value.size());
-    inform_cursors();
 
     if (exists != nullptr) {
         *exists = exact;
@@ -1423,7 +1379,6 @@ auto Tree::erase(const Slice &key) -> Status
         upgrade(node);
         CALICODB_TRY(remove_cell(node, index));
 
-        inform_cursors();
         return resolve_underflow(std::move(node), anchor);
     }
     release(std::move(node));
@@ -2344,12 +2299,7 @@ auto Tree::TEST_validate() -> void
 Cursor::Cursor() = default;
 Cursor::~Cursor() = default;
 
-CursorImpl::~CursorImpl()
-{
-    if (m_tree) {
-        m_tree->forget_cursor(*this);
-    }
-}
+CursorImpl::~CursorImpl() = default;
 
 auto CursorImpl::is_valid() const -> bool
 {
@@ -2359,18 +2309,6 @@ auto CursorImpl::is_valid() const -> bool
 auto CursorImpl::status() const -> Status
 {
     return m_status;
-}
-
-auto CursorImpl::reposition() -> std::string
-{
-    CALICODB_EXPECT_TRUE(m_needs_reposition);
-    m_needs_reposition = false;
-
-    CALICODB_EXPECT_GT(m_key_size, 0);
-    CALICODB_EXPECT_LE(m_key_size, m_key.size());
-    auto key = m_key.substr(0, m_key_size);
-    seek(key);
-    return key;
 }
 
 auto CursorImpl::fetch_payload() -> Status
@@ -2446,12 +2384,6 @@ auto CursorImpl::seek_last() -> void
 auto CursorImpl::next() -> void
 {
     CALICODB_EXPECT_TRUE(is_valid());
-    if (m_needs_reposition) {
-        const auto prev = reposition();
-        if (!is_valid() || prev < key()) {
-            return;
-        }
-    }
     m_key_size = 0;
     m_value_size = 0;
 
@@ -2483,12 +2415,6 @@ auto CursorImpl::next() -> void
 auto CursorImpl::previous() -> void
 {
     CALICODB_EXPECT_TRUE(is_valid());
-    if (m_needs_reposition) {
-        const auto prev = reposition();
-        if (!is_valid() || key() < prev) {
-            return;
-        }
-    }
     m_key_size = 0;
     m_value_size = 0;
 
@@ -2565,7 +2491,6 @@ auto CursorInternal::make_cursor(Tree &tree) -> Cursor *
 {
     auto *cursor = new CursorImpl(tree);
     invalidate(*cursor, default_cursor_status());
-    tree.track_cursor(*cursor);
     return cursor;
 }
 

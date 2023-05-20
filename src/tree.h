@@ -252,10 +252,6 @@ private:
     [[nodiscard]] auto fix_links(Node &node) -> Status;
     [[nodiscard]] auto cell_scratch() -> char *;
 
-    auto track_cursor(CursorImpl &cursor) -> void;
-    auto forget_cursor(CursorImpl &cursor) -> void;
-    auto inform_cursors() -> void;
-
     enum ReportType {
         kBytesRead,
         kBytesWritten,

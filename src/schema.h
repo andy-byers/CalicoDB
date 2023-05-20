@@ -22,8 +22,9 @@ public:
     explicit Schema(Pager &pager, Status &status);
     ~Schema();
 
-    [[nodiscard]] auto new_table(const TableOptions &options, const std::string &name, Table *&out) -> Status;
-    [[nodiscard]] auto drop_table(const std::string &name) -> Status;
+    [[nodiscard]] auto new_cursor() -> Cursor *;
+    [[nodiscard]] auto new_table(const TableOptions &options, const Slice &name, Table *&out) -> Status;
+    [[nodiscard]] auto drop_table(const Slice &name) -> Status;
 
     [[nodiscard]] auto vacuum_page(Id page_id, bool &success) -> Status;
 
@@ -31,13 +32,11 @@ public:
     // tables were rerooted
     [[nodiscard]] auto vacuum_finish() -> Status;
 
-    auto inform_live_cursors() -> void;
-
     auto TEST_validate() const -> void;
 
 private:
-    [[nodiscard]] auto corrupted_root_id(const std::string &table_name, const Slice &value) -> Status;
-    [[nodiscard]] auto construct_table_state(const std::string &name, Id root_id, Table *&out) -> Status;
+    [[nodiscard]] auto corrupted_root_id(const Slice &name, const Slice &value) -> Status;
+    [[nodiscard]] auto construct_table_state(const Slice &name, Id root_id, Table *&out) -> Status;
     [[nodiscard]] auto decode_root_id(const Slice &data, Id &out) -> bool;
     static auto encode_root_id(Id id, std::string &out) -> void;
 
