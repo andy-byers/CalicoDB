@@ -9,8 +9,7 @@
 #include "tree.h"
 #include "unit_tests.h"
 #include "wal.h"
-#include <array>
-#include <barrier>
+#include <atomic>
 #include <filesystem>
 #include <gtest/gtest.h>
 
@@ -910,18 +909,21 @@ protected:
     auto consistency_check_step(const ConsistencyCheckParam &param) -> void
     {
         const auto total = param.read_count + param.write_count + param.ckpt_count;
-        std::barrier sync_point(static_cast<std::ptrdiff_t>(total));
         std::vector<U64> latest(param.read_count, param.start_value);
         std::vector<std::thread> threads;
+        std::atomic<int> count(0);
         threads.reserve(total);
         for (std::size_t i = 0; i < total; ++i) {
-            threads.emplace_back([i, param, &latest, &sync_point, this] {
+            threads.emplace_back([i, param, total, &latest, &count, this] {
                 const auto &[nrd, nwr, nck, _1, reset, _2] = param;
-                sync_point.arrive_and_wait();
 
                 DB *db;
                 ASSERT_OK(new_connection(false, db));
-                sync_point.arrive_and_wait();
+
+                ++count;
+                while (count.load() < total) {
+                    std::this_thread::yield();
+                }
 
                 if (i < nrd) {
                     ASSERT_OK(reader(*db, latest[i])) << "reader (" << i << ") failed";
