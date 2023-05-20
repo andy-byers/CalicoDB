@@ -34,11 +34,11 @@ It is intended for read-heavy embedded applications.
 + Supports multiple readers and a single writer simultaneously
 + Per-table bidirectional iteration using cursors
 + Crash protection via write-ahead logging
-+ Vacuum operation to reclaim unused memory while running
-+ Various parameters can be tuned (cache size, etc.)
++ Live defragmentation is supported
 
 ## Caveats
 + Database is single-threaded: all I/O runs in the main thread
++ Database page size is fixed at 4 KiB
 + Concurrent usage requires each connection to have its own `DB`
 + Platform must support shared-memory primitives
 + Will not work on network filesystems
@@ -52,7 +52,7 @@ The unit tests depend on `@google/googletest`, and the benchmarks depend on `@go
 Both are downloaded using during the build.
 
 ## Performance
-Performance benchmarks can be found [here](./test/benchmarks).
+Performance benchmarks can be found [here](test/benchmarks).
 
 ## TODO
 1. Get everything code reviewed!

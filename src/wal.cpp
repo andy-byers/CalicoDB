@@ -9,7 +9,6 @@
 #include "encoding.h"
 #include "logging.h"
 #include "scope_guard.h"
-#include <atomic>
 
 namespace calicodb
 {
@@ -1238,14 +1237,16 @@ auto WalImpl::write(PageRef *dirty, std::size_t db_size) -> Status
 
         put_u32(&header[0], kWalMagic);
         put_u32(&header[4], kWalVersion);
-        put_u32(&header[8], 0); // TODO: Was page_size field
+        put_u32(&header[8], 0); // Reserved field
         put_u32(&header[12], m_ckpt_number);
         if (m_ckpt_number == 0) {
             m_hdr.salt[0] = m_env->rand();
             m_hdr.salt[1] = m_env->rand();
         }
         std::memcpy(&header[16], m_hdr.salt, sizeof(m_hdr.salt));
-        compute_checksum(Slice(header, sizeof(header) - sizeof(cksum)), nullptr, cksum);
+        // Compute the checksum of the header bytes up to the checksum field.
+        const Slice target(header, sizeof(header) - sizeof(cksum));
+        compute_checksum(target, nullptr, cksum);
         put_u32(&header[24], cksum[0]);
         put_u32(&header[28], cksum[1]);
 
@@ -1275,8 +1276,9 @@ auto WalImpl::write(PageRef *dirty, std::size_t db_size) -> Status
                 if (m_redo_cksum == 0 || frame < m_redo_cksum) {
                     m_redo_cksum = frame;
                 }
-                const Slice page(p->page, kPageSize);
-                CALICODB_TRY(m_wal->write(frame_offset(frame) + WalFrameHdr::kSize, page));
+                CALICODB_TRY(m_wal->write(
+                    frame_offset(frame) + WalFrameHdr::kSize,
+                    Slice(p->page, kPageSize)));
                 continue;
             }
         }
@@ -1461,10 +1463,12 @@ auto WalImpl::transfer_contents(bool reset) -> Status
             // what SQLite does for `SQLITE_CHECKPOINT_RESTART`. New connections will
             // take readmark 0 and read directly from the database file, and the next
             // writer will reset the log.
-            CALICODB_TRY(busy_wait(m_busy, [this] {
+            s = busy_wait(m_busy, [this] {
                 return lock_exclusive(READ_LOCK(1), kReaderCount - 1);
-            }));
-            unlock_exclusive(READ_LOCK(1), kReaderCount - 1);
+            });
+            if (s.is_ok()) {
+                unlock_exclusive(READ_LOCK(1), kReaderCount - 1);
+            }
         }
     }
     return s;

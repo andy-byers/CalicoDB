@@ -11,10 +11,10 @@ Given that a process accessing a CalicoDB database shuts down properly, the reco
 While running, however, 2 additional files are maintained:
 + `-wal`: The `-wal` file is named like the database file, but with a suffix of `-wal`.
 Updates to database pages are written here, rather than the database file.
-See [`-wal` file](#-wal-file) for details.
+See [WAL file](#wal-file) for details.
 + `-shm`: The `-shm` file is named like the `-wal` file, but with a suffix of `-shm` in place of `-wal`.
 Greatly speeds up the process of locating specific database pages in the WAL.
-See [`-shm` file](#-shm-file) for details.
+See [shm file](#shm-file) for details.
 
 ### Env
 The env construct handles platform-specific filesystem operations and I/O.
@@ -79,7 +79,7 @@ In addition to facilitating the vacuum operation, pointer maps make splits and m
 
 ### WAL
 
-#### `-wal` file
+#### WAL file
 As described in [Architecture](#architecture), a database named `~/cats` will store its WAL in a file named `~/cats-wal`.
 This file, hereafter called the WAL file, is opened the first time a transaction is started on the database.
 The WAL file consists of a fixed-length header, followed by 0 or more WAL frames.
@@ -89,7 +89,7 @@ Most writes to the WAL are sequential, the exception being when a page is writte
 In that case, the old version of the page will be overwritten.
 This lets the number of frames added to the WAL be proportional to the number of pages modified during a given transaction.
 
-#### `-shm` file
+#### shm file
 Since the database file is never written during a transaction, its contents quickly become stale.
 This means that pages that exist in the WAL must be read from the WAL, not the database file.
 The shm file is used to store the WAL index data structure, which provides a way to quickly locate pages in the WAL.
@@ -110,7 +110,7 @@ In order to make the library fast enough to be useful, several layers of caching
 First, there is the pager layer, which caches database pages in memory.
 Dirty pages are written to the WAL on commit or eviction from the cache.
 This lets a running transaction modify a given page multiple times before it needs to be written out.
-As mentioned in [Checkpoints](#checkpoints), the WAL eventually needs to be written back to the database file.
+Eventually, the WAL will need to be written back to the database file.
 When this happens, each unique page in the WAL is written back to the database exactly once.
 The pages are also sorted by page number, so each write during the checkpoint is sequential.
 
