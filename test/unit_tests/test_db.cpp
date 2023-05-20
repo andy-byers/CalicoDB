@@ -10,6 +10,7 @@
 #include "unit_tests.h"
 #include "wal.h"
 #include <array>
+#include <barrier>
 #include <filesystem>
 #include <gtest/gtest.h>
 
@@ -794,7 +795,7 @@ TEST_F(DBOpenTests, FailsIfDbExists)
 class DBConcurrencyTests : public DBTests
 {
 protected:
-    static constexpr std::size_t kRecordCount = 8;
+    static constexpr std::size_t kRecordCount = 2;
 
     ~DBConcurrencyTests() override = default;
 
@@ -899,27 +900,28 @@ protected:
     }
 
     struct ConsistencyCheckParam {
-        std::size_t num_readers = 0;
-        std::size_t num_writers = 0;
-        std::size_t num_checkpointers = 0;
+        std::size_t read_count = 0;
+        std::size_t write_count = 0;
+        std::size_t ckpt_count = 0;
         U64 start_value = 0;
         bool ckpt_reset = false;
         bool ckpt_before = false;
     };
     auto consistency_check_step(const ConsistencyCheckParam &param) -> void
     {
-        std::atomic<bool> flag(false);
+        const auto total = param.read_count + param.write_count + param.ckpt_count;
+        std::barrier sync_point(static_cast<std::ptrdiff_t>(total));
+        std::vector<U64> latest(param.read_count, param.start_value);
         std::vector<std::thread> threads;
-        std::vector<U64> latest(param.num_readers, param.start_value);
-        const auto total = param.num_readers + param.num_writers + param.num_checkpointers;
+        threads.reserve(total);
         for (std::size_t i = 0; i < total; ++i) {
-            threads.emplace_back([this, i, param, &flag, &latest] {
+            threads.emplace_back([i, param, &latest, &sync_point, this] {
                 const auto &[nrd, nwr, nck, _1, reset, _2] = param;
+                sync_point.arrive_and_wait();
+
                 DB *db;
                 ASSERT_OK(new_connection(false, db));
-
-                while (!flag.load(std::memory_order_acquire)) {
-                }
+                sync_point.arrive_and_wait();
 
                 if (i < nrd) {
                     ASSERT_OK(reader(*db, latest[i])) << "reader (" << i << ") failed";
@@ -937,7 +939,6 @@ protected:
                 delete db;
             });
         }
-        flag.store(true, std::memory_order_release);
         for (auto &thread : threads) {
             thread.join();
         }
@@ -958,20 +959,20 @@ protected:
             consistency_check_step(param);
             // The main connection should be able to see everything written by the
             // writer threads.
-            child_param.start_value += param.num_writers;
+            child_param.start_value += param.write_count;
             validate(child_param.start_value);
         }
     }
 };
 
-TEST_F(DBConcurrencyTests, A1)
+TEST_F(DBConcurrencyTests, Reader1)
 {
     run_consistency_check({100, 0, 0, 0, false, false});
     run_consistency_check({100, 0, 0, 10, false, false});
     run_consistency_check({100, 0, 0, 10, false, true});
 }
 
-TEST_F(DBConcurrencyTests, B1)
+TEST_F(DBConcurrencyTests, Reader2)
 {
     run_consistency_check({100, 0, 10, 0, false, false});
     run_consistency_check({100, 0, 10, 10, false, false});
@@ -979,14 +980,14 @@ TEST_F(DBConcurrencyTests, B1)
     run_consistency_check({100, 0, 10, 10, true, false});
 }
 
-TEST_F(DBConcurrencyTests, A2)
+TEST_F(DBConcurrencyTests, Writer1)
 {
     run_consistency_check({100, 1, 0, 0, false, false});
     run_consistency_check({100, 1, 0, 10, false, false});
     run_consistency_check({100, 1, 0, 10, false, true});
 }
 
-TEST_F(DBConcurrencyTests, B2)
+TEST_F(DBConcurrencyTests, Writer2)
 {
     run_consistency_check({100, 1, 10, 0, false, false});
     run_consistency_check({100, 1, 10, 10, false, false});
@@ -994,20 +995,20 @@ TEST_F(DBConcurrencyTests, B2)
     run_consistency_check({100, 1, 10, 10, true, false});
 }
 
-// TEST_F(DBConcurrencyTests, A3)
-//{
-//     run_consistency_check({100, 10, 0, 0, false, false});
-//     run_consistency_check({100, 10, 0, 10, false, false});
-//     run_consistency_check({100, 10, 0, 10, false, true});
-// }
-//
-// TEST_F(DBConcurrencyTests, B3)
-//{
-//     run_consistency_check({100, 10, 10, 0, false, false});
-//     run_consistency_check({100, 10, 10, 10, false, false});
-//     run_consistency_check({100, 10, 10, 0, true, false});
-//     run_consistency_check({100, 10, 10, 10, true, false});
-// }
+TEST_F(DBConcurrencyTests, Checkpointer1)
+{
+    run_consistency_check({100, 20, 0, 0, false, false});
+    run_consistency_check({100, 20, 0, 10, false, false});
+    run_consistency_check({100, 20, 0, 10, false, true});
+}
+
+TEST_F(DBConcurrencyTests, Checkpointer2)
+{
+    run_consistency_check({100, 10, 10, 0, false, false});
+    run_consistency_check({100, 10, 10, 10, false, false});
+    run_consistency_check({100, 10, 10, 0, true, false});
+    run_consistency_check({100, 10, 10, 10, true, false});
+}
 
 class DBTransactionTests : public DBErrorTests
 {

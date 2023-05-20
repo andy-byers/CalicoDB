@@ -1,7 +1,7 @@
 
 option(CALICODB_BuildBenchmarks "Build the benchmarks" Off)
 option(CALICODB_BuildFuzzers "Build the fuzz targets" Off)
-option(CALICODB_BuildUnitTests "Build the unit tests" On)
+option(CALICODB_BuildTests "Build the tests" On)
 
 set(gtest_force_shared_crt On CACHE BOOL "" FORCE)
 set(INSTALL_GTEST Off CACHE INTERNAL "" FORCE)
@@ -16,18 +16,13 @@ include(GoogleTest)
 set(CALICODB_TOOLS_DIR "${PROJECT_SOURCE_DIR}/test/tools")
 add_subdirectory(tools)
 
-# TODO: These tests are not finished yet...
-option(CALICODB_BuildInProgressTests Off)
-if(CALICODB_BuildInProgressTests)
-    add_subdirectory(tests)
+if(CALICODB_BuildTests)
+    add_subdirectory(doc_tests)
+    add_subdirectory(unit_tests)
 endif()
 
 if(CALICODB_BuildFuzzers)
     add_subdirectory(fuzzers)
-endif()
-
-if(CALICODB_BuildUnitTests)
-    add_subdirectory(unit_tests)
 endif()
 
 if(CALICODB_BuildBenchmarks)

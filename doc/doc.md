@@ -3,13 +3,16 @@
 + [Build](#build)
 + [API](#api)
     + [Slices](#slices)
+    + [Statuses](#statuses)
     + [Opening a database](#opening-a-database)
     + [Readonly transactions](#readonly-transactions)
     + [Read-write transactions](#read-write-transactions)
+    + [Manual transactions](#manual-transactions)
     + [Tables](#tables)
     + [Cursors](#cursors)
     + [Database properties](#database-properties)
     + [Closing a database](#closing-a-database)
+    + [Checkpoints](#checkpoints)
     + [Destroying a database](#destroying-a-database)
 + [Acknowledgements](#acknowledgements)
 
@@ -60,27 +63,72 @@ assert(s2 < "bc");
 assert(s2.starts_with("ab"));
 ```
 
+### Statuses
+```C++
+// All CalicoDB routines that have the possibility of failure will return (or otherwise expose) a status object.
+// Status objects have a code, a subcode, and possibly a message. The default constructor creates an OK status,
+// that is, a status for which Status::is_ok() returns true (not an error status).
+calicodb::Status s;
+
+// The following static method also creates an OK status.
+s = calicodb::Status::ok();
+
+// The code and subcode can be retrieved as follows:
+std::cerr << "code: " << int(s.code()) << ", subcode: " << int(s.subcode()) << '\n';
+
+// A human-readable string representing the status can be created with:
+std::cerr << s.to_string() << '\n';
+
+// Non-OK statuses must be created through one of the static methods. Note that a status can have either a
+// message, or a subcode, but not both.
+s = calicodb::Status::io_error("uh oh");
+s = calicodb::Status::invalid_argument();
+s = calicodb::Status::busy(calicodb::Status::kRetry); // Equivalent to Status::retry()
+
+// One can check the type of status with one of the following methods:
+if (s.is_ok()) {
+    
+} else if (s.is_io_error()) {
+    
+} else if (s.is_retry()) { // Equivalent to s.is_busy() && s.subcode() == Status::kRetry
+    
+}
+```
+
 ### Opening a database
 ```C++
 // Set some initialization options.
 const calicodb::Options options = {
     // Size of the page cache in bytes.
-    .cache_size = 0x200000,
-    
-    // Store the WAL file in a nonstandard location. The directory "location" must already exist.
-    .wal_filename = "/location/calicodb_wal",
-    
-    // Write info log messages to this calicodb::Sink *.
-    .info_log = nullptr,
-    
-    // This can be used to inject a custom Env implementation. (see the tools::FakeEnv class in
-    // tools/env_helpers.h for an example that stores its files in memory).
-    .env = nullptr,
+    1'024 * calicodb::kPageSize, 
+                                                    
+    // Filename to use for the WAL. If empty, creates the WAL at
+    // "dbname-wal", where "dbname" is the name of the database.
+    "wal-filename",
+
+    // Destination for info log messages.
+    nullptr,
+
+    // Custom storage environment. See env.h for details.
+    nullptr,
+
+    // Action to take while waiting on a file lock.
+    nullptr,
+
+    // If true, create the database if it is missing.
+    true,
+
+    // If true, return with an error if the database already exists.
+    false,
+
+    // If true, sync the WAL file on every commit. Hurts performance quite a bit,
+    // but provides extra durability.
+    false,
 };
 
 // Create or open a database at "/tmp/cats".
 calicodb::DB *db;
-calicodb::Status s = calicodb::DB::open(options, "/tmp/cats", db);
+s = calicodb::DB::open(options, "/tmp/cats", db);
 
 // Handle failure. s.to_string() provides a string representation of the status.
 if (!s.is_ok()) {
@@ -91,26 +139,11 @@ if (!s.is_ok()) {
 ### Readonly transactions
 Readonly transactions are typically run through the `DB::view()` API.
 ```C++
-calicodb::Status s = db->view([](calicodb::Txn &txn) {
+s = db->view([](calicodb::Txn &txn) {
     // Open tables (see #tables) and read some data. The `Txn` object is managed by the 
     // database. DB::view() will forward the status returned by this callable.
-    return Status::ok();
+    return calicodb::Status::ok();
 });
-```
-
-Readonly transactions can also be run manually, however, the caller is responsible for `delete`ing the `Txn` handle when it is no longer needed.
-```C++
-calicodb::Txn *txn;
-
-// Start a readonly transaction.
-s = db->new_txn(false, txn);
-if (!s.is_ok()) {
-}
-
-// Read some data (see #tables).
-
-// Finish the transaction.
-delete txn;
 ```
 
 ### Read-write transactions
@@ -128,16 +161,29 @@ s = db->update([](auto &txn) {
     // status is forwarded to the caller. Note that Txn::commit() does not 
     // invalidate the transaction handle. This allows one to perform multiple 
     // batches of writes per DB::update().
-    return Status::ok();
+    return calicodb::Status::ok();
 });
 ```
 
-Like readonly transactions, read-write transactions can be run manually.
+### Manual transactions
+Transactions can also be run manually.
+The caller is responsible for `delete`ing the `Txn` handle when it is no longer needed.
+
 ```C++
 calicodb::Txn *txn;
 
+// Start a readonly transaction.
+s = db->new_txn(false, txn);
+if (!s.is_ok()) {
+}
+
+// Read some data (see #tables).
+
+// Finish the transaction.
+delete txn;
+
 // Start a read-write transaction.
-calicodb::Status s = db->new_txn(true, txn);
+s = db->new_txn(true, txn);
 if (!s.is_ok()) {
 }
 
@@ -150,9 +196,7 @@ if (!s.is_ok()) {
     // are no changes made to the database in this case.
 }
 
-// Clean up the transaction handle. If Txn::commit() was not called, all changes
-// made during this transaction will be dropped.
-delete txn;
+// Leave txn for other examples to use.
 ```
 
 ### Tables
@@ -171,7 +215,7 @@ tbopt.create_if_missing = true;
 
 // Create the table. Note that this table will not persist in the database 
 // unless `Txn::commit()` is called prior to the transaction ending.
-calicodb::Status s = txn->new_table(tbopt, "cats", table);
+s = txn->new_table(tbopt, "cats", table);
 if (s.is_ok()) {
     // `table` holds the address of the handle for the open table "cats". 
     // "cats" will be open until the handle is delete'd.
@@ -201,11 +245,12 @@ if (s.is_ok()) {
     // An I/O error occurred. It is not an error if the key does not exist.
 }
 
-// Close the table.
-delete table;
+// As with any other object created using a new_*() method, tables are closed
+// with operator delete(). We'll leave this table open so it can be used in
+// other examples.
 
-// Remove the table named "cats" from the database. "cats" must be closed.
-s = txn->drop_table("cats");
+// Remove the table named "CATS" from the database. "CATS" must be closed.
+s = txn->drop_table("CATS");
 if (s.is_ok()) {
     
 }
@@ -214,28 +259,28 @@ if (s.is_ok()) {
 ### Cursors
 
 ```C++
-calicodb::Cursor *cursor = table->new_cursor();
+calicodb::Cursor *c = table->new_cursor();
 
-cursor->seek_first();
-while (cursor->is_valid()) {
-    const calicodb::Slice key = cursor->key();
-    const calicodb::Slice val = cursor->value();
-    cursor->next();
+c->seek_first();
+while (c->is_valid()) {
+    const calicodb::Slice key = c->key();
+    const calicodb::Slice val = c->value();
+    c->next();
 }
 
-cursor->seek_last();
-while (cursor->is_valid()) {
+c->seek_last();
+while (c->is_valid()) {
     // Use the cursor.
-    cursor->previous();
+    c->previous();
 }
 
-cursor->seek("freya");
-while (cursor->is_valid() && cursor->key() <= "lilly") {
+c->seek("freya");
+while (c->is_valid() && c->key() <= "lilly") {
     // Key is in [freya,lilly].
-    cursor->next();
+    c->next();
 }
 
-delete cursor;
+delete c;
 ```
 
 ### Database properties
@@ -244,6 +289,9 @@ delete cursor;
 // Database properties are made available as strings.
 std::string prop;
 bool exists = db->get_property("calicodb.stats", &prop);
+if (exists) {
+    std::cout << "calicodb.stats: " << prop << '\n';
+}
 
 // Passing nullptr for the property value causes get_property() to perform a simple existence check, 
 // without attempting to populate the property value string.
@@ -257,13 +305,30 @@ If a WAL is left behind after closing, then something has gone wrong.
 CalicoDB will attempt recovery on the next startup.
 
 ```C++
+// We left this table open in #tables. It must be closed before the Txn that
+// opened it is closed.
+delete table;
+
+// This transaction was started earlier, in #manual-transactions. It must be
+// finished before the database is closed.
+delete txn;
+
+// Now we can close the database. See DB::update()/DB::view() for an API that
+// takes away some of the pain associated with transaction lifetimes, leaving
+// table management up to the user.
 delete db;
+```
+
+### Checkpoints
+As described in [a](design.md#shm-file)
+```C++
+
 ```
 
 ### Destroying a database
 
 ```C++
-calicodb::Status s = calicodb::DB::destroy(options, "/tmp/cats");
+s = calicodb::DB::destroy(options, "/tmp/cats");
 if (s.is_ok()) {
     // Database has been destroyed.
 }
@@ -278,8 +343,5 @@ if (s.is_ok()) {
 3. https://github.com/google/leveldb
     + Much of the API is inspired by LevelDB
     + Some parts of the CMake build process are taken from their `CMakeLists.txt`
-4. https://github.com/facebook/rocksdb/wiki/Write-Ahead-Log
-    + Explanation of RocksDB's WAL
-    + The idea to have multiple different record types and to use a "tail" buffer are from this document
-5. https://stablecog.com/
+4. https://stablecog.com/
     + Used to generate the original calico cat image, which was then further modified to produce [mascot.png](mascot.png)
