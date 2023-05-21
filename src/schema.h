@@ -49,7 +49,6 @@ private:
 
     struct RootedTable {
         Table *table = nullptr;
-        Tree *tree = nullptr;
         Id root;
     };
 

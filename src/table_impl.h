@@ -7,19 +7,18 @@
 
 #include "calicodb/db.h"
 #include "page.h"
+#include "tree.h"
 #include <vector>
 
 namespace calicodb
 {
-
-class Tree;
 
 class TableImpl : public Table
 {
 public:
     friend class TxnImpl;
 
-    explicit TableImpl(Tree *&tree, Status &status);
+    explicit TableImpl(Pager &pager, Status &status, const Id *root);
     ~TableImpl() override;
     [[nodiscard]] auto new_cursor() const -> Cursor * override;
     [[nodiscard]] auto get(const Slice &key, std::string *value) const -> Status override;
@@ -28,12 +27,12 @@ public:
 
     [[nodiscard]] auto TEST_tree() const -> const Tree &
     {
-        return **m_tree;
+        return m_tree;
     }
 
 private:
     const Status *m_status;
-    Tree **m_tree;
+    mutable Tree m_tree;
 
     // NOTE: This field must be set by `TxnImpl` after the table object is allocated.
     bool m_readonly = true;

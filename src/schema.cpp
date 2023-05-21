@@ -75,9 +75,14 @@ auto Schema::create_table(const TableOptions &options, const Slice &name, Table 
         if (!options.create_if_missing) {
             return Status::invalid_argument("table \"" + name.to_string() + "\" does not exist");
         }
-        CALICODB_TRY(Tree::create(*m_pager, false, &root_id));
-        encode_root_id(root_id, value);
-        CALICODB_TRY(m_map->put(name, value));
+        s = Tree::create(*m_pager, false, &root_id);
+        if (s.is_ok()) {
+            encode_root_id(root_id, value);
+            s = m_map->put(name, value);
+        }
+        if (!s.is_ok()) {
+            return s;
+        }
     }
     return construct_table_state(root_id, out);
 }
@@ -112,8 +117,7 @@ auto Schema::construct_table_state(Id root_id, Table *&out) -> Status
     } else {
         itr = m_tables.insert(itr, {root_id, {}});
         itr->second.root = root_id;
-        itr->second.tree = new Tree(*m_pager, &itr->second.root);
-        itr->second.table = new TableImpl(itr->second.tree, *m_status);
+        itr->second.table = new TableImpl(*m_pager, *m_status, &itr->second.root);
         out = itr->second.table;
     }
     return Status::ok();
@@ -122,7 +126,10 @@ auto Schema::construct_table_state(Id root_id, Table *&out) -> Status
 auto Schema::drop_table(const Slice &name) -> Status
 {
     std::string value;
-    CALICODB_TRY(m_map->get(name, &value));
+    auto s = m_map->get(name, &value);
+    if (!s.is_ok()) {
+        return s;
+    }
 
     Id root_id;
     if (!decode_root_id(value, root_id)) {
@@ -133,10 +140,14 @@ auto Schema::drop_table(const Slice &name) -> Status
         delete itr->second.table;
     }
     Tree drop(*m_pager, &root_id);
-    CALICODB_TRY(Tree::destroy(drop));
-    CALICODB_TRY(m_map->erase(name));
-    m_tables.erase(root_id);
-    return Status::ok();
+    s = Tree::destroy(drop);
+    if (s.is_ok()) {
+        s = m_map->erase(name);
+    }
+    if (s.is_ok()) {
+        m_tables.erase(root_id);
+    }
+    return s;
 }
 
 auto Schema::vacuum_reroot(Id old_id, Id new_id) -> void
@@ -185,7 +196,7 @@ auto Schema::vacuum_finish() -> Status
             // Update the in-memory root stored by each Tree.
             auto tree = m_tables.find(root->second);
             CALICODB_EXPECT_NE(tree, end(m_tables));
-            if (tree->second.tree) {
+            if (tree->second.table) {
                 tree->second.root = root->second;
             } else {
                 // This tree is not actually open. The RootedTree entry exists
@@ -218,12 +229,13 @@ auto Schema::vacuum_page(Id page_id, bool &success) -> Status
 
 auto Schema::TEST_validate() const -> void
 {
-    for (const auto &[_, tree] : m_tables) {
-        if (tree.tree) {
-            tree.tree->TEST_validate();
+    for (const auto &[_, table] : m_tables) {
+        if (table.table) {
+            const auto &tree = table_impl(table.table)->TEST_tree();
+            tree.TEST_validate();
 
             // Make sure the last vacuum didn't miss any roots.
-            CALICODB_EXPECT_EQ(tree.root, tree.tree->root());
+            CALICODB_EXPECT_EQ(table.root, tree.root());
         }
     }
 }

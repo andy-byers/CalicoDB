@@ -9,22 +9,17 @@
 namespace calicodb
 {
 
-TableImpl::TableImpl(Tree *&tree, Status &status)
+TableImpl::TableImpl(Pager &pager, Status &status, const Id *root)
     : m_status(&status),
-      m_tree(&tree)
+      m_tree(pager, root)
 {
 }
 
-TableImpl::~TableImpl()
-{
-    delete *m_tree;
-    // NULL-out the tree pointer contained in the schema object.
-    *m_tree = nullptr;
-}
+TableImpl::~TableImpl() = default;
 
 auto TableImpl::new_cursor() const -> Cursor *
 {
-    auto *cursor = CursorInternal::make_cursor(**m_tree);
+    auto *cursor = CursorInternal::make_cursor(m_tree);
     if (!m_status->is_ok()) {
         CursorInternal::invalidate(*cursor, *m_status);
     }
@@ -35,7 +30,7 @@ auto TableImpl::get(const Slice &key, std::string *value) const -> Status
 {
     auto s = *m_status;
     if (s.is_ok()) {
-        s = (*m_tree)->get(key, value);
+        s = m_tree.get(key, value);
     }
     return s;
 }
@@ -47,7 +42,7 @@ auto TableImpl::put(const Slice &key, const Slice &value) -> Status
     }
     auto s = *m_status;
     if (s.is_ok()) {
-        s = (*m_tree)->put(key, value);
+        s = m_tree.put(key, value);
     }
     return s;
 }
@@ -59,7 +54,7 @@ auto TableImpl::erase(const Slice &key) -> Status
     }
     auto s = *m_status;
     if (s.is_ok()) {
-        s = (*m_tree)->erase(key);
+        s = m_tree.erase(key);
     }
     return s;
 }
