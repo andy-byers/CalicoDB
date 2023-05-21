@@ -14,8 +14,3 @@ target_link_libraries(unit_tests
         PUBLIC calicodb_tools gtest)
 add_test(NAME unit_tests
         COMMAND unit_tests)
-
-# TODO: Move somewhere else.
-add_executable(notes notes.cpp)
-target_link_libraries(notes
-        PUBLIC calicodb)

@@ -104,9 +104,14 @@ public:
     [[nodiscard]] virtual auto schema() const -> Cursor & = 0;
 
     // Create or open a table on the database
-    // Note that tables cannot be created during readonly transactions. A
-    // non-OK status is returned in this case.
-    [[nodiscard]] virtual auto new_table(const TableOptions &options, const Slice &name, Table *&out) -> Status = 0;
+    // On success, stores a table handle in `tb_out` and returns an OK status. The table
+    // named `name` can then be accessed through `tb_out` until the transaction is
+    // finished (or until `name` is dropped through Txn::drop_table()). `tb_out` is owned
+    // by this Txn and must not be delete'd. On failure, stores nullptr in `tb_out` and
+    // returns a non-OK status.
+    // NOTE: Tables cannot be created during readonly transactions. A status for which
+    // Status::is_readonly() evaluates to true is returned in this case.
+    [[nodiscard]] virtual auto create_table(const TableOptions &options, const Slice &name, Table *&tb_out) -> Status = 0;
 
     // Remove a table from the database
     // REQUIRES: Transaction is writable and table `name` is not open

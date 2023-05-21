@@ -70,9 +70,14 @@ public:
         return m_real->status();
     }
 
-    [[nodiscard]] auto new_table(const TableOptions &options, const std::string &name, Table *&out) -> Status override;
+    [[nodiscard]] auto schema() const -> Cursor & override
+    {
+        return m_real->schema();
+    }
 
-    [[nodiscard]] auto drop_table(const std::string &name) -> Status override
+    [[nodiscard]] auto create_table(const TableOptions &options, const Slice &name, Table *&out) -> Status override;
+
+    [[nodiscard]] auto drop_table(const Slice &name) -> Status override
     {
         auto s = m_model->drop_table(name);
         const auto t = m_real->drop_table(name);
@@ -229,13 +234,13 @@ CheckedTxn::~CheckedTxn()
     delete m_model;
 }
 
-auto CheckedTxn::new_table(const TableOptions &options, const std::string &name, Table *&out) -> Status
+auto CheckedTxn::create_table(const TableOptions &options, const Slice &name, Table *&out) -> Status
 {
     Table *real_table;
-    auto s = m_real->new_table(options, name, real_table);
+    auto s = m_real->create_table(options, name, real_table);
     if (s.is_ok()) {
         Table *model_table;
-        (void)m_model->new_table(options, name, model_table);
+        (void)m_model->create_table(options, name, model_table);
         out = new CheckedTable(*real_table, *model_table);
     }
     return s;
@@ -288,7 +293,6 @@ class DBFuzzer
 
     auto reopen_db() -> void
     {
-        delete m_tbl;
         delete m_txn;
         delete m_db;
         m_tbl = nullptr;
@@ -300,7 +304,6 @@ class DBFuzzer
 
     auto reopen_txn() -> void
     {
-        delete m_tbl;
         delete m_txn;
         m_tbl = nullptr;
         CHECK_OK(m_db->new_txn(true, m_txn));
@@ -309,8 +312,9 @@ class DBFuzzer
 
     auto reopen_tbl() -> void
     {
-        delete m_tbl;
-        CHECK_OK(m_txn->new_table(TableOptions(), "TABLE", m_tbl));
+        // This should be a NOOP if the table handle has already been created
+        // since this transaction was started. The same exact handle is returned.
+        CHECK_OK(m_txn->create_table(TableOptions(), "TABLE", m_tbl));
     }
 
 public:
@@ -326,7 +330,6 @@ public:
 
     ~DBFuzzer()
     {
-        delete m_tbl;
         delete m_txn;
         delete m_db;
     }

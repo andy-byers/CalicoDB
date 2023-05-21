@@ -18,7 +18,7 @@ public:
     ~TxnImpl() override;
     [[nodiscard]] auto status() const -> Status override;
     [[nodiscard]] auto schema() const -> Cursor & override;
-    [[nodiscard]] auto new_table(const TableOptions &options, const Slice &name, Table *&out) -> Status override;
+    [[nodiscard]] auto create_table(const TableOptions &options, const Slice &name, Table *&out) -> Status override;
     [[nodiscard]] auto drop_table(const Slice &name) -> Status override;
     [[nodiscard]] auto vacuum() -> Status override;
     [[nodiscard]] auto commit() -> Status override;

@@ -23,7 +23,7 @@ public:
     ~Schema();
 
     [[nodiscard]] auto new_cursor() -> Cursor *;
-    [[nodiscard]] auto new_table(const TableOptions &options, const Slice &name, Table *&out) -> Status;
+    [[nodiscard]] auto create_table(const TableOptions &options, const Slice &name, Table *&out) -> Status;
     [[nodiscard]] auto drop_table(const Slice &name) -> Status;
 
     [[nodiscard]] auto vacuum_page(Id page_id, bool &success) -> Status;
@@ -36,7 +36,7 @@ public:
 
 private:
     [[nodiscard]] auto corrupted_root_id(const Slice &name, const Slice &value) -> Status;
-    [[nodiscard]] auto construct_table_state(const Slice &name, Id root_id, Table *&out) -> Status;
+    [[nodiscard]] auto construct_table_state(Id root_id, Table *&out) -> Status;
     [[nodiscard]] auto decode_root_id(const Slice &data, Id &out) -> bool;
     static auto encode_root_id(Id id, std::string &out) -> void;
 
@@ -47,12 +47,13 @@ private:
     friend class Tree;
     auto vacuum_reroot(Id old_id, Id new_id) -> void;
 
-    struct RootedTree {
+    struct RootedTable {
+        Table *table = nullptr;
         Tree *tree = nullptr;
         Id root;
     };
 
-    HashMap<RootedTree> m_trees;
+    HashMap<RootedTable> m_tables;
     HashMap<Id> m_reroot;
     Status *m_status;
     Pager *m_pager;

@@ -67,10 +67,9 @@ protected:
     [[nodiscard]] static auto put(Txn &txn, const TableOptions &options, const std::string &tbname, int kv, int round = 0) -> Status
     {
         Table *table;
-        auto s = txn.new_table(options, tbname, table);
+        auto s = txn.create_table(options, tbname, table);
         if (s.is_ok()) {
             s = put(*table, kv, round);
-            delete table;
         }
         return s;
     }
@@ -86,10 +85,9 @@ protected:
     [[nodiscard]] static auto put_range(Txn &txn, const TableOptions &options, const std::string &tbname, int kv1, int kv2, int round = 0) -> Status
     {
         Table *table;
-        auto s = txn.new_table(options, tbname, table);
+        auto s = txn.create_table(options, tbname, table);
         if (s.is_ok()) {
             s = put_range(*table, kv1, kv2, round);
-            delete table;
         }
         return s;
     }
@@ -102,10 +100,9 @@ protected:
     [[nodiscard]] static auto erase(Txn &txn, const TableOptions &options, const std::string &tbname, int kv, int round = 0) -> Status
     {
         Table *table;
-        auto s = txn.new_table(options, tbname, table);
+        auto s = txn.create_table(options, tbname, table);
         if (s.is_ok()) {
             s = erase(*table, kv, round);
-            delete table;
         }
         return s;
     }
@@ -121,10 +118,9 @@ protected:
     [[nodiscard]] static auto erase_range(Txn &txn, const TableOptions &options, const std::string &tbname, int kv1, int kv2, int round = 0) -> Status
     {
         Table *table;
-        auto s = txn.new_table(options, tbname, table);
+        auto s = txn.create_table(options, tbname, table);
         if (s.is_ok()) {
             s = erase_range(*table, kv1, kv2, round);
-            delete table;
         }
         return s;
     }
@@ -148,10 +144,9 @@ protected:
     [[nodiscard]] static auto check(Txn &txn, const TableOptions &options, const std::string &tbname, int kv, bool exists, int round = 0) -> Status
     {
         Table *table;
-        auto s = txn.new_table(options, tbname, table);
+        auto s = txn.create_table(options, tbname, table);
         if (s.is_ok()) {
             s = check(*table, kv, exists, round);
-            delete table;
         }
         return s;
     }
@@ -215,10 +210,9 @@ protected:
     [[nodiscard]] static auto check_range(Txn &txn, const TableOptions &options, const std::string &tbname, int kv1, int kv2, bool exists, int round = 0) -> Status
     {
         Table *table;
-        auto s = txn.new_table(options, tbname, table);
+        auto s = txn.create_table(options, tbname, table);
         if (s.is_ok()) {
             s = check_range(*table, kv1, kv2, exists, round);
-            delete table;
         }
         return s;
     }
@@ -314,7 +308,7 @@ TEST_F(DBTests, ConvenienceFunctions)
         txn_impl(&txn);
         txn_impl(&const_txn);
         Table *tbl;
-        EXPECT_OK(txn.new_table(TableOptions(), "TABLE", tbl));
+        EXPECT_OK(txn.create_table(TableOptions(), "TABLE", tbl));
         const auto *const_tbl = tbl;
         (void)table_impl(tbl)->TEST_tree();
         table_impl(const_tbl);
@@ -341,12 +335,11 @@ TEST_F(DBTests, NewTable)
         Table *table;
         TableOptions tbopt;
         tbopt.create_if_missing = false;
-        EXPECT_NOK(txn.new_table(tbopt, "TABLE", table));
+        EXPECT_NOK(txn.create_table(tbopt, "TABLE", table));
         tbopt.create_if_missing = true;
-        EXPECT_OK(txn.new_table(tbopt, "TABLE", table));
-        delete table;
+        EXPECT_OK(txn.create_table(tbopt, "TABLE", table));
         tbopt.error_if_exists = true;
-        EXPECT_NOK(txn.new_table(tbopt, "TABLE", table));
+        EXPECT_NOK(txn.create_table(tbopt, "TABLE", table));
         return Status::ok();
     }));
 }
@@ -355,7 +348,7 @@ TEST_F(DBTests, TableBehavior)
 {
     ASSERT_OK(m_db->update([](auto &txn) {
         Table *table;
-        EXPECT_OK(txn.new_table(TableOptions(), "TABLE", table));
+        EXPECT_OK(txn.create_table(TableOptions(), "TABLE", table));
         // Table::put() should not accept an empty key.
         EXPECT_TRUE(table->put("", "value").is_invalid_argument());
         return Status::ok();
@@ -367,23 +360,21 @@ TEST_F(DBTests, ReadonlyTxn)
     ASSERT_OK(m_db->view([](auto &txn) {
         Table *table;
         // Cannot create a new table in a readonly transaction.
-        EXPECT_NOK(txn.new_table(TableOptions(), "TABLE", table));
+        EXPECT_NOK(txn.create_table(TableOptions(), "TABLE", table));
         return Status::ok();
     }));
     ASSERT_OK(m_db->update([](auto &txn) {
         Table *table;
-        EXPECT_OK(txn.new_table(TableOptions(), "TABLE", table));
-        delete table;
+        EXPECT_OK(txn.create_table(TableOptions(), "TABLE", table));
         return Status::ok();
     }));
     ASSERT_OK(m_db->view([](auto &txn) {
         EXPECT_TRUE(txn.vacuum().is_readonly());
         EXPECT_OK(txn.commit()); // NOOP, no changes to commit
         Table *table;
-        EXPECT_OK(txn.new_table(TableOptions(), "TABLE", table));
+        EXPECT_OK(txn.create_table(TableOptions(), "TABLE", table));
         EXPECT_TRUE(table->put("k", "v").is_readonly());
         EXPECT_TRUE(table->erase("k").is_readonly());
-        delete table;
         return Status::ok();
     }));
 }
@@ -397,7 +388,7 @@ TEST_F(DBTests, UpdateThenView)
         for (int i = 0; i < 3; ++i) {
             ASSERT_OK(m_db->update([i, tbopt, round](auto &txn) {
                 Table *table;
-                auto s = txn.new_table(tbopt, kTableStr + i, table);
+                auto s = txn.create_table(tbopt, kTableStr + i, table);
                 if (s.is_ok()) {
                     s = put_range(*table, 0, 1'000, round);
                     if (s.is_ok()) {
@@ -412,7 +403,7 @@ TEST_F(DBTests, UpdateThenView)
         for (int i = 0; i < 3; ++i) {
             ASSERT_OK(m_db->view([round, i, tbopt](auto &txn) {
                 Table *table;
-                auto s = txn.new_table(tbopt, kTableStr + i, table);
+                auto s = txn.create_table(tbopt, kTableStr + i, table);
                 if (s.is_ok()) {
                     EXPECT_OK(check_range(*table, 0, 250, true, round));
                     EXPECT_OK(check_range(*table, 250, 750, false, round));
@@ -436,7 +427,7 @@ TEST_F(DBTests, RollbackUpdate)
         for (int i = 0; i < 3; ++i) {
             ASSERT_TRUE(m_db->update([i, round](auto &txn) {
                                 Table *table;
-                                auto s = txn.new_table(TableOptions(), kTableStr + i, table);
+                                auto s = txn.create_table(TableOptions(), kTableStr + i, table);
                                 if (s.is_ok()) {
                                     s = put_range(*table, 0, 500, round);
                                     if (s.is_ok()) {
@@ -461,7 +452,7 @@ TEST_F(DBTests, RollbackUpdate)
         for (int i = 0; i < 3; ++i) {
             ASSERT_OK(m_db->view([round, i](auto &txn) {
                 Table *table;
-                auto s = txn.new_table(TableOptions(), kTableStr + i, table);
+                auto s = txn.create_table(TableOptions(), kTableStr + i, table);
                 if (s.is_ok()) {
                     EXPECT_OK(check_range(*table, 0, 500, true, round));
                     EXPECT_OK(check_range(*table, 500, 1'000, false, round));
@@ -485,9 +476,8 @@ TEST_F(DBTests, CheckpointResize)
 {
     ASSERT_OK(m_db->update([](auto &txn) {
         Table *table;
-        auto s = txn.new_table(TableOptions(), "TABLE", table);
+        auto s = txn.create_table(TableOptions(), "TABLE", table);
         if (s.is_ok()) {
-            delete table;
         }
         return s;
     }));
@@ -515,14 +505,11 @@ TEST_F(DBTests, ListTables)
 {
     ASSERT_OK(m_db->update([](auto &txn) {
         Table *tables[5] = {};
-        EXPECT_OK(txn.new_table(TableOptions(), "a", tables[0]));
-        EXPECT_OK(txn.new_table(TableOptions(), "b", tables[1]));
-        EXPECT_OK(txn.new_table(TableOptions(), "c", tables[2]));
-        EXPECT_OK(txn.new_table(TableOptions(), "d", tables[3]));
-        EXPECT_OK(txn.new_table(TableOptions(), "e", tables[4]));
-        for (const auto &p : tables) {
-            delete p;
-        }
+        EXPECT_OK(txn.create_table(TableOptions(), "a", tables[0]));
+        EXPECT_OK(txn.create_table(TableOptions(), "b", tables[1]));
+        EXPECT_OK(txn.create_table(TableOptions(), "c", tables[2]));
+        EXPECT_OK(txn.create_table(TableOptions(), "d", tables[3]));
+        EXPECT_OK(txn.create_table(TableOptions(), "e", tables[4]));
         EXPECT_OK(txn.drop_table("a"));
         EXPECT_OK(txn.drop_table("b"));
         EXPECT_OK(txn.drop_table("d"));
@@ -536,15 +523,13 @@ TEST_F(DBTests, ListTables)
         schema.seek_first();
         EXPECT_TRUE(schema.is_valid());
         EXPECT_EQ("c", schema.key());
-        EXPECT_OK(txn.new_table(tbopt, schema.key().to_string(), c));
+        EXPECT_OK(txn.create_table(tbopt, schema.key().to_string(), c));
         schema.next();
         EXPECT_TRUE(schema.is_valid());
         EXPECT_EQ("e", schema.key());
-        EXPECT_OK(txn.new_table(tbopt, schema.key().to_string(), e));
+        EXPECT_OK(txn.create_table(tbopt, schema.key().to_string(), e));
         schema.next();
         EXPECT_FALSE(schema.is_valid());
-        delete c;
-        delete e;
         return Status::ok();
     }));
 }
@@ -851,7 +836,7 @@ protected:
     {
         return db.view([&latest](auto &txn) {
             Table *tbl;
-            auto s = txn.new_table(TableOptions(), "TABLE", tbl);
+            auto s = txn.create_table(TableOptions(), "TABLE", tbl);
             if (s.is_invalid_argument()) {
                 // Writer hasn't created the table yet.
                 return Status::ok();
@@ -878,7 +863,6 @@ protected:
                     break;
                 }
             }
-            delete tbl;
             return s;
         });
     }
@@ -890,7 +874,7 @@ protected:
     {
         return db.update([](auto &txn) {
             Table *tbl = nullptr;
-            auto s = txn.new_table(TableOptions(), "TABLE", tbl);
+            auto s = txn.create_table(TableOptions(), "TABLE", tbl);
             for (std::size_t i = 0; s.is_ok() && i < kRecordCount; ++i) {
                 U64 result = 1;
                 std::string value;
@@ -907,7 +891,6 @@ protected:
                 s = tbl->put(tools::integral_key(i), tools::integral_key(result));
             }
             EXPECT_OK(s);
-            delete tbl;
             return s;
         });
     }

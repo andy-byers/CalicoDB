@@ -22,7 +22,7 @@ auto ModelDB::new_txn(bool, Txn *&out) -> Status
 
 ModelTxn::~ModelTxn() = default;
 
-auto ModelTxn::new_table(const TableOptions &options, const Slice &name, Table *&out) -> Status
+auto ModelTxn::create_table(const TableOptions &options, const Slice &name, Table *&out) -> Status
 {
     auto itr = m_temp.find(name.to_string());
     if (itr == end(m_temp)) {

@@ -22,6 +22,9 @@ Schema::Schema(Pager &pager, Status &status)
 
 Schema::~Schema()
 {
+    for (const auto &[_, state] : m_tables) {
+        delete state.table;
+    }
     delete m_map;
 }
 
@@ -41,7 +44,7 @@ auto Schema::new_cursor() -> Cursor *
     return CursorInternal::make_cursor(*m_map);
 }
 
-auto Schema::new_table(const TableOptions &options, const Slice &name, Table *&out) -> Status
+auto Schema::create_table(const TableOptions &options, const Slice &name, Table *&out) -> Status
 {
     CALICODB_EXPECT_FALSE(out);
 
@@ -51,9 +54,6 @@ auto Schema::new_table(const TableOptions &options, const Slice &name, Table *&o
             // Initialize the database file header, as well as the schema tree's root page.
             m_pager->initialize_root();
         } else {
-            // Read-only transaction cannot create a new table, and there are no tables
-            // created yet in this database (the schema table hasn't even been created).
-            // This code path ends up returning an invalid argument status.
             s = Status::not_found();
         }
     }
@@ -79,7 +79,7 @@ auto Schema::new_table(const TableOptions &options, const Slice &name, Table *&o
         encode_root_id(root_id, value);
         CALICODB_TRY(m_map->put(name, value));
     }
-    return construct_table_state(name, root_id, out);
+    return construct_table_state(root_id, out);
 }
 
 auto Schema::decode_root_id(const Slice &data, Id &out) -> bool
@@ -104,16 +104,18 @@ auto Schema::encode_root_id(Id id, std::string &out) -> void
     out.resize(static_cast<std::uintptr_t>(end - out.data()));
 }
 
-auto Schema::construct_table_state(const Slice &name, Id root_id, Table *&out) -> Status
+auto Schema::construct_table_state(Id root_id, Table *&out) -> Status
 {
-    auto itr = m_trees.find(root_id);
-    if (itr != end(m_trees) && itr->second.tree) {
-        return Status::invalid_argument("table \"" + name.to_string() + "\" is already open");
+    auto itr = m_tables.find(root_id);
+    if (itr != end(m_tables) && itr->second.table) {
+        out = itr->second.table;
+    } else {
+        itr = m_tables.insert(itr, {root_id, {}});
+        itr->second.root = root_id;
+        itr->second.tree = new Tree(*m_pager, &itr->second.root);
+        itr->second.table = new TableImpl(itr->second.tree, *m_status);
+        out = itr->second.table;
     }
-    itr = m_trees.insert(itr, {root_id, {}});
-    itr->second.root = root_id;
-    itr->second.tree = new Tree(*m_pager, &itr->second.root);
-    out = new TableImpl(itr->second.tree, *m_status);
     return Status::ok();
 }
 
@@ -126,33 +128,32 @@ auto Schema::drop_table(const Slice &name) -> Status
     if (!decode_root_id(value, root_id)) {
         return corrupted_root_id(name, value);
     }
-    auto itr = m_trees.find(root_id);
-    if (itr != end(m_trees) && itr->second.tree) {
-        return Status::invalid_argument(
-            "table \"" + name.to_string() + "\" is still open");
+    auto itr = m_tables.find(root_id);
+    if (itr != end(m_tables)) {
+        delete itr->second.table;
     }
     Tree drop(*m_pager, &root_id);
     CALICODB_TRY(Tree::destroy(drop));
     CALICODB_TRY(m_map->erase(name));
-    m_trees.erase(root_id);
+    m_tables.erase(root_id);
     return Status::ok();
 }
 
 auto Schema::vacuum_reroot(Id old_id, Id new_id) -> void
 {
-    auto tree = m_trees.find(old_id);
-    if (tree == end(m_trees)) {
-        RootedTree rooted;
+    auto tree = m_tables.find(old_id);
+    if (tree == end(m_tables)) {
+        RootedTable rooted;
         rooted.root = old_id;
-        m_trees.insert(tree, {old_id, rooted});
+        m_tables.insert(tree, {old_id, rooted});
     }
     // Rekey the tree. Leave the root ID stored in the tree state set
     // to the original root.
-    auto node = m_trees.extract(old_id);
+    auto node = m_tables.extract(old_id);
     CALICODB_EXPECT_FALSE(!node);
     node.key() = new_id;
     const auto root_id = node.mapped().root;
-    m_trees.insert(std::move(node));
+    m_tables.insert(std::move(node));
 
     // Map the original root ID to the newest root ID.
     m_reroot.insert_or_assign(root_id, new_id);
@@ -182,8 +183,8 @@ auto Schema::vacuum_finish() -> Status
                 break;
             }
             // Update the in-memory root stored by each Tree.
-            auto tree = m_trees.find(root->second);
-            CALICODB_EXPECT_NE(tree, end(m_trees));
+            auto tree = m_tables.find(root->second);
+            CALICODB_EXPECT_NE(tree, end(m_tables));
             if (tree->second.tree) {
                 tree->second.root = root->second;
             } else {
@@ -191,7 +192,7 @@ auto Schema::vacuum_finish() -> Status
                 // so that vacuum_reroot() could find the original root ID (or
                 // the table was just closed by the user, either way, the entry
                 // should be removed).
-                m_trees.erase(tree);
+                m_tables.erase(tree);
             }
             m_reroot.erase(root);
         }
@@ -217,7 +218,7 @@ auto Schema::vacuum_page(Id page_id, bool &success) -> Status
 
 auto Schema::TEST_validate() const -> void
 {
-    for (const auto &[_, tree] : m_trees) {
+    for (const auto &[_, tree] : m_tables) {
         if (tree.tree) {
             tree.tree->TEST_validate();
 
