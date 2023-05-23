@@ -105,7 +105,7 @@ auto DBImpl::destroy(const Options &options, const std::string &filename) -> Sta
     copy.create_if_missing = false;
 
     DB *db;
-    Txn *txn;
+    Txn *tx;
 
     // Determine the WAL filename, and make sure `filename` refers to a CalicoDB
     // database. The file identifier is not checked until a transaction is started.
@@ -113,9 +113,9 @@ auto DBImpl::destroy(const Options &options, const std::string &filename) -> Sta
     auto s = DB::open(copy, filename, db);
     if (s.is_ok()) {
         wal_name = db_impl(db)->m_wal_filename;
-        s = db->new_txn(false, txn);
+        s = db->new_txn(false, tx);
         if (s.is_ok()) {
-            delete txn;
+            delete tx;
         }
         delete db;
     }
@@ -180,8 +180,8 @@ static auto already_running_error(bool write) -> Status
 
 auto DBImpl::checkpoint(bool reset) -> Status
 {
-    if (m_txn) {
-        return already_running_error(m_txn->m_write);
+    if (m_tx) {
+        return already_running_error(m_tx->m_write);
     }
     return m_pager->checkpoint(reset);
 }
@@ -189,8 +189,8 @@ auto DBImpl::checkpoint(bool reset) -> Status
 auto DBImpl::new_txn(bool write, Txn *&out) -> Status
 {
     out = nullptr;
-    if (m_txn) {
-        return already_running_error(m_txn->m_write);
+    if (m_tx) {
+        return already_running_error(m_tx->m_write);
     }
 
     // Forward error statuses. If an error is set at this point, then something
@@ -204,9 +204,9 @@ auto DBImpl::new_txn(bool write, Txn *&out) -> Status
         s = m_pager->start_writer();
     }
     if (s.is_ok()) {
-        m_txn = new TxnImpl(*m_pager, m_state.status, write);
-        m_txn->m_backref = &m_txn;
-        out = m_txn;
+        m_tx = new TxnImpl(*m_pager, m_state.status, write);
+        m_tx->m_backref = &m_tx;
+        out = m_tx;
     } else {
         m_pager->finish();
     }

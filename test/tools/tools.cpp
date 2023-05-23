@@ -142,7 +142,7 @@ auto fill_db(DB &db, const std::string &tablename, RandomGenerator &random, std:
 auto fill_db(Txn &txn, const std::string &tablename, RandomGenerator &random, std::size_t num_records, std::size_t max_payload_size) -> std::map<std::string, std::string>
 {
     Table *table;
-    CHECK_OK(txn.create_table(TableOptions(), tablename, table));
+    CHECK_OK(txn.create_table(TableOptions(), tablename, &table));
     auto records = fill_db(*table, random, num_records, max_payload_size);
     return records;
 }
@@ -174,7 +174,7 @@ auto expect_db_contains(DB &db, const std::string &tablename, const std::map<std
 auto expect_db_contains(Txn &txn, const std::string &tablename, const std::map<std::string, std::string> &map) -> void
 {
     Table *table;
-    CHECK_OK(txn.create_table(TableOptions(), tablename, table));
+    CHECK_OK(txn.create_table(TableOptions(), tablename, &table));
     expect_db_contains(*table, map);
 }
 

@@ -16,6 +16,7 @@ namespace calicodb
 
 class CursorImpl;
 class Schema;
+class Tree;
 struct Node;
 
 // Maintains a list of available memory regions within a node, called the free
@@ -132,9 +133,6 @@ public:
     auto next() -> Id;
 };
 
-// TODO: This implementation takes a shortcut and reads fragmented keys into a temporary buffer.
-//       This isn't necessary: we could iterate through, page by page, and compare bytes as we encounter
-//       them. It's just a bit more complicated.
 class NodeIterator
 {
     Pager *m_pager = nullptr;
@@ -173,10 +171,98 @@ struct OverflowList {
 };
 
 struct PayloadManager {
-    [[nodiscard]] static auto emplace(Pager &pager, char *scratch, Node &node, const Slice &key, const Slice &value, std::size_t index) -> Status;
     [[nodiscard]] static auto promote(Pager &pager, char *scratch, Cell &cell, Id parent_id) -> Status;
     [[nodiscard]] static auto collect_key(Pager &pager, std::string &scratch, const Cell &cell, Slice *key) -> Status;
     [[nodiscard]] static auto collect_value(Pager &pager, std::string &scratch, const Cell &cell, Slice *value) -> Status;
+};
+
+
+class CursorImplV2 : public Cursor
+{
+    friend class Tree;
+
+    mutable Status m_status;
+    std::string m_buffer;
+    Tree *m_tree;
+
+    static constexpr std::size_t kMaxDepth = 20;
+    struct Location {
+        Id page_id;
+        unsigned index = 0;
+    } m_history[kMaxDepth - 1];
+    std::size_t m_level = 0;
+
+    Node m_node;
+
+    auto seek_to(Node node, std::size_t index) -> void;
+    auto fetch_payload() -> Status;
+
+public:
+    explicit CursorImplV2(Tree &tree)
+        : m_status(Status::not_found()),
+          m_tree(&tree)
+    {
+    }
+
+    ~CursorImplV2() override;
+
+    [[nodiscard]] auto is_valid() const -> bool override;
+    [[nodiscard]] auto status() const -> Status override;
+    [[nodiscard]] auto key() const -> Slice override;
+    [[nodiscard]] auto value() const -> Slice override;
+
+    auto seek(const Slice &key) -> void override;
+    auto seek_first() -> void override;
+    auto seek_last() -> void override;
+    auto next() -> void override;
+    auto previous() -> void override;
+};
+
+class CursorImpl : public Cursor
+{
+    mutable Status m_status;
+    std::string m_key;
+    std::string m_value;
+    std::size_t m_key_size = 0;
+    std::size_t m_value_size = 0;
+    Tree *m_tree;
+    struct Location {
+        Id page_id;
+        unsigned index = 0;
+        unsigned count = 0;
+    } m_loc;
+
+    auto seek_to(Node node, std::size_t index) -> void;
+    auto fetch_payload() -> Status;
+
+public:
+    friend class CursorInternal;
+    friend class Tree;
+
+    explicit CursorImpl(Tree &tree)
+        : m_tree(&tree)
+    {
+    }
+
+    ~CursorImpl() override;
+
+    [[nodiscard]] auto is_valid() const -> bool override;
+    [[nodiscard]] auto status() const -> Status override;
+    [[nodiscard]] auto key() const -> Slice override;
+    [[nodiscard]] auto value() const -> Slice override;
+
+    auto seek(const Slice &key) -> void override;
+    auto seek_first() -> void override;
+    auto seek_last() -> void override;
+    auto next() -> void override;
+    auto previous() -> void override;
+};
+
+class CursorInternal
+{
+public:
+    [[nodiscard]] static auto make_cursor(Tree &tree) -> Cursor *;
+    static auto invalidate(const Cursor &cursor, Status error) -> void;
 };
 
 struct TreeStatistics {
@@ -192,7 +278,7 @@ public:
     ~Tree();
     [[nodiscard]] static auto create(Pager &pager, bool is_root, Id *out) -> Status;
     [[nodiscard]] static auto destroy(Tree &tree) -> Status;
-    [[nodiscard]] auto put(const Slice &key, const Slice &value, bool *exists = nullptr) -> Status;
+    [[nodiscard]] auto put(const Slice &key, const Slice &value) -> Status;
     [[nodiscard]] auto get(const Slice &key, std::string *value) const -> Status;
     [[nodiscard]] auto erase(const Slice &key) -> Status;
     [[nodiscard]] auto vacuum_one(Id target, Schema &schema, bool *success = nullptr) -> Status;
@@ -224,6 +310,7 @@ private:
         bool exact = false;
     };
 
+    [[nodiscard]] auto emplace(Node &node, const Slice &key, const Slice &value, std::size_t index, bool &overflow) -> Status;
     [[nodiscard]] auto destroy_impl(Node node) -> Status;
     [[nodiscard]] auto vacuum_step(Page &free, Schema &schema, Id last_id) -> Status;
     [[nodiscard]] auto resolve_overflow(Node node) -> Status;
@@ -265,71 +352,14 @@ private:
     friend class CursorImpl;
     friend class TreeValidator;
 
-    // List of active cursors.
-    CursorImpl *m_cursors = nullptr;
-
     mutable TreeStatistics m_stats;
     mutable std::string m_key_scratch[2];
     mutable std::string m_node_scratch;
     mutable std::string m_cell_scratch;
     mutable std::string m_anchor;
     Pager *m_pager = nullptr;
+//    CursorImpl m_cursor;
     const Id *m_root_id = nullptr;
-};
-
-class CursorImpl : public Cursor
-{
-    struct Location {
-        Id page_id;
-        unsigned index = 0;
-        unsigned count = 0;
-    };
-    mutable Status m_status;
-    std::string m_key;
-    std::string m_value;
-    std::size_t m_key_size = 0;
-    std::size_t m_value_size = 0;
-    Tree *m_tree = nullptr;
-    Location m_loc;
-
-    CursorImpl *m_prev = nullptr;
-    CursorImpl *m_next = nullptr;
-
-    bool m_needs_reposition = false;
-
-    [[nodiscard]] auto reposition() -> std::string;
-
-    auto seek_to(Node node, std::size_t index) -> void;
-    auto fetch_payload() -> Status;
-
-public:
-    friend class CursorInternal;
-    friend class Tree;
-
-    explicit CursorImpl(Tree &tree)
-        : m_tree(&tree)
-    {
-    }
-
-    ~CursorImpl() override;
-
-    [[nodiscard]] auto is_valid() const -> bool override;
-    [[nodiscard]] auto status() const -> Status override;
-    [[nodiscard]] auto key() const -> Slice override;
-    [[nodiscard]] auto value() const -> Slice override;
-
-    auto seek(const Slice &key) -> void override;
-    auto seek_first() -> void override;
-    auto seek_last() -> void override;
-    auto next() -> void override;
-    auto previous() -> void override;
-};
-
-class CursorInternal
-{
-public:
-    [[nodiscard]] static auto make_cursor(Tree &tree) -> Cursor *;
-    static auto invalidate(const Cursor &cursor, Status error) -> void;
 };
 
 } // namespace calicodb

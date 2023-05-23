@@ -7,13 +7,13 @@
 
 #include "calicodb/db.h"
 #include "page.h"
+#include "tree.h"
 #include <unordered_map>
 
 namespace calicodb
 {
 
 class TableImpl;
-class Tree;
 
 // Representation of the database schema
 class Schema final
@@ -23,7 +23,7 @@ public:
     ~Schema();
 
     [[nodiscard]] auto new_cursor() -> Cursor *;
-    [[nodiscard]] auto create_table(const TableOptions &options, const Slice &name, Table *&out) -> Status;
+    [[nodiscard]] auto create_table(const TableOptions &options, const Slice &name, bool readonly, Table **tb_out) -> Status;
     [[nodiscard]] auto drop_table(const Slice &name) -> Status;
 
     [[nodiscard]] auto vacuum_page(Id page_id, bool &success) -> Status;
@@ -36,7 +36,7 @@ public:
 
 private:
     [[nodiscard]] auto corrupted_root_id(const Slice &name, const Slice &value) -> Status;
-    [[nodiscard]] auto construct_table_state(Id root_id, Table *&out) -> Status;
+    [[nodiscard]] auto construct_table_state(Id root_id, bool readonly) -> Table *;
     [[nodiscard]] auto decode_root_id(const Slice &data, Id &out) -> bool;
     static auto encode_root_id(Id id, std::string &out) -> void;
 
@@ -56,7 +56,7 @@ private:
     HashMap<Id> m_reroot;
     Status *m_status;
     Pager *m_pager;
-    Tree *m_map;
+    Tree m_map;
 };
 
 } // namespace calicodb

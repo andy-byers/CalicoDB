@@ -22,7 +22,7 @@ auto ModelDB::new_txn(bool, Txn *&out) -> Status
 
 ModelTxn::~ModelTxn() = default;
 
-auto ModelTxn::create_table(const TableOptions &options, const Slice &name, Table *&out) -> Status
+auto ModelTxn::create_table(const TableOptions &options, const Slice &name, Table **out) -> Status
 {
     auto itr = m_temp.find(name.to_string());
     if (itr == end(m_temp)) {
@@ -33,7 +33,9 @@ auto ModelTxn::create_table(const TableOptions &options, const Slice &name, Tabl
     } else if (options.error_if_exists) {
         return Status::invalid_argument("table exists");
     }
-    out = new ModelTable(itr->second);
+    if (out) {
+        *out = new ModelTable(itr->second);
+    }
     return Status::ok();
 }
 

@@ -18,7 +18,7 @@ class TableImpl : public Table
 public:
     friend class TxnImpl;
 
-    explicit TableImpl(Pager &pager, Status &status, const Id *root);
+    explicit TableImpl(Pager &pager, Status &status, const Id *root, bool readonly);
     ~TableImpl() override;
     [[nodiscard]] auto new_cursor() const -> Cursor * override;
     [[nodiscard]] auto get(const Slice &key, std::string *value) const -> Status override;

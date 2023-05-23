@@ -77,7 +77,7 @@ public:
         return *m_schema; // TODO
     }
 
-    [[nodiscard]] auto create_table(const TableOptions &options, const Slice &name, Table *&out) -> Status override;
+    [[nodiscard]] auto create_table(const TableOptions &options, const Slice &name, Table **out) -> Status override;
 
     [[nodiscard]] auto drop_table(const Slice &name) -> Status override
     {

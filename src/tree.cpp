@@ -454,24 +454,6 @@ auto erase_cell(Node &node, std::size_t index) -> void
     erase_cell(node, index, read_cell(node, index).size);
 }
 
-static auto emplace_cell(char *out, std::size_t key_size, std::size_t value_size, const Slice &local_key, const Slice &local_value, Id overflow_id) -> char *
-{
-    out = encode_varint(out, value_size);
-    out = encode_varint(out, key_size);
-
-    std::memcpy(out, local_key.data(), local_key.size());
-    out += local_key.size();
-
-    std::memcpy(out, local_value.data(), local_value.size());
-    out += local_value.size();
-
-    if (!overflow_id.is_null()) {
-        put_u32(out, overflow_id.value);
-        out += Id::kSize;
-    }
-    return out;
-}
-
 auto Node::get_slot(std::size_t index) const -> std::size_t
 {
     CALICODB_EXPECT_LT(index, header.cell_count);
@@ -599,21 +581,21 @@ auto NodeIterator::seek(const Slice &key, bool *found) -> Status
     };
 
     const auto binary_search = [&fetch, n = m_node->header.cell_count](const auto &lhs) -> Result {
+        auto found = false;
         unsigned lower = 0;
         auto upper = n;
 
         while (lower < upper) {
             const auto mid = (lower + upper) / 2;
             const auto rhs = fetch(mid);
-            if (const auto cmp = lhs.compare(rhs); cmp < 0) {
+            if (const auto cmp = lhs.compare(rhs); cmp <= 0) {
+                found = cmp == 0;
                 upper = mid;
             } else if (cmp > 0) {
                 lower = mid + 1;
-            } else {
-                return {mid, true};
             }
         }
-        return {lower, false};
+        return {lower, found};
     };
 
     const auto [index, exact] = binary_search(key);
@@ -643,6 +625,14 @@ auto NodeIterator::seek(const Cell &cell, bool *found) -> Status
 [[nodiscard]] static auto is_underflowing(const Node &node) -> bool
 {
     return node.header.cell_count == 0;
+}
+
+static constexpr auto kLinkContentOffset = Id::kSize;
+static constexpr auto kLinkContentSize = kPageSize - kLinkContentOffset;
+
+[[nodiscard]] static auto get_readable_content(const Page &page, std::size_t size_limit) -> Slice
+{
+    return page.view().range(kLinkContentOffset, std::min(size_limit, kLinkContentSize));
 }
 
 auto Tree::create(Pager &pager, bool is_root, Id *out) -> Status
@@ -1340,28 +1330,137 @@ auto Tree::get(const Slice &key, std::string *value) const -> Status
     return s;
 }
 
-auto Tree::put(const Slice &key, const Slice &value, bool *exists) -> Status
+auto Tree::put(const Slice &key, const Slice &value) -> Status
 {
     if (key.is_empty()) {
         return Status::invalid_argument("key is empty");
     }
     SearchResult slot;
-    CALICODB_TRY(find_external(key, slot));
-    auto [node, index, exact] = std::move(slot);
-    upgrade(node);
+    auto s = find_external(key, slot);
+    if (s.is_ok()) {
+        auto [node, index, exact] = std::move(slot);
+        const auto id = node.page.id();
+        upgrade(node);
 
-    if (exact) {
-        CALICODB_TRY(remove_cell(node, index));
+        if (exact) {
+            s = remove_cell(node, index);
+        }
+        if (s.is_ok()) {
+            bool overflow;
+            // Create a cell representing the `key` and `value`. This routine also populates any
+            // overflow pages necessary to hold a `key` and/or `value` that won't fit on a single
+            // node page. If the cell cannot fit in `node`, it will be written to scratch memory.
+            s = emplace(node, key, value, index, overflow);
+
+            auto acquired = true;
+            if (s.is_ok()) {
+                if (overflow) {
+                    // There wasn't enough room in `node` to hold the cell. Get the node back and
+                    // perform a split.
+                    node.overflow = parse_external_cell(cell_scratch(), cell_scratch() + kPageSize);
+                    node.overflow->is_free = true;
+                    s = resolve_overflow(std::move(node));
+                    acquired = false;
+                }
+                report_stats(kBytesWritten, key.size() + value.size());
+            }
+            if (acquired) {
+                release(std::move(node));
+            }
+        }
+    }
+    return s;
+}
+
+auto Tree::emplace(Node &node, const Slice &key, const Slice &value, std::size_t index, bool &overflow) -> Status
+{
+    CALICODB_EXPECT_TRUE(node.header.is_external);
+    const auto node_id = node.page.id();
+
+    auto k = key.size();
+    auto v = value.size();
+    const auto local_size = compute_local_size(k, v);
+    const auto has_remote = k + v > local_size;
+
+    if (k > local_size) {
+        k = local_size;
+        v = 0;
+    } else if (has_remote) {
+        v = local_size - k;
     }
 
-    CALICODB_TRY(PayloadManager::emplace(*m_pager, cell_scratch(), node, key, value, index));
-    CALICODB_TRY(resolve_overflow(std::move(node)));
-    report_stats(kBytesWritten, key.size() + value.size());
+    CALICODB_EXPECT_EQ(k + v, local_size);
+    // Serialize the cell header for the external cell and determine the number
+    // of bytes needed for the cell.
+    char header[kVarintMaxLength * 2];
+    auto *ptr = header;
+    ptr = encode_varint(ptr, value.size());
+    ptr = encode_varint(ptr, key.size());
+    const auto hdr_size = std::uintptr_t(ptr - header);
+    const auto cell_size = local_size + hdr_size + Id::kSize * has_remote;
 
-    if (exists != nullptr) {
-        *exists = exact;
+    // Attempt to allocate space for the cell in the node. If this is not possible,
+    // write the cell to scratch memory.
+    ptr = cell_scratch();
+    const auto local_offset = allocate_block(node, index, cell_size);
+    if (local_offset) {
+        ptr = node.page.data() + local_offset;
+        overflow = false;
+    } else {
+        overflow = true;
     }
-    return Status::ok();
+    // Write the cell header.
+    std::memcpy(ptr, header, hdr_size);
+    ptr += hdr_size;
+
+    std::optional<Page> prev;
+    auto payload_left = key.size() + value.size();
+    auto prev_pgno = node.page.id();
+    auto prev_type = PointerMap::kOverflowHead;
+    auto *next_ptr = ptr + local_size;
+    auto len = local_size;
+    auto src = key;
+
+    Status s;
+    while (s.is_ok()) {
+        const auto n = std::min(len, src.size());
+        std::memcpy(ptr, src.data(), n);
+        src.advance(n);
+        payload_left -= n;
+        if (payload_left == 0) {
+            break;
+        }
+        ptr += n;
+        len -= n;
+        if (src.is_empty()) {
+            src = value;
+        }
+        if (src.is_empty()) {
+            break;
+        } else if (len == 0) {
+            Page ovfl;
+            s = m_pager->allocate(ovfl);
+            if (s.is_ok()) {
+                put_u32(next_ptr, ovfl.id().value);
+                put_u32(ovfl.data(), 0);
+                len = kLinkContentSize;
+                ptr = ovfl.data() + Id::kSize;
+                next_ptr = ovfl.data();
+                if (prev) {
+                    m_pager->release(std::move(*prev));
+                }
+                s = PointerMap::write_entry(
+                    *m_pager, ovfl.id(), {prev_pgno, prev_type});
+                prev_type = PointerMap::kOverflowLink;
+                prev_pgno = ovfl.id();
+                prev = std::move(ovfl);
+            }
+        }
+    }
+    if (prev) {
+        m_pager->release(std::move(*prev));
+    }
+    return s;
 }
 
 auto Tree::erase(const Slice &key) -> Status
@@ -1387,24 +1486,24 @@ auto Tree::erase(const Slice &key) -> Status
 
 auto Tree::find_lowest(Node &out) const -> Status
 {
-    CALICODB_TRY(acquire(root(), false, out));
-    while (!out.header.is_external) {
+    auto s = acquire(root(), false, out);
+    while (s.is_ok() && !out.header.is_external) {
         const auto next_id = read_child_id(out, 0);
         release(std::move(out));
-        CALICODB_TRY(acquire(next_id, false, out));
+        s = acquire(next_id, false, out);
     }
-    return Status::ok();
+    return s;
 }
 
 auto Tree::find_highest(Node &out) const -> Status
 {
-    CALICODB_TRY(acquire(root(), false, out));
-    while (!out.header.is_external) {
+    auto s = acquire(root(), false, out);
+    while (s.is_ok() && !out.header.is_external) {
         const auto next_id = out.header.next_id;
         release(std::move(out));
-        CALICODB_TRY(acquire(next_id, false, out));
+        s = acquire(next_id, false, out);
     }
-    return Status::ok();
+    return s;
 }
 
 auto Tree::vacuum_step(Page &free, Schema &schema, Id last_id) -> Status
@@ -1601,14 +1700,6 @@ auto Tree::destroy(Tree &tree) -> Status
     return tree.destroy_impl(std::move(root));
 }
 
-static constexpr auto kLinkContentOffset = Id::kSize;
-static constexpr auto kLinkContentSize = kPageSize - kLinkContentOffset;
-
-[[nodiscard]] static auto get_readable_content(const Page &page, std::size_t size_limit) -> Slice
-{
-    return page.view().range(kLinkContentOffset, std::min(size_limit, kLinkContentSize));
-}
-
 BufferLocalizer::BufferLocalizer(Pager &pager, Id remote)
     : m_status(pager.acquire(remote, m_page)),
       m_pager(&pager),
@@ -1788,49 +1879,6 @@ auto OverflowList::erase(Pager &pager, Id head_id) -> Status
         head_id = read_next_id(page);
         pager.mark_dirty(page);
         CALICODB_TRY(pager.destroy(std::move(page)));
-    }
-    return Status::ok();
-}
-
-auto PayloadManager::emplace(Pager &pager, char *scratch, Node &node, const Slice &key, const Slice &value, std::size_t index) -> Status
-{
-    CALICODB_EXPECT_TRUE(node.header.is_external);
-
-    auto k = key.size();
-    auto v = value.size();
-    const auto local_size = compute_local_size(k, v);
-    const auto has_remote = k + v > local_size;
-
-    if (k > local_size) {
-        k = local_size;
-        v = 0;
-    } else if (has_remote) {
-        v = local_size - k;
-    }
-
-    CALICODB_EXPECT_EQ(k + v, local_size);
-    auto total_size = local_size + varint_length(key.size()) + varint_length(value.size());
-
-    Id overflow_id;
-    if (has_remote) {
-        CALICODB_TRY(OverflowList::write(pager, overflow_id, key.range(k), value.range(v)));
-        PointerMap::Entry entry = {node.page.id(), PointerMap::kOverflowHead};
-        CALICODB_TRY(PointerMap::write_entry(pager, overflow_id, entry));
-        total_size += Id::kSize;
-    }
-
-    const auto emplace = [&](auto *out) {
-        ::calicodb::emplace_cell(out, key.size(), value.size(), key.range(0, k), value.range(0, v), overflow_id);
-    };
-
-    if (const auto offset = allocate_block(node, static_cast<unsigned>(index), static_cast<unsigned>(total_size))) {
-        // Write directly into the node.
-        emplace(node.page.data() + offset);
-    } else {
-        // The node has overflowed. Write the cell to scratch memory.
-        emplace(scratch);
-        node.overflow = parse_external_cell(scratch, scratch + kPageSize);
-        node.overflow->is_free = true;
     }
     return Status::ok();
 }

@@ -38,7 +38,7 @@ public:
     [[nodiscard]] auto open(const Options &sanitized) -> Status;
 
     [[nodiscard]] auto get_property(const Slice &name, std::string *out) const -> bool override;
-    [[nodiscard]] auto new_txn(bool write, Txn *&txn) -> Status override;
+    [[nodiscard]] auto new_txn(bool write, Txn *&tx) -> Status override;
     [[nodiscard]] auto checkpoint(bool reset) -> Status override;
 
     [[nodiscard]] auto TEST_pager() const -> const Pager &;
@@ -52,7 +52,7 @@ private:
     Sink *const m_log = nullptr;
     BusyHandler *const m_busy = nullptr;
 
-    TxnImpl *m_txn = nullptr;
+    TxnImpl *m_tx = nullptr;
 
     const std::string m_db_filename;
     const std::string m_wal_filename;

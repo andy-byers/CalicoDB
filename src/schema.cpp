@@ -16,7 +16,7 @@ namespace calicodb
 Schema::Schema(Pager &pager, Status &status)
     : m_status(&status),
       m_pager(&pager),
-      m_map(new Tree(pager, nullptr))
+      m_map(pager, nullptr)
 {
 }
 
@@ -25,7 +25,6 @@ Schema::~Schema()
     for (const auto &[_, state] : m_tables) {
         delete state.table;
     }
-    delete m_map;
 }
 
 auto Schema::corrupted_root_id(const Slice &name, const Slice &value) -> Status
@@ -41,13 +40,11 @@ auto Schema::corrupted_root_id(const Slice &name, const Slice &value) -> Status
 
 auto Schema::new_cursor() -> Cursor *
 {
-    return CursorInternal::make_cursor(*m_map);
+    return CursorInternal::make_cursor(m_map);
 }
 
-auto Schema::create_table(const TableOptions &options, const Slice &name, Table *&out) -> Status
+auto Schema::create_table(const TableOptions &options, const Slice &name, bool readonly, Table **out) -> Status
 {
-    CALICODB_EXPECT_FALSE(out);
-
     Status s;
     if (m_pager->page_count() == 0) {
         if (options.create_if_missing) {
@@ -60,7 +57,7 @@ auto Schema::create_table(const TableOptions &options, const Slice &name, Table 
 
     std::string value;
     if (s.is_ok()) {
-        s = m_map->get(name, &value);
+        s = m_map.get(name, &value);
     }
 
     Id root_id;
@@ -78,13 +75,16 @@ auto Schema::create_table(const TableOptions &options, const Slice &name, Table 
         s = Tree::create(*m_pager, false, &root_id);
         if (s.is_ok()) {
             encode_root_id(root_id, value);
-            s = m_map->put(name, value);
-        }
-        if (!s.is_ok()) {
-            return s;
+            s = m_map.put(name, value);
         }
     }
-    return construct_table_state(root_id, out);
+    if (s.is_ok()) {
+        auto *tb = construct_table_state(root_id, readonly);
+        if (out) {
+            *out = tb;
+        }
+    }
+    return s;
 }
 
 auto Schema::decode_root_id(const Slice &data, Id &out) -> bool
@@ -109,24 +109,21 @@ auto Schema::encode_root_id(Id id, std::string &out) -> void
     out.resize(static_cast<std::uintptr_t>(end - out.data()));
 }
 
-auto Schema::construct_table_state(Id root_id, Table *&out) -> Status
+auto Schema::construct_table_state(Id root_id, bool readonly) -> Table *
 {
     auto itr = m_tables.find(root_id);
-    if (itr != end(m_tables) && itr->second.table) {
-        out = itr->second.table;
-    } else {
+    if (itr == end(m_tables) || !itr->second.table) {
         itr = m_tables.insert(itr, {root_id, {}});
         itr->second.root = root_id;
-        itr->second.table = new TableImpl(*m_pager, *m_status, &itr->second.root);
-        out = itr->second.table;
+        itr->second.table = new TableImpl(*m_pager, *m_status, &itr->second.root, readonly);
     }
-    return Status::ok();
+    return itr->second.table;
 }
 
 auto Schema::drop_table(const Slice &name) -> Status
 {
     std::string value;
-    auto s = m_map->get(name, &value);
+    auto s = m_map.get(name, &value);
     if (!s.is_ok()) {
         return s;
     }
@@ -142,7 +139,7 @@ auto Schema::drop_table(const Slice &name) -> Status
     Tree drop(*m_pager, &root_id);
     s = Tree::destroy(drop);
     if (s.is_ok()) {
-        s = m_map->erase(name);
+        s = m_map.erase(name);
     }
     if (s.is_ok()) {
         m_tables.erase(root_id);
@@ -172,42 +169,40 @@ auto Schema::vacuum_reroot(Id old_id, Id new_id) -> void
 
 auto Schema::vacuum_finish() -> Status
 {
-    auto *cursor = CursorInternal::make_cursor(*m_map);
-    cursor->seek_first();
-    ScopeGuard guard = [cursor] {
-        delete cursor;
+    auto *c = new_cursor();
+    c->seek_first();
+    ScopeGuard guard = [c] {
+        delete c;
     };
 
     Status s;
-    while (cursor->is_valid()) {
+    while (c->is_valid()) {
         Id old_id;
-        if (!decode_root_id(cursor->value(), old_id)) {
-            return corrupted_root_id(cursor->key().to_string(), cursor->value());
+        if (!decode_root_id(c->value(), old_id)) {
+            return corrupted_root_id(c->key().to_string(), c->value());
         }
         const auto root = m_reroot.find(old_id);
         if (root != end(m_reroot)) {
             std::string value;
             encode_root_id(root->second, value);
             // Update the database schema with the new root page ID for this tree.
-            s = m_map->put(cursor->key(), value);
+            s = m_map.put(c->key(), value);
             if (!s.is_ok()) {
                 break;
             }
-            // Update the in-memory root stored by each Tree.
-            auto tree = m_tables.find(root->second);
-            CALICODB_EXPECT_NE(tree, end(m_tables));
-            if (tree->second.table) {
-                tree->second.root = root->second;
+            // Update the in-memory tree root stored by each table.
+            auto tb = m_tables.find(root->second);
+            CALICODB_EXPECT_NE(tb, end(m_tables));
+            if (tb->second.table) {
+                tb->second.root = root->second;
             } else {
-                // This tree is not actually open. The RootedTree entry exists
-                // so that vacuum_reroot() could find the original root ID (or
-                // the table was just closed by the user, either way, the entry
-                // should be removed).
-                m_tables.erase(tree);
+                // This table is not actually open. The RootedTable entry exists
+                // so that vacuum_reroot() could find the original root ID.
+                m_tables.erase(tb);
             }
             m_reroot.erase(root);
         }
-        cursor->next();
+        c->next();
     }
     const auto missed_roots = m_reroot.size();
     m_reroot.clear();
@@ -224,7 +219,7 @@ auto Schema::vacuum_finish() -> Status
 
 auto Schema::vacuum_page(Id page_id, bool &success) -> Status
 {
-    return m_map->vacuum_one(page_id, *this, &success);
+    return m_map.vacuum_one(page_id, *this, &success);
 }
 
 auto Schema::TEST_validate() const -> void

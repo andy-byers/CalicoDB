@@ -37,19 +37,18 @@ auto TxnImpl::schema() const -> Cursor &
     return *m_schema;
 }
 
-auto TxnImpl::create_table(const TableOptions &options, const Slice &name, Table *&out) -> Status
+auto TxnImpl::create_table(const TableOptions &options, const Slice &name, Table **tb_out) -> Status
 {
-    out = nullptr;
+    if (tb_out) {
+        *tb_out = nullptr;
+    }
     auto s = *m_status;
     if (s.is_ok()) {
         auto altered = options;
         if (altered.create_if_missing) {
             altered.create_if_missing = m_write;
         }
-        s = m_schema_obj.create_table(altered, name, out);
-        if (s.is_ok()) {
-            table_impl(out)->m_readonly = !m_write;
-        }
+        s = m_schema_obj.create_table(altered, name, !m_write, tb_out);
     }
     return s;
 }

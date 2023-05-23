@@ -9,9 +9,10 @@
 namespace calicodb
 {
 
-TableImpl::TableImpl(Pager &pager, Status &status, const Id *root)
+TableImpl::TableImpl(Pager &pager, Status &status, const Id *root, bool readonly)
     : m_status(&status),
-      m_tree(pager, root)
+      m_tree(pager, root),
+      m_readonly(readonly)
 {
 }
 
