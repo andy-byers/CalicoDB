@@ -1060,7 +1060,6 @@ auto Tree::fix_nonroot(Node parent, std::size_t index) -> Status
         Node left;
         CALICODB_TRY(acquire(read_child_id(parent, index - 1), true, left));
         if (left.header.cell_count == 1) {
-            const auto save_id = node.page.id();
             CALICODB_TRY(merge_right(left, m_cursor.take(), parent, index - 1));
             release(std::move(left));
             CALICODB_EXPECT_FALSE(is_overflowing(parent));
