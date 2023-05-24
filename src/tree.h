@@ -193,7 +193,8 @@ public:
     {
         clear();
         m_node = std::move(node);
-        history[level += diff] = {node.page.id(), 0};
+        level = level + diff;
+        history[level] = {node.page.id(), 0};
         m_status = Status::ok();
     }
 
