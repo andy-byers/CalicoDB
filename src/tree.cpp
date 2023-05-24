@@ -2280,7 +2280,6 @@ auto CursorImpl::fetch_payload() -> Status
     CALICODB_TRY(m_tree->acquire(m_loc.page_id, false, node));
 
     Slice key, value;
-    auto cell = read_cell(node, m_loc.index);
     auto s = m_tree->read_key(node, m_loc.index, m_key, key);
     m_key_size = key.size();
     if (s.is_ok()) {
