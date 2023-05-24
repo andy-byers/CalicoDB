@@ -114,21 +114,6 @@ auto write_cell(Node &node, std::size_t index, const Cell &cell) -> std::size_t;
 // Erase a cell from the node at the specified index.
 auto erase_cell(Node &node, std::size_t index) -> void;
 
-class NodeIterator
-{
-    const Tree *m_tree = nullptr;
-    std::string *m_lhs_key = nullptr;
-    std::string *m_rhs_key = nullptr;
-    Node *m_node = nullptr;
-    std::size_t m_index = 0;
-
-public:
-    explicit NodeIterator(const Tree &tree, Node &node);
-    [[nodiscard]] auto index() const -> std::size_t;
-    [[nodiscard]] auto seek(const Slice &key, bool *found = nullptr) -> Status;
-    [[nodiscard]] auto seek(const Cell &cell, bool *found = nullptr) -> Status;
-};
-
 struct NodeManager {
     [[nodiscard]] static auto allocate(Pager &pager, Node &out, std::string &scratch, bool is_external) -> Status;
     [[nodiscard]] static auto acquire(Pager &pager, Id page_id, Node &out, std::string &scratch, bool upgrade) -> Status;
@@ -155,17 +140,18 @@ class InternalCursor
     //       been read by Tree::read_key() (if the key overflowed).
     //    std::vector<Id> m_ovfl_cache;
 
-    static constexpr std::size_t kMaxDepth = 20;
-    struct Location {
-        Id page_id;
-        unsigned index = 0;
-    } m_history[kMaxDepth - 1] = {};
-    std::size_t m_level = 0;
-
     Node m_node;
     bool m_write;
 
 public:
+    static constexpr std::size_t kMaxDepth = 20;
+
+    struct Location {
+        Id page_id;
+        unsigned index = 0;
+    } history[kMaxDepth - 1] = {};
+    std::size_t level = 0;
+
     explicit InternalCursor(Tree &tree)
         : m_status(Status::not_found()),
           m_tree(&tree)
@@ -187,7 +173,7 @@ public:
     [[nodiscard]] auto index() const -> std::size_t
     {
         CALICODB_EXPECT_TRUE(is_valid());
-        return m_history[m_level].index;
+        return history[level].index;
     }
 
     [[nodiscard]] auto node() -> Node &
@@ -201,6 +187,14 @@ public:
         CALICODB_EXPECT_TRUE(is_valid());
         m_status = Status::not_found();
         return std::move(m_node);
+    }
+
+    auto move_to(Node node, int diff) -> void
+    {
+        clear();
+        m_node = std::move(node);
+        history[level += diff] = {node.page.id(), 0};
+        m_status = Status::ok();
     }
 
     auto clear() -> void;
@@ -298,7 +292,6 @@ private:
     friend class InternalCursor;
     friend class CursorInternal;
     friend class DBImpl;
-    friend class NodeIterator;
     friend class Schema;
     friend class TreeValidator;
 
@@ -316,13 +309,13 @@ private:
     [[nodiscard]] auto emplace(Node &node, const Slice &key, const Slice &value, std::size_t index, bool &overflow) -> Status;
     [[nodiscard]] auto destroy_impl(Node node) -> Status;
     [[nodiscard]] auto vacuum_step(Page &free, Schema &schema, Id last_id) -> Status;
-    [[nodiscard]] auto resolve_overflow(Node node) -> Status;
-    [[nodiscard]] auto resolve_underflow(Node node, const Slice &anchor) -> Status;
-    [[nodiscard]] auto split_root(Node root, Node &out) -> Status;
-    [[nodiscard]] auto split_nonroot(Node node, Node &out) -> Status;
-    [[nodiscard]] auto split_nonroot_fast(Node parent, Node left, Node right, const Cell &overflow, Node &out) -> Status;
-    [[nodiscard]] auto fix_root(Node root) -> Status;
-    [[nodiscard]] auto fix_nonroot(Node node, Node &parent, std::size_t index) -> Status;
+    [[nodiscard]] auto resolve_overflow() -> Status;
+    [[nodiscard]] auto resolve_underflow() -> Status;
+    [[nodiscard]] auto split_root() -> Status;
+    [[nodiscard]] auto split_nonroot() -> Status;
+    [[nodiscard]] auto split_nonroot_fast(Node parent, Node right, const Cell &overflow) -> Status;
+    [[nodiscard]] auto fix_root() -> Status;
+    [[nodiscard]] auto fix_nonroot(Node parent, std::size_t index) -> Status;
     [[nodiscard]] auto merge_left(Node &left, Node right, Node &parent, std::size_t index) -> Status;
     [[nodiscard]] auto merge_right(Node &left, Node right, Node &parent, std::size_t index) -> Status;
     [[nodiscard]] auto rotate_left(Node &parent, Node &left, Node &right, std::size_t index) -> Status;
@@ -331,10 +324,7 @@ private:
 
     [[nodiscard]] auto find_highest(Node &node) const -> Status;
     [[nodiscard]] auto find_lowest(Node &node) const -> Status;
-    [[nodiscard]] auto find_external(const Slice &key, Node node, SearchResult &out) const -> Status;
-    [[nodiscard]] auto find_external(const Slice &key, SearchResult &out) const -> Status;
     [[nodiscard]] auto find_external(const Slice &key, bool write, bool &exact) const -> Status;
-    [[nodiscard]] auto node_iterator(Node &node) const -> NodeIterator;
     [[nodiscard]] auto insert_cell(Node &node, std::size_t index, const Cell &cell) -> Status;
     [[nodiscard]] auto remove_cell(Node &node, std::size_t index) -> Status;
     [[nodiscard]] auto find_parent_id(Id page_id, Id &out) const -> Status;
@@ -352,10 +342,8 @@ private:
     auto report_stats(ReportType type, std::size_t increment) const -> void;
 
     mutable TreeStatistics m_stats;
-    mutable std::string m_key_scratch[2];
     mutable std::string m_node_scratch;
     mutable std::string m_cell_scratch;
-    mutable std::string m_anchor;
     Pager *m_pager = nullptr;
     mutable InternalCursor m_cursor;
     const Id *m_root_id = nullptr;

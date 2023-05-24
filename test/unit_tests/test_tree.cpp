@@ -437,6 +437,7 @@ TEST_P(TreeTests, ResolvesUnderflowsOnRightmostPosition)
     add_initial_records(*this);
     for (std::size_t i = 0; i < kInitialRecordCount; ++i) {
         ASSERT_OK(tree->erase(make_long_key(kInitialRecordCount - i - 1)));
+        std::cerr << tree->TEST_to_string() << "\n\n";
     }
     tree->TEST_validate();
 }
