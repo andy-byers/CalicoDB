@@ -150,7 +150,7 @@ public:
         Id page_id;
         unsigned index = 0;
     } history[kMaxDepth - 1] = {};
-    std::size_t level = 0;
+    int level = 0;
 
     explicit InternalCursor(Tree &tree)
         : m_status(Status::not_found()),
@@ -193,8 +193,7 @@ public:
     {
         clear();
         m_node = std::move(node);
-        level = level + diff;
-        history[level] = {node.page.id(), 0};
+        history[level += diff] = {node.page.id(), 0};
         m_status = Status::ok();
     }
 
