@@ -67,10 +67,9 @@ protected:
     [[nodiscard]] static auto put(Txn &txn, const TableOptions &options, const std::string &tbname, int kv, int round = 0) -> Status
     {
         Table *table;
-        auto s = txn.new_table(options, tbname, table);
+        auto s = txn.create_table(options, tbname, &table);
         if (s.is_ok()) {
             s = put(*table, kv, round);
-            delete table;
         }
         return s;
     }
@@ -86,10 +85,9 @@ protected:
     [[nodiscard]] static auto put_range(Txn &txn, const TableOptions &options, const std::string &tbname, int kv1, int kv2, int round = 0) -> Status
     {
         Table *table;
-        auto s = txn.new_table(options, tbname, table);
+        auto s = txn.create_table(options, tbname, &table);
         if (s.is_ok()) {
             s = put_range(*table, kv1, kv2, round);
-            delete table;
         }
         return s;
     }
@@ -102,10 +100,9 @@ protected:
     [[nodiscard]] static auto erase(Txn &txn, const TableOptions &options, const std::string &tbname, int kv, int round = 0) -> Status
     {
         Table *table;
-        auto s = txn.new_table(options, tbname, table);
+        auto s = txn.create_table(options, tbname, &table);
         if (s.is_ok()) {
             s = erase(*table, kv, round);
-            delete table;
         }
         return s;
     }
@@ -121,10 +118,9 @@ protected:
     [[nodiscard]] static auto erase_range(Txn &txn, const TableOptions &options, const std::string &tbname, int kv1, int kv2, int round = 0) -> Status
     {
         Table *table;
-        auto s = txn.new_table(options, tbname, table);
+        auto s = txn.create_table(options, tbname, &table);
         if (s.is_ok()) {
             s = erase_range(*table, kv1, kv2, round);
-            delete table;
         }
         return s;
     }
@@ -148,10 +144,9 @@ protected:
     [[nodiscard]] static auto check(Txn &txn, const TableOptions &options, const std::string &tbname, int kv, bool exists, int round = 0) -> Status
     {
         Table *table;
-        auto s = txn.new_table(options, tbname, table);
+        auto s = txn.create_table(options, tbname, &table);
         if (s.is_ok()) {
             s = check(*table, kv, exists, round);
-            delete table;
         }
         return s;
     }
@@ -215,10 +210,9 @@ protected:
     [[nodiscard]] static auto check_range(Txn &txn, const TableOptions &options, const std::string &tbname, int kv1, int kv2, bool exists, int round = 0) -> Status
     {
         Table *table;
-        auto s = txn.new_table(options, tbname, table);
+        auto s = txn.create_table(options, tbname, &table);
         if (s.is_ok()) {
             s = check_range(*table, kv1, kv2, exists, round);
-            delete table;
         }
         return s;
     }
@@ -311,13 +305,15 @@ TEST_F(DBTests, ConvenienceFunctions)
     db_impl(const_db);
     ASSERT_OK(m_db->update([](auto &txn) {
         const auto &const_txn = txn;
-        txn_impl(&txn);
-        txn_impl(&const_txn);
-        Table *tbl;
-        EXPECT_OK(txn.new_table(TableOptions(), "TABLE", tbl));
-        const auto *const_tbl = tbl;
-        (void)table_impl(tbl)->TEST_tree();
-        table_impl(const_tbl);
+        txn_impl(&txn)->TEST_validate();
+        txn_impl(&const_txn)->TEST_validate();
+        Table *tb;
+        EXPECT_OK(txn.create_table(TableOptions(), "TABLE", &tb));
+        const auto *const_tb = tb;
+        (void)table_impl(tb)->TEST_tree().TEST_to_string();
+        (void)table_impl(tb)->TEST_tree().TEST_validate();
+        (void)table_impl(tb)->TEST_tree().statistics();
+        table_impl(const_tb);
         return Status::ok();
     }));
 }
@@ -341,12 +337,11 @@ TEST_F(DBTests, NewTable)
         Table *table;
         TableOptions tbopt;
         tbopt.create_if_missing = false;
-        EXPECT_NOK(txn.new_table(tbopt, "TABLE", table));
+        EXPECT_NOK(txn.create_table(tbopt, "TABLE", &table));
         tbopt.create_if_missing = true;
-        EXPECT_OK(txn.new_table(tbopt, "TABLE", table));
-        delete table;
+        EXPECT_OK(txn.create_table(tbopt, "TABLE", &table));
         tbopt.error_if_exists = true;
-        EXPECT_NOK(txn.new_table(tbopt, "TABLE", table));
+        EXPECT_NOK(txn.create_table(tbopt, "TABLE", &table));
         return Status::ok();
     }));
 }
@@ -355,7 +350,7 @@ TEST_F(DBTests, TableBehavior)
 {
     ASSERT_OK(m_db->update([](auto &txn) {
         Table *table;
-        EXPECT_OK(txn.new_table(TableOptions(), "TABLE", table));
+        EXPECT_OK(txn.create_table(TableOptions(), "TABLE", &table));
         // Table::put() should not accept an empty key.
         EXPECT_TRUE(table->put("", "value").is_invalid_argument());
         return Status::ok();
@@ -367,23 +362,22 @@ TEST_F(DBTests, ReadonlyTxn)
     ASSERT_OK(m_db->view([](auto &txn) {
         Table *table;
         // Cannot create a new table in a readonly transaction.
-        EXPECT_NOK(txn.new_table(TableOptions(), "TABLE", table));
+        EXPECT_NOK(txn.create_table(TableOptions(), "TABLE", &table));
+        EXPECT_NOK(txn.drop_table("TABLE"));
         return Status::ok();
     }));
     ASSERT_OK(m_db->update([](auto &txn) {
         Table *table;
-        EXPECT_OK(txn.new_table(TableOptions(), "TABLE", table));
-        delete table;
+        EXPECT_OK(txn.create_table(TableOptions(), "TABLE", &table));
         return Status::ok();
     }));
     ASSERT_OK(m_db->view([](auto &txn) {
         EXPECT_TRUE(txn.vacuum().is_readonly());
         EXPECT_OK(txn.commit()); // NOOP, no changes to commit
         Table *table;
-        EXPECT_OK(txn.new_table(TableOptions(), "TABLE", table));
+        EXPECT_OK(txn.create_table(TableOptions(), "TABLE", &table));
         EXPECT_TRUE(table->put("k", "v").is_readonly());
         EXPECT_TRUE(table->erase("k").is_readonly());
-        delete table;
         return Status::ok();
     }));
 }
@@ -397,7 +391,7 @@ TEST_F(DBTests, UpdateThenView)
         for (int i = 0; i < 3; ++i) {
             ASSERT_OK(m_db->update([i, tbopt, round](auto &txn) {
                 Table *table;
-                auto s = txn.new_table(tbopt, kTableStr + i, table);
+                auto s = txn.create_table(tbopt, kTableStr + i, &table);
                 if (s.is_ok()) {
                     s = put_range(*table, 0, 1'000, round);
                     if (s.is_ok()) {
@@ -412,7 +406,7 @@ TEST_F(DBTests, UpdateThenView)
         for (int i = 0; i < 3; ++i) {
             ASSERT_OK(m_db->view([round, i, tbopt](auto &txn) {
                 Table *table;
-                auto s = txn.new_table(tbopt, kTableStr + i, table);
+                auto s = txn.create_table(tbopt, kTableStr + i, &table);
                 if (s.is_ok()) {
                     EXPECT_OK(check_range(*table, 0, 250, true, round));
                     EXPECT_OK(check_range(*table, 250, 750, false, round));
@@ -436,7 +430,7 @@ TEST_F(DBTests, RollbackUpdate)
         for (int i = 0; i < 3; ++i) {
             ASSERT_TRUE(m_db->update([i, round](auto &txn) {
                                 Table *table;
-                                auto s = txn.new_table(TableOptions(), kTableStr + i, table);
+                                auto s = txn.create_table(TableOptions(), kTableStr + i, &table);
                                 if (s.is_ok()) {
                                     s = put_range(*table, 0, 500, round);
                                     if (s.is_ok()) {
@@ -461,7 +455,7 @@ TEST_F(DBTests, RollbackUpdate)
         for (int i = 0; i < 3; ++i) {
             ASSERT_OK(m_db->view([round, i](auto &txn) {
                 Table *table;
-                auto s = txn.new_table(TableOptions(), kTableStr + i, table);
+                auto s = txn.create_table(TableOptions(), kTableStr + i, &table);
                 if (s.is_ok()) {
                     EXPECT_OK(check_range(*table, 0, 500, true, round));
                     EXPECT_OK(check_range(*table, 500, 1'000, false, round));
@@ -481,13 +475,50 @@ TEST_F(DBTests, VacuumEmptyDB)
     }));
 }
 
+TEST_F(DBTests, CorruptedRootIDs)
+{
+    ASSERT_OK(m_db->update([](auto &txn) {
+        return txn.create_table(TableOptions(), "TABLE", nullptr);
+    }));
+    ASSERT_OK(m_db->checkpoint(true));
+
+    File *file;
+    auto *env = Env::default_env();
+    ASSERT_OK(env->new_file(kDBName, Env::kReadWrite, file));
+
+    // Corrupt the root ID written to the schema table, which has already been
+    // written back to the database file. The root ID is a 1 byte varint pointing
+    // to page 3. Just increment it, which makes a root that points past the end
+    // of the file, which is not allowed.
+    char buffer[kPageSize];
+    ASSERT_OK(file->read_exact(0, sizeof(buffer), buffer));
+    ++buffer[kPageSize - 1]; // Corrupt the root ID of "TABLE".
+    ASSERT_OK(file->write(0, Slice(buffer, kPageSize)));
+    delete file;
+
+    (void)m_db->update([](auto &txn) {
+        Status s;
+        EXPECT_TRUE((s = txn.create_table(TableOptions(), "TABLE", nullptr)).is_corruption())
+            << s.to_string();
+        // The corrupted root ID cannot be fixed by this rollback. The corruption
+        // happened outside of a transaction. Future transactions should also see
+        // the corrupted root and fail.
+        return s;
+    });
+    (void)m_db->update([](auto &txn) {
+        Status s;
+        EXPECT_TRUE((s = txn.drop_table("TABLE")).is_corruption())
+            << s.to_string();
+        return s;
+    });
+}
+
 TEST_F(DBTests, CheckpointResize)
 {
     ASSERT_OK(m_db->update([](auto &txn) {
         Table *table;
-        auto s = txn.new_table(TableOptions(), "TABLE", table);
+        auto s = txn.create_table(TableOptions(), "TABLE", &table);
         if (s.is_ok()) {
-            delete table;
         }
         return s;
     }));
@@ -509,6 +540,41 @@ TEST_F(DBTests, CheckpointResize)
     // is empty.
     ASSERT_OK(m_db->checkpoint(true));
     ASSERT_EQ(kPageSize, file_size(kDBName));
+}
+
+TEST_F(DBTests, RerootTables)
+{
+    ASSERT_OK(m_db->update([](auto &txn) {
+        EXPECT_OK(txn.create_table(TableOptions(), "a", nullptr));
+        EXPECT_OK(txn.create_table(TableOptions(), "b", nullptr));
+        EXPECT_OK(txn.create_table(TableOptions(), "c", nullptr));
+        EXPECT_OK(txn.create_table(TableOptions(), "d", nullptr));
+        EXPECT_OK(txn.drop_table("a"));
+        EXPECT_OK(txn.drop_table("b"));
+        EXPECT_OK(txn.drop_table("d"));
+        return Status::ok();
+    }));
+    ASSERT_OK(m_db->update([](auto &txn) {
+        EXPECT_OK(txn.create_table(TableOptions(), "e", nullptr));
+        return txn.vacuum();
+    }));
+    ASSERT_OK(m_db->view([](auto &txn) {
+        Table *c, *e;
+        TableOptions tbopt;
+        tbopt.create_if_missing = false;
+        auto &schema = txn.schema();
+        schema.seek_first();
+        EXPECT_TRUE(schema.is_valid());
+        EXPECT_EQ("c", schema.key());
+        EXPECT_OK(txn.create_table(tbopt, schema.key().to_string(), &c));
+        schema.next();
+        EXPECT_TRUE(schema.is_valid());
+        EXPECT_EQ("e", schema.key());
+        EXPECT_OK(txn.create_table(tbopt, schema.key().to_string(), &e));
+        schema.next();
+        EXPECT_FALSE(schema.is_valid());
+        return Status::ok();
+    }));
 }
 
 TEST(OldWalTests, HandlesOldWalFile)
@@ -812,19 +878,20 @@ protected:
     [[nodiscard]] static auto reader(DB &db, U64 &latest) -> Status
     {
         return db.view([&latest](auto &txn) {
-            Table *tbl;
-            auto s = txn.new_table(TableOptions(), "TABLE", tbl);
+            Table *tb;
+            auto s = txn.create_table(TableOptions(), "TABLE", &tb);
             if (s.is_invalid_argument()) {
                 // Writer hasn't created the table yet.
                 return Status::ok();
             } else if (!s.is_ok()) {
                 return s;
             }
-            for (std::size_t i = 0; i < kRecordCount; ++i) {
+            // Iterate through the records twice. The same value should be read each time.
+            for (std::size_t i = 0; i < kRecordCount * 2; ++i) {
                 std::string value;
                 // If the table exists, then it must contain kRecordCount records (the first writer to run
                 // makes sure of this).
-                s = tbl->get(tools::integral_key(i), &value);
+                s = tb->get(tools::integral_key(i % kRecordCount), &value);
                 if (s.is_ok()) {
                     U64 result;
                     Slice slice(value);
@@ -832,9 +899,6 @@ protected:
                     if (i) {
                         EXPECT_EQ(latest, result);
                     } else {
-                        if (latest > result) {
-                            std::cerr << table_impl(tbl)->TEST_tree().TEST_to_string() << '\n';
-                        }
                         EXPECT_LE(latest, result);
                         latest = result;
                     }
@@ -842,7 +906,6 @@ protected:
                     break;
                 }
             }
-            delete tbl;
             return s;
         });
     }
@@ -853,12 +916,12 @@ protected:
     [[nodiscard]] static auto writer(DB &db) -> Status
     {
         return db.update([](auto &txn) {
-            Table *tbl = nullptr;
-            auto s = txn.new_table(TableOptions(), "TABLE", tbl);
+            Table *tb = nullptr;
+            auto s = txn.create_table(TableOptions(), "TABLE", &tb);
             for (std::size_t i = 0; s.is_ok() && i < kRecordCount; ++i) {
                 U64 result = 1;
                 std::string value;
-                s = tbl->get(tools::integral_key(i), &value);
+                s = tb->get(tools::integral_key(i), &value);
                 if (s.is_not_found()) {
                     s = Status::ok();
                 } else if (s.is_ok()) {
@@ -868,10 +931,9 @@ protected:
                 } else {
                     break;
                 }
-                s = tbl->put(tools::integral_key(i), tools::integral_key(result));
+                s = tb->put(tools::integral_key(i), tools::integral_key(result));
             }
             EXPECT_OK(s);
-            delete tbl;
             return s;
         });
     }
@@ -920,20 +982,21 @@ protected:
                 DB *db;
                 ASSERT_OK(new_connection(false, db));
 
-                ++count;
+                count.fetch_add(1);
                 while (count.load() < total) {
                     std::this_thread::yield();
                 }
 
+                Status s;
                 if (i < nrd) {
+                    // Readers should never block. Anything that would block a reader resolves in a
+                    // bounded amount of time, so the implementation just waits.
                     ASSERT_OK(reader(*db, latest[i])) << "reader (" << i << ") failed";
                 } else if (i < nrd + nwr) {
-                    Status s;
                     while ((s = writer(*db)).is_busy()) {
                     }
                     ASSERT_OK(s) << "writer (" << i << ") failed";
                 } else {
-                    Status s;
                     while ((s = checkpointer(*db, reset)).is_busy()) {
                     }
                     ASSERT_OK(s) << (reset ? "reset" : "passive") << " checkpointer (" << i << ") failed";

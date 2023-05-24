@@ -70,9 +70,14 @@ public:
         return m_real->status();
     }
 
-    [[nodiscard]] auto new_table(const TableOptions &options, const std::string &name, Table *&out) -> Status override;
+    [[nodiscard]] auto schema() const -> Cursor & override
+    {
+        return m_real->schema();
+    }
 
-    [[nodiscard]] auto drop_table(const std::string &name) -> Status override
+    [[nodiscard]] auto create_table(const TableOptions &options, const Slice &name, Table **out) -> Status override;
+
+    [[nodiscard]] auto drop_table(const Slice &name) -> Status override
     {
         auto s = m_model->drop_table(name);
         const auto t = m_real->drop_table(name);
@@ -229,14 +234,14 @@ CheckedTxn::~CheckedTxn()
     delete m_model;
 }
 
-auto CheckedTxn::new_table(const TableOptions &options, const std::string &name, Table *&out) -> Status
+auto CheckedTxn::create_table(const TableOptions &options, const Slice &name, Table **out) -> Status
 {
     Table *real_table;
-    auto s = m_real->new_table(options, name, real_table);
+    auto s = m_real->create_table(options, name, &real_table);
     if (s.is_ok()) {
         Table *model_table;
-        (void)m_model->new_table(options, name, model_table);
-        out = new CheckedTable(*real_table, *model_table);
+        (void)m_model->create_table(options, name, &model_table);
+        *out = new CheckedTable(*real_table, *model_table);
     }
     return s;
 }
@@ -284,33 +289,32 @@ class DBFuzzer
     KVStore m_store;
     DB *m_db = nullptr;
     Txn *m_txn = nullptr;
-    Table *m_tbl = nullptr;
+    Table *m_tb = nullptr;
 
     auto reopen_db() -> void
     {
-        delete m_tbl;
         delete m_txn;
         delete m_db;
-        m_tbl = nullptr;
+        m_tb = nullptr;
         m_txn = nullptr;
         CHECK_OK(CheckedDB::open(m_options, m_filename, m_store, m_db));
         reopen_txn();
-        reopen_tbl();
+        reopen_tb();
     }
 
     auto reopen_txn() -> void
     {
-        delete m_tbl;
         delete m_txn;
-        m_tbl = nullptr;
+        m_tb = nullptr;
         CHECK_OK(m_db->new_txn(true, m_txn));
-        reopen_tbl();
+        reopen_tb();
     }
 
-    auto reopen_tbl() -> void
+    auto reopen_tb() -> void
     {
-        delete m_tbl;
-        CHECK_OK(m_txn->new_table(TableOptions(), "TABLE", m_tbl));
+        // This should be a NOOP if the table handle has already been created
+        // since this transaction was started. The same exact handle is returned.
+        CHECK_OK(m_txn->create_table(TableOptions(), "TABLE", &m_tb));
     }
 
 public:
@@ -326,7 +330,6 @@ public:
 
     ~DBFuzzer()
     {
-        delete m_tbl;
         delete m_txn;
         delete m_db;
     }
@@ -347,21 +350,21 @@ auto DBFuzzer::fuzz(const U8 *&data_ptr, std::size_t &size_ref) -> void
 
     switch (operation_type) {
         case kTableGet:
-            s = m_tbl->get(FUZZER_KEY, &value);
+            s = m_tb->get(FUZZER_KEY, &value);
             if (!s.is_not_found()) {
                 CHECK_OK(s);
             }
             break;
         case kTablePut:
             key = FUZZER_KEY;
-            CHECK_OK(m_tbl->put(key, FUZZER_VAL));
+            CHECK_OK(m_tb->put(key, FUZZER_VAL));
             break;
         case kTableErase:
-            CHECK_OK(m_tbl->erase(FUZZER_KEY));
+            CHECK_OK(m_tb->erase(FUZZER_KEY));
             break;
         case kCursorSeek:
             key = FUZZER_KEY;
-            c = m_tbl->new_cursor();
+            c = m_tb->new_cursor();
             c->seek(key);
             while (c->is_valid()) {
                 if (key.front() & 1) {
@@ -381,7 +384,7 @@ auto DBFuzzer::fuzz(const U8 *&data_ptr, std::size_t &size_ref) -> void
             reopen_txn();
             break;
         case kReopenTable:
-            reopen_tbl();
+            reopen_tb();
             break;
         default: // kReopen
             reopen_db();
@@ -394,7 +397,7 @@ auto DBFuzzer::fuzz(const U8 *&data_ptr, std::size_t &size_ref) -> void
     }
 
     // All records should match between DB and ModelDB.
-    c = m_tbl->new_cursor();
+    c = m_tb->new_cursor();
     c->seek_first();
     while (c->is_valid()) {
         c->next();

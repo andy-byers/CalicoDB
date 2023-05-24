@@ -52,13 +52,12 @@ public:
         m_options.sync = param.sync;
         CHECK_OK(calicodb::DB::open(m_options, kFilename, m_db));
         CHECK_OK(m_db->new_txn(true, m_txn));
-        CHECK_OK(m_txn->new_table(calicodb::TableOptions(), "bench", m_table));
+        CHECK_OK(m_txn->create_table(calicodb::TableOptions(), "bench", &m_table));
     }
 
     ~Benchmark()
     {
         delete m_cursor;
-        delete m_table;
         delete m_txn;
         delete m_db;
 
@@ -182,13 +181,12 @@ private:
 
     auto restart_txn() -> void
     {
-        delete m_table;
         delete m_txn;
         if (m_counters[0] % 1'000 == 999) {
             CHECK_OK(m_db->checkpoint(true));
         }
         CHECK_OK(m_db->new_txn(true, m_txn));
-        CHECK_OK(m_txn->new_table(calicodb::TableOptions(), "bench", m_table));
+        CHECK_OK(m_txn->create_table(calicodb::TableOptions(), "bench", &m_table));
     }
 
     auto increment_counters() -> void

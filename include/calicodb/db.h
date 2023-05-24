@@ -23,7 +23,7 @@ public:
     // On success, stores a pointer to the heap-allocated database in `*db` and returns OK. On
     // failure, sets `*db` to nullptr and returns a non-OK status. The user is responsible for
     // calling delete on the database handle when it is no longer needed.
-    [[nodiscard]] static auto open(const Options &options, const std::string &filename, DB *&db) -> Status;
+    [[nodiscard]] static auto open(const Options &options, const std::string &filename, DB *&db_out) -> Status;
 
     // Delete the contents of the specified database from stable storage
     // Deletes every file associated with the database named `filename` and returns OK on
@@ -40,10 +40,11 @@ public:
     void operator=(DB &) = delete;
 
     // Get a human-readable string describing a named database property
-    // If the property named `name` exists, returns true and stores the property value in `*out`.
-    // Otherwise, false is returned and `*out` is set to nullptr. The `out` parameter is optional:
-    // if passed a nullptr, this method performs an existence check.
-    virtual auto get_property(const Slice &name, std::string *out) const -> bool = 0;
+    // If the property named `name` exists, returns true and stores the property value in
+    // `*value_out`. Otherwise, false is returned and `value_out->clear()` is called. The
+    // `value_out` parameter is optional: if passed a nullptr, this method performs an
+    // existence check.
+    virtual auto get_property(const Slice &name, std::string *value_out) const -> bool = 0;
 
     // Write modified pages from the write-ahead log (WAL) back to the database file
     // If `reset` is true, steps are taken to make sure that the next writer will reset the WAL
@@ -73,7 +74,7 @@ public:
     // The caller is responsible for calling delete on the Txn pointer when it is no longer needed.
     // NOTE: Consider using the DB::view()/DB::update() APIs instead of managing transactions
     // manually.
-    [[nodiscard]] virtual auto new_txn(bool write, Txn *&out) -> Status = 0;
+    [[nodiscard]] virtual auto new_txn(bool write, Txn *&tx_out) -> Status = 0;
 };
 
 // Transaction on a CalicoDB database
@@ -89,21 +90,39 @@ public:
     void operator=(Txn &) = delete;
 
     // Return the status associated with this transaction
-    // On creation, a Txn will always have an OK status. Only read-write
-    // transactions can have a non-OK status. The status may be set when a
-    // non-const method fails on this object, or any Table created from it.
+    // On creation, a Txn will always have an OK status. Only read-write transactions
+    // can have a non-OK status. The status may be set when a non-const method fails
+    // on this object, or any Table created from it.
     [[nodiscard]] virtual auto status() const -> Status = 0;
 
+    // Return a reference to a cursor that iterates over the database schema
+    // NOTE: The returned cursor must not be used after the Txn itself is delete'd. The
+    // underlying storage for this object is freed at that point.
+    // The database schema is a special table stores the name and location of every
+    // other table in the database. Calling Cursor::key() on the returned cursor gives a
+    // table name, and calling Cursor::value() gives a (non-readable) variable-length
+    // integer. See cursor.h for additional requirements pertaining to cursor use.
+    [[nodiscard]] virtual auto schema() const -> Cursor & = 0;
+
     // Create or open a table on the database
-    // Note that tables cannot be created during readonly transactions. A
-    // non-OK status is returned in this case.
-    [[nodiscard]] virtual auto new_table(const TableOptions &options, const std::string &name, Table *&out) -> Status = 0;
+    // `tb_out` is optional: if omitted, this method simply creates a table without handing
+    // back a reference to it.
+    // On success, stores a table handle in `*tb_out` and returns an OK status. The table
+    // named `name` can then be accessed through `*tb_out` until the transaction is
+    // finished (or until `name` is dropped through Txn::drop_table()). `*tb_out` is owned
+    // by this Txn and must not be delete'd. On failure, stores nullptr in `*tb_out` and
+    // returns a non-OK status.
+    // NOTE: Tables cannot be created during readonly transactions. A status for which
+    // Status::is_readonly() evaluates to true is returned in this case.
+    [[nodiscard]] virtual auto create_table(const TableOptions &options, const Slice &name, Table **tb_out) -> Status = 0;
 
     // Remove a table from the database
-    // REQUIRES: Transaction is writable and table `name` is not open
+    // REQUIRES: Transaction is writable
     // If a table named `name` exists, this method drops it and returns an OK status. If
     // `name` does not exist, returns a status for which Status::is_not_found() is true.
-    [[nodiscard]] virtual auto drop_table(const std::string &name) -> Status = 0;
+    // If a table handle was obtained for `name` during this transaction, it must not be
+    // used after this call succeeds.
+    [[nodiscard]] virtual auto drop_table(const Slice &name) -> Status = 0;
 
     // Defragment the database
     // REQUIRES: Transaction is writable
@@ -166,11 +185,11 @@ public:
 template <class Fn>
 auto DB::view(Fn &&fn) -> Status
 {
-    Txn *txn;
-    auto s = new_txn(false, txn);
+    Txn *tx;
+    auto s = new_txn(false, tx);
     if (s.is_ok()) {
-        s = fn(*txn);
-        delete txn;
+        s = fn(*tx);
+        delete tx;
     }
     return s;
 }
@@ -178,15 +197,15 @@ auto DB::view(Fn &&fn) -> Status
 template <class Fn>
 auto DB::update(Fn &&fn) -> Status
 {
-    Txn *txn;
-    auto s = new_txn(true, txn);
+    Txn *tx;
+    auto s = new_txn(true, tx);
     if (s.is_ok()) {
-        s = fn(*txn);
+        s = fn(*tx);
         if (s.is_ok()) {
-            s = txn->commit();
+            s = tx->commit();
         }
         // Implicit rollback of all uncommitted changes.
-        delete txn;
+        delete tx;
     }
     return s;
 }

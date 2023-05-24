@@ -56,6 +56,7 @@ class ModelTxn : public Txn
 {
     KVStore *m_base;
     KVStore m_temp;
+    Cursor *m_schema; // TODO
 
 public:
     explicit ModelTxn(KVStore &base)
@@ -71,12 +72,17 @@ public:
         return Status::ok();
     }
 
-    [[nodiscard]] auto new_table(const TableOptions &options, const std::string &name, Table *&out) -> Status override;
+    [[nodiscard]] auto schema() const -> Cursor & override
+    {
+        return *m_schema; // TODO
+    }
 
-    [[nodiscard]] auto drop_table(const std::string &name) -> Status override
+    [[nodiscard]] auto create_table(const TableOptions &options, const Slice &name, Table **out) -> Status override;
+
+    [[nodiscard]] auto drop_table(const Slice &name) -> Status override
     {
         // Table `name` should be closed.
-        m_temp.erase(name);
+        m_temp.erase(name.to_string());
         return Status::ok();
     }
 

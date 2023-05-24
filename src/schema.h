@@ -7,13 +7,13 @@
 
 #include "calicodb/db.h"
 #include "page.h"
+#include "tree.h"
 #include <unordered_map>
 
 namespace calicodb
 {
 
 class TableImpl;
-class Tree;
 
 // Representation of the database schema
 class Schema final
@@ -22,8 +22,9 @@ public:
     explicit Schema(Pager &pager, Status &status);
     ~Schema();
 
-    [[nodiscard]] auto new_table(const TableOptions &options, const std::string &name, Table *&out) -> Status;
-    [[nodiscard]] auto drop_table(const std::string &name) -> Status;
+    [[nodiscard]] auto new_cursor() -> Cursor *;
+    [[nodiscard]] auto create_table(const TableOptions &options, const Slice &name, bool readonly, Table **tb_out) -> Status;
+    [[nodiscard]] auto drop_table(const Slice &name) -> Status;
 
     [[nodiscard]] auto vacuum_page(Id page_id, bool &success) -> Status;
 
@@ -31,13 +32,11 @@ public:
     // tables were rerooted
     [[nodiscard]] auto vacuum_finish() -> Status;
 
-    auto inform_live_cursors() -> void;
-
     auto TEST_validate() const -> void;
 
 private:
-    [[nodiscard]] auto corrupted_root_id(const std::string &table_name, const Slice &value) -> Status;
-    [[nodiscard]] auto construct_table_state(const std::string &name, Id root_id, Table *&out) -> Status;
+    [[nodiscard]] auto corrupted_root_id(const Slice &name, const Slice &value) -> Status;
+    [[nodiscard]] auto construct_table_state(Id root_id, bool readonly) -> Table *;
     [[nodiscard]] auto decode_root_id(const Slice &data, Id &out) -> bool;
     static auto encode_root_id(Id id, std::string &out) -> void;
 
@@ -48,16 +47,16 @@ private:
     friend class Tree;
     auto vacuum_reroot(Id old_id, Id new_id) -> void;
 
-    struct RootedTree {
-        Tree *tree = nullptr;
+    struct RootedTable {
+        Table *table = nullptr;
         Id root;
     };
 
-    HashMap<RootedTree> m_trees;
+    HashMap<RootedTable> m_tables;
     HashMap<Id> m_reroot;
     Status *m_status;
     Pager *m_pager;
-    Tree *m_map;
+    Tree m_map;
 };
 
 } // namespace calicodb

@@ -22,18 +22,20 @@ auto ModelDB::new_txn(bool, Txn *&out) -> Status
 
 ModelTxn::~ModelTxn() = default;
 
-auto ModelTxn::new_table(const TableOptions &options, const std::string &name, Table *&out) -> Status
+auto ModelTxn::create_table(const TableOptions &options, const Slice &name, Table **out) -> Status
 {
-    auto itr = m_temp.find(name);
+    auto itr = m_temp.find(name.to_string());
     if (itr == end(m_temp)) {
         if (!options.create_if_missing) {
             return Status::invalid_argument("table does not exist");
         }
-        itr = m_temp.insert(itr, {name, KVMap()});
+        itr = m_temp.insert(itr, {name.to_string(), KVMap()});
     } else if (options.error_if_exists) {
         return Status::invalid_argument("table exists");
     }
-    out = new ModelTable(itr->second);
+    if (out) {
+        *out = new ModelTable(itr->second);
+    }
     return Status::ok();
 }
 

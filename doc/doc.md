@@ -200,9 +200,6 @@ if (!s.is_ok()) {
 ```
 
 ### Tables
-Tables are managed by live `Txn` objects.
-This means that all table handles opened by a given `Txn` must be closed by the time the `Txn` object is destroyed.
-When using the `DB::view()`/`DB::update()` API, one just needs to make sure all `Table` handles are `delete`d by the time the callable returns.
 
 ```C++
 calicodb::Table *table;
@@ -214,11 +211,13 @@ tbopt.error_if_exists = true;
 tbopt.create_if_missing = true;
 
 // Create the table. Note that this table will not persist in the database 
-// unless `Txn::commit()` is called prior to the transaction ending.
-s = txn->new_table(tbopt, "cats", table);
+// unless Txn::commit() is called prior to the transaction ending.
+s = txn->create_table(tbopt, "cats", &table);
 if (s.is_ok()) {
-    // `table` holds the address of the handle for the open table "cats". 
-    // "cats" will be open until the handle is delete'd.
+    // table holds the address of the handle for the open table "cats". 
+    // The table handle is owned by txn, and will remain open until either
+    // txn is delete'd, or "cats" is dropped with Txn::drop_table(). The 
+    // handle is owned by txn and must not be delete'd. 
 }
 
 std::string value;
@@ -245,12 +244,8 @@ if (s.is_ok()) {
     // An I/O error occurred. It is not an error if the key does not exist.
 }
 
-// As with any other object created using a new_*() method, tables are closed
-// with operator delete(). We'll leave this table open so it can be used in
-// other examples.
-
-// Remove the table named "CATS" from the database. "CATS" must be closed.
-s = txn->drop_table("CATS");
+// Remove the table named "bats" from the database.
+s = txn->drop_table("bats");
 if (s.is_ok()) {
     
 }
@@ -305,12 +300,9 @@ If a WAL is left behind after closing, then something has gone wrong.
 CalicoDB will attempt recovery on the next startup.
 
 ```C++
-// We left this table open in #tables. It must be closed before the Txn that
-// opened it is closed.
-delete table;
-
 // This transaction was started earlier, in #manual-transactions. It must be
-// finished before the database is closed.
+// finished before the database is closed. Note that the table handle from
+// earlier must not be used after this next line.
 delete txn;
 
 // Now we can close the database. See DB::update()/DB::view() for an API that
@@ -320,7 +312,6 @@ delete db;
 ```
 
 ### Checkpoints
-As described in [a](design.md#shm-file)
 ```C++
 
 ```
