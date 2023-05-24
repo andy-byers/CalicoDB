@@ -52,7 +52,7 @@ public:
         m_options.sync = param.sync;
         CHECK_OK(calicodb::DB::open(m_options, kFilename, m_db));
         CHECK_OK(m_db->new_txn(true, m_txn));
-        CHECK_OK(m_txn->create_table(calicodb::TableOptions(), "bench", m_table));
+        CHECK_OK(m_txn->create_table(calicodb::TableOptions(), "bench", &m_table));
     }
 
     ~Benchmark()
@@ -186,7 +186,7 @@ private:
             CHECK_OK(m_db->checkpoint(true));
         }
         CHECK_OK(m_db->new_txn(true, m_txn));
-        CHECK_OK(m_txn->create_table(calicodb::TableOptions(), "bench", m_table));
+        CHECK_OK(m_txn->create_table(calicodb::TableOptions(), "bench", &m_table));
     }
 
     auto increment_counters() -> void

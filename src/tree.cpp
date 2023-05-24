@@ -142,6 +142,7 @@ static auto parse_external_cell(char *data, const char *limit) -> Cell
             cell.ptr = data;
             cell.key = data + header_size;
             cell.key_size = key_size;
+            cell.total_size = key_size + value_size;
             cell.local_size = compute_local_size(key_size, value_size);
             cell.has_remote = cell.local_size < key_size + value_size;
             cell.size = header_size + cell.local_size + cell.has_remote * Id::kSize;
@@ -164,6 +165,7 @@ static auto parse_internal_cell(char *data, const char *limit) -> Cell
         cell.ptr = data;
         cell.key = data + header_size;
         cell.key_size = key_size;
+        cell.total_size = key_size;
         cell.local_size = compute_local_size(key_size, 0);
         cell.has_remote = cell.local_size < key_size;
         cell.size = header_size + cell.local_size + cell.has_remote * Id::kSize;
@@ -528,35 +530,12 @@ static auto merge_root(Node &root, Node &child) -> void
     root.meta = child.meta;
 }
 
-NodeIterator::NodeIterator(Node &node, const Parameters &param)
-    : m_pager(param.pager),
-      m_lhs_key(param.lhs_key),
-      m_rhs_key(param.rhs_key),
+NodeIterator::NodeIterator(const Tree &tree, Node &node)
+    : m_tree(&tree),
+      m_lhs_key(&tree.m_key_scratch[0]),
+      m_rhs_key(&tree.m_key_scratch[1]),
       m_node(&node)
 {
-    CALICODB_EXPECT_NE(m_pager, nullptr);
-    CALICODB_EXPECT_NE(m_lhs_key, nullptr);
-    CALICODB_EXPECT_NE(m_rhs_key, nullptr);
-}
-
-// NOTE: "buffer" is only used if the key is fragmented.
-auto NodeIterator::fetch_key(std::string &buffer, const Cell &cell, Slice &out) const -> Status
-{
-    if (!cell.has_remote || cell.key_size <= cell.local_size) {
-        out = Slice(cell.key, cell.key_size);
-        return Status::ok();
-    }
-
-    if (buffer.size() < cell.key_size) {
-        buffer.resize(cell.key_size);
-    }
-    std::memcpy(buffer.data(), cell.key, cell.local_size);
-
-    auto *remote = buffer.data() + cell.local_size;
-    CALICODB_TRY(OverflowList::read(*m_pager, read_overflow_id(cell), 0, cell.key_size - cell.local_size, remote));
-
-    out = Slice(buffer.data(), cell.key_size);
-    return Status::ok();
 }
 
 auto NodeIterator::index() const -> std::size_t
@@ -570,7 +549,7 @@ auto NodeIterator::seek(const Slice &key, bool *found) -> Status
     const auto fetch = [&s, this](auto index) {
         Slice out;
         if (s.is_ok()) {
-            s = fetch_key(*m_lhs_key, read_cell(*m_node, index), out);
+            s = m_tree->read_key(*m_node, index, *m_lhs_key, out);
         }
         return out;
     };
@@ -612,9 +591,11 @@ auto NodeIterator::seek(const Cell &cell, bool *found) -> Status
     if (!cell.has_remote) {
         return seek({cell.key, cell.key_size});
     }
-    Slice key;
-    CALICODB_TRY(fetch_key(*m_rhs_key, cell, key));
-    return seek(key, found);
+    if (m_rhs_key->size() < cell.key_size) {
+        m_rhs_key->resize(cell.key_size);
+    }
+    CALICODB_TRY(PayloadManager::access(*m_tree->m_pager, cell, 0, cell.key_size, nullptr, m_rhs_key->data()));
+    return seek(Slice(m_rhs_key->data(), cell.key_size), found);
 }
 
 [[nodiscard]] static auto is_overflowing(const Node &node) -> bool
@@ -664,12 +645,7 @@ auto Tree::create(Pager &pager, bool is_root, Id *out) -> Status
 
 auto Tree::node_iterator(Node &node) const -> NodeIterator
 {
-    const NodeIterator::Parameters param = {
-        m_pager,
-        &m_key_scratch[0],
-        &m_key_scratch[1],
-    };
-    return NodeIterator(node, param);
+    return NodeIterator(*this, node);
 }
 
 auto Tree::find_external(const Slice &key, SearchResult &out) const -> Status
@@ -700,6 +676,45 @@ auto Tree::find_external(const Slice &key, Node node, SearchResult &out) const -
         release(std::move(node));
         CALICODB_TRY(acquire(next_id, false, node));
     }
+}
+
+auto Tree::read_key(Node &node, std::size_t index, std::string &scratch, Slice &key_out) const -> Status
+{
+    const auto cell = read_cell(node, index);
+    if (scratch.size() < cell.key_size) {
+        scratch.resize(cell.key_size);
+    }
+    auto s = PayloadManager::access(*m_pager, cell, 0, cell.key_size, nullptr, scratch.data());
+    if (s.is_ok()) {
+        key_out = Slice(scratch).truncate(cell.key_size);
+    }
+    return s;
+}
+
+auto Tree::read_value(Node &node, std::size_t index, std::string &scratch, Slice &value_out) const -> Status
+{
+    const auto cell = read_cell(node, index);
+    const auto value_size = cell.total_size - cell.key_size;
+    if (scratch.size() < value_size) {
+        scratch.resize(value_size);
+    }
+    auto s = PayloadManager::access(*m_pager, cell, cell.key_size, value_size, nullptr, scratch.data());
+    if (s.is_ok()) {
+        value_out = Slice(scratch).truncate(value_size);
+    }
+    return s;
+}
+
+auto Tree::write_key(Node &node, std::size_t index, const Slice &key) -> Status
+{
+    const auto cell = read_cell(node, index);
+    return PayloadManager::access(*m_pager, cell, 0, key.size(), key.data(), nullptr);
+}
+
+auto Tree::write_value(Node &node, std::size_t index, const Slice &value) -> Status
+{
+    const auto cell = read_cell(node, index);
+    return PayloadManager::access(*m_pager, cell, cell.key_size, value.size(), value.data(), nullptr);
 }
 
 auto Tree::find_parent_id(Id page_id, Id &out) const -> Status
@@ -737,9 +752,21 @@ auto Tree::remove_cell(Node &node, std::size_t index) -> Status
 {
     const auto cell = read_cell(node, index);
     if (cell.has_remote) {
-        CALICODB_TRY(OverflowList::erase(*m_pager, read_overflow_id(cell)));
+        CALICODB_TRY(free_overflow(read_overflow_id(cell)));
     }
     erase_cell(node, index, cell.size);
+    return Status::ok();
+}
+
+auto Tree::free_overflow(Id head_id) -> Status
+{
+    while (!head_id.is_null()) {
+        Page page;
+        CALICODB_TRY(m_pager->acquire(head_id, page));
+        head_id = read_next_id(page);
+        m_pager->mark_dirty(page);
+        CALICODB_TRY(m_pager->destroy(std::move(page)));
+    }
     return Status::ok();
 }
 
@@ -1320,9 +1347,8 @@ auto Tree::get(const Slice &key, std::string *value) const -> Status
 
     Status s;
     if (value != nullptr) {
-        const auto cell = read_cell(node, index);
         Slice slice;
-        s = PayloadManager::collect_value(*m_pager, *value, cell, &slice);
+        s = read_value(node, index, *value, slice);
         value->resize(slice.size());
         report_stats(kBytesRead, slice.size());
     }
@@ -1472,8 +1498,7 @@ auto Tree::erase(const Slice &key) -> Status
 
     if (exact) {
         Slice anchor;
-        const auto cell = read_cell(node, index);
-        CALICODB_TRY(PayloadManager::collect_key(*m_pager, m_anchor, cell, &anchor));
+        CALICODB_TRY(read_key(node, index, m_anchor, anchor));
 
         upgrade(node);
         CALICODB_TRY(remove_cell(node, index));
@@ -1672,7 +1697,7 @@ auto Tree::destroy_impl(Node node) -> Status
     for (std::size_t i = 0; i <= node.header.cell_count; ++i) {
         if (i < node.header.cell_count) {
             if (const auto cell = read_cell(node, i); cell.has_remote) {
-                CALICODB_TRY(OverflowList::erase(*m_pager, read_overflow_id(cell)));
+                CALICODB_TRY(free_overflow(read_overflow_id(cell)));
             }
         }
         if (!node.header.is_external) {
@@ -1698,49 +1723,6 @@ auto Tree::destroy(Tree &tree) -> Status
     Node root;
     CALICODB_TRY(tree.acquire(tree.root(), false, root));
     return tree.destroy_impl(std::move(root));
-}
-
-BufferLocalizer::BufferLocalizer(Pager &pager, Id remote)
-    : m_status(pager.acquire(remote, m_page)),
-      m_pager(&pager),
-      m_has_page(true)
-{
-}
-
-BufferLocalizer::~BufferLocalizer()
-{
-    if (is_valid()) {
-        m_pager->release(std::move(m_page));
-    }
-}
-
-auto BufferLocalizer::status() const -> Status
-{
-    return m_status;
-}
-
-auto BufferLocalizer::is_valid() const -> bool
-{
-    return m_status.is_ok() && m_has_page;
-}
-
-auto BufferLocalizer::value() const -> Slice
-{
-    CALICODB_EXPECT_TRUE(is_valid());
-    return m_page.view().advance(Id::kSize);
-}
-
-auto BufferLocalizer::next() -> Id
-{
-    CALICODB_EXPECT_TRUE(is_valid());
-    const auto id = read_next_id(m_page);
-    m_pager->release(std::move(m_page));
-    if (id.is_null()) {
-        m_has_page = false;
-    } else {
-        m_status = m_pager->acquire(id, m_page);
-    }
-    return id;
 }
 
 auto NodeManager::allocate(Pager &pager, Node &out, std::string &scratch, bool is_external) -> Status
@@ -1785,109 +1767,12 @@ auto NodeManager::destroy(Pager &pager, Node node) -> Status
     return pager.destroy(std::move(node.page));
 }
 
-auto OverflowList::read(Pager &pager, Id head_id, std::size_t offset, std::size_t payload_size, char *buffer) -> Status
-{
-    BufferLocalizer loc(pager, head_id);
-    while (payload_size && loc.is_valid()) {
-        auto chunk = loc.value();
-        if (offset) {
-            const auto skip = std::min(offset, chunk.size());
-            chunk.advance(skip);
-            offset -= skip;
-        }
-        if (payload_size < chunk.size()) {
-            chunk.truncate(payload_size);
-        }
-        std::memcpy(buffer, chunk.data(), chunk.size());
-        payload_size -= chunk.size();
-        buffer += chunk.size();
-        loc.next();
-    }
-    return loc.status();
-}
-
-auto OverflowList::write(Pager &pager, Id &out, const Slice &key, const Slice &value) -> Status
-{
-    std::optional<Page> prev;
-    auto first = key;
-    auto second = value;
-    Id head;
-
-    if (first.is_empty()) {
-        first = second;
-        second.clear();
-    }
-
-    while (!first.is_empty()) {
-        Page page;
-        CALICODB_TRY(pager.allocate(page));
-
-        auto content_size = std::min(
-            first.size() + second.size(),
-            kPageSize - kLinkContentOffset);
-        auto content_data = page.data() + kLinkContentOffset;
-        auto limit = std::min(first.size(), content_size);
-        std::memcpy(content_data, first.data(), limit);
-        first.advance(limit);
-
-        if (first.is_empty()) {
-            first = second;
-            second.clear();
-
-            if (!first.is_empty()) {
-                content_data += limit;
-                content_size -= limit;
-                limit = std::min(first.size(), content_size);
-                std::memcpy(content_data, first.data(), limit);
-                first.advance(limit);
-            }
-        }
-        const auto next_id = page.id();
-        if (prev) {
-            write_next_id(*prev, next_id);
-            const PointerMap::Entry entry = {prev->id(), PointerMap::kOverflowLink};
-            pager.release(std::move(*prev));
-            CALICODB_TRY(PointerMap::write_entry(pager, next_id, entry));
-        } else {
-            head = next_id;
-        }
-        prev.emplace(std::move(page));
-    }
-    if (prev) {
-        // "prev" contains the last page in the chain.
-        write_next_id(*prev, Id::null());
-        pager.release(std::move(*prev));
-    }
-    out = head;
-    return Status::ok();
-}
-
-auto OverflowList::copy(Pager &pager, Id overflow_id, std::size_t size, Id &out) -> Status
-{
-    std::string scratch; // TODO: Copy page-by-page: no scratch is necessary.
-    scratch.resize(size);
-
-    CALICODB_TRY(read(pager, overflow_id, 0, size, scratch.data()));
-    return write(pager, out, scratch);
-}
-
-auto OverflowList::erase(Pager &pager, Id head_id) -> Status
-{
-    while (!head_id.is_null()) {
-        Page page;
-        CALICODB_TRY(pager.acquire(head_id, page));
-        head_id = read_next_id(page);
-        pager.mark_dirty(page);
-        CALICODB_TRY(pager.destroy(std::move(page)));
-    }
-    return Status::ok();
-}
-
 auto PayloadManager::promote(Pager &pager, char *scratch, Cell &cell, Id parent_id) -> Status
 {
     detach_cell(cell, scratch);
 
-    // "scratch" should have enough room before its "m_data" member to write the left child ID.
+    // The buffer that `scratch` points into should have enough room before `scratch` to write
+    // the left child ID.
     const auto header_size = Id::kSize + varint_length(cell.key_size);
     cell.ptr = cell.key - header_size;
     cell.local_size = compute_local_size(cell.key_size, 0);
@@ -1895,78 +1780,105 @@ auto PayloadManager::promote(Pager &pager, char *scratch, Cell &cell, Id parent_
     cell.has_remote = false;
 
     if (cell.key_size > cell.local_size) {
-        // Part of the key is on an overflow page. No value is stored locally in this case, so the local size computation is still correct.
-        Id overflow_id;
-        CALICODB_TRY(OverflowList::copy(pager, read_overflow_id(cell), cell.key_size - cell.local_size, overflow_id));
+        // Part of the key is on an overflow page. No value is stored locally in this case, so
+        // the local size computation is still correct. Copy the overflow key, page-by-page,
+        // to a new overflow chain.
+        Id ovfl_id;
+        auto rest = cell.key_size - cell.local_size;
+        auto pgno = read_overflow_id(cell);
+        std::optional<Page> prev;
+        while (rest && !pgno.is_null()) {
+            Page src, dst;
+            CALICODB_TRY(pager.allocate(dst));
+            CALICODB_TRY(pager.acquire(pgno, src));
+            if (ovfl_id.is_null()) {
+                // Record the new overflow ID to write to the promoted cell.
+                ovfl_id = dst.id();
+            }
+            std::memcpy(dst.data(), src.data(), kPageSize);
+            if (prev) {
+                const PointerMap::Type type = ovfl_id.is_null() ? PointerMap::kOverflowHead : PointerMap::kOverflowLink;
+                const PointerMap::Entry entry = {prev->id(), type};
+                CALICODB_TRY(PointerMap::write_entry(pager, dst.id(), entry));
+                put_u32(prev->data(), dst.id().value);
+                pager.release(std::move(*prev));
+            }
+            rest -= std::min(rest, kLinkContentSize);
+            prev = std::move(dst);
+            pgno = read_next_id(src);
+            pager.release(std::move(src));
+        }
+        put_u32(prev->data(), 0);
+        pager.release(std::move(*prev));
+
         const PointerMap::Entry entry = {parent_id, PointerMap::kOverflowHead};
-        CALICODB_TRY(PointerMap::write_entry(pager, overflow_id, entry));
-        write_overflow_id(cell, overflow_id);
+        CALICODB_TRY(PointerMap::write_entry(pager, ovfl_id, entry));
+        write_overflow_id(cell, ovfl_id);
         cell.size += Id::kSize;
         cell.has_remote = true;
     }
     return Status::ok();
 }
 
-auto PayloadManager::collect_key(Pager &pager, std::string &result, const Cell &cell, Slice *key) -> Status
+auto PayloadManager::access(
+    Pager &pager,
+    const Cell &cell,   // The `cell` containing the payload being accessed
+    std::size_t offset, // `offset` within the payload being accessed
+    std::size_t length, // Number of bytes to access
+    const char *in_buf, // Write buffer of size at least `length` bytes, or nullptr if not a write
+    char *out_buf       // Read buffer of size at least `length` bytes, or nullptr if not a read
+    ) -> Status
 {
-    if (result.size() < cell.key_size) {
-        result.resize(cell.key_size);
-    }
-    if (!cell.has_remote || cell.key_size <= cell.local_size) {
-        std::memcpy(result.data(), cell.key, cell.key_size);
-        if (key != nullptr) {
-            *key = Slice(result.data(), cell.key_size);
+    CALICODB_EXPECT_TRUE(in_buf || out_buf);
+    if (offset <= cell.local_size) {
+        const auto n = std::min(length, cell.local_size - offset);
+        if (in_buf) {
+            std::memcpy(cell.key + offset, in_buf, n);
+            in_buf += n;
+        } else {
+            std::memcpy(out_buf, cell.key + offset, n);
+            out_buf += n;
         }
-        return Status::ok();
+        length -= n;
+        offset = 0;
+    } else {
+        offset -= cell.local_size;
     }
-    std::memcpy(result.data(), cell.key, cell.local_size);
 
-    CALICODB_TRY(OverflowList::read(
-        pager,
-        read_overflow_id(cell),
-        0,
-        cell.key_size - cell.local_size,
-        result.data() + cell.local_size));
-    if (key != nullptr) {
-        *key = Slice(result).truncate(cell.key_size);
-    }
-    return Status::ok();
-}
-
-auto PayloadManager::collect_value(Pager &pager, std::string &result, const Cell &cell, Slice *value) -> Status
-{
-    U64 value_size;
-    decode_varint(cell.ptr, value_size);
-    if (result.size() < value_size) {
-        result.resize(value_size);
-    }
-    if (!cell.has_remote) {
-        std::memcpy(result.data(), cell.key + cell.key_size, value_size);
-        if (value != nullptr) {
-            *value = Slice(result.data(), value_size);
+    Status s;
+    if (length) {
+        auto pgno = read_overflow_id(cell);
+        while (!pgno.is_null()) {
+            Page ovfl;
+            s = pager.acquire(pgno, ovfl);
+            if (!s.is_ok()) {
+                break;
+            }
+            std::size_t len;
+            if (offset >= kLinkContentSize) {
+                offset -= kLinkContentSize;
+                len = 0;
+            } else {
+                auto *ptr = ovfl.data() + kLinkContentOffset + offset;
+                len = std::min(length, kLinkContentSize - offset);
+                if (in_buf) {
+                    std::memcpy(ptr, in_buf, len);
+                    in_buf += len;
+                } else {
+                    std::memcpy(out_buf, ptr, len);
+                    out_buf += len;
+                }
+                offset = 0;
+            }
+            pgno = read_next_id(ovfl);
+            pager.release(std::move(ovfl));
+            length -= len;
+            if (length == 0) {
+                break;
+            }
         }
-        return Status::ok();
     }
-    std::size_t remote_key_size = 0;
-    if (cell.key_size > cell.local_size) {
-        remote_key_size = cell.key_size - cell.local_size;
-    }
-    std::size_t local_value_size = 0;
-    if (remote_key_size == 0) {
-        local_value_size = cell.local_size - cell.key_size;
-        std::memcpy(result.data(), cell.key + cell.key_size, local_value_size);
-    }
-
-    CALICODB_TRY(OverflowList::read(
-        pager,
-        read_overflow_id(cell),
-        remote_key_size,
-        value_size - local_value_size,
-        result.data() + local_value_size));
-    if (value != nullptr) {
-        *value = Slice(result).truncate(value_size);
-    }
-    return Status::ok();
+    return s;
 }
 
 #if CALICODB_TEST
@@ -2286,9 +2198,9 @@ public:
             CHECK_OK(tree.acquire(node.header.next_id, false, right));
             std::string lhs_buffer, rhs_buffer;
             Slice lhs_key;
-            CHECK_OK(PayloadManager::collect_key(*tree.m_pager, lhs_buffer, read_cell(node, 0), &lhs_key));
+            CHECK_OK(const_cast<Tree &>(tree).read_key(node, 0, lhs_buffer, lhs_key));
             Slice rhs_key;
-            CHECK_OK(PayloadManager::collect_key(*tree.m_pager, rhs_buffer, read_cell(right, 0), &rhs_key));
+            CHECK_OK(const_cast<Tree &>(tree).read_key(right, 0, rhs_buffer, rhs_key));
             CHECK_TRUE(lhs_key < rhs_key);
             CHECK_EQ(right.header.prev_id, node.page.id());
             tree.release(std::move(node));
@@ -2369,10 +2281,10 @@ auto CursorImpl::fetch_payload() -> Status
 
     Slice key, value;
     auto cell = read_cell(node, m_loc.index);
-    auto s = PayloadManager::collect_key(*m_tree->m_pager, m_key, cell, &key);
+    auto s = m_tree->read_key(node, m_loc.index, m_key, key);
     m_key_size = key.size();
     if (s.is_ok()) {
-        s = PayloadManager::collect_value(*m_tree->m_pager, m_value, cell, &value);
+        s = m_tree->read_value(node, m_loc.index, m_value, value);
         m_value_size = value.size();
     }
     m_tree->release(std::move(node));

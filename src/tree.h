@@ -67,6 +67,7 @@ struct Cell {
     char *ptr = nullptr;
     char *key = nullptr;
     std::size_t local_size = 0;
+    std::size_t total_size = 0;
     std::size_t key_size = 0;
     std::size_t size = 0;
     bool is_free = false;
@@ -113,43 +114,16 @@ auto write_cell(Node &node, std::size_t index, const Cell &cell) -> std::size_t;
 // Erase a cell from the node at the specified index.
 auto erase_cell(Node &node, std::size_t index) -> void;
 
-class BufferLocalizer final
-{
-    Page m_page;
-    Status m_status;
-    Pager *m_pager;
-
-    // True if this object has ownership of a database page in `m_page`,
-    // false otherwise. If this variable is false, the contents of `m_page`
-    // are unspecified.
-    bool m_has_page;
-
-public:
-    explicit BufferLocalizer(Pager &pager, Id remote);
-    ~BufferLocalizer();
-    [[nodiscard]] auto is_valid() const -> bool;
-    [[nodiscard]] auto status() const -> Status;
-    [[nodiscard]] auto value() const -> Slice;
-    auto next() -> Id;
-};
-
 class NodeIterator
 {
-    Pager *m_pager = nullptr;
+    const Tree *m_tree = nullptr;
     std::string *m_lhs_key = nullptr;
     std::string *m_rhs_key = nullptr;
     Node *m_node = nullptr;
     std::size_t m_index = 0;
 
-    [[nodiscard]] auto fetch_key(std::string &buffer, const Cell &cell, Slice &out) const -> Status;
-
 public:
-    struct Parameters {
-        Pager *pager = nullptr;
-        std::string *lhs_key = nullptr;
-        std::string *rhs_key = nullptr;
-    };
-    explicit NodeIterator(Node &node, const Parameters &param);
+    explicit NodeIterator(const Tree &tree, Node &node);
     [[nodiscard]] auto index() const -> std::size_t;
     [[nodiscard]] auto seek(const Slice &key, bool *found = nullptr) -> Status;
     [[nodiscard]] auto seek(const Cell &cell, bool *found = nullptr) -> Status;
@@ -163,19 +137,11 @@ struct NodeManager {
     static auto release(Pager &pager, Node node) -> void;
 };
 
-struct OverflowList {
-    [[nodiscard]] static auto read(Pager &pager, Id head_id, std::size_t offset, std::size_t size, char *scratch) -> Status;
-    [[nodiscard]] static auto write(Pager &pager, Id &out, const Slice &key, const Slice &value = {}) -> Status;
-    [[nodiscard]] static auto copy(Pager &pager, Id overflow_id, std::size_t size, Id &out) -> Status;
-    [[nodiscard]] static auto erase(Pager &pager, Id head_id) -> Status;
-};
-
 struct PayloadManager {
     [[nodiscard]] static auto promote(Pager &pager, char *scratch, Cell &cell, Id parent_id) -> Status;
-    [[nodiscard]] static auto collect_key(Pager &pager, std::string &scratch, const Cell &cell, Slice *key) -> Status;
-    [[nodiscard]] static auto collect_value(Pager &pager, std::string &scratch, const Cell &cell, Slice *value) -> Status;
+    [[nodiscard]] static auto access(Pager &pager, const Cell &cell, std::size_t offset,
+                                     std::size_t length, const char *in_buf, char *out_buf) -> Status;
 };
-
 
 class CursorImplV2 : public Cursor
 {
@@ -302,7 +268,13 @@ public:
     }
 
 private:
+    friend class CursorImpl;
+    friend class CursorImplV2;   // TODO: remove
+    friend class CursorInternal; // TODO: remove
+    friend class DBImpl;
+    friend class NodeIterator;
     friend class Schema;
+    friend class TreeValidator;
 
     struct SearchResult {
         Node node;
@@ -310,6 +282,11 @@ private:
         bool exact = false;
     };
 
+    [[nodiscard]] auto free_overflow(Id head_id) -> Status;
+    [[nodiscard]] auto read_key(Node &node, std::size_t index, std::string &scratch, Slice &key_out) const -> Status;
+    [[nodiscard]] auto read_value(Node &node, std::size_t index, std::string &scratch, Slice &value_out) const -> Status;
+    [[nodiscard]] auto write_key(Node &node, std::size_t index, const Slice &key) -> Status;
+    [[nodiscard]] auto write_value(Node &node, std::size_t index, const Slice &value) -> Status;
     [[nodiscard]] auto emplace(Node &node, const Slice &key, const Slice &value, std::size_t index, bool &overflow) -> Status;
     [[nodiscard]] auto destroy_impl(Node node) -> Status;
     [[nodiscard]] auto vacuum_step(Page &free, Schema &schema, Id last_id) -> Status;
@@ -347,18 +324,13 @@ private:
 
     auto report_stats(ReportType type, std::size_t increment) const -> void;
 
-    friend class DBImpl;
-    friend class CursorInternal;
-    friend class CursorImpl;
-    friend class TreeValidator;
-
     mutable TreeStatistics m_stats;
     mutable std::string m_key_scratch[2];
     mutable std::string m_node_scratch;
     mutable std::string m_cell_scratch;
     mutable std::string m_anchor;
     Pager *m_pager = nullptr;
-//    CursorImpl m_cursor;
+    //    CursorImpl m_cursor;
     const Id *m_root_id = nullptr;
 };
 
