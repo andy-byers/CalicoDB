@@ -560,7 +560,7 @@ auto NodeIterator::seek(const Slice &key, bool *found) -> Status
     };
 
     const auto binary_search = [&fetch, n = m_node->header.cell_count](const auto &lhs) -> Result {
-        auto found = false;
+        auto exists = false;
         unsigned lower = 0;
         auto upper = n;
 
@@ -568,13 +568,13 @@ auto NodeIterator::seek(const Slice &key, bool *found) -> Status
             const auto mid = (lower + upper) / 2;
             const auto rhs = fetch(mid);
             if (const auto cmp = lhs.compare(rhs); cmp <= 0) {
-                found = cmp == 0;
+                exists = cmp == 0;
                 upper = mid;
             } else if (cmp > 0) {
                 lower = mid + 1;
             }
         }
-        return {lower, found};
+        return {lower, exists};
     };
 
     const auto [index, exact] = binary_search(key);
@@ -1365,7 +1365,6 @@ auto Tree::put(const Slice &key, const Slice &value) -> Status
     auto s = find_external(key, slot);
     if (s.is_ok()) {
         auto [node, index, exact] = std::move(slot);
-        const auto id = node.page.id();
         upgrade(node);
 
         if (exact) {
@@ -1401,8 +1400,6 @@ auto Tree::put(const Slice &key, const Slice &value) -> Status
 auto Tree::emplace(Node &node, const Slice &key, const Slice &value, std::size_t index, bool &overflow) -> Status
 {
     CALICODB_EXPECT_TRUE(node.header.is_external);
-    const auto node_id = node.page.id();
-
     auto k = key.size();
     auto v = value.size();
     const auto local_size = compute_local_size(k, v);
@@ -1428,7 +1425,7 @@ auto Tree::emplace(Node &node, const Slice &key, const Slice &value, std::size_t
     // Attempt to allocate space for the cell in the node. If this is not possible,
     // write the cell to scratch memory.
     ptr = cell_scratch();
-    const auto local_offset = allocate_block(node, index, cell_size);
+    const auto local_offset = allocate_block(node, U32(index), U32(cell_size));
     if (local_offset) {
         ptr = node.page.data() + local_offset;
         overflow = false;
