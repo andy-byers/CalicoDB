@@ -212,7 +212,7 @@ tbopt.create_if_missing = true;
 
 // Create the table. Note that this table will not persist in the database 
 // unless Txn::commit() is called prior to the transaction ending.
-s = txn->create_table(tbopt, "cats", table);
+s = txn->create_table(tbopt, "cats", &table);
 if (s.is_ok()) {
     // table holds the address of the handle for the open table "cats". 
     // The table handle is owned by txn, and will remain open until either

@@ -237,11 +237,11 @@ CheckedTxn::~CheckedTxn()
 auto CheckedTxn::create_table(const TableOptions &options, const Slice &name, Table **out) -> Status
 {
     Table *real_table;
-    auto s = m_real->create_table(options, name, real_table);
+    auto s = m_real->create_table(options, name, &real_table);
     if (s.is_ok()) {
         Table *model_table;
-        (void)m_model->create_table(options, name, model_table);
-        out = new CheckedTable(*real_table, *model_table);
+        (void)m_model->create_table(options, name, &model_table);
+        *out = new CheckedTable(*real_table, *model_table);
     }
     return s;
 }
@@ -314,7 +314,7 @@ class DBFuzzer
     {
         // This should be a NOOP if the table handle has already been created
         // since this transaction was started. The same exact handle is returned.
-        CHECK_OK(m_txn->create_table(TableOptions(), "TABLE", m_tb));
+        CHECK_OK(m_txn->create_table(TableOptions(), "TABLE", &m_tb));
     }
 
 public:
