@@ -90,46 +90,46 @@ public:
         return node;
     }
 
-//    auto write_record(Node &node, const Slice &key, const Slice &value, std::size_t index) -> void
-//    {
-//        ASSERT_OK(PayloadManager::emplace(*m_pager, cell_scratch.data(), node, key, value, index));
-//    }
+    //    auto write_record(Node &node, const Slice &key, const Slice &value, std::size_t index) -> void
+    //    {
+    //        ASSERT_OK(PayloadManager::emplace(*m_pager, cell_scratch.data(), node, key, value, index));
+    //    }
 
-//    [[nodiscard]] auto find_index(Node &node, const Slice &key, std::size_t *out) -> bool
-//    {
-//        Slice slice;
-//        for (std::size_t i = 0; i < node.header.cell_count; ++i) {
-//            const auto cell = read_cell(node, i);
-//            EXPECT_OK(PayloadManager::collect_key(*m_pager, collect_scratch, cell, &slice));
-//            if (key == slice) {
-//                *out = i;
-//                return true;
-//            }
-//        }
-//        return false;
-//    }
-//
-//    [[nodiscard]] auto read_record(Node &node, const Slice &key) -> std::string
-//    {
-//        std::size_t index;
-//        if (find_index(node, key, &index)) {
-//            Slice slice;
-//            EXPECT_OK(PayloadManager::collect_value(*m_pager, collect_scratch, read_cell(node, index), &slice));
-//            return slice.to_string();
-//        }
-//        ADD_FAILURE() << "key \"" << key.to_string() << "\" was not found";
-//        return "";
-//    }
+    //    [[nodiscard]] auto find_index(Node &node, const Slice &key, std::size_t *out) -> bool
+    //    {
+    //        Slice slice;
+    //        for (std::size_t i = 0; i < node.header.cell_count; ++i) {
+    //            const auto cell = read_cell(node, i);
+    //            EXPECT_OK(PayloadManager::collect_key(*m_pager, collect_scratch, cell, &slice));
+    //            if (key == slice) {
+    //                *out = i;
+    //                return true;
+    //            }
+    //        }
+    //        return false;
+    //    }
+    //
+    //    [[nodiscard]] auto read_record(Node &node, const Slice &key) -> std::string
+    //    {
+    //        std::size_t index;
+    //        if (find_index(node, key, &index)) {
+    //            Slice slice;
+    //            EXPECT_OK(PayloadManager::collect_value(*m_pager, collect_scratch, read_cell(node, index), &slice));
+    //            return slice.to_string();
+    //        }
+    //        ADD_FAILURE() << "key \"" << key.to_string() << "\" was not found";
+    //        return "";
+    //    }
 
-//    auto erase_record(Node &node, const Slice &key) -> void
-//    {
-//        std::size_t index;
-//        if (find_index(node, key, &index)) {
-//            erase_cell(node, index);
-//            return;
-//        }
-//        ADD_FAILURE() << "key \"" << key.to_string() << "\" was not found";
-//    }
+    //    auto erase_record(Node &node, const Slice &key) -> void
+    //    {
+    //        std::size_t index;
+    //        if (find_index(node, key, &index)) {
+    //            erase_cell(node, index);
+    //            return;
+    //        }
+    //        ADD_FAILURE() << "key \"" << key.to_string() << "\" was not found";
+    //    }
 
     std::string node_scratch;
     std::string cell_scratch;
@@ -368,13 +368,30 @@ TEST_P(TreeTests, HandlesLargePayloads)
     ASSERT_OK(tree->erase(make_long_key('c')));
 }
 
-TEST_P(TreeTests, GetOutOfRange)
+TEST_P(TreeTests, GetNonexistentKeys)
 {
-    for (std::size_t i = 1; i < 100; ++i) {
-        ASSERT_OK(tree->put(make_long_key(i), make_value('0', true)));
-    }
+    // Missing 0
+    ASSERT_OK(tree->put(make_long_key(1), make_value('0', true)));
+    // Missing 2
+    ASSERT_OK(tree->put(make_long_key(3), make_value('0', true)));
+    ASSERT_OK(tree->put(make_long_key(4), make_value('0', true)));
+    ASSERT_OK(tree->put(make_long_key(5), make_value('0', true)));
+    // Missing 6
+    ASSERT_OK(tree->put(make_long_key(7), make_value('0', true)));
+    ASSERT_OK(tree->put(make_long_key(8), make_value('0', true)));
+    ASSERT_OK(tree->put(make_long_key(9), make_value('0', true)));
+    // Missing 10
+
     ASSERT_NOK(tree->get(make_long_key(0), nullptr));
-    ASSERT_NOK(tree->get(make_long_key(100), nullptr));
+    ASSERT_NOK(tree->get(make_long_key(2), nullptr));
+    ASSERT_NOK(tree->get(make_long_key(6), nullptr));
+    ASSERT_NOK(tree->get(make_long_key(10), nullptr));
+
+    ASSERT_OK(tree->get(make_long_key(1), nullptr));
+    ASSERT_OK(tree->get(make_long_key(3), nullptr));
+    ASSERT_OK(tree->get(make_long_key(5), nullptr));
+    ASSERT_OK(tree->get(make_long_key(7), nullptr));
+    ASSERT_OK(tree->get(make_long_key(9), nullptr));
 }
 
 TEST_P(TreeTests, ResolvesOverflowsOnLeftmostPosition)
@@ -389,8 +406,8 @@ TEST_P(TreeTests, ResolvesOverflowsOnRightmostPosition)
 {
     for (std::size_t i = 0; i < 100; ++i) {
         ASSERT_OK(tree->put(make_long_key(i), make_value('v')));
-    tree->TEST_validate();
     }
+    tree->TEST_validate();
 }
 
 TEST_P(TreeTests, ResolvesOverflowsOnMiddlePosition)
@@ -514,6 +531,7 @@ TEST_P(TreeSanityChecks, Search)
     }
     tree->TEST_validate();
 
+    int i = 0;
     for (const auto &[key, value] : records) {
         std::string result;
         ASSERT_OK(tree->get(key, &result));
@@ -521,6 +539,8 @@ TEST_P(TreeSanityChecks, Search)
 
         ASSERT_OK(tree->erase(key));
         ASSERT_TRUE(tree->get(key, &result).is_not_found());
+
+        ++i;
     }
 }
 

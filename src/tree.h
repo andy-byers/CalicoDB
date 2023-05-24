@@ -143,7 +143,7 @@ struct PayloadManager {
                                      std::size_t length, const char *in_buf, char *out_buf) -> Status;
 };
 
-class CursorImplV2 : public Cursor
+class InternalCursor
 {
     friend class Tree;
 
@@ -151,37 +151,63 @@ class CursorImplV2 : public Cursor
     std::string m_buffer;
     Tree *m_tree;
 
+    // TODO: Cache overflow page IDs so Tree::read_value() doesn't have to read pages that have already
+    //       been read by Tree::read_key() (if the key overflowed).
+    //    std::vector<Id> m_ovfl_cache;
+
     static constexpr std::size_t kMaxDepth = 20;
     struct Location {
         Id page_id;
         unsigned index = 0;
-    } m_history[kMaxDepth - 1];
+    } m_history[kMaxDepth - 1] = {};
     std::size_t m_level = 0;
 
     Node m_node;
-
-    auto seek_to(Node node, std::size_t index) -> void;
-    auto fetch_payload() -> Status;
+    bool m_write;
 
 public:
-    explicit CursorImplV2(Tree &tree)
+    explicit InternalCursor(Tree &tree)
         : m_status(Status::not_found()),
           m_tree(&tree)
     {
     }
 
-    ~CursorImplV2() override;
+    ~InternalCursor();
 
-    [[nodiscard]] auto is_valid() const -> bool override;
-    [[nodiscard]] auto status() const -> Status override;
-    [[nodiscard]] auto key() const -> Slice override;
-    [[nodiscard]] auto value() const -> Slice override;
+    [[nodiscard]] auto is_valid() const -> bool
+    {
+        return m_status.is_ok();
+    }
 
-    auto seek(const Slice &key) -> void override;
-    auto seek_first() -> void override;
-    auto seek_last() -> void override;
-    auto next() -> void override;
-    auto previous() -> void override;
+    [[nodiscard]] auto status() const -> Status
+    {
+        return m_status;
+    }
+
+    [[nodiscard]] auto index() const -> std::size_t
+    {
+        CALICODB_EXPECT_TRUE(is_valid());
+        return m_history[m_level].index;
+    }
+
+    [[nodiscard]] auto node() -> Node &
+    {
+        CALICODB_EXPECT_TRUE(is_valid());
+        return m_node;
+    }
+
+    [[nodiscard]] auto take() -> Node
+    {
+        CALICODB_EXPECT_TRUE(is_valid());
+        m_status = Status::not_found();
+        return std::move(m_node);
+    }
+
+    auto clear() -> void;
+    auto seek_root(bool write) -> void;
+    auto seek(const Slice &key) -> bool;
+    auto move_down(Id child_id) -> void;
+    auto move_up() -> void;
 };
 
 class CursorImpl : public Cursor
@@ -269,8 +295,8 @@ public:
 
 private:
     friend class CursorImpl;
-    friend class CursorImplV2;   // TODO: remove
-    friend class CursorInternal; // TODO: remove
+    friend class InternalCursor;
+    friend class CursorInternal;
     friend class DBImpl;
     friend class NodeIterator;
     friend class Schema;
@@ -307,6 +333,7 @@ private:
     [[nodiscard]] auto find_lowest(Node &node) const -> Status;
     [[nodiscard]] auto find_external(const Slice &key, Node node, SearchResult &out) const -> Status;
     [[nodiscard]] auto find_external(const Slice &key, SearchResult &out) const -> Status;
+    [[nodiscard]] auto find_external(const Slice &key, bool write, bool &exact) const -> Status;
     [[nodiscard]] auto node_iterator(Node &node) const -> NodeIterator;
     [[nodiscard]] auto insert_cell(Node &node, std::size_t index, const Cell &cell) -> Status;
     [[nodiscard]] auto remove_cell(Node &node, std::size_t index) -> Status;
@@ -330,7 +357,7 @@ private:
     mutable std::string m_cell_scratch;
     mutable std::string m_anchor;
     Pager *m_pager = nullptr;
-    //    CursorImpl m_cursor;
+    mutable InternalCursor m_cursor;
     const Id *m_root_id = nullptr;
 };
 
