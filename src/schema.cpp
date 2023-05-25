@@ -115,7 +115,8 @@ auto Schema::construct_table_state(Id root_id, bool readonly) -> Table *
     if (itr == end(m_tables) || !itr->second.table) {
         itr = m_tables.insert(itr, {root_id, {}});
         itr->second.root = root_id;
-        itr->second.table = new TableImpl(*m_pager, *m_status, &itr->second.root, readonly);
+        itr->second.table = new TableImpl(
+            *m_pager, *m_status, &itr->second.root, readonly);
     }
     return itr->second.table;
 }
@@ -135,14 +136,12 @@ auto Schema::drop_table(const Slice &name) -> Status
     auto itr = m_tables.find(root_id);
     if (itr != end(m_tables)) {
         delete itr->second.table;
+        m_tables.erase(root_id);
     }
     Tree drop(*m_pager, &root_id);
     s = Tree::destroy(drop);
     if (s.is_ok()) {
         s = m_map.erase(name);
-    }
-    if (s.is_ok()) {
-        m_tables.erase(root_id);
     }
     return s;
 }

@@ -797,10 +797,10 @@ TEST_F(DBErrorTests, Checkpoint)
         s = try_reopen(false, true);
         if (s.is_ok()) {
             s = m_db->checkpoint(true);
-            if (s.is_ok()) {
-                m_test_env->clear_interceptors();
-                break;
-            }
+        }
+        if (s.is_ok()) {
+            m_test_env->clear_interceptors();
+            break;
         }
         ASSERT_EQ(kErrorMessage, s.to_string());
         reset_error();

@@ -12,6 +12,7 @@
 
 #include "calicodb/cursor.h"
 #include "calicodb/db.h"
+#include "utils.h"
 #include <map>
 
 namespace calicodb::tools
@@ -58,6 +59,14 @@ class ModelTxn : public Txn
     KVStore m_temp;
     Cursor *m_schema; // TODO
 
+    // Table handles that need to be delete'd.
+    struct WrappedTable {
+        Table *tb;
+        void *aux;
+        void (*del)(void *);
+    };
+    std::map<std::string, WrappedTable> m_tb;
+
 public:
     explicit ModelTxn(KVStore &base)
         : m_base(&base),
@@ -81,7 +90,7 @@ public:
 
     [[nodiscard]] auto drop_table(const Slice &name) -> Status override
     {
-        // Table `name` should be closed.
+        m_tb.erase(name.to_string());
         m_temp.erase(name.to_string());
         return Status::ok();
     }
@@ -95,6 +104,17 @@ public:
     {
         *m_base = m_temp;
         return Status::ok();
+    }
+
+    auto set_aux_ptr(const Slice &name, void *ptr, void(*del)(void *)) -> void
+    {
+        auto itr = m_tb.find(name.to_string());
+        CALICODB_EXPECT_NE(end(m_tb), itr);
+        if (itr->second.del) {
+            itr->second.del(itr->second.aux);
+        }
+        itr->second.aux = ptr;
+        itr->second.del = del;
     }
 };
 

@@ -8,6 +8,7 @@
 #include "logging.h"
 #include "pager.h"
 #include "schema.h"
+#include "scope_guard.h"
 #include "utils.h"
 #include <array>
 #include <functional>
@@ -595,20 +596,20 @@ auto Tree::find_external(const Slice &key, bool write, bool &exact) const -> Sta
     return m_cursor.status();
 }
 
-auto Tree::read_key(Node &node, std::size_t index, std::string &scratch, Slice &key_out) const -> Status
+auto Tree::read_key(Node &node, std::size_t index, std::string &scratch, Slice *key_out) const -> Status
 {
     const auto cell = read_cell(node, index);
     if (scratch.size() < cell.key_size) {
         scratch.resize(cell.key_size);
     }
     auto s = PayloadManager::access(*m_pager, cell, 0, cell.key_size, nullptr, scratch.data());
-    if (s.is_ok()) {
-        key_out = Slice(scratch).truncate(cell.key_size);
+    if (s.is_ok() && key_out) {
+        *key_out = Slice(scratch).truncate(cell.key_size);
     }
     return s;
 }
 
-auto Tree::read_value(Node &node, std::size_t index, std::string &scratch, Slice &value_out) const -> Status
+auto Tree::read_value(Node &node, std::size_t index, std::string &scratch, Slice *value_out) const -> Status
 {
     const auto cell = read_cell(node, index);
     const auto value_size = cell.total_size - cell.key_size;
@@ -616,8 +617,8 @@ auto Tree::read_value(Node &node, std::size_t index, std::string &scratch, Slice
         scratch.resize(value_size);
     }
     auto s = PayloadManager::access(*m_pager, cell, cell.key_size, value_size, nullptr, scratch.data());
-    if (s.is_ok()) {
-        value_out = Slice(scratch).truncate(value_size);
+    if (s.is_ok() && value_out) {
+        *value_out = Slice(scratch).truncate(value_size);
     }
     return s;
 }
@@ -1259,7 +1260,7 @@ auto Tree::get(const Slice &key, std::string *value) const -> Status
         s = Status::not_found();
     } else if (value) {
         Slice slice;
-        s = read_value(m_cursor.node(), m_cursor.index(), *value, slice);
+        s = read_value(m_cursor.node(), m_cursor.index(), *value, &slice);
         value->resize(slice.size());
         if (s.is_ok()) {
             report_stats(kBytesRead, slice.size());
@@ -1405,23 +1406,6 @@ auto Tree::erase(const Slice &key) -> Status
     }
     m_cursor.clear();
     return s;
-
-    //    SearchResult slot;
-    //
-    //    CALICODB_TRY(find_external(key, slot));
-    //    auto [node, index, exact] = std::move(slot);
-    //
-    //    if (exact) {
-    //        Slice anchor;
-    //        CALICODB_TRY(read_key(node, index, m_anchor, anchor));
-    //
-    //        upgrade(node);
-    //        CALICODB_TRY(remove_cell(node, index));
-    //
-    //        return resolve_underflow(std::move(node), anchor);
-    //    }
-    //    release(std::move(node));
-    //    return Status::ok();
 }
 
 auto Tree::find_lowest(Node &out) const -> Status
@@ -2112,11 +2096,9 @@ public:
             Node right;
             CHECK_OK(tree.acquire(node.header.next_id, false, right));
             std::string lhs_buffer, rhs_buffer;
-            Slice lhs_key;
-            CHECK_OK(const_cast<Tree &>(tree).read_key(node, 0, lhs_buffer, lhs_key));
-            Slice rhs_key;
-            CHECK_OK(const_cast<Tree &>(tree).read_key(right, 0, rhs_buffer, rhs_key));
-            CHECK_TRUE(lhs_key < rhs_key);
+            CHECK_OK(const_cast<Tree &>(tree).read_key(node, 0, lhs_buffer, nullptr));
+            CHECK_OK(const_cast<Tree &>(tree).read_key(right, 0, rhs_buffer, nullptr));
+            CHECK_TRUE(lhs_buffer < rhs_buffer);
             CHECK_EQ(right.header.prev_id, node.page.id());
             tree.release(std::move(node));
             node = std::move(right);
@@ -2208,7 +2190,7 @@ auto InternalCursor::seek(const Slice &key) -> bool
     while (lower < upper) {
         Slice rhs;
         const auto mid = (lower + upper) / 2;
-        m_status = m_tree->read_key(m_node, mid, m_buffer, rhs);
+        m_status = m_tree->read_key(m_node, mid, m_buffer, &rhs);
         if (!is_valid()) {
             break;
         }
@@ -2235,17 +2217,13 @@ auto InternalCursor::move_down(Id child_id) -> void
     m_status = m_tree->acquire(child_id, m_write, m_node);
 }
 
-auto InternalCursor::move_up() -> void
-{
-    CALICODB_EXPECT_TRUE(is_valid());
-    clear();
-    m_status = m_tree->acquire(history[--level].page_id, m_write, m_node);
-}
-
 Cursor::Cursor() = default;
 Cursor::~Cursor() = default;
 
-CursorImpl::~CursorImpl() = default;
+CursorImpl::~CursorImpl()
+{
+    clear();
+}
 
 auto CursorImpl::is_valid() const -> bool
 {
@@ -2257,41 +2235,53 @@ auto CursorImpl::status() const -> Status
     return m_status;
 }
 
-auto CursorImpl::fetch_payload() -> Status
+auto CursorImpl::fetch_payload(Node &node, std::size_t index) -> Status
 {
-    CALICODB_EXPECT_EQ(m_key_size, 0);
-    CALICODB_EXPECT_EQ(m_value_size, 0);
+    m_key_size = 0;
+    m_value_size = 0;
 
-    Node node;
-    CALICODB_TRY(m_tree->acquire(m_loc.page_id, false, node));
-
-    Slice key, value;
-    auto s = m_tree->read_key(node, m_loc.index, m_key, key);
-    m_key_size = key.size();
-    if (s.is_ok()) {
-        s = m_tree->read_value(node, m_loc.index, m_value, value);
-        m_value_size = value.size();
+    Status s;
+    const auto cell = read_cell(node, index);
+    if (cell.key_size > cell.local_size) {
+        // Read a key spread over the node and 1+ overflow pages.
+        s = m_tree->read_key(node, index, m_key, nullptr);
+        m_key_size = cell.key_size;
     }
-    m_tree->release(std::move(node));
+    if (s.is_ok() && cell.has_remote) {
+        // Read a value spread over (maybe) the node and 1+ overflow pages. The value may be
+        // 0 bytes in length.
+        s = m_tree->read_value(node, index, m_value, nullptr);
+        m_value_size = cell.total_size - cell.key_size;
+    }
     return s;
 }
 
 auto CursorImpl::key() const -> Slice
 {
     CALICODB_EXPECT_TRUE(is_valid());
-    return Slice(m_key).truncate(m_key_size);
+    if (m_key_size) {
+        return Slice(m_key).truncate(m_key_size);
+    }
+    const auto cell = read_cell(m_node, m_index);
+    CALICODB_EXPECT_LE(cell.key_size, cell.local_size);
+    return {cell.key, cell.key_size};
 }
 
 auto CursorImpl::value() const -> Slice
 {
     CALICODB_EXPECT_TRUE(is_valid());
-    return Slice(m_value).truncate(m_value_size);
+    if (m_value_size) {
+        return Slice(m_value).truncate(m_value_size);
+    }
+    const auto cell = read_cell(m_node, m_index);
+    const auto value_size = cell.total_size - cell.key_size;
+    CALICODB_EXPECT_TRUE(!cell.has_remote || value_size == 0);
+    return {cell.key + cell.key_size, value_size};
 }
 
 auto CursorImpl::seek_first() -> void
 {
-    m_key_size = 0;
-    m_value_size = 0;
+    clear();
 
     Node lowest;
     auto s = m_tree->find_lowest(lowest);
@@ -2299,18 +2289,12 @@ auto CursorImpl::seek_first() -> void
         m_status = s;
         return;
     }
-    if (lowest.header.cell_count) {
-        seek_to(std::move(lowest), 0);
-    } else {
-        m_tree->release(std::move(lowest));
-        m_status = Status::not_found();
-    }
+    seek_to(std::move(lowest), 0);
 }
 
 auto CursorImpl::seek_last() -> void
 {
-    m_key_size = 0;
-    m_value_size = 0;
+    clear();
 
     Node highest;
     auto s = m_tree->find_highest(highest);
@@ -2318,86 +2302,66 @@ auto CursorImpl::seek_last() -> void
         m_status = s;
         return;
     }
-    if (const auto count = highest.header.cell_count) {
+    const auto count = highest.header.cell_count;
+    if (count) {
         seek_to(std::move(highest), count - 1);
     } else {
         m_tree->release(std::move(highest));
-        m_status = Status::not_found();
     }
 }
 
 auto CursorImpl::next() -> void
 {
     CALICODB_EXPECT_TRUE(is_valid());
-    m_key_size = 0;
-    m_value_size = 0;
-
-    Node node;
-    auto s = m_tree->acquire(m_loc.page_id, false, node);
-    if (!s.is_ok()) {
-        m_status = s;
+    if (++m_index < m_node.header.cell_count) {
+        auto s = fetch_payload(m_node, m_index);
+        if (!s.is_ok()) {
+            clear(s);
+        }
         return;
     }
-    if (++m_loc.index < m_loc.count) {
-        seek_to(std::move(node), m_loc.index);
-        return;
-    }
-    const auto next_id = node.header.next_id;
-    m_tree->release(std::move(node));
+    const auto next_id = m_node.header.next_id;
+    clear();
 
     if (next_id.is_null()) {
-        m_status = default_cursor_status();
         return;
     }
-    s = m_tree->acquire(next_id, false, node);
-    if (!s.is_ok()) {
-        m_status = s;
-        return;
+    Node node;
+    auto s = m_tree->acquire(next_id, false, node);
+    if (s.is_ok()) {
+        seek_to(std::move(node), 0);
     }
-    seek_to(std::move(node), 0);
 }
 
 auto CursorImpl::previous() -> void
 {
     CALICODB_EXPECT_TRUE(is_valid());
-    m_key_size = 0;
-    m_value_size = 0;
-
-    Node node;
-    auto s = m_tree->acquire(m_loc.page_id, false, node);
-    if (!s.is_ok()) {
-        m_status = s;
+    if (m_index) {
+        auto s = fetch_payload(m_node, --m_index);
+        if (!s.is_ok()) {
+            clear(s);
+        }
         return;
     }
-    if (m_loc.index != 0) {
-        seek_to(std::move(node), m_loc.index - 1);
-        return;
-    }
-    const auto prev_id = node.header.prev_id;
-    m_tree->release(std::move(node));
+    const auto prev_id = m_node.header.prev_id;
+    clear();
 
     if (prev_id.is_null()) {
-        m_status = default_cursor_status();
         return;
     }
-    s = m_tree->acquire(prev_id, false, node);
-    if (!s.is_ok()) {
-        m_status = s;
-        return;
+    Node node;
+    auto s = m_tree->acquire(prev_id, false, node);
+    if (s.is_ok()) {
+        const auto count = node.header.cell_count;
+        seek_to(std::move(node), count - 1);
     }
-    const auto count = node.header.cell_count;
-    seek_to(std::move(node), count - 1);
 }
 
 auto CursorImpl::seek_to(Node node, std::size_t index) -> void
 {
+    CALICODB_EXPECT_FALSE(is_valid());
     const auto *hdr = &node.header;
     CALICODB_EXPECT_TRUE(hdr->is_external);
-    m_status = default_cursor_status();
-    if (!hdr->cell_count) {
-        // Table is empty.
-        return;
-    }
 
     if (index == hdr->cell_count && !hdr->next_id.is_null()) {
         m_tree->release(std::move(node));
@@ -2410,28 +2374,34 @@ auto CursorImpl::seek_to(Node node, std::size_t index) -> void
         index = 0;
     }
     if (index < hdr->cell_count) {
-        m_loc.index = static_cast<unsigned>(index);
-        m_loc.count = hdr->cell_count;
-        m_loc.page_id = node.page.id();
-        m_status = fetch_payload();
+        m_status = fetch_payload(node, index);
+        if (m_status.is_ok()) {
+            m_node = std::move(node);
+            m_index = index;
+            return;
+        }
     }
     m_tree->release(std::move(node));
 }
 
 auto CursorImpl::seek(const Slice &key) -> void
 {
-    m_key_size = 0;
-    m_value_size = 0;
+    clear();
 
-    bool exact;
-    auto s = m_tree->find_external(key, false, exact);
-    if (!s.is_ok()) {
-        m_status = s;
-        return;
+    bool unused;
+    auto s = m_tree->find_external(key, false, unused);
+    if (s.is_ok()) {
+        const auto index = m_tree->m_cursor.index();
+        seek_to(m_tree->m_cursor.take(), index);
     }
-    const auto index = m_tree->m_cursor.index();
-    seek_to(m_tree->m_cursor.take(), index);
-    m_tree->m_cursor.clear();
+}
+
+auto CursorImpl::clear(Status s) -> void
+{
+    if (is_valid()) {
+        m_tree->release(std::move(m_node));
+        m_status = std::move(s);
+    }
 }
 
 auto CursorInternal::make_cursor(Tree &tree) -> Cursor *

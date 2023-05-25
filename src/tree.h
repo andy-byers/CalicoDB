@@ -201,25 +201,22 @@ public:
     auto seek_root(bool write) -> void;
     auto seek(const Slice &key) -> bool;
     auto move_down(Id child_id) -> void;
-    auto move_up() -> void;
 };
 
 class CursorImpl : public Cursor
 {
     mutable Status m_status;
+    mutable Node m_node;
+    Tree *m_tree;
     std::string m_key;
     std::string m_value;
     std::size_t m_key_size = 0;
     std::size_t m_value_size = 0;
-    Tree *m_tree;
-    struct Location {
-        Id page_id;
-        unsigned index = 0;
-        unsigned count = 0;
-    } m_loc;
+    std::size_t m_index = 0;
 
     auto seek_to(Node node, std::size_t index) -> void;
-    auto fetch_payload() -> Status;
+    auto fetch_payload(Node &node, std::size_t index) -> Status;
+    auto clear(Status s = Status::not_found()) -> void;
 
 public:
     friend class CursorInternal;
@@ -302,8 +299,8 @@ private:
     };
 
     [[nodiscard]] auto free_overflow(Id head_id) -> Status;
-    [[nodiscard]] auto read_key(Node &node, std::size_t index, std::string &scratch, Slice &key_out) const -> Status;
-    [[nodiscard]] auto read_value(Node &node, std::size_t index, std::string &scratch, Slice &value_out) const -> Status;
+    [[nodiscard]] auto read_key(Node &node, std::size_t index, std::string &scratch, Slice *key_out) const -> Status;
+    [[nodiscard]] auto read_value(Node &node, std::size_t index, std::string &scratch, Slice *value_out) const -> Status;
     [[nodiscard]] auto write_key(Node &node, std::size_t index, const Slice &key) -> Status;
     [[nodiscard]] auto write_value(Node &node, std::size_t index, const Slice &value) -> Status;
     [[nodiscard]] auto emplace(Node &node, const Slice &key, const Slice &value, std::size_t index, bool &overflow) -> Status;

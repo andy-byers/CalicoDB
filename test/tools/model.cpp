@@ -20,7 +20,13 @@ auto ModelDB::new_txn(bool, Txn *&out) -> Status
     return Status::ok();
 }
 
-ModelTxn::~ModelTxn() = default;
+ModelTxn::~ModelTxn()
+{
+    for (const auto &[name, wrapper] : m_tb) {
+        wrapper.del(wrapper.aux);
+        delete wrapper.tb;
+    }
+}
 
 auto ModelTxn::create_table(const TableOptions &options, const Slice &name, Table **out) -> Status
 {
@@ -34,7 +40,18 @@ auto ModelTxn::create_table(const TableOptions &options, const Slice &name, Tabl
         return Status::invalid_argument("table exists");
     }
     if (out) {
-        *out = new ModelTable(itr->second);
+        auto tb = m_tb.find(name.to_string());
+        if (tb != end(m_tb)) {
+            *out = tb->second.tb;
+        } else {
+            const WrappedTable wrapped = {
+                new ModelTable(itr->second),
+                nullptr,
+                [](auto *) {},
+            };
+            *out = wrapped.tb;
+            m_tb.emplace(name.to_string(), wrapped);
+        }
     }
     return Status::ok();
 }

@@ -242,15 +242,14 @@ auto CheckedTxn::create_table(const TableOptions &options, const Slice &name, Ta
         Table *model_table;
         (void)m_model->create_table(options, name, &model_table);
         *out = new CheckedTable(*real_table, *model_table);
+        m_model->set_aux_ptr(name, *out, [](auto *ptr) {
+            delete reinterpret_cast<CheckedTable *>(ptr);
+        });
     }
     return s;
 }
 
-CheckedTable::~CheckedTable()
-{
-    delete m_model;
-    delete m_real;
-}
+CheckedTable::~CheckedTable() = default;
 
 auto CheckedTable::new_cursor() const -> Cursor *
 {
@@ -279,42 +278,39 @@ enum OperationType {
     kOpCount
 };
 
-constexpr std::size_t kMaxTableSize = 1'000;
-constexpr std::size_t kMaxTables = 10;
-
 class DBFuzzer
 {
     Options m_options;
     std::string m_filename;
     KVStore m_store;
     DB *m_db = nullptr;
-    Txn *m_txn = nullptr;
+    Txn *m_tx = nullptr;
     Table *m_tb = nullptr;
 
     auto reopen_db() -> void
     {
-        delete m_txn;
+        delete m_tx;
         delete m_db;
         m_tb = nullptr;
-        m_txn = nullptr;
+        m_tx = nullptr;
         CHECK_OK(CheckedDB::open(m_options, m_filename, m_store, m_db));
         reopen_txn();
-        reopen_tb();
+        reopen_table();
     }
 
     auto reopen_txn() -> void
     {
-        delete m_txn;
+        delete m_tx;
         m_tb = nullptr;
-        CHECK_OK(m_db->new_txn(true, m_txn));
-        reopen_tb();
+        CHECK_OK(m_db->new_txn(true, m_tx));
+        reopen_table();
     }
 
-    auto reopen_tb() -> void
+    auto reopen_table() -> void
     {
         // This should be a NOOP if the table handle has already been created
         // since this transaction was started. The same exact handle is returned.
-        CHECK_OK(m_txn->create_table(TableOptions(), "TABLE", &m_tb));
+        CHECK_OK(m_tx->create_table(TableOptions(), "TABLE", &m_tb));
     }
 
 public:
@@ -330,7 +326,7 @@ public:
 
     ~DBFuzzer()
     {
-        delete m_txn;
+        delete m_tx;
         delete m_db;
     }
 
@@ -374,19 +370,30 @@ auto DBFuzzer::fuzz(const U8 *&data_ptr, std::size_t &size_ref) -> void
                 }
             }
             break;
+        case kCursorIterate:
+            c = m_tb->new_cursor();
+            c->seek_first();
+            while (c->is_valid()) {
+                c->next();
+            }
+            c->seek_last();
+            while (c->is_valid()) {
+                c->previous();
+            }
+            break;
         case kTxnVacuum:
-            CHECK_OK(m_txn->vacuum());
+            CHECK_OK(m_tx->vacuum());
             break;
         case kTxnCommit:
-            CHECK_OK(m_txn->commit());
+            CHECK_OK(m_tx->commit());
             break;
         case kReopenTxn:
             reopen_txn();
             break;
         case kReopenTable:
-            reopen_tb();
+            reopen_table();
             break;
-        default: // kReopen
+        default: // kReopenDB
             reopen_db();
     }
     if (c) {
@@ -403,7 +410,7 @@ auto DBFuzzer::fuzz(const U8 *&data_ptr, std::size_t &size_ref) -> void
         c->next();
     }
     CHECK_TRUE(c->status().is_not_found());
-    CHECK_OK(m_txn->status());
+    CHECK_OK(m_tx->status());
     delete c;
 }
 
