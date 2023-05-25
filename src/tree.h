@@ -214,6 +214,7 @@ class CursorImpl : public Cursor
     std::size_t m_value_size = 0;
     std::size_t m_index = 0;
 
+protected:
     auto seek_to(Node node, std::size_t index) -> void;
     auto fetch_payload(Node &node, std::size_t index) -> Status;
     auto clear(Status s = Status::not_found()) -> void;
@@ -221,9 +222,11 @@ class CursorImpl : public Cursor
 public:
     friend class CursorInternal;
     friend class Tree;
+    friend class SchemaCursor;
 
     explicit CursorImpl(Tree &tree)
-        : m_tree(&tree)
+        : m_status(Status::not_found()),
+          m_tree(&tree)
     {
     }
 
@@ -287,16 +290,11 @@ public:
 private:
     friend class CursorImpl;
     friend class InternalCursor;
+    friend class SchemaCursor;
     friend class CursorInternal;
     friend class DBImpl;
     friend class Schema;
     friend class TreeValidator;
-
-    struct SearchResult {
-        Node node;
-        std::size_t index = 0;
-        bool exact = false;
-    };
 
     [[nodiscard]] auto free_overflow(Id head_id) -> Status;
     [[nodiscard]] auto read_key(Node &node, std::size_t index, std::string &scratch, Slice *key_out) const -> Status;

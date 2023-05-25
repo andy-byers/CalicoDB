@@ -106,7 +106,7 @@ public:
         return Status::ok();
     }
 
-    auto set_aux_ptr(const Slice &name, void *ptr, void(*del)(void *)) -> void
+    auto set_aux_ptr(const Slice &name, void *ptr, void (*del)(void *)) -> void
     {
         auto itr = m_tb.find(name.to_string());
         CALICODB_EXPECT_NE(end(m_tb), itr);

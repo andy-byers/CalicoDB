@@ -2330,6 +2330,8 @@ auto CursorImpl::next() -> void
     auto s = m_tree->acquire(next_id, false, node);
     if (s.is_ok()) {
         seek_to(std::move(node), 0);
+    } else {
+        m_status = s;
     }
 }
 
@@ -2354,6 +2356,8 @@ auto CursorImpl::previous() -> void
     if (s.is_ok()) {
         const auto count = node.header.cell_count;
         seek_to(std::move(node), count - 1);
+    } else {
+        m_status = s;
     }
 }
 
@@ -2393,11 +2397,14 @@ auto CursorImpl::seek(const Slice &key) -> void
     if (s.is_ok()) {
         const auto index = m_tree->m_cursor.index();
         seek_to(m_tree->m_cursor.take(), index);
+    } else {
+        m_status = s;
     }
 }
 
 auto CursorImpl::clear(Status s) -> void
 {
+    CALICODB_EXPECT_FALSE(s.is_ok());
     if (is_valid()) {
         m_tree->release(std::move(m_node));
         m_status = std::move(s);

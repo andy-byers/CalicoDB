@@ -160,10 +160,11 @@ protected:
         } else {
             c->seek_last();
         }
+        Status s;
         if (c->status().is_io_error()) {
-            return c->status();
+            s = c->status();
         }
-        if (exists) {
+        if (s.is_ok() && exists) {
             for (int kv = kv1; kv < kv2; ++kv) {
                 const auto [k, v] = make_kv(kv, round);
                 if (kv == kv1) {
@@ -173,24 +174,28 @@ protected:
                     EXPECT_EQ(k, c->key().to_string());
                     EXPECT_EQ(v, c->value().to_string());
                 } else {
-                    EXPECT_TRUE((c->status().is_io_error()));
-                    return c->status();
+                    EXPECT_TRUE(c->status().is_io_error());
+                    s = c->status();
+                    break;
                 }
                 c->next();
             }
-            for (int kv = kv2 - 1; kv >= kv1; --kv) {
-                const auto [k, v] = make_kv(kv, round);
-                if (kv == kv2 - 1) {
-                    c->seek(k);
+            if (s.is_ok()) {
+                for (int kv = kv2 - 1; kv >= kv1; --kv) {
+                    const auto [k, v] = make_kv(kv, round);
+                    if (kv == kv2 - 1) {
+                        c->seek(k);
+                    }
+                    if (c->is_valid()) {
+                        EXPECT_EQ(k, c->key());
+                        EXPECT_EQ(v, c->value());
+                    } else {
+                        EXPECT_TRUE((c->status().is_io_error()));
+                        s = c->status();
+                        break;
+                    }
+                    c->previous();
                 }
-                if (c->is_valid()) {
-                    EXPECT_EQ(k, c->key());
-                    EXPECT_EQ(v, c->value());
-                } else {
-                    EXPECT_TRUE((c->status().is_io_error()));
-                    return c->status();
-                }
-                c->previous();
             }
         } else {
             for (int kv = kv1; kv < kv2; ++kv) {
@@ -200,12 +205,14 @@ protected:
                     EXPECT_NE(k, c->key().to_string());
                 } else if (!c->status().is_not_found()) {
                     EXPECT_TRUE((c->status().is_io_error()));
-                    return c->status();
+                    s = c->status();
+                    break;
                 }
                 ++kv;
             }
         }
-        return Status::ok();
+        delete c;
+        return s;
     }
     [[nodiscard]] static auto check_range(Txn &txn, const TableOptions &options, const std::string &tbname, int kv1, int kv2, bool exists, int round = 0) -> Status
     {

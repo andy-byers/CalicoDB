@@ -636,6 +636,17 @@ protected:
         TreeTests::SetUp();
         add_initial_records(*this);
     }
+
+    auto make_cursor() -> std::unique_ptr<Cursor>
+    {
+        switch (GetParam()) {
+            case 0:
+                return std::unique_ptr<Cursor>(CursorInternal::make_cursor(*tree));
+            case 1:
+                return std::make_unique<SchemaCursor>(*tree);
+        }
+        return nullptr;
+    }
 };
 
 TEST_P(CursorTests, AccountsForNodeBoundaries)
@@ -646,7 +657,7 @@ TEST_P(CursorTests, AccountsForNodeBoundaries)
         ASSERT_OK(tree->erase(make_long_key(i + 3)));
         ASSERT_OK(tree->erase(make_long_key(i + 4)));
     }
-    std::unique_ptr<Cursor> cursor{CursorInternal::make_cursor(*tree)};
+    auto cursor = make_cursor();
     for (std::size_t i = 0; i + 10 < kInitialRecordCount; i += 5) {
         cursor->seek(make_long_key(i + 1));
         ASSERT_EQ(make_long_key(i + 5), cursor->key());
@@ -661,7 +672,7 @@ TEST_P(CursorTests, AccountsForNodeBoundaries)
 
 TEST_P(CursorTests, SeeksForward)
 {
-    std::unique_ptr<Cursor> cursor{CursorInternal::make_cursor(*tree)};
+    auto cursor = make_cursor();
     cursor->seek_first();
     std::size_t i = 0;
     while (cursor->is_valid()) {
@@ -675,7 +686,7 @@ TEST_P(CursorTests, SeeksForward)
 
 TEST_P(CursorTests, SeeksForwardFromBoundary)
 {
-    std::unique_ptr<Cursor> cursor{CursorInternal::make_cursor(*tree)};
+    auto cursor = make_cursor();
     cursor->seek(make_long_key(kInitialRecordCount / 4));
     while (cursor->is_valid()) {
         cursor->next();
@@ -684,8 +695,8 @@ TEST_P(CursorTests, SeeksForwardFromBoundary)
 
 TEST_P(CursorTests, SeeksForwardToBoundary)
 {
-    std::unique_ptr<Cursor> cursor{CursorInternal::make_cursor(*tree)};
-    std::unique_ptr<Cursor> bounds{CursorInternal::make_cursor(*tree)};
+    auto cursor = make_cursor();
+    auto bounds = make_cursor();
     cursor->seek_first();
     bounds->seek(make_long_key(kInitialRecordCount * 3 / 4));
     while (cursor->key() != bounds->key()) {
@@ -696,9 +707,9 @@ TEST_P(CursorTests, SeeksForwardToBoundary)
 
 TEST_P(CursorTests, SeeksForwardBetweenBoundaries)
 {
-    std::unique_ptr<Cursor> cursor{CursorInternal::make_cursor(*tree)};
+    auto cursor = make_cursor();
     cursor->seek(make_long_key(kInitialRecordCount / 4));
-    std::unique_ptr<Cursor> bounds{CursorInternal::make_cursor(*tree)};
+    auto bounds = make_cursor();
     bounds->seek(make_long_key(kInitialRecordCount * 3 / 4));
     while (cursor->key() != bounds->key()) {
         ASSERT_TRUE(cursor->is_valid());
@@ -708,12 +719,12 @@ TEST_P(CursorTests, SeeksForwardBetweenBoundaries)
 
 TEST_P(CursorTests, SeeksBackward)
 {
-    std::unique_ptr<Cursor> cursor{CursorInternal::make_cursor(*tree)};
+    auto cursor = make_cursor();
     cursor->seek_last();
     std::size_t i = 0;
     while (cursor->is_valid()) {
         ASSERT_EQ(cursor->key().to_string(), make_long_key(kInitialRecordCount - 1 - i++));
-        ASSERT_EQ(cursor->value().to_string(), make_value('v'));
+        ASSERT_EQ(cursor->value(), make_value('v'));
         cursor->previous();
     }
     ASSERT_EQ(i, kInitialRecordCount);
@@ -721,7 +732,7 @@ TEST_P(CursorTests, SeeksBackward)
 
 TEST_P(CursorTests, SeeksBackwardFromBoundary)
 {
-    std::unique_ptr<Cursor> cursor{CursorInternal::make_cursor(*tree)};
+    auto cursor = make_cursor();
     const auto bounds = kInitialRecordCount * 3 / 4;
     cursor->seek(make_long_key(bounds));
     for (std::size_t i = 0; i <= bounds; ++i) {
@@ -733,9 +744,9 @@ TEST_P(CursorTests, SeeksBackwardFromBoundary)
 
 TEST_P(CursorTests, SeeksBackwardToBoundary)
 {
-    std::unique_ptr<Cursor> cursor{CursorInternal::make_cursor(*tree)};
+    auto cursor = make_cursor();
     cursor->seek_last();
-    std::unique_ptr<Cursor> bounds{CursorInternal::make_cursor(*tree)};
+    auto bounds = make_cursor();
     bounds->seek(make_long_key(kInitialRecordCount / 4));
     while (cursor->key() != bounds->key()) {
         ASSERT_TRUE(cursor->is_valid());
@@ -745,8 +756,8 @@ TEST_P(CursorTests, SeeksBackwardToBoundary)
 
 TEST_P(CursorTests, SeeksBackwardBetweenBoundaries)
 {
-    std::unique_ptr<Cursor> cursor{CursorInternal::make_cursor(*tree)};
-    std::unique_ptr<Cursor> bounds{CursorInternal::make_cursor(*tree)};
+    auto cursor = make_cursor();
+    auto bounds = make_cursor();
     cursor->seek(make_long_key(kInitialRecordCount * 3 / 4));
     bounds->seek(make_long_key(kInitialRecordCount / 4));
     while (cursor->key() != bounds->key()) {
@@ -759,7 +770,7 @@ TEST_P(CursorTests, SeeksBackwardBetweenBoundaries)
 
 TEST_P(CursorTests, SanityCheck_Forward)
 {
-    std::unique_ptr<Cursor> cursor{CursorInternal::make_cursor(*tree)};
+    auto cursor = make_cursor();
     for (std::size_t iteration = 0; iteration < 100; ++iteration) {
         const auto i = random.Next(kInitialRecordCount - 1);
         const auto key = make_long_key(i);
@@ -784,7 +795,7 @@ TEST_P(CursorTests, SanityCheck_Forward)
 
 TEST_P(CursorTests, SanityCheck_Backward)
 {
-    std::unique_ptr<Cursor> cursor{CursorInternal::make_cursor(*tree)};
+    auto cursor = make_cursor();
     for (std::size_t iteration = 0; iteration < 100; ++iteration) {
         const auto i = random.Next(kInitialRecordCount - 1);
         const auto key = make_long_key(i);
@@ -810,7 +821,7 @@ TEST_P(CursorTests, SanityCheck_Backward)
 TEST_P(CursorTests, SeekOutOfRange)
 {
     ASSERT_OK(tree->erase(make_long_key(0)));
-    std::unique_ptr<Cursor> cursor(CursorInternal::make_cursor(*tree));
+    auto cursor = make_cursor();
 
     cursor->seek(make_long_key(0));
     ASSERT_TRUE(cursor->is_valid());
@@ -823,7 +834,7 @@ TEST_P(CursorTests, SeekOutOfRange)
 #if not NDEBUG
 TEST_P(CursorTests, InvalidCursorDeathTest)
 {
-    std::unique_ptr<Cursor> cursor{CursorInternal::make_cursor(*tree)};
+    auto cursor = make_cursor();
     ASSERT_DEATH((void)cursor->key(), kExpectationMatcher);
     ASSERT_DEATH((void)cursor->value(), kExpectationMatcher);
     ASSERT_DEATH((void)cursor->next(), kExpectationMatcher);
@@ -834,7 +845,7 @@ TEST_P(CursorTests, InvalidCursorDeathTest)
 INSTANTIATE_TEST_SUITE_P(
     CursorTests,
     CursorTests,
-    ::testing::Values(0));
+    ::testing::Values(0, 1));
 
 class PointerMapTests : public TreeTests
 {

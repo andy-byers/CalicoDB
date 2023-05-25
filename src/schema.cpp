@@ -40,7 +40,7 @@ auto Schema::corrupted_root_id(const Slice &name, const Slice &value) -> Status
 
 auto Schema::new_cursor() -> Cursor *
 {
-    return CursorInternal::make_cursor(m_map);
+    return new SchemaCursor(m_map);
 }
 
 auto Schema::create_table(const TableOptions &options, const Slice &name, bool readonly, Table **out) -> Status
@@ -232,6 +232,81 @@ auto Schema::TEST_validate() const -> void
             CALICODB_EXPECT_EQ(table.root, tree.root());
         }
     }
+}
+
+SchemaCursor::~SchemaCursor()
+{
+    delete m_impl;
+}
+
+auto SchemaCursor::move_to_impl() -> void
+{
+    if (m_impl->is_valid()) {
+        m_key = m_impl->key().to_string();
+        m_value = m_impl->value().to_string();
+    }
+    m_status = m_impl->status();
+    m_impl->clear();
+}
+
+auto SchemaCursor::is_valid() const -> bool
+{
+    return m_status.is_ok();
+}
+
+auto SchemaCursor::status() const -> Status
+{
+    return m_status;
+}
+
+auto SchemaCursor::key() const -> Slice
+{
+    CALICODB_EXPECT_TRUE(is_valid());
+    return m_key;
+}
+
+auto SchemaCursor::value() const -> Slice
+{
+    CALICODB_EXPECT_TRUE(is_valid());
+    return m_value;
+}
+
+auto SchemaCursor::seek(const Slice &key) -> void
+{
+    m_impl->seek(key);
+    move_to_impl();
+}
+
+auto SchemaCursor::seek_first() -> void
+{
+    m_impl->seek_first();
+    move_to_impl();
+}
+
+auto SchemaCursor::seek_last() -> void
+{
+    m_impl->seek_last();
+    move_to_impl();
+}
+
+auto SchemaCursor::next() -> void
+{
+    CALICODB_EXPECT_TRUE(is_valid());
+    m_impl->seek(m_key);
+    if (m_impl->is_valid()) {
+        m_impl->next();
+    }
+    move_to_impl();
+}
+
+auto SchemaCursor::previous() -> void
+{
+    CALICODB_EXPECT_TRUE(is_valid());
+    m_impl->seek(m_key);
+    if (m_impl->is_valid()) {
+        m_impl->previous();
+    }
+    move_to_impl();
 }
 
 } // namespace calicodb

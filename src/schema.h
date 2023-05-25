@@ -14,6 +14,7 @@ namespace calicodb
 {
 
 class TableImpl;
+class SchemaCursor;
 
 // Representation of the database schema
 class Schema final
@@ -57,6 +58,36 @@ private:
     Status *m_status;
     Pager *m_pager;
     Tree m_map;
+};
+
+class SchemaCursor : public Cursor
+{
+    mutable Status m_status;
+    std::string m_key;
+    std::string m_value;
+    CursorImpl *m_impl;
+
+    auto move_to_impl() -> void;
+
+public:
+    explicit SchemaCursor(Tree &tree)
+        : m_status(Status::not_found()),
+          m_impl(new CursorImpl(tree))
+    {
+    }
+
+    ~SchemaCursor() override;
+
+    [[nodiscard]] auto is_valid() const -> bool override;
+    [[nodiscard]] auto status() const -> Status override;
+    [[nodiscard]] auto key() const -> Slice override;
+    [[nodiscard]] auto value() const -> Slice override;
+
+    auto seek(const Slice &key) -> void override;
+    auto seek_first() -> void override;
+    auto seek_last() -> void override;
+    auto next() -> void override;
+    auto previous() -> void override;
 };
 
 } // namespace calicodb
