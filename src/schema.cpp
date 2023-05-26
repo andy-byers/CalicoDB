@@ -249,28 +249,6 @@ auto SchemaCursor::move_to_impl() -> void
     m_impl->clear();
 }
 
-auto SchemaCursor::is_valid() const -> bool
-{
-    return m_status.is_ok();
-}
-
-auto SchemaCursor::status() const -> Status
-{
-    return m_status;
-}
-
-auto SchemaCursor::key() const -> Slice
-{
-    CALICODB_EXPECT_TRUE(is_valid());
-    return m_key;
-}
-
-auto SchemaCursor::value() const -> Slice
-{
-    CALICODB_EXPECT_TRUE(is_valid());
-    return m_value;
-}
-
 auto SchemaCursor::seek(const Slice &key) -> void
 {
     m_impl->seek(key);

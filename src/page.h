@@ -29,11 +29,30 @@ public:
     explicit Page(Pager &pager, PageRef &ref);
     ~Page();
 
-    [[nodiscard]] auto is_writable() const -> bool;
-    [[nodiscard]] auto id() const -> Id;
-    [[nodiscard]] auto view() const -> Slice;
-    [[nodiscard]] auto data() -> char *;
-    [[nodiscard]] auto data() const -> const char *;
+    [[nodiscard]] auto is_writable() const -> bool
+    {
+        return m_write;
+    }
+
+    [[nodiscard]] auto id() const -> Id
+    {
+        return m_id;
+    }
+
+    [[nodiscard]] auto view() const -> Slice
+    {
+        return Slice(m_data, kPageSize);
+    }
+
+    [[nodiscard]] auto data() -> char *
+    {
+        return m_data;
+    }
+
+    [[nodiscard]] auto data() const -> const char *
+    {
+        return m_data;
+    }
 
     // Disable copies.
     Page(const Page &) = delete;

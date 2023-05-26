@@ -20,7 +20,7 @@ TableImpl::~TableImpl() = default;
 
 auto TableImpl::new_cursor() const -> Cursor *
 {
-    auto *cursor = CursorInternal::make_cursor(m_tree);
+    auto *cursor = new CursorImpl(m_tree);
     if (!m_status->is_ok()) {
         CursorInternal::invalidate(*cursor, *m_status);
     }

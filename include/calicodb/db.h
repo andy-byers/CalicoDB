@@ -138,8 +138,9 @@ public:
 };
 
 // Persistent, ordered mapping between keys and values
-// NOTE: All Table objects created from a Txn must be closed (with operator delete())
-// before the transaction is finished (see Txn::commit()).
+// NOTE: Table handles created from a Txn are owned by the Txn and must
+// not be delete'd. They will expire automatically when either the table
+// is dropped or the transaction finishes.
 class Table
 {
 public:

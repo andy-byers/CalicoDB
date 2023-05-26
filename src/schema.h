@@ -78,10 +78,27 @@ public:
 
     ~SchemaCursor() override;
 
-    [[nodiscard]] auto is_valid() const -> bool override;
-    [[nodiscard]] auto status() const -> Status override;
-    [[nodiscard]] auto key() const -> Slice override;
-    [[nodiscard]] auto value() const -> Slice override;
+    [[nodiscard]] auto is_valid() const -> bool override
+    {
+        return m_status.is_ok();
+    }
+
+    [[nodiscard]] auto status() const -> Status override
+    {
+        return m_status;
+    }
+
+    [[nodiscard]] auto key() const -> Slice override
+    {
+        CALICODB_EXPECT_TRUE(is_valid());
+        return m_key;
+    }
+
+    [[nodiscard]] auto value() const -> Slice override
+    {
+        CALICODB_EXPECT_TRUE(is_valid());
+        return m_value;
+    }
 
     auto seek(const Slice &key) -> void override;
     auto seek_first() -> void override;

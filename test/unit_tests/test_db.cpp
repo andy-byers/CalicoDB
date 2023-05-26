@@ -253,7 +253,7 @@ protected:
                 options.cache_size = 0;
                 break;
             default:
-                return Status::ok();
+                break;
         }
         return DB::open(options, kDBName, m_db);
     }
@@ -266,7 +266,7 @@ protected:
     {
         m_config = Config(m_config + 1);
         EXPECT_OK(reopen_db(clear));
-        return kMaxConfig <= m_config;
+        return m_config <= kMaxConfig;
     }
 
     [[nodiscard]] auto file_size(const std::string &filename) const -> std::size_t
@@ -427,7 +427,7 @@ TEST_F(DBTests, UpdateThenView)
         }));
         ASSERT_OK(m_db->checkpoint(false));
         ++round;
-    } while (change_options());
+    } while (change_options(true));
 }
 
 TEST_F(DBTests, RollbackUpdate)
@@ -472,7 +472,7 @@ TEST_F(DBTests, RollbackUpdate)
         }
         ASSERT_OK(m_db->checkpoint(false));
         ++round;
-    } while (change_options());
+    } while (change_options(true));
 }
 
 TEST_F(DBTests, VacuumEmptyDB)

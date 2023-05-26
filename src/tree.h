@@ -114,14 +114,6 @@ auto write_cell(Node &node, std::size_t index, const Cell &cell) -> std::size_t;
 // Erase a cell from the node at the specified index.
 auto erase_cell(Node &node, std::size_t index) -> void;
 
-struct NodeManager {
-    [[nodiscard]] static auto allocate(Pager &pager, Node &out, std::string &scratch, bool is_external) -> Status;
-    [[nodiscard]] static auto acquire(Pager &pager, Id page_id, Node &out, std::string &scratch, bool upgrade) -> Status;
-    [[nodiscard]] static auto destroy(Pager &pager, Node node) -> Status;
-    static auto upgrade(Pager &pager, Node &node) -> void;
-    static auto release(Pager &pager, Node node) -> void;
-};
-
 struct PayloadManager {
     [[nodiscard]] static auto promote(Pager &pager, char *scratch, Cell &cell, Id parent_id) -> Status;
     [[nodiscard]] static auto access(Pager &pager, const Cell &cell, std::size_t offset,
@@ -138,7 +130,7 @@ class InternalCursor
 
     // TODO: Cache overflow page IDs so Tree::read_value() doesn't have to read pages that have already
     //       been read by Tree::read_key() (if the key overflowed).
-    //    std::vector<Id> m_ovfl_cache;
+    // std::vector<Id> m_ovfl_cache;
 
     Node m_node;
     bool m_write;
@@ -149,7 +141,7 @@ public:
     struct Location {
         Id page_id;
         unsigned index = 0;
-    } history[kMaxDepth - 1] = {};
+    } history[kMaxDepth];
     int level = 0;
 
     explicit InternalCursor(Tree &tree)
@@ -232,11 +224,18 @@ public:
 
     ~CursorImpl() override;
 
-    [[nodiscard]] auto is_valid() const -> bool override;
-    [[nodiscard]] auto status() const -> Status override;
+    [[nodiscard]] auto is_valid() const -> bool override
+    {
+        return m_status.is_ok();
+    }
+
+    [[nodiscard]] auto status() const -> Status override
+    {
+        return m_status;
+    }
+
     [[nodiscard]] auto key() const -> Slice override;
     [[nodiscard]] auto value() const -> Slice override;
-
     auto seek(const Slice &key) -> void override;
     auto seek_first() -> void override;
     auto seek_last() -> void override;
@@ -247,7 +246,6 @@ public:
 class CursorInternal
 {
 public:
-    [[nodiscard]] static auto make_cursor(Tree &tree) -> Cursor *;
     static auto invalidate(const Cursor &cursor, Status error) -> void;
 };
 

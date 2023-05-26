@@ -48,18 +48,18 @@ public:
     explicit Bufmgr(std::size_t frame_count);
     ~Bufmgr();
 
-    // Return the number of entries in the cache
-    [[nodiscard]] auto size() const -> std::size_t;
-
-    // Return a pointer to a specific cache entry, if it exists, nullptr otherwise
-    // This method may alter the cache ordering.
-    [[nodiscard]] auto get(Id page_id) -> PageRef *;
-
     // Get a reference to the root page, which is always in-memory, but is not
     // addressable in the cache
     // Note that it is a logic error to attempt to get a reference to the root page
     // using a different method. This method must be used.
-    [[nodiscard]] auto root() -> PageRef *;
+    [[nodiscard]] auto root() -> PageRef *
+    {
+        return &m_root;
+    }
+
+    // Return a pointer to a specific cache entry, if it exists, nullptr otherwise
+    // This method may alter the cache ordering.
+    [[nodiscard]] auto get(Id page_id) -> PageRef *;
 
     // Similar to get(), except that the cache ordering is not altered
     [[nodiscard]] auto query(Id page_id) -> PageRef *;
@@ -87,6 +87,12 @@ public:
     // REQUIRES: Refcount of `ref` is not already 0
     auto unref(PageRef &ref) -> void;
 
+    // Return the number of entries in the cache
+    [[nodiscard]] auto occupied() const -> std::size_t
+    {
+        return m_map.size();
+    }
+
     // Return the number of available buffers
     [[nodiscard]] auto available() const -> std::size_t
     {
@@ -103,11 +109,22 @@ public:
     void operator=(Bufmgr &) = delete;
     Bufmgr(Bufmgr &) = delete;
 
-    [[nodiscard]] auto hits() const -> U64;
-    [[nodiscard]] auto misses() const -> U64;
+    [[nodiscard]] auto hits() const -> U64
+    {
+        return m_hits;
+    }
+
+    [[nodiscard]] auto misses() const -> U64
+    {
+        return m_misses;
+    }
 
 private:
-    [[nodiscard]] auto buffer_slot(std::size_t index) -> char *;
+    [[nodiscard]] auto buffer_slot(std::size_t index) -> char *
+    {
+        CALICODB_EXPECT_LT(index, m_frame_count);
+        return m_buffer + index * kPageSize;
+    }
 
     // Pin an available buffer to a page reference
     auto pin(PageRef &ref) -> void;

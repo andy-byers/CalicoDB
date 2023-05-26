@@ -45,9 +45,6 @@ auto DBImpl::open(const Options &sanitized) -> Status
     if (!s.is_ok()) {
         return s;
     }
-    const auto cache_size = std::max(
-        sanitized.cache_size, kMinFrameCount * kPageSize);
-
     const Pager::Parameters pager_param = {
         m_db_filename.c_str(),
         m_wal_filename.c_str(),
@@ -56,7 +53,7 @@ auto DBImpl::open(const Options &sanitized) -> Status
         m_log,
         &m_state,
         m_busy,
-        (cache_size + kPageSize - 1) / kPageSize,
+        (sanitized.cache_size + kPageSize - 1) / kPageSize,
         sanitized.sync,
     };
     m_pager = new Pager(pager_param);

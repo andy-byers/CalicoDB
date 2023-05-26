@@ -17,17 +17,12 @@
 namespace calicodb
 {
 
-[[nodiscard]] static auto default_cursor_status() -> Status
-{
-    return Status::not_found();
-}
-
 static constexpr auto kMaxCellHeaderSize =
     kVarintMaxLength + // Value size  (10 B)
     kVarintMaxLength + // Key size    (10 B)
     Id::kSize;         // Overflow ID (4 B)
 
-static constexpr std::size_t kPointerSize = 2;
+static constexpr auto kPointerSize = sizeof(U16);
 
 inline constexpr auto compute_local_size(std::size_t key_size, std::size_t value_size) -> std::size_t
 {
@@ -551,26 +546,27 @@ static constexpr auto kLinkContentSize = kPageSize - kLinkContentOffset;
 
 auto Tree::create(Pager &pager, bool is_root, Id *out) -> Status
 {
-    std::string scratch;
-    Id root_id;
     Node node;
+    if (is_root) {
+        CALICODB_TRY(pager.acquire(Id::root(), node.page));
+        pager.mark_dirty(node.page);
+    } else {
+        CALICODB_TRY(pager.allocate(node.page));
+    }
+
+    node.header.is_external = true;
+    setup_node(node);
+
+    const auto root_id = node.page.id();
+    pager.release(std::move(node).take());
 
     if (!is_root) {
-        CALICODB_TRY(NodeManager::allocate(pager, node, scratch, true));
-        root_id = node.page.id();
-        NodeManager::release(pager, std::move(node));
-
-        CALICODB_EXPECT_FALSE(root_id.is_root());
-        // No back pointer necessary for root pages.
+        // The schema tree doesn't have a pointer map entry.
         PointerMap::Entry entry = {Id::null(), PointerMap::kTreeRoot};
         CALICODB_TRY(PointerMap::write_entry(pager, root_id, entry));
-    } else {
-        CALICODB_TRY(NodeManager::acquire(pager, Id::root(), node, scratch, true));
-        node.header.is_external = true;
-        NodeManager::release(pager, std::move(node));
-        root_id = Id::root();
     }
-    if (out != nullptr) {
+
+    if (out) {
         *out = root_id;
     }
     return Status::ok();
@@ -711,27 +707,44 @@ auto Tree::fix_links(Node &node) -> Status
 
 auto Tree::allocate(bool is_external, Node &out) -> Status
 {
-    return NodeManager::allocate(*m_pager, out, m_node_scratch, is_external);
+    auto s = m_pager->allocate(out.page);
+    if (s.is_ok()) {
+        CALICODB_EXPECT_FALSE(PointerMap::is_map(out.page.id()));
+        out.header.is_external = is_external;
+        out.scratch = m_node_scratch.data();
+        setup_node(out);
+    }
+    return s;
 }
 
-auto Tree::acquire(Id page_id, bool upgrade, Node &out) const -> Status
+auto Tree::acquire(Id page_id, bool write, Node &out) const -> Status
 {
-    return NodeManager::acquire(*m_pager, page_id, out, m_node_scratch, upgrade);
+    CALICODB_EXPECT_FALSE(PointerMap::is_map(page_id));
+    auto s = m_pager->acquire(page_id, out.page);
+    if (s.is_ok()) {
+        out.scratch = m_node_scratch.data();
+        out.header.read(out.page.data() + node_header_offset(out));
+        setup_node(out);
+        if (write) {
+            upgrade(out);
+        }
+    }
+    return s;
 }
 
 auto Tree::free(Node node) -> Status
 {
-    return NodeManager::destroy(*m_pager, std::move(node));
+    return m_pager->destroy(std::move(node.page));
 }
 
 auto Tree::upgrade(Node &node) const -> void
 {
-    NodeManager::upgrade(*m_pager, node);
+    m_pager->mark_dirty(node.page);
 }
 
 auto Tree::release(Node node) const -> void
 {
-    NodeManager::release(*m_pager, std::move(node));
+    m_pager->release(std::move(node).take());
 }
 
 auto Tree::resolve_overflow() -> Status
@@ -1624,48 +1637,6 @@ auto Tree::destroy(Tree &tree) -> Status
     return tree.destroy_impl(std::move(root));
 }
 
-auto NodeManager::allocate(Pager &pager, Node &out, std::string &scratch, bool is_external) -> Status
-{
-    auto s = pager.allocate(out.page);
-    if (s.is_ok()) {
-        CALICODB_EXPECT_FALSE(PointerMap::is_map(out.page.id()));
-        out.header.is_external = is_external;
-        out.scratch = scratch.data();
-        setup_node(out);
-    }
-    return s;
-}
-
-auto NodeManager::acquire(Pager &pager, Id page_id, Node &out, std::string &scratch, bool upgrade_node) -> Status
-{
-    CALICODB_EXPECT_FALSE(PointerMap::is_map(page_id));
-    auto s = pager.acquire(page_id, out.page);
-    if (s.is_ok()) {
-        out.scratch = scratch.data();
-        out.header.read(out.page.data() + node_header_offset(out));
-        setup_node(out);
-        if (upgrade_node) {
-            upgrade(pager, out);
-        }
-    }
-    return s;
-}
-
-auto NodeManager::upgrade(Pager &pager, Node &node) -> void
-{
-    pager.mark_dirty(node.page);
-}
-
-auto NodeManager::release(Pager &pager, Node node) -> void
-{
-    pager.release(std::move(node).take());
-}
-
-auto NodeManager::destroy(Pager &pager, Node node) -> Status
-{
-    return pager.destroy(std::move(node.page));
-}
-
 auto PayloadManager::promote(Pager &pager, char *scratch, Cell &cell, Id parent_id) -> Status
 {
     detach_cell(cell, scratch);
@@ -2218,21 +2189,12 @@ auto InternalCursor::move_down(Id child_id) -> void
 }
 
 Cursor::Cursor() = default;
+
 Cursor::~Cursor() = default;
 
 CursorImpl::~CursorImpl()
 {
     clear();
-}
-
-auto CursorImpl::is_valid() const -> bool
-{
-    return m_status.is_ok();
-}
-
-auto CursorImpl::status() const -> Status
-{
-    return m_status;
 }
 
 auto CursorImpl::fetch_payload(Node &node, std::size_t index) -> Status
@@ -2409,13 +2371,6 @@ auto CursorImpl::clear(Status s) -> void
         m_tree->release(std::move(m_node));
         m_status = std::move(s);
     }
-}
-
-auto CursorInternal::make_cursor(Tree &tree) -> Cursor *
-{
-    auto *cursor = new CursorImpl(tree);
-    invalidate(*cursor, default_cursor_status());
-    return cursor;
 }
 
 auto CursorInternal::invalidate(const Cursor &cursor, Status error) -> void

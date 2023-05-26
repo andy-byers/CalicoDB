@@ -45,31 +45,6 @@ auto Page::operator=(Page &&rhs) noexcept -> Page &
     return *this;
 }
 
-auto Page::is_writable() const -> bool
-{
-    return m_write;
-}
-
-auto Page::id() const -> Id
-{
-    return m_id;
-}
-
-auto Page::view() const -> Slice
-{
-    return Slice(m_data, kPageSize);
-}
-
-auto Page::data() -> char *
-{
-    return m_data;
-}
-
-auto Page::data() const -> const char *
-{
-    return m_data;
-}
-
 [[nodiscard]] auto page_offset(Id page_id) -> std::size_t
 {
     return FileHeader::kSize * page_id.is_root();

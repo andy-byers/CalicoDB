@@ -14,53 +14,6 @@ namespace calicodb
 
 static constexpr std::size_t kInitialRecordCount = 100;
 
-class NodeSlotTests
-    : public PagerTestHarness<tools::FakeEnv>,
-      public testing::Test
-{
-};
-
-TEST_F(NodeSlotTests, SlotsAreConsistent)
-{
-    std::string backing(0x200, '\x00');
-    std::string scratch(0x200, '\x00');
-
-    ASSERT_OK(m_pager->start_reader());
-    ASSERT_OK(m_pager->start_writer());
-
-    Id freelist_head;
-    Freelist freelist(*m_pager, freelist_head);
-
-    Node node;
-    ASSERT_OK(NodeManager::allocate(*m_pager, node, scratch, true));
-
-    node.insert_slot(0, 2);
-    node.insert_slot(1, 4);
-    node.insert_slot(1, 3);
-    node.insert_slot(0, 1);
-
-    node.set_slot(0, node.get_slot(0) + 1);
-    node.set_slot(1, node.get_slot(1) + 1);
-    node.set_slot(2, node.get_slot(2) + 1);
-    node.set_slot(3, node.get_slot(3) + 1);
-
-    ASSERT_EQ(node.get_slot(0), 2);
-    ASSERT_EQ(node.get_slot(1), 3);
-    ASSERT_EQ(node.get_slot(2), 4);
-    ASSERT_EQ(node.get_slot(3), 5);
-
-    node.remove_slot(0);
-    ASSERT_EQ(node.get_slot(0), 3);
-    node.remove_slot(0);
-    ASSERT_EQ(node.get_slot(0), 4);
-    node.remove_slot(0);
-    ASSERT_EQ(node.get_slot(0), 5);
-    node.remove_slot(0);
-
-    NodeManager::release(*m_pager, std::move(node));
-    m_pager->finish();
-}
-
 class NodeTests
     : public PagerTestHarness<tools::FakeEnv>,
       public testing::Test
@@ -81,56 +34,41 @@ public:
     {
         ASSERT_OK(m_pager->start_reader());
         ASSERT_OK(m_pager->start_writer());
+        ASSERT_OK(Tree::create(*m_pager, true, nullptr));
+        tree = std::make_unique<Tree>(*m_pager, nullptr);
     }
 
     [[nodiscard]] auto get_node(bool is_external) -> Node
     {
         Node node;
-        EXPECT_OK(NodeManager::allocate(*m_pager, node, node_scratch, is_external));
+        EXPECT_OK(tree->allocate(is_external, node));
         return node;
     }
 
-    //    auto write_record(Node &node, const Slice &key, const Slice &value, std::size_t index) -> void
-    //    {
-    //        ASSERT_OK(PayloadManager::emplace(*m_pager, cell_scratch.data(), node, key, value, index));
-    //    }
+    auto TearDown() -> void override
+    {
+        m_pager->finish();
+    }
 
-    //    [[nodiscard]] auto find_index(Node &node, const Slice &key, std::size_t *out) -> bool
-    //    {
-    //        Slice slice;
-    //        for (std::size_t i = 0; i < node.header.cell_count; ++i) {
-    //            const auto cell = read_cell(node, i);
-    //            EXPECT_OK(PayloadManager::collect_key(*m_pager, collect_scratch, cell, &slice));
-    //            if (key == slice) {
-    //                *out = i;
-    //                return true;
-    //            }
-    //        }
-    //        return false;
-    //    }
-    //
-    //    [[nodiscard]] auto read_record(Node &node, const Slice &key) -> std::string
-    //    {
-    //        std::size_t index;
-    //        if (find_index(node, key, &index)) {
-    //            Slice slice;
-    //            EXPECT_OK(PayloadManager::collect_value(*m_pager, collect_scratch, read_cell(node, index), &slice));
-    //            return slice.to_string();
-    //        }
-    //        ADD_FAILURE() << "key \"" << key.to_string() << "\" was not found";
-    //        return "";
-    //    }
+    [[nodiscard]] auto make_long_key(std::size_t value) const
+    {
+        const auto suffix = tools::integral_key<6>(value);
+        const std::string key(kPageSize * 2 - suffix.size(), '0');
+        return key + suffix;
+    }
 
-    //    auto erase_record(Node &node, const Slice &key) -> void
-    //    {
-    //        std::size_t index;
-    //        if (find_index(node, key, &index)) {
-    //            erase_cell(node, index);
-    //            return;
-    //        }
-    //        ADD_FAILURE() << "key \"" << key.to_string() << "\" was not found";
-    //    }
+    [[nodiscard]] auto make_value(char c, bool overflow = false) const
+    {
+        std::size_t size{kPageSize};
+        if (overflow) {
+            size /= 3;
+        } else {
+            size /= 20;
+        }
+        return std::string(size, c);
+    }
 
+    std::unique_ptr<Tree> tree;
     std::string node_scratch;
     std::string cell_scratch;
     std::string collect_scratch;
@@ -142,17 +80,18 @@ class BlockAllocatorTests : public NodeTests
 public:
     explicit BlockAllocatorTests() = default;
 
-    ~BlockAllocatorTests() override
-    {
-        NodeManager::release(*m_pager, std::move(node));
-        m_pager->finish();
-    }
+    ~BlockAllocatorTests() override = default;
 
     auto SetUp() -> void override
     {
-        ASSERT_OK(m_pager->start_reader());
-        ASSERT_OK(m_pager->start_writer());
+        NodeTests::SetUp();
         node = get_node(true);
+    }
+
+    auto TearDown() -> void override
+    {
+        tree->release(std::move(node));
+        NodeTests::TearDown();
     }
 
     auto reserve_for_test(std::size_t n) -> void
@@ -248,7 +187,7 @@ TEST_F(BlockAllocatorTests, ExternalNodesDoNotConsume3ByteFragments)
 
 TEST_F(BlockAllocatorTests, InternalNodesConsume3ByteFragments)
 {
-    NodeManager::release(*m_pager, std::move(node));
+    tree->release(std::move(node));
     node = get_node(false);
 
     reserve_for_test(11);
@@ -613,7 +552,7 @@ protected:
 
 TEST_P(EmptyTreeCursorTests, KeyAndValueUseSeparateMemory)
 {
-    std::unique_ptr<Cursor> cursor{CursorInternal::make_cursor(*tree)};
+    std::unique_ptr<Cursor> cursor(new CursorImpl(*tree));
     cursor->seek_first();
     ASSERT_FALSE(cursor->is_valid());
     cursor->seek_last();
@@ -641,7 +580,7 @@ protected:
     {
         switch (GetParam()) {
             case 0:
-                return std::unique_ptr<Cursor>(CursorInternal::make_cursor(*tree));
+                return std::make_unique<CursorImpl>(*tree);
             case 1:
                 return std::make_unique<SchemaCursor>(*tree);
         }
@@ -968,20 +907,20 @@ public:
     auto acquire_node(Id pid, bool is_writable = false)
     {
         Node node;
-        EXPECT_OK(NodeManager::acquire(*m_pager, pid, node, node_scratch, is_writable));
+        EXPECT_OK(tree->acquire(pid, is_writable, node));
         return node;
     }
 
     auto allocate_node(bool is_external)
     {
         Node node;
-        EXPECT_OK(NodeManager::allocate(*m_pager, node, node_scratch, is_external));
+        EXPECT_OK(tree->allocate(is_external, node));
         return node;
     }
 
     auto release_node(Node node) const
     {
-        NodeManager::release(*m_pager, std::move(node));
+        tree->release(std::move(node));
     }
 
     auto is_root_external()
@@ -1050,7 +989,7 @@ public:
 
             m_pager->set_page_count(target.value);
 
-            auto *cursor = CursorInternal::make_cursor(*tree);
+            auto *cursor = new CursorImpl(*tree);
             for (const auto &[key, value] : map) {
                 cursor->seek(key);
                 ASSERT_TRUE(cursor->is_valid());
@@ -1440,7 +1379,7 @@ TEST_P(VacuumTests, VacuumOverflowChainSanityCheck)
     m_pager->set_page_count(7);
     ASSERT_EQ(m_pager->page_count(), 7);
 
-    auto *cursor = CursorInternal::make_cursor(*tree);
+    auto *cursor = new CursorImpl(*tree);
     cursor->seek_first();
     for (std::size_t i = 0; i < values.size(); ++i) {
         ASSERT_TRUE(cursor->is_valid());
@@ -1492,7 +1431,7 @@ TEST_P(VacuumTests, VacuumsNodes)
     ASSERT_TRUE(vacuumed);
     m_pager->set_page_count(4);
 
-    auto *cursor = CursorInternal::make_cursor(*tree);
+    auto *cursor = new CursorImpl(*tree);
     cursor->seek_first();
     for (std::size_t i = 0; i < values.size(); ++i) {
         ASSERT_TRUE(cursor->is_valid());

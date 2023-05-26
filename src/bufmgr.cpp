@@ -28,11 +28,6 @@ Bufmgr::~Bufmgr()
     operator delete[](m_buffer, std::align_val_t{kPageSize});
 }
 
-auto Bufmgr::size() const -> std::size_t
-{
-    return m_map.size();
-}
-
 auto Bufmgr::query(Id page_id) -> PageRef *
 {
     auto itr = m_map.find(page_id);
@@ -53,11 +48,6 @@ auto Bufmgr::get(Id page_id) -> PageRef *
     ++m_hits;
     m_list.splice(end(m_list), m_list, itr->second);
     return &*itr->second;
-}
-
-auto Bufmgr::root() -> PageRef *
-{
-    return &m_root;
 }
 
 auto Bufmgr::alloc(Id page_id) -> PageRef *
@@ -141,22 +131,6 @@ auto Bufmgr::unref(PageRef &ref) -> void
 
     --ref.refcount;
     --m_refsum;
-}
-
-auto Bufmgr::buffer_slot(std::size_t index) -> char *
-{
-    CALICODB_EXPECT_LT(index, m_frame_count);
-    return m_buffer + index * kPageSize;
-}
-
-auto Bufmgr::hits() const -> U64
-{
-    return m_hits;
-}
-
-auto Bufmgr::misses() const -> U64
-{
-    return m_misses;
 }
 
 auto Dirtylist::remove(PageRef &ref) -> PageRef *

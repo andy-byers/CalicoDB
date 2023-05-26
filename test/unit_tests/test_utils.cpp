@@ -194,8 +194,11 @@ static constexpr auto constexpr_test_read(Slice bv, Slice answer)
 
 TEST_F(SliceTests, ConstantExpressions)
 {
-    static constexpr Slice bv("42");
-    constexpr_test_read(bv, "42");
+    static constexpr std::string_view sv("42");
+    static constexpr Slice s1("42");
+    static constexpr Slice s2(sv);
+    constexpr_test_read(s1, sv);
+    constexpr_test_read(s1, s2);
 }
 
 TEST(NonPrintableSliceTests, UsesStringSize)
@@ -204,7 +207,14 @@ TEST(NonPrintableSliceTests, UsesStringSize)
     ASSERT_EQ(Slice(u).size(), 2);
 }
 
-TEST(NonPrintableSliceTests, NullcharsAreEqual)
+TEST(NonPrintableSliceTests, Clear)
+{
+    Slice slice("42");
+    slice.clear();
+    ASSERT_TRUE(slice.is_empty());
+}
+
+TEST(NonPrintableSliceTests, NullBytesAreEqual)
 {
     const std::string u{"\x00", 1};
     const std::string v{"\x00", 1};

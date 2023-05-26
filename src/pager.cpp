@@ -305,7 +305,7 @@ auto Pager::purge_cached_pages() -> void
         CALICODB_EXPECT_NE(victim, nullptr);
         purge_page(*victim);
     }
-    CALICODB_EXPECT_EQ(m_bufmgr.size(), 0);
+    CALICODB_EXPECT_EQ(m_bufmgr.occupied(), 0);
     if (m_dirtylist.head) {
         CALICODB_EXPECT_EQ(m_dirtylist.head, m_bufmgr.root());
         CALICODB_EXPECT_FALSE(m_dirtylist.head->prev);
