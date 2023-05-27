@@ -16,22 +16,34 @@ class TxnImpl : public Txn
 public:
     explicit TxnImpl(Pager &pager, Status &status, bool write);
     ~TxnImpl() override;
-    [[nodiscard]] auto status() const -> Status override;
-    [[nodiscard]] auto schema() const -> Cursor & override;
+
+    [[nodiscard]] auto status() const -> Status override
+    {
+        return *m_status;
+    }
+
+    [[nodiscard]] auto schema() const -> Cursor & override
+    {
+        return *m_schema;
+    }
+
     [[nodiscard]] auto create_table(const TableOptions &options, const Slice &name, Table **tb_out) -> Status override;
     [[nodiscard]] auto drop_table(const Slice &name) -> Status override;
     [[nodiscard]] auto vacuum() -> Status override;
     [[nodiscard]] auto commit() -> Status override;
 
-    auto TEST_validate() const -> void;
+    auto TEST_validate() const -> void
+    {
+        m_schema_obj.TEST_validate();
+    }
 
 private:
     friend class DBImpl;
 
     [[nodiscard]] auto vacuum_freelist() -> Status;
 
-    mutable Schema m_schema_obj;
     TxnImpl **m_backref = nullptr;
+    Schema m_schema_obj;
     Cursor *m_schema;
     Pager *m_pager;
     Status *m_status;

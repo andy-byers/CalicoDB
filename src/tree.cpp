@@ -1241,11 +1241,6 @@ Tree::Tree(Pager &pager, const Id *root_id)
 {
 }
 
-Tree::~Tree()
-{
-    m_cursor.clear();
-}
-
 auto Tree::report_stats(ReportType type, std::size_t increment) const -> void
 {
     if (type == kBytesRead) {
@@ -1580,6 +1575,7 @@ auto Tree::vacuum_step(Page &free, Schema &schema, Id last_id) -> Status
 
 auto Tree::vacuum_one(Id target, Schema &schema, bool *success) -> Status
 {
+    CALICODB_EXPECT_FALSE(m_cursor.is_valid());
     if (PointerMap::is_map(target)) {
         *success = true;
         return Status::ok();

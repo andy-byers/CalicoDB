@@ -230,6 +230,7 @@ public:
 
     auto TearDown() -> void override
     {
+        tree->close_internal_cursor();
         m_pager->finish();
     }
 
@@ -1502,6 +1503,14 @@ public:
     auto SetUp() -> void override
     {
         TreeTests::SetUp();
+    }
+
+    auto TearDown() -> void override
+    {
+        for (auto &tree : multi_tree) {
+            tree->close_internal_cursor();
+        }
+        TreeTests::TearDown();
     }
 
     auto create_tree()

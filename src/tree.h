@@ -259,7 +259,6 @@ class Tree final
 {
 public:
     explicit Tree(Pager &pager, const Id *root_id);
-    ~Tree();
     [[nodiscard]] static auto create(Pager &pager, bool is_root, Id *out) -> Status;
     [[nodiscard]] static auto destroy(Tree &tree) -> Status;
     [[nodiscard]] auto put(const Slice &key, const Slice &value) -> Status;
@@ -283,6 +282,11 @@ public:
     [[nodiscard]] auto statistics() const -> const TreeStatistics &
     {
         return m_stats;
+    }
+
+    auto close_internal_cursor() -> void
+    {
+        return m_cursor.clear();
     }
 
 private:

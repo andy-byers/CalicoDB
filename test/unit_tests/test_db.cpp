@@ -556,6 +556,7 @@ TEST_F(DBTests, RerootTables)
         EXPECT_OK(txn.create_table(TableOptions(), "b", nullptr));
         EXPECT_OK(txn.create_table(TableOptions(), "c", nullptr));
         EXPECT_OK(txn.create_table(TableOptions(), "d", nullptr));
+        txn_impl(&txn)->TEST_validate();
         EXPECT_OK(txn.drop_table("a"));
         EXPECT_OK(txn.drop_table("b"));
         EXPECT_OK(txn.drop_table("d"));
@@ -578,6 +579,9 @@ TEST_F(DBTests, RerootTables)
         EXPECT_TRUE(schema.is_valid());
         EXPECT_EQ("e", schema.key());
         EXPECT_OK(txn.create_table(tbopt, schema.key().to_string(), &e));
+        schema.previous();
+        EXPECT_TRUE(schema.is_valid());
+        schema.next();
         schema.next();
         EXPECT_FALSE(schema.is_valid());
         return Status::ok();
@@ -744,11 +748,15 @@ TEST_F(DBErrorTests, Reads)
 
     for (;;) {
         auto s = m_db->view([](auto &txn) {
-            auto s = check(txn, TableOptions(), "saved", 0, true);
+            Table *tb;
+            auto s = txn.create_table(TableOptions(), "saved", &tb);
             if (s.is_ok()) {
-                s = check_range(txn, TableOptions(), "saved", 0, kSavedCount, true);
+                s = check(*tb, 0, true);
                 if (s.is_ok()) {
-                    s = check_range(txn, TableOptions(), "saved", kSavedCount, 2 * kSavedCount, false);
+                    s = check_range(*tb, 0, kSavedCount, true);
+                    if (s.is_ok()) {
+                        s = check_range(*tb, kSavedCount, 2 * kSavedCount, false);
+                    }
                 }
             }
             EXPECT_OK(txn.status());
@@ -773,8 +781,17 @@ TEST_F(DBErrorTests, Writes)
         auto s = try_reopen(false);
         if (s.is_ok()) {
             s = m_db->update([](auto &txn) {
-                auto s = put_range(txn, TableOptions(), "TABLE", 0, 1'000);
-                EXPECT_EQ(s.to_string(), txn.status().to_string());
+                Table *tb;
+                auto s = txn.create_table(TableOptions(), "TABLE", &tb);
+                if (s.is_ok()) {
+                    s = put_range(*tb, 0, 1'000);
+                    if (!s.is_ok()) {
+                        auto *c = tb->new_cursor();
+                        EXPECT_EQ(s, c->status());
+                        delete c;
+                    }
+                }
+                EXPECT_EQ(s, txn.status());
                 return s;
             });
         }

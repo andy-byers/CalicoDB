@@ -499,7 +499,7 @@ auto HashIterator::read(Entry &out) -> bool
 // WAL header layout:
 //     Offset  Size  Purpose
 //    ---------------------------------------
-//     0       4     Magic number (1559861749)
+//     0       4     Magic number (1,559,861,749)
 //     4       4     WAL version (1)
 //     8       4     DB page size
 //     12      4     Checkpoint number

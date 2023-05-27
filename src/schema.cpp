@@ -13,20 +13,6 @@
 namespace calicodb
 {
 
-Schema::Schema(Pager &pager, Status &status)
-    : m_status(&status),
-      m_pager(&pager),
-      m_map(pager, nullptr)
-{
-}
-
-Schema::~Schema()
-{
-    for (const auto &[_, state] : m_tables) {
-        delete state.table;
-    }
-}
-
 auto Schema::corrupted_root_id(const Slice &name, const Slice &value) -> Status
 {
     std::string message("root entry for table \"" + name.to_string() + "\" is corrupted: ");
@@ -36,11 +22,6 @@ auto Schema::corrupted_root_id(const Slice &name, const Slice &value) -> Status
         *m_status = s;
     }
     return s;
-}
-
-auto Schema::new_cursor() -> Cursor *
-{
-    return new SchemaCursor(m_map);
 }
 
 auto Schema::create_table(const TableOptions &options, const Slice &name, bool readonly, Table **out) -> Status
@@ -225,11 +206,7 @@ auto Schema::TEST_validate() const -> void
 {
     for (const auto &[_, table] : m_tables) {
         if (table.table) {
-            const auto &tree = table_impl(table.table)->TEST_tree();
-            tree.TEST_validate();
-
-            // Make sure the last vacuum didn't miss any roots.
-            CALICODB_EXPECT_EQ(table.root, tree.root());
+            table_impl(table.table)->TEST_tree().TEST_validate();
         }
     }
 }
@@ -247,24 +224,6 @@ auto SchemaCursor::move_to_impl() -> void
     }
     m_status = m_impl->status();
     m_impl->clear();
-}
-
-auto SchemaCursor::seek(const Slice &key) -> void
-{
-    m_impl->seek(key);
-    move_to_impl();
-}
-
-auto SchemaCursor::seek_first() -> void
-{
-    m_impl->seek_first();
-    move_to_impl();
-}
-
-auto SchemaCursor::seek_last() -> void
-{
-    m_impl->seek_last();
-    move_to_impl();
 }
 
 auto SchemaCursor::next() -> void

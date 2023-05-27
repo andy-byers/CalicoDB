@@ -57,11 +57,6 @@ Status::Status(Status &&rhs) noexcept
     rhs.m_subc = kNone;
 }
 
-Status::~Status()
-{
-    delete[] m_state;
-}
-
 auto Status::operator=(const Status &rhs) -> Status &
 {
     if (this != &rhs) {

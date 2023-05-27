@@ -126,7 +126,10 @@ static constexpr SyscallType kSyscallOpen = kSyscallWrite << 1;
 static constexpr SyscallType kSyscallSync = kSyscallOpen << 1;
 static constexpr SyscallType kSyscallUnlink = kSyscallSync << 1;
 static constexpr SyscallType kSyscallResize = kSyscallUnlink << 1;
-static constexpr std::size_t kNumSyscalls = 6;
+static constexpr SyscallType kSyscallFileLock = kSyscallResize << 1;
+static constexpr SyscallType kSyscallShmMap = kSyscallFileLock << 1;
+static constexpr SyscallType kSyscallShmLock = kSyscallShmMap << 1;
+static constexpr std::size_t kNumSyscalls = 9;
 
 using Callback = std::function<Status()>;
 
@@ -213,6 +216,9 @@ public:
     [[nodiscard]] auto read_exact(std::size_t offset, std::size_t size, char *out) -> Status override;
     [[nodiscard]] auto write(std::size_t offset, const Slice &in) -> Status override;
     [[nodiscard]] auto sync() -> Status override;
+    [[nodiscard]] auto file_lock(FileLockMode mode) -> Status override;
+    [[nodiscard]] auto shm_map(std::size_t r, bool extend, volatile void *&ptr_out) -> Status override;
+    [[nodiscard]] auto shm_lock(std::size_t r, std::size_t n, ShmLockFlag flag) -> Status override;
 };
 
 } // namespace calicodb::tools

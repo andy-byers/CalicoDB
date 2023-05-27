@@ -223,7 +223,7 @@ auto Pager::start_writer() -> Status
 
 auto Pager::commit() -> Status
 {
-    CALICODB_EXPECT_NE(m_mode, kOpen);
+    CALICODB_EXPECT_NE(kOpen, m_mode);
     CALICODB_EXPECT_TRUE(assert_state());
     set_status(refresh_state());
 

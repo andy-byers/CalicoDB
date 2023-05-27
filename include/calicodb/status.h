@@ -34,7 +34,10 @@ public:
     // Construct an OK status
     explicit Status() = default;
 
-    ~Status();
+    ~Status()
+    {
+        delete[] m_state;
+    }
 
     // Create an OK status
     static auto ok() -> Status
@@ -151,6 +154,15 @@ public:
 
     // Convert the status to a printable string.
     [[nodiscard]] auto to_string() const -> std::string;
+
+    auto operator==(const Status &rhs) const -> bool
+    {
+        return m_code == rhs.m_code;
+    }
+    auto operator!=(const Status &rhs) const -> bool
+    {
+        return !(*this == rhs);
+    }
 
     // Status can be copied and moved.
     Status(const Status &rhs);

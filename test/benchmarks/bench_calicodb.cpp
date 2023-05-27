@@ -10,7 +10,6 @@
 // each commit. This is what happens if the DB::view()/DB::update() API is used. It's much faster to keep
 // the transaction object around and just call Txn::commit() and Txn::rollback() as needed, but this is
 // bad for concurrency.
-//
 // NOTE: I'm also adding a checkpoint call right before the restart, to be run once every 1'000 restarts.
 #define RESTART_ON_COMMIT 1
 
@@ -224,6 +223,24 @@ static auto set_modification_benchmark_label(benchmark::State &state)
         access_type_name(state.range(0)) +
         (state.range(2) == 1 ? "" : "Batch"));
 }
+namespace calicodb
+{
+auto compress_prefix(const Slice &lhs, const Slice &rhs) -> Slice
+{
+    std::size_t i = 0;
+    for (; lhs[i] == rhs[i]; ++i) {
+    }
+    return rhs.range(i);
+}
+} // namespace calicodb
+static auto BM_CompressPrefix(benchmark::State &state) -> void
+{
+    for (auto _ : state) {
+        calicodb::Slice suffix;
+        CHECK_EQ("gefg", calicodb::compress_prefix("abcdefg", "abcgefg").to_string());
+    }
+}
+BENCHMARK(BM_CompressPrefix);
 
 static auto BM_Write(benchmark::State &state) -> void
 {

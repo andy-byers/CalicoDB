@@ -27,16 +27,6 @@ TxnImpl::~TxnImpl()
     }
 }
 
-auto TxnImpl::status() const -> Status
-{
-    return *m_status;
-}
-
-auto TxnImpl::schema() const -> Cursor &
-{
-    return *m_schema;
-}
-
 auto TxnImpl::create_table(const TableOptions &options, const Slice &name, Table **tb_out) -> Status
 {
     if (tb_out) {
@@ -85,7 +75,8 @@ auto TxnImpl::vacuum() -> Status
     }
     auto s = *m_status;
     if (s.is_ok()) {
-        if (!(s = vacuum_freelist()).is_ok()) {
+        s = vacuum_freelist();
+        if (!s.is_ok()) {
             m_pager->set_status(s);
         }
     }
@@ -113,11 +104,6 @@ auto TxnImpl::vacuum_freelist() -> Status
         m_pager->set_page_count(pgid.value);
     }
     return s;
-}
-
-auto TxnImpl::TEST_validate() const -> void
-{
-    m_schema_obj.TEST_validate();
 }
 
 } // namespace calicodb

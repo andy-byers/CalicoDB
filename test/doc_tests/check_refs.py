@@ -4,7 +4,6 @@
 import argparse
 from os import path
 import re
-import sys
 
 # INTERNAL_REF_RE = re.compile(r'\[[^\[\]]+]\(#([\w_-]+)\)')
 EXTERNAL_REF_RE = re.compile(r'\[[^\[\]]+]\(([./\w_-]+)?(?:#([\w_-]+))?\)')
@@ -41,7 +40,7 @@ def check_md(filename, info):
 def main():
     parser = argparse.ArgumentParser(description='Check markdown file references.')
     parser.add_argument('input', type=str, nargs='+', help='Names of markdown files to check')
-    args = parser.parse_args(sys.argv[1:])
+    args = parser.parse_args()
     info = {fname: parse_md(fname) for fname in args.input}
     for filename in info:
         check_md(filename, info)

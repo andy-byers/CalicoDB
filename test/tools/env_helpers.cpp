@@ -421,4 +421,31 @@ auto TestFile::sync() -> Status
     return s;
 }
 
+auto TestFile::file_lock(FileLockMode mode) -> Status
+{
+    auto s = try_intercept(m_state->interceptors, kSyscallFileLock);
+    if (s.is_ok()) {
+        s = FileWrapper::file_lock(mode);
+    }
+    return s;
+}
+
+auto TestFile::shm_map(std::size_t r, bool extend, volatile void *&ptr_out) -> Status
+{
+    auto s = try_intercept(m_state->interceptors, kSyscallShmMap);
+    if (s.is_ok()) {
+        s = FileWrapper::shm_map(r, extend, ptr_out);
+    }
+    return s;
+}
+
+auto TestFile::shm_lock(std::size_t r, std::size_t n, ShmLockFlag flag) -> Status
+{
+    auto s = try_intercept(m_state->interceptors, kSyscallShmLock);
+    if (s.is_ok()) {
+        s = FileWrapper::shm_lock(r, n, flag);
+    }
+    return s;
+}
+
 } // namespace calicodb::tools

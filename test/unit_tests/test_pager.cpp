@@ -41,8 +41,8 @@ public:
 
 TEST_F(PageCacheTests, EmptyBehavior)
 {
-    ASSERT_EQ(mgr.size(), 0);
-    ASSERT_EQ(mgr.size(), 0);
+    ASSERT_EQ(mgr.occupied(), 0);
+    ASSERT_EQ(mgr.occupied(), 0);
     ASSERT_EQ(mgr.get(Id(2)), nullptr);
     ASSERT_EQ(mgr.next_victim(), nullptr);
 }
@@ -53,7 +53,7 @@ TEST_F(PageCacheTests, OldestReferenceIsEvictedFirst)
     (void)mgr.alloc(Id(4));
     (void)mgr.alloc(Id(3));
     (void)mgr.alloc(Id(2));
-    ASSERT_EQ(mgr.size(), 4);
+    ASSERT_EQ(mgr.occupied(), 4);
 
     ASSERT_EQ(mgr.get(Id(5))->page_id, Id(5));
     ASSERT_EQ(mgr.get(Id(4))->page_id, Id(4));
@@ -66,7 +66,7 @@ TEST_F(PageCacheTests, OldestReferenceIsEvictedFirst)
     mgr.erase(mgr.next_victim()->page_id);
     ASSERT_EQ(mgr.next_victim()->page_id, Id(4));
     mgr.erase(mgr.next_victim()->page_id);
-    ASSERT_EQ(mgr.size(), 0);
+    ASSERT_EQ(mgr.occupied(), 0);
 }
 
 TEST_F(PageCacheTests, ReplacementPolicyIgnoresQuery)
