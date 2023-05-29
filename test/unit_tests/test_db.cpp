@@ -793,8 +793,10 @@ TEST_F(DBErrorTests, Writes)
         if (s.is_ok()) {
             s = m_db->update([](auto &txn) {
                 Table *tb;
+                std::string op("create_table()");
                 auto s = txn.create_table(TableOptions(), "TABLE", &tb);
                 if (s.is_ok()) {
+                    op = "put_range()";
                     s = put_range(*tb, 0, 1'000);
                     if (!s.is_ok()) {
                         auto *c = tb->new_cursor();
@@ -802,7 +804,9 @@ TEST_F(DBErrorTests, Writes)
                         delete c;
                     }
                 }
-                EXPECT_EQ(s, txn.status());
+                EXPECT_EQ(s, txn.status()) << "status mismatch:\n  \"" << s.to_string()
+                                           << "\"\n  \"" << txn.status().to_string() << "\"\n"
+                                           << "during " << op << '\n';
                 return s;
             });
         }
@@ -1157,8 +1161,9 @@ TEST_F(DBTransactionTests, IgnoresFutureVersions)
 
     ASSERT_OK(try_reopen(true));
     const auto intercept = [this, &has_open_db, &n] {
-        if (has_open_db) {
-            // Prevent this callback from being called by itself.
+        if (has_open_db || n >= kN) {
+            // Prevent this callback from being called by itself, and prevent the test from
+            // running for too long.
             return Status::ok();
         }
         DB *db;

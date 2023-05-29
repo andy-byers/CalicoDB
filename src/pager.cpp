@@ -465,20 +465,24 @@ auto Pager::mark_dirty(Page &page) -> void
     page.m_write = true;
 }
 
-auto Pager::release(Page page, bool discard) -> void
+auto Pager::release(Page page, ReleaseAction action) -> void
 {
     CALICODB_EXPECT_GE(m_mode, kRead);
     if (page.m_pager) {
         page.m_pager = nullptr;
         auto *ref = page.m_ref;
         m_bufmgr.unref(*ref);
-        if (discard && ref->refcount == 0) {
-            // Don't keep this page in the cache. `discard` is a hint indicating that
-            // this page is unlikely to be used again in the near future.
-            if (ref->flag & PageRef::kDirty) {
-                m_dirtylist.remove(*ref);
+        if (action > kKeep && ref->refcount == 0) {
+            // kNoCache action is ignored if the page is dirty. It would just get written out
+            // right now, but we shouldn't do anything that can fail in this routine.
+            const auto is_dirty = ref->flag & PageRef::kDirty;
+            const auto is_discard = action == kDiscard || !is_dirty;
+            if (is_discard) {
+                if (is_dirty) {
+                    m_dirtylist.remove(*ref);
+                }
+                m_bufmgr.erase(ref->page_id);
             }
-            m_bufmgr.erase(ref->page_id);
         }
     }
 }

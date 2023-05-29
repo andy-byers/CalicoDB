@@ -157,15 +157,17 @@ public:
         m_cursor = m_table->new_cursor();
     }
 
-    auto vacuum(benchmark::State &state) -> void
+    auto vacuum(benchmark::State &state, std::size_t upper_size) -> void
     {
         state.PauseTiming();
-        for (std::size_t i = 0; i < state.range(1); ++i) {
+        const auto lower_size = upper_size * state.range(0) / 10;
+        CALICODB_EXPECT_LE(lower_size, upper_size);
+        for (std::size_t i = 0; i < upper_size; ++i) {
             CHECK_OK(m_table->put(
                 calicodb::tools::integral_key<kKeyLength>(i),
                 m_random.Generate(m_param.value_length)));
         }
-        for (std::size_t i = 0; i < state.range(0); ++i) {
+        for (auto i = lower_size; i < upper_size; ++i) {
             CHECK_OK(m_table->erase(
                 calicodb::tools::integral_key<kKeyLength>(i)));
         }
@@ -293,27 +295,26 @@ BENCHMARK(BM_Overwrite)
 
 static auto BM_Vacuum(benchmark::State &state) -> void
 {
-    std::string label;
-    calicodb::append_fmt_string(
-        label,
-        "Vacuum_%ld_of_%ld%s",
-        state.range(0),
-        state.range(1),
-        state.range(2) ? "_Sync" : "");
+    static constexpr std::size_t kUpperSize = 1'000;
+    std::string label("Vacuum");
+    if (state.range(0) == 1) {
+        label.append("Few");
+    } else if (state.range(0) == 5) {
+        label.append("Half");
+    } else if (state.range(0) == 10) {
+        label.append("All");
+    }
     state.SetLabel(label);
 
-    Parameters param;
-    param.sync = state.range(2);
-
-    Benchmark bench(param);
+    Benchmark bench(Parameters{});
     for (auto _ : state) {
-        bench.vacuum(state);
+        bench.vacuum(state, kUpperSize);
     }
 }
 BENCHMARK(BM_Vacuum)
-    ->Args({100, 1'000})
-    ->Args({500, 1'000})
-    ->Args({1'000, 1'000});
+    ->Args({1})
+    ->Args({5})
+    ->Args({10});
 
 static auto BM_Exists(benchmark::State &state) -> void
 {

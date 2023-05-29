@@ -66,7 +66,6 @@ public:
     [[nodiscard]] auto destroy(Page page) -> Status;
     [[nodiscard]] auto acquire(Id page_id, Page &page) -> Status;
     auto mark_dirty(Page &page) -> void;
-    auto release(Page page, bool discard = false) -> void;
     auto set_page_count(std::size_t page_count) -> void;
     [[nodiscard]] auto acquire_root() -> Page;
     [[nodiscard]] auto hits() const -> U64;
@@ -74,6 +73,30 @@ public:
     auto assert_state() const -> bool;
     auto purge_cached_pages() -> void;
     auto initialize_root() -> void;
+
+    // Action to take when a page is released
+    // Actions other than kKeep exist as optimizations. Using kKeep for every
+    // release would not cause incorrect behavior.
+    // |ReleaseAction | Purpose                                                  |
+    // |--------------|----------------------------------------------------------|
+    // | kKeep        | Normal release, reference stays in the cache. This is    |
+    // |              | the default, and should be used for nodes, pointer maps, |
+    // |              | and freelist trunks.                                     |
+    // | kNoCache     | Erase the cached reference on release. This              |
+    // |              | action is used for overflow pages, which may need to be  |
+    // |              | written out, but are accessed relatively infrequently.   |
+    // | kDiscard     | Same as kNoCache, except the page is never written to    |
+    // |              | the WAL. This action is used for freelist leaf pages.    |
+    // NOTE: kNoCache and kDiscard are used to limit how much a routine will mess
+    // up the cache. For example, overflow pages are released with kNoCache, so
+    // when an overflow chain is traversed, the same page is reused for each link.
+    enum ReleaseAction { kKeep,
+                         kNoCache,
+                         kDiscard };
+
+    // Release a referenced page back to the pager
+    // This routine is a NOOP if page was already released.
+    auto release(Page page, ReleaseAction action = kKeep) -> void;
 
     auto set_status(const Status &error) const -> Status
     {
