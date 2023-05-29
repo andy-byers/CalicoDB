@@ -60,9 +60,6 @@ Performance benchmarks can be found [here](test/benchmarks).
 3. Modify the tree to not use sibling pointers, or at least don't keep a left sibling pointer
    + Causes extra pages to be written to the WAL during splits
 4. Look into writing a more involved balancing routine
-5. Better freelist that 2 types of pages: leaf and trunk pages
-   + Leaf pages contain no data and don't have to be written to the WAL
-   + Trunk pages contain the page IDs of many leaf pages
 
 ## Documentation
 Check out CalicoDB's [usage and design documents](doc).

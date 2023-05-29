@@ -97,33 +97,16 @@ if (s.is_ok()) {
 
 ### Opening a database
 ```C++
-// Set some initialization options.
+// Set some initialization options. See include/calicodb/options.h.
 const calicodb::Options options = {
-    // Size of the page cache in bytes.
-    1'024 * calicodb::kPageSize, 
-                                                    
-    // Filename to use for the WAL. If empty, creates the WAL at
-    // "dbname-wal", where "dbname" is the name of the database.
-    "wal-filename",
-
-    // Destination for info log messages.
-    nullptr,
-
-    // Custom storage environment. See env.h for details.
-    nullptr,
-
-    // Action to take while waiting on a file lock.
-    nullptr,
-
-    // If true, create the database if it is missing.
-    true,
-
-    // If true, return with an error if the database already exists.
-    false,
-
-    // If true, sync the WAL file on every commit. Hurts performance quite a bit,
-    // but provides extra durability.
-    false,
+    .cache_size = 1'024 * calicodb::kPageSize, 
+    .wal_filename = "wal-filename",
+    .info_log = nullptr,
+    .env = nullptr,
+    .busy = nullptr,
+    .create_if_missing = true,
+    .error_if_exists = false,
+    .sync = false,
 };
 
 // Create or open a database at "/tmp/cats".
@@ -215,9 +198,9 @@ tbopt.create_if_missing = true;
 s = txn->create_table(tbopt, "cats", &table);
 if (s.is_ok()) {
     // table holds the address of the handle for the open table "cats". 
-    // The table handle is owned by txn, and will remain open until either
-    // txn is delete'd, or "cats" is dropped with Txn::drop_table(). The 
-    // handle is owned by txn and must not be delete'd. 
+    // The table handle is owned by txn: it must not be delete'd. The table 
+    // will remain open until either txn is delete'd, or "cats" is dropped 
+    // with Txn::drop_table(). 
 }
 
 std::string value;
