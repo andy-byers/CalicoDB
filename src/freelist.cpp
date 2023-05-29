@@ -50,10 +50,12 @@ auto Freelist::push(Pager &pager, Page page) -> Status
             const auto n = get_u32(trunk.constant_ptr() + sizeof(U32));
             if (n < kTrunkCapacity) {
                 pager.mark_dirty(trunk);
+                const auto leaf_id = page.id();
+                pager.release(std::move(page), true);
                 put_u32(trunk.mutable_ptr() + sizeof(U32), n + 1);
-                put_u32(get_leaf_ptr(trunk.mutable_ptr(), n), page.id().value);
+                put_u32(get_leaf_ptr(trunk.mutable_ptr(), n), leaf_id.value);
                 return PointerMap::write_entry(
-                    pager, page.id(), {free_head, PointerMap::kFreelistLeaf});
+                    pager, leaf_id, {free_head, PointerMap::kFreelistLeaf});
             } else if (n > kTrunkCapacity) {
                 return Status::corruption();
             }

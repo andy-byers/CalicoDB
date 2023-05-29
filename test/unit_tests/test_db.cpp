@@ -49,7 +49,9 @@ protected:
     {
         EXPECT_LE(0, kv);
         EXPECT_LE(0, round);
-        static constexpr std::size_t kMaxKV = kPageSize * 2;
+        // 3 pages is long enough to generate both types of overflow pages (kOverflowHead
+        // and kOverflowLink).
+        static constexpr std::size_t kMaxKV = kPageSize * 3;
         const auto key_length = (round + 1) * kMaxKV / kMaxRounds;
         auto key_str = tools::integral_key(kv);
         const auto val_length = kMaxKV - key_length;

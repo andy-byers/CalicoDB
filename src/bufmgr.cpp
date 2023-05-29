@@ -70,6 +70,7 @@ auto Bufmgr::erase(Id page_id) -> bool
     }
     // Root page is not stored in the cache.
     CALICODB_EXPECT_FALSE(page_id.is_root());
+    CALICODB_EXPECT_EQ(0, itr->second->refcount);
     unpin(*itr->second);
     m_list.erase(itr->second);
     m_map.erase(itr);
@@ -126,8 +127,8 @@ auto Bufmgr::ref(PageRef &ref) -> void
 auto Bufmgr::unref(PageRef &ref) -> void
 {
     CALICODB_EXPECT_FALSE(ref.page_id.is_null());
-    CALICODB_EXPECT_NE(ref.refcount, 0);
-    CALICODB_EXPECT_NE(m_refsum, 0);
+    CALICODB_EXPECT_LT(0, ref.refcount);
+    CALICODB_EXPECT_LT(0, m_refsum);
 
     --ref.refcount;
     --m_refsum;

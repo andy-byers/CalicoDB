@@ -465,13 +465,21 @@ auto Pager::mark_dirty(Page &page) -> void
     page.m_write = true;
 }
 
-auto Pager::release(Page page) -> void
+auto Pager::release(Page page, bool discard) -> void
 {
     CALICODB_EXPECT_GE(m_mode, kRead);
     if (page.m_pager) {
-        CALICODB_EXPECT_GT(page.m_ref->refcount, 0);
-        m_bufmgr.unref(*page.m_ref);
         page.m_pager = nullptr;
+        auto *ref = page.m_ref;
+        m_bufmgr.unref(*ref);
+        if (discard && ref->refcount == 0) {
+            // Don't keep this page in the cache. `discard` is a hint indicating that
+            // this page is unlikely to be used again in the near future.
+            if (ref->flag & PageRef::kDirty) {
+                m_dirtylist.remove(*ref);
+            }
+            m_bufmgr.erase(ref->page_id);
+        }
     }
 }
 

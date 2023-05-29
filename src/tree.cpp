@@ -1393,7 +1393,7 @@ auto Tree::emplace(Node &node, const Slice &key, const Slice &value, std::size_t
                 ptr = ovfl.mutable_ptr() + Id::kSize;
                 next_ptr = ovfl.mutable_ptr();
                 if (prev) {
-                    m_pager->release(std::move(*prev));
+                    m_pager->release(std::move(*prev), true);
                 }
                 s = PointerMap::write_entry(
                     *m_pager, ovfl.id(), {prev_pgno, prev_type});
@@ -1406,7 +1406,7 @@ auto Tree::emplace(Node &node, const Slice &key, const Slice &value, std::size_t
     if (prev) {
         // prev holds the last page in the overflow chain.
         put_u32(prev->mutable_ptr(), 0);
-        m_pager->release(std::move(*prev));
+        m_pager->release(std::move(*prev), true);
     }
     return s;
 }
@@ -1464,7 +1464,7 @@ auto Tree::vacuum_step(Page &free, PointerMap::Entry entry, Schema &schema, Id l
                 CALICODB_TRY(m_pager->acquire(entry.back_ptr, parent));
                 m_pager->mark_dirty(parent);
                 write_next_id(parent, free.id());
-                m_pager->release(std::move(parent));
+                m_pager->release(std::move(parent), true);
             }
             break;
         case PointerMap::kOverflowHead: {
@@ -1529,6 +1529,7 @@ auto Tree::vacuum_step(Page &free, PointerMap::Entry entry, Schema &schema, Id l
                     release(std::move(next));
                 }
             }
+            // Keep this in the cache since it will be acquired again below.
             release(std::move(last));
             break;
         }
@@ -1549,7 +1550,7 @@ auto Tree::vacuum_step(Page &free, PointerMap::Entry entry, Schema &schema, Id l
         }
     }
     std::memcpy(free.mutable_ptr(), last.constant_ptr(), kPageSize);
-    m_pager->release(std::move(last));
+    m_pager->release(std::move(last), true);
     return Status::ok();
 }
 
@@ -1734,7 +1735,7 @@ auto PayloadManager::promote(Pager &pager, char *scratch, Cell &cell, Id parent_
                 if (s.is_ok()) {
                     if (prev) {
                         put_u32(prev->mutable_ptr(), dst.id().value);
-                        pager.release(std::move(*prev));
+                        pager.release(std::move(*prev), true);
                     } else {
                         write_overflow_id(cell, dst.id());
                     }
@@ -1745,12 +1746,12 @@ auto PayloadManager::promote(Pager &pager, char *scratch, Cell &cell, Id parent_
                     pgno = read_next_id(src);
                 }
             }
-            pager.release(std::move(src));
+            pager.release(std::move(src), true);
         }
         if (s.is_ok()) {
             CALICODB_EXPECT_TRUE(prev.has_value());
             put_u32(prev->mutable_ptr(), 0);
-            pager.release(std::move(*prev));
+            pager.release(std::move(*prev), true);
             cell.size += Id::kSize;
             cell.has_remote = true;
         }
@@ -1808,7 +1809,7 @@ auto PayloadManager::access(
                 offset = 0;
             }
             pgno = read_next_id(ovfl);
-            pager.release(std::move(ovfl));
+            pager.release(std::move(ovfl), true);
             length -= len;
             if (length == 0) {
                 break;
