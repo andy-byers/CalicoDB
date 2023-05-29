@@ -68,7 +68,22 @@ When a key or value is too large to fit on a page, some of it is transferred to 
 [//]: # (TODO)
 
 #### Freelist
-[//]: # (TODO)
+Sometimes, pages end up becoming unused.
+This happens, for example, when a record with an overflow chain is erased.
+There are 2 types of freelist pages: trunks and leaves.
+Freelist trunk pages form a linked list threaded through the database file.
+Trunk pages store pointers to 0 or more leaf freelist pages.
+Each trunk page contains the following information:
+
+| Offset | Size   | Name    | Purpose                                              |
+|:-------|:-------|:--------|:-----------------------------------------------------|
+| 0      | 4      | NextPtr | Page ID of the next freelist trunk page              |
+| 4      | 4      | LeafCnt | Number of freelist leaf page IDs stored on this page |
+| 8      | PgSz-8 | Leaves  | `LeafCnt` leaf page IDs                              |
+
+The last trunk page has its `NextPtr` field set to 0.
+Freelist leaf pages contain no pertinent information.
+They are not written to the WAL, nor are they stored in the pager cache.
 
 #### Pointer map
 [//]: # (TODO)
@@ -86,7 +101,7 @@ The WAL file consists of a fixed-length header, followed by 0 or more WAL frames
 Each WAL frame contains a single database page, along with some metadata.
 
 Most writes to the WAL are sequential, the exception being when a page is written out more than once within a transaction.
-In that case, the old version of the page will be overwritten.
+In that case, the most-recent version of the page will be overwritten.
 This lets the number of frames added to the WAL be proportional to the number of pages modified during a given transaction.
 
 #### shm file
