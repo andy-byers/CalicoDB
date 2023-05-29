@@ -51,7 +51,7 @@ auto DBImpl::open(const Options &sanitized) -> Status
         file,
         m_env,
         m_log,
-        &m_state,
+        &m_status,
         m_busy,
         (sanitized.cache_size + kPageSize - 1) / kPageSize,
         sanitized.sync,
@@ -192,7 +192,7 @@ auto DBImpl::new_txn(bool write, Txn *&out) -> Status
 
     // Forward error statuses. If an error is set at this point, then something
     // has gone very wrong.
-    auto s = m_state.status;
+    auto s = m_status;
     if (!s.is_ok()) {
         return s;
     }
@@ -201,7 +201,7 @@ auto DBImpl::new_txn(bool write, Txn *&out) -> Status
         s = m_pager->start_writer();
     }
     if (s.is_ok()) {
-        m_tx = new TxnImpl(*m_pager, m_state.status, write);
+        m_tx = new TxnImpl(*m_pager, m_status, write);
         m_tx->m_backref = &m_tx;
         out = m_tx;
     } else {
@@ -213,11 +213,6 @@ auto DBImpl::new_txn(bool write, Txn *&out) -> Status
 auto DBImpl::TEST_pager() const -> const Pager &
 {
     return *m_pager;
-}
-
-auto DBImpl::TEST_state() const -> const DBState &
-{
-    return m_state;
 }
 
 } // namespace calicodb

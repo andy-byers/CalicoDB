@@ -116,7 +116,7 @@ public:
             file,
             &Base::env(),
             nullptr,
-            &m_state,
+            &m_status,
             nullptr,
             kFrameCount,
         };
@@ -133,7 +133,7 @@ public:
     }
 
 protected:
-    DBState m_state;
+    Status m_status;
     Pager *m_pager = nullptr;
 };
 

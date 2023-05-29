@@ -157,6 +157,26 @@ public:
         m_cursor = m_table->new_cursor();
     }
 
+    auto vacuum(benchmark::State &state) -> void
+    {
+        state.PauseTiming();
+        for (std::size_t i = 0; i < state.range(1); ++i) {
+            CHECK_OK(m_table->put(
+                calicodb::tools::integral_key<kKeyLength>(i),
+                m_random.Generate(m_param.value_length)));
+        }
+        for (std::size_t i = 0; i < state.range(0); ++i) {
+            CHECK_OK(m_table->erase(
+                calicodb::tools::integral_key<kKeyLength>(i)));
+        }
+        state.ResumeTiming();
+
+        CHECK_OK(m_txn->vacuum());
+        CHECK_OK(m_txn->commit());
+        restart_txn();
+        increment_counters();
+    }
+
 private:
     auto use_cursor() const -> void
     {
@@ -223,24 +243,6 @@ static auto set_modification_benchmark_label(benchmark::State &state)
         access_type_name(state.range(0)) +
         (state.range(2) == 1 ? "" : "Batch"));
 }
-namespace calicodb
-{
-auto compress_prefix(const Slice &lhs, const Slice &rhs) -> Slice
-{
-    std::size_t i = 0;
-    for (; lhs[i] == rhs[i]; ++i) {
-    }
-    return rhs.range(i);
-}
-} // namespace calicodb
-static auto BM_CompressPrefix(benchmark::State &state) -> void
-{
-    for (auto _ : state) {
-        calicodb::Slice suffix;
-        CHECK_EQ("gefg", calicodb::compress_prefix("abcdefg", "abcgefg").to_string());
-    }
-}
-BENCHMARK(BM_CompressPrefix);
 
 static auto BM_Write(benchmark::State &state) -> void
 {
@@ -288,6 +290,33 @@ BENCHMARK(BM_Overwrite)
     ->Args({kRandom, true, 1, true})
     ->Args({kSequential, true, 1'000, true})
     ->Args({kRandom, true, 1'000, true});
+
+static auto BM_Vacuum(benchmark::State &state) -> void
+{
+    std::string label;
+    calicodb::append_fmt_string(
+        label,
+        "Vacuum_%ld_of_%ld%s",
+        state.range(0),
+        state.range(1),
+        state.range(2) ? "_Sync" : "");
+    state.SetLabel(label);
+
+    Parameters param;
+    param.sync = state.range(2);
+
+    Benchmark bench(param);
+    for (auto _ : state) {
+        bench.vacuum(state);
+    }
+}
+BENCHMARK(BM_Vacuum)
+    ->Args({100, 1'000, false})
+    ->Args({100, 1'000, true})
+    ->Args({500, 1'000, false})
+    ->Args({500, 1'000, true})
+    ->Args({1'000, 1'000, false})
+    ->Args({1'000, 1'000, true});
 
 static auto BM_Exists(benchmark::State &state) -> void
 {

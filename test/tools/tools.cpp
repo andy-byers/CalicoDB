@@ -31,43 +31,88 @@ auto RandomGenerator::Generate(std::size_t len) const -> Slice
     return {m_data.data() + m_pos - len, static_cast<std::size_t>(len)};
 }
 
-auto print_references(Pager &pager) -> void
+auto print_database_overview(std::ostream &os, Pager &pager) -> void
 {
-    for (auto page_id = Id::root(); page_id.value <= pager.page_count(); ++page_id.value) {
-        std::cerr << std::setw(6) << page_id.value << ": ";
-        if (PointerMap::lookup(page_id) == page_id) {
-            std::cerr << "pointer map\n";
-            continue;
-        }
-        if (page_id.is_root()) {
-            std::cerr << "NULL <- node -> ...\n";
-            continue;
-        }
-        PointerMap::Entry entry;
-        CHECK_OK(PointerMap::read_entry(pager, page_id, entry));
+#define SEP "|-----------|-----------|----------------|---------------------------------|\n"
 
-        Page page;
-        CHECK_OK(pager.acquire(page_id, page));
-
-        switch (entry.type) {
-            case PointerMap::kTreeNode:
-                std::cerr << entry.back_ptr.value << " -> node -> ...\n";
-                break;
-            case PointerMap::kTreeRoot:
-                std::cerr << "1 -> root for table " << entry.back_ptr.value << " -> ...\n";
-                break;
-            case PointerMap::kFreelistLink:
-                std::cerr << entry.back_ptr.value << " -> freelist link -> " << get_u32(page.data()) << '\n';
-                break;
-            case PointerMap::kOverflowHead:
-                std::cerr << entry.back_ptr.value << " -> overflow head -> " << get_u32(page.data()) << '\n';
-                break;
-            case PointerMap::kOverflowLink:
-                std::cerr << entry.back_ptr.value << " -> overflow link -> " << get_u32(page.data()) << '\n';
-                break;
-        }
-        pager.release(std::move(page));
+    if (pager.page_count() == 0) {
+        os << "DB is empty\n";
+        return;
     }
+    for (auto page_id = Id::root(); page_id.value <= pager.page_count(); ++page_id.value) {
+        if (page_id.as_index() % 32 == 0) {
+            os << SEP "|    PageID |  ParentID | PageType       | Info                            |\n" SEP;
+        }
+        Id parent_id;
+        std::string info, type;
+        if (PointerMap::is_map(page_id)) {
+            const auto first = page_id.value + 1;
+            append_fmt_string(info, "Range=[%u,%u]", first, first + kPageSize / 5 - 1);
+            type = "<PtrMap>";
+        } else {
+            PointerMap::Entry entry;
+            if (page_id.is_root()) {
+                entry.type = PointerMap::kTreeRoot;
+            } else {
+                CHECK_OK(PointerMap::read_entry(pager, page_id, entry));
+                parent_id = entry.back_ptr;
+            }
+            Page page;
+            CHECK_OK(pager.acquire(page_id, page));
+
+            switch (entry.type) {
+                case PointerMap::kTreeRoot:
+                    type = "TreeRoot";
+                    [[fallthrough]];
+                case PointerMap::kTreeNode: {
+                    NodeHeader hdr;
+                    hdr.read(page.constant_ptr() + page_id.is_root() * FileHeader::kSize);
+                    auto n = hdr.cell_count;
+                    if (hdr.is_external) {
+                        append_fmt_string(info, "Ex,N=%u,Sib=(%u,%u)", n, hdr.prev_id.value, hdr.next_id.value);
+                    } else {
+                        info = "In,N=";
+                        append_number(info, n);
+                        ++n;
+                    }
+                    if (type.empty()) {
+                        type = "TreeNode";
+                    }
+                    break;
+                }
+                case PointerMap::kFreelistLeaf:
+                    type = "Unused";
+                    break;
+                case PointerMap::kFreelistTrunk:
+                    append_fmt_string(
+                        info, "N=%u,Next=%u", get_u32(page.constant_ptr() + 4), get_u32(page.constant_ptr()));
+                    type = "Freelist";
+                    break;
+                case PointerMap::kOverflowHead:
+                    append_fmt_string(info, "Next=%u", get_u32(page.constant_ptr()));
+                    type = "OvflHead";
+                    break;
+                case PointerMap::kOverflowLink:
+                    append_fmt_string(info, "Next=%u", get_u32(page.constant_ptr()));
+                    type = "OvflLink";
+                    break;
+                default:
+                    type = "<BadType>";
+            }
+            pager.release(std::move(page));
+        }
+        std::string line;
+        append_fmt_string(
+            line,
+            "|%10u |%10u | %-15s| %-32s|\n",
+            page_id.value,
+            parent_id.value,
+            type.c_str(),
+            info.c_str());
+        os << line;
+    }
+    os << SEP;
+#undef SEP
 }
 
 #undef TRY_INTERCEPT_FROM
@@ -118,7 +163,7 @@ auto hexdump_page(const Page &page) -> void
     for (std::size_t i = 0; i < kPageSize / 16; ++i) {
         std::fputs("    ", stderr);
         for (std::size_t j = 0; j < 16; ++j) {
-            const auto c = page.data()[i * 16 + j];
+            const auto c = page.constant_ptr()[i * 16 + j];
             if (std::isprint(c)) {
                 std::fprintf(stderr, "%2c ", c);
             } else {

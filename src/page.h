@@ -72,12 +72,13 @@ public:
         return {m_data, kPageSize};
     }
 
-    [[nodiscard]] auto data() -> char *
+    [[nodiscard]] auto mutable_ptr() -> char *
     {
+        //        CALICODB_EXPECT_TRUE(m_write);
         return m_data;
     }
 
-    [[nodiscard]] auto data() const -> const char *
+    [[nodiscard]] auto constant_ptr() const -> const char *
     {
         return m_data;
     }
@@ -98,12 +99,12 @@ public:
 
 [[nodiscard]] inline auto read_next_id(const Page &page) -> Id
 {
-    return Id(get_u32(page.data() + page_offset(page.id())));
+    return Id(get_u32(page.constant_ptr() + page_offset(page.id())));
 }
 
 inline auto write_next_id(Page &page, Id next_id) -> void
 {
-    put_u32(page.data() + page_offset(page.id()), next_id.value);
+    put_u32(page.mutable_ptr() + page_offset(page.id()), next_id.value);
 }
 
 } // namespace calicodb

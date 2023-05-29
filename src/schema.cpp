@@ -197,9 +197,9 @@ auto Schema::vacuum_finish() -> Status
     return s;
 }
 
-auto Schema::vacuum_page(Id page_id, bool &success) -> Status
+auto Schema::vacuum_freelist() -> Status
 {
-    return m_map.vacuum_one(page_id, *this, &success);
+    return m_map.vacuum(*this);
 }
 
 auto Schema::TEST_validate() const -> void

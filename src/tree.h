@@ -264,7 +264,7 @@ public:
     [[nodiscard]] auto put(const Slice &key, const Slice &value) -> Status;
     [[nodiscard]] auto get(const Slice &key, std::string *value) const -> Status;
     [[nodiscard]] auto erase(const Slice &key) -> Status;
-    [[nodiscard]] auto vacuum_one(Id target, Schema &schema, bool *success = nullptr) -> Status;
+    [[nodiscard]] auto vacuum(Schema &schema) -> Status;
     [[nodiscard]] auto allocate(bool is_external, Node &out) -> Status;
     [[nodiscard]] auto acquire(Id page_id, bool upgrade, Node &out) const -> Status;
     [[nodiscard]] auto free(Node node) -> Status;
@@ -305,7 +305,7 @@ private:
     [[nodiscard]] auto write_value(Node &node, std::size_t index, const Slice &value) -> Status;
     [[nodiscard]] auto emplace(Node &node, const Slice &key, const Slice &value, std::size_t index, bool &overflow) -> Status;
     [[nodiscard]] auto destroy_impl(Node node) -> Status;
-    [[nodiscard]] auto vacuum_step(Page &free, Schema &schema, Id last_id) -> Status;
+    [[nodiscard]] auto vacuum_step(Page &free, PointerMap::Entry entry, Schema &schema, Id last_id) -> Status;
     [[nodiscard]] auto resolve_overflow() -> Status;
     [[nodiscard]] auto resolve_underflow() -> Status;
     [[nodiscard]] auto split_root() -> Status;
@@ -327,7 +327,7 @@ private:
     [[nodiscard]] auto find_parent_id(Id page_id, Id &out) const -> Status;
     [[nodiscard]] auto fix_parent_id(Id page_id, Id parent_id, PointerMap::Type type) -> Status;
     [[nodiscard]] auto maybe_fix_overflow_chain(const Cell &cell, Id parent_id) -> Status;
-    [[nodiscard]] auto fix_links(Node &node) -> Status;
+    [[nodiscard]] auto fix_links(Node &node, Id parent_id = Id::null()) -> Status;
     [[nodiscard]] auto cell_scratch() -> char *;
 
     enum ReportType {

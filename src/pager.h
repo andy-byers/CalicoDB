@@ -6,36 +6,14 @@
 #define CALICODB_PAGER_H
 
 #include "bufmgr.h"
-#include "calicodb/env.h"
-#include "wal.h"
 #include <unordered_set>
 
 namespace calicodb
 {
 
 class Env;
-class Freelist;
 class Wal;
-struct DBState;
-
-// Freelist management. The freelist is essentially a linked list that is threaded through the database. Each freelist
-// link page contains a pointer to the next freelist link page, or to Id::null() if it is the last link. Pages that are
-// no longer needed by the tree are placed at the front of the freelist. When more pages are needed, the freelist is
-// checked first. Only if it is empty do we allocate a page from the end of the file.
-class Freelist
-{
-    friend class Pager;
-    friend class Tree;
-
-    Pager *m_pager = nullptr;
-    Id m_head;
-
-public:
-    explicit Freelist(Pager &pager, Id head);
-    [[nodiscard]] auto is_empty() const -> bool;
-    [[nodiscard]] auto pop(Page &page) -> Status;
-    [[nodiscard]] auto push(Page page) -> Status;
-};
+struct WalStatistics;
 
 class Pager final
 {
@@ -58,7 +36,7 @@ public:
         File *db_file;
         Env *env;
         Sink *log;
-        DBState *state;
+        Status *status;
         BusyHandler *busy;
         std::size_t frame_count;
         bool sync;
@@ -89,7 +67,6 @@ public:
     [[nodiscard]] auto acquire(Id page_id, Page &page) -> Status;
     auto mark_dirty(Page &page) -> void;
     auto release(Page page) -> void;
-    auto set_status(const Status &error) const -> Status;
     auto set_page_count(std::size_t page_count) -> void;
     [[nodiscard]] auto acquire_root() -> Page;
     [[nodiscard]] auto hits() const -> U64;
@@ -97,6 +74,15 @@ public:
     auto assert_state() const -> bool;
     auto purge_cached_pages() -> void;
     auto initialize_root() -> void;
+
+    auto set_status(const Status &error) const -> Status
+    {
+        if (m_status->is_ok() && (error.is_io_error() || error.is_corruption())) {
+            *m_status = error;
+            m_mode = kError;
+        }
+        return error;
+    }
 
 private:
     explicit Pager(const Parameters &param);
@@ -106,38 +92,35 @@ private:
     [[nodiscard]] auto read_page(PageRef &out, size_t *size_out) -> Status;
     [[nodiscard]] auto read_page_from_file(PageRef &ref, std::size_t *size_out) const -> Status;
     [[nodiscard]] auto ensure_available_buffer() -> Status;
-    [[nodiscard]] auto flush_all_pages() -> Status;
+    [[nodiscard]] auto flush_dirty_pages() -> Status;
     auto purge_page(PageRef &victim) -> void;
 
-    struct SaveState {
-        Id freelist_head;
-        std::size_t page_count = 0;
-        Mode mode = kOpen;
-    };
-
     mutable Statistics m_statistics;
-    mutable DBState *m_state = nullptr;
+    mutable Status *m_status;
     mutable Mode m_mode = kOpen;
-    mutable SaveState m_save;
+    mutable Mode m_save = kOpen;
 
     const char *m_db_name;
     const char *m_wal_name;
     const bool m_sync;
 
     Dirtylist m_dirtylist;
-    Freelist m_freelist;
     Bufmgr m_bufmgr;
 
     // True if the in-memory root page needs to be refreshed, false otherwise.
     bool m_refresh_root = false;
 
     Sink *m_log = nullptr;
-    File *m_file = nullptr;
-    Env *m_env = nullptr;
+    File *m_file;
+    Env *m_env;
     Wal *m_wal = nullptr;
     BusyHandler *m_busy = nullptr;
     std::size_t m_page_count = 0;
+    std::size_t m_save_count = 0;
 };
+
+// The first pointer map page is always on page 2, right after the root page.
+static constexpr std::size_t kFirstMapPage = 2;
 
 struct PointerMap {
     enum Type : char {
@@ -145,7 +128,8 @@ struct PointerMap {
         kTreeRoot,
         kOverflowHead,
         kOverflowLink,
-        kFreelistLink,
+        kFreelistTrunk,
+        kFreelistLeaf,
     };
 
     struct Entry {

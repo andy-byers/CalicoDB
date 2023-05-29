@@ -8,7 +8,6 @@
 #include "calicodb/db.h"
 
 #include "header.h"
-#include "pager.h"
 #include "tree.h"
 #include "wal.h"
 
@@ -19,12 +18,9 @@ namespace calicodb
 {
 
 class Env;
+class Pager;
 class TxnImpl;
 class Wal;
-
-struct DBState {
-    Status status;
-};
 
 class DBImpl : public DB
 {
@@ -42,10 +38,9 @@ public:
     [[nodiscard]] auto checkpoint(bool reset) -> Status override;
 
     [[nodiscard]] auto TEST_pager() const -> const Pager &;
-    [[nodiscard]] auto TEST_state() const -> const DBState &;
 
 private:
-    DBState m_state;
+    Status m_status;
     Pager *m_pager = nullptr;
 
     Env *const m_env = nullptr;

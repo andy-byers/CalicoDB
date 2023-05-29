@@ -5,6 +5,7 @@
 #ifndef CALICODB_HEADER_H
 #define CALICODB_HEADER_H
 
+#include "encoding.h"
 #include "utils.h"
 
 namespace calicodb
@@ -42,6 +43,24 @@ struct FileHeader {
         kFmtVersionOfs = 26,
         kSize = 64
     };
+
+    [[nodiscard]] static auto get_page_count(const char *root) -> U32
+    {
+        return get_u32(root + kPageCountOffset);
+    }
+    static auto put_page_count(char *root, U32 value) -> void
+    {
+        put_u32(root + kPageCountOffset, value);
+    }
+
+    [[nodiscard]] static auto get_freelist_head(const char *root) -> Id
+    {
+        return Id(get_u32(root + kFreelistHeadOffset));
+    }
+    static auto put_freelist_head(char *root, Id value) -> void
+    {
+        put_u32(root + kFreelistHeadOffset, value.value);
+    }
 };
 
 // Node Header Format:

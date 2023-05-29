@@ -221,7 +221,7 @@ struct DatabaseCounts {
     return counts;
 }
 
-auto print_references(Pager &pager) -> void;
+auto print_database_overview(std::ostream &os, Pager &pager) -> void;
 auto print_wals(Env &env, std::size_t page_size, const std::string &prefix) -> void;
 auto hexdump_page(const Page &page) -> void;
 

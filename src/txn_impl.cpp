@@ -76,32 +76,16 @@ auto TxnImpl::vacuum() -> Status
     auto s = *m_status;
     if (s.is_ok()) {
         s = vacuum_freelist();
-        if (!s.is_ok()) {
-            m_pager->set_status(s);
-        }
+        m_pager->set_status(s);
     }
     return s;
 }
 
 auto TxnImpl::vacuum_freelist() -> Status
 {
-    CALICODB_TRY(m_pager->refresh_state());
-    Id pgid(m_pager->page_count());
-    for (; Id::root() < pgid; --pgid.value) {
-        bool success;
-        CALICODB_TRY(m_schema_obj.vacuum_page(pgid, success));
-        if (!success) {
-            break;
-        }
-    }
-    if (pgid.value == m_pager->page_count()) {
-        // No pages available to vacuum: database is minimally sized.
-        return Status::ok();
-    }
-
-    auto s = m_schema_obj.vacuum_finish();
+    auto s = m_pager->refresh_state();
     if (s.is_ok()) {
-        m_pager->set_page_count(pgid.value);
+        s = m_schema_obj.vacuum_freelist();
     }
     return s;
 }

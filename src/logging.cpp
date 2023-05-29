@@ -50,6 +50,7 @@ auto append_fmt_string(std::string &out, const char *fmt, ...) -> std::size_t
         info = try_write(buffer.data(), buffer.size(), false, fmt, args);
     }
     va_end(args);
+    buffer.resize(info.length);
     out.append(buffer);
     return info.length;
 }

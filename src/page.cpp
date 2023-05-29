@@ -17,6 +17,7 @@ Page::~Page()
     //       b/c it's convenient).
     if (m_pager) {
         m_pager->release(std::move(*this));
+        m_pager = nullptr;
     }
 }
 

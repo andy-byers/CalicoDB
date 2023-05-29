@@ -4,7 +4,6 @@
 
 #include "header.h"
 #include "calicodb/options.h"
-#include "encoding.h"
 #include "logging.h"
 
 namespace calicodb

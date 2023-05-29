@@ -100,7 +100,7 @@ public:
 
     [[nodiscard]] auto create_table(const TableOptions &options, const Slice &name, bool readonly, Table **tb_out) -> Status;
     [[nodiscard]] auto drop_table(const Slice &name) -> Status;
-    [[nodiscard]] auto vacuum_page(Id page_id, bool &success) -> Status;
+    [[nodiscard]] auto vacuum_freelist() -> Status;
 
     // Write updated root page IDs for tables that were closed during vacuum, if any
     // tables were rerooted

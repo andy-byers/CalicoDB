@@ -3,6 +3,7 @@
 // LICENSE.md. See AUTHORS.md for a list of contributor names.
 
 #include "db_impl.h"
+#include "freelist.h"
 #include "header.h"
 #include "logging.h"
 #include "tools.h"
@@ -308,7 +309,6 @@ TEST_F(DBTests, ConvenienceFunctions)
 {
     const auto *const_db = m_db;
     (void)db_impl(m_db)->TEST_pager();
-    (void)db_impl(m_db)->TEST_state();
     db_impl(const_db);
     ASSERT_OK(m_db->update([](auto &txn) {
         const auto &const_txn = txn;
@@ -485,7 +485,10 @@ TEST_F(DBTests, VacuumEmptyDB)
 TEST_F(DBTests, CorruptedRootIDs)
 {
     ASSERT_OK(m_db->update([](auto &txn) {
-        return txn.create_table(TableOptions(), "TABLE", nullptr);
+        Table *tb1, *tb2;
+        EXPECT_OK(put_range(txn, TableOptions(), "TABLE", 0, 10));
+        EXPECT_OK(put_range(txn, TableOptions(), "temp", 0, 10));
+        return txn.drop_table("temp");
     }));
     ASSERT_OK(m_db->checkpoint(true));
 
@@ -499,7 +502,7 @@ TEST_F(DBTests, CorruptedRootIDs)
     // of the file, which is not allowed.
     char buffer[kPageSize];
     ASSERT_OK(file->read_exact(0, sizeof(buffer), buffer));
-    ++buffer[kPageSize - 1]; // Corrupt the root ID of "TABLE".
+    buffer[kPageSize - 1] = 42; // Corrupt the root ID of "TABLE".
     ASSERT_OK(file->write(0, Slice(buffer, kPageSize)));
     delete file;
 
@@ -515,6 +518,12 @@ TEST_F(DBTests, CorruptedRootIDs)
     (void)m_db->update([](auto &txn) {
         Status s;
         EXPECT_TRUE((s = txn.drop_table("TABLE")).is_corruption())
+            << s.to_string();
+        return s;
+    });
+    (void)m_db->update([](auto &txn) {
+        Status s;
+        EXPECT_TRUE((s = txn.vacuum()).is_corruption())
             << s.to_string();
         return s;
     });
@@ -1242,6 +1251,115 @@ TEST_F(DBCheckpointTests, CheckpointerAllowsTransactions)
             return Status::ok();
         }));
     ASSERT_OK(m_db->checkpoint(false));
+}
+
+class DBVacuumTests : public DBTests
+{
+protected:
+    explicit DBVacuumTests() = default;
+
+    ~DBVacuumTests() override = default;
+
+    auto test_configurations_impl(const std::vector<U8> &bitmaps) const -> void
+    {
+        static constexpr auto *kName = "12345678_TABLE_NAMES";
+        static constexpr std::size_t kN = 10;
+        (void)m_db->update([this, &bitmaps](auto &txn) {
+            Table *tbs[8];
+            for (std::size_t i = 0; i < 8; ++i) {
+                EXPECT_OK(txn.create_table(TableOptions(), kName + i, &tbs[i]));
+            }
+            std::vector<std::size_t> bs;
+            std::vector<std::size_t> is;
+            for (std::size_t b = 0; b < bitmaps.size(); ++b) {
+                for (std::size_t i = 0; i < 8; ++i) {
+                    if ((bitmaps[b] >> i) & 1) {
+                        EXPECT_OK(put_range(*tbs[i], b * kN, (b + 1) * kN));
+                        bs.emplace_back(b);
+                        is.emplace_back(i);
+                    }
+                }
+            }
+            for (std::size_t n = 0; n < bs.size(); ++n) {
+                if (0 == (n & 1)) {
+                    EXPECT_OK(erase_range(*tbs[is[n]], bs[n] * kN, (bs[n] + 1) * kN));
+                }
+            }
+            EXPECT_OK(txn.vacuum());
+
+            for (std::size_t n = 0; n < bs.size(); ++n) {
+                EXPECT_OK(check_range(*tbs[is[n]], bs[n] * kN, (bs[n] + 1) * kN, n & 1));
+                if (n & 1) {
+                    // Erase the rest of the records. The database should be empty after this
+                    // loop completes.
+                    EXPECT_OK(erase_range(*tbs[is[n]], bs[n] * kN, (bs[n] + 1) * kN));
+                }
+            }
+            EXPECT_OK(txn.vacuum());
+
+            for (std::size_t n = 0; n < bs.size(); ++n) {
+                EXPECT_OK(check_range(*tbs[is[n]], bs[n] * kN, (bs[n] + 1) * kN, false));
+            }
+            return Status::ok();
+        });
+    }
+    auto test_configurations(std::vector<U8> bitmaps) const -> void
+    {
+        for (U32 i = 0; i < 8; ++i) {
+            for (auto &b : bitmaps) {
+                b = (b << 1) | (b >> 7);
+            }
+            test_configurations_impl(bitmaps);
+        }
+    }
+};
+
+TEST_F(DBVacuumTests, SingleTable)
+{
+    test_configurations({
+        0b10000000,
+        0b10000000,
+        0b10000000,
+        0b10000000,
+    });
+}
+
+TEST_F(DBVacuumTests, MultipleTables)
+{
+    test_configurations({
+        0b10000000,
+        0b01000000,
+        0b00100000,
+        0b00010000,
+    });
+    test_configurations({
+        0b10001000,
+        0b01000100,
+        0b00100010,
+        0b00010001,
+    });
+    test_configurations({
+        0b10101000,
+        0b01010100,
+        0b00101010,
+        0b00010101,
+    });
+    test_configurations({
+        0b10101010,
+        0b01010101,
+        0b10101010,
+        0b01010101,
+    });
+}
+
+TEST_F(DBVacuumTests, SanityCheck)
+{
+    test_configurations({
+        0b11111111,
+        0b11111111,
+        0b11111111,
+        0b11111111,
+    });
 }
 
 } // namespace calicodb
