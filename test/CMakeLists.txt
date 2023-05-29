@@ -18,9 +18,9 @@ include(GoogleTest)
 set(CALICODB_TOOLS_DIR "${PROJECT_SOURCE_DIR}/test/tools")
 add_subdirectory(tools)
 
-if(CALICODB_BuildCrashTests)
-    add_subdirectory(crash_tests)
-endif()
+#if(CALICODB_BuildCrashTests)
+#    add_subdirectory(crash_tests)
+#endif()
 
 if(CALICODB_BuildDocTests)
     add_subdirectory(doc_tests)

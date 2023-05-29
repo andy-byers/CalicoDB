@@ -311,12 +311,9 @@ static auto BM_Vacuum(benchmark::State &state) -> void
     }
 }
 BENCHMARK(BM_Vacuum)
-    ->Args({100, 1'000, false})
-    ->Args({100, 1'000, true})
-    ->Args({500, 1'000, false})
-    ->Args({500, 1'000, true})
-    ->Args({1'000, 1'000, false})
-    ->Args({1'000, 1'000, true});
+    ->Args({100, 1'000})
+    ->Args({500, 1'000})
+    ->Args({1'000, 1'000});
 
 static auto BM_Exists(benchmark::State &state) -> void
 {
