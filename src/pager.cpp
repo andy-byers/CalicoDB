@@ -339,7 +339,7 @@ auto Pager::flush_dirty_pages() -> Status
     return m_wal->write(p, m_page_count);
 }
 
-auto Pager::set_page_count(std::size_t page_count) -> void
+auto Pager::set_page_count(U32 page_count) -> void
 {
     CALICODB_EXPECT_GT(page_count, 0);
     for (auto i = page_count; i < m_page_count; ++i) {

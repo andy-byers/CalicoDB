@@ -66,7 +66,7 @@ public:
     [[nodiscard]] auto destroy(Page page) -> Status;
     [[nodiscard]] auto acquire(Id page_id, Page &page) -> Status;
     auto mark_dirty(Page &page) -> void;
-    auto set_page_count(std::size_t page_count) -> void;
+    auto set_page_count(U32 page_count) -> void;
     [[nodiscard]] auto acquire_root() -> Page;
     [[nodiscard]] auto hits() const -> U64;
     [[nodiscard]] auto misses() const -> U64;
