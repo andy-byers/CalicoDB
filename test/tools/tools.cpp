@@ -284,16 +284,11 @@ auto FakeWal::rollback() -> void
     m_pending.clear();
 }
 
-auto FakeWal::close(std::size_t &) -> Status
+auto FakeWal::close() -> Status
 {
     m_pending.clear();
     m_committed.clear();
     return Status::ok();
-}
-
-auto FakeWal::statistics() const -> WalStatistics
-{
-    return WalStatistics{};
 }
 
 } // namespace calicodb::tools

@@ -844,8 +844,7 @@ public:
     auto close() -> void
     {
         ASSERT_OK(m_db->file_lock(kLockShared));
-        std::size_t db_size;
-        ASSERT_OK(m_wal->close(db_size));
+        ASSERT_OK(m_wal->close());
         delete m_wal;
         delete m_db;
         m_wal = nullptr;
@@ -1122,8 +1121,7 @@ protected:
     auto reopen_wals() -> void
     {
         ASSERT_OK(m_db->file_lock(kLockShared));
-        std::size_t db_size;
-        ASSERT_OK(m_wal->close(db_size));
+        ASSERT_OK(m_wal->close());
         delete m_wal;
         m_wal = nullptr;
 

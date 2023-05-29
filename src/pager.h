@@ -48,11 +48,21 @@ public:
     };
 
     ~Pager();
+
+    [[nodiscard]] auto statistics() const -> const Statistics &
+    {
+        return m_statistics;
+    }
+
+    [[nodiscard]] auto page_count() const -> U32
+    {
+        CALICODB_EXPECT_LT(kOpen, m_mode);
+        return m_page_count;
+    }
+
     [[nodiscard]] static auto open(const Parameters &param, Pager *&out) -> Status;
     [[nodiscard]] auto close() -> Status;
     [[nodiscard]] auto mode() const -> Mode;
-    [[nodiscard]] auto page_count() const -> std::size_t;
-    [[nodiscard]] auto statistics() const -> const Statistics &;
     [[nodiscard]] auto wal_statistics() const -> WalStatistics;
 
     [[nodiscard]] auto start_reader() -> Status;

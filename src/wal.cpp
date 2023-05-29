@@ -579,9 +579,8 @@ public:
         }
     }
 
-    [[nodiscard]] auto close(std::size_t &db_size) -> Status override
+    [[nodiscard]] auto close() -> Status override
     {
-        db_size = 0;
         // NOTE: Caller will unlock the database file. Only consider removing the WAL if this
         // is the last active connection. If there are other connections not currently running
         // transactions, the next read-write transaction will create a new WAL.
@@ -657,7 +656,7 @@ public:
         }
     }
 
-    [[nodiscard]] auto statistics() const -> WalStatistics override
+    [[nodiscard]] auto statistics() const -> const WalStatistics & override
     {
         return m_stats;
     }

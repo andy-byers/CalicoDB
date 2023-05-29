@@ -116,20 +116,9 @@ Pager::~Pager()
     delete m_file;
 }
 
-auto Pager::statistics() const -> const Statistics &
-{
-    return m_statistics;
-}
-
 auto Pager::wal_statistics() const -> WalStatistics
 {
     return m_wal ? m_wal->statistics() : WalStatistics{};
-}
-
-auto Pager::page_count() const -> std::size_t
-{
-    CALICODB_EXPECT_LT(kOpen, m_mode);
-    return m_page_count;
 }
 
 auto Pager::open_wal() -> Status
@@ -159,12 +148,11 @@ auto Pager::close() -> Status
     auto s = m_file->file_lock(kLockExclusive);
     if (s.is_ok()) {
         if (m_wal) {
-            // Ignore the page count output by Wal::close(). The DB is being closed, so
-            // it isn't necessary to set.
-            std::size_t unused;
-            s = m_wal->close(unused);
+            s = m_wal->close();
         }
         m_file->file_unlock();
+    } else if (s.is_busy()) {
+        s = Status::ok();
     }
     return s;
 }

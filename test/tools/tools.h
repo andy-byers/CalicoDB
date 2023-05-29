@@ -111,14 +111,15 @@ public:
     {
     }
 
-    [[nodiscard]] auto close(std::size_t &) -> Status override
+    [[nodiscard]] auto close() -> Status override
     {
         return Status::ok();
     }
 
-    [[nodiscard]] auto statistics() const -> WalStatistics override
+    [[nodiscard]] auto statistics() const -> const WalStatistics & override
     {
-        return {};
+        static const WalStatistics stats = {};
+        return stats;
     }
 };
 
@@ -137,13 +138,18 @@ public:
     [[nodiscard]] auto read(Id page_id, char *&out) -> Status override;
     [[nodiscard]] auto write(PageRef *dirty, std::size_t db_size) -> Status override;
     [[nodiscard]] auto checkpoint(bool) -> Status override;
-    [[nodiscard]] auto statistics() const -> WalStatistics override;
-    [[nodiscard]] auto close(std::size_t &) -> Status override;
+    [[nodiscard]] auto close() -> Status override;
     [[nodiscard]] auto start_reader(bool &) -> Status override { return Status::ok(); }
     [[nodiscard]] auto start_writer() -> Status override { return Status::ok(); }
     auto finish_reader() -> void override {}
     auto finish_writer() -> void override {}
     auto rollback() -> void override;
+
+    [[nodiscard]] auto statistics() const -> const WalStatistics & override
+    {
+        static const WalStatistics stats = {};
+        return stats;
+    }
 };
 
 template <std::size_t Length = 12>
