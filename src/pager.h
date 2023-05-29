@@ -138,8 +138,8 @@ private:
     Env *m_env;
     Wal *m_wal = nullptr;
     BusyHandler *m_busy = nullptr;
-    std::size_t m_page_count = 0;
-    std::size_t m_save_count = 0;
+    U32 m_page_count = 0;
+    U32 m_save_count = 0;
 };
 
 // The first pointer map page is always on page 2, right after the root page.
