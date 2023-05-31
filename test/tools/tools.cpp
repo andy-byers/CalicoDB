@@ -174,25 +174,25 @@ auto hexdump_page(const Page &page) -> void
     }
 }
 
-auto fill_db(DB &db, const std::string &tablename, RandomGenerator &random, std::size_t num_records, std::size_t max_payload_size) -> std::map<std::string, std::string>
+auto fill_db(DB &db, const std::string &bname, RandomGenerator &random, std::size_t num_records, std::size_t max_payload_size) -> std::map<std::string, std::string>
 {
-    Txn *txn;
-    CHECK_OK(db.new_txn(true, txn));
-    auto records = fill_db(*txn, tablename, random, num_records, max_payload_size);
-    CHECK_OK(txn->commit());
-    delete txn;
+    Tx *tx;
+    CHECK_OK(db.new_tx(WriteTag{}, tx));
+    auto records = fill_db(*tx, bname, random, num_records, max_payload_size);
+    CHECK_OK(tx->commit());
+    delete tx;
     return records;
 }
 
-auto fill_db(Txn &txn, const std::string &tablename, RandomGenerator &random, std::size_t num_records, std::size_t max_payload_size) -> std::map<std::string, std::string>
+auto fill_db(Tx &tx, const std::string &bname, RandomGenerator &random, std::size_t num_records, std::size_t max_payload_size) -> std::map<std::string, std::string>
 {
-    Table *table;
-    CHECK_OK(txn.create_table(TableOptions(), tablename, &table));
-    auto records = fill_db(*table, random, num_records, max_payload_size);
+    Bucket b;
+    CHECK_OK(tx.create_bucket(BucketOptions(), bname, &b));
+    auto records = fill_db(tx, b, random, num_records, max_payload_size);
     return records;
 }
 
-auto fill_db(Table &table, RandomGenerator &random, std::size_t num_records, std::size_t max_payload_size) -> std::map<std::string, std::string>
+auto fill_db(Tx &tx, const Bucket &b, RandomGenerator &random, std::size_t num_records, std::size_t max_payload_size) -> std::map<std::string, std::string>
 {
     CHECK_TRUE(max_payload_size > 0);
     std::map<std::string, std::string> records;
@@ -202,32 +202,32 @@ auto fill_db(Table &table, RandomGenerator &random, std::size_t num_records, std
         const auto vsize = random.Next(max_payload_size - ksize);
         const auto k = random.Generate(ksize);
         const auto v = random.Generate(vsize);
-        CHECK_OK(table.put(k, v));
+        CHECK_OK(tx.put(b, k, v));
         records[k.to_string()] = v.to_string();
     }
     return records;
 }
 
-auto expect_db_contains(DB &db, const std::string &tablename, const std::map<std::string, std::string> &map) -> void
+auto expect_db_contains(DB &db, const std::string &bname, const std::map<std::string, std::string> &map) -> void
 {
-    Txn *txn;
-    CHECK_OK(db.new_txn(false, txn));
-    expect_db_contains(*txn, tablename, map);
-    delete txn;
+    const Tx *tx;
+    CHECK_OK(db.new_tx(tx));
+    expect_db_contains(*tx, bname, map);
+    delete tx;
 }
 
-auto expect_db_contains(Txn &txn, const std::string &tablename, const std::map<std::string, std::string> &map) -> void
+auto expect_db_contains(const Tx &tx, const std::string &bname, const std::map<std::string, std::string> &map) -> void
 {
-    Table *table;
-    CHECK_OK(txn.create_table(TableOptions(), tablename, &table));
-    expect_db_contains(*table, map);
+    Bucket b;
+    CHECK_OK(tx.open_bucket(bname, b));
+    expect_db_contains(tx, b, map);
 }
 
-auto expect_db_contains(const Table &table, const std::map<std::string, std::string> &map) -> void
+auto expect_db_contains(const Tx &tx, const Bucket &b, const std::map<std::string, std::string> &map) -> void
 {
     for (const auto &[key, value] : map) {
         std::string result;
-        CHECK_OK(table.get(key, &result));
+        CHECK_OK(tx.get(b, key, &result));
         CHECK_EQ(result, value);
     }
 }

@@ -20,7 +20,7 @@ class Pager final
 public:
     friend class DBImpl;
     friend class Tree;
-    friend class TxnImpl;
+    friend class TxImpl;
 
     enum Mode {
         kOpen,

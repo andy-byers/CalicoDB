@@ -26,7 +26,6 @@ public:
 
     enum SubCode : char {
         kNone,
-        kReadonly,
         kRetry,
         kMaxSubCode
     };
@@ -114,10 +113,6 @@ public:
     {
         return Status(kBusy, kRetry);
     }
-    [[nodiscard]] static auto readonly() -> Status
-    {
-        return Status(kNotSupported, kReadonly);
-    }
 
     [[nodiscard]] auto is_invalid_argument() const -> bool
     {
@@ -146,10 +141,6 @@ public:
     [[nodiscard]] auto is_retry() const -> bool
     {
         return m_code == kBusy && m_subc == kRetry;
-    }
-    [[nodiscard]] auto is_readonly() const -> bool
-    {
-        return m_code == kNotSupported && m_subc == kReadonly;
     }
 
     // Convert the status to a printable string.

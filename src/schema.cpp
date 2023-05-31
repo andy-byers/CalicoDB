@@ -6,16 +6,15 @@
 #include "encoding.h"
 #include "logging.h"
 #include "scope_guard.h"
-#include "table_impl.h"
 #include "tree.h"
-#include "txn_impl.h"
+#include "tx_impl.h"
 
 namespace calicodb
 {
 
 auto Schema::corrupted_root_id(const Slice &name, const Slice &value) -> Status
 {
-    std::string message("root entry for table \"" + name.to_string() + "\" is corrupted: ");
+    std::string message("root entry for bucket \"" + name.to_string() + "\" is corrupted: ");
     message.append(escape_string(value));
     auto s = Status::corruption(message);
     if (m_status->is_ok()) {
@@ -24,16 +23,47 @@ auto Schema::corrupted_root_id(const Slice &name, const Slice &value) -> Status
     return s;
 }
 
-auto Schema::create_table(const TableOptions &options, const Slice &name, bool readonly, Table **out) -> Status
+auto Schema::create_bucket(const BucketOptions &options, const Slice &name, Bucket *b_out) -> Status
 {
     Status s;
     if (m_pager->page_count() == 0) {
-        if (options.create_if_missing) {
-            // Initialize the database file header, as well as the schema tree's root page.
-            m_pager->initialize_root();
-        } else {
-            s = Status::not_found();
+        // Initialize the database file header, as well as the schema tree's root page.
+        m_pager->initialize_root();
+    }
+
+    Id root_id;
+    std::string value;
+    if (s.is_ok()) {
+        s = m_map.get(name, &value);
+    }
+
+    if (s.is_not_found()) {
+        s = Tree::create(*m_pager, false, &root_id);
+        if (s.is_ok()) {
+            // TODO: Encode persistent bucket options here.
+            encode_root_id(root_id, value);
+            s = m_map.put(name, value);
         }
+    } else if (s.is_ok()) {
+        if (!decode_root_id(value, root_id)) {
+            s = corrupted_root_id(name.to_string(), value);
+        } else if (options.error_if_exists) {
+            s = Status::invalid_argument(
+                "table \"" + name.to_string() + "\" already exists");
+        }
+    }
+
+    if (s.is_ok() && b_out) {
+        *b_out = construct_bucket_state(root_id);
+    }
+    return s;
+}
+
+auto Schema::open_bucket(const Slice &name, Bucket &b_out) -> Status
+{
+    Status s;
+    if (m_pager->page_count() == 0) {
+        return Status::invalid_argument();
     }
 
     std::string value;
@@ -43,28 +73,16 @@ auto Schema::create_table(const TableOptions &options, const Slice &name, bool r
 
     Id root_id;
     if (s.is_ok()) {
-        if (options.error_if_exists) {
-            return Status::invalid_argument("table \"" + name.to_string() + "\" already exists");
-        }
         if (!decode_root_id(value, root_id)) {
             return corrupted_root_id(name.to_string(), value);
         }
     } else if (s.is_not_found()) {
-        if (!options.create_if_missing) {
-            return Status::invalid_argument("table \"" + name.to_string() + "\" does not exist");
-        }
-        s = Tree::create(*m_pager, false, &root_id);
-        if (s.is_ok()) {
-            encode_root_id(root_id, value);
-            s = m_map.put(name, value);
-        }
+        return Status::invalid_argument(
+            "table \"" + name.to_string() + "\" does not exist");
+    } else {
+        return s;
     }
-    if (s.is_ok()) {
-        auto *tb = construct_table_state(root_id, readonly);
-        if (out) {
-            *out = tb;
-        }
-    }
+    b_out = construct_bucket_state(root_id);
     return s;
 }
 
@@ -90,23 +108,26 @@ auto Schema::encode_root_id(Id id, std::string &out) -> void
     out.resize(static_cast<std::uintptr_t>(end - out.data()));
 }
 
-auto Schema::construct_table_state(Id root_id, bool readonly) -> Table *
+auto Schema::construct_bucket_state(Id root_id) -> Bucket
 {
-    auto itr = m_tables.find(root_id);
-    if (itr == end(m_tables) || !itr->second.table) {
-        itr = m_tables.insert(itr, {root_id, {}});
+    auto itr = m_trees.find(root_id);
+    if (itr == end(m_trees) || !itr->second.tree) {
+        itr = m_trees.insert(itr, {root_id, {}});
         itr->second.root = root_id;
-        itr->second.table = new TableImpl(
-            *m_pager, *m_status, &itr->second.root, readonly);
+        itr->second.tree = new Tree(
+            *m_pager, &itr->second.root);
     }
-    return itr->second.table;
+    return Bucket{itr->second.tree};
 }
 
-auto Schema::drop_table(const Slice &name) -> Status
+auto Schema::drop_bucket(const Slice &name) -> Status
 {
     std::string value;
     auto s = m_map.get(name, &value);
-    if (!s.is_ok()) {
+    if (s.is_not_found()) {
+        return Status::invalid_argument(
+            "table \"" + name.to_string() + "\" does not exist");
+    } else if (!s.is_ok()) {
         return s;
     }
 
@@ -114,10 +135,10 @@ auto Schema::drop_table(const Slice &name) -> Status
     if (!decode_root_id(value, root_id)) {
         return corrupted_root_id(name, value);
     }
-    auto itr = m_tables.find(root_id);
-    if (itr != end(m_tables)) {
-        delete itr->second.table;
-        m_tables.erase(root_id);
+    auto itr = m_trees.find(root_id);
+    if (itr != end(m_trees)) {
+        delete itr->second.tree;
+        m_trees.erase(root_id);
     }
     Tree drop(*m_pager, &root_id);
     s = Tree::destroy(drop);
@@ -129,19 +150,19 @@ auto Schema::drop_table(const Slice &name) -> Status
 
 auto Schema::vacuum_reroot(Id old_id, Id new_id) -> void
 {
-    auto tree = m_tables.find(old_id);
-    if (tree == end(m_tables)) {
-        RootedTable rooted;
-        rooted.root = old_id;
-        m_tables.insert(tree, {old_id, rooted});
+    auto tree = m_trees.find(old_id);
+    if (tree == end(m_trees)) {
+        RootedTree reroot;
+        reroot.root = old_id;
+        m_trees.insert(tree, {old_id, reroot});
     }
     // Rekey the tree. Leave the root ID stored in the tree state set
     // to the original root.
-    auto node = m_tables.extract(old_id);
+    auto node = m_trees.extract(old_id);
     CALICODB_EXPECT_FALSE(!node);
     node.key() = new_id;
     const auto root_id = node.mapped().root;
-    m_tables.insert(std::move(node));
+    m_trees.insert(std::move(node));
 
     // Map the original root ID to the newest root ID.
     m_reroot.insert_or_assign(root_id, new_id);
@@ -170,15 +191,15 @@ auto Schema::vacuum_finish() -> Status
             if (!s.is_ok()) {
                 break;
             }
-            // Update the in-memory tree root stored by each table.
-            auto tb = m_tables.find(root->second);
-            CALICODB_EXPECT_NE(tb, end(m_tables));
-            if (tb->second.table) {
-                tb->second.root = root->second;
+            // Update the in-memory tree root stored by each bucket.
+            auto b = m_trees.find(root->second);
+            CALICODB_EXPECT_NE(b, end(m_trees));
+            if (b->second.tree) {
+                b->second.root = root->second;
             } else {
-                // This table is not actually open. The RootedTable entry exists
+                // This bucket is not actually open. The RootedBucket entry exists
                 // so that vacuum_reroot() could find the original root ID.
-                m_tables.erase(tb);
+                m_trees.erase(b);
             }
             m_reroot.erase(root);
         }
@@ -190,7 +211,7 @@ auto Schema::vacuum_finish() -> Status
     if (s.is_ok() && missed_roots > 0) {
         std::string message("missed ");
         append_number(message, missed_roots);
-        message.append(" table(s)");
+        message.append(" bucket(s)");
         return Status::corruption(message);
     }
     return s;
@@ -203,9 +224,9 @@ auto Schema::vacuum_freelist() -> Status
 
 auto Schema::TEST_validate() const -> void
 {
-    for (const auto &[_, table] : m_tables) {
-        if (table.table) {
-            table_impl(table.table)->TEST_tree().TEST_validate();
+    for (const auto &[_, bucket] : m_trees) {
+        if (bucket.tree) {
+            bucket.tree->TEST_validate();
         }
     }
 }
@@ -217,6 +238,8 @@ SchemaCursor::~SchemaCursor()
 
 auto SchemaCursor::move_to_impl() -> void
 {
+    m_key.clear();
+    m_value.clear();
     if (m_impl->is_valid()) {
         m_key = m_impl->key().to_string();
         m_value = m_impl->value().to_string();

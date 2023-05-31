@@ -4,7 +4,7 @@
 //
 // This file contains classes that model the intended behavior of higher-level
 // CalicoDB components. Note that these classes don't attempt to catch certain
-// types of API misuse (for example, ModelTable will write to a table in a read-
+// types of API misuse (for example, ModelBucket will write to a bucket in a read-
 // only transaction without complaint).
 
 #ifndef CALICODB_TEST_TOOLS_MODEL_H
@@ -19,21 +19,20 @@ namespace calicodb::tools
 {
 
 using KVMap = std::map<std::string, std::string>;
-using KVStore = std::map<std::string, KVMap>;
 
 class ModelDB : public DB
 {
-    KVStore *m_store;
+    KVMap *m_store;
     bool m_owns_store;
 
 public:
-    explicit ModelDB(KVStore *store)
+    explicit ModelDB(KVMap *store)
         : m_store(store)
     {
         if (m_store) {
             m_owns_store = false;
         } else {
-            m_store = new KVStore;
+            m_store = new KVMap;
             m_owns_store = true;
         }
     }
@@ -45,7 +44,8 @@ public:
         return false;
     }
 
-    [[nodiscard]] auto new_txn(bool write, Txn *&out) -> Status override;
+    [[nodiscard]] auto new_tx(WriteTag, Tx *&tx_out) -> Status override;
+    [[nodiscard]] auto new_tx(const Tx *&tx_out) const -> Status override;
 
     [[nodiscard]] auto checkpoint(bool) -> Status override
     {
@@ -53,28 +53,20 @@ public:
     }
 };
 
-class ModelTxn : public Txn
+class ModelTx : public Tx
 {
-    KVStore *m_base;
-    KVStore m_temp;
-    Cursor *m_schema; // TODO
-
-    // Table handles that need to be delete'd.
-    struct WrappedTable {
-        Table *tb;
-        void *aux;
-        void (*del)(void *);
-    };
-    std::map<std::string, WrappedTable> m_tb;
+    KVMap m_temp;
+    KVMap *m_base;
+    Cursor *m_schema;
 
 public:
-    explicit ModelTxn(KVStore &base)
+    explicit ModelTx(KVMap &base)
         : m_base(&base),
-          m_temp(*m_base)
+          m_temp(base)
     {
     }
 
-    ~ModelTxn() override;
+    ~ModelTx() override;
 
     [[nodiscard]] auto status() const -> Status override
     {
@@ -86,12 +78,11 @@ public:
         return *m_schema; // TODO
     }
 
-    [[nodiscard]] auto create_table(const TableOptions &options, const Slice &name, Table **out) -> Status override;
+    [[nodiscard]] auto create_bucket(const BucketOptions &options, const Slice &name, Bucket *tb_out) -> Status override;
+    [[nodiscard]] auto open_bucket(const Slice &name, Bucket &tb_out) const -> Status override;
 
-    [[nodiscard]] auto drop_table(const Slice &name) -> Status override
+    [[nodiscard]] auto drop_bucket(const Slice &name) -> Status override
     {
-        m_tb.erase(name.to_string());
-        m_temp.erase(name.to_string());
         return Status::ok();
     }
 
@@ -106,37 +97,13 @@ public:
         return Status::ok();
     }
 
-    auto set_aux_ptr(const Slice &name, void *ptr, void (*del)(void *)) -> void
-    {
-        auto itr = m_tb.find(name.to_string());
-        CALICODB_EXPECT_NE(end(m_tb), itr);
-        if (itr->second.del) {
-            itr->second.del(itr->second.aux);
-        }
-        itr->second.aux = ptr;
-        itr->second.del = del;
-    }
-};
+    [[nodiscard]] auto new_cursor(const Bucket &) const -> Cursor * override;
 
-class ModelTable : public Table
-{
-    KVMap *m_map;
-
-public:
-    explicit ModelTable(KVMap &map)
-        : m_map(&map)
-    {
-    }
-
-    ~ModelTable() override;
-
-    [[nodiscard]] auto new_cursor() const -> Cursor * override;
-
-    [[nodiscard]] auto get(const Slice &key, std::string *value) const -> Status override
+    [[nodiscard]] auto get(const Bucket &, const Slice &key, std::string *value) const -> Status override
     {
         Status s;
-        const auto itr = m_map->find(key.to_string());
-        if (itr == end(*m_map)) {
+        const auto itr = m_temp.find(key.to_string());
+        if (itr == end(m_temp)) {
             s = Status::not_found();
         }
         if (value) {
@@ -145,18 +112,18 @@ public:
         return s;
     }
 
-    [[nodiscard]] auto put(const Slice &key, const Slice &value) -> Status override
+    [[nodiscard]] auto put(const Bucket &, const Slice &key, const Slice &value) -> Status override
     {
         if (key.is_empty()) {
             return Status::invalid_argument();
         }
-        m_map->insert_or_assign(key.to_string(), value.to_string());
+        m_temp.insert_or_assign(key.to_string(), value.to_string());
         return Status::ok();
     }
 
-    [[nodiscard]] auto erase(const Slice &key) -> Status override
+    [[nodiscard]] auto erase(const Bucket &, const Slice &key) -> Status override
     {
-        m_map->erase(key.to_string());
+        m_temp.erase(key.to_string());
         return Status::ok();
     }
 };
@@ -164,10 +131,10 @@ public:
 class ModelCursor : public Cursor
 {
     KVMap::const_iterator m_itr;
-    KVMap *m_map;
+    const KVMap *m_map;
 
 public:
-    explicit ModelCursor(KVMap &map)
+    explicit ModelCursor(const KVMap &map)
         : m_map(&map),
           m_itr(end(map))
     {

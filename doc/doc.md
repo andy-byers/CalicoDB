@@ -8,7 +8,7 @@
     + [Readonly transactions](#readonly-transactions)
     + [Read-write transactions](#read-write-transactions)
     + [Manual transactions](#manual-transactions)
-    + [Tables](#tables)
+    + [Buckets](#buckets)
     + [Cursors](#cursors)
     + [Database properties](#database-properties)
     + [Closing a database](#closing-a-database)
@@ -99,14 +99,14 @@ if (s.is_ok()) {
 ```C++
 // Set some initialization options. See include/calicodb/options.h.
 const calicodb::Options options = {
-    .cache_size = 1'024 * calicodb::kPageSize, 
-    .wal_filename = "wal-filename",
-    .info_log = nullptr,
-    .env = nullptr,
-    .busy = nullptr,
-    .create_if_missing = true,
-    .error_if_exists = false,
-    .sync = false,
+    1'024 * calicodb::kPageSize,  // cache_size
+    "wal-filename", // wal_filename
+    nullptr, // info_log
+    nullptr, // env
+    nullptr, // busy
+    true, // create_if_missing
+    false, // error_if_exists
+    false, // sync
 };
 
 // Create or open a database at "/tmp/cats".
@@ -122,8 +122,8 @@ if (!s.is_ok()) {
 ### Readonly transactions
 Readonly transactions are typically run through the `DB::view()` API.
 ```C++
-s = db->view([](calicodb::Txn &txn) {
-    // Open tables (see #tables) and read some data. The `Txn` object is managed by the 
+s = db->view([](const calicodb::Tx &tx) {
+    // Open buckets (see #buckets) and read some data. The `tx` object is managed by the 
     // database. DB::view() will forward the status returned by this callable.
     return calicodb::Status::ok();
 });
@@ -132,16 +132,16 @@ s = db->view([](calicodb::Txn &txn) {
 ### Read-write transactions
 Read-write transactions can be run using `DB::update()`.
 `DB::update()` accepts a callable that runs a read-write transaction.
-If an error is encountered during a read-write transaction, the transaction status (queried with `Txn::status()`) may be set.
-If this happens, the transaction object, and any tables created from it, will return immediately with this same error whenever a read/write method is called.
+If an error is encountered during a read-write transaction, the transaction status (queried with `tx::status()`) may be set.
+If this happens, the transaction object, and any buckets created from it, will return immediately with this same error whenever a read/write method is called.
 The only possible course-of-action in this case is to `delete` the transaction handle and possibly try again.
 
 ```C++
-s = db->update([](auto &txn) {
+s = db->update([](calicodb::Tx &tx) {
     // Read and/or write some records. If this callable returns an OK status,
-    // `Txn::commit()` is called on `txn` and the resulting status returned.
+    // `tx::commit()` is called on `tx` and the resulting status returned.
     // Otherwise, the transaction is rolled back and the original non-OK 
-    // status is forwarded to the caller. Note that Txn::commit() does not 
+    // status is forwarded to the caller. Note that tx::commit() does not 
     // invalidate the transaction handle. This allows one to perform multiple 
     // batches of writes per DB::update().
     return calicodb::Status::ok();
@@ -150,61 +150,74 @@ s = db->update([](auto &txn) {
 
 ### Manual transactions
 Transactions can also be run manually.
-The caller is responsible for `delete`ing the `Txn` handle when it is no longer needed.
+The caller is responsible for `delete`ing the `tx` handle when it is no longer needed.
 
 ```C++
-calicodb::Txn *txn;
+const calicodb::Tx *reader;
 
-// Start a readonly transaction.
-s = db->new_txn(false, txn);
+// Start a readonly transaction. This overload of DB::new_tx() only accepts 
+// a const Tx *. This means that the resulting transaction object cannot be 
+// used to change the database contents, since only const methods are
+// available on it.
+s = db->new_tx(reader);
 if (!s.is_ok()) {
 }
 
-// Read some data (see #tables).
+// Read some data (see #buckets).
 
-// Finish the transaction.
-delete txn;
+// Finish the transaction. Only 1 transaction can be live on a given DB at
+// any given time (concurrent access requires each thread/process to have 
+// its own DB handle).
+delete reader;
 
-// Start a read-write transaction.
-s = db->new_txn(true, txn);
+calicodb::Tx *writer;
+
+// Start a read-write transaction. The handle resulting from this call can be
+// used to modify the database contents.
+s = db->new_tx(calicodb::WriteTag(), writer);
 if (!s.is_ok()) {
 }
 
 // Write some data...
 
 // Commit the transaction.
-s = txn->commit();
+s = writer->commit();
 if (!s.is_ok()) {
     // If commit() failed, then there was likely a low-level I/O error. There
     // are no changes made to the database in this case.
 }
 
-// Leave txn for other examples to use.
+// Rename to tx for other examples to use (these examples are compiled).
+auto tx = writer;
 ```
 
-### Tables
+### Buckets
+In CalicoDB, buckets are persistent mappings from string keys to string values.
+Each open bucket is represented by an opaque `calicodb::Bucket` handle.
+The actual bucket state is managed by the `calicodb::Tx` that opened the bucket.
+Buckets are implicitly closed when the transaction finishes.
 
 ```C++
-calicodb::Table *table;
+calicodb::Bucket b;
 
-// Set some initialization options. Enforces that the table "cats" must
-// not exist. Note that readonly transactions cannot create new tables.
-calicodb::TableOptions tbopt;
-tbopt.error_if_exists = true;
-tbopt.create_if_missing = true;
+// Set some initialization options. Enforces that the bucket "cats" must
+// not exist. Note that readonly transactions cannot create new buckets by
+// virtue of the fact that they must be used through pointers to const, 
+// and Tx::create_bucket() is not a const method.
+calicodb::BucketOptions bopt;
+bopt.error_if_exists = true;
 
-// Create the table. Note that this table will not persist in the database 
-// unless Txn::commit() is called prior to the transaction ending.
-s = txn->create_table(tbopt, "cats", &table);
+// Create the bucket. Note that this bucket will not persist in the database 
+// unless tx::commit() is called prior to the transaction ending.
+s = tx->create_bucket(bopt, "cats", &b);
 if (s.is_ok()) {
-    // table holds the address of the handle for the open table "cats". 
-    // The table handle is owned by txn: it must not be delete'd. The table 
-    // will remain open until either txn is delete'd, or "cats" is dropped 
-    // with Txn::drop_table(). 
+    // b holds the handle for the open bucket "cats". The bucket will remain 
+    // open until either tx is delete'd, or "cats" is dropped with 
+    // Tx::drop_bucket(). 
 }
 
 std::string value;
-s = table->get("lilly", &value);
+s = tx->get(b, "lilly", &value);
 if (s.is_ok()) {
     // `value` holds the value associated with the key "lilly".
 } else if (s.is_not_found()) {
@@ -213,22 +226,22 @@ if (s.is_ok()) {
     // An I/O error occurred.
 }
 
-s = table->put("lilly", "calico");
+s = tx->put(b, "lilly", "calico");
 if (s.is_ok()) {
-    // The value for key "lilly" in table "cats" has been set to "calico".
+    // The value for key "lilly" in bucket "cats" has been set to "calico".
 } else {
     // An I/O error occurred.
 }
 
-s = table->erase("lilly");
+s = tx->erase(b, "lilly");
 if (s.is_ok()) {
-    // Table "cats" is guaranteed to not have a record with key "lilly".
+    // Bucket "cats" is guaranteed to not have a record with key "lilly".
 } else {
     // An I/O error occurred. It is not an error if the key does not exist.
 }
 
-// Remove the table named "bats" from the database.
-s = txn->drop_table("bats");
+// Remove the bucket named "bats" from the database.
+s = tx->drop_bucket("bats");
 if (s.is_ok()) {
     
 }
@@ -237,7 +250,7 @@ if (s.is_ok()) {
 ### Cursors
 
 ```C++
-calicodb::Cursor *c = table->new_cursor();
+calicodb::Cursor *c = tx->new_cursor(b);
 
 c->seek_first();
 while (c->is_valid()) {
@@ -266,14 +279,15 @@ delete c;
 ```C++
 // Database properties are made available as strings.
 std::string prop;
-bool exists = db->get_property("calicodb.stats", &prop);
-if (exists) {
+if (db->get_property("calicodb.stats", &prop)) {
     std::cout << "calicodb.stats: " << prop << '\n';
 }
 
 // Passing nullptr for the property value causes get_property() to perform a simple existence check, 
 // without attempting to populate the property value string.
-exists = db->get_property("calicodb.stats", nullptr);
+if (db->get_property("calicodb.stats", nullptr)) {
+    
+}
 ```
 
 ### Closing a database
@@ -284,13 +298,12 @@ CalicoDB will attempt recovery on the next startup.
 
 ```C++
 // This transaction was started earlier, in #manual-transactions. It must be
-// finished before the database is closed. Note that the table handle from
+// finished before the database is closed. Note that the bucket handle from
 // earlier must not be used after this next line.
-delete txn;
+delete tx;
 
 // Now we can close the database. See DB::update()/DB::view() for an API that
-// takes away some of the pain associated with transaction lifetimes, leaving
-// table management up to the user.
+// takes away some of the pain associated with transaction lifetimes.
 delete db;
 ```
 
@@ -318,5 +331,7 @@ if (s.is_ok()) {
 4. https://github.com/google/leveldb
     + Much of the API is inspired by LevelDB
     + Some parts of the CMake build process are taken from their `CMakeLists.txt`
-5. https://stablecog.com/
+5. BoltDB (https://github.com/boltdb/bolt)
+    + Inspiration for the transaction API
+6. https://sbucketcog.com/
     + Used to generate the original calico cat image, which was then further modified to produce [mascot.png](mascot.png)

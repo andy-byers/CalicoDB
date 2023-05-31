@@ -113,10 +113,10 @@ We also use the shm file to coordinate locks on the WAL.
 ## Database file format
 The database file consists of 0 or more fixed-size pages.
 A freshly-created database is just an empty database file.
-When the first table is created, the first 3 database pages are initialized in-memory.
+When the first bucket is created, the first 3 database pages are initialized in-memory.
 The first page in the file, called the root page, contains the file header and serves as the [schema tree's][#schema] root node.
 The second page is always a [pointer map](#pointer-map) page.
-The third page is the root node of the tree representing the user-created table.
+The third page is the root node of the tree representing the first user bucket.
 As the database is modified, additional pages are created by extending the database file.
 
 ## Performance

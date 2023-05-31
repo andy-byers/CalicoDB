@@ -45,8 +45,10 @@ struct Options final {
     bool sync = false;
 };
 
-struct TableOptions {
-    bool create_if_missing = true;
+struct BucketOptions {
+    // TODO: open_bucket() has been split off of create_bucket(). create_bucket() takes BucketOptions, but open_bucket()
+    //       does not. BucketOptions should hold options that pertain to new buckets but cannot be changed once the
+    //       bucket is created (comparator type, unique keys, etc.).
     bool error_if_exists = false;
 };
 

@@ -2219,7 +2219,7 @@ auto InternalCursor::seek(const Slice &key) -> bool
             lower = mid + 1;
         }
     }
-    const unsigned shift = !m_node.header.is_external * exact;
+    const unsigned shift = exact * !m_node.header.is_external;
     history[level].index = lower + shift;
     return exact;
 }
@@ -2369,7 +2369,8 @@ auto CursorImpl::previous() -> void
 
 auto CursorImpl::seek_to(Node node, std::size_t index) -> void
 {
-    CALICODB_EXPECT_FALSE(is_valid());
+    CALICODB_EXPECT_FALSE(m_is_valid);
+    CALICODB_EXPECT_TRUE(m_status.is_ok());
     const auto *hdr = &node.header;
     CALICODB_EXPECT_TRUE(hdr->is_external);
 
@@ -2386,6 +2387,7 @@ auto CursorImpl::seek_to(Node node, std::size_t index) -> void
     if (index < hdr->cell_count) {
         m_status = fetch_payload(node, index);
         if (m_status.is_ok()) {
+            m_is_valid = true;
             m_node = std::move(node);
             m_index = index;
             return;
@@ -2410,17 +2412,11 @@ auto CursorImpl::seek(const Slice &key) -> void
 
 auto CursorImpl::clear(Status s) -> void
 {
-    CALICODB_EXPECT_FALSE(s.is_ok());
-    if (is_valid()) {
+    if (m_is_valid) {
+        m_is_valid = false;
         m_tree->release(std::move(m_node));
-        m_status = std::move(s);
     }
-}
-
-auto CursorInternal::invalidate(const Cursor &cursor, Status error) -> void
-{
-    CALICODB_EXPECT_FALSE(error.is_ok());
-    reinterpret_cast<const CursorImpl &>(cursor).m_status = std::move(error);
+    m_status = std::move(s);
 }
 
 } // namespace calicodb

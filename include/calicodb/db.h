@@ -12,10 +12,20 @@ namespace calicodb
 {
 
 class Cursor;
-class Table;
-class Txn;
+class Tx;
 
-// On-disk collection of tables
+// Tag for starting a transaction that has writer capabilities
+// SEE: DB::new_tx()
+struct WriteTag {
+};
+
+// Opaque handle to an open bucket
+// SEE: Tx::create_bucket(), Tx::open_bucket()
+struct Bucket {
+    void *state = nullptr;
+};
+
+// On-disk collection of buckets
 class DB
 {
 public:
@@ -55,123 +65,113 @@ public:
     [[nodiscard]] virtual auto checkpoint(bool reset) -> Status = 0;
 
     // Run a read-only transaction
-    // Forwards the Status returned by the callable `fn`.
-    // REQUIRES: Status Fn::operator()(Txn &) is implemented.
+    // REQUIRES: Status Fn::operator()(const Tx &) is implemented.
+    // Forwards the Status returned by the callable `fn`. Note that the callable accepts a const
+    // Tx reference, meaning methods that modify the database state cannot be called on it.
     template <class Fn>
-    [[nodiscard]] auto view(Fn &&fn) -> Status;
+    [[nodiscard]] auto view(Fn &&fn) const -> Status;
 
     // Run a read-write transaction
+    // REQUIRES: Status Fn::operator()(Tx &) is implemented.
     // If the callable `fn` returns an OK status, the transaction is committed. Otherwise,
     // the transaction is rolled back.
-    // REQUIRES: Status Fn::operator()(Txn &) is implemented.
     template <class Fn>
     [[nodiscard]] auto update(Fn &&fn) -> Status;
 
     // Start a transaction manually
-    // Stores a pointer to the heap-allocated transaction object in `*out` and returns OK on
-    // success. Stores nullptr in `*out` and returns a non-OK status on failure. If `write` is true,
-    // then the transaction is a read-write transaction, otherwise it is a readonly transaction.
-    // The caller is responsible for calling delete on the Txn pointer when it is no longer needed.
-    // NOTE: Consider using the DB::view()/DB::update() APIs instead of managing transactions
-    // manually.
-    [[nodiscard]] virtual auto new_txn(bool write, Txn *&tx_out) -> Status = 0;
+    // Stores a pointer to the heap-allocated transaction object in `tx_out` and returns OK on
+    // success. Stores nullptr in `tx_out` and returns a non-OK status on failure. If the WriteTag
+    // overload is used, then the transaction is a read-write transaction, otherwise it is a
+    // readonly transaction. The caller is responsible for calling delete on the Tx pointer when
+    // it is no longer needed.
+    // NOTE: Consider using the DB::view()/DB::update() API instead.
+    [[nodiscard]] virtual auto new_tx(const Tx *&tx_out) const -> Status = 0;
+    [[nodiscard]] virtual auto new_tx(WriteTag, Tx *&tx_out) -> Status = 0;
 };
 
 // Transaction on a CalicoDB database
-// The lifetime of a transaction is the same as that of the Txn object representing it
-// (see `DB::new_txn()`).
-class Txn
+// The lifetime of a transaction is the same as that of the Tx object representing it (see
+// DB::new_tx()).
+class Tx
 {
 public:
-    explicit Txn();
-    virtual ~Txn();
+    explicit Tx();
+    virtual ~Tx();
 
-    Txn(Txn &) = delete;
-    void operator=(Txn &) = delete;
+    Tx(Tx &) = delete;
+    void operator=(Tx &) = delete;
 
     // Return the status associated with this transaction
-    // On creation, a Txn will always have an OK status. Only read-write transactions
-    // can have a non-OK status. The status may be set when a non-const method fails
-    // on this object, or any Table created from it.
+    // On creation, a Tx will always have an OK status. Only read-write transactions
+    // can have a non-OK status. The status is set when a routine on this object fails
+    // such that the consistency of the underlying data store becomes questionable, or
+    // corruption is detected in one of the files.
     [[nodiscard]] virtual auto status() const -> Status = 0;
 
     // Return a reference to a cursor that iterates over the database schema
-    // NOTE: The returned cursor must not be used after the Txn itself is delete'd. The
-    // underlying storage for this object is freed at that point.
-    // The database schema is a special table stores the name and location of every
-    // other table in the database. Calling Cursor::key() on the returned cursor gives a
-    // table name, and calling Cursor::value() gives a (non-readable) variable-length
-    // integer. See cursor.h for additional requirements pertaining to cursor use.
+    // The database schema is a special bucket that stores the name and location of every
+    // other bucket in the database. Calling Cursor::key() on a valid schema cursor gives a
+    // bucket name. Calling Cursor::value() gives a bucket descriptor: a human-readable
+    // description of options that the bucket was created with. This cursor must not be
+    // used after the Tx that created it has been destroyed.
+    // SEE: cursor.h (for additional Cursor usage requirements)
     [[nodiscard]] virtual auto schema() const -> Cursor & = 0;
 
-    // Create or open a table on the database
-    // `tb_out` is optional: if omitted, this method simply creates a table without handing
-    // back a reference to it.
-    // On success, stores a table handle in `*tb_out` and returns an OK status. The table
-    // named `name` can then be accessed through `*tb_out` until the transaction is
-    // finished (or until `name` is dropped through Txn::drop_table()). `*tb_out` is owned
-    // by this Txn and must not be delete'd. On failure, stores nullptr in `*tb_out` and
-    // returns a non-OK status.
-    // NOTE: Tables cannot be created during readonly transactions. A status for which
-    // Status::is_readonly() evaluates to true is returned in this case.
-    [[nodiscard]] virtual auto create_table(const TableOptions &options, const Slice &name, Table **tb_out) -> Status = 0;
+    // Create a new bucket
+    // On success, stores a bucket handle in `*b_out` and returns an OK status. The bucket
+    // named `name` can then be accessed with `*b_out` until the transaction is finished (or
+    // until `name` is dropped through Tx::drop_bucket()). Returns a non-OK status on failure.
+    // `b_out` is optional: if omitted, this method simply creates a bucket without handing
+    // back a reference to it. Note that the bucket will not persist in the database unless
+    // Tx::commit() is called after the bucket has been created.
+    [[nodiscard]] virtual auto create_bucket(const BucketOptions &options, const Slice &name, Bucket *b_out) -> Status = 0;
 
-    // Remove a table from the database
-    // REQUIRES: Transaction is writable
-    // If a table named `name` exists, this method drops it and returns an OK status. If
-    // `name` does not exist, returns a status for which Status::is_not_found() is true.
-    // If a table handle was obtained for `name` during this transaction, it must not be
-    // used after this call succeeds.
-    [[nodiscard]] virtual auto drop_table(const Slice &name) -> Status = 0;
+    // Open an existing bucket
+    // Returns an OK status on success and a non-OK status on failure. If the bucket named
+    // `name` does not exist already, a status for which Status::is_invalid_argument()
+    // evaluates to true is returned.
+    [[nodiscard]] virtual auto open_bucket(const Slice &name, Bucket &b_out) const -> Status = 0;
+
+    // Remove a bucket from the database
+    // If a bucket named `name` exists, this method drops it and returns an OK status. If
+    // `name` does not exist, returns a status for which Status::is_invalid_argument() is
+    // true. If a bucket handle was obtained for `name` during this transaction, it must
+    // not be used after this call succeeds.
+    [[nodiscard]] virtual auto drop_bucket(const Slice &name) -> Status = 0;
 
     // Defragment the database
-    // REQUIRES: Transaction is writable
     [[nodiscard]] virtual auto vacuum() -> Status = 0;
 
     // Commit pending changes to the database
     // Returns an OK status if the commit operation was successful, and a non-OK status
     // on failure. Calling this method on a read-only transaction is a NOOP. If this
-    // method is not called before the Txn object is destroyed, all pending changes will
-    // be dropped. This method can be called more than once for a given Txn: file locks
-    // are held until the Txn handle is delete'd.
+    // method is not called before the Tx object is destroyed, all pending changes will
+    // be dropped. This method can be called more than once for a given Tx: file locks
+    // are held until the Tx handle is delete'd.
     [[nodiscard]] virtual auto commit() -> Status = 0;
-};
 
-// Persistent, ordered mapping between keys and values
-// NOTE: Table handles created from a Txn are owned by the Txn and must
-// not be delete'd. They will expire automatically when either the table
-// is dropped or the transaction finishes.
-class Table
-{
-public:
-    explicit Table();
-    virtual ~Table();
-
-    Table(Table &) = delete;
-    void operator=(Table &) = delete;
-
-    // Return a heap-allocated cursor over the contents of the table
+    // Return a heap-allocated cursor over the contents of the bucket
     // The cursor should be destroyed (using operator delete()) when it
     // is no longer needed.
-    [[nodiscard]] virtual auto new_cursor() const -> Cursor * = 0;
+    [[nodiscard]] virtual auto new_cursor(const Bucket &b) const -> Cursor * = 0;
 
     // Get the value associated with the given key
     // If the record with key `key` exists, assigns to `*value` the value
     // associated with it and returns an OK status. If the key does not
     // exist, sets `*value` to nullptr and returns a "not found" status.
     // If an error is encountered, returns a non-OK status as appropriate.
-    [[nodiscard]] virtual auto get(const Slice &key, std::string *value) const -> Status = 0;
+    [[nodiscard]] virtual auto get(const Bucket &b, const Slice &key, std::string *value) const -> Status = 0;
 
-    // Create a mapping between `key` and `value` in the table
+    // Create a mapping between `key` and `value`
     // If a record with key `key` already exists, sets its value to `value`.
     // Otherwise, a new record is created. Returns an OK status on success,
     // and a non-OK status on failure.
-    [[nodiscard]] virtual auto put(const Slice &key, const Slice &value) -> Status = 0;
+    [[nodiscard]] virtual auto put(const Bucket &b, const Slice &key, const Slice &value) -> Status = 0;
 
-    // Erase a record from the table
+    // Erase a record from the bucket
     // Returns a non-OK status if an error was encountered. It is not an
     // error if `key` does not exist.
-    [[nodiscard]] virtual auto erase(const Slice &key) -> Status = 0;
+    [[nodiscard]] virtual auto erase(const Bucket &b, const Slice &key) -> Status = 0;
 };
 
 class BusyHandler
@@ -184,10 +184,10 @@ public:
 };
 
 template <class Fn>
-auto DB::view(Fn &&fn) -> Status
+auto DB::view(Fn &&fn) const -> Status
 {
-    Txn *tx;
-    auto s = new_txn(false, tx);
+    const Tx *tx;
+    auto s = new_tx(tx);
     if (s.is_ok()) {
         s = fn(*tx);
         delete tx;
@@ -198,8 +198,8 @@ auto DB::view(Fn &&fn) -> Status
 template <class Fn>
 auto DB::update(Fn &&fn) -> Status
 {
-    Txn *tx;
-    auto s = new_txn(true, tx);
+    Tx *tx;
+    auto s = new_tx(WriteTag(), tx);
     if (s.is_ok()) {
         s = fn(*tx);
         if (s.is_ok()) {

@@ -346,7 +346,7 @@ TEST(StatusTests, StatusMessages)
     // is technically legal, but may not be semantically valid (for example, it makes
     // no sense to retry when a read-only transaction attempts to write: repeating that
     // action will surely fail next time as well).
-    ASSERT_EQ("invalid argument: readonly", Status::invalid_argument(Status::kReadonly).to_string());
+    ASSERT_EQ("invalid argument: retry", Status::invalid_argument(Status::kRetry).to_string());
 }
 
 TEST(StatusTests, NonOkStatusSavesMessage)
@@ -419,7 +419,7 @@ TEST(StatusTests, OkStatusCanBeCopied)
 TEST(StatusTests, NonOkStatusCanBeCopied)
 {
     const auto src1 = Status::invalid_argument("status message");
-    const auto src2 = Status::invalid_argument(Status::kReadonly);
+    const auto src2 = Status::invalid_argument(Status::kRetry);
     const auto dst1 = src1;
     const auto dst2 = src2;
     ASSERT_TRUE(src1.is_invalid_argument());
@@ -427,10 +427,10 @@ TEST(StatusTests, NonOkStatusCanBeCopied)
     ASSERT_TRUE(dst1.is_invalid_argument());
     ASSERT_TRUE(dst2.is_invalid_argument());
     ASSERT_EQ(src1.to_string(), "invalid argument: status message");
-    ASSERT_EQ(src2.to_string(), "invalid argument: readonly");
+    ASSERT_EQ(src2.to_string(), "invalid argument: retry");
     ASSERT_EQ(dst1.to_string(), "invalid argument: status message");
-    ASSERT_EQ(dst2.to_string(), "invalid argument: readonly");
-    ASSERT_EQ(dst2.subcode(), Status::kReadonly);
+    ASSERT_EQ(dst2.to_string(), "invalid argument: retry");
+    ASSERT_EQ(dst2.subcode(), Status::kRetry);
 }
 
 TEST(StatusTests, OkStatusCanBeMoved)

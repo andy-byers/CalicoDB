@@ -13,8 +13,14 @@ namespace calicodb
 class Pager;
 
 struct Freelist {
+    // Add a `page` to the freelist
     static auto push(Pager &pager, Page page) -> Status;
+
+    // Attempt to remove a page from the freelist
+    // If the freelist is empty, returns a status for which Status::is_invalid_argument()
     static auto pop(Pager &pager, Id &id_out) -> Status;
+
+    // Make sure the freelist is consistent
     static auto assert_state(Pager &pager) -> bool;
 };
 

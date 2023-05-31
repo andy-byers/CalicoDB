@@ -199,6 +199,7 @@ class CursorImpl : public Cursor
 {
     mutable Status m_status;
     mutable Node m_node;
+    mutable bool m_is_valid = false;
     Tree *m_tree;
     std::string m_key;
     std::string m_value;
@@ -209,16 +210,13 @@ class CursorImpl : public Cursor
 protected:
     auto seek_to(Node node, std::size_t index) -> void;
     auto fetch_payload(Node &node, std::size_t index) -> Status;
-    auto clear(Status s = Status::not_found()) -> void;
 
 public:
-    friend class CursorInternal;
     friend class Tree;
     friend class SchemaCursor;
 
     explicit CursorImpl(Tree &tree)
-        : m_status(Status::not_found()),
-          m_tree(&tree)
+        : m_tree(&tree)
     {
     }
 
@@ -226,7 +224,7 @@ public:
 
     [[nodiscard]] auto is_valid() const -> bool override
     {
-        return m_status.is_ok();
+        return m_is_valid && m_status.is_ok();
     }
 
     [[nodiscard]] auto status() const -> Status override
@@ -241,12 +239,8 @@ public:
     auto seek_last() -> void override;
     auto next() -> void override;
     auto previous() -> void override;
-};
 
-class CursorInternal
-{
-public:
-    static auto invalidate(const Cursor &cursor, Status error) -> void;
+    auto clear(Status s = Status::ok()) -> void;
 };
 
 struct TreeStatistics {
@@ -293,7 +287,6 @@ private:
     friend class CursorImpl;
     friend class InternalCursor;
     friend class SchemaCursor;
-    friend class CursorInternal;
     friend class DBImpl;
     friend class Schema;
     friend class TreeValidator;

@@ -7,7 +7,7 @@
 #include "encoding.h"
 #include "logging.h"
 #include "scope_guard.h"
-#include "txn_impl.h"
+#include "tx_impl.h"
 
 namespace calicodb
 {
@@ -103,7 +103,7 @@ auto DBImpl::destroy(const Options &options, const std::string &filename) -> Sta
     copy.create_if_missing = false;
 
     DB *db;
-    Txn *tx;
+    const Tx *tx;
 
     // Determine the WAL filename, and make sure `filename` refers to a CalicoDB
     // database. The file identifier is not checked until a transaction is started.
@@ -111,7 +111,7 @@ auto DBImpl::destroy(const Options &options, const std::string &filename) -> Sta
     auto s = DB::open(copy, filename, db);
     if (s.is_ok()) {
         wal_name = db_impl(db)->m_wal_filename;
-        s = db->new_txn(false, tx);
+        s = db->new_tx(tx);
         if (s.is_ok()) {
             delete tx;
         }
@@ -170,28 +170,26 @@ auto DBImpl::get_property(const Slice &name, std::string *out) const -> bool
     return false;
 }
 
-static auto already_running_error(bool write) -> Status
+static auto already_running_error() -> Status
 {
-    std::string message("a transaction (read");
-    message.append(write ? "-write" : "only");
-    message.append(") is running");
-    return Status::not_supported(message);
+    return Status::not_supported("transaction is already running");
 }
 
 auto DBImpl::checkpoint(bool reset) -> Status
 {
     if (m_tx) {
-        return already_running_error(m_tx->m_write);
+        return already_running_error();
     }
     log(m_log, "running%s checkpoint", reset ? " reset" : "");
     return m_pager->checkpoint(reset);
 }
 
-auto DBImpl::new_txn(bool write, Txn *&out) -> Status
+template <class TxType>
+auto DBImpl::prepare_tx(bool write, TxType *&tx_out) const -> Status
 {
-    out = nullptr;
+    tx_out = nullptr;
     if (m_tx) {
-        return already_running_error(m_tx->m_write);
+        return already_running_error();
     }
 
     // Forward error statuses. If an error is set at this point, then something
@@ -205,13 +203,23 @@ auto DBImpl::new_txn(bool write, Txn *&out) -> Status
         s = m_pager->start_writer();
     }
     if (s.is_ok()) {
-        m_tx = new TxnImpl(*m_pager, m_status, write);
+        m_tx = new TxImpl(*m_pager, m_status);
         m_tx->m_backref = &m_tx;
-        out = m_tx;
+        tx_out = m_tx;
     } else {
         m_pager->finish();
     }
     return s;
+}
+
+auto DBImpl::new_tx(WriteTag, Tx *&tx_out) -> Status
+{
+    return prepare_tx(true, tx_out);
+}
+
+auto DBImpl::new_tx(const Tx *&tx_out) const -> Status
+{
+    return prepare_tx(false, tx_out);
 }
 
 auto DBImpl::TEST_pager() const -> const Pager &

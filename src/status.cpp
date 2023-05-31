@@ -29,9 +29,8 @@ static auto copy_status_string(const char *data) -> char *
 }
 
 static constexpr const char *kSubCodeMessages[Status::kMaxSubCode] = {
-    "",         // kNone
-    "readonly", // kReadonly
-    "retry",    // kRetry
+    "",      // kNone
+    "retry", // kRetry
 };
 
 Status::Status(Code code, const Slice &msg)

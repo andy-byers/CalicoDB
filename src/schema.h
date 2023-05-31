@@ -24,8 +24,7 @@ class SchemaCursor : public Cursor
 
 public:
     explicit SchemaCursor(Tree &tree)
-        : m_status(Status::not_found()),
-          m_impl(new CursorImpl(tree))
+        : m_impl(new CursorImpl(tree))
     {
     }
 
@@ -33,7 +32,7 @@ public:
 
     [[nodiscard]] auto is_valid() const -> bool override
     {
-        return m_status.is_ok();
+        return m_status.is_ok() && !m_key.empty();
     }
 
     [[nodiscard]] auto status() const -> Status override
@@ -88,8 +87,8 @@ public:
 
     ~Schema()
     {
-        for (const auto &[_, state] : m_tables) {
-            delete state.table;
+        for (const auto &[_, state] : m_trees) {
+            delete state.tree;
         }
     }
 
@@ -98,35 +97,36 @@ public:
         return new SchemaCursor(m_map);
     }
 
-    [[nodiscard]] auto create_table(const TableOptions &options, const Slice &name, bool readonly, Table **tb_out) -> Status;
-    [[nodiscard]] auto drop_table(const Slice &name) -> Status;
+    [[nodiscard]] auto create_bucket(const BucketOptions &options, const Slice &name, Bucket *b_out) -> Status;
+    [[nodiscard]] auto open_bucket(const Slice &name, Bucket &b_out) -> Status;
+    [[nodiscard]] auto drop_bucket(const Slice &name) -> Status;
     [[nodiscard]] auto vacuum_freelist() -> Status;
 
-    // Write updated root page IDs for tables that were closed during vacuum, if any
-    // tables were rerooted
+    // Write updated root page IDs for buckets that were closed during vacuum, if any
+    // buckets were rerooted
     [[nodiscard]] auto vacuum_finish() -> Status;
 
     auto TEST_validate() const -> void;
 
 private:
     [[nodiscard]] auto corrupted_root_id(const Slice &name, const Slice &value) -> Status;
-    [[nodiscard]] auto construct_table_state(Id root_id, bool readonly) -> Table *;
     [[nodiscard]] auto decode_root_id(const Slice &data, Id &out) -> bool;
+    auto construct_bucket_state(Id root_id) -> Bucket;
     static auto encode_root_id(Id id, std::string &out) -> void;
 
     template <class T>
     using HashMap = std::unordered_map<Id, T, Id::Hash>;
 
-    // Change the root page of a table from `old_id` to `new_id` during vacuum
+    // Change the root page of a bucket from `old_id` to `new_id` during vacuum
     friend class Tree;
     auto vacuum_reroot(Id old_id, Id new_id) -> void;
 
-    struct RootedTable {
-        Table *table = nullptr;
+    struct RootedTree {
+        Tree *tree = nullptr;
         Id root;
     };
 
-    HashMap<RootedTable> m_tables;
+    HashMap<RootedTree> m_trees;
     HashMap<Id> m_reroot;
     Status *m_status;
     Pager *m_pager;

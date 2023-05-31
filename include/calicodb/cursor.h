@@ -11,8 +11,8 @@
 namespace calicodb
 {
 
-// Cursor for iterating over the records in a table
-// Cursors must be obtained through a Table object. It should be noted that a freshly-
+// Cursor for iterating over the records in a bucket
+// Cursors must be obtained through a Bucket object. It should be noted that a freshly-
 // allocated cursor is not considered valid (is_valid() returns false) until one of
 // its seek*() methods is called.
 class Cursor

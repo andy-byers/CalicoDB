@@ -14,53 +14,33 @@ ModelDB::~ModelDB()
     }
 }
 
-auto ModelDB::new_txn(bool, Txn *&out) -> Status
+auto ModelDB::new_tx(WriteTag, Tx *&tx_out) -> Status
 {
-    out = new ModelTxn(*m_store);
+    tx_out = new ModelTx(*m_store);
     return Status::ok();
 }
 
-ModelTxn::~ModelTxn()
+auto ModelDB::new_tx(const Tx *&tx_out) const -> Status
 {
-    for (const auto &[name, wrapper] : m_tb) {
-        wrapper.del(wrapper.aux);
-        delete wrapper.tb;
-    }
-}
-
-auto ModelTxn::create_table(const TableOptions &options, const Slice &name, Table **out) -> Status
-{
-    auto itr = m_temp.find(name.to_string());
-    if (itr == end(m_temp)) {
-        if (!options.create_if_missing) {
-            return Status::invalid_argument("table does not exist");
-        }
-        itr = m_temp.insert(itr, {name.to_string(), KVMap()});
-    } else if (options.error_if_exists) {
-        return Status::invalid_argument("table exists");
-    }
-    if (out) {
-        auto tb = m_tb.find(name.to_string());
-        if (tb != end(m_tb)) {
-            *out = tb->second.tb;
-        } else {
-            const WrappedTable wrapped = {
-                new ModelTable(itr->second),
-                nullptr,
-                [](auto *) {},
-            };
-            *out = wrapped.tb;
-            m_tb.emplace(name.to_string(), wrapped);
-        }
-    }
+    tx_out = new ModelTx(*m_store);
     return Status::ok();
 }
 
-ModelTable::~ModelTable() = default;
+ModelTx::~ModelTx() = default;
 
-auto ModelTable::new_cursor() const -> Cursor *
+auto ModelTx::create_bucket(const BucketOptions &, const Slice &, Bucket *) -> Status
 {
-    return new ModelCursor(*m_map);
+    return Status::ok();
+}
+
+auto ModelTx::open_bucket(const Slice &, Bucket &) const -> Status
+{
+    return Status::ok();
+}
+
+auto ModelTx::new_cursor(const Bucket &) const -> Cursor *
+{
+    return new ModelCursor(m_temp);
 }
 
 ModelCursor::~ModelCursor() = default;

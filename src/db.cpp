@@ -51,13 +51,9 @@ DB::DB() = default;
 
 DB::~DB() = default;
 
-Table::Table() = default;
+Tx::Tx() = default;
 
-Table::~Table() = default;
-
-Txn::Txn() = default;
-
-Txn::~Txn() = default;
+Tx::~Tx() = default;
 
 BusyHandler::BusyHandler() = default;
 

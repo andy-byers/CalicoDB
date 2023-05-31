@@ -88,7 +88,7 @@ auto Freelist::pop(Pager &pager, Id &id_out) -> Status
     auto free_head = FileHeader::get_freelist_head(root.constant_ptr());
     if (free_head.is_null()) {
         // Freelist is empty.
-        return Status::not_found();
+        return Status::invalid_argument();
     } else if (free_head.value > pager.page_count()) {
         return Status::corruption();
     }

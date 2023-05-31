@@ -17,14 +17,14 @@ class CheckedDB : public DB
     ModelDB m_model;
     DB *m_real;
 
-    explicit CheckedDB(DB &db, KVStore &store)
+    explicit CheckedDB(DB &db, KVMap &store)
         : m_model(&store),
           m_real(&db)
     {
     }
 
 public:
-    [[nodiscard]] static auto open(const Options &options, const std::string &filename, KVStore &store, DB *&db_out) -> Status
+    [[nodiscard]] static auto open(const Options &options, const std::string &filename, KVMap &store, DB *&db_out) -> Status
     {
         DB *db;
         auto s = DB::open(options, filename, db);
@@ -43,7 +43,8 @@ public:
         return m_real->get_property(name, value_out);
     }
 
-    [[nodiscard]] auto new_txn(bool write, Txn *&txn_out) -> Status override;
+    [[nodiscard]] auto new_tx(const Tx *&tx_out) const -> Status override;
+    [[nodiscard]] auto new_tx(WriteTag, Tx *&tx_out) -> Status override;
 
     [[nodiscard]] auto checkpoint(bool reset) -> Status override
     {
@@ -51,19 +52,19 @@ public:
     }
 };
 
-class CheckedTxn : public Txn
+class CheckedTx : public Tx
 {
-    ModelTxn *m_model;
-    Txn *m_real;
+    ModelTx *m_model;
+    Tx *m_real;
 
 public:
-    explicit CheckedTxn(Txn &real, ModelTxn &model)
+    explicit CheckedTx(Tx &real, ModelTx &model)
         : m_model(&model),
           m_real(&real)
     {
     }
 
-    ~CheckedTxn() override;
+    ~CheckedTx() override;
 
     [[nodiscard]] auto status() const -> Status override
     {
@@ -75,12 +76,13 @@ public:
         return m_real->schema();
     }
 
-    [[nodiscard]] auto create_table(const TableOptions &options, const Slice &name, Table **out) -> Status override;
+    [[nodiscard]] auto create_bucket(const BucketOptions &options, const Slice &name, Bucket *tb_out) -> Status override;
+    [[nodiscard]] auto open_bucket(const Slice &name, Bucket &tb_out) const -> Status override;
 
-    [[nodiscard]] auto drop_table(const Slice &name) -> Status override
+    [[nodiscard]] auto drop_bucket(const Slice &name) -> Status override
     {
-        auto s = m_model->drop_table(name);
-        const auto t = m_real->drop_table(name);
+        auto s = m_model->drop_bucket(name);
+        const auto t = m_real->drop_bucket(name);
         if (s.is_ok()) {
             CHECK_OK(t);
         } else {
@@ -99,47 +101,32 @@ public:
         (void)m_model->commit();
         return m_real->commit();
     }
-};
 
-class CheckedTable : public Table
-{
-    Table *m_model;
-    Table *m_real;
+    [[nodiscard]] auto new_cursor(const Bucket &b) const -> Cursor * override;
 
-public:
-    explicit CheckedTable(Table &real, Table &model)
-        : m_model(&model),
-          m_real(&real)
-    {
-    }
-
-    ~CheckedTable() override;
-
-    [[nodiscard]] auto new_cursor() const -> Cursor * override;
-
-    [[nodiscard]] auto get(const Slice &key, std::string *value) const -> Status override
+    [[nodiscard]] auto get(const Bucket &b, const Slice &key, std::string *value) const -> Status override
     {
         std::string result;
-        auto s = m_model->get(key, &result);
+        auto s = m_model->get(b, key, &result);
         if (s.is_ok()) {
-            CHECK_OK(m_real->get(key, value));
+            CHECK_OK(m_real->get(b, key, value));
             CHECK_EQ(*value, result);
         } else {
-            CHECK_TRUE(!m_real->get(key, value).is_ok());
+            CHECK_TRUE(!m_real->get(b, key, value).is_ok());
         }
         return s;
     }
 
-    [[nodiscard]] auto put(const Slice &key, const Slice &value) -> Status override
+    [[nodiscard]] auto put(const Bucket &b, const Slice &key, const Slice &value) -> Status override
     {
-        (void)m_model->put(key, value);
-        return m_real->put(key, value);
+        (void)m_model->put(b, key, value);
+        return m_real->put(b, key, value);
     }
 
-    [[nodiscard]] auto erase(const Slice &key) -> Status override
+    [[nodiscard]] auto erase(const Bucket &b, const Slice &key) -> Status override
     {
-        (void)m_model->erase(key);
-        return m_real->erase(key);
+        (void)m_model->erase(b, key);
+        return m_real->erase(b, key);
     }
 };
 
@@ -216,46 +203,45 @@ CheckedDB::~CheckedDB()
     delete m_real;
 }
 
-auto CheckedDB::new_txn(bool write, Txn *&txn_out) -> Status
+auto CheckedDB::new_tx(WriteTag, Tx *&tx_out) -> Status
 {
-    Txn *real_txn;
-    auto s = m_real->new_txn(write, real_txn);
+    Tx *real_tx;
+    auto s = m_real->new_tx(WriteTag{}, real_tx);
     if (s.is_ok()) {
-        Txn *model_txn;
-        CHECK_OK(m_model.new_txn(write, model_txn));
-        txn_out = new CheckedTxn(*real_txn, reinterpret_cast<ModelTxn &>(*model_txn));
+        Tx *model_tx;
+        CHECK_OK(m_model.new_tx(WriteTag{}, model_tx));
+        tx_out = new CheckedTx(*real_tx, reinterpret_cast<ModelTx &>(*model_tx));
     }
     return s;
 }
 
-CheckedTxn::~CheckedTxn()
+auto CheckedDB::new_tx(const Tx *&tx_out) const -> Status
+{
+    tx_out = nullptr;
+    return Status::not_supported();
+}
+
+CheckedTx::~CheckedTx()
 {
     delete m_real;
     delete m_model;
 }
 
-auto CheckedTxn::create_table(const TableOptions &options, const Slice &name, Table **out) -> Status
+auto CheckedTx::create_bucket(const BucketOptions &options, const Slice &name, Bucket *b_out) -> Status
 {
-    Table *real_table;
-    auto s = m_real->create_table(options, name, &real_table);
-    if (s.is_ok()) {
-        Table *model_table;
-        (void)m_model->create_table(options, name, &model_table);
-        *out = new CheckedTable(*real_table, *model_table);
-        m_model->set_aux_ptr(name, *out, [](auto *ptr) {
-            delete reinterpret_cast<CheckedTable *>(ptr);
-        });
-    }
-    return s;
+    return m_real->create_bucket(options, name, b_out);
 }
 
-CheckedTable::~CheckedTable() = default;
+auto CheckedTx::open_bucket(const Slice &name, Bucket &b_out) const -> Status
+{
+    return m_real->open_bucket(name, b_out);
+}
 
-auto CheckedTable::new_cursor() const -> Cursor *
+auto CheckedTx::new_cursor(const Bucket &b) const -> Cursor *
 {
     return new CheckedCursor(
-        *m_real->new_cursor(),
-        *m_model->new_cursor());
+        *m_real->new_cursor(b),
+        *m_model->new_cursor(b));
 }
 
 CheckedCursor::~CheckedCursor()
@@ -268,35 +254,33 @@ class DBFuzzer
 {
     Options m_options;
     std::string m_filename;
-    KVStore m_store;
+    KVMap m_store;
     DB *m_db = nullptr;
-    Txn *m_tx = nullptr;
-    Table *m_tb = nullptr;
+    Tx *m_tx = nullptr;
+    Bucket m_b;
 
     auto reopen_db() -> void
     {
         delete m_tx;
         delete m_db;
-        m_tb = nullptr;
         m_tx = nullptr;
         CHECK_OK(CheckedDB::open(m_options, m_filename, m_store, m_db));
-        reopen_txn();
-        reopen_table();
+        reopen_tx();
+        reopen_bucket();
     }
 
-    auto reopen_txn() -> void
+    auto reopen_tx() -> void
     {
         delete m_tx;
-        m_tb = nullptr;
-        CHECK_OK(m_db->new_txn(true, m_tx));
-        reopen_table();
+        CHECK_OK(m_db->new_tx(WriteTag{}, m_tx));
+        reopen_bucket();
     }
 
-    auto reopen_table() -> void
+    auto reopen_bucket() -> void
     {
-        // This should be a NOOP if the table handle has already been created
+        // This should be a NOOP if the bucket handle has already been created
         // since this transaction was started. The same exact handle is returned.
-        CHECK_OK(m_tx->create_table(TableOptions(), "TABLE", &m_tb));
+        CHECK_OK(m_tx->create_bucket(BucketOptions(), "TABLE", &m_b));
     }
 
 public:
@@ -326,16 +310,16 @@ auto DBFuzzer::fuzz(FuzzerStream &stream) -> bool
     }
 
     const enum OperationType {
-        kTablePut,
-        kTableGet,
-        kTableErase,
+        kBucketPut,
+        kBucketGet,
+        kBucketErase,
         kCursorSeek,
         kCursorIterate,
-        kTxnCommit,
-        kTxnVacuum,
+        kTxCommit,
+        kTxVacuum,
         kReopenDB,
-        kReopenTxn,
-        kReopenTable,
+        kReopenTx,
+        kReopenBucket,
         kOpCount
     } op_type = OperationType(U32(stream.extract_fixed(1)[0]) % kOpCount);
 
@@ -345,19 +329,19 @@ auto DBFuzzer::fuzz(FuzzerStream &stream) -> bool
     Status s;
 
     switch (op_type) {
-        case kTableGet:
-            s = m_tb->get(stream.extract_random(), &value);
+        case kBucketGet:
+            s = m_tx->get(m_b, stream.extract_random(), &value);
             break;
-        case kTablePut:
+        case kBucketPut:
             key = stream.extract_random();
-            s = m_tb->put(key, stream.extract_random());
+            s = m_tx->put(m_b, key, stream.extract_random());
             break;
-        case kTableErase:
-            s = m_tb->erase(stream.extract_random());
+        case kBucketErase:
+            s = m_tx->erase(m_b, stream.extract_random());
             break;
         case kCursorSeek:
             key = stream.extract_random();
-            c = m_tb->new_cursor();
+            c = m_tx->new_cursor(m_b);
             c->seek(key);
             while (c->is_valid()) {
                 if (key.is_empty() || (key[0] & 1)) {
@@ -368,7 +352,7 @@ auto DBFuzzer::fuzz(FuzzerStream &stream) -> bool
             }
             break;
         case kCursorIterate:
-            c = m_tb->new_cursor();
+            c = m_tx->new_cursor(m_b);
             c->seek_first();
             while (c->is_valid()) {
                 c->next();
@@ -378,17 +362,17 @@ auto DBFuzzer::fuzz(FuzzerStream &stream) -> bool
                 c->previous();
             }
             break;
-        case kTxnVacuum:
+        case kTxVacuum:
             s = m_tx->vacuum();
             break;
-        case kTxnCommit:
+        case kTxCommit:
             s = m_tx->commit();
             break;
-        case kReopenTxn:
-            reopen_txn();
+        case kReopenTx:
+            reopen_tx();
             break;
-        case kReopenTable:
-            reopen_table();
+        case kReopenBucket:
+            reopen_bucket();
             break;
         default: // kReopenDB
             reopen_db();
@@ -396,17 +380,17 @@ auto DBFuzzer::fuzz(FuzzerStream &stream) -> bool
     if (c) {
         // Cursor should have been moved off the edge of the range.
         CHECK_FALSE(c->is_valid());
-        CHECK_TRUE(c->status().is_not_found());
+        CHECK_OK(c->status());
         delete c;
     }
 
     // All records should match between DB and ModelDB.
-    c = m_tb->new_cursor();
+    c = m_tx->new_cursor(m_b);
     c->seek_first();
     while (c->is_valid()) {
         c->next();
     }
-    CHECK_TRUE(c->status().is_not_found());
+    CHECK_OK(c->status());
     delete c;
 
     if (s.is_not_found() || s.is_invalid_argument()) {

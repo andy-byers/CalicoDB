@@ -5,7 +5,7 @@
 > I'm open to comments/criticism/pull requests though, as I want to make CalicoDB a useful library eventually!
 
 > **Note**: I've been messing with this library for a while now, and I think it's finally coming together design-wise!
-> We have transactions, tables, cursors, vacuum, and multiversion concurrency control (MVCC).
+> We have transactions, buckets, cursors, vacuum, and multiversion concurrency control (MVCC).
 > This branch (develop) is intended for working on testing and getting the MVCC to work.
 > I'll merge it back into main intermittently so that changes are visible, but some concurrency-related things will likely be broken for a while.
 
@@ -29,10 +29,10 @@ It is intended for read-heavy embedded applications.
 + [Contributions](#contributions)
 
 ## Features
-+ Records are stored in tables, each with an independent range of keys
-+ All tables are stored in the same file, similar to the SQLite database file format
++ Records are stored in buckets, each with an independent range of keys
++ All buckets are stored in the same file, similar to the SQLite database file format
 + Supports multiple readers and a single writer simultaneously
-+ Per-table bidirectional iteration using cursors
++ Per-buckets bidirectional iteration using cursors
 + Crash protection via write-ahead logging
 + Live defragmentation is supported
 

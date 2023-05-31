@@ -376,7 +376,7 @@ auto Pager::allocate(Page &page) -> Status
     // Try to get a page from the freelist first.
     Id id;
     auto s = Freelist::pop(*this, id);
-    if (s.is_not_found()) {
+    if (s.is_invalid_argument()) {
         // If the freelist was empty, get a page from the end of the file.
         const auto allocate_from_eof = [&page, this] {
             return acquire(Id::from_index(m_page_count), page);

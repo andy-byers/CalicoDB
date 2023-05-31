@@ -130,7 +130,7 @@ TEST_F(HashIndexTests, Cleanup)
 TEST_F(HashIndexTests, ReadsAndWrites)
 {
     std::vector<U32> keys;
-    // Write 2 full index tables + a few extra entries.
+    // Write 2 full index buckets + a few extra entries.
     for (U32 i = 0; i < 4'096 * 2; ++i) {
         keys.emplace_back(i);
     }
