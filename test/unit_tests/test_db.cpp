@@ -704,15 +704,18 @@ protected:
         // Don't call DBTests::SetUp(). Defer calling DB::open() until try_reopen() is called.
     }
 
-    [[nodiscard]] auto try_reopen(bool prefill, bool sync_mode = false) -> Status
+    using OpenFlag = unsigned;
+    static constexpr OpenFlag kPrefill = 1;
+    static constexpr OpenFlag kKeepOpen = 2;
+    static constexpr OpenFlag kClearDB = 4;
+    [[nodiscard]] auto try_reopen(OpenFlag flag = 0) -> Status
     {
-        if (sync_mode) {
+        Status s;
+        if (0 == (flag & kKeepOpen)) {
             m_config = kSyncMode;
-        } else {
-            m_config = kDefault;
+            s = reopen_db(flag & kClearDB, m_test_env);
         }
-        auto s = reopen_db(false, m_test_env);
-        if (prefill && m_max_count == 0) {
+        if (s.is_ok() && (flag & kPrefill) && m_max_count == 0) {
             // The first time the DB is opened, add kSavedCount records to the WAL and
             // commit.
             s = m_db->update([](auto &txn) {
@@ -754,7 +757,7 @@ protected:
 
 TEST_F(DBErrorTests, Reads)
 {
-    ASSERT_OK(try_reopen(true));
+    ASSERT_OK(try_reopen(kPrefill));
     set_error(tools::kSyscallRead);
 
     for (;;) {
@@ -785,11 +788,11 @@ TEST_F(DBErrorTests, Reads)
 
 TEST_F(DBErrorTests, Writes)
 {
-    ASSERT_OK(try_reopen(true));
+    ASSERT_OK(try_reopen(kPrefill));
     set_error(tools::kSyscallWrite | tools::kSyscallSync);
 
     for (;;) {
-        auto s = try_reopen(false);
+        auto s = try_reopen();
         if (s.is_ok()) {
             s = m_db->update([](auto &txn) {
                 Table *tb;
@@ -818,7 +821,7 @@ TEST_F(DBErrorTests, Writes)
         }
     }
     m_test_env->clear_interceptors();
-    ASSERT_OK(try_reopen(false));
+    ASSERT_OK(try_reopen());
     ASSERT_OK(m_db->view([](auto &txn) {
         return check_range(txn, TableOptions(), "TABLE", 0, kSavedCount, true);
     }));
@@ -829,11 +832,11 @@ TEST_F(DBErrorTests, Checkpoint)
 {
     // Add some records to the WAL and set the next syscall to fail. The checkpoint during
     // the close routine will fail.
-    ASSERT_OK(try_reopen(true, true));
+    ASSERT_OK(try_reopen(kPrefill));
     set_error(kAllSyscalls);
 
     for (Status s;;) {
-        s = try_reopen(false, true);
+        s = try_reopen();
         if (s.is_ok()) {
             s = m_db->checkpoint(true);
         }
@@ -845,10 +848,70 @@ TEST_F(DBErrorTests, Checkpoint)
         reset_error();
     }
 
-    ASSERT_OK(reopen_db(false));
+    ASSERT_OK(try_reopen());
     ASSERT_OK(m_db->view([](auto &txn) {
         return check_range(txn, TableOptions(), "saved", 0, kSavedCount, true);
     }));
+    ASSERT_LT(0, m_max_count);
+}
+
+TEST_F(DBErrorTests, TransactionsAfterCheckpointFailure)
+{
+    const auto check_db = [](auto &txn) {
+        TableOptions tbopt;
+        tbopt.create_if_missing = false;
+        // These records are in the database file.
+        auto s = check_range(txn, tbopt, "saved", 0, kSavedCount, true);
+        if (s.is_ok()) {
+            // These records are in the WAL (and maybe partially written back to the database file).
+            s = check_range(txn, tbopt, "pending", 0, kSavedCount, true);
+            if (s.is_ok()) {
+                // These records were written after the failed checkpoint.
+                s = check_range(txn, tbopt, "after", 0, kSavedCount, true);
+            }
+        }
+        return s;
+    };
+
+    // Create a situation where we need to look in the database file for some records
+    // and the WAL file for others.
+    ASSERT_OK(try_reopen(kPrefill));
+    ASSERT_OK(m_db->checkpoint(true));
+    ASSERT_OK(m_db->update([](auto &txn) {
+        return put_range(txn, TableOptions(), "pending", 0, kSavedCount);
+    }));
+    set_error(kAllSyscalls);
+
+    for (Status s;;) {
+        s = try_reopen(kKeepOpen);
+        if (s.is_ok()) {
+            s = m_db->checkpoint(true);
+        }
+        if (!s.is_ok()) {
+            ASSERT_EQ(kErrorMessage, s.to_string());
+            if (m_db) {
+                // Stop generating faults.
+                m_counter = -1;
+                ASSERT_OK(m_db->update([](auto &txn) {
+                    Table *tb;
+                    TableOptions tbopt;
+                    tbopt.create_if_missing = false;
+                    auto s = txn.create_table(tbopt, "after", &tb);
+                    if (s.is_invalid_argument()) {
+                        s = put_range(txn, TableOptions(), "after", 0, kSavedCount);
+                    }
+                    return s;
+                }));
+                ASSERT_OK(m_db->view(check_db));
+            }
+        } else {
+            m_test_env->clear_interceptors();
+            break;
+        }
+        reset_error();
+    }
+    ASSERT_OK(reopen_db(false));
+    ASSERT_OK(m_db->view(check_db));
     ASSERT_LT(0, m_max_count);
 }
 
@@ -1126,7 +1189,7 @@ TEST_F(DBTransactionTests, ReadMostRecentSnapshot)
 {
     U64 key_limit = 0;
     auto should_exist = false;
-    ASSERT_OK(try_reopen(true));
+    ASSERT_OK(try_reopen(kPrefill));
     const auto intercept = [this, &key_limit, &should_exist] {
         DB *db;
         Options options;
@@ -1159,7 +1222,7 @@ TEST_F(DBTransactionTests, IgnoresFutureVersions)
     auto has_open_db = false;
     U64 n = 0;
 
-    ASSERT_OK(try_reopen(true));
+    ASSERT_OK(try_reopen(kPrefill));
     const auto intercept = [this, &has_open_db, &n] {
         if (has_open_db || n >= kN) {
             // Prevent this callback from being called by itself, and prevent the test from
@@ -1202,7 +1265,7 @@ protected:
 
 TEST_F(DBCheckpointTests, CheckpointerBlocksOtherCheckpointers)
 {
-    ASSERT_OK(try_reopen(true));
+    ASSERT_OK(try_reopen(kPrefill));
     m_test_env->add_interceptor(
         kDBName,
         tools::Interceptor(tools::kSyscallWrite, [this] {
@@ -1226,7 +1289,7 @@ TEST_F(DBCheckpointTests, CheckpointerAllowsTransactions)
     static constexpr std::size_t kCkptCount = 1'000;
 
     // Set up a DB with some records in both the database file and the WAL.
-    ASSERT_OK(try_reopen(true));
+    ASSERT_OK(try_reopen(kPrefill));
     ASSERT_OK(m_db->checkpoint(true));
     ASSERT_OK(m_db->update([](auto &txn) {
         // These records will be checkpointed below. `round` is 1 to cause a new version of the first half of

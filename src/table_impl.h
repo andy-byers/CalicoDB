@@ -34,7 +34,7 @@ private:
     const Status *m_status;
     mutable Tree m_tree;
 
-    // NOTE: This field must be set by `TxnImpl` after the table object is allocated.
+    // NOTE: This field must be set by TxnImpl after the table object is allocated.
     bool m_readonly = true;
 };
 

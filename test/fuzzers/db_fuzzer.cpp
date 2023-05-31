@@ -264,20 +264,6 @@ CheckedCursor::~CheckedCursor()
     delete m_real;
 }
 
-enum OperationType {
-    kTablePut,
-    kTableGet,
-    kTableErase,
-    kCursorSeek,
-    kCursorIterate,
-    kTxnCommit,
-    kTxnVacuum,
-    kReopenDB,
-    kReopenTxn,
-    kReopenTable,
-    kOpCount
-};
-
 class DBFuzzer
 {
     Options m_options;
@@ -330,43 +316,54 @@ public:
         delete m_db;
     }
 
-    auto fuzz(const U8 *&data_ptr, std::size_t &size_ref) -> void;
+    auto fuzz(FuzzerStream &stream) -> bool;
 };
 
-auto DBFuzzer::fuzz(const U8 *&data_ptr, std::size_t &size_ref) -> void
+auto DBFuzzer::fuzz(FuzzerStream &stream) -> bool
 {
-    CHECK_TRUE(size_ref >= 2);
-    auto operation_type = static_cast<OperationType>(*data_ptr++ % OperationType::kOpCount);
-    --size_ref;
+    if (stream.is_empty()) {
+        return false;
+    }
+
+    const enum OperationType {
+        kTablePut,
+        kTableGet,
+        kTableErase,
+        kCursorSeek,
+        kCursorIterate,
+        kTxnCommit,
+        kTxnVacuum,
+        kReopenDB,
+        kReopenTxn,
+        kReopenTable,
+        kOpCount
+    } op_type = OperationType(U32(stream.extract_fixed(1)[0]) % kOpCount);
 
     Cursor *c = nullptr;
     std::string value;
-    std::string key;
+    Slice key;
     Status s;
 
-    switch (operation_type) {
+    switch (op_type) {
         case kTableGet:
-            s = m_tb->get(FUZZER_KEY, &value);
-            if (!s.is_not_found()) {
-                CHECK_OK(s);
-            }
+            s = m_tb->get(stream.extract_random(), &value);
             break;
         case kTablePut:
-            key = FUZZER_KEY;
-            CHECK_OK(m_tb->put(key, FUZZER_VAL));
+            key = stream.extract_random();
+            s = m_tb->put(key, stream.extract_random());
             break;
         case kTableErase:
-            CHECK_OK(m_tb->erase(FUZZER_KEY));
+            s = m_tb->erase(stream.extract_random());
             break;
         case kCursorSeek:
-            key = FUZZER_KEY;
+            key = stream.extract_random();
             c = m_tb->new_cursor();
             c->seek(key);
             while (c->is_valid()) {
-                if (key.front() & 1) {
-                    c->next();
-                } else {
+                if (key.is_empty() || (key[0] & 1)) {
                     c->previous();
+                } else {
+                    c->next();
                 }
             }
             break;
@@ -382,10 +379,10 @@ auto DBFuzzer::fuzz(const U8 *&data_ptr, std::size_t &size_ref) -> void
             }
             break;
         case kTxnVacuum:
-            CHECK_OK(m_tx->vacuum());
+            s = m_tx->vacuum();
             break;
         case kTxnCommit:
-            CHECK_OK(m_tx->commit());
+            s = m_tx->commit();
             break;
         case kReopenTxn:
             reopen_txn();
@@ -410,8 +407,15 @@ auto DBFuzzer::fuzz(const U8 *&data_ptr, std::size_t &size_ref) -> void
         c->next();
     }
     CHECK_TRUE(c->status().is_not_found());
-    CHECK_OK(m_tx->status());
     delete c;
+
+    if (s.is_not_found() || s.is_invalid_argument()) {
+        // Forgive non-fatal errors.
+        s = Status::ok();
+    }
+    CHECK_OK(s);
+    CHECK_OK(m_tx->status());
+    return true;
 }
 
 extern "C" int LLVMFuzzerTestOneInput(const U8 *data, std::size_t size)
@@ -421,10 +425,9 @@ extern "C" int LLVMFuzzerTestOneInput(const U8 *data, std::size_t size)
     options.cache_size = 0; // Use the smallest possible cache.
 
     {
+        FuzzerStream stream(data, size);
         DBFuzzer fuzzer("db_fuzzer.cdb", &options);
-
-        while (size > 1) {
-            fuzzer.fuzz(data, size);
+        while (fuzzer.fuzz(stream)) {
         }
     }
 

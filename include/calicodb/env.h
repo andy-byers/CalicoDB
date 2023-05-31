@@ -6,12 +6,13 @@
 #define CALICODB_ENV_H
 
 #include "status.h"
+#include <cstdarg>
 
 namespace calicodb
 {
 
 class File;
-class Sink;
+class Logger;
 
 // CalicoDB storage environment
 // Handles platform-specific filesystem manipulations and file locking.
@@ -35,7 +36,7 @@ public:
         kReadWrite = 4,
     };
     [[nodiscard]] virtual auto new_file(const std::string &filename, OpenMode mode, File *&out) -> Status = 0;
-    [[nodiscard]] virtual auto new_sink(const std::string &filename, Sink *&out) -> Status = 0;
+    [[nodiscard]] virtual auto new_logger(const std::string &filename, Logger *&out) -> Status = 0;
     [[nodiscard]] virtual auto resize_file(const std::string &filename, std::size_t size) -> Status = 0;
     [[nodiscard]] virtual auto file_size(const std::string &filename, std::size_t &out) const -> Status = 0;
     [[nodiscard]] virtual auto remove_file(const std::string &filename) -> Status = 0;
@@ -107,19 +108,19 @@ public:
     virtual auto shm_barrier() -> void = 0;
 };
 
-class Sink
+class Logger
 {
 public:
-    explicit Sink();
-    virtual ~Sink();
+    explicit Logger();
+    virtual ~Logger();
 
-    Sink(Sink &) = delete;
-    void operator=(Sink &) = delete;
+    Logger(Logger &) = delete;
+    void operator=(Logger &) = delete;
 
-    virtual auto sink(const Slice &in) -> void = 0;
+    virtual auto logv(const char *fmt, std::va_list args) -> void = 0;
 };
 
-auto logv(Sink *sink, const char *fmt, ...) -> void;
+auto log(Logger *sink, const char *fmt, ...) -> void;
 
 class EnvWrapper : public Env
 {
@@ -130,7 +131,7 @@ public:
 
     ~EnvWrapper() override;
 
-    [[nodiscard]] auto new_sink(const std::string &filename, Sink *&out) -> Status override;
+    [[nodiscard]] auto new_logger(const std::string &filename, Logger *&out) -> Status override;
     [[nodiscard]] auto new_file(const std::string &filename, OpenMode mode, File *&out) -> Status override;
     [[nodiscard]] auto resize_file(const std::string &filename, std::size_t size) -> Status override;
     [[nodiscard]] auto file_size(const std::string &filename, std::size_t &out) const -> Status override;
@@ -144,46 +145,6 @@ public:
 
 private:
     Env *m_target;
-};
-
-class FileWrapper : public File
-{
-public:
-    explicit FileWrapper(File &target);
-    ~FileWrapper() override;
-    [[nodiscard]] auto target() -> File *;
-    [[nodiscard]] auto target() const -> const File *;
-
-    [[nodiscard]] auto read(std::size_t offset, std::size_t size, char *scratch, Slice *out) -> Status override;
-    [[nodiscard]] auto read_exact(std::size_t offset, std::size_t size, char *scratch) -> Status override;
-    [[nodiscard]] auto write(std::size_t offset, const Slice &in) -> Status override;
-    [[nodiscard]] auto sync() -> Status override;
-
-    [[nodiscard]] auto file_lock(FileLockMode mode) -> Status override;
-    auto file_unlock() -> void override;
-
-    [[nodiscard]] auto shm_map(std::size_t r, bool extend, volatile void *&out) -> Status override;
-    [[nodiscard]] auto shm_lock(std::size_t s, std::size_t n, ShmLockFlag flags) -> Status override;
-    auto shm_unmap(bool unlink) -> void override;
-    auto shm_barrier() -> void override;
-
-private:
-    File *m_target;
-};
-
-// For completeness and in case Sink ever gets additional methods.
-class SinkWrapper : public Sink
-{
-public:
-    explicit SinkWrapper(Sink &target);
-    ~SinkWrapper() override;
-    [[nodiscard]] auto target() -> Sink *;
-    [[nodiscard]] auto target() const -> const Sink *;
-
-    auto sink(const Slice &in) -> void override;
-
-private:
-    Sink *m_target;
 };
 
 // Allow composition of flags with OR

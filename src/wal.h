@@ -116,7 +116,7 @@ public:
         const char *db_name;
         Env *env;
         File *db_file;
-        Sink *info_log;
+        Logger *info_log;
         BusyHandler *busy;
         bool sync;
     };

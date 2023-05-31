@@ -147,6 +147,9 @@ public:
 
     [[nodiscard]] auto put(const Slice &key, const Slice &value) -> Status override
     {
+        if (key.is_empty()) {
+            return Status::invalid_argument();
+        }
         m_map->insert_or_assign(key.to_string(), value.to_string());
         return Status::ok();
     }

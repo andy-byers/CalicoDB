@@ -592,9 +592,9 @@ public:
             m_db->shm_unmap(true);
             m_db = nullptr;
             if (!s.is_ok()) {
-                logv(m_log, R"(failed to unlink WAL at "%s")"
-                            "\n%s",
-                     m_wal_name, s.to_string().c_str());
+                log(m_log, R"(failed to unlink WAL at "%s")"
+                           "\n%s",
+                    m_wal_name, s.to_string().c_str());
             }
         }
         return s;
@@ -963,7 +963,7 @@ private:
 
     Env *m_env = nullptr;
     File *m_db = nullptr;
-    Sink *m_log = nullptr;
+    Logger *m_log = nullptr;
     File *m_wal = nullptr;
     BusyHandler *m_busy = nullptr;
 
@@ -984,7 +984,7 @@ auto Wal::open(const Parameters &param, Wal *&out) -> Status
     File *wal_file;
     auto s = param.env->new_file(param.wal_name, Env::kCreate, wal_file);
     if (s.is_ok()) {
-        logv(param.info_log, R"(opened WAL at "%s")", param.wal_name);
+        log(param.info_log, R"(opened WAL at "%s")", param.wal_name);
         out = new WalImpl(param, *wal_file);
     }
     return s;

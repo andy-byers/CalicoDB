@@ -13,7 +13,6 @@ namespace calicodb
 class Pager;
 
 struct Freelist {
-    static auto is_empty(Pager &pager) -> bool;
     static auto push(Pager &pager, Page page) -> Status;
     static auto pop(Pager &pager, Id &id_out) -> Status;
     static auto assert_state(Pager &pager) -> bool;

@@ -35,7 +35,7 @@ public:
         const char *wal_name;
         File *db_file;
         Env *env;
-        Sink *log;
+        Logger *log;
         Status *status;
         BusyHandler *busy;
         std::size_t frame_count;
@@ -143,7 +143,7 @@ private:
     // True if the in-memory root page needs to be refreshed, false otherwise.
     bool m_refresh_root = false;
 
-    Sink *m_log = nullptr;
+    Logger *m_log = nullptr;
     File *m_file;
     Env *m_env;
     Wal *m_wal = nullptr;

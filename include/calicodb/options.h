@@ -12,7 +12,7 @@ namespace calicodb
 
 class BusyHandler;
 class Env;
-class Sink;
+class Logger;
 
 // Size of a database page in bytes.
 static constexpr std::size_t kPageSize = 4'096;
@@ -26,7 +26,7 @@ struct Options final {
     std::string wal_filename;
 
     // Destination for info log messages.
-    Sink *info_log = nullptr;
+    Logger *info_log = nullptr;
 
     // Custom storage environment. See env.h for details.
     Env *env = nullptr;

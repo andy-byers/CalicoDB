@@ -3,13 +3,16 @@
 // LICENSE.md. See AUTHORS.md for a list of contributor names.
 
 #include "env_posix.h"
+#include "logging.h"
 #include "scope_guard.h"
+#include <ctime>
 #include <fcntl.h>
 #include <libgen.h>
 #include <list>
 #include <mutex>
 #include <sys/mman.h>
 #include <sys/stat.h>
+#include <sys/time.h>
 #include <unistd.h>
 #include <vector>
 
@@ -312,6 +315,54 @@ public:
     int local_lock = 0;
 };
 
+class PosixLogger : public Logger
+{
+    int m_file;
+
+public:
+    explicit PosixLogger(int file)
+        : m_file(file)
+    {
+    }
+
+    ~PosixLogger() override = default;
+
+    auto logv(const char *fmt, std::va_list args) -> void override
+    {
+        timeval now_tv;
+        std::tm now_tm;
+        gettimeofday(&now_tv, nullptr);
+        localtime_r(&now_tv.tv_sec, &now_tm);
+
+        char *var = nullptr;
+        char fix[256];
+        auto *p = fix;
+        auto L = sizeof(fix);
+
+        std::va_list args_copy;
+        va_copy(args_copy, args);
+        for (int i = 0; i < 2; ++i) {
+            const auto offset = std::snprintf(
+                p, L, "%04d/%02d/%02d-%02d:%02d:%02d.%06d ",
+                now_tm.tm_year + 1900, now_tm.tm_mon + 1,
+                now_tm.tm_mday, now_tm.tm_hour, now_tm.tm_min,
+                now_tm.tm_sec, static_cast<int>(now_tv.tv_usec));
+            const auto output_length = offset + attempt_fmt(
+                                                    p + offset, L - offset, true, fmt, args);
+            if (output_length <= L) {
+                (void)posix_write(m_file, Slice(p, output_length));
+                break;
+            } else if (i == 0) {
+                var = new char[output_length];
+                L = output_length;
+                p = var;
+            }
+        }
+        va_end(args);
+        delete[] var;
+    }
+};
+
 // Per-process singleton for managing filesystem state
 struct PosixFs final {
     static PosixFs s_fs;
@@ -558,10 +609,14 @@ auto PosixEnv::new_file(const std::string &filename, OpenMode mode, File *&out) 
     return Status::ok();
 }
 
-auto PosixEnv::new_sink(const std::string &filename, Sink *&out) -> Status
+auto PosixEnv::new_logger(const std::string &filename, Logger *&out) -> Status
 {
-    out = nullptr; // TODO
-    return Status::not_supported(filename + " cannot be opened... PosixSink is not yet implemented");
+    const auto file = posix_open(filename, O_CREAT | O_WRONLY | O_APPEND);
+    if (file < 0) {
+        return posix_error(errno);
+    }
+    out = new PosixLogger(file);
+    return Status::ok();
 }
 
 auto PosixEnv::srand(unsigned seed) -> void

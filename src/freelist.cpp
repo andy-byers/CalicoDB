@@ -17,19 +17,10 @@ static auto get_leaf_ptr(Char *base, std::size_t index) -> Char *
     return base + (index + 2) * sizeof(U32);
 }
 
-auto Freelist::is_empty(Pager &pager) -> bool
-{
-    auto root = pager.acquire_root();
-    const auto result = FileHeader::get_freelist_head(
-                            root.constant_ptr())
-                            .is_null();
-    pager.release(std::move(root));
-    return result;
-}
-
 auto Freelist::push(Pager &pager, Page page) -> Status
 {
-    if (page.id().value < kFirstMapPage || page.id().value > pager.page_count()) {
+    if (page.id().value < kFirstMapPage ||
+        page.id().value > pager.page_count()) {
         return Status::corruption();
     }
     Page trunk;

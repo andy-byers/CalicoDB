@@ -68,11 +68,11 @@ When a key or value is too large to fit on a page, some of it is transferred to 
 [//]: # (TODO)
 
 #### Freelist
-Sometimes, pages end up becoming unused.
+Sometimes, database pages end up becoming unused.
 This happens, for example, when a record with an overflow chain is erased.
+Unused database pages are managed using the freelist.
 There are 2 types of freelist pages: trunks and leaves.
 Freelist trunk pages form a linked list threaded through the database file.
-Trunk pages store pointers to 0 or more leaf freelist pages.
 Each trunk page contains the following information:
 
 | Offset | Size   | Name    | Purpose                                              |

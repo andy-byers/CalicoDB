@@ -4,6 +4,7 @@
 
 #include "calicodb/env.h"
 #include "env_posix.h"
+#include "logging.h"
 #include "utils.h"
 
 namespace calicodb
@@ -17,9 +18,9 @@ File::File() = default;
 
 File::~File() = default;
 
-Sink::Sink() = default;
+Logger::Logger() = default;
 
-Sink::~Sink() = default;
+Logger::~Logger() = default;
 
 auto File::read_exact(std::size_t offset, std::size_t size, char *scratch) -> Status
 {
@@ -53,9 +54,9 @@ auto EnvWrapper::new_file(const std::string &filename, OpenMode mode, File *&out
     return m_target->new_file(filename, mode, out);
 }
 
-auto EnvWrapper::new_sink(const std::string &filename, Sink *&out) -> Status
+auto EnvWrapper::new_logger(const std::string &filename, Logger *&out) -> Status
 {
-    return m_target->new_sink(filename, out);
+    return m_target->new_logger(filename, out);
 }
 
 auto EnvWrapper::file_exists(const std::string &filename) const -> bool
@@ -93,93 +94,14 @@ auto EnvWrapper::sleep(unsigned micros) -> void
     m_target->sleep(micros);
 }
 
-FileWrapper::FileWrapper(File &target)
-    : m_target{&target}
+auto log(Logger *logger, const char *fmt, ...) -> void
 {
-}
-
-FileWrapper::~FileWrapper() = default;
-
-auto FileWrapper::target() -> File *
-{
-    return m_target;
-}
-
-auto FileWrapper::target() const -> const File *
-{
-    return m_target;
-}
-
-auto FileWrapper::read(std::size_t offset, std::size_t size, char *scratch, Slice *out) -> Status
-{
-    return m_target->read(offset, size, scratch, out);
-}
-
-auto FileWrapper::read_exact(std::size_t offset, std::size_t size, char *scratch) -> Status
-{
-    return m_target->read_exact(offset, size, scratch);
-}
-
-auto FileWrapper::write(std::size_t offset, const Slice &in) -> Status
-{
-    return m_target->write(offset, in);
-}
-
-auto FileWrapper::sync() -> Status
-{
-    return m_target->sync();
-}
-
-auto FileWrapper::file_lock(FileLockMode mode) -> Status
-{
-    return m_target->file_lock(mode);
-}
-
-auto FileWrapper::file_unlock() -> void
-{
-    return m_target->file_unlock();
-}
-
-auto FileWrapper::shm_map(std::size_t r, bool extend, volatile void *&out) -> Status
-{
-    return m_target->shm_map(r, extend, out);
-}
-
-auto FileWrapper::shm_lock(std::size_t r, std::size_t n, ShmLockFlag flags) -> Status
-{
-    return m_target->shm_lock(r, n, flags);
-}
-
-auto FileWrapper::shm_unmap(bool unlink) -> void
-{
-    return m_target->shm_unmap(unlink);
-}
-
-auto FileWrapper::shm_barrier() -> void
-{
-    return m_target->shm_barrier();
-}
-
-SinkWrapper::SinkWrapper(Sink &target)
-    : m_target{&target}
-{
-}
-
-SinkWrapper::~SinkWrapper() = default;
-
-auto SinkWrapper::target() -> Sink *
-{
-    return m_target;
-}
-
-auto SinkWrapper::target() const -> const Sink *
-{
-    return m_target;
-}
-
-auto SinkWrapper::sink(const Slice &in) -> void
-{
-    return m_target->sink(in);
+    if (logger) {
+        std::va_list args;
+        va_start(args, fmt);
+        logger->logv(fmt, args);
+        va_end(args);
+    }
 }
 
 } // namespace calicodb

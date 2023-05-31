@@ -321,6 +321,64 @@ INSTANTIATE_TEST_SUITE_P(
     FileTests,
     ::testing::Values(1, 2, 5, 10, 100));
 
+class LoggerTests : public testing::Test
+{
+protected:
+    explicit LoggerTests()
+        : m_testdir("."),
+          m_log_filename(m_testdir.as_child("logger"))
+    {
+    }
+
+    ~LoggerTests() override
+    {
+        delete m_logger;
+    }
+
+    auto SetUp() -> void override
+    {
+        ASSERT_OK(Env::default_env()->new_logger(m_log_filename, m_logger));
+    }
+
+    tools::TestDir m_testdir;
+    const std::string m_log_filename;
+    Logger *m_logger = nullptr;
+};
+
+TEST_F(LoggerTests, LogNullptrIsNOOP)
+{
+    log(nullptr, "nothing %d", 42);
+}
+
+TEST_F(LoggerTests, LogsFormattedText)
+{
+    ASSERT_TRUE(tools::read_file_to_string(*Env::default_env(), m_log_filename).empty());
+    log(m_logger, "%u foo", 123);
+    const auto msg1 = tools::read_file_to_string(*Env::default_env(), m_log_filename);
+    log(m_logger, "bar %d", 42);
+    const auto msg2 = tools::read_file_to_string(*Env::default_env(), m_log_filename);
+
+    // Make sure both text and header info were written.
+    ASSERT_EQ(msg1.size() - 8, msg1.find("123 foo\n"));
+    ASSERT_EQ(msg2.size() - 7, msg2.find("bar 42\n"));
+    ASSERT_GT(msg1.size(), 8);
+    ASSERT_GT(msg2.size(), 7);
+}
+
+TEST_F(LoggerTests, HandlesLongMessages)
+{
+    std::string msg;
+    for (std::size_t n = 1; n <= 1'000'000; n *= 10) {
+        ASSERT_OK(Env::default_env()->resize_file(m_log_filename, 0));
+
+        msg.resize(n, '$');
+        log(m_logger, "%s", msg.c_str());
+
+        const auto res = tools::read_file_to_string(*Env::default_env(), m_log_filename);
+        ASSERT_EQ(msg + '\n', res.substr(27)); // Account for the datetime header and trailing newline.
+    }
+}
+
 class EnvLockStateTests : public testing::TestWithParam<std::size_t>
 {
 public:
@@ -910,46 +968,21 @@ INSTANTIATE_TEST_SUITE_P(
         EnvConcurrencyTestsParam{2, 4},
         EnvConcurrencyTestsParam{4, 2}));
 
-TEST(EnvWrappers, WrapperObjectsWorkAsExpected)
+TEST(EnvWrappers, WrapperEnvWorksAsExpected)
 {
     tools::FakeEnv env;
     EnvWrapper w_env(env);
     ASSERT_EQ(&env, w_env.target());
     ASSERT_EQ(&env, const_cast<const EnvWrapper &>(w_env).target());
     File *file;
-    Sink *sink;
+    Logger *sink;
     ASSERT_OK(w_env.new_file("file", Env::kCreate, file));
-    ASSERT_OK(w_env.new_sink("sink", sink));
+    ASSERT_OK(w_env.new_logger("sink", sink));
     ASSERT_TRUE(w_env.file_exists("file"));
-    FileWrapper w_file(*file);
-    tools::StreamSink fake_sink(std::cout);
-    SinkWrapper w_sink(fake_sink);
-    Slice slice;
-    char buffer[14] = {};
-    std::size_t size = 13;
-    ASSERT_OK(w_file.write(0, Slice("Hello, world!", size)));
-    ASSERT_OK(w_file.read(0, size, buffer, &slice));
-    ASSERT_EQ(slice, "Hello, world!");
-    ASSERT_OK(w_file.write(0, Slice("hello, world.", size)));
-    ASSERT_OK(w_file.read_exact(0, size, buffer));
-    ASSERT_EQ(Slice(buffer, size), "hello, world.");
     ASSERT_OK(w_env.resize_file("file", 0));
-    ASSERT_TRUE(w_file.read_exact(0, size, buffer).is_io_error());
-    ASSERT_OK(w_file.sync());
-    ASSERT_OK(w_file.file_lock(kLockShared));
-    w_file.file_unlock();
     volatile void *ptr;
-    ASSERT_OK(w_file.shm_map(0, true, ptr));
-    w_file.shm_barrier();
-    ASSERT_OK(w_file.shm_lock(0, 1, kShmLock | kShmReader));
-    ASSERT_OK(w_file.shm_lock(0, 1, kShmUnlock | kShmReader));
-    w_file.shm_unmap(true);
-    logv(&w_sink, "Hello, world!");
-    ASSERT_EQ(&fake_sink, w_sink.target());
-    ASSERT_EQ(&fake_sink, const_cast<const SinkWrapper &>(w_sink).target());
-    ASSERT_EQ(file, w_file.target());
-    ASSERT_EQ(file, const_cast<const FileWrapper &>(w_file).target());
     delete file;
+    std::size_t size;
     ASSERT_OK(w_env.file_size("file", size));
     ASSERT_EQ(size, 0);
     w_env.srand(123);

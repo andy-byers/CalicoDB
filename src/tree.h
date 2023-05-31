@@ -133,7 +133,7 @@ class InternalCursor
     // std::vector<Id> m_ovfl_cache;
 
     Node m_node;
-    bool m_write;
+    bool m_write = false;
 
 public:
     static constexpr std::size_t kMaxDepth = 20;
@@ -184,8 +184,8 @@ public:
     auto move_to(Node node, int diff) -> void
     {
         clear();
-        m_node = std::move(node);
         history[level += diff] = {node.page.id(), 0};
+        m_node = std::move(node);
         m_status = Status::ok();
     }
 
@@ -299,7 +299,7 @@ private:
     friend class TreeValidator;
 
     [[nodiscard]] auto free_overflow(Id head_id) -> Status;
-    [[nodiscard]] auto read_key(Node &node, std::size_t index, std::string &scratch, Slice *key_out) const -> Status;
+    [[nodiscard]] auto read_key(Node &node, std::size_t index, std::string &scratch, Slice *key_out, std::size_t limit = 0) const -> Status;
     [[nodiscard]] auto read_value(Node &node, std::size_t index, std::string &scratch, Slice *value_out) const -> Status;
     [[nodiscard]] auto write_key(Node &node, std::size_t index, const Slice &key) -> Status;
     [[nodiscard]] auto write_value(Node &node, std::size_t index, const Slice &value) -> Status;

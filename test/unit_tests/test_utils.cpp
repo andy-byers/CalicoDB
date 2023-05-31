@@ -492,19 +492,23 @@ TEST_F(InterceptorTests, RespectsSyscallType)
     delete editor;
 }
 
-TEST(Logging, WriteFormattedString)
+TEST(Logging, AppendFmtString)
 {
-    std::string s;
-    append_fmt_string(s, "%s %d %f", "abc", 42, 1.0);
-}
+    std::string str, msg("123 foo 42 bar");
+    append_fmt_string(str, "%d %s %d %s", 123, "foo", 42, "bar");
+    ASSERT_EQ(str, msg);
 
-TEST(Logging, LogMessage)
-{
-    tools::TestDir testdir(".");
-    std::ofstream ofs(testdir.as_child("output"));
-    std::string str(1'024, '0');
-    tools::StreamSink sink(ofs);
-    logv(&sink, "%s", str.c_str());
+    // Don't mess up the existing text.
+    msg.append(" -> more text");
+    append_fmt_string(str, " -> more text");
+    ASSERT_EQ(str, msg);
+    msg.append(" -> even more text");
+    append_fmt_string(str, " -> even more text");
+    ASSERT_EQ(str, msg);
+
+    // NOOP
+    append_fmt_string(str, "");
+    ASSERT_EQ(str, msg);
 }
 
 TEST(Logging, ConsumeDecimalNumberIgnoresLeadingZeros)

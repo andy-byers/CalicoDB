@@ -315,6 +315,36 @@ TEST_P(TreeTests, HandlesLargePayloads)
     ASSERT_OK(tree->erase(make_long_key('c')));
 }
 
+TEST_P(TreeTests, LongVsShortKeys)
+{
+    for (int i = 0; i < 2; ++i) {
+        const auto tree_key_len = i == 0 ? 1 : kPageSize * 2 - 1;
+        const auto search_key_len = kPageSize * 2 - tree_key_len;
+        ASSERT_OK(tree->put(std::string(tree_key_len, 'a'), make_value('1', true)));
+        ASSERT_OK(tree->put(std::string(tree_key_len, 'b'), make_value('2', true)));
+        ASSERT_OK(tree->put(std::string(tree_key_len, 'c'), make_value('3', true)));
+
+        auto *c = new CursorImpl(*tree);
+        c->seek(std::string(search_key_len, i == 0 ? 'A' : 'a'));
+        ASSERT_TRUE(c->is_valid());
+        ASSERT_EQ(std::string(tree_key_len, 'a'), c->key());
+        ASSERT_EQ(make_value('1', true), c->value());
+        c->seek(std::string(search_key_len, i == 0 ? 'a' : 'b'));
+        ASSERT_TRUE(c->is_valid());
+        ASSERT_EQ(std::string(tree_key_len, 'b'), c->key());
+        ASSERT_EQ(make_value('2', true), c->value());
+        c->seek(std::string(search_key_len, i == 0 ? 'b' : 'c'));
+        ASSERT_TRUE(c->is_valid());
+        ASSERT_EQ(std::string(tree_key_len, 'c'), c->key());
+        ASSERT_EQ(make_value('3', true), c->value());
+        delete c;
+
+        ASSERT_OK(tree->erase(std::string(tree_key_len, 'a')));
+        ASSERT_OK(tree->erase(std::string(tree_key_len, 'b')));
+        ASSERT_OK(tree->erase(std::string(tree_key_len, 'c')));
+    }
+}
+
 TEST_P(TreeTests, GetNonexistentKeys)
 {
     // Missing 0

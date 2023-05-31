@@ -103,7 +103,7 @@ public:
     {
         std::string buffer(kPageSize, '\0');
         std::memcpy(buffer.data(), FileHeader::kFmtString, sizeof(FileHeader::kFmtString));
-        buffer[FileHeader::kFmtVersionOfs] = FileHeader::kFmtVersion;
+        buffer[FileHeader::kFmtVersionOffset] = FileHeader::kFmtVersion;
         put_u32(buffer.data() + FileHeader::kPageCountOffset, 1);
         tools::write_string_to_file(Base::env(), kDBFilename, buffer);
 

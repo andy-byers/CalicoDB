@@ -31,11 +31,8 @@ auto Page::operator=(Page &&rhs) noexcept -> Page &
     if (this != &rhs) {
         m_pager = rhs.m_pager;
         rhs.m_pager = nullptr;
-
-        m_ref = rhs.m_ref;
-        m_data = rhs.m_data;
-        m_id = rhs.m_id;
         m_write = rhs.m_write;
+        m_ref = rhs.m_ref;
     }
     return *this;
 }

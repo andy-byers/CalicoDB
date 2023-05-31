@@ -340,34 +340,26 @@ auto BlockAllocator::defragment(Node &node, int skip) -> void
     auto &header = node.header;
     const auto n = header.cell_count;
     const auto to_skip = skip >= 0 ? static_cast<std::size_t>(skip) : n;
-    auto end = kPageSize;
     auto *ptr = node.page.mutable_ptr();
-    std::vector<std::size_t> ptrs(n);
+    auto end = kPageSize;
 
+    // Copy everything before the indirection vector.
+    std::memcpy(node.scratch, ptr, node.slots_offset);
     for (std::size_t index = 0; index < n; ++index) {
-        if (index == to_skip) {
-            continue;
+        if (index != to_skip) {
+            // Pack cells at the end of the scratch page and write the indirection
+            // vector.
+            const auto cell = read_cell(node, index);
+            end -= cell.size;
+            std::memcpy(node.scratch + end, cell.ptr, cell.size);
+            put_u16(node.scratch + node.slots_offset + index * kPointerSize, end);
         }
-        const auto offset = node.get_slot(index);
-        const auto size = read_cell_at(node, offset).size;
-
-        end -= size;
-        std::memcpy(node.scratch + end, ptr + offset, size);
-        ptrs[index] = end;
     }
-    for (std::size_t index = 0; index < n; ++index) {
-        if (index == to_skip) {
-            continue;
-        }
-        node.set_slot(index, ptrs[index]);
-    }
-    const auto offset = cell_area_offset(node);
-    const auto size = kPageSize - offset;
-    std::memcpy(ptr + offset, node.scratch + offset, size);
+    std::memcpy(ptr, node.scratch, kPageSize);
 
-    header.cell_start = static_cast<unsigned>(end);
     header.frag_count = 0;
     header.free_start = 0;
+    header.cell_start = static_cast<unsigned>(end);
     node.gap_size = static_cast<unsigned>(end - cell_area_offset(node));
 }
 
@@ -590,15 +582,18 @@ auto Tree::find_external(const Slice &key, bool write, bool &exact) const -> Sta
     return m_cursor.status();
 }
 
-auto Tree::read_key(Node &node, std::size_t index, std::string &scratch, Slice *key_out) const -> Status
+auto Tree::read_key(Node &node, std::size_t index, std::string &scratch, Slice *key_out, std::size_t limit) const -> Status
 {
     const auto cell = read_cell(node, index);
-    if (scratch.size() < cell.key_size) {
-        scratch.resize(cell.key_size);
+    if (limit == 0 || limit > cell.key_size) {
+        limit = cell.key_size;
     }
-    auto s = PayloadManager::access(*m_pager, cell, 0, cell.key_size, nullptr, scratch.data());
+    if (scratch.size() < limit) {
+        scratch.resize(limit);
+    }
+    auto s = PayloadManager::access(*m_pager, cell, 0, limit, nullptr, scratch.data());
     if (s.is_ok() && key_out) {
-        *key_out = Slice(scratch).truncate(cell.key_size);
+        *key_out = Slice(scratch).truncate(limit);
     }
     return s;
 }
@@ -2209,10 +2204,12 @@ auto InternalCursor::seek(const Slice &key) -> bool
     while (lower < upper) {
         Slice rhs;
         const auto mid = (lower + upper) / 2;
-        m_status = m_tree->read_key(m_node, mid, m_buffer, &rhs);
-        if (!is_valid()) {
-            break;
-        }
+        // This call to Tree::read_key() may return a partial key, if the whole key wasn't
+        // needed for the comparison. We read at most 1 byte more than is present in `key`
+        // so we still have necessary length information to break ties. This lets us avoid
+        // reading overflow chains if it isn't really necessary.
+        m_status = m_tree->read_key(
+            m_node, mid, m_buffer, &rhs, key.size() + 1);
         const auto cmp = key.compare(rhs);
         if (cmp <= 0) {
             exact = cmp == 0;
@@ -2221,10 +2218,8 @@ auto InternalCursor::seek(const Slice &key) -> bool
             lower = mid + 1;
         }
     }
-    history[level].index = lower;
-    if (!m_node.header.is_external) {
-        history[level].index += exact;
-    }
+    const auto shift = !m_node.header.is_external * exact;
+    history[level].index = lower + shift;
     return exact;
 }
 

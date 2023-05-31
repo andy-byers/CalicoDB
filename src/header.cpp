@@ -16,17 +16,19 @@ auto FileHeader::check_db_support(const char *root) -> Status
     const auto bad_fmt_string = std::memcmp(
         fmt_string.data(), kFmtString, fmt_string.size());
     if (bad_fmt_string) {
-        std::string message("not a CalicoDB database (expected ");
-        append_fmt_string(message, R"(identifier "%s\00" but got "%s"))",
-                          kFmtString, escape_string(fmt_string).c_str());
+        std::string message;
+        append_fmt_string(
+            message, R"(not a CalicoDB database (expected identifier "%s\00" but got "%s"))",
+            kFmtString, escape_string(fmt_string).c_str());
         s = Status::invalid_argument(message);
     }
     const auto bad_fmt_version =
-        root[kFmtVersionOfs] > kFmtVersion;
+        root[kFmtVersionOffset] > kFmtVersion;
     if (s.is_ok() && bad_fmt_version) {
-        std::string message("CalicoDB version is not supported (expected ");
-        append_fmt_string(message, R"(format version "%d" but got "%d"))",
-                          kFmtVersion, root[kFmtVersionOfs]);
+        std::string message;
+        append_fmt_string(
+            message, R"(CalicoDB version is not supported (expected format version "%d" but got "%d"))",
+            kFmtVersion, root[kFmtVersionOffset]);
         s = Status::invalid_argument(message);
     }
     return s;
@@ -36,7 +38,7 @@ auto FileHeader::make_supported_db(char *root) -> void
 {
     // Initialize the file header.
     std::memcpy(root, kFmtString, sizeof(kFmtString));
-    root[kFmtVersionOfs] = kFmtVersion;
+    root[kFmtVersionOffset] = kFmtVersion;
     put_u32(root + kPageCountOffset, 1);
 
     // Initialize the root page of the schema tree.

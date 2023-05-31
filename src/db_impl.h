@@ -44,7 +44,7 @@ private:
     Pager *m_pager = nullptr;
 
     Env *const m_env = nullptr;
-    Sink *const m_log = nullptr;
+    Logger *const m_log = nullptr;
     BusyHandler *const m_busy = nullptr;
 
     TxnImpl *m_tx = nullptr;

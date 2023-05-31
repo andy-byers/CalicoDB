@@ -117,7 +117,7 @@ private:
     template <class T>
     using HashMap = std::unordered_map<Id, T, Id::Hash>;
 
-    // Change the root page of a table from "old_id" to "new_id" during vacuum
+    // Change the root page of a table from `old_id` to `new_id` during vacuum
     friend class Tree;
     auto vacuum_reroot(Id old_id, Id new_id) -> void;
 

@@ -187,11 +187,10 @@ auto Schema::vacuum_finish() -> Status
     const auto missed_roots = m_reroot.size();
     m_reroot.clear();
 
-    if (s.is_ok() && missed_roots) {
-        std::string message("missing ");
+    if (s.is_ok() && missed_roots > 0) {
+        std::string message("missed ");
         append_number(message, missed_roots);
-        message.append(" root entr");
-        message.append(missed_roots == 1 ? "y" : "ies");
+        message.append(" table(s)");
         return Status::corruption(message);
     }
     return s;

@@ -38,8 +38,6 @@ class Page final
 {
     Pager *m_pager = nullptr;
     PageRef *m_ref = nullptr;
-    char *m_data = nullptr;
-    Id m_id;
     bool m_write = false;
 
 public:
@@ -49,9 +47,7 @@ public:
     explicit Page() = default;
     explicit Page(Pager &pager, PageRef &ref)
         : m_pager(&pager),
-          m_ref(&ref),
-          m_data(ref.page),
-          m_id(ref.page_id)
+          m_ref(&ref)
     {
     }
 
@@ -64,23 +60,22 @@ public:
 
     [[nodiscard]] auto id() const -> Id
     {
-        return m_id;
+        return m_ref->page_id;
     }
 
     [[nodiscard]] auto view() const -> Slice
     {
-        return {m_data, kPageSize};
+        return {m_ref->page, kPageSize};
     }
 
     [[nodiscard]] auto mutable_ptr() -> char *
     {
-        //        CALICODB_EXPECT_TRUE(m_write);
-        return m_data;
+        return m_ref->page;
     }
 
     [[nodiscard]] auto constant_ptr() const -> const char *
     {
-        return m_data;
+        return m_ref->page;
     }
 
     // Disable copies.

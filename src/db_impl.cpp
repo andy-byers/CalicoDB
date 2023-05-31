@@ -33,8 +33,9 @@ auto DBImpl::open(const Options &sanitized) -> Status
                 "database \"" + m_db_filename + "\" does not exist");
         }
         if (m_env->remove_file(m_wal_filename).is_ok()) {
-            logv(m_log, R"(removed old WAL file at "%s")", m_wal_filename.c_str());
+            log(m_log, R"(removed old WAL file "%s")", m_wal_filename.c_str());
         }
+        log(m_log, R"(creating missing database "%s")", m_db_filename.c_str());
         s = m_env->new_file(m_db_filename, Env::kCreate, file);
     }
     if (s.is_ok()) {
@@ -85,7 +86,7 @@ DBImpl::~DBImpl()
     if (m_pager) {
         const auto s = m_pager->close();
         if (!s.is_ok()) {
-            logv(m_log, "failed to close pager: %s", s.to_string().c_str());
+            log(m_log, "failed to close pager: %s", s.to_string().c_str());
         }
     }
     delete m_pager;
@@ -147,12 +148,14 @@ auto DBImpl::get_property(const Slice &name, std::string *out) const -> bool
             if (out != nullptr) {
                 append_fmt_string(
                     buffer,
-                    "Name          Value\n"
-                    "-------------------\n"
-                    "Pager I/O(MB) %8.4f/%8.4f\n"
-                    "WAL I/O(MB)   %8.4f/%8.4f\n"
-                    "Cache hits    %ld\n"
-                    "Cache misses  %ld\n",
+                    "Name            Value\n"
+                    "------------------------\n"
+                    "Pager read(MB)  %8.4f\n"
+                    "Pager write(MB) %8.4f\n"
+                    "WAL read(MB)    %8.4f\n"
+                    "WAL write(MB)   %8.4f\n"
+                    "Cache hits      %ld\n"
+                    "Cache misses    %ld\n",
                     static_cast<double>(m_pager->statistics().bytes_read) / 1'048'576.0,
                     static_cast<double>(m_pager->statistics().bytes_written) / 1'048'576.0,
                     static_cast<double>(m_pager->wal_statistics().bytes_read) / 1'048'576.0,
@@ -180,6 +183,7 @@ auto DBImpl::checkpoint(bool reset) -> Status
     if (m_tx) {
         return already_running_error(m_tx->m_write);
     }
+    log(m_log, "running%s checkpoint", reset ? " reset" : "");
     return m_pager->checkpoint(reset);
 }
 
