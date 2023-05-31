@@ -342,13 +342,13 @@ public:
         std::va_list args_copy;
         va_copy(args_copy, args);
         for (int i = 0; i < 2; ++i) {
-            const auto offset = std::snprintf(
+            const auto offset = static_cast<std::size_t>(std::snprintf(
                 p, L, "%04d/%02d/%02d-%02d:%02d:%02d.%06d ",
                 now_tm.tm_year + 1900, now_tm.tm_mon + 1,
                 now_tm.tm_mday, now_tm.tm_hour, now_tm.tm_min,
-                now_tm.tm_sec, static_cast<int>(now_tv.tv_usec));
-            const auto output_length = offset + attempt_fmt(
-                                                    p + offset, L - offset, true, fmt, args);
+                now_tm.tm_sec, static_cast<int>(now_tv.tv_usec)));
+            const auto rc = attempt_fmt(p + offset, L - offset, true, fmt, args);
+            const auto output_length = static_cast<std::size_t>(rc) + offset;
             if (output_length <= L) {
                 (void)posix_write(m_file, Slice(p, output_length));
                 break;
