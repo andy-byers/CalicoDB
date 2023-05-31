@@ -352,7 +352,8 @@ auto BlockAllocator::defragment(Node &node, int skip) -> void
             const auto cell = read_cell(node, index);
             end -= cell.size;
             std::memcpy(node.scratch + end, cell.ptr, cell.size);
-            put_u16(node.scratch + node.slots_offset + index * kPointerSize, end);
+            put_u16(node.scratch + node.slots_offset + index * kPointerSize,
+                    static_cast<U16>(end));
         }
     }
     std::memcpy(ptr, node.scratch, kPageSize);
@@ -2218,7 +2219,7 @@ auto InternalCursor::seek(const Slice &key) -> bool
             lower = mid + 1;
         }
     }
-    const auto shift = !m_node.header.is_external * exact;
+    const unsigned shift = !m_node.header.is_external * exact;
     history[level].index = lower + shift;
     return exact;
 }
