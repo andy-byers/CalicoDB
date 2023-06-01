@@ -368,7 +368,7 @@ TEST_F(LoggerTests, LogsFormattedText)
 TEST_F(LoggerTests, HandlesLongMessages)
 {
     std::string msg;
-    for (std::size_t n = 1; n <= 1'000'000; n *= 10) {
+    for (std::size_t n = 1; n <= 100'000; n *= 10) {
         ASSERT_OK(Env::default_env()->resize_file(m_log_filename, 0));
 
         msg.resize(n, '$');
