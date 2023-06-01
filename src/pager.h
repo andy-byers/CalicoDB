@@ -100,9 +100,11 @@ public:
     // NOTE: kNoCache and kDiscard are used to limit how much a routine will mess
     // up the cache. For example, overflow pages are released with kNoCache, so
     // when an overflow chain is traversed, the same page is reused for each link.
-    enum ReleaseAction { kKeep,
-                         kNoCache,
-                         kDiscard };
+    enum ReleaseAction {
+        kKeep,
+        kNoCache,
+        kDiscard,
+    };
 
     // Release a referenced page back to the pager
     // This routine is a NOOP if page was already released.

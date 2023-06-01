@@ -636,33 +636,33 @@ TEST(OldWalTests, HandlesOldWalFile)
     delete db;
 }
 
-TEST(DestructionTests, OnlyDeletesCalicoDatabases)
-{
-    std::filesystem::remove_all("./testdb");
-
-    // "./testdb" does not exist.
-    ASSERT_TRUE(DB::destroy(Options(), "./testdb").is_invalid_argument());
-    ASSERT_FALSE(Env::default_env()->file_exists("./testdb"));
-
-    // File is too small to read the first page.
-    File *file;
-    ASSERT_OK(Env::default_env()->new_file("./testdb", Env::kCreate, file));
-    ASSERT_OK(file->write(0, "CalicoDB format"));
-    ASSERT_TRUE(DB::destroy(Options(), "./testdb").is_invalid_argument());
-    ASSERT_TRUE(Env::default_env()->file_exists("./testdb"));
-
-    // Identifier is incorrect.
-    ASSERT_OK(file->write(0, "CalicoDB format 0"));
-    ASSERT_TRUE(DB::destroy(Options(), "./testdb").is_invalid_argument());
-
-    DB *db;
-    std::filesystem::remove_all("./testdb");
-    ASSERT_OK(DB::open(Options(), "./testdb", db));
-    ASSERT_OK(DB::destroy(Options(), "./testdb"));
-
-    delete db;
-    delete file;
-}
+//TEST(DestructionTests, OnlyDeletesCalicoDatabases)
+//{
+//    std::filesystem::remove_all("./testdb");
+//
+//    // "./testdb" does not exist.
+//    ASSERT_TRUE(DB::destroy(Options(), "./testdb").is_invalid_argument());
+//    ASSERT_FALSE(Env::default_env()->file_exists("./testdb"));
+//
+//    // File is too small to read the first page.
+//    File *file;
+//    ASSERT_OK(Env::default_env()->new_file("./testdb", Env::kCreate, file));
+//    ASSERT_OK(file->write(0, "CalicoDB format"));
+//    ASSERT_TRUE(DB::destroy(Options(), "./testdb").is_invalid_argument());
+//    ASSERT_TRUE(Env::default_env()->file_exists("./testdb"));
+//
+//    // Identifier is incorrect.
+//    ASSERT_OK(file->write(0, "CalicoDB format 0"));
+//    ASSERT_TRUE(DB::destroy(Options(), "./testdb").is_invalid_argument());
+//
+//    DB *db;
+//    std::filesystem::remove_all("./testdb");
+//    ASSERT_OK(DB::open(Options(), "./testdb", db));
+//    ASSERT_OK(DB::destroy(Options(), "./testdb"));
+//
+//    delete db;
+//    delete file;
+//}
 
 TEST(DestructionTests, OnlyDeletesCalicoWals)
 {

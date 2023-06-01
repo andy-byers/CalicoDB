@@ -118,7 +118,7 @@ Pager::~Pager()
 
 auto Pager::wal_statistics() const -> WalStatistics
 {
-    return m_wal ? m_wal->statistics() : WalStatistics{};
+    return m_wal ? m_wal->statistics() : WalStatistics();
 }
 
 auto Pager::open_wal() -> Status
