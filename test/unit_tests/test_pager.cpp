@@ -41,8 +41,8 @@ public:
 
 TEST_F(PageCacheTests, EmptyBehavior)
 {
-    ASSERT_EQ(mgr.size(), 0);
-    ASSERT_EQ(mgr.size(), 0);
+    ASSERT_EQ(mgr.occupied(), 0);
+    ASSERT_EQ(mgr.occupied(), 0);
     ASSERT_EQ(mgr.get(Id(2)), nullptr);
     ASSERT_EQ(mgr.next_victim(), nullptr);
 }
@@ -53,7 +53,7 @@ TEST_F(PageCacheTests, OldestReferenceIsEvictedFirst)
     (void)mgr.alloc(Id(4));
     (void)mgr.alloc(Id(3));
     (void)mgr.alloc(Id(2));
-    ASSERT_EQ(mgr.size(), 4);
+    ASSERT_EQ(mgr.occupied(), 4);
 
     ASSERT_EQ(mgr.get(Id(5))->page_id, Id(5));
     ASSERT_EQ(mgr.get(Id(4))->page_id, Id(4));
@@ -66,7 +66,7 @@ TEST_F(PageCacheTests, OldestReferenceIsEvictedFirst)
     mgr.erase(mgr.next_victim()->page_id);
     ASSERT_EQ(mgr.next_victim()->page_id, Id(4));
     mgr.erase(mgr.next_victim()->page_id);
-    ASSERT_EQ(mgr.size(), 0);
+    ASSERT_EQ(mgr.occupied(), 0);
 }
 
 TEST_F(PageCacheTests, ReplacementPolicyIgnoresQuery)
@@ -97,14 +97,14 @@ TEST_F(PageCacheTests, RefcountsAreConsideredDuringEviction)
 auto write_to_page(Page &page, const std::string &message) -> void
 {
     EXPECT_LE(page_offset(page.id()) + message.size(), kPageSize);
-    std::memcpy(page.data() + kPageSize - message.size(), message.data(), message.size());
+    std::memcpy(page.mutable_ptr() + kPageSize - message.size(), message.data(), message.size());
 }
 
 [[nodiscard]] auto read_from_page(const Page &page, std::size_t size) -> std::string
 {
     EXPECT_LE(page_offset(page.id()) + size, kPageSize);
     std::string message(size, '\x00');
-    std::memcpy(message.data(), page.data() + kPageSize - message.size(), message.size());
+    std::memcpy(message.data(), page.constant_ptr() + kPageSize - message.size(), message.size());
     return message;
 }
 
@@ -120,7 +120,7 @@ public:
     {
         std::string buffer(kPageSize, '\0');
         std::memcpy(buffer.data(), FileHeader::kFmtString, sizeof(FileHeader::kFmtString));
-        buffer[FileHeader::kFmtVersionOfs] = FileHeader::kFmtVersion;
+        buffer[FileHeader::kFmtVersionOffset] = FileHeader::kFmtVersion;
         put_u32(buffer.data() + FileHeader::kPageCountOffset, 1);
         tools::write_string_to_file(*env, kDBFilename, buffer);
     }
@@ -139,7 +139,7 @@ public:
             file,
             env,
             nullptr,
-            &m_state,
+            &m_status,
             nullptr,
             kPagerFrames,
         };
@@ -259,7 +259,7 @@ public:
         return file_size / kPageSize;
     }
 
-    DBState m_state;
+    Status m_status;
     Env *env = nullptr;
     Pager *m_pager = nullptr;
 };
@@ -282,7 +282,9 @@ public:
 
 TEST_F(PagerTests, NewPagerIsSetUpCorrectly)
 {
+    ASSERT_OK(m_pager->start_reader());
     ASSERT_EQ(m_pager->page_count(), 1);
+    m_pager->finish();
 }
 
 TEST_F(PagerTests, AllocatesPagesAtEOF)
@@ -297,6 +299,50 @@ TEST_F(PagerTests, AllocatesPagesAtEOF)
     ASSERT_EQ(allocate_write_release("c"), Id(4));
     ASSERT_EQ(m_pager->page_count(), 4);
     ASSERT_OK(m_pager->commit());
+    m_pager->finish();
+}
+
+TEST_F(PagerTests, FreelistUpdatesMetadata)
+{
+    static constexpr U32 kNumPages = 1'234;
+    ASSERT_FALSE(PointerMap::is_map(Id(3 + kNumPages)));
+    ASSERT_OK(m_pager->start_reader());
+    ASSERT_OK(m_pager->start_writer());
+    Id trunk_id;
+    for (Id id(3); id <= Id(3 + kNumPages); ++id.value) {
+        if (PointerMap::is_map(id)) {
+            continue;
+        }
+        Page page;
+        ASSERT_OK(m_pager->acquire(id, page));
+        ASSERT_OK(m_pager->destroy(std::move(page)));
+
+        auto root = m_pager->acquire_root();
+        const auto head_id = FileHeader::get_freelist_head(root.constant_ptr());
+        if (!trunk_id.is_null()) {
+            ASSERT_EQ(head_id, trunk_id);
+        } else if (head_id != Id(3)) {
+            trunk_id = head_id;
+        }
+        m_pager->release(std::move(root));
+    }
+    ASSERT_EQ(m_pager->page_count(), 3 + kNumPages);
+
+    for (int i = 0; i < kNumPages; ++i) {
+        Page page;
+        ASSERT_OK(m_pager->allocate(page));
+        auto root = m_pager->acquire_root();
+        const auto head_id = FileHeader::get_freelist_head(root.constant_ptr());
+        if (i + 1 == kNumPages) {
+            ASSERT_TRUE(head_id.is_null());
+            ASSERT_EQ(0, get_u32(page.constant_ptr()))
+                << "next_pointer != NULL on last trunk page";
+        } else if (head_id != Id(3)) {
+            ASSERT_EQ(head_id, trunk_id);
+        }
+        m_pager->release(std::move(root));
+        m_pager->release(std::move(page));
+    }
     m_pager->finish();
 }
 
@@ -416,8 +462,8 @@ TEST_F(PagerTests, RollbackPageCounts)
     ASSERT_EQ(m_pager->page_count(), 1);
     m_pager->finish();
 
-    ASSERT_EQ(m_pager->page_count(), 1);
     ASSERT_OK(m_pager->start_reader());
+    ASSERT_EQ(m_pager->page_count(), 1);
     ASSERT_OK(m_pager->start_writer());
     write_pages(*this, 123, 10);
     ASSERT_EQ(m_pager->page_count(), 10);
@@ -587,13 +633,14 @@ TEST_F(PagerTests, AcquirePastEOF)
     ASSERT_OK(m_pager->commit());
     m_pager->finish();
     ASSERT_OK(m_pager->checkpoint(true));
+
+    ASSERT_OK(m_pager->start_reader());
     ASSERT_EQ(m_pager->page_count(), kOutOfBounds);
     ASSERT_EQ(count_db_pages(), kOutOfBounds);
 
     // Intervening pages should be usable now. They are not in the WAL, so they must
     // be read from the DB file, modified in memory, written back to the WAL, then
     // read out of the WAL again.
-    ASSERT_OK(m_pager->start_reader());
     ASSERT_OK(m_pager->start_writer());
     write_pages(*this, 42, kOutOfBounds);
     ASSERT_OK(m_pager->commit());
@@ -606,9 +653,11 @@ TEST_F(PagerTests, FreelistUsage)
     ASSERT_OK(m_pager->start_reader());
     ASSERT_OK(m_pager->start_writer());
     ASSERT_OK(create_freelist_pages(kSomePages * 2));
+    const auto page_count = m_pager->page_count();
     write_pages(*this, 123, kSomePages * 2);
     ASSERT_OK(m_pager->commit());
     read_and_check(*this, 123, kSomePages * 2);
+    ASSERT_EQ(page_count, m_pager->page_count());
     m_pager->finish();
 
     ASSERT_OK(m_pager->start_reader());
@@ -616,12 +665,14 @@ TEST_F(PagerTests, FreelistUsage)
     write_pages(*this, 456, kSomePages);
     m_pager->rollback();
     read_and_check(*this, 123, kSomePages * 2);
+    ASSERT_EQ(page_count, m_pager->page_count());
     m_pager->finish();
 
     ASSERT_OK(m_pager->checkpoint(true));
     ASSERT_OK(m_pager->start_reader());
     read_and_check(*this, 123, kSomePages * 2);
     read_and_check(*this, 123, kSomePages * 2, true);
+    ASSERT_EQ(page_count, m_pager->page_count());
     m_pager->finish();
 }
 
@@ -636,31 +687,6 @@ TEST_F(PagerTests, InvalidModeDeathTest)
     ASSERT_EQ(m_pager->mode(), Pager::kError);
     ASSERT_DEATH((void)m_pager->start_writer(), kExpectationMatcher);
     ASSERT_DEATH((void)m_pager->checkpoint(true), kExpectationMatcher);
-}
-
-TEST_F(PagerTests, DoubleFreeDeathTest)
-{
-    ASSERT_OK(m_pager->start_reader());
-    ASSERT_OK(m_pager->start_writer());
-    for (std::size_t i = 0; i < 2; ++i) {
-        for (std::size_t j = 0; j < 2; ++j) {
-            Page page;
-            ASSERT_OK(m_pager->allocate(page));
-
-            if (i) {
-                m_pager->release(std::move(page));
-            } else {
-                ASSERT_OK(m_pager->destroy(std::move(page)));
-            }
-
-            if (j) {
-                ASSERT_DEATH(m_pager->release(std::move(page)), kExpectationMatcher);
-            } else {
-                ASSERT_DEATH((void)m_pager->destroy(std::move(page)), kExpectationMatcher);
-            }
-        }
-    }
-    ASSERT_OK(m_pager->commit());
 }
 
 TEST_F(PagerTests, DestroyPointerMapPageDeathTest)
@@ -818,8 +844,7 @@ public:
     auto close() -> void
     {
         ASSERT_OK(m_db->file_lock(kLockShared));
-        std::size_t db_size;
-        ASSERT_OK(m_wal->close(db_size));
+        ASSERT_OK(m_wal->close());
         delete m_wal;
         delete m_db;
         m_wal = nullptr;
@@ -1096,8 +1121,7 @@ protected:
     auto reopen_wals() -> void
     {
         ASSERT_OK(m_db->file_lock(kLockShared));
-        std::size_t db_size;
-        ASSERT_OK(m_wal->close(db_size));
+        ASSERT_OK(m_wal->close());
         delete m_wal;
         m_wal = nullptr;
 

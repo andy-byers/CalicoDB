@@ -26,7 +26,6 @@ public:
 
     enum SubCode : char {
         kNone,
-        kReadonly,
         kRetry,
         kMaxSubCode
     };
@@ -34,7 +33,10 @@ public:
     // Construct an OK status
     explicit Status() = default;
 
-    ~Status();
+    ~Status()
+    {
+        delete[] m_state;
+    }
 
     // Create an OK status
     static auto ok() -> Status
@@ -111,10 +113,6 @@ public:
     {
         return Status(kBusy, kRetry);
     }
-    [[nodiscard]] static auto readonly() -> Status
-    {
-        return Status(kNotSupported, kReadonly);
-    }
 
     [[nodiscard]] auto is_invalid_argument() const -> bool
     {
@@ -144,13 +142,18 @@ public:
     {
         return m_code == kBusy && m_subc == kRetry;
     }
-    [[nodiscard]] auto is_readonly() const -> bool
-    {
-        return m_code == kNotSupported && m_subc == kReadonly;
-    }
 
     // Convert the status to a printable string.
     [[nodiscard]] auto to_string() const -> std::string;
+
+    auto operator==(const Status &rhs) const -> bool
+    {
+        return m_code == rhs.m_code;
+    }
+    auto operator!=(const Status &rhs) const -> bool
+    {
+        return !(*this == rhs);
+    }
 
     // Status can be copied and moved.
     Status(const Status &rhs);

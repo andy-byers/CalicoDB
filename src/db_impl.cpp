@@ -7,7 +7,7 @@
 #include "encoding.h"
 #include "logging.h"
 #include "scope_guard.h"
-#include "txn_impl.h"
+#include "tx_impl.h"
 
 namespace calicodb
 {
@@ -33,8 +33,9 @@ auto DBImpl::open(const Options &sanitized) -> Status
                 "database \"" + m_db_filename + "\" does not exist");
         }
         if (m_env->remove_file(m_wal_filename).is_ok()) {
-            logv(m_log, R"(removed old WAL file at "%s")", m_wal_filename.c_str());
+            log(m_log, R"(removed old WAL file "%s")", m_wal_filename.c_str());
         }
+        log(m_log, R"(creating missing database "%s")", m_db_filename.c_str());
         s = m_env->new_file(m_db_filename, Env::kCreate, file);
     }
     if (s.is_ok()) {
@@ -45,18 +46,15 @@ auto DBImpl::open(const Options &sanitized) -> Status
     if (!s.is_ok()) {
         return s;
     }
-    const auto cache_size = std::max(
-        sanitized.cache_size, kMinFrameCount * kPageSize);
-
     const Pager::Parameters pager_param = {
         m_db_filename.c_str(),
         m_wal_filename.c_str(),
         file,
         m_env,
         m_log,
-        &m_state,
+        &m_status,
         m_busy,
-        (cache_size + kPageSize - 1) / kPageSize,
+        (sanitized.cache_size + kPageSize - 1) / kPageSize,
         sanitized.sync,
     };
     m_pager = new Pager(pager_param);
@@ -88,7 +86,7 @@ DBImpl::~DBImpl()
     if (m_pager) {
         const auto s = m_pager->close();
         if (!s.is_ok()) {
-            logv(m_log, "failed to close pager: %s", s.to_string().c_str());
+            log(m_log, "failed to close pager: %s", s.to_string().c_str());
         }
     }
     delete m_pager;
@@ -105,7 +103,7 @@ auto DBImpl::destroy(const Options &options, const std::string &filename) -> Sta
     copy.create_if_missing = false;
 
     DB *db;
-    Txn *tx;
+    const Tx *tx;
 
     // Determine the WAL filename, and make sure `filename` refers to a CalicoDB
     // database. The file identifier is not checked until a transaction is started.
@@ -113,7 +111,7 @@ auto DBImpl::destroy(const Options &options, const std::string &filename) -> Sta
     auto s = DB::open(copy, filename, db);
     if (s.is_ok()) {
         wal_name = db_impl(db)->m_wal_filename;
-        s = db->new_txn(false, tx);
+        s = db->new_tx(tx);
         if (s.is_ok()) {
             delete tx;
         }
@@ -150,12 +148,14 @@ auto DBImpl::get_property(const Slice &name, std::string *out) const -> bool
             if (out != nullptr) {
                 append_fmt_string(
                     buffer,
-                    "Name          Value\n"
-                    "-------------------\n"
-                    "Pager I/O(MB) %8.4f/%8.4f\n"
-                    "WAL I/O(MB)   %8.4f/%8.4f\n"
-                    "Cache hits    %ld\n"
-                    "Cache misses  %ld\n",
+                    "Name               Value\n"
+                    "------------------------\n"
+                    "Pager read(MB)  %8.4f\n"
+                    "Pager write(MB) %8.4f\n"
+                    "WAL read(MB)    %8.4f\n"
+                    "WAL write(MB)   %8.4f\n"
+                    "Cache hits      %8d\n"
+                    "Cache misses    %8d\n",
                     static_cast<double>(m_pager->statistics().bytes_read) / 1'048'576.0,
                     static_cast<double>(m_pager->statistics().bytes_written) / 1'048'576.0,
                     static_cast<double>(m_pager->wal_statistics().bytes_read) / 1'048'576.0,
@@ -170,32 +170,31 @@ auto DBImpl::get_property(const Slice &name, std::string *out) const -> bool
     return false;
 }
 
-static auto already_running_error(bool write) -> Status
+static auto already_running_error() -> Status
 {
-    std::string message("a transaction (read");
-    message.append(write ? "-write" : "only");
-    message.append(") is running");
-    return Status::not_supported(message);
+    return Status::not_supported("transaction is already running");
 }
 
 auto DBImpl::checkpoint(bool reset) -> Status
 {
     if (m_tx) {
-        return already_running_error(m_tx->m_write);
+        return already_running_error();
     }
+    log(m_log, "running%s checkpoint", reset ? " reset" : "");
     return m_pager->checkpoint(reset);
 }
 
-auto DBImpl::new_txn(bool write, Txn *&out) -> Status
+template <class TxType>
+auto DBImpl::prepare_tx(bool write, TxType *&tx_out) const -> Status
 {
-    out = nullptr;
+    tx_out = nullptr;
     if (m_tx) {
-        return already_running_error(m_tx->m_write);
+        return already_running_error();
     }
 
     // Forward error statuses. If an error is set at this point, then something
     // has gone very wrong.
-    auto s = m_state.status;
+    auto s = m_status;
     if (!s.is_ok()) {
         return s;
     }
@@ -204,23 +203,28 @@ auto DBImpl::new_txn(bool write, Txn *&out) -> Status
         s = m_pager->start_writer();
     }
     if (s.is_ok()) {
-        m_tx = new TxnImpl(*m_pager, m_state.status, write);
+        m_tx = new TxImpl(*m_pager, m_status);
         m_tx->m_backref = &m_tx;
-        out = m_tx;
+        tx_out = m_tx;
     } else {
         m_pager->finish();
     }
     return s;
 }
 
+auto DBImpl::new_tx(WriteTag, Tx *&tx_out) -> Status
+{
+    return prepare_tx(true, tx_out);
+}
+
+auto DBImpl::new_tx(const Tx *&tx_out) const -> Status
+{
+    return prepare_tx(false, tx_out);
+}
+
 auto DBImpl::TEST_pager() const -> const Pager &
 {
     return *m_pager;
-}
-
-auto DBImpl::TEST_state() const -> const DBState &
-{
-    return m_state;
 }
 
 } // namespace calicodb

@@ -5,7 +5,7 @@
 > I'm open to comments/criticism/pull requests though, as I want to make CalicoDB a useful library eventually!
 
 > **Note**: I've been messing with this library for a while now, and I think it's finally coming together design-wise!
-> We have transactions, tables, cursors, vacuum, and multiversion concurrency control (MVCC).
+> We have transactions, buckets, cursors, vacuum, and multiversion concurrency control (MVCC).
 > This branch (develop) is intended for working on testing and getting the MVCC to work.
 > I'll merge it back into main intermittently so that changes are visible, but some concurrency-related things will likely be broken for a while.
 
@@ -29,10 +29,10 @@ It is intended for read-heavy embedded applications.
 + [Contributions](#contributions)
 
 ## Features
-+ Records are stored in tables, each with an independent range of keys
-+ All tables are stored in the same file, similar to the SQLite database file format
++ Records are stored in buckets, each with an independent range of keys
++ All buckets are stored in the same file, similar to the SQLite database file format
 + Supports multiple readers and a single writer simultaneously
-+ Per-table bidirectional iteration using cursors
++ Per-buckets bidirectional iteration using cursors
 + Crash protection via write-ahead logging
 + Live defragmentation is supported
 
@@ -60,9 +60,6 @@ Performance benchmarks can be found [here](test/benchmarks).
 3. Modify the tree to not use sibling pointers, or at least don't keep a left sibling pointer
    + Causes extra pages to be written to the WAL during splits
 4. Look into writing a more involved balancing routine
-5. Better freelist that 2 types of pages: leaf and trunk pages
-   + Leaf pages contain no data and don't have to be written to the WAL
-   + Trunk pages contain the page IDs of many leaf pages
 
 ## Documentation
 Check out CalicoDB's [usage and design documents](doc).

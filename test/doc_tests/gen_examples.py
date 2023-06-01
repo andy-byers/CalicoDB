@@ -3,7 +3,6 @@
 
 import argparse
 import re
-import sys
 
 # Regular expression for extracting the language type and text from a single code block in
 # a .md file. This seems to be the format that code must be in to display properly.
@@ -14,7 +13,7 @@ def main():
     parser = argparse.ArgumentParser(description='Extract C++ example code from a markdown file.')
     parser.add_argument('input', type=str, help='Name of a markdown file to process')
     parser.add_argument('output', type=str, help='Name of the generated source file')
-    args = parser.parse_args(sys.argv[1:])
+    args = parser.parse_args()
 
     with open(args.input, 'r') as f:
         code = CODE_BLOCK_RE.findall(f.read())

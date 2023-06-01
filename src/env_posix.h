@@ -19,7 +19,7 @@ public:
     explicit PosixEnv();
     ~PosixEnv() override = default;
 
-    [[nodiscard]] auto new_sink(const std::string &filename, Sink *&out) -> Status override;
+    [[nodiscard]] auto new_logger(const std::string &filename, Logger *&out) -> Status override;
     [[nodiscard]] auto new_file(const std::string &filename, OpenMode mode, File *&out) -> Status override;
     [[nodiscard]] auto file_exists(const std::string &filename) const -> bool override;
     [[nodiscard]] auto remove_file(const std::string &filename) -> Status override;

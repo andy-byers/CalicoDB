@@ -116,7 +116,7 @@ public:
         const char *db_name;
         Env *env;
         File *db_file;
-        Sink *info_log;
+        Logger *info_log;
         BusyHandler *busy;
         bool sync;
     };
@@ -125,7 +125,7 @@ public:
 
     // Open or create a WAL file called "filename".
     [[nodiscard]] static auto open(const Parameters &param, Wal *&out) -> Status;
-    [[nodiscard]] virtual auto close(std::size_t &db_size) -> Status = 0;
+    [[nodiscard]] virtual auto close() -> Status = 0;
 
     // Write as much of the WAL back to the DB as possible
     [[nodiscard]] virtual auto checkpoint(bool reset) -> Status = 0;
@@ -153,7 +153,7 @@ public:
     // READER -> UNLOCKED
     virtual auto finish_reader() -> void = 0;
 
-    [[nodiscard]] virtual auto statistics() const -> WalStatistics = 0;
+    [[nodiscard]] virtual auto statistics() const -> const WalStatistics & = 0;
 };
 
 template <class Callback>

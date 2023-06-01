@@ -28,11 +28,6 @@ Bufmgr::~Bufmgr()
     operator delete[](m_buffer, std::align_val_t{kPageSize});
 }
 
-auto Bufmgr::size() const -> std::size_t
-{
-    return m_map.size();
-}
-
 auto Bufmgr::query(Id page_id) -> PageRef *
 {
     auto itr = m_map.find(page_id);
@@ -55,11 +50,6 @@ auto Bufmgr::get(Id page_id) -> PageRef *
     return &*itr->second;
 }
 
-auto Bufmgr::root() -> PageRef *
-{
-    return &m_root;
-}
-
 auto Bufmgr::alloc(Id page_id) -> PageRef *
 {
     // The root page is already in a buffer slot. Use root() to get a reference.
@@ -80,6 +70,7 @@ auto Bufmgr::erase(Id page_id) -> bool
     }
     // Root page is not stored in the cache.
     CALICODB_EXPECT_FALSE(page_id.is_root());
+    CALICODB_EXPECT_EQ(0, itr->second->refcount);
     unpin(*itr->second);
     m_list.erase(itr->second);
     m_map.erase(itr);
@@ -136,27 +127,11 @@ auto Bufmgr::ref(PageRef &ref) -> void
 auto Bufmgr::unref(PageRef &ref) -> void
 {
     CALICODB_EXPECT_FALSE(ref.page_id.is_null());
-    CALICODB_EXPECT_NE(ref.refcount, 0);
-    CALICODB_EXPECT_NE(m_refsum, 0);
+    CALICODB_EXPECT_LT(0, ref.refcount);
+    CALICODB_EXPECT_LT(0, m_refsum);
 
     --ref.refcount;
     --m_refsum;
-}
-
-auto Bufmgr::buffer_slot(std::size_t index) -> char *
-{
-    CALICODB_EXPECT_LT(index, m_frame_count);
-    return m_buffer + index * kPageSize;
-}
-
-auto Bufmgr::hits() const -> U64
-{
-    return m_hits;
-}
-
-auto Bufmgr::misses() const -> U64
-{
-    return m_misses;
 }
 
 auto Dirtylist::remove(PageRef &ref) -> PageRef *

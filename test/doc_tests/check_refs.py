@@ -4,10 +4,8 @@
 import argparse
 from os import path
 import re
-import sys
 
-# INTERNAL_REF_RE = re.compile(r'\[[^\[\]]+]\(#([\w_-]+)\)')
-EXTERNAL_REF_RE = re.compile(r'\[[^\[\]]+]\(([./\w_-]+)?(?:#([\w_-]+))?\)')
+REFERENCE_RE = re.compile(r'\[[^\[\]]+]\(([./\w_-]+)?(?:#([\w_-]+))?\)')
 HEADING_RE = re.compile(r'^##+\s+([\w\s_-]+)\s*$', re.MULTILINE)
 
 
@@ -16,7 +14,7 @@ def parse_md(filename):
         content = f.read()
     heading_as_text = HEADING_RE.findall(content)
     heading_as_refs = set('-'.join(t.lower().split()) for t in heading_as_text)
-    references = EXTERNAL_REF_RE.findall(content)
+    references = REFERENCE_RE.findall(content)
     prefix = path.dirname(filename)
     for i, (eref, iref) in enumerate(references):
         references[i] = path.join(prefix, eref if eref else filename), iref
@@ -41,7 +39,7 @@ def check_md(filename, info):
 def main():
     parser = argparse.ArgumentParser(description='Check markdown file references.')
     parser.add_argument('input', type=str, nargs='+', help='Names of markdown files to check')
-    args = parser.parse_args(sys.argv[1:])
+    args = parser.parse_args()
     info = {fname: parse_md(fname) for fname in args.input}
     for filename in info:
         check_md(filename, info)

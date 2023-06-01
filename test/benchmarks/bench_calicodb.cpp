@@ -6,11 +6,10 @@
 #include "tools.h"
 #include <benchmark/benchmark.h>
 
-// This simulates normal transaction behavior, where m_txn is destroyed and DB::new_txn() is called after
+// This simulates normal transaction behavior, where m_tx is destroyed and DB::new_tx() is called after
 // each commit. This is what happens if the DB::view()/DB::update() API is used. It's much faster to keep
-// the transaction object around and just call Txn::commit() and Txn::rollback() as needed, but this is
+// the transaction object around and just call Tx::commit() and Tx::rollback() as needed, but this is
 // bad for concurrency.
-//
 // NOTE: I'm also adding a checkpoint call right before the restart, to be run once every 1'000 restarts.
 #define RESTART_ON_COMMIT 1
 
@@ -37,31 +36,60 @@ struct Parameters {
 
 class Benchmark final
 {
-    static constexpr auto kFilename = "__bench_db__";
-    static constexpr std::size_t kKeyLength = 16;
-    static constexpr std::size_t kNumRecords = 10'000;
-    calicodb::Table *m_table;
-    calicodb::Txn *m_txn;
-
 public:
     explicit Benchmark(const Parameters &param = {})
-        : m_param(param)
+        : m_param(param),
+          m_random(4'194'304)
     {
-        m_options.env = calicodb::Env::default_env();
-        m_options.cache_size = 4'194'304;
+        (void)calicodb::DB::destroy(m_options, kFilename);
         m_options.sync = param.sync;
+        m_options.error_if_exists = true;
         CHECK_OK(calicodb::DB::open(m_options, kFilename, m_db));
-        CHECK_OK(m_db->new_txn(true, m_txn));
-        CHECK_OK(m_txn->create_table(calicodb::TableOptions(), "bench", &m_table));
+        CHECK_OK(m_db->update([](auto &tx) {
+            // Make sure this bucket always exists for readers to open.
+            return tx.create_bucket(calicodb::BucketOptions(), "bench", nullptr);
+        }));
     }
 
     ~Benchmark()
     {
         delete m_cursor;
-        delete m_txn;
+        delete m_rd;
+        delete m_wr;
         delete m_db;
 
-        CHECK_OK(calicodb::DB::destroy(m_options, kFilename));
+        (void)calicodb::DB::destroy(m_options, kFilename);
+    }
+
+    using InitOptions = unsigned;
+    static constexpr InitOptions kPrefill = 1;
+    static constexpr InitOptions kWriter = 2;
+    auto init(InitOptions opt) -> void
+    {
+        if (opt & kPrefill) {
+            CHECK_OK(m_db->update([this](auto &tx) {
+                calicodb::Bucket b;
+                auto s = tx.open_bucket("bench", b);
+                for (std::size_t i = 0; s.is_ok() && i < kNumRecords; ++i) {
+                    s = tx.put(b, calicodb::tools::integral_key<kKeyLength>(i),
+                               m_random.Generate(m_param.value_length));
+                }
+                return s;
+            }));
+        }
+
+        if (opt & kWriter) {
+            CHECK_OK(m_db->new_tx(calicodb::WriteTag{}, m_wr));
+        } else {
+            CHECK_OK(m_db->new_tx(m_rd));
+        }
+        CHECK_OK(current_tx().open_bucket("bench", m_bucket));
+        m_cursor = current_tx().new_cursor(m_bucket);
+    }
+
+    auto current_tx() const -> const calicodb::Tx &
+    {
+        return m_rd ? *m_rd : *m_wr;
     }
 
     auto read(benchmark::State &state, std::string *out) -> void
@@ -74,7 +102,7 @@ public:
         }
         state.ResumeTiming();
 
-        CHECK_OK(m_table->get(key, out));
+        CHECK_OK(m_rd->get(m_bucket, key, out));
         benchmark::DoNotOptimize(out);
 
         increment_counters();
@@ -87,7 +115,7 @@ public:
         const auto value = m_random.Generate(m_param.value_length);
         state.ResumeTiming();
 
-        CHECK_OK(m_table->put(key, value));
+        CHECK_OK(m_wr->put(m_bucket, key, value));
         maybe_commit();
         increment_counters();
     }
@@ -103,10 +131,10 @@ public:
 
         if (is_read) {
             std::string result;
-            CHECK_OK(m_table->get(key, &result));
+            CHECK_OK(m_wr->get(m_bucket, key, &result));
             benchmark::DoNotOptimize(result);
         } else {
-            CHECK_OK(m_table->put(key, value));
+            CHECK_OK(m_wr->put(m_bucket, key, value));
             maybe_commit();
         }
         increment_counters();
@@ -147,15 +175,28 @@ public:
         increment_counters();
     }
 
-    auto add_initial_records() -> void
+    auto vacuum(benchmark::State &state, std::size_t upper_size) -> void
     {
-        for (std::size_t i = 0; i < kNumRecords; ++i) {
-            CHECK_OK(m_table->put(
+        state.PauseTiming();
+        const auto lower_size = upper_size * state.range(0) / 10;
+        CALICODB_EXPECT_LE(lower_size, upper_size);
+        for (std::size_t i = 0; i < upper_size; ++i) {
+            CHECK_OK(m_wr->put(
+                m_bucket,
                 calicodb::tools::integral_key<kKeyLength>(i),
                 m_random.Generate(m_param.value_length)));
         }
-        CHECK_OK(m_txn->commit());
-        m_cursor = m_table->new_cursor();
+        for (auto i = lower_size; i < upper_size; ++i) {
+            CHECK_OK(m_wr->erase(
+                m_bucket,
+                calicodb::tools::integral_key<kKeyLength>(i)));
+        }
+        state.ResumeTiming();
+
+        CHECK_OK(m_wr->vacuum());
+        CHECK_OK(m_wr->commit());
+        restart_tx();
+        increment_counters();
     }
 
 private:
@@ -172,21 +213,21 @@ private:
     auto maybe_commit() -> void
     {
         if (m_counters[0] % m_param.commit_interval == m_param.commit_interval - 1) {
-            CHECK_OK(m_txn->commit());
+            CHECK_OK(m_wr->commit());
 #if RESTART_ON_COMMIT
-            restart_txn();
+            restart_tx();
 #endif
         }
     }
 
-    auto restart_txn() -> void
+    auto restart_tx() -> void
     {
-        delete m_txn;
+        delete m_wr;
         if (m_counters[0] % 1'000 == 999) {
             CHECK_OK(m_db->checkpoint(true));
         }
-        CHECK_OK(m_db->new_txn(true, m_txn));
-        CHECK_OK(m_txn->create_table(calicodb::TableOptions(), "bench", &m_table));
+        CHECK_OK(m_db->new_tx(calicodb::WriteTag{}, m_wr));
+        CHECK_OK(m_wr->open_bucket("bench", m_bucket));
     }
 
     auto increment_counters() -> void
@@ -208,9 +249,15 @@ private:
             is_sequential ? n : m_random.Next(m));
     }
 
+    static constexpr auto kFilename = "__bench_db__";
+    static constexpr std::size_t kKeyLength = 16;
+    static constexpr std::size_t kNumRecords = 10'000;
+    const calicodb::Tx *m_rd = nullptr;
+    calicodb::Tx *m_wr = nullptr;
+    calicodb::Bucket m_bucket;
     Parameters m_param;
     std::size_t m_counters[2] = {};
-    calicodb::tools::RandomGenerator m_random{4'194'304};
+    calicodb::tools::RandomGenerator m_random;
     calicodb::Options m_options;
     calicodb::Cursor *m_cursor = nullptr;
     calicodb::DB *m_db = nullptr;
@@ -234,6 +281,7 @@ static auto BM_Write(benchmark::State &state) -> void
     param.sync = state.range(3);
 
     Benchmark bench(param);
+    bench.init(Benchmark::kWriter);
     for (auto _ : state) {
         bench.write(state);
     }
@@ -257,7 +305,7 @@ static auto BM_Overwrite(benchmark::State &state) -> void
     param.sync = state.range(3);
 
     Benchmark bench(param);
-    bench.add_initial_records();
+    bench.init(Benchmark::kWriter | Benchmark::kPrefill);
     for (auto _ : state) {
         bench.write(state);
     }
@@ -272,12 +320,36 @@ BENCHMARK(BM_Overwrite)
     ->Args({kSequential, true, 1'000, true})
     ->Args({kRandom, true, 1'000, true});
 
+static auto BM_Vacuum(benchmark::State &state) -> void
+{
+    static constexpr std::size_t kUpperSize = 1'000;
+    std::string label("Vacuum");
+    if (state.range(0) == 1) {
+        label.append("Few");
+    } else if (state.range(0) == 5) {
+        label.append("Half");
+    } else if (state.range(0) == 10) {
+        label.append("All");
+    }
+    state.SetLabel(label);
+
+    Benchmark bench(Parameters{});
+    bench.init(Benchmark::kWriter);
+    for (auto _ : state) {
+        bench.vacuum(state, kUpperSize);
+    }
+}
+BENCHMARK(BM_Vacuum)
+    ->Args({1})
+    ->Args({5})
+    ->Args({10});
+
 static auto BM_Exists(benchmark::State &state) -> void
 {
     state.SetLabel("Exists" + access_type_name(state.range(0)));
 
     Benchmark bench;
-    bench.add_initial_records();
+    bench.init(Benchmark::kPrefill);
     for (auto _ : state) {
         bench.read(state, nullptr);
     }
@@ -292,7 +364,7 @@ static auto BM_Read(benchmark::State &state) -> void
     std::string value;
 
     Benchmark bench;
-    bench.add_initial_records();
+    bench.init(Benchmark::kPrefill);
     for (auto _ : state) {
         bench.read(state, &value);
         benchmark::DoNotOptimize(value);
@@ -308,7 +380,7 @@ static auto BM_ReadWrite(benchmark::State &state) -> void
     state.SetLabel(label + calicodb::number_to_string(state.range(1)));
 
     Benchmark bench;
-    bench.add_initial_records();
+    bench.init(Benchmark::kWriter | Benchmark::kPrefill);
     for (auto _ : state) {
         bench.read_write(state);
     }
@@ -324,7 +396,7 @@ BENCHMARK(BM_ReadWrite)
 static auto BM_IterateForward(benchmark::State &state) -> void
 {
     Benchmark bench;
-    bench.add_initial_records();
+    bench.init(Benchmark::kPrefill);
     for (auto _ : state) {
         bench.step_forward(state);
     }
@@ -334,7 +406,7 @@ BENCHMARK(BM_IterateForward);
 static auto BM_IterateBackward(benchmark::State &state) -> void
 {
     Benchmark bench;
-    bench.add_initial_records();
+    bench.init(Benchmark::kPrefill);
     for (auto _ : state) {
         bench.step_backward(state);
     }
@@ -346,7 +418,7 @@ static auto BM_Seek(benchmark::State &state) -> void
     state.SetLabel("Seek" + access_type_name(state.range(0)));
 
     Benchmark bench;
-    bench.add_initial_records();
+    bench.init(Benchmark::kPrefill);
     for (auto _ : state) {
         bench.seek(state);
     }
@@ -360,6 +432,7 @@ static auto BM_Write100K(benchmark::State &state) -> void
     state.SetLabel("Write" + access_type_name(state.range(0)) + "100K");
 
     Benchmark bench{{.value_length = 100'000}};
+    bench.init(Benchmark::kWriter);
     for (auto _ : state) {
         bench.write(state);
     }
@@ -374,7 +447,7 @@ static auto BM_Read100K(benchmark::State &state) -> void
     std::string value;
 
     Benchmark bench{{.value_length = 100'000}};
-    bench.add_initial_records();
+    bench.init(Benchmark::kPrefill);
     for (auto _ : state) {
         bench.read(state, &value);
         benchmark::DoNotOptimize(value);
@@ -389,7 +462,7 @@ static auto BM_Exists100K(benchmark::State &state) -> void
     state.SetLabel("Exists" + access_type_name(state.range(0)) + "100K");
 
     Benchmark bench{{.value_length = 100'000}};
-    bench.add_initial_records();
+    bench.init(Benchmark::kPrefill);
     for (auto _ : state) {
         bench.read(state, nullptr);
     }

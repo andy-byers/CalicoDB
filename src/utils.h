@@ -5,6 +5,7 @@
 #ifndef CALICODB_UTILS_H
 #define CALICODB_UTILS_H
 
+#include "calicodb/options.h"
 #include "calicodb/status.h"
 #include <cstdint>
 #include <cstdio>

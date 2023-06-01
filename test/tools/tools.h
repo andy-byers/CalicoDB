@@ -10,7 +10,7 @@
 #include "db_impl.h"
 #include "env_posix.h"
 #include "logging.h"
-#include "txn_impl.h"
+#include "tx_impl.h"
 #include <atomic>
 #include <climits>
 #include <cstdarg>
@@ -111,14 +111,15 @@ public:
     {
     }
 
-    [[nodiscard]] auto close(std::size_t &) -> Status override
+    [[nodiscard]] auto close() -> Status override
     {
         return Status::ok();
     }
 
-    [[nodiscard]] auto statistics() const -> WalStatistics override
+    [[nodiscard]] auto statistics() const -> const WalStatistics & override
     {
-        return {};
+        static const WalStatistics stats = {};
+        return stats;
     }
 };
 
@@ -137,13 +138,18 @@ public:
     [[nodiscard]] auto read(Id page_id, char *&out) -> Status override;
     [[nodiscard]] auto write(PageRef *dirty, std::size_t db_size) -> Status override;
     [[nodiscard]] auto checkpoint(bool) -> Status override;
-    [[nodiscard]] auto statistics() const -> WalStatistics override;
-    [[nodiscard]] auto close(std::size_t &) -> Status override;
+    [[nodiscard]] auto close() -> Status override;
     [[nodiscard]] auto start_reader(bool &) -> Status override { return Status::ok(); }
     [[nodiscard]] auto start_writer() -> Status override { return Status::ok(); }
     auto finish_reader() -> void override {}
     auto finish_writer() -> void override {}
     auto rollback() -> void override;
+
+    [[nodiscard]] auto statistics() const -> const WalStatistics & override
+    {
+        static const WalStatistics stats = {};
+        return stats;
+    }
 };
 
 template <std::size_t Length = 12>
@@ -221,19 +227,19 @@ struct DatabaseCounts {
     return counts;
 }
 
-auto print_references(Pager &pager) -> void;
+auto print_database_overview(std::ostream &os, Pager &pager) -> void;
 auto print_wals(Env &env, std::size_t page_size, const std::string &prefix) -> void;
 auto hexdump_page(const Page &page) -> void;
 
 auto read_file_to_string(Env &env, const std::string &filename) -> std::string;
 auto write_string_to_file(Env &env, const std::string &filename, const std::string &buffer, long offset = -1) -> void;
 auto assign_file_contents(Env &env, const std::string &filename, const std::string &contents) -> void;
-auto fill_db(DB &db, const std::string &tablename, RandomGenerator &random, std::size_t num_records, std::size_t max_payload_size = 100) -> std::map<std::string, std::string>;
-auto fill_db(Txn &txn, const std::string &tablename, RandomGenerator &random, std::size_t num_records, std::size_t max_payload_size = 100) -> std::map<std::string, std::string>;
-auto fill_db(Table &table, RandomGenerator &random, std::size_t num_records, std::size_t max_payload_size = 100) -> std::map<std::string, std::string>;
-auto expect_db_contains(DB &db, const std::string &tablename, const std::map<std::string, std::string> &map) -> void;
-auto expect_db_contains(Txn &txn, const std::string &tablename, const std::map<std::string, std::string> &map) -> void;
-auto expect_db_contains(const Table &table, const std::map<std::string, std::string> &map) -> void;
+auto fill_db(DB &db, const std::string &bname, RandomGenerator &random, std::size_t num_records, std::size_t max_payload_size = 100) -> std::map<std::string, std::string>;
+auto fill_db(Tx &tx, const std::string &bname, RandomGenerator &random, std::size_t num_records, std::size_t max_payload_size = 100) -> std::map<std::string, std::string>;
+auto fill_db(Tx &tx, const Bucket &b, RandomGenerator &random, std::size_t num_records, std::size_t max_payload_size = 100) -> std::map<std::string, std::string>;
+auto expect_db_contains(DB &db, const std::string &bname, const std::map<std::string, std::string> &map) -> void;
+auto expect_db_contains(const Tx &tx, const std::string &bname, const std::map<std::string, std::string> &map) -> void;
+auto expect_db_contains(const Tx &tx, const Bucket &b, const std::map<std::string, std::string> &map) -> void;
 
 template <class Fn>
 [[nodiscard]] inline auto view_db(const std::string &filename, Fn &fn, const Options &options = {}) -> calicodb::Status

@@ -499,7 +499,7 @@ auto HashIterator::read(Entry &out) -> bool
 // WAL header layout:
 //     Offset  Size  Purpose
 //    ---------------------------------------
-//     0       4     Magic number (1559861749)
+//     0       4     Magic number (1,559,861,749)
 //     4       4     WAL version (1)
 //     8       4     DB page size
 //     12      4     Checkpoint number
@@ -579,9 +579,8 @@ public:
         }
     }
 
-    [[nodiscard]] auto close(std::size_t &db_size) -> Status override
+    [[nodiscard]] auto close() -> Status override
     {
-        db_size = 0;
         // NOTE: Caller will unlock the database file. Only consider removing the WAL if this
         // is the last active connection. If there are other connections not currently running
         // transactions, the next read-write transaction will create a new WAL.
@@ -593,9 +592,9 @@ public:
             m_db->shm_unmap(true);
             m_db = nullptr;
             if (!s.is_ok()) {
-                logv(m_log, R"(failed to unlink WAL at "%s")"
-                            "\n%s",
-                     m_wal_name, s.to_string().c_str());
+                log(m_log, R"(failed to unlink WAL at "%s")"
+                           "\n%s",
+                    m_wal_name, s.to_string().c_str());
             }
         }
         return s;
@@ -657,7 +656,7 @@ public:
         }
     }
 
-    [[nodiscard]] auto statistics() const -> WalStatistics override
+    [[nodiscard]] auto statistics() const -> const WalStatistics & override
     {
         return m_stats;
     }
@@ -964,7 +963,7 @@ private:
 
     Env *m_env = nullptr;
     File *m_db = nullptr;
-    Sink *m_log = nullptr;
+    Logger *m_log = nullptr;
     File *m_wal = nullptr;
     BusyHandler *m_busy = nullptr;
 
@@ -985,7 +984,7 @@ auto Wal::open(const Parameters &param, Wal *&out) -> Status
     File *wal_file;
     auto s = param.env->new_file(param.wal_name, Env::kCreate, wal_file);
     if (s.is_ok()) {
-        logv(param.info_log, R"(opened WAL at "%s")", param.wal_name);
+        log(param.info_log, R"(opened WAL at "%s")", param.wal_name);
         out = new WalImpl(param, *wal_file);
     }
     return s;

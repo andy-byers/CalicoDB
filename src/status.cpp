@@ -29,9 +29,8 @@ static auto copy_status_string(const char *data) -> char *
 }
 
 static constexpr const char *kSubCodeMessages[Status::kMaxSubCode] = {
-    "",         // kNone
-    "readonly", // kReadonly
-    "retry",    // kRetry
+    "",      // kNone
+    "retry", // kRetry
 };
 
 Status::Status(Code code, const Slice &msg)
@@ -55,11 +54,6 @@ Status::Status(Status &&rhs) noexcept
     rhs.m_state = nullptr;
     rhs.m_code = kOK;
     rhs.m_subc = kNone;
-}
-
-Status::~Status()
-{
-    delete[] m_state;
 }
 
 auto Status::operator=(const Status &rhs) -> Status &

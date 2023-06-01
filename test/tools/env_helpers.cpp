@@ -101,7 +101,7 @@ auto FakeFile::shm_unmap(bool unlink) -> void
     }
 }
 
-auto FakeEnv::new_sink(const std::string &, Sink *&) -> Status
+auto FakeEnv::new_logger(const std::string &, Logger *&) -> Status
 {
     return Status::ok();
 }
@@ -367,7 +367,7 @@ auto TestEnv::clear_interceptors(const std::string &filename) -> void
 }
 
 TestFile::TestFile(std::string filename, File &file, TestEnv &env, TestEnv::FileState &state)
-    : FileWrapper(file),
+    : m_target(&file),
       m_filename(std::move(filename)),
       m_env(&env),
       m_state(&state)
@@ -376,14 +376,14 @@ TestFile::TestFile(std::string filename, File &file, TestEnv &env, TestEnv::File
 
 TestFile::~TestFile()
 {
-    delete target();
+    delete m_target;
 }
 
 auto TestFile::read(std::size_t offset, std::size_t size, char *scratch, Slice *out) -> Status
 {
     auto s = try_intercept(m_state->interceptors, kSyscallRead);
     if (s.is_ok()) {
-        s = FileWrapper::read(offset, size, scratch, out);
+        s = m_target->read(offset, size, scratch, out);
     }
     return s;
 }
@@ -392,7 +392,7 @@ auto TestFile::read_exact(std::size_t offset, std::size_t size, char *out) -> St
 {
     auto s = try_intercept(m_state->interceptors, kSyscallRead);
     if (s.is_ok()) {
-        s = FileWrapper::read_exact(offset, size, out);
+        s = m_target->read_exact(offset, size, out);
     }
     return s;
 }
@@ -401,7 +401,7 @@ auto TestFile::write(std::size_t offset, const Slice &in) -> Status
 {
     auto s = try_intercept(m_state->interceptors, kSyscallWrite);
     if (s.is_ok()) {
-        s = FileWrapper::write(offset, in);
+        s = m_target->write(offset, in);
     }
     return s;
 }
@@ -410,13 +410,43 @@ auto TestFile::sync() -> Status
 {
     auto s = try_intercept(m_state->interceptors, kSyscallSync);
     if (s.is_ok()) {
-        s = FileWrapper::sync();
+        s = m_target->sync();
         if (s.is_ok()) {
             m_env->save_file_contents(m_filename);
         }
     } else {
         // Only drop data due to a non-OK status from an interceptor.
         m_env->drop_after_last_sync(m_filename);
+    }
+    return s;
+}
+
+auto TestFile::file_lock(FileLockMode mode) -> Status
+{
+    auto s = try_intercept(m_state->interceptors, kSyscallFileLock);
+    if (s.is_ok()) {
+        s = m_target->file_lock(mode);
+    }
+    return s;
+}
+
+auto TestFile::shm_map(std::size_t r, bool extend, volatile void *&ptr_out) -> Status
+{
+    auto s = try_intercept(m_state->interceptors, kSyscallShmMap);
+    if (s.is_ok()) {
+        s = m_target->shm_map(r, extend, ptr_out);
+    }
+    return s;
+}
+
+auto TestFile::shm_lock(std::size_t r, std::size_t n, ShmLockFlag flag) -> Status
+{
+    Status s;
+    if (flag & kShmLock) {
+        s = try_intercept(m_state->interceptors, kSyscallShmLock);
+    }
+    if (s.is_ok()) {
+        s = m_target->shm_lock(r, n, flag);
     }
     return s;
 }

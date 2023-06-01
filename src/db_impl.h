@@ -8,7 +8,6 @@
 #include "calicodb/db.h"
 
 #include "header.h"
-#include "pager.h"
 #include "tree.h"
 #include "wal.h"
 
@@ -19,12 +18,9 @@ namespace calicodb
 {
 
 class Env;
-class TxnImpl;
+class Pager;
+class TxImpl;
 class Wal;
-
-struct DBState {
-    Status status;
-};
 
 class DBImpl : public DB
 {
@@ -38,21 +34,24 @@ public:
     [[nodiscard]] auto open(const Options &sanitized) -> Status;
 
     [[nodiscard]] auto get_property(const Slice &name, std::string *out) const -> bool override;
-    [[nodiscard]] auto new_txn(bool write, Txn *&tx) -> Status override;
+    [[nodiscard]] auto new_tx(const Tx *&tx) const -> Status override;
+    [[nodiscard]] auto new_tx(WriteTag, Tx *&tx) -> Status override;
     [[nodiscard]] auto checkpoint(bool reset) -> Status override;
 
     [[nodiscard]] auto TEST_pager() const -> const Pager &;
-    [[nodiscard]] auto TEST_state() const -> const DBState &;
 
 private:
-    DBState m_state;
+    template <class TxType>
+    [[nodiscard]] auto prepare_tx(bool write, TxType *&tx_out) const -> Status;
+
+    mutable Status m_status;
+    mutable TxImpl *m_tx = nullptr;
+
     Pager *m_pager = nullptr;
 
     Env *const m_env = nullptr;
-    Sink *const m_log = nullptr;
+    Logger *const m_log = nullptr;
     BusyHandler *const m_busy = nullptr;
-
-    TxnImpl *m_tx = nullptr;
 
     const std::string m_db_filename;
     const std::string m_wal_filename;

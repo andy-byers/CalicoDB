@@ -4,25 +4,20 @@
 
 #include "page.h"
 #include "bufmgr.h"
-#include "encoding.h"
 #include "header.h"
 #include "pager.h"
 
 namespace calicodb
 {
 
-Page::Page(Pager &pager, PageRef &ref)
-    : m_pager(&pager),
-      m_ref(&ref),
-      m_data(ref.page),
-      m_id(ref.page_id)
-{
-}
-
 Page::~Page()
 {
+    // TODO: Is this really necessary? If the tree layer is more careful and doesn't drop
+    //       pages when it encounters an error (careless use of CALICODB_TRY to return early
+    //       b/c it's convenient).
     if (m_pager) {
         m_pager->release(std::move(*this));
+        m_pager = nullptr;
     }
 }
 
@@ -36,53 +31,10 @@ auto Page::operator=(Page &&rhs) noexcept -> Page &
     if (this != &rhs) {
         m_pager = rhs.m_pager;
         rhs.m_pager = nullptr;
-
-        m_ref = rhs.m_ref;
-        m_data = rhs.m_data;
-        m_id = rhs.m_id;
         m_write = rhs.m_write;
+        m_ref = rhs.m_ref;
     }
     return *this;
-}
-
-auto Page::is_writable() const -> bool
-{
-    return m_write;
-}
-
-auto Page::id() const -> Id
-{
-    return m_id;
-}
-
-auto Page::view() const -> Slice
-{
-    return Slice(m_data, kPageSize);
-}
-
-auto Page::data() -> char *
-{
-    return m_data;
-}
-
-auto Page::data() const -> const char *
-{
-    return m_data;
-}
-
-[[nodiscard]] auto page_offset(Id page_id) -> std::size_t
-{
-    return FileHeader::kSize * page_id.is_root();
-}
-
-[[nodiscard]] auto read_next_id(const Page &page) -> Id
-{
-    return Id(get_u32(page.data() + page_offset(page.id())));
-}
-
-auto write_next_id(Page &page, Id next_id) -> void
-{
-    put_u32(page.data() + page_offset(page.id()), next_id.value);
 }
 
 } // namespace calicodb

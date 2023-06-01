@@ -114,14 +114,6 @@ auto write_cell(Node &node, std::size_t index, const Cell &cell) -> std::size_t;
 // Erase a cell from the node at the specified index.
 auto erase_cell(Node &node, std::size_t index) -> void;
 
-struct NodeManager {
-    [[nodiscard]] static auto allocate(Pager &pager, Node &out, std::string &scratch, bool is_external) -> Status;
-    [[nodiscard]] static auto acquire(Pager &pager, Id page_id, Node &out, std::string &scratch, bool upgrade) -> Status;
-    [[nodiscard]] static auto destroy(Pager &pager, Node node) -> Status;
-    static auto upgrade(Pager &pager, Node &node) -> void;
-    static auto release(Pager &pager, Node node) -> void;
-};
-
 struct PayloadManager {
     [[nodiscard]] static auto promote(Pager &pager, char *scratch, Cell &cell, Id parent_id) -> Status;
     [[nodiscard]] static auto access(Pager &pager, const Cell &cell, std::size_t offset,
@@ -138,10 +130,10 @@ class InternalCursor
 
     // TODO: Cache overflow page IDs so Tree::read_value() doesn't have to read pages that have already
     //       been read by Tree::read_key() (if the key overflowed).
-    //    std::vector<Id> m_ovfl_cache;
+    // std::vector<Id> m_ovfl_cache;
 
     Node m_node;
-    bool m_write;
+    bool m_write = false;
 
 public:
     static constexpr std::size_t kMaxDepth = 20;
@@ -149,7 +141,7 @@ public:
     struct Location {
         Id page_id;
         unsigned index = 0;
-    } history[kMaxDepth - 1] = {};
+    } history[kMaxDepth];
     int level = 0;
 
     explicit InternalCursor(Tree &tree)
@@ -192,8 +184,8 @@ public:
     auto move_to(Node node, int diff) -> void
     {
         clear();
-        m_node = std::move(node);
         history[level += diff] = {node.page.id(), 0};
+        m_node = std::move(node);
         m_status = Status::ok();
     }
 
@@ -201,29 +193,27 @@ public:
     auto seek_root(bool write) -> void;
     auto seek(const Slice &key) -> bool;
     auto move_down(Id child_id) -> void;
-    auto move_up() -> void;
 };
 
 class CursorImpl : public Cursor
 {
     mutable Status m_status;
+    mutable Node m_node;
+    mutable bool m_is_valid = false;
+    Tree *m_tree;
     std::string m_key;
     std::string m_value;
     std::size_t m_key_size = 0;
     std::size_t m_value_size = 0;
-    Tree *m_tree;
-    struct Location {
-        Id page_id;
-        unsigned index = 0;
-        unsigned count = 0;
-    } m_loc;
+    std::size_t m_index = 0;
 
+protected:
     auto seek_to(Node node, std::size_t index) -> void;
-    auto fetch_payload() -> Status;
+    auto fetch_payload(Node &node, std::size_t index) -> Status;
 
 public:
-    friend class CursorInternal;
     friend class Tree;
+    friend class SchemaCursor;
 
     explicit CursorImpl(Tree &tree)
         : m_tree(&tree)
@@ -232,23 +222,25 @@ public:
 
     ~CursorImpl() override;
 
-    [[nodiscard]] auto is_valid() const -> bool override;
-    [[nodiscard]] auto status() const -> Status override;
+    [[nodiscard]] auto is_valid() const -> bool override
+    {
+        return m_is_valid && m_status.is_ok();
+    }
+
+    [[nodiscard]] auto status() const -> Status override
+    {
+        return m_status;
+    }
+
     [[nodiscard]] auto key() const -> Slice override;
     [[nodiscard]] auto value() const -> Slice override;
-
     auto seek(const Slice &key) -> void override;
     auto seek_first() -> void override;
     auto seek_last() -> void override;
     auto next() -> void override;
     auto previous() -> void override;
-};
 
-class CursorInternal
-{
-public:
-    [[nodiscard]] static auto make_cursor(Tree &tree) -> Cursor *;
-    static auto invalidate(const Cursor &cursor, Status error) -> void;
+    auto clear(Status s = Status::ok()) -> void;
 };
 
 struct TreeStatistics {
@@ -261,13 +253,12 @@ class Tree final
 {
 public:
     explicit Tree(Pager &pager, const Id *root_id);
-    ~Tree();
     [[nodiscard]] static auto create(Pager &pager, bool is_root, Id *out) -> Status;
     [[nodiscard]] static auto destroy(Tree &tree) -> Status;
     [[nodiscard]] auto put(const Slice &key, const Slice &value) -> Status;
     [[nodiscard]] auto get(const Slice &key, std::string *value) const -> Status;
     [[nodiscard]] auto erase(const Slice &key) -> Status;
-    [[nodiscard]] auto vacuum_one(Id target, Schema &schema, bool *success = nullptr) -> Status;
+    [[nodiscard]] auto vacuum(Schema &schema) -> Status;
     [[nodiscard]] auto allocate(bool is_external, Node &out) -> Status;
     [[nodiscard]] auto acquire(Id page_id, bool upgrade, Node &out) const -> Status;
     [[nodiscard]] auto free(Node node) -> Status;
@@ -287,28 +278,27 @@ public:
         return m_stats;
     }
 
+    auto close_internal_cursor() -> void
+    {
+        return m_cursor.clear();
+    }
+
 private:
     friend class CursorImpl;
     friend class InternalCursor;
-    friend class CursorInternal;
+    friend class SchemaCursor;
     friend class DBImpl;
     friend class Schema;
     friend class TreeValidator;
 
-    struct SearchResult {
-        Node node;
-        std::size_t index = 0;
-        bool exact = false;
-    };
-
     [[nodiscard]] auto free_overflow(Id head_id) -> Status;
-    [[nodiscard]] auto read_key(Node &node, std::size_t index, std::string &scratch, Slice &key_out) const -> Status;
-    [[nodiscard]] auto read_value(Node &node, std::size_t index, std::string &scratch, Slice &value_out) const -> Status;
+    [[nodiscard]] auto read_key(Node &node, std::size_t index, std::string &scratch, Slice *key_out, std::size_t limit = 0) const -> Status;
+    [[nodiscard]] auto read_value(Node &node, std::size_t index, std::string &scratch, Slice *value_out) const -> Status;
     [[nodiscard]] auto write_key(Node &node, std::size_t index, const Slice &key) -> Status;
     [[nodiscard]] auto write_value(Node &node, std::size_t index, const Slice &value) -> Status;
     [[nodiscard]] auto emplace(Node &node, const Slice &key, const Slice &value, std::size_t index, bool &overflow) -> Status;
     [[nodiscard]] auto destroy_impl(Node node) -> Status;
-    [[nodiscard]] auto vacuum_step(Page &free, Schema &schema, Id last_id) -> Status;
+    [[nodiscard]] auto vacuum_step(Page &free, PointerMap::Entry entry, Schema &schema, Id last_id) -> Status;
     [[nodiscard]] auto resolve_overflow() -> Status;
     [[nodiscard]] auto resolve_underflow() -> Status;
     [[nodiscard]] auto split_root() -> Status;
@@ -330,7 +320,7 @@ private:
     [[nodiscard]] auto find_parent_id(Id page_id, Id &out) const -> Status;
     [[nodiscard]] auto fix_parent_id(Id page_id, Id parent_id, PointerMap::Type type) -> Status;
     [[nodiscard]] auto maybe_fix_overflow_chain(const Cell &cell, Id parent_id) -> Status;
-    [[nodiscard]] auto fix_links(Node &node) -> Status;
+    [[nodiscard]] auto fix_links(Node &node, Id parent_id = Id::null()) -> Status;
     [[nodiscard]] auto cell_scratch() -> char *;
 
     enum ReportType {

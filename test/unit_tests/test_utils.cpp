@@ -194,8 +194,11 @@ static constexpr auto constexpr_test_read(Slice bv, Slice answer)
 
 TEST_F(SliceTests, ConstantExpressions)
 {
-    static constexpr Slice bv("42");
-    constexpr_test_read(bv, "42");
+    static constexpr std::string_view sv("42");
+    static constexpr Slice s1("42");
+    static constexpr Slice s2(sv);
+    constexpr_test_read(s1, sv);
+    constexpr_test_read(s1, s2);
 }
 
 TEST(NonPrintableSliceTests, UsesStringSize)
@@ -204,7 +207,14 @@ TEST(NonPrintableSliceTests, UsesStringSize)
     ASSERT_EQ(Slice(u).size(), 2);
 }
 
-TEST(NonPrintableSliceTests, NullcharsAreEqual)
+TEST(NonPrintableSliceTests, Clear)
+{
+    Slice slice("42");
+    slice.clear();
+    ASSERT_TRUE(slice.is_empty());
+}
+
+TEST(NonPrintableSliceTests, NullBytesAreEqual)
 {
     const std::string u{"\x00", 1};
     const std::string v{"\x00", 1};
@@ -336,7 +346,7 @@ TEST(StatusTests, StatusMessages)
     // is technically legal, but may not be semantically valid (for example, it makes
     // no sense to retry when a read-only transaction attempts to write: repeating that
     // action will surely fail next time as well).
-    ASSERT_EQ("invalid argument: readonly", Status::invalid_argument(Status::kReadonly).to_string());
+    ASSERT_EQ("invalid argument: retry", Status::invalid_argument(Status::kRetry).to_string());
 }
 
 TEST(StatusTests, NonOkStatusSavesMessage)
@@ -409,7 +419,7 @@ TEST(StatusTests, OkStatusCanBeCopied)
 TEST(StatusTests, NonOkStatusCanBeCopied)
 {
     const auto src1 = Status::invalid_argument("status message");
-    const auto src2 = Status::invalid_argument(Status::kReadonly);
+    const auto src2 = Status::invalid_argument(Status::kRetry);
     const auto dst1 = src1;
     const auto dst2 = src2;
     ASSERT_TRUE(src1.is_invalid_argument());
@@ -417,10 +427,10 @@ TEST(StatusTests, NonOkStatusCanBeCopied)
     ASSERT_TRUE(dst1.is_invalid_argument());
     ASSERT_TRUE(dst2.is_invalid_argument());
     ASSERT_EQ(src1.to_string(), "invalid argument: status message");
-    ASSERT_EQ(src2.to_string(), "invalid argument: readonly");
+    ASSERT_EQ(src2.to_string(), "invalid argument: retry");
     ASSERT_EQ(dst1.to_string(), "invalid argument: status message");
-    ASSERT_EQ(dst2.to_string(), "invalid argument: readonly");
-    ASSERT_EQ(dst2.subcode(), Status::kReadonly);
+    ASSERT_EQ(dst2.to_string(), "invalid argument: retry");
+    ASSERT_EQ(dst2.subcode(), Status::kRetry);
 }
 
 TEST(StatusTests, OkStatusCanBeMoved)
@@ -482,19 +492,23 @@ TEST_F(InterceptorTests, RespectsSyscallType)
     delete editor;
 }
 
-TEST(Logging, WriteFormattedString)
+TEST(Logging, AppendFmtString)
 {
-    std::string s;
-    append_fmt_string(s, "%s %d %f", "abc", 42, 1.0);
-}
+    std::string str, msg("123 foo 42 bar");
+    append_fmt_string(str, "%d %s %d %s", 123, "foo", 42, "bar");
+    ASSERT_EQ(str, msg);
 
-TEST(Logging, LogMessage)
-{
-    tools::TestDir testdir(".");
-    std::ofstream ofs(testdir.as_child("output"));
-    std::string str(1'024, '0');
-    tools::StreamSink sink(ofs);
-    logv(&sink, "%s", str.c_str());
+    // Don't mess up the existing text.
+    msg.append(" -> more text");
+    append_fmt_string(str, " -> more text");
+    ASSERT_EQ(str, msg);
+    msg.append(" -> even more text");
+    append_fmt_string(str, " -> even more text");
+    ASSERT_EQ(str, msg);
+
+    // NOOP
+    append_fmt_string(str, "");
+    ASSERT_EQ(str, msg);
 }
 
 TEST(Logging, ConsumeDecimalNumberIgnoresLeadingZeros)

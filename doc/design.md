@@ -68,7 +68,22 @@ When a key or value is too large to fit on a page, some of it is transferred to 
 [//]: # (TODO)
 
 #### Freelist
-[//]: # (TODO)
+Sometimes, database pages end up becoming unused.
+This happens, for example, when a record with an overflow chain is erased.
+Unused database pages are managed using the freelist.
+There are 2 types of freelist pages: trunks and leaves.
+Freelist trunk pages form a linked list threaded through the database file.
+Each trunk page contains the following information:
+
+| Offset | Size   | Name    | Purpose                                              |
+|:-------|:-------|:--------|:-----------------------------------------------------|
+| 0      | 4      | NextPtr | Page ID of the next freelist trunk page              |
+| 4      | 4      | LeafCnt | Number of freelist leaf page IDs stored on this page |
+| 8      | PgSz-8 | Leaves  | `LeafCnt` leaf page IDs                              |
+
+The last trunk page has its `NextPtr` field set to 0.
+Freelist leaf pages contain no pertinent information.
+They are not written to the WAL, nor are they stored in the pager cache.
 
 #### Pointer map
 [//]: # (TODO)
@@ -86,7 +101,7 @@ The WAL file consists of a fixed-length header, followed by 0 or more WAL frames
 Each WAL frame contains a single database page, along with some metadata.
 
 Most writes to the WAL are sequential, the exception being when a page is written out more than once within a transaction.
-In that case, the old version of the page will be overwritten.
+In that case, the most-recent version of the page will be overwritten.
 This lets the number of frames added to the WAL be proportional to the number of pages modified during a given transaction.
 
 #### shm file
@@ -98,10 +113,10 @@ We also use the shm file to coordinate locks on the WAL.
 ## Database file format
 The database file consists of 0 or more fixed-size pages.
 A freshly-created database is just an empty database file.
-When the first table is created, the first 3 database pages are initialized in-memory.
+When the first bucket is created, the first 3 database pages are initialized in-memory.
 The first page in the file, called the root page, contains the file header and serves as the [schema tree's][#schema] root node.
 The second page is always a [pointer map](#pointer-map) page.
-The third page is the root node of the tree representing the user-created table.
+The third page is the root node of the tree representing the first user bucket.
 As the database is modified, additional pages are created by extending the database file.
 
 ## Performance

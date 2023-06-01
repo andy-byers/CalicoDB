@@ -10,77 +10,52 @@
 namespace calicodb
 {
 
-struct WriteInfo {
-    std::size_t length = 0;
-    bool success = false;
-};
-
-static auto try_write(char *buffer, std::size_t buffer_size, bool add_newline, const char *fmt, std::va_list args) -> WriteInfo
+auto attempt_fmt(char *ptr, std::size_t length, bool append_newline, const char *fmt, std::va_list args) -> std::size_t
 {
-    std::va_list copy;
-    va_copy(copy, args);
-    const auto rc = std::vsnprintf(buffer, buffer_size, fmt, copy);
-    va_end(copy);
+    std::va_list args_copy;
+    va_copy(args_copy, args);
+    const auto rc = std::vsnprintf(ptr, length, fmt, args);
+    va_end(args_copy);
 
-    WriteInfo info;
-    if (rc >= 0) {
-        info.length = static_cast<std::size_t>(rc);
-        if (info.length + 1 >= buffer_size) {
-            // The message did not fit into the buffer.
-            return {info.length + 2, false};
-        }
-        info.success = true;
-        // Add a newline if necessary.
-        if (add_newline && buffer[info.length - 1] != '\n') {
-            buffer[info.length] = '\n';
-            ++info.length;
-        }
+    // Assume that std::vsnprintf() will never fail.
+    CALICODB_EXPECT_GE(rc, 0);
+    auto write_length = static_cast<std::size_t>(rc);
+
+    if (write_length + 1 >= length) {
+        // The message did not fit into the buffer.
+        return write_length + 2;
     }
-    return info;
+    // Add a newline if necessary.
+    if (append_newline && ptr[write_length - 1] != '\n') {
+        ptr[write_length++] = '\n';
+    }
+    return write_length;
 }
 
 auto append_fmt_string(std::string &out, const char *fmt, ...) -> std::size_t
 {
+    // Write the formatted text at the end of `out`. First, try to format the text into 32 bytes of
+    // additional memory. If that doesn't work, try again with the exact size needed.
+    const auto offset = out.size();
+    out.resize(offset + 32);
+
     std::va_list args;
     va_start(args, fmt);
-    std::string buffer(32, '\0');
-    auto info = try_write(buffer.data(), buffer.size(), false, fmt, args);
-    buffer.resize(info.length);
-    if (!info.success) {
-        info = try_write(buffer.data(), buffer.size(), false, fmt, args);
+
+    std::size_t added_length;
+    for (int i = 0; i < 2; ++i) {
+        added_length = attempt_fmt(
+            out.data() + offset,
+            out.size() - offset,
+            false, fmt, args);
+        const auto limit = out.size();
+        out.resize(offset + added_length);
+        if (offset + added_length <= limit) {
+            break;
+        }
     }
     va_end(args);
-    out.append(buffer);
-    return info.length;
-}
-
-auto logv(Sink *log, const char *fmt, ...) -> void
-{
-    if (log) {
-        std::va_list args;
-        va_start(args, fmt);
-
-        // Try to fit the message in this stack buffer. If it won't fit, allocate space
-        // for it on the heap.
-        char fixed[128];
-        auto *p = fixed;
-        char *variable = nullptr;
-
-        WriteInfo info;
-        info.length = sizeof(fixed);
-        for (int i = 0; i < 2; ++i) {
-            info = try_write(p, info.length, true, fmt, args);
-            if (info.success) {
-                log->sink(Slice(p, info.length));
-                break;
-            } else if (i == 0) {
-                variable = new char[info.length];
-                p = variable;
-            }
-        }
-        delete[] variable;
-        va_end(args);
-    }
+    return added_length;
 }
 
 auto append_number(std::string &out, std::size_t value) -> void

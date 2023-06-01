@@ -5,6 +5,7 @@
 #ifndef CALICODB_HEADER_H
 #define CALICODB_HEADER_H
 
+#include "encoding.h"
 #include "utils.h"
 
 namespace calicodb
@@ -14,9 +15,10 @@ class Page;
 
 // There are 4 page types in CalicoDB: nodes, freelist pages, overflow chain pages, and pointer
 // map pages. Pages that store records or separator keys are called nodes, and pages that hold
-// parent pointers for other pages are called pointer maps. Overflow chain pages store data, as
-// well as a pointer to the next page in the chain, while freelist pages just store the "next
-// pointer".
+// parent pointers for other pages are called pointer maps. Overflow chain pages store data that
+// wasn't able to fit on a node page, as well as the page ID of the next page in the chain.
+// Freelist pages are further subdivided into freelist trunk and leaf pages. Trunk pages store
+// pointers to many leaf pages. Leaf pages are unused and their content is untracked.
 //
 // The first page in the database file is called the root page. The root page contains the file
 // header at offset 0, followed by a node header (the root is always a node).
@@ -39,9 +41,27 @@ struct FileHeader {
     enum FieldOffset {
         kPageCountOffset = 18,
         kFreelistHeadOffset = 22,
-        kFmtVersionOfs = 26,
+        kFmtVersionOffset = 26,
         kSize = 64
     };
+
+    [[nodiscard]] static auto get_page_count(const char *root) -> U32
+    {
+        return get_u32(root + kPageCountOffset);
+    }
+    static auto put_page_count(char *root, U32 value) -> void
+    {
+        put_u32(root + kPageCountOffset, value);
+    }
+
+    [[nodiscard]] static auto get_freelist_head(const char *root) -> Id
+    {
+        return Id(get_u32(root + kFreelistHeadOffset));
+    }
+    static auto put_freelist_head(char *root, Id value) -> void
+    {
+        put_u32(root + kFreelistHeadOffset, value.value);
+    }
 };
 
 // Node Header Format:

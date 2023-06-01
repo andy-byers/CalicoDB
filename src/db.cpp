@@ -26,7 +26,7 @@ auto DB::open(const Options &options, const std::string &filename, DB *&db) -> S
     const auto clean_filename = cleanup_path(filename);
 
     auto sanitized = options;
-    clip_to_range(sanitized.cache_size, {}, kMaxCacheSize);
+    clip_to_range(sanitized.cache_size, kMinFrameCount * kPageSize, kMaxCacheSize);
     if (sanitized.wal_filename.empty()) {
         sanitized.wal_filename = clean_filename + kDefaultWalSuffix;
     } else {
@@ -51,13 +51,9 @@ DB::DB() = default;
 
 DB::~DB() = default;
 
-Table::Table() = default;
+Tx::Tx() = default;
 
-Table::~Table() = default;
-
-Txn::Txn() = default;
-
-Txn::~Txn() = default;
+Tx::~Tx() = default;
 
 BusyHandler::BusyHandler() = default;
 

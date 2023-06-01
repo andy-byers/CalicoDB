@@ -5,20 +5,39 @@
 #ifndef CALICODB_PAGE_H
 #define CALICODB_PAGE_H
 
+#include "encoding.h"
+#include "header.h"
 #include "utils.h"
 
 namespace calicodb
 {
 
 class Pager;
-struct PageRef;
+
+struct PageRef final {
+    Id page_id;
+
+    // Pointer to the start of the buffer slot containing the page data.
+    char *page = nullptr;
+
+    // Number of live copies of this page.
+    unsigned refcount = 0;
+
+    // Dirty list fields.
+    PageRef *prev = nullptr;
+    PageRef *next = nullptr;
+
+    enum Flag {
+        kNormal = 0,
+        kDirty = 1,
+        kExtra = 2,
+    } flag = kNormal;
+};
 
 class Page final
 {
     Pager *m_pager = nullptr;
     PageRef *m_ref = nullptr;
-    char *m_data = nullptr;
-    Id m_id;
     bool m_write = false;
 
 public:
@@ -26,14 +45,38 @@ public:
     friend struct Node;
 
     explicit Page() = default;
-    explicit Page(Pager &pager, PageRef &ref);
+    explicit Page(Pager &pager, PageRef &ref)
+        : m_pager(&pager),
+          m_ref(&ref)
+    {
+    }
+
     ~Page();
 
-    [[nodiscard]] auto is_writable() const -> bool;
-    [[nodiscard]] auto id() const -> Id;
-    [[nodiscard]] auto view() const -> Slice;
-    [[nodiscard]] auto data() -> char *;
-    [[nodiscard]] auto data() const -> const char *;
+    [[nodiscard]] auto is_writable() const -> bool
+    {
+        return m_write;
+    }
+
+    [[nodiscard]] auto id() const -> Id
+    {
+        return m_ref->page_id;
+    }
+
+    [[nodiscard]] auto view() const -> Slice
+    {
+        return {m_ref->page, kPageSize};
+    }
+
+    [[nodiscard]] auto mutable_ptr() -> char *
+    {
+        return m_ref->page;
+    }
+
+    [[nodiscard]] auto constant_ptr() const -> const char *
+    {
+        return m_ref->page;
+    }
 
     // Disable copies.
     Page(const Page &) = delete;
@@ -44,9 +87,20 @@ public:
     auto operator=(Page &&rhs) noexcept -> Page &;
 };
 
-[[nodiscard]] auto page_offset(Id page_id) -> std::size_t;
-[[nodiscard]] auto read_next_id(const Page &page) -> Id;
-auto write_next_id(Page &page, Id next_id) -> void;
+[[nodiscard]] inline auto page_offset(Id page_id) -> std::size_t
+{
+    return FileHeader::kSize * page_id.is_root();
+}
+
+[[nodiscard]] inline auto read_next_id(const Page &page) -> Id
+{
+    return Id(get_u32(page.constant_ptr() + page_offset(page.id())));
+}
+
+inline auto write_next_id(Page &page, Id next_id) -> void
+{
+    put_u32(page.mutable_ptr() + page_offset(page.id()), next_id.value);
+}
 
 } // namespace calicodb
 
