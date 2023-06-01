@@ -640,28 +640,25 @@ TEST(DestructionTests, OnlyDeletesCalicoDatabases)
 {
     std::filesystem::remove_all("./testdb");
 
-    Options options;
-    options.env = Env::default_env();
-
     // "./testdb" does not exist.
-    ASSERT_TRUE(DB::destroy(options, "./testdb").is_invalid_argument());
-    ASSERT_FALSE(options.env->file_exists("./testdb"));
+    ASSERT_TRUE(DB::destroy(Options(), "./testdb").is_invalid_argument());
+    ASSERT_FALSE(Env::default_env()->file_exists("./testdb"));
 
     // File is too small to read the first page.
     File *file;
-    ASSERT_OK(options.env->new_file("./testdb", Env::kCreate, file));
+    ASSERT_OK(Env::default_env()->new_file("./testdb", Env::kCreate, file));
     ASSERT_OK(file->write(0, "CalicoDB format"));
-    ASSERT_TRUE(DB::destroy(options, "./testdb").is_invalid_argument());
-    ASSERT_TRUE(options.env->file_exists("./testdb"));
+    ASSERT_TRUE(DB::destroy(Options(), "./testdb").is_invalid_argument());
+    ASSERT_TRUE(Env::default_env()->file_exists("./testdb"));
 
     // Identifier is incorrect.
     ASSERT_OK(file->write(0, "CalicoDB format 0"));
-    ASSERT_TRUE(DB::destroy(options, "./testdb").is_invalid_argument());
+    ASSERT_TRUE(DB::destroy(Options(), "./testdb").is_invalid_argument());
 
     DB *db;
     std::filesystem::remove_all("./testdb");
-    ASSERT_OK(DB::open(options, "./testdb", db));
-    ASSERT_OK(DB::destroy(options, "./testdb"));
+    ASSERT_OK(DB::open(Options(), "./testdb", db));
+    ASSERT_OK(DB::destroy(Options(), "./testdb"));
 
     delete db;
     delete file;

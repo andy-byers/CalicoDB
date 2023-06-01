@@ -148,14 +148,14 @@ auto DBImpl::get_property(const Slice &name, std::string *out) const -> bool
             if (out != nullptr) {
                 append_fmt_string(
                     buffer,
-                    "Name            Value\n"
+                    "Name               Value\n"
                     "------------------------\n"
                     "Pager read(MB)  %8.4f\n"
                     "Pager write(MB) %8.4f\n"
                     "WAL read(MB)    %8.4f\n"
                     "WAL write(MB)   %8.4f\n"
-                    "Cache hits      %ld\n"
-                    "Cache misses    %ld\n",
+                    "Cache hits      %8d\n"
+                    "Cache misses    %8d\n",
                     static_cast<double>(m_pager->statistics().bytes_read) / 1'048'576.0,
                     static_cast<double>(m_pager->statistics().bytes_written) / 1'048'576.0,
                     static_cast<double>(m_pager->wal_statistics().bytes_read) / 1'048'576.0,

@@ -280,7 +280,7 @@ delete c;
 // Database properties are made available as strings.
 std::string prop;
 if (db->get_property("calicodb.stats", &prop)) {
-    std::cout << "calicodb.stats: " << prop << '\n';
+    std::cout << prop << '\n';
 }
 
 // Passing nullptr for the property value causes get_property() to perform a simple existence check, 
