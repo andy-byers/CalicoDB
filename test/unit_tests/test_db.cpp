@@ -227,13 +227,13 @@ protected:
     }
 
     enum Config {
-        kDefault,
-        kExclusiveLockMode,
-        kOffSyncMode,
-        kFullSyncMode,
-        kUseAltWAL,
-        kSmallCache,
-        kMaxConfig,
+        kDefault = 0,
+        kExclusiveLockMode = 1,
+        kOffSyncMode = 2,
+        kFullSyncMode = 4,
+        kUseAltWAL = 8,
+        kSmallCache = 16,
+        kMaxConfig = 7,
     };
     [[nodiscard]] auto reopen_db(bool clear, Env *env = nullptr) -> Status
     {
@@ -244,24 +244,19 @@ protected:
         Options options;
         options.busy = &m_busy;
         options.env = env ? env : m_env;
-        switch (m_config) {
-            case kDefault:
-                break;
-            case kExclusiveLockMode:
-                options.lock_mode = Options::kLockExclusive;
-            case kOffSyncMode:
-                options.sync_mode = Options::kSyncOff;
-            case kFullSyncMode:
-                options.sync_mode = Options::kSyncFull;
-                break;
-            case kUseAltWAL:
-                options.wal_filename = kAltWALName;
-                break;
-            case kSmallCache:
-                options.cache_size = 0;
-                break;
-            default:
-                break;
+        if (m_config & kExclusiveLockMode) {
+            options.lock_mode = Options::kLockExclusive;
+        }
+        if (m_config & kOffSyncMode) {
+            options.sync_mode = Options::kSyncOff;
+        } else if (m_config & kFullSyncMode) {
+            options.sync_mode = Options::kSyncFull;
+        }
+        if (m_config & kUseAltWAL) {
+            options.wal_filename = kAltWALName;
+        }
+        if (m_config & kSmallCache) {
+            options.cache_size = 0;
         }
         return DB::open(options, kDBName, m_db);
     }
@@ -508,6 +503,26 @@ TEST_F(DBTests, VacuumEmptyDB)
     } while (change_options(true));
 }
 
+TEST_F(DBTests, a)
+{
+    std::filesystem::remove("logfile");
+
+    Logger *logger;
+    auto *env = Env::default_env();
+    ASSERT_OK(env->new_logger("logfile", logger));
+    Options options;
+    options.info_log = logger;
+
+    DB *db;
+    ASSERT_OK(DB::open(options, "dbfile", db));
+    const auto logfile = tools::read_file_to_string(*env, "logfile");
+    delete db;
+    std::cerr << logfile << '\n';
+    delete logger;
+
+    std::filesystem::remove("logfile");
+}
+
 TEST_F(DBTests, CorruptedRootIDs)
 {
     ASSERT_OK(m_db->update([](auto &tx) {
@@ -727,18 +742,20 @@ protected:
         // Don't call DBTests::SetUp(). Defer calling DB::open() until try_reopen() is called.
     }
 
-    using OpenFlag = unsigned;
-    static constexpr OpenFlag kPrefill = 1;
-    static constexpr OpenFlag kKeepOpen = 2;
-    static constexpr OpenFlag kClearDB = 4;
-    [[nodiscard]] auto try_reopen(OpenFlag flag = 0) -> Status
+    enum OpenFlag {
+        kOpenNormal = 0,
+        kOpenPrefill = 1,
+        kOpenKeepOpen = 2,
+        kOpenClearDB = 4,
+    };
+    [[nodiscard]] auto try_reopen(OpenFlag flag = kOpenNormal) -> Status
     {
         Status s;
-        if (0 == (flag & kKeepOpen)) {
-            m_config = kFullSyncMode;
-            s = reopen_db(flag & kClearDB, m_test_env);
+        if (0 == (flag & kOpenKeepOpen)) {
+            m_config = Config(m_config | kFullSyncMode);
+            s = reopen_db(flag & kOpenClearDB, m_test_env);
         }
-        if (s.is_ok() && (flag & kPrefill) && m_max_count == 0) {
+        if (s.is_ok() && (flag & kOpenPrefill) && m_max_count == 0) {
             // The first time the DB is opened, add kSavedCount records to the WAL and
             // commit.
             s = m_db->update([](auto &tx) {
@@ -780,7 +797,7 @@ protected:
 
 TEST_F(DBErrorTests, Reads)
 {
-    ASSERT_OK(try_reopen(kPrefill));
+    ASSERT_OK(try_reopen(kOpenPrefill));
     set_error(tools::kSyscallRead);
 
     for (;;) {
@@ -808,7 +825,7 @@ TEST_F(DBErrorTests, Reads)
 
 TEST_F(DBErrorTests, Writes)
 {
-    ASSERT_OK(try_reopen(kPrefill));
+    ASSERT_OK(try_reopen(kOpenPrefill));
     set_error(tools::kSyscallWrite | tools::kSyscallSync);
 
     for (;;) {
@@ -852,7 +869,7 @@ TEST_F(DBErrorTests, Checkpoint)
 {
     // Add some records to the WAL and set the next syscall to fail. The checkpoint during
     // the close routine will fail.
-    ASSERT_OK(try_reopen(kPrefill));
+    ASSERT_OK(try_reopen(kOpenPrefill));
     set_error(kAllSyscalls);
 
     for (Status s;;) {
@@ -893,7 +910,7 @@ TEST_F(DBErrorTests, TransactionsAfterCheckpointFailure)
 
     // Create a situation where we need to look in the database file for some records
     // and the WAL file for others.
-    ASSERT_OK(try_reopen(kPrefill));
+    ASSERT_OK(try_reopen(kOpenPrefill));
     ASSERT_OK(m_db->checkpoint(true));
     ASSERT_OK(m_db->update([](auto &tx) {
         return put_range(tx, BucketOptions(), "pending", 0, kSavedCount);
@@ -901,7 +918,7 @@ TEST_F(DBErrorTests, TransactionsAfterCheckpointFailure)
     set_error(kAllSyscalls);
 
     for (Status s;;) {
-        s = try_reopen(kKeepOpen);
+        s = try_reopen(kOpenKeepOpen);
         if (s.is_ok()) {
             s = m_db->checkpoint(true);
         }
@@ -1176,17 +1193,17 @@ TEST_F(DBConcurrencyTests, Writer1)
 
 TEST_F(DBConcurrencyTests, Writer2)
 {
-    run_consistency_check({100, 1, 10, 0, false, false});
-    run_consistency_check({100, 1, 10, 10, false, false});
-    run_consistency_check({100, 1, 10, 0, true, false});
-    run_consistency_check({100, 1, 10, 10, true, false});
+    run_consistency_check({100, 20, 0, 0, false, false});
+    run_consistency_check({100, 20, 0, 10, false, false});
+    run_consistency_check({100, 20, 0, 10, false, true});
 }
 
 TEST_F(DBConcurrencyTests, Checkpointer1)
 {
-    run_consistency_check({100, 20, 0, 0, false, false});
-    run_consistency_check({100, 20, 0, 10, false, false});
-    run_consistency_check({100, 20, 0, 10, false, true});
+    run_consistency_check({100, 1, 10, 0, false, false});
+    run_consistency_check({100, 1, 10, 10, false, false});
+    run_consistency_check({100, 1, 10, 0, true, false});
+    run_consistency_check({100, 1, 10, 10, true, false});
 }
 
 TEST_F(DBConcurrencyTests, Checkpointer2)
@@ -1209,13 +1226,16 @@ TEST_F(DBTransactionTests, ReadMostRecentSnapshot)
 {
     U64 key_limit = 0;
     auto should_exist = false;
-    ASSERT_OK(try_reopen(kPrefill));
+    ASSERT_OK(try_reopen(kOpenPrefill));
     const auto intercept = [this, &key_limit, &should_exist] {
         DB *db;
         Options options;
         options.env = m_test_env;
-        EXPECT_OK(DB::open(options, kDBName, db));
-        auto s = db->view([key_limit](auto &tx) {
+        auto s = DB::open(options, kDBName, db);
+        if (!s.is_ok()) {
+            return s;
+        }
+        s = db->view([key_limit](auto &tx) {
             return check_range(tx, "BUCKET", 0, key_limit * 10, true);
         });
         if (!should_exist && s.is_invalid_argument()) {
@@ -1225,7 +1245,7 @@ TEST_F(DBTransactionTests, ReadMostRecentSnapshot)
         return s;
     };
     m_test_env->add_interceptor(kWALName, tools::Interceptor(tools::kSyscallWrite, intercept));
-    (void)m_db->update([&should_exist, &key_limit](auto &tx) {
+    ASSERT_OK(m_db->update([&should_exist, &key_limit](auto &tx) {
         for (std::size_t i = 0; i < 50; ++i) {
             EXPECT_OK(put_range(tx, BucketOptions(), "BUCKET", i * 10, (i + 1) * 10));
             EXPECT_OK(tx.commit());
@@ -1233,7 +1253,31 @@ TEST_F(DBTransactionTests, ReadMostRecentSnapshot)
             key_limit = i + 1;
         }
         return Status::ok();
-    });
+    }));
+}
+
+TEST_F(DBTransactionTests, ExclusiveLockingMode)
+{
+    for (int i = 0; i < 2; ++i) {
+        m_config = i == 0 ? kExclusiveLockMode : kDefault;
+        ASSERT_OK(try_reopen(kOpenNormal));
+        const auto intercept = [this, i] {
+            DB *db;
+            Options options;
+            options.lock_mode = i == 0 ? Options::kLockNormal : Options::kLockExclusive;
+            options.env = m_test_env;
+            EXPECT_TRUE(DB::open(options, kDBName, db).is_busy());
+            return Status::ok();
+        };
+        m_test_env->add_interceptor(kWALName, tools::Interceptor(tools::kSyscallWrite, intercept));
+        ASSERT_OK(m_db->update([](auto &tx) {
+            for (std::size_t i = 0; i < 50; ++i) {
+                EXPECT_OK(put_range(tx, BucketOptions(), "BUCKET", i * 10, (i + 1) * 10));
+                EXPECT_OK(tx.commit());
+            }
+            return Status::ok();
+        }));
+    }
 }
 
 TEST_F(DBTransactionTests, IgnoresFutureVersions)
@@ -1242,7 +1286,7 @@ TEST_F(DBTransactionTests, IgnoresFutureVersions)
     auto has_open_db = false;
     U64 n = 0;
 
-    ASSERT_OK(try_reopen(kPrefill));
+    ASSERT_OK(try_reopen(kOpenPrefill));
     const auto intercept = [this, &has_open_db, &n] {
         if (has_open_db || n >= kN) {
             // Prevent this callback from being called by itself, and prevent the test from
@@ -1285,7 +1329,7 @@ protected:
 
 TEST_F(DBCheckpointTests, CheckpointerBlocksOtherCheckpointers)
 {
-    ASSERT_OK(try_reopen(kPrefill));
+    ASSERT_OK(try_reopen(kOpenPrefill));
     m_test_env->add_interceptor(
         kDBName,
         tools::Interceptor(tools::kSyscallWrite, [this] {
@@ -1309,7 +1353,7 @@ TEST_F(DBCheckpointTests, CheckpointerAllowsTransactions)
     static constexpr std::size_t kCkptCount = 1'000;
 
     // Set up a DB with some records in both the database file and the WAL.
-    ASSERT_OK(try_reopen(kPrefill));
+    ASSERT_OK(try_reopen(kOpenPrefill));
     ASSERT_OK(m_db->checkpoint(true));
     ASSERT_OK(m_db->update([](auto &tx) {
         // These records will be checkpointed below. round is 1 to cause a new version of the first half of

@@ -121,14 +121,7 @@ public:
     // This routine is a NOOP if page was already released.
     auto release(Page page, ReleaseAction action = kKeep) -> void;
 
-    auto set_status(const Status &error) const -> Status
-    {
-        if (m_status->is_ok() && (error.is_io_error() || error.is_corruption())) {
-            *m_status = error;
-            m_mode = kError;
-        }
-        return error;
-    }
+    auto set_status(const Status &error) const -> Status;
 
 private:
     explicit Pager(const Parameters &param);

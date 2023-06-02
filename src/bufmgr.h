@@ -85,6 +85,8 @@ public:
         return m_refsum;
     }
 
+    auto swap_refs(PageRef &lhs, PageRef &rhs) -> void;
+
     // Disable move and copy.
     void operator=(Bufmgr &) = delete;
     Bufmgr(Bufmgr &) = delete;

@@ -103,41 +103,53 @@ DBImpl::~DBImpl()
 
 auto DBImpl::destroy(const Options &options, const std::string &filename) -> Status
 {
+    // Make sure `filename` refers to a CalicoDB database.
+    DB *db;
     auto copy = options;
     copy.error_if_exists = false;
     copy.create_if_missing = false;
-
-    DB *db;
-    const Tx *tx;
-
-    // Determine the WAL filename, and make sure `filename` refers to a CalicoDB
-    // database. The file identifier is not checked until a transaction is started.
-    std::string wal_name;
     auto s = DB::open(copy, filename, db);
     if (s.is_ok()) {
-        wal_name = db_impl(db)->m_wal_filename;
-        s = db->new_tx(tx);
-        if (s.is_ok()) {
-            delete tx;
-        }
+        // The file header is not checked until a transaction is started. Run a read
+        // transaction, which will return with a non-OK status if `filename` is not a
+        // valid database.
+        s = db->view([](auto &) {
+            return Status::ok();
+        });
         delete db;
     }
 
     // Remove the database files from the Env.
-    Status t;
     if (s.is_ok()) {
         auto *env = options.env;
         if (env == nullptr) {
             env = Env::default_env();
         }
         s = env->remove_file(filename);
+        if (s.is_ok()) {
+            log(options.info_log, R"(destroyed database file "%s")", filename.c_str());
+        }
+
+        // Destroy the WAL file, if it exists. If the DB was closed properly above, then neither
+        // the WAL nor shm files should exist. This is to handle cases where that didn't happen.
+        const auto wal_name = options.wal_filename.empty()
+                                  ? filename + kDefaultWalSuffix
+                                  : options.wal_filename;
         if (env->file_exists(wal_name)) {
-            // Delete the WAL file if it wasn't properly cleaned up when the database
-            // was closed above. Under normal conditions, this branch is not hit.
-            t = env->remove_file(wal_name);
+            const auto t = env->remove_file(wal_name);
+            if (t.is_ok()) {
+                log(options.info_log, R"(destroyed WAL file "%s")", wal_name.c_str());
+            }
+        }
+        const auto shm_name = filename + kDefaultShmSuffix;
+        if (env->file_exists(shm_name)) {
+            const auto t = env->remove_file(shm_name);
+            if (t.is_ok()) {
+                log(options.info_log, R"(destroyed shm file "%s")", shm_name.c_str());
+            }
         }
     }
-    return s.is_ok() ? t : s;
+    return s;
 }
 
 auto DBImpl::get_property(const Slice &name, std::string *out) const -> bool

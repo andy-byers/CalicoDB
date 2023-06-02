@@ -123,15 +123,11 @@ auto Pager::open_wal() -> Status
 auto Pager::close() -> Status
 {
     finish();
-    if (m_mode == kError) {
-        // Skip the checkpoint if this connection encountered a fatal error.
-        return *m_status;
-    }
 
     // This connection already has a shared lock on the DB file. Attempt to upgrade to an
     // exclusive lock, which, if successful would indicate that this is the only connection.
     // If this connection is using the Options::kLockExclusive lock mode, this call is a
-    // NOOP, since the file is already locked.
+    // NOOP, since the file is already locked in this mode.
     auto s = m_file->file_lock(kFileExclusive);
     if (s.is_ok()) {
         if (m_wal) {
@@ -248,11 +244,7 @@ auto Pager::finish() -> void
         }
         m_wal->finish_reader();
     }
-    if (!m_status->is_corruption()) {
-        // If corruption is ever detected anywhere, we should probably not continue. Rollback
-        // is not guaranteed to have fixed it.
-        *m_status = Status::ok();
-    }
+    *m_status = Status::ok();
     m_mode = kOpen;
 }
 
@@ -504,6 +496,17 @@ auto Pager::refresh_state() -> Status
         }
     }
     return s;
+}
+
+auto Pager::set_status(const Status &error) const -> Status
+{
+    if (m_status->is_ok() && (error.is_io_error() || error.is_corruption())) {
+        *m_status = error;
+        m_mode = kError;
+
+        log(m_log, "pager error: %s", error.to_string().c_str());
+    }
+    return error;
 }
 
 auto Pager::assert_state() const -> bool

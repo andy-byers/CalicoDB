@@ -48,16 +48,16 @@ static auto write_hdr(const Src *src, volatile Dst *dst) -> void
     }
 }
 template <class Shared, class Local>
-static auto compare_hdr(const volatile Shared *shared, const Local *local) -> bool
+static auto compare_hdr(const volatile Shared *shared, const Local *local) -> int
 {
     const volatile auto *shared64 = reinterpret_cast<const volatile U64 *>(shared);
     const auto *local64 = reinterpret_cast<const U64 *>(local);
     for (std::size_t i = 0; i < sizeof(HashIndexHdr) / sizeof *shared64; ++i) {
         if (ATOMIC_LOAD(&shared64[i]) != local64[i]) {
-            return false;
+            return 1;
         }
     }
-    return true;
+    return 0;
 }
 // Must be true for the above routines to work properly.
 static_assert(0 == sizeof(HashIndexHdr) % sizeof(U64));
@@ -812,10 +812,10 @@ private:
         volatile auto *info = get_ckpt_info();
         CALICODB_EXPECT_EQ(info->readmark[0], 0);
         ATOMIC_STORE(&info->backfill, 0);
-        info->backfill_attempted = 0;
-        info->readmark[1] = 0;
+        ATOMIC_STORE(&info->backfill_attempted, 0);
+        ATOMIC_STORE(&info->readmark[1], 0);
         for (std::size_t i = 2; i < kReaderCount; ++i) {
-            info->readmark[i] = kReadmarkNotUsed;
+            ATOMIC_STORE(&info->readmark[i], kReadmarkNotUsed);
         }
     }
     [[nodiscard]] auto restart_log() -> Status
@@ -891,7 +891,7 @@ private:
             s = lock_shared(READ_LOCK(0));
             m_db->shm_barrier();
             if (s.is_ok()) {
-                if (!compare_hdr(m_index.header(), &m_hdr)) {
+                if (compare_hdr(m_index.header(), &m_hdr)) {
                     // The WAL has been written since the index header was last read. Indicate
                     // that the user should try again.
                     unlock_shared(READ_LOCK(0));
@@ -951,7 +951,7 @@ private:
         // shared lock.
         const auto changed_unexpectedly =
             ATOMIC_LOAD(&info->readmark[max_index]) != max_readmark ||
-            !compare_hdr(m_index.header(), &m_hdr);
+            compare_hdr(m_index.header(), &m_hdr);
         if (changed_unexpectedly) {
             unlock_shared(READ_LOCK(max_index));
             return Status::retry();
@@ -965,7 +965,7 @@ private:
         return s;
     }
 
-    [[nodiscard]] auto frame_offset(U32 frame) const -> std::size_t
+    [[nodiscard]] static auto frame_offset(U32 frame) -> std::size_t
     {
         CALICODB_EXPECT_GT(frame, 0);
         return kWalHdrSize + (frame - 1) * (WalFrameHdr::kSize + kPageSize);
@@ -1015,7 +1015,6 @@ auto Wal::open(const Parameters &param, Wal *&out) -> Status
     File *wal_file;
     auto s = param.env->new_file(param.wal_name, Env::kCreate, wal_file);
     if (s.is_ok()) {
-        log(param.info_log, R"(opened WAL at "%s")", param.wal_name);
         out = new WalImpl(param, *wal_file);
     }
     return s;
@@ -1113,7 +1112,7 @@ auto WalImpl::recover_index() -> Status
             // TODO: It seems that this store races with connections that are attempting to
             //       start reading. Making it atomic for now. When readers read the backfill
             //       count to see if they can get read lock 0, they are not under any lock...
-            //            info->backfill = 0;
+            // info->backfill = 0;
             ATOMIC_STORE(&info->backfill, 0);
             info->backfill_attempted = m_hdr.max_frame;
             info->readmark[0] = 0;
@@ -1128,6 +1127,7 @@ auto WalImpl::recover_index() -> Status
                     unlock_exclusive(READ_LOCK(i), 1);
                 }
             }
+            log(m_log, "recovered %u WAL frames", m_hdr.max_frame);
         }
         unlock_exclusive(lock, READ_LOCK(0) - lock);
         return s;
@@ -1268,7 +1268,6 @@ auto WalImpl::write(PageRef *dirty, std::size_t db_size) -> Status
     if (0 != std::memcmp(&m_hdr, ConstStablePtr(live), sizeof(m_hdr))) {
         first_frame = live->max_frame + 1;
     }
-
     CALICODB_TRY(restart_log());
 
     if (m_hdr.max_frame == 0) {
@@ -1425,10 +1424,15 @@ auto WalImpl::transfer_contents(bool reset) -> Status
     const auto sync_on_ckpt = m_sync_mode != Options::kSyncOff;
 
     Status s;
+    U32 start_frame = 0; // Original "backfill" for logging
     volatile auto *info = get_ckpt_info();
     auto max_safe_frame = m_hdr.max_frame;
     auto max_pgno = m_hdr.page_count;
-    if (info->backfill < max_safe_frame) {
+    // This code can run while another connection is resetting the WAL. That code will set
+    // the backfill count to 0, however, it will also hold exclusive locks on read locks
+    // 1 to N until it has reset the readmarks. This connection will block when trying to
+    // lock the read locks below, and will see that it shouldn't write anything back.
+    if (ATOMIC_LOAD(&info->backfill) < max_safe_frame) {
         // Determine the range of frames that are available to write back to the database
         // file. This range starts at the frame after the last frame backfilled by another
         // checkpointer and ends at either the last WAL frame this connection knows about,
@@ -1452,7 +1456,7 @@ auto WalImpl::transfer_contents(bool reset) -> Status
             }
         }
 
-        if (info->backfill < max_safe_frame) {
+        if (ATOMIC_LOAD(&info->backfill) < max_safe_frame) {
             HashIterator itr(m_index);
             CALICODB_TRY(itr.init(info->backfill));
             CALICODB_TRY(busy_wait(m_busy, [this] {
@@ -1468,7 +1472,7 @@ auto WalImpl::transfer_contents(bool reset) -> Status
                 unlock_exclusive(READ_LOCK(0), 1);
             };
 
-            const auto backfill = info->backfill;
+            start_frame = info->backfill;
             info->backfill_attempted = max_safe_frame;
             if (sync_on_ckpt) {
                 CALICODB_TRY(m_wal->sync());
@@ -1479,7 +1483,7 @@ auto WalImpl::transfer_contents(bool reset) -> Status
                 if (!itr.read(entry)) {
                     break;
                 }
-                if (entry.value <= backfill ||
+                if (entry.value <= start_frame ||
                     entry.value > max_safe_frame ||
                     entry.key > max_pgno) {
                     continue;
@@ -1521,6 +1525,8 @@ auto WalImpl::transfer_contents(bool reset) -> Status
                 unlock_exclusive(READ_LOCK(1), kReaderCount - 1);
             }
         }
+        log(m_log, "checkpointed WAL frames [%u, %u] out of %u",
+            start_frame, info->backfill, m_hdr.max_frame);
     }
     return s;
 }
