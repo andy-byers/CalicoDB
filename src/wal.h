@@ -7,7 +7,7 @@
 
 #include "calicodb/db.h"
 #include "utils.h"
-#include <thread>
+#include <functional>
 #include <vector>
 
 namespace calicodb
