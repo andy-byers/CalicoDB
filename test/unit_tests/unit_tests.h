@@ -20,6 +20,7 @@
 #include <gtest/gtest.h>
 #include <iomanip>
 #include <sstream>
+#include <thread>
 
 namespace calicodb
 {
