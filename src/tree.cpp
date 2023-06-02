@@ -762,7 +762,7 @@ auto Tree::resolve_overflow() -> Status
             s = split_nonroot();
         }
         if (s.is_ok()) {
-            report_stats(kSMOCount, 1);
+            ++m_stats.stats[kStatSMOCount];
         } else {
             break;
         }
@@ -977,7 +977,7 @@ auto Tree::resolve_underflow() -> Status
         CALICODB_TRY(acquire(last_loc.page_id, true, parent));
         CALICODB_TRY(fix_nonroot(std::move(parent), last_loc.index));
 
-        report_stats(kSMOCount, 1);
+        ++m_stats.stats[kStatSMOCount];
     }
     return Status::ok();
 }
@@ -1244,17 +1244,6 @@ Tree::Tree(Pager &pager, const Id *root_id)
 {
 }
 
-auto Tree::report_stats(ReportType type, std::size_t increment) const -> void
-{
-    if (type == kBytesRead) {
-        m_stats.bytes_read += increment;
-    } else if (type == kBytesWritten) {
-        m_stats.bytes_written += increment;
-    } else {
-        m_stats.smo_count += increment;
-    }
-}
-
 auto Tree::cell_scratch() -> char *
 {
     // Leave space for a child ID (maximum difference between the size of a varint and an Id).
@@ -1274,7 +1263,7 @@ auto Tree::get(const Slice &key, std::string *value) const -> Status
         s = read_value(m_cursor.node(), m_cursor.index(), *value, &slice);
         value->resize(slice.size());
         if (s.is_ok()) {
-            report_stats(kBytesRead, slice.size());
+            m_stats.stats[kStatRead] += slice.size();
         }
     }
     m_cursor.clear();
@@ -1308,7 +1297,7 @@ auto Tree::put(const Slice &key, const Slice &value) -> Status
                     m_cursor.node().overflow->is_free = true;
                     s = resolve_overflow();
                 }
-                report_stats(kBytesWritten, key.size() + value.size());
+                m_stats.stats[kStatWrite] += key.size() + value.size();
             }
         }
     }

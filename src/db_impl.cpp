@@ -39,9 +39,13 @@ auto DBImpl::open(const Options &sanitized) -> Status
         s = m_env->new_file(m_db_filename, Env::kCreate, file);
     }
     if (s.is_ok()) {
-        s = busy_wait(m_busy, [file] {
-            return file->file_lock(kLockShared);
+        s = busy_wait(m_busy, [file, sanitized] {
+            // This lock is held for the entire lifetime of this DB.
+            return file->file_lock(kFileShared);
         });
+    }
+    if (s.is_ok() && sanitized.lock_mode == Options::kLockExclusive) {
+        s = file->file_lock(kFileExclusive);
     }
     if (!s.is_ok()) {
         return s;
@@ -55,7 +59,8 @@ auto DBImpl::open(const Options &sanitized) -> Status
         &m_status,
         m_busy,
         (sanitized.cache_size + kPageSize - 1) / kPageSize,
-        sanitized.sync,
+        sanitized.sync_mode,
+        sanitized.lock_mode,
     };
     m_pager = new Pager(pager_param);
 
@@ -145,25 +150,26 @@ auto DBImpl::get_property(const Slice &name, std::string *out) const -> bool
         std::string buffer;
 
         if (prop == "stats") {
-            if (out != nullptr) {
-                append_fmt_string(
-                    buffer,
-                    "Name               Value\n"
-                    "------------------------\n"
-                    "Pager read(MB)  %8.4f\n"
-                    "Pager write(MB) %8.4f\n"
-                    "WAL read(MB)    %8.4f\n"
-                    "WAL write(MB)   %8.4f\n"
-                    "Cache hits      %8d\n"
-                    "Cache misses    %8d\n",
-                    static_cast<double>(m_pager->statistics().bytes_read) / 1'048'576.0,
-                    static_cast<double>(m_pager->statistics().bytes_written) / 1'048'576.0,
-                    static_cast<double>(m_pager->wal_statistics().bytes_read) / 1'048'576.0,
-                    static_cast<double>(m_pager->wal_statistics().bytes_written) / 1'048'576.0,
-                    m_pager->hits(),
-                    m_pager->misses());
-                out->append(buffer);
+            if (out == nullptr) {
+                return true;
             }
+            const auto cache_hits = static_cast<double>(m_pager->stats().stats[Pager::kStatCacheHits]);
+            const auto cache_misses = static_cast<double>(m_pager->stats().stats[Pager::kStatCacheMisses]);
+            append_fmt_string(
+                buffer,
+                "Name               Value\n"
+                "------------------------\n"
+                "DB read(MB)   %10.4f\n"
+                "DB write(MB)  %10.4f\n"
+                "WAL read(MB)  %10.4f\n"
+                "WAL write(MB) %10.4f\n"
+                "Cache hit %%   %10.4f\n",
+                static_cast<double>(m_pager->stats().stats[Pager::kStatRead]) / 1'048'576.0,
+                static_cast<double>(m_pager->wal_stats().stats[Wal::kStatWriteDB]) / 1'048'576.0,
+                static_cast<double>(m_pager->wal_stats().stats[Wal::kStatReadWal]) / 1'048'576.0,
+                static_cast<double>(m_pager->wal_stats().stats[Wal::kStatWriteWal]) / 1'048'576.0,
+                cache_hits / (cache_hits + cache_misses));
+            out->append(buffer);
             return true;
         }
     }
@@ -172,7 +178,7 @@ auto DBImpl::get_property(const Slice &name, std::string *out) const -> bool
 
 static auto already_running_error() -> Status
 {
-    return Status::not_supported("transaction is already running");
+    return Status::not_supported("another Tx is live");
 }
 
 auto DBImpl::checkpoint(bool reset) -> Status

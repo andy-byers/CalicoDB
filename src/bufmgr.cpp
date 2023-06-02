@@ -42,10 +42,10 @@ auto Bufmgr::get(Id page_id) -> PageRef *
     CALICODB_EXPECT_FALSE(page_id.is_root());
     auto itr = m_map.find(page_id);
     if (itr == end(m_map)) {
-        ++m_misses;
+        ++cache_misses;
         return nullptr;
     }
-    ++m_hits;
+    ++cache_hits;
     m_list.splice(end(m_list), m_list, itr->second);
     return &*itr->second;
 }

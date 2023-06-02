@@ -84,8 +84,8 @@ struct Node {
     Node() = default;
     [[nodiscard]] auto take() && -> Page;
 
-    Node(Node &&rhs) noexcept = default;
-    auto operator=(Node &&) noexcept -> Node & = default;
+    Node(Node &&rhs) = default;
+    auto operator=(Node &&) -> Node & = default;
 
     [[nodiscard]] auto get_slot(std::size_t index) const -> std::size_t;
     auto set_slot(std::size_t index, std::size_t pointer) -> void;
@@ -243,12 +243,6 @@ public:
     auto clear(Status s = Status::ok()) -> void;
 };
 
-struct TreeStatistics {
-    std::size_t smo_count = 0;
-    std::size_t bytes_read = 0;
-    std::size_t bytes_written = 0;
-};
-
 class Tree final
 {
 public:
@@ -273,14 +267,23 @@ public:
         return m_root_id ? *m_root_id : Id::root();
     }
 
-    [[nodiscard]] auto statistics() const -> const TreeStatistics &
-    {
-        return m_stats;
-    }
-
     auto close_internal_cursor() -> void
     {
         return m_cursor.clear();
+    }
+
+    enum StatType {
+        kStatRead,
+        kStatWrite,
+        kStatSMOCount,
+        kStatTypeCount
+    };
+
+    using Stats = StatCounters<kStatTypeCount>;
+
+    [[nodiscard]] auto statistics() const -> const Stats &
+    {
+        return m_stats;
     }
 
 private:
@@ -323,15 +326,9 @@ private:
     [[nodiscard]] auto fix_links(Node &node, Id parent_id = Id::null()) -> Status;
     [[nodiscard]] auto cell_scratch() -> char *;
 
-    enum ReportType {
-        kBytesRead,
-        kBytesWritten,
-        kSMOCount,
-    };
+    auto report_stats(StatType type, std::size_t increment) const -> void;
 
-    auto report_stats(ReportType type, std::size_t increment) const -> void;
-
-    mutable TreeStatistics m_stats;
+    mutable Stats m_stats;
     mutable std::string m_node_scratch;
     mutable std::string m_cell_scratch;
     Pager *m_pager = nullptr;

@@ -366,7 +366,7 @@ TEST_F(LoggerTests, LogsFormattedText)
 }
 
 // TODO: fixme!
-//TEST_F(LoggerTests, HandlesLongMessages)
+// TEST_F(LoggerTests, HandlesLongMessages)
 //{
 //    std::string msg;
 //    for (std::size_t n = 1; n <= 100'000; n *= 10) {
@@ -410,8 +410,8 @@ public:
     auto test_sequence(bool reserve) -> void
     {
         auto *f = new_file(kFilename);
-        ASSERT_OK(f->file_lock(kLockShared));
-        ASSERT_OK(f->file_lock(kLockExclusive));
+        ASSERT_OK(f->file_lock(kFileShared));
+        ASSERT_OK(f->file_lock(kFileExclusive));
         f->file_unlock();
     }
 
@@ -420,9 +420,9 @@ public:
         auto *a = new_file(kFilename);
         auto *b = new_file(kFilename);
         auto *c = new_file(kFilename);
-        ASSERT_OK(a->file_lock(kLockShared));
-        ASSERT_OK(b->file_lock(kLockShared));
-        ASSERT_OK(c->file_lock(kLockShared));
+        ASSERT_OK(a->file_lock(kFileShared));
+        ASSERT_OK(b->file_lock(kFileShared));
+        ASSERT_OK(c->file_lock(kFileShared));
         c->file_unlock();
         b->file_unlock();
         a->file_unlock();
@@ -433,17 +433,17 @@ public:
         auto *a = new_file(kFilename);
         auto *b = new_file(kFilename);
 
-        ASSERT_OK(a->file_lock(kLockShared));
-        ASSERT_OK(a->file_lock(kLockExclusive));
+        ASSERT_OK(a->file_lock(kFileShared));
+        ASSERT_OK(a->file_lock(kFileExclusive));
 
         // Try to take a shared file_lock on "b", but fail due to "a"'s exclusive
         // file_lock.
-        ASSERT_TRUE(b->file_lock(kLockShared).is_busy());
+        ASSERT_TRUE(b->file_lock(kFileShared).is_busy());
 
         // Unlock "a" and let "b" get the exclusive file_lock.
         a->file_unlock();
-        ASSERT_OK(b->file_lock(kLockShared));
-        ASSERT_OK(b->file_lock(kLockExclusive));
+        ASSERT_OK(b->file_lock(kFileShared));
+        ASSERT_OK(b->file_lock(kFileExclusive));
         b->file_unlock();
     }
 
@@ -481,14 +481,14 @@ TEST_P(EnvLockStateTests, NOOPs)
 {
     auto *f = new_file(kFilename);
 
-    ASSERT_OK(f->file_lock(kLockShared));
-    ASSERT_OK(f->file_lock(kLockShared));
+    ASSERT_OK(f->file_lock(kFileShared));
+    ASSERT_OK(f->file_lock(kFileShared));
 
-    ASSERT_OK(f->file_lock(kLockShared));
+    ASSERT_OK(f->file_lock(kFileShared));
 
-    ASSERT_OK(f->file_lock(kLockExclusive));
-    ASSERT_OK(f->file_lock(kLockExclusive));
-    ASSERT_OK(f->file_lock(kLockShared));
+    ASSERT_OK(f->file_lock(kFileExclusive));
+    ASSERT_OK(f->file_lock(kFileExclusive));
+    ASSERT_OK(f->file_lock(kFileShared));
 
     f->file_unlock();
     f->file_unlock();
@@ -499,7 +499,7 @@ TEST_P(EnvLockStateTests, InvalidRequestDeathTest)
 {
     auto *f = new_file(kFilename);
     // kUnlocked -> kShared is the only allowed transition out of kUnlocked.
-    ASSERT_DEATH((void)f->file_lock(kLockExclusive), kExpectationMatcher);
+    ASSERT_DEATH((void)f->file_lock(kFileExclusive), kExpectationMatcher);
 }
 #endif // NDEBUG
 
@@ -613,10 +613,10 @@ static auto busy_wait_file_lock(File &file, bool is_writer) -> void
 {
     Status s;
     do {
-        s = file.file_lock(kLockShared);
+        s = file.file_lock(kFileShared);
         if (s.is_ok()) {
             if (is_writer) {
-                s = file.file_lock(kLockExclusive);
+                s = file.file_lock(kFileExclusive);
                 if (s.is_ok()) {
                     return;
                 }

@@ -74,11 +74,7 @@ auto TxImpl::vacuum() -> Status
 
 auto TxImpl::vacuum_freelist() -> Status
 {
-    auto s = m_pager->refresh_state();
-    if (s.is_ok()) {
-        s = m_schema_obj.vacuum_freelist();
-    }
-    return s;
+    return m_schema_obj.vacuum_freelist();
 }
 
 auto TxImpl::new_cursor(const Bucket &b) const -> Cursor *

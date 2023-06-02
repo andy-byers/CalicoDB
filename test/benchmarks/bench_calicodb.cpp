@@ -10,8 +10,10 @@
 // each commit. This is what happens if the DB::view()/DB::update() API is used. It's much faster to keep
 // the transaction object around and just call Tx::commit() and Tx::rollback() as needed, but this is
 // bad for concurrency.
-// NOTE: I'm also adding a checkpoint call right before the restart, to be run once every 1'000 restarts.
+// NOTE: I'm also adding a checkpoint call right before the restart, to be run once every CHECKPOINT_SCALE
+//       restarts.
 #define RESTART_ON_COMMIT 1
+#define CHECKPOINT_SCALE 100
 
 enum AccessType : int64_t {
     kSequential,
@@ -32,6 +34,7 @@ struct Parameters {
     std::size_t value_length = 100;
     std::size_t commit_interval = 1;
     bool sync = false;
+    bool excl = false; // TODO
 };
 
 class Benchmark final
@@ -39,10 +42,15 @@ class Benchmark final
 public:
     explicit Benchmark(const Parameters &param = {})
         : m_param(param),
-          m_random(4'194'304)
+          m_random(4 * 1'024 * 1'024)
     {
         (void)calicodb::DB::destroy(m_options, kFilename);
-        m_options.sync = param.sync;
+        m_options.lock_mode = param.excl
+                                  ? calicodb::Options::kLockExclusive
+                                  : calicodb::Options::kLockNormal;
+        m_options.sync_mode = param.sync
+                                  ? calicodb::Options::kSyncFull
+                                  : calicodb::Options::kSyncNormal;
         m_options.error_if_exists = true;
         CHECK_OK(calicodb::DB::open(m_options, kFilename, m_db));
         CHECK_OK(m_db->update([](auto &tx) {
@@ -212,7 +220,8 @@ private:
 
     auto maybe_commit() -> void
     {
-        if (m_counters[0] % m_param.commit_interval == m_param.commit_interval - 1) {
+        const auto interval = m_param.commit_interval;
+        if (m_counters[0] % interval + 1 == interval) {
             CHECK_OK(m_wr->commit());
 #if RESTART_ON_COMMIT
             restart_tx();
@@ -223,10 +232,13 @@ private:
     auto restart_tx() -> void
     {
         delete m_wr;
-        if (m_counters[0] % 1'000 == 999) {
-            CHECK_OK(m_db->checkpoint(true));
+
+        const auto interval = m_param.commit_interval * CHECKPOINT_SCALE;
+        if (m_counters[0] % interval + 1 == interval) {
+            CHECK_OK(m_db->checkpoint(false));
         }
-        CHECK_OK(m_db->new_tx(calicodb::WriteTag{}, m_wr));
+
+        CHECK_OK(m_db->new_tx(calicodb::WriteTag(), m_wr));
         CHECK_OK(m_wr->open_bucket("bench", m_bucket));
     }
 

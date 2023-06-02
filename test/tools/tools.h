@@ -107,7 +107,7 @@ public:
         return Status::ok();
     }
 
-    auto rollback() -> void override
+    auto rollback(const Undo &) -> void override
     {
     }
 
@@ -116,10 +116,10 @@ public:
         return Status::ok();
     }
 
-    [[nodiscard]] auto statistics() const -> const WalStatistics & override
+    [[nodiscard]] auto stats() const -> const Wal::Stats & override
     {
-        static const WalStatistics stats = {};
-        return stats;
+        static constexpr Wal::Stats kEmpty;
+        return kEmpty;
     }
 };
 
@@ -143,12 +143,12 @@ public:
     [[nodiscard]] auto start_writer() -> Status override { return Status::ok(); }
     auto finish_reader() -> void override {}
     auto finish_writer() -> void override {}
-    auto rollback() -> void override;
+    auto rollback(const Undo &undo) -> void override;
 
-    [[nodiscard]] auto statistics() const -> const WalStatistics & override
+    [[nodiscard]] auto stats() const -> const Wal::Stats & override
     {
-        static const WalStatistics stats = {};
-        return stats;
+        static constexpr Wal::Stats kEmpty;
+        return kEmpty;
     }
 };
 

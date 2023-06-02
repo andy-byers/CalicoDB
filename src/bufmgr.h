@@ -89,15 +89,8 @@ public:
     void operator=(Bufmgr &) = delete;
     Bufmgr(Bufmgr &) = delete;
 
-    [[nodiscard]] auto hits() const -> U64
-    {
-        return m_hits;
-    }
-
-    [[nodiscard]] auto misses() const -> U64
-    {
-        return m_misses;
-    }
+    U64 cache_hits = 0;
+    U64 cache_misses = 0;
 
 private:
     [[nodiscard]] auto buffer_slot(std::size_t index) -> char *
@@ -134,8 +127,6 @@ private:
     std::size_t m_frame_count = 0;
 
     unsigned m_refsum = 0;
-    U64 m_misses = 0;
-    U64 m_hits = 0;
 };
 
 struct Dirtylist {

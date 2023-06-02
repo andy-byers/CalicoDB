@@ -433,23 +433,21 @@ TEST_F(PagerTests, NormalRollbacks)
     ASSERT_OK(m_pager->start_reader());
     ASSERT_OK(m_pager->start_writer());
     write_pages(*this, 456, kSomePages);
-    m_pager->rollback();
-    read_and_check(*this, 123, kManyPages);
     m_pager->finish();
-
     ASSERT_OK(m_pager->start_reader());
+    read_and_check(*this, 123, kManyPages);
+
     ASSERT_OK(m_pager->start_writer());
     write_pages(*this, 789, kFullCache);
-    m_pager->rollback();
-    read_and_check(*this, 123, kManyPages);
     m_pager->finish();
-
     ASSERT_OK(m_pager->start_reader());
+    read_and_check(*this, 123, kManyPages);
+
     ASSERT_OK(m_pager->start_writer());
     write_pages(*this, 0, kManyPages);
-    m_pager->rollback();
-    read_and_check(*this, 123, kManyPages);
     m_pager->finish();
+    ASSERT_OK(m_pager->start_reader());
+    read_and_check(*this, 123, kManyPages);
 }
 
 TEST_F(PagerTests, RollbackPageCounts)
@@ -458,11 +456,10 @@ TEST_F(PagerTests, RollbackPageCounts)
     ASSERT_OK(m_pager->start_writer());
     write_pages(*this, 0, 10);
     ASSERT_EQ(m_pager->page_count(), 10);
-    m_pager->rollback();
-    ASSERT_EQ(m_pager->page_count(), 1);
     m_pager->finish();
-
     ASSERT_OK(m_pager->start_reader());
+    ASSERT_EQ(m_pager->page_count(), 1);
+
     ASSERT_EQ(m_pager->page_count(), 1);
     ASSERT_OK(m_pager->start_writer());
     write_pages(*this, 123, 10);
@@ -474,7 +471,8 @@ TEST_F(PagerTests, RollbackPageCounts)
     ASSERT_OK(m_pager->start_writer());
     write_pages(*this, 456, 20);
     ASSERT_EQ(m_pager->page_count(), 20);
-    m_pager->rollback();
+    m_pager->finish();
+    ASSERT_OK(m_pager->start_reader());
     ASSERT_EQ(m_pager->page_count(), 10);
     read_and_check(*this, 123, 10);
     m_pager->finish();
@@ -556,7 +554,6 @@ TEST_F(PagerTests, OnlyWritesBackCommittedWalFrames)
     ASSERT_OK(m_pager->start_reader());
     ASSERT_OK(m_pager->start_writer());
     write_pages(*this, 0, kSomePages);
-    m_pager->rollback();
     m_pager->finish();
 
     ASSERT_OK(m_pager->checkpoint(true));
@@ -585,7 +582,6 @@ TEST_F(PagerTests, TransactionBehavior)
 
     ASSERT_OK(m_pager->start_reader());
     ASSERT_OK(m_pager->start_writer());
-    m_pager->rollback();
     m_pager->finish();
 
     // Only able to start a read transaction once. Second call is a NOOP.
@@ -663,7 +659,8 @@ TEST_F(PagerTests, FreelistUsage)
     ASSERT_OK(m_pager->start_reader());
     ASSERT_OK(m_pager->start_writer());
     write_pages(*this, 456, kSomePages);
-    m_pager->rollback();
+    m_pager->finish();
+    ASSERT_OK(m_pager->start_reader());
     read_and_check(*this, 123, kSomePages * 2);
     ASSERT_EQ(page_count, m_pager->page_count());
     m_pager->finish();
@@ -681,7 +678,6 @@ TEST_F(PagerTests, InvalidModeDeathTest)
 {
     ASSERT_EQ(m_pager->mode(), Pager::kOpen);
     ASSERT_DEATH((void)m_pager->commit(), kExpectationMatcher);
-    ASSERT_DEATH((void)m_pager->rollback(), kExpectationMatcher);
 
     m_pager->set_status(Status::io_error("I/O error"));
     ASSERT_EQ(m_pager->mode(), Pager::kError);
@@ -754,13 +750,6 @@ TEST_F(TruncationTests, OnlyValidPagesAreCheckpointed)
     ASSERT_EQ(file_size, kInitialPageCount * kPageSize / 2);
 }
 
-#ifndef NDEBUG
-TEST_F(TruncationTests, PurgeRootDeathTest)
-{
-    ASSERT_DEATH(m_pager->set_page_count(0), kExpectationMatcher);
-}
-#endif // NDEBUG
-
 class RandomDirtyListBuilder
 {
 public:
@@ -831,7 +820,7 @@ public:
             m_db,
             nullptr,
             nullptr,
-            false,
+            Options::kSyncNormal,
         };
         EXPECT_OK(Wal::open(m_param, m_wal));
     }
@@ -843,7 +832,7 @@ public:
 
     auto close() -> void
     {
-        ASSERT_OK(m_db->file_lock(kLockShared));
+        ASSERT_OK(m_db->file_lock(kFileShared));
         ASSERT_OK(m_wal->close());
         delete m_wal;
         delete m_db;
@@ -889,7 +878,7 @@ protected:
     auto start_reader_routine(std::size_t r, std::size_t n, Status::Code outcome) -> void
     {
         bool unused;
-        ASSERT_OK(m_db->file_lock(kLockShared));
+        ASSERT_OK(m_db->file_lock(kFileShared));
 
         std::atomic<bool> flag(false);
         std::thread thread([this, &flag, r, n] {
@@ -934,7 +923,7 @@ protected:
 
 TEST_F(WalTests, EmptyWal)
 {
-    ASSERT_OK(m_db->file_lock(kLockShared));
+    ASSERT_OK(m_db->file_lock(kFileShared));
 
     bool changed;
     ASSERT_OK(m_wal->start_reader(changed));
@@ -960,7 +949,7 @@ TEST_F(WalTests, EmptyWal)
 
 TEST_F(WalTests, RecoversIndex)
 {
-    ASSERT_OK(m_db->file_lock(kLockShared));
+    ASSERT_OK(m_db->file_lock(kFileShared));
 
     bool changed;
     ASSERT_OK(m_wal->start_reader(changed));
@@ -1023,7 +1012,7 @@ TEST_F(WalTests, ReportsProtocolError)
 
 TEST_F(WalTests, StartWriter)
 {
-    ASSERT_OK(m_db->file_lock(kLockShared));
+    ASSERT_OK(m_db->file_lock(kFileShared));
 
     bool changed;
     ASSERT_OK(m_wal->start_reader(changed));
@@ -1120,7 +1109,7 @@ protected:
 
     auto reopen_wals() -> void
     {
-        ASSERT_OK(m_db->file_lock(kLockShared));
+        ASSERT_OK(m_db->file_lock(kFileShared));
         ASSERT_OK(m_wal->close());
         delete m_wal;
         m_wal = nullptr;
@@ -1183,8 +1172,8 @@ protected:
             const auto is_commit = m_commit_interval && iteration % m_commit_interval == m_commit_interval - 1;
             write_records(m_pages_per_iter, is_commit);
             if (!is_commit) {
-                m_wal->rollback();
-                m_fake->rollback();
+                m_wal->rollback([](auto) {});
+                m_fake->rollback([](auto) {});
             }
             m_wal->finish_writer();
             m_wal->finish_reader();

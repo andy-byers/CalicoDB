@@ -279,8 +279,11 @@ auto FakeWal::checkpoint(bool reset) -> Status
     return Status::ok();
 }
 
-auto FakeWal::rollback() -> void
+auto FakeWal::rollback(const Undo &undo) -> void
 {
+    for (const auto &[id, page] : m_pending) {
+        undo(id);
+    }
     m_pending.clear();
 }
 

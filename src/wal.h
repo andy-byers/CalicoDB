@@ -38,13 +38,14 @@ public:
     using Key = U32;
     using Value = U32;
 
-    explicit HashIndex(HashIndexHdr &header, File &file);
+    explicit HashIndex(HashIndexHdr &header, File *file);
     [[nodiscard]] auto fetch(Value value) -> Key;
     [[nodiscard]] auto lookup(Key key, Value lower, Value &out) -> Status;
     [[nodiscard]] auto assign(Key key, Value value) -> Status;
     [[nodiscard]] auto header() -> volatile HashIndexHdr *;
     [[nodiscard]] auto groups() const -> const std::vector<volatile char *> &;
     auto cleanup() -> void;
+    auto close() -> void;
 
 private:
     friend class WalImpl;
@@ -103,11 +104,6 @@ private:
     Key m_prior = 0;
 };
 
-struct WalStatistics {
-    std::size_t bytes_read = 0;
-    std::size_t bytes_written = 0;
-};
-
 class Wal
 {
 public:
@@ -118,7 +114,8 @@ public:
         File *db_file;
         Logger *info_log;
         BusyHandler *busy;
-        bool sync;
+        Options::SyncMode sync_mode;
+        Options::LockMode lock_mode;
     };
 
     virtual ~Wal();
@@ -145,7 +142,8 @@ public:
     // Write new versions of the given pages to the WAL.
     [[nodiscard]] virtual auto write(PageRef *dirty, std::size_t db_size) -> Status = 0;
 
-    virtual auto rollback() -> void = 0;
+    using Undo = std::function<void(Id)>;
+    virtual auto rollback(const Undo &undo) -> void = 0;
 
     // WRITER -> READER
     virtual auto finish_writer() -> void = 0;
@@ -153,7 +151,15 @@ public:
     // READER -> UNLOCKED
     virtual auto finish_reader() -> void = 0;
 
-    [[nodiscard]] virtual auto statistics() const -> const WalStatistics & = 0;
+    enum StatType {
+        kStatReadWal,
+        kStatWriteWal,
+        kStatWriteDB,
+        kStatTypeCount
+    };
+    using Stats = StatCounters<kStatTypeCount>;
+
+    [[nodiscard]] virtual auto stats() const -> const Stats & = 0;
 };
 
 template <class Callback>

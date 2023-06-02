@@ -15,54 +15,54 @@ namespace calicodb
 class Slice final
 {
 public:
-    constexpr Slice() noexcept = default;
+    constexpr Slice() = default;
 
-    constexpr Slice(const char *data, std::size_t size) noexcept
+    constexpr Slice(const char *data, std::size_t size)
         : m_data(data),
           m_size(size)
     {
         assert(m_data != nullptr);
     }
 
-    constexpr Slice(const char *data) noexcept
+    constexpr Slice(const char *data)
         : m_data(data)
     {
         assert(m_data != nullptr);
         m_size = std::char_traits<char>::length(m_data);
     }
 
-    constexpr Slice(const std::string_view &rhs) noexcept
+    constexpr Slice(const std::string_view &rhs)
         : Slice(rhs.data(), rhs.size())
     {
     }
 
-    Slice(const std::string &rhs) noexcept
+    Slice(const std::string &rhs)
         : Slice(rhs.data(), rhs.size())
     {
     }
 
-    [[nodiscard]] constexpr auto is_empty() const noexcept -> bool
+    [[nodiscard]] constexpr auto is_empty() const -> bool
     {
         return m_size == 0;
     }
 
-    [[nodiscard]] constexpr auto data() const noexcept -> const char *
+    [[nodiscard]] constexpr auto data() const -> const char *
     {
         return m_data;
     }
 
-    [[nodiscard]] constexpr auto size() const noexcept -> std::size_t
+    [[nodiscard]] constexpr auto size() const -> std::size_t
     {
         return m_size;
     }
 
-    constexpr auto operator[](std::size_t index) const noexcept -> const char &
+    constexpr auto operator[](std::size_t index) const -> const char &
     {
         assert(index < m_size);
         return m_data[index];
     }
 
-    [[nodiscard]] constexpr auto range(std::size_t offset, std::size_t size) const noexcept -> Slice
+    [[nodiscard]] constexpr auto range(std::size_t offset, std::size_t size) const -> Slice
     {
         assert(size <= m_size);
         assert(offset <= m_size);
@@ -70,19 +70,19 @@ public:
         return {m_data + offset, size};
     }
 
-    [[nodiscard]] constexpr auto range(std::size_t offset) const noexcept -> Slice
+    [[nodiscard]] constexpr auto range(std::size_t offset) const -> Slice
     {
         assert(offset <= m_size);
         return range(offset, m_size - offset);
     }
 
-    constexpr auto clear() noexcept -> void
+    constexpr auto clear() -> void
     {
         m_data = "";
         m_size = 0;
     }
 
-    constexpr auto advance(std::size_t n = 1) noexcept -> Slice
+    constexpr auto advance(std::size_t n = 1) -> Slice
     {
         assert(n <= m_size);
         m_data += n;
@@ -90,14 +90,14 @@ public:
         return *this;
     }
 
-    constexpr auto truncate(std::size_t size) noexcept -> Slice
+    constexpr auto truncate(std::size_t size) -> Slice
     {
         assert(size <= m_size);
         m_size = size;
         return *this;
     }
 
-    [[nodiscard]] constexpr auto starts_with(const Slice &rhs) const noexcept -> bool
+    [[nodiscard]] constexpr auto starts_with(const Slice &rhs) const -> bool
     {
         if (rhs.size() > m_size) {
             return false;
@@ -105,7 +105,7 @@ public:
         return std::memcmp(m_data, rhs.data(), rhs.size()) == 0;
     }
 
-    [[nodiscard]] auto compare(const Slice &rhs) const noexcept -> int
+    [[nodiscard]] auto compare(const Slice &rhs) const -> int
     {
         const auto min_length = m_size < rhs.size() ? m_size : rhs.size();
         const auto r = std::memcmp(m_data, rhs.data(), min_length);
@@ -119,7 +119,7 @@ public:
         return r;
     }
 
-    [[nodiscard]] auto to_string() const noexcept -> std::string
+    [[nodiscard]] auto to_string() const -> std::string
     {
         return {m_data, m_size};
     }
@@ -129,32 +129,32 @@ private:
     std::size_t m_size = 0;
 };
 
-inline auto operator<(const Slice &lhs, const Slice &rhs) noexcept -> bool
+inline auto operator<(const Slice &lhs, const Slice &rhs) -> bool
 {
     return lhs.compare(rhs) < 0;
 }
 
-inline auto operator<=(const Slice &lhs, const Slice &rhs) noexcept -> bool
+inline auto operator<=(const Slice &lhs, const Slice &rhs) -> bool
 {
     return lhs.compare(rhs) <= 0;
 }
 
-inline auto operator>(const Slice &lhs, const Slice &rhs) noexcept -> bool
+inline auto operator>(const Slice &lhs, const Slice &rhs) -> bool
 {
     return lhs.compare(rhs) > 0;
 }
 
-inline auto operator>=(const Slice &lhs, const Slice &rhs) noexcept -> bool
+inline auto operator>=(const Slice &lhs, const Slice &rhs) -> bool
 {
     return lhs.compare(rhs) >= 0;
 }
 
-inline auto operator==(const Slice &lhs, const Slice &rhs) noexcept -> bool
+inline auto operator==(const Slice &lhs, const Slice &rhs) -> bool
 {
     return lhs.compare(rhs) == 0;
 }
 
-inline auto operator!=(const Slice &lhs, const Slice &rhs) noexcept -> bool
+inline auto operator!=(const Slice &lhs, const Slice &rhs) -> bool
 {
     return lhs.compare(rhs) != 0;
 }

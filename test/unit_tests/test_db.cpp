@@ -228,7 +228,9 @@ protected:
 
     enum Config {
         kDefault,
-        kSyncMode,
+        kExclusiveLockMode,
+        kOffSyncMode,
+        kFullSyncMode,
         kUseAltWAL,
         kSmallCache,
         kMaxConfig,
@@ -245,8 +247,12 @@ protected:
         switch (m_config) {
             case kDefault:
                 break;
-            case kSyncMode:
-                options.sync = true;
+            case kExclusiveLockMode:
+                options.lock_mode = Options::kLockExclusive;
+            case kOffSyncMode:
+                options.sync_mode = Options::kSyncOff;
+            case kFullSyncMode:
+                options.sync_mode = Options::kSyncFull;
                 break;
             case kUseAltWAL:
                 options.wal_filename = kAltWALName;
@@ -392,19 +398,21 @@ TEST_F(DBTests, BucketBehavior)
 
 TEST_F(DBTests, ReadonlyTx)
 {
-    ASSERT_OK(m_db->update([](auto &tx) {
-        Bucket b;
-        EXPECT_OK(tx.create_bucket(BucketOptions(), "BUCKET", &b));
-        return Status::ok();
-    }));
-    ASSERT_OK(m_db->view([](auto &tx) {
-        Bucket b;
-        EXPECT_OK(tx.open_bucket("BUCKET", b));
-        auto *c = tx.new_cursor(b);
-        delete c;
-        c = &tx.schema();
-        return Status::ok();
-    }));
+    do {
+        ASSERT_OK(m_db->update([](auto &tx) {
+            Bucket b;
+            EXPECT_OK(tx.create_bucket(BucketOptions(), "BUCKET", &b));
+            return Status::ok();
+        }));
+        ASSERT_OK(m_db->view([](auto &tx) {
+            Bucket b;
+            EXPECT_OK(tx.open_bucket("BUCKET", b));
+            auto *c = tx.new_cursor(b);
+            delete c;
+            c = &tx.schema();
+            return Status::ok();
+        }));
+    } while (change_options(true));
 }
 
 TEST_F(DBTests, UpdateThenView)
@@ -493,9 +501,11 @@ TEST_F(DBTests, RollbackUpdate)
 
 TEST_F(DBTests, VacuumEmptyDB)
 {
-    ASSERT_OK(m_db->update([](auto &tx) {
-        return tx.vacuum();
-    }));
+    do {
+        ASSERT_OK(m_db->update([](auto &tx) {
+            return tx.vacuum();
+        }));
+    } while (change_options(true));
 }
 
 TEST_F(DBTests, CorruptedRootIDs)
@@ -521,6 +531,10 @@ TEST_F(DBTests, CorruptedRootIDs)
     buffer[kPageSize - 1] = 42; // Corrupt the root ID of "BUCKET".
     ASSERT_OK(file->write(0, Slice(buffer, kPageSize)));
     delete file;
+
+    // The pager won't reread pages unless another connection has changed the
+    // database. Reopen the database to force it to read the corrupted page.
+    ASSERT_OK(reopen_db(false));
 
     (void)m_db->update([](auto &tx) {
         Status s;
@@ -636,33 +650,33 @@ TEST(OldWalTests, HandlesOldWalFile)
     delete db;
 }
 
-//TEST(DestructionTests, OnlyDeletesCalicoDatabases)
+// TEST(DestructionTests, OnlyDeletesCalicoDatabases)
 //{
-//    std::filesystem::remove_all("./testdb");
+//     std::filesystem::remove_all("./testdb");
 //
-//    // "./testdb" does not exist.
-//    ASSERT_TRUE(DB::destroy(Options(), "./testdb").is_invalid_argument());
-//    ASSERT_FALSE(Env::default_env()->file_exists("./testdb"));
+//     // "./testdb" does not exist.
+//     ASSERT_TRUE(DB::destroy(Options(), "./testdb").is_invalid_argument());
+//     ASSERT_FALSE(Env::default_env()->file_exists("./testdb"));
 //
-//    // File is too small to read the first page.
-//    File *file;
-//    ASSERT_OK(Env::default_env()->new_file("./testdb", Env::kCreate, file));
-//    ASSERT_OK(file->write(0, "CalicoDB format"));
-//    ASSERT_TRUE(DB::destroy(Options(), "./testdb").is_invalid_argument());
-//    ASSERT_TRUE(Env::default_env()->file_exists("./testdb"));
+//     // File is too small to read the first page.
+//     File *file;
+//     ASSERT_OK(Env::default_env()->new_file("./testdb", Env::kCreate, file));
+//     ASSERT_OK(file->write(0, "CalicoDB format"));
+//     ASSERT_TRUE(DB::destroy(Options(), "./testdb").is_invalid_argument());
+//     ASSERT_TRUE(Env::default_env()->file_exists("./testdb"));
 //
-//    // Identifier is incorrect.
-//    ASSERT_OK(file->write(0, "CalicoDB format 0"));
-//    ASSERT_TRUE(DB::destroy(Options(), "./testdb").is_invalid_argument());
+//     // Identifier is incorrect.
+//     ASSERT_OK(file->write(0, "CalicoDB format 0"));
+//     ASSERT_TRUE(DB::destroy(Options(), "./testdb").is_invalid_argument());
 //
-//    DB *db;
-//    std::filesystem::remove_all("./testdb");
-//    ASSERT_OK(DB::open(Options(), "./testdb", db));
-//    ASSERT_OK(DB::destroy(Options(), "./testdb"));
+//     DB *db;
+//     std::filesystem::remove_all("./testdb");
+//     ASSERT_OK(DB::open(Options(), "./testdb", db));
+//     ASSERT_OK(DB::destroy(Options(), "./testdb"));
 //
-//    delete db;
-//    delete file;
-//}
+//     delete db;
+//     delete file;
+// }
 
 TEST(DestructionTests, OnlyDeletesCalicoWals)
 {
@@ -721,7 +735,7 @@ protected:
     {
         Status s;
         if (0 == (flag & kKeepOpen)) {
-            m_config = kSyncMode;
+            m_config = kFullSyncMode;
             s = reopen_db(flag & kClearDB, m_test_env);
         }
         if (s.is_ok() && (flag & kPrefill) && m_max_count == 0) {
@@ -1057,7 +1071,7 @@ protected:
     {
         Options options;
         options.env = m_env;
-        options.sync = sync;
+        options.sync_mode = Options::kSyncFull;
         options.busy = &m_busy;
 
         return DB::open(options, kDBName, db_out);
@@ -1298,7 +1312,7 @@ TEST_F(DBCheckpointTests, CheckpointerAllowsTransactions)
     ASSERT_OK(try_reopen(kPrefill));
     ASSERT_OK(m_db->checkpoint(true));
     ASSERT_OK(m_db->update([](auto &tx) {
-        // These records will be checkpointed below. `round` is 1 to cause a new version of the first half of
+        // These records will be checkpointed below. round is 1 to cause a new version of the first half of
         // the records to be written.
         return put_range(tx, BucketOptions(), "saved", 0, kSavedCount / 2, 1);
     }));
@@ -1340,7 +1354,7 @@ protected:
     {
         static constexpr auto *kName = "12345678_BUCKET_NAMES";
         static constexpr std::size_t kN = 10;
-        (void)m_db->update([&bitmaps](auto &tx) {
+        (void)m_db->update([&bitmaps, this](auto &tx) {
             Bucket buckets[8];
             for (std::size_t i = 0; i < 8; ++i) {
                 EXPECT_OK(tx.create_bucket(BucketOptions(), kName + i, &buckets[i]));
@@ -1361,6 +1375,7 @@ protected:
                     EXPECT_OK(erase_range(tx, buckets[is[n]], bs[n] * kN, (bs[n] + 1) * kN));
                 }
             }
+
             EXPECT_OK(tx.vacuum());
 
             for (std::size_t n = 0; n < bs.size(); ++n) {

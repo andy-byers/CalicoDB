@@ -45,7 +45,7 @@ auto Schema::create_bucket(const BucketOptions &options, const Slice &name, Buck
             s = m_map.put(name, value);
         }
     } else if (s.is_ok()) {
-        if (!decode_root_id(value, root_id)) {
+        if (!decode_and_check_root_id(value, root_id)) {
             s = corrupted_root_id(name.to_string(), value);
         } else if (options.error_if_exists) {
             s = Status::invalid_argument(
@@ -73,7 +73,7 @@ auto Schema::open_bucket(const Slice &name, Bucket &b_out) -> Status
 
     Id root_id;
     if (s.is_ok()) {
-        if (!decode_root_id(value, root_id)) {
+        if (!decode_and_check_root_id(value, root_id)) {
             return corrupted_root_id(name.to_string(), value);
         }
     } else if (s.is_not_found()) {
@@ -90,12 +90,18 @@ auto Schema::decode_root_id(const Slice &data, Id &out) -> bool
 {
     U64 num;
     if (decode_varint(data.data(), data.data() + data.size(), num)) {
-        if (num <= m_pager->page_count()) {
-            out.value = static_cast<U32>(num);
-            return true;
-        }
+        out.value = static_cast<U32>(num);
+        return true;
     }
     return false;
+}
+
+auto Schema::decode_and_check_root_id(const Slice &data, Id &out) -> bool
+{
+    if (!decode_root_id(data, out) || out.value > m_pager->page_count()) {
+        return false;
+    }
+    return true;
 }
 
 auto Schema::encode_root_id(Id id, std::string &out) -> void
@@ -132,7 +138,7 @@ auto Schema::drop_bucket(const Slice &name) -> Status
     }
 
     Id root_id;
-    if (!decode_root_id(value, root_id)) {
+    if (!decode_and_check_root_id(value, root_id)) {
         return corrupted_root_id(name, value);
     }
     auto itr = m_trees.find(root_id);
@@ -179,7 +185,7 @@ auto Schema::vacuum_finish() -> Status
     Status s;
     while (c->is_valid()) {
         Id old_id;
-        if (!decode_root_id(c->value(), old_id)) {
+        if (!decode_and_check_root_id(c->value(), old_id)) {
             return corrupted_root_id(c->key().to_string(), c->value());
         }
         const auto root = m_reroot.find(old_id);
