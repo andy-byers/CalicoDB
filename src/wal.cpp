@@ -1514,6 +1514,7 @@ auto WalImpl::transfer_contents(bool reset) -> Status
             // Some other connection got in the way.
             s = Status::retry();
         } else if (reset) {
+            const auto salt_1 = m_env->rand();
             // Wait on other connections that are still reading from the WAL. This is
             // what SQLite does for `SQLITE_CHECKPOINT_RESTART`. New connections will
             // take readmark 0 and read directly from the database file, and the next
@@ -1522,6 +1523,7 @@ auto WalImpl::transfer_contents(bool reset) -> Status
                 return lock_exclusive(READ_LOCK(1), kReaderCount - 1);
             });
             if (s.is_ok()) {
+                restart_header(salt_1);
                 unlock_exclusive(READ_LOCK(1), kReaderCount - 1);
             }
         }

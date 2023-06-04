@@ -6,7 +6,10 @@ FetchContent_Declare(benchmark
         GIT_TAG main)
 FetchContent_MakeAvailable(benchmark)
 
-add_executable(bench_calicodb
-        bench_calicodb.cpp)
-target_link_libraries(bench_calicodb
-        PRIVATE benchmark calicodb_tools)
+function(build_benchmark LIB_NAME)
+    set(NAME bench_${LIB_NAME})
+    add_executable(${NAME} ${NAME}.cpp benchmark.h)
+    target_link_libraries(${NAME} ${LIB_NAME} benchmark)
+endfunction()
+
+build_benchmark(calicodb)

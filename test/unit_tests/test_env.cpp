@@ -2,11 +2,11 @@
 // This source code is licensed under the MIT License, which can be found in
 // LICENSE.md. See AUTHORS.md for a list of contributor names.
 
+#include "../test.h"
 #include "calicodb/env.h"
 #include "encoding.h"
 #include "tools.h"
 #include "unit_tests.h"
-#include "utils.h"
 #include <gtest/gtest.h>
 #include <thread>
 

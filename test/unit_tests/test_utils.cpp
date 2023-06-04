@@ -7,12 +7,12 @@
 #include <gtest/gtest.h>
 #include <vector>
 
+#include "../test.h"
 #include "calicodb/slice.h"
 #include "encoding.h"
 #include "logging.h"
 #include "scope_guard.h"
 #include "unit_tests.h"
-#include "utils.h"
 
 namespace calicodb
 {

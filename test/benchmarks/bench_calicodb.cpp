@@ -2,9 +2,10 @@
 // This source code is licensed under the MIT License, which can be found in
 // LICENSE.md. See AUTHORS.md for a list of contributor names.
 
-#include "logging.h"
-#include "tools.h"
+#include "benchmark.h"
 #include <benchmark/benchmark.h>
+#include <calicodb/cursor.h>
+#include <calicodb/db.h>
 
 // This simulates normal transaction behavior, where m_tx is destroyed and DB::new_tx() is called after
 // each commit. This is what happens if the DB::view()/DB::update() API is used. It's much faster to keep
@@ -14,6 +15,8 @@
 //       restarts.
 #define RESTART_ON_COMMIT 1
 #define CHECKPOINT_SCALE 100
+
+#define CHECK_OK(expr) assert((expr).is_ok())
 
 enum AccessType : int64_t {
     kSequential,
@@ -187,7 +190,7 @@ public:
     {
         state.PauseTiming();
         const auto lower_size = upper_size * state.range(0) / 10;
-        CALICODB_EXPECT_LE(lower_size, upper_size);
+        assert(lower_size <= upper_size);
         for (std::size_t i = 0; i < upper_size; ++i) {
             CHECK_OK(m_wr->put(
                 m_bucket,
@@ -210,7 +213,7 @@ public:
 private:
     auto use_cursor() const -> void
     {
-        CHECK_TRUE(m_cursor->is_valid());
+        assert(m_cursor->is_valid());
         auto result_key = m_cursor->key();
         auto result_value = m_cursor->value();
         benchmark::DoNotOptimize(result_key);
@@ -257,8 +260,15 @@ private:
             m = kNumRecords - 1;
             n %= kNumRecords;
         }
-        return calicodb::tools::integral_key<kKeyLength>(
-            is_sequential ? n : m_random.Next(m));
+        const auto key = is_sequential ? n : m_random.Next(m);
+
+        char buffer[30];
+        std::snprintf(
+            buffer,
+            sizeof(buffer),
+            "%016u",
+            key);
+        return {buffer};
     }
 
     static constexpr auto kFilename = "__bench_db__";
@@ -269,7 +279,7 @@ private:
     calicodb::Bucket m_bucket;
     Parameters m_param;
     std::size_t m_counters[2] = {};
-    calicodb::tools::RandomGenerator m_random;
+    calicodb::benchmarks::RandomGenerator m_random;
     calicodb::Options m_options;
     calicodb::Cursor *m_cursor = nullptr;
     calicodb::DB *m_db = nullptr;
@@ -389,7 +399,7 @@ BENCHMARK(BM_Read)
 static auto BM_ReadWrite(benchmark::State &state) -> void
 {
     const auto label = "ReadWrite" + access_type_name(state.range(0)) + "_1:";
-    state.SetLabel(label + calicodb::number_to_string(state.range(1)));
+    state.SetLabel(label + std::to_string(state.range(1)));
 
     Benchmark bench;
     bench.init(Benchmark::kWriter | Benchmark::kPrefill);

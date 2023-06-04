@@ -75,11 +75,7 @@ auto Pager::open(const Parameters &param, Pager *&out) -> Status
     CALICODB_EXPECT_LE(param.frame_count * kPageSize, kMaxCacheSize);
 
     out = new Pager(param);
-    auto s = out->open_wal();
-    if (s.is_ok() && param.lock_mode == Options::kLockExclusive) {
-        s = out->refresh_state();
-    }
-    return s;
+    return out->open_wal();
 }
 
 Pager::Pager(const Parameters &param)

@@ -5,6 +5,7 @@
 #ifndef CALICODB_TEST_UNIT_TESTS_H
 #define CALICODB_TEST_UNIT_TESTS_H
 
+#include "../test.h"
 #include "calicodb/status.h"
 #include "db_impl.h"
 #include "encoding.h"
@@ -13,7 +14,6 @@
 #include "harness.h"
 #include "page.h"
 #include "tools.h"
-#include "utils.h"
 #include "wal.h"
 #include <atomic>
 #include <filesystem>
@@ -192,6 +192,65 @@ inline auto assert_special_error(const Status &s)
         std::abort();
     }
 }
+
+class FileWrapper : public File
+{
+public:
+    explicit FileWrapper(File &target)
+        : m_target(&target)
+    {
+    }
+
+    ~FileWrapper() override = default;
+
+    [[nodiscard]] auto read(std::size_t offset, std::size_t size, char *scratch, Slice *out) -> Status override
+    {
+        return m_target->read(offset, size, scratch, out);
+    }
+
+    [[nodiscard]] auto write(std::size_t offset, const Slice &in) -> Status override
+    {
+        return m_target->write(offset, in);
+    }
+
+    [[nodiscard]] auto sync() -> Status override
+    {
+        return m_target->sync();
+    }
+
+    [[nodiscard]] auto file_lock(FileLockMode mode) -> Status override
+    {
+        return m_target->file_lock(mode);
+    }
+
+    auto file_unlock() -> void override
+    {
+        return m_target->file_unlock();
+    }
+
+    [[nodiscard]] auto shm_map(std::size_t r, bool extend, volatile void *&out) -> Status override
+    {
+        return m_target->shm_map(r, extend, out);
+    }
+
+    [[nodiscard]] auto shm_lock(std::size_t r, std::size_t n, ShmLockFlag flags) -> Status override
+    {
+        return m_target->shm_lock(r, n, flags);
+    }
+
+    auto shm_unmap(bool unlink) -> void override
+    {
+        return m_target->shm_unmap(unlink);
+    }
+
+    auto shm_barrier() -> void override
+    {
+        return m_target->shm_barrier();
+    }
+
+protected:
+    File *m_target;
+};
 
 } // namespace calicodb
 
