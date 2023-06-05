@@ -350,20 +350,22 @@ protected:
                 barrier_wait(barrier);
 
                 Bucket b;
-                auto s = tx.open_bucket("BUCKET", b);
-                if (s.is_invalid_argument()) {
+                // Oddly enough, if we name this Status "s", some platforms complain about shadowing,
+                // even though s is not captured in this lambda.
+                auto t = tx.open_bucket("BUCKET", b);
+                if (t.is_invalid_argument()) {
                     // Writer hasn't created the bucket yet.
                     return Status::ok();
-                } else if (!s.is_ok()) {
-                    return s;
+                } else if (!t.is_ok()) {
+                    return t;
                 }
                 // Iterate through the records twice. The same value should be read each time.
                 for (std::size_t i = 0; i < co.op_args[1] * 2; ++i) {
                     std::string value;
                     // If the bucket exists, then it must contain co.op_arg records (the first writer to run
                     // makes sure of this).
-                    s = tx.get(b, numeric_key(i % co.op_args[1]), &value);
-                    if (!s.is_ok()) {
+                    t = tx.get(b, numeric_key(i % co.op_args[1]), &value);
+                    if (!t.is_ok()) {
                         break;
                     } else if (i == 0) {
                         co.result.emplace_back(value);
@@ -371,7 +373,7 @@ protected:
                         EXPECT_EQ(value, co.result.back()) << "non repeatable read";
                     }
                 }
-                return s;
+                return t;
             });
         }
 
@@ -398,26 +400,26 @@ protected:
                 barrier_wait(barrier);
 
                 Bucket b;
-                auto s = tx.create_bucket(BucketOptions(), "BUCKET", &b);
-                for (std::size_t i = 0; s.is_ok() && i < co.op_args[1]; ++i) {
+                auto t = tx.create_bucket(BucketOptions(), "BUCKET", &b);
+                for (std::size_t i = 0; t.is_ok() && i < co.op_args[1]; ++i) {
                     U64 result = 1;
                     std::string value;
-                    s = tx.get(b, numeric_key(i), &value);
-                    if (s.is_not_found()) {
-                        s = Status::ok();
-                    } else if (s.is_ok()) {
+                    t = tx.get(b, numeric_key(i), &value);
+                    if (t.is_not_found()) {
+                        t = Status::ok();
+                    } else if (t.is_ok()) {
                         Slice slice(value);
                         EXPECT_TRUE(consume_decimal_number(slice, &result));
                         ++result;
                     } else {
                         break;
                     }
-                    if (s.is_ok()) {
-                        s = tx.put(b, numeric_key(i), numeric_key(result));
+                    if (t.is_ok()) {
+                        t = tx.put(b, numeric_key(i), numeric_key(result));
                     }
                 }
-                EXPECT_OK(s);
-                return s;
+                EXPECT_OK(t);
+                return t;
             });
 
             if (s.is_busy()) {
