@@ -5,6 +5,7 @@
 #ifndef CALICODB_UTILS_FAKE_ENV_H
 #define CALICODB_UTILS_FAKE_ENV_H
 
+#include <unordered_map>
 #include "calicodb/env.h"
 
 namespace calicodb
@@ -39,7 +40,6 @@ protected:
         bool created = false;
     };
 
-    [[nodiscard]] auto open_or_create_file(const std::string &filename) const -> FileState &;
     [[nodiscard]] auto read_file_at(const FileState &mem, std::size_t offset, std::size_t size, char *scratch, Slice *out) -> Status;
     [[nodiscard]] auto write_file_at(FileState &mem, std::size_t offset, const Slice &in) -> Status;
 

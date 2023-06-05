@@ -150,7 +150,7 @@ auto FakeEnv::srand(unsigned seed) -> void
 
 auto FakeEnv::rand() -> unsigned
 {
-    return ::rand();
+    return static_cast<unsigned>(::rand());
 }
 
 auto FakeEnv::clone() const -> Env *
