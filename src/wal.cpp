@@ -328,7 +328,7 @@ auto HashIndex::close() -> void
         m_file = nullptr;
     } else {
         for (const auto *ptr : m_groups) {
-            delete[] ptr;
+            delete ptr;
         }
     }
     m_groups.clear();
@@ -1304,14 +1304,14 @@ auto WalImpl::write(PageRef *dirty, std::size_t db_size) -> Status
     // Write each dirty page to the WAL.
     auto next_frame = m_hdr.max_frame + 1;
     auto offset = frame_offset(next_frame);
-    for (auto *p = dirty; p; p = p->dirty) {
+    for (auto *p = dirty; p; p = p->next) {
         U32 frame;
 
         // Condition ensures that if this set of pages completes a transaction, then
         // the last frame will always be appended, even if another copy of the page
         // exists in the WAL for this transaction. This frame needs to have its
         // "db_size" field set to mark that it is a commit frame.
-        if (first_frame && (p->dirty || !is_commit)) {
+        if (first_frame && (p->next || !is_commit)) {
             // Check to see if the page has been written to the WAL already by the
             // current transaction. If so, overwrite it and indicate that checksums
             // need to be recomputed from here on commit.
@@ -1331,7 +1331,7 @@ auto WalImpl::write(PageRef *dirty, std::size_t db_size) -> Status
         // WAL frame for it.
         WalFrameHdr header;
         header.pgno = p->page_id.value;
-        header.db_size = p->dirty == nullptr ? static_cast<U32>(db_size) : 0;
+        header.db_size = p->next == nullptr ? static_cast<U32>(db_size) : 0;
         encode_frame(header, p->page, m_frame.data());
         CALICODB_TRY(m_wal->write(offset, m_frame));
         m_stats.stats[kStatWriteWal] += m_frame.size();
@@ -1348,7 +1348,7 @@ auto WalImpl::write(PageRef *dirty, std::size_t db_size) -> Status
 
     Status s;
     next_frame = m_hdr.max_frame + 1;
-    for (auto *p = dirty; s.is_ok() && p; p = p->dirty) {
+    for (auto *p = dirty; s.is_ok() && p; p = p->next) {
         if (p->flag & PageRef::kExtra) {
             s = m_index.assign(p->page_id.value, next_frame++);
             p->flag = PageRef::kNormal;

@@ -47,7 +47,7 @@ protected:
         ASSERT_OK(reopen_db(false));
     }
 
-    [[nodiscard]] static auto make_kv(std::size_t kv, std::size_t round = 0) -> std::pair<std::string, std::string>
+    [[nodiscard]] static auto make_kv(int kv, int round = 0) -> std::pair<std::string, std::string>
     {
         EXPECT_LE(0, kv);
         EXPECT_LE(0, round);
@@ -55,8 +55,7 @@ protected:
         // and kOverflowLink).
         static constexpr std::size_t kMaxKV = kPageSize * 3;
         const auto key_length = (round + 1) * kMaxKV / kMaxRounds;
-        auto key_str = numeric_key<kMaxKV>(kv);
-        key_str = key_str.substr(kMaxKV - key_length);
+        auto key_str = numeric_key(kv);
         const auto val_length = kMaxKV - key_length;
         auto val_str = number_to_string(kv);
         if (val_str.size() < val_length) {
@@ -65,12 +64,12 @@ protected:
         return {key_str, val_str};
     }
 
-    [[nodiscard]] static auto put(Tx &tx, const Bucket &b, std::size_t kv, std::size_t round = 0) -> Status
+    [[nodiscard]] static auto put(Tx &tx, const Bucket &b, int kv, int round = 0) -> Status
     {
         const auto [k, v] = make_kv(kv, round);
         return tx.put(b, k, v);
     }
-    [[nodiscard]] static auto put(Tx &tx, const BucketOptions &options, const std::string &bname, std::size_t kv, std::size_t round = 0) -> Status
+    [[nodiscard]] static auto put(Tx &tx, const BucketOptions &options, const std::string &bname, int kv, int round = 0) -> Status
     {
         Bucket b;
         auto s = tx.create_bucket(options, bname, &b);
@@ -80,15 +79,15 @@ protected:
         return s;
     }
 
-    [[nodiscard]] static auto put_range(Tx &tx, const Bucket &b, std::size_t kv1, std::size_t kv2, std::size_t round = 0) -> Status
+    [[nodiscard]] static auto put_range(Tx &tx, const Bucket &b, int kv1, int kv2, int round = 0) -> Status
     {
         Status s;
-        for (std::size_t kv = kv1; s.is_ok() && kv < kv2; ++kv) {
+        for (int kv = kv1; s.is_ok() && kv < kv2; ++kv) {
             s = put(tx, b, kv, round);
         }
         return s;
     }
-    [[nodiscard]] static auto put_range(Tx &tx, const BucketOptions &options, const std::string &bname, std::size_t kv1, std::size_t kv2, std::size_t round = 0) -> Status
+    [[nodiscard]] static auto put_range(Tx &tx, const BucketOptions &options, const std::string &bname, int kv1, int kv2, int round = 0) -> Status
     {
         Bucket b;
         auto s = tx.create_bucket(options, bname, &b);
@@ -98,12 +97,12 @@ protected:
         return s;
     }
 
-    [[nodiscard]] static auto erase(Tx &tx, const Bucket &b, std::size_t kv, std::size_t round = 0) -> Status
+    [[nodiscard]] static auto erase(Tx &tx, const Bucket &b, int kv, int round = 0) -> Status
     {
         const auto [k, _] = make_kv(kv, round);
         return tx.erase(b, k);
     }
-    [[nodiscard]] static auto erase(Tx &tx, const BucketOptions &options, const std::string &bname, std::size_t kv, std::size_t round = 0) -> Status
+    [[nodiscard]] static auto erase(Tx &tx, const BucketOptions &options, const std::string &bname, int kv, int round = 0) -> Status
     {
         Bucket b;
         auto s = tx.create_bucket(options, bname, &b);
@@ -113,15 +112,15 @@ protected:
         return s;
     }
 
-    [[nodiscard]] static auto erase_range(Tx &tx, const Bucket &b, std::size_t kv1, std::size_t kv2, std::size_t round = 0) -> Status
+    [[nodiscard]] static auto erase_range(Tx &tx, const Bucket &b, int kv1, int kv2, int round = 0) -> Status
     {
         Status s;
-        for (std::size_t kv = kv1; s.is_ok() && kv < kv2; ++kv) {
+        for (int kv = kv1; s.is_ok() && kv < kv2; ++kv) {
             s = erase(tx, b, kv, round);
         }
         return s;
     }
-    [[nodiscard]] static auto erase_range(Tx &tx, const BucketOptions &options, const std::string &bname, std::size_t kv1, std::size_t kv2, std::size_t round = 0) -> Status
+    [[nodiscard]] static auto erase_range(Tx &tx, const BucketOptions &options, const std::string &bname, int kv1, int kv2, int round = 0) -> Status
     {
         Bucket b;
         auto s = tx.create_bucket(options, bname, &b);
@@ -131,7 +130,7 @@ protected:
         return s;
     }
 
-    [[nodiscard]] static auto check(Tx &tx, const Bucket &b, std::size_t kv, bool exists, std::size_t round = 0) -> Status
+    [[nodiscard]] static auto check(Tx &tx, const Bucket &b, int kv, bool exists, int round = 0) -> Status
     {
         std::string result;
         const auto [k, v] = make_kv(kv, round);
@@ -147,7 +146,7 @@ protected:
         }
         return s;
     }
-    [[nodiscard]] static auto check(Tx &tx, const BucketOptions &options, const std::string &bname, std::size_t kv, bool exists, std::size_t round = 0) -> Status
+    [[nodiscard]] static auto check(Tx &tx, const BucketOptions &options, const std::string &bname, int kv, bool exists, int round = 0) -> Status
     {
         Bucket b;
         auto s = tx.create_bucket(options, bname, &b);
@@ -157,7 +156,7 @@ protected:
         return s;
     }
 
-    [[nodiscard]] static auto check_range(const Tx &tx, const Bucket &b, std::size_t kv1, std::size_t kv2, bool exists, std::size_t round = 0) -> Status
+    [[nodiscard]] static auto check_range(const Tx &tx, const Bucket &b, int kv1, int kv2, bool exists, int round = 0) -> Status
     {
         auto *c = tx.new_cursor(b);
         // Run some extra seek*() calls.
@@ -171,7 +170,7 @@ protected:
             s = c->status();
         }
         if (s.is_ok() && exists) {
-            for (std::size_t kv = kv1; kv < kv2; ++kv) {
+            for (int kv = kv1; kv < kv2; ++kv) {
                 const auto [k, v] = make_kv(kv, round);
                 if (kv == kv1) {
                     c->seek(k);
@@ -187,7 +186,7 @@ protected:
                 c->next();
             }
             if (s.is_ok()) {
-                for (std::size_t kv = kv2 - 1; kv >= kv1; --kv) {
+                for (int kv = kv2 - 1; kv >= kv1; --kv) {
                     const auto [k, v] = make_kv(kv, round);
                     if (kv == kv2 - 1) {
                         c->seek(k);
@@ -203,7 +202,7 @@ protected:
                 }
             }
         } else {
-            for (std::size_t kv = kv1; kv < kv2; ++kv) {
+            for (int kv = kv1; kv < kv2; ++kv) {
                 const auto [k, v] = make_kv(kv, round);
                 c->seek(k);
                 if (c->is_valid()) {
@@ -218,7 +217,7 @@ protected:
         delete c;
         return s;
     }
-    [[nodiscard]] static auto check_range(const Tx &tx, const std::string &bname, std::size_t kv1, std::size_t kv2, bool exists, std::size_t round = 0) -> Status
+    [[nodiscard]] static auto check_range(const Tx &tx, const std::string &bname, int kv1, int kv2, bool exists, int round = 0) -> Status
     {
         Bucket b;
         auto s = tx.open_bucket(bname, b);
@@ -354,8 +353,8 @@ TEST_F(DBTests, NewTx)
     std::vector<std::string> values;
     auto s = m_db->view([&values](const auto &tx) {
         Bucket b;
-        auto t = tx.open_bucket("bucket", b);
-        if (t.is_ok()) {
+        auto s = tx.open_bucket("bucket", b);
+        if (s.is_ok()) {
             auto *c = tx.new_cursor(b);
             c->seek_first();
             while (c->is_valid()) {
@@ -364,10 +363,10 @@ TEST_F(DBTests, NewTx)
                 }
                 c->next();
             }
-            t = c->status();
+            s = c->status();
             delete c;
         }
-        return t;
+        return s;
     });
 }
 
@@ -414,7 +413,7 @@ TEST_F(DBTests, ReadonlyTx)
 
 TEST_F(DBTests, UpdateThenView)
 {
-    std::size_t round = 0;
+    int round = 0;
     do {
         BucketOptions tbopt;
         tbopt.error_if_exists = true;
@@ -453,7 +452,7 @@ TEST_F(DBTests, UpdateThenView)
 
 TEST_F(DBTests, RollbackUpdate)
 {
-    std::size_t round = 0;
+    int round = 0;
     do {
         for (int i = 0; i < 3; ++i) {
             ASSERT_TRUE(m_db->update([i, round](auto &tx) {
@@ -785,15 +784,15 @@ TEST_F(DBErrorTests, Reads)
     for (;;) {
         auto s = m_db->view([](auto &tx) {
             Bucket b;
-            auto t = tx.open_bucket("saved", b);
-            if (t.is_ok()) {
-                t = check_range(tx, b, 0, kSavedCount, true);
-                if (t.is_ok()) {
-                    t = check_range(tx, b, kSavedCount, 2 * kSavedCount, false);
+            auto s = tx.open_bucket("saved", b);
+            if (s.is_ok()) {
+                s = check_range(tx, b, 0, kSavedCount, true);
+                if (s.is_ok()) {
+                    s = check_range(tx, b, kSavedCount, 2 * kSavedCount, false);
                 }
             }
             EXPECT_OK(tx.status());
-            return t;
+            return s;
         });
         if (s.is_ok()) {
             break;
@@ -816,20 +815,20 @@ TEST_F(DBErrorTests, Writes)
             s = m_db->update([](auto &tx) {
                 Bucket b;
                 std::string op("create_bucket()");
-                auto t = tx.create_bucket(BucketOptions(), "BUCKET", &b);
-                if (t.is_ok()) {
+                auto s = tx.create_bucket(BucketOptions(), "BUCKET", &b);
+                if (s.is_ok()) {
                     op = "put_range()";
-                    t = put_range(tx, b, 0, 1'000);
-                    if (!t.is_ok()) {
+                    s = put_range(tx, b, 0, 1'000);
+                    if (!s.is_ok()) {
                         auto *c = tx.new_cursor(b);
-                        EXPECT_EQ(t, c->status());
+                        EXPECT_EQ(s, c->status());
                         delete c;
                     }
                 }
-                EXPECT_EQ(t, tx.status()) << "status mismatch:\n  \"" << t.to_string()
+                EXPECT_EQ(s, tx.status()) << "status mismatch:\n  \"" << s.to_string()
                                           << "\"\n  \"" << tx.status().to_string() << "\"\n"
                                           << "during " << op << '\n';
-                return t;
+                return s;
             });
         }
         if (s.is_ok()) {
@@ -913,13 +912,13 @@ TEST_F(DBErrorTests, TransactionsAfterCheckpointFailure)
                     Bucket b;
                     BucketOptions bopt;
                     bopt.error_if_exists = true;
-                    auto t = tx.create_bucket(bopt, "after", &b);
-                    if (t.is_ok()) {
-                        t = put_range(tx, BucketOptions(), "after", 0, kSavedCount);
-                    } else if (t.is_invalid_argument()) {
-                        t = Status::ok();
+                    auto s = tx.create_bucket(bopt, "after", &b);
+                    if (s.is_ok()) {
+                        s = put_range(tx, BucketOptions(), "after", 0, kSavedCount);
+                    } else if (s.is_invalid_argument()) {
+                        s = Status::ok();
                     }
-                    return t;
+                    return s;
                 }));
                 ASSERT_OK(m_db->view(check_db));
             }
@@ -1210,7 +1209,7 @@ protected:
     {
         for (U32 i = 0; i < 8; ++i) {
             for (auto &b : bitmaps) {
-                b = static_cast<U8>((b << 1) | (b >> 7));
+                b = (b << 1) | (b >> 7);
             }
             test_configurations_impl(bitmaps);
         }

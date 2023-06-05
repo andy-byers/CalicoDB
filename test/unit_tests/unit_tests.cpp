@@ -412,7 +412,7 @@ auto write_string_to_file(Env &env, const std::string &filename, const std::stri
     if (offset < 0) {
         ASSERT_OK(env.file_size(filename, write_pos));
     } else {
-        write_pos = static_cast<std::size_t>(offset);
+        write_pos = offset;
     }
     ASSERT_OK(file->write(write_pos, buffer));
     ASSERT_OK(file->sync());

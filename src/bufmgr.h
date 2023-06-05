@@ -134,7 +134,6 @@ private:
 struct Dirtylist {
     auto remove(PageRef &ref) -> PageRef *;
     auto add(PageRef &ref) -> void;
-    auto sort() -> void;
 
     PageRef *head = nullptr;
 };

@@ -450,7 +450,7 @@ TEST_P(TreeTests, SplitWithShortAndLongKeys)
 {
     for (unsigned i = 0; i < kInitialRecordCount; ++i) {
         char key[3]{};
-        put_u16(key, static_cast<U16>(kInitialRecordCount - i - 1));
+        put_u16(key, kInitialRecordCount - i - 1);
         ASSERT_OK(tree->put({key, 2}, "v"));
     }
     for (unsigned i = 0; i < kInitialRecordCount; ++i) {
@@ -898,7 +898,7 @@ TEST_P(PointerMapTests, MapPagesAreRecognized)
     // Back pointers for the next "map.map_size()" pages are stored on page 2. The next pointermap page is
     // the page following the last page whose back pointer is on page 2. This pattern continues forever.
     for (std::size_t i = 0; i < 1'000'000; ++i) {
-        id.value += static_cast<U32>(map_size() + 1);
+        id.value += map_size() + 1;
         ASSERT_EQ(PointerMap::lookup(id), id);
     }
 }
@@ -912,7 +912,7 @@ TEST_P(PointerMapTests, FindsCorrectMapPages)
         if (counter++ == map_size()) {
             // Found a map page. Calls to find() with a page ID between this page and the next map page
             // should map to this page ID.
-            map_id.value += static_cast<U32>(map_size() + 1);
+            map_id.value += map_size() + 1;
             counter = 0;
         } else {
             ASSERT_EQ(PointerMap::lookup(page_id), map_id);

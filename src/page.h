@@ -23,16 +23,14 @@ struct PageRef final {
     // Number of live copies of this page.
     unsigned refcount = 0;
 
-    PageRef *dirty = nullptr;
-
     // Dirty list fields.
     PageRef *prev = nullptr;
     PageRef *next = nullptr;
 
     enum Flag {
         kNormal = 0,
-        kExtra = 1,
-        kDirty = 2, // TODO: remove and use "dirty" pointer to test for inclusion in dirtylist.
+        kDirty = 1,
+        kExtra = 2,
     } flag = kNormal;
 };
 
