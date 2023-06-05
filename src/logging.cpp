@@ -14,7 +14,7 @@ auto attempt_fmt(char *ptr, std::size_t length, bool append_newline, const char 
 {
     std::va_list args_copy;
     va_copy(args_copy, args);
-    const auto rc = std::vsnprintf(ptr, length, fmt, args);
+    const auto rc = std::vsnprintf(ptr, length, fmt, args_copy);
     va_end(args_copy);
 
     // Assume that std::vsnprintf() will never fail.
