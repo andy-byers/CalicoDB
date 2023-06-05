@@ -8,9 +8,9 @@ add_executable(unit_tests
         test_utils.cpp
         unit_tests.cpp
         unit_tests.h
-        ../tools/harness.cpp
-        ../tools/harness.h)
+        ../test.cpp
+        ../test.h)
 target_link_libraries(unit_tests
-        PUBLIC calicodb_tools gtest)
+        PUBLIC calicodb_utils gtest)
 add_test(NAME unit_tests
         COMMAND unit_tests)

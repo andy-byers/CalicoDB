@@ -3,9 +3,9 @@
 // LICENSE.md. See AUTHORS.md for a list of contributor names.
 
 #include "benchmark.h"
-#include <benchmark/benchmark.h>
-#include <calicodb/cursor.h>
-#include <calicodb/db.h>
+#include "benchmark/benchmark.h"
+#include "calicodb/cursor.h"
+#include "calicodb/db.h"
 
 // This simulates normal transaction behavior, where m_tx is destroyed and DB::new_tx() is called after
 // each commit. This is what happens if the DB::view()/DB::update() API is used. It's much faster to keep
@@ -16,7 +16,17 @@
 #define RESTART_ON_COMMIT 1
 #define CHECKPOINT_SCALE 100
 
-#define CHECK_OK(expr) assert((expr).is_ok())
+#define CHECK_OK(expr)                                                 \
+    do {                                                               \
+        auto check_s = (expr);                                         \
+        if (!check_s.is_ok()) {                                        \
+            std::fprintf(stderr, "%s\n", check_s.to_string().c_str()); \
+            std::abort();                                              \
+        }                                                              \
+    } while (0)
+
+using namespace calicodb;
+using namespace calicodb::benchmarks;
 
 enum AccessType : int64_t {
     kSequential,
@@ -47,18 +57,18 @@ public:
         : m_param(param),
           m_random(4 * 1'024 * 1'024)
     {
-        (void)calicodb::DB::destroy(m_options, kFilename);
+        (void)DB::destroy(m_options, kFilename);
         m_options.lock_mode = param.excl
-                                  ? calicodb::Options::kLockExclusive
-                                  : calicodb::Options::kLockNormal;
+                                  ? Options::kLockExclusive
+                                  : Options::kLockNormal;
         m_options.sync_mode = param.sync
-                                  ? calicodb::Options::kSyncFull
-                                  : calicodb::Options::kSyncNormal;
+                                  ? Options::kSyncFull
+                                  : Options::kSyncNormal;
         m_options.error_if_exists = true;
-        CHECK_OK(calicodb::DB::open(m_options, kFilename, m_db));
+        CHECK_OK(DB::open(m_options, kFilename, m_db));
         CHECK_OK(m_db->update([](auto &tx) {
             // Make sure this bucket always exists for readers to open.
-            return tx.create_bucket(calicodb::BucketOptions(), "bench", nullptr);
+            return tx.create_bucket(BucketOptions(), "bench", nullptr);
         }));
     }
 
@@ -69,20 +79,21 @@ public:
         delete m_wr;
         delete m_db;
 
-        (void)calicodb::DB::destroy(m_options, kFilename);
+        (void)DB::destroy(m_options, kFilename);
     }
 
     using InitOptions = unsigned;
     static constexpr InitOptions kPrefill = 1;
     static constexpr InitOptions kWriter = 2;
+    static constexpr InitOptions kCursor = 4;
     auto init(InitOptions opt) -> void
     {
         if (opt & kPrefill) {
             CHECK_OK(m_db->update([this](auto &tx) {
-                calicodb::Bucket b;
+                Bucket b;
                 auto s = tx.open_bucket("bench", b);
                 for (std::size_t i = 0; s.is_ok() && i < kNumRecords; ++i) {
-                    s = tx.put(b, calicodb::tools::integral_key<kKeyLength>(i),
+                    s = tx.put(b, numeric_key<kKeyLength>(i),
                                m_random.Generate(m_param.value_length));
                 }
                 return s;
@@ -90,15 +101,17 @@ public:
         }
 
         if (opt & kWriter) {
-            CHECK_OK(m_db->new_tx(calicodb::WriteTag{}, m_wr));
+            CHECK_OK(m_db->new_tx(WriteTag(), m_wr));
         } else {
             CHECK_OK(m_db->new_tx(m_rd));
         }
         CHECK_OK(current_tx().open_bucket("bench", m_bucket));
-        m_cursor = current_tx().new_cursor(m_bucket);
+        if (opt & kCursor) {
+            m_cursor = current_tx().new_cursor(m_bucket);
+        }
     }
 
-    auto current_tx() const -> const calicodb::Tx &
+    auto current_tx() const -> const Tx &
     {
         return m_rd ? *m_rd : *m_wr;
     }
@@ -194,13 +207,13 @@ public:
         for (std::size_t i = 0; i < upper_size; ++i) {
             CHECK_OK(m_wr->put(
                 m_bucket,
-                calicodb::tools::integral_key<kKeyLength>(i),
+                numeric_key<kKeyLength>(i),
                 m_random.Generate(m_param.value_length)));
         }
         for (auto i = lower_size; i < upper_size; ++i) {
             CHECK_OK(m_wr->erase(
                 m_bucket,
-                calicodb::tools::integral_key<kKeyLength>(i)));
+                numeric_key<kKeyLength>(i)));
         }
         state.ResumeTiming();
 
@@ -241,7 +254,7 @@ private:
             CHECK_OK(m_db->checkpoint(false));
         }
 
-        CHECK_OK(m_db->new_tx(calicodb::WriteTag(), m_wr));
+        CHECK_OK(m_db->new_tx(WriteTag(), m_wr));
         CHECK_OK(m_wr->open_bucket("bench", m_bucket));
     }
 
@@ -266,7 +279,7 @@ private:
         std::snprintf(
             buffer,
             sizeof(buffer),
-            "%016u",
+            "%016llu",
             key);
         return {buffer};
     }
@@ -274,15 +287,15 @@ private:
     static constexpr auto kFilename = "__bench_db__";
     static constexpr std::size_t kKeyLength = 16;
     static constexpr std::size_t kNumRecords = 10'000;
-    const calicodb::Tx *m_rd = nullptr;
-    calicodb::Tx *m_wr = nullptr;
-    calicodb::Bucket m_bucket;
+    const Tx *m_rd = nullptr;
+    Tx *m_wr = nullptr;
+    Bucket m_bucket;
     Parameters m_param;
     std::size_t m_counters[2] = {};
-    calicodb::benchmarks::RandomGenerator m_random;
-    calicodb::Options m_options;
-    calicodb::Cursor *m_cursor = nullptr;
-    calicodb::DB *m_db = nullptr;
+    benchmarks::RandomGenerator m_random;
+    Options m_options;
+    Cursor *m_cursor = nullptr;
+    DB *m_db = nullptr;
 };
 
 static auto set_modification_benchmark_label(benchmark::State &state)
@@ -387,6 +400,7 @@ static auto BM_Read(benchmark::State &state) -> void
 
     Benchmark bench;
     bench.init(Benchmark::kPrefill);
+
     for (auto _ : state) {
         bench.read(state, &value);
         benchmark::DoNotOptimize(value);
@@ -418,7 +432,7 @@ BENCHMARK(BM_ReadWrite)
 static auto BM_IterateForward(benchmark::State &state) -> void
 {
     Benchmark bench;
-    bench.init(Benchmark::kPrefill);
+    bench.init(Benchmark::kCursor | Benchmark::kPrefill);
     for (auto _ : state) {
         bench.step_forward(state);
     }
@@ -428,7 +442,7 @@ BENCHMARK(BM_IterateForward);
 static auto BM_IterateBackward(benchmark::State &state) -> void
 {
     Benchmark bench;
-    bench.init(Benchmark::kPrefill);
+    bench.init(Benchmark::kCursor | Benchmark::kPrefill);
     for (auto _ : state) {
         bench.step_backward(state);
     }
@@ -440,7 +454,7 @@ static auto BM_Seek(benchmark::State &state) -> void
     state.SetLabel("Seek" + access_type_name(state.range(0)));
 
     Benchmark bench;
-    bench.init(Benchmark::kPrefill);
+    bench.init(Benchmark::kCursor | Benchmark::kPrefill);
     for (auto _ : state) {
         bench.seek(state);
     }

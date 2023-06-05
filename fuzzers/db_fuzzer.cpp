@@ -2,15 +2,12 @@
 // This source code is licensed under the MIT License, which can be found in
 // LICENSE.md. See AUTHORS.md for a list of contributor names.
 
-#include "env_helpers.h"
+#include "fake_env.h"
 #include "fuzzer.h"
-#include "harness.h"
 #include "model.h"
-#include "tools.h"
 
 namespace calicodb
 {
-using namespace tools;
 
 static auto common_status(const Status &real_s, const Status &model_s) -> Status
 {
@@ -389,9 +386,6 @@ auto DBFuzzer::fuzz(FuzzerStream &stream) -> bool
             s = m_tx->commit();
             break;
         case kReopenTx:
-            tools::print_database_overview(std::cerr, const_cast<Pager &>(db_impl(reinterpret_cast<CheckedDB *>(m_db)->real())->TEST_pager()));
-            std::cerr << "\n\n";
-            std::cerr << reinterpret_cast<Tree *>(m_b.state)->TEST_to_string() << "\n\n";
             reopen_tx();
             break;
         case kReopenBucket:
@@ -428,7 +422,7 @@ auto DBFuzzer::fuzz(FuzzerStream &stream) -> bool
 extern "C" int LLVMFuzzerTestOneInput(const U8 *data, std::size_t size)
 {
     Options options;
-    options.env = new tools::FakeEnv;
+    options.env = new FakeEnv;
     options.cache_size = 0; // Use the smallest possible cache.
 
     {

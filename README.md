@@ -52,7 +52,7 @@ The unit tests depend on `@google/googletest`, and the benchmarks depend on `@go
 Both are downloaded using during the build.
 
 ## Performance
-Performance benchmarks can be found [here](test/benchmarks).
+Performance benchmarks can be found [here](benchmarks).
 
 ## TODO
 1. Get everything code reviewed!

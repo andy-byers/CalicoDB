@@ -26,7 +26,7 @@ TEST(TestUtils, ExpectationDeathTest)
 
 TEST(TestUtils, EncodingIsConsistent)
 {
-    tools::RandomGenerator random;
+    RandomGenerator random;
     const auto u16 = U16(-1);
     const auto u32 = U32(-2);
     const auto u64 = U64(-3);
@@ -468,13 +468,13 @@ TEST(MiscTests, StringsUsesSizeParameterForComparisons)
 
 class InterceptorTests
     : public testing::Test,
-      public EnvTestHarness<tools::TestEnv>
+      public EnvTestHarness<TestEnv>
 {
 };
 
 TEST_F(InterceptorTests, RespectsPrefix)
 {
-    QUICK_INTERCEPTOR("./test", tools::kSyscallOpen);
+    QUICK_INTERCEPTOR("./test", kSyscallOpen);
 
     File *editor;
     assert_special_error(env().new_file("./test", Env::kCreate, editor));
@@ -484,7 +484,7 @@ TEST_F(InterceptorTests, RespectsPrefix)
 
 TEST_F(InterceptorTests, RespectsSyscallType)
 {
-    QUICK_INTERCEPTOR("./test", tools::kSyscallWrite);
+    QUICK_INTERCEPTOR("./test", kSyscallWrite);
 
     File *editor;
     ASSERT_OK(env().new_file("./test", Env::kCreate, editor));

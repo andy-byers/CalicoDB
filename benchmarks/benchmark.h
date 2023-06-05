@@ -56,6 +56,14 @@ public:
     }
 };
 
+template <std::size_t Length = 16>
+static auto numeric_key(std::size_t key, char padding = '0') -> std::string
+{
+    const auto key_string = std::to_string(key);
+    assert(Length >= key_string.size());
+    return std::string(Length - key_string.size(), padding) + key_string;
+}
+
 } // namespace calicodb::benchmarks
 
 #endif // CALICODB_BENCHMARKS_UTILS_H

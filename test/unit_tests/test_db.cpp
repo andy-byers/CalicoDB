@@ -2,12 +2,14 @@
 // This source code is licensed under the MIT License, which can be found in
 // LICENSE.md. See AUTHORS.md for a list of contributor names.
 
+#include "common.h"
 #include "db_impl.h"
+#include "fake_env.h"
 #include "freelist.h"
 #include "header.h"
 #include "logging.h"
-#include "tools.h"
 #include "tree.h"
+#include "tx_impl.h"
 #include "unit_tests.h"
 #include "wal.h"
 #include <atomic>
@@ -53,7 +55,7 @@ protected:
         // and kOverflowLink).
         static constexpr std::size_t kMaxKV = kPageSize * 3;
         const auto key_length = (round + 1) * kMaxKV / kMaxRounds;
-        auto key_str = tools::integral_key(kv);
+        auto key_str = numeric_key(kv);
         const auto val_length = kMaxKV - key_length;
         auto val_str = number_to_string(kv);
         if (val_str.size() < val_length) {
@@ -210,7 +212,6 @@ protected:
                     s = c->status();
                     break;
                 }
-                ++kv;
             }
         }
         delete c;
@@ -503,26 +504,6 @@ TEST_F(DBTests, VacuumEmptyDB)
     } while (change_options(true));
 }
 
-TEST_F(DBTests, a)
-{
-    std::filesystem::remove("logfile");
-
-    Logger *logger;
-    auto *env = Env::default_env();
-    ASSERT_OK(env->new_logger("logfile", logger));
-    Options options;
-    options.info_log = logger;
-
-    DB *db;
-    ASSERT_OK(DB::open(options, "dbfile", db));
-    const auto logfile = tools::read_file_to_string(*env, "logfile");
-    delete db;
-    std::cerr << logfile << '\n';
-    delete logger;
-
-    std::filesystem::remove("logfile");
-}
-
 TEST_F(DBTests, CorruptedRootIDs)
 {
     ASSERT_OK(m_db->update([](auto &tx) {
@@ -645,7 +626,7 @@ TEST(OldWalTests, HandlesOldWalFile)
     static constexpr auto kOldWal = "./testwal";
 
     File *oldwal;
-    tools::FakeEnv env;
+    FakeEnv env;
     ASSERT_OK(env.new_file(kOldWal, Env::kCreate, oldwal));
     ASSERT_OK(oldwal->write(42, ":3"));
 
@@ -696,7 +677,7 @@ TEST(OldWalTests, HandlesOldWalFile)
 TEST(DestructionTests, OnlyDeletesCalicoWals)
 {
     Options options;
-    options.env = new tools::FakeEnv;
+    options.env = new FakeEnv;
     options.wal_filename = "./wal";
 
     DB *db;
@@ -721,12 +702,12 @@ class DBErrorTests : public DBTests
 {
 protected:
     static constexpr auto kErrorMessage = "I/O error: 42";
-    static constexpr auto kAllSyscalls = (1 << tools::kNumSyscalls) - 1;
+    static constexpr auto kAllSyscalls = (1 << kNumSyscalls) - 1;
     static constexpr std::size_t kSavedCount = 1'000;
 
     explicit DBErrorTests()
     {
-        m_test_env = new tools::TestEnv(*Env::default_env());
+        m_test_env = new TestEnv(*Env::default_env());
     }
 
     ~DBErrorTests() override
@@ -765,9 +746,9 @@ protected:
         return s;
     }
 
-    auto set_error(tools::SyscallType type) -> void
+    auto set_error(SyscallType type) -> void
     {
-        const tools::Interceptor interceptor(type, [this] {
+        const Interceptor interceptor(type, [this] {
             if (m_counter >= 0 && m_counter++ >= m_max_count) {
                 return Status::io_error("42");
             }
@@ -789,7 +770,7 @@ protected:
         }
     }
 
-    tools::TestEnv *m_test_env;
+    TestEnv *m_test_env;
     Options m_options;
     int m_counter = 0;
     int m_max_count = 0;
@@ -798,7 +779,7 @@ protected:
 TEST_F(DBErrorTests, Reads)
 {
     ASSERT_OK(try_reopen(kOpenPrefill));
-    set_error(tools::kSyscallRead);
+    set_error(kSyscallRead);
 
     for (;;) {
         auto s = m_db->view([](auto &tx) {
@@ -826,7 +807,7 @@ TEST_F(DBErrorTests, Reads)
 TEST_F(DBErrorTests, Writes)
 {
     ASSERT_OK(try_reopen(kOpenPrefill));
-    set_error(tools::kSyscallWrite | tools::kSyscallSync);
+    set_error(kSyscallWrite | kSyscallSync);
 
     for (;;) {
         auto s = try_reopen();
@@ -1026,7 +1007,7 @@ TEST_F(DBTransactionTests, ReadMostRecentSnapshot)
         delete db;
         return s;
     };
-    m_test_env->add_interceptor(kWALName, tools::Interceptor(tools::kSyscallWrite, intercept));
+    m_test_env->add_interceptor(kWALName, Interceptor(kSyscallWrite, intercept));
     ASSERT_OK(m_db->update([&should_exist, &key_limit](auto &tx) {
         for (std::size_t i = 0; i < 50; ++i) {
             EXPECT_OK(put_range(tx, BucketOptions(), "BUCKET", i * 10, (i + 1) * 10));
@@ -1043,15 +1024,19 @@ TEST_F(DBTransactionTests, ExclusiveLockingMode)
     for (int i = 0; i < 2; ++i) {
         m_config = i == 0 ? kExclusiveLockMode : kDefault;
         ASSERT_OK(try_reopen(kOpenNormal));
-        const auto intercept = [this, i] {
+        const auto intercept = [this, &i] {
             DB *db;
             Options options;
-            options.lock_mode = i == 0 ? Options::kLockNormal : Options::kLockExclusive;
+            options.lock_mode = i == 0 ? Options::kLockNormal
+                                       : Options::kLockExclusive;
             options.env = m_test_env;
-            EXPECT_TRUE(DB::open(options, kDBName, db).is_busy());
+
+            Status s;
+            EXPECT_TRUE((s = DB::open(options, kDBName, db)).is_busy())
+                << s.to_string();
             return Status::ok();
         };
-        m_test_env->add_interceptor(kWALName, tools::Interceptor(tools::kSyscallWrite, intercept));
+        m_test_env->add_interceptor(kWALName, Interceptor(kSyscallWrite, intercept));
         ASSERT_OK(m_db->update([](auto &tx) {
             for (std::size_t i = 0; i < 50; ++i) {
                 EXPECT_OK(put_range(tx, BucketOptions(), "BUCKET", i * 10, (i + 1) * 10));
@@ -1091,7 +1076,7 @@ TEST_F(DBTransactionTests, IgnoresFutureVersions)
     ASSERT_OK(m_db->update([](auto &tx) {
         return put_range(tx, BucketOptions(), "BUCKET", 0, kN);
     }));
-    m_test_env->add_interceptor(kWALName, tools::Interceptor(tools::kSyscallRead, intercept));
+    m_test_env->add_interceptor(kWALName, Interceptor(kSyscallRead, intercept));
     (void)m_db->view([&n](auto &tx) {
         for (std::size_t i = 0; i < kN; ++i) {
             EXPECT_OK(check_range(tx, "BUCKET", 0, kN, true));
@@ -1114,7 +1099,7 @@ TEST_F(DBCheckpointTests, CheckpointerBlocksOtherCheckpointers)
     ASSERT_OK(try_reopen(kOpenPrefill));
     m_test_env->add_interceptor(
         kDBName,
-        tools::Interceptor(tools::kSyscallWrite, [this] {
+        Interceptor(kSyscallWrite, [this] {
             // Each time File::write() is called, use a different connection to attempt a
             // checkpoint. It should get blocked every time, since a checkpoint is already
             // running.
@@ -1146,11 +1131,11 @@ TEST_F(DBCheckpointTests, CheckpointerAllowsTransactions)
     U64 n = 0;
     m_test_env->add_interceptor(
         kDBName,
-        tools::Interceptor(tools::kSyscallWrite, [this, &n] {
+        Interceptor(kSyscallWrite, [this, &n] {
             DB *db;
             Options options;
             options.env = m_test_env;
-            CHECK_OK(DB::open(options, kDBName, db));
+            EXPECT_OK(DB::open(options, kDBName, db));
             EXPECT_OK(db->update([n](auto &tx) {
                 return put_range(tx, BucketOptions(), "SELF", n * 2, (n + 1) * 2);
             }));
@@ -1180,7 +1165,7 @@ protected:
     {
         static constexpr auto *kName = "12345678_BUCKET_NAMES";
         static constexpr std::size_t kN = 10;
-        (void)m_db->update([&bitmaps, this](auto &tx) {
+        (void)m_db->update([&bitmaps](auto &tx) {
             Bucket buckets[8];
             for (std::size_t i = 0; i < 8; ++i) {
                 EXPECT_OK(tx.create_bucket(BucketOptions(), kName + i, &buckets[i]));

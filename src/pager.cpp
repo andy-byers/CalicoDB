@@ -125,16 +125,14 @@ auto Pager::close() -> Status
     // If this connection is using the Options::kLockExclusive lock mode, this call is a
     // NOOP, since the file is already locked in this mode.
     auto s = m_file->file_lock(kFileExclusive);
-    if (s.is_ok()) {
-        if (m_wal) {
-            s = m_wal->close();
-        }
-        // Regardless of lock mode, this is where the database file lock is released. The
-        // database file should not be accessed after this point.
-        m_file->file_unlock();
+    if (s.is_ok() && m_wal) {
+        s = m_wal->close();
     } else if (s.is_busy()) {
         s = Status::ok();
     }
+    // Regardless of lock mode, this is where the database file lock is released. The
+    // database file should not be accessed after this point.
+    m_file->file_unlock();
     return s;
 }
 

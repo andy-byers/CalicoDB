@@ -8,7 +8,7 @@ function(build_fuzzer NAME)
     if(CALICODB_FuzzerStandalone)
         target_sources(${TARGET} PRIVATE main.cpp)
     endif()
-    target_link_libraries(${TARGET} PRIVATE calicodb_tools)
+    target_link_libraries(${TARGET} PRIVATE calicodb_utils)
 endfunction()
 
 build_fuzzer(db)

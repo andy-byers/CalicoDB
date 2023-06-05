@@ -3,6 +3,7 @@
 // LICENSE.md. See AUTHORS.md for a list of contributor names.
 
 #include "bufmgr.h"
+#include "fake_env.h"
 #include "header.h"
 #include "logging.h"
 #include "page.h"
@@ -18,12 +19,7 @@ namespace calicodb
 
 [[nodiscard]] static auto make_key(U64 k) -> std::string
 {
-    return tools::integral_key<16>(k);
-}
-
-[[nodiscard]] static auto make_cache_entry(U64 id_value) -> PageRef
-{
-    return {.page_id = Id(id_value)};
+    return numeric_key<16>(k);
 }
 
 class PageCacheTests : public testing::Test
@@ -122,7 +118,7 @@ public:
         std::memcpy(buffer.data(), FileHeader::kFmtString, sizeof(FileHeader::kFmtString));
         buffer[FileHeader::kFmtVersionOffset] = FileHeader::kFmtVersion;
         put_u32(buffer.data() + FileHeader::kPageCountOffset, 1);
-        tools::write_string_to_file(*env, kDBFilename, buffer);
+        write_string_to_file(*env, kDBFilename, buffer);
     }
 
     [[nodiscard]] auto init_with_status() -> Status
@@ -142,6 +138,8 @@ public:
             &m_status,
             nullptr,
             kPagerFrames,
+            Options::kSyncNormal,
+            Options::kLockNormal,
         };
         CALICODB_TRY(Pager::open(pager_param, m_pager));
         m_pager->set_page_count(1);
@@ -219,7 +217,7 @@ public:
 
     [[nodiscard]] auto create_freelist_pages(std::size_t n) const -> Status
     {
-        CHECK_TRUE(n < kPagerFrames);
+        EXPECT_TRUE(n < kPagerFrames);
         std::vector<Page> pages;
         for (std::size_t i = 0; i < n; ++i) {
             Page page;
@@ -275,7 +273,7 @@ public:
 
     auto SetUp() -> void override
     {
-        env = new tools::FakeEnv();
+        env = new FakeEnv();
         write_header_and_init();
     }
 };
@@ -328,7 +326,7 @@ TEST_F(PagerTests, FreelistUpdatesMetadata)
     }
     ASSERT_EQ(m_pager->page_count(), 3 + kNumPages);
 
-    for (int i = 0; i < kNumPages; ++i) {
+    for (U32 i = 0; i < kNumPages; ++i) {
         Page page;
         ASSERT_OK(m_pager->allocate(page));
         auto root = m_pager->acquire_root();
@@ -802,7 +800,7 @@ public:
 
 private:
     std::string m_pages;
-    tools::RandomGenerator m_random;
+    RandomGenerator m_random;
     std::default_random_engine m_rng;
 };
 
@@ -821,6 +819,7 @@ public:
             nullptr,
             nullptr,
             Options::kSyncNormal,
+            Options::kLockNormal,
         };
         EXPECT_OK(Wal::open(m_param, m_wal));
     }
@@ -1055,8 +1054,12 @@ protected:
             "testdb-db",
             &env(),
             m_fake_file,
+            nullptr,
+            nullptr,
+            Options::kSyncNormal,
+            Options::kLockNormal,
         };
-        m_fake = new tools::FakeWal(m_fake_param);
+        m_fake = new FakeWal(m_fake_param);
     }
 
     ~WalParamTests() override
@@ -1099,8 +1102,8 @@ protected:
             ASSERT_OK(m_fake->read(Id(i + 1), fp));
             if (fp) {
                 ASSERT_NE(rp, nullptr);
-                CHECK_EQ(std::string(real, kPageSize),
-                         std::string(fake, kPageSize));
+                ASSERT_EQ(std::string(real, kPageSize),
+                          std::string(fake, kPageSize));
             } else {
                 ASSERT_EQ(rp, nullptr);
             }
@@ -1121,7 +1124,7 @@ protected:
         ASSERT_OK(Wal::open(m_param, m_wal));
 
         delete m_fake;
-        m_fake = new tools::FakeWal(m_fake_param);
+        m_fake = new FakeWal(m_fake_param);
     }
 
     auto run_and_validate_checkpoint(bool save_state = true) -> void
@@ -1197,7 +1200,7 @@ protected:
     Wal::Parameters m_fake_param;
     RandomDirtyListBuilder m_builder;
     RandomDirtyListBuilder m_saved;
-    tools::FakeWal *m_fake = nullptr;
+    FakeWal *m_fake = nullptr;
     File *m_fake_file = nullptr;
 };
 

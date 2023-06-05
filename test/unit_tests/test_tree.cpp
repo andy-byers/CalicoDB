@@ -3,6 +3,7 @@
 // LICENSE.md. See AUTHORS.md for a list of contributor names.
 
 #include "encoding.h"
+#include "fake_env.h"
 #include "freelist.h"
 #include "logging.h"
 #include "schema.h"
@@ -16,7 +17,7 @@ namespace calicodb
 static constexpr std::size_t kInitialRecordCount = 100;
 
 class NodeTests
-    : public PagerTestHarness<tools::FakeEnv>,
+    : public PagerTestHarness<FakeEnv>,
       public testing::Test
 {
 public:
@@ -53,7 +54,7 @@ public:
 
     [[nodiscard]] auto make_long_key(std::size_t value) const
     {
-        const auto suffix = tools::integral_key<6>(value);
+        const auto suffix = numeric_key<6>(value);
         const std::string key(kPageSize * 2 - suffix.size(), '0');
         return key + suffix;
     }
@@ -73,7 +74,7 @@ public:
     std::string node_scratch;
     std::string cell_scratch;
     std::string collect_scratch;
-    tools::RandomGenerator random;
+    RandomGenerator random;
 };
 
 class BlockAllocatorTests : public NodeTests
@@ -210,7 +211,7 @@ TEST_F(NodeTests, AllocatorSkipsPointerMapPage)
 }
 
 class TreeTests
-    : public PagerTestHarness<tools::FakeEnv>,
+    : public PagerTestHarness<FakeEnv>,
       public testing::TestWithParam<std::size_t>
 {
 public:
@@ -237,7 +238,7 @@ public:
 
     [[nodiscard]] auto make_long_key(std::size_t value) const
     {
-        const auto suffix = tools::integral_key<6>(value);
+        const auto suffix = numeric_key<6>(value);
         const std::string key(kPageSize * 2 - suffix.size(), '0');
         return key + suffix;
     }
@@ -259,7 +260,7 @@ public:
         tree->TEST_validate();
     }
 
-    tools::RandomGenerator random;
+    RandomGenerator random;
     std::size_t param;
     std::string collect_scratch;
     std::unique_ptr<Tree> tree;
@@ -484,7 +485,7 @@ public:
         const auto key = random_chunk(overflow_keys);
         const auto val = random_chunk(overflow_values, false);
         EXPECT_OK(tree->put(key, val));
-        return {key.to_string(), val.to_string()};
+        return {std::string(key), std::string(val)};
     }
 
     const bool overflow_keys = GetParam() & 0b10;
@@ -512,7 +513,6 @@ TEST_P(TreeSanityChecks, Search)
     }
     validate();
 
-    int i = 0;
     for (const auto &[key, value] : records) {
         std::string result;
         ASSERT_OK(tree->get(key, &result));
@@ -520,8 +520,6 @@ TEST_P(TreeSanityChecks, Search)
 
         ASSERT_OK(tree->erase(key));
         ASSERT_TRUE(tree->get(key, &result).is_not_found());
-
-        ++i;
     }
 }
 
@@ -548,7 +546,7 @@ TEST_P(TreeSanityChecks, SmallRecords)
     std::unordered_map<std::string, std::string> records;
     for (std::size_t iteration = 0; iteration < 3; ++iteration) {
         for (std::size_t i = 0; i < record_count * 10; ++i) {
-            const auto key = tools::integral_key<6>(i);
+            const auto key = numeric_key<6>(i);
             ASSERT_OK(tree->put(key, ""));
             records[key] = "";
         }
@@ -942,7 +940,7 @@ public:
         : payload_values(kInitialRecordCount)
     {
         for (auto &value : payload_values) {
-            value = random.Generate(kPageSize * 2).to_string();
+            value = random.Generate(kPageSize * 2);
         }
     }
 
@@ -1146,7 +1144,7 @@ public:
             for (std::size_t i = 0; i < GetParam(); ++i) {
                 for (const auto &[k, value_size] : info) {
                     ASSERT_OK(tree->put(
-                        tools::integral_key(iteration * info.size() + k),
+                        numeric_key(iteration * info.size() + k),
                         m_random.Generate(value_size)));
                 }
                 ++iteration;
@@ -1157,7 +1155,7 @@ public:
             iteration = 0;
             for (std::size_t i = 0; i < GetParam(); ++i) {
                 for (const auto &[k, _] : info) {
-                    ASSERT_OK(tree->erase(tools::integral_key(iteration * info.size() + k)));
+                    ASSERT_OK(tree->erase(numeric_key(iteration * info.size() + k)));
                 }
                 ++iteration;
             }
@@ -1165,7 +1163,7 @@ public:
     }
 
 protected:
-    tools::RandomGenerator m_random;
+    RandomGenerator m_random;
 };
 
 TEST_P(RebalanceTests, A)

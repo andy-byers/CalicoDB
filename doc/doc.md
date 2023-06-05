@@ -133,7 +133,7 @@ s = db->view([](const calicodb::Tx &tx) {
 ### Read-write transactions
 Read-write transactions can be run using `DB::update()`.
 `DB::update()` accepts a callable that runs a read-write transaction.
-If an error is encountered during a read-write transaction, the transaction status (queried with `tx::status()`) may be set.
+If an error is encountered during a read-write transaction, the transaction status (queried with `Tx::status()`) may be set.
 If this happens, the transaction object, and any buckets created from it, will return immediately with this same error whenever a read/write method is called.
 The only possible course-of-action in this case is to `delete` the transaction handle and possibly try again.
 
@@ -151,7 +151,7 @@ s = db->update([](calicodb::Tx &tx) {
 
 ### Manual transactions
 Transactions can also be run manually.
-The caller is responsible for `delete`ing the `tx` handle when it is no longer needed.
+The caller is responsible for `delete`ing the `Tx` handle when it is no longer needed.
 
 ```C++
 const calicodb::Tx *reader;
@@ -189,7 +189,7 @@ if (!s.is_ok()) {
 }
 
 // Rename to tx for other examples to use (these examples are compiled).
-auto tx = writer;
+auto *tx = writer;
 ```
 
 ### Buckets
@@ -204,13 +204,14 @@ calicodb::Bucket b;
 // Set some initialization options. Enforces that the bucket "cats" must
 // not exist. Note that readonly transactions cannot create new buckets by
 // virtue of the fact that they must be used through pointers to const, 
-// and Tx::create_bucket() is not a const method.
-calicodb::BucketOptions bopt;
-bopt.error_if_exists = true;
+// and Tx::create_bucket() is not a const method. Tx::open_bucket() can be
+// used by a readonly transaction to open an existing bucket.
+calicodb::BucketOptions b_opt;
+b_opt.error_if_exists = true;
 
 // Create the bucket. Note that this bucket will not persist in the database 
-// unless tx::commit() is called prior to the transaction ending.
-s = tx->create_bucket(bopt, "cats", &b);
+// unless Tx::commit() is called prior to the transaction ending.
+s = tx->create_bucket(b_opt, "cats", &b);
 if (s.is_ok()) {
     // b holds the handle for the open bucket "cats". The bucket will remain 
     // open until either tx is delete'd, or "cats" is dropped with 

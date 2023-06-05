@@ -19,6 +19,8 @@ if (CMAKE_CURRENT_SOURCE_DIR STREQUAL CMAKE_SOURCE_DIR)
     set(MAIN_PROJECT On)
 endif()
 
+option(CALICODB_BuildBenchmarks "Build the benchmarks" Off)
+option(CALICODB_BuildFuzzers "Build the fuzz targets" Off)
 option(CALICODB_BuildTests "Build the tests" ${MAIN_PROJECT})
 option(CALICODB_Install "Install the CMake targets during the install step" ${MAIN_PROJECT})
 
@@ -78,16 +80,26 @@ target_compile_definitions(calicodb
         PUBLIC CALICODB_VERSION_MAJOR=${PROJECT_VERSION_MAJOR}
                CALICODB_VERSION_MINOR=${PROJECT_VERSION_MINOR}
                CALICODB_VERSION_PATCH=${PROJECT_VERSION_PATCH})
-if(${CALICODB_BuildTests})
-    target_compile_definitions(calicodb
-            PRIVATE CALICODB_TEST)
+
+if(CALICODB_BuildTests OR CALICODB_BuildFuzzers)
+    add_subdirectory(utils)
 endif()
 
 if(CALICODB_BuildTests)
+    target_compile_definitions(calicodb
+            PRIVATE CALICODB_TEST)
     include(FetchContent)
     include(CTest)
     enable_testing()
     add_subdirectory(test)
+endif()
+
+if(CALICODB_BuildBenchmarks)
+    add_subdirectory(benchmarks)
+endif()
+
+if(CALICODB_BuildFuzzers)
+    add_subdirectory(fuzzers)
 endif()
 
 include(GNUInstallDirs)

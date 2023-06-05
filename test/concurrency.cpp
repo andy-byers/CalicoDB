@@ -3,6 +3,7 @@
 // LICENSE.md. See AUTHORS.md for a list of contributor names.
 
 #include "calicodb/db.h"
+#include "common.h"
 #include "logging.h"
 #include "test.h"
 #include <condition_variable>
@@ -191,7 +192,7 @@ protected:
 
     struct Connection {
         Operation op;
-        U32 op_args[4] = {};
+        std::size_t op_args[4] = {};
         const char *filename = nullptr;
         BusyHandler *busy = nullptr;
         Env *env = nullptr;
@@ -331,7 +332,7 @@ protected:
     // Reader task invariants:
     // 1. If the bucket named "BUCKET" exists, it contains co.op_arg records
     // 2. Record keys are monotonically increasing integers starting from 0, serialized
-    //    using tools::integral_key()
+    //    using numeric_key()
     // 3. Each record value is another such serialized integer, however, each value is
     //    identical
     // 4. The record value read by a reader must never decrease between runs
