@@ -179,7 +179,7 @@ TEST_F(HashIndexTests, SimulateUsage)
                 // Perform a write, but only if the page does not already exist in a frame
                 // in the range "lower" to "m_header.max_frame", inclusive.
                 U32 value;
-                const U32 key = random.Next(1, kNumTestFrames);
+                const U32 key = static_cast<U32>(random.Next(1, kNumTestFrames));
                 ASSERT_OK(m_index->lookup(key, lower, value));
                 if (value < lower) {
                     append(key);
@@ -232,7 +232,7 @@ protected:
 
         for (std::size_t d = 0; d < m_num_copies; ++d) {
             for (std::size_t i = 0; i < m_num_pages; ++i) {
-                append(m_num_pages - i);
+                append(static_cast<U32>(m_num_pages - i));
             }
         }
         HashIterator itr(*m_index);

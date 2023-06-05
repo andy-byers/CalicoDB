@@ -5,6 +5,9 @@
 #ifndef CALICODB_BENCHMARKS_UTILS_H
 #define CALICODB_BENCHMARKS_UTILS_H
 
+#include <algorithm>
+#include <cassert>
+#include <climits>
 #include <cstdint>
 #include <random>
 #include <string_view>

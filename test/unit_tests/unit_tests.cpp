@@ -168,12 +168,14 @@ auto TestEnv::try_intercept_syscall(SyscallType type, const std::string &filenam
 
 auto TestEnv::copy_file(const std::string &source, const std::string &target) -> void
 {
-    std::size_t src_size;
+    (void)source;
+    (void)target;
+    std::size_t src_size = 0;
     CALICODB_EXPECT_TRUE(file_size(source, src_size).is_ok());
 
-    File *src_file;
+    File *src_file = nullptr;
     CALICODB_EXPECT_TRUE(new_file(source, kReadOnly, src_file).is_ok());
-    File *dst_file;
+    File *dst_file = nullptr;
     CALICODB_EXPECT_TRUE(new_file(target, kCreate | kReadWrite, dst_file).is_ok());
 
     std::string buffer(src_size, '\0');
@@ -412,7 +414,7 @@ auto write_string_to_file(Env &env, const std::string &filename, const std::stri
     if (offset < 0) {
         ASSERT_OK(env.file_size(filename, write_pos));
     } else {
-        write_pos = offset;
+        write_pos = static_cast<std::size_t>(offset);
     }
     ASSERT_OK(file->write(write_pos, buffer));
     ASSERT_OK(file->sync());

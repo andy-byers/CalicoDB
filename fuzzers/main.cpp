@@ -21,12 +21,14 @@ auto main(int argc, const char *argv[]) -> int
         CHECK_TRUE(fp);
 
         std::fseek(fp, 0, SEEK_END);
-        const auto file_size = std::ftell(fp);
+        const auto rc = std::ftell(fp);
+        CHECK_TRUE(0 <= rc);
+        auto file_size = static_cast<std::size_t>(rc);
         std::fseek(fp, 0, SEEK_SET);
 
         std::string buffer(file_size, '\0');
-        const auto rc = std::fread(buffer.data(), 1, file_size, fp);
-        CHECK_EQ(rc, static_cast<std::size_t>(file_size));
+        const auto read_size = std::fread(buffer.data(), 1, file_size, fp);
+        CHECK_EQ(read_size, file_size);
 
         std::fclose(fp);
 
