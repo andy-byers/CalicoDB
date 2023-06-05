@@ -33,4 +33,4 @@ function(build_test TEST_NAME)
 endfunction()
 
 build_test(concurrency)
-#build_test(crashes)
+build_test(crashes)

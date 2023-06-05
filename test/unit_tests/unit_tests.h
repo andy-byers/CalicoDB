@@ -18,8 +18,10 @@
 #include <filesystem>
 #include <gtest/gtest.h>
 #include <iomanip>
+#include <mutex>
 #include <sstream>
 #include <thread>
+#include <unordered_map>
 
 namespace calicodb
 {
