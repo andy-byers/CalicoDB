@@ -4,21 +4,22 @@
 
 #include "calicodb/env.h"
 #include "calicodb/slice.h"
+#include "fake_env.h"
 #include "logging.h"
-#include "tools.h"
 #include "unit_tests.h"
 #include <gtest/gtest.h>
+#include <random>
 
 namespace calicodb
 {
 
-class HashIndexTestBase : public EnvTestHarness<tools::FakeEnv>
+class HashIndexTestBase : public EnvTestHarness<FakeEnv>
 {
 protected:
     explicit HashIndexTestBase()
     {
-        EXPECT_OK(m_env->new_file(kShmFilename, Env::kCreate, m_shm));
-        m_index = new HashIndex(m_header, *m_shm);
+        EXPECT_OK(m_env.new_file(kShmFilename, Env::kCreate, m_shm));
+        m_index = new HashIndex(m_header, m_shm);
     }
 
     ~HashIndexTestBase() override
@@ -32,14 +33,13 @@ protected:
         ASSERT_OK(m_index->assign(key, ++m_header.max_frame));
     }
 
+    FakeEnv m_env;
     File *m_shm = nullptr;
     HashIndexHdr m_header = {};
     HashIndex *m_index = nullptr;
 };
 
-class HashIndexTests
-    : public HashIndexTestBase,
-      public testing::Test
+class HashIndexTests : public HashIndexTestBase, public testing::Test
 {
 protected:
     ~HashIndexTests() override = default;
@@ -152,7 +152,7 @@ TEST_F(HashIndexTests, ReadsAndWrites)
         if (m_header.max_frame < value || value < lower) {
             ASSERT_FALSE(current);
         } else {
-            CHECK_EQ(current, value);
+            ASSERT_EQ(current, value);
         }
         ++value;
     }
@@ -162,7 +162,7 @@ TEST_F(HashIndexTests, SimulateUsage)
 {
     static constexpr std::size_t kNumTestFrames = 10'000;
 
-    tools::RandomGenerator random;
+    RandomGenerator random;
     std::map<U32, U32> simulated;
 
     for (std::size_t iteration = 0; iteration < 2; ++iteration) {
@@ -179,7 +179,7 @@ TEST_F(HashIndexTests, SimulateUsage)
                 // Perform a write, but only if the page does not already exist in a frame
                 // in the range "lower" to "m_header.max_frame", inclusive.
                 U32 value;
-                const U32 key = random.Next(1, kNumTestFrames);
+                const U32 key = static_cast<U32>(random.Next(1, kNumTestFrames));
                 ASSERT_OK(m_index->lookup(key, lower, value));
                 if (value < lower) {
                     append(key);
@@ -190,7 +190,7 @@ TEST_F(HashIndexTests, SimulateUsage)
         U32 result;
         for (const auto &[key, value] : simulated) {
             ASSERT_OK(m_index->lookup(key, lower, result));
-            CHECK_EQ(result, value);
+            ASSERT_EQ(result, value);
         }
         // Reset the WAL index.
         m_header.max_frame = 0;
@@ -198,9 +198,7 @@ TEST_F(HashIndexTests, SimulateUsage)
     }
 }
 
-class HashIteratorTests
-    : public HashIndexTestBase,
-      public testing::Test
+class HashIteratorTests : public HashIndexTestBase, public testing::Test
 {
 protected:
     ~HashIteratorTests() override = default;
@@ -220,8 +218,8 @@ class HashIteratorParamTests
 {
 protected:
     HashIteratorParamTests()
-        : m_num_copies(std::get<0>(GetParam())),
-          m_num_pages(std::get<1>(GetParam()))
+        : m_num_pages(std::get<1>(GetParam())),
+          m_num_copies(std::get<0>(GetParam()))
     {
     }
 
@@ -234,7 +232,7 @@ protected:
 
         for (std::size_t d = 0; d < m_num_copies; ++d) {
             for (std::size_t i = 0; i < m_num_pages; ++i) {
-                append(m_num_pages - i);
+                append(static_cast<U32>(m_num_pages - i));
             }
         }
         HashIterator itr(*m_index);

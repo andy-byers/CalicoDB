@@ -3,6 +3,7 @@
 // LICENSE.md. See AUTHORS.md for a list of contributor names.
 
 #include "bufmgr.h"
+#include "fake_env.h"
 #include "header.h"
 #include "logging.h"
 #include "page.h"
@@ -18,12 +19,7 @@ namespace calicodb
 
 [[nodiscard]] static auto make_key(U64 k) -> std::string
 {
-    return tools::integral_key<16>(k);
-}
-
-[[nodiscard]] static auto make_cache_entry(U64 id_value) -> PageRef
-{
-    return {.page_id = Id(id_value)};
+    return numeric_key<16>(k);
 }
 
 class PageCacheTests : public testing::Test
@@ -122,7 +118,7 @@ public:
         std::memcpy(buffer.data(), FileHeader::kFmtString, sizeof(FileHeader::kFmtString));
         buffer[FileHeader::kFmtVersionOffset] = FileHeader::kFmtVersion;
         put_u32(buffer.data() + FileHeader::kPageCountOffset, 1);
-        tools::write_string_to_file(*env, kDBFilename, buffer);
+        write_string_to_file(*env, kDBFilename, buffer);
     }
 
     [[nodiscard]] auto init_with_status() -> Status
@@ -142,6 +138,8 @@ public:
             &m_status,
             nullptr,
             kPagerFrames,
+            Options::kSyncNormal,
+            Options::kLockNormal,
         };
         CALICODB_TRY(Pager::open(pager_param, m_pager));
         m_pager->set_page_count(1);
@@ -219,7 +217,7 @@ public:
 
     [[nodiscard]] auto create_freelist_pages(std::size_t n) const -> Status
     {
-        CHECK_TRUE(n < kPagerFrames);
+        EXPECT_TRUE(n < kPagerFrames);
         std::vector<Page> pages;
         for (std::size_t i = 0; i < n; ++i) {
             Page page;
@@ -275,7 +273,7 @@ public:
 
     auto SetUp() -> void override
     {
-        env = new tools::FakeEnv();
+        env = new FakeEnv();
         write_header_and_init();
     }
 };
@@ -328,7 +326,7 @@ TEST_F(PagerTests, FreelistUpdatesMetadata)
     }
     ASSERT_EQ(m_pager->page_count(), 3 + kNumPages);
 
-    for (int i = 0; i < kNumPages; ++i) {
+    for (U32 i = 0; i < kNumPages; ++i) {
         Page page;
         ASSERT_OK(m_pager->allocate(page));
         auto root = m_pager->acquire_root();
@@ -433,23 +431,21 @@ TEST_F(PagerTests, NormalRollbacks)
     ASSERT_OK(m_pager->start_reader());
     ASSERT_OK(m_pager->start_writer());
     write_pages(*this, 456, kSomePages);
-    m_pager->rollback();
-    read_and_check(*this, 123, kManyPages);
     m_pager->finish();
-
     ASSERT_OK(m_pager->start_reader());
+    read_and_check(*this, 123, kManyPages);
+
     ASSERT_OK(m_pager->start_writer());
     write_pages(*this, 789, kFullCache);
-    m_pager->rollback();
-    read_and_check(*this, 123, kManyPages);
     m_pager->finish();
-
     ASSERT_OK(m_pager->start_reader());
+    read_and_check(*this, 123, kManyPages);
+
     ASSERT_OK(m_pager->start_writer());
     write_pages(*this, 0, kManyPages);
-    m_pager->rollback();
-    read_and_check(*this, 123, kManyPages);
     m_pager->finish();
+    ASSERT_OK(m_pager->start_reader());
+    read_and_check(*this, 123, kManyPages);
 }
 
 TEST_F(PagerTests, RollbackPageCounts)
@@ -458,11 +454,10 @@ TEST_F(PagerTests, RollbackPageCounts)
     ASSERT_OK(m_pager->start_writer());
     write_pages(*this, 0, 10);
     ASSERT_EQ(m_pager->page_count(), 10);
-    m_pager->rollback();
-    ASSERT_EQ(m_pager->page_count(), 1);
     m_pager->finish();
-
     ASSERT_OK(m_pager->start_reader());
+    ASSERT_EQ(m_pager->page_count(), 1);
+
     ASSERT_EQ(m_pager->page_count(), 1);
     ASSERT_OK(m_pager->start_writer());
     write_pages(*this, 123, 10);
@@ -474,7 +469,8 @@ TEST_F(PagerTests, RollbackPageCounts)
     ASSERT_OK(m_pager->start_writer());
     write_pages(*this, 456, 20);
     ASSERT_EQ(m_pager->page_count(), 20);
-    m_pager->rollback();
+    m_pager->finish();
+    ASSERT_OK(m_pager->start_reader());
     ASSERT_EQ(m_pager->page_count(), 10);
     read_and_check(*this, 123, 10);
     m_pager->finish();
@@ -556,7 +552,6 @@ TEST_F(PagerTests, OnlyWritesBackCommittedWalFrames)
     ASSERT_OK(m_pager->start_reader());
     ASSERT_OK(m_pager->start_writer());
     write_pages(*this, 0, kSomePages);
-    m_pager->rollback();
     m_pager->finish();
 
     ASSERT_OK(m_pager->checkpoint(true));
@@ -585,7 +580,6 @@ TEST_F(PagerTests, TransactionBehavior)
 
     ASSERT_OK(m_pager->start_reader());
     ASSERT_OK(m_pager->start_writer());
-    m_pager->rollback();
     m_pager->finish();
 
     // Only able to start a read transaction once. Second call is a NOOP.
@@ -663,7 +657,8 @@ TEST_F(PagerTests, FreelistUsage)
     ASSERT_OK(m_pager->start_reader());
     ASSERT_OK(m_pager->start_writer());
     write_pages(*this, 456, kSomePages);
-    m_pager->rollback();
+    m_pager->finish();
+    ASSERT_OK(m_pager->start_reader());
     read_and_check(*this, 123, kSomePages * 2);
     ASSERT_EQ(page_count, m_pager->page_count());
     m_pager->finish();
@@ -681,7 +676,6 @@ TEST_F(PagerTests, InvalidModeDeathTest)
 {
     ASSERT_EQ(m_pager->mode(), Pager::kOpen);
     ASSERT_DEATH((void)m_pager->commit(), kExpectationMatcher);
-    ASSERT_DEATH((void)m_pager->rollback(), kExpectationMatcher);
 
     m_pager->set_status(Status::io_error("I/O error"));
     ASSERT_EQ(m_pager->mode(), Pager::kError);
@@ -754,13 +748,6 @@ TEST_F(TruncationTests, OnlyValidPagesAreCheckpointed)
     ASSERT_EQ(file_size, kInitialPageCount * kPageSize / 2);
 }
 
-#ifndef NDEBUG
-TEST_F(TruncationTests, PurgeRootDeathTest)
-{
-    ASSERT_DEATH(m_pager->set_page_count(0), kExpectationMatcher);
-}
-#endif // NDEBUG
-
 class RandomDirtyListBuilder
 {
 public:
@@ -813,7 +800,7 @@ public:
 
 private:
     std::string m_pages;
-    tools::RandomGenerator m_random;
+    RandomGenerator m_random;
     std::default_random_engine m_rng;
 };
 
@@ -831,7 +818,8 @@ public:
             m_db,
             nullptr,
             nullptr,
-            false,
+            Options::kSyncNormal,
+            Options::kLockNormal,
         };
         EXPECT_OK(Wal::open(m_param, m_wal));
     }
@@ -843,7 +831,7 @@ public:
 
     auto close() -> void
     {
-        ASSERT_OK(m_db->file_lock(kLockShared));
+        ASSERT_OK(m_db->file_lock(kFileShared));
         ASSERT_OK(m_wal->close());
         delete m_wal;
         delete m_db;
@@ -889,7 +877,7 @@ protected:
     auto start_reader_routine(std::size_t r, std::size_t n, Status::Code outcome) -> void
     {
         bool unused;
-        ASSERT_OK(m_db->file_lock(kLockShared));
+        ASSERT_OK(m_db->file_lock(kFileShared));
 
         std::atomic<bool> flag(false);
         std::thread thread([this, &flag, r, n] {
@@ -934,7 +922,7 @@ protected:
 
 TEST_F(WalTests, EmptyWal)
 {
-    ASSERT_OK(m_db->file_lock(kLockShared));
+    ASSERT_OK(m_db->file_lock(kFileShared));
 
     bool changed;
     ASSERT_OK(m_wal->start_reader(changed));
@@ -960,7 +948,7 @@ TEST_F(WalTests, EmptyWal)
 
 TEST_F(WalTests, RecoversIndex)
 {
-    ASSERT_OK(m_db->file_lock(kLockShared));
+    ASSERT_OK(m_db->file_lock(kFileShared));
 
     bool changed;
     ASSERT_OK(m_wal->start_reader(changed));
@@ -1023,7 +1011,7 @@ TEST_F(WalTests, ReportsProtocolError)
 
 TEST_F(WalTests, StartWriter)
 {
-    ASSERT_OK(m_db->file_lock(kLockShared));
+    ASSERT_OK(m_db->file_lock(kFileShared));
 
     bool changed;
     ASSERT_OK(m_wal->start_reader(changed));
@@ -1066,8 +1054,12 @@ protected:
             "testdb-db",
             &env(),
             m_fake_file,
+            nullptr,
+            nullptr,
+            Options::kSyncNormal,
+            Options::kLockNormal,
         };
-        m_fake = new tools::FakeWal(m_fake_param);
+        m_fake = new FakeWal(m_fake_param);
     }
 
     ~WalParamTests() override
@@ -1110,8 +1102,8 @@ protected:
             ASSERT_OK(m_fake->read(Id(i + 1), fp));
             if (fp) {
                 ASSERT_NE(rp, nullptr);
-                CHECK_EQ(std::string(real, kPageSize),
-                         std::string(fake, kPageSize));
+                ASSERT_EQ(std::string(real, kPageSize),
+                          std::string(fake, kPageSize));
             } else {
                 ASSERT_EQ(rp, nullptr);
             }
@@ -1120,7 +1112,7 @@ protected:
 
     auto reopen_wals() -> void
     {
-        ASSERT_OK(m_db->file_lock(kLockShared));
+        ASSERT_OK(m_db->file_lock(kFileShared));
         ASSERT_OK(m_wal->close());
         delete m_wal;
         m_wal = nullptr;
@@ -1132,7 +1124,7 @@ protected:
         ASSERT_OK(Wal::open(m_param, m_wal));
 
         delete m_fake;
-        m_fake = new tools::FakeWal(m_fake_param);
+        m_fake = new FakeWal(m_fake_param);
     }
 
     auto run_and_validate_checkpoint(bool save_state = true) -> void
@@ -1183,8 +1175,8 @@ protected:
             const auto is_commit = m_commit_interval && iteration % m_commit_interval == m_commit_interval - 1;
             write_records(m_pages_per_iter, is_commit);
             if (!is_commit) {
-                m_wal->rollback();
-                m_fake->rollback();
+                m_wal->rollback([](auto) {});
+                m_fake->rollback([](auto) {});
             }
             m_wal->finish_writer();
             m_wal->finish_reader();
@@ -1208,7 +1200,7 @@ protected:
     Wal::Parameters m_fake_param;
     RandomDirtyListBuilder m_builder;
     RandomDirtyListBuilder m_saved;
-    tools::FakeWal *m_fake = nullptr;
+    FakeWal *m_fake = nullptr;
     File *m_fake_file = nullptr;
 };
 

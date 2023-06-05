@@ -2,12 +2,14 @@
 // This source code is licensed under the MIT License, which can be found in
 // LICENSE.md. See AUTHORS.md for a list of contributor names.
 
+#include "common.h"
 #include "db_impl.h"
+#include "fake_env.h"
 #include "freelist.h"
 #include "header.h"
 #include "logging.h"
-#include "tools.h"
 #include "tree.h"
+#include "tx_impl.h"
 #include "unit_tests.h"
 #include "wal.h"
 #include <atomic>
@@ -45,7 +47,7 @@ protected:
         ASSERT_OK(reopen_db(false));
     }
 
-    [[nodiscard]] static auto make_kv(int kv, int round = 0) -> std::pair<std::string, std::string>
+    [[nodiscard]] static auto make_kv(std::size_t kv, std::size_t round = 0) -> std::pair<std::string, std::string>
     {
         EXPECT_LE(0, kv);
         EXPECT_LE(0, round);
@@ -53,7 +55,8 @@ protected:
         // and kOverflowLink).
         static constexpr std::size_t kMaxKV = kPageSize * 3;
         const auto key_length = (round + 1) * kMaxKV / kMaxRounds;
-        auto key_str = tools::integral_key(kv);
+        auto key_str = numeric_key<kMaxKV>(kv);
+        key_str = key_str.substr(kMaxKV - key_length);
         const auto val_length = kMaxKV - key_length;
         auto val_str = number_to_string(kv);
         if (val_str.size() < val_length) {
@@ -62,12 +65,12 @@ protected:
         return {key_str, val_str};
     }
 
-    [[nodiscard]] static auto put(Tx &tx, const Bucket &b, int kv, int round = 0) -> Status
+    [[nodiscard]] static auto put(Tx &tx, const Bucket &b, std::size_t kv, std::size_t round = 0) -> Status
     {
         const auto [k, v] = make_kv(kv, round);
         return tx.put(b, k, v);
     }
-    [[nodiscard]] static auto put(Tx &tx, const BucketOptions &options, const std::string &bname, int kv, int round = 0) -> Status
+    [[nodiscard]] static auto put(Tx &tx, const BucketOptions &options, const std::string &bname, std::size_t kv, std::size_t round = 0) -> Status
     {
         Bucket b;
         auto s = tx.create_bucket(options, bname, &b);
@@ -77,15 +80,15 @@ protected:
         return s;
     }
 
-    [[nodiscard]] static auto put_range(Tx &tx, const Bucket &b, int kv1, int kv2, int round = 0) -> Status
+    [[nodiscard]] static auto put_range(Tx &tx, const Bucket &b, std::size_t kv1, std::size_t kv2, std::size_t round = 0) -> Status
     {
         Status s;
-        for (int kv = kv1; s.is_ok() && kv < kv2; ++kv) {
+        for (std::size_t kv = kv1; s.is_ok() && kv < kv2; ++kv) {
             s = put(tx, b, kv, round);
         }
         return s;
     }
-    [[nodiscard]] static auto put_range(Tx &tx, const BucketOptions &options, const std::string &bname, int kv1, int kv2, int round = 0) -> Status
+    [[nodiscard]] static auto put_range(Tx &tx, const BucketOptions &options, const std::string &bname, std::size_t kv1, std::size_t kv2, std::size_t round = 0) -> Status
     {
         Bucket b;
         auto s = tx.create_bucket(options, bname, &b);
@@ -95,12 +98,12 @@ protected:
         return s;
     }
 
-    [[nodiscard]] static auto erase(Tx &tx, const Bucket &b, int kv, int round = 0) -> Status
+    [[nodiscard]] static auto erase(Tx &tx, const Bucket &b, std::size_t kv, std::size_t round = 0) -> Status
     {
         const auto [k, _] = make_kv(kv, round);
         return tx.erase(b, k);
     }
-    [[nodiscard]] static auto erase(Tx &tx, const BucketOptions &options, const std::string &bname, int kv, int round = 0) -> Status
+    [[nodiscard]] static auto erase(Tx &tx, const BucketOptions &options, const std::string &bname, std::size_t kv, std::size_t round = 0) -> Status
     {
         Bucket b;
         auto s = tx.create_bucket(options, bname, &b);
@@ -110,15 +113,15 @@ protected:
         return s;
     }
 
-    [[nodiscard]] static auto erase_range(Tx &tx, const Bucket &b, int kv1, int kv2, int round = 0) -> Status
+    [[nodiscard]] static auto erase_range(Tx &tx, const Bucket &b, std::size_t kv1, std::size_t kv2, std::size_t round = 0) -> Status
     {
         Status s;
-        for (int kv = kv1; s.is_ok() && kv < kv2; ++kv) {
+        for (std::size_t kv = kv1; s.is_ok() && kv < kv2; ++kv) {
             s = erase(tx, b, kv, round);
         }
         return s;
     }
-    [[nodiscard]] static auto erase_range(Tx &tx, const BucketOptions &options, const std::string &bname, int kv1, int kv2, int round = 0) -> Status
+    [[nodiscard]] static auto erase_range(Tx &tx, const BucketOptions &options, const std::string &bname, std::size_t kv1, std::size_t kv2, std::size_t round = 0) -> Status
     {
         Bucket b;
         auto s = tx.create_bucket(options, bname, &b);
@@ -128,7 +131,7 @@ protected:
         return s;
     }
 
-    [[nodiscard]] static auto check(Tx &tx, const Bucket &b, int kv, bool exists, int round = 0) -> Status
+    [[nodiscard]] static auto check(Tx &tx, const Bucket &b, std::size_t kv, bool exists, std::size_t round = 0) -> Status
     {
         std::string result;
         const auto [k, v] = make_kv(kv, round);
@@ -144,7 +147,7 @@ protected:
         }
         return s;
     }
-    [[nodiscard]] static auto check(Tx &tx, const BucketOptions &options, const std::string &bname, int kv, bool exists, int round = 0) -> Status
+    [[nodiscard]] static auto check(Tx &tx, const BucketOptions &options, const std::string &bname, std::size_t kv, bool exists, std::size_t round = 0) -> Status
     {
         Bucket b;
         auto s = tx.create_bucket(options, bname, &b);
@@ -154,7 +157,7 @@ protected:
         return s;
     }
 
-    [[nodiscard]] static auto check_range(const Tx &tx, const Bucket &b, int kv1, int kv2, bool exists, int round = 0) -> Status
+    [[nodiscard]] static auto check_range(const Tx &tx, const Bucket &b, std::size_t kv1, std::size_t kv2, bool exists, std::size_t round = 0) -> Status
     {
         auto *c = tx.new_cursor(b);
         // Run some extra seek*() calls.
@@ -168,7 +171,7 @@ protected:
             s = c->status();
         }
         if (s.is_ok() && exists) {
-            for (int kv = kv1; kv < kv2; ++kv) {
+            for (std::size_t kv = kv1; kv < kv2; ++kv) {
                 const auto [k, v] = make_kv(kv, round);
                 if (kv == kv1) {
                     c->seek(k);
@@ -184,14 +187,14 @@ protected:
                 c->next();
             }
             if (s.is_ok()) {
-                for (int kv = kv2 - 1; kv >= kv1; --kv) {
-                    const auto [k, v] = make_kv(kv, round);
-                    if (kv == kv2 - 1) {
+                for (std::size_t i = 0; i < kv2 - kv1; ++i) {
+                    const auto [k, v] = make_kv(kv2 - i - 1, round);
+                    if (i == 0) {
                         c->seek(k);
                     }
                     if (c->is_valid()) {
-                        EXPECT_EQ(k, c->key());
-                        EXPECT_EQ(v, c->value());
+                        EXPECT_EQ(k, c->key().to_string());
+                        EXPECT_EQ(v, c->value().to_string());
                     } else {
                         s = c->status();
                         break;
@@ -200,7 +203,7 @@ protected:
                 }
             }
         } else {
-            for (int kv = kv1; kv < kv2; ++kv) {
+            for (std::size_t kv = kv1; kv < kv2; ++kv) {
                 const auto [k, v] = make_kv(kv, round);
                 c->seek(k);
                 if (c->is_valid()) {
@@ -210,13 +213,12 @@ protected:
                     s = c->status();
                     break;
                 }
-                ++kv;
             }
         }
         delete c;
         return s;
     }
-    [[nodiscard]] static auto check_range(const Tx &tx, const std::string &bname, int kv1, int kv2, bool exists, int round = 0) -> Status
+    [[nodiscard]] static auto check_range(const Tx &tx, const std::string &bname, std::size_t kv1, std::size_t kv2, bool exists, std::size_t round = 0) -> Status
     {
         Bucket b;
         auto s = tx.open_bucket(bname, b);
@@ -227,11 +229,13 @@ protected:
     }
 
     enum Config {
-        kDefault,
-        kSyncMode,
-        kUseAltWAL,
-        kSmallCache,
-        kMaxConfig,
+        kDefault = 0,
+        kExclusiveLockMode = 1,
+        kOffSyncMode = 2,
+        kFullSyncMode = 4,
+        kUseAltWAL = 8,
+        kSmallCache = 16,
+        kMaxConfig = 7,
     };
     [[nodiscard]] auto reopen_db(bool clear, Env *env = nullptr) -> Status
     {
@@ -242,20 +246,19 @@ protected:
         Options options;
         options.busy = &m_busy;
         options.env = env ? env : m_env;
-        switch (m_config) {
-            case kDefault:
-                break;
-            case kSyncMode:
-                options.sync = true;
-                break;
-            case kUseAltWAL:
-                options.wal_filename = kAltWALName;
-                break;
-            case kSmallCache:
-                options.cache_size = 0;
-                break;
-            default:
-                break;
+        if (m_config & kExclusiveLockMode) {
+            options.lock_mode = Options::kLockExclusive;
+        }
+        if (m_config & kOffSyncMode) {
+            options.sync_mode = Options::kSyncOff;
+        } else if (m_config & kFullSyncMode) {
+            options.sync_mode = Options::kSyncFull;
+        }
+        if (m_config & kUseAltWAL) {
+            options.wal_filename = kAltWALName;
+        }
+        if (m_config & kSmallCache) {
+            options.cache_size = 0;
         }
         return DB::open(options, kDBName, m_db);
     }
@@ -392,24 +395,26 @@ TEST_F(DBTests, BucketBehavior)
 
 TEST_F(DBTests, ReadonlyTx)
 {
-    ASSERT_OK(m_db->update([](auto &tx) {
-        Bucket b;
-        EXPECT_OK(tx.create_bucket(BucketOptions(), "BUCKET", &b));
-        return Status::ok();
-    }));
-    ASSERT_OK(m_db->view([](auto &tx) {
-        Bucket b;
-        EXPECT_OK(tx.open_bucket("BUCKET", b));
-        auto *c = tx.new_cursor(b);
-        delete c;
-        c = &tx.schema();
-        return Status::ok();
-    }));
+    do {
+        ASSERT_OK(m_db->update([](auto &tx) {
+            Bucket b;
+            EXPECT_OK(tx.create_bucket(BucketOptions(), "BUCKET", &b));
+            return Status::ok();
+        }));
+        ASSERT_OK(m_db->view([](auto &tx) {
+            Bucket b;
+            EXPECT_OK(tx.open_bucket("BUCKET", b));
+            auto *c = tx.new_cursor(b);
+            delete c;
+            c = &tx.schema();
+            return Status::ok();
+        }));
+    } while (change_options(true));
 }
 
 TEST_F(DBTests, UpdateThenView)
 {
-    int round = 0;
+    std::size_t round = 0;
     do {
         BucketOptions tbopt;
         tbopt.error_if_exists = true;
@@ -448,7 +453,7 @@ TEST_F(DBTests, UpdateThenView)
 
 TEST_F(DBTests, RollbackUpdate)
 {
-    int round = 0;
+    std::size_t round = 0;
     do {
         for (int i = 0; i < 3; ++i) {
             ASSERT_TRUE(m_db->update([i, round](auto &tx) {
@@ -493,9 +498,11 @@ TEST_F(DBTests, RollbackUpdate)
 
 TEST_F(DBTests, VacuumEmptyDB)
 {
-    ASSERT_OK(m_db->update([](auto &tx) {
-        return tx.vacuum();
-    }));
+    do {
+        ASSERT_OK(m_db->update([](auto &tx) {
+            return tx.vacuum();
+        }));
+    } while (change_options(true));
 }
 
 TEST_F(DBTests, CorruptedRootIDs)
@@ -521,6 +528,10 @@ TEST_F(DBTests, CorruptedRootIDs)
     buffer[kPageSize - 1] = 42; // Corrupt the root ID of "BUCKET".
     ASSERT_OK(file->write(0, Slice(buffer, kPageSize)));
     delete file;
+
+    // The pager won't reread pages unless another connection has changed the
+    // database. Reopen the database to force it to read the corrupted page.
+    ASSERT_OK(reopen_db(false));
 
     (void)m_db->update([](auto &tx) {
         Status s;
@@ -616,7 +627,7 @@ TEST(OldWalTests, HandlesOldWalFile)
     static constexpr auto kOldWal = "./testwal";
 
     File *oldwal;
-    tools::FakeEnv env;
+    FakeEnv env;
     ASSERT_OK(env.new_file(kOldWal, Env::kCreate, oldwal));
     ASSERT_OK(oldwal->write(42, ":3"));
 
@@ -636,38 +647,38 @@ TEST(OldWalTests, HandlesOldWalFile)
     delete db;
 }
 
-//TEST(DestructionTests, OnlyDeletesCalicoDatabases)
+// TEST(DestructionTests, OnlyDeletesCalicoDatabases)
 //{
-//    std::filesystem::remove_all("./testdb");
+//     std::filesystem::remove_all("./testdb");
 //
-//    // "./testdb" does not exist.
-//    ASSERT_TRUE(DB::destroy(Options(), "./testdb").is_invalid_argument());
-//    ASSERT_FALSE(Env::default_env()->file_exists("./testdb"));
+//     // "./testdb" does not exist.
+//     ASSERT_TRUE(DB::destroy(Options(), "./testdb").is_invalid_argument());
+//     ASSERT_FALSE(Env::default_env()->file_exists("./testdb"));
 //
-//    // File is too small to read the first page.
-//    File *file;
-//    ASSERT_OK(Env::default_env()->new_file("./testdb", Env::kCreate, file));
-//    ASSERT_OK(file->write(0, "CalicoDB format"));
-//    ASSERT_TRUE(DB::destroy(Options(), "./testdb").is_invalid_argument());
-//    ASSERT_TRUE(Env::default_env()->file_exists("./testdb"));
+//     // File is too small to read the first page.
+//     File *file;
+//     ASSERT_OK(Env::default_env()->new_file("./testdb", Env::kCreate, file));
+//     ASSERT_OK(file->write(0, "CalicoDB format"));
+//     ASSERT_TRUE(DB::destroy(Options(), "./testdb").is_invalid_argument());
+//     ASSERT_TRUE(Env::default_env()->file_exists("./testdb"));
 //
-//    // Identifier is incorrect.
-//    ASSERT_OK(file->write(0, "CalicoDB format 0"));
-//    ASSERT_TRUE(DB::destroy(Options(), "./testdb").is_invalid_argument());
+//     // Identifier is incorrect.
+//     ASSERT_OK(file->write(0, "CalicoDB format 0"));
+//     ASSERT_TRUE(DB::destroy(Options(), "./testdb").is_invalid_argument());
 //
-//    DB *db;
-//    std::filesystem::remove_all("./testdb");
-//    ASSERT_OK(DB::open(Options(), "./testdb", db));
-//    ASSERT_OK(DB::destroy(Options(), "./testdb"));
+//     DB *db;
+//     std::filesystem::remove_all("./testdb");
+//     ASSERT_OK(DB::open(Options(), "./testdb", db));
+//     ASSERT_OK(DB::destroy(Options(), "./testdb"));
 //
-//    delete db;
-//    delete file;
-//}
+//     delete db;
+//     delete file;
+// }
 
 TEST(DestructionTests, OnlyDeletesCalicoWals)
 {
     Options options;
-    options.env = new tools::FakeEnv;
+    options.env = new FakeEnv;
     options.wal_filename = "./wal";
 
     DB *db;
@@ -692,12 +703,12 @@ class DBErrorTests : public DBTests
 {
 protected:
     static constexpr auto kErrorMessage = "I/O error: 42";
-    static constexpr auto kAllSyscalls = (1 << tools::kNumSyscalls) - 1;
+    static constexpr auto kAllSyscalls = (1 << kNumSyscalls) - 1;
     static constexpr std::size_t kSavedCount = 1'000;
 
     explicit DBErrorTests()
     {
-        m_test_env = new tools::TestEnv(*Env::default_env());
+        m_test_env = new TestEnv(*Env::default_env());
     }
 
     ~DBErrorTests() override
@@ -713,18 +724,20 @@ protected:
         // Don't call DBTests::SetUp(). Defer calling DB::open() until try_reopen() is called.
     }
 
-    using OpenFlag = unsigned;
-    static constexpr OpenFlag kPrefill = 1;
-    static constexpr OpenFlag kKeepOpen = 2;
-    static constexpr OpenFlag kClearDB = 4;
-    [[nodiscard]] auto try_reopen(OpenFlag flag = 0) -> Status
+    enum OpenFlag {
+        kOpenNormal = 0,
+        kOpenPrefill = 1,
+        kOpenKeepOpen = 2,
+        kOpenClearDB = 4,
+    };
+    [[nodiscard]] auto try_reopen(OpenFlag flag = kOpenNormal) -> Status
     {
         Status s;
-        if (0 == (flag & kKeepOpen)) {
-            m_config = kSyncMode;
-            s = reopen_db(flag & kClearDB, m_test_env);
+        if (0 == (flag & kOpenKeepOpen)) {
+            m_config = Config(m_config | kFullSyncMode);
+            s = reopen_db(flag & kOpenClearDB, m_test_env);
         }
-        if (s.is_ok() && (flag & kPrefill) && m_max_count == 0) {
+        if (s.is_ok() && (flag & kOpenPrefill) && m_max_count == 0) {
             // The first time the DB is opened, add kSavedCount records to the WAL and
             // commit.
             s = m_db->update([](auto &tx) {
@@ -734,9 +747,9 @@ protected:
         return s;
     }
 
-    auto set_error(tools::SyscallType type) -> void
+    auto set_error(SyscallType type) -> void
     {
-        const tools::Interceptor interceptor(type, [this] {
+        const Interceptor interceptor(type, [this] {
             if (m_counter >= 0 && m_counter++ >= m_max_count) {
                 return Status::io_error("42");
             }
@@ -758,7 +771,7 @@ protected:
         }
     }
 
-    tools::TestEnv *m_test_env;
+    TestEnv *m_test_env;
     Options m_options;
     int m_counter = 0;
     int m_max_count = 0;
@@ -766,8 +779,8 @@ protected:
 
 TEST_F(DBErrorTests, Reads)
 {
-    ASSERT_OK(try_reopen(kPrefill));
-    set_error(tools::kSyscallRead);
+    ASSERT_OK(try_reopen(kOpenPrefill));
+    set_error(kSyscallRead);
 
     for (;;) {
         auto s = m_db->view([](auto &tx) {
@@ -794,8 +807,8 @@ TEST_F(DBErrorTests, Reads)
 
 TEST_F(DBErrorTests, Writes)
 {
-    ASSERT_OK(try_reopen(kPrefill));
-    set_error(tools::kSyscallWrite | tools::kSyscallSync);
+    ASSERT_OK(try_reopen(kOpenPrefill));
+    set_error(kSyscallWrite | kSyscallSync);
 
     for (;;) {
         auto s = try_reopen();
@@ -838,7 +851,7 @@ TEST_F(DBErrorTests, Checkpoint)
 {
     // Add some records to the WAL and set the next syscall to fail. The checkpoint during
     // the close routine will fail.
-    ASSERT_OK(try_reopen(kPrefill));
+    ASSERT_OK(try_reopen(kOpenPrefill));
     set_error(kAllSyscalls);
 
     for (Status s;;) {
@@ -879,7 +892,7 @@ TEST_F(DBErrorTests, TransactionsAfterCheckpointFailure)
 
     // Create a situation where we need to look in the database file for some records
     // and the WAL file for others.
-    ASSERT_OK(try_reopen(kPrefill));
+    ASSERT_OK(try_reopen(kOpenPrefill));
     ASSERT_OK(m_db->checkpoint(true));
     ASSERT_OK(m_db->update([](auto &tx) {
         return put_range(tx, BucketOptions(), "pending", 0, kSavedCount);
@@ -887,7 +900,7 @@ TEST_F(DBErrorTests, TransactionsAfterCheckpointFailure)
     set_error(kAllSyscalls);
 
     for (Status s;;) {
-        s = try_reopen(kKeepOpen);
+        s = try_reopen(kOpenKeepOpen);
         if (s.is_ok()) {
             s = m_db->checkpoint(true);
         }
@@ -965,224 +978,6 @@ TEST_F(DBOpenTests, FailsIfDbExists)
     ASSERT_TRUE(DB::open(options, kDBName, m_db).is_invalid_argument());
 }
 
-class DBConcurrencyTests : public DBTests
-{
-protected:
-    static constexpr std::size_t kRecordCount = 2;
-
-    ~DBConcurrencyTests() override = default;
-
-    auto SetUp() -> void override
-    {
-    }
-
-    // Reader task invariants:
-    // 1. If the bucket named "BUCKET" exists, it contains kRecordCount records
-    // 2. Record keys are monotonically increasing integers starting from 0, serialized
-    //    using tools::integral_key()
-    // 3. Each record value is another such serialized integer, however, each value is
-    //    identical
-    // 4. The record value read by a reader must never decrease between runs
-    [[nodiscard]] static auto reader(DB &db, U64 &latest) -> Status
-    {
-        return db.view([&latest](const auto &tx) {
-            Bucket b;
-            auto s = tx.open_bucket("BUCKET", b);
-            if (s.is_invalid_argument()) {
-                // Writer hasn't created the bucket yet.
-                return Status::ok();
-            } else if (!s.is_ok()) {
-                return s;
-            }
-            // Iterate through the records twice. The same value should be read each time.
-            for (std::size_t i = 0; i < kRecordCount * 2; ++i) {
-                std::string value;
-                // If the bucket exists, then it must contain kRecordCount records (the first writer to run
-                // makes sure of this).
-                s = tx.get(b, tools::integral_key(i % kRecordCount), &value);
-                if (s.is_ok()) {
-                    U64 result;
-                    Slice slice(value);
-                    EXPECT_TRUE(consume_decimal_number(slice, &result));
-                    if (i) {
-                        EXPECT_EQ(latest, result);
-                    } else {
-                        EXPECT_LE(latest, result);
-                        latest = result;
-                    }
-                } else {
-                    break;
-                }
-            }
-            return s;
-        });
-    }
-
-    // Writer tasks set up invariants on the DB for the reader to check. Each writer
-    // either creates or increases kRecordCount records in a bucket named "BUCKET". The
-    // first writer to run creates the bucket.
-    [[nodiscard]] static auto writer(DB &db) -> Status
-    {
-        return db.update([](auto &tx) {
-            Bucket b;
-            auto s = tx.create_bucket(BucketOptions(), "BUCKET", &b);
-            for (std::size_t i = 0; s.is_ok() && i < kRecordCount; ++i) {
-                U64 result = 1;
-                std::string value;
-                s = tx.get(b, tools::integral_key(i), &value);
-                if (s.is_not_found()) {
-                    s = Status::ok();
-                } else if (s.is_ok()) {
-                    Slice slice(value);
-                    EXPECT_TRUE(consume_decimal_number(slice, &result));
-                    ++result;
-                } else {
-                    break;
-                }
-                s = tx.put(b, tools::integral_key(i), tools::integral_key(result));
-            }
-            EXPECT_OK(s);
-            return s;
-        });
-    }
-
-    // Checkpointers just run a single checkpoint on the DB. This should not interfere with the
-    // logical contents of the database in any way.
-    [[nodiscard]] static auto checkpointer(DB &db, bool reset = false) -> Status
-    {
-        return db.checkpoint(reset);
-    }
-
-    [[nodiscard]] auto new_connection(bool sync, DB *&db_out) -> Status
-    {
-        Options options;
-        options.env = m_env;
-        options.sync = sync;
-        options.busy = &m_busy;
-
-        return DB::open(options, kDBName, db_out);
-    }
-
-    auto validate(U64 value) -> void
-    {
-        ASSERT_OK(reader(*m_db, value));
-    }
-
-    struct ConsistencyCheckParam {
-        std::size_t read_count = 0;
-        std::size_t write_count = 0;
-        std::size_t ckpt_count = 0;
-        U64 start_value = 0;
-        bool ckpt_reset = false;
-        bool ckpt_before = false;
-    };
-    auto consistency_check_step(const ConsistencyCheckParam &param) -> void
-    {
-        const auto total = param.read_count + param.write_count + param.ckpt_count;
-        std::vector<U64> latest(param.read_count, param.start_value);
-        std::vector<std::thread> threads;
-        std::atomic<int> count(0);
-        threads.reserve(total);
-        for (std::size_t i = 0; i < total; ++i) {
-            threads.emplace_back([i, param, total, &latest, &count, this] {
-                const auto &[nrd, nwr, nck, _1, reset, _2] = param;
-
-                DB *db;
-                ASSERT_OK(new_connection(false, db));
-
-                count.fetch_add(1);
-                while (count.load() < total) {
-                    std::this_thread::yield();
-                }
-
-                Status s;
-                if (i < nrd) {
-                    // Readers should never block. Anything that would block a reader resolves in a
-                    // bounded amount of time, so the implementation just waits.
-                    ASSERT_OK(reader(*db, latest[i])) << "reader (" << i << ") failed";
-                } else if (i < nrd + nwr) {
-                    while ((s = writer(*db)).is_busy()) {
-                    }
-                    ASSERT_OK(s) << "writer (" << i << ") failed";
-                } else {
-                    while ((s = checkpointer(*db, reset)).is_busy()) {
-                    }
-                    ASSERT_OK(s) << (reset ? "reset" : "passive") << " checkpointer (" << i << ") failed";
-                }
-                delete db;
-            });
-        }
-        for (auto &thread : threads) {
-            thread.join();
-        }
-    }
-    auto run_consistency_check(const ConsistencyCheckParam &param) -> void
-    {
-        // Start with a fresh DB. Unlinks old database files.
-        ASSERT_OK(reopen_db(true));
-        for (std::size_t i = 0; i < param.start_value; ++i) {
-            ASSERT_OK(writer(*m_db));
-        }
-        if (param.ckpt_before) {
-            ASSERT_OK(m_db->checkpoint(param.ckpt_reset));
-        }
-        auto child_param = param;
-        static constexpr std::size_t kNumRounds = 5;
-        for (std::size_t i = 0; i < kNumRounds; ++i) {
-            consistency_check_step(param);
-            // The main connection should be able to see everything written by the
-            // writer threads.
-            child_param.start_value += param.write_count;
-            validate(child_param.start_value);
-        }
-    }
-};
-
-TEST_F(DBConcurrencyTests, Reader1)
-{
-    run_consistency_check({100, 0, 0, 0, false, false});
-    run_consistency_check({100, 0, 0, 10, false, false});
-    run_consistency_check({100, 0, 0, 10, false, true});
-}
-
-TEST_F(DBConcurrencyTests, Reader2)
-{
-    run_consistency_check({100, 0, 10, 0, false, false});
-    run_consistency_check({100, 0, 10, 10, false, false});
-    run_consistency_check({100, 0, 10, 0, true, false});
-    run_consistency_check({100, 0, 10, 10, true, false});
-}
-
-TEST_F(DBConcurrencyTests, Writer1)
-{
-    run_consistency_check({100, 1, 0, 0, false, false});
-    run_consistency_check({100, 1, 0, 10, false, false});
-    run_consistency_check({100, 1, 0, 10, false, true});
-}
-
-TEST_F(DBConcurrencyTests, Writer2)
-{
-    run_consistency_check({100, 1, 10, 0, false, false});
-    run_consistency_check({100, 1, 10, 10, false, false});
-    run_consistency_check({100, 1, 10, 0, true, false});
-    run_consistency_check({100, 1, 10, 10, true, false});
-}
-
-TEST_F(DBConcurrencyTests, Checkpointer1)
-{
-    run_consistency_check({100, 20, 0, 0, false, false});
-    run_consistency_check({100, 20, 0, 10, false, false});
-    run_consistency_check({100, 20, 0, 10, false, true});
-}
-
-TEST_F(DBConcurrencyTests, Checkpointer2)
-{
-    run_consistency_check({100, 10, 10, 0, false, false});
-    run_consistency_check({100, 10, 10, 10, false, false});
-    run_consistency_check({100, 10, 10, 0, true, false});
-    run_consistency_check({100, 10, 10, 10, true, false});
-}
-
 class DBTransactionTests : public DBErrorTests
 {
 protected:
@@ -1195,13 +990,16 @@ TEST_F(DBTransactionTests, ReadMostRecentSnapshot)
 {
     U64 key_limit = 0;
     auto should_exist = false;
-    ASSERT_OK(try_reopen(kPrefill));
+    ASSERT_OK(try_reopen(kOpenPrefill));
     const auto intercept = [this, &key_limit, &should_exist] {
         DB *db;
         Options options;
         options.env = m_test_env;
-        EXPECT_OK(DB::open(options, kDBName, db));
-        auto s = db->view([key_limit](auto &tx) {
+        auto s = DB::open(options, kDBName, db);
+        if (!s.is_ok()) {
+            return s;
+        }
+        s = db->view([key_limit](auto &tx) {
             return check_range(tx, "BUCKET", 0, key_limit * 10, true);
         });
         if (!should_exist && s.is_invalid_argument()) {
@@ -1210,8 +1008,8 @@ TEST_F(DBTransactionTests, ReadMostRecentSnapshot)
         delete db;
         return s;
     };
-    m_test_env->add_interceptor(kWALName, tools::Interceptor(tools::kSyscallWrite, intercept));
-    (void)m_db->update([&should_exist, &key_limit](auto &tx) {
+    m_test_env->add_interceptor(kWALName, Interceptor(kSyscallWrite, intercept));
+    ASSERT_OK(m_db->update([&should_exist, &key_limit](auto &tx) {
         for (std::size_t i = 0; i < 50; ++i) {
             EXPECT_OK(put_range(tx, BucketOptions(), "BUCKET", i * 10, (i + 1) * 10));
             EXPECT_OK(tx.commit());
@@ -1219,7 +1017,35 @@ TEST_F(DBTransactionTests, ReadMostRecentSnapshot)
             key_limit = i + 1;
         }
         return Status::ok();
-    });
+    }));
+}
+
+TEST_F(DBTransactionTests, ExclusiveLockingMode)
+{
+    for (int i = 0; i < 2; ++i) {
+        m_config = i == 0 ? kExclusiveLockMode : kDefault;
+        ASSERT_OK(try_reopen(kOpenNormal));
+        const auto intercept = [this, &i] {
+            DB *db;
+            Options options;
+            options.lock_mode = i == 0 ? Options::kLockNormal
+                                       : Options::kLockExclusive;
+            options.env = m_test_env;
+
+            Status s;
+            EXPECT_TRUE((s = DB::open(options, kDBName, db)).is_busy())
+                << s.to_string();
+            return Status::ok();
+        };
+        m_test_env->add_interceptor(kWALName, Interceptor(kSyscallWrite, intercept));
+        ASSERT_OK(m_db->update([](auto &tx) {
+            for (std::size_t i = 0; i < 50; ++i) {
+                EXPECT_OK(put_range(tx, BucketOptions(), "BUCKET", i * 10, (i + 1) * 10));
+                EXPECT_OK(tx.commit());
+            }
+            return Status::ok();
+        }));
+    }
 }
 
 TEST_F(DBTransactionTests, IgnoresFutureVersions)
@@ -1228,7 +1054,7 @@ TEST_F(DBTransactionTests, IgnoresFutureVersions)
     auto has_open_db = false;
     U64 n = 0;
 
-    ASSERT_OK(try_reopen(kPrefill));
+    ASSERT_OK(try_reopen(kOpenPrefill));
     const auto intercept = [this, &has_open_db, &n] {
         if (has_open_db || n >= kN) {
             // Prevent this callback from being called by itself, and prevent the test from
@@ -1251,7 +1077,7 @@ TEST_F(DBTransactionTests, IgnoresFutureVersions)
     ASSERT_OK(m_db->update([](auto &tx) {
         return put_range(tx, BucketOptions(), "BUCKET", 0, kN);
     }));
-    m_test_env->add_interceptor(kWALName, tools::Interceptor(tools::kSyscallRead, intercept));
+    m_test_env->add_interceptor(kWALName, Interceptor(kSyscallRead, intercept));
     (void)m_db->view([&n](auto &tx) {
         for (std::size_t i = 0; i < kN; ++i) {
             EXPECT_OK(check_range(tx, "BUCKET", 0, kN, true));
@@ -1271,10 +1097,10 @@ protected:
 
 TEST_F(DBCheckpointTests, CheckpointerBlocksOtherCheckpointers)
 {
-    ASSERT_OK(try_reopen(kPrefill));
+    ASSERT_OK(try_reopen(kOpenPrefill));
     m_test_env->add_interceptor(
         kDBName,
-        tools::Interceptor(tools::kSyscallWrite, [this] {
+        Interceptor(kSyscallWrite, [this] {
             // Each time File::write() is called, use a different connection to attempt a
             // checkpoint. It should get blocked every time, since a checkpoint is already
             // running.
@@ -1295,10 +1121,10 @@ TEST_F(DBCheckpointTests, CheckpointerAllowsTransactions)
     static constexpr std::size_t kCkptCount = 1'000;
 
     // Set up a DB with some records in both the database file and the WAL.
-    ASSERT_OK(try_reopen(kPrefill));
+    ASSERT_OK(try_reopen(kOpenPrefill));
     ASSERT_OK(m_db->checkpoint(true));
     ASSERT_OK(m_db->update([](auto &tx) {
-        // These records will be checkpointed below. `round` is 1 to cause a new version of the first half of
+        // These records will be checkpointed below. round is 1 to cause a new version of the first half of
         // the records to be written.
         return put_range(tx, BucketOptions(), "saved", 0, kSavedCount / 2, 1);
     }));
@@ -1306,19 +1132,17 @@ TEST_F(DBCheckpointTests, CheckpointerAllowsTransactions)
     U64 n = 0;
     m_test_env->add_interceptor(
         kDBName,
-        tools::Interceptor(tools::kSyscallWrite, [this, &n] {
+        Interceptor(kSyscallWrite, [this, &n] {
             DB *db;
             Options options;
             options.env = m_test_env;
-            CHECK_OK(DB::open(options, kDBName, db));
+            EXPECT_OK(DB::open(options, kDBName, db));
             EXPECT_OK(db->update([n](auto &tx) {
                 return put_range(tx, BucketOptions(), "SELF", n * 2, (n + 1) * 2);
             }));
             (void)db->view([n](auto &tx) {
-                // The version 0 records must come from the database file.
-                EXPECT_OK(check_range(tx, "saved", 0, kSavedCount / 2, true, 0));
-                // The version 1 records must come from the WAL.
-                EXPECT_OK(check_range(tx, "saved", kSavedCount / 2, kSavedCount, true, 1));
+                EXPECT_OK(check_range(tx, "saved", 0, kSavedCount / 2, true, 1));
+                EXPECT_OK(check_range(tx, "saved", kSavedCount / 2, kSavedCount, true, 0));
                 EXPECT_OK(check_range(tx, "SELF", 0, (n + 1) * 2, true));
                 return Status::ok();
             });
@@ -1361,6 +1185,7 @@ protected:
                     EXPECT_OK(erase_range(tx, buckets[is[n]], bs[n] * kN, (bs[n] + 1) * kN));
                 }
             }
+
             EXPECT_OK(tx.vacuum());
 
             for (std::size_t n = 0; n < bs.size(); ++n) {
@@ -1383,7 +1208,7 @@ protected:
     {
         for (U32 i = 0; i < 8; ++i) {
             for (auto &b : bitmaps) {
-                b = (b << 1) | (b >> 7);
+                b = static_cast<U8>((b << 1) | (b >> 7));
             }
             test_configurations_impl(bitmaps);
         }

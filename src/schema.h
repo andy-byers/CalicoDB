@@ -106,13 +106,15 @@ public:
     // buckets were rerooted
     [[nodiscard]] auto vacuum_finish() -> Status;
 
+    [[nodiscard]] static auto decode_root_id(const Slice &data, Id &out) -> bool;
+    static auto encode_root_id(Id id, std::string &out) -> void;
+
     auto TEST_validate() const -> void;
 
 private:
+    [[nodiscard]] auto decode_and_check_root_id(const Slice &data, Id &out) -> bool;
     [[nodiscard]] auto corrupted_root_id(const Slice &name, const Slice &value) -> Status;
-    [[nodiscard]] auto decode_root_id(const Slice &data, Id &out) -> bool;
     auto construct_bucket_state(Id root_id) -> Bucket;
-    static auto encode_root_id(Id id, std::string &out) -> void;
 
     template <class T>
     using HashMap = std::unordered_map<Id, T, Id::Hash>;

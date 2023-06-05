@@ -43,7 +43,7 @@
 namespace calicodb
 {
 
-inline constexpr auto expect_impl(bool cond, const char *repr, const char *file, int line) noexcept -> void
+inline constexpr auto expect_impl(bool cond, const char *repr, const char *file, int line) -> void
 {
     if (!cond) {
         std::fprintf(stderr, "expectation (%s) failed at %s:%d\n", repr, file, line);
@@ -64,12 +64,12 @@ using U32 = std::uint32_t;
 using U64 = std::uint64_t;
 
 // Additional file locking modes that cannot be requested directly
-enum : int { kLockUnlocked = 0 };
+enum { kLockUnlocked = 0 };
 
 struct Id {
     static constexpr U32 kNull = 0;
     static constexpr U32 kRoot = 1;
-    static constexpr auto kSize = sizeof(kNull);
+    static constexpr auto kSize = sizeof(U32);
 
     struct Hash {
         auto operator()(const Id &id) const -> U64
@@ -86,32 +86,32 @@ struct Id {
     {
     }
 
-    [[nodiscard]] static constexpr auto from_index(std::size_t index) noexcept -> Id
+    [[nodiscard]] static constexpr auto from_index(std::size_t index) -> Id
     {
         return Id(index + 1);
     }
 
-    [[nodiscard]] static constexpr auto null() noexcept -> Id
+    [[nodiscard]] static constexpr auto null() -> Id
     {
         return Id(kNull);
     }
 
-    [[nodiscard]] static constexpr auto root() noexcept -> Id
+    [[nodiscard]] static constexpr auto root() -> Id
     {
         return Id(kRoot);
     }
 
-    [[nodiscard]] constexpr auto is_null() const noexcept -> bool
+    [[nodiscard]] constexpr auto is_null() const -> bool
     {
         return value == kNull;
     }
 
-    [[nodiscard]] constexpr auto is_root() const noexcept -> bool
+    [[nodiscard]] constexpr auto is_root() const -> bool
     {
         return value == kRoot;
     }
 
-    [[nodiscard]] constexpr auto as_index() const noexcept -> std::size_t
+    [[nodiscard]] constexpr auto as_index() const -> std::size_t
     {
         CALICODB_EXPECT_NE(value, null().value);
         return value - 1;
@@ -151,6 +151,11 @@ auto operator<<(std::ostream &os, const Slice &slice) -> std::ostream &
 {
     return os << slice.to_string();
 }
+
+template <std::size_t N>
+struct StatCounters {
+    U64 stats[N] = {};
+};
 
 } // namespace calicodb
 

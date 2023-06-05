@@ -49,10 +49,10 @@ Check out the [docs](doc/doc.md).
 ## Dependencies
 The library itself has no dependencies.
 The unit tests depend on `@google/googletest`, and the benchmarks depend on `@google/benchmark`.
-Both are downloaded using during the build.
+Both are downloaded during the build.
 
 ## Performance
-Performance benchmarks can be found [here](test/benchmarks).
+Performance benchmarks can be found [here](benchmarks).
 
 ## TODO
 1. Get everything code reviewed!

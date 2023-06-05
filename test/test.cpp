@@ -2,9 +2,9 @@
 // This source code is licensed under the MIT License, which can be found in
 // LICENSE.md. See AUTHORS.md for a list of contributor names.
 
-#include "harness.h"
+#include "test.h"
 
-namespace calicodb::tools
+namespace calicodb::test
 {
 
 auto check_status(const char *expr, const Status &s) -> testing::AssertionResult
@@ -16,4 +16,4 @@ auto check_status(const char *expr, const Status &s) -> testing::AssertionResult
     }
 }
 
-} // namespace calicodb::tools
+} // namespace calicodb::test

@@ -20,7 +20,7 @@ See [shm file](#shm-file) for details.
 The env construct handles platform-specific filesystem operations and I/O.
 Users can override classes in [`calicodb/env.h`](../include/calicodb/env.h).
 Then, a pointer to the custom `Env` object can be passed to the database when it is opened.
-See [`env_helpers.h`](../test/tools/env_helpers.h) for an example that stores the database files in memory.
+See [`fake_env.h`](../utils/fake_env.h) for an example that stores the database files in memory.
 
 ### Pager
 The pager module provides in-memory caching for database pages read by the `Env`.

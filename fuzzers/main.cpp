@@ -4,7 +4,7 @@
 //
 // Based off of StandaloneFuzzTargetMain.c in libFuzzer.
 
-#include "tools.h"
+#include "fuzzer.h"
 #include <cstdio>
 #include <cstring>
 #include <filesystem>
@@ -21,11 +21,14 @@ auto main(int argc, const char *argv[]) -> int
         CHECK_TRUE(fp);
 
         std::fseek(fp, 0, SEEK_END);
-        const auto file_size = std::ftell(fp);
+        const auto rc = std::ftell(fp);
+        CHECK_TRUE(0 <= rc);
+        auto file_size = static_cast<std::size_t>(rc);
         std::fseek(fp, 0, SEEK_SET);
 
         std::string buffer(file_size, '\0');
-        CHECK_EQ(std::fread(buffer.data(), 1, file_size, fp), file_size);
+        const auto read_size = std::fread(buffer.data(), 1, file_size, fp);
+        CHECK_EQ(read_size, file_size);
 
         std::fclose(fp);
 
@@ -38,9 +41,9 @@ auto main(int argc, const char *argv[]) -> int
 
     namespace fs = std::filesystem;
 
-    for (std::size_t i = 1; i < argc; ++i) {
+    for (int i = 1; i < argc; ++i) {
         if (fs::is_directory(argv[i])) {
-            for (const auto &entry : fs::directory_iterator{argv[i]}) {
+            for (const auto &entry : fs::directory_iterator(argv[i])) {
                 run_input(entry.path().c_str());
             }
         } else {

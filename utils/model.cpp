@@ -4,7 +4,7 @@
 
 #include "model.h"
 
-namespace calicodb::tools
+namespace calicodb
 {
 
 ModelDB::~ModelDB()
@@ -45,4 +45,4 @@ auto ModelTx::new_cursor(const Bucket &) const -> Cursor *
 
 ModelCursor::~ModelCursor() = default;
 
-} // namespace calicodb::tools
+} // namespace calicodb

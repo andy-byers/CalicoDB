@@ -40,9 +40,16 @@ struct Options final {
     // If true, return with an error if the database already exists.
     bool error_if_exists = false;
 
-    // If true, sync the WAL file on every commit. Hurts performance quite a bit,
-    // but provides extra durability.
-    bool sync = false;
+    enum SyncMode {
+        kSyncOff,    // No durability
+        kSyncNormal, // Persist data on checkpoint
+        kSyncFull,   // Persist data on commit
+    } sync_mode = kSyncNormal;
+
+    enum LockMode {
+        kLockNormal,    // Allow concurrent access
+        kLockExclusive, // Exclude other connections
+    } lock_mode = kLockNormal;
 };
 
 struct BucketOptions {

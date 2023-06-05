@@ -7,15 +7,15 @@
 // types of API misuse (for example, ModelBucket will write to a bucket in a read-
 // only transaction without complaint).
 
-#ifndef CALICODB_TEST_TOOLS_MODEL_H
-#define CALICODB_TEST_TOOLS_MODEL_H
+#ifndef CALICODB_UTILS_MODEL_H
+#define CALICODB_UTILS_MODEL_H
 
 #include "calicodb/cursor.h"
 #include "calicodb/db.h"
-#include "utils.h"
+#include "common.h"
 #include <map>
 
-namespace calicodb::tools
+namespace calicodb
 {
 
 using KVMap = std::map<std::string, std::string>;
@@ -61,8 +61,8 @@ class ModelTx : public Tx
 
 public:
     explicit ModelTx(KVMap &base)
-        : m_base(&base),
-          m_temp(base)
+        : m_temp(base),
+          m_base(&base)
     {
     }
 
@@ -81,7 +81,7 @@ public:
     [[nodiscard]] auto create_bucket(const BucketOptions &options, const Slice &name, Bucket *tb_out) -> Status override;
     [[nodiscard]] auto open_bucket(const Slice &name, Bucket &tb_out) const -> Status override;
 
-    [[nodiscard]] auto drop_bucket(const Slice &name) -> Status override
+    [[nodiscard]] auto drop_bucket(const Slice &) -> Status override
     {
         return Status::ok();
     }
@@ -135,8 +135,8 @@ class ModelCursor : public Cursor
 
 public:
     explicit ModelCursor(const KVMap &map)
-        : m_map(&map),
-          m_itr(end(map))
+        : m_itr(end(map)),
+          m_map(&map)
     {
     }
 
@@ -197,6 +197,6 @@ public:
     }
 };
 
-} // namespace calicodb::tools
+} // namespace calicodb
 
-#endif // CALICODB_TEST_TOOLS_MODEL_H
+#endif // CALICODB_UTILS_MODEL_H

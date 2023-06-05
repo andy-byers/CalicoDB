@@ -2,15 +2,18 @@
 // This source code is licensed under the MIT License, which can be found in
 // LICENSE.md. See AUTHORS.md for a list of contributor names.
 
-#include "env_helpers.h"
+#include "fake_env.h"
 #include "fuzzer.h"
-#include "harness.h"
 #include "model.h"
-#include "tools.h"
 
 namespace calicodb
 {
-using namespace tools;
+
+static auto common_status(const Status &real_s, const Status &model_s) -> Status
+{
+    CHECK_TRUE(real_s == model_s);
+    return real_s;
+}
 
 class CheckedDB : public DB
 {
@@ -24,6 +27,7 @@ class CheckedDB : public DB
     }
 
 public:
+    auto real() -> DB * { return m_real; }
     [[nodiscard]] static auto open(const Options &options, const std::string &filename, KVMap &store, DB *&db_out) -> Status
     {
         DB *db;
@@ -48,7 +52,9 @@ public:
 
     [[nodiscard]] auto checkpoint(bool reset) -> Status override
     {
-        return m_real->checkpoint(reset);
+        return common_status(
+            m_real->checkpoint(reset),
+            m_model.checkpoint(reset));
     }
 };
 
@@ -68,7 +74,9 @@ public:
 
     [[nodiscard]] auto status() const -> Status override
     {
-        return m_real->status();
+        return common_status(
+            m_real->status(),
+            m_model->status());
     }
 
     [[nodiscard]] auto schema() const -> Cursor & override
@@ -81,52 +89,53 @@ public:
 
     [[nodiscard]] auto drop_bucket(const Slice &name) -> Status override
     {
-        auto s = m_model->drop_bucket(name);
-        const auto t = m_real->drop_bucket(name);
-        if (s.is_ok()) {
-            CHECK_OK(t);
-        } else {
-            CHECK_TRUE(!t.is_ok());
-        }
-        return s;
+        return common_status(
+            m_real->drop_bucket(name),
+            m_model->drop_bucket(name));
     }
 
     [[nodiscard]] auto vacuum() -> Status override
     {
-        return m_real->vacuum();
+        return common_status(
+            m_real->vacuum(),
+            m_model->vacuum());
     }
 
     [[nodiscard]] auto commit() -> Status override
     {
-        (void)m_model->commit();
-        return m_real->commit();
+        return common_status(
+            m_real->commit(),
+            m_model->commit());
     }
 
     [[nodiscard]] auto new_cursor(const Bucket &b) const -> Cursor * override;
 
     [[nodiscard]] auto get(const Bucket &b, const Slice &key, std::string *value) const -> Status override
     {
-        std::string result;
-        auto s = m_model->get(b, key, &result);
+        std::string actual;
+        auto s = common_status(
+            m_real->get(b, key, value),
+            m_model->get(b, key, &actual));
         if (s.is_ok()) {
-            CHECK_OK(m_real->get(b, key, value));
-            CHECK_EQ(*value, result);
+            CHECK_EQ(*value, actual);
         } else {
-            CHECK_TRUE(!m_real->get(b, key, value).is_ok());
+            CHECK_TRUE(actual.empty());
         }
         return s;
     }
 
     [[nodiscard]] auto put(const Bucket &b, const Slice &key, const Slice &value) -> Status override
     {
-        (void)m_model->put(b, key, value);
-        return m_real->put(b, key, value);
+        return common_status(
+            m_real->put(b, key, value),
+            m_model->put(b, key, value));
     }
 
     [[nodiscard]] auto erase(const Bucket &b, const Slice &key) -> Status override
     {
-        (void)m_model->erase(b, key);
-        return m_real->erase(b, key);
+        return common_status(
+            m_real->erase(b, key),
+            m_model->erase(b, key));
     }
 };
 
@@ -152,7 +161,9 @@ public:
 
     [[nodiscard]] auto status() const -> Status override
     {
-        return m_real->status();
+        return common_status(
+            m_real->status(),
+            m_model->status());
     }
 
     [[nodiscard]] auto key() const -> Slice override
@@ -205,19 +216,21 @@ CheckedDB::~CheckedDB()
 
 auto CheckedDB::new_tx(WriteTag, Tx *&tx_out) -> Status
 {
-    Tx *real_tx;
-    auto s = m_real->new_tx(WriteTag{}, real_tx);
+    Tx *real_tx, *model_tx;
+    auto s = common_status(
+        m_real->new_tx(WriteTag(), real_tx),
+        m_model.new_tx(WriteTag(), model_tx));
     if (s.is_ok()) {
-        Tx *model_tx;
-        CHECK_OK(m_model.new_tx(WriteTag{}, model_tx));
         tx_out = new CheckedTx(*real_tx, reinterpret_cast<ModelTx &>(*model_tx));
+    } else {
+        tx_out = nullptr;
     }
     return s;
 }
 
-auto CheckedDB::new_tx(const Tx *&tx_out) const -> Status
+auto CheckedDB::new_tx(const Tx *&) const -> Status
 {
-    tx_out = nullptr;
+    // Only fuzzing on read-write transactions.
     return Status::not_supported();
 }
 
@@ -229,12 +242,16 @@ CheckedTx::~CheckedTx()
 
 auto CheckedTx::create_bucket(const BucketOptions &options, const Slice &name, Bucket *b_out) -> Status
 {
-    return m_real->create_bucket(options, name, b_out);
+    return common_status(
+        m_real->create_bucket(options, name, b_out),
+        m_model->create_bucket(options, name, b_out));
 }
 
 auto CheckedTx::open_bucket(const Slice &name, Bucket &b_out) const -> Status
 {
-    return m_real->open_bucket(name, b_out);
+    return common_status(
+        m_real->open_bucket(name, b_out),
+        m_model->open_bucket(name, b_out));
 }
 
 auto CheckedTx::new_cursor(const Bucket &b) const -> Cursor *
@@ -405,7 +422,7 @@ auto DBFuzzer::fuzz(FuzzerStream &stream) -> bool
 extern "C" int LLVMFuzzerTestOneInput(const U8 *data, std::size_t size)
 {
     Options options;
-    options.env = new tools::FakeEnv;
+    options.env = new FakeEnv;
     options.cache_size = 0; // Use the smallest possible cache.
 
     {

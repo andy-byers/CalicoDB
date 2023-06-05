@@ -6,14 +6,13 @@
 #define CALICODB_PAGER_H
 
 #include "bufmgr.h"
+#include "wal.h"
 #include <unordered_set>
 
 namespace calicodb
 {
 
 class Env;
-class Wal;
-struct WalStatistics;
 
 class Pager final
 {
@@ -39,19 +38,31 @@ public:
         Status *status;
         BusyHandler *busy;
         std::size_t frame_count;
-        bool sync;
-    };
-
-    struct Statistics {
-        std::size_t bytes_read = 0;
-        std::size_t bytes_written = 0;
+        Options::SyncMode sync_mode;
+        Options::LockMode lock_mode;
     };
 
     ~Pager();
 
-    [[nodiscard]] auto statistics() const -> const Statistics &
+    enum StatType {
+        kStatRead,
+        kStatCacheHits,
+        kStatCacheMisses,
+        kStatTypeCount
+    };
+    using Stats = StatCounters<kStatTypeCount>;
+
+    [[nodiscard]] auto stats() const -> const Stats &
     {
-        return m_statistics;
+        m_stats.stats[kStatCacheHits] = m_bufmgr.cache_hits;
+        m_stats.stats[kStatCacheMisses] = m_bufmgr.cache_misses;
+        return m_stats;
+    }
+
+    [[nodiscard]] auto wal_stats() const -> Wal::Stats
+    {
+        static constexpr Wal::Stats kEmpty;
+        return m_wal ? m_wal->stats() : kEmpty;
     }
 
     [[nodiscard]] auto page_count() const -> U32
@@ -60,15 +71,17 @@ public:
         return m_page_count;
     }
 
+    [[nodiscard]] auto mode() const -> Mode
+    {
+        return m_mode;
+    }
+
     [[nodiscard]] static auto open(const Parameters &param, Pager *&out) -> Status;
     [[nodiscard]] auto close() -> Status;
-    [[nodiscard]] auto mode() const -> Mode;
-    [[nodiscard]] auto wal_statistics() const -> WalStatistics;
 
     [[nodiscard]] auto start_reader() -> Status;
     [[nodiscard]] auto start_writer() -> Status;
     [[nodiscard]] auto commit() -> Status;
-    auto rollback() -> void;
     auto finish() -> void;
 
     [[nodiscard]] auto checkpoint(bool reset) -> Status;
@@ -78,10 +91,8 @@ public:
     auto mark_dirty(Page &page) -> void;
     auto set_page_count(U32 page_count) -> void;
     [[nodiscard]] auto acquire_root() -> Page;
-    [[nodiscard]] auto hits() const -> U64;
-    [[nodiscard]] auto misses() const -> U64;
     auto assert_state() const -> bool;
-    auto purge_cached_pages() -> void;
+    auto purge_pages(bool purge_all) -> void;
     auto initialize_root() -> void;
 
     // Action to take when a page is released
@@ -110,14 +121,7 @@ public:
     // This routine is a NOOP if page was already released.
     auto release(Page page, ReleaseAction action = kKeep) -> void;
 
-    auto set_status(const Status &error) const -> Status
-    {
-        if (m_status->is_ok() && (error.is_io_error() || error.is_corruption())) {
-            *m_status = error;
-            m_mode = kError;
-        }
-        return error;
-    }
+    auto set_status(const Status &error) const -> Status;
 
 private:
     explicit Pager(const Parameters &param);
@@ -130,20 +134,19 @@ private:
     [[nodiscard]] auto flush_dirty_pages() -> Status;
     auto purge_page(PageRef &victim) -> void;
 
-    mutable Statistics m_statistics;
+    mutable Stats m_stats;
     mutable Status *m_status;
     mutable Mode m_mode = kOpen;
-    mutable Mode m_save = kOpen;
 
     const char *m_db_name;
     const char *m_wal_name;
-    const bool m_sync;
+    const Options::SyncMode m_sync_mode;
+    const Options::LockMode m_lock_mode;
 
     Dirtylist m_dirtylist;
     Bufmgr m_bufmgr;
 
-    // True if the in-memory root page needs to be refreshed, false otherwise.
-    bool m_refresh_root = false;
+    bool m_needs_refresh = false;
 
     Logger *m_log = nullptr;
     File *m_file;

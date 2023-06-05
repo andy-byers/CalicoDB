@@ -2,11 +2,12 @@
 // This source code is licensed under the MIT License, which can be found in
 // LICENSE.md. See AUTHORS.md for a list of contributor names.
 
+#include "../test.h"
 #include "calicodb/env.h"
+#include "common.h"
 #include "encoding.h"
-#include "tools.h"
+#include "fake_env.h"
 #include "unit_tests.h"
-#include "utils.h"
 #include <gtest/gtest.h>
 #include <thread>
 
@@ -56,9 +57,9 @@ TEST(PathParserTests, JoinsComponents)
 
 static auto make_filename(std::size_t n)
 {
-    return tools::integral_key<10>(n);
+    return numeric_key<10>(n);
 }
-static auto write_out_randomly(tools::RandomGenerator &random, File &writer, const Slice &message) -> void
+static auto write_out_randomly(RandomGenerator &random, File &writer, const Slice &message) -> void
 {
     constexpr std::size_t kChunks = 20;
     ASSERT_GT(message.size(), kChunks) << "File is too small for this test";
@@ -75,7 +76,7 @@ static auto write_out_randomly(tools::RandomGenerator &random, File &writer, con
     }
     ASSERT_TRUE(in.is_empty());
 }
-[[nodiscard]] static auto read_back_randomly(tools::RandomGenerator &random, File &reader, std::size_t size) -> std::string
+[[nodiscard]] static auto read_back_randomly(RandomGenerator &random, File &reader, std::size_t size) -> std::string
 {
     static constexpr std::size_t kChunks = 20;
     EXPECT_GT(size, kChunks) << "File is too small for this test";
@@ -94,7 +95,7 @@ static auto write_out_randomly(tools::RandomGenerator &random, File &writer, con
 }
 struct EnvWithFiles final {
     explicit EnvWithFiles()
-        : testdir(".")
+        : m_dirname(testing::TempDir())
     {
     }
 
@@ -123,7 +124,7 @@ struct EnvWithFiles final {
     [[nodiscard]] auto open_file(std::size_t id, Env::OpenMode mode) const -> File *
     {
         File *file;
-        const auto filename = testdir.as_child(make_filename(id));
+        const auto filename = m_dirname + make_filename(id);
         EXPECT_TRUE(env->new_file(filename, mode, file).is_ok())
             << "failed to " << ((mode & Env::kCreate) ? "create" : "open") << " file \"" << filename << '"';
         return file;
@@ -142,7 +143,7 @@ struct EnvWithFiles final {
     }
 
     mutable std::mutex mutex;
-    tools::TestDir testdir;
+    std::string m_dirname;
     std::vector<File *> files;
     Env *env = nullptr;
     std::size_t last_id = 0;
@@ -205,7 +206,7 @@ static constexpr std::size_t kVersionLengthInU32 = 128;
 static constexpr auto kVersionLength = kVersionLengthInU32 * sizeof(U32);
 
 // REQUIRES: kShared or greater file_lock is held on "file"
-static constexpr U32 kBadVersion = -1;
+static constexpr auto kBadVersion = static_cast<U32>(-1);
 static auto read_file_version(File &file) -> U32
 {
     std::string version_string(kVersionLength, '\0');
@@ -291,7 +292,7 @@ public:
     }
 
 protected:
-    tools::RandomGenerator m_random;
+    RandomGenerator m_random;
     EnvWithFiles m_helper;
     // Pointer to an object owned by m_helper.
     Env *m_env;
@@ -324,9 +325,11 @@ INSTANTIATE_TEST_SUITE_P(
 class LoggerTests : public testing::Test
 {
 protected:
+    static constexpr auto kHdrLen = std::char_traits<char>::length(
+        "0000/00/00-00:00:00.000000 ");
+
     explicit LoggerTests()
-        : m_testdir("."),
-          m_log_filename(m_testdir.as_child("logger"))
+        : m_log_filename(testing::TempDir() + "logger")
     {
     }
 
@@ -337,10 +340,10 @@ protected:
 
     auto SetUp() -> void override
     {
+        std::filesystem::remove_all(m_log_filename);
         ASSERT_OK(Env::default_env()->new_logger(m_log_filename, m_logger));
     }
 
-    tools::TestDir m_testdir;
     const std::string m_log_filename;
     Logger *m_logger = nullptr;
 };
@@ -348,37 +351,36 @@ protected:
 TEST_F(LoggerTests, LogNullptrIsNOOP)
 {
     log(nullptr, "nothing %d", 42);
+    ASSERT_TRUE(read_file_to_string(*Env::default_env(), m_log_filename).empty());
 }
 
 TEST_F(LoggerTests, LogsFormattedText)
 {
-    ASSERT_TRUE(tools::read_file_to_string(*Env::default_env(), m_log_filename).empty());
     log(m_logger, "%u foo", 123);
-    const auto msg1 = tools::read_file_to_string(*Env::default_env(), m_log_filename);
+    const auto msg1 = read_file_to_string(*Env::default_env(), m_log_filename);
     log(m_logger, "bar %d", 42);
-    const auto msg2 = tools::read_file_to_string(*Env::default_env(), m_log_filename);
+    const auto msg2 = read_file_to_string(*Env::default_env(), m_log_filename);
 
     // Make sure both text and header info were written.
-    ASSERT_EQ(msg1.size() - 8, msg1.find("123 foo\n"));
-    ASSERT_EQ(msg2.size() - 7, msg2.find("bar 42\n"));
-    ASSERT_GT(msg1.size(), 8);
-    ASSERT_GT(msg2.size(), 7);
+    ASSERT_EQ(kHdrLen, msg1.find("123 foo\n"));
+    ASSERT_EQ(kHdrLen * 2 + 8, msg2.find("bar 42\n"));
+    ASSERT_EQ(msg1.size(), kHdrLen + 8);
+    ASSERT_EQ(msg2.size(), kHdrLen * 2 + 15);
 }
 
-// TODO: fixme!
-//TEST_F(LoggerTests, HandlesLongMessages)
-//{
-//    std::string msg;
-//    for (std::size_t n = 1; n <= 100'000; n *= 10) {
-//        ASSERT_OK(Env::default_env()->resize_file(m_log_filename, 0));
-//
-//        msg.resize(n, '$');
-//        log(m_logger, "%s", msg.c_str());
-//
-//        const auto res = tools::read_file_to_string(*Env::default_env(), m_log_filename);
-//        ASSERT_EQ(msg + '\n', res.substr(27)); // Account for the datetime header and trailing newline.
-//    }
-//}
+TEST_F(LoggerTests, HandlesLongMessages)
+{
+    std::string msg;
+    for (std::size_t n = 1000; n < 10'000; n *= 10) {
+        ASSERT_OK(Env::default_env()->resize_file(m_log_filename, 0));
+
+        msg.resize(n, '$');
+        log(m_logger, "%s", msg.c_str());
+
+        const auto res = read_file_to_string(*Env::default_env(), m_log_filename);
+        ASSERT_EQ(msg + '\n', res.substr(kHdrLen)); // Account for the datetime header and trailing newline.
+    }
+}
 
 class EnvLockStateTests : public testing::TestWithParam<std::size_t>
 {
@@ -407,11 +409,11 @@ public:
         return file;
     }
 
-    auto test_sequence(bool reserve) -> void
+    auto test_sequence(bool) -> void
     {
         auto *f = new_file(kFilename);
-        ASSERT_OK(f->file_lock(kLockShared));
-        ASSERT_OK(f->file_lock(kLockExclusive));
+        ASSERT_OK(f->file_lock(kFileShared));
+        ASSERT_OK(f->file_lock(kFileExclusive));
         f->file_unlock();
     }
 
@@ -420,9 +422,9 @@ public:
         auto *a = new_file(kFilename);
         auto *b = new_file(kFilename);
         auto *c = new_file(kFilename);
-        ASSERT_OK(a->file_lock(kLockShared));
-        ASSERT_OK(b->file_lock(kLockShared));
-        ASSERT_OK(c->file_lock(kLockShared));
+        ASSERT_OK(a->file_lock(kFileShared));
+        ASSERT_OK(b->file_lock(kFileShared));
+        ASSERT_OK(c->file_lock(kFileShared));
         c->file_unlock();
         b->file_unlock();
         a->file_unlock();
@@ -433,17 +435,17 @@ public:
         auto *a = new_file(kFilename);
         auto *b = new_file(kFilename);
 
-        ASSERT_OK(a->file_lock(kLockShared));
-        ASSERT_OK(a->file_lock(kLockExclusive));
+        ASSERT_OK(a->file_lock(kFileShared));
+        ASSERT_OK(a->file_lock(kFileExclusive));
 
         // Try to take a shared file_lock on "b", but fail due to "a"'s exclusive
         // file_lock.
-        ASSERT_TRUE(b->file_lock(kLockShared).is_busy());
+        ASSERT_TRUE(b->file_lock(kFileShared).is_busy());
 
         // Unlock "a" and let "b" get the exclusive file_lock.
         a->file_unlock();
-        ASSERT_OK(b->file_lock(kLockShared));
-        ASSERT_OK(b->file_lock(kLockExclusive));
+        ASSERT_OK(b->file_lock(kFileShared));
+        ASSERT_OK(b->file_lock(kFileExclusive));
         b->file_unlock();
     }
 
@@ -481,14 +483,14 @@ TEST_P(EnvLockStateTests, NOOPs)
 {
     auto *f = new_file(kFilename);
 
-    ASSERT_OK(f->file_lock(kLockShared));
-    ASSERT_OK(f->file_lock(kLockShared));
+    ASSERT_OK(f->file_lock(kFileShared));
+    ASSERT_OK(f->file_lock(kFileShared));
 
-    ASSERT_OK(f->file_lock(kLockShared));
+    ASSERT_OK(f->file_lock(kFileShared));
 
-    ASSERT_OK(f->file_lock(kLockExclusive));
-    ASSERT_OK(f->file_lock(kLockExclusive));
-    ASSERT_OK(f->file_lock(kLockShared));
+    ASSERT_OK(f->file_lock(kFileExclusive));
+    ASSERT_OK(f->file_lock(kFileExclusive));
+    ASSERT_OK(f->file_lock(kFileShared));
 
     f->file_unlock();
     f->file_unlock();
@@ -499,7 +501,7 @@ TEST_P(EnvLockStateTests, InvalidRequestDeathTest)
 {
     auto *f = new_file(kFilename);
     // kUnlocked -> kShared is the only allowed transition out of kUnlocked.
-    ASSERT_DEATH((void)f->file_lock(kLockExclusive), kExpectationMatcher);
+    ASSERT_DEATH((void)f->file_lock(kFileExclusive), kExpectationMatcher);
 }
 #endif // NDEBUG
 
@@ -613,10 +615,10 @@ static auto busy_wait_file_lock(File &file, bool is_writer) -> void
 {
     Status s;
     do {
-        s = file.file_lock(kLockShared);
+        s = file.file_lock(kFileShared);
         if (s.is_ok()) {
             if (is_writer) {
-                s = file.file_lock(kLockExclusive);
+                s = file.file_lock(kFileExclusive);
                 if (s.is_ok()) {
                     return;
                 }
@@ -644,7 +646,7 @@ static auto busy_wait_shm_lock(File &file, std::size_t r, std::size_t n, ShmLock
         std::this_thread::yield();
     }
 }
-static auto file_reader_writer_test_routine(Env &env, File &file, bool is_writer) -> void
+static auto file_reader_writer_test_routine(Env &, File &file, bool is_writer) -> void
 {
     busy_wait_file_lock(file, is_writer);
 
@@ -712,15 +714,17 @@ public:
     const std::size_t kNumEnvs = GetParam().num_envs;
     const std::size_t kNumThreads = GetParam().num_threads;
     static constexpr std::size_t kNumRounds = 500;
+    std::string m_dirname;
 
     ~EnvConcurrencyTests() override = default;
 
     auto SetUp() -> void override
     {
+        m_dirname = testing::TempDir();
         // Create the file and zero out the version.
         auto *tempenv = Env::default_env();
         File *tempfile;
-        ASSERT_OK(tempenv->new_file("./testdir/0000000000", Env::kCreate, tempfile));
+        ASSERT_OK(tempenv->new_file(m_dirname + "/0000000000", Env::kCreate, tempfile));
         write_file_version(*tempfile, 0);
         delete tempfile;
     }
@@ -799,7 +803,7 @@ public:
                 threads.emplace_back([this, unlink] {
                     for (std::size_t r = 0; r < kNumRounds; ++r) {
                         shm_lifetime_test_routine(
-                            *m_helper.env, m_helper.testdir.as_child(make_filename(0)), unlink);
+                            *m_helper.env, m_dirname + make_filename(0), unlink);
                     }
                 });
             }
@@ -824,7 +828,7 @@ public:
 
         auto *env = Env::default_env();
         File *file; // Keep this shm open to read from at the end...
-        ASSERT_OK(env->new_file("./testdir/0000000000", Env::kCreate, file));
+        ASSERT_OK(env->new_file(m_dirname + "0000000000", Env::kCreate, file));
         volatile void *ptr;
         ASSERT_OK(file->shm_map(0, true, ptr));
         run_test([&](auto) {
@@ -971,7 +975,7 @@ INSTANTIATE_TEST_SUITE_P(
 
 TEST(EnvWrappers, WrapperEnvWorksAsExpected)
 {
-    tools::FakeEnv env;
+    FakeEnv env;
     EnvWrapper w_env(env);
     ASSERT_EQ(&env, w_env.target());
     ASSERT_EQ(&env, const_cast<const EnvWrapper &>(w_env).target());

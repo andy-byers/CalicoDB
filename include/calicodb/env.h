@@ -50,9 +50,9 @@ public:
 
 // Available modes for the file locking API
 // NOTE: File locking modes and semantics are from SQLite.
-enum FileLockMode : int {
-    kLockShared = 1,    // Any number of threads can hold a kShared lock
-    kLockExclusive = 2, // Excludes all other locks
+enum FileLockMode {
+    kFileShared = 1, // Any number of connections can hold a kShared lock
+    kFileExclusive,  // Excludes all other locks
 };
 
 // Available flags for the shared memory locking API

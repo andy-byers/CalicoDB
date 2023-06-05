@@ -11,8 +11,8 @@
     + [Buckets](#buckets)
     + [Cursors](#cursors)
     + [Database properties](#database-properties)
-    + [Closing a database](#closing-a-database)
     + [Checkpoints](#checkpoints)
+    + [Closing a database](#closing-a-database)
     + [Destroying a database](#destroying-a-database)
 + [Acknowledgements](#acknowledgements)
 
@@ -38,6 +38,7 @@ cmake -DCMAKE_BUILD_TYPE=Release -DCALICODB_Test=Off .. && cmake --build .
 ## API
 
 ### Slices
+
 ```C++
 std::string str("abc");
 
@@ -64,6 +65,7 @@ assert(s2.starts_with("ab"));
 ```
 
 ### Statuses
+
 ```C++
 // All CalicoDB routines that have the possibility of failure will return (or otherwise expose) a status object.
 // Status objects have a code, a subcode, and possibly a message. The default constructor creates an OK status,
@@ -96,6 +98,7 @@ if (s.is_ok()) {
 ```
 
 ### Opening a database
+
 ```C++
 // Set some initialization options. See include/calicodb/options.h.
 const calicodb::Options options = {
@@ -106,7 +109,8 @@ const calicodb::Options options = {
     nullptr, // busy
     true, // create_if_missing
     false, // error_if_exists
-    false, // sync
+    calicodb::Options::kSyncNormal, // sync_mode
+    calicodb::Options::kLockNormal, // lock_mode
 };
 
 // Create or open a database at "/tmp/cats".
@@ -121,6 +125,7 @@ if (!s.is_ok()) {
 
 ### Readonly transactions
 Readonly transactions are typically run through the `DB::view()` API.
+
 ```C++
 s = db->view([](const calicodb::Tx &tx) {
     // Open buckets (see #buckets) and read some data. The `tx` object is managed by the 
@@ -132,7 +137,7 @@ s = db->view([](const calicodb::Tx &tx) {
 ### Read-write transactions
 Read-write transactions can be run using `DB::update()`.
 `DB::update()` accepts a callable that runs a read-write transaction.
-If an error is encountered during a read-write transaction, the transaction status (queried with `tx::status()`) may be set.
+If an error is encountered during a read-write transaction, the transaction status (queried with `Tx::status()`) may be set.
 If this happens, the transaction object, and any buckets created from it, will return immediately with this same error whenever a read/write method is called.
 The only possible course-of-action in this case is to `delete` the transaction handle and possibly try again.
 
@@ -150,7 +155,7 @@ s = db->update([](calicodb::Tx &tx) {
 
 ### Manual transactions
 Transactions can also be run manually.
-The caller is responsible for `delete`ing the `tx` handle when it is no longer needed.
+The caller is responsible for `delete`ing the `Tx` handle when it is no longer needed.
 
 ```C++
 const calicodb::Tx *reader;
@@ -188,7 +193,7 @@ if (!s.is_ok()) {
 }
 
 // Rename to tx for other examples to use (these examples are compiled).
-auto tx = writer;
+auto *tx = writer;
 ```
 
 ### Buckets
@@ -203,13 +208,14 @@ calicodb::Bucket b;
 // Set some initialization options. Enforces that the bucket "cats" must
 // not exist. Note that readonly transactions cannot create new buckets by
 // virtue of the fact that they must be used through pointers to const, 
-// and Tx::create_bucket() is not a const method.
-calicodb::BucketOptions bopt;
-bopt.error_if_exists = true;
+// and Tx::create_bucket() is not a const method. Tx::open_bucket() can be
+// used by a readonly transaction to open an existing bucket.
+calicodb::BucketOptions b_opt;
+b_opt.error_if_exists = true;
 
 // Create the bucket. Note that this bucket will not persist in the database 
-// unless tx::commit() is called prior to the transaction ending.
-s = tx->create_bucket(bopt, "cats", &b);
+// unless Tx::commit() is called prior to the transaction ending.
+s = tx->create_bucket(b_opt, "cats", &b);
 if (s.is_ok()) {
     // b holds the handle for the open bucket "cats". The bucket will remain 
     // open until either tx is delete'd, or "cats" is dropped with 
@@ -290,6 +296,29 @@ if (db->get_property("calicodb.stats", nullptr)) {
 }
 ```
 
+### Checkpoints
+```C++
+// This transaction was started earlier, in #manual-transactions. It must be
+// finished before the database can be checkpointed. Note that the bucket 
+// handle from earlier must not be used after this next line.
+delete tx;
+
+// Now we can run a checkpoint. See DB::update()/DB::view() for an API that
+// takes away some of the pain associated with transaction lifetimes.
+
+// If the `reset` parameter to DB::checkpoint() is true, the DB will set things
+// up such that the next writer writes to the start of the WAL file again. This
+// involves blocking until other connections are finished with the WAL.
+s = db->checkpoint(true);
+if (s.is_ok()) {
+    
+} else if (s.is_busy()) {
+    
+} else {
+    
+}
+```
+
 ### Closing a database
 To close the database, just `delete` the handle.
 The last connection to a particular database to close will unlink the WAL.
@@ -297,19 +326,7 @@ If a WAL is left behind after closing, then something has gone wrong.
 CalicoDB will attempt recovery on the next startup.
 
 ```C++
-// This transaction was started earlier, in #manual-transactions. It must be
-// finished before the database is closed. Note that the bucket handle from
-// earlier must not be used after this next line.
-delete tx;
-
-// Now we can close the database. See DB::update()/DB::view() for an API that
-// takes away some of the pain associated with transaction lifetimes.
 delete db;
-```
-
-### Checkpoints
-```C++
-
 ```
 
 ### Destroying a database
