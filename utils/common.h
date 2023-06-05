@@ -5,7 +5,9 @@
 #ifndef CALICODB_UTILS_COMMON_H
 #define CALICODB_UTILS_COMMON_H
 
+#include <algorithm>
 #include <climits>
+#include <functional>
 #include <random>
 #include "calicodb/env.h"
 
