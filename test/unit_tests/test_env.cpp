@@ -206,7 +206,7 @@ static constexpr std::size_t kVersionLengthInU32 = 128;
 static constexpr auto kVersionLength = kVersionLengthInU32 * sizeof(U32);
 
 // REQUIRES: kShared or greater file_lock is held on "file"
-static constexpr U32 kBadVersion = -1;
+static constexpr auto kBadVersion = U32(-1);
 static auto read_file_version(File &file) -> U32
 {
     std::string version_string(kVersionLength, '\0');

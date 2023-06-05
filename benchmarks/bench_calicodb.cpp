@@ -279,7 +279,7 @@ private:
         std::snprintf(
             buffer,
             sizeof(buffer),
-            "%016llu",
+            "%016lu",
             key);
         return {buffer};
     }
