@@ -9,8 +9,8 @@
 namespace calicodb
 {
 
-TxImpl::TxImpl(Pager &pager, Status &status)
-    : m_schema_obj(pager, status),
+TxImpl::TxImpl(Pager &pager, Status &status, char *scratch)
+    : m_schema_obj(pager, status, scratch),
       m_schema(m_schema_obj.new_cursor()),
       m_pager(&pager),
       m_status(&status)

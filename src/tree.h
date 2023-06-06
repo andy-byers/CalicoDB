@@ -246,7 +246,7 @@ public:
 class Tree final
 {
 public:
-    explicit Tree(Pager &pager, const Id *root_id);
+    explicit Tree(Pager &pager, char *scratch, const Id *root_id);
     [[nodiscard]] static auto create(Pager &pager, bool is_root, Id *out) -> Status;
     [[nodiscard]] static auto destroy(Tree &tree) -> Status;
     [[nodiscard]] auto put(const Slice &key, const Slice &value) -> Status;
@@ -326,14 +326,12 @@ private:
     [[nodiscard]] auto fix_links(Node &node, Id parent_id = Id::null()) -> Status;
     [[nodiscard]] auto cell_scratch() -> char *;
 
-    auto report_stats(StatType type, std::size_t increment) const -> void;
-
     mutable Stats m_stats;
-    mutable std::string m_node_scratch;
-    mutable std::string m_cell_scratch;
-    Pager *m_pager = nullptr;
     mutable InternalCursor m_cursor;
-    const Id *m_root_id = nullptr;
+    char *m_node_scratch;
+    char *m_cell_scratch;
+    Pager *m_pager;
+    const Id *m_root_id;
 };
 
 } // namespace calicodb

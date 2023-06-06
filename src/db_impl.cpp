@@ -77,7 +77,8 @@ auto DBImpl::open(const Options &sanitized) -> Status
 }
 
 DBImpl::DBImpl(const Options &options, const Options &sanitized, std::string filename)
-    : m_env(sanitized.env),
+    : m_scratch(new char[kPageSize * 2]),
+      m_env(sanitized.env),
       m_log(sanitized.info_log),
       m_busy(sanitized.busy),
       m_db_filename(std::move(filename)),
@@ -95,6 +96,7 @@ DBImpl::~DBImpl()
         }
     }
     delete m_pager;
+    delete[] m_scratch;
 
     if (m_owns_log) {
         delete m_log;
@@ -221,7 +223,7 @@ auto DBImpl::prepare_tx(bool write, TxType *&tx_out) const -> Status
         s = m_pager->start_writer();
     }
     if (s.is_ok()) {
-        m_tx = new TxImpl(*m_pager, m_status);
+        m_tx = new TxImpl(*m_pager, m_status, m_scratch);
         m_tx->m_backref = &m_tx;
         tx_out = m_tx;
     } else {

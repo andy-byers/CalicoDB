@@ -16,7 +16,7 @@ struct BucketOptions;
 class TxImpl : public Tx
 {
 public:
-    explicit TxImpl(Pager &pager, Status &status);
+    explicit TxImpl(Pager &pager, Status &status, char *scratch);
     ~TxImpl() override;
 
     [[nodiscard]] auto status() const -> Status override

@@ -22,8 +22,7 @@ class NodeTests
 {
 public:
     explicit NodeTests()
-        : node_scratch(kPageSize, '\0'),
-          cell_scratch(kPageSize, '\0')
+        : tree_scratch(kPageSize * 2, '\0')
     {
     }
 
@@ -37,7 +36,7 @@ public:
         ASSERT_OK(m_pager->start_reader());
         ASSERT_OK(m_pager->start_writer());
         ASSERT_OK(Tree::create(*m_pager, true, nullptr));
-        tree = std::make_unique<Tree>(*m_pager, nullptr);
+        tree = std::make_unique<Tree>(*m_pager, tree_scratch.data(), nullptr);
     }
 
     [[nodiscard]] auto get_node(bool is_external) -> Node
@@ -71,8 +70,7 @@ public:
     }
 
     std::unique_ptr<Tree> tree;
-    std::string node_scratch;
-    std::string cell_scratch;
+    std::string tree_scratch;
     std::string collect_scratch;
     RandomGenerator random;
 };
@@ -217,7 +215,7 @@ class TreeTests
 public:
     TreeTests()
         : param(GetParam()),
-          collect_scratch(kPageSize, '\x00'),
+          collect_scratch(kPageSize * 2, '\x00'),
           root_id(Id::root())
     {
     }
@@ -227,7 +225,7 @@ public:
         ASSERT_OK(m_pager->start_reader());
         ASSERT_OK(m_pager->start_writer());
         ASSERT_OK(Tree::create(*m_pager, true, nullptr));
-        tree = std::make_unique<Tree>(*m_pager, nullptr);
+        tree = std::make_unique<Tree>(*m_pager, collect_scratch.data(), nullptr);
     }
 
     auto TearDown() -> void override
@@ -937,7 +935,8 @@ class MultiTreeTests : public TreeTests
 {
 public:
     MultiTreeTests()
-        : payload_values(kInitialRecordCount)
+        : payload_values(kInitialRecordCount),
+          m_scratch(kPageSize * 2, '\0')
     {
         for (auto &value : payload_values) {
             value = random.Generate(kPageSize * 2);
@@ -963,7 +962,7 @@ public:
         EXPECT_OK(Tree::create(*m_pager, last_tree_id.is_null(), &root));
         ++last_tree_id.value;
         root_ids.emplace_back(root);
-        multi_tree.emplace_back(std::make_unique<Tree>(*m_pager, &root_ids.back()));
+        multi_tree.emplace_back(std::make_unique<Tree>(*m_pager, m_scratch.data(), &root_ids.back()));
         return multi_tree.size() - 1;
     }
 
@@ -997,6 +996,7 @@ public:
     std::vector<std::unique_ptr<Tree>> multi_tree;
     std::vector<std::string> payload_values;
     std::list<Id> root_ids;
+    std::string m_scratch;
 };
 
 TEST_P(MultiTreeTests, CreateAdditionalTrees)

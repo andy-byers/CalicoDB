@@ -46,6 +46,7 @@ private:
 
     mutable Status m_status;
     mutable TxImpl *m_tx = nullptr;
+    char *m_scratch = nullptr;
 
     Pager *m_pager = nullptr;
 

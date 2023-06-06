@@ -78,10 +78,11 @@ public:
 class Schema final
 {
 public:
-    explicit Schema(Pager &pager, Status &status)
+    explicit Schema(Pager &pager, Status &status, char *scratch)
         : m_status(&status),
           m_pager(&pager),
-          m_map(pager, nullptr)
+          m_scratch(scratch),
+          m_map(pager, scratch, nullptr)
     {
     }
 
@@ -132,6 +133,7 @@ private:
     HashMap<Id> m_reroot;
     Status *m_status;
     Pager *m_pager;
+    char *m_scratch;
     Tree m_map;
 };
 

@@ -714,7 +714,7 @@ auto Tree::allocate(bool is_external, Node &out) -> Status
     if (s.is_ok()) {
         CALICODB_EXPECT_FALSE(PointerMap::is_map(out.page.id()));
         out.header.is_external = is_external;
-        out.scratch = m_node_scratch.data();
+        out.scratch = m_node_scratch;
         setup_node(out);
     }
     return s;
@@ -725,7 +725,7 @@ auto Tree::acquire(Id page_id, bool write, Node &out) const -> Status
     CALICODB_EXPECT_FALSE(PointerMap::is_map(page_id));
     auto s = m_pager->acquire(page_id, out.page);
     if (s.is_ok()) {
-        out.scratch = m_node_scratch.data();
+        out.scratch = m_node_scratch;
         out.header.read(out.page.constant_ptr() + node_header_offset(out));
         setup_node(out);
         if (write) {
@@ -1235,11 +1235,11 @@ auto Tree::rotate_right(Node &parent, Node &left, Node &right, std::size_t index
     return Status::ok();
 }
 
-Tree::Tree(Pager &pager, const Id *root_id)
-    : m_node_scratch(kPageSize, '\0'),
-      m_cell_scratch(kPageSize, '\0'),
+Tree::Tree(Pager &pager, char *scratch, const Id *root_id)
+    : m_cursor(*this),
+      m_node_scratch(scratch),
+      m_cell_scratch(scratch + kPageSize),
       m_pager(&pager),
-      m_cursor(*this),
       m_root_id(root_id)
 {
 }
@@ -1247,7 +1247,7 @@ Tree::Tree(Pager &pager, const Id *root_id)
 auto Tree::cell_scratch() -> char *
 {
     // Leave space for a child ID (maximum difference between the size of a varint and an Id).
-    return m_cell_scratch.data() + Id::kSize - 1;
+    return m_cell_scratch + Id::kSize - 1;
 }
 
 auto Tree::get(const Slice &key, std::string *value) const -> Status
