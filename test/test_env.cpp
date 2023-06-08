@@ -790,25 +790,25 @@ public:
     auto run_test(const Test &test)
     {
         for (std::size_t n = 0; n < kNumEnvs; ++n) {
-            //            const auto pid = fork();
-            //            ASSERT_NE(-1, pid) << strerror(errno);
-            //            if (pid) {
-            //                continue;
-            //            }
+            const auto pid = fork();
+            ASSERT_NE(-1, pid) << strerror(errno);
+            if (pid) {
+                continue;
+            }
 
             test(n);
-            //            std::exit(testing::Test::HasFailure());
+            std::exit(testing::Test::HasFailure());
         }
-        //        for (std::size_t n = 0; n < kNumEnvs; ++n) {
-        //            int s;
-        //            const auto pid = wait(&s);
-        //            ASSERT_NE(pid, -1)
-        //                << "wait failed: " << strerror(errno);
-        //            ASSERT_TRUE(WIFEXITED(s) && WEXITSTATUS(s) == 0)
-        //                << "exited " << (WIFEXITED(s) ? "" : "ab")
-        //                << "normally with exit status "
-        //                << WEXITSTATUS(s);
-        //        }
+        for (std::size_t n = 0; n < kNumEnvs; ++n) {
+            int s;
+            const auto pid = wait(&s);
+            ASSERT_NE(pid, -1)
+                << "wait failed: " << strerror(errno);
+            ASSERT_TRUE(WIFEXITED(s) && WEXITSTATUS(s) == 0)
+                << "exited " << (WIFEXITED(s) ? "" : "ab")
+                << "normally with exit status "
+                << WEXITSTATUS(s);
+        }
     }
 
     template <class IsWriter>

@@ -129,32 +129,32 @@ private:
     std::size_t m_size = 0;
 };
 
-inline auto operator<(const Slice &lhs, const Slice &rhs) -> bool
+inline constexpr auto operator<(const Slice &lhs, const Slice &rhs) -> bool
 {
     return lhs.compare(rhs) < 0;
 }
 
-inline auto operator<=(const Slice &lhs, const Slice &rhs) -> bool
+inline constexpr auto operator<=(const Slice &lhs, const Slice &rhs) -> bool
 {
     return lhs.compare(rhs) <= 0;
 }
 
-inline auto operator>(const Slice &lhs, const Slice &rhs) -> bool
+inline constexpr auto operator>(const Slice &lhs, const Slice &rhs) -> bool
 {
     return lhs.compare(rhs) > 0;
 }
 
-inline auto operator>=(const Slice &lhs, const Slice &rhs) -> bool
+inline constexpr auto operator>=(const Slice &lhs, const Slice &rhs) -> bool
 {
     return lhs.compare(rhs) >= 0;
 }
 
-inline auto operator==(const Slice &lhs, const Slice &rhs) -> bool
+inline constexpr auto operator==(const Slice &lhs, const Slice &rhs) -> bool
 {
     return lhs.compare(rhs) == 0;
 }
 
-inline auto operator!=(const Slice &lhs, const Slice &rhs) -> bool
+inline constexpr auto operator!=(const Slice &lhs, const Slice &rhs) -> bool
 {
     return lhs.compare(rhs) != 0;
 }
