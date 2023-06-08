@@ -558,13 +558,13 @@ TEST(Slice, DeathTest)
 
     ASSERT_DEATH(slice.advance(oob), "Assertion failed");
     ASSERT_DEATH(slice.truncate(oob), "Assertion failed");
-    ASSERT_DEATH(auto r = slice.range(oob, 1), "Assertion failed");
-    ASSERT_DEATH(auto r = slice.range(0, oob), "Assertion failed");
-    ASSERT_DEATH(auto r = slice.range(oob / 2, oob - 1), "Assertion failed");
-    ASSERT_DEATH(auto r = slice.range(oob), "Assertion failed");
-    ASSERT_DEATH(auto r = slice[oob], "Assertion failed");
-    ASSERT_DEATH(Slice bad_ptr(nullptr), "Assertion failed");
-    ASSERT_DEATH(Slice bad_ptr(nullptr, 123), "Assertion failed");
+    ASSERT_DEATH((void)slice.range(oob, 1), "Assertion failed");
+    ASSERT_DEATH((void)slice.range(0, oob), "Assertion failed");
+    ASSERT_DEATH((void)slice.range(oob / 2, oob - 1), "Assertion failed");
+    ASSERT_DEATH((void)slice.range(oob), "Assertion failed");
+    ASSERT_DEATH((void)slice[oob], "Assertion failed");
+    ASSERT_DEATH(Slice(nullptr), "Assertion failed");
+    ASSERT_DEATH(Slice(nullptr, 123), "Assertion failed");
 }
 #endif // not NDEBUG
 
