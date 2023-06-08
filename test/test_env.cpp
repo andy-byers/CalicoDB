@@ -2,15 +2,16 @@
 // This source code is licensed under the MIT License, which can be found in
 // LICENSE.md. See AUTHORS.md for a list of contributor names.
 
+#include <filesystem>
+#include <mutex>
+#include <thread>
+#include <gtest/gtest.h>
 #include "calicodb/env.h"
 #include "common.h"
 #include "encoding.h"
 #include "env_posix.h"
 #include "fake_env.h"
 #include "test.h"
-#include <filesystem>
-#include <gtest/gtest.h>
-#include <thread>
 
 namespace calicodb::test
 {
@@ -451,7 +452,7 @@ public:
     }
 
     template <class Test>
-    auto run_test(const Test &test)
+    auto run_test(const Test &&test)
     {
         for (std::size_t i = 0; i < kReplicates; ++i) {
             test();
