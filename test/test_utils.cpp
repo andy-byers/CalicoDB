@@ -446,11 +446,15 @@ TEST(Slice, Clear)
     ASSERT_EQ(0, slice.size());
 }
 
-static constexpr auto constexpr_slice_test(Slice s, Slice answer)
+static constexpr auto constexpr_slice_test(Slice s, Slice answer) -> int
 {
-    CALICODB_EXPECT_EQ(s, answer.range(0, s.size()));
+    if (s != answer.range(0, s.size())) {
+        return -1;
+    }
     for (std::size_t i = 0; i < s.size(); ++i) {
-        CALICODB_EXPECT_EQ(s[i], answer[i]);
+        if (s[i] != answer[i]) {
+            return -1;
+        }
     }
 
     (void)s.starts_with(answer);
@@ -459,6 +463,7 @@ static constexpr auto constexpr_slice_test(Slice s, Slice answer)
     (void)s.is_empty();
     s.advance(0);
     s.truncate(s.size());
+    return 0;
 }
 
 TEST(Slice, ConstantExpressions)
@@ -466,8 +471,8 @@ TEST(Slice, ConstantExpressions)
     static constexpr std::string_view sv("42");
     static constexpr Slice s1("42");
     static constexpr Slice s2(sv);
-    constexpr_slice_test(s1, sv);
-    constexpr_slice_test(s1, s2);
+    ASSERT_EQ(0, constexpr_slice_test(s1, sv));
+    ASSERT_EQ(0, constexpr_slice_test(s1, s2));
 }
 
 TEST(Slice, NonPrintableSlice)
