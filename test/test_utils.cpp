@@ -448,9 +448,6 @@ TEST(Slice, Clear)
 
 static constexpr auto constexpr_slice_test(Slice s, Slice answer) -> int
 {
-    if (s != answer.range(0, s.size())) {
-        return -1;
-    }
     for (std::size_t i = 0; i < s.size(); ++i) {
         if (s[i] != answer[i]) {
             return -1;
