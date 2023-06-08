@@ -24,15 +24,14 @@ option(CALICODB_BuildFuzzers "Build the fuzz targets" Off)
 option(CALICODB_BuildTests "Build the tests" ${MAIN_PROJECT})
 option(CALICODB_Install "Install the CMake targets during the install step" ${MAIN_PROJECT})
 
-# CalicoDB is built without exceptions or RTTI. The tests are allowed to use RTTI though.
+# CalicoDB is built without exceptions or RTTI.
 set(CALICODB_OPTIONS -fno-exceptions)
 if(NOT CALICODB_BuildTests)
     list(APPEND CALICODB_OPTIONS -fno-rtti)
 endif()
 
 # All applicable warnings from @lefticus/cpp-best-practices.
-set(COMPILER_VENDOR ${CMAKE_CXX_COMPILER_ID})
-if(COMPILER_VENDOR STREQUAL MSVC)
+if(${CMAKE_CXX_COMPILER_ID} STREQUAL MSVC)
     message(FATAL_ERROR 'Visual Studio is not yet supported')
 else()
     list(APPEND CALICODB_OPTIONS -Werror)
@@ -42,13 +41,14 @@ else()
     list(APPEND CALICODB_OPTIONS -Wpedantic)
     list(APPEND CALICODB_OPTIONS -Wold-style-cast)
     list(APPEND CALICODB_OPTIONS -Wcast-align)
-    list(APPEND CALICODB_OPTIONS -Wunused)
     list(APPEND CALICODB_OPTIONS -Woverloaded-virtual)
     list(APPEND CALICODB_OPTIONS -Wdouble-promotion)
     list(APPEND CALICODB_OPTIONS -Wimplicit-fallthrough)
+    list(APPEND CALICODB_OPTIONS -Wunused)
+
     list(APPEND CALICODB_OPTIONS -Wno-unused-variable)
 
-    if(COMPILER_VENDOR STREQUAL GNU)
+    if(${CMAKE_CXX_COMPILER_ID} STREQUAL GNU)
         list(APPEND CALICODB_OPTIONS -Wconversion)
         list(APPEND CALICODB_OPTIONS -Wsign-conversion)
         list(APPEND CALICODB_OPTIONS -Wduplicated-cond)

@@ -35,15 +35,15 @@ public:
         kReadOnly = 2,
         kReadWrite = 4,
     };
-    [[nodiscard]] virtual auto new_file(const std::string &filename, OpenMode mode, File *&out) -> Status = 0;
-    [[nodiscard]] virtual auto new_logger(const std::string &filename, Logger *&out) -> Status = 0;
-    [[nodiscard]] virtual auto resize_file(const std::string &filename, std::size_t size) -> Status = 0;
-    [[nodiscard]] virtual auto file_size(const std::string &filename, std::size_t &out) const -> Status = 0;
-    [[nodiscard]] virtual auto remove_file(const std::string &filename) -> Status = 0;
+    virtual auto new_file(const std::string &filename, OpenMode mode, File *&out) -> Status = 0;
+    virtual auto new_logger(const std::string &filename, Logger *&out) -> Status = 0;
+    virtual auto resize_file(const std::string &filename, std::size_t size) -> Status = 0;
+    virtual auto file_size(const std::string &filename, std::size_t &out) const -> Status = 0;
+    virtual auto remove_file(const std::string &filename) -> Status = 0;
     [[nodiscard]] virtual auto file_exists(const std::string &filename) const -> bool = 0;
 
     virtual auto srand(unsigned seed) -> void = 0;
-    [[nodiscard]] virtual auto rand() -> unsigned = 0;
+    virtual auto rand() -> unsigned = 0;
 
     virtual auto sleep(unsigned micros) -> void = 0;
 };
@@ -78,21 +78,21 @@ public:
     // Reads into `scratch`, which must point to at least `size` bytes of available
     // memory. On success, sets "*out" to point to the data that was read, which may
     // be less than what was requested, but only if `out` is not nullptr.
-    [[nodiscard]] virtual auto read(std::size_t offset, std::size_t size, char *scratch, Slice *out) -> Status = 0;
+    virtual auto read(std::size_t offset, std::size_t size, char *scratch, Slice *out) -> Status = 0;
 
     // Read exactly `size` bytes from the file at the given offset.
     //
     // Return a "not found" status if there is not enough data remaining in the file.
-    [[nodiscard]] virtual auto read_exact(std::size_t offset, std::size_t size, char *scratch) -> Status;
+    virtual auto read_exact(std::size_t offset, std::size_t size, char *scratch) -> Status;
 
     // Write `in` to the file at the given offset.
-    [[nodiscard]] virtual auto write(std::size_t offset, const Slice &in) -> Status = 0;
+    virtual auto write(std::size_t offset, const Slice &in) -> Status = 0;
 
     // Synchronize with the underlying filesystem.
-    [[nodiscard]] virtual auto sync() -> Status = 0;
+    virtual auto sync() -> Status = 0;
 
     // Take or upgrade a lock on the file
-    [[nodiscard]] virtual auto file_lock(FileLockMode mode) -> Status = 0;
+    virtual auto file_lock(FileLockMode mode) -> Status = 0;
 
     // Release a lock on the file
     virtual auto file_unlock() -> void = 0;
@@ -102,8 +102,8 @@ public:
     static constexpr std::size_t kShmRegionSize = 1'024 * 32;
     static constexpr std::size_t kShmLockCount = 8;
 
-    [[nodiscard]] virtual auto shm_map(std::size_t r, bool extend, volatile void *&out) -> Status = 0;
-    [[nodiscard]] virtual auto shm_lock(std::size_t r, std::size_t n, ShmLockFlag flags) -> Status = 0;
+    virtual auto shm_map(std::size_t r, bool extend, volatile void *&out) -> Status = 0;
+    virtual auto shm_lock(std::size_t r, std::size_t n, ShmLockFlag flags) -> Status = 0;
     virtual auto shm_unmap(bool unlink) -> void = 0;
     virtual auto shm_barrier() -> void = 0;
 };
@@ -131,15 +131,15 @@ public:
 
     ~EnvWrapper() override;
 
-    [[nodiscard]] auto new_logger(const std::string &filename, Logger *&out) -> Status override;
-    [[nodiscard]] auto new_file(const std::string &filename, OpenMode mode, File *&out) -> Status override;
-    [[nodiscard]] auto resize_file(const std::string &filename, std::size_t size) -> Status override;
-    [[nodiscard]] auto file_size(const std::string &filename, std::size_t &out) const -> Status override;
-    [[nodiscard]] auto remove_file(const std::string &filename) -> Status override;
+    auto new_logger(const std::string &filename, Logger *&out) -> Status override;
+    auto new_file(const std::string &filename, OpenMode mode, File *&out) -> Status override;
+    auto resize_file(const std::string &filename, std::size_t size) -> Status override;
+    auto file_size(const std::string &filename, std::size_t &out) const -> Status override;
+    auto remove_file(const std::string &filename) -> Status override;
     [[nodiscard]] auto file_exists(const std::string &filename) const -> bool override;
 
     auto srand(unsigned seed) -> void override;
-    [[nodiscard]] auto rand() -> unsigned override;
+    auto rand() -> unsigned override;
 
     auto sleep(unsigned micros) -> void override;
 

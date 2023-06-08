@@ -86,26 +86,27 @@ public:
     {
     }
 
-    ~Schema()
-    {
-        for (const auto &[_, state] : m_trees) {
-            delete state.tree;
-        }
-    }
-
     [[nodiscard]] auto new_cursor() -> Cursor *
     {
         return new SchemaCursor(m_map);
     }
 
-    [[nodiscard]] auto create_bucket(const BucketOptions &options, const Slice &name, Bucket *b_out) -> Status;
-    [[nodiscard]] auto open_bucket(const Slice &name, Bucket &b_out) -> Status;
-    [[nodiscard]] auto drop_bucket(const Slice &name) -> Status;
-    [[nodiscard]] auto vacuum_freelist() -> Status;
+    auto close() -> void
+    {
+        for (const auto &[_, state] : m_trees) {
+            delete state.tree;
+        }
+        m_map.m_cursor.clear();
+    }
+
+    auto create_bucket(const BucketOptions &options, const Slice &name, Bucket *b_out) -> Status;
+    auto open_bucket(const Slice &name, Bucket &b_out) -> Status;
+    auto drop_bucket(const Slice &name) -> Status;
+    auto vacuum_freelist() -> Status;
 
     // Write updated root page IDs for buckets that were closed during vacuum, if any
     // buckets were rerooted
-    [[nodiscard]] auto vacuum_finish() -> Status;
+    auto vacuum_finish() -> Status;
 
     [[nodiscard]] static auto decode_root_id(const Slice &data, Id &out) -> bool;
     static auto encode_root_id(Id id, std::string &out) -> void;
@@ -114,7 +115,7 @@ public:
 
 private:
     [[nodiscard]] auto decode_and_check_root_id(const Slice &data, Id &out) -> bool;
-    [[nodiscard]] auto corrupted_root_id(const Slice &name, const Slice &value) -> Status;
+    auto corrupted_root_id(const Slice &name, const Slice &value) -> Status;
     auto construct_bucket_state(Id root_id) -> Bucket;
 
     template <class T>

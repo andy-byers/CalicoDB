@@ -77,10 +77,7 @@ struct ShmNode final {
     // knows it is the first connection if it can get a writer lock on the DMS
     // byte.
     [[nodiscard]] auto take_dms_lock() -> int;
-
-#ifdef CALICODB_TEST
     [[nodiscard]] auto check_locks() const -> bool;
-#endif // CALICODB_TEST
 };
 
 struct INode final {
@@ -275,7 +272,7 @@ static constexpr std::size_t kOpenCloseTimeout = 100;
 }
 
 struct PosixShm {
-    [[nodiscard]] auto lock(std::size_t r, std::size_t n, ShmLockFlag flags) -> Status;
+    auto lock(std::size_t r, std::size_t n, ShmLockFlag flags) -> Status;
 
     ShmNode *snode = nullptr;
     PosixShm *next = nullptr;
@@ -293,16 +290,16 @@ public:
         (void)close();
     }
 
-    [[nodiscard]] auto close() -> Status;
+    auto close() -> Status;
 
-    [[nodiscard]] auto read(std::size_t offset, std::size_t size, char *scratch, Slice *out) -> Status override;
-    [[nodiscard]] auto write(std::size_t offset, const Slice &in) -> Status override;
-    [[nodiscard]] auto sync() -> Status override;
-    [[nodiscard]] auto file_lock(FileLockMode mode) -> Status override;
+    auto read(std::size_t offset, std::size_t size, char *scratch, Slice *out) -> Status override;
+    auto write(std::size_t offset, const Slice &in) -> Status override;
+    auto sync() -> Status override;
+    auto file_lock(FileLockMode mode) -> Status override;
     auto file_unlock() -> void override;
 
-    [[nodiscard]] auto shm_map(std::size_t r, bool extend, volatile void *&out) -> Status override;
-    [[nodiscard]] auto shm_lock(std::size_t r, std::size_t n, ShmLockFlag flags) -> Status override;
+    auto shm_map(std::size_t r, bool extend, volatile void *&out) -> Status override;
+    auto shm_lock(std::size_t r, std::size_t n, ShmLockFlag flags) -> Status override;
     auto shm_unmap(bool unlink) -> void override;
     auto shm_barrier() -> void override;
 
@@ -915,9 +912,10 @@ auto ShmNode::take_dms_lock() -> int
     return rc;
 }
 
-#ifdef CALICODB_TEST
 auto ShmNode::check_locks() const -> bool
 {
+    int result = 0;
+#ifdef CALICODB_TEST
     // REQUIRES: "snode->mutex" is locked
     int check[File::kShmLockCount] = {};
 
@@ -932,12 +930,10 @@ auto ShmNode::check_locks() const -> bool
             }
         }
     }
-
-    const auto result = std::memcmp(locks, check, sizeof(check));
-    CALICODB_EXPECT_EQ(0, result);
+    result = std::memcmp(locks, check, sizeof(check));
+#endif // CALICODB_TEST
     return result == 0;
 }
-#endif // CALICODB_TEST
 
 auto split_path(const std::string &filename) -> std::pair<std::string, std::string>
 {

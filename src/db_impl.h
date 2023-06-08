@@ -30,19 +30,19 @@ public:
     explicit DBImpl(const Options &options, const Options &sanitized, std::string filename);
     ~DBImpl() override;
 
-    [[nodiscard]] static auto destroy(const Options &options, const std::string &filename) -> Status;
-    [[nodiscard]] auto open(const Options &sanitized) -> Status;
+    static auto destroy(const Options &options, const std::string &filename) -> Status;
+    auto open(const Options &sanitized) -> Status;
 
     [[nodiscard]] auto get_property(const Slice &name, std::string *out) const -> bool override;
-    [[nodiscard]] auto new_tx(const Tx *&tx) const -> Status override;
-    [[nodiscard]] auto new_tx(WriteTag, Tx *&tx) -> Status override;
-    [[nodiscard]] auto checkpoint(bool reset) -> Status override;
+    auto new_tx(const Tx *&tx) const -> Status override;
+    auto new_tx(WriteTag, Tx *&tx) -> Status override;
+    auto checkpoint(bool reset) -> Status override;
 
     [[nodiscard]] auto TEST_pager() const -> const Pager &;
 
 private:
     template <class TxType>
-    [[nodiscard]] auto prepare_tx(bool write, TxType *&tx_out) const -> Status;
+    auto prepare_tx(bool write, TxType *&tx_out) const -> Status;
 
     mutable Status m_status;
     mutable TxImpl *m_tx = nullptr;

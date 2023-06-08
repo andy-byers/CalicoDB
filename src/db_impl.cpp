@@ -62,10 +62,14 @@ auto DBImpl::open(const Options &sanitized) -> Status
         sanitized.sync_mode,
         sanitized.lock_mode,
     };
-    m_pager = new Pager(pager_param);
-
+    // Pager::open() will open/create the WAL file. If a WAL file exists beforehand, then we
+    // should attempt a checkpoint before we do anything else. If this is not the first
+    // connection, then a checkpoint really isn't necessary, but it reduces the amount of
+    // work needed when DB::checkpoint() is actually called. If this is actually the first
+    // connection, then fsync() must be called on each file before it is used, to make sure
+    // there isn't any data left in the kernel page cache.
     const auto needs_ckpt = m_env->file_exists(m_wal_filename);
-    s = m_pager->open_wal();
+    s = Pager::open(pager_param, m_pager);
     if (s.is_ok() && needs_ckpt) {
         s = m_pager->checkpoint(false);
         if (s.is_busy()) {

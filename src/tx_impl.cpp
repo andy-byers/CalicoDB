@@ -20,6 +20,7 @@ TxImpl::TxImpl(Pager &pager, Status &status, char *scratch)
 TxImpl::~TxImpl()
 {
     delete m_schema;
+    m_schema_obj.close();
     m_pager->finish();
     if (m_backref) {
         *m_backref = nullptr;

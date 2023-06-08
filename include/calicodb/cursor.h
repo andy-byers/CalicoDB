@@ -36,7 +36,7 @@ public:
     // invalid. If the status returns true when Status::is_not_found() is called,
     // the cursor is out of bounds. Cursors in this state can call, one of the
     // seek*() to put themselves back on a valid record.
-    [[nodiscard]] virtual auto status() const -> Status = 0;
+    virtual auto status() const -> Status = 0;
 
     // Get the current record key
     // REQUIRES: is_valid()

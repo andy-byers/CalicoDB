@@ -425,7 +425,7 @@ HashIterator::HashIterator(HashIndex &source)
 
 HashIterator::~HashIterator()
 {
-    operator delete (m_state, std::align_val_t{alignof(State)});
+    operator delete(m_state, std::align_val_t{alignof(State)});
 }
 
 auto HashIterator::init(U32 backfill) -> Status
@@ -450,7 +450,7 @@ auto HashIterator::init(U32 backfill) -> Status
         (m_num_groups - 1) * sizeof(State::Group) + // Additional groups.
         last_value * sizeof(Hash);                  // Indices to sort.
     m_state = reinterpret_cast<State *>(
-        operator new (state_size, std::align_val_t{alignof(State)}));
+        operator new(state_size, std::align_val_t{alignof(State)}));
     std::memset(m_state, 0, state_size);
 
     // Temporary buffer for the mergesort routine. Freed before returning from this routine.
@@ -582,9 +582,9 @@ public:
     explicit WalImpl(const Parameters &param, File &wal_file);
     ~WalImpl() override;
 
-    [[nodiscard]] auto read(Id page_id, char *&page) -> Status override;
-    [[nodiscard]] auto write(PageRef *dirty, std::size_t db_size) -> Status override;
-    [[nodiscard]] auto checkpoint(bool reset) -> Status override;
+    auto read(Id page_id, char *&page) -> Status override;
+    auto write(PageRef *dirty, std::size_t db_size) -> Status override;
+    auto checkpoint(bool reset) -> Status override;
 
     auto rollback(const Undo &undo) -> void override
     {
@@ -600,7 +600,7 @@ public:
         }
     }
 
-    [[nodiscard]] auto close() -> Status override
+    auto close() -> Status override
     {
         // NOTE: Caller will unlock the database file. Only consider removing the WAL if this
         // is the last active connection. If there are other connections not currently running
@@ -619,7 +619,7 @@ public:
         return s;
     }
 
-    [[nodiscard]] auto start_reader(bool &changed) -> Status override
+    auto start_reader(bool &changed) -> Status override
     {
         CALICODB_EXPECT_FALSE(m_ckpt_lock);
 
@@ -643,7 +643,7 @@ public:
         }
     }
 
-    [[nodiscard]] auto start_writer() -> Status override
+    auto start_writer() -> Status override
     {
         if (m_writer_lock) {
             return Status::ok();
@@ -681,7 +681,7 @@ public:
     }
 
 private:
-    [[nodiscard]] auto lock_shared(std::size_t r) -> Status
+    auto lock_shared(std::size_t r) -> Status
     {
         if (m_lock_mode == Options::kLockExclusive) {
             return Status::ok();
@@ -695,7 +695,7 @@ private:
         }
     }
 
-    [[nodiscard]] auto lock_exclusive(std::size_t r, std::size_t n) -> Status
+    auto lock_exclusive(std::size_t r, std::size_t n) -> Status
     {
         if (m_lock_mode == Options::kLockExclusive) {
             return Status::ok();
@@ -747,7 +747,7 @@ private:
         }
         return true;
     }
-    [[nodiscard]] auto read_index_header(bool &changed) -> Status
+    auto read_index_header(bool &changed) -> Status
     {
         CALICODB_TRY(m_index.map_group(0, m_writer_lock));
         CALICODB_EXPECT_FALSE(m_index.m_groups.empty());
@@ -818,7 +818,7 @@ private:
             ATOMIC_STORE(&info->readmark[i], kReadmarkNotUsed);
         }
     }
-    [[nodiscard]] auto restart_log() -> Status
+    auto restart_log() -> Status
     {
         Status s;
         if (m_reader_lock == 0) {
@@ -848,7 +848,7 @@ private:
         return s;
     }
 
-    [[nodiscard]] auto try_reader(bool use_wal, unsigned tries, bool &changed) -> Status
+    auto try_reader(bool use_wal, unsigned tries, bool &changed) -> Status
     {
         CALICODB_EXPECT_LT(m_reader_lock, 0);
         if (tries > 5) {
@@ -971,9 +971,9 @@ private:
         return kWalHdrSize + (frame - 1) * (WalFrameHdr::kSize + kPageSize);
     }
 
-    [[nodiscard]] auto transfer_contents(bool reset) -> Status;
-    [[nodiscard]] auto rewrite_checksums(U32 end) -> Status;
-    [[nodiscard]] auto recover_index() -> Status;
+    auto transfer_contents(bool reset) -> Status;
+    auto rewrite_checksums(U32 end) -> Status;
+    auto recover_index() -> Status;
     [[nodiscard]] auto decode_frame(const char *frame, WalFrameHdr &out) -> bool;
     auto encode_frame(const WalFrameHdr &hdr, const char *page, char *out) -> void;
 

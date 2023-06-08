@@ -20,7 +20,7 @@ def main():
     # Paste each C++ block from doc.md into a main() function in order.
     cpp = '\n'.join(y for x, y in code if x.lower() == 'c++')
     cpp = f'''
-#include <iostream>
+#include <cstdio>
 #include "calicodb/db.h"
 #include "calicodb/cursor.h"
 int main() {{{cpp} return 0;}}

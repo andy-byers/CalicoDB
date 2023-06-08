@@ -48,7 +48,7 @@ calicodb::Slice s2(str);
 calicodb::Slice s3(str.data(), str.size());
 
 // A slice can be converted back to a std::string using Slice::to_string().
-std::cout << s1.to_string() << '\n';
+std::printf("s1 = %s\n", s1.to_string().c_str());
 
 // Slices have methods for modifying the size and pointer position. These methods do not change the underlying data, 
 // they just change what range of bytes the slice is currently viewing. Slice::advance() increments the underlying 
@@ -76,10 +76,10 @@ calicodb::Status s;
 s = calicodb::Status::ok();
 
 // The code and subcode can be retrieved as follows:
-std::cerr << "code: " << int(s.code()) << ", subcode: " << int(s.subcode()) << '\n';
+std::printf("code = %d, subcode = %d\n", int(s.code()), int(s.subcode()));
 
 // A human-readable string representing the status can be created with:
-std::cerr << s.to_string() << '\n';
+std::printf("s = %s\n", s.to_string().c_str());
 
 // Non-OK statuses must be created through one of the static methods. Note that a status can have either a
 // message, or a subcode, but not both.
@@ -286,7 +286,7 @@ delete c;
 // Database properties are made available as strings.
 std::string prop;
 if (db->get_property("calicodb.stats", &prop)) {
-    std::cout << prop << '\n';
+    std::puts(prop.c_str());
 }
 
 // Passing nullptr for the property value causes get_property() to perform a simple existence check, 

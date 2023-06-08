@@ -29,16 +29,16 @@ public:
         return *m_schema;
     }
 
-    [[nodiscard]] auto create_bucket(const BucketOptions &options, const Slice &name, Bucket *b_out) -> Status override;
+    auto create_bucket(const BucketOptions &options, const Slice &name, Bucket *b_out) -> Status override;
     [[nodiscard]] auto open_bucket(const Slice &name, Bucket &b_out) const -> Status override;
-    [[nodiscard]] auto drop_bucket(const Slice &name) -> Status override;
-    [[nodiscard]] auto vacuum() -> Status override;
-    [[nodiscard]] auto commit() -> Status override;
+    auto drop_bucket(const Slice &name) -> Status override;
+    auto vacuum() -> Status override;
+    auto commit() -> Status override;
 
     [[nodiscard]] auto new_cursor(const Bucket &b) const -> Cursor * override;
     [[nodiscard]] auto get(const Bucket &b, const Slice &key, std::string *value) const -> Status override;
-    [[nodiscard]] auto put(const Bucket &b, const Slice &key, const Slice &value) -> Status override;
-    [[nodiscard]] auto erase(const Bucket &b, const Slice &key) -> Status override;
+    auto put(const Bucket &b, const Slice &key, const Slice &value) -> Status override;
+    auto erase(const Bucket &b, const Slice &key) -> Status override;
 
     auto TEST_validate() const -> void
     {
@@ -49,7 +49,7 @@ private:
     // m_backref is not known until after the constructor runs. Let DBImpl set it.
     friend class DBImpl;
 
-    [[nodiscard]] auto vacuum_freelist() -> Status;
+    auto vacuum_freelist() -> Status;
 
     mutable Schema m_schema_obj;
     TxImpl **m_backref = nullptr;

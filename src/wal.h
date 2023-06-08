@@ -40,8 +40,8 @@ public:
 
     explicit HashIndex(HashIndexHdr &header, File *file);
     [[nodiscard]] auto fetch(Value value) -> Key;
-    [[nodiscard]] auto lookup(Key key, Value lower, Value &out) -> Status;
-    [[nodiscard]] auto assign(Key key, Value value) -> Status;
+    auto lookup(Key key, Value lower, Value &out) -> Status;
+    auto assign(Key key, Value value) -> Status;
     [[nodiscard]] auto header() -> volatile HashIndexHdr *;
     [[nodiscard]] auto groups() const -> const std::vector<volatile char *> &;
     auto cleanup() -> void;
@@ -50,7 +50,7 @@ public:
 private:
     friend class WalImpl;
 
-    [[nodiscard]] auto map_group(std::size_t group_number, bool extend) -> Status;
+    auto map_group(std::size_t group_number, bool extend) -> Status;
 
     // Storage for hash table groups.
     std::vector<volatile char *> m_groups;
@@ -79,7 +79,7 @@ public:
 
     // Create an iterator over the contents of the provided hash index.
     explicit HashIterator(HashIndex &index);
-    [[nodiscard]] auto init(U32 backfill = 0) -> Status;
+    auto init(U32 backfill = 0) -> Status;
 
     // Return the next hash entry.
     //
@@ -121,26 +121,26 @@ public:
     virtual ~Wal();
 
     // Open or create a WAL file called "filename".
-    [[nodiscard]] static auto open(const Parameters &param, Wal *&out) -> Status;
-    [[nodiscard]] virtual auto close() -> Status = 0;
+    static auto open(const Parameters &param, Wal *&out) -> Status;
+    virtual auto close() -> Status = 0;
 
     // Write as much of the WAL back to the DB as possible
-    [[nodiscard]] virtual auto checkpoint(bool reset) -> Status = 0;
+    virtual auto checkpoint(bool reset) -> Status = 0;
 
     // UNLOCKED -> READER
-    [[nodiscard]] virtual auto start_reader(bool &changed) -> Status = 0;
+    virtual auto start_reader(bool &changed) -> Status = 0;
 
     // Read the most-recent version of page "page_id" from the WAL.
     //
     // "page" must point to at least a full page of memory. It is set to nullptr if
     // page "page_id" does not exist in the WAL.
-    [[nodiscard]] virtual auto read(Id page_id, char *&page) -> Status = 0;
+    virtual auto read(Id page_id, char *&page) -> Status = 0;
 
     // READER -> WRITER
-    [[nodiscard]] virtual auto start_writer() -> Status = 0;
+    virtual auto start_writer() -> Status = 0;
 
     // Write new versions of the given pages to the WAL.
-    [[nodiscard]] virtual auto write(PageRef *dirty, std::size_t db_size) -> Status = 0;
+    virtual auto write(PageRef *dirty, std::size_t db_size) -> Status = 0;
 
     using Undo = std::function<void(Id)>;
     virtual auto rollback(const Undo &undo) -> void = 0;

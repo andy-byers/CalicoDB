@@ -116,7 +116,7 @@ public:
                 delete m_target;
             }
 
-            [[nodiscard]] auto sync() -> Status override
+            auto sync() -> Status override
             {
                 if (m_env->m_delay_sync.load(std::memory_order_acquire)) {
                     m_env->sleep(100);
@@ -141,7 +141,7 @@ public:
     }
 };
 
-TEST(TestConcurrencyTools, BarrierIsReusable)
+TEST(ConcurrencyTestsTools, BarrierIsReusable)
 {
     static constexpr std::size_t kNumThreads = 20;
     Barrier barrier(kNumThreads + 1);
@@ -173,19 +173,19 @@ TEST(TestConcurrencyTools, BarrierIsReusable)
     }
 }
 
-class TestConcurrency : public testing::Test
+class ConcurrencyTests : public testing::Test
 {
 protected:
     std::string m_filename;
     DelayEnv *m_env;
 
-    explicit TestConcurrency()
+    explicit ConcurrencyTests()
         : m_filename(testing::TempDir() + "concurrency"),
           m_env(new DelayEnv(*Env::default_env()))
     {
     }
 
-    ~TestConcurrency() override = default;
+    ~ConcurrencyTests() override = default;
 
     struct Connection;
     using Operation = std::function<Status(Connection &, Barrier *)>;
@@ -460,21 +460,21 @@ protected:
     }
 };
 
-TEST_F(TestConcurrency, 0)
+TEST_F(ConcurrencyTests, 0)
 {
     run_test({1, 0, 0});
     run_test({0, 1, 0});
     run_test({0, 0, 1});
 }
 
-TEST_F(TestConcurrency, 1)
+TEST_F(ConcurrencyTests, 1)
 {
     run_test({10, 0, 0});
     run_test({0, 10, 0});
     run_test({0, 0, 10});
 }
 
-TEST_F(TestConcurrency, 2)
+TEST_F(ConcurrencyTests, 2)
 {
     run_test({10, 0, 1});
     run_test({10, 1, 0});
@@ -487,7 +487,7 @@ TEST_F(TestConcurrency, 2)
     run_test({1, 1, 10});
 }
 
-TEST_F(TestConcurrency, 3)
+TEST_F(ConcurrencyTests, 3)
 {
     run_test({100, 10, 10});
     run_test({10, 100, 10});

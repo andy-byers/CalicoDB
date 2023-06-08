@@ -2,16 +2,17 @@
 // This source code is licensed under the MIT License, which can be found in
 // LICENSE.md. See AUTHORS.md for a list of contributor names.
 
-#include "../test.h"
 #include "calicodb/env.h"
 #include "common.h"
 #include "encoding.h"
+#include "env_posix.h"
 #include "fake_env.h"
-#include "unit_tests.h"
+#include "test.h"
+#include <filesystem>
 #include <gtest/gtest.h>
 #include <thread>
 
-namespace calicodb
+namespace calicodb::test
 {
 
 TEST(PathParserTests, ExtractsDirnames)
@@ -501,7 +502,7 @@ TEST_P(EnvLockStateTests, InvalidRequestDeathTest)
 {
     auto *f = new_file(kFilename);
     // kUnlocked -> kShared is the only allowed transition out of kUnlocked.
-    ASSERT_DEATH((void)f->file_lock(kFileExclusive), kExpectationMatcher);
+    ASSERT_DEATH((void)f->file_lock(kFileExclusive), "expect");
 }
 #endif // NDEBUG
 
@@ -689,6 +690,48 @@ static auto shm_reader_writer_test_routine(File &file, std::size_t r, std::size_
     }
     ASSERT_OK(file.shm_lock(r, n, kShmUnlock | lock_flag));
 }
+
+class SharedCount
+{
+    volatile U32 *m_ptr = nullptr;
+    File *m_file = nullptr;
+
+public:
+    explicit SharedCount(Env &env, const std::string &name)
+    {
+        volatile void *ptr;
+        EXPECT_OK(env.new_file(name, Env::kCreate | Env::kReadWrite, m_file));
+        EXPECT_OK(m_file->shm_map(0, true, ptr));
+        EXPECT_TRUE(ptr);
+        m_ptr = reinterpret_cast<volatile U32 *>(ptr);
+    }
+
+    ~SharedCount()
+    {
+        m_file->shm_unmap(true);
+        delete m_file;
+    }
+
+    enum MemoryOrder : int {
+        kRelaxed = __ATOMIC_RELAXED,
+        kAcquire = __ATOMIC_ACQUIRE,
+        kRelease = __ATOMIC_RELEASE,
+        kAcqRel = __ATOMIC_ACQ_REL,
+        kSeqCst = __ATOMIC_SEQ_CST,
+    };
+    auto load(MemoryOrder order = kAcquire) const -> U32
+    {
+        return __atomic_load_n(m_ptr, order);
+    }
+    auto store(U32 value, MemoryOrder order = kRelease) -> void
+    {
+        __atomic_store_n(m_ptr, value, order);
+    }
+    auto increase(U32 n, MemoryOrder order = kRelaxed) -> U32
+    {
+        return __atomic_add_fetch(m_ptr, n, order);
+    }
+};
 
 // Env multithreading tests
 //
@@ -996,4 +1039,4 @@ TEST(EnvWrappers, WrapperEnvWorksAsExpected)
     ASSERT_OK(w_env.remove_file("file"));
 }
 
-} // namespace calicodb
+} // namespace calicodb::test

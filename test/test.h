@@ -18,6 +18,9 @@ namespace calicodb::test
 
 auto check_status(const char *expr, const Status &s) -> testing::AssertionResult;
 
+auto read_file_to_string(Env &env, const std::string &filename) -> std::string;
+auto write_string_to_file(Env &env, const std::string &filename, const std::string &buffer, long offset = -1) -> void;
+
 } // namespace calicodb::test
 
 #endif // CALICODB_TEST_TEST_H

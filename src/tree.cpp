@@ -127,57 +127,65 @@ static auto write_child_id(Cell &cell, Id child_id) -> void
     put_u32(cell.ptr, child_id.value);
 }
 
-static auto parse_external_cell(char *data, const char *limit) -> Cell
+static auto parse_external_cell(char *data, const char *limit, Cell *cell_out) -> int
 {
     U64 key_size, value_size;
     const auto *ptr = data;
-    if ((ptr = decode_varint(ptr, limit, value_size))) {
-        if ((ptr = decode_varint(ptr, limit, key_size))) {
-            const auto header_size = static_cast<std::uintptr_t>(ptr - data);
-
-            Cell cell;
-            cell.ptr = data;
-            cell.key = data + header_size;
-            cell.key_size = key_size;
-            cell.total_size = key_size + value_size;
-            cell.local_size = compute_local_size(key_size, value_size);
-            cell.has_remote = cell.local_size < key_size + value_size;
-            cell.size = header_size + cell.local_size + cell.has_remote * Id::kSize;
-            return cell;
-        }
+    if (!(ptr = decode_varint(ptr, limit, value_size))) {
+        return -1;
     }
-    return Cell{};
+    if (!(ptr = decode_varint(ptr, limit, key_size))) {
+        return -1;
+    }
+    const auto header_size = static_cast<std::uintptr_t>(ptr - data);
+    const auto local_size = compute_local_size(key_size, value_size);
+    const auto has_remote = local_size < key_size + value_size;
+    const auto cell_size = header_size + local_size + has_remote * Id::kSize;
+    if (data + cell_size <= limit) {
+        if (cell_out) {
+            cell_out->ptr = data;
+            cell_out->key = data + header_size;
+            cell_out->key_size = key_size;
+            cell_out->total_size = key_size + value_size;
+            cell_out->local_size = local_size;
+            cell_out->has_remote = has_remote;
+            cell_out->size = cell_size;
+        }
+        return 0;
+    }
+    return -1;
 }
-
-static auto parse_internal_cell(char *data, const char *limit) -> Cell
+static auto parse_internal_cell(char *data, const char *limit, Cell *cell_out) -> int
 {
     U64 key_size;
     if (const auto *ptr = decode_varint(data + Id::kSize, limit, key_size)) {
         const auto header_size = static_cast<std::uintptr_t>(ptr - data);
-
-        Cell cell;
-        cell.ptr = data;
-        cell.key = data + header_size;
-        cell.key_size = key_size;
-        cell.total_size = key_size;
-        cell.local_size = compute_local_size(key_size, 0);
-        cell.has_remote = cell.local_size < key_size;
-        cell.size = header_size + cell.local_size + cell.has_remote * Id::kSize;
-        return cell;
+        const auto local_size = compute_local_size(key_size, 0);
+        const auto has_remote = local_size < key_size;
+        const auto cell_size = header_size + local_size + has_remote * Id::kSize;
+        if (data + cell_size <= limit) {
+            if (cell_out) {
+                cell_out->ptr = data;
+                cell_out->key = data + header_size;
+                cell_out->key_size = key_size;
+                cell_out->total_size = key_size;
+                cell_out->local_size = local_size;
+                cell_out->has_remote = has_remote;
+                cell_out->size = cell_size;
+            }
+            return 0;
+        }
     }
-    // TODO: See parse_external_cell().
-    CALICODB_EXPECT_TRUE(false && "not implemented");
-    return Cell{};
+    return -1;
 }
 
-static auto read_cell_at(Node &node, std::size_t offset)
+static auto read_cell_at(Node &node, std::size_t offset, Cell *cell_out)
 {
-    return node.meta->parse_cell(node.page.mutable_ptr() + offset, node.page.constant_ptr() + kPageSize);
+    return node.meta->parse_cell(node.page.mutable_ptr() + offset, node.page.constant_ptr() + kPageSize, cell_out);
 }
-
-auto read_cell(Node &node, std::size_t index) -> Cell
+auto read_cell(Node &node, std::size_t index, Cell *cell_out) -> int
 {
-    return read_cell_at(node, node.get_slot(index));
+    return read_cell_at(node, node.get_slot(index), cell_out);
 }
 
 [[nodiscard]] static auto get_next_pointer(const Node &node, std::size_t offset) -> unsigned
@@ -257,7 +265,7 @@ static auto allocate_from_gap(Node &node, std::size_t needed_size) -> std::size_
 auto BlockAllocator::accumulate_free_bytes(const Node &node) -> std::size_t
 {
     unsigned total = 0;
-    for (auto ptr = node.header.free_start; ptr != 0;) {
+    for (auto ptr = node.header.free_start; ptr;) {
         total += get_block_size(node, ptr);
         ptr = get_next_pointer(node, ptr);
     }
@@ -335,7 +343,7 @@ auto BlockAllocator::release(Node &node, std::size_t block_start, std::size_t bl
     set_block_size(node, block_start, block_size);
 }
 
-auto BlockAllocator::defragment(Node &node, int skip) -> void
+auto BlockAllocator::defragment(Node &node, int skip) -> int
 {
     auto &header = node.header;
     const auto n = header.cell_count;
@@ -349,7 +357,10 @@ auto BlockAllocator::defragment(Node &node, int skip) -> void
         if (index != to_skip) {
             // Pack cells at the end of the scratch page and write the indirection
             // vector.
-            const auto cell = read_cell(node, index);
+            Cell cell;
+            if (read_cell(node, index, &cell)) {
+                return -1;
+            }
             end -= cell.size;
             std::memcpy(node.scratch + end, cell.ptr, cell.size);
             put_u16(node.scratch + node.slots_offset + index * kPointerSize,
@@ -362,6 +373,7 @@ auto BlockAllocator::defragment(Node &node, int skip) -> void
     header.free_start = 0;
     header.cell_start = static_cast<unsigned>(end);
     node.gap_size = static_cast<unsigned>(end - cell_area_offset(node));
+    return 0;
 }
 
 static constexpr NodeMeta kExternalMeta = {
@@ -432,15 +444,10 @@ auto write_cell(Node &node, std::size_t index, const Cell &cell) -> std::size_t
     return 0;
 }
 
-static auto erase_cell(Node &node, std::size_t index, std::size_t size_hint) -> void
+auto erase_cell(Node &node, std::size_t index, std::size_t cell_size) -> void
 {
     CALICODB_EXPECT_LT(index, node.header.cell_count);
-    free_block(node, static_cast<unsigned>(index), static_cast<unsigned>(size_hint));
-}
-
-auto erase_cell(Node &node, std::size_t index) -> void
-{
-    erase_cell(node, index, read_cell(node, index).size);
+    free_block(node, static_cast<unsigned>(index), static_cast<unsigned>(cell_size));
 }
 
 auto Node::get_slot(std::size_t index) const -> std::size_t
@@ -530,11 +537,6 @@ static auto merge_root(Node &root, Node &child) -> void
 static constexpr auto kLinkContentOffset = Id::kSize;
 static constexpr auto kLinkContentSize = kPageSize - kLinkContentOffset;
 
-[[nodiscard]] static auto get_readable_content(const Page &page, std::size_t size_limit) -> Slice
-{
-    return page.view().range(kLinkContentOffset, std::min(size_limit, kLinkContentSize));
-}
-
 auto Tree::create(Pager &pager, bool is_root, Id *out) -> Status
 {
     Node node;
@@ -585,7 +587,14 @@ auto Tree::find_external(const Slice &key, bool write, bool &exact) const -> Sta
 
 auto Tree::read_key(Node &node, std::size_t index, std::string &scratch, Slice *key_out, std::size_t limit) const -> Status
 {
-    const auto cell = read_cell(node, index);
+    Cell cell;
+    if (read_cell(node, index, &cell)) {
+        return Status::corruption();
+    }
+    return read_key(cell, scratch, key_out, limit);
+}
+auto Tree::read_key(const Cell &cell, std::string &scratch, Slice *key_out, std::size_t limit) const -> Status
+{
     if (limit == 0 || limit > cell.key_size) {
         limit = cell.key_size;
     }
@@ -601,7 +610,14 @@ auto Tree::read_key(Node &node, std::size_t index, std::string &scratch, Slice *
 
 auto Tree::read_value(Node &node, std::size_t index, std::string &scratch, Slice *value_out) const -> Status
 {
-    const auto cell = read_cell(node, index);
+    Cell cell;
+    if (read_cell(node, index, &cell)) {
+        return Status::corruption();
+    }
+    return read_value(cell, scratch, value_out);
+}
+auto Tree::read_value(const Cell &cell, std::string &scratch, Slice *value_out) const -> Status
+{
     const auto value_size = cell.total_size - cell.key_size;
     if (scratch.size() < value_size) {
         scratch.resize(value_size);
@@ -615,13 +631,19 @@ auto Tree::read_value(Node &node, std::size_t index, std::string &scratch, Slice
 
 auto Tree::write_key(Node &node, std::size_t index, const Slice &key) -> Status
 {
-    const auto cell = read_cell(node, index);
+    Cell cell;
+    if (read_cell(node, index, &cell)) {
+        return Status::corruption();
+    }
     return PayloadManager::access(*m_pager, cell, 0, key.size(), key.data(), nullptr);
 }
 
 auto Tree::write_value(Node &node, std::size_t index, const Slice &value) -> Status
 {
-    const auto cell = read_cell(node, index);
+    Cell cell;
+    if (read_cell(node, index, &cell)) {
+        return Status::corruption();
+    }
     return PayloadManager::access(*m_pager, cell, cell.key_size, value.size(), value.data(), nullptr);
 }
 
@@ -658,7 +680,10 @@ auto Tree::insert_cell(Node &node, std::size_t index, const Cell &cell) -> Statu
 
 auto Tree::remove_cell(Node &node, std::size_t index) -> Status
 {
-    const auto cell = read_cell(node, index);
+    Cell cell;
+    if (read_cell(node, index, &cell)) {
+        return Status::corruption();
+    }
     if (cell.has_remote) {
         CALICODB_TRY(free_overflow(read_overflow_id(cell)));
     }
@@ -688,7 +713,10 @@ auto Tree::fix_links(Node &node, Id parent_id) -> Status
         parent_id = node.page.id();
     }
     for (std::size_t index = 0; index < node.header.cell_count; ++index) {
-        const auto cell = read_cell(node, index);
+        Cell cell;
+        if (read_cell(node, index, &cell)) {
+            return Status::corruption();
+        }
         // Fix the back pointer for the head of an overflow chain rooted at `node`.
         CALICODB_TRY(maybe_fix_overflow_chain(cell, parent_id));
         if (!node.header.is_external) {
@@ -727,6 +755,9 @@ auto Tree::acquire(Id page_id, bool write, Node &out) const -> Status
     if (s.is_ok()) {
         out.scratch = m_node_scratch;
         out.header.read(out.page.constant_ptr() + node_header_offset(out));
+
+        // TODO: This is where we can validate the node's header fields. CRC?
+
         setup_node(out);
         if (write) {
             upgrade(out);
@@ -817,11 +848,16 @@ auto Tree::split_root() -> Status
 auto Tree::transfer_left(Node &left, Node &right) -> Status
 {
     CALICODB_EXPECT_EQ(left.header.is_external, right.header.is_external);
-    const auto cell = read_cell(right, 0);
-    CALICODB_TRY(insert_cell(left, left.header.cell_count, cell));
-    CALICODB_EXPECT_FALSE(is_overflowing(left));
-    erase_cell(right, 0, cell.size);
-    return Status::ok();
+    Cell cell;
+    if (read_cell(right, 0, &cell)) {
+        return Status::corruption();
+    }
+    auto s = insert_cell(left, left.header.cell_count, cell);
+    if (s.is_ok()) {
+        CALICODB_EXPECT_FALSE(is_overflowing(left));
+        erase_cell(right, 0, cell.size);
+    }
+    return s;
 }
 
 auto Tree::split_nonroot() -> Status
@@ -877,7 +913,10 @@ auto Tree::split_nonroot() -> Status
     CALICODB_EXPECT_FALSE(is_overflowing(left));
     CALICODB_EXPECT_FALSE(is_overflowing(node));
 
-    auto separator = read_cell(node, 0);
+    Cell separator;
+    if (read_cell(node, 0, &separator)) {
+        return Status::corruption();
+    }
     detach_cell(separator, cell_scratch());
 
     if (header.is_external) {
@@ -898,7 +937,7 @@ auto Tree::split_nonroot() -> Status
     } else {
         left.header.next_id = read_child_id(separator);
         CALICODB_TRY(fix_parent_id(left.header.next_id, left.page.id(), PointerMap::kTreeNode));
-        erase_cell(node, 0);
+        erase_cell(node, 0, separator.size);
     }
 
     // Post the separator into the parent node. This call will fix the sibling's parent pointer.
@@ -931,16 +970,20 @@ auto Tree::split_nonroot_fast(Node parent, Node right, const Cell &overflow) -> 
         right.header.prev_id = left.page.id();
         left.header.next_id = right.page.id();
 
-        separator = read_cell(right, 0);
+        if (read_cell(right, 0, &separator)) {
+            return Status::corruption();
+        }
         CALICODB_TRY(PayloadManager::promote(
             *m_pager,
             cell_scratch(),
             separator,
             parent.page.id()));
     } else {
-        separator = read_cell(left, header.cell_count - 1);
+        if (read_cell(left, header.cell_count - 1, &separator)) {
+            return Status::corruption();
+        }
         detach_cell(separator, cell_scratch());
-        erase_cell(left, header.cell_count - 1);
+        erase_cell(left, header.cell_count - 1, separator.size);
 
         right.header.next_id = left.header.next_id;
         left.header.next_id = read_child_id(separator);
@@ -1005,7 +1048,10 @@ auto Tree::merge_left(Node &left, Node right, Node &parent, std::size_t index) -
         }
     } else {
         CALICODB_EXPECT_FALSE(right.header.is_external);
-        auto separator = read_cell(parent, index);
+        Cell separator;
+        if (read_cell(parent, index, &separator)) {
+            return Status::corruption();
+        }
         write_cell(left, left.header.cell_count, separator);
         write_child_id(left, left.header.cell_count - 1, left.header.next_id);
         CALICODB_TRY(fix_parent_id(left.header.next_id, left.page.id(), PointerMap::kTreeNode));
@@ -1046,7 +1092,10 @@ auto Tree::merge_right(Node &left, Node right, Node &parent, std::size_t index) 
     } else {
         CALICODB_EXPECT_FALSE(right.header.is_external);
 
-        auto separator = read_cell(parent, index);
+        Cell separator;
+        if (read_cell(parent, index, &separator)) {
+            return Status::corruption();
+        }
         write_cell(left, left.header.cell_count, separator);
         write_child_id(left, left.header.cell_count - 1, left.header.next_id);
         CALICODB_TRY(fix_parent_id(left.header.next_id, left.page.id(), PointerMap::kTreeNode));
@@ -1121,10 +1170,14 @@ auto Tree::fix_root() -> Status
         // Note that the child needs an overflow cell for the split routine to work. We'll just fake it by
         // extracting an arbitrary cell and making it the overflow cell.
         if (node.page.id().is_root() && usable_space(child) < FileHeader::kSize) {
+            Cell temp;
             child.overflow_index = child.header.cell_count / 2;
-            child.overflow = read_cell(child, child.overflow_index);
+            if (read_cell(child, child.overflow_index, &temp)) {
+                return Status::corruption();
+            }
+            child.overflow = temp;
             detach_cell(*child.overflow, cell_scratch());
-            erase_cell(child, child.overflow_index);
+            erase_cell(child, child.overflow_index, temp.size);
             m_cursor.clear();
             m_cursor.move_to(std::move(child), 0);
             CALICODB_TRY(split_nonroot());
@@ -1145,12 +1198,18 @@ auto Tree::rotate_left(Node &parent, Node &left, Node &right, std::size_t index)
     if (left.header.is_external) {
         CALICODB_EXPECT_TRUE(right.header.is_external);
 
-        auto lowest = read_cell(right, 0);
+        Cell lowest;
+        if (read_cell(right, 0, &lowest)) {
+            return Status::corruption();
+        }
         CALICODB_TRY(insert_cell(left, left.header.cell_count, lowest));
         CALICODB_EXPECT_FALSE(is_overflowing(left));
-        erase_cell(right, 0);
+        erase_cell(right, 0, lowest.size);
 
-        auto separator = read_cell(right, 0);
+        Cell separator;
+        if (read_cell(right, 0, &separator)) {
+            return Status::corruption();
+        }
         CALICODB_TRY(PayloadManager::promote(
             *m_pager,
             cell_scratch(),
@@ -1170,15 +1229,21 @@ auto Tree::rotate_left(Node &parent, Node &left, Node &right, std::size_t index)
         CALICODB_TRY(fix_parent_id(child.page.id(), left.page.id(), PointerMap::kTreeNode));
         release(std::move(child));
 
-        const auto separator = read_cell(parent, index);
+        Cell separator;
+        if (read_cell(parent, index, &separator)) {
+            return Status::corruption();
+        }
         CALICODB_TRY(insert_cell(left, left.header.cell_count, separator));
         CALICODB_EXPECT_FALSE(is_overflowing(left));
         write_child_id(left, left.header.cell_count - 1, saved_id);
         erase_cell(parent, index, separator.size);
 
-        auto lowest = read_cell(right, 0);
+        Cell lowest;
+        if (read_cell(right, 0, &lowest)) {
+            return Status::corruption();
+        }
         detach_cell(lowest, cell_scratch());
-        erase_cell(right, 0);
+        erase_cell(right, 0, lowest.size);
         write_child_id(lowest, left.page.id());
         return insert_cell(parent, index, lowest);
     }
@@ -1193,7 +1258,10 @@ auto Tree::rotate_right(Node &parent, Node &left, Node &right, std::size_t index
     if (left.header.is_external) {
         CALICODB_EXPECT_TRUE(right.header.is_external);
 
-        auto highest = read_cell(left, left.header.cell_count - 1);
+        Cell highest;
+        if (read_cell(left, left.header.cell_count - 1, &highest)) {
+            return Status::corruption();
+        }
         CALICODB_TRY(insert_cell(right, 0, highest));
         CALICODB_EXPECT_FALSE(is_overflowing(right));
 
@@ -1206,7 +1274,7 @@ auto Tree::rotate_right(Node &parent, Node &left, Node &right, std::size_t index
         write_child_id(separator, left.page.id());
 
         // Don't erase the cell until it has been detached.
-        erase_cell(left, left.header.cell_count - 1);
+        erase_cell(left, left.header.cell_count - 1, highest.size);
 
         CALICODB_TRY(remove_cell(parent, index));
         CALICODB_TRY(insert_cell(parent, index, separator));
@@ -1220,13 +1288,19 @@ auto Tree::rotate_right(Node &parent, Node &left, Node &right, std::size_t index
         left.header.next_id = read_child_id(left, left.header.cell_count - 1);
         release(std::move(child));
 
-        auto separator = read_cell(parent, index);
+        Cell separator;
+        if (read_cell(parent, index, &separator)) {
+            return Status::corruption();
+        }
         CALICODB_TRY(insert_cell(right, 0, separator));
         CALICODB_EXPECT_FALSE(is_overflowing(right));
         write_child_id(right, 0, child_id);
         erase_cell(parent, index, separator.size);
 
-        auto highest = read_cell(left, left.header.cell_count - 1);
+        Cell highest;
+        if (read_cell(left, left.header.cell_count - 1, &highest)) {
+            return Status::corruption();
+        }
         detach_cell(highest, cell_scratch());
         write_child_id(highest, left.page.id());
         erase_cell(left, left.header.cell_count - 1, highest.size);
@@ -1292,10 +1366,14 @@ auto Tree::put(const Slice &key, const Slice &value) -> Status
                 if (overflow) {
                     // There wasn't enough room in `node` to hold the cell. Get the node back and
                     // perform a split.
-                    m_cursor.node().overflow = parse_external_cell(
-                        cell_scratch(), cell_scratch() + kPageSize);
-                    m_cursor.node().overflow->is_free = true;
-                    s = resolve_overflow();
+                    Cell ovfl;
+                    if (parse_external_cell(cell_scratch(), cell_scratch() + kPageSize, &ovfl)) {
+                        s = Status::corruption();
+                    } else {
+                        m_cursor.node().overflow = ovfl;
+                        m_cursor.node().overflow->is_free = true;
+                        s = resolve_overflow();
+                    }
                 }
                 m_stats.stats[kStatWrite] += key.size() + value.size();
             }
@@ -1459,7 +1537,10 @@ auto Tree::vacuum_step(Page &free, PointerMap::Entry entry, Schema &schema, Id l
             CALICODB_TRY(acquire(entry.back_ptr, true, parent));
             bool found = false;
             for (std::size_t i = 0; i < parent.header.cell_count; ++i) {
-                auto cell = read_cell(parent, i);
+                Cell cell;
+                if (read_cell(parent, i, &cell)) {
+                    return Status::corruption();
+                }
                 found = cell.has_remote && read_overflow_id(cell) == last_id;
                 if (found) {
                     write_overflow_id(cell, free.id());
@@ -1553,14 +1634,12 @@ static auto vacuum_end_page(U32 db_size, U32 free_size) -> Id
     const auto pm_size = (free_size + pm_page.value + kEntriesPerMap - db_size) / kEntriesPerMap;
 
     auto end_page = Id(db_size - free_size - pm_size);
-    if (PointerMap::is_map(end_page)) {
-        --end_page.value;
-    }
+    end_page.value -= PointerMap::is_map(end_page);
     return end_page;
 }
 
 // The CalicoDB database file format does not store the number of free pages; this number must be determined
-// by iterating through the freelist trunk pages.
+// by iterating through the freelist trunk pages. At present, this only happens when a vacuum is performed.
 [[nodiscard]] static auto determine_freelist_size(Pager &pager, Id free_head, U32 &size_out) -> Status
 {
     Status s;
@@ -1648,7 +1727,11 @@ auto Tree::destroy_impl(Node node) -> Status
 {
     for (std::size_t i = 0; i <= node.header.cell_count; ++i) {
         if (i < node.header.cell_count) {
-            if (const auto cell = read_cell(node, i); cell.has_remote) {
+            Cell cell;
+            if (read_cell(node, i, &cell)) {
+                return Status::corruption();
+            }
+            if (cell.has_remote) {
                 CALICODB_TRY(free_overflow(read_overflow_id(cell)));
             }
         }
@@ -1848,9 +1931,9 @@ auto Node::TEST_validate() -> void
         account(0, cell_area_offset(*this));
 
         // Make sure the header fields are not obviously wrong.
-        CALICODB_EXPECT_LT(header.frag_count, static_cast<U8>(-1) * 2);
-        CALICODB_EXPECT_LT(header.cell_count, static_cast<U16>(-1));
-        CALICODB_EXPECT_LT(header.free_start, static_cast<U16>(-1));
+        CHECK_TRUE(header.frag_count < static_cast<U8>(-1) * 2);
+        CHECK_TRUE(header.cell_count < static_cast<U16>(-1));
+        CHECK_TRUE(header.free_start < static_cast<U16>(-1));
     }
     // Gap space.
     {
@@ -1869,18 +1952,20 @@ auto Node::TEST_validate() -> void
         }
         const auto offsets_copy = offsets;
         std::sort(begin(offsets), end(offsets));
-        CALICODB_EXPECT_EQ(offsets, offsets_copy);
+        CHECK_EQ(offsets, offsets_copy);
     }
     // Cell bodies. Also makes sure the cells are in order where possible.
     for (std::size_t n = 0; n < header.cell_count; ++n) {
         const auto lhs_ptr = get_slot(n);
-        const auto lhs_cell = read_cell_at(*this, lhs_ptr);
+        Cell lhs_cell;
+        CHECK_EQ(0, read_cell_at(*this, lhs_ptr, &lhs_cell));
         CHECK_TRUE(lhs_cell.size >= 3);
         account(lhs_ptr, lhs_cell.size);
 
         if (n + 1 < header.cell_count) {
             const auto rhs_ptr = get_slot(n + 1);
-            const auto rhs_cell = read_cell_at(*this, rhs_ptr);
+            Cell rhs_cell;
+            CHECK_EQ(0, read_cell_at(*this, rhs_ptr, &rhs_cell));
             if (!lhs_cell.has_remote && !rhs_cell.has_remote) {
                 const Slice lhs_key(lhs_cell.key, lhs_cell.key_size);
                 const Slice rhs_key(rhs_cell.key, rhs_cell.key_size);
@@ -1994,7 +2079,8 @@ class TreeValidator
         for (std::size_t cid = 0; cid < header.cell_count; ++cid) {
             const auto is_first = cid == 0;
             const auto not_last = cid + 1 < header.cell_count;
-            auto cell = read_cell(node, cid);
+            Cell cell;
+            CHECK_EQ(0, read_cell(node, cid, &cell));
 
             if (!header.is_external) {
                 Node next;
@@ -2027,6 +2113,11 @@ class TreeValidator
         tree.release(std::move(node));
     }
 
+    [[nodiscard]] static auto get_readable_content(const Page &page, std::size_t size_limit) -> Slice
+    {
+        return page.view().range(kLinkContentOffset, std::min(size_limit, kLinkContentSize));
+    }
+
 public:
     static auto validate_tree(const Tree &tree) -> void
     {
@@ -2054,7 +2145,8 @@ public:
         });
 
         traverse_inorder(tree, [&tree](auto &node, auto index) {
-            const auto cell = read_cell(node, index);
+            Cell cell;
+            CHECK_EQ(0, read_cell(node, index, &cell));
 
             auto accumulated = cell.local_size;
             auto requested = cell.key_size;
@@ -2151,7 +2243,7 @@ auto Tree::TEST_to_string() const -> std::string
     return "";
 }
 
-auto Tree::TEST_validate() -> void
+auto Tree::TEST_validate() const -> void
 {
 }
 
@@ -2198,6 +2290,9 @@ auto InternalCursor::seek(const Slice &key) -> bool
         // reading overflow chains if it isn't really necessary.
         m_status = m_tree->read_key(m_node, mid, m_buffer,
                                     &rhs, key.size() + 1);
+        if (!m_status.is_ok()) {
+            break;
+        }
         const auto cmp = key.compare(rhs);
         if (cmp <= 0) {
             exact = cmp == 0;
@@ -2231,21 +2326,17 @@ CursorImpl::~CursorImpl()
 
 auto CursorImpl::fetch_payload(Node &node, std::size_t index) -> Status
 {
-    m_key_size = 0;
-    m_value_size = 0;
+    m_key.clear();
+    m_val.clear();
 
-    Status s;
-    const auto cell = read_cell(node, index);
-    if (cell.key_size > cell.local_size) {
-        // Read a key spread over the node and 1+ overflow pages.
-        s = m_tree->read_key(node, index, m_key, nullptr);
-        m_key_size = cell.key_size;
+    Cell cell;
+    if (read_cell(node, index, &cell)) {
+        return Status::corruption();
     }
-    if (s.is_ok() && cell.has_remote) {
-        // Read a value spread over (maybe) the node and 1+ overflow pages. The value may be
-        // 0 bytes in length.
-        s = m_tree->read_value(node, index, m_value, nullptr);
-        m_value_size = cell.total_size - cell.key_size;
+
+    auto s = m_tree->read_key(cell, m_key_buf, &m_key);
+    if (s.is_ok()) {
+        s = m_tree->read_value(cell, m_val_buf, &m_val);
     }
     return s;
 }
@@ -2253,24 +2344,13 @@ auto CursorImpl::fetch_payload(Node &node, std::size_t index) -> Status
 auto CursorImpl::key() const -> Slice
 {
     CALICODB_EXPECT_TRUE(is_valid());
-    if (m_key_size) {
-        return Slice(m_key).truncate(m_key_size);
-    }
-    const auto cell = read_cell(m_node, m_index);
-    CALICODB_EXPECT_LE(cell.key_size, cell.local_size);
-    return {cell.key, cell.key_size};
+    return m_key;
 }
 
 auto CursorImpl::value() const -> Slice
 {
     CALICODB_EXPECT_TRUE(is_valid());
-    if (m_value_size) {
-        return Slice(m_value).truncate(m_value_size);
-    }
-    const auto cell = read_cell(m_node, m_index);
-    const auto value_size = cell.total_size - cell.key_size;
-    CALICODB_EXPECT_TRUE(!cell.has_remote || value_size == 0);
-    return {cell.key + cell.key_size, value_size};
+    return m_val;
 }
 
 auto CursorImpl::seek_first() -> void

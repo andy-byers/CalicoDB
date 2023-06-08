@@ -42,8 +42,9 @@ public:
     // "block_start".
     static auto release(Node &node, std::size_t block_start, std::size_t block_size) -> void;
 
-    // Merge all free blocks and fragment bytes into the gap space.
-    static auto defragment(Node &node, int skip = -1) -> void;
+    // Merge all free blocks and fragment bytes into the gap space
+    // Returns 0 on success, -1 on failure. This routine might fail if the page has been corrupted.
+    static auto defragment(Node &node, int skip = -1) -> int;
 };
 
 // Internal Cell Format:
@@ -75,9 +76,7 @@ struct Cell {
 };
 
 struct NodeMeta {
-    using ParseCell = Cell (*)(char *, const char *);
-
-    ParseCell parse_cell = nullptr;
+    int (*parse_cell)(char *ptr, const char *limit, Cell *cell_out);
 };
 
 struct Node {
@@ -104,15 +103,18 @@ struct Node {
     unsigned gap_size = 0;
 };
 
-// Read a cell from the node at the specified index or offset. The node must remain alive for as long as the cell.
-[[nodiscard]] auto read_cell(Node &node, std::size_t index) -> Cell;
+// Read a cell from the `node` at the specified `index`
+// The `node` must remain alive for as long as the cell. On success, stores the cell in `*cell_out` and returns
+// 0. Returns a nonzero integer if the cell is determined to be corrupted.
+[[nodiscard]] auto read_cell(Node &node, std::size_t index, Cell *cell_out) -> int;
 
-// Write a cell to the node at the specified index. May defragment the node. The cell must be of the same
-// type as the node, or if the node is internal, promote_cell() must have been called on the cell.
+// Write a `cell` to the `node` at the specified `index`
+// May defragment the `node`. The `cell` must be of the same type as the `node`, or if the `node` is internal,
+// promote_cell() must have been called on the `cell`.
 auto write_cell(Node &node, std::size_t index, const Cell &cell) -> std::size_t;
 
-// Erase a cell from the node at the specified index.
-auto erase_cell(Node &node, std::size_t index) -> void;
+// Erase a cell from the `node` at the specified `index`
+auto erase_cell(Node &node, std::size_t index, std::size_t cell_size) -> void;
 
 struct PayloadManager {
     [[nodiscard]] static auto promote(Pager &pager, char *scratch, Cell &cell, Id parent_id) -> Status;
@@ -201,10 +203,10 @@ class CursorImpl : public Cursor
     mutable Node m_node;
     mutable bool m_is_valid = false;
     Tree *m_tree;
-    std::string m_key;
-    std::string m_value;
-    std::size_t m_key_size = 0;
-    std::size_t m_value_size = 0;
+    std::string m_key_buf;
+    std::string m_val_buf;
+    Slice m_key;
+    Slice m_val;
     std::size_t m_index = 0;
 
 protected:
@@ -249,13 +251,13 @@ public:
     explicit Tree(Pager &pager, char *scratch, const Id *root_id);
     [[nodiscard]] static auto create(Pager &pager, bool is_root, Id *out) -> Status;
     [[nodiscard]] static auto destroy(Tree &tree) -> Status;
-    [[nodiscard]] auto put(const Slice &key, const Slice &value) -> Status;
+    auto put(const Slice &key, const Slice &value) -> Status;
     [[nodiscard]] auto get(const Slice &key, std::string *value) const -> Status;
-    [[nodiscard]] auto erase(const Slice &key) -> Status;
-    [[nodiscard]] auto vacuum(Schema &schema) -> Status;
-    [[nodiscard]] auto allocate(bool is_external, Node &out) -> Status;
+    auto erase(const Slice &key) -> Status;
+    auto vacuum(Schema &schema) -> Status;
+    auto allocate(bool is_external, Node &out) -> Status;
     [[nodiscard]] auto acquire(Id page_id, bool upgrade, Node &out) const -> Status;
-    [[nodiscard]] auto free(Node node) -> Status;
+    auto free(Node node) -> Status;
     auto upgrade(Node &node) const -> void;
     auto release(Node node) const -> void;
 
@@ -294,36 +296,38 @@ private:
     friend class Schema;
     friend class TreeValidator;
 
-    [[nodiscard]] auto free_overflow(Id head_id) -> Status;
+    auto free_overflow(Id head_id) -> Status;
+    [[nodiscard]] auto read_key(const Cell &cell, std::string &scratch, Slice *key_out, std::size_t limit = 0) const -> Status;
+    [[nodiscard]] auto read_value(const Cell &cell, std::string &scratch, Slice *value_out) const -> Status;
     [[nodiscard]] auto read_key(Node &node, std::size_t index, std::string &scratch, Slice *key_out, std::size_t limit = 0) const -> Status;
     [[nodiscard]] auto read_value(Node &node, std::size_t index, std::string &scratch, Slice *value_out) const -> Status;
-    [[nodiscard]] auto write_key(Node &node, std::size_t index, const Slice &key) -> Status;
-    [[nodiscard]] auto write_value(Node &node, std::size_t index, const Slice &value) -> Status;
-    [[nodiscard]] auto emplace(Node &node, const Slice &key, const Slice &value, std::size_t index, bool &overflow) -> Status;
-    [[nodiscard]] auto destroy_impl(Node node) -> Status;
-    [[nodiscard]] auto vacuum_step(Page &free, PointerMap::Entry entry, Schema &schema, Id last_id) -> Status;
-    [[nodiscard]] auto resolve_overflow() -> Status;
-    [[nodiscard]] auto resolve_underflow() -> Status;
-    [[nodiscard]] auto split_root() -> Status;
-    [[nodiscard]] auto split_nonroot() -> Status;
-    [[nodiscard]] auto split_nonroot_fast(Node parent, Node right, const Cell &overflow) -> Status;
-    [[nodiscard]] auto fix_root() -> Status;
-    [[nodiscard]] auto fix_nonroot(Node parent, std::size_t index) -> Status;
-    [[nodiscard]] auto merge_left(Node &left, Node right, Node &parent, std::size_t index) -> Status;
-    [[nodiscard]] auto merge_right(Node &left, Node right, Node &parent, std::size_t index) -> Status;
-    [[nodiscard]] auto rotate_left(Node &parent, Node &left, Node &right, std::size_t index) -> Status;
-    [[nodiscard]] auto rotate_right(Node &parent, Node &left, Node &right, std::size_t index) -> Status;
-    [[nodiscard]] auto transfer_left(Node &left, Node &right) -> Status;
+    auto write_key(Node &node, std::size_t index, const Slice &key) -> Status;
+    auto write_value(Node &node, std::size_t index, const Slice &value) -> Status;
+    auto emplace(Node &node, const Slice &key, const Slice &value, std::size_t index, bool &overflow) -> Status;
+    auto destroy_impl(Node node) -> Status;
+    auto vacuum_step(Page &free, PointerMap::Entry entry, Schema &schema, Id last_id) -> Status;
+    auto resolve_overflow() -> Status;
+    auto resolve_underflow() -> Status;
+    auto split_root() -> Status;
+    auto split_nonroot() -> Status;
+    auto split_nonroot_fast(Node parent, Node right, const Cell &overflow) -> Status;
+    auto fix_root() -> Status;
+    auto fix_nonroot(Node parent, std::size_t index) -> Status;
+    auto merge_left(Node &left, Node right, Node &parent, std::size_t index) -> Status;
+    auto merge_right(Node &left, Node right, Node &parent, std::size_t index) -> Status;
+    auto rotate_left(Node &parent, Node &left, Node &right, std::size_t index) -> Status;
+    auto rotate_right(Node &parent, Node &left, Node &right, std::size_t index) -> Status;
+    auto transfer_left(Node &left, Node &right) -> Status;
 
     [[nodiscard]] auto find_highest(Node &node) const -> Status;
     [[nodiscard]] auto find_lowest(Node &node) const -> Status;
     [[nodiscard]] auto find_external(const Slice &key, bool write, bool &exact) const -> Status;
-    [[nodiscard]] auto insert_cell(Node &node, std::size_t index, const Cell &cell) -> Status;
-    [[nodiscard]] auto remove_cell(Node &node, std::size_t index) -> Status;
+    auto insert_cell(Node &node, std::size_t index, const Cell &cell) -> Status;
+    auto remove_cell(Node &node, std::size_t index) -> Status;
     [[nodiscard]] auto find_parent_id(Id page_id, Id &out) const -> Status;
-    [[nodiscard]] auto fix_parent_id(Id page_id, Id parent_id, PointerMap::Type type) -> Status;
-    [[nodiscard]] auto maybe_fix_overflow_chain(const Cell &cell, Id parent_id) -> Status;
-    [[nodiscard]] auto fix_links(Node &node, Id parent_id = Id::null()) -> Status;
+    auto fix_parent_id(Id page_id, Id parent_id, PointerMap::Type type) -> Status;
+    auto maybe_fix_overflow_chain(const Cell &cell, Id parent_id) -> Status;
+    auto fix_links(Node &node, Id parent_id = Id::null()) -> Status;
     [[nodiscard]] auto cell_scratch() -> char *;
 
     mutable Stats m_stats;
