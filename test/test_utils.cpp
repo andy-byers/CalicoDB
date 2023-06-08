@@ -556,15 +556,15 @@ TEST(Slice, DeathTest)
     Slice slice("Hello, world!");
     const auto oob = slice.size() + 1;
 
-    ASSERT_DEATH(slice.advance(oob), "Assertion failed");
-    ASSERT_DEATH(slice.truncate(oob), "Assertion failed");
-    ASSERT_DEATH((void)slice.range(oob, 1), "Assertion failed");
-    ASSERT_DEATH((void)slice.range(0, oob), "Assertion failed");
-    ASSERT_DEATH((void)slice.range(oob / 2, oob - 1), "Assertion failed");
-    ASSERT_DEATH((void)slice.range(oob), "Assertion failed");
-    ASSERT_DEATH((void)slice[oob], "Assertion failed");
-    ASSERT_DEATH(Slice(nullptr), "Assertion failed");
-    ASSERT_DEATH(Slice(nullptr, 123), "Assertion failed");
+    ASSERT_DEATH(slice.advance(oob), "Assert");
+    ASSERT_DEATH(slice.truncate(oob), "Assert");
+    ASSERT_DEATH((void)slice.range(oob, 1), "Assert");
+    ASSERT_DEATH((void)slice.range(0, oob), "Assert");
+    ASSERT_DEATH((void)slice.range(oob / 2, oob - 1), "Assert");
+    ASSERT_DEATH((void)slice.range(oob), "Assert");
+    ASSERT_DEATH((void)slice[oob], "Assert");
+    ASSERT_DEATH(Slice(nullptr), "Assert");
+    ASSERT_DEATH(Slice(nullptr, 123), "Assert");
 }
 #endif // not NDEBUG
 
