@@ -627,7 +627,6 @@ static auto busy_wait_file_lock(File &file, bool is_writer) -> void
                 std::this_thread::yield();
                 file.file_unlock();
             } else {
-                std::this_thread::sleep_for(std::chrono::microseconds{100});
                 return;
             }
         }
