@@ -127,7 +127,7 @@ static auto write_child_id(Cell &cell, Id child_id) -> void
     put_u32(cell.ptr, child_id.value);
 }
 
-static auto parse_external_cell(char *data, const char *limit, Cell *cell_out) -> int
+static auto external_parse_cell(char *data, const char *limit, Cell *cell_out) -> int
 {
     U64 key_size, value_size;
     const auto *ptr = data;
@@ -155,7 +155,7 @@ static auto parse_external_cell(char *data, const char *limit, Cell *cell_out) -
     }
     return -1;
 }
-static auto parse_internal_cell(char *data, const char *limit, Cell *cell_out) -> int
+static auto internal_parse_cell(char *data, const char *limit, Cell *cell_out) -> int
 {
     U64 key_size;
     if (const auto *ptr = decode_varint(data + Id::kSize, limit, key_size)) {
@@ -377,10 +377,10 @@ auto BlockAllocator::defragment(Node &node, int skip) -> int
 }
 
 static constexpr NodeMeta kExternalMeta = {
-    parse_external_cell};
+    external_parse_cell};
 
 static constexpr NodeMeta kInternalMeta = {
-    parse_internal_cell};
+    internal_parse_cell};
 
 static auto setup_node(Node &node) -> void
 {
@@ -398,7 +398,7 @@ static auto setup_node(Node &node) -> void
     node.gap_size = static_cast<unsigned>(top - bottom);
 }
 
-static auto allocate_block(Node &node, unsigned index, unsigned size) -> std::size_t
+static auto allocate_block(Node &node, unsigned index, unsigned size) -> int
 {
     CALICODB_EXPECT_LE(index, node.header.cell_count);
 
@@ -409,14 +409,18 @@ static auto allocate_block(Node &node, unsigned index, unsigned size) -> std::si
 
     // We don't have room to insert the cell pointer.
     if (node.gap_size < kPointerSize) {
-        BlockAllocator::defragment(node);
+        if (BlockAllocator::defragment(node)) {
+            return -1;
+        }
     }
     // Insert a dummy cell pointer to save the slot.
     node.insert_slot(index, kPageSize - 1);
 
     auto offset = BlockAllocator::allocate(node, size);
     if (offset == 0) {
-        BlockAllocator::defragment(node, static_cast<int>(index));
+        if (BlockAllocator::defragment(node, static_cast<int>(index))) {
+            return -1;
+        }
         offset = BlockAllocator::allocate(node, size);
     }
     // We already made sure we had enough room to fulfill the request. If we had to defragment, the call
@@ -490,24 +494,14 @@ auto Node::remove_slot(std::size_t index) -> void
     --header.cell_count;
 }
 
-auto Node::take() && -> Page
-{
-    if (page.is_writable()) {
-        if (header.frag_count > 0xFF) {
-            // Fragment count overflow.
-            BlockAllocator::defragment(*this);
-        }
-        header.write(page.mutable_ptr() + node_header_offset(*this));
-    }
-    return std::move(page);
-}
-
-static auto merge_root(Node &root, Node &child) -> void
+[[nodiscard]] static auto merge_root(Node &root, Node &child) -> int
 {
     CALICODB_EXPECT_EQ(root.header.next_id, child.page.id());
     const auto &header = child.header;
-    if (header.free_start) {
-        BlockAllocator::defragment(child);
+    if (header.free_start != 0) {
+        if (BlockAllocator::defragment(child)) {
+            return -1;
+        }
     }
 
     // Copy the cell content area.
@@ -522,6 +516,7 @@ static auto merge_root(Node &root, Node &child) -> void
     std::memcpy(memory, child.page.constant_ptr() + cell_slots_offset(child), memory_size);
     root.header = header;
     root.meta = child.meta;
+    return 0;
 }
 
 [[nodiscard]] static auto is_overflowing(const Node &node) -> bool
@@ -551,7 +546,8 @@ auto Tree::create(Pager &pager, bool is_root, Id *out) -> Status
     setup_node(node);
 
     const auto root_id = node.page.id();
-    pager.release(std::move(node).take());
+    node.header.write(node.page.mutable_ptr() + node_header_offset(node));
+    pager.release(std::move(node).page);
 
     if (!is_root) {
         // The schema tree doesn't have a pointer map entry.
@@ -778,7 +774,17 @@ auto Tree::upgrade(Node &node) const -> void
 
 auto Tree::release(Node node) const -> void
 {
-    m_pager->release(std::move(node).take());
+    if (m_pager->mode() == Pager::kDirty) {
+        // If the pager is in kWrite mode and a page is marked dirty, it immediately
+        // transitions to kDirty mode. So, if this node is dirty, then the pager must
+        // be in kDirty mode (unless there was an error).
+        if (node.header.frag_count > 0xFF) {
+            // Fragment count overflow.
+            BlockAllocator::defragment(node);
+        }
+        node.header.write(node.page.mutable_ptr() + node_header_offset(node));
+    }
+    m_pager->release(std::move(node).page);
 }
 
 auto Tree::resolve_overflow() -> Status
@@ -1182,7 +1188,9 @@ auto Tree::fix_root() -> Status
             m_cursor.move_to(std::move(child), 0);
             CALICODB_TRY(split_nonroot());
         } else {
-            merge_root(node, child);
+            if (merge_root(node, child)) {
+                return Status::corruption();
+            }
             CALICODB_TRY(free(std::move(child)));
         }
         CALICODB_TRY(fix_links(node));
@@ -1367,7 +1375,7 @@ auto Tree::put(const Slice &key, const Slice &value) -> Status
                     // There wasn't enough room in `node` to hold the cell. Get the node back and
                     // perform a split.
                     Cell ovfl;
-                    if (parse_external_cell(cell_scratch(), cell_scratch() + kPageSize, &ovfl)) {
+                    if (external_parse_cell(cell_scratch(), cell_scratch() + kPageSize, &ovfl)) {
                         s = Status::corruption();
                     } else {
                         m_cursor.node().overflow = ovfl;

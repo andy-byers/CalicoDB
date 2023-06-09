@@ -4,6 +4,7 @@
 
 #include "common.h"
 #include "fake_env.h"
+#include "freelist.h"
 #include "pager.h"
 #include "test.h"
 #include "wal.h"
@@ -380,6 +381,25 @@ TEST_F(PagerTests, Freelist)
     pager_view([this] {
         ASSERT_EQ(m_page_ids.back().value, m_pager->page_count());
     });
+}
+
+TEST_F(PagerTests, ReportsOutOfRangePages)
+{
+    ASSERT_OK(m_pager->start_reader());
+    ASSERT_OK(m_pager->start_writer());
+    Page page;
+
+    ASSERT_NOK(m_pager->acquire(Id(100), page));
+
+    PageRef ref;
+    page.TEST_ref() = &ref;
+
+    ref.page_id = Id(1);
+    ASSERT_NOK(Freelist::push(*m_pager, std::move(page)));
+    ref.page_id = Id(100);
+    ASSERT_NOK(Freelist::push(*m_pager, std::move(page)));
+
+    m_pager->finish();
 }
 
 #ifndef NDEBUG

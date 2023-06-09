@@ -426,7 +426,6 @@ auto Pager::mark_dirty(Page &page) -> void
             m_mode = kDirty;
         }
     }
-    page.m_write = true;
 }
 
 auto Pager::release(Page page, ReleaseAction action) -> void

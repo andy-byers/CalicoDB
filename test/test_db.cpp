@@ -9,34 +9,49 @@
 #include "test.h"
 #include "tx_impl.h"
 #include "wal.h"
-#include <atomic>
-#include <filesystem>
 #include <gtest/gtest.h>
 
 namespace calicodb::test
 {
 
+TEST(FileFormatTests, ReportsUnrecognizedFormatString)
+{
+    char page[kPageSize];
+    FileHeader::make_supported_db(page);
+
+    ++page[0];
+    ASSERT_NOK(FileHeader::check_db_support(page));
+}
+
+TEST(FileFormatTests, ReportsUnrecognizedFormatVersion)
+{
+    char page[kPageSize];
+    FileHeader::make_supported_db(page);
+
+    ++page[FileHeader::kFmtVersionOffset];
+    ASSERT_NOK(FileHeader::check_db_support(page));
+}
+
 class DBTests : public testing::Test
 {
 protected:
-    static constexpr auto kDBDir = "/tmp/calicodb_test";
-    static constexpr auto kDBName = "/tmp/calicodb_test/testdb";
-    static constexpr auto kWALName = "/tmp/calicodb_test/testdb-wal";
-    static constexpr auto kShmName = "/tmp/calicodb_test/testdb-shm";
-    static constexpr auto kAltWALName = "/tmp/calicodb_test/testwal";
     static constexpr std::size_t kMaxRounds = 1'000;
+    const std::string m_test_dir;
+    const std::string m_db_name;
+    const std::string m_alt_wal_name;
 
     explicit DBTests()
-        : m_env(Env::default_env())
+        : m_test_dir(testing::TempDir()),
+          m_db_name(m_test_dir + "db"),
+          m_alt_wal_name(m_test_dir + "wal"),
+          m_env(Env::default_env())
     {
-        std::filesystem::remove_all(kDBDir);
-        std::filesystem::create_directory(kDBDir);
+        (void)DB::destroy(Options(), m_db_name);
     }
 
     ~DBTests() override
     {
         delete m_db;
-        std::filesystem::remove_all(kDBDir);
     }
 
     auto SetUp() -> void override
@@ -238,7 +253,7 @@ protected:
     {
         close_db();
         if (clear) {
-            (void)DB::destroy(Options(), kDBName);
+            (void)DB::destroy(Options(), m_db_name);
         }
         Options options;
         options.busy = &m_busy;
@@ -252,12 +267,12 @@ protected:
             options.sync_mode = Options::kSyncFull;
         }
         if (m_config & kUseAltWAL) {
-            options.wal_filename = kAltWALName;
+            options.wal_filename = m_alt_wal_name;
         }
         if (m_config & kSmallCache) {
             options.cache_size = 0;
         }
-        return DB::open(options, kDBName, m_db);
+        return DB::open(options, m_db_name, m_db);
     }
     auto close_db() -> void
     {
@@ -514,7 +529,7 @@ TEST_F(DBTests, CorruptedRootIDs)
 
     File *file;
     auto *env = Env::default_env();
-    ASSERT_OK(env->new_file(kDBName, Env::kReadWrite, file));
+    ASSERT_OK(env->new_file(m_db_name, Env::kReadWrite, file));
 
     // Corrupt the root ID written to the schema bucket, which has already been
     // written back to the database file. The root ID is a 1 byte varint pointing
@@ -562,10 +577,10 @@ TEST_F(DBTests, CheckpointResize)
         }
         return s;
     }));
-    ASSERT_EQ(0, file_size(kDBName));
+    ASSERT_EQ(0, file_size(m_db_name));
 
     ASSERT_OK(m_db->checkpoint(true));
-    ASSERT_EQ(kPageSize * 3, file_size(kDBName));
+    ASSERT_EQ(kPageSize * 3, file_size(m_db_name));
 
     ASSERT_OK(m_db->update([](auto &tx) {
         auto s = tx.drop_bucket("BUCKET");
@@ -574,12 +589,12 @@ TEST_F(DBTests, CheckpointResize)
         }
         return s;
     }));
-    ASSERT_EQ(kPageSize * 3, file_size(kDBName));
+    ASSERT_EQ(kPageSize * 3, file_size(m_db_name));
 
     // Tx::vacuum() never gets rid of the root database page, even if the whole database
     // is empty.
     ASSERT_OK(m_db->checkpoint(true));
-    ASSERT_EQ(kPageSize, file_size(kDBName));
+    ASSERT_EQ(kPageSize, file_size(m_db_name));
 }
 
 TEST_F(DBTests, RerootBuckets)
@@ -707,24 +722,29 @@ protected:
     }
 };
 
+TEST_F(DBOpenTests, HandlesEmptyFilename)
+{
+    ASSERT_NOK(DB::open(Options(), "", m_db));
+}
+
 TEST_F(DBOpenTests, CreatesMissingDb)
 {
     Options options;
     options.error_if_exists = false;
     options.create_if_missing = true;
-    ASSERT_OK(DB::open(options, kDBName, m_db));
+    ASSERT_OK(DB::open(options, m_db_name, m_db));
     delete m_db;
     m_db = nullptr;
 
     options.create_if_missing = false;
-    ASSERT_OK(DB::open(options, kDBName, m_db));
+    ASSERT_OK(DB::open(options, m_db_name, m_db));
 }
 
 TEST_F(DBOpenTests, FailsIfMissingDb)
 {
     Options options;
     options.create_if_missing = false;
-    ASSERT_TRUE(DB::open(options, kDBName, m_db).is_invalid_argument());
+    ASSERT_TRUE(DB::open(options, m_db_name, m_db).is_invalid_argument());
 }
 
 TEST_F(DBOpenTests, FailsIfDbExists)
@@ -732,12 +752,12 @@ TEST_F(DBOpenTests, FailsIfDbExists)
     Options options;
     options.create_if_missing = true;
     options.error_if_exists = true;
-    ASSERT_OK(DB::open(options, kDBName, m_db));
+    ASSERT_OK(DB::open(options, m_db_name, m_db));
     delete m_db;
     m_db = nullptr;
 
     options.create_if_missing = false;
-    ASSERT_TRUE(DB::open(options, kDBName, m_db).is_invalid_argument());
+    ASSERT_TRUE(DB::open(options, m_db_name, m_db).is_invalid_argument());
 }
 //
 // class DBTransactionTests : public DBErrorTests
@@ -757,7 +777,7 @@ TEST_F(DBOpenTests, FailsIfDbExists)
 //        DB *db;
 //        Options options;
 //        options.env = m_test_env;
-//        auto s = DB::open(options, kDBName, db);
+//        auto s = DB::open(options, m_db_name, db);
 //        if (!s.is_ok()) {
 //            return s;
 //        }
@@ -795,7 +815,7 @@ TEST_F(DBOpenTests, FailsIfDbExists)
 //            options.env = m_test_env;
 //
 //            Status s;
-//            EXPECT_TRUE((s = DB::open(options, kDBName, db)).is_busy())
+//            EXPECT_TRUE((s = DB::open(options, m_db_name, db)).is_busy())
 //                << s.to_string();
 //            return Status::ok();
 //        };
@@ -827,7 +847,7 @@ TEST_F(DBOpenTests, FailsIfDbExists)
 //        Options options;
 //        options.env = m_test_env;
 //        has_open_db = true;
-//        EXPECT_OK(DB::open(options, kDBName, db));
+//        EXPECT_OK(DB::open(options, m_db_name, db));
 //        EXPECT_OK(db->update([n](auto &tx) {
 //            return put_range(tx, BucketOptions(), "BUCKET", kN * n, kN * (n + 1));
 //        }));
@@ -861,7 +881,7 @@ TEST_F(DBOpenTests, FailsIfDbExists)
 //{
 //    ASSERT_OK(try_reopen(kOpenPrefill));
 //    m_test_env->add_interceptor(
-//        kDBName,
+//        m_db_name,
 //        Interceptor(kSyscallWrite, [this] {
 //            // Each time File::write() is called, use a different connection to attempt a
 //            // checkpoint. It should get blocked every time, since a checkpoint is already
@@ -869,7 +889,7 @@ TEST_F(DBOpenTests, FailsIfDbExists)
 //            DB *db;
 //            Options options;
 //            options.env = m_test_env;
-//            EXPECT_OK(DB::open(options, kDBName, db));
+//            EXPECT_OK(DB::open(options, m_db_name, db));
 //            EXPECT_TRUE(db->checkpoint(false).is_busy());
 //            EXPECT_TRUE(db->checkpoint(true).is_busy());
 //            delete db;
@@ -893,12 +913,12 @@ TEST_F(DBOpenTests, FailsIfDbExists)
 //
 //    U64 n = 0;
 //    m_test_env->add_interceptor(
-//        kDBName,
+//        m_db_name,
 //        Interceptor(kSyscallWrite, [this, &n] {
 //            DB *db;
 //            Options options;
 //            options.env = m_test_env;
-//            EXPECT_OK(DB::open(options, kDBName, db));
+//            EXPECT_OK(DB::open(options, m_db_name, db));
 //            EXPECT_OK(db->update([n](auto &tx) {
 //                return put_range(tx, BucketOptions(), "SELF", n * 2, (n + 1) * 2);
 //            }));

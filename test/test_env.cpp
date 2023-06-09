@@ -2,16 +2,16 @@
 // This source code is licensed under the MIT License, which can be found in
 // LICENSE.md. See AUTHORS.md for a list of contributor names.
 
-#include <filesystem>
-#include <mutex>
-#include <thread>
-#include <gtest/gtest.h>
 #include "calicodb/env.h"
 #include "common.h"
 #include "encoding.h"
 #include "env_posix.h"
 #include "fake_env.h"
 #include "test.h"
+#include <filesystem>
+#include <gtest/gtest.h>
+#include <mutex>
+#include <thread>
 
 namespace calicodb::test
 {
@@ -267,8 +267,6 @@ static auto sum_shm_versions(File &file) -> U32
     return total;
 }
 
-static constexpr auto kFilename = "./__testfile";
-
 class FileTests : public testing::TestWithParam<std::size_t>
 {
 public:
@@ -388,8 +386,10 @@ class EnvLockStateTests : public testing::TestWithParam<std::size_t>
 {
 public:
     const std::size_t kReplicates = GetParam();
+    std::string m_filename;
 
     explicit EnvLockStateTests()
+        : m_filename(testing::TempDir() + "filename")
     {
         m_env = Env::default_env();
         m_helper.env = m_env;
@@ -397,7 +397,7 @@ public:
 
     ~EnvLockStateTests() override
     {
-        (void)m_env->remove_file(kFilename);
+        (void)m_env->remove_file(m_filename);
     }
 
     auto new_file(const std::string &filename) -> File *
@@ -413,7 +413,7 @@ public:
 
     auto test_sequence(bool) -> void
     {
-        auto *f = new_file(kFilename);
+        auto *f = new_file(m_filename);
         ASSERT_OK(f->file_lock(kFileShared));
         ASSERT_OK(f->file_lock(kFileExclusive));
         f->file_unlock();
@@ -421,9 +421,9 @@ public:
 
     auto test_shared() -> void
     {
-        auto *a = new_file(kFilename);
-        auto *b = new_file(kFilename);
-        auto *c = new_file(kFilename);
+        auto *a = new_file(m_filename);
+        auto *b = new_file(m_filename);
+        auto *c = new_file(m_filename);
         ASSERT_OK(a->file_lock(kFileShared));
         ASSERT_OK(b->file_lock(kFileShared));
         ASSERT_OK(c->file_lock(kFileShared));
@@ -434,8 +434,8 @@ public:
 
     auto test_exclusive() -> void
     {
-        auto *a = new_file(kFilename);
-        auto *b = new_file(kFilename);
+        auto *a = new_file(m_filename);
+        auto *b = new_file(m_filename);
 
         ASSERT_OK(a->file_lock(kFileShared));
         ASSERT_OK(a->file_lock(kFileExclusive));
@@ -483,7 +483,7 @@ TEST_P(EnvLockStateTests, Exclusive)
 
 TEST_P(EnvLockStateTests, NOOPs)
 {
-    auto *f = new_file(kFilename);
+    auto *f = new_file(m_filename);
 
     ASSERT_OK(f->file_lock(kFileShared));
     ASSERT_OK(f->file_lock(kFileShared));
@@ -501,7 +501,7 @@ TEST_P(EnvLockStateTests, NOOPs)
 #ifndef NDEBUG
 TEST_P(EnvLockStateTests, InvalidRequestDeathTest)
 {
-    auto *f = new_file(kFilename);
+    auto *f = new_file(m_filename);
     // kUnlocked -> kShared is the only allowed transition out of kUnlocked.
     ASSERT_DEATH((void)f->file_lock(kFileExclusive), "expect");
 }

@@ -27,13 +27,20 @@ auto DBImpl::open(const Options &sanitized) -> Status
             return Status::invalid_argument(
                 "database \"" + m_db_filename + "\" already exists");
         }
-    } else if (s.is_io_error()) {
+    } else if (s.is_not_found()) {
         if (!sanitized.create_if_missing) {
             return Status::invalid_argument(
                 "database \"" + m_db_filename + "\" does not exist");
         }
-        if (m_env->remove_file(m_wal_filename).is_ok()) {
+        // If there exists a file named m_wal_filename, then it must either be leftover from a
+        // failed call to DB::destroy(), or it is an unrelated file that coincidentally has the
+        // name of this database's WAL file. Either way, we must get rid of it here, otherwise
+        // we'll end up checkpointing it.
+        s = m_env->remove_file(m_wal_filename);
+        if (s.is_ok()) {
             log(m_log, R"(removed old WAL file "%s")", m_wal_filename.c_str());
+        } else if (!s.is_not_found()) {
+            return s;
         }
         log(m_log, R"(creating missing database "%s")", m_db_filename.c_str());
         s = m_env->new_file(m_db_filename, Env::kCreate, file);

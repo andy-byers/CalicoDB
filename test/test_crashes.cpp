@@ -16,90 +16,6 @@
 namespace calicodb::test
 {
 
-auto print_database_overview(std::ostream &os, Pager &pager) -> void
-{
-#define SEP "|-----------|-----------|----------------|---------------------------------|\n"
-
-    if (pager.page_count() == 0) {
-        os << "DB is empty\n";
-        return;
-    }
-    for (auto page_id = Id::root(); page_id.value <= pager.page_count(); ++page_id.value) {
-        if (page_id.as_index() % 32 == 0) {
-            os << SEP "|    PageID |  ParentID | PageType       | Info                            |\n" SEP;
-        }
-        Id parent_id;
-        std::string info, type;
-        if (PointerMap::is_map(page_id)) {
-            const auto first = page_id.value + 1;
-            append_fmt_string(info, "Range=[%u,%u]", first, first + kPageSize / 5 - 1);
-            type = "<PtrMap>";
-        } else {
-            PointerMap::Entry entry;
-            if (page_id.is_root()) {
-                entry.type = PointerMap::kTreeRoot;
-            } else {
-                ASSERT_OK(PointerMap::read_entry(pager, page_id, entry));
-                parent_id = entry.back_ptr;
-            }
-            Page page;
-            ASSERT_OK(pager.acquire(page_id, page));
-
-            switch (entry.type) {
-                case PointerMap::kTreeRoot:
-                    type = "TreeRoot";
-                    [[fallthrough]];
-                case PointerMap::kTreeNode: {
-                    NodeHeader hdr;
-                    hdr.read(page.constant_ptr() + page_id.is_root() * FileHeader::kSize);
-                    auto n = hdr.cell_count;
-                    if (hdr.is_external) {
-                        append_fmt_string(info, "Ex,N=%u,Sib=(%u,%u)", n, hdr.prev_id.value, hdr.next_id.value);
-                    } else {
-                        info = "In,N=";
-                        append_number(info, n);
-                        ++n;
-                    }
-                    if (type.empty()) {
-                        type = "TreeNode";
-                    }
-                    break;
-                }
-                case PointerMap::kFreelistLeaf:
-                    type = "Unused";
-                    break;
-                case PointerMap::kFreelistTrunk:
-                    append_fmt_string(
-                        info, "N=%u,Next=%u", get_u32(page.constant_ptr() + 4), get_u32(page.constant_ptr()));
-                    type = "Freelist";
-                    break;
-                case PointerMap::kOverflowHead:
-                    append_fmt_string(info, "Next=%u", get_u32(page.constant_ptr()));
-                    type = "OvflHead";
-                    break;
-                case PointerMap::kOverflowLink:
-                    append_fmt_string(info, "Next=%u", get_u32(page.constant_ptr()));
-                    type = "OvflLink";
-                    break;
-                default:
-                    type = "<BadType>";
-            }
-            pager.release(std::move(page));
-        }
-        std::string line;
-        append_fmt_string(
-            line,
-            "|%10u |%10u | %-15s| %-32s|\n",
-            page_id.value,
-            parent_id.value,
-            type.c_str(),
-            info.c_str());
-        os << line;
-    }
-    os << SEP;
-#undef SEP
-}
-
 #define MAYBE_CRASH(target)                              \
     do {                                                 \
         if ((target)->should_next_syscall_fail()) {      \
@@ -377,11 +293,11 @@ protected:
         db_impl(&db)->TEST_pager().assert_state();
     }
 
-    struct Parameters {
+    struct OperationsParameters {
         bool inject_faults = false;
         bool test_checkpoint = false;
     };
-    auto run_operations_test(const Parameters &param) -> void
+    auto run_operations_test(const OperationsParameters &param) -> void
     {
         enum SourceLocation {
             kSrcOpen,
@@ -435,7 +351,6 @@ protected:
                     ++src_counters[kSrcCheckpoint];
                     return db->checkpoint(true);
                 });
-                validate(*db);
             }
 
             m_env->m_enabled = false;
@@ -449,8 +364,55 @@ protected:
         std::cout << " kViewDB        | " << std::setw(18) << static_cast<double>(src_counters[kSrcView]) / kNumIterations << '\n';
         std::cout << " kSrcCheckpoint | " << std::setw(18) << static_cast<double>(src_counters[kSrcCheckpoint]) / kNumIterations << '\n';
         std::cout << '\n';
+    }
 
-        std::memset(src_counters, 0, sizeof(src_counters));
+    struct OpenCloseParameters {
+        bool inject_faults = false;
+        std::size_t num_iterations = 1;
+    };
+    auto run_open_close_test(const OpenCloseParameters &param) -> void
+    {
+        Options options;
+        options.env = m_env;
+
+        std::size_t tries = 0;
+        for (std::size_t i = 0; i < param.num_iterations; ++i) {
+            m_env->m_enabled = false;
+            (void)DB::destroy(options, m_filename);
+
+            DB *db;
+            ASSERT_OK(DB::open(options, m_filename, db));
+            ASSERT_OK(db->update([scale = i + 1](auto &tx) {
+                Bucket b;
+                auto s = tx.create_bucket(BucketOptions(), "BUCKET", &b);
+                for (std::size_t i = 0; s.is_ok() && i < kNumRecords; ++i) {
+                    auto kv = make_key(i).to_string();
+                    kv.resize(kv.size() * scale, '0');
+                    s = tx.put(b, kv, kv);
+                }
+                return s;
+            }));
+
+            m_env->m_enabled = param.inject_faults;
+            m_env->m_max_num = static_cast<int>(i * 5);
+            m_env->m_num = 0;
+
+            delete db;
+
+            run_until_completion([this, &options, &db, &tries] {
+                ++tries;
+                auto s = DB::open(options, m_filename, db);
+                if (!s.is_ok()) {
+                    assert_injected_fault(s);
+                }
+                return s;
+            });
+            validate(*db);
+
+            delete db;
+        }
+
+        std::cout << "Tries per iteration: " << static_cast<double>(tries) / static_cast<double>(param.num_iterations) << '\n';
     }
 };
 
@@ -463,6 +425,19 @@ TEST_F(TestCrashes, Operations)
     // Run with fault injection.
     run_operations_test({true, false});
     run_operations_test({true, true});
+}
+
+TEST_F(TestCrashes, OpenClose)
+{
+    // Sanity check. No faults.
+    run_open_close_test({false, 1});
+    run_open_close_test({false, 2});
+    run_open_close_test({false, 3});
+
+    // Run with fault injection.
+    run_open_close_test({true, 1});
+    run_open_close_test({true, 2});
+    run_open_close_test({true, 3});
 }
 
 } // namespace calicodb::test

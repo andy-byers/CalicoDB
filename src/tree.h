@@ -81,7 +81,6 @@ struct NodeMeta {
 
 struct Node {
     Node() = default;
-    [[nodiscard]] auto take() && -> Page;
 
     Node(Node &&rhs) = default;
     auto operator=(Node &&) -> Node & = default;

@@ -175,6 +175,8 @@ struct INode final {
         case ENOLCK:
         case ETIMEDOUT:
             return Status::busy(std::strerror(error));
+        case ENOENT:
+            return Status::not_found(std::strerror(errno));
         default:
             return Status::io_error(std::strerror(error));
     }

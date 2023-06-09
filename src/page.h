@@ -36,9 +36,8 @@ struct PageRef final {
 
 class Page final
 {
-    Pager *m_pager = nullptr;
-    PageRef *m_ref = nullptr;
-    bool m_write = false;
+    Pager *m_pager;
+    PageRef *m_ref;
 
 public:
     friend class Pager;
@@ -52,11 +51,6 @@ public:
     }
 
     ~Page();
-
-    [[nodiscard]] auto is_writable() const -> bool
-    {
-        return m_write;
-    }
 
     [[nodiscard]] auto id() const -> Id
     {
@@ -85,6 +79,11 @@ public:
     // Custom move to handle NULLing out the Pager pointer.
     Page(Page &&rhs) noexcept;
     auto operator=(Page &&rhs) noexcept -> Page &;
+
+    [[nodiscard]] auto TEST_ref() -> PageRef *&
+    {
+        return m_ref;
+    }
 };
 
 [[nodiscard]] inline auto page_offset(Id page_id) -> std::size_t
