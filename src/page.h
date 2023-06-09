@@ -36,8 +36,8 @@ struct PageRef final {
 
 class Page final
 {
-    Pager *m_pager;
-    PageRef *m_ref;
+    Pager *m_pager = nullptr;
+    PageRef *m_ref = nullptr;
 
 public:
     friend class Pager;

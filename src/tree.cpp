@@ -428,7 +428,7 @@ static auto allocate_block(Node &node, unsigned index, unsigned size) -> int
     CALICODB_EXPECT_NE(offset, 0);
     node.set_slot(index, offset);
 
-    return offset;
+    return int(offset); // TODO: Return an int from BlockAllocator::allocate() to report corruption? There are a few things we could detect...
 }
 
 static auto free_block(Node &node, unsigned index, unsigned size) -> void
@@ -441,7 +441,7 @@ auto write_cell(Node &node, std::size_t index, const Cell &cell) -> std::size_t
 {
     if (const auto offset = allocate_block(node, static_cast<unsigned>(index), static_cast<unsigned>(cell.size))) {
         std::memcpy(node.page.mutable_ptr() + offset, cell.ptr, cell.size);
-        return offset;
+        return std::size_t(offset); // TODO
     }
     node.overflow_index = static_cast<unsigned>(index);
     node.overflow = cell;
