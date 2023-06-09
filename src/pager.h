@@ -76,18 +76,18 @@ public:
         return m_mode;
     }
 
-    [[nodiscard]] static auto open(const Parameters &param, Pager *&out) -> Status;
-    [[nodiscard]] auto close() -> Status;
+    static auto open(const Parameters &param, Pager *&out) -> Status;
+    auto close() -> Status;
 
-    [[nodiscard]] auto start_reader() -> Status;
-    [[nodiscard]] auto start_writer() -> Status;
-    [[nodiscard]] auto commit() -> Status;
+    auto start_reader() -> Status;
+    auto start_writer() -> Status;
+    auto commit() -> Status;
     auto finish() -> void;
 
-    [[nodiscard]] auto checkpoint(bool reset) -> Status;
-    [[nodiscard]] auto allocate(Page &page) -> Status;
-    [[nodiscard]] auto destroy(Page page) -> Status;
-    [[nodiscard]] auto acquire(Id page_id, Page &page) -> Status;
+    auto checkpoint(bool reset) -> Status;
+    auto allocate(Page &page) -> Status;
+    auto destroy(Page page) -> Status;
+    auto acquire(Id page_id, Page &page) -> Status;
     auto mark_dirty(Page &page) -> void;
     auto set_page_count(U32 page_count) -> void;
     [[nodiscard]] auto acquire_root() -> Page;
@@ -121,17 +121,22 @@ public:
     // This routine is a NOOP if page was already released.
     auto release(Page page, ReleaseAction action = kKeep) -> void;
 
-    auto set_status(const Status &error) const -> Status;
+    auto set_status(const Status &error) const -> void;
+
+    // Access to the WAL for testing.
+    [[nodiscard]] auto TEST_wal() -> Wal *
+    {
+        return m_wal;
+    }
 
 private:
     explicit Pager(const Parameters &param);
     [[nodiscard]] auto dirtylist_contains(const PageRef &ref) const -> bool;
-    [[nodiscard]] auto refresh_state() -> Status;
-    [[nodiscard]] auto open_wal() -> Status;
-    [[nodiscard]] auto read_page(PageRef &out, size_t *size_out) -> Status;
+    auto refresh_state() -> Status;
+    auto read_page(PageRef &out, size_t *size_out) -> Status;
     [[nodiscard]] auto read_page_from_file(PageRef &ref, std::size_t *size_out) const -> Status;
-    [[nodiscard]] auto ensure_available_buffer() -> Status;
-    [[nodiscard]] auto flush_dirty_pages() -> Status;
+    auto ensure_available_buffer() -> Status;
+    auto flush_dirty_pages() -> Status;
     auto purge_page(PageRef &victim) -> void;
 
     mutable Stats m_stats;
@@ -154,7 +159,6 @@ private:
     Wal *m_wal = nullptr;
     BusyHandler *m_busy = nullptr;
     U32 m_page_count = 0;
-    U32 m_save_count = 0;
 };
 
 // The first pointer map page is always on page 2, right after the root page.

@@ -48,9 +48,9 @@ public:
     }
 
     [[nodiscard]] auto new_tx(const Tx *&tx_out) const -> Status override;
-    [[nodiscard]] auto new_tx(WriteTag, Tx *&tx_out) -> Status override;
+    auto new_tx(WriteTag, Tx *&tx_out) -> Status override;
 
-    [[nodiscard]] auto checkpoint(bool reset) -> Status override
+    auto checkpoint(bool reset) -> Status override
     {
         return common_status(
             m_real->checkpoint(reset),
@@ -84,24 +84,24 @@ public:
         return m_real->schema();
     }
 
-    [[nodiscard]] auto create_bucket(const BucketOptions &options, const Slice &name, Bucket *tb_out) -> Status override;
+    auto create_bucket(const BucketOptions &options, const Slice &name, Bucket *tb_out) -> Status override;
     [[nodiscard]] auto open_bucket(const Slice &name, Bucket &tb_out) const -> Status override;
 
-    [[nodiscard]] auto drop_bucket(const Slice &name) -> Status override
+    auto drop_bucket(const Slice &name) -> Status override
     {
         return common_status(
             m_real->drop_bucket(name),
             m_model->drop_bucket(name));
     }
 
-    [[nodiscard]] auto vacuum() -> Status override
+    auto vacuum() -> Status override
     {
         return common_status(
             m_real->vacuum(),
             m_model->vacuum());
     }
 
-    [[nodiscard]] auto commit() -> Status override
+    auto commit() -> Status override
     {
         return common_status(
             m_real->commit(),
@@ -124,14 +124,14 @@ public:
         return s;
     }
 
-    [[nodiscard]] auto put(const Bucket &b, const Slice &key, const Slice &value) -> Status override
+    auto put(const Bucket &b, const Slice &key, const Slice &value) -> Status override
     {
         return common_status(
             m_real->put(b, key, value),
             m_model->put(b, key, value));
     }
 
-    [[nodiscard]] auto erase(const Bucket &b, const Slice &key) -> Status override
+    auto erase(const Bucket &b, const Slice &key) -> Status override
     {
         return common_status(
             m_real->erase(b, key),
@@ -297,7 +297,7 @@ class DBFuzzer
     {
         // This should be a NOOP if the bucket handle has already been created
         // since this transaction was started. The same exact handle is returned.
-        CHECK_OK(m_tx->create_bucket(BucketOptions(), "TABLE", &m_b));
+        CHECK_OK(m_tx->create_bucket(BucketOptions(), "BUCKET", &m_b));
     }
 
 public:

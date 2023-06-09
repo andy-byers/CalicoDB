@@ -9,8 +9,8 @@
 namespace calicodb
 {
 
-TxImpl::TxImpl(Pager &pager, Status &status)
-    : m_schema_obj(pager, status),
+TxImpl::TxImpl(Pager &pager, Status &status, char *scratch)
+    : m_schema_obj(pager, status, scratch),
       m_schema(m_schema_obj.new_cursor()),
       m_pager(&pager),
       m_status(&status)
@@ -20,6 +20,7 @@ TxImpl::TxImpl(Pager &pager, Status &status)
 TxImpl::~TxImpl()
 {
     delete m_schema;
+    m_schema_obj.close();
     m_pager->finish();
     if (m_backref) {
         *m_backref = nullptr;

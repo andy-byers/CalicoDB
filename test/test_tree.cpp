@@ -2,28 +2,75 @@
 // This source code is licensed under the MIT License, which can be found in
 // LICENSE.md. See AUTHORS.md for a list of contributor names.
 
+#include "common.h"
 #include "encoding.h"
 #include "fake_env.h"
 #include "freelist.h"
 #include "logging.h"
 #include "schema.h"
+#include "test.h"
 #include "tree.h"
-#include "unit_tests.h"
 #include <gtest/gtest.h>
 
-namespace calicodb
+namespace calicodb::test
 {
 
 static constexpr std::size_t kInitialRecordCount = 100;
 
+class PagerTestHarness
+{
+public:
+    static constexpr auto kFrameCount = kMinFrameCount;
+    FakeEnv *m_env;
+
+    PagerTestHarness()
+        : m_env(new FakeEnv)
+    {
+        std::string buffer(kPageSize, '\0');
+        std::memcpy(buffer.data(), FileHeader::kFmtString, sizeof(FileHeader::kFmtString));
+        buffer[FileHeader::kFmtVersionOffset] = FileHeader::kFmtVersion;
+        put_u32(buffer.data() + FileHeader::kPageCountOffset, 1);
+
+        File *file;
+        EXPECT_OK(m_env->new_file("db", Env::kCreate, file));
+        EXPECT_OK(file->write(0, buffer));
+
+        const Pager::Parameters pager_param = {
+            "db",
+            "wal",
+            file,
+            m_env,
+            nullptr,
+            &m_status,
+            nullptr,
+            kFrameCount,
+            Options::kSyncNormal,
+            Options::kLockNormal,
+        };
+
+        EXPECT_OK(Pager::open(pager_param, m_pager));
+        m_pager->set_page_count(1);
+    }
+
+    ~PagerTestHarness()
+    {
+        (void)m_pager->close();
+        delete m_pager;
+        delete m_env;
+    }
+
+protected:
+    Status m_status;
+    Pager *m_pager = nullptr;
+};
+
 class NodeTests
-    : public PagerTestHarness<FakeEnv>,
+    : public PagerTestHarness,
       public testing::Test
 {
 public:
     explicit NodeTests()
-        : node_scratch(kPageSize, '\0'),
-          cell_scratch(kPageSize, '\0')
+        : tree_scratch(kPageSize * 2, '\0')
     {
     }
 
@@ -37,7 +84,7 @@ public:
         ASSERT_OK(m_pager->start_reader());
         ASSERT_OK(m_pager->start_writer());
         ASSERT_OK(Tree::create(*m_pager, true, nullptr));
-        tree = std::make_unique<Tree>(*m_pager, nullptr);
+        tree = std::make_unique<Tree>(*m_pager, tree_scratch.data(), nullptr);
     }
 
     [[nodiscard]] auto get_node(bool is_external) -> Node
@@ -71,8 +118,7 @@ public:
     }
 
     std::unique_ptr<Tree> tree;
-    std::string node_scratch;
-    std::string cell_scratch;
+    std::string tree_scratch;
     std::string collect_scratch;
     RandomGenerator random;
 };
@@ -211,13 +257,13 @@ TEST_F(NodeTests, AllocatorSkipsPointerMapPage)
 }
 
 class TreeTests
-    : public PagerTestHarness<FakeEnv>,
+    : public PagerTestHarness,
       public testing::TestWithParam<std::size_t>
 {
 public:
     TreeTests()
         : param(GetParam()),
-          collect_scratch(kPageSize, '\x00'),
+          collect_scratch(kPageSize * 2, '\x00'),
           root_id(Id::root())
     {
     }
@@ -227,7 +273,7 @@ public:
         ASSERT_OK(m_pager->start_reader());
         ASSERT_OK(m_pager->start_writer());
         ASSERT_OK(Tree::create(*m_pager, true, nullptr));
-        tree = std::make_unique<Tree>(*m_pager, nullptr);
+        tree = std::make_unique<Tree>(*m_pager, collect_scratch.data(), nullptr);
     }
 
     auto TearDown() -> void override
@@ -814,10 +860,10 @@ TEST_P(CursorTests, SeekOutOfRange)
 TEST_P(CursorTests, InvalidCursorDeathTest)
 {
     auto cursor = make_cursor();
-    ASSERT_DEATH((void)cursor->key(), kExpectationMatcher);
-    ASSERT_DEATH((void)cursor->value(), kExpectationMatcher);
-    ASSERT_DEATH((void)cursor->next(), kExpectationMatcher);
-    ASSERT_DEATH((void)cursor->previous(), kExpectationMatcher);
+    ASSERT_DEATH((void)cursor->key(), "expect");
+    ASSERT_DEATH((void)cursor->value(), "expect");
+    ASSERT_DEATH((void)cursor->next(), "expect");
+    ASSERT_DEATH((void)cursor->previous(), "expect");
 }
 #endif // NDEBUG
 
@@ -923,8 +969,8 @@ TEST_P(PointerMapTests, FindsCorrectMapPages)
 #ifndef NDEBUG
 TEST_P(PointerMapTests, LookupNullIdDeathTest)
 {
-    ASSERT_DEATH((void)PointerMap::lookup(Id(0)), kExpectationMatcher);
-    ASSERT_DEATH((void)PointerMap::is_map(Id(0)), kExpectationMatcher);
+    ASSERT_DEATH((void)PointerMap::lookup(Id(0)), "expect");
+    ASSERT_DEATH((void)PointerMap::is_map(Id(0)), "expect");
 }
 #endif // NDEBUG
 
@@ -937,7 +983,8 @@ class MultiTreeTests : public TreeTests
 {
 public:
     MultiTreeTests()
-        : payload_values(kInitialRecordCount)
+        : payload_values(kInitialRecordCount),
+          m_scratch(kPageSize * 2, '\0')
     {
         for (auto &value : payload_values) {
             value = random.Generate(kPageSize * 2);
@@ -963,7 +1010,7 @@ public:
         EXPECT_OK(Tree::create(*m_pager, last_tree_id.is_null(), &root));
         ++last_tree_id.value;
         root_ids.emplace_back(root);
-        multi_tree.emplace_back(std::make_unique<Tree>(*m_pager, &root_ids.back()));
+        multi_tree.emplace_back(std::make_unique<Tree>(*m_pager, m_scratch.data(), &root_ids.back()));
         return multi_tree.size() - 1;
     }
 
@@ -997,6 +1044,7 @@ public:
     std::vector<std::unique_ptr<Tree>> multi_tree;
     std::vector<std::string> payload_values;
     std::list<Id> root_ids;
+    std::string m_scratch;
 };
 
 TEST_P(MultiTreeTests, CreateAdditionalTrees)
@@ -1196,4 +1244,4 @@ INSTANTIATE_TEST_SUITE_P(
     RebalanceTests,
     ::testing::Values(1, 2, 5));
 
-} // namespace calicodb
+} // namespace calicodb::test

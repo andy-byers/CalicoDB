@@ -27,13 +27,20 @@ auto DBImpl::open(const Options &sanitized) -> Status
             return Status::invalid_argument(
                 "database \"" + m_db_filename + "\" already exists");
         }
-    } else if (s.is_io_error()) {
+    } else if (s.is_not_found()) {
         if (!sanitized.create_if_missing) {
             return Status::invalid_argument(
                 "database \"" + m_db_filename + "\" does not exist");
         }
-        if (m_env->remove_file(m_wal_filename).is_ok()) {
+        // If there exists a file named m_wal_filename, then it must either be leftover from a
+        // failed call to DB::destroy(), or it is an unrelated file that coincidentally has the
+        // name of this database's WAL file. Either way, we must get rid of it here, otherwise
+        // we'll end up checkpointing it.
+        s = m_env->remove_file(m_wal_filename);
+        if (s.is_ok()) {
             log(m_log, R"(removed old WAL file "%s")", m_wal_filename.c_str());
+        } else if (!s.is_not_found()) {
+            return s;
         }
         log(m_log, R"(creating missing database "%s")", m_db_filename.c_str());
         s = m_env->new_file(m_db_filename, Env::kCreate, file);
@@ -62,10 +69,14 @@ auto DBImpl::open(const Options &sanitized) -> Status
         sanitized.sync_mode,
         sanitized.lock_mode,
     };
-    m_pager = new Pager(pager_param);
-
+    // Pager::open() will open/create the WAL file. If a WAL file exists beforehand, then we
+    // should attempt a checkpoint before we do anything else. If this is not the first
+    // connection, then a checkpoint really isn't necessary, but it reduces the amount of
+    // work needed when DB::checkpoint() is actually called. If this is actually the first
+    // connection, then fsync() must be called on each file before it is used, to make sure
+    // there isn't any data left in the kernel page cache.
     const auto needs_ckpt = m_env->file_exists(m_wal_filename);
-    s = m_pager->open_wal();
+    s = Pager::open(pager_param, m_pager);
     if (s.is_ok() && needs_ckpt) {
         s = m_pager->checkpoint(false);
         if (s.is_busy()) {
@@ -77,7 +88,8 @@ auto DBImpl::open(const Options &sanitized) -> Status
 }
 
 DBImpl::DBImpl(const Options &options, const Options &sanitized, std::string filename)
-    : m_env(sanitized.env),
+    : m_scratch(new char[kPageSize * 2]),
+      m_env(sanitized.env),
       m_log(sanitized.info_log),
       m_busy(sanitized.busy),
       m_db_filename(std::move(filename)),
@@ -95,6 +107,7 @@ DBImpl::~DBImpl()
         }
     }
     delete m_pager;
+    delete[] m_scratch;
 
     if (m_owns_log) {
         delete m_log;
@@ -221,7 +234,7 @@ auto DBImpl::prepare_tx(bool write, TxType *&tx_out) const -> Status
         s = m_pager->start_writer();
     }
     if (s.is_ok()) {
-        m_tx = new TxImpl(*m_pager, m_status);
+        m_tx = new TxImpl(*m_pager, m_status, m_scratch);
         m_tx->m_backref = &m_tx;
         tx_out = m_tx;
     } else {

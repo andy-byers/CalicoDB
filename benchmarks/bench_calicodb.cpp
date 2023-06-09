@@ -412,8 +412,8 @@ BENCHMARK(BM_Read)
 
 static auto BM_ReadWrite(benchmark::State &state) -> void
 {
-    const auto label = "ReadWrite" + access_type_name(state.range(0)) + "_1:";
-    state.SetLabel(label + std::to_string(state.range(1)));
+    const auto label = "ReadWrite" + access_type_name(state.range(0)) + '_';
+    state.SetLabel(label + std::to_string(state.range(1)) + ":1");
 
     Benchmark bench;
     bench.init(Benchmark::kWriter | Benchmark::kPrefill);

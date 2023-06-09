@@ -32,22 +32,22 @@ public:
 
     ~FileWrapper() override = default;
 
-    [[nodiscard]] auto read(std::size_t offset, std::size_t size, char *scratch, Slice *out) -> Status override
+    auto read(std::size_t offset, std::size_t size, char *scratch, Slice *out) -> Status override
     {
         return m_target->read(offset, size, scratch, out);
     }
 
-    [[nodiscard]] auto write(std::size_t offset, const Slice &in) -> Status override
+    auto write(std::size_t offset, const Slice &in) -> Status override
     {
         return m_target->write(offset, in);
     }
 
-    [[nodiscard]] auto sync() -> Status override
+    auto sync() -> Status override
     {
         return m_target->sync();
     }
 
-    [[nodiscard]] auto file_lock(FileLockMode mode) -> Status override
+    auto file_lock(FileLockMode mode) -> Status override
     {
         return m_target->file_lock(mode);
     }
@@ -57,12 +57,12 @@ public:
         return m_target->file_unlock();
     }
 
-    [[nodiscard]] auto shm_map(std::size_t r, bool extend, volatile void *&out) -> Status override
+    auto shm_map(std::size_t r, bool extend, volatile void *&out) -> Status override
     {
         return m_target->shm_map(r, extend, out);
     }
 
-    [[nodiscard]] auto shm_lock(std::size_t r, std::size_t n, ShmLockFlag flags) -> Status override
+    auto shm_lock(std::size_t r, std::size_t n, ShmLockFlag flags) -> Status override
     {
         return m_target->shm_lock(r, n, flags);
     }

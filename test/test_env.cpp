@@ -2,16 +2,18 @@
 // This source code is licensed under the MIT License, which can be found in
 // LICENSE.md. See AUTHORS.md for a list of contributor names.
 
-#include "../test.h"
 #include "calicodb/env.h"
 #include "common.h"
 #include "encoding.h"
+#include "env_posix.h"
 #include "fake_env.h"
-#include "unit_tests.h"
+#include "test.h"
+#include <filesystem>
 #include <gtest/gtest.h>
+#include <mutex>
 #include <thread>
 
-namespace calicodb
+namespace calicodb::test
 {
 
 TEST(PathParserTests, ExtractsDirnames)
@@ -265,8 +267,6 @@ static auto sum_shm_versions(File &file) -> U32
     return total;
 }
 
-static constexpr auto kFilename = "./__testfile";
-
 class FileTests : public testing::TestWithParam<std::size_t>
 {
 public:
@@ -386,8 +386,10 @@ class EnvLockStateTests : public testing::TestWithParam<std::size_t>
 {
 public:
     const std::size_t kReplicates = GetParam();
+    std::string m_filename;
 
     explicit EnvLockStateTests()
+        : m_filename(testing::TempDir() + "filename")
     {
         m_env = Env::default_env();
         m_helper.env = m_env;
@@ -395,7 +397,7 @@ public:
 
     ~EnvLockStateTests() override
     {
-        (void)m_env->remove_file(kFilename);
+        (void)m_env->remove_file(m_filename);
     }
 
     auto new_file(const std::string &filename) -> File *
@@ -411,7 +413,7 @@ public:
 
     auto test_sequence(bool) -> void
     {
-        auto *f = new_file(kFilename);
+        auto *f = new_file(m_filename);
         ASSERT_OK(f->file_lock(kFileShared));
         ASSERT_OK(f->file_lock(kFileExclusive));
         f->file_unlock();
@@ -419,9 +421,9 @@ public:
 
     auto test_shared() -> void
     {
-        auto *a = new_file(kFilename);
-        auto *b = new_file(kFilename);
-        auto *c = new_file(kFilename);
+        auto *a = new_file(m_filename);
+        auto *b = new_file(m_filename);
+        auto *c = new_file(m_filename);
         ASSERT_OK(a->file_lock(kFileShared));
         ASSERT_OK(b->file_lock(kFileShared));
         ASSERT_OK(c->file_lock(kFileShared));
@@ -432,8 +434,8 @@ public:
 
     auto test_exclusive() -> void
     {
-        auto *a = new_file(kFilename);
-        auto *b = new_file(kFilename);
+        auto *a = new_file(m_filename);
+        auto *b = new_file(m_filename);
 
         ASSERT_OK(a->file_lock(kFileShared));
         ASSERT_OK(a->file_lock(kFileExclusive));
@@ -450,7 +452,7 @@ public:
     }
 
     template <class Test>
-    auto run_test(const Test &test)
+    auto run_test(const Test &&test)
     {
         for (std::size_t i = 0; i < kReplicates; ++i) {
             test();
@@ -481,7 +483,7 @@ TEST_P(EnvLockStateTests, Exclusive)
 
 TEST_P(EnvLockStateTests, NOOPs)
 {
-    auto *f = new_file(kFilename);
+    auto *f = new_file(m_filename);
 
     ASSERT_OK(f->file_lock(kFileShared));
     ASSERT_OK(f->file_lock(kFileShared));
@@ -499,9 +501,9 @@ TEST_P(EnvLockStateTests, NOOPs)
 #ifndef NDEBUG
 TEST_P(EnvLockStateTests, InvalidRequestDeathTest)
 {
-    auto *f = new_file(kFilename);
+    auto *f = new_file(m_filename);
     // kUnlocked -> kShared is the only allowed transition out of kUnlocked.
-    ASSERT_DEATH((void)f->file_lock(kFileExclusive), kExpectationMatcher);
+    ASSERT_DEATH((void)f->file_lock(kFileExclusive), "expect");
 }
 #endif // NDEBUG
 
@@ -625,7 +627,6 @@ static auto busy_wait_file_lock(File &file, bool is_writer) -> void
                 std::this_thread::yield();
                 file.file_unlock();
             } else {
-                std::this_thread::sleep_for(std::chrono::microseconds{100});
                 return;
             }
         }
@@ -690,6 +691,48 @@ static auto shm_reader_writer_test_routine(File &file, std::size_t r, std::size_
     ASSERT_OK(file.shm_lock(r, n, kShmUnlock | lock_flag));
 }
 
+class SharedCount
+{
+    volatile U32 *m_ptr = nullptr;
+    File *m_file = nullptr;
+
+public:
+    explicit SharedCount(Env &env, const std::string &name)
+    {
+        volatile void *ptr;
+        EXPECT_OK(env.new_file(name, Env::kCreate | Env::kReadWrite, m_file));
+        EXPECT_OK(m_file->shm_map(0, true, ptr));
+        EXPECT_TRUE(ptr);
+        m_ptr = reinterpret_cast<volatile U32 *>(ptr);
+    }
+
+    ~SharedCount()
+    {
+        m_file->shm_unmap(true);
+        delete m_file;
+    }
+
+    enum MemoryOrder : int {
+        kRelaxed = __ATOMIC_RELAXED,
+        kAcquire = __ATOMIC_ACQUIRE,
+        kRelease = __ATOMIC_RELEASE,
+        kAcqRel = __ATOMIC_ACQ_REL,
+        kSeqCst = __ATOMIC_SEQ_CST,
+    };
+    auto load(MemoryOrder order = kAcquire) const -> U32
+    {
+        return __atomic_load_n(m_ptr, order);
+    }
+    auto store(U32 value, MemoryOrder order = kRelease) -> void
+    {
+        __atomic_store_n(m_ptr, value, order);
+    }
+    auto increase(U32 n, MemoryOrder order = kRelaxed) -> U32
+    {
+        return __atomic_add_fetch(m_ptr, n, order);
+    }
+};
+
 // Env multithreading tests
 //
 // Each Env instance created in a given process communicates with the same global
@@ -746,25 +789,25 @@ public:
     auto run_test(const Test &test)
     {
         for (std::size_t n = 0; n < kNumEnvs; ++n) {
-            //            const auto pid = fork();
-            //            ASSERT_NE(-1, pid) << strerror(errno);
-            //            if (pid) {
-            //                continue;
-            //            }
+            const auto pid = fork();
+            ASSERT_NE(-1, pid) << strerror(errno);
+            if (pid) {
+                continue;
+            }
 
             test(n);
-            //            std::exit(testing::Test::HasFailure());
+            std::exit(testing::Test::HasFailure());
         }
-        //        for (std::size_t n = 0; n < kNumEnvs; ++n) {
-        //            int s;
-        //            const auto pid = wait(&s);
-        //            ASSERT_NE(pid, -1)
-        //                << "wait failed: " << strerror(errno);
-        //            ASSERT_TRUE(WIFEXITED(s) && WEXITSTATUS(s) == 0)
-        //                << "exited " << (WIFEXITED(s) ? "" : "ab")
-        //                << "normally with exit status "
-        //                << WEXITSTATUS(s);
-        //        }
+        for (std::size_t n = 0; n < kNumEnvs; ++n) {
+            int s;
+            const auto pid = wait(&s);
+            ASSERT_NE(pid, -1)
+                << "wait failed: " << strerror(errno);
+            ASSERT_TRUE(WIFEXITED(s) && WEXITSTATUS(s) == 0)
+                << "exited " << (WIFEXITED(s) ? "" : "ab")
+                << "normally with exit status "
+                << WEXITSTATUS(s);
+        }
     }
 
     template <class IsWriter>
@@ -996,4 +1039,4 @@ TEST(EnvWrappers, WrapperEnvWorksAsExpected)
     ASSERT_OK(w_env.remove_file("file"));
 }
 
-} // namespace calicodb
+} // namespace calicodb::test

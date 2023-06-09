@@ -95,7 +95,7 @@ auto FakeEnv::new_file(const std::string &filename, OpenMode mode, File *&out) -
             itr->second.created = true;
             itr->second.buffer.clear();
         } else {
-            return Status::io_error();
+            return Status::not_found();
         }
     }
     out = new FakeFile(filename, *this, itr->second);

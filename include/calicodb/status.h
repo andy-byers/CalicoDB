@@ -10,7 +10,7 @@
 namespace calicodb
 {
 
-class Status final
+class [[nodiscard]] Status final
 {
 public:
     enum Code : char {
@@ -44,13 +44,59 @@ public:
         return Status();
     }
 
-    [[nodiscard]] auto code() const -> Code
+    // Each of the methods in this block constructs a non-OK status, optionally with an
+    // error message.
+    static auto invalid_argument(SubCode msg = kNone) -> Status
     {
-        return m_code;
+        return Status(kInvalidArgument, msg);
     }
-    [[nodiscard]] auto subcode() const -> SubCode
+    static auto invalid_argument(const Slice &msg) -> Status
     {
-        return m_subc;
+        return Status(kInvalidArgument, msg);
+    }
+    static auto not_supported(SubCode msg = kNone) -> Status
+    {
+        return Status(kNotSupported, msg);
+    }
+    static auto not_supported(const Slice &msg) -> Status
+    {
+        return Status(kNotSupported, msg);
+    }
+    static auto corruption(SubCode msg = kNone) -> Status
+    {
+        return Status(kCorruption, msg);
+    }
+    static auto corruption(const Slice &msg) -> Status
+    {
+        return Status(kCorruption, msg);
+    }
+    static auto not_found(SubCode msg = kNone) -> Status
+    {
+        return Status(kNotFound, msg);
+    }
+    static auto not_found(const Slice &msg) -> Status
+    {
+        return Status(kNotFound, msg);
+    }
+    static auto io_error(SubCode msg = kNone) -> Status
+    {
+        return Status(kIOError, msg);
+    }
+    static auto io_error(const Slice &msg) -> Status
+    {
+        return Status(kIOError, msg);
+    }
+    static auto busy(SubCode msg = kNone) -> Status
+    {
+        return Status(kBusy, msg);
+    }
+    static auto busy(const Slice &msg) -> Status
+    {
+        return Status(kBusy, msg);
+    }
+    static auto retry() -> Status
+    {
+        return Status(kBusy, kRetry);
     }
 
     // Return true if the status is OK, false otherwise
@@ -58,62 +104,6 @@ public:
     {
         return m_code == kOK;
     }
-
-    // Each of the methods in this block constructs a non-OK status, optionally with an
-    // error message.
-    [[nodiscard]] static auto invalid_argument(SubCode msg = kNone) -> Status
-    {
-        return Status(kInvalidArgument, msg);
-    }
-    [[nodiscard]] static auto invalid_argument(const Slice &msg) -> Status
-    {
-        return Status(kInvalidArgument, msg);
-    }
-    [[nodiscard]] static auto not_supported(SubCode msg = kNone) -> Status
-    {
-        return Status(kNotSupported, msg);
-    }
-    [[nodiscard]] static auto not_supported(const Slice &msg) -> Status
-    {
-        return Status(kNotSupported, msg);
-    }
-    [[nodiscard]] static auto corruption(SubCode msg = kNone) -> Status
-    {
-        return Status(kCorruption, msg);
-    }
-    [[nodiscard]] static auto corruption(const Slice &msg) -> Status
-    {
-        return Status(kCorruption, msg);
-    }
-    [[nodiscard]] static auto not_found(SubCode msg = kNone) -> Status
-    {
-        return Status(kNotFound, msg);
-    }
-    [[nodiscard]] static auto not_found(const Slice &msg) -> Status
-    {
-        return Status(kNotFound, msg);
-    }
-    [[nodiscard]] static auto io_error(SubCode msg = kNone) -> Status
-    {
-        return Status(kIOError, msg);
-    }
-    [[nodiscard]] static auto io_error(const Slice &msg) -> Status
-    {
-        return Status(kIOError, msg);
-    }
-    [[nodiscard]] static auto busy(SubCode msg = kNone) -> Status
-    {
-        return Status(kBusy, msg);
-    }
-    [[nodiscard]] static auto busy(const Slice &msg) -> Status
-    {
-        return Status(kBusy, msg);
-    }
-    [[nodiscard]] static auto retry() -> Status
-    {
-        return Status(kBusy, kRetry);
-    }
-
     [[nodiscard]] auto is_invalid_argument() const -> bool
     {
         return m_code == kInvalidArgument;
@@ -141,6 +131,15 @@ public:
     [[nodiscard]] auto is_retry() const -> bool
     {
         return m_code == kBusy && m_subc == kRetry;
+    }
+
+    [[nodiscard]] auto code() const -> Code
+    {
+        return m_code;
+    }
+    [[nodiscard]] auto subcode() const -> SubCode
+    {
+        return m_subc;
     }
 
     // Convert the status to a printable string.

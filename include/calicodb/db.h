@@ -33,14 +33,14 @@ public:
     // On success, stores a pointer to the heap-allocated database in `*db` and returns OK. On
     // failure, sets `*db` to nullptr and returns a non-OK status. The user is responsible for
     // calling delete on the database handle when it is no longer needed.
-    [[nodiscard]] static auto open(const Options &options, const std::string &filename, DB *&db_out) -> Status;
+    static auto open(const Options &options, const std::string &filename, DB *&db_out) -> Status;
 
     // Delete the contents of the specified database from stable storage
     // Deletes every file associated with the database named `filename` and returns OK on
     // success. Returns a non-OK status on failure. `options` should hold the same options
     // that were used to create the database (`options` must at least specify the WAL and
     // info log paths, if non-default values were used).
-    [[nodiscard]] static auto destroy(const Options &options, const std::string &filename) -> Status;
+    static auto destroy(const Options &options, const std::string &filename) -> Status;
 
     explicit DB();
     virtual ~DB();
@@ -62,21 +62,21 @@ public:
     // other connections are finished using the WAL. Additional checkpoints are run (a) when
     // the database is closed, and (b) when a database is opened that has a WAL on disk. Note
     // that in the case of (b), `reset` is false.
-    [[nodiscard]] virtual auto checkpoint(bool reset) -> Status = 0;
+    virtual auto checkpoint(bool reset) -> Status = 0;
 
     // Run a read-only transaction
     // REQUIRES: Status Fn::operator()(const Tx &) is implemented.
     // Forwards the Status returned by the callable `fn`. Note that the callable accepts a const
     // Tx reference, meaning methods that modify the database state cannot be called on it.
     template <class Fn>
-    [[nodiscard]] auto view(Fn &&fn) const -> Status;
+    auto view(Fn &&fn) const -> Status;
 
     // Run a read-write transaction
     // REQUIRES: Status Fn::operator()(Tx &) is implemented.
     // If the callable `fn` returns an OK status, the transaction is committed. Otherwise,
     // the transaction is rolled back.
     template <class Fn>
-    [[nodiscard]] auto update(Fn &&fn) -> Status;
+    auto update(Fn &&fn) -> Status;
 
     // Start a transaction manually
     // Stores a pointer to the heap-allocated transaction object in `tx_out` and returns OK on
@@ -85,8 +85,8 @@ public:
     // readonly transaction. The caller is responsible for calling delete on the Tx pointer when
     // it is no longer needed.
     // NOTE: Consider using the DB::view()/DB::update() API instead.
-    [[nodiscard]] virtual auto new_tx(const Tx *&tx_out) const -> Status = 0;
-    [[nodiscard]] virtual auto new_tx(WriteTag, Tx *&tx_out) -> Status = 0;
+    virtual auto new_tx(const Tx *&tx_out) const -> Status = 0;
+    virtual auto new_tx(WriteTag, Tx *&tx_out) -> Status = 0;
 };
 
 // Transaction on a CalicoDB database
@@ -106,7 +106,7 @@ public:
     // can have a non-OK status. The status is set when a routine on this object fails
     // such that the consistency of the underlying data store becomes questionable, or
     // corruption is detected in one of the files.
-    [[nodiscard]] virtual auto status() const -> Status = 0;
+    virtual auto status() const -> Status = 0;
 
     // Return a reference to a cursor that iterates over the database schema
     // The database schema is a special bucket that stores the name and location of every
@@ -124,23 +124,23 @@ public:
     // `b_out` is optional: if omitted, this method simply creates a bucket without handing
     // back a reference to it. Note that the bucket will not persist in the database unless
     // Tx::commit() is called after the bucket has been created.
-    [[nodiscard]] virtual auto create_bucket(const BucketOptions &options, const Slice &name, Bucket *b_out) -> Status = 0;
+    virtual auto create_bucket(const BucketOptions &options, const Slice &name, Bucket *b_out) -> Status = 0;
 
     // Open an existing bucket
     // Returns an OK status on success and a non-OK status on failure. If the bucket named
     // `name` does not exist already, a status for which Status::is_invalid_argument()
     // evaluates to true is returned.
-    [[nodiscard]] virtual auto open_bucket(const Slice &name, Bucket &b_out) const -> Status = 0;
+    virtual auto open_bucket(const Slice &name, Bucket &b_out) const -> Status = 0;
 
     // Remove a bucket from the database
     // If a bucket named `name` exists, this method drops it and returns an OK status. If
     // `name` does not exist, returns a status for which Status::is_invalid_argument() is
     // true. If a bucket handle was obtained for `name` during this transaction, it must
     // not be used after this call succeeds.
-    [[nodiscard]] virtual auto drop_bucket(const Slice &name) -> Status = 0;
+    virtual auto drop_bucket(const Slice &name) -> Status = 0;
 
     // Defragment the database
-    [[nodiscard]] virtual auto vacuum() -> Status = 0;
+    virtual auto vacuum() -> Status = 0;
 
     // Commit pending changes to the database
     // Returns an OK status if the commit operation was successful, and a non-OK status
@@ -148,7 +148,7 @@ public:
     // method is not called before the Tx object is destroyed, all pending changes will
     // be dropped. This method can be called more than once for a given Tx: file locks
     // are held until the Tx handle is delete'd.
-    [[nodiscard]] virtual auto commit() -> Status = 0;
+    virtual auto commit() -> Status = 0;
 
     // Return a heap-allocated cursor over the contents of the bucket
     // The cursor should be destroyed (using operator delete()) when it
@@ -160,18 +160,18 @@ public:
     // associated with it and returns an OK status. If the key does not
     // exist, sets `*value` to nullptr and returns a "not found" status.
     // If an error is encountered, returns a non-OK status as appropriate.
-    [[nodiscard]] virtual auto get(const Bucket &b, const Slice &key, std::string *value) const -> Status = 0;
+    virtual auto get(const Bucket &b, const Slice &key, std::string *value) const -> Status = 0;
 
     // Create a mapping between `key` and `value`
     // If a record with key `key` already exists, sets its value to `value`.
     // Otherwise, a new record is created. Returns an OK status on success,
     // and a non-OK status on failure.
-    [[nodiscard]] virtual auto put(const Bucket &b, const Slice &key, const Slice &value) -> Status = 0;
+    virtual auto put(const Bucket &b, const Slice &key, const Slice &value) -> Status = 0;
 
     // Erase a record from the bucket
     // Returns a non-OK status if an error was encountered. It is not an
     // error if `key` does not exist.
-    [[nodiscard]] virtual auto erase(const Bucket &b, const Slice &key) -> Status = 0;
+    virtual auto erase(const Bucket &b, const Slice &key) -> Status = 0;
 };
 
 class BusyHandler

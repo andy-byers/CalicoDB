@@ -1,6 +1,5 @@
 
 option(CALICODB_BuildDocTests "Build the documentation tests" On)
-option(CALICODB_BuildUnitTests "Build the unit tests" On)
 
 set(gtest_force_shared_crt On CACHE BOOL "" FORCE)
 set(INSTALL_GTEST Off CACHE INTERNAL "" FORCE)
@@ -12,25 +11,22 @@ FetchContent_Declare(googletest
 FetchContent_MakeAvailable(googletest)
 include(GoogleTest)
 
-#set(CALICODB_TOOLS_DIR "${PROJECT_SOURCE_DIR}/test/tools")
-#add_subdirectory(tools)
-
 if(CALICODB_BuildDocTests)
     add_subdirectory(doc_tests)
 endif()
 
-if(CALICODB_BuildUnitTests)
-    add_subdirectory(unit_tests)
-endif()
-
-function(build_test TEST_NAME)
-    set(NAME test_${TEST_NAME})
-    add_executable(${NAME} ${TEST_NAME}.cpp test.cpp test.h)
+function(build_test NAME)
+    add_executable(${NAME} ${NAME}.cpp test.cpp test.h)
     target_compile_options(${NAME} PRIVATE ${CALICODB_OPTIONS})
     target_link_libraries(${NAME} calicodb_utils gtest_main)
     target_include_directories(${NAME} PUBLIC "${CALICODB_SOURCE_DIR}")
     add_test(NAME ${NAME} COMMAND ${NAME})
 endfunction()
 
-build_test(concurrency)
-#build_test(crashes)
+build_test(test_concurrency)
+build_test(test_db)
+build_test(test_env)
+build_test(test_crashes)
+build_test(test_pager)
+build_test(test_tree)
+build_test(test_utils)

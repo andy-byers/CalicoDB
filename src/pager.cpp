@@ -75,7 +75,18 @@ auto Pager::open(const Parameters &param, Pager *&out) -> Status
     CALICODB_EXPECT_LE(param.frame_count * kPageSize, kMaxCacheSize);
 
     out = new Pager(param);
-    return out->open_wal();
+
+    const Wal::Parameters wal_param = {
+        out->m_wal_name,
+        out->m_db_name,
+        out->m_env,
+        out->m_file,
+        out->m_log,
+        out->m_busy,
+        out->m_sync_mode,
+        out->m_lock_mode,
+    };
+    return Wal::open(wal_param, out->m_wal);
 }
 
 Pager::Pager(const Parameters &param)
@@ -99,21 +110,6 @@ Pager::~Pager()
 {
     delete m_wal;
     delete m_file;
-}
-
-auto Pager::open_wal() -> Status
-{
-    const Wal::Parameters param = {
-        m_wal_name,
-        m_db_name,
-        m_env,
-        m_file,
-        m_log,
-        m_busy,
-        m_sync_mode,
-        m_lock_mode,
-    };
-    return Wal::open(param, m_wal);
 }
 
 auto Pager::close() -> Status
@@ -384,7 +380,9 @@ auto Pager::allocate(Page &page) -> Status
 auto Pager::acquire(Id page_id, Page &page) -> Status
 {
     CALICODB_EXPECT_GE(m_mode, kRead);
-    if (page_id.is_null()) {
+    if (page_id.is_null() || m_page_count < page_id.as_index()) {
+        // This allows `page_id` to be equal to the page count, which effectively adds a page
+        // to the database. This is what Pager::allocate() does if the freelist is empty.
         return Status::corruption();
     }
     PageRef *ref;
@@ -428,7 +426,6 @@ auto Pager::mark_dirty(Page &page) -> void
             m_mode = kDirty;
         }
     }
-    page.m_write = true;
 }
 
 auto Pager::release(Page page, ReleaseAction action) -> void
@@ -474,7 +471,6 @@ auto Pager::refresh_state() -> Status
     if (s.is_ok()) {
         m_needs_refresh = false;
         m_page_count = 0;
-        m_save_count = 0;
 
         if (read_size == kPageSize) {
             // Make sure the file is a CalicoDB database, and that the database file format can be
@@ -483,7 +479,6 @@ auto Pager::refresh_state() -> Status
             s = FileHeader::check_db_support(root);
             if (s.is_ok()) {
                 m_page_count = FileHeader::get_page_count(root);
-                m_save_count = m_page_count;
             }
         } else if (read_size > 0) {
             s = Status::corruption();
@@ -492,7 +487,7 @@ auto Pager::refresh_state() -> Status
     return s;
 }
 
-auto Pager::set_status(const Status &error) const -> Status
+auto Pager::set_status(const Status &error) const -> void
 {
     if (m_status->is_ok() && (error.is_io_error() || error.is_corruption())) {
         *m_status = error;
@@ -500,7 +495,6 @@ auto Pager::set_status(const Status &error) const -> Status
 
         log(m_log, "pager error: %s", error.to_string().c_str());
     }
-    return error;
 }
 
 auto Pager::assert_state() const -> bool
@@ -565,8 +559,8 @@ auto PointerMap::lookup(Id page_id) -> Id
 {
     CALICODB_EXPECT_FALSE(page_id.is_null());
 
-    // Root page (1) has no parents, and page 2 is the first pointer map page. If "page_id" is a pointer map
-    // page, "page_id" will be returned.
+    // Root page (1) has no parents, and page 2 is the first pointer map page. If `page_id` is a pointer map
+    // page, `page_id` will be returned.
     if (page_id.value < kFirstMapPage) {
         return Id::null();
     }
@@ -590,10 +584,12 @@ auto PointerMap::read_entry(Pager &pager, Id page_id, Entry &out) -> Status
     CALICODB_EXPECT_LE(offset + kEntrySize, kPageSize);
 
     Page map;
-    CALICODB_TRY(pager.acquire(mid, map));
-    out = decode_entry(map.constant_ptr() + offset);
-    pager.release(std::move(map));
-    return Status::ok();
+    auto s = pager.acquire(mid, map);
+    if (s.is_ok()) {
+        out = decode_entry(map.constant_ptr() + offset);
+        pager.release(std::move(map));
+    }
+    return s;
 }
 
 auto PointerMap::write_entry(Pager &pager, Id page_id, Entry entry) -> Status
@@ -606,16 +602,19 @@ auto PointerMap::write_entry(Pager &pager, Id page_id, Entry entry) -> Status
     CALICODB_EXPECT_LE(offset + kEntrySize, kPageSize);
 
     Page map;
-    CALICODB_TRY(pager.acquire(mid, map));
-    const auto [back_ptr, type] = decode_entry(map.constant_ptr() + offset);
-    if (entry.back_ptr != back_ptr || entry.type != type) {
-        pager.mark_dirty(map);
-        auto *data = map.mutable_ptr() + offset;
-        *data++ = entry.type;
-        put_u32(data, entry.back_ptr.value);
+    auto s = pager.acquire(mid, map);
+    if (s.is_ok()) {
+        const auto [back_ptr, type] = decode_entry(
+            map.constant_ptr() + offset);
+        if (entry.back_ptr != back_ptr || entry.type != type) {
+            pager.mark_dirty(map);
+            auto *data = map.mutable_ptr() + offset;
+            *data++ = entry.type;
+            put_u32(data, entry.back_ptr.value);
+        }
+        pager.release(std::move(map));
     }
-    pager.release(std::move(map));
-    return Status::ok();
+    return s;
 }
 
 } // namespace calicodb
