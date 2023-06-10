@@ -9,7 +9,6 @@
 #include "freelist.h"
 #include "header.h"
 #include "logging.h"
-#include "page.h"
 #include "wal.h"
 
 namespace calicodb
@@ -192,12 +191,12 @@ auto Pager::commit() -> Status
     Status s;
     if (m_mode == kDirty) {
         // Update the page count if necessary.
-        auto root = acquire_root();
-        if (FileHeader::get_page_count(root.constant_ptr()) != m_page_count) {
-            mark_dirty(root);
-            FileHeader::put_page_count(root.mutable_ptr(), m_page_count);
+        auto *root = &acquire_root();
+        if (FileHeader::get_page_count(root->page) != m_page_count) {
+            mark_dirty(*root);
+            FileHeader::put_page_count(root->page, m_page_count);
         }
-        release(std::move(root));
+        release(root);
 
         if (m_dirtylist.head == nullptr) {
             // Ensure that there is always a WAL frame to store the DB size.
@@ -339,7 +338,7 @@ auto Pager::ensure_available_buffer() -> Status
     return s;
 }
 
-auto Pager::allocate(Page &page) -> Status
+auto Pager::allocate(PageRef *&page_out) -> Status
 {
     CALICODB_EXPECT_GE(m_mode, kWrite);
     static constexpr std::size_t kMaxPageCount = 0xFF'FF'FF'FE;
@@ -354,30 +353,30 @@ auto Pager::allocate(Page &page) -> Status
     auto s = Freelist::pop(*this, id);
     if (s.is_invalid_argument()) {
         // If the freelist was empty, get a page from the end of the file.
-        const auto allocate_from_eof = [&page, this] {
-            return acquire(Id::from_index(m_page_count), page);
+        const auto allocate_from_eof = [&page_out, this] {
+            return acquire(Id::from_index(m_page_count), page_out);
         };
         s = allocate_from_eof();
 
         // Since this is a fresh page from the end of the file, it could be a pointer map page. If so,
         // it is already blank, so just skip it and allocate another. It'll get filled in as the pages
         // following it are used by the tree layer.
-        if (s.is_ok() && PointerMap::lookup(page.id()) == page.id()) {
-            release(std::move(page));
+        if (s.is_ok() && PointerMap::is_map(page_out->page_id)) {
+            release(page_out);
             s = allocate_from_eof();
         }
     } else if (s.is_ok()) {
         // id contains an unused page ID.
-        s = acquire(id, page);
+        s = acquire(id, page_out);
     }
     if (s.is_ok()) {
         // Callers of this routine will always modify `page`. Mark it dirty here for convenience.
-        mark_dirty(page);
+        mark_dirty(*page_out);
     }
     return s;
 }
 
-auto Pager::acquire(Id page_id, Page &page) -> Status
+auto Pager::acquire(Id page_id, PageRef *&page_out) -> Status
 {
     CALICODB_EXPECT_GE(m_mode, kRead);
     if (page_id.is_null() || m_page_count < page_id.as_index()) {
@@ -399,54 +398,53 @@ auto Pager::acquire(Id page_id, Page &page) -> Status
         }
     }
     m_bufmgr.ref(*ref);
-    page = Page(*this, *ref);
+    page_out = ref;
     return Status::ok();
 }
 
-auto Pager::destroy(Page page) -> Status
+auto Pager::destroy(PageRef *&page) -> Status
 {
     CALICODB_EXPECT_GE(m_mode, kWrite);
-    return Freelist::push(*this, std::move(page));
+    return Freelist::push(*this, page);
 }
 
-auto Pager::acquire_root() -> Page
+auto Pager::acquire_root() -> PageRef &
 {
     CALICODB_EXPECT_GE(m_mode, kRead);
     CALICODB_EXPECT_FALSE(m_needs_refresh);
     m_bufmgr.ref(*m_bufmgr.root());
-    return Page(*this, *m_bufmgr.root());
+    return *m_bufmgr.root();
 }
 
-auto Pager::mark_dirty(Page &page) -> void
+auto Pager::mark_dirty(PageRef &page) -> void
 {
     CALICODB_EXPECT_GE(m_mode, kWrite);
-    if (!(page.m_ref->flag & PageRef::kDirty)) {
-        m_dirtylist.add(*page.m_ref);
+    if (!(page.flag & PageRef::kDirty)) {
+        m_dirtylist.add(page);
         if (m_mode == kWrite) {
             m_mode = kDirty;
         }
     }
 }
 
-auto Pager::release(Page page, ReleaseAction action) -> void
+auto Pager::release(PageRef *&page, ReleaseAction action) -> void
 {
-    CALICODB_EXPECT_GE(m_mode, kRead);
-    if (page.m_pager) {
-        page.m_pager = nullptr;
-        auto *ref = page.m_ref;
-        m_bufmgr.unref(*ref);
-        if (action > kKeep && ref->refcount == 0) {
+    if (page) {
+        CALICODB_EXPECT_GE(m_mode, kRead);
+        m_bufmgr.unref(*page);
+        if (action > kKeep && page->refcount == 0) {
             // kNoCache action is ignored if the page is dirty. It would just get written out
             // right now, but we shouldn't do anything that can fail in this routine.
-            const auto is_dirty = ref->flag & PageRef::kDirty;
+            const auto is_dirty = page->flag & PageRef::kDirty;
             const auto is_discard = action == kDiscard || !is_dirty;
             if (is_discard) {
                 if (is_dirty) {
-                    m_dirtylist.remove(*ref);
+                    m_dirtylist.remove(*page);
                 }
-                m_bufmgr.erase(ref->page_id);
+                m_bufmgr.erase(page->page_id);
             }
         }
+        page = nullptr;
     }
 }
 
@@ -583,11 +581,11 @@ auto PointerMap::read_entry(Pager &pager, Id page_id, Entry &out) -> Status
     const auto offset = entry_offset(mid, page_id);
     CALICODB_EXPECT_LE(offset + kEntrySize, kPageSize);
 
-    Page map;
+    PageRef *map;
     auto s = pager.acquire(mid, map);
     if (s.is_ok()) {
-        out = decode_entry(map.constant_ptr() + offset);
-        pager.release(std::move(map));
+        out = decode_entry(map->page + offset);
+        pager.release(map);
     }
     return s;
 }
@@ -601,18 +599,18 @@ auto PointerMap::write_entry(Pager &pager, Id page_id, Entry entry) -> Status
     const auto offset = entry_offset(mid, page_id);
     CALICODB_EXPECT_LE(offset + kEntrySize, kPageSize);
 
-    Page map;
+    PageRef *map;
     auto s = pager.acquire(mid, map);
     if (s.is_ok()) {
         const auto [back_ptr, type] = decode_entry(
-            map.constant_ptr() + offset);
+            map->page + offset);
         if (entry.back_ptr != back_ptr || entry.type != type) {
-            pager.mark_dirty(map);
-            auto *data = map.mutable_ptr() + offset;
+            pager.mark_dirty(*map);
+            auto *data = map->page + offset;
             *data++ = entry.type;
             put_u32(data, entry.back_ptr.value);
         }
-        pager.release(std::move(map));
+        pager.release(map);
     }
     return s;
 }

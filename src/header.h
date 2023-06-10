@@ -11,8 +11,6 @@
 namespace calicodb
 {
 
-class Page;
-
 // There are 4 page types in CalicoDB: nodes, freelist pages, overflow chain pages, and pointer
 // map pages. Pages that store records or separator keys are called nodes, and pages that hold
 // parent pointers for other pages are called pointer maps. Overflow chain pages store data that

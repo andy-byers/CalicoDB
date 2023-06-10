@@ -7,7 +7,6 @@
 #include "calicodb/options.h"
 #include "encoding.h"
 #include "header.h"
-#include "page.h"
 
 namespace calicodb
 {
@@ -79,9 +78,6 @@ auto Bufmgr::erase(Id page_id) -> bool
 
 auto Bufmgr::next_victim() -> PageRef *
 {
-    // NOTE: If this method is being called repeatedly (i.e. to evict all cached pages),
-    // then there shouldn't be any outstanding references. The first page in the list
-    // should be returned each time this method is called in that case.
     for (auto &ref : m_list) {
         if (ref.refcount == 0) {
             return &ref;

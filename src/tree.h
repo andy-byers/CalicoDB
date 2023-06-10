@@ -7,7 +7,6 @@
 
 #include "calicodb/cursor.h"
 #include "header.h"
-#include "page.h"
 #include "pager.h"
 #include <optional>
 
@@ -71,35 +70,23 @@ struct Cell {
     std::size_t total_size = 0;
     std::size_t key_size = 0;
     std::size_t size = 0;
-    bool is_free = false;
     bool has_remote = false;
 };
 
-struct NodeMeta {
-    int (*parse_cell)(char *ptr, const char *limit, Cell *cell_out);
-};
-
+// Simple construct representing a tree node
 struct Node {
-    Node() = default;
-
-    Node(Node &&rhs) = default;
-    auto operator=(Node &&) -> Node & = default;
-
-    [[nodiscard]] auto get_slot(std::size_t index) const -> std::size_t;
-    auto set_slot(std::size_t index, std::size_t pointer) -> void;
-    auto insert_slot(std::size_t index, std::size_t pointer) -> void;
-    auto remove_slot(std::size_t index) -> void;
-
-    auto TEST_validate() -> void;
-
-    Page page;
+    PageRef *ref = nullptr;
     char *scratch = nullptr;
-    const NodeMeta *meta = nullptr;
-    NodeHeader header;
+
+    // If ref is not nullptr, then the following fields can be accessed.
+    NodeHeader hdr;
+    int (*parser)(char *, const char *, Cell *) = nullptr;
     std::optional<Cell> overflow;
     unsigned overflow_index = 0;
     unsigned slots_offset = 0;
     unsigned gap_size = 0;
+
+    auto TEST_validate() -> void;
 };
 
 // Read a cell from the `node` at the specified `index`
@@ -128,13 +115,7 @@ class InternalCursor
     mutable Status m_status;
     std::string m_buffer;
     Tree *m_tree;
-
-    // TODO: Cache overflow page IDs so Tree::read_value() doesn't have to read pages that have already
-    //       been read by Tree::read_key() (if the key overflowed).
-    // std::vector<Id> m_ovfl_cache;
-
     Node m_node;
-    bool m_write = false;
 
 public:
     static constexpr std::size_t kMaxDepth = 20;
@@ -155,7 +136,7 @@ public:
 
     [[nodiscard]] auto is_valid() const -> bool
     {
-        return m_status.is_ok();
+        return m_status.is_ok() && m_node.ref != nullptr;
     }
 
     [[nodiscard]] auto status() const -> Status
@@ -179,19 +160,22 @@ public:
     {
         CALICODB_EXPECT_TRUE(is_valid());
         m_status = Status::not_found();
-        return std::move(m_node);
+        auto node = m_node;
+        m_node.ref = nullptr;
+        return node;
     }
 
-    auto move_to(Node node, int diff) -> void
+    auto move_to(Node &node, int diff) -> void
     {
         clear();
-        history[level += diff] = {node.page.id(), 0};
-        m_node = std::move(node);
+        history[level += diff] = {node.ref->page_id, 0};
         m_status = Status::ok();
+        m_node = node;
+        node.ref = nullptr;
     }
 
     auto clear() -> void;
-    auto seek_root(bool write) -> void;
+    auto seek_root() -> void;
     auto seek(const Slice &key) -> bool;
     auto move_down(Id child_id) -> void;
 };
@@ -247,18 +231,29 @@ public:
 class Tree final
 {
 public:
+    ~Tree()
+    {
+        finish_operation();
+    }
+
     explicit Tree(Pager &pager, char *scratch, const Id *root_id);
-    [[nodiscard]] static auto create(Pager &pager, bool is_root, Id *out) -> Status;
-    [[nodiscard]] static auto destroy(Tree &tree) -> Status;
+    static auto create(Pager &pager, Id *out) -> Status;
+    static auto destroy(Tree &tree) -> Status;
     auto put(const Slice &key, const Slice &value) -> Status;
-    [[nodiscard]] auto get(const Slice &key, std::string *value) const -> Status;
+    auto get(const Slice &key, std::string *value) const -> Status;
     auto erase(const Slice &key) -> Status;
     auto vacuum(Schema &schema) -> Status;
-    auto allocate(bool is_external, Node &out) -> Status;
-    [[nodiscard]] auto acquire(Id page_id, bool upgrade, Node &out) const -> Status;
-    auto free(Node node) -> Status;
+    auto allocate(bool is_external, Node &node) -> Status;
+    auto acquire(Id page_id, bool write, Node &node) const -> Status;
+    auto free(Node &node) -> Status;
     auto upgrade(Node &node) const -> void;
-    auto release(Node node) const -> void;
+    auto release(Node &node) const -> void;
+
+    auto wset_allocate(bool is_external, Node *&node_out) -> Status;
+    auto wset_acquire(Id page_id, bool upgrade, Node *&node_out) const -> Status;
+    auto advance_cursor(Node &node, int diff) const -> void;
+    auto clear_working_set() const -> void;
+    auto finish_operation() const -> void;
 
     [[nodiscard]] auto TEST_to_string() const -> std::string;
     auto TEST_validate() const -> void;
@@ -270,7 +265,7 @@ public:
 
     auto close_internal_cursor() -> void
     {
-        return m_cursor.clear();
+        return m_c.clear();
     }
 
     enum StatType {
@@ -296,31 +291,34 @@ private:
     friend class TreeValidator;
 
     auto free_overflow(Id head_id) -> Status;
-    [[nodiscard]] auto read_key(const Cell &cell, std::string &scratch, Slice *key_out, std::size_t limit = 0) const -> Status;
-    [[nodiscard]] auto read_value(const Cell &cell, std::string &scratch, Slice *value_out) const -> Status;
-    [[nodiscard]] auto read_key(Node &node, std::size_t index, std::string &scratch, Slice *key_out, std::size_t limit = 0) const -> Status;
-    [[nodiscard]] auto read_value(Node &node, std::size_t index, std::string &scratch, Slice *value_out) const -> Status;
+    auto read_key(const Cell &cell, std::string &scratch, Slice *key_out, std::size_t limit = 0) const -> Status;
+    auto read_value(const Cell &cell, std::string &scratch, Slice *value_out) const -> Status;
+    auto read_key(Node &node, std::size_t index, std::string &scratch, Slice *key_out, std::size_t limit = 0) const -> Status;
+    auto read_value(Node &node, std::size_t index, std::string &scratch, Slice *value_out) const -> Status;
     auto write_key(Node &node, std::size_t index, const Slice &key) -> Status;
     auto write_value(Node &node, std::size_t index, const Slice &value) -> Status;
     auto emplace(Node &node, const Slice &key, const Slice &value, std::size_t index, bool &overflow) -> Status;
     auto destroy_impl(Node node) -> Status;
-    auto vacuum_step(Page &free, PointerMap::Entry entry, Schema &schema, Id last_id) -> Status;
+    auto vacuum_step(PageRef &free, PointerMap::Entry entry, Schema &schema, Id last_id) -> Status;
+
     auto resolve_overflow() -> Status;
-    auto resolve_underflow() -> Status;
     auto split_root() -> Status;
     auto split_nonroot() -> Status;
-    auto split_nonroot_fast(Node parent, Node right, const Cell &overflow) -> Status;
+    auto split_nonroot_fast(Node &parent, Node &right, const Cell &overflow) -> Status;
+
+    auto resolve_underflow() -> Status;
     auto fix_root() -> Status;
-    auto fix_nonroot(Node parent, std::size_t index) -> Status;
-    auto merge_left(Node &left, Node right, Node &parent, std::size_t index) -> Status;
-    auto merge_right(Node &left, Node right, Node &parent, std::size_t index) -> Status;
+    auto fix_nonroot(Node &parent, std::size_t index) -> Status;
+    auto merge_left(Node &left, Node &right, Node &parent, std::size_t index) -> Status;
+    auto merge_right(Node &left, Node &right, Node &parent, std::size_t index) -> Status;
     auto rotate_left(Node &parent, Node &left, Node &right, std::size_t index) -> Status;
     auto rotate_right(Node &parent, Node &left, Node &right, std::size_t index) -> Status;
+
     auto transfer_left(Node &left, Node &right) -> Status;
 
     [[nodiscard]] auto find_highest(Node &node) const -> Status;
     [[nodiscard]] auto find_lowest(Node &node) const -> Status;
-    [[nodiscard]] auto find_external(const Slice &key, bool write, bool &exact) const -> Status;
+    [[nodiscard]] auto find_external(const Slice &key, bool &exact) const -> Status;
     auto insert_cell(Node &node, std::size_t index, const Cell &cell) -> Status;
     auto remove_cell(Node &node, std::size_t index) -> Status;
     [[nodiscard]] auto find_parent_id(Id page_id, Id &out) const -> Status;
@@ -329,12 +327,29 @@ private:
     auto fix_links(Node &node, Id parent_id = Id::null()) -> Status;
     [[nodiscard]] auto cell_scratch() -> char *;
 
+    // Storage for the current working set of nodes, that is, nodes that are being accessed by the current
+    // tree operation. The tree algorithms are designed so that they never need more than kMaxWorkingSetSize
+    // nodes at once (imagine split_non_root(), where we need the left node, the right node, the parent node,
+    // and possibly some sibling nodes, which are accessed one-at-a-time). The internal cursor has storage
+    // for 1 additional node, which is managed separately. Nodes in the working set don't need to be released
+    // manually. This greatly simplifies situations in which there are multiple live nodes that need to be
+    // managed.
+    static constexpr std::size_t kMaxWorkingSetSize = 4;
+    mutable Node m_wset[kMaxWorkingSetSize];
+    mutable std::size_t m_wset_idx = 1;
+
+    // Various tree operation counts are tracked in this variable.
     mutable Stats m_stats;
-    mutable InternalCursor m_cursor;
-    char *m_node_scratch;
-    char *m_cell_scratch;
-    Pager *m_pager;
-    const Id *m_root_id;
+
+    // Internal cursor used to traverse the tree structure.
+    mutable InternalCursor m_c;
+
+    // Scratch memory for defragmenting nodes and storing an overflow cell.
+    char *const m_node_scratch;
+    char *const m_cell_scratch;
+
+    Pager *const m_pager;
+    const Id *const m_root_id;
 };
 
 } // namespace calicodb

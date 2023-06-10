@@ -6,7 +6,6 @@
 #define CALICODB_SCHEMA_H
 
 #include "calicodb/db.h"
-#include "page.h"
 #include "tree.h"
 #include <unordered_map>
 
@@ -96,7 +95,7 @@ public:
         for (const auto &[_, state] : m_trees) {
             delete state.tree;
         }
-        m_map.m_cursor.clear();
+        m_map.finish_operation();
     }
 
     auto create_bucket(const BucketOptions &options, const Slice &name, Bucket *b_out) -> Status;

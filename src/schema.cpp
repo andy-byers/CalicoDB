@@ -38,7 +38,7 @@ auto Schema::create_bucket(const BucketOptions &options, const Slice &name, Buck
     }
 
     if (s.is_not_found()) {
-        s = Tree::create(*m_pager, false, &root_id);
+        s = Tree::create(*m_pager, &root_id);
         if (s.is_ok()) {
             // TODO: Encode persistent bucket options here.
             encode_root_id(root_id, value);
