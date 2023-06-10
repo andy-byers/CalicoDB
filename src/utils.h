@@ -51,6 +51,20 @@ inline constexpr auto expect_impl(bool cond, const char *repr, const char *file,
     }
 }
 
+template <class Callback>
+auto busy_wait(BusyHandler *handler, const Callback &callback) -> Status
+{
+    for (unsigned n = 0;; ++n) {
+        auto s = callback();
+        if (s.is_busy()) {
+            if (handler && handler->exec(n)) {
+                continue;
+            }
+        }
+        return s;
+    }
+}
+
 static constexpr std::size_t kMinFrameCount = 8;
 static constexpr std::size_t kMaxCacheSize = 1 << 30;
 static constexpr auto kDefaultWalSuffix = "-wal";

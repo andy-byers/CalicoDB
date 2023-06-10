@@ -5,12 +5,17 @@
 #ifndef CALICODB_SCHEMA_H
 #define CALICODB_SCHEMA_H
 
+#include "calicodb/cursor.h"
 #include "calicodb/db.h"
-#include "tree.h"
+#include "utils.h"
 #include <unordered_map>
 
 namespace calicodb
 {
+
+class CursorImpl;
+class Pager;
+class Tree;
 
 class SchemaCursor : public Cursor
 {
@@ -22,11 +27,7 @@ class SchemaCursor : public Cursor
     auto move_to_impl() -> void;
 
 public:
-    explicit SchemaCursor(Tree &tree)
-        : m_impl(new CursorImpl(tree))
-    {
-    }
-
+    explicit SchemaCursor(Tree &tree);
     ~SchemaCursor() override;
 
     [[nodiscard]] auto is_valid() const -> bool override
@@ -51,24 +52,9 @@ public:
         return m_value;
     }
 
-    auto seek(const Slice &key) -> void override
-    {
-        m_impl->seek(key);
-        move_to_impl();
-    }
-
-    auto seek_first() -> void override
-    {
-        m_impl->seek_first();
-        move_to_impl();
-    }
-
-    auto seek_last() -> void override
-    {
-        m_impl->seek_last();
-        move_to_impl();
-    }
-
+    auto seek(const Slice &key) -> void override;
+    auto seek_first() -> void override;
+    auto seek_last() -> void override;
     auto next() -> void override;
     auto previous() -> void override;
 };
@@ -77,27 +63,14 @@ public:
 class Schema final
 {
 public:
-    explicit Schema(Pager &pager, Status &status, char *scratch)
-        : m_status(&status),
-          m_pager(&pager),
-          m_scratch(scratch),
-          m_map(pager, scratch, nullptr)
-    {
-    }
+    explicit Schema(Pager &pager, Status &status, char *scratch);
 
     [[nodiscard]] auto new_cursor() -> Cursor *
     {
-        return new SchemaCursor(m_map);
+        return new SchemaCursor(*m_map);
     }
 
-    auto close() -> void
-    {
-        for (const auto &[_, state] : m_trees) {
-            delete state.tree;
-        }
-        m_map.finish_operation();
-    }
-
+    auto close() -> void;
     auto create_bucket(const BucketOptions &options, const Slice &name, Bucket *b_out) -> Status;
     auto open_bucket(const Slice &name, Bucket &b_out) -> Status;
     auto drop_bucket(const Slice &name) -> Status;
@@ -134,7 +107,7 @@ private:
     Status *m_status;
     Pager *m_pager;
     char *m_scratch;
-    Tree m_map;
+    Tree *m_map;
 };
 
 } // namespace calicodb

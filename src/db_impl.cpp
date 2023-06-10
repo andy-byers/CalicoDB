@@ -6,6 +6,7 @@
 #include "calicodb/env.h"
 #include "encoding.h"
 #include "logging.h"
+#include "pager.h"
 #include "scope_guard.h"
 #include "tx_impl.h"
 

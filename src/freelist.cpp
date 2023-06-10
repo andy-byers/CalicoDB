@@ -33,7 +33,7 @@ auto Freelist::push(Pager &pager, PageRef *&page) -> Status
     };
 
     // Page ID of the first freelist trunk page.
-    auto free_head = FileHeader::get_freelist_head(root->page);
+    auto free_head = FileHdr::get_freelist_head(root->page);
     if (free_head.value > pager.page_count()) {
         return Status::corruption();
     }
@@ -63,7 +63,7 @@ auto Freelist::push(Pager &pager, PageRef *&page) -> Status
     }
     // `page` must become a new freelist trunk page. Update the file header to reflect this.
     pager.mark_dirty(*root);
-    FileHeader::put_freelist_head(root->page, page->page_id);
+    FileHdr::put_freelist_head(root->page, page->page_id);
     // Transform `page` into a blank freelist trunk page that points at what was previously the first
     // trunk page. Only need to modify the first 8 bytes.
     pager.mark_dirty(*page);
@@ -87,7 +87,7 @@ auto Freelist::pop(Pager &pager, Id &id_out) -> Status
         pager.release(trunk);
     };
 
-    auto free_head = FileHeader::get_freelist_head(root->page);
+    auto free_head = FileHdr::get_freelist_head(root->page);
     if (free_head.is_null()) {
         // Freelist is empty.
         return Status::invalid_argument();
@@ -110,7 +110,7 @@ auto Freelist::pop(Pager &pager, Id &id_out) -> Status
             id_out = free_head;
             free_head.value = get_u32(trunk->page);
             pager.mark_dirty(*root);
-            FileHeader::put_freelist_head(root->page, free_head);
+            FileHdr::put_freelist_head(root->page, free_head);
             if (!free_head.is_null()) {
                 s = PointerMap::write_entry(
                     pager, free_head, {Id::null(), PointerMap::kFreelistTrunk});
@@ -129,7 +129,7 @@ auto Freelist::assert_state(Pager &pager) -> bool
         pager.release(head);
     };
 
-    auto free_head = FileHeader::get_freelist_head(root->page);
+    auto free_head = FileHdr::get_freelist_head(root->page);
     CALICODB_EXPECT_LE(free_head.value, pager.page_count());
     CALICODB_EXPECT_TRUE(free_head.is_null() || free_head.value > kFirstMapPage);
 

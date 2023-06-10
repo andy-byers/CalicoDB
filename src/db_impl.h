@@ -7,10 +7,6 @@
 
 #include "calicodb/db.h"
 
-#include "header.h"
-#include "tree.h"
-#include "wal.h"
-
 #include <functional>
 #include <map>
 

@@ -138,7 +138,7 @@ public:
 
     auto reserve_for_test(std::size_t n) -> void
     {
-        ASSERT_LT(n, kPageSize - FileHeader::kSize - NodeHeader::kSize)
+        ASSERT_LT(n, kPageSize - FileHdr::kSize - NodeHdr::kSize)
             << "reserve_for_test(" << n << ") leaves no room for possible headers";
         size = n;
         base = kPageSize - n;
@@ -992,9 +992,7 @@ public:
 
     auto TearDown() -> void override
     {
-        for (auto &tree : multi_tree) {
-            tree->close_internal_cursor();
-        }
+        multi_tree.clear();
         TreeTests::TearDown();
     }
 

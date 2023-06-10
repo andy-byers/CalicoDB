@@ -7,7 +7,6 @@
 
 #include "bufmgr.h"
 #include "wal.h"
-#include <unordered_set>
 
 namespace calicodb
 {
@@ -110,9 +109,9 @@ public:
     // up the cache. For example, overflow pages are released with kNoCache, so
     // when an overflow chain is traversed, the same page is reused for each link.
     enum ReleaseAction {
-        kKeep,
-        kNoCache,
         kDiscard,
+        kNoCache,
+        kKeep,
     };
 
     // Release a referenced page back to the pager
@@ -128,7 +127,7 @@ public:
     }
 
 private:
-    explicit Pager(const Parameters &param);
+    explicit Pager(Wal &wal, const Parameters &param);
     [[nodiscard]] auto dirtylist_contains(const PageRef &ref) const -> bool;
     auto refresh_state() -> Status;
     auto read_page(PageRef &out, size_t *size_out) -> Status;
@@ -141,22 +140,16 @@ private:
     mutable Status *m_status;
     mutable Mode m_mode = kOpen;
 
-    const char *m_db_name;
-    const char *m_wal_name;
-    const Options::SyncMode m_sync_mode;
-    const Options::LockMode m_lock_mode;
-
     Dirtylist m_dirtylist;
     Bufmgr m_bufmgr;
 
-    bool m_needs_refresh = false;
+    Logger *const m_log;
+    File *const m_file;
+    Wal *const m_wal;
+    BusyHandler *const m_busy;
 
-    Logger *m_log = nullptr;
-    File *m_file;
-    Env *m_env;
-    Wal *m_wal = nullptr;
-    BusyHandler *m_busy = nullptr;
     U32 m_page_count = 0;
+    bool m_needs_refresh = false;
 };
 
 // The first pointer map page is always on page 2, right after the root page.
@@ -164,6 +157,7 @@ static constexpr std::size_t kFirstMapPage = 2;
 
 struct PointerMap {
     enum Type : char {
+        kEmpty,
         kTreeNode,
         kTreeRoot,
         kOverflowHead,
@@ -174,7 +168,7 @@ struct PointerMap {
 
     struct Entry {
         Id back_ptr;
-        Type type = kTreeNode;
+        Type type = kEmpty;
     };
 
     // Return the page ID of the pointer map page that holds the back pointer for page "page_id",

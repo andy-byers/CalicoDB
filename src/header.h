@@ -29,7 +29,7 @@ namespace calicodb
 //     22      4     Freelist head
 //     26      1     File format version
 //     27      37    Reserved
-struct FileHeader {
+struct FileHdr {
     static constexpr char kFmtString[18] = "CalicoDB format 1";
     static constexpr char kFmtVersion = 1;
 
@@ -65,16 +65,16 @@ struct FileHeader {
 // Node Header Format:
 //     Offset  Size  Name
 //    --------------------------
-//     0       1     Flags byte (1 = external, internal otherwise)
+//     0       1     Flags byte (1=external, 2=internal)
 //     1       4     Next ID
 //     5       4     Previous ID
 //     9       2     Cell count
 //     11      2     Cell area start
 //     13      2     Freelist start
 //     15      1     Fragment count
-struct NodeHeader {
+struct NodeHdr {
     static constexpr std::size_t kSize = 16;
-    auto read(const char *data) -> void;
+    [[nodiscard]] auto read(const char *data) -> int;
     auto write(char *data) const -> void;
 
     Id next_id;

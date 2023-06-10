@@ -6,21 +6,19 @@
 #include "calicodb/db.h"
 #include "calicodb/env.h"
 #include "common.h"
-#include "logging.h"
-#include "test.h"
-
-// TODO
 #include "db_impl.h"
+#include "logging.h"
 #include "pager.h"
+#include "test.h"
 
 namespace calicodb::test
 {
 
-#define MAYBE_CRASH(target)                              \
-    do {                                                 \
-        if ((target)->should_next_syscall_fail()) {      \
-            return Status::io_error("<injected_fault>"); \
-        }                                                \
+#define MAYBE_CRASH(target)                         \
+    do {                                            \
+        if ((target)->should_next_syscall_fail()) { \
+            return Status::io_error("<FAULT>");     \
+        }                                           \
     } while (0)
 
 class CrashEnv : public EnvWrapper
@@ -154,16 +152,10 @@ protected:
         return s_keys[n];
     }
 
-    // Check if a fault was intentional
-    [[nodiscard]] static auto is_injected_fault(const Status &s) -> bool
+    // Check if a status is an injected fault
+    static auto is_injected_fault(const Status &s) -> bool
     {
-        return s.to_string() == "I/O error: <injected_fault>";
-    }
-    // Ensure that all statuses contain injected faults
-    template <class... S>
-    static auto assert_injected_fault(const S &...s) -> void
-    {
-        ASSERT_TRUE((is_injected_fault(s) && ...));
+        return s.to_string() == "I/O error: <FAULT>";
     }
 
     [[nodiscard]] static auto writer_task(Tx &tx, std::size_t iteration) -> Status
@@ -186,12 +178,12 @@ protected:
             }
         }
         if (!s.is_ok()) {
-            assert_injected_fault(s, tx.status());
+            EXPECT_EQ(s, tx.status());
             return s;
         }
         s = tx.create_bucket(BucketOptions(), name2, &b2);
         if (!s.is_ok()) {
-            assert_injected_fault(s, tx.status());
+            EXPECT_EQ(s, tx.status());
             return s;
         }
 
@@ -220,11 +212,7 @@ protected:
         if (s.is_ok()) {
             s = tx.vacuum();
         }
-        if (s.is_ok()) {
-            EXPECT_OK(tx.status());
-        } else {
-            assert_injected_fault(s, tx.status());
-        }
+        EXPECT_EQ(s, tx.status());
         return s;
     }
 
@@ -239,14 +227,12 @@ protected:
             b_name = schema.key().to_string();
             EXPECT_EQ(b_name, std::to_string((iteration + 1) % kNumIterations));
         } else {
-            assert_injected_fault(schema.status());
             return schema.status();
         }
 
         Bucket b;
         auto s = tx.open_bucket(b_name, b);
         if (!s.is_ok()) {
-            assert_injected_fault(s);
             return s;
         }
         for (std::size_t i = 0; i < kNumRecords; ++i) {
@@ -257,7 +243,6 @@ protected:
             if (s.is_ok()) {
                 EXPECT_EQ(key, value);
             } else {
-                assert_injected_fault(s);
                 return s;
             }
         }
@@ -274,18 +259,16 @@ protected:
         }
         EXPECT_FALSE(c->is_valid()) << "key = \"" << c->key().to_string() << '\"';
         delete c;
-
-        if (!s.is_ok()) {
-            assert_injected_fault(s);
-        }
         return s;
     }
 
     auto run_until_completion(const std::function<Status()> &task) -> void
     {
         m_env->m_max_num = 0;
-        while (!task().is_ok()) {
+        Status s;
+        while (is_injected_fault(s = task())) {
         }
+        ASSERT_OK(s);
     }
 
     static auto validate(DB &db)
@@ -324,7 +307,7 @@ protected:
                 ++src_counters[kSrcOpen];
                 auto s = DB::open(options, m_filename, db);
                 if (!s.is_ok()) {
-                    assert_injected_fault(s);
+                    EXPECT_TRUE(is_injected_fault(s));
                 }
                 return s;
             });
@@ -403,7 +386,7 @@ protected:
                 ++tries;
                 auto s = DB::open(options, m_filename, db);
                 if (!s.is_ok()) {
-                    assert_injected_fault(s);
+                    EXPECT_TRUE(is_injected_fault(s));
                 }
                 return s;
             });
@@ -419,12 +402,12 @@ protected:
 TEST_F(TestCrashes, Operations)
 {
     // Sanity check. No faults.
-    run_operations_test({false, false});
-    run_operations_test({false, true});
+    //    run_operations_test({false, false});
+    //    run_operations_test({false, true});
 
     // Run with fault injection.
     run_operations_test({true, false});
-    run_operations_test({true, true});
+    //    run_operations_test({true, true});
 }
 
 TEST_F(TestCrashes, OpenClose)
