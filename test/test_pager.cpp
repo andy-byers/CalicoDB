@@ -387,20 +387,10 @@ TEST_F(PagerTests, Freelist)
 
 TEST_F(PagerTests, ReportsOutOfRangePages)
 {
-    ASSERT_OK(m_pager->start_reader());
-    ASSERT_OK(m_pager->start_writer());
-    PageRef *page;
-
-    ASSERT_NOK(m_pager->acquire(Id(100), page));
-
-    PageRef ref;
-    page = &ref;
-    ref.page_id = Id(1);
-    ASSERT_NOK(Freelist::push(*m_pager, page));
-    ref.page_id = Id(100);
-    ASSERT_NOK(Freelist::push(*m_pager, page));
-
-    m_pager->finish();
+    pager_update([this] {
+        PageRef *page;
+        ASSERT_NOK(m_pager->acquire(Id(100), page));
+    });
 }
 
 #ifndef NDEBUG

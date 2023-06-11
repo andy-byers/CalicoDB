@@ -2425,12 +2425,10 @@ auto CursorImpl::seek_first() -> void
     clear();
 
     Node lowest;
-    auto s = m_tree->find_lowest(lowest);
-    if (!s.is_ok()) {
-        m_status = s;
-        return;
+    m_status = m_tree->find_lowest(lowest);
+    if (m_status.is_ok()) {
+        seek_to(lowest, 0);
     }
-    seek_to(lowest, 0);
 }
 
 auto CursorImpl::seek_last() -> void
@@ -2438,9 +2436,8 @@ auto CursorImpl::seek_last() -> void
     clear();
 
     Node highest;
-    auto s = m_tree->find_highest(highest);
-    if (!s.is_ok()) {
-        m_status = s;
+    m_status = m_tree->find_highest(highest);
+    if (!m_status.is_ok()) {
         return;
     }
     if (highest.hdr.cell_count > 0) {
@@ -2467,11 +2464,9 @@ auto CursorImpl::next() -> void
         return;
     }
     Node node;
-    auto s = m_tree->acquire(next_id, false, node);
-    if (s.is_ok()) {
+    m_status = m_tree->acquire(next_id, false, node);
+    if (m_status.is_ok()) {
         seek_to(node, 0);
-    } else {
-        m_status = s;
     }
 }
 
@@ -2492,11 +2487,10 @@ auto CursorImpl::previous() -> void
         return;
     }
     Node node;
-    auto s = m_tree->acquire(prev_id, false, node);
-    if (s.is_ok()) {
-        seek_to(node, node.hdr.cell_count - 1);
-    } else {
-        m_status = s;
+    m_status = m_tree->acquire(prev_id, false, node);
+    if (m_status.is_ok()) {
+        // node should never be empty. TODO: Report corruption
+        seek_to(node, std::max<U32>(1, node.hdr.cell_count) - 1);
     }
 }
 
@@ -2527,6 +2521,7 @@ auto CursorImpl::seek_to(Node &node, std::size_t index) -> void
             return;
         }
     }
+    m_tree->release(node);
 }
 
 auto CursorImpl::seek(const Slice &key) -> void
