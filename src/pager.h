@@ -85,7 +85,7 @@ public:
     auto destroy(PageRef *&page) -> Status;
     auto acquire(Id page_id, PageRef *&page_out) -> Status;
     auto mark_dirty(PageRef &page) -> void;
-    [[nodiscard]] auto acquire_root() -> PageRef &;
+    [[nodiscard]] auto get_root() -> PageRef &;
 
     auto set_page_count(U32 page_count) -> void;
     auto assert_state() const -> bool;
@@ -137,12 +137,12 @@ private:
     auto purge_page(PageRef &victim) -> void;
 
     mutable Stats m_stats;
-    mutable Status *m_status;
     mutable Mode m_mode = kOpen;
 
-    Dirtylist m_dirtylist;
     Bufmgr m_bufmgr;
+    Dirtylist m_dirtylist;
 
+    Status *const m_status;
     Logger *const m_log;
     File *const m_file;
     Wal *const m_wal;

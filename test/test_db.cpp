@@ -571,11 +571,7 @@ TEST_F(DBTests, CorruptedRootIDs)
 TEST_F(DBTests, CheckpointResize)
 {
     ASSERT_OK(m_db->update([](auto &tx) {
-        Bucket b;
-        auto s = tx.create_bucket(BucketOptions(), "BUCKET", &b);
-        if (s.is_ok()) {
-        }
-        return s;
+        return tx.create_bucket(BucketOptions(), "BUCKET", nullptr);
     }));
     ASSERT_EQ(0, file_size(m_db_name));
 

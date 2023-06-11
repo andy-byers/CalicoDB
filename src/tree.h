@@ -92,7 +92,6 @@ class CursorImpl : public Cursor
 {
     mutable Status m_status;
     mutable Node m_node;
-    mutable bool m_is_valid = false;
     Tree *m_tree;
     std::string m_key_buf;
     std::string m_val_buf;
@@ -117,7 +116,7 @@ public:
 
     [[nodiscard]] auto is_valid() const -> bool override
     {
-        return m_is_valid && m_status.is_ok();
+        return m_node.ref && m_status.is_ok();
     }
 
     [[nodiscard]] auto status() const -> Status override
@@ -220,7 +219,7 @@ private:
 
         [[nodiscard]] auto is_valid() const -> bool
         {
-            return m_status.is_ok() && m_node->ref != nullptr;
+            return m_node->ref && m_status.is_ok();
         }
 
         [[nodiscard]] auto status() const -> Status
@@ -244,7 +243,6 @@ private:
         {
             clear();
             history[level += diff] = {node.ref->page_id, 0};
-            m_status = Status::ok();
             *m_node = node;
             node.ref = nullptr;
         }

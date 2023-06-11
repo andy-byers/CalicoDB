@@ -88,6 +88,7 @@ protected:
 
     Env *m_env;
     Pager *m_pager = nullptr;
+    File *m_file = nullptr;
     Status m_status;
 
     explicit PagerTests()
@@ -98,6 +99,7 @@ protected:
     ~PagerTests() override
     {
         close();
+        delete m_file;
         delete m_env;
     }
 
@@ -112,16 +114,15 @@ protected:
         (void)m_env->remove_file("db");
         (void)m_env->remove_file("wal");
 
-        File *db_file = nullptr;
         auto s = m_env->new_file(
             "db",
             Env::kCreate | Env::kReadWrite,
-            db_file);
+            m_file);
         if (s.is_ok()) {
             const Pager::Parameters param = {
                 "db",
                 "wal",
-                db_file,
+                m_file,
                 m_env,
                 nullptr,
                 &m_status,
@@ -134,7 +135,7 @@ protected:
         }
         if (!s.is_ok()) {
             ADD_FAILURE() << s.to_string();
-            delete db_file;
+            delete m_file;
             return false;
         }
         return true;

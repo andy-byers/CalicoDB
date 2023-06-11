@@ -402,12 +402,12 @@ protected:
 TEST_F(TestCrashes, Operations)
 {
     // Sanity check. No faults.
-    //    run_operations_test({false, false});
-    //    run_operations_test({false, true});
+//    run_operations_test({false, false});
+//    run_operations_test({false, true});
 
-    // Run with fault injection.
+//    // Run with fault injection.
     run_operations_test({true, false});
-    //    run_operations_test({true, true});
+//    run_operations_test({true, true});
 }
 
 TEST_F(TestCrashes, OpenClose)

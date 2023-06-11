@@ -47,7 +47,7 @@ static constexpr auto kPointerSize = sizeof(U16);
     return Status::corruption(msg);
 }
 
-[[nodiscard]] static auto page_offset(Id page_id)
+[[nodiscard]] static auto page_offset(Id page_id) -> std::size_t
 {
     return FileHdr::kSize * page_id.is_root();
 }
@@ -1871,10 +1871,10 @@ auto Tree::vacuum(Schema &schema) -> Status
     }
 
     Status s;
-    auto *root = &m_pager->acquire_root();
+    auto &root = m_pager->get_root();
 
     U32 free_size;
-    const auto free_head = FileHdr::get_freelist_head(root->page);
+    const auto free_head = FileHdr::get_freelist_head(root.page);
     // Count the number of pages in the freelist, since we don't keep this information stored
     // anywhere. This involves traversing the list of freelist trunk pages. Luckily, these pages
     // are likely to be accessed again soon, so it may not hurt have them in the pager cache.
@@ -1896,7 +1896,6 @@ auto Tree::vacuum(Schema &schema) -> Status
                 // finished and all occupied pages are tightly packed at the start of the file.
                 while (s.is_ok()) {
                     m_pager->release(free);
-                    // If this call to Pager::allocate() succeeds,
                     s = m_pager->allocate(free);
                     if (s.is_ok()) {
                         if (free->page_id <= end_page) {
@@ -1920,11 +1919,10 @@ auto Tree::vacuum(Schema &schema) -> Status
         s = schema.vacuum_finish();
     }
     if (s.is_ok() && db_size < m_pager->page_count()) {
-        m_pager->mark_dirty(*root);
-        FileHdr::put_freelist_head(root->page, Id::null());
+        m_pager->mark_dirty(root);
+        FileHdr::put_freelist_head(root.page, Id::null());
         m_pager->set_page_count(db_size);
     }
-    m_pager->release(root);
     return s;
 }
 
@@ -2331,9 +2329,8 @@ auto Tree::TEST_validate() const -> void
 #endif // CALICODB_TEST
 
 Tree::InternalCursor::InternalCursor(Tree &tree)
-    : m_status(Status::ok()),
-      m_tree(&tree),
-      m_node(&tree.m_wset[Tree::kMaxWorkingSetSize])
+    : m_tree(&tree),
+      m_node(&tree.m_wset[0])
 {
 }
 
@@ -2469,11 +2466,10 @@ auto CursorImpl::next() -> void
     if (next_id.is_null()) {
         return;
     }
-    Node *node;
-    auto s = m_tree->wset_acquire(next_id, false, node);
+    Node node;
+    auto s = m_tree->acquire(next_id, false, node);
     if (s.is_ok()) {
-        seek_to(*node, 0);
-        m_tree->clear_working_set();
+        seek_to(node, 0);
     } else {
         m_status = s;
     }
@@ -2495,11 +2491,10 @@ auto CursorImpl::previous() -> void
     if (prev_id.is_null()) {
         return;
     }
-    Node *node;
-    auto s = m_tree->wset_acquire(prev_id, false, node);
+    Node node;
+    auto s = m_tree->acquire(prev_id, false, node);
     if (s.is_ok()) {
-        seek_to(*node, node->hdr.cell_count - 1);
-        m_tree->clear_working_set();
+        seek_to(node, node.hdr.cell_count - 1);
     } else {
         m_status = s;
     }
@@ -2507,7 +2502,7 @@ auto CursorImpl::previous() -> void
 
 auto CursorImpl::seek_to(Node &node, std::size_t index) -> void
 {
-    CALICODB_EXPECT_FALSE(m_is_valid);
+    CALICODB_EXPECT_EQ(nullptr, m_node.ref);
     CALICODB_EXPECT_TRUE(m_status.is_ok());
     const auto *hdr = &node.hdr;
     CALICODB_EXPECT_TRUE(hdr->is_external);
@@ -2529,7 +2524,6 @@ auto CursorImpl::seek_to(Node &node, std::size_t index) -> void
             m_node = node;
             node.ref = nullptr;
             m_index = index;
-            m_is_valid = true;
             return;
         }
     }
@@ -2553,10 +2547,7 @@ auto CursorImpl::seek(const Slice &key) -> void
 
 auto CursorImpl::clear(Status s) -> void
 {
-    if (m_is_valid) {
-        m_is_valid = false;
-        m_tree->release(m_node);
-    }
+    m_tree->release(m_node);
     m_status = std::move(s);
 }
 

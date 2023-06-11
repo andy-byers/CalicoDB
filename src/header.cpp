@@ -48,11 +48,16 @@ auto FileHdr::make_supported_db(char *root) -> void
     root_hdr.write(root + kSize);
 }
 
+enum : char {
+    kExternal = '\x01',
+    kInternal = '\x02',
+};
+
 auto NodeHdr::read(const char *data) -> int
 {
-    if (const auto t = *data++; t == 1) {
+    if (const auto t = *data++; t == kExternal) {
         is_external = true;
-    } else if (t == 2) {
+    } else if (t == kInternal) {
         is_external = false;
     } else {
         return -1;
@@ -79,7 +84,7 @@ auto NodeHdr::read(const char *data) -> int
 
 auto NodeHdr::write(char *data) const -> void
 {
-    *data++ = is_external ? 1 : 2;
+    *data++ = is_external ? kExternal : kInternal;
 
     put_u32(data, next_id.value);
     data += Id::kSize;

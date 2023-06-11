@@ -4,10 +4,8 @@
 
 #include "db_impl.h"
 #include "calicodb/env.h"
-#include "encoding.h"
 #include "logging.h"
 #include "pager.h"
-#include "scope_guard.h"
 #include "tx_impl.h"
 
 namespace calicodb
@@ -15,14 +13,7 @@ namespace calicodb
 
 auto DBImpl::open(const Options &sanitized) -> Status
 {
-    File *file = nullptr;
-    ScopeGuard guard = [&file, this] {
-        if (m_pager == nullptr) {
-            delete file;
-        }
-    };
-
-    auto s = m_env->new_file(m_db_filename, Env::kReadWrite, file);
+    auto s = m_env->new_file(m_db_filename, Env::kReadWrite, m_file);
     if (s.is_ok()) {
         if (sanitized.error_if_exists) {
             return Status::invalid_argument(
@@ -44,16 +35,16 @@ auto DBImpl::open(const Options &sanitized) -> Status
             return s;
         }
         log(m_log, R"(creating missing database "%s")", m_db_filename.c_str());
-        s = m_env->new_file(m_db_filename, Env::kCreate, file);
+        s = m_env->new_file(m_db_filename, Env::kCreate, m_file);
     }
     if (s.is_ok()) {
-        s = busy_wait(m_busy, [file, sanitized] {
+        s = busy_wait(m_busy, [this] {
             // This lock is held for the entire lifetime of this DB.
-            return file->file_lock(kFileShared);
+            return m_file->file_lock(kFileShared);
         });
     }
     if (s.is_ok() && sanitized.lock_mode == Options::kLockExclusive) {
-        s = file->file_lock(kFileExclusive);
+        s = m_file->file_lock(kFileExclusive);
     }
     if (!s.is_ok()) {
         return s;
@@ -61,7 +52,7 @@ auto DBImpl::open(const Options &sanitized) -> Status
     const Pager::Parameters pager_param = {
         m_db_filename.c_str(),
         m_wal_filename.c_str(),
-        file,
+        m_file,
         m_env,
         m_log,
         &m_status,
@@ -84,7 +75,6 @@ auto DBImpl::open(const Options &sanitized) -> Status
             s = Status::ok();
         }
     }
-    std::move(guard).cancel();
     return s;
 }
 
@@ -108,6 +98,7 @@ DBImpl::~DBImpl()
         }
     }
     delete m_pager;
+    delete m_file;
     delete[] m_scratch;
 
     if (m_owns_log) {

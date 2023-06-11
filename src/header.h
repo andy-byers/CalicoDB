@@ -65,7 +65,7 @@ struct FileHdr {
 // Node Header Format:
 //     Offset  Size  Name
 //    --------------------------
-//     0       1     Flags byte (1=external, 2=internal)
+//     0       1     Node type
 //     1       4     Next ID
 //     5       4     Previous ID
 //     9       2     Cell count

@@ -26,13 +26,12 @@ public:
     PagerTestHarness()
         : m_env(new FakeEnv)
     {
-        File *file;
-        EXPECT_OK(m_env->new_file("db", Env::kCreate, file));
+        EXPECT_OK(m_env->new_file("db", Env::kCreate, m_file));
 
         const Pager::Parameters pager_param = {
             "db",
             "wal",
-            file,
+            m_file,
             m_env,
             nullptr,
             &m_status,
@@ -53,12 +52,14 @@ public:
     {
         (void)m_pager->close();
         delete m_pager;
+        delete m_file;
         delete m_env;
     }
 
 protected:
     Status m_status;
     Pager *m_pager = nullptr;
+    File *m_file = nullptr;
 };
 
 class NodeTests
