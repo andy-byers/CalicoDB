@@ -12,7 +12,7 @@ namespace calicodb
 {
 
 Bufmgr::Bufmgr(std::size_t frame_count)
-    : m_buffer(new(std::align_val_t{kPageSize}) char[kPageSize * frame_count]),
+    : m_buffer(new (std::align_val_t{kPageSize}) char[kPageSize * frame_count]),
       m_frame_count(frame_count)
 {
     for (std::size_t i = 1; i < m_frame_count; ++i) {
@@ -24,7 +24,7 @@ Bufmgr::Bufmgr(std::size_t frame_count)
 
 Bufmgr::~Bufmgr()
 {
-    operator delete[](m_buffer, std::align_val_t{kPageSize});
+    operator delete[] (m_buffer, std::align_val_t{kPageSize});
 }
 
 auto Bufmgr::query(Id page_id) -> PageRef *
@@ -78,6 +78,9 @@ auto Bufmgr::erase(Id page_id) -> bool
 
 auto Bufmgr::next_victim() -> PageRef *
 {
+    // NOTE: If this method is being called repeatedly (i.e. to evict all cached pages),
+    // then there shouldn't be any outstanding references. The first page in the list
+    // should be returned each time this method is called in that case.
     for (auto &ref : m_list) {
         if (ref.refcount == 0) {
             return &ref;
@@ -133,22 +136,23 @@ auto Bufmgr::unref(PageRef &ref) -> void
 auto Dirtylist::remove(PageRef &ref) -> PageRef *
 {
     CALICODB_EXPECT_TRUE(head);
-    CALICODB_EXPECT_FALSE(head->prev);
+    CALICODB_EXPECT_FALSE(head->prev_dirty);
     CALICODB_EXPECT_TRUE(ref.flag & PageRef::kDirty);
     ref.flag = PageRef::kNormal;
 
-    if (ref.prev) {
-        ref.prev->next = ref.next;
+    if (ref.prev_dirty) {
+        ref.prev_dirty->next_dirty = ref.next_dirty;
     } else {
         CALICODB_EXPECT_EQ(&ref, head);
-        head = ref.next;
+        head = ref.next_dirty;
     }
-    auto *next = ref.next;
+    auto *next = ref.next_dirty;
     if (next) {
-        next->prev = ref.prev;
+        next->prev_dirty = ref.prev_dirty;
     }
-    ref.prev = nullptr;
-    ref.next = nullptr;
+    ref.dirty = nullptr;
+    ref.prev_dirty = nullptr;
+    ref.next_dirty = nullptr;
     return next;
 }
 
@@ -156,13 +160,102 @@ auto Dirtylist::add(PageRef &ref) -> void
 {
     CALICODB_EXPECT_FALSE(ref.flag & PageRef::kDirty);
     if (head) {
-        CALICODB_EXPECT_FALSE(head->prev);
-        head->prev = &ref;
+        CALICODB_EXPECT_FALSE(head->prev_dirty);
+        head->prev_dirty = &ref;
     }
     ref.flag = PageRef::kDirty;
-    ref.prev = nullptr;
-    ref.next = head;
+    ref.dirty = nullptr;
+    ref.prev_dirty = nullptr;
+    ref.next_dirty = head;
     head = &ref;
+}
+
+static auto dirtylist_merge(PageRef &lhs_ref, PageRef &rhs_ref) -> PageRef *
+{
+    PageRef result;
+    auto *tail = &result;
+    auto *lhs = &lhs_ref;
+    auto *rhs = &rhs_ref;
+
+    for (;;) {
+        if (lhs->page_id < rhs->page_id) {
+            tail->dirty = lhs;
+            tail = lhs;
+            lhs = lhs->dirty;
+            if (lhs == nullptr) {
+                tail->dirty = rhs;
+                break;
+            }
+        } else {
+            tail->dirty = rhs;
+            tail = rhs;
+            rhs = rhs->dirty;
+            if (rhs == nullptr) {
+                tail->dirty = lhs;
+                break;
+            }
+        }
+    }
+    return result.dirty;
+}
+
+auto Dirtylist::sort() -> void
+{
+#ifndef NDEBUG
+    auto *old_head = head;
+#endif // NDEBUG
+
+    for (auto *p = head; p; p = p->next_dirty) {
+        p->dirty = p->next_dirty;
+    }
+
+    static constexpr std::size_t kNSortBuckets = 32;
+    auto *in = head;
+    PageRef *arr[kNSortBuckets] = {};
+    PageRef *ptr;
+
+    while (in) {
+        ptr = in;
+        in = in->dirty;
+        ptr->dirty = nullptr;
+
+        std::size_t i = 0;
+        for (; i < kNSortBuckets - 1; ++i) {
+            if (arr[i] == nullptr) {
+                arr[i] = ptr;
+                break;
+            } else {
+                ptr = dirtylist_merge(*arr[i], *ptr);
+                arr[i] = nullptr;
+            }
+        }
+        if (i == kNSortBuckets - 1) {
+            arr[i] = dirtylist_merge(*arr[i], *ptr);
+        }
+    }
+    ptr = arr[0];
+    for (std::size_t i = 1; i < kNSortBuckets; ++i) {
+        if (arr[i] == nullptr) {
+            continue;
+        }
+        ptr = ptr ? dirtylist_merge(*ptr, *arr[i]) : arr[i];
+    }
+    head = ptr;
+
+#ifndef NDEBUG
+    // Make sure the list was sorted correctly.
+    for (PageRef *transient = head, *permanent = old_head; transient;) {
+        auto *next = transient->dirty;
+        if (next != nullptr) {
+            CALICODB_EXPECT_LT(transient->page_id, next->page_id);
+        }
+        transient = next;
+
+        // Traverse the non-transient list as well. It should be the same length.
+        CALICODB_EXPECT_EQ(!next, !permanent->next_dirty);
+        permanent = permanent->next_dirty;
+    }
+#endif // NDEBUG
 }
 
 } // namespace calicodb

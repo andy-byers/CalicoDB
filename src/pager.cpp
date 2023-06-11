@@ -240,7 +240,7 @@ auto Pager::purge_pages(bool purge_all) -> void
 {
     for (auto *p = m_dirtylist.head; p;) {
         auto *save = p;
-        p = p->next;
+        p = p->next_dirty;
         m_dirtylist.remove(*save);
         if (save->page_id.is_root()) {
             // Indicate that the root needs to be reread.
@@ -289,11 +289,12 @@ auto Pager::flush_dirty_pages() -> Status
             p = m_dirtylist.remove(*p);
         } else {
             p->flag = PageRef::kNormal;
-            p = p->next;
+            p = p->next_dirty;
         }
     }
     // These pages are no longer considered dirty. If the call to Wal::write() fails,
     // this connection must purge the whole cache.
+    m_dirtylist.sort();
     p = m_dirtylist.head;
     m_dirtylist.head = nullptr;
     CALICODB_EXPECT_NE(p, nullptr);
@@ -329,6 +330,7 @@ auto Pager::ensure_available_buffer() -> Status
 
             // Write just this page to the WAL. DB page count is 0 here because this write
             // is not part of a commit.
+            victim->dirty = nullptr;
             s = m_wal->write(victim, 0);
             if (!s.is_ok()) {
                 set_status(s);
@@ -533,8 +535,8 @@ auto Pager::assert_state() const -> bool
 auto Pager::dirtylist_contains(const PageRef &ref) const -> bool
 {
     auto found = false;
-    for (auto *p = m_dirtylist.head; p; p = p->next) {
-        CALICODB_EXPECT_TRUE(p->next == nullptr || p->next->prev == p);
+    for (auto *p = m_dirtylist.head; p; p = p->next_dirty) {
+        CALICODB_EXPECT_TRUE(p->next_dirty == nullptr || p->next_dirty->prev_dirty == p);
         if (p->page_id == ref.page_id) {
             CALICODB_EXPECT_FALSE(found);
             found = true;

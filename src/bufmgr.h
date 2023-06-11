@@ -30,8 +30,9 @@ struct PageRef final {
     unsigned refcount = 0;
 
     // Dirty list fields.
-    PageRef *prev = nullptr;
-    PageRef *next = nullptr;
+    PageRef *dirty = nullptr;
+    PageRef *prev_dirty = nullptr;
+    PageRef *next_dirty = nullptr;
 
     enum Flag {
         kNormal = 0,
@@ -151,6 +152,7 @@ private:
 struct Dirtylist {
     auto remove(PageRef &ref) -> PageRef *;
     auto add(PageRef &ref) -> void;
+    auto sort() -> void;
 
     PageRef *head = nullptr;
 };
