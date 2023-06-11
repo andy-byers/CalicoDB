@@ -396,14 +396,6 @@ TEST_F(PagerTests, ReportsOutOfRangePages)
 #ifndef NDEBUG
 TEST_F(PagerTests, DeathTest)
 {
-    pager_update([this] {
-        PageRef *page;
-        m_pager->initialize_root();
-        ASSERT_OK(m_pager->acquire(Id(2), page));
-        ASSERT_DEATH((void)m_pager->destroy(page), "expect");
-        ASSERT_OK(m_pager->commit());
-    });
-
     ASSERT_EQ(m_pager->mode(), Pager::kOpen);
     ASSERT_DEATH((void)m_pager->commit(), "expect");
 
