@@ -17,14 +17,16 @@ Greatly speeds up the process of locating specific database pages in the WAL.
 See [shm file](#shm-file) for details.
 
 ### Env
-The env construct handles platform-specific filesystem operations and I/O.
+The `Env` construct handles platform-specific filesystem operations and I/O.
 Users can override classes in [`calicodb/env.h`](../include/calicodb/env.h).
 Then, a pointer to the custom `Env` object can be passed to the database when it is opened.
-See [`fake_env.h`](../utils/fake_env.h) for an example that stores the database files in memory.
+See [`fake_env.h`](../utils/fake_env.h) for an example that stores the database files in memory for test reproducibility.
 
 ### Pager
 The pager module provides in-memory caching for database pages read by the `Env`.
 It is the pager's job to maintain consistency between database pages on disk and in memory, and to coordinate with the WAL.
+In this design, the pager is never allowed to write directly to the database file.
+Instead, modified pages are flushed to the WAL on commit or eviction from the cache.
 
 ### Tree
 CalicoDB trees are similar to table B-trees in SQLite3.
@@ -140,6 +142,10 @@ Second, there can only be a single writer at any given time.
 Multiple simultaneous readers are allowed to run while there is an active writer, however.
 This means that if a database is being accessed by multiple threads or processes, certain calls may return with `Status::busy()`.
 
+The WAL, being a sequential log, provides a total ordering of all operations performed on the database since the last checkpoint reset.
+This makes it perfect for serializing writers and providing snapshot isolation for readers.
+Each connection just needs to know what part of the WAL is safe to access.
+
 Concurrency control in CalicoDB relies on a few key mechanisms described here.
 First, locking is coordinated on the shm file, using the `File::shm_lock()` API.
 There are 8 lock bytes available:
@@ -158,4 +164,3 @@ New connections may use an existing readmark by taking a read lock on the corres
 This indicates to other connections what portion of the WAL is being read by readers attached to that readmark.
 The first readmark always has a value of 0, indicating that readers are ignoring the WAL completely.
 If a new connection finds that the WAL is empty, it will attempt to use the first readmark.
-

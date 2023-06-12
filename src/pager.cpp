@@ -319,7 +319,7 @@ auto Pager::ensure_available_buffer() -> Status
 {
     Status s;
     if (!m_bufmgr.available()) {
-        // There are no available frames, so the cache must be full. "next_victim()" will not find
+        // There are no available frames, so the cache must be full. next_victim() will not find
         // a page to evict if all pages are referenced, which should never happen.
         auto *victim = m_bufmgr.next_victim();
         CALICODB_EXPECT_NE(victim, nullptr);

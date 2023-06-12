@@ -45,31 +45,41 @@ public:
     static auto defragment(Node &node, int skip = -1) -> int;
 };
 
-// Internal Cell Format:
+// Internal cell format:
 //     Size    Name
 //    -----------------------
 //     4       child_id
 //     varint  key_size
 //     n       key
-//     4       [overflow_id]
+//    [4       overflow_id]
 //
-// External Cell Format:
+// External cell format:
 //     Size    Name
 //    -----------------------
 //     varint  value_size
 //     varint  key_size
 //     n       key
 //     m       value
-//     4       [overflow_id]
+//    [4       overflow_id]
 //
 struct Cell {
+    // Pointer to the start of the cell.
     char *ptr = nullptr;
+
+    // Pointer to the start of the record key.
     char *key = nullptr;
-    std::size_t local_size = 0;
-    std::size_t total_size = 0;
-    std::size_t key_size = 0;
-    std::size_t size = 0;
-    bool has_remote = false;
+
+    // Number of bytes contained in the key.
+    U32 key_size = 0;
+
+    // Number of bytes contained in both the key and the value.
+    U32 total_pl_size = 0;
+
+    // Number of payload bytes stored locally (embedded in a node).
+    U32 local_pl_size = 0;
+
+    // Number of bytes occupied by this cell when embedded.
+    U32 footprint = 0;
 };
 
 // Simple construct representing a tree node
@@ -81,23 +91,29 @@ struct Node {
     NodeHdr hdr;
     int (*parser)(char *, const char *, Cell *) = nullptr;
     std::optional<Cell> overflow;
-    unsigned overflow_index = 0;
-    unsigned slots_offset = 0;
-    unsigned gap_size = 0;
+    U32 overflow_index = 0;
+    U32 slots_offset = 0;
+    U32 gap_size = 0;
 
     auto TEST_validate() -> void;
 };
 
 class CursorImpl : public Cursor
 {
-    mutable Status m_status;
-    mutable Node m_node;
+    Status m_status;
     Tree *m_tree;
+
+    Node m_node;
+    U32 m_index = 0;
+
+    // Buffers for storing keys and/or values that wouldn't fit on a single page.
     std::string m_key_buf;
     std::string m_val_buf;
+
+    // References to the current key and value, which may be located in one of the auxiliary buffers, or
+    // directly on a database page from the cache (in m_node).
     Slice m_key;
     Slice m_val;
-    std::size_t m_index = 0;
 
 protected:
     auto seek_to(Node &node, std::size_t index) -> void;
@@ -198,61 +214,6 @@ public:
     }
 
 private:
-    class InternalCursor
-    {
-        mutable Status m_status;
-        std::string m_buffer;
-        Tree *m_tree;
-        Node *m_node;
-
-    public:
-        static constexpr std::size_t kMaxDepth = 20;
-
-        struct Location {
-            Id page_id;
-            unsigned index = 0;
-        } history[kMaxDepth];
-        int level = 0;
-
-        explicit InternalCursor(Tree &tree);
-        ~InternalCursor();
-
-        [[nodiscard]] auto is_valid() const -> bool
-        {
-            return m_node->ref && m_status.is_ok();
-        }
-
-        [[nodiscard]] auto status() const -> Status
-        {
-            return m_status;
-        }
-
-        [[nodiscard]] auto index() const -> std::size_t
-        {
-            CALICODB_EXPECT_TRUE(is_valid());
-            return history[level].index;
-        }
-
-        [[nodiscard]] auto node() -> Node &
-        {
-            CALICODB_EXPECT_TRUE(is_valid());
-            return *m_node;
-        }
-
-        auto move_to(Node &node, int diff) -> void
-        {
-            clear();
-            history[level += diff] = {node.ref->page_id, 0};
-            *m_node = node;
-            node.ref = nullptr;
-        }
-
-        auto clear() -> void;
-        auto seek_root() -> void;
-        auto seek(const Slice &key) -> bool;
-        auto move_down(Id child_id) -> void;
-    };
-
     friend class CursorImpl;
     friend class SchemaCursor;
     friend class DBImpl;
@@ -305,6 +266,62 @@ private:
         return m_wset[idx + 1];
     }
 
+    // Internal cursor used to traverse the tree structure
+    mutable class InternalCursor
+    {
+        mutable Status m_status;
+        std::string m_buffer;
+        Tree *m_tree;
+        Node *m_node;
+
+    public:
+        static constexpr std::size_t kMaxDepth = 20;
+
+        struct Location {
+            Id page_id;
+            U32 index = 0;
+        } history[kMaxDepth];
+        int level = 0;
+
+        explicit InternalCursor(Tree &tree);
+        ~InternalCursor();
+
+        [[nodiscard]] auto is_valid() const -> bool
+        {
+            return m_node->ref && m_status.is_ok();
+        }
+
+        [[nodiscard]] auto status() const -> Status
+        {
+            return m_status;
+        }
+
+        [[nodiscard]] auto index() const -> std::size_t
+        {
+            CALICODB_EXPECT_TRUE(is_valid());
+            return history[level].index;
+        }
+
+        [[nodiscard]] auto node() -> Node &
+        {
+            CALICODB_EXPECT_TRUE(is_valid());
+            return *m_node;
+        }
+
+        auto move_to(Node &node, int diff) -> void
+        {
+            clear();
+            history[level += diff] = {node.ref->page_id, 0};
+            *m_node = node;
+            node.ref = nullptr;
+        }
+
+        auto clear() -> void;
+        auto seek_root() -> void;
+        auto seek(const Slice &key) -> bool;
+        auto move_down(Id child_id) -> void;
+    } m_c;
+
     // Storage for the current working set of nodes, that is, nodes that are being accessed by the current
     // tree operation. The tree algorithms are designed so that they never need more than kMaxWorkingSetSize
     // nodes at once. The internal cursor uses slot 0.
@@ -314,9 +331,6 @@ private:
 
     // Various tree operation counts are tracked in this variable.
     mutable Stats m_stats;
-
-    // Internal cursor used to traverse the tree structure.
-    mutable InternalCursor m_c;
 
     // Scratch memory for defragmenting nodes and storing an overflow cell.
     char *const m_node_scratch;
