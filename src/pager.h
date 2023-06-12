@@ -7,7 +7,6 @@
 
 #include "bufmgr.h"
 #include "wal.h"
-#include <unordered_set>
 
 namespace calicodb
 {
@@ -17,10 +16,6 @@ class Env;
 class Pager final
 {
 public:
-    friend class DBImpl;
-    friend class Tree;
-    friend class TxImpl;
-
     enum Mode {
         kOpen,
         kRead,
@@ -85,12 +80,14 @@ public:
     auto finish() -> void;
 
     auto checkpoint(bool reset) -> Status;
-    auto allocate(Page &page) -> Status;
-    auto destroy(Page page) -> Status;
-    auto acquire(Id page_id, Page &page) -> Status;
-    auto mark_dirty(Page &page) -> void;
+
+    auto allocate(PageRef *&page_out) -> Status;
+    auto destroy(PageRef *&page) -> Status;
+    auto acquire(Id page_id, PageRef *&page_out) -> Status;
+    auto mark_dirty(PageRef &page) -> void;
+    [[nodiscard]] auto get_root() -> PageRef &;
+
     auto set_page_count(U32 page_count) -> void;
-    [[nodiscard]] auto acquire_root() -> Page;
     auto assert_state() const -> bool;
     auto purge_pages(bool purge_all) -> void;
     auto initialize_root() -> void;
@@ -112,14 +109,14 @@ public:
     // up the cache. For example, overflow pages are released with kNoCache, so
     // when an overflow chain is traversed, the same page is reused for each link.
     enum ReleaseAction {
-        kKeep,
-        kNoCache,
         kDiscard,
+        kNoCache,
+        kKeep,
     };
 
     // Release a referenced page back to the pager
     // This routine is a NOOP if page was already released.
-    auto release(Page page, ReleaseAction action = kKeep) -> void;
+    auto release(PageRef *&page, ReleaseAction action = kKeep) -> void;
 
     auto set_status(const Status &error) const -> void;
 
@@ -130,7 +127,7 @@ public:
     }
 
 private:
-    explicit Pager(const Parameters &param);
+    explicit Pager(Wal &wal, const Parameters &param);
     [[nodiscard]] auto dirtylist_contains(const PageRef &ref) const -> bool;
     auto refresh_state() -> Status;
     auto read_page(PageRef &out, size_t *size_out) -> Status;
@@ -140,25 +137,19 @@ private:
     auto purge_page(PageRef &victim) -> void;
 
     mutable Stats m_stats;
-    mutable Status *m_status;
     mutable Mode m_mode = kOpen;
 
-    const char *m_db_name;
-    const char *m_wal_name;
-    const Options::SyncMode m_sync_mode;
-    const Options::LockMode m_lock_mode;
-
-    Dirtylist m_dirtylist;
     Bufmgr m_bufmgr;
+    Dirtylist m_dirtylist;
 
-    bool m_needs_refresh = false;
+    Status *const m_status;
+    Logger *const m_log;
+    File *const m_file;
+    Wal *const m_wal;
+    BusyHandler *const m_busy;
 
-    Logger *m_log = nullptr;
-    File *m_file;
-    Env *m_env;
-    Wal *m_wal = nullptr;
-    BusyHandler *m_busy = nullptr;
     U32 m_page_count = 0;
+    bool m_needs_refresh = false;
 };
 
 // The first pointer map page is always on page 2, right after the root page.
@@ -166,6 +157,7 @@ static constexpr std::size_t kFirstMapPage = 2;
 
 struct PointerMap {
     enum Type : char {
+        kEmpty,
         kTreeNode,
         kTreeRoot,
         kOverflowHead,
@@ -176,7 +168,7 @@ struct PointerMap {
 
     struct Entry {
         Id back_ptr;
-        Type type = kTreeNode;
+        Type type = kEmpty;
     };
 
     // Return the page ID of the pointer map page that holds the back pointer for page "page_id",

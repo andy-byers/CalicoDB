@@ -7,16 +7,10 @@
 
 #include "calicodb/db.h"
 
-#include "header.h"
-#include "tree.h"
-#include "wal.h"
-
-#include <functional>
-#include <map>
-
 namespace calicodb
 {
 
+class File;
 class Env;
 class Pager;
 class TxImpl;
@@ -49,6 +43,7 @@ private:
     char *m_scratch = nullptr;
 
     Pager *m_pager = nullptr;
+    File *m_file = nullptr;
 
     Env *const m_env = nullptr;
     Logger *const m_log = nullptr;

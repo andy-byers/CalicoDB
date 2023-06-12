@@ -174,15 +174,6 @@ public:
     virtual auto erase(const Bucket &b, const Slice &key) -> Status = 0;
 };
 
-class BusyHandler
-{
-public:
-    explicit BusyHandler();
-    virtual ~BusyHandler();
-
-    virtual auto exec(unsigned attempts) -> bool = 0;
-};
-
 template <class Fn>
 auto DB::view(Fn &&fn) const -> Status
 {

@@ -5,16 +5,17 @@
 #ifndef CALICODB_FREELIST_H
 #define CALICODB_FREELIST_H
 
-#include "page.h"
+#include "utils.h"
 
 namespace calicodb
 {
 
 class Pager;
+struct PageRef;
 
 struct Freelist {
     // Add a `page` to the freelist
-    static auto push(Pager &pager, Page page) -> Status;
+    static auto push(Pager &pager, PageRef *&page) -> Status;
 
     // Attempt to remove a page from the freelist
     // If the freelist is empty, returns a status for which Status::is_invalid_argument()

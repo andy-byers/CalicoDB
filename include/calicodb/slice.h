@@ -97,7 +97,7 @@ public:
         return *this;
     }
 
-    [[nodiscard]] constexpr auto starts_with(const Slice &rhs) const -> bool
+    [[nodiscard]] auto starts_with(const Slice &rhs) const -> bool
     {
         if (rhs.size() > m_size) {
             return false;

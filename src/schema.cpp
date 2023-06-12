@@ -7,10 +7,25 @@
 #include "logging.h"
 #include "scope_guard.h"
 #include "tree.h"
-#include "tx_impl.h"
 
 namespace calicodb
 {
+
+Schema::Schema(Pager &pager, Status &status, char *scratch)
+    : m_status(&status),
+      m_pager(&pager),
+      m_scratch(scratch),
+      m_map(new Tree(pager, scratch, nullptr))
+{
+}
+
+auto Schema::close() -> void
+{
+    for (const auto &[_, state] : m_trees) {
+        delete state.tree;
+    }
+    delete m_map;
+}
 
 auto Schema::corrupted_root_id(const Slice &name, const Slice &value) -> Status
 {
@@ -34,15 +49,15 @@ auto Schema::create_bucket(const BucketOptions &options, const Slice &name, Buck
     Id root_id;
     std::string value;
     if (s.is_ok()) {
-        s = m_map.get(name, &value);
+        s = m_map->get(name, &value);
     }
 
     if (s.is_not_found()) {
-        s = Tree::create(*m_pager, false, &root_id);
+        s = Tree::create(*m_pager, &root_id);
         if (s.is_ok()) {
             // TODO: Encode persistent bucket options here.
             encode_root_id(root_id, value);
-            s = m_map.put(name, value);
+            s = m_map->put(name, value);
         }
     } else if (s.is_ok()) {
         if (!decode_and_check_root_id(value, root_id)) {
@@ -68,7 +83,7 @@ auto Schema::open_bucket(const Slice &name, Bucket &b_out) -> Status
 
     std::string value;
     if (s.is_ok()) {
-        s = m_map.get(name, &value);
+        s = m_map->get(name, &value);
     }
 
     Id root_id;
@@ -129,7 +144,7 @@ auto Schema::construct_bucket_state(Id root_id) -> Bucket
 auto Schema::drop_bucket(const Slice &name) -> Status
 {
     std::string value;
-    auto s = m_map.get(name, &value);
+    auto s = m_map->get(name, &value);
     if (s.is_not_found()) {
         return Status::invalid_argument(
             "table \"" + name.to_string() + "\" does not exist");
@@ -149,29 +164,33 @@ auto Schema::drop_bucket(const Slice &name) -> Status
     Tree drop(*m_pager, m_scratch, &root_id);
     s = Tree::destroy(drop);
     if (s.is_ok()) {
-        s = m_map.erase(name);
+        s = m_map->erase(name);
     }
     return s;
 }
 
 auto Schema::vacuum_reroot(Id old_id, Id new_id) -> void
 {
-    auto tree = m_trees.find(old_id);
-    if (tree == end(m_trees)) {
+    Id original_id;
+    auto itr = m_trees.find(old_id);
+    if (itr == end(m_trees)) {
         RootedTree reroot;
         reroot.root = old_id;
-        m_trees.insert(tree, {old_id, reroot});
+        // This tree isn't open right now (and it hasn't been rerooted yet), but we need to keep track of the
+        // new root mapping. Create a dummy tree entry for this purpose.
+        m_trees.insert(itr, {new_id, reroot});
+        original_id = old_id;
+    } else {
+        // Reroot the tree. This tree is either open, or it has already been rerooted. Leave the root ID stored
+        // in the tree state set to the original root.
+        auto node = m_trees.extract(itr);
+        CALICODB_EXPECT_FALSE(!node);
+        node.key() = new_id;
+        original_id = node.mapped().root;
+        m_trees.insert(std::move(node));
     }
-    // Rekey the tree. Leave the root ID stored in the tree state set
-    // to the original root.
-    auto node = m_trees.extract(old_id);
-    CALICODB_EXPECT_FALSE(!node);
-    node.key() = new_id;
-    const auto root_id = node.mapped().root;
-    m_trees.insert(std::move(node));
-
     // Map the original root ID to the newest root ID.
-    m_reroot.insert_or_assign(root_id, new_id);
+    m_reroot.insert_or_assign(original_id, new_id);
 }
 
 auto Schema::vacuum_finish() -> Status
@@ -193,19 +212,19 @@ auto Schema::vacuum_finish() -> Status
             std::string value;
             encode_root_id(root->second, value);
             // Update the database schema with the new root page ID for this tree.
-            s = m_map.put(c->key(), value);
+            s = m_map->put(c->key(), value);
             if (!s.is_ok()) {
                 break;
             }
             // Update the in-memory tree root stored by each bucket.
-            auto b = m_trees.find(root->second);
-            CALICODB_EXPECT_NE(b, end(m_trees));
-            if (b->second.tree) {
-                b->second.root = root->second;
+            auto tree = m_trees.find(root->second);
+            CALICODB_EXPECT_NE(tree, end(m_trees));
+            if (tree->second.tree) {
+                tree->second.root = root->second;
             } else {
-                // This bucket is not actually open. The RootedBucket entry exists
-                // so that vacuum_reroot() could find the original root ID.
-                m_trees.erase(b);
+                // This tree is not actually open. The RootedTree entry exists so that vacuum_reroot() could
+                // find the original root ID.
+                m_trees.erase(tree);
             }
             m_reroot.erase(root);
         }
@@ -225,7 +244,7 @@ auto Schema::vacuum_finish() -> Status
 
 auto Schema::vacuum_freelist() -> Status
 {
-    return m_map.vacuum(*this);
+    return m_map->vacuum(*this);
 }
 
 auto Schema::TEST_validate() const -> void
@@ -235,6 +254,11 @@ auto Schema::TEST_validate() const -> void
             bucket.tree->TEST_validate();
         }
     }
+}
+
+SchemaCursor::SchemaCursor(Tree &tree)
+    : m_impl(new CursorImpl(tree))
+{
 }
 
 SchemaCursor::~SchemaCursor()
@@ -252,6 +276,24 @@ auto SchemaCursor::move_to_impl() -> void
     }
     m_status = m_impl->status();
     m_impl->clear();
+}
+
+auto SchemaCursor::seek(const Slice &key) -> void
+{
+    m_impl->seek(key);
+    move_to_impl();
+}
+
+auto SchemaCursor::seek_first() -> void
+{
+    m_impl->seek_first();
+    move_to_impl();
+}
+
+auto SchemaCursor::seek_last() -> void
+{
+    m_impl->seek_last();
+    move_to_impl();
 }
 
 auto SchemaCursor::next() -> void

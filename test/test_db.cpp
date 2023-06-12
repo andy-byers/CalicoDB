@@ -5,10 +5,10 @@
 #include "common.h"
 #include "db_impl.h"
 #include "fake_env.h"
+#include "header.h"
 #include "logging.h"
 #include "test.h"
 #include "tx_impl.h"
-#include "wal.h"
 #include <gtest/gtest.h>
 
 namespace calicodb::test
@@ -17,19 +17,19 @@ namespace calicodb::test
 TEST(FileFormatTests, ReportsUnrecognizedFormatString)
 {
     char page[kPageSize];
-    FileHeader::make_supported_db(page);
+    FileHdr::make_supported_db(page);
 
     ++page[0];
-    ASSERT_NOK(FileHeader::check_db_support(page));
+    ASSERT_NOK(FileHdr::check_db_support(page));
 }
 
 TEST(FileFormatTests, ReportsUnrecognizedFormatVersion)
 {
     char page[kPageSize];
-    FileHeader::make_supported_db(page);
+    FileHdr::make_supported_db(page);
 
-    ++page[FileHeader::kFmtVersionOffset];
-    ASSERT_NOK(FileHeader::check_db_support(page));
+    ++page[FileHdr::kFmtVersionOffset];
+    ASSERT_NOK(FileHdr::check_db_support(page));
 }
 
 class DBTests : public testing::Test
@@ -571,11 +571,7 @@ TEST_F(DBTests, CorruptedRootIDs)
 TEST_F(DBTests, CheckpointResize)
 {
     ASSERT_OK(m_db->update([](auto &tx) {
-        Bucket b;
-        auto s = tx.create_bucket(BucketOptions(), "BUCKET", &b);
-        if (s.is_ok()) {
-        }
-        return s;
+        return tx.create_bucket(BucketOptions(), "BUCKET", nullptr);
     }));
     ASSERT_EQ(0, file_size(m_db_name));
 

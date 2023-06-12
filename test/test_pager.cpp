@@ -3,6 +3,7 @@
 // LICENSE.md. See AUTHORS.md for a list of contributor names.
 
 #include "common.h"
+#include "encoding.h"
 #include "fake_env.h"
 #include "freelist.h"
 #include "pager.h"
@@ -87,6 +88,7 @@ protected:
 
     Env *m_env;
     Pager *m_pager = nullptr;
+    File *m_file = nullptr;
     Status m_status;
 
     explicit PagerTests()
@@ -97,6 +99,7 @@ protected:
     ~PagerTests() override
     {
         close();
+        delete m_file;
         delete m_env;
     }
 
@@ -111,16 +114,15 @@ protected:
         (void)m_env->remove_file("db");
         (void)m_env->remove_file("wal");
 
-        File *db_file = nullptr;
         auto s = m_env->new_file(
             "db",
             Env::kCreate | Env::kReadWrite,
-            db_file);
+            m_file);
         if (s.is_ok()) {
             const Pager::Parameters param = {
                 "db",
                 "wal",
-                db_file,
+                m_file,
                 m_env,
                 nullptr,
                 &m_status,
@@ -133,7 +135,7 @@ protected:
         }
         if (!s.is_ok()) {
             ADD_FAILURE() << s.to_string();
-            delete db_file;
+            delete m_file;
             return false;
         }
         return true;
@@ -148,48 +150,48 @@ protected:
     }
 
     std::vector<Id> m_page_ids;
-    auto allocate_page(Page *page_out) -> Id
+    auto allocate_page(PageRef *&page_out) -> Id
     {
         if (m_pager->page_count() == 0) {
             m_pager->initialize_root();
         }
 
-        Page page;
-        EXPECT_OK(m_pager->allocate(page));
-        const auto id = page.id();
-        if (page_out) {
-            *page_out = std::move(page);
-        } else {
-            m_pager->release(std::move(page));
+        EXPECT_OK(m_pager->allocate(page_out));
+        if (m_page_ids.empty() || m_page_ids.back() < page_out->page_id) {
+            m_page_ids.emplace_back(page_out->page_id);
         }
-        if (m_page_ids.empty() || m_page_ids.back() < id) {
-            m_page_ids.emplace_back(id);
-        }
+        return page_out->page_id;
+    }
+    auto allocate_page() -> Id
+    {
+        PageRef *page;
+        const auto id = allocate_page(page);
+        m_pager->release(page);
         return id;
     }
-    auto alter_page(Page &page) -> void
+    auto alter_page(PageRef &page) -> void
     {
         m_pager->mark_dirty(page);
-        const auto value = get_u32(page.constant_ptr() + kPageSize - 4);
-        put_u32(page.mutable_ptr() + kPageSize - 4, value + 1);
+        const auto value = get_u32(page.page + kPageSize - 4);
+        put_u32(page.page + kPageSize - 4, value + 1);
     }
     auto alter_page(std::size_t index) -> void
     {
-        Page page;
+        PageRef *page;
         EXPECT_OK(m_pager->acquire(m_page_ids.at(index), page));
-        alter_page(page);
-        m_pager->release(std::move(page));
+        alter_page(*page);
+        m_pager->release(page);
     }
-    auto read_page(const Page &page) -> U32
+    auto read_page(const PageRef &page) -> U32
     {
-        return get_u32(page.constant_ptr() + kPageSize - 4);
+        return get_u32(page.page + kPageSize - 4);
     }
     auto read_page(std::size_t index) -> U32
     {
-        Page page;
+        PageRef *page;
         EXPECT_OK(m_pager->acquire(m_page_ids.at(index), page));
-        const auto value = read_page(page);
-        m_pager->release(std::move(page));
+        const auto value = read_page(*page);
+        m_pager->release(page);
         return value;
     }
 
@@ -215,9 +217,9 @@ TEST_F(PagerTests, AllocatePage)
     pager_update([this] {
         ASSERT_EQ(0, m_pager->page_count());
         // Pager layer skips pointer map pages, and the root already exists.
-        ASSERT_EQ(Id(3), allocate_page(nullptr));
-        ASSERT_EQ(Id(4), allocate_page(nullptr));
-        ASSERT_EQ(Id(5), allocate_page(nullptr));
+        ASSERT_EQ(Id(3), allocate_page());
+        ASSERT_EQ(Id(4), allocate_page());
+        ASSERT_EQ(Id(5), allocate_page());
         ASSERT_EQ(5, m_pager->page_count());
     });
 }
@@ -225,13 +227,13 @@ TEST_F(PagerTests, AllocatePage)
 TEST_F(PagerTests, AcquirePage)
 {
     pager_update([this] {
-        allocate_page(nullptr);
+        allocate_page();
         ASSERT_EQ(3, m_pager->page_count());
 
-        Page page;
+        PageRef *page;
         for (U32 n = 1; n < 5; ++n) {
             ASSERT_OK(m_pager->acquire(Id(n), page));
-            m_pager->release(std::move(page));
+            m_pager->release(page);
             // Pager::acquire() can increase the database size by 1.
             ASSERT_EQ(n <= 3 ? 3 : n, m_pager->page_count());
         }
@@ -261,20 +263,20 @@ TEST_F(PagerTests, Commit)
         reopen(iteration < 3 ? Options::kLockNormal : Options::kLockExclusive);
         pager_update([this] {
             for (std::size_t i = 0; i < kManyPages; ++i) {
-                Page page;
-                allocate_page(&page);
-                alter_page(page);
+                PageRef *page;
+                allocate_page(page);
+                alter_page(*page);
                 m_pager->release(
-                    std::move(page),
+                    page,
                     // kNoCache should be ignored, since the page is dirty.
                     Pager::kNoCache);
             }
             for (std::size_t i = 0; i < kManyPages; ++i) {
-                Page page;
+                PageRef *page;
                 ASSERT_OK(m_pager->acquire(m_page_ids[i], page));
-                alter_page(page);
+                alter_page(*page);
                 m_pager->release(
-                    std::move(page),
+                    page,
                     // Drop every other update.
                     i & 1 ? Pager::kNoCache : Pager::kDiscard);
             }
@@ -305,10 +307,10 @@ TEST_F(PagerTests, Rollback)
         reopen(iteration < 3 ? Options::kLockNormal : Options::kLockExclusive);
         pager_update([this] {
             for (std::size_t i = 0; i < kManyPages; ++i) {
-                Page page;
-                allocate_page(&page);
-                alter_page(page);
-                m_pager->release(std::move(page));
+                PageRef *page;
+                allocate_page(page);
+                alter_page(*page);
+                m_pager->release(page);
 
                 if (i == kManyPages / 2) {
                     ASSERT_OK(m_pager->commit());
@@ -332,7 +334,7 @@ TEST_F(PagerTests, Truncation)
 {
     pager_update([this] {
         for (std::size_t i = 0; i < kManyPages; ++i) {
-            allocate_page(nullptr);
+            allocate_page();
         }
         for (std::size_t i = 0; i < kManyPages; ++i) {
             alter_page(i);
@@ -357,24 +359,24 @@ TEST_F(PagerTests, Truncation)
 TEST_F(PagerTests, Freelist)
 {
     pager_update([this] {
-        Page page;
+        PageRef *page;
         // Fill up several trunk pages.
         for (std::size_t i = 0; i < kPageSize; ++i) {
-            allocate_page(&page);
-            m_pager->release(std::move(page));
+            allocate_page(page);
+            m_pager->release(page);
         }
         for (std::size_t i = 0; i < kPageSize; ++i) {
             ASSERT_OK(m_pager->acquire(m_page_ids.at(i), page));
-            ASSERT_OK(m_pager->destroy(std::move(page)));
+            ASSERT_OK(m_pager->destroy(page));
         }
         ASSERT_OK(m_pager->commit());
     });
     pager_update([this] {
         ASSERT_EQ(m_page_ids.back().value, m_pager->page_count());
-        Page page;
+        PageRef *page;
         for (std::size_t i = 0; i < kPageSize; ++i) {
-            allocate_page(&page);
-            m_pager->release(std::move(page));
+            allocate_page(page);
+            m_pager->release(page);
         }
         ASSERT_OK(m_pager->commit());
     });
@@ -385,34 +387,15 @@ TEST_F(PagerTests, Freelist)
 
 TEST_F(PagerTests, ReportsOutOfRangePages)
 {
-    ASSERT_OK(m_pager->start_reader());
-    ASSERT_OK(m_pager->start_writer());
-    Page page;
-
-    ASSERT_NOK(m_pager->acquire(Id(100), page));
-
-    PageRef ref;
-    page.TEST_ref() = &ref;
-
-    ref.page_id = Id(1);
-    ASSERT_NOK(Freelist::push(*m_pager, std::move(page)));
-    ref.page_id = Id(100);
-    ASSERT_NOK(Freelist::push(*m_pager, std::move(page)));
-
-    m_pager->finish();
+    pager_update([this] {
+        PageRef *page;
+        ASSERT_NOK(m_pager->acquire(Id(100), page));
+    });
 }
 
 #ifndef NDEBUG
 TEST_F(PagerTests, DeathTest)
 {
-    pager_update([this] {
-        Page page;
-        m_pager->initialize_root();
-        ASSERT_OK(m_pager->acquire(Id(2), page));
-        ASSERT_DEATH((void)m_pager->destroy(std::move(page)), "expect");
-        ASSERT_OK(m_pager->commit());
-    });
-
     ASSERT_EQ(m_pager->mode(), Pager::kOpen);
     ASSERT_DEATH((void)m_pager->commit(), "expect");
 

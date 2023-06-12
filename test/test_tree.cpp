@@ -26,19 +26,12 @@ public:
     PagerTestHarness()
         : m_env(new FakeEnv)
     {
-        std::string buffer(kPageSize, '\0');
-        std::memcpy(buffer.data(), FileHeader::kFmtString, sizeof(FileHeader::kFmtString));
-        buffer[FileHeader::kFmtVersionOffset] = FileHeader::kFmtVersion;
-        put_u32(buffer.data() + FileHeader::kPageCountOffset, 1);
-
-        File *file;
-        EXPECT_OK(m_env->new_file("db", Env::kCreate, file));
-        EXPECT_OK(file->write(0, buffer));
+        EXPECT_OK(m_env->new_file("db", Env::kCreate, m_file));
 
         const Pager::Parameters pager_param = {
             "db",
             "wal",
-            file,
+            m_file,
             m_env,
             nullptr,
             &m_status,
@@ -49,19 +42,24 @@ public:
         };
 
         EXPECT_OK(Pager::open(pager_param, m_pager));
-        m_pager->set_page_count(1);
+        EXPECT_OK(m_pager->start_reader());
+        EXPECT_OK(m_pager->start_writer());
+        m_pager->initialize_root();
+        m_pager->finish();
     }
 
     ~PagerTestHarness()
     {
         (void)m_pager->close();
         delete m_pager;
+        delete m_file;
         delete m_env;
     }
 
 protected:
     Status m_status;
     Pager *m_pager = nullptr;
+    File *m_file = nullptr;
 };
 
 class NodeTests
@@ -74,16 +72,12 @@ public:
     {
     }
 
-    ~NodeTests() override
-    {
-        m_pager->finish();
-    }
+    ~NodeTests() override = default;
 
     auto SetUp() -> void override
     {
         ASSERT_OK(m_pager->start_reader());
         ASSERT_OK(m_pager->start_writer());
-        ASSERT_OK(Tree::create(*m_pager, true, nullptr));
         tree = std::make_unique<Tree>(*m_pager, tree_scratch.data(), nullptr);
     }
 
@@ -96,6 +90,7 @@ public:
 
     auto TearDown() -> void override
     {
+        tree.reset();
         m_pager->finish();
     }
 
@@ -138,13 +133,13 @@ public:
 
     auto TearDown() -> void override
     {
-        tree->release(std::move(node));
+        tree->release(node);
         NodeTests::TearDown();
     }
 
     auto reserve_for_test(std::size_t n) -> void
     {
-        ASSERT_LT(n, kPageSize - FileHeader::kSize - NodeHeader::kSize)
+        ASSERT_LT(n, kPageSize - FileHdr::kSize - NodeHdr::kSize)
             << "reserve_for_test(" << n << ") leaves no room for possible headers";
         size = n;
         base = kPageSize - n;
@@ -192,7 +187,7 @@ TEST_F(BlockAllocatorTests, MergesAdjacentBlocks)
 TEST_F(BlockAllocatorTests, ConsumesAdjacentFragments)
 {
     reserve_for_test(40);
-    node.header.frag_count = 6;
+    node.hdr.frag_count = 6;
 
     // .........*#####**...........**#####*....
     BlockAllocator::release(node, base + 10, 5);
@@ -201,45 +196,46 @@ TEST_F(BlockAllocatorTests, ConsumesAdjacentFragments)
     // .....##########**...........**#####*....
     BlockAllocator::release(node, base + 5, 4);
     ASSERT_EQ(BlockAllocator::accumulate_free_bytes(node), 15);
-    ASSERT_EQ(node.header.frag_count, 5);
+    ASSERT_EQ(node.hdr.frag_count, 5);
 
     // .....#################......**#####*....
     BlockAllocator::release(node, base + 17, 5);
     ASSERT_EQ(BlockAllocator::accumulate_free_bytes(node), 22);
-    ASSERT_EQ(node.header.frag_count, 3);
+    ASSERT_EQ(node.hdr.frag_count, 3);
 
     // .....##############################*....
     BlockAllocator::release(node, base + 22, 6);
     ASSERT_EQ(BlockAllocator::accumulate_free_bytes(node), 30);
-    ASSERT_EQ(node.header.frag_count, 1);
+    ASSERT_EQ(node.hdr.frag_count, 1);
 
     // .....##############################*....
     BlockAllocator::release(node, base + 36, 4);
     ASSERT_EQ(BlockAllocator::accumulate_free_bytes(node), 35);
-    ASSERT_EQ(node.header.frag_count, 0);
+    ASSERT_EQ(node.hdr.frag_count, 0);
 }
 
 TEST_F(BlockAllocatorTests, ExternalNodesDoNotConsume3ByteFragments)
 {
     reserve_for_test(11);
-    node.header.frag_count = 3;
+    node.hdr.is_external = true;
+    node.hdr.frag_count = 3;
 
     // ....***####
     BlockAllocator::release(node, base + 7, 4);
 
     // ####***####
     BlockAllocator::release(node, base + 0, 4);
-    ASSERT_EQ(BlockAllocator::accumulate_free_bytes(node), size - node.header.frag_count);
-    ASSERT_EQ(node.header.frag_count, 3);
+    ASSERT_EQ(BlockAllocator::accumulate_free_bytes(node), size - node.hdr.frag_count);
+    ASSERT_EQ(node.hdr.frag_count, 3);
 }
 
 TEST_F(BlockAllocatorTests, InternalNodesConsume3ByteFragments)
 {
-    tree->release(std::move(node));
+    tree->release(node);
     node = get_node(false);
 
     reserve_for_test(11);
-    node.header.frag_count = 3;
+    node.hdr.frag_count = 3;
 
     // ....***####
     BlockAllocator::release(node, base + 7, 4);
@@ -247,13 +243,15 @@ TEST_F(BlockAllocatorTests, InternalNodesConsume3ByteFragments)
     // ###########
     BlockAllocator::release(node, base + 0, 4);
     ASSERT_EQ(BlockAllocator::accumulate_free_bytes(node), size);
-    ASSERT_EQ(node.header.frag_count, 0);
+    ASSERT_EQ(node.hdr.frag_count, 0);
 }
 
 TEST_F(NodeTests, AllocatorSkipsPointerMapPage)
 {
     // Page 1 is allocated before Pager::open() returns, and this call skips page 2.
-    ASSERT_EQ(get_node(true).page.id(), Id(3));
+    auto node = get_node(true);
+    ASSERT_EQ(node.ref->page_id, Id(3));
+    tree->release(node);
 }
 
 class TreeTests
@@ -263,8 +261,7 @@ class TreeTests
 public:
     TreeTests()
         : param(GetParam()),
-          collect_scratch(kPageSize * 2, '\x00'),
-          root_id(Id::root())
+          collect_scratch(kPageSize * 2, '\x00')
     {
     }
 
@@ -272,13 +269,12 @@ public:
     {
         ASSERT_OK(m_pager->start_reader());
         ASSERT_OK(m_pager->start_writer());
-        ASSERT_OK(Tree::create(*m_pager, true, nullptr));
         tree = std::make_unique<Tree>(*m_pager, collect_scratch.data(), nullptr);
     }
 
     auto TearDown() -> void override
     {
-        tree->close_internal_cursor();
+        tree.reset();
         m_pager->finish();
     }
 
@@ -310,7 +306,6 @@ public:
     std::size_t param;
     std::string collect_scratch;
     std::unique_ptr<Tree> tree;
-    Id root_id;
 };
 
 TEST_P(TreeTests, ConstructsAndDestructs)
@@ -913,9 +908,9 @@ TEST_P(PointerMapTests, PointerMapCanFitAllPointers)
 {
     // PointerMap::find_map() expects the given pointer map page to be allocated already.
     for (std::size_t i = 0; i < map_size() * 2; ++i) {
-        Page page;
+        PageRef *page;
         ASSERT_OK(m_pager->allocate(page));
-        m_pager->release(std::move(page));
+        m_pager->release(page);
     }
 
     for (std::size_t i = 0; i < map_size() + 10; ++i) {
@@ -998,16 +993,14 @@ public:
 
     auto TearDown() -> void override
     {
-        for (auto &tree : multi_tree) {
-            tree->close_internal_cursor();
-        }
+        multi_tree.clear();
         TreeTests::TearDown();
     }
 
     auto create_tree()
     {
         Id root;
-        EXPECT_OK(Tree::create(*m_pager, last_tree_id.is_null(), &root));
+        EXPECT_OK(Tree::create(*m_pager, &root));
         ++last_tree_id.value;
         root_ids.emplace_back(root);
         multi_tree.emplace_back(std::make_unique<Tree>(*m_pager, m_scratch.data(), &root_ids.back()));

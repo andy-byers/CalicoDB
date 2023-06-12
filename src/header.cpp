@@ -9,7 +9,7 @@
 namespace calicodb
 {
 
-auto FileHeader::check_db_support(const char *root) -> Status
+auto FileHdr::check_db_support(const char *root) -> Status
 {
     Status s;
     const Slice fmt_string(root, sizeof(kFmtString));
@@ -34,7 +34,7 @@ auto FileHeader::check_db_support(const char *root) -> Status
     return s;
 }
 
-auto FileHeader::make_supported_db(char *root) -> void
+auto FileHdr::make_supported_db(char *root) -> void
 {
     // Initialize the file header.
     std::memcpy(root, kFmtString, sizeof(kFmtString));
@@ -42,21 +42,26 @@ auto FileHeader::make_supported_db(char *root) -> void
     put_u32(root + kPageCountOffset, 1);
 
     // Initialize the root page of the schema tree.
-    NodeHeader root_hdr;
+    NodeHdr root_hdr;
     root_hdr.is_external = true;
     root_hdr.cell_start = kPageSize;
     root_hdr.write(root + kSize);
 }
 
-auto NodeHeader::read(const char *data) -> void
-{
-    // TODO: Return a bool from this method. false if there is corruption, true otherwise.
-    //       These asserts should be made into guard clauses at some point. The tree layer
-    //       can set an error status on the pager if there is corruption detected.
-    CALICODB_EXPECT_EQ(*data & ~0b11, 0);
+enum : char {
+    kExternal = '\x01',
+    kInternal = '\x02',
+};
 
-    // Flags byte.
-    is_external = *data++ & 1;
+auto NodeHdr::read(const char *data) -> int
+{
+    if (const auto t = *data++; t == kExternal) {
+        is_external = true;
+    } else if (t == kInternal) {
+        is_external = false;
+    } else {
+        return -1;
+    }
 
     next_id.value = get_u32(data);
     data += Id::kSize;
@@ -74,11 +79,12 @@ auto NodeHeader::read(const char *data) -> void
     data += sizeof(U16);
 
     frag_count = static_cast<U8>(*data);
+    return 0;
 }
 
-auto NodeHeader::write(char *data) const -> void
+auto NodeHdr::write(char *data) const -> void
 {
-    *data++ = is_external ? 1 : 2;
+    *data++ = is_external ? kExternal : kInternal;
 
     put_u32(data, next_id.value);
     data += Id::kSize;

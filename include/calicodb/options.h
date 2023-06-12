@@ -59,6 +59,15 @@ struct BucketOptions {
     bool error_if_exists = false;
 };
 
+class BusyHandler
+{
+public:
+    explicit BusyHandler();
+    virtual ~BusyHandler();
+
+    virtual auto exec(unsigned attempts) -> bool = 0;
+};
+
 } // namespace calicodb
 
 #endif // CALICODB_OPTIONS_H
