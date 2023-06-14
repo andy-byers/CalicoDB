@@ -12,7 +12,7 @@ namespace calicodb
 {
 
 Bufmgr::Bufmgr(std::size_t frame_count)
-    : m_buffer(new (std::align_val_t{kPageSize}) char[kPageSize * frame_count]),
+    : m_buffer(new(std::align_val_t{kPageSize}) char[kPageSize * frame_count]),
       m_frame_count(frame_count)
 {
     for (std::size_t i = 1; i < m_frame_count; ++i) {
@@ -24,7 +24,7 @@ Bufmgr::Bufmgr(std::size_t frame_count)
 
 Bufmgr::~Bufmgr()
 {
-    operator delete[] (m_buffer, std::align_val_t{kPageSize});
+    operator delete[](m_buffer, std::align_val_t{kPageSize});
 }
 
 auto Bufmgr::query(Id page_id) -> PageRef *
@@ -131,6 +131,14 @@ auto Bufmgr::unref(PageRef &ref) -> void
 
     --ref.refcount;
     --m_refsum;
+}
+
+auto Bufmgr::move_page(PageRef &page, Id page_id) -> void
+{
+    auto node = m_map.extract(page.page_id);
+    CALICODB_EXPECT_TRUE(!!node);
+    node.key() = page_id;
+    page.page_id = page_id;
 }
 
 auto Dirtylist::remove(PageRef &ref) -> PageRef *

@@ -63,7 +63,7 @@ public:
 class Schema final
 {
 public:
-    explicit Schema(Pager &pager, Status &status, char *scratch);
+    explicit Schema(Pager &pager, const Status &status, char *scratch);
 
     [[nodiscard]] auto new_cursor() -> Cursor *
     {
@@ -104,7 +104,7 @@ private:
 
     HashMap<RootedTree> m_trees;
     HashMap<Id> m_reroot;
-    Status *m_status;
+    const Status *m_status;
     Pager *m_pager;
     char *m_scratch;
     Tree *m_map;

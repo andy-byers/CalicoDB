@@ -220,6 +220,8 @@ private:
     friend class Schema;
     friend class TreeValidator;
 
+    auto corrupted_page(Id page_id) const -> Status;
+
     // Find the external node containing the lowest/highest key in the tree
     auto find_lowest(Node &node_out) const -> Status;
     auto find_highest(Node &node_out) const -> Status;

@@ -32,6 +32,76 @@ TEST(FileFormatTests, ReportsUnrecognizedFormatVersion)
     ASSERT_NOK(FileHdr::check_db_support(page));
 }
 
+class CallbackEnv : public EnvWrapper
+{
+public:
+    std::function<void()> m_read_callback;
+    std::function<void()> m_write_callback;
+    bool m_in_callback = false;
+
+    auto call_read_callback() -> void
+    {
+        if (m_read_callback && !m_in_callback) {
+            m_in_callback = true;
+            m_read_callback();
+            m_in_callback = false;
+        }
+    }
+    auto call_write_callback() -> void
+    {
+        if (m_write_callback && !m_in_callback) {
+            m_in_callback = true;
+            m_write_callback();
+            m_in_callback = false;
+        }
+    }
+
+    explicit CallbackEnv(Env &env)
+        : EnvWrapper(env)
+    {
+    }
+
+    ~CallbackEnv() override = default;
+
+    auto new_file(const std::string &filename, OpenMode mode, File *&file_out) -> Status override
+    {
+        class CallbackFile : public FileWrapper
+        {
+            CallbackEnv *m_env;
+
+        public:
+            explicit CallbackFile(CallbackEnv &env, File &base)
+                : FileWrapper(base),
+                  m_env(&env)
+            {
+            }
+
+            ~CallbackFile() override
+            {
+                delete m_target;
+            }
+
+            auto read(std::size_t offset, std::size_t size, char *scratch, Slice *out) -> Status override
+            {
+                m_env->call_read_callback();
+                return FileWrapper::read(offset, size, scratch, out);
+            }
+
+            auto write(std::size_t offset, const Slice &in) -> Status override
+            {
+                m_env->call_write_callback();
+                return FileWrapper::write(offset, in);
+            }
+        };
+
+        auto s = target()->new_file(filename, mode, file_out);
+        if (s.is_ok()) {
+            file_out = new CallbackFile(*this, *file_out);
+        }
+        return s;
+    }
+};
+
 class DBTests : public testing::Test
 {
 protected:
@@ -44,7 +114,7 @@ protected:
         : m_test_dir(testing::TempDir()),
           m_db_name(m_test_dir + "db"),
           m_alt_wal_name(m_test_dir + "wal"),
-          m_env(Env::default_env())
+          m_env(new CallbackEnv(*Env::default_env()))
     {
         (void)DB::destroy(Options(), m_db_name);
     }
@@ -52,6 +122,7 @@ protected:
     ~DBTests() override
     {
         delete m_db;
+        delete m_env;
     }
 
     auto SetUp() -> void override
@@ -247,7 +318,7 @@ protected:
         kFullSyncMode = 4,
         kUseAltWAL = 8,
         kSmallCache = 16,
-        kMaxConfig = 7,
+        kMaxConfig,
     };
     auto reopen_db(bool clear, Env *env = nullptr) -> Status
     {
@@ -296,7 +367,7 @@ protected:
     static constexpr std::size_t kMaxBuckets = 13;
     static constexpr const char kBucketStr[kMaxBuckets + 2] = "BUCKET_NAMING_";
     Config m_config = kDefault;
-    Env *m_env = nullptr;
+    CallbackEnv *m_env = nullptr;
     DB *m_db = nullptr;
 
     class BusyHandlerStub : public BusyHandler
@@ -630,6 +701,34 @@ TEST_F(DBTests, RerootBuckets)
     }));
 }
 
+TEST_F(DBTests, BucketExistence)
+{
+    // Cannot Tx::open_bucket() a bucket that doesn't exist, even in a read-write transaction.
+    const auto try_open_bucket = [](const auto &tx) {
+        Bucket b;
+        return tx.open_bucket("bucket", b);
+    };
+    ASSERT_NOK(m_db->view(try_open_bucket));
+    ASSERT_NOK(m_db->update(try_open_bucket));
+
+    // Tx::create_bucket() must be used for bucket creation.
+    ASSERT_OK(m_db->update([](auto &tx) {
+        return tx.create_bucket(BucketOptions(), "bucket", nullptr);
+    }));
+
+    ASSERT_NOK(m_db->update([](auto &tx) {
+        BucketOptions b_opt;
+        b_opt.error_if_exists = true;
+        return tx.create_bucket(b_opt, "bucket", nullptr);
+    }));
+
+    // Now the bucket can be opened.
+    ASSERT_OK(m_db->view([](auto &tx) {
+        Bucket b;
+        return tx.open_bucket("bucket", b);
+    }));
+}
+
 TEST(OldWalTests, HandlesOldWalFile)
 {
     static constexpr auto kOldWal = "./testwal";
@@ -655,33 +754,34 @@ TEST(OldWalTests, HandlesOldWalFile)
     delete db;
 }
 
-// TEST(DestructionTests, OnlyDeletesCalicoDatabases)
-//{
-//     std::filesystem::remove_all("./testdb");
-//
-//     // "./testdb" does not exist.
-//     ASSERT_TRUE(DB::destroy(Options(), "./testdb").is_invalid_argument());
-//     ASSERT_FALSE(Env::default_env()->file_exists("./testdb"));
-//
-//     // File is too small to read the first page.
-//     File *file;
-//     ASSERT_OK(Env::default_env()->new_file("./testdb", Env::kCreate, file));
-//     ASSERT_OK(file->write(0, "CalicoDB format"));
-//     ASSERT_TRUE(DB::destroy(Options(), "./testdb").is_invalid_argument());
-//     ASSERT_TRUE(Env::default_env()->file_exists("./testdb"));
-//
-//     // Identifier is incorrect.
-//     ASSERT_OK(file->write(0, "CalicoDB format 0"));
-//     ASSERT_TRUE(DB::destroy(Options(), "./testdb").is_invalid_argument());
-//
-//     DB *db;
-//     std::filesystem::remove_all("./testdb");
-//     ASSERT_OK(DB::open(Options(), "./testdb", db));
-//     ASSERT_OK(DB::destroy(Options(), "./testdb"));
-//
-//     delete db;
-//     delete file;
-// }
+TEST(DestructionTests, OnlyDeletesCalicoDatabases)
+{
+    (void)Env::default_env()->remove_file("./testdb");
+
+    // "./testdb" does not exist.
+    ASSERT_NOK(DB::destroy(Options(), "./testdb"));
+    ASSERT_FALSE(Env::default_env()->file_exists("./testdb"));
+
+    // File is too small to read the first page.
+    File *file;
+    ASSERT_OK(Env::default_env()->new_file("./testdb", Env::kCreate, file));
+    ASSERT_OK(file->write(0, "CalicoDB format"));
+    ASSERT_NOK(DB::destroy(Options(), "./testdb"));
+    ASSERT_TRUE(Env::default_env()->file_exists("./testdb"));
+
+    // Identifier is incorrect.
+    ASSERT_OK(file->write(0, "CalicoDB format 0"));
+    ASSERT_NOK(DB::destroy(Options(), "./testdb"));
+
+    ASSERT_OK(Env::default_env()->remove_file("./testdb"));
+
+    DB *db;
+    ASSERT_OK(DB::open(Options(), "./testdb", db));
+    ASSERT_OK(DB::destroy(Options(), "./testdb"));
+
+    delete db;
+    delete file;
+}
 
 TEST(DestructionTests, OnlyDeletesCalicoWals)
 {
@@ -705,6 +805,34 @@ TEST(DestructionTests, OnlyDeletesCalicoWals)
     ASSERT_TRUE(options.env->file_exists("./test.db"));
 
     delete options.env;
+}
+
+TEST(DestructionTests, DeletesWalAndShm)
+{
+    Options options;
+    options.env = new FakeEnv;
+
+    DB *db;
+    // Create the DB file.
+    ASSERT_OK(DB::open(options, "./test", db));
+    delete db;
+
+    File *file;
+    // Create fake WAL and shm files.
+    ASSERT_OK(options.env->new_file("./test-wal", Env::kCreate, file));
+    delete file;
+    ASSERT_OK(options.env->new_file("./test-shm", Env::kCreate, file));
+    delete file;
+
+    ASSERT_TRUE(options.env->file_exists("./test"));
+    ASSERT_TRUE(options.env->file_exists("./test-wal"));
+    ASSERT_TRUE(options.env->file_exists("./test-shm"));
+
+    ASSERT_OK(DB::destroy(options, "./test"));
+
+    ASSERT_FALSE(options.env->file_exists("./test"));
+    ASSERT_FALSE(options.env->file_exists("./test-wal"));
+    ASSERT_FALSE(options.env->file_exists("./test-shm"));
 }
 
 class DBOpenTests : public DBTests
@@ -755,188 +883,197 @@ TEST_F(DBOpenTests, FailsIfDbExists)
     options.create_if_missing = false;
     ASSERT_TRUE(DB::open(options, m_db_name, m_db).is_invalid_argument());
 }
-//
-// class DBTransactionTests : public DBErrorTests
-//{
-// protected:
-//    explicit DBTransactionTests() = default;
-//
-//    ~DBTransactionTests() override = default;
-//};
-//
-// TEST_F(DBTransactionTests, ReadMostRecentSnapshot)
-//{
-//    U64 key_limit = 0;
-//    auto should_exist = false;
-//    ASSERT_OK(try_reopen(kOpenPrefill));
-//    const auto intercept = [this, &key_limit, &should_exist] {
-//        DB *db;
-//        Options options;
-//        options.env = m_test_env;
-//        auto s = DB::open(options, m_db_name, db);
-//        if (!s.is_ok()) {
-//            return s;
-//        }
-//        s = db->view([key_limit](auto &tx) {
-//            return check_range(tx, "BUCKET", 0, key_limit * 10, true);
-//        });
-//        if (!should_exist && s.is_invalid_argument()) {
-//            s = Status::ok();
-//        }
-//        delete db;
-//        return s;
-//    };
-//    m_test_env->add_interceptor(kWALName, Interceptor(kSyscallWrite, intercept));
-//    ASSERT_OK(m_db->update([&should_exist, &key_limit](auto &tx) {
-//        for (std::size_t i = 0; i < 50; ++i) {
-//            EXPECT_OK(put_range(tx, BucketOptions(), "BUCKET", i * 10, (i + 1) * 10));
-//            EXPECT_OK(tx.commit());
-//            should_exist = true;
-//            key_limit = i + 1;
-//        }
-//        return Status::ok();
-//    }));
-//}
-//
-// TEST_F(DBTransactionTests, ExclusiveLockingMode)
-//{
-//    for (int i = 0; i < 2; ++i) {
-//        m_config = i == 0 ? kExclusiveLockMode : kDefault;
-//        ASSERT_OK(try_reopen(kOpenNormal));
-//        const auto intercept = [this, &i] {
-//            DB *db;
-//            Options options;
-//            options.lock_mode = i == 0 ? Options::kLockNormal
-//                                       : Options::kLockExclusive;
-//            options.env = m_test_env;
-//
-//            Status s;
-//            EXPECT_TRUE((s = DB::open(options, m_db_name, db)).is_busy())
-//                << s.to_string();
-//            return Status::ok();
-//        };
-//        m_test_env->add_interceptor(kWALName, Interceptor(kSyscallWrite, intercept));
-//        ASSERT_OK(m_db->update([](auto &tx) {
-//            for (std::size_t i = 0; i < 50; ++i) {
-//                EXPECT_OK(put_range(tx, BucketOptions(), "BUCKET", i * 10, (i + 1) * 10));
-//                EXPECT_OK(tx.commit());
-//            }
-//            return Status::ok();
-//        }));
-//    }
-//}
-//
-// TEST_F(DBTransactionTests, IgnoresFutureVersions)
-//{
-//    static constexpr U64 kN = 300;
-//    auto has_open_db = false;
-//    U64 n = 0;
-//
-//    ASSERT_OK(try_reopen(kOpenPrefill));
-//    const auto intercept = [this, &has_open_db, &n] {
-//        if (has_open_db || n >= kN) {
-//            // Prevent this callback from being called by itself, and prevent the test from
-//            // running for too long.
-//            return Status::ok();
-//        }
-//        DB *db;
-//        Options options;
-//        options.env = m_test_env;
-//        has_open_db = true;
-//        EXPECT_OK(DB::open(options, m_db_name, db));
-//        EXPECT_OK(db->update([n](auto &tx) {
-//            return put_range(tx, BucketOptions(), "BUCKET", kN * n, kN * (n + 1));
-//        }));
-//        delete db;
-//        has_open_db = false;
-//        ++n;
-//        return Status::ok();
-//    };
-//    ASSERT_OK(m_db->update([](auto &tx) {
-//        return put_range(tx, BucketOptions(), "BUCKET", 0, kN);
-//    }));
-//    m_test_env->add_interceptor(kWALName, Interceptor(kSyscallRead, intercept));
-//    (void)m_db->view([&n](auto &tx) {
-//        for (std::size_t i = 0; i < kN; ++i) {
-//            EXPECT_OK(check_range(tx, "BUCKET", 0, kN, true));
-//            EXPECT_OK(check_range(tx, "BUCKET", kN, kN * (n + 1), false));
-//        }
-//        return Status::ok();
-//    });
-//}
-//
-// class DBCheckpointTests : public DBErrorTests
-//{
-// protected:
-//    explicit DBCheckpointTests() = default;
-//
-//    ~DBCheckpointTests() override = default;
-//};
-//
-// TEST_F(DBCheckpointTests, CheckpointerBlocksOtherCheckpointers)
-//{
-//    ASSERT_OK(try_reopen(kOpenPrefill));
-//    m_test_env->add_interceptor(
-//        m_db_name,
-//        Interceptor(kSyscallWrite, [this] {
-//            // Each time File::write() is called, use a different connection to attempt a
-//            // checkpoint. It should get blocked every time, since a checkpoint is already
-//            // running.
-//            DB *db;
-//            Options options;
-//            options.env = m_test_env;
-//            EXPECT_OK(DB::open(options, m_db_name, db));
-//            EXPECT_TRUE(db->checkpoint(false).is_busy());
-//            EXPECT_TRUE(db->checkpoint(true).is_busy());
-//            delete db;
-//            return Status::ok();
-//        }));
-//    ASSERT_OK(m_db->checkpoint(true));
-//}
-//
-// TEST_F(DBCheckpointTests, CheckpointerAllowsTransactions)
-//{
-//    static constexpr std::size_t kCkptCount = 1'000;
-//
-//    // Set up a DB with some records in both the database file and the WAL.
-//    ASSERT_OK(try_reopen(kOpenPrefill));
-//    ASSERT_OK(m_db->checkpoint(true));
-//    ASSERT_OK(m_db->update([](auto &tx) {
-//        // These records will be checkpointed below. round is 1 to cause a new version of the first half of
-//        // the records to be written.
-//        return put_range(tx, BucketOptions(), "saved", 0, kSavedCount / 2, 1);
-//    }));
-//
-//    U64 n = 0;
-//    m_test_env->add_interceptor(
-//        m_db_name,
-//        Interceptor(kSyscallWrite, [this, &n] {
-//            DB *db;
-//            Options options;
-//            options.env = m_test_env;
-//            EXPECT_OK(DB::open(options, m_db_name, db));
-//            EXPECT_OK(db->update([n](auto &tx) {
-//                return put_range(tx, BucketOptions(), "SELF", n * 2, (n + 1) * 2);
-//            }));
-//            (void)db->view([n](auto &tx) {
-//                EXPECT_OK(check_range(tx, "saved", 0, kSavedCount / 2, true, 1));
-//                EXPECT_OK(check_range(tx, "saved", kSavedCount / 2, kSavedCount, true, 0));
-//                EXPECT_OK(check_range(tx, "SELF", 0, (n + 1) * 2, true));
-//                return Status::ok();
-//            });
-//            ++n;
-//            delete db;
-//            return Status::ok();
-//        }));
-//    ASSERT_OK(m_db->checkpoint(false));
-//}
 
-class DBVacuumTests : public DBTests
+class TransactionTests : public DBTests
 {
 protected:
-    explicit DBVacuumTests() = default;
+    explicit TransactionTests() = default;
 
-    ~DBVacuumTests() override = default;
+    ~TransactionTests() override = default;
+};
+
+TEST_F(TransactionTests, ReadsMostRecentSnapshot)
+{
+    U64 key_limit = 0;
+    auto should_records_exist = false;
+    auto should_database_exist = true;
+    m_env->m_write_callback = [&] {
+        DB *db;
+        Options options;
+        options.env = m_env;
+        auto s = DB::open(options, m_db_name, db);
+        if (!should_database_exist && s.is_busy()) {
+            // This happens when this callback is called by a write during the final checkpoint, after an exclusive
+            // lock has been taken on the database file to make sure we are the last connection. It is too late at
+            // this point, the checkpoint will run and the WAL will be unlinked.
+            return;
+        }
+        s = db->view([key_limit](auto &tx) {
+            return check_range(tx, "BUCKET", 0, key_limit, true);
+        });
+        delete db;
+        if (!should_records_exist && s.is_invalid_argument()) {
+            s = Status::ok();
+        }
+        ASSERT_OK(s);
+    };
+    ASSERT_OK(m_db->update([&](auto &tx) {
+        for (std::size_t i = 0; i < 50; ++i) {
+            static constexpr U64 kScale = 10;
+            EXPECT_OK(put_range(tx, BucketOptions(), "BUCKET", i * kScale, (i + 1) * kScale));
+            EXPECT_OK(tx.commit());
+            should_records_exist = true;
+            key_limit = (i + 1) * kScale;
+        }
+        should_database_exist = false;
+        return Status::ok();
+    }));
+
+    should_database_exist = true;
+    m_env->m_write_callback();
+}
+
+TEST_F(TransactionTests, ExclusiveLockingMode)
+{
+    for (int i = 0; i < 2; ++i) {
+        m_config = i == 0 ? kExclusiveLockMode : kDefault;
+        ASSERT_OK(reopen_db(false));
+        m_env->m_write_callback = [this, &i] {
+            DB *db;
+            Options options;
+            options.lock_mode = i == 0 ? Options::kLockNormal
+                                       : Options::kLockExclusive;
+            options.env = m_env;
+
+            Status s;
+            ASSERT_TRUE((s = DB::open(options, m_db_name, db)).is_busy())
+                << s.to_string();
+        };
+        ASSERT_OK(m_db->update([](auto &tx) {
+            for (std::size_t i = 0; i < 50; ++i) {
+                EXPECT_OK(put_range(tx, BucketOptions(), "BUCKET", i * 10, (i + 1) * 10));
+                EXPECT_OK(tx.commit());
+            }
+            return Status::ok();
+        }));
+        m_env->m_write_callback = {};
+    }
+}
+
+TEST_F(TransactionTests, IgnoresFutureVersions)
+{
+    static constexpr U64 kN = 5;
+    auto has_open_db = false;
+    U64 n = 0;
+
+    ASSERT_OK(m_db->update([](auto &tx) {
+        return put_range(tx, BucketOptions(), "BUCKET", 0, kN);
+    }));
+
+    m_env->m_read_callback = [this, &has_open_db, &n] {
+        if (has_open_db || n >= kN) {
+            // Prevent this callback from being called by itself, and prevent the test from
+            // running for too long.
+            return;
+        }
+        DB *db;
+        Options options;
+        options.env = m_env;
+        has_open_db = true;
+        ASSERT_OK(DB::open(options, m_db_name, db));
+        ASSERT_OK(db->update([n](auto &tx) {
+            return put_range(tx, BucketOptions(), "BUCKET", kN * n, kN * (n + 1));
+        }));
+        delete db;
+        has_open_db = false;
+        ++n;
+    };
+
+    (void)m_db->view([&n](auto &tx) {
+        for (std::size_t i = 0; i < kN; ++i) {
+            EXPECT_OK(check_range(tx, "BUCKET", 0, kN, true));
+            EXPECT_OK(check_range(tx, "BUCKET", kN, kN * (n + 1), false));
+        }
+        return Status::ok();
+    });
+
+    m_env->m_read_callback = {};
+}
+
+class CheckpointTests : public DBTests
+{
+protected:
+    explicit CheckpointTests() = default;
+
+    ~CheckpointTests() override = default;
+};
+
+TEST_F(CheckpointTests, CheckpointerBlocksOtherCheckpointers)
+{
+    ASSERT_OK(m_db->update([](auto &tx) {
+        return put_range(tx, BucketOptions(), "BUCKET", 0, 1'000);
+    }));
+    m_env->m_write_callback = [this] {
+        // Each time File::write() is called, use a different connection to attempt a
+        // checkpoint. It should get blocked every time, since a checkpoint is already
+        // running.
+        DB *db;
+        Options options;
+        options.env = m_env;
+        ASSERT_OK(DB::open(options, m_db_name, db));
+        ASSERT_TRUE(db->checkpoint(false).is_busy());
+        ASSERT_TRUE(db->checkpoint(true).is_busy());
+        delete db;
+    };
+    ASSERT_OK(m_db->checkpoint(true));
+}
+
+TEST_F(CheckpointTests, CheckpointerAllowsTransactions)
+{
+    static constexpr std::size_t kSavedCount = 100;
+
+    // Set up a DB with some records in both the database file and the WAL.
+    ASSERT_OK(m_db->update([](auto &tx) {
+        return put_range(tx, BucketOptions(), "before", 0, kSavedCount);
+    }));
+    ASSERT_OK(m_db->checkpoint(true));
+    ASSERT_OK(m_db->update([](auto &tx) {
+        // These records will be checkpointed below. round is 1 to cause a new version of the first half of
+        // the records to be written.
+        return put_range(tx, BucketOptions(), "before", 0, kSavedCount / 2, 1);
+    }));
+
+    U64 n = 0;
+    m_env->m_write_callback = [this, &n] {
+        DB *db;
+        Options options;
+        options.env = m_env;
+        ASSERT_OK(DB::open(options, m_db_name, db));
+        ASSERT_OK(db->update([n](auto &tx) {
+            return put_range(tx, BucketOptions(), "after", n * 2, (n + 1) * 2);
+        }));
+        (void)db->view([n](auto &tx) {
+            EXPECT_OK(check_range(tx, "before", 0, kSavedCount / 2, true, 1));
+            EXPECT_OK(check_range(tx, "before", kSavedCount / 2, kSavedCount, true, 0));
+            EXPECT_OK(check_range(tx, "after", 0, (n + 1) * 2, true));
+            return Status::ok();
+        });
+        ++n;
+        delete db;
+    };
+
+    ASSERT_OK(m_db->checkpoint(false));
+    // Don't call the callback during close. DB::open() will return a Status::busy() due to the
+    // exclusive lock held.
+    m_env->m_write_callback = {};
+}
+
+class VacuumTests : public DBTests
+{
+protected:
+    explicit VacuumTests() = default;
+
+    ~VacuumTests() override = default;
 
     auto test_configurations_impl(const std::vector<U8> &bitmaps) const -> void
     {
@@ -993,7 +1130,7 @@ protected:
     }
 };
 
-TEST_F(DBVacuumTests, SingleBucket)
+TEST_F(VacuumTests, SingleBucket)
 {
     test_configurations({
         0b10000000,
@@ -1003,7 +1140,7 @@ TEST_F(DBVacuumTests, SingleBucket)
     });
 }
 
-TEST_F(DBVacuumTests, MultipleBuckets)
+TEST_F(VacuumTests, MultipleBuckets)
 {
     test_configurations({
         0b10000000,
@@ -1031,7 +1168,7 @@ TEST_F(DBVacuumTests, MultipleBuckets)
     });
 }
 
-TEST_F(DBVacuumTests, SanityCheck)
+TEST_F(VacuumTests, SanityCheck)
 {
     test_configurations({
         0b11111111,

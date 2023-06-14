@@ -44,12 +44,12 @@ public:
         EXPECT_OK(m_pager->start_reader());
         EXPECT_OK(m_pager->start_writer());
         m_pager->initialize_root();
+        EXPECT_OK(m_pager->commit());
         m_pager->finish();
     }
 
     ~PagerTestHarness()
     {
-        (void)m_pager->close();
         delete m_pager;
         delete m_file;
         delete m_env;
@@ -874,7 +874,7 @@ class PointerMapTests : public TreeTests
 public:
     [[nodiscard]] auto map_size() -> std::size_t
     {
-        return kPageSize / (sizeof(char) + Id::kSize);
+        return kPageSize / (sizeof(char) + sizeof(U32));
     }
 };
 
