@@ -153,7 +153,6 @@ private:
     BusyHandler *const m_busy;
 
     U32 m_page_count = 0;
-    bool m_needs_refresh = false;
 };
 
 // The first pointer map page is always on page 2, right after the root page.
