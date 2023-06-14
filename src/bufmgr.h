@@ -105,6 +105,8 @@ public:
         return m_refsum;
     }
 
+    auto move_page(PageRef &page, Id page_id) -> void;
+
     // Disable move and copy.
     void operator=(Bufmgr &) = delete;
     Bufmgr(Bufmgr &) = delete;

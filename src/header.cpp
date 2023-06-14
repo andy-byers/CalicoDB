@@ -64,10 +64,10 @@ auto NodeHdr::read(const char *data) -> int
     }
 
     next_id.value = get_u32(data);
-    data += Id::kSize;
+    data += sizeof(U32);
 
     prev_id.value = get_u32(data);
-    data += Id::kSize;
+    data += sizeof(U32);
 
     cell_count = get_u16(data);
     data += sizeof(U16);
@@ -87,10 +87,10 @@ auto NodeHdr::write(char *data) const -> void
     *data++ = is_external ? kExternal : kInternal;
 
     put_u32(data, next_id.value);
-    data += Id::kSize;
+    data += sizeof(U32);
 
     put_u32(data, prev_id.value);
-    data += Id::kSize;
+    data += sizeof(U32);
 
     put_u16(data, static_cast<U16>(cell_count));
     data += sizeof(U16);

@@ -326,6 +326,7 @@ public:
 
     ~PosixLogger() override = default;
 
+    // Modified from LevelDB.
     auto logv(const char *fmt, std::va_list args) -> void override
     {
         timeval now_tv;

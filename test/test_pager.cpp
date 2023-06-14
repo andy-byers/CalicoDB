@@ -140,11 +140,8 @@ protected:
         }
         return true;
     }
-    auto close(bool call_close_routine = false) -> void
+    auto close() -> void
     {
-        if (call_close_routine && m_pager) {
-            ASSERT_OK(m_pager->close());
-        }
         delete m_pager;
         m_pager = nullptr;
     }
@@ -399,9 +396,8 @@ TEST_F(PagerTests, DeathTest)
     ASSERT_EQ(m_pager->mode(), Pager::kOpen);
     ASSERT_DEATH((void)m_pager->commit(), "expect");
 
-    m_pager->set_status(Status::io_error("I/O error"));
-    ASSERT_EQ(m_pager->mode(), Pager::kError);
     ASSERT_DEATH((void)m_pager->start_writer(), "expect");
+    ASSERT_OK(m_pager->start_reader());
     ASSERT_DEATH((void)m_pager->checkpoint(true), "expect");
 }
 #endif // NDEBUG

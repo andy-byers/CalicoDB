@@ -23,11 +23,11 @@ auto Pager::purge_page(PageRef &victim) -> void
 auto Pager::read_page(PageRef &out, size_t *size_out) -> Status
 {
     char *page = nullptr;
-    Status s;
 
     // Try to read the page from the WAL.
     page = out.page;
-    if ((s = m_wal->read(out.page_id, page)).is_ok()) {
+    auto s = m_wal->read(out.page_id, page);
+    if (s.is_ok()) {
         if (page == nullptr) {
             // No error, but the page could not be located in the WAL. Read the page
             // from the DB file instead.
@@ -38,10 +38,6 @@ auto Pager::read_page(PageRef &out, size_t *size_out) -> Status
     }
 
     if (!s.is_ok()) {
-        if (out.flag & PageRef::kDirty) {
-            m_dirtylist.remove(out);
-        }
-        CALICODB_EXPECT_FALSE(dirtylist_contains(out));
         m_bufmgr.erase(out.page_id);
         if (m_mode > kRead) {
             set_status(s);
@@ -104,14 +100,7 @@ Pager::Pager(Wal &wal, const Parameters &param)
 
 Pager::~Pager()
 {
-    delete m_wal;
-}
-
-auto Pager::close() -> Status
-{
-    if (m_wal) {
-        finish();
-    }
+    finish();
 
     // This connection already has a shared lock on the DB file. Attempt to upgrade to an
     // exclusive lock, which, if successful would indicate that this is the only connection.
@@ -126,7 +115,11 @@ auto Pager::close() -> Status
     // Regardless of lock mode, this is where the database file lock is released. The
     // database file should not be accessed after this point.
     m_file->file_unlock();
-    return s;
+    delete m_wal;
+
+    if (!s.is_ok()) {
+        log(m_log, "failed to close pager: %s", s.to_string().c_str());
+    }
 }
 
 auto Pager::start_reader() -> Status
@@ -145,13 +138,10 @@ auto Pager::start_reader() -> Status
         return m_wal->start_reader(changed);
     });
     if (s.is_ok()) {
-        if (changed || m_needs_refresh) {
-            // Make sure there aren't any cached pages and that the root is up-to-date. Either
-            // some other connection wrote to the database, or this connection rolled back the
-            // last transaction (or both). Either way, we cannot trust anything in the cache.
+        if (changed) {
             purge_pages(true);
-            s = refresh_state();
         }
+        s = refresh_state();
         if (s.is_ok()) {
             m_mode = kRead;
         }
@@ -217,18 +207,14 @@ auto Pager::finish() -> void
     if (m_mode >= kDirty) {
         m_wal->rollback([this](auto id) {
             if (id.is_root()) {
-                m_needs_refresh = true;
+                // Root page is stored separately. Don't look for it in the cache.
             } else if (auto *ref = m_bufmgr.get(id)) {
                 // Get rid of obsolete cached pages that aren't dirty anymore.
                 purge_page(*ref);
             }
         });
         m_wal->finish_writer();
-        if (!m_needs_refresh) {
-            m_page_count = FileHdr::get_page_count(
-                m_bufmgr.root()->page);
-        }
-        // Get rid of dirty pages, or all cached pages if there was a fault. Depending on
+        // Get rid of dirty pages, or all cached pages if there was a fault.
         purge_pages(m_mode == kError);
     }
     m_wal->finish_reader();
@@ -242,10 +228,7 @@ auto Pager::purge_pages(bool purge_all) -> void
         auto *save = p;
         p = p->next_dirty;
         m_dirtylist.remove(*save);
-        if (save->page_id.is_root()) {
-            // Indicate that the root needs to be reread.
-            m_needs_refresh = true;
-        } else {
+        if (!save->page_id.is_root()) {
             m_bufmgr.erase(save->page_id);
         }
     }
@@ -258,7 +241,6 @@ auto Pager::purge_pages(bool purge_all) -> void
             purge_page(*victim);
         }
         CALICODB_EXPECT_EQ(m_bufmgr.occupied(), 0);
-        m_needs_refresh = true;
     }
 }
 
@@ -299,9 +281,6 @@ auto Pager::flush_dirty_pages() -> Status
     m_dirtylist.head = nullptr;
     CALICODB_EXPECT_NE(p, nullptr);
 
-    // The DB page count is specified here. This indicates that the writes are part of
-    // a commit, which is always the case if this method is called while the WAL is
-    // enabled.
     return m_wal->write(p, m_page_count);
 }
 
@@ -319,7 +298,7 @@ auto Pager::ensure_available_buffer() -> Status
 {
     Status s;
     if (!m_bufmgr.available()) {
-        // There are no available frames, so the cache must be full. "next_victim()" will not find
+        // There are no available frames, so the cache must be full. next_victim() will not find
         // a page to evict if all pages are referenced, which should never happen.
         auto *victim = m_bufmgr.next_victim();
         CALICODB_EXPECT_NE(victim, nullptr);
@@ -421,7 +400,6 @@ auto Pager::destroy(PageRef *&page) -> Status
 auto Pager::get_root() -> PageRef &
 {
     CALICODB_EXPECT_GE(m_mode, kRead);
-    CALICODB_EXPECT_FALSE(m_needs_refresh);
     return *m_bufmgr.root();
 }
 
@@ -461,8 +439,10 @@ auto Pager::release(PageRef *&page, ReleaseAction action) -> void
 
 auto Pager::initialize_root() -> void
 {
-    CALICODB_EXPECT_EQ(0, m_page_count);
+    CALICODB_EXPECT_EQ(m_mode, kWrite);
+    CALICODB_EXPECT_EQ(m_page_count, 0);
     m_page_count = 1;
+    m_mode = kDirty;
 
     // Initialize the file header.
     FileHdr::make_supported_db(get_root().page);
@@ -477,7 +457,6 @@ auto Pager::refresh_state() -> Status
     std::size_t read_size = 0;
     s = read_page(*m_bufmgr.root(), &read_size);
     if (s.is_ok()) {
-        m_needs_refresh = false;
         m_page_count = 0;
 
         if (read_size == kPageSize) {
@@ -511,17 +490,18 @@ auto Pager::assert_state() const -> bool
         case kOpen:
             CALICODB_EXPECT_EQ(m_bufmgr.refsum(), 0);
             CALICODB_EXPECT_TRUE(m_status->is_ok());
-            CALICODB_EXPECT_FALSE(m_dirtylist.head);
+            CALICODB_EXPECT_EQ(m_dirtylist.head, nullptr);
             break;
         case kRead:
             CALICODB_EXPECT_TRUE(m_status->is_ok());
-            CALICODB_EXPECT_FALSE(m_dirtylist.head);
+            CALICODB_EXPECT_EQ(m_dirtylist.head, nullptr);
             break;
         case kWrite:
-            CALICODB_EXPECT_TRUE(m_wal);
+            CALICODB_EXPECT_TRUE(m_status->is_ok());
+            CALICODB_EXPECT_EQ(m_dirtylist.head, nullptr);
             break;
         case kDirty:
-            CALICODB_EXPECT_TRUE(m_wal);
+            CALICODB_EXPECT_TRUE(m_status->is_ok());
             break;
         case kError:
             CALICODB_EXPECT_FALSE(m_status->is_ok());
@@ -547,7 +527,7 @@ auto Pager::dirtylist_contains(const PageRef &ref) const -> bool
 
 static constexpr auto kEntrySize =
     sizeof(char) + // Type (1 B)
-    Id::kSize;     // Back pointer (4 B)
+    sizeof(U32);   // Back pointer (4 B)
 
 static auto entry_offset(Id map_id, Id page_id) -> std::size_t
 {

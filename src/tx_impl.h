@@ -16,7 +16,7 @@ struct BucketOptions;
 class TxImpl : public Tx
 {
 public:
-    explicit TxImpl(Pager &pager, Status &status, char *scratch);
+    explicit TxImpl(Pager &pager, const Status &status, char *scratch);
     ~TxImpl() override;
 
     [[nodiscard]] auto status() const -> Status override
@@ -52,10 +52,10 @@ private:
     auto vacuum_freelist() -> Status;
 
     mutable Schema m_schema_obj;
+    const Status *m_status;
     TxImpl **m_backref = nullptr;
     Cursor *m_schema;
     Pager *m_pager;
-    Status *m_status;
 };
 
 inline auto tx_impl(Tx *tx) -> TxImpl *

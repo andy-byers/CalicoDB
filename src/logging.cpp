@@ -65,13 +65,6 @@ auto append_number(std::string &out, std::size_t value) -> void
     out.append(buffer);
 }
 
-auto append_double(std::string &out, double value) -> void
-{
-    char buffer[30];
-    std::snprintf(buffer, sizeof(buffer), "%g", value);
-    out.append(buffer);
-}
-
 auto append_escaped_string(std::string &out, const Slice &value) -> void
 {
     for (std::size_t i = 0; i < value.size(); ++i) {
@@ -90,13 +83,6 @@ auto number_to_string(std::size_t value) -> std::string
 {
     std::string out;
     append_number(out, value);
-    return out;
-}
-
-auto double_to_string(double value) -> std::string
-{
-    std::string out;
-    append_double(out, value);
     return out;
 }
 

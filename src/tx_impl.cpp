@@ -9,11 +9,11 @@
 namespace calicodb
 {
 
-TxImpl::TxImpl(Pager &pager, Status &status, char *scratch)
+TxImpl::TxImpl(Pager &pager, const Status &status, char *scratch)
     : m_schema_obj(pager, status, scratch),
+      m_status(&status),
       m_schema(m_schema_obj.new_cursor()),
-      m_pager(&pager),
-      m_status(&status)
+      m_pager(&pager)
 {
 }
 
@@ -68,7 +68,6 @@ auto TxImpl::vacuum() -> Status
     auto s = *m_status;
     if (s.is_ok()) {
         s = vacuum_freelist();
-        m_pager->set_status(s);
     }
     return s;
 }

@@ -20,7 +20,6 @@ static constexpr std::size_t kInitialRecordCount = 100;
 class PagerTestHarness
 {
 public:
-    static constexpr auto kFrameCount = kMinFrameCount;
     FakeEnv *m_env;
 
     PagerTestHarness()
@@ -36,7 +35,7 @@ public:
             nullptr,
             &m_status,
             nullptr,
-            kFrameCount,
+            kMinFrameCount * 2,
             Options::kSyncNormal,
             Options::kLockNormal,
         };
@@ -45,12 +44,12 @@ public:
         EXPECT_OK(m_pager->start_reader());
         EXPECT_OK(m_pager->start_writer());
         m_pager->initialize_root();
+        EXPECT_OK(m_pager->commit());
         m_pager->finish();
     }
 
     ~PagerTestHarness()
     {
-        (void)m_pager->close();
         delete m_pager;
         delete m_file;
         delete m_env;
@@ -299,6 +298,7 @@ public:
     auto validate() const -> void
     {
         ASSERT_TRUE(Freelist::assert_state(*m_pager));
+        tree->finish_operation();
         tree->TEST_validate();
     }
 
@@ -443,6 +443,7 @@ static auto add_initial_records(TreeTests &test, bool has_overflow = false)
     for (std::size_t i = 0; i < kInitialRecordCount; ++i) {
         (void)test.tree->put(test.make_long_key(i), test.make_value('v', has_overflow));
     }
+    test.tree->finish_operation();
 }
 
 TEST_P(TreeTests, ToStringDoesNotCrash)
@@ -677,6 +678,7 @@ TEST_P(CursorTests, AccountsForNodeBoundaries)
         ASSERT_OK(tree->erase(make_long_key(i + 3)));
         ASSERT_OK(tree->erase(make_long_key(i + 4)));
     }
+    tree->finish_operation();
     auto cursor = make_cursor();
     for (std::size_t i = 0; i + 10 < kInitialRecordCount; i += 5) {
         cursor->seek(make_long_key(i + 1));
@@ -872,7 +874,7 @@ class PointerMapTests : public TreeTests
 public:
     [[nodiscard]] auto map_size() -> std::size_t
     {
-        return kPageSize / (sizeof(char) + Id::kSize);
+        return kPageSize / (sizeof(char) + sizeof(U32));
     }
 };
 
@@ -1030,6 +1032,7 @@ public:
         for (std::size_t i = 0; i < kInitialRecordCount; ++i) {
             ASSERT_OK(multi_tree[tid]->erase(make_long_key(i)));
         }
+        multi_tree[tid]->finish_operation();
         multi_tree[tid]->TEST_validate();
     }
 

@@ -83,7 +83,6 @@ enum { kLockUnlocked = 0 };
 struct Id {
     static constexpr U32 kNull = 0;
     static constexpr U32 kRoot = 1;
-    static constexpr auto kSize = sizeof(U32);
 
     struct Hash {
         auto operator()(const Id &id) const -> U64

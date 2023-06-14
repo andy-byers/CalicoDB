@@ -11,7 +11,7 @@
 namespace calicodb
 {
 
-Schema::Schema(Pager &pager, Status &status, char *scratch)
+Schema::Schema(Pager &pager, const Status &status, char *scratch)
     : m_status(&status),
       m_pager(&pager),
       m_scratch(scratch),
@@ -32,9 +32,7 @@ auto Schema::corrupted_root_id(const Slice &name, const Slice &value) -> Status
     std::string message("root entry for bucket \"" + name.to_string() + "\" is corrupted: ");
     message.append(escape_string(value));
     auto s = Status::corruption(message);
-    if (m_status->is_ok()) {
-        *m_status = s;
-    }
+    m_pager->set_status(s);
     return s;
 }
 

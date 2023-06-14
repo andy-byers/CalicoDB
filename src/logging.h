@@ -15,10 +15,8 @@ namespace calicodb
 auto attempt_fmt(char *ptr, std::size_t length, bool append_newline, const char *fmt, std::va_list args) -> std::size_t;
 auto append_fmt_string(std::string &out, const char *fmt, ...) -> std::size_t;
 auto append_number(std::string &out, std::size_t value) -> void;
-auto append_double(std::string &out, double value) -> void;
 auto append_escaped_string(std::string &out, const Slice &value) -> void;
 auto number_to_string(std::size_t value) -> std::string;
-auto double_to_string(double value) -> std::string;
 auto escape_string(const Slice &value) -> std::string;
 auto consume_decimal_number(Slice &data, U64 *val) -> bool;
 

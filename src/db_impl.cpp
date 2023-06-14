@@ -91,12 +91,6 @@ DBImpl::DBImpl(const Options &options, const Options &sanitized, std::string fil
 
 DBImpl::~DBImpl()
 {
-    if (m_pager) {
-        const auto s = m_pager->close();
-        if (!s.is_ok()) {
-            log(m_log, "failed to close pager: %s", s.to_string().c_str());
-        }
-    }
     delete m_pager;
     delete m_file;
     delete[] m_scratch;

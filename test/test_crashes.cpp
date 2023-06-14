@@ -14,10 +14,13 @@
 namespace calicodb::test
 {
 
+static constexpr auto *kFaultText = "<FAULT>";
+static const auto kFaultStatus = Status::io_error(kFaultText);
+
 #define MAYBE_CRASH(target)                         \
     do {                                            \
         if ((target)->should_next_syscall_fail()) { \
-            return Status::io_error("<FAULT>");     \
+            return kFaultStatus;                    \
         }                                           \
     } while (0)
 
@@ -26,7 +29,8 @@ class CrashEnv : public EnvWrapper
 public:
     mutable int m_max_num = 0;
     mutable int m_num = 0;
-    bool m_enabled = false;
+    bool m_crashes_enabled = false;
+    bool m_drop_unsynced = false;
 
     explicit CrashEnv(Env &env)
         : EnvWrapper(env)
@@ -37,7 +41,7 @@ public:
 
     [[nodiscard]] auto should_next_syscall_fail() const -> bool
     {
-        if (m_enabled && m_num++ >= m_max_num) {
+        if (m_crashes_enabled && m_num++ >= m_max_num) {
             m_num = 0;
             ++m_max_num;
             return true;
@@ -63,11 +67,38 @@ public:
 
         class CrashFile : public FileWrapper
         {
+            const std::string m_filename;
+            std::string m_backup;
             CrashEnv *m_env;
 
+            auto save_to_backup() -> void
+            {
+                const auto crash_state = m_env->m_crashes_enabled;
+                m_env->m_crashes_enabled = false;
+
+                std::size_t file_size;
+                ASSERT_OK(m_env->file_size(m_filename, file_size));
+                m_backup.resize(file_size);
+                ASSERT_OK(read_exact(0, file_size, m_backup.data()));
+
+                m_env->m_crashes_enabled = crash_state;
+            }
+
+            auto load_from_backup() -> void
+            {
+                const auto crash_state = m_env->m_crashes_enabled;
+                m_env->m_crashes_enabled = false;
+
+                ASSERT_OK(m_env->resize_file(m_filename, m_backup.size()));
+                ASSERT_OK(write(0, m_backup));
+
+                m_env->m_crashes_enabled = crash_state;
+            }
+
         public:
-            explicit CrashFile(CrashEnv &env, File &base)
+            explicit CrashFile(CrashEnv &env, std::string filename, File &base)
                 : FileWrapper(base),
+                  m_filename(std::move(filename)),
                   m_env(&env)
             {
             }
@@ -91,8 +122,21 @@ public:
 
             auto sync() -> Status override
             {
+                if (m_env->should_next_syscall_fail()) {
+                    if (m_env->m_drop_unsynced) {
+                        std::cout << "Loading "
+                                  << static_cast<double>(m_backup.size()) / 1'024.0
+                                  << " KiB backup\n";
+                        load_from_backup();
+                    }
+                    return kFaultStatus;
+                }
                 MAYBE_CRASH(m_env);
-                return FileWrapper::sync();
+                auto s = FileWrapper::sync();
+                if (s.is_ok() && m_env->m_drop_unsynced) {
+                    save_to_backup();
+                }
+                return s;
             }
 
             auto file_lock(FileLockMode mode) -> Status override
@@ -117,7 +161,7 @@ public:
         };
         auto s = target()->new_file(filename, mode, file_out);
         if (s.is_ok()) {
-            file_out = new CrashFile(*this, *file_out);
+            file_out = new CrashFile(*this, filename, *file_out);
         }
         return s;
     }
@@ -128,7 +172,7 @@ public:
 class TestCrashes : public testing::Test
 {
 protected:
-    std::string m_filename;
+    const std::string m_filename;
     CrashEnv *m_env;
 
     explicit TestCrashes()
@@ -279,6 +323,7 @@ protected:
     struct OperationsParameters {
         bool inject_faults = false;
         bool test_checkpoint = false;
+        bool test_sync_mode = false;
     };
     auto run_operations_test(const OperationsParameters &param) -> void
     {
@@ -296,11 +341,18 @@ protected:
 
         Options options;
         options.env = m_env;
+        options.sync_mode = param.test_sync_mode
+                                ? Options::kSyncFull
+                                : Options::kSyncNormal;
+        // m_drop_unsynced has no effect unless m_crashes_enabled is true. If both are true, then failures on fsync()
+        // cause all data written since the last fsync() to be dropped. This only applies to the file that encountered
+        // the fault.
+        m_env->m_drop_unsynced = param.test_sync_mode;
 
         (void)DB::destroy(options, m_filename);
 
         for (std::size_t i = 0; i < kNumIterations; ++i) {
-            m_env->m_enabled = param.inject_faults;
+            m_env->m_crashes_enabled = param.inject_faults;
 
             DB *db;
             run_until_completion([this, &options, &db, &src_counters] {
@@ -336,7 +388,7 @@ protected:
                 });
             }
 
-            m_env->m_enabled = false;
+            m_env->m_crashes_enabled = false;
             delete db;
         }
 
@@ -360,7 +412,7 @@ protected:
 
         std::size_t tries = 0;
         for (std::size_t i = 0; i < param.num_iterations; ++i) {
-            m_env->m_enabled = false;
+            m_env->m_crashes_enabled = false;
             (void)DB::destroy(options, m_filename);
 
             DB *db;
@@ -376,7 +428,7 @@ protected:
                 return s;
             }));
 
-            m_env->m_enabled = param.inject_faults;
+            m_env->m_crashes_enabled = param.inject_faults;
             m_env->m_max_num = static_cast<int>(i * 5);
             m_env->m_num = 0;
 
@@ -402,12 +454,14 @@ protected:
 TEST_F(TestCrashes, Operations)
 {
     // Sanity check. No faults.
-//    run_operations_test({false, false});
-//    run_operations_test({false, true});
+    run_operations_test({false, false});
+    run_operations_test({false, true});
 
-//    // Run with fault injection.
-    run_operations_test({true, false});
-//    run_operations_test({true, true});
+    // Run with fault injection.
+    run_operations_test({true, false, false});
+    run_operations_test({true, true, false});
+    run_operations_test({true, false, true});
+    run_operations_test({true, true, true});
 }
 
 TEST_F(TestCrashes, OpenClose)

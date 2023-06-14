@@ -72,7 +72,6 @@ public:
     }
 
     static auto open(const Parameters &param, Pager *&out) -> Status;
-    auto close() -> Status;
 
     auto start_reader() -> Status;
     auto start_writer() -> Status;
@@ -120,6 +119,11 @@ public:
 
     auto set_status(const Status &error) const -> void;
 
+    auto move_page(PageRef &page, Id page_id) -> void
+    {
+        m_bufmgr.move_page(page, page_id);
+    }
+
     // Access to the WAL for testing.
     [[nodiscard]] auto TEST_wal() -> Wal *
     {
@@ -149,7 +153,6 @@ private:
     BusyHandler *const m_busy;
 
     U32 m_page_count = 0;
-    bool m_needs_refresh = false;
 };
 
 // The first pointer map page is always on page 2, right after the root page.
