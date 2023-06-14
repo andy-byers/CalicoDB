@@ -390,6 +390,21 @@ TEST_F(PagerTests, ReportsOutOfRangePages)
     });
 }
 
+TEST_F(PagerTests, MovePage)
+{
+    pager_update([this] {
+        PageRef *page;
+        allocate_page(page);
+        m_pager->release(page);
+        allocate_page(page);
+        ASSERT_EQ(page->page_id, Id(4));
+        alter_page(*page);
+        // Rekey the PageRef containing page 4 such that it is written back to page 3.
+        m_pager->move_page(*page, Id(3));
+        m_pager->release(page);
+    });
+}
+
 #ifndef NDEBUG
 TEST_F(PagerTests, DeathTest)
 {

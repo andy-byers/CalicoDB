@@ -133,14 +133,6 @@ auto Bufmgr::unref(PageRef &ref) -> void
     --m_refsum;
 }
 
-auto Bufmgr::move_page(PageRef &page, Id page_id) -> void
-{
-    auto node = m_map.extract(page.page_id);
-    CALICODB_EXPECT_TRUE(!!node);
-    node.key() = page_id;
-    page.page_id = page_id;
-}
-
 auto Dirtylist::remove(PageRef &ref) -> PageRef *
 {
     CALICODB_EXPECT_TRUE(head);

@@ -79,7 +79,12 @@ auto TxImpl::vacuum_freelist() -> Status
 
 auto TxImpl::new_cursor(const Bucket &b) const -> Cursor *
 {
-    auto *cursor = new CursorImpl(*static_cast<Tree *>(b.state));
+    static constexpr std::size_t kMaxCursors = 8;
+    if (m_user_cursors >= kMaxCursors) {
+        return nullptr;
+    }
+    ++m_user_cursors;
+    auto *cursor = new CursorImpl(*static_cast<Tree *>(b.state), &m_user_cursors);
     if (!m_status->is_ok()) {
         cursor->clear(*m_status);
     }

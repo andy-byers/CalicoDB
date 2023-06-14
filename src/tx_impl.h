@@ -52,6 +52,8 @@ private:
     auto vacuum_freelist() -> Status;
 
     mutable Schema m_schema_obj;
+    mutable U32 m_user_cursors = 0;
+
     const Status *m_status;
     TxImpl **m_backref = nullptr;
     Cursor *m_schema;
