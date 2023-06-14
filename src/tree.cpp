@@ -23,16 +23,16 @@ static constexpr auto kMaxCellHeaderSize =
     kVarintMaxLength + // Key size    (10 B)
     sizeof(U32);       // Overflow ID (4 B)
 
-static constexpr auto kPointerSize = sizeof(U16);
+static constexpr U32 kPointerSize = sizeof(U16);
 
 // Determine how many bytes of payload can be stored locally (not on an overflow chain)
-[[nodiscard]] static constexpr auto compute_local_pl_size(U32 key_size, U32 value_size)
+[[nodiscard]] static constexpr auto compute_local_pl_size(std::size_t key_size, std::size_t value_size)
 {
     // SQLite's computation for min and max local payload sizes. If kMaxLocal is exceeded, then 1 or more
     // overflow chain pages will be required to store this payload.
-    constexpr const U32 kMinLocal =
+    constexpr const std::size_t kMinLocal =
         (kPageSize - NodeHdr::kSize) * 32 / 256 - kMaxCellHeaderSize - kPointerSize;
-    constexpr const U32 kMaxLocal =
+    constexpr const std::size_t kMaxLocal =
         (kPageSize - NodeHdr::kSize) * 64 / 256 - kMaxCellHeaderSize - kPointerSize;
     if (key_size + value_size <= kMaxLocal) {
         // The whole payload can be stored locally.
@@ -54,7 +54,7 @@ auto Tree::corrupted_page(Id page_id) const -> Status
     return s;
 }
 
-[[nodiscard]] static auto page_offset(Id page_id)
+[[nodiscard]] static auto page_offset(Id page_id) -> U32
 {
     return FileHdr::kSize * page_id.is_root();
 }
@@ -64,12 +64,12 @@ auto Tree::corrupted_page(Id page_id) const -> Status
     return page_offset(node.ref->page_id);
 }
 
-[[nodiscard]] static auto cell_slots_offset(const Node &node)
+[[nodiscard]] static auto cell_slots_offset(const Node &node) -> U32
 {
     return node_header_offset(node) + NodeHdr::kSize;
 }
 
-[[nodiscard]] static auto cell_area_offset(const Node &node)
+[[nodiscard]] static auto cell_area_offset(const Node &node) -> U32
 {
     return cell_slots_offset(node) + node.hdr.cell_count * kPointerSize;
 }
@@ -213,10 +213,10 @@ static auto write_child_id(Cell &cell, Id child_id)
         if (cell_out) {
             cell_out->ptr = data;
             cell_out->key = data + header_size;
-            cell_out->key_size = key_size;
-            cell_out->total_pl_size = key_size + value_size;
-            cell_out->local_pl_size = local_pl_size;
-            cell_out->footprint = footprint;
+            cell_out->key_size = static_cast<U32>(key_size);
+            cell_out->total_pl_size = static_cast<U32>(key_size + value_size);
+            cell_out->local_pl_size = static_cast<U32>(local_pl_size);
+            cell_out->footprint = static_cast<U32>(footprint);
         }
         return 0;
     }
@@ -234,10 +234,10 @@ static auto write_child_id(Cell &cell, Id child_id)
             if (cell_out) {
                 cell_out->ptr = data;
                 cell_out->key = data + header_size;
-                cell_out->key_size = key_size;
-                cell_out->total_pl_size = key_size;
-                cell_out->local_pl_size = local_pl_size;
-                cell_out->footprint = footprint;
+                cell_out->key_size = static_cast<U32>(key_size);
+                cell_out->total_pl_size = static_cast<U32>(key_size);
+                cell_out->local_pl_size = static_cast<U32>(local_pl_size);
+                cell_out->footprint = static_cast<U32>(footprint);
             }
             return 0;
         }
@@ -572,9 +572,9 @@ struct PayloadManager {
         // The buffer that `scratch` points into should have enough room before `scratch` to write
         // the left child ID.
         cell.ptr = cell.key - header_size;
-        cell.local_pl_size = compute_local_pl_size(cell.key_size, 0);
+        cell.local_pl_size = static_cast<U32>(compute_local_pl_size(cell.key_size, 0));
         cell.total_pl_size = cell.key_size;
-        cell.footprint = header_size + cell.local_pl_size;
+        cell.footprint = static_cast<U32>(header_size + cell.local_pl_size);
 
         Status s;
         if (cell.key_size > cell.local_pl_size) {
@@ -1638,7 +1638,7 @@ auto Tree::emplace(Node &node, const Slice &key, const Slice &value, std::size_t
 
     Status s;
     while (s.is_ok()) {
-        const auto n = std::min(len, static_cast<U32>(src.size()));
+        const auto n = std::min(len, src.size());
         // Copy a chunk of the payload to a page. ptr either points to where the local payload
         // should go in node, or somewhere in prev, which holds the overflow page being written.
         std::memcpy(ptr, src.data(), n);
@@ -2245,7 +2245,7 @@ public:
             if (node.hdr.is_external) {
                 U64 value_size;
                 decode_varint(cell.ptr, value_size);
-                requested += value_size;
+                requested += U32(value_size); // TODO: varints should be varint32s
             }
 
             if (cell.local_pl_size != cell.total_pl_size) {
@@ -2255,7 +2255,7 @@ public:
                 traverse_chain(*tree.m_pager, head, [&](auto &page) {
                     CHECK_TRUE(requested > accumulated);
                     const auto size_limit = std::min(static_cast<U32>(kPageSize), requested - accumulated);
-                    accumulated += get_readable_content(*page, size_limit).size();
+                    accumulated += U32(get_readable_content(*page, size_limit).size());
                 });
                 CHECK_EQ(requested, accumulated);
             }
@@ -2529,7 +2529,7 @@ auto CursorImpl::seek_to(Node &node, std::size_t index) -> void
             // Take ownership of the node.
             m_node = node;
             node.ref = nullptr;
-            m_index = index;
+            m_index = static_cast<U32>(index);
             return;
         }
     }
