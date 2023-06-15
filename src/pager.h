@@ -66,6 +66,11 @@ public:
         return m_page_count;
     }
 
+    [[nodiscard]] auto buffer_count() const -> std::size_t
+    {
+        return m_bufmgr.available() + m_bufmgr.occupied();
+    }
+
     [[nodiscard]] auto mode() const -> Mode
     {
         return m_mode;
@@ -118,11 +123,6 @@ public:
     auto release(PageRef *&page, ReleaseAction action = kKeep) -> void;
 
     auto set_status(const Status &error) const -> void;
-
-    auto move_page(PageRef &page, Id page_id) -> void
-    {
-        m_bufmgr.move_page(page, page_id);
-    }
 
     // Access to the WAL for testing.
     [[nodiscard]] auto TEST_wal() -> Wal *

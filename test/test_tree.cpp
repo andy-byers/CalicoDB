@@ -366,7 +366,7 @@ TEST_P(TreeTests, LongVsShortKeys)
         ASSERT_OK(tree->put(std::string(tree_key_len, 'b'), make_value('2', true)));
         ASSERT_OK(tree->put(std::string(tree_key_len, 'c'), make_value('3', true)));
 
-        auto *c = new CursorImpl(*tree);
+        auto *c = new CursorImpl(*tree, nullptr);
         c->seek(std::string(search_key_len, i == 0 ? 'A' : 'a'));
         ASSERT_TRUE(c->is_valid());
         ASSERT_EQ(std::string(tree_key_len, 'a'), c->key());
@@ -634,7 +634,7 @@ protected:
 
 TEST_P(EmptyTreeCursorTests, KeyAndValueUseSeparateMemory)
 {
-    std::unique_ptr<Cursor> cursor(new CursorImpl(*tree));
+    std::unique_ptr<Cursor> cursor(new CursorImpl(*tree, nullptr));
     cursor->seek_first();
     ASSERT_FALSE(cursor->is_valid());
     cursor->seek_last();
@@ -662,7 +662,7 @@ protected:
     {
         switch (GetParam()) {
             case 0:
-                return std::make_unique<CursorImpl>(*tree);
+                return std::make_unique<CursorImpl>(*tree, nullptr);
             case 1:
                 return std::make_unique<SchemaCursor>(*tree);
         }

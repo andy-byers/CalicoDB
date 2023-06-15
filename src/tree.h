@@ -102,6 +102,7 @@ class CursorImpl : public Cursor
 {
     Status m_status;
     Tree *m_tree;
+    U32 *m_count_ptr = nullptr;
 
     Node m_node;
     U32 m_index = 0;
@@ -123,8 +124,9 @@ public:
     friend class Tree;
     friend class SchemaCursor;
 
-    explicit CursorImpl(Tree &tree)
-        : m_tree(&tree)
+    explicit CursorImpl(Tree &tree, U32 *count_ptr)
+        : m_tree(&tree),
+          m_count_ptr(count_ptr)
     {
     }
 

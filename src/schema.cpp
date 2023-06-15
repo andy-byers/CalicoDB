@@ -101,7 +101,7 @@ auto Schema::open_bucket(const Slice &name, Bucket &b_out) -> Status
 
 auto Schema::decode_root_id(const Slice &data, Id &out) -> bool
 {
-    U64 num;
+    U32 num;
     if (decode_varint(data.data(), data.data() + data.size(), num)) {
         out.value = static_cast<U32>(num);
         return true;
@@ -255,7 +255,7 @@ auto Schema::TEST_validate() const -> void
 }
 
 SchemaCursor::SchemaCursor(Tree &tree)
-    : m_impl(new CursorImpl(tree))
+    : m_impl(new CursorImpl(tree, nullptr))
 {
 }
 

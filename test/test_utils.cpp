@@ -79,58 +79,46 @@ TEST(Encoding, EncodingOutput)
     ASSERT_EQ(0x08, static_cast<int>(dst[7]));
 }
 
-TEST(Encoding, Varint64)
+auto append_varint(std::string *s, U32 v) -> void
 {
-    // Construct the list of values to check
-    std::vector<U64> values;
-    // Some special values
-    values.push_back(0);
-    values.push_back(100);
-    values.push_back(~static_cast<U64>(0));
-    values.push_back(~static_cast<U64>(0) - 1);
-    for (U32 k = 0; k < 64; k++) {
-        // Test values near powers of two
-        const U64 power = 1ull << k;
-        values.push_back(power);
-        values.push_back(power - 1);
-        values.push_back(power + 1);
-    }
+    const auto len = varint_length(v);
+    s->resize(s->size() + len);
+    encode_varint(s->data() + s->size() - len, v);
+}
 
+TEST(Coding, Varint32) {
     std::string s;
-    for (auto v : values) {
-        const auto v_len = varint_length(v);
-        auto old_len = s.size();
-        s.resize(old_len + v_len);
-        encode_varint(s.data() + old_len, v);
+    for (uint32_t i = 0; i < (32 * 32); i++) {
+        uint32_t v = (i / 32) << (i % 32);
+        append_varint(&s, v);
     }
 
-    const char *p = s.data();
-    const char *limit = p + s.size();
-    for (auto v : values) {
-        ASSERT_TRUE(p < limit);
-        U64 actual;
-        const char *start = p;
+    const char* p = s.data();
+    const char* limit = p + s.size();
+    for (uint32_t i = 0; i < (32 * 32); i++) {
+        uint32_t expected = (i / 32) << (i % 32);
+        uint32_t actual;
+        const char* start = p;
         p = decode_varint(p, limit, actual);
         ASSERT_TRUE(p != nullptr);
-        ASSERT_EQ(v, actual);
+        ASSERT_EQ(expected, actual);
         ASSERT_EQ(varint_length(actual), p - start);
     }
-    ASSERT_EQ(p, limit);
+    ASSERT_EQ(p, s.data() + s.size());
 }
 
-TEST(Encoding, Varint64Overflow)
-{
-    U64 result;
-    std::string input("\x81\x82\x83\x84\x85\x81\x82\x83\x84\x85\x11");
-    ASSERT_TRUE(decode_varint(input.data(), input.data() + input.size(), result) == nullptr);
+TEST(Coding, Varint32Overflow) {
+    uint32_t result;
+    std::string input("\x81\x82\x83\x84\x85\x11");
+    ASSERT_TRUE(decode_varint(input.data(), input.data() + input.size(),
+                               result) == nullptr);
 }
 
-TEST(Encoding, Varint64Truncation)
-{
-    U64 large_value = (1ull << 63) + 100ull;
-    std::string s(varint_length(large_value), '\0');
-    encode_varint(s.data(), large_value);
-    U64 result;
+TEST(Coding, Varint32Truncation) {
+    uint32_t large_value = (1u << 31) + 100;
+    std::string s;
+    append_varint(&s, large_value);
+    uint32_t result;
     for (size_t len = 0; len < s.size() - 1; len++) {
         ASSERT_TRUE(decode_varint(s.data(), s.data() + len, result) == nullptr);
     }

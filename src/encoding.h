@@ -13,8 +13,7 @@ namespace calicodb
 inline auto get_u16(const char *ptr) -> U16
 {
     const auto buf = reinterpret_cast<const U8 *>(ptr);
-    return static_cast<U16>(buf[0]) |
-           (static_cast<U16>(buf[1]) << 8);
+    return static_cast<U16>(buf[0] | (buf[1] << 8));
 }
 
 inline auto get_u16(const Slice &slice) -> U16
@@ -83,9 +82,9 @@ inline auto put_u64(char *ptr, U64 value) -> void
     buf[7] = static_cast<U8>(value >> 56);
 }
 
-static constexpr std::size_t kVarintMaxLength = 10;
+static constexpr std::size_t kVarintMaxLength = 5;
 
-[[nodiscard]] inline auto varint_length(U64 value) -> std::size_t
+[[nodiscard]] inline auto varint_length(U32 value) -> std::size_t
 {
     std::size_t length = 1;
     while (value >= 0x80) {
@@ -95,50 +94,51 @@ static constexpr std::size_t kVarintMaxLength = 10;
     return length;
 }
 
-inline auto encode_varint(char *ptr, U64 value) -> char *
+inline auto encode_varint(char *dst, U32 v) -> char *
 {
-    auto *buf = reinterpret_cast<U8 *>(ptr);
-    while (value >= 0x80) {
-        *buf++ = U8(value) | 0x80;
-        value >>= 7;
+    U8* ptr = reinterpret_cast<U8*>(dst);
+    static constexpr int B = 128;
+    if (v < (1 << 7)) {
+        *ptr++ = static_cast<U8>(v);
+    } else if (v < (1 << 14)) {
+        *ptr++ = static_cast<U8>(v | B);
+        *ptr++ = static_cast<U8>(v >> 7);
+    } else if (v < (1 << 21)) {
+        *ptr++ = static_cast<U8>(v | B);
+        *ptr++ = static_cast<U8>((v >> 7) | B);
+        *ptr++ = static_cast<U8>(v >> 14);
+    } else if (v < (1 << 28)) {
+        *ptr++ = static_cast<U8>(v | B);
+        *ptr++ = static_cast<U8>((v >> 7) | B);
+        *ptr++ = static_cast<U8>((v >> 14) | B);
+        *ptr++ = static_cast<U8>(v >> 21);
+    } else {
+        *ptr++ = static_cast<U8>(v | B);
+        *ptr++ = static_cast<U8>((v >> 7) | B);
+        *ptr++ = static_cast<U8>((v >> 14) | B);
+        *ptr++ = static_cast<U8>((v >> 21) | B);
+        *ptr++ = static_cast<U8>(v >> 28);
     }
-    *buf++ = static_cast<U8>(value);
-    return reinterpret_cast<char *>(buf);
+    return reinterpret_cast<char *>(ptr);
 }
 
-// TODO: We should pass an "end" variable to mark the end of possible input. This will help
-//       catch corruption in data pages, and prevent out-of-bounds reads.
-inline auto decode_varint(const char *ptr, U64 &value) -> const char *
+inline auto decode_varint(const char *p, const char *limit, U32 &value_out)  -> const char *
 {
-    value = 0;
-    for (U32 shift = 0; shift < 64; shift += 7) {
-        U64 c = *reinterpret_cast<const U8 *>(ptr);
-        ++ptr;
-        if (c & 0x80) {
-            value |= (c & 0x7F) << shift;
+    U32 result = 0;
+    for (U32 shift = 0; shift <= 28 && p < limit; shift += 7) {
+        U32 byte = *reinterpret_cast<const U8 *>(p++);
+        if (byte & 128) {
+            // More bytes are present
+            result |= ((byte & 127) << shift);
         } else {
-            value |= c << shift;
-            return ptr;
+            result |= (byte << shift);
+            value_out = result;
+            return reinterpret_cast<const char *>(p);
         }
     }
     return nullptr;
 }
-// TODO: Use this one instead.
-inline auto decode_varint(const char *ptr, const char *end, U64 &value) -> const char *
-{
-    value = 0;
-    for (U32 shift = 0; shift < 64 && ptr < end; shift += 7) {
-        U64 c = *reinterpret_cast<const U8 *>(ptr);
-        ++ptr;
-        if (c & 0x80) {
-            value |= (c & 0x7F) << shift;
-        } else {
-            value |= c << shift;
-            return ptr;
-        }
-    }
-    return nullptr;
-}
+
 
 } // namespace calicodb
 
