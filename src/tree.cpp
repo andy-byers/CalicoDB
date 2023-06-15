@@ -30,19 +30,19 @@ static constexpr U32 kCellPtrSize = sizeof(U16);
 {
     // SQLite's computation for min and max local payload sizes. If kMaxLocal is exceeded, then 1 or more
     // overflow chain pages will be required to store this payload.
-    constexpr const std::size_t kMinLocal =
+    constexpr const U32 kMinLocal =
         (kPageSize - NodeHdr::kSize) * 32 / 256 - kMaxCellHeaderSize - kCellPtrSize;
-    constexpr const std::size_t kMaxLocal =
+    constexpr const U32 kMaxLocal =
         (kPageSize - NodeHdr::kSize) * 64 / 256 - kMaxCellHeaderSize - kCellPtrSize;
     if (key_size + value_size <= kMaxLocal) {
         // The whole payload can be stored locally.
-        return key_size + value_size;
+        return static_cast<U32>(key_size + value_size);
     } else if (key_size > kMaxLocal) {
         // The first part of the key will occupy the entire local payload.
         return kMaxLocal;
     }
     // Try to prevent the key from being split.
-    return std::max(kMinLocal, key_size);
+    return std::max(kMinLocal, static_cast<U32>(key_size));
 }
 
 auto Tree::corrupted_page(Id page_id) const -> Status
@@ -1614,8 +1614,8 @@ auto Tree::emplace(Node &node, const Slice &key, const Slice &value, std::size_t
     // of bytes needed for the cell.
     char header[kVarintMaxLength * 2];
     auto *ptr = header;
-    ptr = encode_varint(ptr, value.size());
-    ptr = encode_varint(ptr, key.size());
+    ptr = encode_varint(ptr, static_cast<U32>(value.size()));
+    ptr = encode_varint(ptr, static_cast<U32>(key.size()));
     const auto hdr_size = std::uintptr_t(ptr - header);
     const auto cell_size = local_pl_size + hdr_size + sizeof(U32) * has_remote;
 
@@ -2255,8 +2255,8 @@ public:
             auto accumulated = cell.local_pl_size;
             auto requested = cell.key_size;
             if (node.hdr.is_external) {
-                U32 value_size;
-                decode_varint(cell.ptr, node.ref->page + kPageSize, value_size);
+                U32 value_size = 0;
+                CHECK_TRUE(decode_varint(cell.ptr, node.ref->page + kPageSize, value_size));
                 requested += value_size;
             }
 
