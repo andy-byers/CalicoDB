@@ -137,7 +137,7 @@ struct NodeHdr {
     }
     static auto put_type(char *root, Type value) -> void
     {
-        put_u32(root + kTypeOffset, value);
+        root[kTypeOffset] = value;
     }
 
     [[nodiscard]] static auto get_next_id(const char *root) -> Id
@@ -164,7 +164,7 @@ struct NodeHdr {
     }
     static auto put_cell_count(char *root, U32 value) -> void
     {
-        put_u16(root + kCellCountOffset, value);
+        put_u16(root + kCellCountOffset, static_cast<U16>(value));
     }
 
     [[nodiscard]] static auto get_cell_start(const char *root) -> U32
@@ -173,7 +173,7 @@ struct NodeHdr {
     }
     static auto put_cell_start(char *root, U32 value) -> void
     {
-        put_u16(root + kCellStartOffset, value);
+        put_u16(root + kCellStartOffset, static_cast<U16>(value));
     }
 
     [[nodiscard]] static auto get_free_start(const char *root) -> U32
@@ -182,7 +182,7 @@ struct NodeHdr {
     }
     static auto put_free_start(char *root, U32 value) -> void
     {
-        put_u16(root + kFreeStartOffset, value);
+        put_u16(root + kFreeStartOffset, static_cast<U16>(value));
     }
 
     [[nodiscard]] static auto get_frag_count(const char *root) -> U32

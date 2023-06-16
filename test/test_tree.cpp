@@ -136,7 +136,7 @@ public:
         NodeTests::TearDown();
     }
 
-    auto reserve_for_test(std::size_t n) -> void
+    auto reserve_for_test(U32 n) -> void
     {
         ASSERT_LT(n, kPageSize - FileHdr::kSize - NodeHdr_::kSize)
             << "reserve_for_test(" << n << ") leaves no room for possible headers";
@@ -144,8 +144,8 @@ public:
         base = kPageSize - n;
     }
 
-    std::size_t size = 0;
-    std::size_t base = 0;
+    U32 size = 0;
+    U32 base = 0;
     Node node;
 };
 

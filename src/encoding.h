@@ -13,8 +13,7 @@ namespace calicodb
 inline auto get_u16(const char *ptr) -> U16
 {
     const auto buf = reinterpret_cast<const U8 *>(ptr);
-    return static_cast<U16>(buf[0]) |
-           (static_cast<U16>(buf[1]) << 8);
+    return static_cast<U16>(buf[0] | (buf[1] << 8));
 }
 
 inline auto get_u16(const Slice &slice) -> U16
@@ -100,25 +99,25 @@ inline auto encode_varint(char *dst, U32 v) -> char *
     U8 *ptr = reinterpret_cast<U8 *>(dst);
     static constexpr int B = 128;
     if (v < (1 << 7)) {
-        *ptr++ = v;
+        *ptr++ = static_cast<U8>(v);
     } else if (v < (1 << 14)) {
-        *ptr++ = v | B;
-        *ptr++ = v >> 7;
+        *ptr++ = static_cast<U8>(v | B);
+        *ptr++ = static_cast<U8>(v >> 7);
     } else if (v < (1 << 21)) {
-        *ptr++ = v | B;
-        *ptr++ = (v >> 7) | B;
-        *ptr++ = v >> 14;
+        *ptr++ = static_cast<U8>(v | B);
+        *ptr++ = static_cast<U8>((v >> 7) | B);
+        *ptr++ = static_cast<U8>(v >> 14);
     } else if (v < (1 << 28)) {
-        *ptr++ = v | B;
-        *ptr++ = (v >> 7) | B;
-        *ptr++ = (v >> 14) | B;
-        *ptr++ = v >> 21;
+        *ptr++ = static_cast<U8>(v | B);
+        *ptr++ = static_cast<U8>((v >> 7) | B);
+        *ptr++ = static_cast<U8>((v >> 14) | B);
+        *ptr++ = static_cast<U8>(v >> 21);
     } else {
-        *ptr++ = v | B;
-        *ptr++ = (v >> 7) | B;
-        *ptr++ = (v >> 14) | B;
-        *ptr++ = (v >> 21) | B;
-        *ptr++ = v >> 28;
+        *ptr++ = static_cast<U8>(v | B);
+        *ptr++ = static_cast<U8>((v >> 7) | B);
+        *ptr++ = static_cast<U8>((v >> 14) | B);
+        *ptr++ = static_cast<U8>((v >> 21) | B);
+        *ptr++ = static_cast<U8>(v >> 28);
     }
     return reinterpret_cast<char *>(ptr);
 }

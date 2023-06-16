@@ -30,19 +30,19 @@ static constexpr U32 kCellPtrSize = sizeof(U16);
 {
     // SQLite's computation for min and max local payload sizes. If kMaxLocal is exceeded, then 1 or more
     // overflow chain pages will be required to store this payload.
-    constexpr const std::size_t kMinLocal =
+    constexpr const U32 kMinLocal =
         (kPageSize - NodeHdr_::kSize) * 32 / 256 - kMaxCellHeaderSize - kCellPtrSize;
-    constexpr const std::size_t kMaxLocal =
+    constexpr const U32 kMaxLocal =
         (kPageSize - NodeHdr_::kSize) * 64 / 256 - kMaxCellHeaderSize - kCellPtrSize;
     if (key_size + value_size <= kMaxLocal) {
         // The whole payload can be stored locally.
-        return key_size + value_size;
+        return static_cast<U32>(key_size + value_size);
     } else if (key_size > kMaxLocal) {
         // The first part of the key will occupy the entire local payload.
         return kMaxLocal;
     }
     // Try to prevent the key from being split.
-    return std::max(kMinLocal, key_size);
+    return std::max(kMinLocal, static_cast<U32>(key_size));
 }
 
 auto Tree::corrupted_page(Id page_id) const -> Status
@@ -376,7 +376,7 @@ static auto set_block_size(Node &node, std::size_t offset, std::size_t value) ->
     return put_u16(node.ref->page + offset + kCellPtrSize, static_cast<U16>(value));
 }
 
-static auto take_free_space(Node &node, std::size_t ptr0, std::size_t ptr1, std::size_t needed_size) -> std::size_t
+static auto take_free_space(Node &node, U32 ptr0, U32 ptr1, U32 needed_size) -> U32
 {
     CALICODB_EXPECT_LT(ptr0, kPageSize);
     CALICODB_EXPECT_LT(ptr1, kPageSize);
@@ -386,10 +386,9 @@ static auto take_free_space(Node &node, std::size_t ptr0, std::size_t ptr1, std:
     const auto free_size = get_block_size(node, ptr1);
 
     CALICODB_EXPECT_GE(free_size, needed_size);
-    const auto diff = static_cast<U32>(free_size - needed_size);
+    const auto diff = free_size - needed_size;
 
     if (diff < 4) {
-        // TODO: Defragment the node if the fragment count gets above 128 or so, way before this byte might overflow.
         NodeHdr::put_frag_count(node.hdr, NodeHdr::get_frag_count(node.hdr) + diff);
         if (ptr0 == 0) {
             NodeHdr::put_free_start(node.hdr, ptr2);
@@ -517,7 +516,7 @@ auto BlockAllocator::defragment(Node &node, int skip) -> int
     const auto n = NodeHdr::get_cell_count(node.hdr);
     const auto to_skip = skip >= 0 ? static_cast<U32>(skip) : n;
     auto *ptr = node.ref->page;
-    auto end = kPageSize;
+    U32 end = kPageSize;
 
     // Copy everything before the indirection vector.
     std::memcpy(node.scratch, ptr, cell_slots_offset(node));
@@ -1627,8 +1626,8 @@ auto Tree::emplace(Node &node, const Slice &key, const Slice &value, std::size_t
     // of bytes needed for the cell.
     char header[kVarintMaxLength * 2];
     auto *ptr = header;
-    ptr = encode_varint(ptr, value.size());
-    ptr = encode_varint(ptr, key.size());
+    ptr = encode_varint(ptr, static_cast<U32>(value.size()));
+    ptr = encode_varint(ptr, static_cast<U32>(key.size()));
     const auto hdr_size = std::uintptr_t(ptr - header);
     const auto cell_size = local_pl_size + hdr_size + sizeof(U32) * has_remote;
 
@@ -2270,8 +2269,8 @@ public:
             auto accumulated = cell.local_pl_size;
             auto requested = cell.key_size;
             if (node.is_leaf) {
-                U32 value_size;
-                decode_varint(cell.ptr, node.ref->page + kPageSize, value_size);
+                U32 value_size = 0;
+                CHECK_TRUE(decode_varint(cell.ptr, node.ref->page + kPageSize, value_size));
                 requested += value_size;
             }
 
