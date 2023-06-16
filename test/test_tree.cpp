@@ -138,7 +138,7 @@ public:
 
     auto reserve_for_test(std::size_t n) -> void
     {
-        ASSERT_LT(n, kPageSize - FileHdr::kSize - NodeHdr::kSize)
+        ASSERT_LT(n, kPageSize - FileHdr::kSize - NodeHdr_::kSize)
             << "reserve_for_test(" << n << ") leaves no room for possible headers";
         size = n;
         base = kPageSize - n;
@@ -186,7 +186,7 @@ TEST_F(BlockAllocatorTests, MergesAdjacentBlocks)
 TEST_F(BlockAllocatorTests, ConsumesAdjacentFragments)
 {
     reserve_for_test(40);
-    node.hdr.frag_count = 6;
+    NodeHdr::put_frag_count(node.hdr, 6);
 
     // .........*#####**...........**#####*....
     BlockAllocator::release(node, base + 10, 5);
@@ -195,37 +195,37 @@ TEST_F(BlockAllocatorTests, ConsumesAdjacentFragments)
     // .....##########**...........**#####*....
     BlockAllocator::release(node, base + 5, 4);
     ASSERT_EQ(BlockAllocator::accumulate_free_bytes(node), 15);
-    ASSERT_EQ(node.hdr.frag_count, 5);
+    ASSERT_EQ(NodeHdr::get_frag_count(node.hdr), 5);
 
     // .....#################......**#####*....
     BlockAllocator::release(node, base + 17, 5);
     ASSERT_EQ(BlockAllocator::accumulate_free_bytes(node), 22);
-    ASSERT_EQ(node.hdr.frag_count, 3);
+    ASSERT_EQ(NodeHdr::get_frag_count(node.hdr), 3);
 
     // .....##############################*....
     BlockAllocator::release(node, base + 22, 6);
     ASSERT_EQ(BlockAllocator::accumulate_free_bytes(node), 30);
-    ASSERT_EQ(node.hdr.frag_count, 1);
+    ASSERT_EQ(NodeHdr::get_frag_count(node.hdr), 1);
 
     // .....##############################*....
     BlockAllocator::release(node, base + 36, 4);
     ASSERT_EQ(BlockAllocator::accumulate_free_bytes(node), 35);
-    ASSERT_EQ(node.hdr.frag_count, 0);
+    ASSERT_EQ(NodeHdr::get_frag_count(node.hdr), 0);
 }
 
 TEST_F(BlockAllocatorTests, ExternalNodesDoNotConsume3ByteFragments)
 {
     reserve_for_test(11);
-    node.hdr.is_external = true;
-    node.hdr.frag_count = 3;
+    node.is_leaf = true;
+    NodeHdr::put_frag_count(node.hdr, 3);
 
     // ....***####
     BlockAllocator::release(node, base + 7, 4);
 
     // ####***####
     BlockAllocator::release(node, base + 0, 4);
-    ASSERT_EQ(BlockAllocator::accumulate_free_bytes(node), size - node.hdr.frag_count);
-    ASSERT_EQ(node.hdr.frag_count, 3);
+    ASSERT_EQ(BlockAllocator::accumulate_free_bytes(node), size - NodeHdr::get_frag_count(node.hdr));
+    ASSERT_EQ(NodeHdr::get_frag_count(node.hdr), 3);
 }
 
 TEST_F(BlockAllocatorTests, InternalNodesConsume3ByteFragments)
@@ -234,7 +234,7 @@ TEST_F(BlockAllocatorTests, InternalNodesConsume3ByteFragments)
     node = get_node(false);
 
     reserve_for_test(11);
-    node.hdr.frag_count = 3;
+    NodeHdr::put_frag_count(node.hdr, 3);
 
     // ....***####
     BlockAllocator::release(node, base + 7, 4);
@@ -242,7 +242,7 @@ TEST_F(BlockAllocatorTests, InternalNodesConsume3ByteFragments)
     // ###########
     BlockAllocator::release(node, base + 0, 4);
     ASSERT_EQ(BlockAllocator::accumulate_free_bytes(node), size);
-    ASSERT_EQ(node.hdr.frag_count, 0);
+    ASSERT_EQ(NodeHdr::get_frag_count(node.hdr), 0);
 }
 
 TEST_F(NodeTests, AllocatorSkipsPointerMapPage)

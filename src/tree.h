@@ -30,15 +30,15 @@ struct Node;
 class BlockAllocator
 {
 public:
-    static auto accumulate_free_bytes(const Node &node) -> std::size_t;
+    static auto accumulate_free_bytes(const Node &node) -> U32;
 
-    // Allocate "needed_size" bytes of contiguous memory in "node" and return the
+    // Allocate `needed_size` bytes of contiguous memory in `node` and return the
     // offset of the first byte, relative to the start of the page.
-    static auto allocate(Node &node, std::size_t needed_size) -> std::size_t;
+    static auto allocate(Node &node, U32 needed_size) -> U32;
 
-    // Free "block_size" bytes of contiguous memory in "node" starting at
-    // "block_start".
-    static auto release(Node &node, std::size_t block_start, std::size_t block_size) -> void;
+    // Free `block_size` bytes of contiguous memory in `node` starting at
+    // `block_start`.
+    static auto release(Node &node, U32 block_start, U32 block_size) -> int;
 
     // Merge all free blocks and fragment bytes into the gap space
     // Returns 0 on success, -1 on failure. This routine might fail if the page has been corrupted.
@@ -85,15 +85,15 @@ struct Cell {
 // Simple construct representing a tree node
 struct Node {
     PageRef *ref = nullptr;
+    char *hdr = nullptr;
     char *scratch = nullptr;
 
     // If ref is not nullptr, then the following fields can be accessed.
-    NodeHdr hdr;
     int (*parser)(char *, const char *, Cell *) = nullptr;
     std::optional<Cell> overflow;
     U32 overflow_index = 0;
-    U32 slots_offset = 0;
     U32 gap_size = 0;
+    bool is_leaf = false;
 
     auto TEST_validate() -> void;
 };

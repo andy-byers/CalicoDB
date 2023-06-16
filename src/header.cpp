@@ -42,7 +42,7 @@ auto FileHdr::make_supported_db(char *root) -> void
     put_u32(root + kPageCountOffset, 1);
 
     // Initialize the root page of the schema tree.
-    NodeHdr root_hdr;
+    NodeHdr_ root_hdr;
     root_hdr.is_external = true;
     root_hdr.cell_start = kPageSize;
     root_hdr.write(root + kSize);
@@ -53,7 +53,7 @@ enum : char {
     kInternal = '\x02',
 };
 
-auto NodeHdr::read(const char *data) -> int
+auto NodeHdr_::read(const char *data) -> int
 {
     if (const auto t = *data++; t == kExternal) {
         is_external = true;
@@ -82,7 +82,7 @@ auto NodeHdr::read(const char *data) -> int
     return 0;
 }
 
-auto NodeHdr::write(char *data) const -> void
+auto NodeHdr_::write(char *data) const -> void
 {
     *data++ = is_external ? kExternal : kInternal;
 

@@ -97,7 +97,7 @@ static constexpr std::size_t kVarintMaxLength = 5;
 
 inline auto encode_varint(char *dst, U32 v) -> char *
 {
-    U8* ptr = reinterpret_cast<U8*>(dst);
+    U8 *ptr = reinterpret_cast<U8 *>(dst);
     static constexpr int B = 128;
     if (v < (1 << 7)) {
         *ptr++ = v;
@@ -123,7 +123,7 @@ inline auto encode_varint(char *dst, U32 v) -> char *
     return reinterpret_cast<char *>(ptr);
 }
 
-inline auto decode_varint(const char *p, const char *limit, U32 &value_out)  -> const char *
+inline auto decode_varint(const char *p, const char *limit, U32 &value_out) -> const char *
 {
     U32 result = 0;
     for (U32 shift = 0; shift <= 28 && p < limit; shift += 7) {
@@ -139,7 +139,6 @@ inline auto decode_varint(const char *p, const char *limit, U32 &value_out)  -> 
     }
     return nullptr;
 }
-
 
 } // namespace calicodb
 
