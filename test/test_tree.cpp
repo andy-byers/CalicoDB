@@ -61,198 +61,6 @@ protected:
     File *m_file = nullptr;
 };
 
-class NodeTests
-    : public PagerTestHarness,
-      public testing::Test
-{
-public:
-    explicit NodeTests()
-        : tree_scratch(kPageSize * 2, '\0')
-    {
-    }
-
-    ~NodeTests() override = default;
-
-    auto SetUp() -> void override
-    {
-        ASSERT_OK(m_pager->start_reader());
-        ASSERT_OK(m_pager->start_writer());
-        tree = std::make_unique<Tree>(*m_pager, tree_scratch.data(), nullptr);
-    }
-
-    [[nodiscard]] auto get_node(bool is_external) -> Node
-    {
-        Node node;
-        EXPECT_OK(tree->allocate(is_external, node));
-        return node;
-    }
-
-    auto TearDown() -> void override
-    {
-        tree.reset();
-        m_pager->finish();
-    }
-
-    [[nodiscard]] auto make_long_key(std::size_t value) const
-    {
-        const auto suffix = numeric_key<6>(value);
-        const std::string key(kPageSize * 2 - suffix.size(), '0');
-        return key + suffix;
-    }
-
-    [[nodiscard]] auto make_value(char c, bool overflow = false) const
-    {
-        std::size_t size{kPageSize};
-        if (overflow) {
-            size /= 3;
-        } else {
-            size /= 20;
-        }
-        return std::string(size, c);
-    }
-
-    std::unique_ptr<Tree> tree;
-    std::string tree_scratch;
-    std::string collect_scratch;
-    RandomGenerator random;
-};
-
-class BlockAllocatorTests : public NodeTests
-{
-public:
-    explicit BlockAllocatorTests() = default;
-
-    ~BlockAllocatorTests() override = default;
-
-    auto SetUp() -> void override
-    {
-        NodeTests::SetUp();
-        node = get_node(true);
-    }
-
-    auto TearDown() -> void override
-    {
-        tree->release(node);
-        NodeTests::TearDown();
-    }
-
-    auto reserve_for_test(U32 n) -> void
-    {
-        ASSERT_LT(n, kPageSize - FileHdr::kSize - NodeHdr_::kSize)
-            << "reserve_for_test(" << n << ") leaves no room for possible headers";
-        size = n;
-        base = kPageSize - n;
-    }
-
-    U32 size = 0;
-    U32 base = 0;
-    Node node;
-};
-
-TEST_F(BlockAllocatorTests, MergesAdjacentBlocks)
-{
-    reserve_for_test(40);
-
-    // ..........#####...............#####.....
-    BlockAllocator::release(node, base + 10, 5);
-    BlockAllocator::release(node, base + 30, 5);
-    ASSERT_EQ(BlockAllocator::accumulate_free_bytes(node), 10);
-
-    // .....##########...............#####.....
-    BlockAllocator::release(node, base + 5, 5);
-    ASSERT_EQ(BlockAllocator::accumulate_free_bytes(node), 15);
-
-    // .....##########...............##########
-    BlockAllocator::release(node, base + 35, 5);
-    ASSERT_EQ(BlockAllocator::accumulate_free_bytes(node), 20);
-
-    // .....###############..........##########
-    BlockAllocator::release(node, base + 15, 5);
-    ASSERT_EQ(BlockAllocator::accumulate_free_bytes(node), 25);
-
-    // .....###############.....###############
-    BlockAllocator::release(node, base + 25, 5);
-    ASSERT_EQ(BlockAllocator::accumulate_free_bytes(node), 30);
-
-    // .....###################################
-    BlockAllocator::release(node, base + 20, 5);
-    ASSERT_EQ(BlockAllocator::accumulate_free_bytes(node), 35);
-
-    // ########################################
-    BlockAllocator::release(node, base, 5);
-    ASSERT_EQ(BlockAllocator::accumulate_free_bytes(node), size);
-}
-
-TEST_F(BlockAllocatorTests, ConsumesAdjacentFragments)
-{
-    reserve_for_test(40);
-    NodeHdr::put_frag_count(node.hdr, 6);
-
-    // .........*#####**...........**#####*....
-    BlockAllocator::release(node, base + 10, 5);
-    BlockAllocator::release(node, base + 30, 5);
-
-    // .....##########**...........**#####*....
-    BlockAllocator::release(node, base + 5, 4);
-    ASSERT_EQ(BlockAllocator::accumulate_free_bytes(node), 15);
-    ASSERT_EQ(NodeHdr::get_frag_count(node.hdr), 5);
-
-    // .....#################......**#####*....
-    BlockAllocator::release(node, base + 17, 5);
-    ASSERT_EQ(BlockAllocator::accumulate_free_bytes(node), 22);
-    ASSERT_EQ(NodeHdr::get_frag_count(node.hdr), 3);
-
-    // .....##############################*....
-    BlockAllocator::release(node, base + 22, 6);
-    ASSERT_EQ(BlockAllocator::accumulate_free_bytes(node), 30);
-    ASSERT_EQ(NodeHdr::get_frag_count(node.hdr), 1);
-
-    // .....##############################*....
-    BlockAllocator::release(node, base + 36, 4);
-    ASSERT_EQ(BlockAllocator::accumulate_free_bytes(node), 35);
-    ASSERT_EQ(NodeHdr::get_frag_count(node.hdr), 0);
-}
-
-TEST_F(BlockAllocatorTests, ExternalNodesDoNotConsume3ByteFragments)
-{
-    reserve_for_test(11);
-    node.is_leaf = true;
-    NodeHdr::put_frag_count(node.hdr, 3);
-
-    // ....***####
-    BlockAllocator::release(node, base + 7, 4);
-
-    // ####***####
-    BlockAllocator::release(node, base + 0, 4);
-    ASSERT_EQ(BlockAllocator::accumulate_free_bytes(node), size - NodeHdr::get_frag_count(node.hdr));
-    ASSERT_EQ(NodeHdr::get_frag_count(node.hdr), 3);
-}
-
-TEST_F(BlockAllocatorTests, InternalNodesConsume3ByteFragments)
-{
-    tree->release(node);
-    node = get_node(false);
-
-    reserve_for_test(11);
-    NodeHdr::put_frag_count(node.hdr, 3);
-
-    // ....***####
-    BlockAllocator::release(node, base + 7, 4);
-
-    // ###########
-    BlockAllocator::release(node, base + 0, 4);
-    ASSERT_EQ(BlockAllocator::accumulate_free_bytes(node), size);
-    ASSERT_EQ(NodeHdr::get_frag_count(node.hdr), 0);
-}
-
-TEST_F(NodeTests, AllocatorSkipsPointerMapPage)
-{
-    // Page 1 is allocated before Pager::open() returns, and this call skips page 2.
-    auto node = get_node(true);
-    ASSERT_EQ(node.ref->page_id, Id(3));
-    tree->release(node);
-}
-
 class TreeTests
     : public PagerTestHarness,
       public testing::TestWithParam<std::size_t>
@@ -286,7 +94,7 @@ public:
 
     [[nodiscard]] auto make_value(char c, bool overflow = false) const
     {
-        std::size_t size{kPageSize};
+        auto size = kPageSize;
         if (overflow) {
             size /= 3;
         } else {
@@ -395,6 +203,7 @@ TEST_P(TreeTests, GetNonexistentKeys)
     ASSERT_OK(tree->put(make_long_key(3), make_value('0', true)));
     ASSERT_OK(tree->put(make_long_key(4), make_value('0', true)));
     ASSERT_OK(tree->put(make_long_key(5), make_value('0', true)));
+
     // Missing 6
     ASSERT_OK(tree->put(make_long_key(7), make_value('0', true)));
     ASSERT_OK(tree->put(make_long_key(8), make_value('0', true)));

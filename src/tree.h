@@ -7,6 +7,7 @@
 
 #include "calicodb/cursor.h"
 #include "header.h"
+#include "node.h"
 #include "pager.h"
 #include <optional>
 
@@ -15,88 +16,6 @@ namespace calicodb
 
 class Schema;
 class Tree;
-struct Node;
-
-// Maintains a list of available memory regions within a node, called the free
-// block list, as well as the "gap" space between the cell with the lowest offset
-// and the end of the cell pointer array.
-//
-// Free blocks take the form (offset, size), where "offset" and "size" are 16-bit
-// unsigned integers. The entries are kept sorted by the "offset" field, and
-// adjacent regions are merged if possible. Free blocks must be at least 4 bytes.
-// If a region smaller than 4 bytes is released, it is considered a fragment, and
-// its size is added to the "frag_count" node header field. Luckily, it is possible
-// to clean up some of these fragments as regions are merged (see release()).
-class BlockAllocator
-{
-public:
-    static auto accumulate_free_bytes(const Node &node) -> U32;
-
-    // Allocate `needed_size` bytes of contiguous memory in `node` and return the
-    // offset of the first byte, relative to the start of the page.
-    static auto allocate(Node &node, U32 needed_size) -> U32;
-
-    // Free `block_size` bytes of contiguous memory in `node` starting at
-    // `block_start`.
-    static auto release(Node &node, U32 block_start, U32 block_size) -> int;
-
-    // Merge all free blocks and fragment bytes into the gap space
-    // Returns 0 on success, -1 on failure. This routine might fail if the page has been corrupted.
-    static auto defragment(Node &node, int skip = -1) -> int;
-};
-
-// Internal cell format:
-//     Size    Name
-//    -----------------------
-//     4       child_id
-//     varint  key_size
-//     n       key
-//    [4       overflow_id]
-//
-// External cell format:
-//     Size    Name
-//    -----------------------
-//     varint  value_size
-//     varint  key_size
-//     n       key
-//     m       value
-//    [4       overflow_id]
-//
-struct Cell {
-    // Pointer to the start of the cell.
-    char *ptr = nullptr;
-
-    // Pointer to the start of the record key.
-    char *key = nullptr;
-
-    // Number of bytes contained in the key.
-    U32 key_size = 0;
-
-    // Number of bytes contained in both the key and the value.
-    U32 total_pl_size = 0;
-
-    // Number of payload bytes stored locally (embedded in a node).
-    U32 local_pl_size = 0;
-
-    // Number of bytes occupied by this cell when embedded.
-    U32 footprint = 0;
-};
-
-// Simple construct representing a tree node
-struct Node {
-    PageRef *ref = nullptr;
-    char *hdr = nullptr;
-    char *scratch = nullptr;
-
-    // If ref is not nullptr, then the following fields can be accessed.
-    int (*parser)(char *, const char *, Cell *) = nullptr;
-    std::optional<Cell> overflow;
-    U32 overflow_index = 0;
-    U32 gap_size = 0;
-    bool is_leaf = false;
-
-    auto TEST_validate() -> void;
-};
 
 class CursorImpl : public Cursor
 {
@@ -185,12 +104,9 @@ public:
     auto acquire(Id page_id, bool write, Node &node) const -> Status;
     auto free(Node &node) -> Status;
     auto upgrade(Node &node) const -> void;
-    auto release(Node &node) const -> void;
+    auto release(Node node) const -> void;
 
-    auto wset_allocate(bool is_external, Node *&node_out) -> Status;
-    auto wset_acquire(Id page_id, bool upgrade, Node *&node_out) const -> Status;
-    auto advance_cursor(Node &node, int diff) const -> void;
-    auto clear_working_set() const -> void;
+    auto advance_cursor(Node node, int diff) const -> void;
     auto finish_operation() const -> void;
 
     [[nodiscard]] auto TEST_to_string() const -> std::string;
@@ -234,11 +150,11 @@ private:
     auto resolve_overflow() -> Status;
     auto split_root() -> Status;
     auto split_nonroot() -> Status;
-    auto split_nonroot_fast(Node &parent, Node &right, const Cell &overflow) -> Status;
+    auto split_nonroot_fast(Node parent, Node right) -> Status;
 
     auto resolve_underflow() -> Status;
     auto fix_root() -> Status;
-    auto fix_nonroot(Node &parent, std::size_t index) -> Status;
+    auto fix_nonroot(Node parent, std::size_t index) -> Status;
     auto merge_left(Node &left, Node &right, Node &parent, std::size_t index) -> Status;
     auto merge_right(Node &left, Node &right, Node &parent, std::size_t index) -> Status;
     auto rotate_left(Node &parent, Node &left, Node &right, std::size_t index) -> Status;
@@ -265,18 +181,13 @@ private:
     auto fix_links(Node &node, Id parent_id = Id::null()) -> Status;
     [[nodiscard]] auto cell_scratch() -> char *;
 
-    [[nodiscard]] auto wset_node(std::size_t idx) const -> Node &
-    {
-        return m_wset[idx + 1];
-    }
-
     // Internal cursor used to traverse the tree structure
     mutable class InternalCursor
     {
         mutable Status m_status;
         std::string m_buffer;
         Tree *m_tree;
-        Node *m_node;
+        Node m_node;
 
     public:
         static constexpr std::size_t kMaxDepth = 20;
@@ -292,7 +203,7 @@ private:
 
         [[nodiscard]] auto is_valid() const -> bool
         {
-            return m_node->ref && m_status.is_ok();
+            return m_node.ref && m_status.is_ok();
         }
 
         [[nodiscard]] auto status() const -> Status
@@ -309,15 +220,14 @@ private:
         [[nodiscard]] auto node() -> Node &
         {
             CALICODB_EXPECT_TRUE(is_valid());
-            return *m_node;
+            return m_node;
         }
 
-        auto move_to(Node &node, int diff) -> void
+        auto move_to(Node node, int diff) -> void
         {
             clear();
             history[level += diff] = {node.ref->page_id, 0};
-            *m_node = node;
-            node.ref = nullptr;
+            m_node = std::move(node);
         }
 
         auto clear() -> void;
@@ -326,12 +236,10 @@ private:
         auto move_down(Id child_id) -> void;
     } m_c;
 
-    // Storage for the current working set of nodes, that is, nodes that are being accessed by the current
-    // tree operation. The tree algorithms are designed so that they never need more than kMaxWorkingSetSize
-    // nodes at once. The internal cursor uses slot 0.
-    static constexpr std::size_t kMaxWorkingSetSize = 5;
-    mutable Node m_wset[kMaxWorkingSetSize + 1];
-    mutable std::size_t m_wset_idx = 0;
+    // When the node pointed at by m_c overflows, store the cell that couldn't fit on the page here. The
+    // overflow index (the index that the cell would have had if it fit on the page) is m_c.index().
+    Cell m_ovfl_cell;
+    bool m_has_ovfl = false;
 
     // Various tree operation counts are tracked in this variable.
     mutable Stats m_stats;

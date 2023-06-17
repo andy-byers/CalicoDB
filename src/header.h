@@ -73,50 +73,10 @@ struct FileHdr {
 //     11      2     Cell area start
 //     13      2     Freelist start
 //     15      1     Fragment count
-struct NodeHdr_ {
-    [[nodiscard]] auto read(const char *data) -> int;
-    auto write(char *data) const -> void;
-
-    enum NodeType : char {
-        kExternalType = '\x01',
-        kInternalType = '\x02',
-    };
-
-    enum {
-        kTypeOffset,
-        kNextIdOffset = kTypeOffset + sizeof(NodeType),
-        kPrevIdOffset = kNextIdOffset + sizeof(U32),
-        kCellCountOffset = kPrevIdOffset + sizeof(U32),
-        kCellStartOffset = kCellCountOffset + sizeof(U16),
-        kFreeStartOffset = kCellStartOffset + sizeof(U16),
-        kFreeCountOffset = kFreeStartOffset + sizeof(U16),
-        kFragCountOffset = kFreeCountOffset + sizeof(U16),
-        kSize = kFragCountOffset + sizeof(U8)
-    };
-
-    Id next_id;
-    Id prev_id;
-    unsigned cell_count = 0;
-    unsigned cell_start = 0;
-    unsigned free_start = 0;
-    unsigned frag_count = 0;
-    bool is_external = false;
-};
-
-// Node Header Format:
-//     Offset  Size  Name
-//    --------------------------
-//     0       1     Node type
-//     1       4     Next ID
-//     5       4     Previous ID
-//     9       2     Cell count
-//     11      2     Cell area start
-//     13      2     Freelist start
-//     15      1     Fragment count
 struct NodeHdr {
     enum Type : char {
-        kExternalType = '\x01',
-        kInternalType = '\x02',
+        kExternal = '\x01',
+        kInternal = '\x02',
     };
 
     enum {

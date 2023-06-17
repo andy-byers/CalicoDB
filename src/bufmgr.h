@@ -5,6 +5,7 @@
 #ifndef CALICODB_BUFMGR_H
 #define CALICODB_BUFMGR_H
 
+#include "page.h"
 #include "utils.h"
 #include <list>
 #include <map>
@@ -19,27 +20,6 @@ namespace calicodb
 class Pager;
 class File;
 class Env;
-
-struct PageRef final {
-    Id page_id;
-
-    // Pointer to the start of the buffer slot containing the page data.
-    char *page = nullptr;
-
-    // Number of live copies of this page.
-    unsigned refcount = 0;
-
-    // Dirty list fields.
-    PageRef *dirty = nullptr;
-    PageRef *prev_dirty = nullptr;
-    PageRef *next_dirty = nullptr;
-
-    enum Flag {
-        kNormal = 0,
-        kDirty = 1,
-        kExtra = 2,
-    } flag = kNormal;
-};
 
 // Manages database pages that have been read from stable storage
 class Bufmgr final
