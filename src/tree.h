@@ -36,7 +36,7 @@ class CursorImpl : public Cursor
     Slice m_val;
 
 protected:
-    auto seek_to(Node &node, std::size_t index) -> void;
+    auto seek_to(Node node, std::size_t index) -> void;
     auto fetch_payload(Node &node, std::size_t index) -> Status;
 
 public:
@@ -102,7 +102,7 @@ public:
 
     auto allocate(bool is_external, Node &node) -> Status;
     auto acquire(Id page_id, bool write, Node &node) const -> Status;
-    auto free(Node &node) -> Status;
+    auto free(Node node) -> Status;
     auto upgrade(Node &node) const -> void;
     auto release(Node node) const -> void;
 
@@ -152,11 +152,13 @@ private:
     auto split_nonroot() -> Status;
     auto split_nonroot_fast(Node parent, Node right) -> Status;
 
+    auto redistribute_cells(Node &left, Node &right, Node &parent) -> Status;
+
     auto resolve_underflow() -> Status;
     auto fix_root() -> Status;
     auto fix_nonroot(Node parent, std::size_t index) -> Status;
-    auto merge_left(Node &left, Node &right, Node &parent, std::size_t index) -> Status;
-    auto merge_right(Node &left, Node &right, Node &parent, std::size_t index) -> Status;
+    auto merge_left(Node &left, Node right, Node &parent, std::size_t index) -> Status;
+    auto merge_right(Node &left, Node right, Node &parent, std::size_t index) -> Status;
     auto rotate_left(Node &parent, Node &left, Node &right, std::size_t index) -> Status;
     auto rotate_right(Node &parent, Node &left, Node &right, std::size_t index) -> Status;
 
@@ -169,7 +171,7 @@ private:
 
     auto emplace(Node &node, const Slice &key, const Slice &value, std::size_t index, bool &overflow) -> Status;
     auto free_overflow(Id head_id) -> Status;
-    auto destroy_impl(Node &node) -> Status;
+    auto destroy_impl(Node node) -> Status;
     auto vacuum_step(PageRef &free, PointerMap::Entry entry, Schema &schema, Id last_id) -> Status;
     auto transfer_left(Node &left, Node &right) -> Status;
 
@@ -179,7 +181,7 @@ private:
     auto fix_parent_id(Id page_id, Id parent_id, PointerMap::Type type) -> Status;
     auto maybe_fix_overflow_chain(const Cell &cell, Id parent_id) -> Status;
     auto fix_links(Node &node, Id parent_id = Id::null()) -> Status;
-    [[nodiscard]] auto cell_scratch() -> char *;
+    [[nodiscard]] auto cell_scratch(std::size_t n = 0) -> char *;
 
     // Internal cursor used to traverse the tree structure
     mutable class InternalCursor
@@ -226,7 +228,8 @@ private:
         auto move_to(Node node, int diff) -> void
         {
             clear();
-            history[level += diff] = {node.ref->page_id, 0};
+            level += diff;
+            history[level].page_id = node.ref->page_id;
             m_node = std::move(node);
         }
 
@@ -244,9 +247,9 @@ private:
     // Various tree operation counts are tracked in this variable.
     mutable Stats m_stats;
 
-    // Scratch memory for defragmenting nodes and storing an overflow cell.
+    // Scratch memory for defragmenting nodes and storing cells that aren't embedded in nodes.
     char *const m_node_scratch;
-    char *const m_cell_scratch;
+    char *const m_cell_scratch[3];
 
     Pager *const m_pager;
     const Id *const m_root_id;

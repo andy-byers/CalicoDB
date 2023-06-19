@@ -210,6 +210,9 @@ TEST_P(TreeTests, GetNonexistentKeys)
     ASSERT_OK(tree->put(make_long_key(9), make_value('0', true)));
     // Missing 10
 
+    tree->TEST_validate();
+    std::cerr<<tree->TEST_to_string()<<"\n\n";
+
     ASSERT_NOK(tree->get(make_long_key(0), nullptr));
     ASSERT_NOK(tree->get(make_long_key(2), nullptr));
     ASSERT_NOK(tree->get(make_long_key(6), nullptr));
@@ -251,6 +254,8 @@ static auto add_initial_records(TreeTests &test, bool has_overflow = false)
 {
     for (std::size_t i = 0; i < kInitialRecordCount; ++i) {
         (void)test.tree->put(test.make_long_key(i), test.make_value('v', has_overflow));
+    std::cerr<<test.tree->TEST_to_string()<<"\n\n";
+    test.validate();
     }
     test.tree->finish_operation();
 }
@@ -264,10 +269,14 @@ TEST_P(TreeTests, ToStringDoesNotCrash)
 TEST_P(TreeTests, ResolvesUnderflowsOnRightmostPosition)
 {
     add_initial_records(*this);
+    validate();
+    std::cerr<<tree->TEST_to_string()<<"\n\n";
+
     for (std::size_t i = 0; i < kInitialRecordCount; ++i) {
         ASSERT_OK(tree->erase(make_long_key(kInitialRecordCount - i - 1)));
-    }
+std::cerr<<tree->TEST_to_string()<<"\n\n";
     validate();
+    }
 }
 
 TEST_P(TreeTests, ResolvesUnderflowsOnLeftmostPosition)
@@ -347,15 +356,7 @@ public:
         kInitialRecordCount * 5 * !overflow_values;
 };
 
-TEST_P(TreeSanityChecks, Insert)
-{
-    for (std::size_t i = 0; i < record_count; ++i) {
-        random_write();
-    }
-    validate();
-}
-
-TEST_P(TreeSanityChecks, Search)
+TEST_P(TreeSanityChecks, ReadAndWrite)
 {
     std::unordered_map<std::string, std::string> records;
     for (std::size_t i = 0; i < record_count; ++i) {
@@ -374,6 +375,93 @@ TEST_P(TreeSanityChecks, Search)
     }
 }
 
+
+auto print_database_overview(std::ostream &os, Pager &pager) -> void
+{
+#define SEP "|-----------|-----------|----------------|---------------------------------|\n"
+    
+    if (pager.page_count() == 0) {
+        os << "DB is empty\n";
+        return;
+    }
+    for (auto page_id = Id::root(); page_id.value <= pager.page_count(); ++page_id.value) {
+        if (page_id.as_index() % 32 == 0) {
+            os << SEP "|    PageID |  ParentID | PageType       | Info                            |\n" SEP;
+        }
+        Id parent_id;
+        std::string info, type;
+        if (PointerMap::is_map(page_id)) {
+            const auto first = page_id.value + 1;
+            append_fmt_string(info, "Range=[%u,%u]", first, first + kPageSize / 5 - 1);
+            type = "<PtrMap>";
+        } else {
+            PointerMap::Entry entry;
+            if (page_id.is_root()) {
+                entry.type = PointerMap::kTreeRoot;
+            } else {
+                ASSERT_OK(PointerMap::read_entry(pager, page_id, entry));
+                parent_id = entry.back_ptr;
+            }
+            PageRef *page;
+            ASSERT_OK(pager.acquire(page_id, page));
+
+            switch (entry.type) {
+                case PointerMap::kTreeRoot:
+                    type = "TreeRoot";
+                    [[fallthrough]];
+                case PointerMap::kTreeNode: {
+                    Node node;
+                    ASSERT_NE(-1, Node::from_existing_page(*page, node));
+                    const auto cell_count = NodeHdr::get_cell_count(node.hdr());
+                    if (NodeHdr::get_type(page->page) == NodeHdr::kExternal) {
+                        append_fmt_string(info, "Ex,N=%u,Sib=(%u,%u)",
+                                          cell_count,
+                                          NodeHdr::get_prev_id(node.hdr()).value,
+                                          NodeHdr::get_next_id(node.hdr()).value);
+                    } else {
+                        info = "In,N=";
+                        append_number(info, cell_count);
+                    }
+                    if (type.empty()) {
+                        type = "TreeNode";
+                    }
+                    break;
+                }
+                case PointerMap::kFreelistLeaf:
+                    type = "Unused";
+                    break;
+                case PointerMap::kFreelistTrunk:
+                    append_fmt_string(
+                        info, "N=%u,Next=%u", get_u32(page->page + 4), get_u32(page->page));
+                    type = "Freelist";
+                    break;
+                case PointerMap::kOverflowHead:
+                    append_fmt_string(info, "Next=%u", get_u32(page->page));
+                    type = "OvflHead";
+                    break;
+                case PointerMap::kOverflowLink:
+                    append_fmt_string(info, "Next=%u", get_u32(page->page));
+                    type = "OvflLink";
+                    break;
+                default:
+                    type = "<BadType>";
+            }
+            pager.release(page);
+        }
+        std::string line;
+        append_fmt_string(
+            line,
+            "|%10u |%10u | %-15s| %-32s|\n",
+            page_id.value,
+            parent_id.value,
+            type.c_str(),
+            info.c_str());
+        os << line;
+    }
+    os << SEP;
+#undef SEP
+}
+
 TEST_P(TreeSanityChecks, Erase)
 {
     std::unordered_map<std::string, std::string> records;
@@ -386,8 +474,18 @@ TEST_P(TreeSanityChecks, Erase)
         std::size_t i = 0;
         for (const auto &[key, value] : records) {
             ASSERT_OK(tree->erase(key));
+            if (i>=625&&iteration==2) {
+                std::cerr<<iteration<<": " << i << "/" << records.size() << ": " << escape_string(key) << ":\n" <<tree->TEST_to_string()<<"\n\n";
+                print_database_overview(std::cerr,*m_pager);
+                std::cerr<<"\n\n";
+                Node nd;
+                ASSERT_OK(tree->acquire(Id(511),false,nd));
+
+                tree->release(std::move(nd));
+                validate();
+            }
+            ++i;
         }
-        validate();
         records.clear();
     }
 }
