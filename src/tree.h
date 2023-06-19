@@ -147,20 +147,16 @@ private:
     // Move the internal cursor to the external node containing the given `key`
     auto find_external(const Slice &key, bool &exact) const -> Status;
 
+    auto redistribute_cells(Node &left, Node &right, Node &parent) -> Status;
+
     auto resolve_overflow() -> Status;
     auto split_root() -> Status;
     auto split_nonroot() -> Status;
     auto split_nonroot_fast(Node parent, Node right) -> Status;
 
-    auto redistribute_cells(Node &left, Node &right, Node &parent) -> Status;
-
     auto resolve_underflow() -> Status;
     auto fix_root() -> Status;
     auto fix_nonroot(Node parent, std::size_t index) -> Status;
-    auto merge_left(Node &left, Node right, Node &parent, std::size_t index) -> Status;
-    auto merge_right(Node &left, Node right, Node &parent, std::size_t index) -> Status;
-    auto rotate_left(Node &parent, Node &left, Node &right, std::size_t index) -> Status;
-    auto rotate_right(Node &parent, Node &left, Node &right, std::size_t index) -> Status;
 
     auto read_key(const Cell &cell, std::string &scratch, Slice *key_out, std::size_t limit = 0) const -> Status;
     auto read_value(const Cell &cell, std::string &scratch, Slice *value_out) const -> Status;
