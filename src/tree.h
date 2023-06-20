@@ -9,7 +9,6 @@
 #include "header.h"
 #include "node.h"
 #include "pager.h"
-#include <optional>
 
 namespace calicodb
 {
@@ -100,17 +99,74 @@ public:
     auto erase(const Slice &key) -> Status;
     auto vacuum(Schema &schema) -> Status;
 
-    auto allocate(bool is_external, Node &node) -> Status;
-    auto acquire(Id page_id, bool write, Node &node) const -> Status;
-    auto free(Node node) -> Status;
-    auto upgrade(Node &node) const -> void;
-    auto release(Node node) const -> void;
+    auto allocate(bool is_external, Node &node) -> Status
+    {
+        PageRef *ref;
+        auto s = m_pager->allocate(ref);
+        if (s.is_ok()) {
+            CALICODB_EXPECT_FALSE(PointerMap::is_map(ref->page_id));
+            node = Node::from_new_page(*ref, is_external);
+        }
+        return s;
+    }
 
-    auto advance_cursor(Node node, int diff) const -> void;
-    auto finish_operation() const -> void;
+    auto acquire(Id page_id, bool write, Node &node) const -> Status
+    {
+        CALICODB_EXPECT_FALSE(PointerMap::is_map(page_id));
 
-    [[nodiscard]] auto TEST_to_string() const -> std::string;
-    auto TEST_validate() const -> void;
+        PageRef *ref;
+        auto s = m_pager->acquire(page_id, ref);
+        if (s.is_ok()) {
+            if (Node::from_existing_page(*ref, node)) {
+                m_pager->release(ref);
+                return corrupted_page(page_id);
+            }
+            if (write) {
+                upgrade(node);
+            }
+        }
+        return s;
+    }
+
+    auto free(Node node) -> Status
+    {
+        return m_pager->destroy(node.ref);
+    }
+
+    auto upgrade(Node &node) const -> void
+    {
+        m_pager->mark_dirty(*node.ref);
+    }
+
+    auto release(Node node) const -> void
+    {
+        if (node.ref && m_pager->mode() == Pager::kDirty) {
+            // If the pager is in kWrite mode and a page is marked dirty, it immediately
+            // transitions to kDirty mode. So, if this node is dirty, then the pager must
+            // be in kDirty mode (unless there was an error).
+            if (0x80 < NodeHdr::get_frag_count(node.hdr())) {
+                // Fragment count is too large. Defragment the node to get rid of all fragments.
+                if (node.defrag(m_node_scratch)) {
+                    // Sets the pager error status.
+                    (void)corrupted_page(node.ref->page_id);
+                }
+            }
+        }
+        // Pager::release() NULLs out the page reference.
+        m_pager->release(node.ref);
+    }
+
+    auto advance_cursor(Node node, int diff) const -> void
+    {
+        // InternalCursor::move_to() takes ownership of the page reference in `node`. When the working set
+        // is cleared below, this reference is not released.
+        m_c.move_to(std::move(node), diff);
+    }
+
+    auto finish_operation() const -> void
+    {
+        m_c.clear();
+    }
 
     [[nodiscard]] auto root() const -> Id
     {
@@ -126,10 +182,13 @@ public:
 
     using Stats = StatCounters<kStatTypeCount>;
 
-    [[nodiscard]] auto statistics() const -> const Stats &
+    [[nodiscard]] auto stats() const -> const Stats &
     {
         return m_stats;
     }
+
+    [[nodiscard]] auto TEST_to_string() const -> std::string;
+    auto TEST_validate() const -> void;
 
 private:
     friend class CursorImpl;
@@ -147,7 +206,7 @@ private:
     // Move the internal cursor to the external node containing the given `key`
     auto find_external(const Slice &key, bool &exact) const -> Status;
 
-    auto redistribute_cells(Node &left, Node &right, Node &parent) -> Status;
+    auto redistribute_cells(Node &left, Node &right, Node &parent, U32 pivot_idx) -> Status;
 
     auto resolve_overflow() -> Status;
     auto split_root() -> Status;
@@ -169,7 +228,6 @@ private:
     auto free_overflow(Id head_id) -> Status;
     auto destroy_impl(Node node) -> Status;
     auto vacuum_step(PageRef &free, PointerMap::Entry entry, Schema &schema, Id last_id) -> Status;
-    auto transfer_left(Node &left, Node &right) -> Status;
 
     auto insert_cell(Node &node, std::size_t index, const Cell &cell) -> Status;
     auto remove_cell(Node &node, std::size_t index) -> Status;
@@ -235,13 +293,29 @@ private:
         auto move_down(Id child_id) -> void;
     } m_c;
 
-    // When the node pointed at by m_c overflows, store the cell that couldn't fit on the page here. The
-    // overflow index (the index that the cell would have had if it fit on the page) is m_c.index().
-    Cell m_ovfl_cell;
-    bool m_has_ovfl = false;
-
     // Various tree operation counts are tracked in this variable.
     mutable Stats m_stats;
+
+    // When the node pointed at by m_c overflows, store the cell that couldn't fit on the page here. The
+    // location that the overflow cell should be placed is copied into the pid and idx fields from m_c.
+    // The overflow cell is usually backed by one of the cell scratch buffers.
+    struct {
+        // Return true if an overflow cell exists, false otherwise
+        [[nodiscard]] auto exists() const -> bool
+        {
+            return !pid.is_null();
+        }
+
+        // Discard the overflow cell
+        auto clear() -> void
+        {
+            pid = Id::null();
+        }
+
+        Id pid;
+        Cell cell;
+        U32 idx;
+    } m_ovfl;
 
     // Scratch memory for defragmenting nodes and storing cells that aren't embedded in nodes.
     char *const m_node_scratch;
