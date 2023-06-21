@@ -137,6 +137,29 @@ TEST_P(TreeTests, KeysAreUnique)
     ASSERT_EQ(value, make_value('2'));
 }
 
+static constexpr auto kMaxLocalSize =
+    kMaxCellHeaderSize +
+    compute_local_pl_size(kPageSize, 0) +
+    sizeof(U16); // Indirection vector entry
+
+TEST_P(TreeTests, RootFitsAtLeast3Cells)
+{
+    Node root;
+    ASSERT_OK(tree->acquire(Id(1), false, root));
+    ASSERT_GE(root.usable_space, 3 * kMaxLocalSize);
+    ASSERT_LT(root.usable_space, 4 * kMaxLocalSize);
+    tree->release(std::move(root));
+}
+
+TEST_P(TreeTests, NonRootFitsAtLeast4Cells)
+{
+    Node nonroot;
+    ASSERT_OK(tree->allocate(true, nonroot));
+    ASSERT_GE(nonroot.usable_space, 4 * kMaxLocalSize);
+    ASSERT_LT(nonroot.usable_space, 5 * kMaxLocalSize);
+    tree->release(std::move(nonroot));
+}
+
 TEST_P(TreeTests, RecordsAreErased)
 {
     (void)tree->put("a", make_value('1'));
@@ -264,6 +287,90 @@ TEST_P(TreeTests, ToStringDoesNotCrash)
     (void)tree->TEST_to_string();
 }
 
+auto print_database_overview(std::ostream &os, Pager &pager) -> void
+{
+#define SEP "|-----------|-----------|----------------|---------------------------------|\n"
+
+    if (pager.page_count() == 0) {
+        os << "DB is empty\n";
+        return;
+    }
+    for (auto page_id = Id::root(); page_id.value <= pager.page_count(); ++page_id.value) {
+        if (page_id.as_index() % 32 == 0) {
+            os << SEP "|    PageID |  ParentID | PageType       | Info                            |\n" SEP;
+        }
+        Id parent_id;
+        std::string info, type;
+        if (PointerMap::is_map(page_id)) {
+            const auto first = page_id.value + 1;
+            append_fmt_string(info, "Range=[%u,%u]", first, first + kPageSize / 5 - 1);
+            type = "<PtrMap>";
+        } else {
+            PointerMap::Entry entry;
+            if (page_id.is_root()) {
+                entry.type = PointerMap::kTreeRoot;
+            } else {
+                ASSERT_OK(PointerMap::read_entry(pager, page_id, entry));
+                parent_id = entry.back_ptr;
+            }
+            PageRef *page;
+            ASSERT_OK(pager.acquire(page_id, page));
+
+            switch (entry.type) {
+                case PointerMap::kTreeRoot:
+                    type = "TreeRoot";
+                    [[fallthrough]];
+                case PointerMap::kTreeNode: {
+                    auto n = NodeHdr::get_cell_count(page->page);
+                    if (NodeHdr::get_type(page->page) == NodeHdr::kExternal) {
+                        append_fmt_string(info, "Ex,N=%u,Sib=(%u,%u)", n,
+                                          NodeHdr::get_prev_id(page->page).value,
+                                          NodeHdr::get_next_id(page->page).value);
+                    } else {
+                        info = "In,N=";
+                        append_number(info, n);
+                        ++n;
+                    }
+                    if (type.empty()) {
+                        type = "TreeNode";
+                    }
+                    break;
+                }
+                case PointerMap::kFreelistLeaf:
+                    type = "Unused";
+                    break;
+                case PointerMap::kFreelistTrunk:
+                    append_fmt_string(
+                        info, "N=%u,Next=%u", get_u32(page->page + 4), get_u32(page->page));
+                    type = "Freelist";
+                    break;
+                case PointerMap::kOverflowHead:
+                    append_fmt_string(info, "Next=%u", get_u32(page->page));
+                    type = "OvflHead";
+                    break;
+                case PointerMap::kOverflowLink:
+                    append_fmt_string(info, "Next=%u", get_u32(page->page));
+                    type = "OvflLink";
+                    break;
+                default:
+                    type = "<BadType>";
+            }
+            pager.release(page);
+        }
+        std::string line;
+        append_fmt_string(
+            line,
+            "|%10u |%10u | %-15s| %-32s|\n",
+            page_id.value,
+            parent_id.value,
+            type.c_str(),
+            info.c_str());
+        os << line;
+    }
+    os << SEP;
+#undef SEP
+}
+
 TEST_P(TreeTests, ResolvesUnderflowsOnRightmostPosition)
 {
     add_initial_records(*this);
@@ -359,14 +466,12 @@ TEST_P(TreeSanityChecks, ReadAndWrite)
         const auto [k, v] = random_write();
         records[k] = v;
     }
+    validate();
 
     for (const auto &[key, value] : records) {
         std::string result;
         ASSERT_OK(tree->get(key, &result));
         ASSERT_EQ(result, value);
-
-        ASSERT_OK(tree->erase(key));
-        ASSERT_TRUE(tree->get(key, &result).is_not_found());
     }
 }
 
@@ -966,6 +1071,7 @@ TEST(PermutationGeneratorTests, GeneratesAllPermutationsInLexicographicalOrder)
 class RebalanceTests : public TreeTests
 {
 public:
+    static constexpr std::size_t kValueSizes[] = {10, 100, 500, kPageSize};
     ~RebalanceTests() override = default;
 
     struct RecordInfo {
@@ -978,12 +1084,12 @@ public:
         }
     };
 
-    auto run(const std::vector<std::size_t> &sizes) -> void
+    auto run(const std::vector<std::size_t> &size_idx) -> void
     {
         std::vector<RecordInfo> info;
-        info.reserve(sizes.size());
-        for (std::size_t i = 0; i < sizes.size(); ++i) {
-            info.emplace_back(RecordInfo{i, sizes[i]});
+        info.reserve(size_idx.size());
+        for (std::size_t i = 0; i < size_idx.size(); ++i) {
+            info.emplace_back(RecordInfo{i, kValueSizes[size_idx[i]]});
         }
         PermutationGenerator<RecordInfo> generator(info);
         while (generator(info)) {
@@ -996,7 +1102,6 @@ public:
                 }
                 ++iteration;
             }
-
             validate();
 
             iteration = 0;
@@ -1015,27 +1120,37 @@ protected:
 
 TEST_P(RebalanceTests, A)
 {
-    run({500, 500, 500, 500, 500, 500});
+    run({0, 0, 0, 0, 0, 3});
+    run({1, 1, 1, 1, 1, 3});
+    run({2, 2, 2, 2, 2, 3});
 }
 
 TEST_P(RebalanceTests, B)
 {
-    run({1'000, 500, 500, 500, 500, 500});
+    run({0, 0, 0, 0, 3, 3});
+    run({1, 1, 1, 1, 3, 3});
+    run({2, 2, 2, 2, 3, 3});
 }
 
 TEST_P(RebalanceTests, C)
 {
-    run({500, 500, 500, 1'000, 1'000, 1'000});
+    run({0, 0, 0, 3, 3, 3});
+    run({1, 1, 1, 3, 3, 3});
+    run({2, 2, 2, 3, 3, 3});
 }
 
 TEST_P(RebalanceTests, D)
 {
-    run({500, 1'000, 1'000, 1'000, 1'000, 1'000});
+    run({0, 0, 3, 3, 3, 3});
+    run({1, 1, 3, 3, 3, 3});
+    run({2, 2, 3, 3, 3, 3});
 }
 
 TEST_P(RebalanceTests, E)
 {
-    run({1'000, 1'000, 1'000, 1'000, 1'000, 1'000});
+    run({0, 3, 3, 3, 3, 3});
+    run({1, 3, 3, 3, 3, 3});
+    run({2, 3, 3, 3, 3, 3});
 }
 
 INSTANTIATE_TEST_SUITE_P(

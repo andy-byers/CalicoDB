@@ -498,8 +498,8 @@ auto Node::assert_state() -> bool
         if (i + 1 < NodeHdr::get_cell_count(hdr())) {
             Cell rhs_cell = {};
             CALICODB_EXPECT_EQ(0, read(i + 1, rhs_cell));
-            if (lhs_cell.local_pl_size == lhs_cell.total_pl_size &&
-                rhs_cell.local_pl_size == rhs_cell.total_pl_size) {
+            if (lhs_cell.key_size <= lhs_cell.local_pl_size &&
+                rhs_cell.key_size <= rhs_cell.local_pl_size) {
                 const Slice lhs_key(lhs_cell.key, lhs_cell.key_size);
                 const Slice rhs_key(rhs_cell.key, rhs_cell.key_size);
                 CALICODB_EXPECT_TRUE(lhs_key < rhs_key);

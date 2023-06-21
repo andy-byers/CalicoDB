@@ -248,7 +248,6 @@ private:
 
     public:
         static constexpr std::size_t kMaxDepth = 20;
-
         struct Location {
             Id page_id;
             U32 index = 0;
