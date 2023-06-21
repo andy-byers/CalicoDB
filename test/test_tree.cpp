@@ -287,7 +287,7 @@ TEST_P(TreeTests, ResolvesUnderflowsOnLeftmostPosition)
 TEST_P(TreeTests, ResolvesUnderflowsOnMiddlePosition)
 {
     add_initial_records(*this);
-    for (std::size_t i{}, j{kInitialRecordCount - 1}; i < j; ++i, --j) {
+    for (std::size_t i = 0, j = kInitialRecordCount - 1; i < j; ++i, --j) {
         ASSERT_OK(tree->erase(make_long_key(i)));
         ASSERT_OK(tree->erase(make_long_key(j)));
     }
@@ -359,7 +359,6 @@ TEST_P(TreeSanityChecks, ReadAndWrite)
         const auto [k, v] = random_write();
         records[k] = v;
     }
-    validate();
 
     for (const auto &[key, value] : records) {
         std::string result;

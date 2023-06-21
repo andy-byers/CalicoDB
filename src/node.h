@@ -124,13 +124,6 @@ struct Node final {
         return *this;
     }
 
-    [[nodiscard]] auto take() && -> PageRef *
-    {
-        auto *r = ref;
-        ref = nullptr;
-        return r;
-    }
-
     [[nodiscard]] auto hdr() const -> char *
     {
         return ref->page + page_offset(ref->page_id);

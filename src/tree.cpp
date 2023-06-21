@@ -44,16 +44,6 @@ static auto write_next_id(PageRef &page, Id next_id) -> void
     put_u32(page.page + page_offset(page.page_id), next_id.value);
 }
 
-static auto detach_cell(Cell &cell, char *backing)
-{
-    if (backing && cell.ptr != backing) {
-        std::memcpy(backing, cell.ptr, cell.footprint);
-        const auto diff = cell.key - cell.ptr;
-        cell.ptr = backing;
-        cell.key = backing + diff;
-    }
-}
-
 [[nodiscard]] static auto read_child_id(const Cell &cell)
 {
     return Id(get_u32(cell.ptr));
@@ -86,14 +76,14 @@ static auto write_child_id(Cell &cell, Id child_id)
     // Copy the cell content area.
     const auto cell_start = NodeHdr::get_cell_start(child.hdr());
     CALICODB_EXPECT_GE(cell_start, cell_slots_offset(root));
-    auto memory_size = kPageSize - cell_start;
-    auto *memory = root.ref->page + cell_start;
-    std::memcpy(memory, child.ref->page + cell_start, memory_size);
+    auto area_size = kPageSize - cell_start;
+    auto *area = root.ref->page + cell_start;
+    std::memcpy(area, child.ref->page + cell_start, area_size);
 
     // Copy the header and cell pointers.
-    memory_size = NodeHdr::get_cell_count(child.hdr()) * kCellPtrSize;
-    memory = root.ref->page + cell_slots_offset(root);
-    std::memcpy(memory, child.ref->page + cell_slots_offset(child), memory_size);
+    area_size = NodeHdr::get_cell_count(child.hdr()) * kCellPtrSize;
+    area = root.ref->page + cell_slots_offset(root);
+    std::memcpy(area, child.ref->page + cell_slots_offset(child), area_size);
     std::memcpy(root.hdr(), child.hdr(), NodeHdr::kSize);
     root.parser = child.parser;
     return 0;
@@ -372,21 +362,20 @@ auto Tree::insert_cell(Node &node, std::size_t index, const Cell &cell) -> Statu
         return corrupted_page(node.ref->page_id);
     } else if (rc == 0) {
         CALICODB_EXPECT_FALSE(m_ovfl.exists());
-        m_ovfl.pid = node.ref->page_id;
-        m_ovfl.cell = cell;
-        m_ovfl.idx = index;
+        // NOTE: The overflow cell may need to be detached, if the node it is backed by will be released
+        //       before it can be written to another node (without that node itself overflowing).
+        m_ovfl = {cell, node.ref->page_id, static_cast<U32>(index)};
     }
-    Status s;
     if (!node.is_leaf()) {
-        s = fix_parent_id(
+        auto s = fix_parent_id(
             read_child_id(cell),
             node.ref->page_id,
             PointerMap::kTreeNode);
+        if (!s.is_ok()) {
+            return s;
+        }
     }
-    if (s.is_ok()) {
-        s = maybe_fix_overflow_chain(cell, node.ref->page_id);
-    }
-    return s;
+    return maybe_fix_overflow_chain(cell, node.ref->page_id);
 }
 
 auto Tree::remove_cell(Node &node, std::size_t index) -> Status
@@ -583,8 +572,11 @@ auto Tree::split_nonroot_fast(Node parent, Node right) -> Status
     InternalCursor::Location last_loc;
 
     CALICODB_EXPECT_TRUE(m_ovfl.exists());
-    auto s = insert_cell(right, 0, m_ovfl.cell);
+    const auto ovfl = m_ovfl.cell;
     m_ovfl.clear();
+
+    auto s = insert_cell(right, 0, ovfl);
+    CALICODB_EXPECT_FALSE(m_ovfl.exists());
 
     Cell pivot;
     if (left.is_leaf()) {
@@ -606,6 +598,7 @@ auto Tree::split_nonroot_fast(Node parent, Node right) -> Status
             s = corrupted_page(right.ref->page_id);
             goto cleanup;
         }
+        // NOTE: The overflow cell has already been written to `right`, so cell_scratch(0) is available.
         detach_cell(pivot, cell_scratch());
         s = PayloadManager::promote(
             *m_pager,
@@ -685,13 +678,14 @@ auto Tree::resolve_underflow() -> Status
 // operations. When called from put(), there will be an overflow cell in m_ovfl.cell which needs
 // to be put in either `left` or `right`, depending on the final distribution. When called from
 // erase(), the `left` node may be left totally empty, in which case, it should be freed. If
-// `left` is empty, then `parent` will not have a pivot cell pointing down to it.
+// `left` is empty, then `parent` will not have a pivot cell for it.
 auto Tree::redistribute_cells(Node &left, Node &right, Node &parent, U32 pivot_idx) -> Status
 {
     CALICODB_EXPECT_GT(m_c.level, 0);
 
     Node tmp, *p_src, *p_left, *p_right;
     if (0 < NodeHdr::get_cell_count(left.hdr())) {
+        CALICODB_EXPECT_EQ(0, NodeHdr::get_cell_count(right.hdr()));
         p_src = &left;
         p_left = &tmp;
         p_right = &right;
@@ -735,21 +729,24 @@ auto Tree::redistribute_cells(Node &left, Node &right, Node &parent, U32 pivot_i
         right_accum += cell.footprint;
     }
     CALICODB_EXPECT_FALSE(m_ovfl.exists());
-    if (!is_split && !p_src->is_leaf()) {
+    if (!is_split) {
         if (parent.read(pivot_idx, cell)) {
             return corrupted_page(parent.ref->page_id);
         }
-        detach_cell(cell, cell_scratch(1));
-        parent.erase(pivot_idx, cell.footprint);
-        right_accum += cell.footprint;
-        if (p_src == &left) {
-            cells.emplace_back(cell);
-        } else {
-            cells.insert(begin(cells), cell);
+        if (!p_src->is_leaf()) {
+            detach_cell(cell, cell_scratch(1));
+            // cell is from the `parent`, so it already has room for a left child ID.
+            write_child_id(cell, NodeHdr::get_next_id(p_left->hdr()));
+            right_accum += cell.footprint;
+            if (p_src == &left) {
+                cells.emplace_back(cell);
+            } else {
+                cells.insert(begin(cells), cell);
+            }
         }
+        parent.erase(pivot_idx, cell.footprint);
     }
-    // If this is a not a split, there must be a pivot and at least 1 cell in p_src.
-    CALICODB_EXPECT_GE(cells.size(), is_split ? 4 : 2);
+    CALICODB_EXPECT_GE(cells.size(), is_split ? 4 : 1);
 
     auto sep = -1;
     U32 left_accum = 0;
@@ -767,31 +764,48 @@ auto Tree::redistribute_cells(Node &left, Node &right, Node &parent, U32 pivot_i
     auto idx = static_cast<int>(cells.size()) - 1;
     for (; idx > sep; --idx) {
         s = insert_cell(*p_right, 0, cells[idx]);
+        CALICODB_EXPECT_FALSE(m_ovfl.exists());
         if (!s.is_ok()) {
             return s;
         }
     }
 
     CALICODB_EXPECT_TRUE(idx > 0 || idx == -1);
-
+char sc[kPageSize];//TODO
     // Post a pivot to the `parent` which links to p_left. If this connection existed before, we would have erased it
     // when parsing cells earlier.
     if (idx > 0) {
         if (p_src->is_leaf()) {
             ++idx; // Backtrack to the last cell written to p_right.
-            detach_cell(cells[idx], cell_scratch(2));
+            detach_cell(cells[idx], cell_scratch(1));
             s = PayloadManager::promote(*m_pager, cells[idx], parent.ref->page_id);
 
         } else {
             const auto next_id = read_child_id(cells[idx]);
             NodeHdr::put_next_id(p_left->hdr(), next_id);
             s = fix_parent_id(next_id, p_left->ref->page_id, PointerMap::kTreeNode);
+            detach_cell(cells[idx], sc); // TODO: Don't mess up one of the sibling cells when writing the child ID below.
         }
         if (s.is_ok()) {
             // Post the pivot. This may cause the `parent` to overflow.
             write_child_id(cells[idx], p_left->ref->page_id);
             s = insert_cell(parent, pivot_idx, cells[idx]);
+            if (m_ovfl.exists()) {
+                detach_cell(m_ovfl.cell, cell_scratch(2));
+            }
             --idx;
+        }
+    } else if (p_src->is_leaf()) {
+        // p_left must be freed by the caller. Go ahead and fix the sibling chain here.
+        const auto prev_id = NodeHdr::get_prev_id(p_left->hdr());
+        NodeHdr::put_prev_id(p_right->hdr(), prev_id);
+        if (!prev_id.is_null()) {
+            Node left_sibling;
+            s = acquire(prev_id, true, left_sibling);
+            if (s.is_ok()) {
+                NodeHdr::put_next_id(left_sibling.hdr(), p_right->ref->page_id);
+                release(std::move(left_sibling));
+            }
         }
     }
     if (!s.is_ok()) {
@@ -814,6 +828,9 @@ auto Tree::redistribute_cells(Node &left, Node &right, Node &parent, U32 pivot_i
 
     // Only the parent is allowed to overflow. The caller is expected to rebalance the parent in this case.
     CALICODB_EXPECT_TRUE(!m_ovfl.exists() || m_ovfl.pid == parent.ref->page_id);
+    if (m_ovfl.exists()) {
+        detach_cell(m_ovfl.cell, cell_scratch(0));
+    }
     return s;
 }
 
@@ -825,30 +842,30 @@ auto Tree::fix_nonroot(Node parent, std::size_t index) -> Status
     CALICODB_EXPECT_FALSE(m_ovfl.exists());
 
     Status s;
-    Node sibling;
+    Node sibling, *p_left, *p_right;
     if (index > 0) {
-        s = acquire(parent.read_child_id(index - 1), true, sibling);
-        if (!s.is_ok()) {
-            goto cleanup;
-        }
-        s = redistribute_cells(sibling, m_c.node(), parent, index - 1);
-        if (s.is_ok() && 0 == NodeHdr::get_cell_count(sibling.hdr())) {
-            s = free(std::move(sibling));
-            goto cleanup;
-        }
+        --index; // Correct the pivot `index` to point to p_left.
+        s = acquire(parent.read_child_id(index), true, sibling);
+        p_left = &sibling;
+        p_right = &node;
     } else {
         s = acquire(parent.read_child_id(index + 1), true, sibling);
-        if (!s.is_ok()) {
-            goto cleanup;
-        }
-        s = redistribute_cells(m_c.node(), sibling, parent, index);
-        if (s.is_ok() && 0 == NodeHdr::get_cell_count(m_c.node().hdr())) {
-            s = free(std::move(m_c.node()));
+        p_left = &node;
+        p_right = &sibling;
+    }
+    if (s.is_ok()) {
+        s = redistribute_cells(*p_left, *p_right, parent, index);
+        // NOTE: If this block isn't hit, then (a) sibling is not acquired, and (b) node will be
+        //       released when the cursor is advanced.
+        release(std::move(*p_right));
+        if (s.is_ok() && 0 == NodeHdr::get_cell_count(p_left->hdr())) {
+            // redistribute_cells() performed a merge.
+            s = free(std::move(*p_left));
+        } else {
+            release(std::move(*p_left));
         }
     }
-    release(std::move(sibling));
 
-cleanup:
     advance_cursor(std::move(parent), -1);
     if (s.is_ok() && m_ovfl.exists()) {
         s = resolve_overflow();
@@ -902,27 +919,42 @@ auto Tree::fix_root() -> Status
 
 Tree::Tree(Pager &pager, char *scratch, const Id *root_id)
     : m_c(*this),
-      m_node_scratch(scratch),
+      m_node_scratch(scratch + kPageSize),
       m_cell_scratch{
-          scratch + kPageSize,
-          scratch + kPageSize + kPageSize * 1 / 3,
-          scratch + kPageSize + kPageSize * 2 / 3,
+          scratch,
+          scratch + kPageSize * 1 / kNumCellBuffers,
+          scratch + kPageSize * 2 / kNumCellBuffers,
       },
       m_pager(&pager),
       m_root_id(root_id)
 {
+    // Make sure that cells written to scratch memory don't interfere with each other.
+    static_assert(kPageSize / kNumCellBuffers > kMaxCellHeaderSize + compute_local_pl_size(kPageSize, 0));
+}
+
+auto Tree::detach_cell(Cell &cell, char *backing) -> void
+{
+    CALICODB_EXPECT_NE(backing, nullptr);
+    // NOTE: PayloadManager::promote() may move the cell's ptr back a few bytes to make room for
+    //       a left child ID.
+    if (cell.ptr < backing || cell.ptr + kCellScratchDiff > backing) {
+        std::memcpy(backing, cell.ptr, cell.footprint);
+        const auto diff = cell.key - cell.ptr;
+        cell.ptr = backing;
+        cell.key = backing + diff;
+    }
 }
 
 auto Tree::cell_scratch(std::size_t n) -> char *
 {
-    CALICODB_EXPECT_LT(n, 3);
+    CALICODB_EXPECT_LT(n, kNumCellBuffers);
     // Leave space for a child ID. We need the maximum difference between the size of a varint and
     // an Id. When a cell is promoted (i.e. made into an internal cell, so it can be posted to the
     // parent node) it loses a varint (the value size), but gains an Id (the left child pointer).
     // We should be able to write any external cell to this location, and still have room to write
     // the left child ID before the key size field, regardless of the number of bytes occupied by
     // the varint value size.
-    return m_cell_scratch[n] + sizeof(U32) - 1;
+    return m_cell_scratch[n] + kCellScratchDiff;
 }
 
 auto Tree::get(const Slice &key, std::string *value) const -> Status
@@ -964,23 +996,23 @@ auto Tree::put(const Slice &key, const Slice &value) -> Status
         }
         if (s.is_ok()) {
             bool overflow;
-            // Create a cell representing the `key` and `value`. This routine also populates any
-            // overflow pages necessary to hold a `key` and/or `value` that won't fit on a single
-            // node page. If the cell cannot fit in `node`, it will be written to scratch memory.
+            // Attempt to write a cell representing the `key` and `value` directly to the page.
+            // This routine also populates any overflow pages necessary to hold a `key` and/or
+            // `value` that won't fit on a single node page. If the cell cannot fit in `node`,
+            // it will be written to cell_scratch(0) instead.
             s = emplace(m_c.node(), key, value, m_c.index(), overflow);
 
             if (s.is_ok()) {
                 if (overflow) {
-                    // There wasn't enough room in `node` to hold the cell. Get the node back and
-                    // perform a split.
+                    // There wasn't enough room for the cell in `node`, so it was built in
+                    // cell_scratch(0) instead.
                     Cell ovfl;
-                    if (m_c.node().parser(cell_scratch(), cell_scratch() + kPageSize, &ovfl)) {
+                    const auto rc = m_c.node().parser(cell_scratch(0), cell_scratch(1), &ovfl);
+                    if (rc) {
                         s = corrupted_page(m_c.node().ref->page_id);
                     } else {
                         CALICODB_EXPECT_FALSE(m_ovfl.exists());
-                        m_ovfl.cell = ovfl;
-                        m_ovfl.pid = m_c.node().ref->page_id;
-                        m_ovfl.idx = m_c.index();
+                        m_ovfl = { ovfl, m_c.node().ref->page_id, static_cast<U32>(m_c.index())};
                         s = resolve_overflow();
                     }
                 }
@@ -1014,7 +1046,7 @@ auto Tree::emplace(Node &node, const Slice &key, const Slice &value, std::size_t
     auto *ptr = header;
     ptr = encode_varint(ptr, static_cast<U32>(value.size()));
     ptr = encode_varint(ptr, static_cast<U32>(key.size()));
-    const auto hdr_size = std::uintptr_t(ptr - header);
+    const auto hdr_size = static_cast<std::uintptr_t>(ptr - header);
     const auto cell_size = local_pl_size + hdr_size + sizeof(U32) * has_remote;
 
     // Attempt to allocate space for the cell in the node. If this is not possible,
@@ -1157,7 +1189,7 @@ auto Tree::vacuum_step(PageRef &free, PointerMap::Entry entry, Schema &schema, I
             Node parent;
             s = acquire(entry.back_ptr, true, parent);
             bool found = false;
-            for (std::size_t i = 0; s.is_ok() && i < NodeHdr::get_cell_count(parent.hdr()); ++i) {
+            for (U32 i = 0, n = NodeHdr::get_cell_count(parent.hdr()); i < n; ++i) {
                 Cell cell;
                 if (parent.read(i, cell)) {
                     s = corrupted_page(parent.ref->page_id);
@@ -1193,7 +1225,7 @@ auto Tree::vacuum_step(PageRef &free, PointerMap::Entry entry, Schema &schema, I
                 }
                 CALICODB_EXPECT_FALSE(parent.is_leaf());
                 bool found = false;
-                for (std::size_t i = 0; !found && i <= NodeHdr::get_cell_count(parent.hdr()); ++i) {
+                for (U32 i = 0, n = NodeHdr::get_cell_count(parent.hdr()); !found && i <= n; ++i) {
                     const auto child_id = parent.read_child_id(i);
                     found = child_id == last_id;
                     if (found) {
@@ -1571,8 +1603,8 @@ class TreeValidator
             }
             std::string key;
             CHECK_OK(tree.read_key(node, cid, key, nullptr));
-            const auto ikey = std::to_string(std::stoi(key));
-            //            const auto ikey = escape_string(key.substr(0, std::min(key.size(), 3UL)));
+//            const auto ikey = std::to_string(std::stoi(key));
+            const auto ikey = escape_string(key.substr(0, std::min(key.size(), 3UL)));
             add_to_level(data, ikey, level);
             if (cell.local_pl_size != cell.total_pl_size) {
                 add_to_level(data, "(" + number_to_string(read_overflow_id(cell).value) + ")", level);

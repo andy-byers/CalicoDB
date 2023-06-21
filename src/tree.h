@@ -236,6 +236,7 @@ private:
     auto maybe_fix_overflow_chain(const Cell &cell, Id parent_id) -> Status;
     auto fix_links(Node &node, Id parent_id = Id::null()) -> Status;
     [[nodiscard]] auto cell_scratch(std::size_t n = 0) -> char *;
+    auto detach_cell(Cell &cell, char *backing) -> void;
 
     // Internal cursor used to traverse the tree structure
     mutable class InternalCursor
@@ -312,14 +313,19 @@ private:
             pid = Id::null();
         }
 
-        Id pid;
         Cell cell;
+        Id pid;
         U32 idx;
     } m_ovfl;
 
-    // Scratch memory for defragmenting nodes and storing cells that aren't embedded in nodes.
+    // Scratch memory for defragmenting nodes.
     char *const m_node_scratch;
-    char *const m_cell_scratch[3];
+
+    // Scratch memory for cells that aren't embedded in nodes. Use cell_scratch(n) to get a pointer to
+    // the start of cell scratch buffer n, where n < kNumCellBuffers.
+    static constexpr std::size_t kCellScratchDiff = sizeof(U32) - 1;
+    static constexpr std::size_t kNumCellBuffers = 3;
+    char *const m_cell_scratch[kNumCellBuffers];
 
     Pager *const m_pager;
     const Id *const m_root_id;
