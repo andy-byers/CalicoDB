@@ -229,8 +229,9 @@ private:
     auto destroy_impl(Node node) -> Status;
     auto vacuum_step(PageRef &free, PointerMap::Entry entry, Schema &schema, Id last_id) -> Status;
 
-    auto insert_cell(Node &node, std::size_t index, const Cell &cell) -> Status;
-    auto remove_cell(Node &node, std::size_t index) -> Status;
+    auto post_pivot(Node &node, U32 idx, Cell &cell, Id child_id) -> Status;
+    auto insert_cell(Node &node, U32 idx, const Cell &cell) -> Status;
+    auto remove_cell(Node &node, U32 idx) -> Status;
     auto find_parent_id(Id page_id, Id &out) const -> Status;
     auto fix_parent_id(Id page_id, Id parent_id, PointerMap::Type type) -> Status;
     auto maybe_fix_overflow_chain(const Cell &cell, Id parent_id) -> Status;
@@ -323,7 +324,7 @@ private:
     // Scratch memory for cells that aren't embedded in nodes. Use cell_scratch(n) to get a pointer to
     // the start of cell scratch buffer n, where n < kNumCellBuffers.
     static constexpr std::size_t kCellScratchDiff = sizeof(U32) - 1;
-    static constexpr std::size_t kNumCellBuffers = 3;
+    static constexpr std::size_t kNumCellBuffers = 4;
     char *const m_cell_scratch[kNumCellBuffers];
 
     Pager *const m_pager;

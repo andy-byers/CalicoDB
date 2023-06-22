@@ -251,6 +251,9 @@ TEST_P(TreeTests, ResolvesOverflowsOnLeftmostPosition)
 {
     for (std::size_t i = 0; i < 100; ++i) {
         ASSERT_OK(tree->put(make_long_key(99 - i), make_value('v', true)));
+
+    std::cerr<<i<<":\n"<<tree->TEST_to_string()<<"\n\n";
+    validate();
     }
     validate();
 }

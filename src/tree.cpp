@@ -355,16 +355,41 @@ auto Tree::maybe_fix_overflow_chain(const Cell &cell, Id parent_id) -> Status
     return Status::ok();
 }
 
-auto Tree::insert_cell(Node &node, std::size_t index, const Cell &cell) -> Status
+auto Tree::post_pivot(Node &parent, U32 idx, Cell &pivot, Id child_id) -> Status
 {
-    const auto rc = node.write(index, cell, m_node_scratch);
+    const auto rc = parent.write(idx, pivot, m_node_scratch);
+    if (rc > 0) {
+        // Child ID must be written after the pivot is posted. Otherwise, we corrupt memory in
+        // the child node where the cell originated.
+        parent.write_child_id(idx, child_id);
+    } else if (rc == 0) {
+        CALICODB_EXPECT_FALSE(m_ovfl.exists());
+        detach_cell(pivot, cell_scratch(3));
+        m_ovfl = {pivot, parent.ref->page_id, idx};
+        write_child_id(pivot, child_id);
+    } else {
+        return corrupted_page(parent.ref->page_id);
+    }
+    auto s = fix_parent_id(
+        child_id,
+        parent.ref->page_id,
+        PointerMap::kTreeNode);
+    if (s.is_ok()) {
+        s = maybe_fix_overflow_chain(pivot, parent.ref->page_id);
+    }
+    return s;
+}
+
+auto Tree::insert_cell(Node &node, U32 idx, const Cell &cell) -> Status
+{
+    const auto rc = node.write(idx, cell, m_node_scratch);
     if (rc < 0) {
         return corrupted_page(node.ref->page_id);
     } else if (rc == 0) {
         CALICODB_EXPECT_FALSE(m_ovfl.exists());
         // NOTE: The overflow cell may need to be detached, if the node it is backed by will be released
         //       before it can be written to another node (without that node itself overflowing).
-        m_ovfl = {cell, node.ref->page_id, static_cast<U32>(index)};
+        m_ovfl = {cell, node.ref->page_id, idx};
     }
     if (!node.is_leaf()) {
         auto s = fix_parent_id(
@@ -378,17 +403,17 @@ auto Tree::insert_cell(Node &node, std::size_t index, const Cell &cell) -> Statu
     return maybe_fix_overflow_chain(cell, node.ref->page_id);
 }
 
-auto Tree::remove_cell(Node &node, std::size_t index) -> Status
+auto Tree::remove_cell(Node &node, U32 idx) -> Status
 {
     Cell cell;
-    if (node.read(index, cell)) {
+    if (node.read(idx, cell)) {
         return corrupted_page(node.ref->page_id);
     }
     Status s;
     if (cell.local_pl_size != cell.total_pl_size) {
         s = free_overflow(read_overflow_id(cell));
     }
-    if (s.is_ok() && node.erase(index, cell.footprint)) {
+    if (s.is_ok() && node.erase(idx, cell.footprint)) {
         s = corrupted_page(node.ref->page_id);
     }
     return s;
@@ -599,7 +624,7 @@ auto Tree::split_nonroot_fast(Node parent, Node right) -> Status
             goto cleanup;
         }
         // NOTE: The overflow cell has already been written to `right`, so cell_scratch(0) is available.
-        detach_cell(pivot, cell_scratch());
+        detach_cell(pivot, cell_scratch()); // TODO: Shouldn't need this. promote() should only change Cell members and fix parents, etc., nothing that affects the actual cell data
         s = PayloadManager::promote(
             *m_pager,
             pivot,
@@ -610,8 +635,8 @@ auto Tree::split_nonroot_fast(Node parent, Node right) -> Status
             s = corrupted_page(left.ref->page_id);
             goto cleanup;
         }
-        detach_cell(pivot, cell_scratch());
-        left.erase(cell_count - 1, pivot.footprint);
+        detach_cell(pivot, cell_scratch()); // TODO: Shouldn't need to detach here?
+        left.erase(cell_count - 1, pivot.footprint);//TODO: erase() should only overwrite the first 4 bytes of the cell (if it is more than the minimum of 3 bytes, otherwise, it does nothing to the cell)
 
         NodeHdr::put_next_id(right.hdr(), NodeHdr::get_next_id(left.hdr()));
         NodeHdr::put_next_id(left.hdr(), read_child_id(pivot));
@@ -631,8 +656,12 @@ auto Tree::split_nonroot_fast(Node parent, Node right) -> Status
         last_loc = m_c.history[m_c.level - 1];
 
         // Post the pivot into the parent node. This call will fix the sibling's parent pointer.
-        write_child_id(pivot, left.ref->page_id);
-        s = insert_cell(parent, last_loc.index, pivot);
+//        write_child_id(pivot, left.ref->page_id);
+//        s = insert_cell(parent, last_loc.index, pivot);
+        s = post_pivot(parent, last_loc.index, pivot, left.ref->page_id);
+        if (m_ovfl.exists()){
+            detach_cell(m_ovfl.cell, cell_scratch());
+        }
         if (s.is_ok()) {
             parent.write_child_id(
                 last_loc.index + !m_ovfl.exists(),
@@ -674,11 +703,11 @@ auto Tree::resolve_underflow() -> Status
 }
 
 // This routine redistributes cells between two siblings, `left` and `right`, and their `parent`
-// One of the two siblings must be empty. This code handles rebalancing after both put and erase
-// operations. When called from put(), there will be an overflow cell in m_ovfl.cell which needs
-// to be put in either `left` or `right`, depending on the final distribution. When called from
-// erase(), the `left` node may be left totally empty, in which case, it should be freed. If
-// `left` is empty, then `parent` will not have a pivot cell for it.
+// One of the two siblings must be empty. This code handles rebalancing after both put() and
+// erase() operations. When called from put(), there will be an overflow cell in m_ovfl.cell
+// which needs to be put in either `left` or `right`, depending on the final distribution. When
+// called from erase(), the `left` node may be left totally empty, in which case, it should be
+// freed. If `left` is empty, then `parent` will not have a pivot cell for it.
 auto Tree::redistribute_cells(Node &left, Node &right, Node &parent, U32 pivot_idx) -> Status
 {
     CALICODB_EXPECT_GT(m_c.level, 0);
@@ -708,10 +737,6 @@ auto Tree::redistribute_cells(Node &left, Node &right, Node &parent, U32 pivot_i
     CALICODB_EXPECT_EQ(0, NodeHdr::get_free_start(tmp.hdr()));
     CALICODB_EXPECT_EQ(0, NodeHdr::get_frag_count(tmp.hdr()));
 
-    // Cells that need to be redistributed, in order.
-    std::vector<Cell> cells;
-    Cell cell;
-
     const auto is_split = m_ovfl.exists();
     const auto cell_count = NodeHdr::get_cell_count(p_src->hdr());
     // split_nonroot_fast() handles this case. If the overflow is on the rightmost position, this
@@ -720,20 +745,24 @@ auto Tree::redistribute_cells(Node &left, Node &right, Node &parent, U32 pivot_i
     // may not be a pointer to `left` in `parent` yet.
     CALICODB_EXPECT_TRUE(!is_split || (m_ovfl.idx < cell_count && p_src == &right));
 
+    // Cells that need to be redistributed, in order.
+    std::vector<Cell> cells(cell_count + m_ovfl.exists());
+    auto cell_itr = begin(cells);
     U32 right_accum = 0;
-    cells.reserve(cell_count + 1);
+    Cell cell;
+
     for (U32 i = 0; i < cell_count;) {
         if (m_ovfl.exists() && i == m_ovfl.idx) {
             right_accum += m_ovfl.cell.footprint;
-            cells.emplace_back(m_ovfl.cell);
+            *cell_itr++ = m_ovfl.cell;
             m_ovfl.clear();
             continue;
         }
         if (p_src->read(i++, cell)) {
             return corrupted_page(p_src->ref->page_id);
         }
-        cells.emplace_back(cell);
         right_accum += cell.footprint;
+        *cell_itr++ = cell;
     }
     CALICODB_EXPECT_FALSE(m_ovfl.exists());
     // The pivot cell from `parent` may need to be added to the redistribution set. If a pivot exists
@@ -783,7 +812,6 @@ auto Tree::redistribute_cells(Node &left, Node &right, Node &parent, U32 pivot_i
     }
 
     CALICODB_EXPECT_TRUE(idx > 0 || idx == -1);
-    char sc[kPageSize]; // TODO
     // Post a pivot to the `parent` which links to p_left. If this connection existed before, we would have erased it
     // when parsing cells earlier.
     if (idx > 0) {
@@ -796,15 +824,10 @@ auto Tree::redistribute_cells(Node &left, Node &right, Node &parent, U32 pivot_i
             const auto next_id = read_child_id(cells[idx]);
             NodeHdr::put_next_id(p_left->hdr(), next_id);
             s = fix_parent_id(next_id, p_left->ref->page_id, PointerMap::kTreeNode);
-            detach_cell(cells[idx], sc); // TODO: Don't mess up one of the sibling cells when writing the child ID below.
         }
         if (s.is_ok()) {
             // Post the pivot. This may cause the `parent` to overflow.
-            write_child_id(cells[idx], p_left->ref->page_id);
-            s = insert_cell(parent, pivot_idx, cells[idx]);
-            if (m_ovfl.exists()) {
-                detach_cell(m_ovfl.cell, cell_scratch(2));
-            }
+            s = post_pivot(parent, pivot_idx, cells[idx], p_left->ref->page_id);
             --idx;
         }
     } else if (p_src->is_leaf()) {
@@ -936,6 +959,7 @@ Tree::Tree(Pager &pager, char *scratch, const Id *root_id)
           scratch,
           scratch + kPageSize * 1 / kNumCellBuffers,
           scratch + kPageSize * 2 / kNumCellBuffers,
+          scratch + kPageSize * 3 / kNumCellBuffers,
       },
       m_pager(&pager),
       m_root_id(root_id)
@@ -1333,7 +1357,7 @@ static auto vacuum_end_page(U32 db_size, U32 free_size) -> Id
 {
     // Number of entries that can fit on a pointer map page.
     static constexpr auto kEntriesPerMap = kPageSize / 5;
-    // PageRef *ID of the most-recent pointer map page (the page that holds the back pointer for the last page
+    // Page ID of the most-recent pointer map page (the page that holds the back pointer for the last page
     // in the database file).
     const auto pm_page = PointerMap::lookup(Id(db_size));
     // Number of pointer map pages between the current last page and the after-vacuum last page.

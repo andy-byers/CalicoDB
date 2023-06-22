@@ -90,6 +90,7 @@ public:
     auto acquire(Id page_id, PageRef *&page_out) -> Status;
     auto mark_dirty(PageRef &page) -> void;
     [[nodiscard]] auto get_root() -> PageRef &;
+//    [[nodiscard]] auto get_unused() -> PageRef *;
 
     auto set_page_count(U32 page_count) -> void;
     auto assert_state() const -> bool;
