@@ -1533,8 +1533,4 @@ auto WalImpl::transfer_contents(bool reset) -> Status
     return s;
 }
 
-#undef READ_LOCK
-#undef ATOMIC_LOAD
-#undef ATOMIC_STORE
-
 } // namespace calicodb

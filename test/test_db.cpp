@@ -7,6 +7,7 @@
 #include "fake_env.h"
 #include "header.h"
 #include "logging.h"
+#include "pager.h"
 #include "test.h"
 #include "tx_impl.h"
 #include <gtest/gtest.h>
@@ -1100,7 +1101,6 @@ protected:
                     EXPECT_OK(erase_range(tx, buckets[is[n]], bs[n] * kN, (bs[n] + 1) * kN));
                 }
             }
-
             EXPECT_OK(tx.vacuum());
 
             for (std::size_t n = 0; n < bs.size(); ++n) {

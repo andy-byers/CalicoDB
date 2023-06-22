@@ -403,12 +403,6 @@ auto Pager::get_root() -> PageRef &
     return *m_bufmgr.root();
 }
 
-//auto Pager::get_unused() -> PageRef *
-//{
-//    CALICODB_EXPECT_GE(m_mode, kWrite);
-//    return m_bufmgr.alloc(Id::null());
-//}
-
 auto Pager::mark_dirty(PageRef &page) -> void
 {
     CALICODB_EXPECT_GE(m_mode, kWrite);

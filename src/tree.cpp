@@ -167,8 +167,8 @@ struct PayloadManager {
     static auto access(
         Pager &pager,
         const Cell &cell,   // The `cell` containing the payload being accessed
-        U32 offset, // `offset` within the payload being accessed
-        U32 length, // Number of bytes to access
+        U32 offset,         // `offset` within the payload being accessed
+        U32 length,         // Number of bytes to access
         const char *in_buf, // Write buffer of size at least `length` bytes, or nullptr if not a write
         char *out_buf       // Read buffer of size at least `length` bytes, or nullptr if not a read
         ) -> Status
@@ -364,7 +364,7 @@ auto Tree::post_pivot(Node &parent, U32 idx, Cell &pivot, Id child_id) -> Status
         parent.write_child_id(idx, child_id);
     } else if (rc == 0) {
         CALICODB_EXPECT_FALSE(m_ovfl.exists());
-        detach_cell(pivot, cell_scratch(3));
+        detach_cell(pivot, cell_scratch(0));
         m_ovfl = {pivot, parent.ref->page_id, idx};
         write_child_id(pivot, child_id);
     } else {
@@ -624,7 +624,9 @@ auto Tree::split_nonroot_fast(Node parent, Node right) -> Status
             goto cleanup;
         }
         // NOTE: The overflow cell has already been written to `right`, so cell_scratch(0) is available.
-        detach_cell(pivot, cell_scratch()); // TODO: Shouldn't need this. promote() should only change Cell members and fix parents, etc., nothing that affects the actual cell data
+        //       PayloadManager::promote() may allocate a new overflow chain to hold an overflowing key.
+        //       If this happens, it will write a new overflow ID, which would mess up the old cell.
+        detach_cell(pivot, cell_scratch());
         s = PayloadManager::promote(
             *m_pager,
             pivot,
@@ -635,11 +637,12 @@ auto Tree::split_nonroot_fast(Node parent, Node right) -> Status
             s = corrupted_page(left.ref->page_id);
             goto cleanup;
         }
-        detach_cell(pivot, cell_scratch()); // TODO: Shouldn't need to detach here?
-        left.erase(cell_count - 1, pivot.footprint);//TODO: erase() should only overwrite the first 4 bytes of the cell (if it is more than the minimum of 3 bytes, otherwise, it does nothing to the cell)
-
         NodeHdr::put_next_id(right.hdr(), NodeHdr::get_next_id(left.hdr()));
         NodeHdr::put_next_id(left.hdr(), read_child_id(pivot));
+
+        // NOTE: The pivot doesn't need to be detached, since only the child ID is overwritten by erase().
+        left.erase(cell_count - 1, pivot.footprint);
+
         s = fix_parent_id(
             NodeHdr::get_next_id(right.hdr()),
             right.ref->page_id,
@@ -656,12 +659,7 @@ auto Tree::split_nonroot_fast(Node parent, Node right) -> Status
         last_loc = m_c.history[m_c.level - 1];
 
         // Post the pivot into the parent node. This call will fix the sibling's parent pointer.
-//        write_child_id(pivot, left.ref->page_id);
-//        s = insert_cell(parent, last_loc.index, pivot);
         s = post_pivot(parent, last_loc.index, pivot, left.ref->page_id);
-        if (m_ovfl.exists()){
-            detach_cell(m_ovfl.cell, cell_scratch());
-        }
         if (s.is_ok()) {
             parent.write_child_id(
                 last_loc.index + !m_ovfl.exists(),
@@ -727,7 +725,7 @@ auto Tree::redistribute_cells(Node &left, Node &right, Node &parent, U32 pivot_i
     // Create a temporary node that uses the defragmentation scratch as its backing buffer.
     // This is where the new copy of the nonempty sibling node will be built.
     auto ref = *p_src->ref;
-    char tmp_node_scratch[kPageSize]; // TODO
+    char tmp_node_scratch[kPageSize]; // TODO: Get an unused buffer from the pager, create the node there then rekey it.
     ref.page = tmp_node_scratch;
     tmp = Node::from_new_page(ref, p_src->is_leaf());
     // The new node is empty, so just copy over the pointer fields.
@@ -754,6 +752,10 @@ auto Tree::redistribute_cells(Node &left, Node &right, Node &parent, U32 pivot_i
     for (U32 i = 0; i < cell_count;) {
         if (m_ovfl.exists() && i == m_ovfl.idx) {
             right_accum += m_ovfl.cell.footprint;
+            // Move the overflow cell backing to an unused scratch buffer. The `parent` may overflow
+            // when the pivot is posted (and this cell may not be the pivot). The new overflow cell
+            // will use scratch buffer 0, so this cell cannot be stored there.
+            detach_cell(m_ovfl.cell, cell_scratch(3));
             *cell_itr++ = m_ovfl.cell;
             m_ovfl.clear();
             continue;
@@ -817,7 +819,6 @@ auto Tree::redistribute_cells(Node &left, Node &right, Node &parent, U32 pivot_i
     if (idx > 0) {
         if (p_src->is_leaf()) {
             ++idx; // Backtrack to the last cell written to p_right.
-            detach_cell(cells[U32(idx)], cell_scratch(1));
             s = PayloadManager::promote(*m_pager, cells[U32(idx)], parent.ref->page_id);
 
         } else {
@@ -831,7 +832,7 @@ auto Tree::redistribute_cells(Node &left, Node &right, Node &parent, U32 pivot_i
             --idx;
         }
     } else if (p_src->is_leaf()) {
-        // p_left must be freed by the caller. Go ahead and fix the sibling chain here.
+        // p_left must be freed by the caller. Go ahead and remove it from the sibling chain here.
         const auto prev_id = NodeHdr::get_prev_id(p_left->hdr());
         NodeHdr::put_prev_id(p_right->hdr(), prev_id);
         if (!prev_id.is_null()) {
@@ -855,7 +856,7 @@ auto Tree::redistribute_cells(Node &left, Node &right, Node &parent, U32 pivot_i
         }
     }
 
-    // Copy the newly-built node back to the initial nonempty sibling.
+    // Copy the newly-built node back to the initial nonempty sibling. TODO: See above TODO about the pager.
     std::memcpy(p_src->ref->page, tmp.ref->page, kPageSize);
     auto *saved_ref = p_src->ref;
     *p_src = std::move(tmp);
@@ -863,9 +864,6 @@ auto Tree::redistribute_cells(Node &left, Node &right, Node &parent, U32 pivot_i
 
     // Only the parent is allowed to overflow. The caller is expected to rebalance the parent in this case.
     CALICODB_EXPECT_TRUE(!m_ovfl.exists() || m_ovfl.pid == parent.ref->page_id);
-    if (m_ovfl.exists()) {
-        detach_cell(m_ovfl.cell, cell_scratch(0));
-    }
     return s;
 }
 
@@ -903,6 +901,8 @@ auto Tree::fix_nonroot(Node parent, U32 index) -> Status
 
     advance_cursor(std::move(parent), -1);
     if (s.is_ok() && m_ovfl.exists()) {
+        // The `parent` may have overflowed when the pivot was posted (if redistribute_cells()
+        // performed a rotation).
         s = resolve_overflow();
     }
     return s;
@@ -971,14 +971,10 @@ Tree::Tree(Pager &pager, char *scratch, const Id *root_id)
 auto Tree::detach_cell(Cell &cell, char *backing) -> void
 {
     CALICODB_EXPECT_NE(backing, nullptr);
-    // NOTE: PayloadManager::promote() may move the cell's ptr back a few bytes to make room for
-    //       a left child ID.
-    if (cell.ptr < backing || cell.ptr + kCellScratchDiff > backing) {
-        std::memcpy(backing, cell.ptr, cell.footprint);
-        const auto diff = cell.key - cell.ptr;
-        cell.ptr = backing;
-        cell.key = backing + diff;
-    }
+    std::memmove(backing, cell.ptr, cell.footprint);
+    const auto diff = cell.key - cell.ptr;
+    cell.ptr = backing;
+    cell.key = backing + diff;
 }
 
 auto Tree::cell_scratch(U32 n) -> char *
@@ -1302,7 +1298,7 @@ auto Tree::vacuum_step(PageRef &free, PointerMap::Entry entry, Schema &schema, I
                     NodeHdr::put_next_id(prev.hdr(), free.page_id);
                     release(std::move(prev));
                 }
-                const auto next_id = NodeHdr::get_prev_id(last.hdr());
+                const auto next_id = NodeHdr::get_next_id(last.hdr());
                 if (!next_id.is_null()) {
                     Node next;
                     s = acquire(next_id, true, next);
@@ -1512,29 +1508,32 @@ auto Tree::destroy(Tree &tree) -> Status
 
 #if CALICODB_TEST
 
-#define CHECK_OK(expr)                                           \
-    do {                                                         \
-        if (const auto check_s = (expr); !check_s.is_ok()) {     \
-            std::fprintf(stderr, "error(line %d): %s\n",         \
-                         __LINE__, check_s.to_string().c_str()); \
-            std::abort();                                        \
-        }                                                        \
+#define CHECK_OK(expr)                                       \
+    do {                                                     \
+        if (const auto check_s = (expr); !check_s.is_ok()) { \
+            std::fprintf(stderr, "error(%s:%d): %s\n",       \
+                         __FILE__, __LINE__,                 \
+                         check_s.to_string().c_str());       \
+            std::abort();                                    \
+        }                                                    \
     } while (0)
 
-#define CHECK_TRUE(expr)                                                                   \
-    do {                                                                                   \
-        if (!(expr)) {                                                                     \
-            std::fprintf(stderr, "error: \"%s\" was false on line %d\n", #expr, __LINE__); \
-            std::abort();                                                                  \
-        }                                                                                  \
+#define CHECK_TRUE(expr)                                             \
+    do {                                                             \
+        if (!(expr)) {                                               \
+            std::fprintf(stderr, "error(%s:%d): \"%s\" was false\n", \
+                         __FILE__, __LINE__, #expr);                 \
+            std::abort();                                            \
+        }                                                            \
     } while (0)
 
-#define CHECK_EQ(lhs, rhs)                                                                         \
-    do {                                                                                           \
-        if ((lhs) != (rhs)) {                                                                      \
-            std::fprintf(stderr, "error: \"" #lhs " != " #rhs "\" failed on line %d\n", __LINE__); \
-            std::abort();                                                                          \
-        }                                                                                          \
+#define CHECK_EQ(lhs, rhs)                                                   \
+    do {                                                                     \
+        if ((lhs) != (rhs)) {                                                \
+            std::fprintf(stderr, "error(%s:%d): \"" #lhs " != " #rhs "\"\n", \
+                         __FILE__, __LINE__);                                \
+            std::abort();                                                    \
+        }                                                                    \
     } while (0)
 
 class TreeValidator
@@ -1787,10 +1786,6 @@ auto Tree::TEST_to_string() const -> std::string
 
 #else
 
-auto Node::TEST_validate() -> void
-{
-}
-
 auto Tree::TEST_to_string() const -> std::string
 {
     return "";
@@ -1979,7 +1974,8 @@ auto CursorImpl::seek_to(Node node, U32 index) -> void
     CALICODB_EXPECT_TRUE(m_status.is_ok());
     CALICODB_EXPECT_TRUE(node.is_leaf());
 
-    if (index == NodeHdr::get_cell_count(node.hdr()) && !NodeHdr::get_next_id(node.hdr()).is_null()) {
+    if (index == NodeHdr::get_cell_count(node.hdr()) &&
+        !NodeHdr::get_next_id(node.hdr()).is_null()) {
         const auto next_id = NodeHdr::get_next_id(node.hdr());
         m_tree->release(std::move(node));
         auto s = m_tree->acquire(next_id, false, node);
