@@ -35,8 +35,8 @@ class CursorImpl : public Cursor
     Slice m_val;
 
 protected:
-    auto seek_to(Node node, std::size_t index) -> void;
-    auto fetch_payload(Node &node, std::size_t index) -> Status;
+    auto seek_to(Node node, U32 index) -> void;
+    auto fetch_payload(Node &node, U32 index) -> Status;
 
 public:
     friend class Tree;
@@ -215,16 +215,16 @@ private:
 
     auto resolve_underflow() -> Status;
     auto fix_root() -> Status;
-    auto fix_nonroot(Node parent, std::size_t index) -> Status;
+    auto fix_nonroot(Node parent, U32 index) -> Status;
 
-    auto read_key(const Cell &cell, std::string &scratch, Slice *key_out, std::size_t limit = 0) const -> Status;
+    auto read_key(const Cell &cell, std::string &scratch, Slice *key_out, U32 limit = 0) const -> Status;
     auto read_value(const Cell &cell, std::string &scratch, Slice *value_out) const -> Status;
-    auto read_key(Node &node, std::size_t index, std::string &scratch, Slice *key_out, std::size_t limit = 0) const -> Status;
-    auto read_value(Node &node, std::size_t index, std::string &scratch, Slice *value_out) const -> Status;
-    auto write_key(Node &node, std::size_t index, const Slice &key) -> Status;
-    auto write_value(Node &node, std::size_t index, const Slice &value) -> Status;
+    auto read_key(Node &node, U32 index, std::string &scratch, Slice *key_out, U32 limit = 0) const -> Status;
+    auto read_value(Node &node, U32 index, std::string &scratch, Slice *value_out) const -> Status;
+    auto write_key(Node &node, U32 index, const Slice &key) -> Status;
+    auto write_value(Node &node, U32 index, const Slice &value) -> Status;
 
-    auto emplace(Node &node, const Slice &key, const Slice &value, std::size_t index, bool &overflow) -> Status;
+    auto emplace(Node &node, const Slice &key, const Slice &value, U32 index, bool &overflow) -> Status;
     auto free_overflow(Id head_id) -> Status;
     auto destroy_impl(Node node) -> Status;
     auto vacuum_step(PageRef &free, PointerMap::Entry entry, Schema &schema, Id last_id) -> Status;
@@ -236,7 +236,7 @@ private:
     auto fix_parent_id(Id page_id, Id parent_id, PointerMap::Type type) -> Status;
     auto maybe_fix_overflow_chain(const Cell &cell, Id parent_id) -> Status;
     auto fix_links(Node &node, Id parent_id = Id::null()) -> Status;
-    [[nodiscard]] auto cell_scratch(std::size_t n = 0) -> char *;
+    [[nodiscard]] auto cell_scratch(U32 n = 0) -> char *;
     auto detach_cell(Cell &cell, char *backing) -> void;
 
     // Internal cursor used to traverse the tree structure
@@ -268,7 +268,7 @@ private:
             return m_status;
         }
 
-        [[nodiscard]] auto index() const -> std::size_t
+        [[nodiscard]] auto index() const -> U32
         {
             CALICODB_EXPECT_TRUE(is_valid());
             return history[level].index;

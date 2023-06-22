@@ -167,8 +167,8 @@ struct PayloadManager {
     static auto access(
         Pager &pager,
         const Cell &cell,   // The `cell` containing the payload being accessed
-        std::size_t offset, // `offset` within the payload being accessed
-        std::size_t length, // Number of bytes to access
+        U32 offset, // `offset` within the payload being accessed
+        U32 length, // Number of bytes to access
         const char *in_buf, // Write buffer of size at least `length` bytes, or nullptr if not a write
         char *out_buf       // Read buffer of size at least `length` bytes, or nullptr if not a read
         ) -> Status
@@ -198,7 +198,7 @@ struct PayloadManager {
                 if (!s.is_ok()) {
                     break;
                 }
-                std::size_t len;
+                U32 len;
                 if (offset >= kLinkContentSize) {
                     offset -= kLinkContentSize;
                     len = 0;
@@ -267,7 +267,7 @@ auto Tree::find_external(const Slice &key, bool &exact) const -> Status
     return m_c.status();
 }
 
-auto Tree::read_key(Node &node, std::size_t index, std::string &scratch, Slice *key_out, std::size_t limit) const -> Status
+auto Tree::read_key(Node &node, U32 index, std::string &scratch, Slice *key_out, U32 limit) const -> Status
 {
     Cell cell;
     if (node.read(index, cell)) {
@@ -275,7 +275,7 @@ auto Tree::read_key(Node &node, std::size_t index, std::string &scratch, Slice *
     }
     return read_key(cell, scratch, key_out, limit);
 }
-auto Tree::read_key(const Cell &cell, std::string &scratch, Slice *key_out, std::size_t limit) const -> Status
+auto Tree::read_key(const Cell &cell, std::string &scratch, Slice *key_out, U32 limit) const -> Status
 {
     if (limit == 0 || limit > cell.key_size) {
         limit = cell.key_size;
@@ -290,7 +290,7 @@ auto Tree::read_key(const Cell &cell, std::string &scratch, Slice *key_out, std:
     return s;
 }
 
-auto Tree::read_value(Node &node, std::size_t index, std::string &scratch, Slice *value_out) const -> Status
+auto Tree::read_value(Node &node, U32 index, std::string &scratch, Slice *value_out) const -> Status
 {
     Cell cell;
     if (node.read(index, cell)) {
@@ -311,22 +311,22 @@ auto Tree::read_value(const Cell &cell, std::string &scratch, Slice *value_out) 
     return s;
 }
 
-auto Tree::write_key(Node &node, std::size_t index, const Slice &key) -> Status
+auto Tree::write_key(Node &node, U32 index, const Slice &key) -> Status
 {
     Cell cell;
     if (node.read(index, cell)) {
         return corrupted_page(node.ref->page_id);
     }
-    return PayloadManager::access(*m_pager, cell, 0, key.size(), key.data(), nullptr);
+    return PayloadManager::access(*m_pager, cell, 0, static_cast<U32>(key.size()), key.data(), nullptr);
 }
 
-auto Tree::write_value(Node &node, std::size_t index, const Slice &value) -> Status
+auto Tree::write_value(Node &node, U32 index, const Slice &value) -> Status
 {
     Cell cell;
     if (node.read(index, cell)) {
         return corrupted_page(node.ref->page_id);
     }
-    return PayloadManager::access(*m_pager, cell, cell.key_size, value.size(), value.data(), nullptr);
+    return PayloadManager::access(*m_pager, cell, cell.key_size, static_cast<U32>(value.size()), value.data(), nullptr);
 }
 
 auto Tree::find_parent_id(Id page_id, Id &out) const -> Status
@@ -442,7 +442,7 @@ auto Tree::fix_links(Node &node, Id parent_id) -> Status
     if (parent_id.is_null()) {
         parent_id = node.ref->page_id;
     }
-    for (std::size_t i = 0, n = NodeHdr::get_cell_count(node.hdr()); i < n; ++i) {
+    for (U32 i = 0, n = NodeHdr::get_cell_count(node.hdr()); i < n; ++i) {
         Cell cell;
         if (node.read(i, cell)) {
             return corrupted_page(node.ref->page_id);
@@ -792,18 +792,18 @@ auto Tree::redistribute_cells(Node &left, Node &right, Node &parent, U32 pivot_i
     U32 left_accum = 0;
     while (right_accum > p_left->usable_space / 2 &&
            right_accum > left_accum &&
-           2 + sep++ < static_cast<int>(cells.size())) {
-        left_accum += cells[sep].footprint;
-        right_accum -= cells[sep].footprint;
+           2 + sep++ < int(cells.size())) {
+        left_accum += cells[U32(sep)].footprint;
+        right_accum -= cells[U32(sep)].footprint;
     }
     if (sep == 0) {
         sep = 1;
     }
 
     Status s;
-    auto idx = static_cast<int>(cells.size()) - 1;
+    auto idx = int(cells.size()) - 1;
     for (; idx > sep; --idx) {
-        s = insert_cell(*p_right, 0, cells[idx]);
+        s = insert_cell(*p_right, 0, cells[U32(idx)]);
         p_right->assert_state();
         CALICODB_EXPECT_FALSE(m_ovfl.exists());
         if (!s.is_ok()) {
@@ -817,17 +817,17 @@ auto Tree::redistribute_cells(Node &left, Node &right, Node &parent, U32 pivot_i
     if (idx > 0) {
         if (p_src->is_leaf()) {
             ++idx; // Backtrack to the last cell written to p_right.
-            detach_cell(cells[idx], cell_scratch(1));
-            s = PayloadManager::promote(*m_pager, cells[idx], parent.ref->page_id);
+            detach_cell(cells[U32(idx)], cell_scratch(1));
+            s = PayloadManager::promote(*m_pager, cells[U32(idx)], parent.ref->page_id);
 
         } else {
-            const auto next_id = read_child_id(cells[idx]);
+            const auto next_id = read_child_id(cells[U32(idx)]);
             NodeHdr::put_next_id(p_left->hdr(), next_id);
             s = fix_parent_id(next_id, p_left->ref->page_id, PointerMap::kTreeNode);
         }
         if (s.is_ok()) {
             // Post the pivot. This may cause the `parent` to overflow.
-            s = post_pivot(parent, pivot_idx, cells[idx], p_left->ref->page_id);
+            s = post_pivot(parent, pivot_idx, cells[U32(idx)], p_left->ref->page_id);
             --idx;
         }
     } else if (p_src->is_leaf()) {
@@ -849,7 +849,7 @@ auto Tree::redistribute_cells(Node &left, Node &right, Node &parent, U32 pivot_i
 
     // Write the rest of the cells to p_left.
     for (; idx >= 0; --idx) {
-        s = insert_cell(*p_left, 0, cells[idx]);
+        s = insert_cell(*p_left, 0, cells[U32(idx)]);
         if (!s.is_ok()) {
             return s;
         }
@@ -869,7 +869,7 @@ auto Tree::redistribute_cells(Node &left, Node &right, Node &parent, U32 pivot_i
     return s;
 }
 
-auto Tree::fix_nonroot(Node parent, std::size_t index) -> Status
+auto Tree::fix_nonroot(Node parent, U32 index) -> Status
 {
     auto &node = m_c.node();
     CALICODB_EXPECT_NE(node.ref->page_id, root());
@@ -981,7 +981,7 @@ auto Tree::detach_cell(Cell &cell, char *backing) -> void
     }
 }
 
-auto Tree::cell_scratch(std::size_t n) -> char *
+auto Tree::cell_scratch(U32 n) -> char *
 {
     CALICODB_EXPECT_LT(n, kNumCellBuffers);
     // Leave space for a child ID. We need the maximum difference between the size of a varint and
@@ -1060,7 +1060,7 @@ auto Tree::put(const Slice &key, const Slice &value) -> Status
     return s;
 }
 
-auto Tree::emplace(Node &node, const Slice &key, const Slice &value, std::size_t index, bool &overflow) -> Status
+auto Tree::emplace(Node &node, const Slice &key, const Slice &value, U32 index, bool &overflow) -> Status
 {
     CALICODB_EXPECT_TRUE(node.is_leaf());
     auto k = key.size();
@@ -1539,17 +1539,17 @@ auto Tree::destroy(Tree &tree) -> Status
 
 class TreeValidator
 {
-    using NodeCallback = std::function<void(Node &, std::size_t)>;
+    using NodeCallback = std::function<void(Node &, U32)>;
     using PageCallback = std::function<void(PageRef *&)>;
 
     struct PrinterData {
         std::vector<std::string> levels;
-        std::vector<std::size_t> spaces;
+        std::vector<U32> spaces;
     };
 
     static auto traverse_inorder_helper(const Tree &tree, Node node, const NodeCallback &callback) -> void
     {
-        for (std::size_t index = 0; index <= NodeHdr::get_cell_count(node.hdr()); ++index) {
+        for (U32 index = 0; index <= NodeHdr::get_cell_count(node.hdr()); ++index) {
             if (!node.is_leaf()) {
                 const auto saved_id = node.ref->page_id;
                 const auto next_id = node.read_child_id(index);
@@ -1591,11 +1591,11 @@ class TreeValidator
         }
     }
 
-    static auto add_to_level(PrinterData &data, const std::string &message, std::size_t target) -> void
+    static auto add_to_level(PrinterData &data, const std::string &message, U32 target) -> void
     {
         // If target is equal to levels.size(), add spaces to all levels.
         CHECK_TRUE(target <= data.levels.size());
-        std::size_t i = 0;
+        U32 i = 0;
 
         auto s_itr = begin(data.spaces);
         auto L_itr = begin(data.levels);
@@ -1607,14 +1607,14 @@ class TreeValidator
                 L_itr->append(message);
                 *s_itr = 0;
             } else {
-                *s_itr += message.size();
+                *s_itr += U32(message.size());
             }
             ++L_itr;
             ++s_itr;
         }
     }
 
-    static auto ensure_level_exists(PrinterData &data, std::size_t level) -> void
+    static auto ensure_level_exists(PrinterData &data, U32 level) -> void
     {
         while (level >= data.levels.size()) {
             data.levels.emplace_back();
@@ -1624,11 +1624,11 @@ class TreeValidator
         CHECK_TRUE(data.levels.size() == data.spaces.size());
     }
 
-    static auto collect_levels(const Tree &tree, PrinterData &data, Node &node, std::size_t level) -> void
+    static auto collect_levels(const Tree &tree, PrinterData &data, Node &node, U32 level) -> void
     {
         ensure_level_exists(data, level);
         const auto cell_count = NodeHdr::get_cell_count(node.hdr());
-        for (std::size_t cid = 0; cid < cell_count; ++cid) {
+        for (U32 cid = 0; cid < cell_count; ++cid) {
             const auto is_first = cid == 0;
             const auto not_last = cid + 1 < cell_count;
             Cell cell;
@@ -1821,7 +1821,6 @@ auto Tree::InternalCursor::clear() -> void
 auto Tree::InternalCursor::seek_root() -> void
 {
     clear();
-    std::memset(history, 0, sizeof(history));
     history[0].page_id = m_tree->root();
     level = 0;
 
@@ -1842,8 +1841,8 @@ auto Tree::InternalCursor::seek(const Slice &key) -> bool
         // needed for the comparison. We read at most 1 byte more than is present in `key`
         // so we still have necessary length information to break ties. This lets us avoid
         // reading overflow chains if it isn't really necessary.
-        m_status = m_tree->read_key(m_node, mid, m_buffer,
-                                    &rhs, key.size() + 1);
+        m_status = m_tree->read_key(m_node, mid, m_buffer, &rhs,
+                                    static_cast<U32>(key.size() + 1));
         if (!m_status.is_ok()) {
             break;
         }
@@ -1881,7 +1880,7 @@ CursorImpl::~CursorImpl()
     }
 }
 
-auto CursorImpl::fetch_payload(Node &node, std::size_t index) -> Status
+auto CursorImpl::fetch_payload(Node &node, U32 index) -> Status
 {
     m_key.clear();
     m_val.clear();
@@ -1974,7 +1973,7 @@ auto CursorImpl::previous() -> void
     }
 }
 
-auto CursorImpl::seek_to(Node node, std::size_t index) -> void
+auto CursorImpl::seek_to(Node node, U32 index) -> void
 {
     CALICODB_EXPECT_EQ(nullptr, m_node.ref);
     CALICODB_EXPECT_TRUE(m_status.is_ok());
