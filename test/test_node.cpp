@@ -3,6 +3,7 @@
 // LICENSE.md. See AUTHORS.md for a list of contributor names.
 
 #include "node.h"
+#include <limits>
 #include <gtest/gtest.h>
 
 namespace calicodb::test
@@ -30,8 +31,9 @@ public:
     // Use 2 bytes for the keys.
     char m_external_cell[4] = {'\x00', '\x02'};
     char m_internal_cell[7] = {'\x00', '\x00', '\x00', '\x00', '\x02'};
-    [[nodiscard]] auto make_cell(U16 k) -> Cell
+    [[nodiscard]] auto make_cell(U32 k) -> Cell
     {
+        EXPECT_LE(k, std::numeric_limits<U16>::max());
         Cell cell = {
             m_internal_cell,
             m_internal_cell + 5,
@@ -212,7 +214,7 @@ TEST_F(NodeTests, CellLifecycle)
                 break;
             }
             ASSERT_GT(rc, 0);
-            target_space -= cell_in.footprint + sizeof(U16);
+            target_space -= cell_in.footprint + 2;
             ASSERT_EQ(m_node.usable_space, target_space);
             ASSERT_TRUE(m_node.assert_state());
         }
@@ -231,7 +233,7 @@ TEST_F(NodeTests, CellLifecycle)
             Cell cell_out = {};
             ASSERT_EQ(0, m_node.read(0, cell_out));
             ASSERT_EQ(0, m_node.erase(0, cell_out.footprint));
-            target_space += cell_out.footprint + sizeof(U16);
+            target_space += cell_out.footprint + 2;
             ASSERT_EQ(m_node.usable_space, target_space);
         }
         ASSERT_TRUE(m_node.assert_state());
