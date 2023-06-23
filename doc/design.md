@@ -35,33 +35,10 @@ The tree that is rooted on the first database page is called the schema tree.
 It is used to store a name-to-root mapping for the other trees, if any exist.
 Additional trees will be rooted on pages after the second database page, which is always a pointer map page (see [Pointer Map](#pointer-map)).
 Trees are of variable order, so splits are performed when nodes (pages that are part of a tree) have run out of physical space.
-The implementation is pretty straightforward: we basically do as little as possible to make sure that the tree ordering remains correct.
+Merges/rotations are performed when a node has become totally empty.
 
-#### Fixing Overflows
-As previously mentioned, tree nodes are split when they run out of room.
-To keep things simple, each node is allowed to overflow by a single cell, and overflows are resolved immediately.
-There are 3 general routines for resolving node overflows: `split_root`, `split_nonroot`, and `split_nonroot_fast`.
-Note that these routines are greatly simplified compared to the similarly-named balancing routines in SQLite.
-For instance, SQLite attempts to involve 3 nodes in their split to better redistribute cells, while this implementation only uses 2.
-
-`split_nonroot` is called when a non-root node has overflowed.
-First, allocate a new node, called `R`.
-Let the node that is overfull be `L` and the parent `P`.
-Start transferring cells from `L` to `R`, checking at each point if the overflow cell `c` will fit in `L`.
-There will be a point (once we reach the "overflow slot") at which there have been enough cells transferred that `c` belongs in `R`.
-If this point is reached, then `c` is written to `R`, since it must fit.
-This routine takes advantage of the fact that the local size of a cell is limited to roughly 1/4 of the usable space on a page.
-If a maximally-sized overflow cell will not fit in `L` then it definitely will fit in `R`, since `R` was empty initially.
-This is true even if `L` was 100% full before the overflow.
-Note that this splitting routine is optimal when keys are sequential and decreasing, but has its worst case when keys are sequential and increasing.
-When a node overflows on the rightmost position, `split_nonroot_fast` is called.
-`split_nonroot_fast` allocates a new right sibling and writes the overflow cell to it.
-This makes resolving overflows on the rightmost position much faster, which helps sequential write performance.
-
-#### Fixing Underflows
-Sibling nodes are merged together when one of them has become empty.
-Since a merge involves addition of the separator cell, this may not be possible if the second node is very full.
-In this case, a single rotation is performed.
+#### Rebalancing
+[//]: # (TODO)
 
 #### Overflow chains
 CalicoDB supports very large keys and/or values.

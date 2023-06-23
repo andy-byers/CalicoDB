@@ -42,66 +42,8 @@ auto FileHdr::make_supported_db(char *root) -> void
     put_u32(root + kPageCountOffset, 1);
 
     // Initialize the root page of the schema tree.
-    NodeHdr root_hdr;
-    root_hdr.is_external = true;
-    root_hdr.cell_start = kPageSize;
-    root_hdr.write(root + kSize);
-}
-
-enum : char {
-    kExternal = '\x01',
-    kInternal = '\x02',
-};
-
-auto NodeHdr::read(const char *data) -> int
-{
-    if (const auto t = *data++; t == kExternal) {
-        is_external = true;
-    } else if (t == kInternal) {
-        is_external = false;
-    } else {
-        return -1;
-    }
-
-    next_id.value = get_u32(data);
-    data += sizeof(U32);
-
-    prev_id.value = get_u32(data);
-    data += sizeof(U32);
-
-    cell_count = get_u16(data);
-    data += sizeof(U16);
-
-    cell_start = get_u16(data);
-    data += sizeof(U16);
-
-    free_start = get_u16(data);
-    data += sizeof(U16);
-
-    frag_count = static_cast<U8>(*data);
-    return 0;
-}
-
-auto NodeHdr::write(char *data) const -> void
-{
-    *data++ = is_external ? kExternal : kInternal;
-
-    put_u32(data, next_id.value);
-    data += sizeof(U32);
-
-    put_u32(data, prev_id.value);
-    data += sizeof(U32);
-
-    put_u16(data, static_cast<U16>(cell_count));
-    data += sizeof(U16);
-
-    put_u16(data, static_cast<U16>(cell_start));
-    data += sizeof(U16);
-
-    put_u16(data, static_cast<U16>(free_start));
-    data += sizeof(U16);
-
-    *data = static_cast<char>(frag_count);
+    NodeHdr::put_type(root + FileHdr::kSize, NodeHdr::kExternal);
+    NodeHdr::put_cell_start(root + FileHdr::kSize, kPageSize);
 }
 
 } // namespace calicodb

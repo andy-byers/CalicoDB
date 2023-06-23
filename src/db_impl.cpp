@@ -26,8 +26,8 @@ auto DBImpl::open(const Options &sanitized) -> Status
         }
         // If there exists a file named m_wal_filename, then it must either be leftover from a
         // failed call to DB::destroy(), or it is an unrelated file that coincidentally has the
-        // name of this database's WAL file. Either way, we must get rid of it here, otherwise
-        // we'll end up checkpointing it.
+        // same name as this database's WAL file. Either way, we must get rid of it here,
+        // otherwise we'll end up checkpointing it.
         s = m_env->remove_file(m_wal_filename);
         if (s.is_ok()) {
             log(m_log, R"(removed old WAL file "%s")", m_wal_filename.c_str());
@@ -164,8 +164,6 @@ auto DBImpl::get_property(const Slice &name, std::string *out) const -> bool
             if (out == nullptr) {
                 return true;
             }
-            const auto cache_hits = static_cast<double>(m_pager->stats().stats[Pager::kStatCacheHits]);
-            const auto cache_misses = static_cast<double>(m_pager->stats().stats[Pager::kStatCacheMisses]);
             append_fmt_string(
                 buffer,
                 "Name               Value\n"
@@ -179,7 +177,9 @@ auto DBImpl::get_property(const Slice &name, std::string *out) const -> bool
                 static_cast<double>(m_pager->wal_stats().stats[Wal::kStatWriteDB]) / 1'048'576.0,
                 static_cast<double>(m_pager->wal_stats().stats[Wal::kStatReadWal]) / 1'048'576.0,
                 static_cast<double>(m_pager->wal_stats().stats[Wal::kStatWriteWal]) / 1'048'576.0,
-                cache_hits / (cache_hits + cache_misses));
+                static_cast<double>(m_pager->stats().stats[Pager::kStatCacheHits]) /
+                    static_cast<double>(m_pager->stats().stats[Pager::kStatCacheHits] +
+                                        m_pager->stats().stats[Pager::kStatCacheMisses]));
             out->append(buffer);
             return true;
         }

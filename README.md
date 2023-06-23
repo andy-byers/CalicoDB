@@ -6,8 +6,8 @@
 
 > **Note**: I've been messing with this library for a while now, and I think it's finally coming together design-wise!
 > We have transactions, buckets, cursors, vacuum, and multiversion concurrency control (MVCC).
-> This branch (develop) is intended for working on testing and getting the MVCC to work.
-> I'll merge it back into main intermittently so that changes are visible, but some concurrency-related things will likely be broken for a while.
+> This branch (develop) is being used to finish up the initial design.
+> I'll merge it back into main intermittently so that changes are visible.
 
 CalicoDB is an embedded transactional key-value database written in C++17.
 It exposes a small API that allows storage and retrieval of arbitrary byte sequences.
@@ -57,9 +57,6 @@ Performance benchmarks can be found [here](benchmarks).
 ## TODO
 1. Get everything code reviewed!
 2. Support Windows (write an `Env` implementation)
-3. Modify the tree to not use sibling pointers, or at least don't keep a left sibling pointer
-   + Causes extra pages to be written to the WAL during splits
-4. Look into writing a more involved balancing routine
 
 ## Documentation
 Check out CalicoDB's [usage and design documents](doc).
