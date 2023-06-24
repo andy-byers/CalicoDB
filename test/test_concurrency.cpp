@@ -185,7 +185,10 @@ protected:
     {
     }
 
-    ~ConcurrencyTests() override = default;
+    ~ConcurrencyTests() override
+    {
+        delete m_env;
+    }
 
     struct Connection;
     using Operation = std::function<Status(Connection &, Barrier *)>;

@@ -181,7 +181,10 @@ protected:
     {
     }
 
-    ~TestCrashes() override = default;
+    ~TestCrashes() override
+    {
+        delete m_env;
+    }
 
     static constexpr std::size_t kNumRecords = 512;
     static constexpr std::size_t kNumIterations = 3;

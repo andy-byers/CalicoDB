@@ -834,6 +834,8 @@ TEST(DestructionTests, DeletesWalAndShm)
     ASSERT_FALSE(options.env->file_exists("./test"));
     ASSERT_FALSE(options.env->file_exists("./test-wal"));
     ASSERT_FALSE(options.env->file_exists("./test-shm"));
+
+    delete options.env;
 }
 
 class DBOpenTests : public DBTests
