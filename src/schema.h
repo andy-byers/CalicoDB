@@ -17,58 +17,13 @@ class CursorImpl;
 class Pager;
 class Tree;
 
-class SchemaCursor : public Cursor
-{
-    mutable Status m_status;
-    std::string m_key;
-    std::string m_value;
-    CursorImpl *m_impl;
-
-    auto move_to_impl() -> void;
-
-public:
-    explicit SchemaCursor(Tree &tree);
-    ~SchemaCursor() override;
-
-    [[nodiscard]] auto is_valid() const -> bool override
-    {
-        return m_status.is_ok() && !m_key.empty();
-    }
-
-    [[nodiscard]] auto status() const -> Status override
-    {
-        return m_status;
-    }
-
-    [[nodiscard]] auto key() const -> Slice override
-    {
-        CALICODB_EXPECT_TRUE(is_valid());
-        return m_key;
-    }
-
-    [[nodiscard]] auto value() const -> Slice override
-    {
-        CALICODB_EXPECT_TRUE(is_valid());
-        return m_value;
-    }
-
-    auto seek(const Slice &key) -> void override;
-    auto seek_first() -> void override;
-    auto seek_last() -> void override;
-    auto next() -> void override;
-    auto previous() -> void override;
-};
-
 // Representation of the database schema
 class Schema final
 {
 public:
     explicit Schema(Pager &pager, const Status &status, char *scratch);
 
-    [[nodiscard]] auto new_cursor() -> Cursor *
-    {
-        return new SchemaCursor(*m_map);
-    }
+    [[nodiscard]] auto new_cursor() -> Cursor *;
 
     auto close() -> void;
     auto create_bucket(const BucketOptions &options, const Slice &name, Bucket *b_out) -> Status;

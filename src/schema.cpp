@@ -11,12 +11,59 @@
 namespace calicodb
 {
 
+class SchemaCursor : public Cursor
+{
+    mutable Status m_status;
+    std::string m_key;
+    std::string m_value;
+    CursorImpl m_impl;
+
+    auto move_to_impl() -> void;
+
+public:
+    explicit SchemaCursor(Tree &tree);
+    ~SchemaCursor() override = default;
+
+    [[nodiscard]] auto is_valid() const -> bool override
+    {
+        return m_status.is_ok() && !m_key.empty();
+    }
+
+    [[nodiscard]] auto status() const -> Status override
+    {
+        return m_status;
+    }
+
+    [[nodiscard]] auto key() const -> Slice override
+    {
+        CALICODB_EXPECT_TRUE(is_valid());
+        return m_key;
+    }
+
+    [[nodiscard]] auto value() const -> Slice override
+    {
+        CALICODB_EXPECT_TRUE(is_valid());
+        return m_value;
+    }
+
+    auto seek(const Slice &key) -> void override;
+    auto seek_first() -> void override;
+    auto seek_last() -> void override;
+    auto next() -> void override;
+    auto previous() -> void override;
+};
+
 Schema::Schema(Pager &pager, const Status &status, char *scratch)
     : m_status(&status),
       m_pager(&pager),
       m_scratch(scratch),
       m_map(new Tree(pager, scratch, nullptr))
 {
+}
+
+auto Schema::new_cursor() -> Cursor *
+{
+    return new SchemaCursor(*m_map);
 }
 
 auto Schema::close() -> void
@@ -117,14 +164,14 @@ auto Schema::decode_and_check_root_id(const Slice &data, Id &out) -> bool
     return true;
 }
 
-auto Schema::encode_root_id(Id id, std::string &out) -> void
+auto Schema::encode_root_id(Id id, std::string &root_id_out) -> void
 {
-    if (out.size() < kVarintMaxLength) {
+    if (root_id_out.size() < kVarintMaxLength) {
         // More than enough for a U32.
-        out.resize(kVarintMaxLength);
+        root_id_out.resize(kVarintMaxLength);
     }
-    const auto *end = encode_varint(out.data(), id.value);
-    out.resize(static_cast<std::uintptr_t>(end - out.data()));
+    const auto *end = encode_varint(root_id_out.data(), id.value);
+    root_id_out.resize(static_cast<std::uintptr_t>(end - root_id_out.data()));
 }
 
 auto Schema::construct_bucket_state(Id root_id) -> Bucket
@@ -255,51 +302,46 @@ auto Schema::TEST_validate() const -> void
 }
 
 SchemaCursor::SchemaCursor(Tree &tree)
-    : m_impl(new CursorImpl(tree, nullptr))
+    : m_impl(tree, nullptr)
 {
-}
-
-SchemaCursor::~SchemaCursor()
-{
-    delete m_impl;
 }
 
 auto SchemaCursor::move_to_impl() -> void
 {
     m_key.clear();
     m_value.clear();
-    if (m_impl->is_valid()) {
-        m_key = m_impl->key().to_string();
-        m_value = m_impl->value().to_string();
+    if (m_impl.is_valid()) {
+        m_key = m_impl.key().to_string();
+        m_value = m_impl.value().to_string();
     }
-    m_status = m_impl->status();
-    m_impl->clear();
+    m_status = m_impl.status();
+    m_impl.clear();
 }
 
 auto SchemaCursor::seek(const Slice &key) -> void
 {
-    m_impl->seek(key);
+    m_impl.seek(key);
     move_to_impl();
 }
 
 auto SchemaCursor::seek_first() -> void
 {
-    m_impl->seek_first();
+    m_impl.seek_first();
     move_to_impl();
 }
 
 auto SchemaCursor::seek_last() -> void
 {
-    m_impl->seek_last();
+    m_impl.seek_last();
     move_to_impl();
 }
 
 auto SchemaCursor::next() -> void
 {
     CALICODB_EXPECT_TRUE(is_valid());
-    m_impl->seek(m_key);
-    if (m_impl->is_valid()) {
-        m_impl->next();
+    m_impl.seek(m_key);
+    if (m_impl.is_valid()) {
+        m_impl.next();
     }
     move_to_impl();
 }
@@ -307,9 +349,9 @@ auto SchemaCursor::next() -> void
 auto SchemaCursor::previous() -> void
 {
     CALICODB_EXPECT_TRUE(is_valid());
-    m_impl->seek(m_key);
-    if (m_impl->is_valid()) {
-        m_impl->previous();
+    m_impl.seek(m_key);
+    if (m_impl.is_valid()) {
+        m_impl.previous();
     }
     move_to_impl();
 }

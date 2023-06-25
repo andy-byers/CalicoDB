@@ -699,10 +699,21 @@ auto PosixFile::write(std::size_t offset, const Slice &in) -> Status
 
 auto PosixFile::sync() -> Status
 {
-    if (fsync(file)) {
-        return posix_error(errno);
+    int rc;
+
+#ifdef F_FULLFSYNC
+    // NOTE: This will certainly make performance quite a bit worse on OSX, however, it is
+    //       necessary for durability. On OSX, fcntl() returns before the storage device's
+    //       volatile write cache has been flushed.
+    rc = fcntl(file, F_FULLFSYNC);
+#else
+    rc = 1;
+#endif
+
+    if (rc) {
+        rc = fsync(file);
     }
-    return Status::ok();
+    return rc ? posix_error(errno) : Status::ok();
 }
 
 auto PosixFile::shm_unmap(bool unlink) -> void
