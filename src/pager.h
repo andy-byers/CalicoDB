@@ -175,12 +175,15 @@ struct PointerMap {
         Type type = kEmpty;
     };
 
+    // Return true if page "page_id" is a pointer map page, false otherwise.
+    [[nodiscard]] static auto is_map(Id page_id) -> bool
+    {
+        return lookup(page_id) == page_id;
+    }
+
     // Return the page ID of the pointer map page that holds the back pointer for page "page_id",
     // Id::null() otherwise.
     [[nodiscard]] static auto lookup(Id page_id) -> Id;
-
-    // Return true if page "page_id" is a pointer map page, false otherwise.
-    [[nodiscard]] static auto is_map(Id page_id) -> bool;
 
     // Read an entry from the pointer map.
     [[nodiscard]] static auto read_entry(Pager &pager, Id page_id, Entry &entry) -> Status;

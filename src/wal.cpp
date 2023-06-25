@@ -3,11 +3,11 @@
 // LICENSE.md. See AUTHORS.md for a list of contributor names.
 
 #include "wal.h"
-#include "bufmgr.h"
 #include "calicodb/db.h"
 #include "calicodb/env.h"
 #include "encoding.h"
 #include "logging.h"
+#include "page.h"
 #include "scope_guard.h"
 
 namespace calicodb
