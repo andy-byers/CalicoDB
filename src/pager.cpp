@@ -548,10 +548,10 @@ static auto entry_offset(Id map_id, Id page_id) -> std::size_t
 
 static auto decode_entry(const char *data) -> PointerMap::Entry
 {
-    PointerMap::Entry entry;
-    entry.type = PointerMap::Type{*data++};
-    entry.back_ptr.value = get_u32(data);
-    return entry;
+    return {
+        Id(get_u32(data + 1)),
+        PointerMap::Type{*data},
+    };
 }
 
 auto PointerMap::lookup(Id page_id) -> Id
@@ -563,14 +563,9 @@ auto PointerMap::lookup(Id page_id) -> Id
     if (page_id.value < kFirstMapPage) {
         return Id::null();
     }
-    const auto inc = kPageSize / kEntrySize + 1;
-    const auto idx = (page_id.value - kFirstMapPage) / inc;
-    return Id(idx * inc + kFirstMapPage);
-}
-
-auto PointerMap::is_map(Id page_id) -> bool
-{
-    return lookup(page_id) == page_id;
+    static constexpr auto kMapSz = kPageSize / kEntrySize + 1;
+    const auto idx = (page_id.value - kFirstMapPage) / kMapSz;
+    return Id(idx * kMapSz + kFirstMapPage);
 }
 
 auto PointerMap::read_entry(Pager &pager, Id page_id, Entry &out) -> Status
