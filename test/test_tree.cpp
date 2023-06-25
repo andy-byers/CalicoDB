@@ -478,10 +478,14 @@ class CursorTests
       public testing::TestWithParam<U32>
 {
 protected:
-    ~CursorTests() override = default;
+    ~CursorTests() override
+    {
+        delete m_schema;
+    }
     auto SetUp() -> void override
     {
         open();
+        m_schema = new Schema(*m_pager, m_status, m_scratch.data());
         add_initial_records(*this);
     }
 
@@ -491,11 +495,12 @@ protected:
             case 0:
                 return std::make_unique<CursorImpl>(*m_tree, nullptr);
             case 1:
-                return std::make_unique<SchemaCursor>(*m_tree);
+                return std::unique_ptr<Cursor>(m_schema->new_cursor());
         }
         return nullptr;
     }
 
+    Schema *m_schema = nullptr;
     RandomGenerator random;
 };
 
