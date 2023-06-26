@@ -1114,7 +1114,7 @@ auto Tree::emplace(Node &node, const Slice &key, const Slice &value, U32 index, 
         m_node_scratch);
     if (local_offset > 0) {
         ptr = node.ref->page + local_offset;
-        node.usable_space -= cell_size + sizeof(U16);
+        node.usable_space -= static_cast<U32>(cell_size + sizeof(U16));
         overflow = false;
     } else if (local_offset == 0) {
         overflow = true;
