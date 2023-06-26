@@ -249,8 +249,30 @@ auto Tree::create(Pager &pager, Id *root_id_out) -> Status
 
 auto Tree::find_external(const Slice &key, bool &exact) const -> Status
 {
-    m_c.seek_root();
+    //    m_c.seek_root();
     exact = false;
+
+    auto found_target = false;
+    if (m_c.is_valid() && m_c.node().is_leaf() && NodeHdr::get_cell_count(m_c.node().hdr()) > 0) {
+        // This block handles cases where the cursor is already positioned on the target node. This
+        // means that (a) this tree is the most-recently-accessed tree in the database, and (b) the
+        // last operation didn't cause an overflow or underflow.
+        if (NodeHdr::get_next_id(m_c.node().hdr()).is_null()) {
+            Cell boundary;
+            if (m_c.node().read(0, boundary)) {
+                return corrupted_page(m_c.node().ref->page_id);
+            }
+            std::size_t cmp_length = boundary.key_size;
+            if (cmp_length > key.size() + 1) {
+                cmp_length = key.size() + 1;
+            }
+            found_target = cmp_length <= boundary.local_pl_size &&
+                           Slice(boundary.key, cmp_length) <= key;
+        }
+    }
+    if (!found_target) {
+        m_c.seek_root();
+    }
 
     while (m_c.is_valid()) {
         const auto found = m_c.seek(key);
@@ -682,7 +704,8 @@ auto Tree::resolve_underflow() -> Status
     Status s;
     while (m_c.is_valid() && is_underflowing(m_c.node())) {
         if (root() == m_c.node().ref->page_id) {
-            return fix_root();
+            s = fix_root();
+            break;
         }
         CALICODB_EXPECT_GT(m_c.level, 0);
 
@@ -697,6 +720,7 @@ auto Tree::resolve_underflow() -> Status
         }
         ++m_stats.stats[kStatSMOCount];
     }
+    m_c.clear();
     return s;
 }
 
@@ -1005,7 +1029,6 @@ auto Tree::get(const Slice &key, std::string *value) const -> Status
             m_stats.stats[kStatRead] += slice.size();
         }
     }
-    m_c.clear();
     return s;
 }
 
@@ -1052,7 +1075,6 @@ auto Tree::put(const Slice &key, const Slice &value) -> Status
             }
         }
     }
-    m_c.clear();
     return s;
 }
 
@@ -1087,11 +1109,12 @@ auto Tree::emplace(Node &node, const Slice &key, const Slice &value, U32 index, 
     // bounds write (this only happens if the node is corrupted).
     ptr = cell_scratch();
     const auto local_offset = node.alloc(
-        static_cast<U32>(index),
+        index,
         static_cast<U32>(cell_size),
         m_node_scratch);
     if (local_offset > 0) {
         ptr = node.ref->page + local_offset;
+        node.usable_space -= cell_size + sizeof(U16);
         overflow = false;
     } else if (local_offset == 0) {
         overflow = true;
@@ -1165,7 +1188,6 @@ auto Tree::erase(const Slice &key) -> Status
             s = resolve_underflow();
         }
     }
-    m_c.clear();
     return s;
 }
 
@@ -1644,8 +1666,8 @@ class TreeValidator
             }
             std::string key;
             CHECK_OK(tree.read_key(node, cid, key, nullptr));
-            const auto ikey = std::to_string(std::stoi(key));
-            //            const auto ikey = escape_string(key.substr(0, std::min(key.size(), 3UL)));
+            //            const auto ikey = std::to_string(std::stoi(key));
+            const auto ikey = escape_string(key.substr(0, std::min(key.size(), 3UL)));
             add_to_level(data, ikey, level);
             if (cell.local_pl_size != cell.total_pl_size) {
                 add_to_level(data, "(" + number_to_string(read_overflow_id(cell).value) + ")", level);
