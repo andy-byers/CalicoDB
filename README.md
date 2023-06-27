@@ -48,11 +48,11 @@ Check out the [docs](doc/doc.md).
 
 ## Dependencies
 The library itself has no dependencies.
-The unit tests depend on `@google/googletest`, and the benchmarks depend on `@google/benchmark`.
-Both are downloaded during the build.
+The tests depend on `@google/googletest`, which is downloaded during the build.
 
 ## Performance
-Performance benchmarks can be found [here](benchmarks).
+Performance benchmarks are run in a [fork of LevelDB](https://github.com/andy-byers/leveldb/tree/db_bench_calicodb).
+Recent results can be found [here](https://github.com/andy-byers/leveldb/blob/db_bench_calicodb/benchmarks/results.md).
 
 ## TODO
 1. Get everything code reviewed!

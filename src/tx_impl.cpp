@@ -67,14 +67,9 @@ auto TxImpl::vacuum() -> Status
 {
     auto s = *m_status;
     if (s.is_ok()) {
-        s = vacuum_freelist();
+        s = m_schema_obj.vacuum();
     }
     return s;
-}
-
-auto TxImpl::vacuum_freelist() -> Status
-{
-    return m_schema_obj.vacuum_freelist();
 }
 
 auto TxImpl::new_cursor(const Bucket &b) const -> Cursor *
@@ -95,6 +90,7 @@ auto TxImpl::get(const Bucket &b, const Slice &key, std::string *value) const ->
 {
     auto s = *m_status;
     if (s.is_ok()) {
+        m_schema_obj.use_bucket(b);
         s = static_cast<Tree *>(b.state)->get(key, value);
     }
     return s;
@@ -104,6 +100,7 @@ auto TxImpl::put(const Bucket &b, const Slice &key, const Slice &value) -> Statu
 {
     auto s = *m_status;
     if (s.is_ok()) {
+        m_schema_obj.use_bucket(b);
         s = static_cast<Tree *>(b.state)->put(key, value);
     }
     return s;
@@ -113,6 +110,7 @@ auto TxImpl::erase(const Bucket &b, const Slice &key) -> Status
 {
     auto s = *m_status;
     if (s.is_ok()) {
+        m_schema_obj.use_bucket(b);
         s = static_cast<Tree *>(b.state)->erase(key);
     }
     return s;

@@ -15,7 +15,7 @@
 namespace calicodb::test
 {
 
-static constexpr std::size_t kInitialRecordCount = 100;
+static constexpr std::size_t kInitialRecordCount = 1'000;
 
 class TreeTestHarness
 {
@@ -89,6 +89,7 @@ public:
 
     auto close() const -> void
     {
+        m_tree->finish_operation();
         m_pager->finish();
     }
 

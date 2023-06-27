@@ -52,7 +52,7 @@ struct Options final {
     } lock_mode = kLockNormal;
 };
 
-struct BucketOptions {
+struct BucketOptions final {
     // TODO: open_bucket() has been split off of create_bucket(). create_bucket() takes BucketOptions, but open_bucket()
     //       does not. BucketOptions should hold options that pertain to new buckets but cannot be changed once the
     //       bucket is created (comparator type, unique keys, etc.).

@@ -29,7 +29,7 @@ In this design, the pager is never allowed to write directly to the database fil
 Instead, modified pages are flushed to the WAL on commit or eviction from the cache.
 
 ### Tree
-CalicoDB trees are similar to table B-trees in SQLite3.
+CalicoDB trees are similar to index B-trees in SQLite3.
 Every tree is rooted on some database page, called its root page.
 The tree that is rooted on the first database page is called the schema tree.
 It is used to store a name-to-root mapping for the other trees, if any exist.
@@ -38,20 +38,49 @@ Trees are of variable order, so splits are performed when nodes (pages that are 
 Merges/rotations are performed when a node has become totally empty.
 
 #### Rebalancing
-[//]: # (TODO)
+At present, the `Tree` class is responsible for making sure the tree it represents is balanced before returning from either `put()` or `erase()`.
+This is accomplished by calling one of the two rebalancing entrypoint routines, `resolve_overflow()` or `resolve_underflow()`.
+These routines, in turn, call other routines as outlined in the following table:
+
+| Caller                | Callee                 | Note                               |
+|:----------------------|:-----------------------|:-----------------------------------|
+| `resolve_overflow()`  | `split_root()`         | Increases the height of the tree   |
+| `resolve_overflow()`  | `split_nonroot()`      | Adds a node to the tree            |
+| `resolve_underflow()` | `fix_root()`           | Decreases the height of the tree   |
+| `resolve_underflow()` | `fix_nonroot()`        | May remove a node from the tree    |
+| `split_nonroot()`     | `split_nonroot_fast()` | Optimization for sequential writes |
+| `split_nonroot()`     | `redistribute_cells()` | *See below*                        |
+| `fix_nonroot()`       | `redistribute_cells()` | *See below*                        |
+
+As shown above, there are several routines that call `redistribute_cells()`.
+`redistribute_cells()` expects 2 sibling nodes, 1 of which must be empty and the other nonempty, and their parent.
+It works by attempting to transfer roughly half of the cell content from the nonempty node to the empty node, manipulating pivot cells as necessary in the parent.
+If there are not enough cells in the nonempty node, then the two nodes are merged.
+Note that the parent may overflow if the new pivot is posted.
 
 #### Overflow chains
 CalicoDB supports very large keys and/or values.
 When a key or value is too large to fit on a page, some of it is transferred to an overflow chain.
+An overflow chain is a singly-linked list of pages, each containing some portion of a record payload.
+Each overflow chain page takes the following form:
 
-[//]: # (TODO)
+| Offset | Size   | Name    | Purpose                                                          |
+|:-------|:-------|:--------|:-----------------------------------------------------------------|
+| 0      | 4      | NextPtr | Page ID of the next overflow chain page, or 0 if this is the end |
+| 4      | PgSz-4 | Payload | Up to PgSz-4 bytes of record payload                             |
+
+The formula for determining when a record should spill onto an overflow chain was modified from one found in SQLite3.
+We try to keep the whole key embedded in the node, if possible.
+This makes comparisons faster, since we don't have to read overflow pages to get the whole key.
+Otherwise, the maximum local cell size (the amount of record stored locally, plus the cell header, etc.) is limited such that at least 4 cells will fit on any non-root page.
+The root page may only hold 3 cells due to the space occupied by the file header.
 
 #### Freelist
 Sometimes, database pages end up becoming unused.
 This happens, for example, when a record with an overflow chain is erased.
 Unused database pages are managed using the freelist.
 There are 2 types of freelist pages: trunks and leaves.
-Freelist trunk pages form a linked list threaded through the database file.
+Like overflow chain pages, freelist trunk pages form a linked list threaded through the database file.
 Each trunk page contains the following information:
 
 | Offset | Size   | Name    | Purpose                                              |
@@ -65,11 +94,22 @@ Freelist leaf pages contain no pertinent information.
 They are not written to the WAL, nor are they stored in the pager cache.
 
 #### Pointer map
-[//]: # (TODO)
-
 Each cell that is moved between internal tree nodes must have its child's parent pointer updated.
-If the parent pointers are embedded in the nodes, splits and merges become very expensive, since each transferred cell requires the child page to be written.
+If the parent pointers are embedded in the nodes, splits and merges become very expensive, since each transferred cell requires the child page to be updated.
 In addition to facilitating the vacuum operation, pointer maps make splits and merges much more efficient by consolidating many parent pointers on a single page.
+
+The pointer map is a collection of pointer map entries for every non-pointer map page in the database.
+Each pointer map entry consists of the following fields:
+
+| Offset | Size   | Name     | Purpose                                   |
+|:-------|:-------|:---------|:------------------------------------------|
+| 0      | 1      | Type     | Page type (see [pager.h](../src/pager.h)) |
+| 1      | 4      | BackPtr  | Page ID of the page's parent              |
+
+The pointer map is spread out over 0 or more specific database pages called pointer map pages.
+The first pointer map page is always on page 2, that is, the page right after the root page.
+Each pointer map page holds `kPageSize / 5` entries: one for each of the `kPageSize / 5` pages directly following it.
+Every other pointer map page is located on the page following the last page referenced by the previous pointer map page.
 
 ### WAL
 

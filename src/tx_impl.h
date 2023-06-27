@@ -30,13 +30,13 @@ public:
     }
 
     auto create_bucket(const BucketOptions &options, const Slice &name, Bucket *b_out) -> Status override;
-    [[nodiscard]] auto open_bucket(const Slice &name, Bucket &b_out) const -> Status override;
+    auto open_bucket(const Slice &name, Bucket &b_out) const -> Status override;
     auto drop_bucket(const Slice &name) -> Status override;
     auto vacuum() -> Status override;
     auto commit() -> Status override;
 
     [[nodiscard]] auto new_cursor(const Bucket &b) const -> Cursor * override;
-    [[nodiscard]] auto get(const Bucket &b, const Slice &key, std::string *value) const -> Status override;
+    auto get(const Bucket &b, const Slice &key, std::string *value) const -> Status override;
     auto put(const Bucket &b, const Slice &key, const Slice &value) -> Status override;
     auto erase(const Bucket &b, const Slice &key) -> Status override;
 

@@ -5,7 +5,6 @@
 #include "schema.h"
 #include "encoding.h"
 #include "logging.h"
-#include "scope_guard.h"
 #include "tree.h"
 
 namespace calicodb
@@ -186,6 +185,15 @@ auto Schema::construct_bucket_state(Id root_id) -> Bucket
     return Bucket{itr->second.tree};
 }
 
+auto Schema::use_bucket(const Bucket &b) -> void
+{
+    CALICODB_EXPECT_NE(b.state, nullptr);
+    if (m_recent && m_recent != b.state) {
+        m_recent->finish_operation();
+    }
+    m_recent = reinterpret_cast<const Tree *>(b.state);
+}
+
 auto Schema::drop_bucket(const Slice &name) -> Status
 {
     std::string value;
@@ -242,15 +250,13 @@ auto Schema::vacuum_finish() -> Status
 {
     auto *c = new_cursor();
     c->seek_first();
-    ScopeGuard guard = [c] {
-        delete c;
-    };
 
     Status s;
     while (c->is_valid()) {
         Id old_id;
         if (!decode_and_check_root_id(c->value(), old_id)) {
-            return corrupted_root_id(c->key().to_string(), c->value());
+            s = corrupted_root_id(c->key().to_string(), c->value());
+            break;
         }
         const auto root = m_reroot.find(old_id);
         if (root != end(m_reroot)) {
@@ -275,20 +281,23 @@ auto Schema::vacuum_finish() -> Status
         }
         c->next();
     }
-    const auto missed_roots = m_reroot.size();
-    m_reroot.clear();
-
-    if (s.is_ok() && missed_roots > 0) {
+    if (s.is_ok() && !m_reroot.empty()) {
         std::string message("missed ");
-        append_number(message, missed_roots);
+        append_number(message, m_reroot.size());
         message.append(" bucket(s)");
-        return Status::corruption(message);
+        s = Status::corruption(message);
     }
+    m_reroot.clear();
+    delete c;
     return s;
 }
 
-auto Schema::vacuum_freelist() -> Status
+auto Schema::vacuum() -> Status
 {
+    if (m_recent) {
+        m_recent->finish_operation();
+        m_recent = nullptr;
+    }
     return m_map->vacuum(*this);
 }
 

@@ -29,11 +29,15 @@ public:
     auto create_bucket(const BucketOptions &options, const Slice &name, Bucket *b_out) -> Status;
     auto open_bucket(const Slice &name, Bucket &b_out) -> Status;
     auto drop_bucket(const Slice &name) -> Status;
-    auto vacuum_freelist() -> Status;
 
-    // Write updated root page IDs for buckets that were closed during vacuum, if any
-    // buckets were rerooted
-    auto vacuum_finish() -> Status;
+    // Set a bucket `b` as the most-recently-used bucket
+    // This class keeps the most-recently-used bucket's internal tree cursor active. A
+    // root-to-leaf traversal can be avoided if the cursor is already on the correct node.
+    // Other buckets should have their cursors cleared so that the system doesn't run out
+    // of pager buffers (each live cursor holds onto a page reference).
+    auto use_bucket(const Bucket &b) -> void;
+
+    auto vacuum() -> Status;
 
     [[nodiscard]] static auto decode_root_id(const Slice &data, Id &out) -> bool;
     static auto encode_root_id(Id id, std::string &out) -> void;
@@ -48,9 +52,14 @@ private:
     template <class T>
     using HashMap = std::unordered_map<Id, T, Id::Hash>;
 
-    // Change the root page of a bucket from `old_id` to `new_id` during vacuum
     friend class Tree;
+
+    // Change the root page of a bucket from `old_id` to `new_id` during vacuum
     auto vacuum_reroot(Id old_id, Id new_id) -> void;
+
+    // Write updated root page IDs for buckets that were closed during vacuum, if any
+    // buckets were rerooted
+    auto vacuum_finish() -> Status;
 
     struct RootedTree {
         Tree *tree = nullptr;
@@ -63,6 +72,9 @@ private:
     Pager *m_pager;
     char *m_scratch;
     Tree *m_map;
+
+    // Pointer to the most-recently-accessed tree.
+    const Tree *m_recent = nullptr;
 };
 
 } // namespace calicodb
