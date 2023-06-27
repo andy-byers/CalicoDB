@@ -16,12 +16,13 @@ namespace calicodb
 class CursorImpl;
 class Pager;
 class Tree;
+struct Stat;
 
 // Representation of the database schema
 class Schema final
 {
 public:
-    explicit Schema(Pager &pager, const Status &status, char *scratch);
+    explicit Schema(Pager &pager, const Status &status, Stat &stat, char *scratch);
 
     [[nodiscard]] auto new_cursor() -> Cursor *;
 
@@ -68,10 +69,12 @@ private:
 
     HashMap<RootedTree> m_trees;
     HashMap<Id> m_reroot;
-    const Status *m_status;
-    Pager *m_pager;
-    char *m_scratch;
-    Tree *m_map;
+
+    const Status *const m_status;
+    Pager *const m_pager;
+    char *const m_scratch;
+    Tree *const m_map;
+    Stat *const m_stat;
 
     // Pointer to the most-recently-accessed tree.
     const Tree *m_recent = nullptr;

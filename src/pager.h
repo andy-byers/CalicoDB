@@ -6,6 +6,7 @@
 #define CALICODB_PAGER_H
 
 #include "bufmgr.h"
+#include "stat.h"
 #include "wal.h"
 
 namespace calicodb
@@ -31,6 +32,7 @@ public:
         Env *env;
         Logger *log;
         Status *status;
+        Stat *stat;
         BusyHandler *busy;
         std::size_t frame_count;
         Options::SyncMode sync_mode;
@@ -38,27 +40,6 @@ public:
     };
 
     ~Pager();
-
-    enum StatType {
-        kStatRead,
-        kStatCacheHits,
-        kStatCacheMisses,
-        kStatTypeCount
-    };
-    using Stats = StatCounters<kStatTypeCount>;
-
-    [[nodiscard]] auto stats() const -> const Stats &
-    {
-        m_stats.stats[kStatCacheHits] = m_bufmgr.cache_hits;
-        m_stats.stats[kStatCacheMisses] = m_bufmgr.cache_misses;
-        return m_stats;
-    }
-
-    [[nodiscard]] auto wal_stats() const -> Wal::Stats
-    {
-        static constexpr Wal::Stats kEmpty;
-        return m_wal ? m_wal->stats() : kEmpty;
-    }
 
     [[nodiscard]] auto page_count() const -> U32
     {
@@ -86,8 +67,13 @@ public:
     auto checkpoint(bool reset) -> Status;
 
     auto allocate(PageRef *&page_out) -> Status;
-    auto destroy(PageRef *&page) -> Status;
     auto acquire(Id page_id, PageRef *&page_out) -> Status;
+
+    // Push a database `page` onto the freelist
+    // Returns an OK status on success, and a non-OK status on failure. The caller can
+    // consider the `page` "released", regardless of the return status (release() is
+    // called on the `page` unconditionally).
+    auto destroy(PageRef *&page) -> Status;
     auto mark_dirty(PageRef &page) -> void;
     [[nodiscard]] auto get_root() -> PageRef &;
 
@@ -140,7 +126,6 @@ private:
     auto flush_dirty_pages() -> Status;
     auto purge_page(PageRef &victim) -> void;
 
-    mutable Stats m_stats;
     mutable Mode m_mode = kOpen;
 
     Bufmgr m_bufmgr;
@@ -150,6 +135,7 @@ private:
     Logger *const m_log;
     File *const m_file;
     Wal *const m_wal;
+    Stat *const m_stat;
     BusyHandler *const m_busy;
 
     U32 m_page_count = 0;

@@ -56,6 +56,7 @@ auto DBImpl::open(const Options &sanitized) -> Status
         m_env,
         m_log,
         &m_status,
+        &m_stat,
         m_busy,
         (sanitized.cache_size + kPageSize - 1) / kPageSize,
         sanitized.sync_mode,
@@ -170,16 +171,22 @@ auto DBImpl::get_property(const Slice &name, std::string *out) const -> bool
                 "------------------------\n"
                 "DB read(MB)   %10.4f\n"
                 "DB write(MB)  %10.4f\n"
+                "DB sync       %10llu\n"
                 "WAL read(MB)  %10.4f\n"
                 "WAL write(MB) %10.4f\n"
+                "WAL sync      %10llu\n"
+                "SMO count     %10llu\n"
                 "Cache hit %%   %10.4f\n",
-                static_cast<double>(m_pager->stats().stats[Pager::kStatRead]) / 1'048'576.0,
-                static_cast<double>(m_pager->wal_stats().stats[Wal::kStatWriteDB]) / 1'048'576.0,
-                static_cast<double>(m_pager->wal_stats().stats[Wal::kStatReadWal]) / 1'048'576.0,
-                static_cast<double>(m_pager->wal_stats().stats[Wal::kStatWriteWal]) / 1'048'576.0,
-                static_cast<double>(m_pager->stats().stats[Pager::kStatCacheHits]) /
-                    static_cast<double>(m_pager->stats().stats[Pager::kStatCacheHits] +
-                                        m_pager->stats().stats[Pager::kStatCacheMisses]));
+                static_cast<double>(m_stat.counters[Stat::kReadDB]) / 1'048'576.0,
+                static_cast<double>(m_stat.counters[Stat::kWriteDB]) / 1'048'576.0,
+                m_stat.counters[Stat::kSyncDB],
+                static_cast<double>(m_stat.counters[Stat::kReadWal]) / 1'048'576.0,
+                static_cast<double>(m_stat.counters[Stat::kWriteWal]) / 1'048'576.0,
+                m_stat.counters[Stat::kSyncWal],
+                m_stat.counters[Stat::kSMOCount],
+                static_cast<double>(m_stat.counters[Stat::kCacheHits]) /
+                    static_cast<double>(m_stat.counters[Stat::kCacheHits] +
+                                        m_stat.counters[Stat::kCacheMisses]));
             out->append(buffer);
             return true;
         }
@@ -220,7 +227,7 @@ auto DBImpl::prepare_tx(bool write, TxType *&tx_out) const -> Status
         s = m_pager->start_writer();
     }
     if (s.is_ok()) {
-        m_tx = new TxImpl(*m_pager, m_status, m_scratch);
+        m_tx = new TxImpl(*m_pager, m_status, m_stat, m_scratch);
         m_tx->m_backref = &m_tx;
         tx_out = m_tx;
     } else {

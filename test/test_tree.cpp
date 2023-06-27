@@ -23,6 +23,7 @@ public:
     FakeEnv *m_env;
     std::string m_scratch;
     Status m_status;
+    Stat m_stat;
     Pager *m_pager = nullptr;
     File *m_file = nullptr;
     Tree *m_tree = nullptr;
@@ -40,6 +41,7 @@ public:
             m_env,
             nullptr,
             &m_status,
+            &m_stat,
             nullptr,
             kMinFrameCount * 2,
             Options::kSyncNormal,
@@ -84,7 +86,7 @@ public:
     {
         EXPECT_OK(m_pager->start_reader());
         EXPECT_OK(m_pager->start_writer());
-        m_tree = new Tree(*m_pager, m_scratch.data(), nullptr);
+        m_tree = new Tree(*m_pager, m_stat, m_scratch.data(), nullptr);
     }
 
     auto close() const -> void
@@ -486,7 +488,7 @@ protected:
     auto SetUp() -> void override
     {
         open();
-        m_schema = new Schema(*m_pager, m_status, m_scratch.data());
+        m_schema = new Schema(*m_pager, m_status, m_stat, m_scratch.data());
         add_initial_records(*this);
     }
 
@@ -835,7 +837,8 @@ public:
         EXPECT_OK(Tree::create(*m_pager, &root));
         ++last_tree_id.value;
         root_ids.emplace_back(root);
-        multi_tree.emplace_back(std::make_unique<Tree>(*m_pager, m_scratch.data(), &root_ids.back()));
+        multi_tree.emplace_back(std::make_unique<Tree>(
+            *m_pager, m_stat, m_scratch.data(), &root_ids.back()));
         return multi_tree.size() - 1;
     }
 

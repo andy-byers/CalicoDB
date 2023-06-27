@@ -20,12 +20,13 @@ namespace calicodb
 class Pager;
 class File;
 class Env;
+struct Stat;
 
 // Manages database pages that have been read from stable storage
 class Bufmgr final
 {
 public:
-    explicit Bufmgr(std::size_t frame_count);
+    explicit Bufmgr(std::size_t frame_count, Stat &stat);
     ~Bufmgr();
 
     // Get a reference to the root page, which is always in-memory, but is not
@@ -89,9 +90,6 @@ public:
     void operator=(Bufmgr &) = delete;
     Bufmgr(Bufmgr &) = delete;
 
-    U64 cache_hits = 0;
-    U64 cache_misses = 0;
-
 private:
     [[nodiscard]] auto buffer_slot(std::size_t index) -> char *
     {
@@ -125,6 +123,8 @@ private:
 
     // Used to perform bounds checking in assertions.
     std::size_t m_frame_count = 0;
+
+    Stat *const m_stat;
 
     unsigned m_refsum = 0;
 };

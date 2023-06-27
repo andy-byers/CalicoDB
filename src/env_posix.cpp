@@ -4,7 +4,6 @@
 
 #include "env_posix.h"
 #include "logging.h"
-#include "scope_guard.h"
 #include <ctime>
 #include <fcntl.h>
 #include <libgen.h>
@@ -745,31 +744,27 @@ auto PosixFile::shm_map(std::size_t r, bool extend, volatile void *&out) -> Stat
     // request for region "r".
     const auto mmap_scale = PosixFs::s_fs.mmap_scale;
     const auto request = (r + mmap_scale) / mmap_scale * mmap_scale;
-    ScopeGuard scope = [&out, r, snode] {
-        if (r < snode->regions.size()) {
-            out = snode->regions[r];
-        } else {
-            out = nullptr;
-        }
-    };
 
+    Status s;
     if (snode->regions.size() < request) {
         std::size_t file_size;
         if (struct stat st = {}; fstat(snode->file, &st)) {
-            return posix_error(errno);
+            s = posix_error(errno);
+            goto cleanup;
         } else {
             file_size = static_cast<std::size_t>(st.st_size);
         }
         if (file_size < request * File::kShmRegionSize) {
             if (!extend) {
-                return Status::ok();
+                goto cleanup;
             }
             // Write a '\0' to the end of the highest-addressed region to extend the
             // file. SQLite writes a byte to the end of each OS page, causing the pages
             // to be allocated immediately (to reduce the chance of a later SIGBUS).
             // This should be good enough for now.
             if (seek_and_write(snode->file, request * File::kShmRegionSize - 1, Slice("", 1))) {
-                return posix_error(errno);
+                s = posix_error(errno);
+                goto cleanup;
             }
         }
 
@@ -781,7 +776,8 @@ auto PosixFile::shm_map(std::size_t r, bool extend, volatile void *&out) -> Stat
                 MAP_SHARED, snode->file,
                 static_cast<ssize_t>(File::kShmRegionSize * snode->regions.size()));
             if (p == MAP_FAILED) {
-                return posix_error(errno);
+                s = posix_error(errno);
+                break;
             }
             // Store a pointer to the start of each memory region.
             for (std::size_t i = 0; i < mmap_scale; ++i) {
@@ -789,7 +785,14 @@ auto PosixFile::shm_map(std::size_t r, bool extend, volatile void *&out) -> Stat
             }
         }
     }
-    return Status::ok();
+
+cleanup:
+    if (r < snode->regions.size()) {
+        out = snode->regions[r];
+    } else {
+        out = nullptr;
+    }
+    return s;
 }
 
 auto PosixFile::shm_lock(std::size_t r, std::size_t n, ShmLockFlag flags) -> Status

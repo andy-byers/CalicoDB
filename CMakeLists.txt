@@ -19,7 +19,6 @@ if (CMAKE_CURRENT_SOURCE_DIR STREQUAL CMAKE_SOURCE_DIR)
     set(MAIN_PROJECT On)
 endif()
 
-option(CALICODB_BuildBenchmarks "Build the benchmarks" Off)
 option(CALICODB_BuildFuzzers "Build the fuzz targets" Off)
 option(CALICODB_BuildTests "Build the tests" ${MAIN_PROJECT})
 option(CALICODB_Install "Install the CMake targets during the install step" ${MAIN_PROJECT})
@@ -91,10 +90,6 @@ if(CALICODB_BuildTests)
     include(CTest)
     enable_testing()
     add_subdirectory(test)
-endif()
-
-if(CALICODB_BuildBenchmarks)
-    add_subdirectory(benchmarks)
 endif()
 
 if(CALICODB_BuildFuzzers)

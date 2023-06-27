@@ -3,8 +3,8 @@
 // LICENSE.md. See AUTHORS.md for a list of contributor names.
 
 #include "node.h"
-#include <limits>
 #include <gtest/gtest.h>
+#include <limits>
 
 namespace calicodb::test
 {
@@ -259,7 +259,7 @@ TEST_F(NodeTests, OverwriteOnEraseBehavior)
 
         for (int i = 0; i < 2; ++i) {
             ASSERT_EQ(Slice(cell_in.key, cell_in.key_size) ==
-                      Slice(cell_out.key, cell_out.key_size),
+                          Slice(cell_out.key, cell_out.key_size),
                       i == 0 || t == kInternalNode);
             if (i == 0) {
                 // Node::erase() should overwrite at most the first 4 bytes of the cell, which in this case,

@@ -52,11 +52,12 @@ public:
     auto previous() -> void override;
 };
 
-Schema::Schema(Pager &pager, const Status &status, char *scratch)
+Schema::Schema(Pager &pager, const Status &status, Stat &stat, char *scratch)
     : m_status(&status),
       m_pager(&pager),
       m_scratch(scratch),
-      m_map(new Tree(pager, scratch, nullptr))
+      m_map(new Tree(pager, stat, scratch, nullptr)),
+      m_stat(&stat)
 {
 }
 
@@ -180,7 +181,10 @@ auto Schema::construct_bucket_state(Id root_id) -> Bucket
         itr = m_trees.insert(itr, {root_id, {}});
         itr->second.root = root_id;
         itr->second.tree = new Tree(
-            *m_pager, m_scratch, &itr->second.root);
+            *m_pager,
+            *m_stat,
+            m_scratch,
+            &itr->second.root);
     }
     return Bucket{itr->second.tree};
 }
@@ -214,7 +218,7 @@ auto Schema::drop_bucket(const Slice &name) -> Status
         delete itr->second.tree;
         m_trees.erase(root_id);
     }
-    Tree drop(*m_pager, m_scratch, &root_id);
+    Tree drop(*m_pager, *m_stat, m_scratch, &root_id);
     s = Tree::destroy(drop);
     if (s.is_ok()) {
         s = m_map->erase(name);

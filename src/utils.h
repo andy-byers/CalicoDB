@@ -165,11 +165,6 @@ auto operator<<(std::ostream &os, const Slice &slice) -> std::ostream &
     return os << slice.to_string();
 }
 
-template <std::size_t N>
-struct StatCounters {
-    U64 stats[N] = {};
-};
-
 } // namespace calicodb
 
 #endif // CALICODB_UTILS_H
