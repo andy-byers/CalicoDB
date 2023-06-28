@@ -32,14 +32,14 @@ jobs:
 
       - name: Setup
         run: >-
-          cmake -S ${{ github.workspace }} -B ${{ env.CMAKE_BUILD_DIR }}
-                -DCMAKE_BUILD_TYPE=${{ env.CMAKE_BUILD_TYPE }} ${{ matrix.fuzz }}
-                -DCMAKE_CXXFLAGS='-fsanitize=address,undefined'
+          cmake -S "${{ github.workspace }}" -B "${{ env.CMAKE_BUILD_DIR }}"
+          -DCMAKE_BUILD_TYPE=${{ env.CMAKE_BUILD_TYPE }} ${{ matrix.fuzz }}
+          -DCMAKE_CXXFLAGS='-fsanitize=address,undefined'
 
       - name: Build
         run: >-
           cmake --build "${{ env.CMAKE_BUILD_DIR }}" 
-                --config "${{ env.CMAKE_BUILD_TYPE }}"
+          --config "${{ env.CMAKE_BUILD_TYPE }}"
 
       - name: Test
         working-directory: ${{ github.workspace }}/build
