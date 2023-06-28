@@ -129,7 +129,6 @@ TEST_F(TreeTests, ConstructsAndDestructs)
 
 TEST_F(TreeTests, KeysAreUnique)
 {
-    bool exists;
     ASSERT_OK(m_tree->put("a", make_value('x')));
     ASSERT_OK(m_tree->put("b", make_value('2')));
     ASSERT_OK(m_tree->put("a", make_value('1')));

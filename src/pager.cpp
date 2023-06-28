@@ -238,7 +238,9 @@ auto Pager::purge_pages(bool purge_all) -> void
         auto *save = p;
         p = p->next_dirty;
         m_dirtylist.remove(*save);
-        if (!save->page_id.is_root()) {
+        if (save->page_id.is_root()) {
+            m_refresh = true;
+        } else {
             m_bufmgr.erase(save->page_id);
         }
     }

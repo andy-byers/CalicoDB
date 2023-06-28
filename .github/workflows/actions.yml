@@ -33,7 +33,7 @@ jobs:
           -DCMAKE_BUILD_TYPE=${{ env.CMAKE_BUILD_TYPE }}
           -DCMAKE_CXXFLAGS='-fsanitize=address,undefined'
           -DCALICO_BuildBenchmarks=On
-          -DCALICO_BUILD_EXAMPLES=On
+          -DCALICO_BuildFuzzers=On
           -DCALICO_BuildTests=On
       - name: Build
         run: >-
