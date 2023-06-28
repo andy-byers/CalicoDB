@@ -23,7 +23,7 @@ jobs:
 
     env:
       CMAKE_BUILD_DIR: ${{ github.workspace }}/build
-      CMAKE_BUILD_TYPE: RelWithAssertions
+      CMAKE_BUILD_TYPE: ${{ matrix.build_type }}
       CXX: ${{ matrix.compiler }}
       BINARY_PATH: ${{ github.workspace }}/build
 
