@@ -17,6 +17,12 @@ jobs:
         build_type: [Debug, Release]
         include:
           - compiler: clang
+            CC: clang
+            CXX: clang++
+          - compiler: gcc
+            CC: gcc
+            CXX: g++
+          - compiler: clang
             os: ubuntu-latest
             build_type: Release
             fuzz: -DCALICODB_BuildFuzzers=On -DCALICODB_FuzzerStandalone=On
@@ -24,7 +30,8 @@ jobs:
     env:
       CMAKE_BUILD_DIR: ${{ github.workspace }}/build
       CMAKE_BUILD_TYPE: ${{ matrix.build_type }}
-      CXX: ${{ matrix.compiler }}
+      CC: ${{ matrix.CC }}
+      CXX: ${{ matrix.CXX }}
       BINARY_PATH: ${{ github.workspace }}/build
 
     steps:

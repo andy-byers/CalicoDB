@@ -14,6 +14,7 @@ jobs:
       CMAKE_BUILD_DIR: ${{ github.workspace }}/build
       BINARY_PATH: ${{ github.workspace }}/build
       LDFLAGS: -fsanitize=fuzzer
+      CC: clang
       CXX: clang++
 
     steps:
@@ -25,6 +26,7 @@ jobs:
           -DCMAKE_BUILD_TYPE=Release -DCALICODB_BuildFuzzers=On
           -DCALICODB_FuzzerStandalone=Off
           -DCMAKE_CXXFLAGS='-fsanitize=fuzzer,address,undefined'
+          -DCMAKE_LDFLAGS='-fsanitize=fuzzer'
 
       - name: Build
         run: >-
