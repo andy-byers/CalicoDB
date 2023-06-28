@@ -1,0 +1,36 @@
+name: linux
+
+on: [push, pull_request]
+
+permissions:
+  contents: read
+
+jobs:
+  build-and-fuzz:
+    name: Build & Fuzz
+    runs-on: ubuntu-latest
+
+    env:
+      CMAKE_BUILD_DIR: ${{ github.workspace }}/build
+      BINARY_PATH: ${{ github.workspace }}/build
+      CXX: clang++
+
+    steps:
+      - uses: actions/checkout@v3
+
+      - name: Configure
+        run: >-
+          cmake -S ${{ github.workspace }} -B ${{ env.CMAKE_BUILD_DIR }}
+                -DCMAKE_BUILD_TYPE=Release -DCALICODB_BuildFuzzers=On
+                -DCALICODB_FuzzerStandalone=Off
+                -DCMAKE_CXXFLAGS='-fsanitize=fuzzer,address,undefined'
+
+      - name: Build
+        run: >-
+          cmake --build ${{ env.CMAKE_BUILD_DIR }} 
+                --config Release -j
+
+      - name: Fuzz
+        run: ./fuzzers/db_fuzzer -seed=42 -max_total_time=60
+        env:
+          CTEST_OUTPUT_ON_FAILURE: True

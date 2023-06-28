@@ -150,6 +150,8 @@ auto Pager::start_reader() -> Status
             s = refresh_state();
         }
         if (s.is_ok()) {
+            m_page_count = FileHdr::get_page_count(
+                m_bufmgr.root()->page);
             m_mode = kRead;
         }
     }
@@ -484,7 +486,6 @@ auto Pager::refresh_state() -> Status
             s = Status::corruption();
         }
         if (s.is_ok()) {
-            m_page_count = FileHdr::get_page_count(root);
             m_refresh = false;
         }
     }
