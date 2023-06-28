@@ -13,6 +13,7 @@ jobs:
     env:
       CMAKE_BUILD_DIR: ${{ github.workspace }}/build
       BINARY_PATH: ${{ github.workspace }}/build
+      LDFLAGS: -fsanitize=fuzzer
       CXX: clang++
 
     steps:
