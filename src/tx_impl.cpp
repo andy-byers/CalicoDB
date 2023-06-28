@@ -9,8 +9,8 @@
 namespace calicodb
 {
 
-TxImpl::TxImpl(Pager &pager, const Status &status, char *scratch)
-    : m_schema_obj(pager, status, scratch),
+TxImpl::TxImpl(Pager &pager, const Status &status, Stat &stat, char *scratch)
+    : m_schema_obj(pager, status, stat, scratch),
       m_status(&status),
       m_schema(m_schema_obj.new_cursor()),
       m_pager(&pager)
@@ -79,7 +79,9 @@ auto TxImpl::new_cursor(const Bucket &b) const -> Cursor *
         return nullptr;
     }
     ++m_user_cursors;
-    auto *cursor = new CursorImpl(*static_cast<Tree *>(b.state), &m_user_cursors);
+    m_schema_obj.use_bucket(b);
+    auto *cursor = new CursorImpl(
+        *static_cast<Tree *>(b.state), &m_user_cursors);
     if (!m_status->is_ok()) {
         cursor->clear(*m_status);
     }

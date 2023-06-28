@@ -6,6 +6,7 @@
 #define CALICODB_DB_IMPL_H
 
 #include "calicodb/db.h"
+#include "stat.h"
 
 namespace calicodb
 {
@@ -40,6 +41,7 @@ private:
 
     mutable Status m_status;
     mutable TxImpl *m_tx = nullptr;
+    mutable Stat m_stat;
     char *m_scratch = nullptr;
 
     Pager *m_pager = nullptr;

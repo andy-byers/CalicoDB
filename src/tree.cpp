@@ -7,6 +7,7 @@
 #include "logging.h"
 #include "pager.h"
 #include "schema.h"
+#include "stat.h"
 #include "utils.h"
 #include <functional>
 
@@ -512,7 +513,7 @@ auto Tree::resolve_overflow() -> Status
         } else {
             s = split_nonroot();
         }
-        ++m_stats.stats[kStatSMOCount];
+        ++m_stat->counters[Stat::kSMOCount];
     }
     m_c.clear();
     return s;
@@ -718,7 +719,7 @@ auto Tree::resolve_underflow() -> Status
         if (!s.is_ok()) {
             break;
         }
-        ++m_stats.stats[kStatSMOCount];
+        ++m_stat->counters[Stat::kSMOCount];
     }
     m_c.clear();
     return s;
@@ -976,8 +977,9 @@ auto Tree::fix_root() -> Status
     return s;
 }
 
-Tree::Tree(Pager &pager, char *scratch, const Id *root_id)
+Tree::Tree(Pager &pager, Stat &stat, char *scratch, const Id *root_id)
     : m_c(*this),
+      m_stat(&stat),
       m_node_scratch(scratch + kPageSize),
       m_cell_scratch{
           scratch,
@@ -1025,9 +1027,6 @@ auto Tree::get(const Slice &key, std::string *value) const -> Status
         Slice slice;
         s = read_value(m_c.node(), m_c.index(), *value, &slice);
         value->resize(slice.size());
-        if (s.is_ok()) {
-            m_stats.stats[kStatRead] += slice.size();
-        }
     }
     return s;
 }
@@ -1071,7 +1070,6 @@ auto Tree::put(const Slice &key, const Slice &value) -> Status
                         s = resolve_overflow();
                     }
                 }
-                m_stats.stats[kStatWrite] += key.size() + value.size();
             }
         }
     }

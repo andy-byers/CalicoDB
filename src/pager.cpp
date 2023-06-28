@@ -7,6 +7,7 @@
 #include "freelist.h"
 #include "header.h"
 #include "logging.h"
+#include "stat.h"
 
 namespace calicodb
 {
@@ -52,7 +53,7 @@ auto Pager::read_page_from_file(PageRef &ref, std::size_t *size_out) const -> St
     const auto offset = ref.page_id.as_index() * kPageSize;
     auto s = m_file->read(offset, kPageSize, ref.page, &slice);
     if (s.is_ok()) {
-        m_stats.stats[kStatRead] += slice.size();
+        m_stat->counters[Stat::kReadDB] += slice.size();
         std::memset(ref.page + slice.size(), 0, kPageSize - slice.size());
         if (size_out) {
             *size_out = slice.size();
@@ -72,6 +73,7 @@ auto Pager::open(const Parameters &param, Pager *&out) -> Status
         param.env,
         param.db_file,
         param.log,
+        param.stat,
         param.busy,
         param.sync_mode,
         param.lock_mode,
@@ -87,15 +89,17 @@ auto Pager::open(const Parameters &param, Pager *&out) -> Status
 }
 
 Pager::Pager(Wal &wal, const Parameters &param)
-    : m_bufmgr(param.frame_count),
+    : m_bufmgr(param.frame_count, *param.stat),
       m_status(param.status),
       m_log(param.log),
       m_file(param.db_file),
       m_wal(&wal),
+      m_stat(param.stat),
       m_busy(param.busy)
 {
     CALICODB_EXPECT_NE(m_file, nullptr);
     CALICODB_EXPECT_NE(m_status, nullptr);
+    CALICODB_EXPECT_NE(m_stat, nullptr);
 }
 
 Pager::~Pager()
@@ -234,7 +238,9 @@ auto Pager::purge_pages(bool purge_all) -> void
         auto *save = p;
         p = p->next_dirty;
         m_dirtylist.remove(*save);
-        if (!save->page_id.is_root()) {
+        if (save->page_id.is_root()) {
+            m_refresh = true;
+        } else {
             m_bufmgr.erase(save->page_id);
         }
     }

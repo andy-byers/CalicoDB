@@ -16,6 +16,7 @@ namespace calicodb
 class Env;
 class File;
 struct PageRef;
+struct Stat;
 
 struct HashIndexHdr {
     U32 version;
@@ -113,6 +114,7 @@ public:
         Env *env;
         File *db_file;
         Logger *info_log;
+        Stat *stat;
         BusyHandler *busy;
         Options::SyncMode sync_mode;
         Options::LockMode lock_mode;
@@ -150,16 +152,6 @@ public:
 
     // READER -> UNLOCKED
     virtual auto finish_reader() -> void = 0;
-
-    enum StatType {
-        kStatReadWal,
-        kStatWriteWal,
-        kStatWriteDB,
-        kStatTypeCount
-    };
-    using Stats = StatCounters<kStatTypeCount>;
-
-    [[nodiscard]] virtual auto stats() const -> const Stats & = 0;
 };
 
 } // namespace calicodb

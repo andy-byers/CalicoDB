@@ -17,12 +17,13 @@ class BufmgrTests : public testing::Test
 {
 public:
     explicit BufmgrTests()
-        : mgr(kMinFrameCount)
+        : mgr(kMinFrameCount, m_stat)
     {
     }
 
     ~BufmgrTests() override = default;
 
+    Stat m_stat;
     Bufmgr mgr;
 };
 
@@ -90,6 +91,7 @@ protected:
     Pager *m_pager = nullptr;
     File *m_file = nullptr;
     Status m_status;
+    Stat m_stat;
 
     explicit PagerTests()
         : m_env(new FakeEnv())
@@ -126,6 +128,7 @@ protected:
                 m_env,
                 nullptr,
                 &m_status,
+                &m_stat,
                 nullptr,
                 kMinFrameCount,
                 Options::kSyncNormal,
@@ -379,6 +382,18 @@ TEST_F(PagerTests, Freelist)
     });
     pager_view([this] {
         ASSERT_EQ(m_page_ids.back().value, m_pager->page_count());
+    });
+}
+
+TEST_F(PagerTests, FreelistCorruption)
+{
+    pager_update([this] {
+        PageRef *page;
+        allocate_page(page);
+        page->page_id.value = m_pager->page_count() + 1;
+        ASSERT_NOK(m_pager->destroy(page));
+        auto *root = &m_pager->get_root();
+        ASSERT_NOK(m_pager->destroy(root));
     });
 }
 

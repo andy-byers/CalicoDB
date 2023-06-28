@@ -7,13 +7,15 @@
 #include "calicodb/options.h"
 #include "encoding.h"
 #include "header.h"
+#include "stat.h"
 
 namespace calicodb
 {
 
-Bufmgr::Bufmgr(std::size_t frame_count)
+Bufmgr::Bufmgr(std::size_t frame_count, Stat &stat)
     : m_buffer(new(std::align_val_t{kPageSize}) char[kPageSize * frame_count]),
-      m_frame_count(frame_count)
+      m_frame_count(frame_count),
+      m_stat(&stat)
 {
     for (std::size_t i = 1; i < m_frame_count; ++i) {
         m_available.emplace_back(buffer_slot(i));
@@ -41,10 +43,10 @@ auto Bufmgr::get(Id page_id) -> PageRef *
     CALICODB_EXPECT_FALSE(page_id.is_root());
     auto itr = m_map.find(page_id);
     if (itr == end(m_map)) {
-        ++cache_misses;
+        ++m_stat->counters[Stat::kCacheMisses];
         return nullptr;
     }
-    ++cache_hits;
+    ++m_stat->counters[Stat::kCacheHits];
     m_list.splice(end(m_list), m_list, itr->second);
     return &*itr->second;
 }
@@ -199,6 +201,7 @@ static auto dirtylist_merge(PageRef &lhs_ref, PageRef &rhs_ref) -> PageRef *
     return result.dirty;
 }
 
+// NOTE: Sorting routine is from SQLite (src/pcache.c).
 auto Dirtylist::sort() -> void
 {
 #ifndef NDEBUG

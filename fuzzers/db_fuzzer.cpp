@@ -5,6 +5,7 @@
 #include "fake_env.h"
 #include "fuzzer.h"
 #include "model.h"
+#include "tree.h"
 
 namespace calicodb
 {
@@ -400,7 +401,6 @@ auto DBFuzzer::fuzz(FuzzerStream &stream) -> bool
         CHECK_OK(c->status());
         delete c;
     }
-
     // All records should match between DB and ModelDB.
     c = m_tx->new_cursor(m_b);
     c->seek_first();

@@ -12,11 +12,12 @@ namespace calicodb
 
 struct Bucket;
 struct BucketOptions;
+struct Stat;
 
 class TxImpl : public Tx
 {
 public:
-    explicit TxImpl(Pager &pager, const Status &status, char *scratch);
+    explicit TxImpl(Pager &pager, const Status &status, Stat &stat, char *scratch);
     ~TxImpl() override;
 
     [[nodiscard]] auto status() const -> Status override

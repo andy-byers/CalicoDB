@@ -90,7 +90,7 @@ public:
         finish_operation();
     }
 
-    explicit Tree(Pager &pager, char *scratch, const Id *root_id);
+    explicit Tree(Pager &pager, Stat &stat, char *scratch, const Id *root_id);
     static auto create(Pager &pager, Id *out) -> Status;
     static auto destroy(Tree &tree) -> Status;
 
@@ -171,20 +171,6 @@ public:
     [[nodiscard]] auto root() const -> Id
     {
         return m_root_id ? *m_root_id : Id::root();
-    }
-
-    enum StatType {
-        kStatRead,
-        kStatWrite,
-        kStatSMOCount,
-        kStatTypeCount
-    };
-
-    using Stats = StatCounters<kStatTypeCount>;
-
-    [[nodiscard]] auto stats() const -> const Stats &
-    {
-        return m_stats;
     }
 
     [[nodiscard]] auto TEST_to_string() const -> std::string;
@@ -295,7 +281,7 @@ private:
     } m_c;
 
     // Various tree operation counts are tracked in this variable.
-    mutable Stats m_stats;
+    Stat *m_stat;
 
     // When the node pointed at by m_c overflows, store the cell that couldn't fit on the page here. The
     // location that the overflow cell should be placed is copied into the pid and idx fields from m_c.

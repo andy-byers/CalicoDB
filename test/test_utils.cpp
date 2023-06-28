@@ -7,7 +7,6 @@
 
 #include "encoding.h"
 #include "logging.h"
-#include "scope_guard.h"
 
 namespace calicodb::test
 {
@@ -86,19 +85,20 @@ auto append_varint(std::string *s, U32 v) -> void
     encode_varint(s->data() + s->size() - len, v);
 }
 
-TEST(Coding, Varint32) {
+TEST(Coding, Varint32)
+{
     std::string s;
     for (uint32_t i = 0; i < (32 * 32); i++) {
         uint32_t v = (i / 32) << (i % 32);
         append_varint(&s, v);
     }
 
-    const char* p = s.data();
-    const char* limit = p + s.size();
+    const char *p = s.data();
+    const char *limit = p + s.size();
     for (uint32_t i = 0; i < (32 * 32); i++) {
         uint32_t expected = (i / 32) << (i % 32);
         uint32_t actual;
-        const char* start = p;
+        const char *start = p;
         p = decode_varint(p, limit, actual);
         ASSERT_TRUE(p != nullptr);
         ASSERT_EQ(expected, actual);
@@ -107,14 +107,16 @@ TEST(Coding, Varint32) {
     ASSERT_EQ(p, s.data() + s.size());
 }
 
-TEST(Coding, Varint32Overflow) {
+TEST(Coding, Varint32Overflow)
+{
     uint32_t result;
     std::string input("\x81\x82\x83\x84\x85\x11");
     ASSERT_TRUE(decode_varint(input.data(), input.data() + input.size(),
-                               result) == nullptr);
+                              result) == nullptr);
 }
 
-TEST(Coding, Varint32Truncation) {
+TEST(Coding, Varint32Truncation)
+{
     uint32_t large_value = (1u << 31) + 100;
     std::string s;
     append_varint(&s, large_value);
@@ -486,51 +488,6 @@ TEST(Slice, NonPrintableSlice)
         // Unsigned comparison should come out the other way.
         ASSERT_LT(Slice(u).compare(v), 0);
     }
-}
-
-class ScopeGuardTests : public testing::Test
-{
-protected:
-    ScopeGuardTests()
-    {
-        m_callback = [this] {
-            ++m_calls;
-        };
-    }
-
-    ~ScopeGuardTests() override = default;
-
-    std::function<void()> m_callback;
-    int m_calls = 0;
-};
-
-TEST_F(ScopeGuardTests, CallbackIsCalledOnceOnScopeExit)
-{
-    {
-        ASSERT_EQ(m_calls, 0);
-        ScopeGuard guard(m_callback);
-    }
-    ASSERT_EQ(m_calls, 1);
-}
-
-TEST_F(ScopeGuardTests, CallbackIsNotCalledIfCancelled)
-{
-    {
-        ASSERT_EQ(m_calls, 0);
-        ScopeGuard guard(m_callback);
-        std::move(guard).cancel();
-    }
-    ASSERT_EQ(m_calls, 0);
-}
-
-TEST_F(ScopeGuardTests, CallbackIsNotCalledAgainIfInvoked)
-{
-    {
-        ASSERT_EQ(m_calls, 0);
-        ScopeGuard guard(m_callback);
-        std::move(guard).invoke();
-    }
-    ASSERT_EQ(m_calls, 1);
 }
 
 #if not NDEBUG
