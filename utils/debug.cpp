@@ -6,6 +6,7 @@
 #define CALICODB_UTILS_DEBUG_H
 
 #include "common.h"
+#include <iostream>
 #include "logging.h"
 #include "pager.h"
 
