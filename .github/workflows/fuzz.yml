@@ -24,7 +24,7 @@ jobs:
         run: >-
           cmake -S "${{ github.workspace }}" -B "${{ env.CMAKE_BUILD_DIR }}"
           -DCMAKE_BUILD_TYPE=Release -DCALICODB_BuildFuzzers=On
-          -DCALICODB_FuzzerStandalone=Off
+          -DCALICODB_FuzzerStandalone=Off -DCALICODB_BuildTests=Off
           -DCMAKE_CXXFLAGS='-fsanitize=fuzzer,address,undefined'
           -DCMAKE_LDFLAGS='-fsanitize=fuzzer'
 

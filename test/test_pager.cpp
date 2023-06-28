@@ -305,7 +305,7 @@ TEST_F(PagerTests, Rollback)
 {
     for (int iteration = 0; iteration < 6; ++iteration) {
         reopen(iteration < 3 ? Options::kLockNormal : Options::kLockExclusive);
-        std::size_t page_count;
+        std::size_t page_count = 0;
         pager_update([this, &page_count] {
             for (std::size_t i = 0; i < kManyPages; ++i) {
                 PageRef *page;
