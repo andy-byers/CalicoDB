@@ -34,6 +34,6 @@ jobs:
           --config Release -j
 
       - name: Fuzz
-        run: ./fuzzers/db_fuzzer -seed=42 -max_total_time=60
+        run: ${{ env.CMAKE_BUILD_DIR }}/fuzzers/db_fuzzer -seed=42 -max_total_time=60
         env:
           CTEST_OUTPUT_ON_FAILURE: True
