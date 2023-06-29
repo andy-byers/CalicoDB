@@ -116,7 +116,7 @@ private:
     PageRef m_root;
 
     // Storage for cached pages. Aligned to the page size.
-    char *m_buffer = nullptr;
+    char *const m_buffer = nullptr;
 
     // List of pointers to available buffer slots.
     std::list<char *> m_available;

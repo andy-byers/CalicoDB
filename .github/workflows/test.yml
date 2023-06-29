@@ -9,7 +9,7 @@ permissions:
 jobs:
   build-and-test:
     name: Build & Test (${{ matrix.compiler }} on ${{ matrix.os }})
-    runs-on: ubuntu-latest
+    runs-on: ${{ matrix.os }}
     strategy:
       matrix:
         compiler: [clang, gcc]
@@ -34,10 +34,9 @@ jobs:
       CMAKE_BUILD_TYPE: ${{ matrix.build_type }}
       CC: ${{ matrix.CC }}
       CXX: ${{ matrix.CXX }}
-      BINARY_PATH: ${{ github.workspace }}/build
 
     steps:
-      - uses: actions/checkout@v2
+      - uses: actions/checkout@v3
 
       - name: Setup
         run: >-

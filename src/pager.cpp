@@ -82,7 +82,12 @@ auto Pager::open(const Parameters &param, Pager *&out) -> Status
     auto s = Wal::open(wal_param, wal);
     if (s.is_ok()) {
         out = new Pager(*wal, param);
-    } else {
+        if (0 == out->m_bufmgr.available()) {
+            s = Status::invalid_argument("not enough memory for page cache");
+            delete out;
+        }
+    }
+    if (!s.is_ok()) {
         out = nullptr;
     }
     return s;
