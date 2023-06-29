@@ -31,9 +31,8 @@ jobs:
       CXX: ${{ matrix.CXX }}
 
     steps:
-      - uses: actions/checkout@v3
-
       - name: Checkout
+        uses: actions/checkout@v3
         with:
           repository: andy-byers/leveldb
           submodules: 'recursive'
