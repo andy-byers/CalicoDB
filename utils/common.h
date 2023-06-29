@@ -5,14 +5,16 @@
 #ifndef CALICODB_UTILS_COMMON_H
 #define CALICODB_UTILS_COMMON_H
 
+#include "calicodb/env.h"
 #include <algorithm>
 #include <climits>
 #include <functional>
 #include <random>
-#include "calicodb/env.h"
 
 namespace calicodb
 {
+
+class Pager;
 
 template <std::size_t Length = 16>
 static auto numeric_key(std::size_t key, char padding = '0') -> std::string
@@ -126,6 +128,9 @@ public:
         return dist(m_rng);
     }
 };
+
+// Print information about each database page to `os`
+auto print_database_overview(std::ostream &os, Pager &pager) -> void;
 
 } // namespace calicodb
 

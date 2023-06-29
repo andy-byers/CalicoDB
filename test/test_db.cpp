@@ -535,6 +535,43 @@ TEST_F(DBTests, UpdateThenView)
     } while (change_options(true));
 }
 
+TEST_F(DBTests, RollbackRootUpdate)
+{
+    do {
+        ASSERT_TRUE(m_db->update([](auto &tx) {
+                            Bucket b;
+                            for (std::size_t i = 0; i < 10; ++i) {
+                                auto s = tx.create_bucket(BucketOptions(), numeric_key(i), &b);
+                                if (!s.is_ok()) {
+                                    return s;
+                                }
+                                if (i == 5) {
+                                    s = tx.commit();
+                                    if (!s.is_ok()) {
+                                        return s;
+                                    }
+                                }
+                            }
+                            return Status::not_found("42");
+                        })
+                        .to_string() == "not found: 42");
+        ASSERT_OK(m_db->view([](const auto &tx) {
+            Bucket b;
+            Status s;
+            for (std::size_t i = 0; i < 10 && s.is_ok(); ++i) {
+                s = tx.open_bucket(numeric_key(i), b);
+                if (i <= 5) {
+                    EXPECT_OK(s);
+                } else {
+                    EXPECT_NOK(s);
+                    s = Status::ok();
+                }
+            }
+            return s;
+        }));
+    } while (change_options(true));
+}
+
 TEST_F(DBTests, RollbackUpdate)
 {
     std::size_t round = 0;

@@ -1,8 +1,11 @@
 # Modified from LevelDB's GitHub workflows storage.
 name: CI
+
 on: [pull_request, push]
+
 permissions:
   contents: read
+
 jobs:
   build-and-test:
     name: Build & Test (${{ matrix.compiler }} on ${{ matrix.os }})
@@ -11,34 +14,42 @@ jobs:
       matrix:
         compiler: [clang, gcc]
         os: [ubuntu-latest, macos-latest]
-        optimized: [true]
+        build_type: [Debug, Release]
         include:
+          # Compiler environment variables for each build type.
           - compiler: clang
             CC: clang
             CXX: clang++
           - compiler: gcc
             CC: gcc
             CXX: g++
+          # Build fuzzers with clang on ubuntu-latest only.
+          - compiler: clang
+            os: ubuntu-latest
+            build_type: Release
+            fuzz: -DCALICODB_BuildFuzzers=On -DCALICODB_FuzzerStandalone=On
+
     env:
       CMAKE_BUILD_DIR: ${{ github.workspace }}/build
-      CMAKE_BUILD_TYPE: RelWithAssertions
+      CMAKE_BUILD_TYPE: ${{ matrix.build_type }}
       CC: ${{ matrix.CC }}
       CXX: ${{ matrix.CXX }}
       BINARY_PATH: ${{ github.workspace }}/build
+
     steps:
       - uses: actions/checkout@v2
+
       - name: Setup
         run: >-
-          cmake -S "${{ github.workspace }}" -B "${{ env.CMAKE_BUILD_DIR }}" 
-          -DCMAKE_BUILD_TYPE=${{ env.CMAKE_BUILD_TYPE }}
+          cmake -S ${{ github.workspace }} -B ${{ env.CMAKE_BUILD_DIR }}
+          -DCMAKE_BUILD_TYPE=${{ env.CMAKE_BUILD_TYPE }} ${{ matrix.fuzz }}
           -DCMAKE_CXXFLAGS='-fsanitize=address,undefined'
-          -DCALICO_BuildBenchmarks=On
-          -DCALICO_BuildFuzzers=On
-          -DCALICO_BuildTests=On
+
       - name: Build
         run: >-
           cmake --build "${{ env.CMAKE_BUILD_DIR }}" 
           --config "${{ env.CMAKE_BUILD_TYPE }}"
+
       - name: Test
         working-directory: ${{ github.workspace }}/build
         run: ctest -V -C "${{ env.CMAKE_BUILD_TYPE }}"

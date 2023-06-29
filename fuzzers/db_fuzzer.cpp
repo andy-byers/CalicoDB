@@ -2,10 +2,11 @@
 // This source code is licensed under the MIT License, which can be found in
 // LICENSE.md. See AUTHORS.md for a list of contributor names.
 
+#include "db_impl.h"
 #include "fake_env.h"
 #include "fuzzer.h"
+#include "logging.h"
 #include "model.h"
-#include "tree.h"
 
 namespace calicodb
 {

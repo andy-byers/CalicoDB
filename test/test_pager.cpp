@@ -305,7 +305,8 @@ TEST_F(PagerTests, Rollback)
 {
     for (int iteration = 0; iteration < 6; ++iteration) {
         reopen(iteration < 3 ? Options::kLockNormal : Options::kLockExclusive);
-        pager_update([this] {
+        std::size_t page_count = 0;
+        pager_update([this, &page_count] {
             for (std::size_t i = 0; i < kManyPages; ++i) {
                 PageRef *page;
                 allocate_page(page);
@@ -314,6 +315,7 @@ TEST_F(PagerTests, Rollback)
 
                 if (i == kManyPages / 2) {
                     ASSERT_OK(m_pager->commit());
+                    page_count = m_pager->page_count();
                 }
             }
         });
@@ -322,7 +324,8 @@ TEST_F(PagerTests, Rollback)
             ASSERT_OK(m_pager->checkpoint(iteration % 3 == 1));
             ASSERT_OK(m_env->resize_file("wal", 0));
         }
-        pager_view([this] {
+        pager_view([this, page_count] {
+            ASSERT_EQ(m_pager->page_count(), page_count);
             for (std::size_t i = 0; i < kManyPages; ++i) {
                 ASSERT_EQ(i <= kManyPages / 2, read_page(i));
             }

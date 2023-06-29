@@ -1,6 +1,7 @@
 
 add_library(calicodb_utils
         STATIC common.h
+               debug.cpp
                fake_env.cpp
                fake_env.h
                model.cpp
