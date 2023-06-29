@@ -7,6 +7,7 @@ permissions:
   contents: read
 
 jobs:
+  # Checkout the CalicoDB benchmarks, run them, then upload the results.
   build-and-benchmark:
     name: Build & Benchmark (${{ matrix.compiler }} on ${{ matrix.os }})
 
@@ -26,7 +27,7 @@ jobs:
             CXX: g++
 
     env:
-      CMAKE_BUILD_DIR: ${{ github.workspace }}/build
+      BUILD_DIR: "${{ github.workspace }}/build"
       CC: ${{ matrix.CC }}
       CXX: ${{ matrix.CXX }}
 
@@ -40,20 +41,24 @@ jobs:
 
       - name: Setup
         run: >-
-          cmake -S ${{ github.workspace }} -B ${{ env.CMAKE_BUILD_DIR }}
+          cmake -S "${{ github.workspace }}" -B "${{ env.BUILD_DIR }}"
+          -D
           -DCMAKE_BUILD_TYPE=Release
 
       - name: Build
         run: >-
-          cmake --build "${{ env.CMAKE_BUILD_DIR }}" 
-          --config "${{ env.CMAKE_BUILD_TYPE }}"
+          cmake --build "${{ env.BUILD_DIR }}" 
+          -DLEVELDB_BUILD_TESTS=Off -DLEVELDB_INSTALL=Off
+          -DLEVELDB_BUILD_BENCHMARKS=On
+          --config ${{ env.CMAKE_BUILD_TYPE }}
 
       - name: Benchmark
         working-directory: ${{ github.workspace }}/build
         run: |
-          benchmarks/db_bench
-          benchmarks/db_bench_sqlite3
-          benchmarks/db_bench_calicodb
+          ls -al
+          ${{ env.BUILD_DIR }}/benchmarks/db_bench
+          ${{ env.BUILD_DIR }}/benchmarks/db_bench_sqlite3
+          ${{ env.BUILD_DIR }}/benchmarks/db_bench_calicodb
 
 #  upload-results:
 #    runs-on: ubuntu-latest
