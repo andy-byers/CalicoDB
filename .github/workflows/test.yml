@@ -34,9 +34,16 @@ jobs:
       CMAKE_BUILD_TYPE: ${{ matrix.build_type }}
       CC: ${{ matrix.CC }}
       CXX: ${{ matrix.CXX }}
+<<<<<<<< HEAD:.github/workflows/test.yml
 
     steps:
       - uses: actions/checkout@v3
+========
+      BINARY_PATH: ${{ github.workspace }}/build
+
+    steps:
+      - uses: actions/checkout@v2
+>>>>>>>> origin/develop:.github/workflows/ci.yml
 
       - name: Setup
         run: >-
