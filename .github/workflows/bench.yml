@@ -42,14 +42,13 @@ jobs:
       - name: Setup
         run: >-
           cmake -S "${{ github.workspace }}" -B "${{ env.BUILD_DIR }}"
-          -D
+          -DLEVELDB_BUILD_TESTS=Off -DLEVELDB_INSTALL=Off
+          -DLEVELDB_BUILD_BENCHMARKS=On
           -DCMAKE_BUILD_TYPE=Release
 
       - name: Build
         run: >-
           cmake --build "${{ env.BUILD_DIR }}" 
-          -DLEVELDB_BUILD_TESTS=Off -DLEVELDB_INSTALL=Off
-          -DLEVELDB_BUILD_BENCHMARKS=On
           --config ${{ env.CMAKE_BUILD_TYPE }}
 
       - name: Benchmark
