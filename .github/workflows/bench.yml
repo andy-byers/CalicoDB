@@ -49,10 +49,10 @@ jobs:
       - name: Build
         run: >-
           cmake --build "${{ env.BUILD_DIR }}" 
-          --config ${{ env.CMAKE_BUILD_TYPE }}
+          --config Release
 
       - name: Benchmark
-        working-directory: ${{ github.workspace }}/build
+        working-directory: "${{ env.BUILD_DIR }}"
         run: |
           ls -al
           ${{ env.BUILD_DIR }}/benchmarks/db_bench

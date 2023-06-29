@@ -31,7 +31,7 @@ jobs:
 
     env:
       BUILD_DIR: "${{ github.workspace }}/build"
-      CMAKE_BUILD_TYPE: ${{ matrix.build_type }}
+      BUILD_TYPE: ${{ matrix.build_type }}
       CC: ${{ matrix.CC }}
       CXX: ${{ matrix.CXX }}
 
@@ -41,14 +41,14 @@ jobs:
       - name: Setup
         run: >-
           cmake -S "${{ github.workspace }}" -B "${{ env.BUILD_DIR }}"
-          -DCMAKE_BUILD_TYPE=${{ env.CMAKE_BUILD_TYPE }} ${{ matrix.fuzz }}
+          -DCMAKE_BUILD_TYPE=${{ env.BUILD_TYPE }} ${{ matrix.fuzz }}
           -DCMAKE_CXXFLAGS='-fsanitize=address,undefined'
 
       - name: Build
         run: >-
           cmake --build "${{ env.BUILD_DIR }}" 
-          --config ${{ env.CMAKE_BUILD_TYPE }}
+          --config ${{ env.BUILD_TYPE }}
 
       - name: Test
         working-directory: "${{ env.BUILD_DIR }}"
-        run: ctest -V -C ${{ env.CMAKE_BUILD_TYPE }}
+        run: ctest -V -C ${{ env.BUILD_TYPE }}
