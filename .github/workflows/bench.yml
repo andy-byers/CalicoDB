@@ -51,7 +51,11 @@ jobs:
           --config Release
 
       - name: Benchmark
+        working-directory: "${{ env.BUILD_DIR }}"
         run: |
-          "${{ env.BUILD_DIR }}/db_bench"
-          "${{ env.BUILD_DIR }}/db_bench_sqlite3"
-          "${{ env.BUILD_DIR }}/db_bench_calicodb"
+          ./db_bench > report.txt
+          echo >> report.txt
+          ./db_bench_sqlite3 >> report.txt
+          echo >> report.txt
+          ./db_bench_calicodb >> report.txt
+          cat report.txt
