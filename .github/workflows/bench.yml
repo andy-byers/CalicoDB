@@ -42,7 +42,7 @@ jobs:
       - name: Setup
         run: >-
           cmake -S "${{ github.workspace }}" -B "${{ env.BUILD_DIR }}"
-          -DLEVELDB_BUILD_TESTS=Off -DLEVELDB_INSTALL=Off
+          -DLEVELDB_BUILD_TESTS=On -DLEVELDB_INSTALL=Off
           -DLEVELDB_BUILD_BENCHMARKS=On
           -DCMAKE_BUILD_TYPE=Release
 
