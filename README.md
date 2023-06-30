@@ -14,7 +14,7 @@ It exposes a small API that allows storage and retrieval of arbitrary byte seque
 CalicoDB runs in a single thread and uses a B<sup>+</sup>-tree backend.
 It is intended for read-heavy embedded applications.
 
-![CI status badge](https://github.com/andy-byers/CalicoDB/actions/workflows/ci.yml/badge.svg)
+![CI status badge](https://github.com/andy-byers/CalicoDB/actions/workflows/test.yml/badge.svg)
 
 <div align="center">
     <img src="doc/mascot.png" style="width: 40%; max-width: 400px" />

@@ -728,9 +728,9 @@ auto Tree::resolve_underflow() -> Status
 // This routine redistributes cells between two siblings, `left` and `right`, and their `parent`
 // One of the two siblings must be empty. This code handles rebalancing after both put() and
 // erase() operations. When called from put(), there will be an overflow cell in m_ovfl.cell
-// which needs to be put in either `left` or `right`, depending on the final distribution. When
-// called from erase(), the `left` node may be left totally empty, in which case, it should be
-// freed. If `left` is empty, then `parent` will not have a pivot cell for it.
+// which needs to be put in either `left` or `right`, depending on its index and which cell is
+// chosen as the new pivot. When called from erase(), the `left` node may be left totally empty,
+// in which case, it should be freed.
 auto Tree::redistribute_cells(Node &left, Node &right, Node &parent, U32 pivot_idx) -> Status
 {
     CALICODB_EXPECT_GT(m_c.level, 0);
