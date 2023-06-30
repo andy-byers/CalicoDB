@@ -48,14 +48,18 @@ jobs:
       - name: Build
         run: >-
           cmake --build "${{ env.BUILD_DIR }}" 
+          --target db_bench_calicodb db_bench_sqlite3
           --config Release
 
       - name: Benchmark
         working-directory: "${{ env.BUILD_DIR }}"
         run: |
-          ./db_bench > report.txt
-          echo >> report.txt
-          ./db_bench_sqlite3 >> report.txt
-          echo >> report.txt
-          ./db_bench_calicodb >> report.txt
-          cat report.txt
+          ./db_bench_sqlite3 --use_normal_sync &> sqlite3_out.txt
+          ./db_bench_calicodb --use_normal_sync &> calicodb_out.txt
+
+      - name: Report
+        working-directory: "${{ env.BUILD_DIR }}"
+        run: |
+          echo "## Results (micros/op)"
+          python3 write_table.py --input ./calicodb_out.txt ./sqlite3_out.txt
+          
