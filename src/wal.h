@@ -152,6 +152,8 @@ public:
 
     // READER -> UNLOCKED
     virtual auto finish_reader() -> void = 0;
+
+    [[nodiscard]] virtual auto last_frame_count() const -> std::size_t = 0;
 };
 
 } // namespace calicodb

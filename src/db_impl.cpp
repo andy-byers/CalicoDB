@@ -219,6 +219,10 @@ auto DBImpl::prepare_tx(bool write, TxType *&tx_out) const -> Status
     // Forward error statuses. If an error is set at this point, then something
     // has gone very wrong.
     auto s = m_status;
+    if (s.is_ok() && m_auto_ckpt) {
+        s = m_pager->auto_checkpoint(m_auto_ckpt);
+        s = s.is_busy() ? Status::ok() : s;
+    }
     if (!s.is_ok()) {
         return s;
     }

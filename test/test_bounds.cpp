@@ -2,16 +2,16 @@
 // This source code is licensed under the MIT License, which can be found in
 // LICENSE.md. See AUTHORS.md for a list of contributor names.
 
-#include <gtest/gtest.h>
 #include "calicodb/cursor.h"
 #include "calicodb/db.h"
 #include "common.h"
 #include "test.h"
 #include "utils.h"
+#include <gtest/gtest.h>
 
 namespace calicodb::test
 {
-#if 0 // TODO: These tests use quite a bit of memory and may not be a good idea to run in CI right now.
+#if 0  // TODO: These tests use quite a bit of memory and may not be a good idea to run in CI right now.
 class BoundaryValueTests : public testing::Test
 {
 protected:

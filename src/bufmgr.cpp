@@ -15,7 +15,7 @@ namespace calicodb
 Bufmgr::Bufmgr(std::size_t frame_count, Stat &stat)
     : m_buffer(reinterpret_cast<char *>(
           operator new(
-              kPageSize * frame_count,
+              kPageSize *frame_count,
               std::align_val_t(kPageSize),
               std::nothrow_t()))),
       m_frame_count(frame_count),

@@ -48,7 +48,6 @@ jobs:
       - name: Build
         run: >-
           cmake --build "${{ env.BUILD_DIR }}" 
-          --target db_bench_calicodb db_bench_sqlite3
           --config Release
 
       - name: Benchmark

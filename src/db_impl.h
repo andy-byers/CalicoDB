@@ -51,6 +51,7 @@ private:
     Logger *const m_log = nullptr;
     BusyHandler *const m_busy = nullptr;
 
+    const std::size_t m_auto_ckpt = 1'000;
     const std::string m_db_filename;
     const std::string m_wal_filename;
     const bool m_owns_log;

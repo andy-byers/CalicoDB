@@ -425,7 +425,7 @@ HashIterator::HashIterator(HashIndex &source)
 
 HashIterator::~HashIterator()
 {
-    operator delete(m_state, std::align_val_t{alignof(State)});
+    operator delete (m_state, std::align_val_t{alignof(State)});
 }
 
 auto HashIterator::init(U32 backfill) -> Status
@@ -450,7 +450,7 @@ auto HashIterator::init(U32 backfill) -> Status
         (m_num_groups - 1) * sizeof(State::Group) + // Additional groups.
         last_value * sizeof(Hash);                  // Indices to sort.
     m_state = reinterpret_cast<State *>(
-        operator new(state_size, std::align_val_t{alignof(State)}));
+        operator new (state_size, std::align_val_t{alignof(State)}));
     std::memset(m_state, 0, state_size);
 
     // Temporary buffer for the mergesort routine. Freed before returning from this routine.
@@ -673,6 +673,13 @@ public:
             m_writer_lock = false;
             m_redo_cksum = 0;
         }
+    }
+
+    [[nodiscard]] auto last_frame_count() const -> std::size_t override
+    {
+        // NOTE: This value is used to determine if an automatic checkpoint should be run. It doesn't need to
+        //       be totally up-to-date. It must, however, be less than or equal to the actual maximum frame.
+        return m_hdr.max_frame;
     }
 
 private:
@@ -1501,7 +1508,6 @@ auto WalImpl::transfer_contents(bool reset) -> Status
                 }
             }
             if (s.is_ok()) {
-                //
                 ATOMIC_STORE(&info->backfill, max_safe_frame);
             }
             unlock_exclusive(READ_LOCK(0), 1);

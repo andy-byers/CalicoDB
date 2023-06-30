@@ -21,6 +21,12 @@ struct Options final {
     // Size of the page cache in bytes. Must be at least 16 pages.
     std::size_t cache_size = 1'024 * kPageSize; // 4 MB
 
+    // Run a checkpoint when the WAL has reached this number of frames. If
+    // set to 0, only the necessary checkpoints are run automatically. These
+    // include (a) when the database is closed, and (b) when the database is
+    // opened and recovery is needed.
+    std::size_t auto_checkpoint = 0;
+
     // Alternate filename to use for the WAL. If empty, creates the WAL at
     // "dbname-wal", where "dbname" is the name of the database.
     std::string wal_filename;

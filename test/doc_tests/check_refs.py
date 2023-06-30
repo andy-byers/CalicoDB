@@ -2,8 +2,8 @@
 # -*- coding: utf-8 -*-
 
 import argparse
-from os import path
 import re
+from os import path
 
 REFERENCE_RE = re.compile(r'\[[^\[\]]+]\(([./\w_-]+)?(?:#([\w_-]+))?\)')
 HEADING_RE = re.compile(r'^##+\s+([\w\s_-]+)\s*$', re.MULTILINE)
