@@ -23,36 +23,36 @@ option(CALICODB_BuildFuzzers "Build the fuzz targets" Off)
 option(CALICODB_BuildTests "Build the tests" ${MAIN_PROJECT})
 option(CALICODB_Install "Install the CMake targets during the install step" ${MAIN_PROJECT})
 
-# CalicoDB is built without exceptions or RTTI.
-set(CALICODB_OPTIONS -fno-exceptions)
-if(NOT CALICODB_BuildTests)
-    list(APPEND CALICODB_OPTIONS -fno-rtti)
-endif()
-
-# All applicable warnings from @lefticus/cpp-best-practices.
+# Add applicable warnings from @lefticus/cpp-best-practices.
+set(CALICODB_FLAGS "")
 if(${CMAKE_CXX_COMPILER_ID} STREQUAL MSVC)
     message(FATAL_ERROR 'Visual Studio is not yet supported')
 else()
-    list(APPEND CALICODB_OPTIONS -Werror)
-    list(APPEND CALICODB_OPTIONS -Wall)
-    list(APPEND CALICODB_OPTIONS -Wextra)
-    list(APPEND CALICODB_OPTIONS -Wnon-virtual-dtor)
-    list(APPEND CALICODB_OPTIONS -Wpedantic)
-    list(APPEND CALICODB_OPTIONS -Wold-style-cast)
-    list(APPEND CALICODB_OPTIONS -Wcast-align)
-    list(APPEND CALICODB_OPTIONS -Woverloaded-virtual)
-    list(APPEND CALICODB_OPTIONS -Wdouble-promotion)
-    list(APPEND CALICODB_OPTIONS -Wimplicit-fallthrough)
-    list(APPEND CALICODB_OPTIONS -Wunused)
+    # Disable exceptions and RTTI.
+    string(REGEX REPLACE "-fexceptions" "" CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS}")
+    string(REGEX REPLACE "-frtti" "" CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS}")
+    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fno-exceptions -fno-rtti")
 
-    list(APPEND CALICODB_OPTIONS -Wno-unused-variable)
+    list(APPEND CALICODB_FLAGS -Werror)
+    list(APPEND CALICODB_FLAGS -Wall)
+    list(APPEND CALICODB_FLAGS -Wextra)
+    list(APPEND CALICODB_FLAGS -Wnon-virtual-dtor)
+    list(APPEND CALICODB_FLAGS -Wpedantic)
+    list(APPEND CALICODB_FLAGS -Wold-style-cast)
+    list(APPEND CALICODB_FLAGS -Wcast-align)
+    list(APPEND CALICODB_FLAGS -Woverloaded-virtual)
+    list(APPEND CALICODB_FLAGS -Wdouble-promotion)
+    list(APPEND CALICODB_FLAGS -Wimplicit-fallthrough)
+    list(APPEND CALICODB_FLAGS -Wunused)
+
+    list(APPEND CALICODB_FLAGS -Wno-unused-variable)
 
     if(${CMAKE_CXX_COMPILER_ID} STREQUAL GNU)
-        list(APPEND CALICODB_OPTIONS -Wconversion)
-        list(APPEND CALICODB_OPTIONS -Wsign-conversion)
-        list(APPEND CALICODB_OPTIONS -Wduplicated-cond)
-        list(APPEND CALICODB_OPTIONS -Wduplicated-branches)
-        list(APPEND CALICODB_OPTIONS -Wlogical-op)
+        list(APPEND CALICODB_FLAGS -Wconversion)
+        list(APPEND CALICODB_FLAGS -Wsign-conversion)
+        list(APPEND CALICODB_FLAGS -Wduplicated-cond)
+        list(APPEND CALICODB_FLAGS -Wduplicated-branches)
+        list(APPEND CALICODB_FLAGS -Wlogical-op)
     endif()
 endif()
 
@@ -73,7 +73,7 @@ target_include_directories(calicodb
                 $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>
         PRIVATE "${CALICODB_SOURCE_DIR}")
 target_compile_options(calicodb
-        PRIVATE "${CALICODB_OPTIONS}")
+        PRIVATE "${CALICODB_FLAGS}")
 target_compile_definitions(calicodb
         PUBLIC CALICODB_VERSION_MAJOR=${PROJECT_VERSION_MAJOR}
                CALICODB_VERSION_MINOR=${PROJECT_VERSION_MINOR}

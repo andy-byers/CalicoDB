@@ -1,0 +1,61 @@
+# Modified from LevelDB's GitHub workflows storage.
+name: CI
+
+on: [pull_request, push]
+
+permissions:
+  contents: read
+
+jobs:
+  build-and-benchmark:
+    name: Build & Benchmark (${{ matrix.compiler }} on ${{ matrix.os }})
+
+    runs-on: ${{ matrix.os }}
+
+    strategy:
+      matrix:
+        compiler: [ clang, gcc ]
+        os: [ ubuntu-latest, macos-latest ]
+        include:
+          # Compiler environment variables for each build type.
+          - compiler: clang
+            CC: clang
+            CXX: clang++
+          - compiler: gcc
+            CC: gcc
+            CXX: g++
+
+    env:
+      BUILD_DIR: "${{ github.workspace }}/build"
+      CC: ${{ matrix.CC }}
+      CXX: ${{ matrix.CXX }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v3
+        with:
+          repository: andy-byers/leveldb
+          submodules: 'recursive'
+          ref: db_bench_calicodb
+
+      - name: Setup
+        run: >-
+          cmake -S "${{ github.workspace }}" -B "${{ env.BUILD_DIR }}"
+          -DLEVELDB_BUILD_TESTS=On -DLEVELDB_INSTALL=Off
+          -DLEVELDB_BUILD_BENCHMARKS=On
+          -DCMAKE_BUILD_TYPE=Release
+
+      - name: Build
+        run: >-
+          cmake --build "${{ env.BUILD_DIR }}" 
+          --config Release
+
+      - name: Benchmark
+        working-directory: "${{ env.BUILD_DIR }}"
+        run: |
+          ./db_bench > report.txt
+          echo >> report.txt
+          ./db_bench_sqlite3 >> report.txt
+          echo >> report.txt
+          ./db_bench_calicodb >> report.txt
+          cat report.txt

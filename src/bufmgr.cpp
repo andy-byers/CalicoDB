@@ -13,10 +13,19 @@ namespace calicodb
 {
 
 Bufmgr::Bufmgr(std::size_t frame_count, Stat &stat)
-    : m_buffer(new(std::align_val_t{kPageSize}) char[kPageSize * frame_count]),
+    : m_buffer(reinterpret_cast<char *>(
+          operator new(
+              kPageSize * frame_count,
+              std::align_val_t(kPageSize),
+              std::nothrow_t()))),
       m_frame_count(frame_count),
       m_stat(&stat)
 {
+    if (m_buffer == nullptr) {
+        // If the allocation failed, don't build m_available. All the pointers will
+        // be junk anyway.
+        return;
+    }
     for (std::size_t i = 1; i < m_frame_count; ++i) {
         m_available.emplace_back(buffer_slot(i));
     }
@@ -26,7 +35,7 @@ Bufmgr::Bufmgr(std::size_t frame_count, Stat &stat)
 
 Bufmgr::~Bufmgr()
 {
-    operator delete[](m_buffer, std::align_val_t{kPageSize});
+    operator delete[](m_buffer, std::align_val_t(kPageSize));
 }
 
 auto Bufmgr::query(Id page_id) -> PageRef *

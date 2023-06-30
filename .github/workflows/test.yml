@@ -9,7 +9,7 @@ permissions:
 jobs:
   build-and-test:
     name: Build & Test (${{ matrix.compiler }} on ${{ matrix.os }})
-    runs-on: ubuntu-latest
+    runs-on: ${{ matrix.os }}
     strategy:
       matrix:
         compiler: [clang, gcc]
@@ -30,26 +30,25 @@ jobs:
             fuzz: -DCALICODB_BuildFuzzers=On -DCALICODB_FuzzerStandalone=On
 
     env:
-      CMAKE_BUILD_DIR: ${{ github.workspace }}/build
-      CMAKE_BUILD_TYPE: ${{ matrix.build_type }}
+      BUILD_DIR: "${{ github.workspace }}/build"
+      BUILD_TYPE: ${{ matrix.build_type }}
       CC: ${{ matrix.CC }}
       CXX: ${{ matrix.CXX }}
-      BINARY_PATH: ${{ github.workspace }}/build
 
     steps:
-      - uses: actions/checkout@v2
+      - uses: actions/checkout@v3
 
       - name: Setup
         run: >-
-          cmake -S ${{ github.workspace }} -B ${{ env.CMAKE_BUILD_DIR }}
-          -DCMAKE_BUILD_TYPE=${{ env.CMAKE_BUILD_TYPE }} ${{ matrix.fuzz }}
+          cmake -S "${{ github.workspace }}" -B "${{ env.BUILD_DIR }}"
+          -DCMAKE_BUILD_TYPE=${{ env.BUILD_TYPE }} ${{ matrix.fuzz }}
           -DCMAKE_CXXFLAGS='-fsanitize=address,undefined'
 
       - name: Build
         run: >-
-          cmake --build "${{ env.CMAKE_BUILD_DIR }}" 
-          --config "${{ env.CMAKE_BUILD_TYPE }}"
+          cmake --build "${{ env.BUILD_DIR }}" 
+          --config ${{ env.BUILD_TYPE }}
 
       - name: Test
-        working-directory: ${{ github.workspace }}/build
-        run: ctest -V -C "${{ env.CMAKE_BUILD_TYPE }}"
+        working-directory: "${{ env.BUILD_DIR }}"
+        run: ctest -V -C ${{ env.BUILD_TYPE }}
