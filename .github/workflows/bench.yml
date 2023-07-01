@@ -53,12 +53,14 @@ jobs:
       - name: Benchmark
         working-directory: "${{ env.BUILD_DIR }}"
         run: |
-          ./db_bench_sqlite3 --use_normal_sync &> sqlite3_out.txt
-          ./db_bench_calicodb --use_normal_sync &> calicodb_out.txt
+          ./db_bench_sqlite3 --use_normal_sync > sqlite3_out.txt
+          ./db_bench_calicodb --use_normal_sync > calicodb_out.txt
 
       - name: Report
         working-directory: "${{ env.BUILD_DIR }}"
         run: |
+          echo SQLite3
           cat ./sqlite3_out.txt
+          echo CalicoDB
           cat ./calicodb_out.txt
           
