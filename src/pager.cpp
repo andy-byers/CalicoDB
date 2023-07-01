@@ -279,6 +279,15 @@ auto Pager::checkpoint(bool reset) -> Status
     return m_wal->checkpoint(reset);
 }
 
+auto Pager::auto_checkpoint(std::size_t frame_limit) -> Status
+{
+    CALICODB_EXPECT_GT(frame_limit, 0);
+    if (frame_limit < m_wal->last_frame_count()) {
+        return checkpoint(false);
+    }
+    return Status::ok();
+}
+
 auto Pager::flush_dirty_pages() -> Status
 {
     auto *p = m_dirtylist.head;

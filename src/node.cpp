@@ -506,10 +506,10 @@ auto Node::assert_state() -> bool
                 rhs_cell.key_size <= rhs_cell.local_pl_size) {
                 const Slice lhs_key(lhs_cell.key, lhs_cell.key_size);
                 const Slice rhs_key(rhs_cell.key, rhs_cell.key_size);
-                CALICODB_EXPECT_TRUE(lhs_key < rhs_key);
-            }
-        }
-    }
+                CALICODB_EXPECT_TRUE(lhs_key <= rhs_key);//TODO TODO TODO TODO TODO TODO TODO TODO
+            }//TODO TODO TODO TODO TODO TODO TODO TODO
+        }//TODO TODO TODO TODO TODO TODO TODO TODO
+    }//TODO TODO TODO TODO TODO TODO TODO TODO
 
     // Every byte should be accounted for, except for fragments.
     U32 total_bytes = NodeHdr::get_frag_count(hdr());

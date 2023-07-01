@@ -677,6 +677,23 @@ TEST_F(DBTests, CorruptedRootIDs)
     });
 }
 
+TEST_F(DBTests, AutoCheckpoint)
+{
+    Options options;
+    for (std::size_t i = 1; i < 100; i += i) {
+        delete m_db;
+        m_db = nullptr;
+
+        options.auto_checkpoint = i;
+        ASSERT_OK(DB::open(options, m_db_name, m_db));
+        for (std::size_t j = 0; j < 10; ++j) {
+            ASSERT_OK(m_db->update([j](auto &tx) {
+                return put_range(tx, BucketOptions(), "b", j * 1'000, (j + 1) * 1'000);
+            }));
+        }
+    }
+}
+
 TEST_F(DBTests, CheckpointResize)
 {
     ASSERT_OK(m_db->update([](auto &tx) {

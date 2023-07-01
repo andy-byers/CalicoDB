@@ -65,6 +65,7 @@ public:
     auto finish() -> void;
 
     auto checkpoint(bool reset) -> Status;
+    auto auto_checkpoint(std::size_t frame_limit) -> Status;
 
     auto allocate(PageRef *&page_out) -> Status;
     auto acquire(Id page_id, PageRef *&page_out) -> Status;
