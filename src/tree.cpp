@@ -390,12 +390,11 @@ auto Tree::make_pivot(const PivotOptions &opt, Cell &pivot_out) -> Status
         auto *ptr = opt.scratch + sizeof(U32); // Skip the left child ID.
         auto prefix = determine_prefix(left_key, right_key);
         pivot_out.ptr = opt.scratch;
-        ptr = encode_varint(ptr, prefix.size());
-        pivot_out.key = ptr;
+        pivot_out.key = encode_varint(ptr, prefix.size());
         pivot_out.total_pl_size = prefix.size();
         pivot_out.local_pl_size = compute_local_pl_size(prefix.size(), 0);
-        pivot_out.footprint = pivot_out.local_pl_size + U32(ptr - opt.scratch);
-        std::memcpy(ptr, prefix.data(), pivot_out.local_pl_size);
+        pivot_out.footprint = pivot_out.local_pl_size + U32(pivot_out.key - opt.scratch);
+        std::memcpy(pivot_out.key, prefix.data(), pivot_out.local_pl_size);
         prefix.advance(pivot_out.local_pl_size);
         if (!prefix.is_empty()) {
             // The pivot is too long to fit on a single page. Transfer the portion that
