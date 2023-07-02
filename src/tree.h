@@ -81,6 +81,29 @@ public:
     auto clear(Status s = Status::ok()) -> void;
 };
 
+[[nodiscard]] inline auto determine_prefix(const Slice &lhs, const Slice &rhs) -> Slice
+{
+    CALICODB_EXPECT_FALSE(lhs.is_empty());
+    CALICODB_EXPECT_FALSE(rhs.is_empty());
+    // If this is true, then 1 of these 2 things must be true:
+    //   1. There is some index at which the byte in `rhs` compares greater than the
+    //      corresponding byte in `lhs`.
+    //   2. `rhs` is longer than `lhs`, but they are otherwise identical.
+    CALICODB_EXPECT_LT(lhs, rhs);
+
+    const auto end = std::min(
+        lhs.size(), rhs.size());
+
+    std::size_t n = 0;
+    for (; n < end; ++n) {
+        if (lhs[n] != rhs[n]) {
+            break;
+        }
+    }
+    // Include the first mismatch in `rhs`.
+    return rhs.range(0, n + 1);
+}
+
 class Tree final
 {
 public:
@@ -215,6 +238,13 @@ private:
     auto destroy_impl(Node node) -> Status;
     auto vacuum_step(PageRef &free, PointerMap::Entry entry, Schema &schema, Id last_id) -> Status;
 
+    struct PivotOptions {
+        const Cell *left;
+        const Cell *right;
+        char *scratch;
+        Id parent_id;
+    };
+    auto make_pivot(const PivotOptions &opt, Cell &pivot_out) -> Status;
     auto post_pivot(Node &node, U32 idx, Cell &cell, Id child_id) -> Status;
     auto insert_cell(Node &node, U32 idx, const Cell &cell) -> Status;
     auto remove_cell(Node &node, U32 idx) -> Status;

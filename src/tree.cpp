@@ -98,6 +98,69 @@ static auto write_child_id(Cell &cell, Id child_id)
 static constexpr U32 kLinkContentOffset = sizeof(U32);
 static constexpr U32 kLinkContentSize = kPageSize - kLinkContentOffset;
 
+class KeyIterator
+{
+    Pager *const m_pager;
+    const Cell *const m_cell;
+    PageRef *m_ovfl = nullptr;
+    U32 m_local_len = 0;
+    U32 m_local_idx = 0;
+    U32 m_total_idx = 0;
+
+public:
+    explicit KeyIterator(Pager &pager, const Cell &cell)
+        : m_pager(&pager),
+          m_cell(&cell),
+          m_local_len(std::min(cell.key_size, cell.local_pl_size))
+    {
+    }
+
+    ~KeyIterator()
+    {
+        m_pager->release(m_ovfl);
+    }
+
+    // Get the next part of a key
+    // On success, assigns to `chunk_out` at most `max_length` bytes of the key being
+    // iterated over. If the key has been exhausted, assigns a Slice to `chunk_out` for
+    // which Slice::is_empty() evaluates to true. Otherwise, at least 1 byte of key will
+    // be provided on each call (this is necessary because keys may be fragmented).
+    [[nodiscard]] auto next_chunk(U32 max_length, Slice &chunk_out) -> Status
+    {
+        const char *chunk_ptr;
+        U32 chunk_len;
+        Status s;
+
+        if (m_total_idx > m_cell->key_size) {
+            // No more data.
+            return s;
+        } else if (m_local_idx >= m_local_len) {
+            // Acquire the next overflow page.
+            Id next_id;
+            if (m_ovfl) {
+                next_id.value = get_u32(m_ovfl->page);
+                m_pager->release(m_ovfl);
+            } else {
+                next_id = read_overflow_id(*m_cell);
+            }
+            s = m_pager->acquire(next_id, m_ovfl);
+            chunk_len = kLinkContentSize;
+            chunk_ptr = m_ovfl->page;
+        } else {
+            chunk_len = m_local_len - m_local_idx;
+            chunk_ptr = m_ovfl ? m_ovfl->page : m_cell->key;
+            chunk_ptr += m_local_idx;
+        }
+        if (s.is_ok()) {
+            chunk_len = std::min(max_length, chunk_len);
+            chunk_out = Slice(chunk_ptr, chunk_len);
+            m_local_idx += chunk_len;
+            m_total_idx += chunk_len;
+        }
+        return s;
+    }
+};
+
 struct PayloadManager {
     static auto promote(Pager &pager, Cell &cell, Id parent_id) -> Status
     {
@@ -378,6 +441,69 @@ auto Tree::maybe_fix_overflow_chain(const Cell &cell, Id parent_id) -> Status
     return Status::ok();
 }
 
+auto Tree::make_pivot(const PivotOptions &opt, Cell &pivot_out) -> Status
+{
+    Slice left_key, right_key;
+    std::string left_buf, right_buf;
+    auto s = read_key(*opt.left, left_buf, &left_key);
+    if (s.is_ok()) {
+        s = read_key(*opt.right, right_buf, &right_key);
+    }
+    if (s.is_ok()) {
+        auto *ptr = opt.scratch + sizeof(U32); // Skip the left child ID.
+        auto prefix = determine_prefix(left_key, right_key);
+        pivot_out.ptr = opt.scratch;
+        ptr = encode_varint(ptr, prefix.size());
+        pivot_out.key = ptr;
+        pivot_out.total_pl_size = prefix.size();
+        pivot_out.local_pl_size = compute_local_pl_size(prefix.size(), 0);
+        pivot_out.footprint = pivot_out.local_pl_size + std::uintptr_t(ptr - opt.scratch);
+        std::memcpy(ptr, prefix.data(), pivot_out.local_pl_size);
+        prefix.advance(pivot_out.local_pl_size);
+        if (!prefix.is_empty()) {
+            // The pivot is too long to fit on a single page. Transfer the portion that
+            // won't fit to an overflow chain.
+            PageRef *prev = nullptr;
+            auto dst_type = PointerMap::kOverflowHead;
+            auto dst_bptr = opt.parent_id;
+            while (s.is_ok() && !prefix.is_empty()) {
+                PageRef *dst;
+                // Allocate a new overflow page.
+                s = m_pager->allocate(dst);
+                if (!s.is_ok()) {
+                    break;
+                }
+                const auto copy_size = std::min<std::size_t>(
+                    prefix.size(), kLinkContentSize);
+                std::memcpy(dst->page + kLinkContentOffset,
+                            prefix.data(),
+                            copy_size);
+                prefix.advance(copy_size);
+
+                if (prev) {
+                    put_u32(prev->page, dst->page_id.value);
+                    m_pager->release(prev, Pager::kNoCache);
+                } else {
+                    write_overflow_id(pivot_out, dst->page_id);
+                }
+                dst_type = PointerMap::kOverflowLink;
+                dst_bptr = dst->page_id;
+                prev = dst;
+
+                s = PointerMap::write_entry(
+                    *m_pager, dst->page_id, {dst_bptr, dst_type});
+            }
+            if (s.is_ok()) {
+                CALICODB_EXPECT_NE(nullptr, prev);
+                put_u32(prev->page, 0);
+                pivot_out.footprint += sizeof(U32);
+            }
+            m_pager->release(prev, Pager::kNoCache);
+        }
+    }
+    return s;
+}
+
 auto Tree::post_pivot(Node &parent, U32 idx, Cell &pivot, Id child_id) -> Status
 {
     const auto rc = parent.write(idx, pivot, m_node_scratch);
@@ -642,18 +768,24 @@ auto Tree::split_nonroot_fast(Node parent, Node right) -> Status
         NodeHdr::put_prev_id(right.hdr(), left.ref->page_id);
         NodeHdr::put_next_id(left.hdr(), right.ref->page_id);
 
-        if (right.read(0, pivot)) {
+        Cell right_cell;
+        if (right.read(0, right_cell)) {
             s = corrupted_page(right.ref->page_id);
             goto cleanup;
         }
-        // NOTE: The overflow cell has already been written to `right`, so cell_scratch(0) is available.
-        //       PayloadManager::promote() may allocate a new overflow chain to hold an overflowing key.
-        //       If this happens, it will write a new overflow ID, which would mess up the old cell.
-        detach_cell(pivot, cell_scratch());
-        s = PayloadManager::promote(
-            *m_pager,
-            pivot,
-            parent.ref->page_id);
+
+        Cell left_cell;
+        if (left.read(NodeHdr::get_cell_count(left.hdr()) - 1, left_cell)) {
+            s = corrupted_page(right.ref->page_id);
+            goto cleanup;
+        }
+        const PivotOptions opt = {
+            &left_cell,
+            &right_cell,
+            cell_scratch(0),
+            parent.ref->page_id,
+        };
+        s = make_pivot(opt, pivot);
     } else {
         auto cell_count = NodeHdr::get_cell_count(left.hdr());
         if (left.read(cell_count - 1, pivot)) {
@@ -842,9 +974,17 @@ auto Tree::redistribute_cells(Node &left, Node &right, Node &parent, U32 pivot_i
     // Post a pivot to the `parent` which links to p_left. If this connection existed before, we would have erased it
     // when parsing cells earlier.
     if (idx > 0) {
+        Cell pivot;
         if (p_src->is_leaf()) {
             ++idx; // Backtrack to the last cell written to p_right.
-            s = PayloadManager::promote(*m_pager, cells[U32(idx)], parent.ref->page_id);
+            const PivotOptions opt = {
+                &cells[U32(idx) - 1],
+                &cells[U32(idx)],
+                cell_scratch(2),
+                parent.ref->page_id,
+            };
+            s = make_pivot(opt, pivot);
+            cells[U32(idx)] = pivot;
 
         } else {
             const auto next_id = read_child_id(cells[U32(idx)]);
