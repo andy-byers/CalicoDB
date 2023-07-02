@@ -9,6 +9,7 @@
 #include "logging.h"
 #include "pager.h"
 #include "test.h"
+#include "tree.h"
 #include "tx_impl.h"
 #include <gtest/gtest.h>
 
@@ -787,15 +788,16 @@ TEST_F(DBTests, BucketExistence)
 TEST_F(DBTests, SpaceAmplification)
 {
     static constexpr std::size_t kInputSize = 1'024 * 1'024;
-    static constexpr std::size_t kNumRecords = kInputSize / 16;
+    static constexpr std::size_t kNumRecords = kInputSize / 256;
 
     RandomGenerator random;
     ASSERT_OK(m_db->update([&random](auto &tx) {
         Bucket b;
         auto s = tx.create_bucket(BucketOptions(), "b", &b);
         for (std::size_t i = 0; s.is_ok() && i < kNumRecords; ++i) {
-            const auto key = random.Generate(kInputSize / kNumRecords);
-            s = tx.put(b, key, "");
+            const auto key = random.Generate(kInputSize / kNumRecords / 2);
+            const auto val = random.Generate(key.size());
+            s = tx.put(b, key, val);
         }
         return s;
     }));

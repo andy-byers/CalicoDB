@@ -343,14 +343,13 @@ if (s.is_ok()) {
 ## Acknowledgements
 1. https://cstack.github.io/db_tutorial/
     + Tutorial on database development in C
-2. Graefe, Modern B-Tree Techniques, Foundation and Trends R<sup>©</sup> in Databases, vol 3, no 4, pp 203–402, 2010
-3. https://www.sqlite.org/arch.html
+2. https://www.sqlite.org/arch.html
     + Much of this project was inspired by SQLite3, both the architecture design documents and the source code
     + Especially see the B-tree design document, as well as `btree.h`, `btree.c`, and `btreeInt.h`
-4. https://github.com/google/leveldb
+3. https://github.com/google/leveldb
     + Much of the API is inspired by LevelDB
     + Some parts of the CMake build process are taken from their `CMakeLists.txt`
-5. BoltDB (https://github.com/boltdb/bolt)
+4. BoltDB (https://github.com/boltdb/bolt)
     + Inspiration for the transaction API
-6. https://sbucketcog.com/
+5. https://sbucketcog.com/
     + Used to generate the original calico cat image, which was then further modified to produce [mascot.png](mascot.png)

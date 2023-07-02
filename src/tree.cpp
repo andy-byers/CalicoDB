@@ -1740,7 +1740,7 @@ class TreeValidator
             }
             std::string key;
             CHECK_OK(tree.read_key(node, cid, key, nullptr));
-            //            const auto ikey = std::to_string(std::stoi(key));
+            // const auto ikey = std::to_string(std::stoi(key));
             const auto ikey = escape_string(key.substr(0, std::min(key.size(), 3UL)));
             add_to_level(data, ikey, level);
             if (cell.local_pl_size != cell.total_pl_size) {
