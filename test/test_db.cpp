@@ -787,16 +787,15 @@ TEST_F(DBTests, BucketExistence)
 TEST_F(DBTests, SpaceAmplification)
 {
     static constexpr std::size_t kInputSize = 1'024 * 1'024;
-    static constexpr std::size_t kNumRecords = 1'000;
+    static constexpr std::size_t kNumRecords = kInputSize / 16;
 
     RandomGenerator random;
     ASSERT_OK(m_db->update([&random](auto &tx) {
         Bucket b;
         auto s = tx.create_bucket(BucketOptions(), "b", &b);
         for (std::size_t i = 0; s.is_ok() && i < kNumRecords; ++i) {
-            const auto key = random.Generate(kInputSize / kNumRecords / 10);
-            const auto value = random.Generate(key.size() * 9);
-            s = tx.put(b, key, value);
+            const auto key = random.Generate(kInputSize / kNumRecords);
+            s = tx.put(b, key, "");
         }
         return s;
     }));
