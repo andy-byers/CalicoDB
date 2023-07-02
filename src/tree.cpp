@@ -98,69 +98,6 @@ static auto write_child_id(Cell &cell, Id child_id)
 static constexpr U32 kLinkContentOffset = sizeof(U32);
 static constexpr U32 kLinkContentSize = kPageSize - kLinkContentOffset;
 
-class KeyIterator
-{
-    Pager *const m_pager;
-    const Cell *const m_cell;
-    PageRef *m_ovfl = nullptr;
-    U32 m_local_len = 0;
-    U32 m_local_idx = 0;
-    U32 m_total_idx = 0;
-
-public:
-    explicit KeyIterator(Pager &pager, const Cell &cell)
-        : m_pager(&pager),
-          m_cell(&cell),
-          m_local_len(std::min(cell.key_size, cell.local_pl_size))
-    {
-    }
-
-    ~KeyIterator()
-    {
-        m_pager->release(m_ovfl);
-    }
-
-    // Get the next part of a key
-    // On success, assigns to `chunk_out` at most `max_length` bytes of the key being
-    // iterated over. If the key has been exhausted, assigns a Slice to `chunk_out` for
-    // which Slice::is_empty() evaluates to true. Otherwise, at least 1 byte of key will
-    // be provided on each call (this is necessary because keys may be fragmented).
-    [[nodiscard]] auto next_chunk(U32 max_length, Slice &chunk_out) -> Status
-    {
-        const char *chunk_ptr;
-        U32 chunk_len;
-        Status s;
-
-        if (m_total_idx > m_cell->key_size) {
-            // No more data.
-            return s;
-        } else if (m_local_idx >= m_local_len) {
-            // Acquire the next overflow page.
-            Id next_id;
-            if (m_ovfl) {
-                next_id.value = get_u32(m_ovfl->page);
-                m_pager->release(m_ovfl);
-            } else {
-                next_id = read_overflow_id(*m_cell);
-            }
-            s = m_pager->acquire(next_id, m_ovfl);
-            chunk_len = kLinkContentSize;
-            chunk_ptr = m_ovfl->page;
-        } else {
-            chunk_len = m_local_len - m_local_idx;
-            chunk_ptr = m_ovfl ? m_ovfl->page : m_cell->key;
-            chunk_ptr += m_local_idx;
-        }
-        if (s.is_ok()) {
-            chunk_len = std::min(max_length, chunk_len);
-            chunk_out = Slice(chunk_ptr, chunk_len);
-            m_local_idx += chunk_len;
-            m_total_idx += chunk_len;
-        }
-        return s;
-    }
-};
-
 struct PayloadManager {
     static auto promote(Pager &pager, Cell &cell, Id parent_id) -> Status
     {

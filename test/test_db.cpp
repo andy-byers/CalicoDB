@@ -784,6 +784,30 @@ TEST_F(DBTests, BucketExistence)
     }));
 }
 
+TEST_F(DBTests, SpaceAmplification)
+{
+    static constexpr std::size_t kInputSize = 1'024 * 1'024;
+    static constexpr std::size_t kNumRecords = 1'000;
+
+    RandomGenerator random;
+    ASSERT_OK(m_db->update([&random](auto &tx) {
+        Bucket b;
+        auto s = tx.create_bucket(BucketOptions(), "b", &b);
+        for (std::size_t i = 0; s.is_ok() && i < kNumRecords; ++i) {
+            const auto key = random.Generate(kInputSize / kNumRecords / 10);
+            const auto value = random.Generate(key.size() * 9);
+            s = tx.put(b, key, value);
+        }
+        return s;
+    }));
+
+    close_db();
+    std::size_t file_size;
+    ASSERT_OK(m_env->file_size(m_db_name, file_size));
+    const auto space_amp = static_cast<double>(file_size) / static_cast<double>(kInputSize);
+    std::cout << "SpaceAmplification: " << space_amp << '\n';
+}
+
 TEST(OldWalTests, HandlesOldWalFile)
 {
     static constexpr auto kOldWal = "./testwal";
