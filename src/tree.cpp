@@ -457,7 +457,7 @@ auto Tree::make_pivot(const PivotOptions &opt, Cell &pivot_out) -> Status
         pivot_out.key = ptr;
         pivot_out.total_pl_size = prefix.size();
         pivot_out.local_pl_size = compute_local_pl_size(prefix.size(), 0);
-        pivot_out.footprint = pivot_out.local_pl_size + std::uintptr_t(ptr - opt.scratch);
+        pivot_out.footprint = pivot_out.local_pl_size + U32(ptr - opt.scratch);
         std::memcpy(ptr, prefix.data(), pivot_out.local_pl_size);
         prefix.advance(pivot_out.local_pl_size);
         if (!prefix.is_empty()) {
