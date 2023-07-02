@@ -1103,7 +1103,7 @@ TEST(PrefixTests, PrefixesAreValid)
     ASSERT_EQ("1", checked_prefix("00", "1"));
     ASSERT_EQ("1", checked_prefix("0", "11"));
     ASSERT_EQ("1", checked_prefix("00", "11"));
-    ASSERT_EQ("0", checked_prefix("0", "01"));
+    ASSERT_EQ("01", checked_prefix("0", "01"));
     ASSERT_EQ("01", checked_prefix("00", "01"));
     ASSERT_EQ("10", checked_prefix("1", "10"));
 
