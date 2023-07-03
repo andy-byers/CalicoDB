@@ -386,7 +386,7 @@ auto Tree::make_pivot(const PivotOptions &opt, Cell &pivot_out) -> Status
     }
     if (s.is_ok()) {
         auto *ptr = opt.scratch + sizeof(U32); // Skip the left child ID.
-        auto prefix = determine_prefix(left_key, right_key);
+        auto prefix = truncate_suffix(left_key, right_key);
         pivot_out.ptr = opt.scratch;
         pivot_out.total_pl_size = static_cast<U32>(prefix.size());
         pivot_out.key = encode_varint(ptr, pivot_out.total_pl_size);

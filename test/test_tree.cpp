@@ -1096,9 +1096,9 @@ INSTANTIATE_TEST_SUITE_P(
 TEST(PrefixTests, PrefixesAreValid)
 {
     const auto checked_prefix = [](const auto &lhs, const auto &rhs) {
-        const auto prefix = determine_prefix(lhs, rhs);
-        EXPECT_FALSE(prefix.is_empty());
+        const auto prefix = truncate_suffix(lhs, rhs);
         // lhs < prefix <= rhs
+        EXPECT_FALSE(prefix.is_empty());
         EXPECT_LT(lhs, prefix);
         EXPECT_LE(prefix, rhs);
         return prefix.to_string();
@@ -1117,6 +1117,10 @@ TEST(PrefixTests, PrefixesAreValid)
     ASSERT_EQ("As", checked_prefix("And", "As"));
     ASSERT_EQ("Solv", checked_prefix("Solutions", "Solve"));
     ASSERT_EQ("S", checked_prefix("Problems", "Solution"));
+
+    // lhs may be empty, but since lhs < rhs, rhs must not be empty.
+    ASSERT_EQ("0", checked_prefix("", "0"));
+    ASSERT_EQ("0", checked_prefix("", "00"));
 }
 
 } // namespace calicodb::test
