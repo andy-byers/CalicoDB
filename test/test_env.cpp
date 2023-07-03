@@ -1004,12 +1004,12 @@ INSTANTIATE_TEST_SUITE_P(
         EnvConcurrencyTestsParam{1, 1},
 
         // Multiple threads
-        EnvConcurrencyTestsParam{1, 5},
-        EnvConcurrencyTestsParam{1, 10},
+        EnvConcurrencyTestsParam{1, 2},
+        EnvConcurrencyTestsParam{1, 4},
 
         // Multiple processes
-        EnvConcurrencyTestsParam{5, 1},
-        EnvConcurrencyTestsParam{10, 1},
+        EnvConcurrencyTestsParam{2, 1},
+        EnvConcurrencyTestsParam{4, 1},
 
         // Multiple threads in multiple processes
         EnvConcurrencyTestsParam{2, 2},

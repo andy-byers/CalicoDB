@@ -115,6 +115,8 @@ protected:
         close();
         (void)m_env->remove_file("db");
         (void)m_env->remove_file("wal");
+        delete m_file;
+        m_file = nullptr;
 
         auto s = m_env->new_file(
             "db",

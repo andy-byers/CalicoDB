@@ -1088,4 +1088,30 @@ INSTANTIATE_TEST_SUITE_P(
     RebalanceTests,
     ::testing::Values(1, 2, 5));
 
+TEST(PrefixTests, PrefixesAreValid)
+{
+    const auto checked_prefix = [](const auto &lhs, const auto &rhs) {
+        const auto prefix = determine_prefix(lhs, rhs);
+        EXPECT_FALSE(prefix.is_empty());
+        // lhs < prefix <= rhs
+        EXPECT_LT(lhs, prefix);
+        EXPECT_LE(prefix, rhs);
+        return prefix.to_string();
+    };
+
+    ASSERT_EQ("1", checked_prefix("0", "1"));
+    ASSERT_EQ("1", checked_prefix("00", "1"));
+    ASSERT_EQ("1", checked_prefix("0", "11"));
+    ASSERT_EQ("1", checked_prefix("00", "11"));
+    ASSERT_EQ("01", checked_prefix("0", "01"));
+    ASSERT_EQ("01", checked_prefix("00", "01"));
+    ASSERT_EQ("10", checked_prefix("1", "10"));
+
+    // Examples are from https://dl.acm.org/doi/pdf/10.1145/320521.320530.
+    ASSERT_EQ("An", checked_prefix("A", "An"));
+    ASSERT_EQ("As", checked_prefix("And", "As"));
+    ASSERT_EQ("Solv", checked_prefix("Solutions", "Solve"));
+    ASSERT_EQ("S", checked_prefix("Problems", "Solution"));
+}
+
 } // namespace calicodb::test

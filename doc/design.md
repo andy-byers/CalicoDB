@@ -181,3 +181,7 @@ New connections may use an existing readmark by taking a read lock on the corres
 This indicates to other connections what portion of the WAL is being read by readers attached to that readmark.
 The first readmark always has a value of 0, indicating that readers are ignoring the WAL completely.
 If a new connection finds that the WAL is empty, it will attempt to use the first readmark.
+
+## References
+1. Graefe, Modern B-Tree Techniques, Foundation and Trends R<sup>©</sup> in Databases, vol 3, no 4, pp 203–402, 2010
+2. Rudolf Bayer and Karl Unterauer. 1977. Prefix B-trees. ACM Trans. Database Syst. 2, 1 (March 1977), 11–26. https://doi.org/10.1145/320521.320530
