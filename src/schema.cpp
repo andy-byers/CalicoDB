@@ -56,9 +56,14 @@ Schema::Schema(Pager &pager, const Status &status, Stat &stat, char *scratch)
     : m_status(&status),
       m_pager(&pager),
       m_scratch(scratch),
-      m_map(new Tree(pager, stat, scratch, nullptr)),
-      m_stat(&stat)
+      m_stat(&stat),
+      m_map(new Tree(pager, stat, scratch, nullptr))
 {
+}
+
+Schema::~Schema()
+{
+    delete m_map;
 }
 
 auto Schema::new_cursor() -> Cursor *
@@ -72,6 +77,7 @@ auto Schema::close() -> void
         delete state.tree;
     }
     delete m_map;
+    m_map = nullptr;
 }
 
 auto Schema::corrupted_root_id(const Slice &name, const Slice &value) -> Status

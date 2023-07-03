@@ -23,6 +23,7 @@ class Schema final
 {
 public:
     explicit Schema(Pager &pager, const Status &status, Stat &stat, char *scratch);
+    ~Schema();
 
     [[nodiscard]] auto new_cursor() -> Cursor *;
 
@@ -73,8 +74,8 @@ private:
     const Status *const m_status;
     Pager *const m_pager;
     char *const m_scratch;
-    Tree *const m_map;
     Stat *const m_stat;
+    Tree *m_map;
 
     // Pointer to the most-recently-accessed tree.
     const Tree *m_recent = nullptr;

@@ -250,9 +250,7 @@ auto Tree::create(Pager &pager, Id *root_id_out) -> Status
 
 auto Tree::find_external(const Slice &key, bool &exact) const -> Status
 {
-    //    m_c.seek_root();
     exact = false;
-
     auto found_target = false;
     if (m_c.is_valid() && m_c.node().is_leaf() && NodeHdr::get_cell_count(m_c.node().hdr()) > 0) {
         // This block handles cases where the cursor is already positioned on the target node. This
@@ -366,7 +364,7 @@ auto Tree::find_parent_id(Id page_id, Id &out) const -> Status
 
 auto Tree::fix_parent_id(Id page_id, Id parent_id, PointerMap::Type type) -> Status
 {
-    PointerMap::Entry entry = {parent_id, type};
+    const PointerMap::Entry entry = {parent_id, type};
     return PointerMap::write_entry(*m_pager, page_id, entry);
 }
 
@@ -440,6 +438,17 @@ auto Tree::make_pivot(const PivotOptions &opt, Cell &pivot_out) -> Status
     return s;
 }
 
+static auto detach_cell(Cell &cell, char *backing) -> void
+{
+    CALICODB_EXPECT_NE(backing, nullptr);
+    if (cell.ptr != backing) {
+        std::memcpy(backing, cell.ptr, cell.footprint);
+        const auto diff = cell.key - cell.ptr;
+        cell.ptr = backing;
+        cell.key = backing + diff;
+    }
+}
+
 auto Tree::post_pivot(Node &parent, U32 idx, Cell &pivot, Id child_id) -> Status
 {
     const auto rc = parent.write(idx, pivot, m_node_scratch);
@@ -449,7 +458,7 @@ auto Tree::post_pivot(Node &parent, U32 idx, Cell &pivot, Id child_id) -> Status
         parent.write_child_id(idx, child_id);
     } else if (rc == 0) {
         CALICODB_EXPECT_FALSE(m_ovfl.exists());
-        detach_cell(pivot, cell_scratch(0));
+        detach_cell(pivot, m_cell_scratch[0]);
         m_ovfl = {pivot, parent.ref->page_id, idx};
         write_child_id(pivot, child_id);
     } else {
@@ -718,7 +727,7 @@ auto Tree::split_nonroot_fast(Node parent, Node right) -> Status
         const PivotOptions opt = {
             &left_cell,
             &right_cell,
-            cell_scratch(0),
+            m_cell_scratch[0],
             parent.ref->page_id,
         };
         s = make_pivot(opt, pivot);
@@ -848,7 +857,7 @@ auto Tree::redistribute_cells(Node &left, Node &right, Node &parent, U32 pivot_i
             // Move the overflow cell backing to an unused scratch buffer. The `parent` may overflow
             // when the pivot is posted (and this cell may not be the pivot). The new overflow cell
             // will use scratch buffer 0, so this cell cannot be stored there.
-            detach_cell(m_ovfl.cell, cell_scratch(3));
+            detach_cell(m_ovfl.cell, m_cell_scratch[3]);
             *cell_itr++ = m_ovfl.cell;
             m_ovfl.clear();
             continue;
@@ -868,7 +877,7 @@ auto Tree::redistribute_cells(Node &left, Node &right, Node &parent, U32 pivot_i
             return corrupted_page(parent.ref->page_id);
         }
         if (!p_src->is_leaf()) {
-            detach_cell(cell, cell_scratch(1));
+            detach_cell(cell, m_cell_scratch[1]);
             // cell is from the `parent`, so it already has room for a left child ID (`parent` must
             // be internal).
             write_child_id(cell, NodeHdr::get_next_id(p_left->hdr()));
@@ -916,7 +925,7 @@ auto Tree::redistribute_cells(Node &left, Node &right, Node &parent, U32 pivot_i
             const PivotOptions opt = {
                 &cells[U32(idx) - 1],
                 &cells[U32(idx)],
-                cell_scratch(2),
+                m_cell_scratch[2],
                 parent.ref->page_id,
             };
             s = make_pivot(opt, pivot);
@@ -1033,7 +1042,7 @@ auto Tree::fix_root() -> Status
                 release(std::move(child));
             } else {
                 m_ovfl.cell = cell;
-                detach_cell(m_ovfl.cell, cell_scratch());
+                detach_cell(m_ovfl.cell, m_cell_scratch[0]);
                 child.erase(m_c.index(), cell.footprint);
                 advance_cursor(std::move(child), 0);
                 s = split_nonroot();
@@ -1059,36 +1068,15 @@ Tree::Tree(Pager &pager, Stat &stat, char *scratch, const Id *root_id)
       m_node_scratch(scratch + kPageSize),
       m_cell_scratch{
           scratch,
-          scratch + kPageSize * 1 / kNumCellBuffers,
-          scratch + kPageSize * 2 / kNumCellBuffers,
-          scratch + kPageSize * 3 / kNumCellBuffers,
+          scratch + kCellBufferLen,
+          scratch + kCellBufferLen * 2,
+          scratch + kCellBufferLen * 3,
       },
       m_pager(&pager),
       m_root_id(root_id)
 {
     // Make sure that cells written to scratch memory don't interfere with each other.
-    static_assert(kPageSize / kNumCellBuffers > kMaxCellHeaderSize + compute_local_pl_size(kPageSize, 0));
-}
-
-auto Tree::detach_cell(Cell &cell, char *backing) -> void
-{
-    CALICODB_EXPECT_NE(backing, nullptr);
-    std::memmove(backing, cell.ptr, cell.footprint);
-    const auto diff = cell.key - cell.ptr;
-    cell.ptr = backing;
-    cell.key = backing + diff;
-}
-
-auto Tree::cell_scratch(U32 n) -> char *
-{
-    CALICODB_EXPECT_LT(n, kNumCellBuffers);
-    // Leave space for a child ID. We need the maximum difference between the size of a varint and
-    // an Id. When a cell is promoted (i.e. made into an internal cell, so it can be posted to the
-    // parent node) it loses a varint (the value size), but gains an Id (the left child pointer).
-    // We should be able to write any external cell to this location, and still have room to write
-    // the left child ID before the key size field, regardless of the number of bytes occupied by
-    // the varint value size.
-    return m_cell_scratch[n] + kCellScratchDiff;
+    static_assert(kCellBufferLen > kMaxCellHeaderSize + compute_local_pl_size(kPageSize, 0));
 }
 
 auto Tree::get(const Slice &key, std::string *value) const -> Status
@@ -1129,15 +1117,15 @@ auto Tree::put(const Slice &key, const Slice &value) -> Status
             // Attempt to write a cell representing the `key` and `value` directly to the page.
             // This routine also populates any overflow pages necessary to hold a `key` and/or
             // `value` that won't fit on a single node page. If the cell cannot fit in `node`,
-            // it will be written to cell_scratch(0) instead.
+            // it will be written to m_cell_scratch[0] instead.
             s = emplace(m_c.node(), key, value, m_c.index(), overflow);
 
             if (s.is_ok()) {
                 if (overflow) {
                     // There wasn't enough room for the cell in `node`, so it was built in
-                    // cell_scratch(0) instead.
+                    // m_cell_scratch[0] instead.
                     Cell ovfl;
-                    const auto rc = m_c.node().parser(cell_scratch(0), cell_scratch(1), &ovfl);
+                    const auto rc = m_c.node().parser(m_cell_scratch[0], m_cell_scratch[1], &ovfl);
                     if (rc) {
                         s = corrupted_page(m_c.node().ref->page_id);
                     } else {
@@ -1181,7 +1169,7 @@ auto Tree::emplace(Node &node, const Slice &key, const Slice &value, U32 index, 
     // write the cell to scratch memory. allocate_block() should not return an offset
     // that would interfere with the node header/indirection vector or cause an out-of-
     // bounds write (this only happens if the node is corrupted).
-    ptr = cell_scratch();
+    ptr = m_cell_scratch[0];
     const auto local_offset = node.alloc(
         index,
         static_cast<U32>(cell_size),
