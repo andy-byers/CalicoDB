@@ -344,11 +344,16 @@ TEST_F(TreeTests, SplitWithShortAndLongKeys)
     validate();
 }
 
-TEST_F(TreeTests, EmptyKeyBehavior)
+TEST_F(TreeTests, AllowsEmptyKey)
 {
-    ASSERT_TRUE(m_tree->put("", "").is_invalid_argument());
-    ASSERT_TRUE(m_tree->get("", nullptr).is_not_found());
-    ASSERT_OK(m_tree->erase(""));
+    for (int i = 0; i < 2; ++i) {
+        std::string value;
+        ASSERT_OK(m_tree->put("", "value"));
+        add_initial_records(*this, i != 0);
+        ASSERT_OK(m_tree->get("", &value));
+        ASSERT_OK(m_tree->erase(""));
+        ASSERT_EQ("value", value);
+    }
 }
 
 class TreeSanityChecks

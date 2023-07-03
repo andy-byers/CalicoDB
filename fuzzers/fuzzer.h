@@ -63,7 +63,7 @@ public:
         std::size_t next_len = 0;
         for (U32 i = 0; i < std::min(2UL, *m_len); ++i) {
             // Determine a length for the binary string.
-            next_len = ((next_len << 8) | (*m_ptr)[i]) & 0xFFF;
+            next_len = ((next_len << 8) | (*m_ptr)[i]) & 0xFFFF;
         }
         return extract_fixed(std::min(*m_len, next_len));
     }

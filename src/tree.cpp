@@ -1098,9 +1098,7 @@ auto Tree::get(const Slice &key, std::string *value) const -> Status
 auto Tree::put(const Slice &key, const Slice &value) -> Status
 {
     static constexpr auto kMaxLength = std::numeric_limits<U32>::max();
-    if (key.is_empty()) {
-        return Status::invalid_argument("key is empty");
-    } else if (key.size() > kMaxLength) {
+    if (key.size() > kMaxLength) {
         return Status::invalid_argument("key is too long");
     } else if (value.size() > kMaxLength) {
         return Status::invalid_argument("value is too long");
