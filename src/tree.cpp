@@ -379,24 +379,32 @@ auto Tree::maybe_fix_overflow_chain(const Cell &cell, Id parent_id) -> Status
 
 auto Tree::make_pivot(const PivotOptions &opt, Cell &pivot_out) -> Status
 {
-    Slice keys[2];
     std::string buffers[2];
+    Slice keys[2];
     for (std::size_t i = 0; i < 2; ++i) {
-        if (opt.cells[i]->key_size <= opt.cells[i]->local_pl_size) {
-            keys[i] = Slice(
-                opt.cells[i]->key,
-                opt.cells[i]->key_size);
-        } else {
-            auto s = read_key(
-                *opt.cells[i],
-                buffers[i],
-                &keys[i]);
-            if (!s.is_ok()) {
-                return s;
+        const auto local_key_size = std::min(
+            opt.cells[i]->key_size,
+            opt.cells[i]->local_pl_size);
+        keys[i] = Slice(opt.cells[i]->key, local_key_size);
+    }
+    if (keys[0] >= keys[1]) {
+        // The left key must be less than the right key. If this cannot be seen in the local
+        // keys, then 1 of the 2 must be overflowing. The nonlocal part is needed to perform
+        // suffix truncation.
+        for (std::size_t i = 0; i < 2; ++i) {
+            if (opt.cells[i]->key_size > keys[i].size()) {
+                // Read just enough of the key to determine the ordering.
+                auto s = read_key(
+                    *opt.cells[i],
+                    buffers[i],
+                    &keys[i],
+                    opt.cells[1 - i]->key_size + 1);
+                if (!s.is_ok()) {
+                    return s;
+                }
             }
         }
     }
-
     auto *ptr = opt.scratch + sizeof(U32); // Skip the left child ID.
     auto prefix = truncate_suffix(keys[0], keys[1]);
     pivot_out.ptr = opt.scratch;
