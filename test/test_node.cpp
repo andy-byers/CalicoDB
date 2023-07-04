@@ -91,7 +91,10 @@ public:
 class BlockAllocatorTests : public NodeTests
 {
 public:
-    explicit BlockAllocatorTests() = default;
+    explicit BlockAllocatorTests()
+    {
+        NodeHdr::put_type(m_node.hdr(), NodeHdr::kInternal);
+    }
 
     ~BlockAllocatorTests() override = default;
 
@@ -171,19 +174,34 @@ TEST_F(BlockAllocatorTests, ConsumesAdjacentFragments)
     ASSERT_EQ(NodeHdr::get_frag_count(m_node.hdr()), 0);
 }
 
-TEST_F(BlockAllocatorTests, ExternalNodesDoNotConsume3ByteFragments)
+TEST_F(BlockAllocatorTests, ExternalNodesDoNotConsume2ByteFragments)
 {
     reserve_for_test(11);
     NodeHdr::put_type(m_node.hdr(), NodeHdr::kExternal);
-    NodeHdr::put_frag_count(m_node.hdr(), 3);
+    NodeHdr::put_frag_count(m_node.hdr(), 2);
 
-    // ....***####
-    ASSERT_EQ(0, BlockAllocator::release(m_node, m_base + 7, 4));
+    // ....**#####
+    ASSERT_EQ(0, BlockAllocator::release(m_node, m_base + 6, 5));
 
-    // ####***####
+    // ####**#####
     ASSERT_EQ(0, BlockAllocator::release(m_node, m_base + 0, 4));
     ASSERT_EQ(BlockAllocator::freelist_size(m_node), m_size - NodeHdr::get_frag_count(m_node.hdr()));
-    ASSERT_EQ(NodeHdr::get_frag_count(m_node.hdr()), 3);
+    ASSERT_EQ(NodeHdr::get_frag_count(m_node.hdr()), 2);
+}
+
+TEST_F(BlockAllocatorTests, ExternalNodesConsume1ByteFragments)
+{
+    reserve_for_test(11);
+    NodeHdr::put_type(m_node.hdr(), NodeHdr::kExternal);
+    NodeHdr::put_frag_count(m_node.hdr(), 1);
+
+    // ....*######
+    ASSERT_EQ(0, BlockAllocator::release(m_node, m_base + 5, 6));
+
+    // ####*######
+    ASSERT_EQ(0, BlockAllocator::release(m_node, m_base + 0, 4));
+    ASSERT_EQ(BlockAllocator::freelist_size(m_node), m_size - NodeHdr::get_frag_count(m_node.hdr()));
+    ASSERT_EQ(NodeHdr::get_frag_count(m_node.hdr()), 0);
 }
 
 TEST_F(BlockAllocatorTests, InternalNodesConsume3ByteFragments)

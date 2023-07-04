@@ -245,9 +245,12 @@ auto BlockAllocator::allocate(Node &node, U32 needed_size) -> int
 auto BlockAllocator::release(Node &node, U32 block_start, U32 block_size) -> int
 {
     // Largest possible fragment that can be reclaimed in this process. Based on
-    // the fact that external cells must be at least 3 bytes. Internal cells are
+    // the fact that external cells must be at least 2 bytes. Internal cells are
     // always larger than fragments.
-    const U32 fragment_cutoff = 2 + !node.is_leaf();
+    static constexpr U32 kFragmentCutoff[2] = {
+        3, // Internal node: min cell size is 5 (max fragment size is 3)
+        1, // External node: min cell size is 2
+    };
     auto frag_count = NodeHdr::get_frag_count(node.hdr());
     auto free_start = NodeHdr::get_free_start(node.hdr());
     CALICODB_EXPECT_NE(block_size, 0);
@@ -270,7 +273,7 @@ auto BlockAllocator::release(Node &node, U32 block_start, U32 block_size) -> int
     if (prev != 0) {
         // Merge with the predecessor block.
         const auto before_end = prev + get_block_size(node, prev);
-        if (before_end + fragment_cutoff >= block_start) {
+        if (before_end + kFragmentCutoff[node.is_leaf()] >= block_start) {
             const auto diff = block_start - before_end;
             block_start = prev;
             block_size += get_block_size(node, prev) + diff;
@@ -290,7 +293,7 @@ auto BlockAllocator::release(Node &node, U32 block_start, U32 block_size) -> int
     if (next != 0) {
         // Merge with the successor block.
         const auto current_end = block_start + block_size;
-        if (current_end + fragment_cutoff >= next) {
+        if (current_end + kFragmentCutoff[node.is_leaf()] >= next) {
             const auto diff = next - current_end;
             block_size += get_block_size(node, next) + diff;
             frag_count -= diff;

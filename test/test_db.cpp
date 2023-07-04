@@ -472,8 +472,10 @@ TEST_F(DBTests, BucketBehavior)
     ASSERT_OK(m_db->update([](auto &tx) {
         Bucket b;
         EXPECT_OK(tx.create_bucket(BucketOptions(), "BUCKET", &b));
-        // Tx::put() should not accept an empty key.
-        EXPECT_TRUE(tx.put(b, "", "value").is_invalid_argument());
+        EXPECT_OK(tx.put(b, "key", "value"));
+        std::string value;
+        EXPECT_OK(tx.get(b, "key", &value));
+        EXPECT_EQ("value", value);
         return Status::ok();
     }));
 }

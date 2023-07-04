@@ -81,9 +81,8 @@ public:
     auto clear(Status s = Status::ok()) -> void;
 };
 
-[[nodiscard]] inline auto determine_prefix(const Slice &lhs, const Slice &rhs) -> Slice
+[[nodiscard]] inline auto truncate_suffix(const Slice &lhs, const Slice &rhs) -> Slice
 {
-    CALICODB_EXPECT_FALSE(lhs.is_empty());
     CALICODB_EXPECT_FALSE(rhs.is_empty());
     // If this is true, then 1 of these 2 things must be true:
     //   1. There is some index at which the byte in `rhs` compares greater than the
@@ -100,7 +99,7 @@ public:
             break;
         }
     }
-    // Include the first mismatch in `rhs`.
+    // `lhs` < result <= `rhs`
     return rhs.range(0, n + 1);
 }
 

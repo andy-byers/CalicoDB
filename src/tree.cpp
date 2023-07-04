@@ -386,7 +386,7 @@ auto Tree::make_pivot(const PivotOptions &opt, Cell &pivot_out) -> Status
     }
     if (s.is_ok()) {
         auto *ptr = opt.scratch + sizeof(U32); // Skip the left child ID.
-        auto prefix = determine_prefix(left_key, right_key);
+        auto prefix = truncate_suffix(left_key, right_key);
         pivot_out.ptr = opt.scratch;
         pivot_out.total_pl_size = static_cast<U32>(prefix.size());
         pivot_out.key = encode_varint(ptr, pivot_out.total_pl_size);
@@ -788,10 +788,10 @@ auto Tree::resolve_underflow() -> Status
         CALICODB_EXPECT_GT(m_c.level, 0);
 
         Node parent;
-        const auto [parent_id, idx] = m_c.history[m_c.level - 1];
-        s = acquire(parent_id, true, parent);
+        const auto loc = m_c.history[m_c.level - 1];
+        s = acquire(loc.page_id, true, parent);
         if (s.is_ok()) {
-            s = fix_nonroot(std::move(parent), idx);
+            s = fix_nonroot(std::move(parent), loc.index);
         }
         if (!s.is_ok()) {
             break;
@@ -1098,9 +1098,7 @@ auto Tree::get(const Slice &key, std::string *value) const -> Status
 auto Tree::put(const Slice &key, const Slice &value) -> Status
 {
     static constexpr auto kMaxLength = std::numeric_limits<U32>::max();
-    if (key.is_empty()) {
-        return Status::invalid_argument("key is empty");
-    } else if (key.size() > kMaxLength) {
+    if (key.size() > kMaxLength) {
         return Status::invalid_argument("key is too long");
     } else if (value.size() > kMaxLength) {
         return Status::invalid_argument("value is too long");
@@ -1622,48 +1620,42 @@ auto Tree::destroy(Tree &tree) -> Status
 
 class TreeValidator
 {
-    using NodeCallback = std::function<void(Node &, U32)>;
-    using PageCallback = std::function<void(PageRef *&)>;
+    using NodeCallback = std::function<void(Node &, U32, U32)>;
 
-    struct PrinterData {
-        std::vector<std::string> levels;
-        std::vector<U32> spaces;
-    };
-
-    static auto traverse_inorder_helper(const Tree &tree, Node node, const NodeCallback &callback) -> void
+    static auto traverse_inorder(const Tree &tree, const NodeCallback &cb) -> void
     {
-        for (U32 index = 0; index <= NodeHdr::get_cell_count(node.hdr()); ++index) {
-            if (!node.is_leaf()) {
-                const auto saved_id = node.ref->page_id;
-                const auto next_id = node.read_child_id(index);
+        auto &c = tree.m_c;
+        c.clear();
+        c.seek_root();
+        traverse_inorder_impl(tree, cb, 0);
+        c.clear();
+    }
 
-                // "node" must be released while we traverse, otherwise we are limited in how long of a traversal we can
-                // perform by the number of pager frames.
-                tree.release(std::move(node));
+    static auto traverse_inorder_impl(const Tree &tree, const NodeCallback &cb, U32 level) -> void
+    {
+        auto &c = tree.m_c;
+        for (U32 index = 0, n = NodeHdr::get_cell_count(c.node().hdr()); index <= n; ++index) {
+            if (!c.node().is_leaf()) {
+                const auto saved_id = c.node().ref->page_id;
+                c.move_down(c.node().read_child_id(index));
+                traverse_inorder_impl(tree, cb, level + 1);
 
-                Node next;
-                CHECK_OK(tree.acquire(next_id, false, next));
-                traverse_inorder_helper(tree, std::move(next), callback);
+                Node node;
                 CHECK_OK(tree.acquire(saved_id, false, node));
+                c.move_to(std::move(node), -1);
             }
-            if (index < NodeHdr::get_cell_count(node.hdr())) {
-                callback(node, index);
+            if (index < n) {
+                cb(c.node(), index, level);
             }
         }
-        tree.release(std::move(node));
     }
 
-    static auto traverse_inorder(const Tree &tree, const NodeCallback &callback) -> void
-    {
-        Node root;
-        CHECK_OK(tree.acquire(tree.root(), false, root));
-        traverse_inorder_helper(tree, std::move(root), callback);
-    }
+    using PageCallback = std::function<void(PageRef *&)>;
 
-    static auto traverse_chain(Pager &pager, PageRef *page, const PageCallback &callback) -> void
+    static auto traverse_chain(Pager &pager, PageRef *page, const PageCallback &cb) -> void
     {
         for (;;) {
-            callback(page);
+            cb(page);
 
             const auto next_id = read_next_id(*page);
             pager.release(page);
@@ -1673,6 +1665,11 @@ class TreeValidator
             CHECK_OK(pager.acquire(next_id, page));
         }
     }
+
+    struct PrinterData {
+        std::vector<std::string> levels;
+        std::vector<U32> spaces;
+    };
 
     static auto add_to_level(PrinterData &data, const std::string &message, U32 target) -> void
     {
@@ -1728,8 +1725,8 @@ class TreeValidator
             }
             std::string key;
             CHECK_OK(tree.read_key(node, cid, key, nullptr));
-            // const auto ikey = std::to_string(std::stoi(key));
-            const auto ikey = escape_string(key.substr(0, std::min(key.size(), 3UL)));
+            //             const auto ikey = std::to_string(std::stoi(key));
+            const auto ikey = escape_string(key.substr(std::max(key.size(), 3UL) - 3, std::min(key.size(), 3UL)));
             add_to_level(data, ikey, level);
             if (cell.local_pl_size != cell.total_pl_size) {
                 add_to_level(data, "(" + number_to_string(read_overflow_id(cell).value) + ")", level);
@@ -1756,7 +1753,7 @@ class TreeValidator
     }
 
 public:
-    static auto validate_tree(const Tree &tree) -> void
+    static auto validate(const Tree &tree) -> void
     {
         auto check_parent_child = [&tree](auto &node, auto index) -> void {
             Node child;
@@ -1768,7 +1765,7 @@ public:
 
             tree.release(std::move(child));
         };
-        traverse_inorder(tree, [f = std::move(check_parent_child)](const auto &node, auto index) {
+        traverse_inorder(tree, [f = std::move(check_parent_child)](const auto &node, auto index, auto) {
             const auto count = NodeHdr::get_cell_count(node.hdr());
             CHECK_TRUE(index < count);
 
@@ -1781,7 +1778,7 @@ public:
             }
         });
 
-        traverse_inorder(tree, [&tree](auto &node, auto index) {
+        traverse_inorder(tree, [&tree](auto &node, auto index, auto) {
             Cell cell;
             CHECK_EQ(0, node.read(index, cell));
 
@@ -1807,24 +1804,18 @@ public:
 
             if (index == 0) {
                 CHECK_TRUE(node.assert_state());
-
-                if (node.is_leaf() && !NodeHdr::get_next_id(node.hdr()).is_null()) {
-                    Node next;
-                    CHECK_OK(tree.acquire(NodeHdr::get_next_id(node.hdr()), false, next));
-
-                    tree.release(std::move(next));
-                }
             }
         });
 
-        // Find the leftmost external node.
-        Node node;
-        CHECK_OK(tree.acquire(tree.root(), false, node));
-        while (!node.is_leaf()) {
-            const auto id = node.read_child_id(0);
-            tree.release(std::move(node));
-            CHECK_OK(tree.acquire(id, false, node));
+        auto &c = tree.m_c;
+        c.clear();
+        c.seek_root();
+        while (c.is_valid() && !c.node().is_leaf()) {
+            c.move_down(c.node().read_child_id(0));
         }
+        auto node = std::move(c.node());
+        c.clear();
+
         while (!NodeHdr::get_next_id(node.hdr()).is_null()) {
             Node right;
             CHECK_OK(tree.acquire(NodeHdr::get_next_id(node.hdr()), false, right));
@@ -1856,7 +1847,7 @@ public:
 
 auto Tree::TEST_validate() const -> void
 {
-    TreeValidator::validate_tree(*this);
+    TreeValidator::validate(*this);
 }
 
 auto Tree::TEST_to_string() const -> std::string
