@@ -8,6 +8,7 @@
 #include "header.h"
 #include "logging.h"
 #include "stat.h"
+#include "temp.h"
 
 namespace calicodb
 {
@@ -79,7 +80,12 @@ auto Pager::open(const Parameters &param, Pager *&out) -> Status
         param.lock_mode,
     };
     Wal *wal;
-    auto s = Wal::open(wal_param, wal);
+    Status s;
+    if (param.persistent) {
+        s = Wal::open(wal_param, wal);
+    } else {
+        wal = new_temp_wal(wal_param);
+    }
     if (s.is_ok()) {
         out = new Pager(*wal, param);
         if (0 == out->m_bufmgr.available()) {
@@ -148,7 +154,7 @@ auto Pager::start_reader() -> Status
     });
     if (s.is_ok()) {
         if (changed) {
-            // This call to purge_pages() sets m_refresh unconditionally.
+            // purge_pages(true) sets m_refresh unconditionally.
             purge_pages(true);
         }
         if (m_refresh) {

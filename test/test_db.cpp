@@ -320,6 +320,7 @@ protected:
         kFullSyncMode = 4,
         kUseAltWAL = 8,
         kSmallCache = 16,
+        kInMemory = 32,
         kMaxConfig,
     };
     auto reopen_db(bool clear, Env *env = nullptr) -> Status
@@ -344,6 +345,10 @@ protected:
         }
         if (m_config & kSmallCache) {
             options.cache_size = 0;
+        }
+        if (m_config & kInMemory) {
+            options.temp_database = true;
+            options.env = nullptr;
         }
         return DB::open(options, m_db_name, m_db);
     }

@@ -132,11 +132,11 @@ public:
     // UNLOCKED -> READER
     virtual auto start_reader(bool &changed) -> Status = 0;
 
-    // Read the most-recent version of page "page_id" from the WAL.
-    //
-    // "page" must point to at least a full page of memory. It is set to nullptr if
-    // page "page_id" does not exist in the WAL.
-    virtual auto read(Id page_id, char *&page) -> Status = 0;
+    // Read the most-recent version of page `page_id` from the WAL
+    // `page_out` must point to at least a full page of memory. On success, reads page `page_id`
+    // into `page_out` and returns an OK status. Otherwise, sets `page_out` to nullptr and
+    // returns a non-OK status.
+    virtual auto read(Id page_id, char *&page_out) -> Status = 0;
 
     // READER -> WRITER
     virtual auto start_writer() -> Status = 0;

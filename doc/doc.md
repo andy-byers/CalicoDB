@@ -111,6 +111,7 @@ const calicodb::Options options = {
     nullptr, // busy
     true, // create_if_missing
     false, // error_if_exists
+    false, // temp_database
     calicodb::Options::kSyncNormal, // sync_mode
     calicodb::Options::kLockNormal, // lock_mode
 };

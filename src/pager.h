@@ -37,6 +37,7 @@ public:
         std::size_t frame_count;
         Options::SyncMode sync_mode;
         Options::LockMode lock_mode;
+        bool persistent;
     };
 
     ~Pager();
@@ -140,7 +141,7 @@ private:
     BusyHandler *const m_busy;
 
     U32 m_page_count = 0;
-    bool m_refresh = false;
+    bool m_refresh = true;
 };
 
 // The first pointer map page is always on page 2, right after the root page.

@@ -7,6 +7,7 @@
 #include "encoding.h"
 #include "env_posix.h"
 #include "fake_env.h"
+#include "temp.h"
 #include "test.h"
 #include <filesystem>
 #include <gtest/gtest.h>
@@ -368,10 +369,25 @@ TEST_F(LoggerTests, LogsFormattedText)
     ASSERT_EQ(msg2.size(), kHdrLen * 2 + 15);
 }
 
+
+TEST_F(LoggerTests, HandlesMessages)
+{
+    std::string msg;
+    for (std::size_t n = 0; n < 512; ++n) {
+        ASSERT_OK(Env::default_env()->resize_file(m_log_filename, 0));
+
+        msg.resize(n, '$');
+        log(m_logger, "%s", msg.c_str());
+
+        const auto res = read_file_to_string(*Env::default_env(), m_log_filename);
+        ASSERT_EQ(msg + '\n', res.substr(kHdrLen)); // Account for the datetime header and trailing newline.
+    }
+}
+
 TEST_F(LoggerTests, HandlesLongMessages)
 {
     std::string msg;
-    for (std::size_t n = 1000; n < 10'000; n *= 10) {
+    for (std::size_t n = 1'000; n < 10'000; n *= 10) {
         ASSERT_OK(Env::default_env()->resize_file(m_log_filename, 0));
 
         msg.resize(n, '$');
@@ -1037,6 +1053,64 @@ TEST(EnvWrappers, WrapperEnvWorksAsExpected)
     (void)w_env.rand();
     w_env.sleep(0);
     ASSERT_OK(w_env.remove_file("file"));
+}
+
+TEST(TempEnv, TempEnv)
+{
+    auto env = std::unique_ptr<Env>(new_temp_env());
+    auto in_page = std::string(kPageSize - 1, '*') + "0";
+    std::string out_page(kPageSize, '\0');
+
+    File *file;
+    ASSERT_OK(env->new_file("temp", Env::OpenMode(), file));
+
+    // NOOPs.
+    EXPECT_OK(file->file_lock(FileLockMode()));
+    file->file_unlock();
+
+    // Not supported.
+    EXPECT_NOK(file->shm_lock(0, 1, ShmLockFlag()));
+    volatile void *ptr;
+    EXPECT_NOK(file->shm_map(0, false, ptr));
+    file->shm_unmap(true);
+
+    EXPECT_OK(file->write(0, in_page));
+    in_page.back() = '1';
+    EXPECT_OK(file->write(kPageSize, in_page));
+    in_page.back() = '2';
+    EXPECT_OK(file->write(kPageSize * 2, in_page));
+
+    Slice read;
+    EXPECT_OK(file->read(kPageSize * 2, kPageSize, out_page.data(), &read));
+    EXPECT_EQ(read, in_page);
+    in_page.back() = '1';
+    EXPECT_OK(file->read(kPageSize, kPageSize, out_page.data(), &read));
+    EXPECT_EQ(read, in_page);
+    in_page.back() = '0';
+    EXPECT_OK(file->read(0, kPageSize, out_page.data(), &read));
+    EXPECT_EQ(read, in_page);
+
+    EXPECT_OK(env->resize_file("temp", 0));
+    EXPECT_OK(file->read(0, kPageSize, out_page.data(), &read));
+    EXPECT_TRUE(read.is_empty());
+
+    // File should still be accessible through the pointer returned by new_file().
+    EXPECT_TRUE(env->file_exists("temp"));
+    EXPECT_OK(env->remove_file("temp"));
+    EXPECT_FALSE(env->file_exists("temp"));
+    EXPECT_OK(file->write(0, in_page));
+    EXPECT_OK(file->read(0, kPageSize, out_page.data(), &read));
+    EXPECT_EQ(read, in_page);
+
+    delete file;
+
+    env->srand(42);
+    env->rand();
+    env->sleep(1);
+
+    Logger *logger;
+    ASSERT_OK(env->new_logger("NOOP", logger));
+    ASSERT_EQ(logger, nullptr);
 }
 
 } // namespace calicodb::test

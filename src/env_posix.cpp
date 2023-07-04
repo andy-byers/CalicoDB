@@ -337,25 +337,32 @@ public:
         char fix[256];
         auto *p = fix;
         auto L = sizeof(fix);
+        std::size_t offset;
 
         std::va_list args_copy;
         va_copy(args_copy, args);
         for (int i = 0; i < 2; ++i) {
-            const auto offset = static_cast<std::size_t>(std::snprintf(
+            offset = static_cast<std::size_t>(std::snprintf(
                 p, L, "%04d/%02d/%02d-%02d:%02d:%02d.%06d ",
                 now_tm.tm_year + 1900, now_tm.tm_mon + 1,
                 now_tm.tm_mday, now_tm.tm_hour, now_tm.tm_min,
                 now_tm.tm_sec, static_cast<int>(now_tv.tv_usec)));
-            const auto rc = attempt_fmt(p + offset, L - offset, true, fmt, args);
-            const auto output_length = static_cast<std::size_t>(rc) + offset;
-            if (output_length <= L) {
-                (void)posix_write(m_file, Slice(p, output_length));
-                break;
-            } else if (i == 0) {
-                var = new char[output_length];
-                L = output_length;
-                p = var;
+            offset += static_cast<std::size_t>(std::vsnprintf(
+                p + offset, L - offset, fmt, args_copy));
+            if (offset + 1 >= L) {
+                if (i == 0) {
+                    L = offset + 2;
+                    var = new char[L];
+                    p = var;
+                    continue;
+                }
+                offset = L - 1;
             }
+            if (p[offset - 1] != '\n') {
+                p[offset++] = '\n';
+            }
+            (void)posix_write(m_file, Slice(p, offset));
+            break;
         }
         va_end(args);
         delete[] var;
