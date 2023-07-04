@@ -99,7 +99,7 @@ public:
             break;
         }
     }
-    // Include the first mismatch in `rhs`.
+    // `lhs` < result <= `rhs`
     return rhs.range(0, n + 1);
 }
 
