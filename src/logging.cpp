@@ -10,52 +10,29 @@
 namespace calicodb
 {
 
-auto attempt_fmt(char *ptr, std::size_t length, bool append_newline, const char *fmt, std::va_list args) -> std::size_t
+auto append_fmt_string(std::string &str, const char *fmt, ...) -> void
 {
-    std::va_list args_copy;
-    va_copy(args_copy, args);
-    const auto rc = std::vsnprintf(ptr, length, fmt, args_copy);
-    va_end(args_copy);
-
-    // Assume that std::vsnprintf() will never fail.
-    CALICODB_EXPECT_GE(rc, 0);
-    auto write_length = static_cast<std::size_t>(rc);
-
-    if (write_length + 1 >= length) {
-        // The message did not fit into the buffer.
-        return write_length + 2;
-    }
-    // Add a newline if necessary.
-    if (append_newline && ptr[write_length - 1] != '\n') {
-        ptr[write_length++] = '\n';
-    }
-    return write_length;
-}
-
-auto append_fmt_string(std::string &out, const char *fmt, ...) -> std::size_t
-{
-    // Write the formatted text at the end of `out`. First, try to format the text into 32 bytes of
-    // additional memory. If that doesn't work, try again with the exact size needed.
-    const auto offset = out.size();
-    out.resize(offset + 32);
-
     std::va_list args;
     va_start(args, fmt);
 
-    std::size_t added_length;
-    for (int i = 0; i < 2; ++i) {
-        added_length = attempt_fmt(
-            out.data() + offset,
-            out.size() - offset,
-            false, fmt, args);
-        const auto limit = out.size();
-        out.resize(offset + added_length);
-        if (offset + added_length <= limit) {
-            break;
-        }
-    }
+    std::va_list args_copy;
+    va_copy(args_copy, args);
+    auto len = std::vsnprintf(
+        nullptr, 0,
+        fmt, args_copy);
+    va_end(args_copy);
+
+    CALICODB_EXPECT_GE(len, 0);
+    const auto offset = str.size();
+    str.resize(offset + static_cast<std::size_t>(len) + 1);
+    len = std::vsnprintf(
+        str.data() + offset,
+        str.size() - offset,
+        fmt, args);
+    str.pop_back();
     va_end(args);
-    return added_length;
+
+    CALICODB_EXPECT_TRUE(0 <= len && len <= int(str.size()));
 }
 
 auto append_number(std::string &out, std::size_t value) -> void

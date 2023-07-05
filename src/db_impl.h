@@ -55,6 +55,7 @@ private:
     const std::string m_db_filename;
     const std::string m_wal_filename;
     const bool m_owns_log;
+    const bool m_owns_env;
 };
 
 inline auto db_impl(DB *db) -> DBImpl *

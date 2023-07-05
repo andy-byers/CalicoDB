@@ -358,6 +358,16 @@ TEST(Logging, ConsumeDecimalNumberNoDigits)
     ConsumeDecimalNumberNoDigitsTest(std::string("\377123", 4));
 }
 
+TEST(Logging, AppendFmtString)
+{
+    std::string str;
+    append_fmt_string(str, "hello %d %s", 42, "goodbye");
+    const std::string long_str(128, '*');
+    append_fmt_string(str, "%s", long_str.data());
+    append_fmt_string(str, "empty");
+    ASSERT_EQ(str, "hello 42 goodbye" + long_str + "empty");
+}
+
 TEST(Slice, Construction)
 {
     std::string s("123");

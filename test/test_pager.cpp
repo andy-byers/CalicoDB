@@ -7,6 +7,7 @@
 #include "fake_env.h"
 #include "freelist.h"
 #include "pager.h"
+#include "temp.h"
 #include "test.h"
 #include "wal.h"
 
@@ -135,6 +136,7 @@ protected:
                 kMinFrameCount,
                 Options::kSyncNormal,
                 lock_mode,
+                true,
             };
             s = Pager::open(param, m_pager);
         }
