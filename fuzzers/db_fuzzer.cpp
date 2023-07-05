@@ -2,6 +2,7 @@
 // This source code is licensed under the MIT License, which can be found in
 // LICENSE.md. See AUTHORS.md for a list of contributor names.
 
+#include "fake_env.h"
 #include "fuzzer.h"
 #include "logging.h"
 #include "model.h"
@@ -421,7 +422,7 @@ auto DBFuzzer::fuzz(FuzzerStream &stream) -> bool
 extern "C" int LLVMFuzzerTestOneInput(const U8 *data, std::size_t size)
 {
     Options options;
-    options.temp_database = true; // Use an in-memory database.
+    options.env = new FakeEnv; // Use a fake Env that doesn't write to disk.
     options.cache_size = 0; // Use the smallest possible cache.
 
     {
