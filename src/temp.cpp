@@ -146,7 +146,7 @@ public:
 
     auto rand() -> unsigned override
     {
-        return std::uniform_int_distribution()(m_rng);
+        return std::uniform_int_distribution<unsigned>()(m_rng);
     }
 
     auto sleep(unsigned micros) -> void override
