@@ -19,7 +19,8 @@ static constexpr U32 kCellPtrSize = sizeof(U16);
 auto Tree::corrupted_page(Id page_id) const -> Status
 {
     std::string msg;
-    append_fmt_string(msg, "corruption detected (root=%u, page=%u)", root().value, page_id.value);
+    append_fmt_string(msg, "corruption detected (root=%u, page=%u)",
+                      root().value, page_id.value);
     auto s = Status::corruption(msg);
     m_pager->set_status(s);
     return s;
@@ -378,62 +379,83 @@ auto Tree::maybe_fix_overflow_chain(const Cell &cell, Id parent_id) -> Status
 
 auto Tree::make_pivot(const PivotOptions &opt, Cell &pivot_out) -> Status
 {
-    Slice left_key, right_key;
-    std::string left_buf, right_buf;
-    auto s = read_key(*opt.left, left_buf, &left_key);
-    if (s.is_ok()) {
-        s = read_key(*opt.right, right_buf, &right_key);
+    std::string buffers[2];
+    Slice keys[2];
+    for (std::size_t i = 0; i < 2; ++i) {
+        const auto local_key_size = std::min(
+            opt.cells[i]->key_size,
+            opt.cells[i]->local_pl_size);
+        keys[i] = Slice(opt.cells[i]->key, local_key_size);
     }
-    if (s.is_ok()) {
-        auto *ptr = opt.scratch + sizeof(U32); // Skip the left child ID.
-        auto prefix = truncate_suffix(left_key, right_key);
-        pivot_out.ptr = opt.scratch;
-        pivot_out.total_pl_size = static_cast<U32>(prefix.size());
-        pivot_out.key = encode_varint(ptr, pivot_out.total_pl_size);
-        pivot_out.local_pl_size = compute_local_pl_size(prefix.size(), 0);
-        pivot_out.footprint = pivot_out.local_pl_size + U32(pivot_out.key - opt.scratch);
-        std::memcpy(pivot_out.key, prefix.data(), pivot_out.local_pl_size);
-        prefix.advance(pivot_out.local_pl_size);
-        if (!prefix.is_empty()) {
-            // The pivot is too long to fit on a single page. Transfer the portion that
-            // won't fit to an overflow chain.
-            PageRef *prev = nullptr;
-            auto dst_type = PointerMap::kOverflowHead;
-            auto dst_bptr = opt.parent_id;
-            while (s.is_ok() && !prefix.is_empty()) {
-                PageRef *dst;
-                // Allocate a new overflow page.
-                s = m_pager->allocate(dst);
+    if (keys[0] >= keys[1]) {
+        // The left key must be less than the right key. If this cannot be seen in the local
+        // keys, then 1 of the 2 must be overflowing. The nonlocal part is needed to perform
+        // suffix truncation.
+        for (std::size_t i = 0; i < 2; ++i) {
+            if (opt.cells[i]->key_size > keys[i].size()) {
+                // Read just enough of the key to determine the ordering.
+                auto s = read_key(
+                    *opt.cells[i],
+                    buffers[i],
+                    &keys[i],
+                    opt.cells[1 - i]->key_size + 1);
                 if (!s.is_ok()) {
-                    break;
+                    return s;
                 }
-                const auto copy_size = std::min<std::size_t>(
-                    prefix.size(), kLinkContentSize);
-                std::memcpy(dst->page + kLinkContentOffset,
-                            prefix.data(),
-                            copy_size);
-                prefix.advance(copy_size);
-
-                if (prev) {
-                    put_u32(prev->page, dst->page_id.value);
-                    m_pager->release(prev, Pager::kNoCache);
-                } else {
-                    write_overflow_id(pivot_out, dst->page_id);
-                }
-                dst_type = PointerMap::kOverflowLink;
-                dst_bptr = dst->page_id;
-                prev = dst;
-
-                s = PointerMap::write_entry(
-                    *m_pager, dst->page_id, {dst_bptr, dst_type});
             }
-            if (s.is_ok()) {
-                CALICODB_EXPECT_NE(nullptr, prev);
-                put_u32(prev->page, 0);
-                pivot_out.footprint += sizeof(U32);
-            }
-            m_pager->release(prev, Pager::kNoCache);
         }
+    }
+    auto *ptr = opt.scratch + sizeof(U32); // Skip the left child ID.
+    auto prefix = truncate_suffix(keys[0], keys[1]);
+    pivot_out.ptr = opt.scratch;
+    pivot_out.total_pl_size = static_cast<U32>(prefix.size());
+    pivot_out.key = encode_varint(ptr, pivot_out.total_pl_size);
+    pivot_out.local_pl_size = compute_local_pl_size(prefix.size(), 0);
+    pivot_out.footprint = pivot_out.local_pl_size + U32(pivot_out.key - opt.scratch);
+    std::memcpy(pivot_out.key, prefix.data(), pivot_out.local_pl_size);
+    prefix.advance(pivot_out.local_pl_size);
+
+    // Handle overflow key.
+    Status s;
+    if (!prefix.is_empty()) {
+        // The pivot is too long to fit on a single page. Transfer the portion that
+        // won't fit to an overflow chain.
+        PageRef *prev = nullptr;
+        auto dst_type = PointerMap::kOverflowHead;
+        auto dst_bptr = opt.parent_id;
+        while (s.is_ok() && !prefix.is_empty()) {
+            PageRef *dst;
+            // Allocate a new overflow page.
+            s = m_pager->allocate(dst);
+            if (!s.is_ok()) {
+                break;
+            }
+            const auto copy_size = std::min<std::size_t>(
+                prefix.size(), kLinkContentSize);
+            std::memcpy(dst->page + kLinkContentOffset,
+                        prefix.data(),
+                        copy_size);
+            prefix.advance(copy_size);
+
+            if (prev) {
+                put_u32(prev->page, dst->page_id.value);
+                m_pager->release(prev, Pager::kNoCache);
+            } else {
+                write_overflow_id(pivot_out, dst->page_id);
+            }
+            dst_type = PointerMap::kOverflowLink;
+            dst_bptr = dst->page_id;
+            prev = dst;
+
+            s = PointerMap::write_entry(
+                *m_pager, dst->page_id, {dst_bptr, dst_type});
+        }
+        if (s.is_ok()) {
+            CALICODB_EXPECT_NE(nullptr, prev);
+            put_u32(prev->page, 0);
+            pivot_out.footprint += sizeof(U32);
+        }
+        m_pager->release(prev, Pager::kNoCache);
     }
     return s;
 }
@@ -725,8 +747,8 @@ auto Tree::split_nonroot_fast(Node parent, Node right) -> Status
             goto cleanup;
         }
         const PivotOptions opt = {
-            &left_cell,
-            &right_cell,
+            {&left_cell,
+             &right_cell},
             m_cell_scratch[0],
             parent.ref->page_id,
         };
@@ -923,8 +945,8 @@ auto Tree::redistribute_cells(Node &left, Node &right, Node &parent, U32 pivot_i
         if (p_src->is_leaf()) {
             ++idx; // Backtrack to the last cell written to p_right.
             const PivotOptions opt = {
-                &cells[U32(idx) - 1],
-                &cells[U32(idx)],
+                {&cells[U32(idx) - 1],
+                 &cells[U32(idx)]},
                 m_cell_scratch[2],
                 parent.ref->page_id,
             };
