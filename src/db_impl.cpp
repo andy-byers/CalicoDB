@@ -61,6 +61,7 @@ auto DBImpl::open(const Options &sanitized) -> Status
         (sanitized.cache_size + kPageSize - 1) / kPageSize,
         sanitized.sync_mode,
         sanitized.lock_mode,
+        !sanitized.temp_database,
     };
     // Pager::open() will open/create the WAL file. If a WAL file exists beforehand, then we
     // should attempt a checkpoint before we do anything else. If this is not the first
@@ -86,7 +87,8 @@ DBImpl::DBImpl(const Options &options, const Options &sanitized, std::string fil
       m_busy(sanitized.busy),
       m_db_filename(std::move(filename)),
       m_wal_filename(sanitized.wal_filename),
-      m_owns_log(options.info_log == nullptr)
+      m_owns_log(options.info_log == nullptr),
+      m_owns_env(options.temp_database)
 {
 }
 
@@ -98,6 +100,9 @@ DBImpl::~DBImpl()
 
     if (m_owns_log) {
         delete m_log;
+    }
+    if (m_owns_env) {
+        delete m_env;
     }
 }
 

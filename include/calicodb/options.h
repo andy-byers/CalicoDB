@@ -46,6 +46,11 @@ struct Options final {
     // If true, return with an error if the database already exists.
     bool error_if_exists = false;
 
+    // If true, create the database in RAM only and never write anything to disk. The
+    // database will persist for the duration of the process that created it, and a
+    // lock_mode of kLockExclusive is implied.
+    bool temp_database = false;
+
     enum SyncMode {
         kSyncOff,    // No durability
         kSyncNormal, // Persist data on checkpoint

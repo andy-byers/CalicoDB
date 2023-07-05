@@ -4,10 +4,10 @@
 
 #include "common.h"
 #include "encoding.h"
-#include "fake_env.h"
 #include "freelist.h"
 #include "logging.h"
 #include "schema.h"
+#include "temp.h"
 #include "test.h"
 #include "tree.h"
 #include <gtest/gtest.h>
@@ -20,7 +20,7 @@ static constexpr std::size_t kInitialRecordCount = 1'000;
 class TreeTestHarness
 {
 public:
-    FakeEnv *m_env;
+    Env *m_env;
     std::string m_scratch;
     Status m_status;
     Stat m_stat;
@@ -29,7 +29,7 @@ public:
     Tree *m_tree = nullptr;
 
     TreeTestHarness()
-        : m_env(new FakeEnv),
+        : m_env(new_temp_env()),
           m_scratch(kPageSize * 2, '\0')
     {
         EXPECT_OK(m_env->new_file("db", Env::kCreate, m_file));
@@ -46,6 +46,7 @@ public:
             kMinFrameCount * 2,
             Options::kSyncNormal,
             Options::kLockNormal,
+            false,
         };
 
         EXPECT_OK(Pager::open(pager_param, m_pager));
@@ -237,6 +238,10 @@ TEST_F(TreeTests, GetNonexistentKeys)
     ASSERT_OK(m_tree->put(make_long_key(8), make_value('0', true)));
     ASSERT_OK(m_tree->put(make_long_key(9), make_value('0', true)));
     // Missing 10
+
+print_database_overview(std::cerr,*m_pager);
+std::cerr<<"\n\n";
+std::cerr<<m_tree->TEST_to_string()<<"\n\n";
 
     m_tree->TEST_validate();
 
