@@ -238,8 +238,7 @@ private:
     auto vacuum_step(PageRef &free, PointerMap::Entry entry, Schema &schema, Id last_id) -> Status;
 
     struct PivotOptions {
-        const Cell *left;
-        const Cell *right;
+        const Cell *cells[2];
         char *scratch;
         Id parent_id;
     };
