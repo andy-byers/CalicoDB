@@ -9,6 +9,8 @@
 #include <chrono>
 #include <random>
 #include <thread>
+#include <vector>
+#include <unordered_map>
 
 namespace calicodb
 {

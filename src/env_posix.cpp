@@ -337,10 +337,9 @@ public:
         char fix[256];
         auto *p = fix;
         auto L = sizeof(fix);
-        std::size_t offset;
 
         for (int i = 0; i < 2; ++i) {
-            offset = static_cast<std::size_t>(std::snprintf(
+            auto offset = static_cast<std::size_t>(std::snprintf(
                 p, L, "%04d/%02d/%02d-%02d:%02d:%02d.%06d ",
                 now_tm.tm_year + 1900, now_tm.tm_mon + 1,
                 now_tm.tm_mday, now_tm.tm_hour, now_tm.tm_min,
