@@ -152,6 +152,7 @@ auto Node::alloc(U32 index, U32 size, char *scratch) -> int
     CALICODB_EXPECT_NE(offset, 0);
     if (offset > 0) {
         put_ivec_slot(*this, index, static_cast<U32>(offset));
+        usable_space -= size + kSlotWidth;
     }
     return offset;
 }
@@ -432,7 +433,6 @@ auto Node::write(U32 index, const Cell &cell, char *scratch) -> int
     const auto offset = alloc(index, cell.footprint, scratch);
     if (offset > 0) {
         std::memcpy(ref->page + offset, cell.ptr, cell.footprint);
-        usable_space -= cell.footprint + kSlotWidth;
     }
     return offset;
 }
