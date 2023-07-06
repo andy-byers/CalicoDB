@@ -100,72 +100,6 @@ static constexpr U32 kLinkContentOffset = sizeof(U32);
 static constexpr U32 kLinkContentSize = kPageSize - kLinkContentOffset;
 
 struct PayloadManager {
-    static auto promote(Pager &pager, Cell &cell, Id parent_id) -> Status
-    {
-        const auto header_size = sizeof(U32) + varint_length(cell.key_size);
-
-        // The buffer that `scratch` points into should have enough room before `scratch` to write
-        // the left child ID.
-        cell.ptr = cell.key - header_size;
-        cell.local_pl_size = compute_local_pl_size(cell.key_size, 0);
-        cell.total_pl_size = cell.key_size;
-        cell.footprint = static_cast<U32>(header_size + cell.local_pl_size);
-
-        Status s;
-        if (cell.key_size > cell.local_pl_size) {
-            // Part of the key is on an overflow page. No value is stored locally in this case, so
-            // the local size computation is still correct. Copy the overflow key, page-by-page,
-            // to a new overflow chain.
-            Id ovfl_id;
-            auto rest = cell.key_size - cell.local_pl_size;
-            auto pgno = read_overflow_id(cell);
-            PageRef *prev = nullptr;
-            auto dst_type = PointerMap::kOverflowHead;
-            auto dst_bptr = parent_id;
-            while (s.is_ok() && rest > 0) {
-                PageRef *src, *dst;
-                // Allocate a new overflow page.
-                s = pager.allocate(dst);
-                if (!s.is_ok()) {
-                    break;
-                }
-                // Acquire the old overflow page.
-                s = pager.acquire(pgno, src);
-                if (!s.is_ok()) {
-                    pager.release(dst);
-                    break;
-                }
-                const auto copy_size = std::min(rest, kLinkContentSize);
-                std::memcpy(dst->page + kLinkContentOffset,
-                            src->page + kLinkContentOffset,
-                            copy_size);
-
-                if (prev) {
-                    put_u32(prev->page, dst->page_id.value);
-                    pager.release(prev, Pager::kNoCache);
-                } else {
-                    write_overflow_id(cell, dst->page_id);
-                }
-                rest -= copy_size;
-                dst_type = PointerMap::kOverflowLink;
-                dst_bptr = dst->page_id;
-                prev = dst;
-                pgno = read_next_id(*src);
-                pager.release(src, Pager::kNoCache);
-
-                s = PointerMap::write_entry(
-                    pager, dst->page_id, {dst_bptr, dst_type});
-            }
-            if (s.is_ok()) {
-                CALICODB_EXPECT_NE(nullptr, prev);
-                put_u32(prev->page, 0);
-                cell.footprint += sizeof(U32);
-            }
-            pager.release(prev, Pager::kNoCache);
-        }
-        return s;
-    }
-
     static auto access(
         Pager &pager,
         const Cell &cell,   // The `cell` containing the payload being accessed
@@ -1942,7 +1876,7 @@ auto Tree::InternalCursor::seek(const Slice &key) -> bool
         if (cmp <= 0) {
             exact = cmp == 0;
             upper = mid;
-        } else if (cmp > 0) {
+        } else {
             lower = mid + 1;
         }
     }
