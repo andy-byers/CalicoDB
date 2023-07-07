@@ -19,8 +19,7 @@ class Tree;
 class CursorImpl : public Cursor
 {
     Status m_status;
-    Tree *m_tree;
-    U32 *m_count_ptr = nullptr;
+    Tree *const m_tree;
 
     Node m_node;
     U32 m_index = 0;
@@ -34,25 +33,40 @@ class CursorImpl : public Cursor
     Slice m_key;
     Slice m_val;
 
+    // Singly-linked list of user cursors. m_link_p is used to avoid traversing the list when a cursor
+    // is removed.
+    CursorImpl **m_link_p = nullptr;
+    CursorImpl *m_next_c = nullptr;
+
+    // True if the position has been saved and m_node released, false otherwise. The cursor position is
+    // saved by writing the full key and value to the local buffers m_key_buf and m_val_buf. m_key and
+    // m_val must also be adjusted. Saving a cursor will likely invalidate slices obtained by calling
+    // key() or value().
+    bool m_saved = false;
+
+    auto list_add(CursorImpl *&head) -> void;
+    auto list_remove() -> void;
+    auto save_position() -> void;
+    auto load_position() -> void;
+
 protected:
     auto seek_to(Node node, U32 index) -> void;
     auto fetch_payload(Node &node, U32 index) -> Status;
+
+    explicit CursorImpl(Tree &tree)
+        : m_tree(&tree)
+    {
+    }
 
 public:
     friend class Tree;
     friend class SchemaCursor;
 
-    explicit CursorImpl(Tree &tree, U32 *count_ptr)
-        : m_tree(&tree),
-          m_count_ptr(count_ptr)
-    {
-    }
-
     ~CursorImpl() override;
 
     [[nodiscard]] auto is_valid() const -> bool override
     {
-        return m_node.ref && m_status.is_ok();
+        return (m_node.ref || m_saved) && m_status.is_ok();
     }
 
     [[nodiscard]] auto status() const -> Status override
@@ -111,11 +125,13 @@ public:
         // Ensure that all page references are released back to the pager.
         finish_operation();
     }
+    auto finish_operation() const -> void;
 
     explicit Tree(Pager &pager, Stat &stat, char *scratch, const Id *root_id);
     static auto create(Pager &pager, Id *out) -> Status;
     static auto destroy(Tree &tree) -> Status;
 
+    auto new_cursor() -> CursorImpl *;
     auto put(const Slice &key, const Slice &value) -> Status;
     auto get(const Slice &key, std::string *value) const -> Status;
     auto erase(const Slice &key) -> Status;
@@ -183,11 +199,6 @@ public:
         // InternalCursor::move_to() takes ownership of the page reference in `node`. When the working set
         // is cleared below, this reference is not released.
         m_c.move_to(std::move(node), diff);
-    }
-
-    auto finish_operation() const -> void
-    {
-        m_c.clear();
     }
 
     [[nodiscard]] auto root() const -> Id
@@ -305,6 +316,10 @@ private:
         auto seek(const Slice &key) -> bool;
         auto move_down(Id child_id) -> void;
     } m_c;
+
+    auto save_user_cursors() const -> void;
+    CursorImpl *m_user_c = nullptr;
+    CursorImpl *m_saved_c = nullptr;
 
     // Various tree operation counts are tracked in this variable.
     Stat *m_stat;

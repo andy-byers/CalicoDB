@@ -146,7 +146,7 @@ TEST_F(StressTests, CursorLimit)
         Bucket b;
         auto s = tx.create_bucket(BucketOptions(), "bucket", &b);
         std::vector<Cursor *> cursors;
-        for (std::size_t i = 0; s.is_ok(); ++i) {
+        for (std::size_t i = 0; s.is_ok() && i < 1'000; ++i) {
             auto *c = tx.new_cursor(b);
             if (c) {
                 cursors.emplace_back(c);
@@ -155,15 +155,6 @@ TEST_F(StressTests, CursorLimit)
                 break;
             }
         }
-        EXPECT_EQ(nullptr, tx.new_cursor(b));
-        // The Tx keeps track of how many cursors are live. We should be able to get rid of a few,
-        // and then allocate them again.
-        delete cursors.at(0);
-        delete cursors.at(1);
-        cursors.at(0) = tx.new_cursor(b);
-        cursors.at(1) = tx.new_cursor(b);
-        EXPECT_NE(nullptr, cursors.at(0));
-        EXPECT_NE(nullptr, cursors.at(1));
 
         for (std::size_t i = 0; s.is_ok() && i < cursors.size(); ++i) {
             cursors[i]->seek_first();

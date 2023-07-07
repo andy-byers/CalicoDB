@@ -74,18 +74,12 @@ auto TxImpl::vacuum() -> Status
 
 auto TxImpl::new_cursor(const Bucket &b) const -> Cursor *
 {
-    static constexpr std::size_t kMaxCursors = 8;
-    if (m_user_cursors >= kMaxCursors) {
-        return nullptr;
-    }
-    ++m_user_cursors;
     m_schema_obj.use_bucket(b);
-    auto *cursor = new CursorImpl(
-        *static_cast<Tree *>(b.state), &m_user_cursors);
+    auto *c = static_cast<Tree *>(b.state)->new_cursor();
     if (!m_status->is_ok()) {
-        cursor->clear(*m_status);
+        c->clear(*m_status);
     }
-    return cursor;
+    return c;
 }
 
 auto TxImpl::get(const Bucket &b, const Slice &key, std::string *value) const -> Status

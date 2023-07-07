@@ -257,6 +257,7 @@ if (s.is_ok()) {
 ```
 
 ### Cursors
+Cursors are used to perform full-bucket scans and range queries.
 
 ```C++
 calicodb::Cursor *c = tx->new_cursor(b);
