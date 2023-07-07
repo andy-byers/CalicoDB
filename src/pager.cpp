@@ -335,9 +335,12 @@ auto Pager::ensure_available_buffer() -> Status
     Status s;
     if (!m_bufmgr.available()) {
         // There are no available frames, so the cache must be full. next_victim() will not find
-        // a page to evict if all pages are referenced, which should never happen.
+        // a page to evict if all pages are referenced, which could happen if there are too many
+        // cursors created on the same tree, each positioned on a different page.
         auto *victim = m_bufmgr.next_victim();
-        CALICODB_EXPECT_NE(victim, nullptr);
+        if (victim == nullptr) {
+            return Status::invalid_argument("out of page cache frames");
+        }
 
         if (victim->flag & PageRef::kDirty) {
             CALICODB_EXPECT_EQ(m_mode, kDirty);

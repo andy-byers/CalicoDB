@@ -203,7 +203,7 @@ TEST_F(TreeTests, LongVsShortKeys)
         ASSERT_OK(m_tree->put(std::string(tree_key_len, 'b'), make_value('2', true)));
         ASSERT_OK(m_tree->put(std::string(tree_key_len, 'c'), make_value('3', true)));
 
-        auto *c = new CursorImpl(*m_tree, nullptr);
+        auto *c = reinterpret_cast<CursorImpl *>(m_tree->new_cursor());
         c->seek(std::string(search_key_len, i == 0 ? 'A' : 'a'));
         ASSERT_TRUE(c->is_valid());
         ASSERT_EQ(std::string(tree_key_len, 'a'), c->key());
@@ -239,9 +239,9 @@ TEST_F(TreeTests, GetNonexistentKeys)
     ASSERT_OK(m_tree->put(make_long_key(9), make_value('0', true)));
     // Missing 10
 
-print_database_overview(std::cerr,*m_pager);
-std::cerr<<"\n\n";
-std::cerr<<m_tree->TEST_to_string()<<"\n\n";
+    print_database_overview(std::cerr, *m_pager);
+    std::cerr << "\n\n";
+    std::cerr << m_tree->TEST_to_string() << "\n\n";
 
     m_tree->TEST_validate();
 
@@ -476,7 +476,7 @@ protected:
 
 TEST_F(EmptyTreeCursorTests, KeyAndValueUseSeparateMemory)
 {
-    std::unique_ptr<Cursor> cursor(new CursorImpl(*m_tree, nullptr));
+    std::unique_ptr<Cursor> cursor(reinterpret_cast<CursorImpl *>(m_tree->new_cursor()));
     cursor->seek_first();
     ASSERT_FALSE(cursor->is_valid());
     cursor->seek_last();
@@ -505,7 +505,7 @@ protected:
     {
         switch (GetParam()) {
             case 0:
-                return std::make_unique<CursorImpl>(*m_tree, nullptr);
+                return std::unique_ptr<Cursor>(m_tree->new_cursor());
             case 1:
                 return std::unique_ptr<Cursor>(m_schema->new_cursor());
         }
@@ -714,6 +714,147 @@ INSTANTIATE_TEST_SUITE_P(
     CursorTests,
     CursorTests,
     ::testing::Values(0, 1));
+
+class MultiCursorTests : public TreeTests
+{
+protected:
+    auto SetUp() -> void override
+    {
+        TreeTests::SetUp();
+        add_initial_records(*this, true);
+    }
+
+    auto TearDown() -> void override
+    {
+        while (!m_cursors.empty()) {
+            del_cursor(0);
+        }
+        TreeTests::TearDown();
+    }
+
+    auto add_cursor() -> Cursor *
+    {
+        auto *c = m_tree->new_cursor();
+        m_cursors.emplace_back(c);
+        return c;
+    }
+
+    auto del_cursor(std::size_t idx) -> void
+    {
+        delete m_cursors.at(idx);
+        m_cursors.erase(begin(m_cursors) + static_cast<std::ptrdiff_t>(idx));
+    }
+
+    std::vector<Cursor *> m_cursors;
+};
+
+TEST_F(MultiCursorTests, CursorIsUnaffectedByModifications)
+{
+    auto cursor = add_cursor();
+
+    cursor->seek_first();
+    ASSERT_TRUE(cursor->is_valid());
+
+    const auto v0 = cursor->value().to_string();
+    // Modifying the tree causes cursors to be "saved". key() and value() can still be called,
+    // and is_valid() will return true given that status() is OK. Calling next() on such a
+    // cursor will cause it to be placed on the first record greater than the one it was saved
+    // on. Likewise, previous() will place the cursor on the first record smaller than the
+    // saved record. In either case, if no such record exists, the cursor will be invalidated.
+    ASSERT_OK(m_tree->erase(make_long_key(0)));
+
+    // Cursor isn't aware of modifications yet.
+    ASSERT_EQ(cursor->key(), make_long_key(0));
+    ASSERT_EQ(cursor->value(), v0);
+
+    ASSERT_OK(m_tree->put(make_long_key(0), "value"));
+    ASSERT_EQ(cursor->key(), make_long_key(0));
+    ASSERT_EQ(cursor->value(), v0);
+}
+
+TEST_F(MultiCursorTests, SavedCursorEraseFromLeft)
+{
+    auto cursor = add_cursor();
+
+    cursor->seek_first();
+    while (cursor->is_valid()) {
+        const auto key = cursor->key();
+        ASSERT_OK(m_tree->erase(key));
+        // Tree::erase(const Slice &) doesn't fix any cursors, so cursor is on a record
+        // that was already erased, with a key lower than the lowest key in the tree.
+        // Calling Cursor::next() should see that the new key is greater than the saved
+        // key and stop on the first record.
+        cursor->next();
+    }
+
+    cursor->seek_first();
+    ASSERT_FALSE(cursor->is_valid());
+    ASSERT_OK(cursor->status());
+}
+
+TEST_F(MultiCursorTests, SavedCursorEraseFromRight)
+{
+    auto cursor = add_cursor();
+
+    cursor->seek_last();
+    while (cursor->is_valid()) {
+        const auto key = cursor->key();
+        ASSERT_OK(m_tree->erase(key));
+        cursor->previous();
+        // When the cursor seeks back to the saved record, it will go off the end of the
+        // key range, causing it to be invalidated. Cursor::previous() must not be called
+        // on an invalid cursor.
+        ASSERT_FALSE(cursor->is_valid());
+        cursor->seek_last();
+    }
+
+    cursor->seek_last();
+    ASSERT_FALSE(cursor->is_valid());
+    ASSERT_OK(cursor->status());
+}
+
+TEST_F(MultiCursorTests, CursorListManagement)
+{
+    std::default_random_engine rng;
+    for (std::size_t i = 1; i < 123; ++i) {
+        while (m_cursors.size() < i) {
+            add_cursor();
+        }
+        std::shuffle(
+            begin(m_cursors),
+            end(m_cursors),
+            rng);
+        while (!m_cursors.empty()) {
+            del_cursor(0);
+        }
+    }
+}
+
+TEST_F(MultiCursorTests, OutOfFrames)
+{
+    for (std::size_t i = 1; i < m_pager->buffer_count() * 10; ++i) {
+        add_cursor();
+    }
+    for (auto *c : m_cursors) {
+        c->seek_first();
+    }
+    bool out_of_frames = false;
+    for (std::size_t i = 0; i < m_cursors.size(); ++i) {
+        for (std::size_t j = 0; m_cursors[i]->is_valid() && j < i; ++j) {
+            // Spread the cursors out until too many page cache frames are occupied.
+            m_cursors[i]->next();
+        }
+        if (m_cursors[i]->status().is_invalid_argument()) {
+            out_of_frames = true;
+            break;
+        }
+    }
+    ASSERT_TRUE(out_of_frames);
+
+    // Both put() and erase() cause live cursors to be saved.
+    ASSERT_OK(m_tree->put("key", "value"));
+    ASSERT_OK(m_tree->erase("key"));
+}
 
 class PointerMapTests : public TreeTests
 {
@@ -940,6 +1081,55 @@ TEST_F(MultiTreeTests, MultipleSplitsAndMerges_2)
         fill_tree(tid);
         check_tree(tid);
         clear_tree(tid);
+    }
+}
+
+TEST_F(MultiTreeTests, SavedCursors)
+{
+    std::vector<std::size_t> tids;
+    std::vector<Cursor *> cs;
+    Status s;
+
+    while (s.is_ok()) {
+        // Create a new tree and add some records.
+        tids.emplace_back(create_tree());
+        for (std::size_t i = 0; s.is_ok() && i < kInitialRecordCount; ++i) {
+            const auto value = payload_values[i];
+            s = multi_tree[tids.back()]->put(make_long_key(i), value);
+        }
+        if (!s.is_ok()) {
+            break;
+        }
+        // Advance or wrap the cursors, all of which should be live again (not "saved").
+        for (auto *c : cs) {
+            if (c->is_valid()) {
+                c->next();
+            } else if (c->status().is_ok()) {
+                c->seek_first();
+            } else {
+                s = c->status();
+                break;
+            }
+        }
+        if (!s.is_ok()) {
+            break;
+        }
+        // Add a new cursor to every tree.
+        for (auto tid : tids) {
+            cs.emplace_back(multi_tree[tid]->new_cursor());
+            cs.back()->seek_first();
+            if (!cs.back()->is_valid()) {
+                s = cs.back()->status();
+                break;
+            }
+        }
+    }
+
+    // Should be an "out of frames" error. TODO: Make a specific out of memory status code?
+    ASSERT_TRUE(s.is_invalid_argument());
+
+    for (const auto *c : cs) {
+        delete c;
     }
 }
 

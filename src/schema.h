@@ -7,15 +7,14 @@
 
 #include "calicodb/cursor.h"
 #include "calicodb/db.h"
+#include "tree.h"
 #include "utils.h"
 #include <unordered_map>
 
 namespace calicodb
 {
 
-class CursorImpl;
 class Pager;
-class Tree;
 struct Stat;
 
 // Representation of the database schema
@@ -23,7 +22,7 @@ class Schema final
 {
 public:
     explicit Schema(Pager &pager, const Status &status, Stat &stat, char *scratch);
-    ~Schema();
+    ~Schema() = default;
 
     [[nodiscard]] auto new_cursor() -> Cursor *;
 
@@ -75,7 +74,7 @@ private:
     Pager *const m_pager;
     char *const m_scratch;
     Stat *const m_stat;
-    Tree *m_map;
+    Tree m_map;
 
     // Pointer to the most-recently-accessed tree.
     const Tree *m_recent = nullptr;

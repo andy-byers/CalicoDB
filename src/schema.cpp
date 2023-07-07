@@ -12,44 +12,66 @@ namespace calicodb
 
 class SchemaCursor : public Cursor
 {
-    mutable Status m_status;
-    std::string m_key;
-    std::string m_value;
-    CursorImpl m_impl;
-
-    auto move_to_impl() -> void;
+    CursorImpl *const m_c;
 
 public:
-    explicit SchemaCursor(Tree &tree);
-    ~SchemaCursor() override = default;
+    explicit SchemaCursor(CursorImpl &c)
+        : m_c(&c)
+    {
+    }
+
+    ~SchemaCursor() override
+    {
+        delete m_c;
+    }
 
     [[nodiscard]] auto is_valid() const -> bool override
     {
-        return m_status.is_ok() && !m_key.empty();
+        return m_c->is_valid();
     }
 
     [[nodiscard]] auto status() const -> Status override
     {
-        return m_status;
+        return m_c->status();
     }
 
     [[nodiscard]] auto key() const -> Slice override
     {
-        CALICODB_EXPECT_TRUE(is_valid());
-        return m_key;
+        return m_c->key();
     }
 
     [[nodiscard]] auto value() const -> Slice override
     {
+        // TODO: Parse the options string into a human-readable format, save it internally and return a slice to it.
+        //       We should skip the varint root ID or convert it into a decimal string.
         CALICODB_EXPECT_TRUE(is_valid());
-        return m_value;
+        return m_c->value();
     }
 
-    auto seek(const Slice &key) -> void override;
-    auto seek_first() -> void override;
-    auto seek_last() -> void override;
-    auto next() -> void override;
-    auto previous() -> void override;
+    auto seek(const Slice &key) -> void override
+    {
+        return m_c->seek(key);
+    }
+
+    auto seek_first() -> void override
+    {
+        m_c->seek_first();
+    }
+
+    auto seek_last() -> void override
+    {
+        m_c->seek_last();
+    }
+
+    auto next() -> void override
+    {
+        m_c->next();
+    }
+
+    auto previous() -> void override
+    {
+        m_c->previous();
+    }
 };
 
 Schema::Schema(Pager &pager, const Status &status, Stat &stat, char *scratch)
@@ -57,18 +79,13 @@ Schema::Schema(Pager &pager, const Status &status, Stat &stat, char *scratch)
       m_pager(&pager),
       m_scratch(scratch),
       m_stat(&stat),
-      m_map(new Tree(pager, stat, scratch, nullptr))
+      m_map(pager, stat, scratch, nullptr)
 {
-}
-
-Schema::~Schema()
-{
-    delete m_map;
 }
 
 auto Schema::new_cursor() -> Cursor *
 {
-    return new SchemaCursor(*m_map);
+    return new SchemaCursor(*m_map.new_cursor());
 }
 
 auto Schema::close() -> void
@@ -76,8 +93,7 @@ auto Schema::close() -> void
     for (const auto &[_, state] : m_trees) {
         delete state.tree;
     }
-    delete m_map;
-    m_map = nullptr;
+    m_map.finish_operation();
 }
 
 auto Schema::corrupted_root_id(const Slice &name, const Slice &value) -> Status
@@ -100,7 +116,7 @@ auto Schema::create_bucket(const BucketOptions &options, const Slice &name, Buck
     Id root_id;
     std::string value;
     if (s.is_ok()) {
-        s = m_map->get(name, &value);
+        s = m_map.get(name, &value);
     }
 
     if (s.is_not_found()) {
@@ -108,7 +124,7 @@ auto Schema::create_bucket(const BucketOptions &options, const Slice &name, Buck
         if (s.is_ok()) {
             // TODO: Encode persistent bucket options here.
             encode_root_id(root_id, value);
-            s = m_map->put(name, value);
+            s = m_map.put(name, value);
         }
     } else if (s.is_ok()) {
         if (!decode_and_check_root_id(value, root_id)) {
@@ -134,7 +150,7 @@ auto Schema::open_bucket(const Slice &name, Bucket &b_out) -> Status
 
     std::string value;
     if (s.is_ok()) {
-        s = m_map->get(name, &value);
+        s = m_map.get(name, &value);
     }
 
     Id root_id;
@@ -207,7 +223,7 @@ auto Schema::use_bucket(const Bucket &b) -> void
 auto Schema::drop_bucket(const Slice &name) -> Status
 {
     std::string value;
-    auto s = m_map->get(name, &value);
+    auto s = m_map.get(name, &value);
     if (s.is_not_found()) {
         return Status::invalid_argument(
             "table \"" + name.to_string() + "\" does not exist");
@@ -227,7 +243,7 @@ auto Schema::drop_bucket(const Slice &name) -> Status
     Tree drop(*m_pager, *m_stat, m_scratch, &root_id);
     s = Tree::destroy(drop);
     if (s.is_ok()) {
-        s = m_map->erase(name);
+        s = m_map.erase(name);
     }
     return s;
 }
@@ -273,7 +289,7 @@ auto Schema::vacuum_finish() -> Status
             std::string value;
             encode_root_id(root->second, value);
             // Update the database schema with the new root page ID for this tree.
-            s = m_map->put(c->key(), value);
+            s = m_map.put(c->key(), value);
             if (!s.is_ok()) {
                 break;
             }
@@ -308,7 +324,7 @@ auto Schema::vacuum() -> Status
         m_recent->finish_operation();
         m_recent = nullptr;
     }
-    return m_map->vacuum(*this);
+    return m_map.vacuum(*this);
 }
 
 auto Schema::TEST_validate() const -> void
@@ -318,61 +334,6 @@ auto Schema::TEST_validate() const -> void
             bucket.tree->TEST_validate();
         }
     }
-}
-
-SchemaCursor::SchemaCursor(Tree &tree)
-    : m_impl(tree, nullptr)
-{
-}
-
-auto SchemaCursor::move_to_impl() -> void
-{
-    m_key.clear();
-    m_value.clear();
-    if (m_impl.is_valid()) {
-        m_key = m_impl.key().to_string();
-        m_value = m_impl.value().to_string();
-    }
-    m_status = m_impl.status();
-    m_impl.clear();
-}
-
-auto SchemaCursor::seek(const Slice &key) -> void
-{
-    m_impl.seek(key);
-    move_to_impl();
-}
-
-auto SchemaCursor::seek_first() -> void
-{
-    m_impl.seek_first();
-    move_to_impl();
-}
-
-auto SchemaCursor::seek_last() -> void
-{
-    m_impl.seek_last();
-    move_to_impl();
-}
-
-auto SchemaCursor::next() -> void
-{
-    CALICODB_EXPECT_TRUE(is_valid());
-    m_impl.seek(m_key);
-    if (m_impl.is_valid()) {
-        m_impl.next();
-    }
-    move_to_impl();
-}
-
-auto SchemaCursor::previous() -> void
-{
-    CALICODB_EXPECT_TRUE(is_valid());
-    m_impl.seek(m_key);
-    if (m_impl.is_valid()) {
-        m_impl.previous();
-    }
-    move_to_impl();
 }
 
 } // namespace calicodb

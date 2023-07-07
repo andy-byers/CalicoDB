@@ -12,9 +12,9 @@ namespace calicodb
 {
 
 // Cursor for iterating over the records in a bucket
-// Cursors must be obtained through a Bucket object. It should be noted that a freshly-
-// allocated cursor is not considered valid (is_valid() returns false) until one of
-// its seek*() methods is called.
+// Cursors must be obtained by passing an open Bucket to Tx::new_cursor(). It should be
+// noted that a freshly-allocated cursor is not considered valid (is_valid() returns
+// false) until one of its seek*() methods is called.
 class Cursor
 {
 public:
@@ -33,9 +33,9 @@ public:
     // Return the status associated with this cursor
     // If is_valid() returns true, this method will always return an OK status.
     // Otherwise, the returned status will indicate the reason why the cursor is
-    // invalid. If the status returns true when Status::is_not_found() is called,
-    // the cursor is out of bounds. Cursors in this state can call, one of the
-    // seek*() to put themselves back on a valid record.
+    // invalid. If the status is OK, then the cursor is out of bounds but otherwise
+    // valid. Cursors in this state can call, one of the seek*() to put themselves
+    // back on a valid record.
     virtual auto status() const -> Status = 0;
 
     // Get the current record key

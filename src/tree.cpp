@@ -161,6 +161,12 @@ struct PayloadManager {
     }
 };
 
+auto Tree::finish_operation() const -> void
+{
+    save_user_cursors();
+    m_c.clear();
+}
+
 auto Tree::create(Pager &pager, Id *root_id_out) -> Status
 {
     PageRef *page;
@@ -1059,6 +1065,8 @@ auto Tree::put(const Slice &key, const Slice &value) -> Status
     } else if (value.size() > kMaxLength) {
         return Status::invalid_argument("value is too long");
     }
+    save_user_cursors();
+
     bool exact;
     auto s = find_external(key, exact);
     if (s.is_ok()) {
@@ -1194,6 +1202,8 @@ auto Tree::emplace(Node &node, const Slice &key, const Slice &value, U32 index, 
 
 auto Tree::erase(const Slice &key) -> Status
 {
+    save_user_cursors();
+
     bool exact;
     auto s = find_external(key, exact);
     if (s.is_ok() && exact) {
@@ -1893,16 +1903,72 @@ auto Tree::InternalCursor::move_down(Id child_id) -> void
     m_status = m_tree->acquire(child_id, false, m_node);
 }
 
+auto Tree::new_cursor() -> CursorImpl *
+{
+    auto *c = new CursorImpl(*this);
+    c->list_add(m_user_c);
+    return c;
+}
+
+auto Tree::save_user_cursors() const -> void
+{
+    CursorImpl *t;
+    for (auto *c = m_user_c; c; c = t) {
+        t = c->m_next_c;
+        // This call moves the cursor to the saved list so that we don't encounter it again.
+        // The next time it is used, it will be moved back to this list.
+        c->save_position();
+    }
+}
+
 Cursor::Cursor() = default;
 
 Cursor::~Cursor() = default;
 
 CursorImpl::~CursorImpl()
 {
+    list_remove();
     clear();
-    if (m_count_ptr) {
-        --*m_count_ptr;
+}
+
+auto CursorImpl::list_add(CursorImpl *&head) -> void
+{
+    m_next_c = head;
+    m_link_p = &head;
+    head = this;
+    if (m_next_c) {
+        m_next_c->m_link_p = &m_next_c;
     }
+}
+
+auto CursorImpl::list_remove() -> void
+{
+    if (m_next_c) {
+        m_next_c->m_link_p = m_link_p;
+    }
+    *m_link_p = m_next_c;
+}
+
+auto CursorImpl::save_position() -> void
+{
+    if (!m_saved && is_valid()) {
+        list_remove();
+        list_add(m_tree->m_saved_c);
+
+        m_tree->release(std::move(m_node));
+        m_saved = true;
+    }
+}
+
+auto CursorImpl::load_position() -> void
+{
+    CALICODB_EXPECT_TRUE(m_saved);
+
+    list_remove();
+    list_add(m_tree->m_user_c);
+
+    seek(m_key);
+    m_saved = false;
 }
 
 auto CursorImpl::fetch_payload(Node &node, U32 index) -> Status
@@ -1914,7 +1980,9 @@ auto CursorImpl::fetch_payload(Node &node, U32 index) -> Status
     if (node.read(index, cell)) {
         return m_tree->corrupted_page(node.ref->page_id);
     }
-
+    // Read the key and value into the buffers, even if they are totally embedded in m_node.
+    // We could potentially return slices directly into m_node, but they would become invalid
+    // if the tree gets modified.
     auto s = m_tree->read_key(cell, m_key_buf, &m_key);
     if (s.is_ok()) {
         s = m_tree->read_value(cell, m_val_buf, &m_val);
@@ -1953,6 +2021,24 @@ auto CursorImpl::seek_last() -> void
 auto CursorImpl::next() -> void
 {
     CALICODB_EXPECT_TRUE(is_valid());
+
+    std::string saved_key;
+    const auto reload = m_saved;
+    if (reload) {
+        // Move the saved key to a local variable, and make sure m_key still refers to it.
+        // It is used, then cleared, by load_position().
+        saved_key = std::move(m_key_buf);
+        m_key = saved_key;
+        // Attempt to seek the cursor back to the saved key.
+        load_position();
+    }
+    if (!is_valid()) {
+        return;
+    }
+    if (reload && m_key > saved_key) {
+        // The tree was modified such that this cursor is already in the correct position.
+        return;
+    }
     if (++m_index < NodeHdr::get_cell_count(m_node.hdr())) {
         auto s = fetch_payload(m_node, m_index);
         if (!s.is_ok()) {
@@ -1976,6 +2062,20 @@ auto CursorImpl::next() -> void
 auto CursorImpl::previous() -> void
 {
     CALICODB_EXPECT_TRUE(is_valid());
+
+    std::string saved_key;
+    const auto reload = m_saved;
+    if (reload) {
+        saved_key = std::move(m_key_buf);
+        m_key = saved_key;
+        load_position();
+    }
+    if (!is_valid()) {
+        return;
+    }
+    if (reload && m_key < saved_key) {
+        return;
+    }
     if (m_index) {
         auto s = fetch_payload(m_node, --m_index);
         if (!s.is_ok()) {
