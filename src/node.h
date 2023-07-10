@@ -20,7 +20,12 @@ struct BlockAllocator {
     [[nodiscard]] static auto defragment(Node &node, char *scratch, int skip = -1) -> int;
 };
 
-static constexpr auto kMaxCellHeaderSize =
+// NOTE: Cell headers are padded out to kMinCellHeaderSize, which corresponds to the size of a free block
+//       header.
+static constexpr U32 kMinCellHeaderSize =
+    sizeof(U16) +
+    sizeof(U16);
+static constexpr U32 kMaxCellHeaderSize =
     kVarintMaxLength + // Value size  (5 B)
     kVarintMaxLength + // Key size    (5 B)
     sizeof(U32);       // Overflow ID (4 B)

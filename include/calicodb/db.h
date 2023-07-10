@@ -172,6 +172,13 @@ public:
     // Returns a non-OK status if an error was encountered. It is not an
     // error if `key` does not exist.
     virtual auto erase(const Bucket &b, const Slice &key) -> Status = 0;
+
+    // TODO: New API that uses cursors to aid in modifying buckets. The following should
+    //       work: tx.put(c, c->key(), new_value). put() should use c as a hint. c should be
+    //       left on the modified record after put(), and on the record following the
+    //       erased record after erase().
+//    virtual auto put(Cursor &c, const Slice &key, const Slice &value) -> Status = 0;
+//    virtual auto erase(Cursor &c) -> Status = 0;
 };
 
 template <class Fn>

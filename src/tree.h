@@ -14,86 +14,7 @@ namespace calicodb
 {
 
 class Schema;
-class Tree;
-
-class CursorImpl : public Cursor
-{
-    Status m_status;
-    Tree *const m_tree;
-
-    Node m_node;
-    U32 m_index = 0;
-
-    // Buffers for storing keys and/or values that wouldn't fit on a single page.
-    std::string m_key_buf;
-    std::string m_val_buf;
-
-    // References to the current key and value, which may be located in one of the auxiliary buffers, or
-    // directly on a database page from the cache (in m_node).
-    Slice m_key;
-    Slice m_val;
-
-    // Singly-linked list of user cursors. m_link_p is used to avoid traversing the list when a cursor
-    // is removed.
-    CursorImpl **m_link_p = nullptr;
-    CursorImpl *m_next_c = nullptr;
-
-    // True if the position has been saved and m_node released, false otherwise. The cursor position is
-    // saved by writing the full key and value to the local buffers m_key_buf and m_val_buf. m_key and
-    // m_val must also be adjusted. Saving a cursor will likely invalidate slices obtained by calling
-    // key() or value().
-    bool m_saved = false;
-
-    auto list_add(CursorImpl *&head) -> void;
-    auto list_remove() -> void;
-    auto save_position() -> void;
-    auto load_position() -> void;
-
-protected:
-    auto seek_to(Node node, U32 index) -> void;
-    auto fetch_payload(Node &node, U32 index) -> Status;
-
-    explicit CursorImpl(Tree &tree)
-        : m_tree(&tree)
-    {
-    }
-
-public:
-    friend class Tree;
-    friend class SchemaCursor;
-
-    ~CursorImpl() override;
-
-    [[nodiscard]] auto is_valid() const -> bool override
-    {
-        return (m_node.ref || m_saved) && m_status.is_ok();
-    }
-
-    [[nodiscard]] auto status() const -> Status override
-    {
-        return m_status;
-    }
-
-    [[nodiscard]] auto key() const -> Slice override
-    {
-        CALICODB_EXPECT_TRUE(is_valid());
-        return m_key;
-    }
-
-    [[nodiscard]] auto value() const -> Slice override
-    {
-        CALICODB_EXPECT_TRUE(is_valid());
-        return m_val;
-    }
-
-    auto seek(const Slice &key) -> void override;
-    auto seek_first() -> void override;
-    auto seek_last() -> void override;
-    auto next() -> void override;
-    auto previous() -> void override;
-
-    auto clear(Status s = Status::ok()) -> void;
-};
+struct TreeCursor;
 
 [[nodiscard]] inline auto truncate_suffix(const Slice &lhs, const Slice &rhs) -> Slice
 {
@@ -120,6 +41,8 @@ public:
 class Tree final
 {
 public:
+    friend struct TreeCursor;
+
     ~Tree()
     {
         // Ensure that all page references are released back to the pager.
@@ -131,11 +54,14 @@ public:
     static auto create(Pager &pager, Id *out) -> Status;
     static auto destroy(Tree &tree) -> Status;
 
-    auto new_cursor() -> CursorImpl *;
+    auto new_cursor() -> Cursor *;
     auto put(const Slice &key, const Slice &value) -> Status;
     auto get(const Slice &key, std::string *value) const -> Status;
     auto erase(const Slice &key) -> Status;
     auto vacuum(Schema &schema) -> Status;
+
+    auto put(Cursor &c, const Slice &key, const Slice &value) -> Status;
+    auto erase(Cursor &c) -> Status;
 
     auto allocate(bool is_external, Node &node) -> Status
     {
@@ -194,13 +120,6 @@ public:
         m_pager->release(node.ref);
     }
 
-    auto advance_cursor(Node node, int diff) const -> void
-    {
-        // InternalCursor::move_to() takes ownership of the page reference in `node`. When the working set
-        // is cleared below, this reference is not released.
-        m_c.move_to(std::move(node), diff);
-    }
-
     [[nodiscard]] auto root() const -> Id
     {
         return m_root_id ? *m_root_id : Id::root();
@@ -210,31 +129,25 @@ public:
     auto TEST_validate() const -> void;
 
 private:
-    friend class CursorImpl;
+    friend class UserCursor;
     friend class SchemaCursor;
     friend class DBImpl;
     friend class Schema;
     friend class TreeValidator;
 
+    auto put(TreeCursor &c, const Slice &key, const Slice &value) -> Status;
+    auto erase(TreeCursor &c) -> Status;
+
     auto corrupted_page(Id page_id) const -> Status;
 
-    // Find the external node containing the lowest/highest key in the tree
-    auto find_lowest(Node &node_out) const -> Status;
-    auto find_highest(Node &node_out) const -> Status;
-
-    // Move the internal cursor to the external node containing the given `key`
-    auto find_external(const Slice &key, bool &exact) const -> Status;
-
-    auto redistribute_cells(Node &left, Node &right, Node &parent, U32 pivot_idx) -> Status;
-
-    auto resolve_overflow() -> Status;
-    auto split_root() -> Status;
-    auto split_nonroot() -> Status;
-    auto split_nonroot_fast(Node parent, Node right) -> Status;
-
-    auto resolve_underflow() -> Status;
-    auto fix_root() -> Status;
-    auto fix_nonroot(Node parent, U32 index) -> Status;
+    auto redistribute_cells(TreeCursor &c, Node &left, Node &right, Node &parent, U32 pivot_idx) -> Status;
+    auto resolve_overflow(TreeCursor &c) -> Status;
+    auto split_root(TreeCursor &c) -> Status;
+    auto split_nonroot(TreeCursor &c) -> Status;
+    auto split_nonroot_fast(TreeCursor &c, Node &parent, Node right) -> Status;
+    auto resolve_underflow(TreeCursor &c) -> Status;
+    auto fix_root(TreeCursor &c) -> Status;
+    auto fix_nonroot(TreeCursor &c, Node &parent, U32 index) -> Status;
 
     auto read_key(const Cell &cell, std::string &scratch, Slice *key_out, U32 limit = 0) const -> Status;
     auto read_value(const Cell &cell, std::string &scratch, Slice *value_out) const -> Status;
@@ -263,63 +176,10 @@ private:
     auto fix_links(Node &node, Id parent_id = Id::null()) -> Status;
 
     // Internal cursor used to traverse the tree structure
-    mutable class InternalCursor
-    {
-        mutable Status m_status;
-        std::string m_buffer;
-        Tree *m_tree;
-        Node m_node;
+    TreeCursor *const m_cursor;
 
-    public:
-        static constexpr std::size_t kMaxDepth = 20;
-        struct Location {
-            Id page_id;
-            U32 index = 0;
-        } history[kMaxDepth];
-        int level = 0;
-
-        explicit InternalCursor(Tree &tree);
-        ~InternalCursor();
-
-        [[nodiscard]] auto is_valid() const -> bool
-        {
-            return m_node.ref && m_status.is_ok();
-        }
-
-        [[nodiscard]] auto status() const -> Status
-        {
-            return m_status;
-        }
-
-        [[nodiscard]] auto index() const -> U32
-        {
-            CALICODB_EXPECT_TRUE(is_valid());
-            return history[level].index;
-        }
-
-        [[nodiscard]] auto node() -> Node &
-        {
-            CALICODB_EXPECT_TRUE(is_valid());
-            return m_node;
-        }
-
-        auto move_to(Node node, int diff) -> void
-        {
-            clear();
-            level += diff;
-            history[level].page_id = node.ref->page_id;
-            m_node = std::move(node);
-        }
-
-        auto clear() -> void;
-        auto seek_root() -> void;
-        auto seek(const Slice &key) -> bool;
-        auto move_down(Id child_id) -> void;
-    } m_c;
-
-    auto save_user_cursors() const -> void;
-    CursorImpl *m_user_c = nullptr;
-    CursorImpl *m_saved_c = nullptr;
+    auto use_cursor(TreeCursor *c) const -> void;
+    mutable TreeCursor *m_last_cursor = nullptr;
 
     // Various tree operation counts are tracked in this variable.
     Stat *m_stat;

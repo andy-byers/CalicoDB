@@ -29,7 +29,7 @@ public:
     Node m_node;
 
     // Use 2 bytes for the keys.
-    char m_external_cell[4] = {'\x00', '\x02'};
+    char m_external_cell[6] = {'\x00', '\x02', '\x00', '\x00'};
     char m_internal_cell[7] = {'\x00', '\x00', '\x00', '\x00', '\x02'};
     [[nodiscard]] auto make_cell(U32 k) -> Cell
     {
@@ -44,7 +44,7 @@ public:
         };
         if (m_node.is_leaf()) {
             cell.ptr = m_external_cell;
-            cell.key = m_external_cell + 2;
+            cell.key = m_external_cell + 4;
             cell.footprint = sizeof(m_external_cell);
         }
         cell.key[0] = static_cast<char>(k >> 8);
@@ -174,31 +174,16 @@ TEST_F(BlockAllocatorTests, ConsumesAdjacentFragments)
     ASSERT_EQ(NodeHdr::get_frag_count(m_node.hdr()), 0);
 }
 
-TEST_F(BlockAllocatorTests, ExternalNodesDoNotConsume2ByteFragments)
+TEST_F(BlockAllocatorTests, ExternalNodesConsume3ByteFragments)
 {
     reserve_for_test(11);
     NodeHdr::put_type(m_node.hdr(), NodeHdr::kExternal);
-    NodeHdr::put_frag_count(m_node.hdr(), 2);
+    NodeHdr::put_frag_count(m_node.hdr(), 3);
 
-    // ....**#####
-    ASSERT_EQ(0, BlockAllocator::release(m_node, m_base + 6, 5));
+    // ....***####
+    ASSERT_EQ(0, BlockAllocator::release(m_node, m_base + 7, 4));
 
-    // ####**#####
-    ASSERT_EQ(0, BlockAllocator::release(m_node, m_base + 0, 4));
-    ASSERT_EQ(BlockAllocator::freelist_size(m_node), m_size - NodeHdr::get_frag_count(m_node.hdr()));
-    ASSERT_EQ(NodeHdr::get_frag_count(m_node.hdr()), 2);
-}
-
-TEST_F(BlockAllocatorTests, ExternalNodesConsume1ByteFragments)
-{
-    reserve_for_test(11);
-    NodeHdr::put_type(m_node.hdr(), NodeHdr::kExternal);
-    NodeHdr::put_frag_count(m_node.hdr(), 1);
-
-    // ....*######
-    ASSERT_EQ(0, BlockAllocator::release(m_node, m_base + 5, 6));
-
-    // ####*######
+    // ###########
     ASSERT_EQ(0, BlockAllocator::release(m_node, m_base + 0, 4));
     ASSERT_EQ(BlockAllocator::freelist_size(m_node), m_size - NodeHdr::get_frag_count(m_node.hdr()));
     ASSERT_EQ(NodeHdr::get_frag_count(m_node.hdr()), 0);
@@ -262,8 +247,7 @@ TEST_F(NodeTests, CellLifecycle)
 }
 
 // When a cell is erased, at most 4 bytes are overwritten at the start (to write the block size and
-// next block location as part of intra-node memory management). This means that if the node was an
-// internal node, the cell is still usable.
+// next block location as part of intra-node memory management).
 TEST_F(NodeTests, OverwriteOnEraseBehavior)
 {
     for (auto t : {kExternalNode, kInternalNode}) {
@@ -276,9 +260,8 @@ TEST_F(NodeTests, OverwriteOnEraseBehavior)
         ASSERT_EQ(cell_in.footprint, cell_out.footprint);
 
         for (int i = 0; i < 2; ++i) {
-            ASSERT_EQ(Slice(cell_in.key, cell_in.key_size) ==
-                          Slice(cell_out.key, cell_out.key_size),
-                      i == 0 || t == kInternalNode);
+            ASSERT_EQ(Slice(cell_in.key, cell_in.key_size),
+                      Slice(cell_out.key, cell_out.key_size));
             if (i == 0) {
                 // Node::erase() should overwrite at most the first 4 bytes of the cell, which in this case,
                 // belong to the child ID. The other fields should remain the same. In fact, the cell itself

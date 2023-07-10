@@ -12,10 +12,10 @@ namespace calicodb
 
 class SchemaCursor : public Cursor
 {
-    CursorImpl *const m_c;
+    Cursor *const m_c;
 
 public:
-    explicit SchemaCursor(CursorImpl &c)
+    explicit SchemaCursor(Cursor &c)
         : m_c(&c)
     {
     }

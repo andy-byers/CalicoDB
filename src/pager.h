@@ -110,6 +110,11 @@ public:
     // This routine is a NOOP if page was already released.
     auto release(PageRef *&page, ReleaseAction action = kKeep) -> void;
 
+    auto status() const -> Status
+    {
+        return *m_status;
+    }
+
     auto set_status(const Status &error) const -> void;
 
     // Access to the WAL for testing.

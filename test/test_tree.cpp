@@ -203,7 +203,7 @@ TEST_F(TreeTests, LongVsShortKeys)
         ASSERT_OK(m_tree->put(std::string(tree_key_len, 'b'), make_value('2', true)));
         ASSERT_OK(m_tree->put(std::string(tree_key_len, 'c'), make_value('3', true)));
 
-        auto *c = reinterpret_cast<CursorImpl *>(m_tree->new_cursor());
+        auto *c = m_tree->new_cursor();
         c->seek(std::string(search_key_len, i == 0 ? 'A' : 'a'));
         ASSERT_TRUE(c->is_valid());
         ASSERT_EQ(std::string(tree_key_len, 'a'), c->key());
@@ -476,7 +476,7 @@ protected:
 
 TEST_F(EmptyTreeCursorTests, KeyAndValueUseSeparateMemory)
 {
-    std::unique_ptr<Cursor> cursor(reinterpret_cast<CursorImpl *>(m_tree->new_cursor()));
+    std::unique_ptr<Cursor> cursor(m_tree->new_cursor());
     cursor->seek_first();
     ASSERT_FALSE(cursor->is_valid());
     cursor->seek_last();

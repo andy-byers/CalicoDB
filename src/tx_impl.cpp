@@ -75,11 +75,7 @@ auto TxImpl::vacuum() -> Status
 auto TxImpl::new_cursor(const Bucket &b) const -> Cursor *
 {
     m_schema_obj.use_bucket(b);
-    auto *c = static_cast<Tree *>(b.state)->new_cursor();
-    if (!m_status->is_ok()) {
-        c->clear(*m_status);
-    }
-    return c;
+    return static_cast<Tree *>(b.state)->new_cursor();
 }
 
 auto TxImpl::get(const Bucket &b, const Slice &key, std::string *value) const -> Status
