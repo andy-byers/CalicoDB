@@ -32,9 +32,10 @@ It is intended for read-heavy embedded applications.
 + Records are stored in buckets, each with an independent range of keys
 + All buckets are stored in the same file, similar to the SQLite database file format
 + Supports multiple readers and a single writer simultaneously
-+ Per-buckets bidirectional iteration using cursors
++ Per-bucket bidirectional iteration using cursors
 + Crash protection via write-ahead logging
 + Live defragmentation is supported
++ In-memory databases
 
 ## Caveats
 + Database is single-threaded: all I/O runs in the main thread

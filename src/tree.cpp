@@ -289,7 +289,7 @@ class UserCursor : public Cursor
             }
             m_c.tree->release(std::move(m_c.node_path[n]));
             const auto ncells = NodeHdr::get_cell_count(node.hdr());
-            idx = right ? 0 : ncells - 1;
+            idx = right ? 0 : ncells;
             pid = node.read_child_id(idx);
             m_c.node_path[n] = std::move(node);
             m_c.idx_path[n] = idx;
