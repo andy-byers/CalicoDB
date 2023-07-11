@@ -13,12 +13,15 @@
 #include "calicodb/cursor.h"
 #include "calicodb/db.h"
 #include "common.h"
+#include "logging.h"
+#include <iostream>
 #include <map>
 
 namespace calicodb
 {
 
 using KVMap = std::map<std::string, std::string>;
+class ModelCursor;
 
 class ModelDB : public DB
 {
@@ -55,9 +58,18 @@ public:
 
 class ModelTx : public Tx
 {
+    friend class ModelCursor;
+
     KVMap m_temp;
     KVMap *m_base;
     Cursor *m_schema;
+
+    auto save_cursor() const -> void;
+    auto load_cursor() const -> std::pair<bool, std::string>;
+    mutable ModelCursor *m_last_c = nullptr;
+    mutable std::string m_saved_key;
+    mutable std::string m_saved_val;
+    mutable bool m_saved = false;
 
 public:
     explicit ModelTx(KVMap &base)
@@ -88,6 +100,7 @@ public:
 
     auto vacuum() -> Status override
     {
+        save_cursor();
         return Status::ok();
     }
 
@@ -112,42 +125,22 @@ public:
         return s;
     }
 
-    auto put(const Bucket &, const Slice &key, const Slice &value) -> Status override
-    {
-        m_temp.insert_or_assign(key.to_string(), value.to_string());
-        return Status::ok();
-    }
-
-    auto put(Cursor &c, const Slice &key, const Slice &value) -> Status override
-    {
-        m_temp.insert_or_assign(key.to_string(), value.to_string());
-        c.seek(key);
-        return Status::ok();
-    }
-
-    auto erase(const Bucket &, const Slice &key) -> Status override
-    {
-        m_temp.erase(key.to_string());
-        return Status::ok();
-    }
-
-    auto erase(Cursor &c) -> Status override
-    {
-        const auto key = c.key().to_string();
-        m_temp.erase(key);
-        c.seek(key);
-        return Status::ok();
-    }
+    auto put(const Bucket &, const Slice &key, const Slice &value) -> Status override;
+    auto put(Cursor &c, const Slice &key, const Slice &value) -> Status override;
+    auto erase(const Bucket &, const Slice &key) -> Status override;
+    auto erase(Cursor &c) -> Status override;
 };
 
 class ModelCursor : public Cursor
 {
+    const ModelTx *const m_tx;
     KVMap::const_iterator m_itr;
     const KVMap *m_map;
 
 public:
-    explicit ModelCursor(const KVMap &map)
-        : m_itr(end(map)),
+    explicit ModelCursor(const ModelTx &tx, const KVMap &map)
+        : m_tx(&tx),
+          m_itr(end(map)),
           m_map(&map)
     {
     }
@@ -161,7 +154,7 @@ public:
 
     [[nodiscard]] auto is_valid() const -> bool override
     {
-        return m_itr != end(*m_map);
+        return m_itr != end(*m_map) || m_tx->m_saved;
     }
 
     [[nodiscard]] auto status() const -> Status override
@@ -171,26 +164,29 @@ public:
 
     [[nodiscard]] auto key() const -> Slice override
     {
-        return m_itr->first;
+        return m_tx->m_saved ? m_tx->m_saved_key : m_itr->first;
     }
 
     [[nodiscard]] auto value() const -> Slice override
     {
-        return m_itr->second;
+        return m_tx->m_saved ? m_tx->m_saved_val : m_itr->second;
     }
 
     auto seek(const Slice &key) -> void override
     {
+        m_tx->m_saved = false;
         m_itr = m_map->lower_bound(key.to_string());
     }
 
     auto seek_first() -> void override
     {
+        m_tx->m_saved = false;
         m_itr = begin(*m_map);
     }
 
     auto seek_last() -> void override
     {
+        m_tx->m_saved = false;
         m_itr = end(*m_map);
         if (!m_map->empty()) {
             --m_itr;
@@ -199,6 +195,10 @@ public:
 
     auto next() -> void override
     {
+        const auto [reloaded, saved_key] = m_tx->load_cursor();
+        if (reloaded && key() > saved_key) {
+            return;
+        }
         if (m_itr != end(*m_map)) {
             ++m_itr;
         }
@@ -206,6 +206,7 @@ public:
 
     auto previous() -> void override
     {
+        m_tx->load_cursor();
         if (m_itr == begin(*m_map)) {
             m_itr = end(*m_map);
         } else {

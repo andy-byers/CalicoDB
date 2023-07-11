@@ -43,12 +43,8 @@ class Tree final
 public:
     friend struct TreeCursor;
 
-    ~Tree()
-    {
-        // Ensure that all page references are released back to the pager.
-        finish_operation();
-    }
-    auto finish_operation() const -> void;
+    ~Tree();
+    auto release_nodes() const -> void;
 
     explicit Tree(Pager &pager, Stat &stat, char *scratch, const Id *root_id);
     static auto create(Pager &pager, Id *out) -> Status;
@@ -179,7 +175,7 @@ private:
     TreeCursor *const m_cursor;
 
     auto use_cursor(TreeCursor *c) const -> void;
-    mutable TreeCursor *m_last_cursor = nullptr;
+    mutable TreeCursor *m_last_c = nullptr;
 
     // Various tree operation counts are tracked in this variable.
     Stat *m_stat;

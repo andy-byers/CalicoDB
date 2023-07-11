@@ -168,6 +168,7 @@ struct TreeCursor {
     auto load_position() -> std::string
     {
         CALICODB_EXPECT_TRUE(saved);
+        CALICODB_EXPECT_EQ(tree->m_last_c, this);
         saved = false;
         // NOTE: key_buffer is used to hold overflow keys on the way down.
         auto backing = std::move(key_buffer);
@@ -210,9 +211,6 @@ class UserCursor : public Cursor
     Slice m_key;
     Slice m_val;
 
-    bool m_valid = false; // TODO: Just check m_c.has_key(), which itself checks the status.
-    // TODO: Since the cursor will never be left on an internal node, and we would have set the
-    // TODO: status if reading the key failed, we must have a valid key in the key buffer.
     auto set_position(Node node, U32 idx) -> void
     {
         CALICODB_EXPECT_EQ(nullptr, m_c.node.ref);
@@ -238,7 +236,6 @@ class UserCursor : public Cursor
             }
         }
         m_c.tree->release(std::move(node));
-        m_valid = false;
     }
 
     auto fetch_payload(Node &node, U32 idx) -> Status
@@ -256,7 +253,6 @@ class UserCursor : public Cursor
         auto s = m_c.tree->read_key(cell, m_key_buf, &m_key);
         if (s.is_ok()) {
             s = m_c.tree->read_value(cell, m_val_buf, &m_val);
-            m_valid = s.is_ok();
         }
         return s;
     }
@@ -299,7 +295,6 @@ class UserCursor : public Cursor
     auto prepare() -> void
     {
         m_c.tree->use_cursor(&m_c);
-        m_valid = false;
     }
 
     auto ensure_position_loaded() -> std::pair<bool, std::string>
@@ -329,8 +324,8 @@ public:
         m_c.reset();
         // The TreeCursor contained within this class is about to be destroyed. Make sure the
         // tree doesn't attempt to access its contents when switching cursors.
-        if (m_c.tree->m_last_cursor == &m_c) {
-            m_c.tree->m_last_cursor = nullptr;
+        if (m_c.tree->m_last_c == &m_c) {
+            m_c.tree->m_last_c = nullptr;
         }
     }
 
@@ -353,7 +348,7 @@ public:
 
     [[nodiscard]] auto is_valid() const -> bool override
     {
-        return m_valid && m_c.status.is_ok();
+        return m_c.has_key() || m_c.saved;
     }
 
     auto status() const -> Status override
@@ -419,6 +414,9 @@ public:
         CALICODB_EXPECT_TRUE(is_valid());
         prepare();
 
+        // NOTE: Loading the cursor position involves seeking back to the saved key. If the saved key
+        //       was erased, then this will place the cursor on the first record with a key that
+        //       compares greater than it.
         const auto [reloaded, saved_key] = ensure_position_loaded();
         if (!m_c.has_key()) {
             return;
@@ -453,11 +451,8 @@ public:
         CALICODB_EXPECT_TRUE(is_valid());
         prepare();
 
-        const auto [reloaded, saved_key] = ensure_position_loaded();
+        ensure_position_loaded();
         if (!m_c.has_key()) {
-            return;
-        }
-        if (reloaded && m_key < saved_key) {
             return;
         }
         if (m_c.idx > 0) {
@@ -486,7 +481,9 @@ public:
 
     auto seek(const Slice &key) -> void override
     {
+        m_c.reset();
         prepare();
+
         const auto key_exists = m_c.seek_to_leaf(key);
         if (m_c.status.is_ok()) {
             const auto idx = m_c.idx;
@@ -642,10 +639,9 @@ struct PayloadManager {
     }
 };
 
-auto Tree::finish_operation() const -> void
+auto Tree::release_nodes() const -> void
 {
     use_cursor(nullptr);
-    m_cursor->release_nodes(TreeCursor::kAllLevels);
 }
 
 auto Tree::create(Pager &pager, Id *root_id_out) -> Status
@@ -1466,9 +1462,16 @@ Tree::Tree(Pager &pager, Stat &stat, char *scratch, const Id *root_id)
     static_assert(kCellBufferLen > kMaxCellHeaderSize + compute_local_pl_size(kPageSize, 0));
 }
 
+Tree::~Tree()
+{
+    release_nodes();
+    delete m_cursor;
+}
+
 auto Tree::get(const Slice &key, std::string *value) const -> Status
 {
     Status s;
+    use_cursor(m_cursor);
     const auto key_exists = m_cursor->seek_to_leaf(key);
     if (!m_cursor->status.is_ok()) {
         s = m_cursor->status;
@@ -1488,6 +1491,8 @@ auto Tree::put(Cursor &c, const Slice &key, const Slice &value) -> Status
         return c.status();
     }
     auto &user_c = reinterpret_cast<UserCursor &>(c);
+    use_cursor(&user_c.m_c);
+
     auto s = put(user_c.m_c, key, value);
     if (s.is_ok()) {
         if (user_c.m_c.has_key()) {
@@ -1512,7 +1517,6 @@ auto Tree::put(TreeCursor &c, const Slice &key, const Slice &value) -> Status
     } else if (value.size() > kMaxLength) {
         return Status::invalid_argument("value is too long");
     }
-    use_cursor(&c);
 
     const auto key_exists = c.seek_to_leaf(key);
     auto s = c.status;
@@ -1554,6 +1558,7 @@ auto Tree::put(TreeCursor &c, const Slice &key, const Slice &value) -> Status
 
 auto Tree::put(const Slice &key, const Slice &value) -> Status
 {
+    use_cursor(m_cursor);
     return put(*m_cursor, key, value);
 }
 
@@ -1679,17 +1684,21 @@ auto Tree::erase(Cursor &c) -> Status
         return Status::invalid_argument();
     }
     Status s;
-    std::string saved_key;
     auto &user_c = reinterpret_cast<UserCursor &>(c);
-    if (1 == NodeHdr::get_cell_count(user_c.m_c.node.hdr())) {
-        // TODO: This is hacky...
+    auto &tree_c = user_c.m_c;
+    use_cursor(&tree_c);
+
+    auto [reload, saved_key] = user_c.ensure_position_loaded();
+    if (!reload && 1 == NodeHdr::get_cell_count(tree_c.node.hdr())) {
+        // This node will underflow when the record is removed. Make sure the key is saved so that
+        // the correct position can be found after underflow resolution.
         saved_key = std::move(user_c.m_key_buf);
         saved_key.resize(user_c.m_key.size());
     }
-    s = erase(user_c.m_c);
+    s = erase(tree_c);
     if (s.is_ok()) {
-        if (user_c.m_c.has_node()) {
-            user_c.set_position(std::move(user_c.m_c.node), user_c.m_c.idx);
+        if (tree_c.has_node()) {
+            user_c.set_position(std::move(tree_c.node), tree_c.idx);
         } else {
             user_c.seek(saved_key);
         }
@@ -1700,7 +1709,6 @@ auto Tree::erase(Cursor &c) -> Status
 
 auto Tree::erase(TreeCursor &c) -> Status
 {
-    use_cursor(&c);
     upgrade(c.node);
     auto s = remove_cell(c.node, c.idx);
     if (s.is_ok() && is_underflowing(c.node)) {
@@ -1916,6 +1924,7 @@ auto Tree::vacuum(Schema &schema) -> Status
 
     Status s;
     auto &root = m_pager->get_root();
+    use_cursor(nullptr); // TODO: The schema should clear all cursors
 
     U32 free_size;
     const auto free_head = FileHdr::get_freelist_head(root.page);
@@ -2319,12 +2328,14 @@ auto Tree::new_cursor() -> Cursor *
 
 auto Tree::use_cursor(TreeCursor *c) const -> void
 {
-    if (m_last_cursor &&
-        c != m_last_cursor &&
-        m_last_cursor->has_key()) {
-        m_last_cursor->save_position();
+    if (m_last_c && c != m_last_c) {
+        if (m_last_c->has_key()) {
+            m_last_c->save_position();
+        } else {
+            m_last_c->reset();
+        }
     }
-    m_last_cursor = c;
+    m_last_c = c;
 }
 
 } // namespace calicodb

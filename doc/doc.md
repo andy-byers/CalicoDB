@@ -286,21 +286,21 @@ while (c->is_valid() && c->key() < "lilly") {
 }
 
 // Insert a new record using a cursor.
-s = tx.put(c, "junie", "tabby");
+s = tx->put(*c, "junie", "tabby");
 if (s.is_ok()) {
     // c is placed on the newly-inserted record.
-    assert(c.is_valid());
-    assert(c.key() == "junie");
-    assert(c.value() == "tabby");
+    assert(c->is_valid());
+    assert(c->key() == "junie");
+    assert(c->value() == "tabby");
 }
 
 // Modify a record using a cursor.
-s = tx.put(c, c->key(), "brown tabby");
+s = tx->put(*c, c->key(), "brown tabby");
 if (s.is_ok()) {
 }
 
 // Erase the record pointed to by the cursor.
-s = tx.erase(c);
+s = tx->erase(*c);
 if (s.is_ok()) {
     // c is on the record immediately following the erased record, if
     // such a record exists.

@@ -98,7 +98,7 @@ auto Schema::close() -> void
     for (const auto &[_, state] : m_trees) {
         delete state.tree;
     }
-    m_map.finish_operation();
+    m_map.release_nodes();
 }
 
 auto Schema::corrupted_root_id(const Slice &name, const Slice &value) -> Status
@@ -220,7 +220,7 @@ auto Schema::use_bucket(const Bucket &b) -> void
 {
     CALICODB_EXPECT_NE(b.state, nullptr);
     if (m_recent && m_recent != b.state) {
-        m_recent->finish_operation();
+        m_recent->release_nodes();
     }
     m_recent = reinterpret_cast<const Tree *>(b.state);
 }
@@ -325,10 +325,11 @@ auto Schema::vacuum_finish() -> Status
 
 auto Schema::vacuum() -> Status
 {
-    if (m_recent) {
-        m_recent->finish_operation();
-        m_recent = nullptr;
+    for (auto &[_, tree] : m_trees) {
+        tree.tree->release_nodes();
     }
+    m_map.release_nodes();
+    m_recent = nullptr;
     return m_map.vacuum(*this);
 }
 
