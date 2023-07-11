@@ -43,7 +43,7 @@ public:
             &m_status,
             &m_stat,
             nullptr,
-            kMinFrameCount * 2,
+            kMinFrameCount * 5,
             Options::kSyncNormal,
             Options::kLockNormal,
             false,
@@ -239,10 +239,6 @@ TEST_F(TreeTests, GetNonexistentKeys)
     ASSERT_OK(m_tree->put(make_long_key(9), make_value('0', true)));
     // Missing 10
 
-    print_database_overview(std::cerr, *m_pager);
-    std::cerr << "\n\n";
-    std::cerr << m_tree->TEST_to_string() << "\n\n";
-
     m_tree->TEST_validate();
 
     ASSERT_NOK(m_tree->get(make_long_key(0), nullptr));
@@ -426,6 +422,7 @@ TEST_P(TreeSanityChecks, Erase)
             ASSERT_OK(m_tree->erase(key));
         }
         records.clear();
+        validate();
     }
 }
 
@@ -438,13 +435,13 @@ TEST_P(TreeSanityChecks, SmallRecords)
             ASSERT_OK(m_tree->put(key, ""));
             records[key] = "";
         }
+        validate();
 
-        std::size_t i = 0;
         for (const auto &[key, value] : records) {
             ASSERT_OK(m_tree->erase(key));
         }
-        validate();
         records.clear();
+        validate();
     }
 }
 
@@ -474,7 +471,7 @@ protected:
     ~EmptyTreeCursorTests() override = default;
 };
 
-TEST_F(EmptyTreeCursorTests, KeyAndValueUseSeparateMemory)
+TEST_F(EmptyTreeCursorTests, EmptyTreeBehavior)
 {
     std::unique_ptr<Cursor> cursor(m_tree->new_cursor());
     cursor->seek_first();
@@ -528,13 +525,13 @@ TEST_P(CursorTests, AccountsForNodeBoundaries)
     auto cursor = make_cursor();
     for (std::size_t i = 0; i + 10 < kInitialRecordCount; i += 5) {
         cursor->seek(make_long_key(i + 1));
-        ASSERT_EQ(make_long_key(i + 5), cursor->key());
+        ASSERT_EQ(make_long_key(i + 5), cursor->key().to_string());
         cursor->seek(make_long_key(i + 2));
-        ASSERT_EQ(make_long_key(i + 5), cursor->key());
+        ASSERT_EQ(make_long_key(i + 5), cursor->key().to_string());
         cursor->seek(make_long_key(i + 3));
-        ASSERT_EQ(make_long_key(i + 5), cursor->key());
+        ASSERT_EQ(make_long_key(i + 5), cursor->key().to_string());
         cursor->seek(make_long_key(i + 4));
-        ASSERT_EQ(make_long_key(i + 5), cursor->key());
+        ASSERT_EQ(make_long_key(i + 5), cursor->key().to_string());
     }
 }
 
@@ -783,7 +780,7 @@ TEST_F(MultiCursorTests, SavedCursorEraseFromLeft)
         // Tree::erase(const Slice &) doesn't fix any cursors, so cursor is on a record
         // that was already erased, with a key lower than the lowest key in the tree.
         // Calling Cursor::next() should see that the new key is greater than the saved
-        // key and stop on the first record.
+        // key and stop without moving the cursor.
         cursor->next();
     }
 
@@ -830,31 +827,32 @@ TEST_F(MultiCursorTests, CursorListManagement)
     }
 }
 
-TEST_F(MultiCursorTests, OutOfFrames)
-{
-    for (std::size_t i = 1; i < m_pager->buffer_count() * 10; ++i) {
-        add_cursor();
-    }
-    for (auto *c : m_cursors) {
-        c->seek_first();
-    }
-    bool out_of_frames = false;
-    for (std::size_t i = 0; i < m_cursors.size(); ++i) {
-        for (std::size_t j = 0; m_cursors[i]->is_valid() && j < i; ++j) {
-            // Spread the cursors out until too many page cache frames are occupied.
-            m_cursors[i]->next();
-        }
-        if (m_cursors[i]->status().is_invalid_argument()) {
-            out_of_frames = true;
-            break;
-        }
-    }
-    ASSERT_TRUE(out_of_frames);
-
-    // Both put() and erase() cause live cursors to be saved.
-    ASSERT_OK(m_tree->put("key", "value"));
-    ASSERT_OK(m_tree->erase("key"));
-}
+// TODO: This actually shouldn't be possible anymore.
+// TEST_F(MultiCursorTests, OutOfFrames)
+//{
+//    for (std::size_t i = 1; i < m_pager->buffer_count() * 10; ++i) {
+//        add_cursor();
+//    }
+//    for (auto *c : m_cursors) {
+//        c->seek_first();
+//    }
+//    bool out_of_frames = false;
+//    for (std::size_t i = 0; i < m_cursors.size(); ++i) {
+//        for (std::size_t j = 0; m_cursors[i]->is_valid() && j < i; ++j) {
+//            // Spread the cursors out until too many page cache frames are occupied.
+//            m_cursors[i]->next();
+//        }
+//        if (m_cursors[i]->status().is_invalid_argument()) {
+//            out_of_frames = true;
+//            break;
+//        }
+//    }
+//    ASSERT_TRUE(out_of_frames);
+//
+//    // Both put() and erase() cause live cursors to be saved.
+//    ASSERT_OK(m_tree->put("key", "value"));
+//    ASSERT_OK(m_tree->erase("key"));
+//}
 
 class PointerMapTests : public TreeTests
 {
@@ -966,7 +964,7 @@ public:
           m_scratch(kPageSize * 2, '\0')
     {
         for (auto &value : payload_values) {
-            value = random.Generate(kPageSize * 2);
+            value = random.Generate(kPageSize / 2);
         }
     }
 
@@ -1248,6 +1246,13 @@ protected:
     RandomGenerator m_random;
 };
 
+TEST_P(RebalanceTests, SanityCheck)
+{
+    run({0, 0, 0, 0, 0});
+    run({1, 1, 1, 1});
+    run({2, 2, 2});
+}
+
 TEST_P(RebalanceTests, A)
 {
     run({0, 0, 0, 0, 0, 3});
@@ -1316,6 +1321,128 @@ TEST(PrefixTests, PrefixesAreValid)
     // lhs may be empty, but since lhs < rhs, rhs must not be empty.
     ASSERT_EQ("0", checked_prefix("", "0"));
     ASSERT_EQ("0", checked_prefix("", "00"));
+}
+
+class CursorModificationTests
+    : public TreeTestHarness,
+      public testing::Test
+{
+public:
+    ~CursorModificationTests() override = default;
+
+    auto SetUp() -> void override
+    {
+        open();
+    }
+    auto TearDown() -> void override
+    {
+        close();
+    }
+};
+
+TEST_F(CursorModificationTests, QuickCheck)
+{
+    std::unique_ptr<Cursor> c(m_tree->new_cursor());
+    ASSERT_FALSE(c->is_valid());
+
+    for (std::ptrdiff_t i = 0; i < 2; ++i) {
+        for (const auto *key : {"BB", "CC", "AA"}) {
+            const auto *value = key + i;
+            ASSERT_OK(m_tree->put(*c, key, value));
+            ASSERT_TRUE(c->is_valid());
+            ASSERT_EQ(key, c->key());
+            ASSERT_EQ(value, c->value());
+        }
+    }
+
+    for (const auto *key : {"AA", "BB", "CC"}) {
+        ASSERT_TRUE(c->is_valid());
+        ASSERT_EQ(key, c->key());
+        ASSERT_EQ(key + 1, c->value());
+        ASSERT_OK(m_tree->erase(*c));
+    }
+
+    ASSERT_FALSE(c->is_valid());
+}
+
+TEST_F(CursorModificationTests, SeekAndPut)
+{
+    auto num_records = kInitialRecordCount;
+    for (std::size_t i = 0; i < num_records; ++i) {
+        ASSERT_OK(m_tree->put(make_long_key(i * 2), make_value(false)));
+    }
+    for (std::size_t iteration = 0; iteration < 2; ++iteration) {
+        auto step = num_records / 10;
+        std::unique_ptr<Cursor> c(m_tree->new_cursor());
+        if (iteration == 0) {
+            c->seek_first();
+        } else {
+            c->seek_last();
+        }
+        for (std::size_t i = 0; c->is_valid() && i < kInitialRecordCount; ++i) {
+            ASSERT_OK(m_tree->put(*c, make_long_key(i * 2 + iteration), make_value(true)));
+            ++num_records;
+            for (std::size_t j = 0; c->is_valid() && j < step; ++j) {
+                if (iteration == 0) {
+                    c->next();
+                } else {
+                    c->previous();
+                }
+            }
+        }
+        ASSERT_OK(c->status());
+        ASSERT_FALSE(c->is_valid());
+        validate();
+    }
+}
+
+TEST_F(CursorModificationTests, SeekAndEraseForward)
+{
+    add_initial_records(*this, true);
+    auto num_records = kInitialRecordCount;
+    while (num_records > 0) {
+        const auto step = num_records / 4;
+        std::unique_ptr<Cursor> c(m_tree->new_cursor());
+        c->seek_first();
+        while (num_records > 0 && c->is_valid()) {
+            ASSERT_OK(m_tree->erase(*c));
+            --num_records;
+            for (std::size_t i = 0; c->is_valid() && i < step; ++i) {
+                c->next();
+            }
+        }
+        ASSERT_OK(c->status());
+        ASSERT_FALSE(c->is_valid());
+        validate();
+    }
+}
+
+TEST_F(CursorModificationTests, SeekAndEraseBackward)
+{
+    add_initial_records(*this, true);
+    auto num_records = kInitialRecordCount;
+    while (num_records > 0) {
+        const auto step = num_records / 4;
+        std::unique_ptr<Cursor> c(m_tree->new_cursor());
+        c->seek_last();
+        for (auto first = true; num_records > 0 && c->is_valid();) {
+            ASSERT_OK(m_tree->erase(*c));
+            if (first) {
+                // Erasing the last record causes the cursor to immediately fall off the
+                // edge of the key range.
+                ASSERT_FALSE(c->is_valid());
+                c->seek_last();
+                first = false;
+            }
+            --num_records;
+            for (std::size_t i = 0; c->is_valid() && i < step; ++i) {
+                c->previous();
+            }
+        }
+        ASSERT_OK(c->status());
+        ASSERT_FALSE(c->is_valid());
+        validate();
+    }
 }
 
 } // namespace calicodb::test

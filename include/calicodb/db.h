@@ -6,23 +6,14 @@
 #define CALICODB_DB_H
 
 #include "options.h"
-#include "status.h"
+#include "tx.h"
 
 namespace calicodb
 {
 
-class Cursor;
-class Tx;
-
 // Tag for starting a transaction that has writer capabilities
 // SEE: DB::new_tx()
 struct WriteTag {
-};
-
-// Opaque handle to an open bucket
-// SEE: Tx::create_bucket(), Tx::open_bucket()
-struct Bucket {
-    void *state = nullptr;
 };
 
 // On-disk collection of buckets
@@ -87,98 +78,6 @@ public:
     // NOTE: Consider using the DB::view()/DB::update() API instead.
     virtual auto new_tx(const Tx *&tx_out) const -> Status = 0;
     virtual auto new_tx(WriteTag, Tx *&tx_out) -> Status = 0;
-};
-
-// Transaction on a CalicoDB database
-// The lifetime of a transaction is the same as that of the Tx object representing it (see
-// DB::new_tx()).
-class Tx
-{
-public:
-    explicit Tx();
-    virtual ~Tx();
-
-    Tx(Tx &) = delete;
-    void operator=(Tx &) = delete;
-
-    // Return the status associated with this transaction
-    // On creation, a Tx will always have an OK status. Only read-write transactions
-    // can have a non-OK status. The status is set when a routine on this object fails
-    // such that the consistency of the underlying data store becomes questionable, or
-    // corruption is detected in one of the files.
-    virtual auto status() const -> Status = 0;
-
-    // Return a reference to a cursor that iterates over the database schema
-    // The database schema is a special bucket that stores the name and location of every
-    // other bucket in the database. Calling Cursor::key() on a valid schema cursor gives a
-    // bucket name. Calling Cursor::value() gives a bucket descriptor: a human-readable
-    // description of options that the bucket was created with. This cursor must not be
-    // used after the Tx that created it has been destroyed.
-    // SEE: cursor.h (for additional Cursor usage requirements)
-    [[nodiscard]] virtual auto schema() const -> Cursor & = 0;
-
-    // Create a new bucket
-    // On success, stores a bucket handle in `*b_out` and returns an OK status. The bucket
-    // named `name` can then be accessed with `*b_out` until the transaction is finished (or
-    // until `name` is dropped through Tx::drop_bucket()). Returns a non-OK status on failure.
-    // `b_out` is optional: if omitted, this method simply creates a bucket without handing
-    // back a reference to it. Note that the bucket will not persist in the database unless
-    // Tx::commit() is called after the bucket has been created.
-    virtual auto create_bucket(const BucketOptions &options, const Slice &name, Bucket *b_out) -> Status = 0;
-
-    // Open an existing bucket
-    // Returns an OK status on success and a non-OK status on failure. If the bucket named
-    // `name` does not exist already, a status for which Status::is_invalid_argument()
-    // evaluates to true is returned.
-    virtual auto open_bucket(const Slice &name, Bucket &b_out) const -> Status = 0;
-
-    // Remove a bucket from the database
-    // If a bucket named `name` exists, this method drops it and returns an OK status. If
-    // `name` does not exist, returns a status for which Status::is_invalid_argument() is
-    // true. If a bucket handle was obtained for `name` during this transaction, it must
-    // not be used after this call succeeds.
-    virtual auto drop_bucket(const Slice &name) -> Status = 0;
-
-    // Defragment the database
-    virtual auto vacuum() -> Status = 0;
-
-    // Commit pending changes to the database
-    // Returns an OK status if the commit operation was successful, and a non-OK status
-    // on failure. Calling this method on a read-only transaction is a NOOP. If this
-    // method is not called before the Tx object is destroyed, all pending changes will
-    // be dropped. This method can be called more than once for a given Tx: file locks
-    // are held until the Tx handle is delete'd.
-    virtual auto commit() -> Status = 0;
-
-    // Return a heap-allocated cursor over the contents of the bucket
-    // The cursor should be destroyed (using operator delete()) when it
-    // is no longer needed.
-    [[nodiscard]] virtual auto new_cursor(const Bucket &b) const -> Cursor * = 0;
-
-    // Get the value associated with the given key
-    // If the record with key `key` exists, assigns to `*value` the value
-    // associated with it and returns an OK status. If the key does not
-    // exist, sets `*value` to nullptr and returns a "not found" status.
-    // If an error is encountered, returns a non-OK status as appropriate.
-    virtual auto get(const Bucket &b, const Slice &key, std::string *value) const -> Status = 0;
-
-    // Create a mapping between `key` and `value`
-    // If a record with key `key` already exists, sets its value to `value`.
-    // Otherwise, a new record is created. Returns an OK status on success,
-    // and a non-OK status on failure.
-    virtual auto put(const Bucket &b, const Slice &key, const Slice &value) -> Status = 0;
-
-    // Erase a record from the bucket
-    // Returns a non-OK status if an error was encountered. It is not an
-    // error if `key` does not exist.
-    virtual auto erase(const Bucket &b, const Slice &key) -> Status = 0;
-
-    // TODO: New API that uses cursors to aid in modifying buckets. The following should
-    //       work: tx.put(c, c->key(), new_value). put() should use c as a hint. c should be
-    //       left on the modified record after put(), and on the record following the
-    //       erased record after erase().
-//    virtual auto put(Cursor &c, const Slice &key, const Slice &value) -> Status = 0;
-//    virtual auto erase(Cursor &c) -> Status = 0;
 };
 
 template <class Fn>

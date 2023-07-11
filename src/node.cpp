@@ -79,8 +79,7 @@ static auto remove_ivec_slot(Node &node, U32 index)
         return -1;
     }
     const auto hdr_size = static_cast<std::uintptr_t>(ptr - data);
-    const auto pad_size = hdr_size > kMinCellHeaderSize
-                              ? 0 : kMinCellHeaderSize - hdr_size;
+    const auto pad_size = hdr_size > kMinCellHeaderSize ? 0 : kMinCellHeaderSize - hdr_size;
     const auto local_pl_size = compute_local_pl_size(key_size, value_size);
     const auto has_remote = local_pl_size < key_size + value_size;
     const auto footprint = hdr_size + pad_size + local_pl_size + has_remote * sizeof(U32);
@@ -502,8 +501,8 @@ auto Node::assert_state() -> bool
         if (i + 1 < NodeHdr::get_cell_count(hdr())) {
             Cell rhs_cell = {};
             CALICODB_EXPECT_EQ(0, read(i + 1, rhs_cell));
-            const Slice lhs_key(lhs_cell.key, lhs_cell.key_size);
-            const Slice rhs_key(rhs_cell.key, rhs_cell.key_size);
+            const Slice lhs_key(lhs_cell.key, std::min(lhs_cell.key_size, lhs_cell.local_pl_size));
+            const Slice rhs_key(rhs_cell.key, std::min(rhs_cell.key_size, rhs_cell.local_pl_size));
             CALICODB_EXPECT_LE(lhs_key, rhs_key);
             if (lhs_key == rhs_key) {
                 const auto lhs_has_ovfl = lhs_cell.key_size > lhs_cell.local_pl_size;

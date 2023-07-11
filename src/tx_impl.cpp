@@ -98,12 +98,32 @@ auto TxImpl::put(const Bucket &b, const Slice &key, const Slice &value) -> Statu
     return s;
 }
 
+auto TxImpl::put(Cursor &c, const Slice &key, const Slice &value) -> Status
+{
+    auto s = *m_status;
+    if (s.is_ok()) {
+        m_schema_obj.use_bucket(Bucket{c.handle()});
+        s = static_cast<Tree *>(c.handle())->put(c, key, value);
+    }
+    return s;
+}
+
 auto TxImpl::erase(const Bucket &b, const Slice &key) -> Status
 {
     auto s = *m_status;
     if (s.is_ok()) {
         m_schema_obj.use_bucket(b);
         s = static_cast<Tree *>(b.state)->erase(key);
+    }
+    return s;
+}
+
+auto TxImpl::erase(Cursor &c) -> Status
+{
+    auto s = *m_status;
+    if (s.is_ok()) {
+        m_schema_obj.use_bucket(Bucket{c.handle()});
+        s = static_cast<Tree *>(c.handle())->erase(c);
     }
     return s;
 }

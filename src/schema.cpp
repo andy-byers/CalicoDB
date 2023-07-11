@@ -25,6 +25,11 @@ public:
         delete m_c;
     }
 
+    [[nodiscard]] auto handle() const -> void * override
+    {
+        return nullptr;
+    }
+
     [[nodiscard]] auto is_valid() const -> bool override
     {
         return m_c->is_valid();

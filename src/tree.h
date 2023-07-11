@@ -140,7 +140,7 @@ private:
 
     auto corrupted_page(Id page_id) const -> Status;
 
-    auto redistribute_cells(TreeCursor &c, Node &left, Node &right, Node &parent, U32 pivot_idx) -> Status;
+    auto redistribute_cells(Node &left, Node &right, Node &parent, U32 pivot_idx) -> Status;
     auto resolve_overflow(TreeCursor &c) -> Status;
     auto split_root(TreeCursor &c) -> Status;
     auto split_nonroot(TreeCursor &c) -> Status;

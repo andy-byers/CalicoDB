@@ -118,9 +118,24 @@ public:
         return Status::ok();
     }
 
+    auto put(Cursor &c, const Slice &key, const Slice &value) -> Status override
+    {
+        m_temp.insert_or_assign(key.to_string(), value.to_string());
+        c.seek(key);
+        return Status::ok();
+    }
+
     auto erase(const Bucket &, const Slice &key) -> Status override
     {
         m_temp.erase(key.to_string());
+        return Status::ok();
+    }
+
+    auto erase(Cursor &c) -> Status override
+    {
+        const auto key = c.key().to_string();
+        m_temp.erase(key);
+        c.seek(key);
         return Status::ok();
     }
 };
@@ -138,6 +153,11 @@ public:
     }
 
     ~ModelCursor() override;
+
+    [[nodiscard]] auto handle() const -> void * override
+    {
+        return nullptr;
+    }
 
     [[nodiscard]] auto is_valid() const -> bool override
     {

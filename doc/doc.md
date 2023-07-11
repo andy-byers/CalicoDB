@@ -249,8 +249,8 @@ if (s.is_ok()) {
     // An I/O error occurred. It is not an error if the key does not exist.
 }
 
-// Remove the bucket named "bats" from the database.
-s = tx->drop_bucket("bats");
+// Remove the bucket named "fish" from the database.
+s = tx->drop_bucket("fish");
 if (s.is_ok()) {
     
 }
@@ -258,10 +258,12 @@ if (s.is_ok()) {
 
 ### Cursors
 Cursors are used to perform full-bucket scans and range queries.
+They can also be used to help modify the database during [read-write transactions](#read-write-transactions).
 
 ```C++
 calicodb::Cursor *c = tx->new_cursor(b);
 
+// Scan the entire bucket forwards.
 c->seek_first();
 while (c->is_valid()) {
     const calicodb::Slice key = c->key();
@@ -269,16 +271,39 @@ while (c->is_valid()) {
     c->next();
 }
 
+// Scan the entire bucket backwards.
 c->seek_last();
 while (c->is_valid()) {
     // Use the cursor.
     c->previous();
 }
 
+// Scan a range of keys.
 c->seek("freya");
-while (c->is_valid() && c->key() <= "lilly") {
-    // Key is in [freya,lilly].
+while (c->is_valid() && c->key() < "lilly") {
+    // Key is in [freya,lilly).
     c->next();
+}
+
+// Insert a new record using a cursor.
+s = tx.put(c, "junie", "tabby");
+if (s.is_ok()) {
+    // c is placed on the newly-inserted record.
+    assert(c.is_valid());
+    assert(c.key() == "junie");
+    assert(c.value() == "tabby");
+}
+
+// Modify a record using a cursor.
+s = tx.put(c, c->key(), "brown tabby");
+if (s.is_ok()) {
+}
+
+// Erase the record pointed to by the cursor.
+s = tx.erase(c);
+if (s.is_ok()) {
+    // c is on the record immediately following the erased record, if
+    // such a record exists.
 }
 
 delete c;

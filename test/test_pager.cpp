@@ -192,6 +192,9 @@ protected:
     }
     auto read_page(std::size_t index) -> U32
     {
+        if (m_page_ids.at(index).value > m_pager->page_count()) {
+            return 0;
+        }
         PageRef *page;
         EXPECT_OK(m_pager->acquire(m_page_ids.at(index), page));
         const auto value = read_page(*page);

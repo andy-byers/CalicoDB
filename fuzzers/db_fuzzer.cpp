@@ -132,11 +132,25 @@ public:
             m_model->put(b, key, value));
     }
 
+    auto put(Cursor &c, const Slice &key, const Slice &value) -> Status override
+    {
+        return common_status(
+            m_real->put(c, key, value),
+            m_model->put(c, key, value));
+    }
+
     auto erase(const Bucket &b, const Slice &key) -> Status override
     {
         return common_status(
             m_real->erase(b, key),
             m_model->erase(b, key));
+    }
+
+    auto erase(Cursor &c) -> Status override
+    {
+        return common_status(
+            m_real->erase(c),
+            m_model->erase(c));
     }
 };
 
@@ -153,6 +167,11 @@ public:
     }
 
     ~CheckedCursor() override;
+
+    [[nodiscard]] auto handle() const -> void * override
+    {
+        return m_real->handle();
+    }
 
     [[nodiscard]] auto is_valid() const -> bool override
     {

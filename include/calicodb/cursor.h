@@ -38,6 +38,10 @@ public:
     // back on a valid record.
     virtual auto status() const -> Status = 0;
 
+    // Return an opaque handle to the underlying bucket state
+    // This method is intended for internal use.
+    [[nodiscard]] virtual auto handle() const -> void * = 0;
+
     // Get the current record key
     // REQUIRES: is_valid()
     [[nodiscard]] virtual auto key() const -> Slice = 0;

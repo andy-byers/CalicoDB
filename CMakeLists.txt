@@ -67,6 +67,7 @@ add_library(calicodb
         "${CALICODB_INCLUDE_DIR}/calicodb/options.h"
         "${CALICODB_INCLUDE_DIR}/calicodb/slice.h"
         "${CALICODB_INCLUDE_DIR}/calicodb/status.h"
+        "${CALICODB_INCLUDE_DIR}/calicodb/tx.h"
         "${CALICODB_SOURCES}")
 target_include_directories(calicodb
         PUBLIC  $<BUILD_INTERFACE:${CALICODB_INCLUDE_DIR}>
