@@ -43,11 +43,11 @@ class TreeCursor
         for (;; --n) {
             if (n < 0) {
                 return;
-            } else if (const auto idx = m_idx_path[n] + diff;
-                       idx <= NodeHdr::get_cell_count(m_node_path[n].hdr())) {
-                // NOTE: If idx wrapped, it would have become greater than any valid node cell count
-                //       (minimal value of diff is -1).
-                m_idx_path[n] = idx;
+            }
+            const auto idx = static_cast<int>(m_idx_path[n]) + diff;
+            const auto ncells = static_cast<int>(NodeHdr::get_cell_count(m_node_path[n].hdr()));
+            if (0 <= idx && idx <= ncells) {
+                m_idx_path[n] = static_cast<U32>(idx);
                 break;
             }
         }
@@ -2092,9 +2092,8 @@ class TreeValidator
         auto &c = *tree.m_cursor;
         for (U32 index = 0, n = NodeHdr::get_cell_count(c.m_node.hdr()); index <= n; ++index) {
             if (!c.m_node.is_leaf()) {
-                const auto saved_id = c.page_id();
-                const auto child_id = c.m_node.read_child_id(index);
                 Node child;
+                const auto child_id = c.m_node.read_child_id(index);
                 CHECK_OK(tree.acquire(child_id, child, false));
                 c.move_to_child(std::move(child));
                 traverse_inorder_impl(tree, cb, level + 1);
