@@ -25,9 +25,9 @@ public:
         delete m_c;
     }
 
-    [[nodiscard]] auto handle() const -> void * override
+    [[nodiscard]] auto token() -> void * override
     {
-        return nullptr;
+        return m_c->token();
     }
 
     [[nodiscard]] auto is_valid() const -> bool override
@@ -279,7 +279,7 @@ auto Schema::vacuum_reroot(Id old_id, Id new_id) -> void
 
 auto Schema::vacuum_finish() -> Status
 {
-    auto *c = new_cursor();
+    auto *c = m_map.new_cursor();
     c->seek_first();
 
     Status s;
@@ -294,7 +294,7 @@ auto Schema::vacuum_finish() -> Status
             std::string value;
             encode_root_id(root->second, value);
             // Update the database schema with the new root page ID for this tree.
-            s = m_map.put(c->key(), value);
+            s = m_map.put(*c, c->key(), value);
             if (!s.is_ok()) {
                 break;
             }

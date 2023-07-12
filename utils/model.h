@@ -147,7 +147,7 @@ public:
 
     ~ModelCursor() override;
 
-    [[nodiscard]] auto handle() const -> void * override
+    [[nodiscard]] auto token() -> void * override
     {
         return nullptr;
     }

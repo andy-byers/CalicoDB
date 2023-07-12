@@ -619,6 +619,7 @@ auto PointerMap::read_entry(Pager &pager, Id page_id, Entry &out) -> Status
 
 auto PointerMap::write_entry(Pager &pager, Id page_id, Entry entry) -> Status
 {
+    CALICODB_EXPECT_NE(page_id, entry.back_ptr);
     const auto mid = lookup(page_id);
     CALICODB_EXPECT_LE(kFirstMapPage, mid.value);
     CALICODB_EXPECT_NE(mid, page_id);

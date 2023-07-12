@@ -162,9 +162,9 @@ public:
 
     ~CheckedCursor() override;
 
-    [[nodiscard]] auto handle() const -> void * override
+    [[nodiscard]] auto token() -> void * override
     {
-        return m_real->handle();
+        return m_real->token();
     }
 
     [[nodiscard]] auto is_valid() const -> bool override

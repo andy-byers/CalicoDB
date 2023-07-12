@@ -14,6 +14,7 @@ namespace calicodb
 {
 
 class Schema;
+class Tree;
 class TreeCursor;
 
 [[nodiscard]] inline auto truncate_suffix(const Slice &lhs, const Slice &rhs) -> Slice
@@ -49,6 +50,7 @@ public:
     explicit Tree(Pager &pager, Stat &stat, char *scratch, const Id *root_id);
     static auto create(Pager &pager, Id *out) -> Status;
     static auto destroy(Tree &tree) -> Status;
+    static auto get_tree(Cursor &c) -> Tree *;
 
     auto new_cursor() -> Cursor *;
     auto put(const Slice &key, const Slice &value) -> Status;
@@ -59,30 +61,30 @@ public:
     auto put(Cursor &c, const Slice &key, const Slice &value) -> Status;
     auto erase(Cursor &c) -> Status;
 
-    auto allocate(bool is_external, Node &node) -> Status
+    auto allocate(bool is_external, Node &node_out) -> Status
     {
         PageRef *ref;
         auto s = m_pager->allocate(ref);
         if (s.is_ok()) {
             CALICODB_EXPECT_FALSE(PointerMap::is_map(ref->page_id));
-            node = Node::from_new_page(*ref, is_external);
+            node_out = Node::from_new_page(*ref, is_external);
         }
         return s;
     }
 
-    auto acquire(Id page_id, bool write, Node &node) const -> Status
+    auto acquire(Id page_id, Node &node_out, bool write = false) const -> Status
     {
         CALICODB_EXPECT_FALSE(PointerMap::is_map(page_id));
 
         PageRef *ref;
         auto s = m_pager->acquire(page_id, ref);
         if (s.is_ok()) {
-            if (Node::from_existing_page(*ref, node)) {
+            if (Node::from_existing_page(*ref, node_out)) {
                 m_pager->release(ref);
                 return corrupted_page(page_id);
             }
             if (write) {
-                upgrade(node);
+                upgrade(node_out);
             }
         }
         return s;
@@ -100,7 +102,7 @@ public:
 
     auto release(Node node) const -> void
     {
-        if (node.ref && m_pager->mode() == Pager::kDirty) {
+        if (node.ref != nullptr && m_pager->mode() == Pager::kDirty) {
             // If the pager is in kWrite mode and a page is marked dirty, it immediately
             // transitions to kDirty mode. So, if this node is dirty, then the pager must
             // be in kDirty mode (unless there was an error).
@@ -112,7 +114,6 @@ public:
                 }
             }
         }
-        // Pager::release() NULLs out the page reference.
         m_pager->release(node.ref);
     }
 

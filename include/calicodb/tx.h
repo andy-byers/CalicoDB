@@ -101,10 +101,13 @@ public:
     // Create a mapping between `key` and `value` in the bucket using a cursor
     // This routine behaves like the other overload of put, but also adjusts
     // the cursor `c` to point to the newly-created record. On success (when an
-    // OK status is returned), the expression
-    //     `c->key() == key && c->value() == value`
-    // should evaluate to true. Additionally, it is safe to use both `c->key()`
-    // and `c->value()` as parameters. On failure, the cursor is left in an
+    // OK status is returned), the following expressions will evaluate to true:
+    //     `c->is_valid()`
+    //     `c->status().is_ok()`
+    //     `c->key()` == `key`
+    //     `c->value()` == `value`
+    // Additionally, it is safe to use both `c->key()` and `c->value()` as
+    // parameters to this routine. On failure, the cursor is left in an
     // unspecified state (possibly invalidated, or placed on a nearby record).
     virtual auto put(Cursor &c, const Slice &key, const Slice &value) -> Status = 0;
 

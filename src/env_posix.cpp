@@ -709,8 +709,8 @@ auto PosixFile::sync() -> Status
     int rc;
 
 #ifdef F_FULLFSYNC
-    // NOTE: This will certainly make performance quite a bit worse on OSX, however, it is
-    //       necessary for durability. On OSX, fcntl() returns before the storage device's
+    // NOTE: This will certainly make performance quite a bit worse on macOS, however, it is
+    //       necessary for durability. On macOS, fcntl() returns before the storage device's
     //       volatile write cache has been flushed.
     rc = fcntl(file, F_FULLFSYNC);
 #else
