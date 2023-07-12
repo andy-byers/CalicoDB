@@ -2,15 +2,13 @@
 // This source code is licensed under the MIT License, which can be found in
 // LICENSE.md. See AUTHORS.md for a list of contributor names.
 
+#include "test.h"
 #include "common.h"
 #include "encoding.h"
 #include "freelist.h"
-#include "logging.h"
 #include "schema.h"
 #include "temp.h"
-#include "test.h"
 #include "tree.h"
-#include <gtest/gtest.h>
 
 namespace calicodb::test
 {
@@ -92,14 +90,14 @@ public:
 
     auto close() const -> void
     {
-        m_tree->finish_operation();
+        m_tree->release_nodes();
         m_pager->finish();
     }
 
     auto validate() const -> void
     {
         ASSERT_TRUE(Freelist::assert_state(*m_pager));
-        m_tree->finish_operation();
+        m_tree->release_nodes();
         m_tree->TEST_validate();
     }
 };
@@ -284,7 +282,7 @@ static auto add_initial_records(TreeTestHarness &test, bool has_overflow = false
         (void)test.m_tree->put(TreeTestHarness::make_long_key(i), TreeTestHarness::make_value('v', has_overflow));
     }
     test.validate();
-    test.m_tree->finish_operation();
+    test.m_tree->release_nodes();
 }
 
 TEST_F(TreeTests, ToStringDoesNotCrash)
@@ -521,17 +519,17 @@ TEST_P(CursorTests, AccountsForNodeBoundaries)
         ASSERT_OK(m_tree->erase(make_long_key(i + 3)));
         ASSERT_OK(m_tree->erase(make_long_key(i + 4)));
     }
-    m_tree->finish_operation();
+    m_tree->release_nodes();
     auto cursor = make_cursor();
     for (std::size_t i = 0; i + 10 < kInitialRecordCount; i += 5) {
         cursor->seek(make_long_key(i + 1));
-        ASSERT_EQ(make_long_key(i + 5), cursor->key().to_string());
+        ASSERT_EQ(make_long_key(i + 5), cursor->key());
         cursor->seek(make_long_key(i + 2));
-        ASSERT_EQ(make_long_key(i + 5), cursor->key().to_string());
+        ASSERT_EQ(make_long_key(i + 5), cursor->key());
         cursor->seek(make_long_key(i + 3));
-        ASSERT_EQ(make_long_key(i + 5), cursor->key().to_string());
+        ASSERT_EQ(make_long_key(i + 5), cursor->key());
         cursor->seek(make_long_key(i + 4));
-        ASSERT_EQ(make_long_key(i + 5), cursor->key().to_string());
+        ASSERT_EQ(make_long_key(i + 5), cursor->key());
     }
 }
 
@@ -588,7 +586,7 @@ TEST_P(CursorTests, SeeksBackward)
     cursor->seek_last();
     std::size_t i = 0;
     while (cursor->is_valid()) {
-        ASSERT_EQ(cursor->key().to_string(), make_long_key(kInitialRecordCount - 1 - i++));
+        ASSERT_EQ(cursor->key(), make_long_key(kInitialRecordCount - 1 - i++));
         ASSERT_EQ(cursor->value(), make_value('v'));
         cursor->previous();
     }
@@ -1013,7 +1011,7 @@ public:
         for (std::size_t i = 0; i < kInitialRecordCount; ++i) {
             ASSERT_OK(multi_tree[tid]->erase(make_long_key(i)));
         }
-        multi_tree[tid]->finish_operation();
+        multi_tree[tid]->release_nodes();
         multi_tree[tid]->TEST_validate();
     }
 
@@ -1293,34 +1291,34 @@ INSTANTIATE_TEST_SUITE_P(
     RebalanceTests,
     ::testing::Values(1, 2, 5));
 
-TEST(PrefixTests, PrefixesAreValid)
+TEST(SuffixTruncationTests, SuffixTruncation)
 {
-    const auto checked_prefix = [](const auto &lhs, const auto &rhs) {
+    const auto checked_truncate_suffix = [](const auto &lhs, const auto &rhs) {
         const auto prefix = truncate_suffix(lhs, rhs);
         // lhs < prefix <= rhs
         EXPECT_FALSE(prefix.is_empty());
         EXPECT_LT(lhs, prefix);
         EXPECT_LE(prefix, rhs);
-        return prefix.to_string();
+        return prefix;
     };
 
-    ASSERT_EQ("1", checked_prefix("0", "1"));
-    ASSERT_EQ("1", checked_prefix("00", "1"));
-    ASSERT_EQ("1", checked_prefix("0", "11"));
-    ASSERT_EQ("1", checked_prefix("00", "11"));
-    ASSERT_EQ("01", checked_prefix("0", "01"));
-    ASSERT_EQ("01", checked_prefix("00", "01"));
-    ASSERT_EQ("10", checked_prefix("1", "10"));
+    ASSERT_EQ("1", checked_truncate_suffix("0", "1"));
+    ASSERT_EQ("1", checked_truncate_suffix("00", "1"));
+    ASSERT_EQ("1", checked_truncate_suffix("0", "11"));
+    ASSERT_EQ("1", checked_truncate_suffix("00", "11"));
+    ASSERT_EQ("01", checked_truncate_suffix("0", "01"));
+    ASSERT_EQ("01", checked_truncate_suffix("00", "01"));
+    ASSERT_EQ("10", checked_truncate_suffix("1", "10"));
 
     // Examples are from https://dl.acm.org/doi/pdf/10.1145/320521.320530.
-    ASSERT_EQ("An", checked_prefix("A", "An"));
-    ASSERT_EQ("As", checked_prefix("And", "As"));
-    ASSERT_EQ("Solv", checked_prefix("Solutions", "Solve"));
-    ASSERT_EQ("S", checked_prefix("Problems", "Solution"));
+    ASSERT_EQ("An", checked_truncate_suffix("A", "An"));
+    ASSERT_EQ("As", checked_truncate_suffix("And", "As"));
+    ASSERT_EQ("Solv", checked_truncate_suffix("Solutions", "Solve"));
+    ASSERT_EQ("S", checked_truncate_suffix("Problems", "Solution"));
 
     // lhs may be empty, but since lhs < rhs, rhs must not be empty.
-    ASSERT_EQ("0", checked_prefix("", "0"));
-    ASSERT_EQ("0", checked_prefix("", "00"));
+    ASSERT_EQ("0", checked_truncate_suffix("", "0"));
+    ASSERT_EQ("0", checked_truncate_suffix("", "00"));
 }
 
 class CursorModificationTests
@@ -1350,15 +1348,15 @@ TEST_F(CursorModificationTests, QuickCheck)
             const auto *value = key + i;
             ASSERT_OK(m_tree->put(*c, key, value));
             ASSERT_TRUE(c->is_valid());
-            ASSERT_EQ(key, c->key());
-            ASSERT_EQ(value, c->value());
+            ASSERT_EQ(Slice(key), c->key());
+            ASSERT_EQ(Slice(value), c->value());
         }
     }
 
     for (const auto *key : {"AA", "BB", "CC"}) {
         ASSERT_TRUE(c->is_valid());
-        ASSERT_EQ(key, c->key());
-        ASSERT_EQ(key + 1, c->value());
+        ASSERT_EQ(Slice(key), c->key());
+        ASSERT_EQ(Slice(key + 1), c->value());
         ASSERT_OK(m_tree->erase(*c));
     }
 

@@ -71,7 +71,7 @@ struct Cell {
     // Pointer to the start of the cell.
     char *ptr;
 
-    // Pointer to the start of the record key.
+    // Pointer to the start of the key.
     char *key;
 
     // Number of bytes contained in the key.

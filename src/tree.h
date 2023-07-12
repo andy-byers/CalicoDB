@@ -14,7 +14,7 @@ namespace calicodb
 {
 
 class Schema;
-struct TreeCursor;
+class TreeCursor;
 
 [[nodiscard]] inline auto truncate_suffix(const Slice &lhs, const Slice &rhs) -> Slice
 {
@@ -41,7 +41,7 @@ struct TreeCursor;
 class Tree final
 {
 public:
-    friend struct TreeCursor;
+    friend class TreeCursor;
 
     ~Tree();
     auto release_nodes() const -> void;
@@ -174,8 +174,8 @@ private:
     // Internal cursor used to traverse the tree structure
     TreeCursor *const m_cursor;
 
-    auto use_cursor(TreeCursor *c) const -> void;
-    mutable TreeCursor *m_last_c = nullptr;
+    auto use_cursor(Cursor *c) const -> void;
+    mutable Cursor *m_last_c = nullptr;
 
     // Various tree operation counts are tracked in this variable.
     Stat *m_stat;
