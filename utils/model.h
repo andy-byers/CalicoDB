@@ -195,10 +195,7 @@ public:
 
     auto next() -> void override
     {
-        const auto [reloaded, saved_key] = m_tx->load_cursor();
-        if (reloaded && key() > saved_key) {
-            return;
-        }
+        m_tx->load_cursor();
         if (m_itr != end(*m_map)) {
             ++m_itr;
         }

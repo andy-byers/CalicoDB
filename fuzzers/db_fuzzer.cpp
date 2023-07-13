@@ -388,7 +388,7 @@ auto DBFuzzer::fuzz(FuzzerStream &stream) -> bool
         kOpCount
     } op_type = OperationType(U32(stream.extract_fixed(1)[0]) % kOpCount);
 
-//#ifdef FUZZER_TRACE
+#ifdef FUZZER_TRACE
     static constexpr const char *kOperationTypeNames[kOpCount] = {
         "kBucketPut",
         "kBucketGet",
@@ -409,7 +409,7 @@ auto DBFuzzer::fuzz(FuzzerStream &stream) -> bool
     const auto sample = escape_string(stream.peek(sample_len));
     std::cout << "TRACE: OpType: " << kOperationTypeNames[op_type] << R"( Input: ")"
               << sample << R"(" + <)" << missing_len << " bytes>\n";
-//#endif // FUZZER_TRACE
+#endif // FUZZER_TRACE
 
     std::string value;
     Slice key;
@@ -422,9 +422,11 @@ auto DBFuzzer::fuzz(FuzzerStream &stream) -> bool
         case kBucketPut:
             key = stream.extract_random();
             s = m_tx->put(m_b, key, stream.extract_random());
+            m_c->seek(key); // TODO
             break;
         case kBucketErase:
             s = m_tx->erase(m_b, stream.extract_random());
+            m_c->seek_first(); // TODO
             break;
         case kCursorSeek:
             key = stream.extract_random();

@@ -394,6 +394,7 @@ public:
     auto seek_first() -> void override
     {
         prepare();
+        m_saved = false;
         m_c.seek_to_first_leaf();
         if (m_c.has_key()) {
             m_c.m_status = fetch_payload();
@@ -403,6 +404,7 @@ public:
     auto seek_last() -> void override
     {
         prepare();
+        m_saved = false;
         m_c.seek_to_last_leaf();
         if (m_c.has_key()) {
             m_c.m_status = fetch_payload();
@@ -431,7 +433,7 @@ public:
         const auto next_id = NodeHdr::get_next_id(m_c.m_node.hdr());
 
         if (next_id.is_null()) {
-            m_c.release_nodes(TreeCursor::kCurrentLevel);
+            m_c.reset();
         } else {
             Node right;
             m_c.m_status = m_c.m_tree->acquire(next_id, right);
@@ -465,7 +467,7 @@ public:
         const auto prev_id = NodeHdr::get_prev_id(m_c.m_node.hdr());
 
         if (prev_id.is_null()) {
-            m_c.release_nodes(TreeCursor::kCurrentLevel);
+            m_c.reset();
         } else {
             Node left;
             m_c.m_status = m_c.m_tree->acquire(prev_id, left);
@@ -483,6 +485,7 @@ public:
         // The cursor position is not reset prior to the call to seek_to_leaf(). seek_to_leaf() may
         // try to avoid performing a full root-to-leaf traversal.
         prepare();
+        m_saved = false;
         m_c.seek_to_leaf(key);
         ensure_correct_leaf();
     }
@@ -1713,10 +1716,13 @@ auto Tree::erase(Cursor &c) -> Status
 
 auto Tree::erase(TreeCursor &c) -> Status
 {
-    upgrade(c.m_node);
-    auto s = remove_cell(c.m_node, c.m_idx);
-    if (s.is_ok() && is_underflowing(c.m_node)) {
-        s = resolve_underflow(c);
+    Status s;
+    if (c.m_idx < NodeHdr::get_cell_count(c.m_node.hdr())) {
+        upgrade(c.m_node);
+        s = remove_cell(c.m_node, c.m_idx);
+        if (s.is_ok() && is_underflowing(c.m_node)) {
+            s = resolve_underflow(c);
+        }
     }
     return s;
 }
