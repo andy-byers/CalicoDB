@@ -62,7 +62,7 @@ public:
         delete m_file;
         delete m_env;
     }
-    
+
     [[nodiscard]] static auto make_normal_key(std::size_t value)
     {
         return numeric_key<6>(value);
@@ -291,8 +291,8 @@ static auto init_tree(TreeTestHarness &test, InitFlag flags = kInitNormal)
 {
     for (std::size_t i = 0; i < kInitialRecordCount; ++i) {
         ASSERT_OK(test.m_tree->put(
-            flags & kInitLongKeys ? TreeTestHarness::make_long_key(i) 
-                                  : TreeTestHarness::make_normal_key(i), 
+            flags & kInitLongKeys ? TreeTestHarness::make_long_key(i)
+                                  : TreeTestHarness::make_normal_key(i),
             TreeTestHarness::make_value('*', flags & kInitLongValues)));
     }
     test.validate();
@@ -302,7 +302,8 @@ static auto init_tree(TreeTestHarness &test, InitFlag flags = kInitNormal)
 TEST_F(TreeTests, ToStringDoesNotCrash)
 {
     init_tree(*this);
-    (void)m_tree->TEST_to_string();
+    (void)m_tree->to_string();
+    std::cerr << m_tree->to_string() << '\n';
 }
 
 TEST_F(TreeTests, ResolvesUnderflowsOnRightmostPosition)
@@ -455,14 +456,6 @@ TEST_P(TreeSanityChecks, SmallRecords)
         records.clear();
         validate();
     }
-}
-
-TEST_P(TreeSanityChecks, Destruction)
-{
-    for (std::size_t i = 0; i < record_count; ++i) {
-        random_write();
-    }
-    ASSERT_OK(Tree::destroy(*m_tree));
 }
 
 // Parameter bits:
@@ -960,34 +953,33 @@ public:
         m_pager->finish();
     }
 
-    auto create_tree()
+    auto create_tree(std::size_t tid)
     {
         Id root;
-        EXPECT_OK(Tree::create(*m_pager, &root));
-        ++last_tree_id.value;
         Bucket b;
+        EXPECT_OK(Tree::create(*m_pager, &root));
         EXPECT_OK(m_schema->create_bucket(
             BucketOptions(),
-            numeric_key(last_tree_id.value),
+            numeric_key(tid),
             &b));
-        multi_tree.emplace_back(static_cast<Tree *>(b.state));
-        return multi_tree.size() - 1;
+        EXPECT_EQ(multi_tree.find(tid), end(multi_tree));
+        multi_tree.emplace(tid, static_cast<Tree *>(b.state));
     }
 
     auto fill_tree(std::size_t tid)
     {
         for (std::size_t i = 0; i < kInitialRecordCount; ++i) {
             const auto value = payload_values[(i + tid) % payload_values.size()];
-            ASSERT_OK(multi_tree[tid]->put(make_long_key(i), value));
+            ASSERT_OK(multi_tree.at(tid)->put(make_long_key(i), value));
         }
-        multi_tree[tid]->TEST_validate();
+        multi_tree.at(tid)->TEST_validate();
     }
 
     auto check_tree(std::size_t tid)
     {
         std::string value;
         for (std::size_t i = 0; i < kInitialRecordCount; ++i) {
-            ASSERT_OK(multi_tree[tid]->get(make_long_key(i), &value));
+            ASSERT_OK(multi_tree.at(tid)->get(make_long_key(i), &value));
             ASSERT_EQ(value, payload_values[(i + tid) % payload_values.size()]);
         }
     }
@@ -995,31 +987,37 @@ public:
     auto clear_tree(std::size_t tid)
     {
         for (std::size_t i = 0; i < kInitialRecordCount; ++i) {
-            ASSERT_OK(multi_tree[tid]->erase(make_long_key(i)));
+            ASSERT_OK(multi_tree.at(tid)->erase(make_long_key(i)));
         }
     }
 
+    auto drop_tree(std::size_t tid)
+    {
+        ASSERT_NE(multi_tree.find(tid), end(multi_tree));
+        ASSERT_OK(m_schema->drop_bucket(numeric_key(tid)));
+        multi_tree.erase(tid);
+    }
+
     Schema *m_schema = nullptr;
-    Id last_tree_id = Id::root();
-    std::vector<Tree *> multi_tree;
+    std::unordered_map<std::size_t, Tree *> multi_tree;
     std::vector<std::string> payload_values;
     std::string m_scratch;
 };
 
 TEST_F(MultiTreeTests, CreateAdditionalTrees)
 {
-    create_tree();
-    create_tree();
-    create_tree();
+    create_tree(1);
+    create_tree(2);
+    create_tree(3);
 }
 
 TEST_F(MultiTreeTests, DuplicateKeysAreAllowedBetweenTrees)
 {
-    const auto tid_1 = create_tree();
-    const auto tid_2 = create_tree();
+    create_tree(1);
+    create_tree(2);
 
-    auto &hello_tree = multi_tree[tid_1];
-    auto &world_tree = multi_tree[tid_2];
+    auto &hello_tree = multi_tree.at(1);
+    auto &world_tree = multi_tree.at(2);
     ASSERT_OK(hello_tree->put("same_key", "hello"));
     ASSERT_OK(world_tree->put("same_key", "world"));
 
@@ -1032,32 +1030,61 @@ TEST_F(MultiTreeTests, DuplicateKeysAreAllowedBetweenTrees)
 
 TEST_F(MultiTreeTests, NonRootTreeSplitsAndMerges)
 {
-    const auto tid = create_tree();
-    fill_tree(tid);
-    clear_tree(tid);
+    create_tree(1);
+    fill_tree(1);
+    clear_tree(1);
 }
 
 TEST_F(MultiTreeTests, MultipleSplitsAndMerges_1)
 {
-    std::vector<std::size_t> tids(10);
-    for (auto &tid : tids) {
-        tid = create_tree();
+    for (std::size_t tid = 0; tid < 10; ++tid) {
+        create_tree(tid);
     }
-    for (const auto &tid : tids) {
+    for (std::size_t tid = 0; tid < 10; ++tid) {
         fill_tree(tid);
     }
-    for (const auto &tid : tids) {
+    for (std::size_t tid = 0; tid < 10; ++tid) {
         check_tree(tid);
     }
-    for (const auto &tid : tids) {
+    for (std::size_t tid = 0; tid < 10; ++tid) {
         clear_tree(tid);
     }
 }
 
 TEST_F(MultiTreeTests, MultipleSplitsAndMerges_2)
 {
-    for (std::size_t i = 0; i < 10; ++i) {
-        const auto tid = create_tree();
+    for (std::size_t tid = 0; tid < 10; ++tid) {
+        create_tree(tid);
+        fill_tree(tid);
+        check_tree(tid);
+        clear_tree(tid);
+    }
+}
+
+TEST_F(MultiTreeTests, TreeDestruction_1)
+{
+    for (std::size_t i = 0; i < 2; ++i) {
+        create_tree(1);
+        fill_tree(1);
+        drop_tree(1);
+    }
+    create_tree(1);
+    fill_tree(1);
+    check_tree(1);
+    clear_tree(1);
+}
+
+TEST_F(MultiTreeTests, TreeDestruction_2)
+{
+    for (std::size_t tid = 0; tid < 10; ++tid) {
+        create_tree(tid);
+        fill_tree(tid);
+    }
+    for (std::size_t tid = 0; tid < 10; ++tid) {
+        drop_tree(tid);
+    }
+    for (std::size_t tid = 0; tid < 10; ++tid) {
+        create_tree(tid);
         fill_tree(tid);
         check_tree(tid);
         clear_tree(tid);
@@ -1072,10 +1099,11 @@ TEST_F(MultiTreeTests, SavedCursors)
 
     while (s.is_ok()) {
         // Create a new tree and add some records.
-        tids.emplace_back(create_tree());
+        tids.emplace_back(tids.size());
+        create_tree(tids.back());
         for (std::size_t i = 0; s.is_ok() && i < kInitialRecordCount; ++i) {
             const auto value = payload_values[i];
-            s = multi_tree[tids.back()]->put(make_long_key(i), value);
+            s = multi_tree.at(tids.back())->put(make_long_key(i), value);
         }
         if (!s.is_ok()) {
             break;
@@ -1096,7 +1124,7 @@ TEST_F(MultiTreeTests, SavedCursors)
         }
         // Add a new cursor to every tree.
         for (auto tid : tids) {
-            cs.emplace_back(multi_tree[tid]->new_cursor());
+            cs.emplace_back(multi_tree.at(tid)->new_cursor());
             cs.back()->seek_first();
             if (!cs.back()->is_valid()) {
                 s = cs.back()->status();
@@ -1105,8 +1133,8 @@ TEST_F(MultiTreeTests, SavedCursors)
         }
     }
 
-    // Should be an "out of frames" error. TODO: Make a specific out of memory status code?
-    ASSERT_TRUE(s.is_invalid_argument());
+    // Should be an "out of frames" error.   TODO: This error can be made to not happen. Cursors need a callback or something to call
+    ASSERT_TRUE(s.is_invalid_argument()); // TODO: to tell the schema to use the current tree and save cursors belonging to other trees.
 
     for (const auto *c : cs) {
         delete c;
@@ -1145,11 +1173,7 @@ public:
 TEST(PermutationGeneratorTests, GeneratesAllPermutationsInLexicographicalOrder)
 {
     std::vector<int> result;
-    PermutationGenerator<int> generator({
-        1,
-        2,
-        3,
-    });
+    PermutationGenerator<int> generator({1, 2, 3});
 
     for (int iteration = 0; iteration < 2; ++iteration) {
         ASSERT_TRUE(generator(result));
@@ -1468,7 +1492,7 @@ TEST_F(CursorModificationTests, SeekAndEraseBackward)
     }
 }
 
-TEST_F(CursorModificationTests, Modify)
+TEST_F(CursorModificationTests, ModifyExistingRecords)
 {
     for (std::size_t i = 0; i < kInitialRecordCount; ++i) {
         ASSERT_OK(m_tree->put(numeric_key(i), ""));
@@ -1508,6 +1532,37 @@ TEST_F(CursorModificationTests, Modify)
     ASSERT_OK(c->status());
 }
 
+TEST_F(CursorModificationTests, UntrackedCursors)
+{
+    init_tree(*this, kInitLongValues);
+
+    std::unique_ptr<Cursor> c1(m_tree->new_cursor());
+    std::unique_ptr<Cursor> c2(m_tree->new_cursor());
+    c1->seek_first();
+    c2->seek_last();
+
+    for (std::size_t i = 0; i < kInitialRecordCount; ++i) {
+        ASSERT_OK(m_tree->erase(make_normal_key(i)));
+    }
+
+    ASSERT_TRUE(c1->is_valid());
+    ASSERT_EQ(c1->key(), make_normal_key(0));
+    ASSERT_TRUE(c2->is_valid());
+    ASSERT_EQ(c2->key(), make_normal_key(kInitialRecordCount - 1));
+
+    c1->next();
+    c2->previous();
+
+    ASSERT_FALSE(c1->is_valid());
+    ASSERT_FALSE(c2->is_valid());
+
+    c1->seek_first();
+    c1->seek_last();
+
+    ASSERT_FALSE(c1->is_valid());
+    ASSERT_FALSE(c2->is_valid());
+}
+
 class VacuumTests : public MultiTreeTests
 {
 public:
@@ -1519,7 +1574,8 @@ public:
     {
         MultiTreeTests::SetUp();
         m_root = m_tree;
-        m_tree = multi_tree.at(create_tree());
+        create_tree(1);
+        m_tree = multi_tree.at(1);
     }
 
     auto TearDown() -> void override

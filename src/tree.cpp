@@ -17,6 +17,7 @@ namespace calicodb
 // Helper for traversing the tree structure
 class TreeCursor
 {
+    friend class InorderTraversal;
     friend class Tree;
     friend class TreeValidator;
     friend class UserCursor;
@@ -1990,57 +1991,73 @@ auto Tree::vacuum(Schema &schema) -> Status
     return s;
 }
 
-auto Tree::destroy_impl(Node node) -> Status
+class InorderTraversal
 {
-    Status s;
-    for (U32 i = 0, n = NodeHdr::get_cell_count(node.hdr()); i <= n; ++i) {
-        if (i < NodeHdr::get_cell_count(node.hdr())) {
-            Cell cell;
-            if (node.read(i, cell)) {
-                s = corrupted_page(node.ref->page_id);
-            }
-            if (s.is_ok() && cell.local_pl_size != cell.total_pl_size) {
-                s = free_overflow(read_overflow_id(cell));
-            }
-            if (!s.is_ok()) {
-                break;
-            }
-        }
-        if (!node.is_leaf()) {
-            const auto save_id = node.ref->page_id;
-            const auto next_id = node.read_child_id(i);
-            release(std::move(node));
+public:
+    struct TraversalInfo {
+        U32 idx;
+        U32 ncells;
+        U32 level;
+    };
+    using Callback = std::function<Status(Node &, const TraversalInfo &)>;
 
-            Node next;
-            s = acquire(next_id, next);
-            if (s.is_ok()) {
-                s = destroy_impl(std::move(next));
-            }
-            if (s.is_ok()) {
-                s = acquire(save_id, node);
-            }
-            if (!s.is_ok()) {
-                // Just return early: `node` has already been released.
-                return s;
-            }
+    // Call the callback for every record and pivot in the tree, in sort order, plus once when the node
+    // is no longer required for determining the rest of the traversal
+    static auto traverse(const Tree &tree, const Callback &cb) -> Status
+    {
+        Node root;
+        auto s = tree.acquire(tree.root(), root);
+        if (s.is_ok()) {
+            s = traverse_impl(tree, std::move(root), cb, 0);
         }
-    }
-    if (s.is_ok() && !node.ref->page_id.is_root()) {
-        return free(std::move(node));
+        return s;
     }
 
-    release(std::move(node));
-    return s;
-}
+private:
+    static auto traverse_impl(const Tree &tree, Node node, const Callback &cb, U32 level) -> Status
+    {
+        Status s;
+        for (U32 i = 0, n = NodeHdr::get_cell_count(node.hdr()); s.is_ok() && i <= n; ++i) {
+            if (!node.is_leaf()) {
+                const auto save_id = node.ref->page_id;
+                const auto next_id = node.read_child_id(i);
+                tree.release(std::move(node));
+
+                Node next;
+                s = tree.acquire(next_id, next);
+                if (s.is_ok()) {
+                    s = traverse_impl(tree, std::move(next), cb, level + 1);
+                }
+                if (s.is_ok()) {
+                    s = tree.acquire(save_id, node);
+                }
+            }
+            if (s.is_ok()) {
+                s = cb(node, {i, n, level});
+            }
+        }
+        tree.release(std::move(node));
+        return s;
+    }
+};
 
 auto Tree::destroy(Tree &tree) -> Status
 {
-    Node root;
-    auto s = tree.acquire(tree.root(), root);
-    if (s.is_ok()) {
-        s = tree.destroy_impl(std::move(root));
-    }
-    return s;
+    CALICODB_EXPECT_FALSE(tree.root().is_root());
+    const auto cleanup = [&tree](auto &node, const auto &info) {
+        if (info.idx == info.ncells) {
+            return tree.free(std::move(node));
+        }
+        Cell cell;
+        if (node.read(info.idx, cell)) {
+            return tree.corrupted_page(node.ref->page_id);
+        }
+        if (cell.local_pl_size < cell.total_pl_size) {
+            return tree.free_overflow(read_overflow_id(cell));
+        }
+        return Status::ok();
+    };
+    return InorderTraversal::traverse(tree, cleanup);
 }
 
 #if CALICODB_TEST
@@ -2310,7 +2327,7 @@ auto Tree::TEST_validate() const -> void
     TreeValidator::validate(*this);
 }
 
-auto Tree::TEST_to_string() const -> std::string
+auto Tree::to_string() const -> std::string
 {
     return TreeValidator::to_string(*this);
 }
@@ -2320,11 +2337,6 @@ auto Tree::TEST_to_string() const -> std::string
 #undef CHECK_OK
 
 #else
-
-auto Tree::TEST_to_string() const -> std::string
-{
-    return "";
-}
 
 auto Tree::TEST_validate() const -> void
 {

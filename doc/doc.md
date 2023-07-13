@@ -14,7 +14,7 @@
     + [Checkpoints](#checkpoints)
     + [Closing a database](#closing-a-database)
     + [Destroying a database](#destroying-a-database)
-+ [Acknowledgements](#acknowledgements)
++ [Resources](#resources)
 
 ## Build
 CalicoDB is built using CMake.
@@ -326,6 +326,12 @@ if (db->get_property("calicodb.stats", nullptr)) {
 ```
 
 ### Checkpoints
+Pages that are modified during transactions are written to the WAL, not the database file.
+At some point, it is desirable to write the pages accumulated in the WAL back to the database.
+This operation is called a checkpoint.
+Note that automatic checkpoints can be run using the `auto_checkpoint` option (see [Opening a database](#opening-a-database)).
+Automatic checkpoints are attempted when transactions are started.
+
 ```C++
 // This transaction was started earlier, in #manual-transactions. It must be
 // finished before the database can be checkpointed. Note that the bucket 
@@ -340,11 +346,11 @@ delete tx;
 // involves blocking until other connections are finished with the WAL.
 s = db->checkpoint(true);
 if (s.is_ok()) {
-    
+    // The whole WAL was written back to the database file.
 } else if (s.is_busy()) {
-    
+    // Some other connection got in the way.
 } else {
-    
+    // Some other error occurred.
 }
 ```
 
@@ -367,16 +373,14 @@ if (s.is_ok()) {
 }
 ```
 
-## Acknowledgements
-1. https://cstack.github.io/db_tutorial/
+## Resources
+1. [Let's Build a Simple Database](https://cstack.github.io/db_tutorial/)
     + Tutorial on database development in C
-2. https://www.sqlite.org/arch.html
+2. [Architecture of SQLite](https://www.sqlite.org/arch.html)
     + Much of this project was inspired by SQLite3, both the architecture design documents and the source code
     + Especially see the B-tree design document, as well as `btree.h`, `btree.c`, and `btreeInt.h`
-3. https://github.com/google/leveldb
+3. [LevelDB](https://github.com/google/leveldb)
     + Much of the API is inspired by LevelDB
     + Some parts of the CMake build process are taken from their `CMakeLists.txt`
-4. BoltDB (https://github.com/boltdb/bolt)
+4. [BoltDB](https://github.com/boltdb/bolt)
     + Inspiration for the transaction API
-5. https://sbucketcog.com/
-    + Used to generate the original calico cat image, which was then further modified to produce [mascot.png](mascot.png)

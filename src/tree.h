@@ -42,8 +42,6 @@ class TreeCursor;
 class Tree final
 {
 public:
-    friend class TreeCursor;
-
     ~Tree();
     auto release_nodes() const -> void;
 
@@ -122,15 +120,17 @@ public:
         return m_root_id ? *m_root_id : Id::root();
     }
 
-    [[nodiscard]] auto TEST_to_string() const -> std::string;
+    [[nodiscard]] auto to_string() const -> std::string;
     auto TEST_validate() const -> void;
 
 private:
-    friend class UserCursor;
-    friend class SchemaCursor;
     friend class DBImpl;
+    friend class InorderTraversal;
     friend class Schema;
+    friend class SchemaCursor;
+    friend class TreeCursor;
     friend class TreeValidator;
+    friend class UserCursor;
 
     auto put(TreeCursor &c, const Slice &key, const Slice &value) -> Status;
     auto erase(TreeCursor &c) -> Status;
@@ -155,7 +155,6 @@ private:
 
     auto emplace(Node &node, const Slice &key, const Slice &value, U32 index, bool &overflow) -> Status;
     auto free_overflow(Id head_id) -> Status;
-    auto destroy_impl(Node node) -> Status;
     auto vacuum_step(PageRef &free, PointerMap::Entry entry, Schema &schema, Id last_id) -> Status;
 
     struct PivotOptions {
