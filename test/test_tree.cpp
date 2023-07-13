@@ -1584,7 +1584,7 @@ TEST_F(VacuumTests, VacuumOverflowChains)
 TEST_F(VacuumTests, VacuumPartialRange)
 {
     std::unique_ptr<Cursor> c(m_tree->new_cursor());
-    for (int i = 0; i < 2; ++i) {
+    for (std::size_t i = 0; i < 2; ++i) {
         init_tree(*this, kInitLongKeys | (i == 0 ? 0 : kInitLongValues));
 
         c->seek_first();
