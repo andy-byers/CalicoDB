@@ -792,32 +792,26 @@ TEST_F(MultiCursorTests, CursorManagement)
     }
 }
 
-// TODO: This actually shouldn't be possible anymore.
-// TEST_F(MultiCursorTests, OutOfFrames)
-//{
-//    for (std::size_t i = 1; i < m_pager->buffer_count() * 10; ++i) {
-//        add_cursor();
-//    }
-//    for (auto *c : m_cursors) {
-//        c->seek_first();
-//    }
-//    bool out_of_frames = false;
-//    for (std::size_t i = 0; i < m_cursors.size(); ++i) {
-//        for (std::size_t j = 0; m_cursors[i]->is_valid() && j < i; ++j) {
-//            // Spread the cursors out until too many page cache frames are occupied.
-//            m_cursors[i]->next();
-//        }
-//        if (m_cursors[i]->status().is_invalid_argument()) {
-//            out_of_frames = true;
-//            break;
-//        }
-//    }
-//    ASSERT_TRUE(out_of_frames);
-//
-//    // Both put() and erase() cause live cursors to be saved.
-//    ASSERT_OK(m_tree->put("key", "value"));
-//    ASSERT_OK(m_tree->erase("key"));
-//}
+ TEST_F(MultiCursorTests, LotsOfCursors)
+{
+    for (std::size_t i = 1; i < m_pager->buffer_count() * 10; ++i) {
+        add_cursor();
+    }
+    for (auto *c : m_cursors) {
+        c->seek_first();
+    }
+    for (std::size_t i = 0; i < m_cursors.size(); ++i) {
+        for (std::size_t j = 0; m_cursors[i]->is_valid() && j < i; ++j) {
+            // Spread the cursors out until too many page cache frames are occupied.
+            m_cursors[i]->next();
+        }
+        ASSERT_OK(m_cursors[i]->status());
+    }
+
+    // Both put() and erase() cause live cursors to be saved.
+    ASSERT_OK(m_tree->put("key", "value"));
+    ASSERT_OK(m_tree->erase("key"));
+}
 
 class PointerMapTests : public TreeTests
 {
@@ -1640,7 +1634,7 @@ TEST_F(VacuumTests, VacuumOverflowChains)
 TEST_F(VacuumTests, VacuumPartialRange)
 {
     std::unique_ptr<Cursor> c(m_tree->new_cursor());
-    for (int i = 0; i < 2; ++i) {
+    for (std::size_t i = 0; i < 2; ++i) {
         init_tree(*this, kInitLongKeys | (i == 0 ? 0 : kInitLongValues));
 
         c->seek_first();
