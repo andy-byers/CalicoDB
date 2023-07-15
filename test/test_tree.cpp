@@ -299,11 +299,30 @@ static auto init_tree(TreeTestHarness &test, InitFlag flags = kInitNormal)
     test.m_tree->release_nodes();
 }
 
-TEST_F(TreeTests, ToStringDoesNotCrash)
+TEST_F(TreeTests, PrintStructure)
 {
-    init_tree(*this);
-    (void)m_tree->to_string();
-    std::cerr << m_tree->to_string() << '\n';
+    std::string empty, normal_keys, long_keys;
+    ASSERT_OK(m_tree->print_structure(empty));
+    init_tree(*this, kInitNormal);
+    ASSERT_OK(m_tree->print_structure(normal_keys));
+    init_tree(*this, kInitLongKeys);
+    ASSERT_OK(m_tree->print_structure(long_keys));
+    // empty may or may not be empty...
+    ASSERT_FALSE(normal_keys.empty());
+    ASSERT_FALSE(long_keys.empty());
+}
+
+TEST_F(TreeTests, PrintRecords)
+{
+    std::string empty, normal_keys, long_keys;
+    ASSERT_OK(m_tree->print_nodes(empty));
+    init_tree(*this, kInitNormal);
+    ASSERT_OK(m_tree->print_nodes(normal_keys));
+    init_tree(*this, kInitLongKeys);
+    ASSERT_OK(m_tree->print_nodes(long_keys));
+    // empty may or may not be empty...
+    ASSERT_FALSE(normal_keys.empty());
+    ASSERT_FALSE(long_keys.empty());
 }
 
 TEST_F(TreeTests, ResolvesUnderflowsOnRightmostPosition)
@@ -792,7 +811,7 @@ TEST_F(MultiCursorTests, CursorManagement)
     }
 }
 
- TEST_F(MultiCursorTests, LotsOfCursors)
+TEST_F(MultiCursorTests, LotsOfCursors)
 {
     for (std::size_t i = 1; i < m_pager->buffer_count() * 10; ++i) {
         add_cursor();

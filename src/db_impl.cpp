@@ -85,6 +85,7 @@ DBImpl::DBImpl(const Options &options, const Options &sanitized, std::string fil
       m_env(sanitized.env),
       m_log(sanitized.info_log),
       m_busy(sanitized.busy),
+      m_auto_ckpt(sanitized.auto_checkpoint),
       m_db_filename(std::move(filename)),
       m_wal_filename(sanitized.wal_filename),
       m_owns_log(options.info_log == nullptr),
@@ -128,7 +129,7 @@ auto DBImpl::destroy(const Options &options, const std::string &filename) -> Sta
     if (s.is_ok()) {
         auto *env = options.env;
         if (env == nullptr) {
-            env = Env::default_env();
+            env = &Env::default_env();
         }
         s = env->remove_file(filename);
         if (s.is_ok()) {

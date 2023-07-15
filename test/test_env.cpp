@@ -105,7 +105,7 @@ struct EnvWithFiles final {
     ~EnvWithFiles()
     {
         cleanup_files();
-        if (env != Env::default_env()) {
+        if (env != &Env::default_env()) {
             delete env;
         }
     }
@@ -275,7 +275,7 @@ public:
 
     explicit FileTests()
     {
-        m_env = Env::default_env();
+        m_env = &Env::default_env();
         m_helper.env = m_env;
     }
 
@@ -342,7 +342,7 @@ protected:
     auto SetUp() -> void override
     {
         std::filesystem::remove_all(m_log_filename);
-        ASSERT_OK(Env::default_env()->new_logger(m_log_filename, m_logger));
+        ASSERT_OK(Env::default_env().new_logger(m_log_filename, m_logger));
     }
 
     const std::string m_log_filename;
@@ -352,15 +352,15 @@ protected:
 TEST_F(LoggerTests, LogNullptrIsNOOP)
 {
     log(nullptr, "nothing %d", 42);
-    ASSERT_TRUE(read_file_to_string(*Env::default_env(), m_log_filename).empty());
+    ASSERT_TRUE(read_file_to_string(Env::default_env(), m_log_filename).empty());
 }
 
 TEST_F(LoggerTests, LogsFormattedText)
 {
     log(m_logger, "%u foo", 123);
-    const auto msg1 = read_file_to_string(*Env::default_env(), m_log_filename);
+    const auto msg1 = read_file_to_string(Env::default_env(), m_log_filename);
     log(m_logger, "bar %d", 42);
-    const auto msg2 = read_file_to_string(*Env::default_env(), m_log_filename);
+    const auto msg2 = read_file_to_string(Env::default_env(), m_log_filename);
 
     // Make sure both text and header info were written.
     ASSERT_EQ(kHdrLen, msg1.find("123 foo\n"));
@@ -369,17 +369,16 @@ TEST_F(LoggerTests, LogsFormattedText)
     ASSERT_EQ(msg2.size(), kHdrLen * 2 + 15);
 }
 
-
 TEST_F(LoggerTests, HandlesMessages)
 {
     std::string msg;
     for (std::size_t n = 0; n < 512; ++n) {
-        ASSERT_OK(Env::default_env()->resize_file(m_log_filename, 0));
+        ASSERT_OK(Env::default_env().resize_file(m_log_filename, 0));
 
         msg.resize(n, '$');
         log(m_logger, "%s", msg.c_str());
 
-        const auto res = read_file_to_string(*Env::default_env(), m_log_filename);
+        const auto res = read_file_to_string(Env::default_env(), m_log_filename);
         ASSERT_EQ(msg + '\n', res.substr(kHdrLen)); // Account for the datetime header and trailing newline.
     }
 }
@@ -388,12 +387,12 @@ TEST_F(LoggerTests, HandlesLongMessages)
 {
     std::string msg;
     for (std::size_t n = 1'000; n < 10'000; n *= 10) {
-        ASSERT_OK(Env::default_env()->resize_file(m_log_filename, 0));
+        ASSERT_OK(Env::default_env().resize_file(m_log_filename, 0));
 
         msg.resize(n, '$');
         log(m_logger, "%s", msg.c_str());
 
-        const auto res = read_file_to_string(*Env::default_env(), m_log_filename);
+        const auto res = read_file_to_string(Env::default_env(), m_log_filename);
         ASSERT_EQ(msg + '\n', res.substr(kHdrLen)); // Account for the datetime header and trailing newline.
     }
 }
@@ -407,7 +406,7 @@ public:
     explicit EnvLockStateTests()
         : m_filename(testing::TempDir() + "filename")
     {
-        m_env = Env::default_env();
+        m_env = &Env::default_env();
         m_helper.env = m_env;
     }
 
@@ -533,7 +532,7 @@ class EnvShmTests : public testing::Test
 public:
     explicit EnvShmTests()
     {
-        m_helper.env = Env::default_env();
+        m_helper.env = &Env::default_env();
     }
 
     ~EnvShmTests() override = default;
@@ -781,9 +780,9 @@ public:
     {
         m_dirname = testing::TempDir();
         // Create the file and zero out the version.
-        auto *tempenv = Env::default_env();
+        auto &tempenv = Env::default_env();
         File *tempfile;
-        ASSERT_OK(tempenv->new_file(m_dirname + "/0000000000", Env::kCreate, tempfile));
+        ASSERT_OK(tempenv.new_file(m_dirname + "/0000000000", Env::kCreate, tempfile));
         write_file_version(*tempfile, 0);
         delete tempfile;
     }
@@ -791,7 +790,7 @@ public:
     auto set_up() -> void
     {
         if (m_env == nullptr) {
-            m_env = Env::default_env();
+            m_env = &Env::default_env();
             m_helper.env = m_env;
         }
 
@@ -885,9 +884,9 @@ public:
             flags[indices[i]] = true;
         }
 
-        auto *env = Env::default_env();
+        auto &env = Env::default_env();
         File *file; // Keep this shm open to read from at the end...
-        ASSERT_OK(env->new_file(m_dirname + "0000000000", Env::kCreate, file));
+        ASSERT_OK(env.new_file(m_dirname + "0000000000", Env::kCreate, file));
         volatile void *ptr;
         ASSERT_OK(file->shm_map(0, true, ptr));
         run_test([&](auto) {
@@ -924,17 +923,17 @@ public:
     auto run_shm_atomic_test(std::size_t num_writes) -> void
     {
         ASSERT_LE(num_writes, kNumRounds);
-        auto *env = Env::default_env();
-        SharedCount count(*env, "shared_count");
+        auto &env = Env::default_env();
+        SharedCount count(env, "shared_count");
 
         run_test([&](auto) {
-            auto *env = Env::default_env();
+            auto &env = Env::default_env();
             std::vector<std::thread> threads;
             while (threads.size() < kNumThreads) {
                 const auto t = threads.size();
-                threads.emplace_back([env, num_writes] {
+                threads.emplace_back([&env, num_writes] {
                     for (std::size_t r = 0; r < kNumRounds; ++r) {
-                        SharedCount count(*env, "shared_count");
+                        SharedCount count(env, "shared_count");
                         if (r < num_writes) {
                             count.increase(1);
                         }

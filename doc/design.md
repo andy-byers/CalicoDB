@@ -47,10 +47,9 @@ They are arranged as a doubly-linked list, with the leftmost node containing the
 The external nodes in a tree can be thought of as a single sorted array of records, split up over multiple pages.
 This makes sequential and reverse sequential scans very fast.
 We just walk the linked list of external nodes, iterating through each node in order.
-Importantly, searching for a key within a node can utilize binary search.
 Internal nodes are used to direct searches to the correct external node.
 They contain only keys, called pivot keys in this document.
-CalicoDB uses the suffix truncation described in [2] to reduce pivot key lengths.
+CalicoDB uses the suffix truncation described in [2] to reduce pivot key lengths (see [Rebalancing](#rebalancing)).
 
 #### Rebalancing
 At present, the `Tree` class is responsible for making sure the tree it represents is balanced before returning from either `put()` or `erase()`.
@@ -73,8 +72,12 @@ It works by attempting to transfer roughly half of the cell content from the non
 If there are not enough cells in the nonempty node, then the two nodes are merged.
 Note that the parent may overflow if the new pivot is posted.
 
+Suffix truncation is performed when an external node is split.
+The pivot that is posted only needs to be long enough to direct traversals to the correct external node.
+For example, if the largest key in the left node is "AABCDD" and the smallest key in the right node is "AABDAA", the pivot can be chosen as "AABD".
+
 #### Overflow chains
-CalicoDB supports very large keys and/or values.
+CalicoDB supports very long keys and values.
 When a key or value is too large to fit on a page, some of it is transferred to an overflow chain.
 An overflow chain is a singly-linked list of pages, each containing some portion of a record payload.
 Each overflow chain page takes the following form:
@@ -111,7 +114,7 @@ They are not written to the WAL, nor are they stored in the pager cache.
 #### Pointer map
 Each cell that is moved between internal tree nodes must have its child's parent pointer updated.
 If the parent pointers are embedded in the nodes, splits and merges become very expensive, since each transferred cell requires the child page to be updated.
-In addition to facilitating the vacuum operation, pointer maps make splits and merges much more efficient by consolidating many parent pointers on a single page.
+In addition to allowing the vacuum operation, pointer maps make splits and merges much more efficient by consolidating many parent pointers on a single page.
 
 The pointer map is a collection of pointer map entries for every non-pointer map page in the database.
 Each pointer map entry consists of the following fields:

@@ -24,7 +24,7 @@ static constexpr auto clip_to_range(T &t, V min, V max) -> void
 
 auto DB::open(const Options &options, const std::string &filename, DB *&db) -> Status
 {
-    const auto clean_filename = cleanup_path(filename);
+    auto clean_filename = cleanup_path(filename);
 
     auto sanitized = options;
     clip_to_range(sanitized.cache_size, kMinFrameCount * kPageSize, kMaxCacheSize);
@@ -40,6 +40,9 @@ auto DB::open(const Options &options, const std::string &filename, DB *&db) -> S
                 "(custom Env must not be used with temp database)",
                 sanitized.env);
         }
+        if (clean_filename.empty()) {
+            clean_filename = "TempDB";
+        }
         sanitized.env = new_temp_env();
         // Only the following combination of lock_mode and sync_mode is supported for an
         // in-memory database. The database can only be accessed though this DB object,
@@ -48,7 +51,7 @@ auto DB::open(const Options &options, const std::string &filename, DB *&db) -> S
         sanitized.sync_mode = Options::kSyncOff;
     }
     if (sanitized.env == nullptr) {
-        sanitized.env = Env::default_env();
+        sanitized.env = &Env::default_env();
     }
 
     auto *impl = new DBImpl(options, sanitized, clean_filename);

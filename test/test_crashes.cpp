@@ -177,7 +177,7 @@ protected:
 
     explicit TestCrashes()
         : m_filename(testing::TempDir() + "crashes"),
-          m_env(new CrashEnv(*Env::default_env()))
+          m_env(new CrashEnv(Env::default_env()))
     {
     }
 

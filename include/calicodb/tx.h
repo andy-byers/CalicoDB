@@ -63,10 +63,10 @@ public:
     virtual auto open_bucket(const Slice &name, Bucket &b_out) const -> Status = 0;
 
     // Remove a bucket from the database
-    // If a bucket named `name` exists, this method drops it and returns an OK status. If
-    // `name` does not exist, returns a status for which Status::is_invalid_argument() is
-    // true. If a bucket handle was obtained for `name` during this transaction, it must
-    // not be used after this call succeeds.
+    // If a bucket named `name` exists, this method will attempt to remove it. If `name`
+    // does not exist, returns a status for which Status::is_invalid_argument() evaluates
+    // to true. If a bucket handle was obtained for `name` during this transaction, it
+    // must not be used after this call succeeds.
     virtual auto drop_bucket(const Slice &name) -> Status = 0;
 
     // Defragment the database
@@ -74,10 +74,9 @@ public:
 
     // Commit pending changes to the database
     // Returns an OK status if the commit operation was successful, and a non-OK status
-    // on failure. Calling this method on a read-only transaction is a NOOP. If this
-    // method is not called before the Tx object is destroyed, all pending changes will
-    // be dropped. This method can be called more than once for a given Tx: file locks
-    // are held until the Tx handle is delete'd.
+    // on failure. If this method is not called before the Tx object is destroyed, all
+    // pending changes will be dropped. This method can be called more than once for a
+    // given Tx: file locks are held until the Tx handle is delete'd.
     virtual auto commit() -> Status = 0;
 
     // Return a heap-allocated cursor over the contents of the bucket
@@ -106,9 +105,9 @@ public:
     //     `c->status().is_ok()`
     //     `c->key()` == `key`
     //     `c->value()` == `value`
-    // Additionally, it is safe to use both `c->key()` and `c->value()` as
-    // parameters to this routine. On failure, the cursor is left in an
-    // unspecified state (possibly invalidated, or placed on a nearby record).
+    // It is safe to use both `c->key()` and `c->value()` as parameters to this
+    // routine. On failure, the cursor is left in an unspecified state (possibly
+    // invalidated, or placed on a nearby record).
     virtual auto put(Cursor &c, const Slice &key, const Slice &value) -> Status = 0;
 
     // Erase a record from the bucket

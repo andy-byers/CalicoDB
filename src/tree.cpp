@@ -335,11 +335,7 @@ class UserCursor : public Cursor
     {
         if (m_saved) {
             m_saved = false;
-            // NOTE: m_key_buffer is used to hold overflow keys on the way down.
-            auto saved_key = std::move(m_key_buffer);
-            const auto position = Slice(saved_key)
-                                      .truncate(m_key.size());
-            m_c.seek_to_leaf(position);
+            m_c.seek_to_leaf(m_key);
             ensure_correct_leaf();
         }
     }
@@ -2090,66 +2086,14 @@ auto Tree::destroy(Tree &tree) -> Status
         }                                                                    \
     } while (0)
 
-class TreeValidator
+class TreePrinter
 {
-    using NodeCallback = std::function<void(Node &, U32, U32)>;
-
-    static auto traverse_inorder(const Tree &tree, const NodeCallback &cb) -> void
-    {
-        auto &c = *tree.m_cursor;
-        c.reset();
-        Node root;
-        CHECK_OK(tree.acquire(tree.root(), root, false));
-        if (0 == NodeHdr::get_cell_count(root.hdr())) {
-            tree.release(std::move(root));
-            return;
-        }
-        c.m_node = std::move(root);
-        c.m_level = 0;
-        traverse_inorder_impl(tree, cb, 0);
-        c.reset();
-    }
-
-    static auto traverse_inorder_impl(const Tree &tree, const NodeCallback &cb, U32 level) -> void
-    {
-        auto &c = *tree.m_cursor;
-        for (U32 index = 0, n = NodeHdr::get_cell_count(c.m_node.hdr()); index <= n; ++index) {
-            if (!c.m_node.is_leaf()) {
-                Node child;
-                const auto child_id = c.m_node.read_child_id(index);
-                CHECK_OK(tree.acquire(child_id, child, false));
-                c.move_to_child(std::move(child));
-                traverse_inorder_impl(tree, cb, level + 1);
-                c.move_to_parent();
-            }
-            if (index < n) {
-                cb(c.m_node, index, level);
-            }
-        }
-    }
-
-    using PageCallback = std::function<void(PageRef *&)>;
-
-    static auto traverse_chain(Pager &pager, PageRef *page, const PageCallback &cb) -> void
-    {
-        for (;;) {
-            cb(page);
-
-            const auto next_id = read_next_id(*page);
-            pager.release(page);
-            if (next_id.is_null()) {
-                break;
-            }
-            CHECK_OK(pager.acquire(next_id, page));
-        }
-    }
-
-    struct PrinterData {
+    struct StructuralData {
         std::vector<std::string> levels;
         std::vector<U32> spaces;
     };
 
-    static auto add_to_level(PrinterData &data, const std::string &message, U32 target) -> void
+    static auto add_to_level(StructuralData &data, const std::string &message, U32 target) -> void
     {
         // If target is equal to levels.size(), add spaces to all levels.
         CHECK_TRUE(target <= data.levels.size());
@@ -2172,7 +2116,7 @@ class TreeValidator
         }
     }
 
-    static auto ensure_level_exists(PrinterData &data, U32 level) -> void
+    static auto ensure_level_exists(StructuralData &data, U32 level) -> void
     {
         while (level >= data.levels.size()) {
             data.levels.emplace_back();
@@ -2182,47 +2126,87 @@ class TreeValidator
         CHECK_TRUE(data.levels.size() == data.spaces.size());
     }
 
-    static auto collect_levels(const Tree &tree, PrinterData &data, Node &node, U32 level) -> void
+public:
+    static auto print_structure(const Tree &tree, std::string &repr_out) -> Status
     {
-        ensure_level_exists(data, level);
-        const auto cell_count = NodeHdr::get_cell_count(node.hdr());
-        for (U32 cid = 0; cid < cell_count; ++cid) {
-            const auto is_first = cid == 0;
-            const auto not_last = cid + 1 < cell_count;
-            Cell cell;
-            CHECK_EQ(0, node.read(cid, cell));
-
-            if (!node.is_leaf()) {
-                Node next;
-                CHECK_OK(tree.acquire(read_child_id(cell), next, false));
-                collect_levels(tree, data, next, level + 1);
-            }
-
-            if (is_first) {
-                add_to_level(data, std::to_string(node.ref->page_id.value) + ":[", level);
-            }
-            std::string key;
-            CHECK_OK(tree.read_key(node, cid, key, nullptr));
-            //             const auto ikey = std::to_string(std::stoi(key));
-            const auto ikey = escape_string(key.substr(std::max(key.size(), 3UL) - 3, std::min(key.size(), 3UL)));
-            add_to_level(data, ikey, level);
-            if (cell.local_pl_size != cell.total_pl_size) {
-                add_to_level(data, "(" + number_to_string(read_overflow_id(cell).value) + ")", level);
-            }
-
-            if (not_last) {
-                add_to_level(data, ",", level);
+        StructuralData data;
+        const auto print = [&data](auto &node, const auto &info) {
+            std::string msg;
+            if (info.idx == info.ncells) {
+                if (node.is_leaf()) {
+                    append_fmt_string(msg, "%u]", info.ncells);
+                }
             } else {
-                add_to_level(data, "]", level);
+                if (info.idx == 0) {
+                    append_fmt_string(msg, "%u:[", node.ref->page_id.value);
+                    ensure_level_exists(data, info.level);
+                }
+                if (!node.is_leaf()) {
+                    msg += '*';
+                    if (info.idx + 1 == info.ncells) {
+                        msg += ']';
+                    }
+                }
+            }
+            add_to_level(data, msg, info.level);
+            return Status::ok();
+        };
+        auto s = InorderTraversal::traverse(tree, print);
+        if (s.is_ok()) {
+            for (const auto &level : data.levels) {
+                repr_out.append(level + '\n');
             }
         }
-        if (!node.is_leaf()) {
-            Node next;
-            CHECK_OK(tree.acquire(NodeHdr::get_next_id(node.hdr()), next, false));
-            collect_levels(tree, data, next, level + 1);
-        }
+        return s;
+    }
 
-        tree.release(std::move(node));
+    static auto print_nodes(const Tree &tree, std::string &repr_out) -> Status
+    {
+        const auto print = [&repr_out, &tree](auto &node, const auto &info) {
+            if (info.idx == info.ncells) {
+                std::string msg;
+                append_fmt_string(msg, "%sternalNode(%u)\n", node.is_leaf() ? "Ex" : "In",
+                                  node.ref->page_id.value);
+                for (U32 i = 0; i < info.ncells; ++i) {
+                    Cell cell;
+                    if (node.read(i, cell)) {
+                        return tree.corrupted_page(node.ref->page_id);
+                    }
+                    msg.append("  Cell(");
+                    if (!node.is_leaf()) {
+                        append_fmt_string(msg, "%u,", read_child_id(cell).value);
+                    }
+                    const auto key_len = std::min(32U, std::min(cell.key_size, cell.local_pl_size));
+                    msg.append('"' + escape_string(Slice(cell.key, key_len)) + '"');
+                    if (cell.key_size > key_len) {
+                        append_fmt_string(msg, " + <%zu bytes>", cell.key_size - key_len);
+                    }
+                    msg.append(")\n");
+                }
+                repr_out.append(msg);
+            }
+            return Status::ok();
+        };
+        return InorderTraversal::traverse(tree, print);
+    }
+};
+
+class TreeValidator
+{
+    using PageCallback = std::function<void(PageRef *&)>;
+
+    static auto traverse_chain(Pager &pager, PageRef *page, const PageCallback &cb) -> void
+    {
+        for (;;) {
+            cb(page);
+
+            const auto next_id = read_next_id(*page);
+            pager.release(page);
+            if (next_id.is_null()) {
+                break;
+            }
+            CHECK_OK(pager.acquire(next_id, page));
+        }
     }
 
     [[nodiscard]] static auto get_readable_content(const PageRef &page, U32 size_limit) -> Slice
@@ -2243,22 +2227,27 @@ public:
 
             tree.release(std::move(child));
         };
-        traverse_inorder(tree, [f = std::move(check_parent_child)](const auto &node, auto index, auto) {
-            const auto count = NodeHdr::get_cell_count(node.hdr());
-            CHECK_TRUE(index < count);
+        CHECK_OK(InorderTraversal::traverse(tree, [f = std::move(check_parent_child)](const auto &node, const auto &info) {
+            if (info.idx == info.ncells) {
+                return Status::ok();
+            }
 
             if (!node.is_leaf()) {
-                f(node, index);
+                f(node, info.idx);
                 // Rightmost child.
-                if (index + 1 == count) {
-                    f(node, index + 1);
+                if (info.idx + 1 == info.ncells) {
+                    f(node, info.idx + 1);
                 }
             }
-        });
+            return Status::ok();
+        }));
 
-        traverse_inorder(tree, [&tree](auto &node, auto index, auto) {
+        CHECK_OK(InorderTraversal::traverse(tree, [&tree](const auto &node, const auto &info) {
+            if (info.idx == info.ncells) {
+                return Status::ok();
+            }
             Cell cell;
-            CHECK_EQ(0, node.read(index, cell));
+            CHECK_EQ(0, node.read(info.idx, cell));
 
             auto accumulated = cell.local_pl_size;
             auto requested = cell.key_size;
@@ -2280,13 +2269,14 @@ public:
                 CHECK_EQ(requested, accumulated);
             }
 
-            if (index == 0) {
+            if (info.idx == 0) {
                 CHECK_TRUE(node.assert_state());
             }
-        });
+            return Status::ok();
+        }));
 
         auto &c = *tree.m_cursor;
-        c.seek_to_leaf("");
+        c.seek_to_first_leaf();
         if (!c.has_key()) {
             return;
         }
@@ -2306,20 +2296,6 @@ public:
         }
         tree.release(std::move(node));
     }
-
-    [[nodiscard]] static auto to_string(const Tree &tree) -> std::string
-    {
-        std::string repr;
-        PrinterData data;
-
-        Node root;
-        CHECK_OK(tree.acquire(tree.root(), root, false));
-        collect_levels(tree, data, root, 0);
-        for (const auto &level : data.levels) {
-            repr.append(level + '\n');
-        }
-        return repr;
-    }
 };
 
 auto Tree::TEST_validate() const -> void
@@ -2327,9 +2303,14 @@ auto Tree::TEST_validate() const -> void
     TreeValidator::validate(*this);
 }
 
-auto Tree::to_string() const -> std::string
+auto Tree::print_structure(std::string &repr_out) const -> Status
 {
-    return TreeValidator::to_string(*this);
+    return TreePrinter::print_structure(*this, repr_out);
+}
+
+auto Tree::print_nodes(std::string &repr_out) const -> Status
+{
+    return TreePrinter::print_nodes(*this, repr_out);
 }
 
 #undef CHECK_TRUE

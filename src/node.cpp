@@ -456,7 +456,7 @@ auto Node::defrag(char *scratch) -> int
     return 0;
 }
 
-auto Node::assert_state() -> bool
+auto Node::assert_state() const -> bool
 {
     bool used[kPageSize] = {};
     const auto account = [&used](auto from, auto size) {

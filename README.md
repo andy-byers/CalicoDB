@@ -1,5 +1,5 @@
 # CalicoDB
-CalicoDB is an embedded transactional key-value database written in C++17.
+CalicoDB is a tiny transactional key-value database library written in C++17.
 It exposes a small API that allows storage and retrieval of arbitrary byte sequences.
 CalicoDB runs in a single thread and uses a B<sup>+</sup>-tree backend.
 It is intended for read-heavy embedded applications.
@@ -16,9 +16,9 @@ It is intended for read-heavy embedded applications.
 + [Contributions](#contributions)
 
 ## Disclaimer
-CalicoDB is in active development.
+CalicoDB is under active development.
 It is not ready for production.
-The author is not a professional database developer, so any type of feedback is appreciated.
+The author is not a professional database developer, so any type of feedback is appreciated!
 
 ## Features
 + Records are stored in buckets, each with an independent range of keys
@@ -30,7 +30,7 @@ The author is not a professional database developer, so any type of feedback is 
 + In-memory databases
 
 ## Caveats
-+ Database is single-threaded: all I/O runs in the main thread
++ Each connection is single-threaded: all I/O runs in the main thread
 + Database page size is fixed at 4 KiB
 + Concurrent usage requires each connection to have its own `DB`
 + Only practical for datasets that can reasonably be stored in a single file 

@@ -1074,10 +1074,10 @@ auto PosixFile::file_unlock() -> void
     local_lock = kLockUnlocked;
 }
 
-auto Env::default_env() -> Env *
+auto Env::default_env() -> Env &
 {
     static PosixEnv s_env;
-    return &s_env;
+    return s_env;
 }
 
 } // namespace calicodb

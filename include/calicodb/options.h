@@ -25,7 +25,7 @@ struct Options final {
     // set to 0, only the necessary checkpoints are run automatically. These
     // include (a) when the database is closed, and (b) when the database is
     // opened and recovery is needed.
-    std::size_t auto_checkpoint = 0;
+    std::size_t auto_checkpoint = 1'000;
 
     // Alternate filename to use for the WAL. If empty, creates the WAL at
     // "dbname-wal", where "dbname" is the name of the database.
@@ -51,12 +51,15 @@ struct Options final {
     // lock_mode of kLockExclusive is implied.
     bool temp_database = false;
 
+    // Determines how often the operating system is asked to flush data to secondary
+    // storage from the OS page cache.
     enum SyncMode {
         kSyncOff,    // No durability
         kSyncNormal, // Persist data on checkpoint
         kSyncFull,   // Persist data on commit
     } sync_mode = kSyncNormal;
 
+    // Determines how much concurrency is allowed.
     enum LockMode {
         kLockNormal,    // Allow concurrent access
         kLockExclusive, // Exclude other connections
@@ -64,9 +67,6 @@ struct Options final {
 };
 
 struct BucketOptions final {
-    // TODO: open_bucket() has been split off of create_bucket(). create_bucket() takes BucketOptions, but open_bucket()
-    //       does not. BucketOptions should hold options that pertain to new buckets but cannot be changed once the
-    //       bucket is created (comparator type, unique keys, etc.).
     bool error_if_exists = false;
 };
 

@@ -120,7 +120,9 @@ public:
         return m_root_id ? *m_root_id : Id::root();
     }
 
-    [[nodiscard]] auto to_string() const -> std::string;
+    auto print_structure(std::string &repr_out) const -> Status;
+    auto print_nodes(std::string &repr_out) const -> Status;
+
     auto TEST_validate() const -> void;
 
 private:
@@ -129,6 +131,7 @@ private:
     friend class Schema;
     friend class SchemaCursor;
     friend class TreeCursor;
+    friend class TreePrinter;
     friend class TreeValidator;
     friend class UserCursor;
 

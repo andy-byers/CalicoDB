@@ -65,11 +65,12 @@ assert(s2.starts_with("ab"));
 ```
 
 ### Statuses
+All CalicoDB routines that have the possibility of failure will return (or otherwise expose) a status object.
+Status objects have a code, a subcode, and possibly a message.
 
 ```C++
-// All CalicoDB routines that have the possibility of failure will return (or otherwise expose) a status object.
-// Status objects have a code, a subcode, and possibly a message. The default constructor creates an OK status,
-// that is, a status for which Status::is_ok() returns true (not an error status).
+// The default constructor creates an OK status. An OK status is a status for which 
+// Status::is_ok() returns true (not an error status).
 calicodb::Status s;
 
 // The following static method also creates an OK status.
@@ -81,8 +82,8 @@ std::printf("code = %d, subcode = %d\n", int(s.code()), int(s.subcode()));
 // A human-readable string representing the status can be created with:
 std::printf("s = %s\n", s.to_string().c_str());
 
-// Non-OK statuses must be created through one of the static methods. Note that a status can have either a
-// message, or a subcode, but not both.
+// Non-OK statuses must be created through one of the static methods. Note that a status can 
+// have either a message, or a subcode, but not both.
 s = calicodb::Status::io_error("uh oh");
 s = calicodb::Status::invalid_argument();
 s = calicodb::Status::busy(calicodb::Status::kRetry); // Equivalent to Status::retry()
@@ -92,8 +93,8 @@ if (s.is_ok()) {
     
 } else if (s.is_io_error()) {
     
-} else if (s.is_retry()) { // Equivalent to s.is_busy() && s.subcode() == Status::kRetry
-    
+} else if (s.is_retry()) { 
+    // Equivalent to s.is_busy() && s.subcode() == Status::kRetry
 }
 ```
 
@@ -131,8 +132,8 @@ Readonly transactions are typically run through the `DB::view()` API.
 
 ```C++
 s = db->view([](const calicodb::Tx &tx) {
-    // Open buckets (see #buckets) and read some data. The `tx` object is managed by the 
-    // database. DB::view() will forward the status returned by this callable.
+    // Open buckets (see #buckets) and read some data. The `tx` object is managed 
+    // by the database. DB::view() will forward the status returned by this callable.
     return calicodb::Status::ok();
 });
 ```

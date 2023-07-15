@@ -148,7 +148,7 @@ struct Node final {
     [[nodiscard]] auto read(U32 index, Cell &cell_out) const -> int;
     auto erase(U32 index, U32 cell_size) -> int; // TODO: Figure out a better place to check for corruption
 
-    auto assert_state() -> bool;
+    auto assert_state() const -> bool;
 };
 
 } // namespace calicodb

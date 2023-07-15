@@ -60,7 +60,7 @@ file(GLOB_RECURSE
         CALICODB_SOURCES
         "${CALICODB_SOURCE_DIR}/*.cpp"
         "${CALICODB_SOURCE_DIR}/*.h")
-add_library(calicodb
+add_library(calicodb STATIC
         "${CALICODB_INCLUDE_DIR}/calicodb/cursor.h"
         "${CALICODB_INCLUDE_DIR}/calicodb/db.h"
         "${CALICODB_INCLUDE_DIR}/calicodb/env.h"
