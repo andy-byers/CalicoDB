@@ -3,8 +3,50 @@
 // LICENSE.md. See AUTHORS.md for a list of contributor names.
 
 #include "test.h"
+#include "calicodb/cursor.h"
+#include "logging.h"
 
-namespace calicodb::test
+namespace calicodb
+{
+
+auto PrintTo(const Slice &s, std::ostream *os) -> void
+{
+    *os << escape_string(s);
+}
+
+auto PrintTo(const Status &s, std::ostream *os) -> void
+{
+    *os << s.to_string();
+}
+
+auto PrintTo(const Cursor &c, std::ostream *os) -> void
+{
+    *os << "Cursor{";
+    if (c.is_valid()) {
+        const auto total_k = c.key();
+        const auto short_k = escape_string(total_k)
+                                 .substr(0, std::min(total_k.size(), 5UL));
+        *os << '"' << short_k;
+        if (total_k.size() > short_k.size()) {
+            *os << R"(" + <)" << total_k.size() - short_k.size() << " bytes>";
+        } else {
+            *os << '"';
+        }
+
+        const auto total_v = c.value();
+        const auto short_v = escape_string(total_v)
+                                 .substr(0, std::min(total_v.size(), 5UL));
+        *os << R"(",")" << short_v;
+        if (total_v.size() > short_v.size()) {
+            *os << R"(" + <)" << total_v.size() - short_v.size() << " bytes>";
+        } else {
+            *os << '"';
+        }
+    }
+    *os << '}';
+}
+
+namespace test
 {
 
 auto check_status(const char *expr, const Status &s) -> testing::AssertionResult
@@ -50,4 +92,6 @@ auto write_string_to_file(Env &env, const std::string &filename, const std::stri
     delete file;
 }
 
-} // namespace calicodb::test
+} // namespace test
+
+} // namespace calicodb

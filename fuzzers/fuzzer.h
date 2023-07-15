@@ -58,6 +58,11 @@ public:
         return *m_len == 0;
     }
 
+    [[nodiscard]] auto length() const -> std::size_t
+    {
+        return *m_len;
+    }
+
     [[nodiscard]] auto extract_random() -> Slice
     {
         std::size_t next_len = 0;
@@ -70,12 +75,16 @@ public:
 
     [[nodiscard]] auto extract_fixed(std::size_t len) -> Slice
     {
+        const auto fixed = peek(len);
+        *m_ptr += len;
+        *m_len -= len;
+        return fixed;
+    }
+
+    [[nodiscard]] auto peek(std::size_t len) -> Slice
+    {
         CALICODB_EXPECT_LE(len, *m_len);
-        const auto *result_ptr = reinterpret_cast<const char *>(*m_ptr);
-        const auto result_len = std::min(*m_len, len);
-        *m_ptr += result_len;
-        *m_len -= result_len;
-        return {result_ptr, result_len};
+        return {reinterpret_cast<const char *>(*m_ptr), len};
     }
 };
 

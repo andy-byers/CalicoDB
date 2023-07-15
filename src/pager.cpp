@@ -466,6 +466,7 @@ auto Pager::release(PageRef *&page, ReleaseAction action) -> void
                 const auto is_discard = action == kDiscard || !is_dirty;
                 if (is_discard) {
                     if (is_dirty) {
+                        CALICODB_EXPECT_GE(m_mode, kDirty);
                         m_dirtylist.remove(*page);
                     }
                     m_bufmgr.erase(page->page_id);
@@ -618,6 +619,7 @@ auto PointerMap::read_entry(Pager &pager, Id page_id, Entry &out) -> Status
 
 auto PointerMap::write_entry(Pager &pager, Id page_id, Entry entry) -> Status
 {
+    CALICODB_EXPECT_NE(page_id, entry.back_ptr);
     const auto mid = lookup(page_id);
     CALICODB_EXPECT_LE(kFirstMapPage, mid.value);
     CALICODB_EXPECT_NE(mid, page_id);

@@ -181,7 +181,7 @@ protected:
 
     explicit ConcurrencyTests()
         : m_filename(testing::TempDir() + "concurrency"),
-          m_env(new DelayEnv(*Env::default_env()))
+          m_env(new DelayEnv(Env::default_env()))
     {
         (void)m_env->remove_file(m_filename);
         (void)m_env->remove_file(m_filename + kDefaultWalSuffix);

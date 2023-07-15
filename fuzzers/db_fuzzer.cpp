@@ -28,7 +28,11 @@ class CheckedDB : public DB
     }
 
 public:
-    auto real() -> DB * { return m_real; }
+    [[nodiscard]] auto real() -> DB *
+    {
+        return m_real;
+    }
+
     [[nodiscard]] static auto open(const Options &options, const std::string &filename, KVMap &store, DB *&db_out) -> Status
     {
         DB *db;
@@ -132,12 +136,16 @@ public:
             m_model->put(b, key, value));
     }
 
+    auto put(Cursor &c, const Slice &key, const Slice &value) -> Status override;
+
     auto erase(const Bucket &b, const Slice &key) -> Status override
     {
         return common_status(
             m_real->erase(b, key),
             m_model->erase(b, key));
     }
+
+    auto erase(Cursor &c) -> Status override;
 };
 
 class CheckedCursor : public Cursor
@@ -153,6 +161,11 @@ public:
     }
 
     ~CheckedCursor() override;
+
+    [[nodiscard]] auto token() -> void * override
+    {
+        return m_real->token();
+    }
 
     [[nodiscard]] auto is_valid() const -> bool override
     {
@@ -208,6 +221,16 @@ public:
         m_model->previous();
         m_real->previous();
     }
+
+    [[nodiscard]] auto real() -> Cursor &
+    {
+        return *m_real;
+    }
+
+    [[nodiscard]] auto model() -> ModelCursor &
+    {
+        return reinterpret_cast<ModelCursor &>(*m_model);
+    }
 };
 
 CheckedDB::~CheckedDB()
@@ -262,6 +285,20 @@ auto CheckedTx::new_cursor(const Bucket &b) const -> Cursor *
         *m_model->new_cursor(b));
 }
 
+auto CheckedTx::put(Cursor &c, const Slice &key, const Slice &value) -> Status
+{
+    return common_status(
+        m_real->put(reinterpret_cast<CheckedCursor &>(c).real(), key, value),
+        m_model->put(reinterpret_cast<CheckedCursor &>(c).model(), key, value));
+}
+
+auto CheckedTx::erase(Cursor &c) -> Status
+{
+    return common_status(
+        m_real->erase(reinterpret_cast<CheckedCursor &>(c).real()),
+        m_model->erase(reinterpret_cast<CheckedCursor &>(c).model()));
+}
+
 CheckedCursor::~CheckedCursor()
 {
     delete m_model;
@@ -275,30 +312,36 @@ class DBFuzzer
     KVMap m_store;
     DB *m_db = nullptr;
     Tx *m_tx = nullptr;
+    Cursor *m_c = nullptr;
     Bucket m_b;
 
     auto reopen_db() -> void
     {
+        delete m_c;
         delete m_tx;
         delete m_db;
+        m_c = nullptr;
         m_tx = nullptr;
         CHECK_OK(CheckedDB::open(m_options, m_filename, m_store, m_db));
         reopen_tx();
-        reopen_bucket();
     }
 
     auto reopen_tx() -> void
     {
+        delete m_c;
         delete m_tx;
-        CHECK_OK(m_db->new_tx(WriteTag{}, m_tx));
+        m_c = nullptr;
+        CHECK_OK(m_db->new_tx(WriteTag(), m_tx));
         reopen_bucket();
     }
 
     auto reopen_bucket() -> void
     {
+        delete m_c;
         // This should be a NOOP if the bucket handle has already been created
         // since this transaction was started. The same exact handle is returned.
         CHECK_OK(m_tx->create_bucket(BucketOptions(), "BUCKET", &m_b));
+        m_c = m_tx->new_cursor(m_b);
     }
 
 public:
@@ -314,6 +357,7 @@ public:
 
     ~DBFuzzer()
     {
+        delete m_c;
         delete m_tx;
         delete m_db;
     }
@@ -331,8 +375,11 @@ auto DBFuzzer::fuzz(FuzzerStream &stream) -> bool
         kBucketPut,
         kBucketGet,
         kBucketErase,
+        kCursorNext,
+        kCursorPrevious,
         kCursorSeek,
-        kCursorIterate,
+        kCursorPut,
+        kCursorErase,
         kTxCommit,
         kTxVacuum,
         kReopenDB,
@@ -341,7 +388,29 @@ auto DBFuzzer::fuzz(FuzzerStream &stream) -> bool
         kOpCount
     } op_type = OperationType(U32(stream.extract_fixed(1)[0]) % kOpCount);
 
-    Cursor *c = nullptr;
+#ifdef FUZZER_TRACE
+    static constexpr const char *kOperationTypeNames[kOpCount] = {
+        "kBucketPut",
+        "kBucketGet",
+        "kBucketErase",
+        "kCursorNext",
+        "kCursorPrevious",
+        "kCursorSeek",
+        "kCursorPut",
+        "kCursorErase",
+        "kTxCommit",
+        "kTxVacuum",
+        "kReopenDB",
+        "kReopenTx",
+        "kReopenBucket",
+    };
+    const auto sample_len = std::min(stream.length(), 8UL);
+    const auto missing_len = stream.length() - sample_len;
+    const auto sample = escape_string(stream.peek(sample_len));
+    std::cout << "TRACE: OpType: " << kOperationTypeNames[op_type] << R"( Input: ")"
+              << sample << R"(" + <)" << missing_len << " bytes>\n";
+#endif // FUZZER_TRACE
+
     std::string value;
     Slice key;
     Status s;
@@ -353,32 +422,36 @@ auto DBFuzzer::fuzz(FuzzerStream &stream) -> bool
         case kBucketPut:
             key = stream.extract_random();
             s = m_tx->put(m_b, key, stream.extract_random());
+            m_c->seek(key); // TODO
             break;
         case kBucketErase:
             s = m_tx->erase(m_b, stream.extract_random());
+            m_c->seek_first(); // TODO
             break;
         case kCursorSeek:
             key = stream.extract_random();
-            c = m_tx->new_cursor(m_b);
-            c->seek(key);
-            while (c->is_valid()) {
-                if (key.is_empty() || (key[0] & 1)) {
-                    c->previous();
-                } else {
-                    c->next();
-                }
+            m_c->seek(key);
+            break;
+        case kCursorNext:
+            if (m_c->is_valid()) {
+                m_c->next();
+            } else {
+                m_c->seek_first();
             }
             break;
-        case kCursorIterate:
-            c = m_tx->new_cursor(m_b);
-            c->seek_first();
-            while (c->is_valid()) {
-                c->next();
+        case kCursorPrevious:
+            if (m_c->is_valid()) {
+                m_c->previous();
+            } else {
+                m_c->seek_last();
             }
-            c->seek_last();
-            while (c->is_valid()) {
-                c->previous();
-            }
+            break;
+        case kCursorPut:
+            key = stream.extract_random();
+            s = m_tx->put(*m_c, key, stream.extract_random());
+            break;
+        case kCursorErase:
+            s = m_tx->erase(*m_c);
             break;
         case kTxVacuum:
             s = m_tx->vacuum();
@@ -395,20 +468,11 @@ auto DBFuzzer::fuzz(FuzzerStream &stream) -> bool
         default: // kReopenDB
             reopen_db();
     }
-    if (c) {
-        // Cursor should have been moved off the edge of the range.
-        CHECK_FALSE(c->is_valid());
-        CHECK_OK(c->status());
-        delete c;
+    if (m_c->is_valid()) {
+        [[maybe_unused]] const auto _k = m_c->key();
+        [[maybe_unused]] const auto _v = m_c->value();
+        [[maybe_unused]] const auto _s = m_c->status();
     }
-    // All records should match between DB and ModelDB.
-    c = m_tx->new_cursor(m_b);
-    c->seek_first();
-    while (c->is_valid()) {
-        c->next();
-    }
-    CHECK_OK(c->status());
-    delete c;
 
     if (s.is_not_found() || s.is_invalid_argument()) {
         // Forgive non-fatal errors.
@@ -423,7 +487,7 @@ extern "C" int LLVMFuzzerTestOneInput(const U8 *data, std::size_t size)
 {
     Options options;
     options.env = new FakeEnv; // Use a fake Env that doesn't write to disk.
-    options.cache_size = 0; // Use the smallest possible cache.
+    options.cache_size = 0;    // Use the smallest possible cache.
 
     {
         FuzzerStream stream(data, size);

@@ -39,7 +39,9 @@ public:
     [[nodiscard]] auto new_cursor(const Bucket &b) const -> Cursor * override;
     auto get(const Bucket &b, const Slice &key, std::string *value) const -> Status override;
     auto put(const Bucket &b, const Slice &key, const Slice &value) -> Status override;
+    auto put(Cursor &c, const Slice &key, const Slice &value) -> Status override;
     auto erase(const Bucket &b, const Slice &key) -> Status override;
+    auto erase(Cursor &c) -> Status override;
 
     auto TEST_validate() const -> void
     {

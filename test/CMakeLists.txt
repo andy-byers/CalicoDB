@@ -1,6 +1,4 @@
 
-option(CALICODB_BuildDocTests "Build the documentation tests" On)
-
 set(gtest_force_shared_crt On CACHE BOOL "" FORCE)
 set(INSTALL_GTEST Off CACHE INTERNAL "" FORCE)
 set(INSTALL_GMOCK Off CACHE INTERNAL "" FORCE)
@@ -10,10 +8,6 @@ FetchContent_Declare(googletest
         GIT_TAG release-1.11.0)
 FetchContent_MakeAvailable(googletest)
 include(GoogleTest)
-
-if(CALICODB_BuildDocTests)
-    add_subdirectory(doc_tests)
-endif()
 
 function(build_test NAME)
     add_executable(${NAME} ${NAME}.cpp test.cpp test.h)
@@ -32,3 +26,9 @@ build_test(test_node)
 build_test(test_pager)
 build_test(test_tree)
 build_test(test_utils)
+
+add_subdirectory(doc_tests)
+
+# CMake tests were adapted from @nlohmann/json.
+add_subdirectory(cmake_tests/fetch_content)
+add_subdirectory(cmake_tests/add_subdirectory)

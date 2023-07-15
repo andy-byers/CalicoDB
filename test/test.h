@@ -8,7 +8,15 @@
 #include "calicodb/env.h"
 #include <gtest/gtest.h>
 
-namespace calicodb::test
+namespace calicodb
+{
+
+class Cursor;
+auto PrintTo(const Slice &s, std::ostream *os) -> void;
+auto PrintTo(const Status &s, std::ostream *os) -> void;
+auto PrintTo(const Cursor &c, std::ostream *os) -> void;
+
+namespace test
 {
 
 #define ASSERT_OK(s) ASSERT_PRED_FORMAT1(calicodb::test::check_status, s)
@@ -21,6 +29,8 @@ auto check_status(const char *expr, const Status &s) -> testing::AssertionResult
 auto read_file_to_string(Env &env, const std::string &filename) -> std::string;
 auto write_string_to_file(Env &env, const std::string &filename, const std::string &buffer, long offset = -1) -> void;
 
-} // namespace calicodb::test
+} // namespace test
+
+} // namespace calicodb
 
 #endif // CALICODB_TEST_TEST_H

@@ -31,11 +31,6 @@ public:
     auto open_bucket(const Slice &name, Bucket &b_out) -> Status;
     auto drop_bucket(const Slice &name) -> Status;
 
-    // Set a bucket `b` as the most-recently-used bucket
-    // This class keeps the most-recently-used bucket's internal tree cursor active. A
-    // root-to-leaf traversal can be avoided if the cursor is already on the correct node.
-    // Other buckets should have their cursors cleared so that the system doesn't run out
-    // of pager buffers (each live cursor holds onto a page reference).
     auto use_bucket(const Bucket &b) -> void;
 
     auto vacuum() -> Status;

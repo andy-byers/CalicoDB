@@ -22,7 +22,7 @@ public:
     // Return a handle to this platform's default `Env` implementation
     // The returned handle belongs to CalicoDB and must not be `delete`d. Note that this method
     // always returns the same address for a given process.
-    static auto default_env() -> Env *;
+    [[nodiscard]] static auto default_env() -> Env &;
 
     explicit Env();
     virtual ~Env();

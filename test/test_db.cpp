@@ -7,9 +7,7 @@
 #include "fake_env.h"
 #include "header.h"
 #include "logging.h"
-#include "pager.h"
 #include "test.h"
-#include "tree.h"
 #include "tx_impl.h"
 #include <gtest/gtest.h>
 
@@ -116,7 +114,7 @@ protected:
         : m_test_dir(testing::TempDir()),
           m_db_name(m_test_dir + "db"),
           m_alt_wal_name(m_test_dir + "wal"),
-          m_env(new CallbackEnv(*Env::default_env()))
+          m_env(new CallbackEnv(Env::default_env()))
     {
         (void)DB::destroy(Options(), m_db_name);
     }
@@ -645,8 +643,8 @@ TEST_F(DBTests, CorruptedRootIDs)
     ASSERT_OK(m_db->checkpoint(true));
 
     File *file;
-    auto *env = Env::default_env();
-    ASSERT_OK(env->new_file(m_db_name, Env::kReadWrite, file));
+    auto &env = Env::default_env();
+    ASSERT_OK(env.new_file(m_db_name, Env::kReadWrite, file));
 
     // Corrupt the root ID written to the schema bucket, which has already been
     // written back to the database file. The root ID is a 1 byte varint pointing
@@ -843,24 +841,24 @@ TEST(OldWalTests, HandlesOldWalFile)
 
 TEST(DestructionTests, OnlyDeletesCalicoDatabases)
 {
-    (void)Env::default_env()->remove_file("./testdb");
+    (void)Env::default_env().remove_file("./testdb");
 
     // "./testdb" does not exist.
     ASSERT_NOK(DB::destroy(Options(), "./testdb"));
-    ASSERT_FALSE(Env::default_env()->file_exists("./testdb"));
+    ASSERT_FALSE(Env::default_env().file_exists("./testdb"));
 
     // File is too small to read the first page.
     File *file;
-    ASSERT_OK(Env::default_env()->new_file("./testdb", Env::kCreate, file));
+    ASSERT_OK(Env::default_env().new_file("./testdb", Env::kCreate, file));
     ASSERT_OK(file->write(0, "CalicoDB format"));
     ASSERT_NOK(DB::destroy(Options(), "./testdb"));
-    ASSERT_TRUE(Env::default_env()->file_exists("./testdb"));
+    ASSERT_TRUE(Env::default_env().file_exists("./testdb"));
 
     // Identifier is incorrect.
     ASSERT_OK(file->write(0, "CalicoDB format 0"));
     ASSERT_NOK(DB::destroy(Options(), "./testdb"));
 
-    ASSERT_OK(Env::default_env()->remove_file("./testdb"));
+    ASSERT_OK(Env::default_env().remove_file("./testdb"));
 
     DB *db;
     ASSERT_OK(DB::open(Options(), "./testdb", db));
@@ -971,6 +969,43 @@ TEST_F(DBOpenTests, FailsIfDbExists)
 
     options.create_if_missing = false;
     ASSERT_TRUE(DB::open(options, m_db_name, m_db).is_invalid_argument());
+}
+
+TEST_F(DBOpenTests, CustomLogger)
+{
+    class : public Logger
+    {
+    public:
+        std::string m_str;
+
+        auto logv(const char *fmt, std::va_list args) -> void override
+        {
+            char fixed[1'024];
+            std::va_list args_copy;
+            va_copy(args_copy, args);
+
+            const auto offset = m_str.size();
+            const auto len = std::vsnprintf(
+                fixed, sizeof(fixed), fmt, args);
+            ASSERT_TRUE(0 <= len && len < 1'024);
+            m_str.append(fixed);
+            va_end(args_copy);
+        }
+    } logger;
+
+    Options options;
+    options.info_log = &logger;
+    // DB will warn (through the log) about the fact that options.env is not nullptr.
+    // It will clear that field and use it to hold a custom Env that helps implement
+    // in-memory databases.
+    options.env = &Env::default_env();
+    options.temp_database = true;
+    // In-memory databases can have an empty filename.
+    ASSERT_OK(DB::open(options, "", m_db));
+    delete m_db;
+    m_db = nullptr;
+
+    ASSERT_FALSE(logger.m_str.empty());
 }
 
 class TransactionTests : public DBTests

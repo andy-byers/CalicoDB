@@ -78,15 +78,16 @@ static auto remove_ivec_slot(Node &node, U32 index)
     if (!(ptr = decode_varint(ptr, limit, key_size))) {
         return -1;
     }
-    const auto header_size = static_cast<std::uintptr_t>(ptr - data);
+    const auto hdr_size = static_cast<std::uintptr_t>(ptr - data);
+    const auto pad_size = hdr_size > kMinCellHeaderSize ? 0 : kMinCellHeaderSize - hdr_size;
     const auto local_pl_size = compute_local_pl_size(key_size, value_size);
     const auto has_remote = local_pl_size < key_size + value_size;
-    const auto footprint = header_size + local_pl_size + has_remote * sizeof(U32);
+    const auto footprint = hdr_size + pad_size + local_pl_size + has_remote * sizeof(U32);
 
     if (data + footprint <= limit) {
         if (cell_out) {
             cell_out->ptr = data;
-            cell_out->key = data + header_size;
+            cell_out->key = data + hdr_size + pad_size;
             cell_out->key_size = key_size;
             cell_out->total_pl_size = key_size + value_size;
             cell_out->local_pl_size = local_pl_size;
@@ -100,14 +101,14 @@ static auto remove_ivec_slot(Node &node, U32 index)
 {
     U32 key_size;
     if (const auto *ptr = decode_varint(data + sizeof(U32), limit, key_size)) {
-        const auto header_size = static_cast<std::uintptr_t>(ptr - data);
+        const auto hdr_size = static_cast<std::uintptr_t>(ptr - data);
         const auto local_pl_size = compute_local_pl_size(key_size, 0);
         const auto has_remote = local_pl_size < key_size;
-        const auto footprint = header_size + local_pl_size + has_remote * sizeof(U32);
+        const auto footprint = hdr_size + local_pl_size + has_remote * sizeof(U32);
         if (data + footprint <= limit) {
             if (cell_out) {
                 cell_out->ptr = data;
-                cell_out->key = data + header_size;
+                cell_out->key = data + hdr_size;
                 cell_out->key_size = key_size;
                 cell_out->total_pl_size = key_size;
                 cell_out->local_pl_size = local_pl_size;
@@ -245,13 +246,9 @@ auto BlockAllocator::allocate(Node &node, U32 needed_size) -> int
 
 auto BlockAllocator::release(Node &node, U32 block_start, U32 block_size) -> int
 {
-    // Largest possible fragment that can be reclaimed in this process. Based on
-    // the fact that external cells must be at least 2 bytes. Internal cells are
-    // always larger than fragments.
-    static constexpr U32 kFragmentCutoff[2] = {
-        3, // Internal node: min cell size is 5 (max fragment size is 3)
-        1, // External node: min cell size is 2
-    };
+    // Largest possible fragment that can be reclaimed in this process. All cell headers
+    // are padded out to 4 bytes, so anything smaller must be a fragment.
+    static constexpr U32 kFragmentCutoff = 3;
     auto frag_count = NodeHdr::get_frag_count(node.hdr());
     auto free_start = NodeHdr::get_free_start(node.hdr());
     CALICODB_EXPECT_NE(block_size, 0);
@@ -274,7 +271,7 @@ auto BlockAllocator::release(Node &node, U32 block_start, U32 block_size) -> int
     if (prev != 0) {
         // Merge with the predecessor block.
         const auto before_end = prev + get_block_size(node, prev);
-        if (before_end + kFragmentCutoff[node.is_leaf()] >= block_start) {
+        if (before_end + kFragmentCutoff >= block_start) {
             const auto diff = block_start - before_end;
             block_start = prev;
             block_size += get_block_size(node, prev) + diff;
@@ -294,7 +291,7 @@ auto BlockAllocator::release(Node &node, U32 block_start, U32 block_size) -> int
     if (next != 0) {
         // Merge with the successor block.
         const auto current_end = block_start + block_size;
-        if (current_end + kFragmentCutoff[node.is_leaf()] >= next) {
+        if (current_end + kFragmentCutoff >= next) {
             const auto diff = next - current_end;
             block_size += get_block_size(node, next) + diff;
             frag_count -= diff;
@@ -459,7 +456,7 @@ auto Node::defrag(char *scratch) -> int
     return 0;
 }
 
-auto Node::assert_state() -> bool
+auto Node::assert_state() const -> bool
 {
     bool used[kPageSize] = {};
     const auto account = [&used](auto from, auto size) {
@@ -496,20 +493,23 @@ auto Node::assert_state() -> bool
 
     // Cell bodies. Also makes sure the cells are in order where possible.
     for (i = 0; i < NodeHdr::get_cell_count(hdr()); ++i) {
-        const auto lhs_ptr = get_ivec_slot(*this, i);
         Cell lhs_cell = {};
         CALICODB_EXPECT_EQ(0, read(i, lhs_cell));
-        CALICODB_EXPECT_TRUE(lhs_cell.footprint >= 3);
-        account(lhs_ptr, lhs_cell.footprint);
+        CALICODB_EXPECT_TRUE(lhs_cell.footprint >= kMinCellHeaderSize);
+        account(get_ivec_slot(*this, i), lhs_cell.footprint);
 
         if (i + 1 < NodeHdr::get_cell_count(hdr())) {
             Cell rhs_cell = {};
             CALICODB_EXPECT_EQ(0, read(i + 1, rhs_cell));
-            if (lhs_cell.key_size <= lhs_cell.local_pl_size &&
-                rhs_cell.key_size <= rhs_cell.local_pl_size) {
-                const Slice lhs_key(lhs_cell.key, lhs_cell.key_size);
-                const Slice rhs_key(rhs_cell.key, rhs_cell.key_size);
-                CALICODB_EXPECT_TRUE(lhs_key < rhs_key);
+            const Slice lhs_key(lhs_cell.key, std::min(lhs_cell.key_size, lhs_cell.local_pl_size));
+            const Slice rhs_key(rhs_cell.key, std::min(rhs_cell.key_size, rhs_cell.local_pl_size));
+            CALICODB_EXPECT_LE(lhs_key, rhs_key);
+            if (lhs_key == rhs_key) {
+                const auto lhs_has_ovfl = lhs_cell.key_size > lhs_cell.local_pl_size;
+                const auto rhs_has_ovfl = rhs_cell.key_size > rhs_cell.local_pl_size;
+                // If the keys appear to be equal, then there must be some part of rhs_key on
+                // an overflow page that causes it to ultimately compare greater than lhs_key.
+                CALICODB_EXPECT_TRUE(lhs_has_ovfl || (lhs_has_ovfl && rhs_has_ovfl));
             }
         }
     }

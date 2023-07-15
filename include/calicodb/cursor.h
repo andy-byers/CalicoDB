@@ -24,6 +24,13 @@ public:
     Cursor(Cursor &) = delete;
     void operator=(Cursor &) = delete;
 
+    // Return an opaque handle representing the cursor
+    // This method is intended for internal use.
+    [[nodiscard]] virtual auto token() -> void *
+    {
+        return this;
+    }
+
     // Return true if the cursor is valid (positioned on a record), false otherwise
     // This method must return true before any of the methods key(), value(),
     // next(), or previous() are called. Those calls will result in unspecified

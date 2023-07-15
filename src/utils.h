@@ -65,11 +65,10 @@ auto busy_wait(BusyHandler *handler, const Callback &callback) -> Status
     }
 }
 
-static constexpr std::size_t kMinFrameCount = 8;
+static constexpr std::size_t kMinFrameCount = 18;
 static constexpr std::size_t kMaxCacheSize = 1 << 30;
 static constexpr auto kDefaultWalSuffix = "-wal";
 static constexpr auto kDefaultShmSuffix = "-shm";
-static constexpr auto kDefaultLogSuffix = "-log";
 
 // Fixed-width unsigned integers for use in the database file format
 using U8 = std::uint8_t;

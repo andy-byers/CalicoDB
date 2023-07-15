@@ -15,6 +15,9 @@ struct PageRef;
 
 struct Freelist {
     // Add a `page` to the freelist
+    // The page does not need to be marked dirty prior to calling this routine. If the page
+    // is converted into a freelist leaf page, it doesn't need to be logged. If it becomes
+    // a freelist trunk page, it will be marked dirty in this routine.
     static auto push(Pager &pager, PageRef *&page) -> Status;
 
     // Attempt to remove a page from the freelist

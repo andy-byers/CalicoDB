@@ -12,10 +12,10 @@ namespace calicodb
 
 class SchemaCursor : public Cursor
 {
-    CursorImpl *const m_c;
+    Cursor *const m_c;
 
 public:
-    explicit SchemaCursor(CursorImpl &c)
+    explicit SchemaCursor(Cursor &c)
         : m_c(&c)
     {
     }
@@ -23,6 +23,11 @@ public:
     ~SchemaCursor() override
     {
         delete m_c;
+    }
+
+    [[nodiscard]] auto token() -> void * override
+    {
+        return m_c->token();
     }
 
     [[nodiscard]] auto is_valid() const -> bool override
@@ -93,7 +98,7 @@ auto Schema::close() -> void
     for (const auto &[_, state] : m_trees) {
         delete state.tree;
     }
-    m_map.finish_operation();
+    m_map.release_nodes();
 }
 
 auto Schema::corrupted_root_id(const Slice &name, const Slice &value) -> Status
@@ -215,7 +220,7 @@ auto Schema::use_bucket(const Bucket &b) -> void
 {
     CALICODB_EXPECT_NE(b.state, nullptr);
     if (m_recent && m_recent != b.state) {
-        m_recent->finish_operation();
+        m_recent->release_nodes();
     }
     m_recent = reinterpret_cast<const Tree *>(b.state);
 }
@@ -274,7 +279,7 @@ auto Schema::vacuum_reroot(Id old_id, Id new_id) -> void
 
 auto Schema::vacuum_finish() -> Status
 {
-    auto *c = new_cursor();
+    auto *c = m_map.new_cursor();
     c->seek_first();
 
     Status s;
@@ -289,7 +294,7 @@ auto Schema::vacuum_finish() -> Status
             std::string value;
             encode_root_id(root->second, value);
             // Update the database schema with the new root page ID for this tree.
-            s = m_map.put(c->key(), value);
+            s = m_map.put(*c, c->key(), value);
             if (!s.is_ok()) {
                 break;
             }
@@ -320,10 +325,11 @@ auto Schema::vacuum_finish() -> Status
 
 auto Schema::vacuum() -> Status
 {
-    if (m_recent) {
-        m_recent->finish_operation();
-        m_recent = nullptr;
+    for (auto &[_, tree] : m_trees) {
+        tree.tree->release_nodes();
     }
+    m_map.release_nodes();
+    m_recent = nullptr;
     return m_map.vacuum(*this);
 }
 

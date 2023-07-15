@@ -14,7 +14,7 @@
     + [Checkpoints](#checkpoints)
     + [Closing a database](#closing-a-database)
     + [Destroying a database](#destroying-a-database)
-+ [Acknowledgements](#acknowledgements)
++ [Resources](#resources)
 
 ## Build
 CalicoDB is built using CMake.
@@ -65,11 +65,12 @@ assert(s2.starts_with("ab"));
 ```
 
 ### Statuses
+All CalicoDB routines that have the possibility of failure will return (or otherwise expose) a status object.
+Status objects have a code, a subcode, and possibly a message.
 
 ```C++
-// All CalicoDB routines that have the possibility of failure will return (or otherwise expose) a status object.
-// Status objects have a code, a subcode, and possibly a message. The default constructor creates an OK status,
-// that is, a status for which Status::is_ok() returns true (not an error status).
+// The default constructor creates an OK status. An OK status is a status for which 
+// Status::is_ok() returns true (not an error status).
 calicodb::Status s;
 
 // The following static method also creates an OK status.
@@ -81,8 +82,8 @@ std::printf("code = %d, subcode = %d\n", int(s.code()), int(s.subcode()));
 // A human-readable string representing the status can be created with:
 std::printf("s = %s\n", s.to_string().c_str());
 
-// Non-OK statuses must be created through one of the static methods. Note that a status can have either a
-// message, or a subcode, but not both.
+// Non-OK statuses must be created through one of the static methods. Note that a status can 
+// have either a message, or a subcode, but not both.
 s = calicodb::Status::io_error("uh oh");
 s = calicodb::Status::invalid_argument();
 s = calicodb::Status::busy(calicodb::Status::kRetry); // Equivalent to Status::retry()
@@ -92,8 +93,8 @@ if (s.is_ok()) {
     
 } else if (s.is_io_error()) {
     
-} else if (s.is_retry()) { // Equivalent to s.is_busy() && s.subcode() == Status::kRetry
-    
+} else if (s.is_retry()) { 
+    // Equivalent to s.is_busy() && s.subcode() == Status::kRetry
 }
 ```
 
@@ -131,8 +132,8 @@ Readonly transactions are typically run through the `DB::view()` API.
 
 ```C++
 s = db->view([](const calicodb::Tx &tx) {
-    // Open buckets (see #buckets) and read some data. The `tx` object is managed by the 
-    // database. DB::view() will forward the status returned by this callable.
+    // Open buckets (see #buckets) and read some data. The `tx` object is managed 
+    // by the database. DB::view() will forward the status returned by this callable.
     return calicodb::Status::ok();
 });
 ```
@@ -249,8 +250,8 @@ if (s.is_ok()) {
     // An I/O error occurred. It is not an error if the key does not exist.
 }
 
-// Remove the bucket named "bats" from the database.
-s = tx->drop_bucket("bats");
+// Remove the bucket named "fish" from the database.
+s = tx->drop_bucket("fish");
 if (s.is_ok()) {
     
 }
@@ -258,10 +259,12 @@ if (s.is_ok()) {
 
 ### Cursors
 Cursors are used to perform full-bucket scans and range queries.
+They can also be used to help modify the database during [read-write transactions](#read-write-transactions).
 
 ```C++
 calicodb::Cursor *c = tx->new_cursor(b);
 
+// Scan the entire bucket forwards.
 c->seek_first();
 while (c->is_valid()) {
     const calicodb::Slice key = c->key();
@@ -269,16 +272,39 @@ while (c->is_valid()) {
     c->next();
 }
 
+// Scan the entire bucket backwards.
 c->seek_last();
 while (c->is_valid()) {
     // Use the cursor.
     c->previous();
 }
 
+// Scan a range of keys.
 c->seek("freya");
-while (c->is_valid() && c->key() <= "lilly") {
-    // Key is in [freya,lilly].
+while (c->is_valid() && c->key() < "lilly") {
+    // Key is in [freya,lilly).
     c->next();
+}
+
+// Insert a new record using a cursor.
+s = tx->put(*c, "junie", "tabby");
+if (s.is_ok()) {
+    // c is placed on the newly-inserted record.
+    assert(c->is_valid());
+    assert(c->key() == "junie");
+    assert(c->value() == "tabby");
+}
+
+// Modify a record using a cursor.
+s = tx->put(*c, c->key(), "brown tabby");
+if (s.is_ok()) {
+}
+
+// Erase the record pointed to by the cursor.
+s = tx->erase(*c);
+if (s.is_ok()) {
+    // c is on the record immediately following the erased record, if
+    // such a record exists.
 }
 
 delete c;
@@ -301,6 +327,12 @@ if (db->get_property("calicodb.stats", nullptr)) {
 ```
 
 ### Checkpoints
+Pages that are modified during transactions are written to the WAL, not the database file.
+At some point, it is desirable to write the pages accumulated in the WAL back to the database.
+This operation is called a checkpoint.
+Note that automatic checkpoints can be run using the `auto_checkpoint` option (see [Opening a database](#opening-a-database)).
+Automatic checkpoints are attempted when transactions are started.
+
 ```C++
 // This transaction was started earlier, in #manual-transactions. It must be
 // finished before the database can be checkpointed. Note that the bucket 
@@ -315,11 +347,11 @@ delete tx;
 // involves blocking until other connections are finished with the WAL.
 s = db->checkpoint(true);
 if (s.is_ok()) {
-    
+    // The whole WAL was written back to the database file.
 } else if (s.is_busy()) {
-    
+    // Some other connection got in the way.
 } else {
-    
+    // Some other error occurred.
 }
 ```
 
@@ -342,16 +374,14 @@ if (s.is_ok()) {
 }
 ```
 
-## Acknowledgements
-1. https://cstack.github.io/db_tutorial/
+## Resources
+1. [Let's Build a Simple Database](https://cstack.github.io/db_tutorial/)
     + Tutorial on database development in C
-2. https://www.sqlite.org/arch.html
+2. [Architecture of SQLite](https://www.sqlite.org/arch.html)
     + Much of this project was inspired by SQLite3, both the architecture design documents and the source code
     + Especially see the B-tree design document, as well as `btree.h`, `btree.c`, and `btreeInt.h`
-3. https://github.com/google/leveldb
+3. [LevelDB](https://github.com/google/leveldb)
     + Much of the API is inspired by LevelDB
     + Some parts of the CMake build process are taken from their `CMakeLists.txt`
-4. BoltDB (https://github.com/boltdb/bolt)
+4. [BoltDB](https://github.com/boltdb/bolt)
     + Inspiration for the transaction API
-5. https://sbucketcog.com/
-    + Used to generate the original calico cat image, which was then further modified to produce [mascot.png](mascot.png)

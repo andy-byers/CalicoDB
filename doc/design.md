@@ -23,19 +23,33 @@ Then, a pointer to the custom `Env` object can be passed to the database when it
 See [`fake_env.h`](../utils/fake_env.h) for an example that stores the database files in memory for test reproducibility.
 
 ### Pager
-The pager module provides in-memory caching for database pages read by the `Env`.
+The pager layer uses an `Env` to provide access to the database file in fixed-size chunks, called pages.
+Pages are the basic unit of I/O for a CalicoDB database, and are fixed at 4096 bytes.
+When a database is opened, the pager will allocate a large buffer to hold database pages read from disk.
+The buffer slot assignment is coordinated using a simple LRU cache.
+
 It is the pager's job to maintain consistency between database pages on disk and in memory, and to coordinate with the WAL.
 In this design, the pager is never allowed to write directly to the database file.
 Instead, modified pages are flushed to the WAL on commit or eviction from the cache.
 
 ### Tree
-CalicoDB trees are similar to index B-trees in SQLite3.
+As mentioned earlier, CalicoDB uses B<sup>+</sup>-trees, hereafter called trees, to store records on disk.
 Every tree is rooted on some database page, called its root page.
 The tree that is rooted on the first database page is called the schema tree.
-It is used to store a name-to-root mapping for the other trees, if any exist.
+The schema tree is used to maintain a name-to-root mapping for the other trees, if any exist.
 Additional trees will be rooted on pages after the second database page, which is always a pointer map page (see [Pointer Map](#pointer-map)).
 Trees are of variable order, so splits are performed when nodes (pages that are part of a tree) have run out of physical space.
 Merges/rotations are performed when a node has become totally empty.
+
+Tree nodes can be 1 of 2 types: internal or external.
+External nodes store records (key-value pairs) sorted by key.
+They are arranged as a doubly-linked list, with the leftmost node containing the smallest keys.
+The external nodes in a tree can be thought of as a single sorted array of records, split up over multiple pages.
+This makes sequential and reverse sequential scans very fast.
+We just walk the linked list of external nodes, iterating through each node in order.
+Internal nodes are used to direct searches to the correct external node.
+They contain only keys, called pivot keys in this document.
+CalicoDB uses the suffix truncation described in [2] to reduce pivot key lengths (see [Rebalancing](#rebalancing)).
 
 #### Rebalancing
 At present, the `Tree` class is responsible for making sure the tree it represents is balanced before returning from either `put()` or `erase()`.
@@ -58,8 +72,12 @@ It works by attempting to transfer roughly half of the cell content from the non
 If there are not enough cells in the nonempty node, then the two nodes are merged.
 Note that the parent may overflow if the new pivot is posted.
 
+Suffix truncation is performed when an external node is split.
+The pivot that is posted only needs to be long enough to direct traversals to the correct external node.
+For example, if the largest key in the left node is "AABCDD" and the smallest key in the right node is "AABDAA", the pivot can be chosen as "AABD".
+
 #### Overflow chains
-CalicoDB supports very large keys and/or values.
+CalicoDB supports very long keys and values.
 When a key or value is too large to fit on a page, some of it is transferred to an overflow chain.
 An overflow chain is a singly-linked list of pages, each containing some portion of a record payload.
 Each overflow chain page takes the following form:
@@ -96,7 +114,7 @@ They are not written to the WAL, nor are they stored in the pager cache.
 #### Pointer map
 Each cell that is moved between internal tree nodes must have its child's parent pointer updated.
 If the parent pointers are embedded in the nodes, splits and merges become very expensive, since each transferred cell requires the child page to be updated.
-In addition to facilitating the vacuum operation, pointer maps make splits and merges much more efficient by consolidating many parent pointers on a single page.
+In addition to allowing the vacuum operation, pointer maps make splits and merges much more efficient by consolidating many parent pointers on a single page.
 
 The pointer map is a collection of pointer map entries for every non-pointer map page in the database.
 Each pointer map entry consists of the following fields:
@@ -128,6 +146,10 @@ Since the database file is never written during a transaction, its contents quic
 This means that pages that exist in the WAL must be read from the WAL, not the database file.
 The shm file is used to store the WAL index data structure, which provides a way to quickly locate pages in the WAL.
 We also use the shm file to coordinate locks on the WAL.
+
+## Error handling
+`Status` objects are used describe errors in CalicoDB.
+If a method can fail, it will generally return a `Status`.
 
 ## Database file format
 The database file consists of 0 or more fixed-size pages.

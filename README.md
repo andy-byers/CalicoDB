@@ -1,25 +1,12 @@
 # CalicoDB
-
-> **Warning**: This library has not been code reviewed, and I'm not an expert database developer. 
-> Please don't use it for anything serious!
-> I'm open to comments/criticism/pull requests though, as I want to make CalicoDB a useful library eventually!
-
-> **Note**: I've been messing with this library for a while now, and I think it's finally coming together design-wise!
-> We have transactions, buckets, cursors, vacuum, and multiversion concurrency control (MVCC).
-> This branch (develop) is being used to finish up the initial design.
-> I'll merge it back into main intermittently so that changes are visible.
-
-CalicoDB is an embedded transactional key-value database written in C++17.
+CalicoDB is a tiny transactional key-value database library written in C++17.
 It exposes a small API that allows storage and retrieval of arbitrary byte sequences.
 CalicoDB runs in a single thread and uses a B<sup>+</sup>-tree backend.
 It is intended for read-heavy embedded applications.
 
 ![CI status badge](https://github.com/andy-byers/CalicoDB/actions/workflows/test.yml/badge.svg)
 
-<div align="center">
-    <img src="doc/mascot.png" style="width: 40%; max-width: 400px" />
-</div>
-
++ [Disclaimer](#disclaimer)
 + [Features](#features)
 + [Caveats](#caveats)
 + [Documentation](#documentation)
@@ -28,18 +15,25 @@ It is intended for read-heavy embedded applications.
 + [TODO](#todo)
 + [Contributions](#contributions)
 
+## Disclaimer
+CalicoDB is under active development.
+It is not ready for production.
+The author is not a professional database developer, so any type of feedback is appreciated!
+
 ## Features
 + Records are stored in buckets, each with an independent range of keys
 + All buckets are stored in the same file, similar to the SQLite database file format
 + Supports multiple readers and a single writer simultaneously
-+ Per-buckets bidirectional iteration using cursors
++ Per-bucket bidirectional iteration using cursors
 + Crash protection via write-ahead logging
 + Live defragmentation is supported
++ In-memory databases
 
 ## Caveats
-+ Database is single-threaded: all I/O runs in the main thread
++ Each connection is single-threaded: all I/O runs in the main thread
 + Database page size is fixed at 4 KiB
 + Concurrent usage requires each connection to have its own `DB`
++ Only practical for datasets that can reasonably be stored in a single file 
 + Platform must support shared-memory primitives
 + Will not work on network filesystems
 
@@ -60,6 +54,7 @@ Recent results can be found [here](https://github.com/andy-byers/leveldb/blob/db
 
 ## Documentation
 Check out CalicoDB's [usage and design documents](doc).
+Build instructions can be found [here](doc/doc.md#build).
 
 ## Contributions
 Contributions are welcome!
