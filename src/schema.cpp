@@ -242,7 +242,10 @@ auto Schema::drop_bucket(const Slice &name) -> Status
     }
     auto itr = m_trees.find(root_id);
     if (itr != end(m_trees)) {
+        use_bucket(Bucket{itr->second.tree});
+        itr->second.tree->release_nodes();
         delete itr->second.tree;
+        m_recent = nullptr;
         m_trees.erase(root_id);
     }
     Tree drop(*m_pager, *m_stat, m_scratch, &root_id);

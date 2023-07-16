@@ -298,6 +298,9 @@ if (s.is_ok()) {
 // Modify a record using a cursor.
 s = tx->put(*c, c->key(), "brown tabby");
 if (s.is_ok()) {
+    assert(c->is_valid());
+    assert(c->key() == "junie");
+    assert(c->value() == "brown tabby");
 }
 
 // Erase the record pointed to by the cursor.

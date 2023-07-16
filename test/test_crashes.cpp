@@ -452,6 +452,80 @@ protected:
 
         std::cout << "Tries per iteration: " << static_cast<double>(tries) / static_cast<double>(param.num_iterations) << '\n';
     }
+
+    auto run_cursor_mod_test(const OperationsParameters &param) -> void
+    {
+        Options options;
+        options.env = m_env;
+        options.sync_mode = param.test_sync_mode
+                                ? Options::kSyncFull
+                                : Options::kSyncNormal;
+        // m_drop_unsynced has no effect unless m_crashes_enabled is true. If both are true, then failures on fsync()
+        // cause all data written since the last fsync() to be dropped. This only applies to the file that encountered
+        // the fault.
+        m_env->m_drop_unsynced = param.test_sync_mode;
+
+        (void)DB::destroy(options, m_filename);
+
+        for (std::size_t i = 0; i < kNumIterations; ++i) {
+            m_env->m_crashes_enabled = param.inject_faults;
+
+            DB *db;
+            run_until_completion([this, &options, &db] {
+                auto s = DB::open(options, m_filename, db);
+                if (!s.is_ok()) {
+                    EXPECT_TRUE(is_injected_fault(s));
+                }
+                return s;
+            });
+            validate(*db);
+
+            run_until_completion([&db] {
+                return db->update([](auto &tx) {
+                    Bucket b;
+                    Cursor *c;
+                    auto s = tx.create_bucket(BucketOptions(), "BUCKET", &b);
+                    if (s.is_ok()) {
+                        c = tx.new_cursor(b);
+                    }
+                    for (std::size_t j = 0; s.is_ok() && j < kNumRecords; ++j) {
+                        auto kv = make_key(j).to_string();
+                        s = tx.put(*c, kv, kv);
+                        if (s.is_ok()) {
+                            EXPECT_TRUE(c->is_valid());
+                            EXPECT_EQ(c->key(), kv);
+                            EXPECT_EQ(c->value(), kv);
+                        }
+                    }
+                    if (s.is_ok()) {
+                        c->seek_last();
+                        s = c->status();
+                    }
+                    while (s.is_ok() && c->is_valid()) {
+                        const auto v = c->value().to_string();
+                        s = tx.put(*c, c->key(), v + v);
+                        if (s.is_ok()) {
+                            EXPECT_TRUE(c->is_valid());
+                            EXPECT_EQ(c->value(), v + v);
+                            c->previous();
+                        }
+                    }
+                    if (s.is_ok()) {
+                        c->seek_first();
+                        s = c->status();
+                    }
+                    while (s.is_ok() && c->is_valid()) {
+                        s = tx.erase(*c);
+                    }
+                    return s;
+                });
+            });
+            validate(*db);
+
+            m_env->m_crashes_enabled = false;
+            delete db;
+        }
+    }
 };
 
 TEST_F(TestCrashes, Operations)
@@ -478,6 +552,19 @@ TEST_F(TestCrashes, OpenClose)
     run_open_close_test({true, 1});
     run_open_close_test({true, 2});
     run_open_close_test({true, 3});
+}
+
+TEST_F(TestCrashes, CursorModificationFaults)
+{
+    // Sanity check. No faults.
+    run_cursor_mod_test({false, false});
+    run_cursor_mod_test({false, true});
+
+    // Run with fault injection.
+    run_cursor_mod_test({true, false, false});
+    run_cursor_mod_test({true, true, false});
+    run_cursor_mod_test({true, false, true});
+    run_cursor_mod_test({true, true, true});
 }
 
 } // namespace calicodb::test

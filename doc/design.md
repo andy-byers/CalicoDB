@@ -41,6 +41,8 @@ Additional trees will be rooted on pages after the second database page, which i
 Trees are of variable order, so splits are performed when nodes (pages that are part of a tree) have run out of physical space.
 Merges/rotations are performed when a node has become totally empty.
 
+#### Tree nodes
+A tree node is a database page that is part of a tree.
 Tree nodes can be 1 of 2 types: internal or external.
 External nodes store records (key-value pairs) sorted by key.
 They are arranged as a doubly-linked list, with the leftmost node containing the smallest keys.
@@ -50,6 +52,37 @@ We just walk the linked list of external nodes, iterating through each node in o
 Internal nodes are used to direct searches to the correct external node.
 They contain only keys, called pivot keys in this document.
 CalicoDB uses the suffix truncation described in [2] to reduce pivot key lengths (see [Rebalancing](#rebalancing)).
+
+All nodes use a type of "slotted pages" layout that consists of 5 regions:
+1. Header(s)
+2. Indirection vector
+3. Gap space
+4. Cell content area
+5. Free blocks and fragments
+
+The headers are always stored at the start of the page.
+If the node is located on the first database page (it is the root node of the schema tree), there will also be a file header at offset 0, after which the node header is placed.
+The indirection vector is located right after the header(s).
+Its purpose is to keep track of the offset of every cell on the page, sorted by key.
+Each time a cell is added to or removed from the node, the indirection vector is updated.
+Indirection vector values are contiguous and fixed-length, making binary search simple and quick.
+For an empty node (the indirection vector has 0 length), the gap space will occupy everything from after the headers to the end of the page.
+When the first cell is added, the indirection vector grows by the size of a cell pointer, and the cell itself is written at the end of the gap space.
+Like the first cell, additional cells are written at the end of the gap space, shrinking the gap space and growing the cell content area and indirection vector.
+When the node can no longer fit another cell, it overflows, and the tree must be rebalanced to make room.
+Also, nodes (besides the root when the tree is empty) are not allowed to become empty.
+If a node becomes empty, it is considered to be "underflowing".
+Rebalancing is required to restore the tree invariants.
+A free block is created each time a cell is erased from a node.
+Free blocks are maintained as an intrusive list and threaded through the node.
+Each free block must store its own size, as well as the offset of the next free block (or 0 if there is not another free block).
+This means that a free block can be no less than 4 bytes in length.
+If less than 4 bytes are released back to the node, there will not be enough room to store the intrusive list information.
+In this case, the memory region becomes a fragment.
+The total size of all fragments on a page is kept in the node header.
+When a free blocks is created, an attempt is made to merge it with an adjacent free block, consuming intervening fragments if possible.
+Note that fragments are only created when only part of a free block is used to fulfill an allocation, and less than 4 bytes were left over.
+Cell headers are padded to 4 bytes, so the smallest possible cell will become a free block.
 
 #### Rebalancing
 At present, the `Tree` class is responsible for making sure the tree it represents is balanced before returning from either `put()` or `erase()`.
@@ -113,7 +146,7 @@ They are not written to the WAL, nor are they stored in the pager cache.
 
 #### Pointer map
 Each cell that is moved between internal tree nodes must have its child's parent pointer updated.
-If the parent pointers are embedded in the nodes, splits and merges become very expensive, since each transferred cell requires the child page to be updated.
+If parent pointers are embedded in the nodes, splits and merges become very expensive, since each cell that is transferred requires the child page to be updated.
 In addition to allowing the vacuum operation, pointer maps make splits and merges much more efficient by consolidating many parent pointers on a single page.
 
 The pointer map is a collection of pointer map entries for every non-pointer map page in the database.
@@ -180,10 +213,6 @@ Each thread must have its own `DB`, but threads in the same process can share an
 Second, there can only be a single writer at any given time.
 Multiple simultaneous readers are allowed to run while there is an active writer, however.
 This means that if a database is being accessed by multiple threads or processes, certain calls may return with `Status::busy()`.
-
-The WAL, being a sequential log, provides a total ordering of all operations performed on the database since the last checkpoint reset.
-This makes it perfect for serializing writers and providing snapshot isolation for readers.
-Each connection just needs to know what part of the WAL is safe to access.
 
 Concurrency control in CalicoDB relies on a few key mechanisms described here.
 First, locking is coordinated on the shm file, using the `File::shm_lock()` API.
