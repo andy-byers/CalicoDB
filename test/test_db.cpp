@@ -814,6 +814,25 @@ TEST_F(DBTests, SpaceAmplification)
     std::cout << "SpaceAmplification: " << space_amp << '\n';
 }
 
+TEST_F(DBTests, VacuumDroppedBuckets)
+{
+    ASSERT_OK(m_db->update([](auto &tx) {
+        EXPECT_OK(put_range(tx, BucketOptions(), "a", 0, 1'000));
+        EXPECT_OK(put_range(tx, BucketOptions(), "b", 0, 1'000));
+        EXPECT_OK(put_range(tx, BucketOptions(), "c", 0, 1'000));
+        return Status::ok();
+    }));
+    ASSERT_OK(m_db->update([](auto &tx) {
+        Bucket a, b, c;
+        EXPECT_OK(tx.open_bucket("a", a));
+        EXPECT_OK(tx.open_bucket("b", b));
+        EXPECT_OK(tx.open_bucket("c", c));
+        EXPECT_OK(tx.drop_bucket("a"));
+        EXPECT_OK(tx.drop_bucket("c"));
+        return tx.vacuum();
+    }));
+}
+
 TEST(OldWalTests, HandlesOldWalFile)
 {
     static constexpr auto kOldWal = "./testwal";

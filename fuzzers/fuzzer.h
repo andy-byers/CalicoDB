@@ -43,6 +43,8 @@ namespace calicodb
 
 class FuzzerStream
 {
+    static constexpr char kFakeData[kPageSize] = {};
+
     const U8 **m_ptr;
     std::size_t *m_len;
 
@@ -73,11 +75,21 @@ public:
         return extract_fixed(std::min(*m_len, next_len));
     }
 
+    [[nodiscard]] auto extract_fake_random() -> Slice
+    {
+        if (*m_len == 0) {
+            return "";
+        }
+        const auto len = static_cast<std::size_t>(**m_ptr) * 16;
+        (void)extract_fixed(1);
+        return Slice(kFakeData, kPageSize).truncate(len);
+    }
+
     [[nodiscard]] auto extract_fixed(std::size_t len) -> Slice
     {
         const auto fixed = peek(len);
-        *m_ptr += len;
-        *m_len -= len;
+        *m_ptr += fixed.size();
+        *m_len -= fixed.size();
         return fixed;
     }
 

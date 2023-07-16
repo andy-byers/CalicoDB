@@ -305,10 +305,9 @@ CheckedCursor::~CheckedCursor()
     delete m_real;
 }
 
-class DBFuzzer
+class Fuzzer
 {
     Options m_options;
-    std::string m_filename;
     KVMap m_store;
     DB *m_db = nullptr;
     Tx *m_tx = nullptr;
@@ -322,7 +321,7 @@ class DBFuzzer
         delete m_db;
         m_c = nullptr;
         m_tx = nullptr;
-        CHECK_OK(CheckedDB::open(m_options, m_filename, m_store, m_db));
+        CHECK_OK(CheckedDB::open(m_options, "", m_store, m_db));
         reopen_tx();
     }
 
@@ -345,17 +344,15 @@ class DBFuzzer
     }
 
 public:
-    explicit DBFuzzer(std::string filename, Options *options)
-        : m_filename(std::move(filename))
+    explicit Fuzzer(Options *options)
     {
         if (options) {
             m_options = *options;
         }
-        (void)DB::destroy(m_options, m_filename);
         reopen_db();
     }
 
-    ~DBFuzzer()
+    ~Fuzzer()
     {
         delete m_c;
         delete m_tx;
@@ -365,7 +362,7 @@ public:
     auto fuzz(FuzzerStream &stream) -> bool;
 };
 
-auto DBFuzzer::fuzz(FuzzerStream &stream) -> bool
+auto Fuzzer::fuzz(FuzzerStream &stream) -> bool
 {
     if (stream.is_empty()) {
         return false;
@@ -421,7 +418,7 @@ auto DBFuzzer::fuzz(FuzzerStream &stream) -> bool
             break;
         case kBucketPut:
             key = stream.extract_random();
-            s = m_tx->put(m_b, key, stream.extract_random());
+            s = m_tx->put(m_b, key, stream.extract_fake_random());
             m_c->seek(key); // TODO
             break;
         case kBucketErase:
@@ -448,7 +445,7 @@ auto DBFuzzer::fuzz(FuzzerStream &stream) -> bool
             break;
         case kCursorPut:
             key = stream.extract_random();
-            s = m_tx->put(*m_c, key, stream.extract_random());
+            s = m_tx->put(*m_c, key, stream.extract_fake_random());
             break;
         case kCursorErase:
             s = m_tx->erase(*m_c);
@@ -485,18 +482,17 @@ auto DBFuzzer::fuzz(FuzzerStream &stream) -> bool
 
 extern "C" int LLVMFuzzerTestOneInput(const U8 *data, std::size_t size)
 {
+    FakeEnv env;
+    env.srand(42);
     Options options;
-    options.env = new FakeEnv; // Use a fake Env that doesn't write to disk.
-    options.cache_size = 0;    // Use the smallest possible cache.
+    options.env = &env;     // Use a fake Env that doesn't write to disk.
+    options.cache_size = 0; // Use the smallest possible cache.
 
-    {
-        FuzzerStream stream(data, size);
-        DBFuzzer fuzzer("db_fuzzer.cdb", &options);
-        while (fuzzer.fuzz(stream)) {
-        }
+    Fuzzer fuzzer(&options);
+    FuzzerStream stream(data, size);
+    while (fuzzer.fuzz(stream)) {
     }
 
-    delete options.env;
     return 0;
 }
 

@@ -11,4 +11,5 @@ function(build_fuzzer NAME)
     target_link_libraries(${TARGET} PRIVATE calicodb_utils)
 endfunction()
 
-build_fuzzer(db)
+build_fuzzer(db_bucket)
+build_fuzzer(db_model)

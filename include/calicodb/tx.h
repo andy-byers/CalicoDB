@@ -50,10 +50,11 @@ public:
     // Create a new bucket
     // On success, stores a bucket handle in `*b_out` and returns an OK status. The bucket
     // named `name` can then be accessed with `*b_out` until the transaction is finished (or
-    // until `name` is dropped through Tx::drop_bucket()). Returns a non-OK status on failure.
+    // until `name` is dropped using Tx::drop_bucket()). Returns a non-OK status on failure.
     // `b_out` is optional: if omitted, this method simply creates a bucket without handing
     // back a reference to it. Note that the bucket will not persist in the database unless
-    // Tx::commit() is called after the bucket has been created.
+    // Tx::commit() is called after the bucket has been created but before the transaction
+    // is finished.
     virtual auto create_bucket(const BucketOptions &options, const Slice &name, Bucket *b_out) -> Status = 0;
 
     // Open an existing bucket
@@ -66,10 +67,13 @@ public:
     // If a bucket named `name` exists, this method will attempt to remove it. If `name`
     // does not exist, returns a status for which Status::is_invalid_argument() evaluates
     // to true. If a bucket handle was obtained for `name` during this transaction, it
-    // must not be used after this call succeeds.
+    // must not be used after this call succeeds. All cursors belonging to a bucket must
+    // be delete'd before the bucket is dropped.
     virtual auto drop_bucket(const Slice &name) -> Status = 0;
 
     // Defragment the database
+    // This routine reclaims all unused pages in the database. The database file will be
+    // truncated the next time a checkpoint is run.
     virtual auto vacuum() -> Status = 0;
 
     // Commit pending changes to the database

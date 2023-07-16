@@ -1383,8 +1383,7 @@ auto WalImpl::checkpoint(bool reset) -> Status
     CALICODB_EXPECT_FALSE(m_writer_lock);
 
     // Exclude other connections from running a checkpoint. If the `reset` flag is set,
-    // also exclude writers. If this connection is to reset the log, there must be no
-    // frames written after the
+    // also exclude writers.
     auto s = lock_exclusive(kCheckpointLock, 1);
     if (s.is_ok()) {
         m_ckpt_lock = true;
@@ -1525,11 +1524,12 @@ auto WalImpl::transfer_contents(bool reset) -> Status
             }
         }
     }
-    if (s.is_ok()) {
+    if (s.is_ok() && reset) {
+        CALICODB_EXPECT_TRUE(m_writer_lock);
         if (info->backfill < m_hdr.max_frame) {
             // Some other connection got in the way.
             s = Status::retry();
-        } else if (reset) {
+        } else {
             const auto salt_1 = m_env->rand();
             // Wait on other connections that are still reading from the WAL. This is
             // what SQLite does for `SQLITE_CHECKPOINT_RESTART`. New connections will
@@ -1543,9 +1543,9 @@ auto WalImpl::transfer_contents(bool reset) -> Status
                 unlock_exclusive(READ_LOCK(1), kReaderCount - 1);
             }
         }
-        log(m_log, "checkpointed WAL frames [%u, %u] out of %u",
-            start_frame, info->backfill, m_hdr.max_frame);
     }
+    log(m_log, "checkpointed WAL frames [%u, %u] out of %u",
+        start_frame, ATOMIC_LOAD(&info->backfill), m_hdr.max_frame);
     return s;
 }
 

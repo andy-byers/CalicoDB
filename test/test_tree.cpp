@@ -970,7 +970,6 @@ public:
     {
         Id root;
         Bucket b;
-        EXPECT_OK(Tree::create(*m_pager, &root));
         EXPECT_OK(m_schema->create_bucket(
             BucketOptions(),
             numeric_key(tid),
@@ -1152,6 +1151,21 @@ TEST_F(MultiTreeTests, SavedCursors)
     for (const auto *c : cs) {
         delete c;
     }
+}
+
+TEST_F(MultiTreeTests, VacuumRoots)
+{
+    create_tree(0);
+    fill_tree(0);
+    create_tree(1);
+    fill_tree(1);
+
+    create_tree(2);
+    drop_tree(0);
+    fill_tree(2);
+    drop_tree(1);
+
+    ASSERT_OK(m_schema->vacuum());
 }
 
 template <class T>
