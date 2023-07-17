@@ -15,6 +15,7 @@ jobs:
         compiler: [clang, gcc]
         os: [ubuntu-latest, macos-latest]
         build_type: [Debug, Release]
+        sanitize: [none, address, thread]
         include:
           # Compiler environment variables for each build type.
           - compiler: clang
@@ -23,17 +24,10 @@ jobs:
           - compiler: gcc
             CC: gcc
             CXX: g++
-          - compiler: clang
-            os: ubuntu-latest
+          - sanitize: address
             flags: -DCALICODB_WithASan=On -DCALICODB_WithUBSan=On
-          - compiler: clang
-            os: ubuntu-latest
+          - sanitize: thread
             flags: -DCALICODB_WithTSan=On
-          # Build fuzzers with clang on ubuntu-latest only.
-          - compiler: clang
-            os: ubuntu-latest
-            build_type: Release
-            flags: -DCALICODB_BuildFuzzers=On -DCALICODB_FuzzerStandalone=On
 
     env:
       BUILD_DIR: "${{ github.workspace }}/build"
@@ -48,6 +42,7 @@ jobs:
         run: >-
           cmake -S "${{ github.workspace }}" -B "${{ env.BUILD_DIR }}"
           -DCMAKE_BUILD_TYPE=${{ env.BUILD_TYPE }} ${{ matrix.flags }}
+          -DCALICODB_BuildFuzzers=On -DCALICODB_FuzzerStandalone=On
 
       - name: Build
         run: >-
