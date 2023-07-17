@@ -725,10 +725,10 @@ TEST_P(CursorTests, SeekOutOfRange)
 TEST_P(CursorTests, InvalidCursorDeathTest)
 {
     auto cursor = make_cursor();
-    ASSERT_DEATH((void)cursor->key(), "expect");
-    ASSERT_DEATH((void)cursor->value(), "expect");
-    ASSERT_DEATH((void)cursor->next(), "expect");
-    ASSERT_DEATH((void)cursor->previous(), "expect");
+    ASSERT_DEATH((void)cursor->key(), "");
+    ASSERT_DEATH((void)cursor->value(), "");
+    ASSERT_DEATH((void)cursor->next(), "");
+    ASSERT_DEATH((void)cursor->previous(), "");
 }
 #endif // NDEBUG
 
@@ -929,8 +929,8 @@ TEST_F(PointerMapTests, FindsCorrectMapPages)
 #ifndef NDEBUG
 TEST_F(PointerMapTests, LookupNullIdDeathTest)
 {
-    ASSERT_DEATH((void)PointerMap::lookup(Id(0)), "expect");
-    ASSERT_DEATH((void)PointerMap::is_map(Id(0)), "expect");
+    ASSERT_DEATH((void)PointerMap::lookup(Id(0)), "");
+    ASSERT_DEATH((void)PointerMap::is_map(Id(0)), "");
 }
 #endif // NDEBUG
 

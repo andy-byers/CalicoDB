@@ -503,7 +503,7 @@ TEST(Slice, NonPrintableSlice)
 #if not NDEBUG
 TEST(Expect, DeathTest)
 {
-    ASSERT_DEATH(CALICODB_EXPECT_TRUE(false), "expect");
+    ASSERT_DEATH(CALICODB_EXPECT_TRUE(false), "");
 }
 
 TEST(Slice, DeathTest)

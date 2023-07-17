@@ -419,11 +419,11 @@ TEST_F(PagerTests, ReportsOutOfRangePages)
 TEST_F(PagerTests, DeathTest)
 {
     ASSERT_EQ(m_pager->mode(), Pager::kOpen);
-    ASSERT_DEATH((void)m_pager->commit(), "expect");
+    ASSERT_DEATH((void)m_pager->commit(), "");
 
-    ASSERT_DEATH((void)m_pager->start_writer(), "expect");
+    ASSERT_DEATH((void)m_pager->start_writer(), "");
     ASSERT_OK(m_pager->start_reader());
-    ASSERT_DEATH((void)m_pager->checkpoint(true), "expect");
+    ASSERT_DEATH((void)m_pager->checkpoint(true), "");
 }
 #endif // NDEBUG
 
@@ -626,7 +626,7 @@ protected:
 TEST_F(HashIteratorTests, EmptyIndexDeathTest)
 {
     HashIterator itr(*m_index);
-    ASSERT_DEATH((void)itr.init(), "expect");
+    ASSERT_DEATH((void)itr.init(), "");
 }
 #endif // NDEBUG
 

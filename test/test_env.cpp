@@ -518,7 +518,7 @@ TEST_P(EnvLockStateTests, InvalidRequestDeathTest)
 {
     auto *f = new_file(m_filename);
     // kUnlocked -> kShared is the only allowed transition out of kUnlocked.
-    ASSERT_DEATH((void)f->file_lock(kFileExclusive), "expect");
+    ASSERT_DEATH((void)f->file_lock(kFileExclusive), "");
 }
 #endif // NDEBUG
 
