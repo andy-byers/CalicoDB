@@ -175,6 +175,8 @@ private:
                 }
                 resize(idx + 1);
             }
+            CALICODB_EXPECT_LT(idx, pages.size());
+            CALICODB_EXPECT_EQ(pages[idx].size(), kPageSize);
             return pages[idx].data();
         }
 
