@@ -13,6 +13,9 @@ endif()
 option(CALICODB_BuildFuzzers "Build the fuzz targets" Off)
 option(CALICODB_BuildTests "Build the tests" ${MAIN_PROJECT})
 option(CALICODB_Install "Install the CMake targets during the install step" ${MAIN_PROJECT})
+option(CALICODB_WithASan "Build with ASan" Off)
+option(CALICODB_WithUBSan "Build with UBSan" Off)
+option(CALICODB_WithTSan "Build with TSan" Off)
 
 # Add applicable warnings from @lefticus/cpp-best-practices.
 set(CALICODB_FLAGS "")
@@ -69,6 +72,21 @@ target_compile_definitions(calicodb
         PUBLIC CALICODB_VERSION_MAJOR=${PROJECT_VERSION_MAJOR}
                CALICODB_VERSION_MINOR=${PROJECT_VERSION_MINOR}
                CALICODB_VERSION_PATCH=${PROJECT_VERSION_PATCH})
+
+if(CALICODB_WithASan)
+    target_compile_options(calicodb PUBLIC -fsanitize=address)
+    target_link_options(calicodb PUBLIC -fsanitize=address)
+endif()
+
+if(CALICODB_WithUBSan)
+    target_compile_options(calicodb PUBLIC -fsanitize=undefined)
+    target_link_options(calicodb PUBLIC -fsanitize=undefined)
+endif()
+
+if(CALICODB_WithTSan)
+    target_compile_options(calicodb PUBLIC -fsanitize=thread)
+    target_link_options(calicodb PUBLIC -fsanitize=thread)
+endif()
 
 if(CALICODB_BuildTests OR CALICODB_BuildFuzzers)
     add_subdirectory(utils)
