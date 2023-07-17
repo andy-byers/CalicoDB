@@ -85,9 +85,9 @@ Note that fragments are only created when only part of a free block is used to f
 Cell headers are padded to 4 bytes, so the smallest possible cell will become a free block.
 
 #### Rebalancing
-At present, the `Tree` class is responsible for making sure the tree it represents is balanced before returning from either `put()` or `erase()`.
-This is accomplished by calling one of the two rebalancing entrypoint routines, `resolve_overflow()` or `resolve_underflow()`.
-These routines, in turn, call other routines as outlined in the following table:
+The `Tree` class is responsible for making sure that it is balanced before returning from either `put()` or `erase()`.
+This is accomplished by calling one of the two rebalancing routines, `resolve_overflow()` or `resolve_underflow()`.
+These routines, in turn, call other subroutines as outlined in the following table:
 
 | Caller                | Callee                 | Note                               |
 |:----------------------|:-----------------------|:-----------------------------------|
@@ -101,12 +101,27 @@ These routines, in turn, call other routines as outlined in the following table:
 
 As shown above, there are several routines that call `redistribute_cells()`.
 `redistribute_cells()` expects 2 sibling nodes, 1 of which must be empty and the other nonempty, and their parent.
-It works by attempting to transfer roughly half of the cell content from the nonempty node to the empty node, manipulating pivot cells as necessary in the parent.
+It works by attempting to transfer roughly half of the cell content from the nonempty node to the empty node.
 If there are not enough cells in the nonempty node, then the two nodes are merged.
-Note that the parent may overflow if the new pivot is posted.
+
+When a node is split in `redistribute_cells()`, a pivot is posted to the parent to separate the left and right siblings.
+Similarly, when a merge occurs in `fix_nonroot()/redistribute_cells()`, the pivot that had previously separated the two nodes is transferred down into the merged child.
+If the parent node is overflowing after `redistribute_cells()`, an additional call to a `split_*()` is needed.
+Likewise, if the parent is underflowing, a `fix_*()` must be called.
+
+If the node that needs rebalancing is the root node, one of the `*_root()` subroutines is called.
+`split_root()` is called when the root node overflows.
+It works by transferring its contents to a new node, and setting this node as a child of the (now empty) root.
+This increases the height of the tree by 1.
+`split_root()` must always be followed by a call to `split_nonroot()`, during which the child is split and a pivot posted to the root.
+`fix_root()` is called when the root becomes empty.
+An empty root node will always have a single child, unless the whole tree is empty.
+The contents of the child node are copied into the empty root, and the child node is pushed to the freelist.
+This decreases the height of the tree by 1.
+When `fix_root()` is called on the [schema tree](#schema)
 
 Suffix truncation is performed when an external node is split.
-The pivot that is posted only needs to be long enough to direct traversals to the correct external node.
+The pivot that is posted only needs to be long enough to direct traversals toward the correct external node.
 For example, if the largest key in the left node is "AABCDD" and the smallest key in the right node is "AABDAA", the pivot can be chosen as "AABD".
 
 #### Overflow chains
@@ -123,10 +138,10 @@ Each overflow chain page takes the following form:
 The formula for determining when a record should spill onto an overflow chain was modified from one found in SQLite3.
 We try to keep the whole key embedded in the node, if possible.
 This makes comparisons faster, since we don't have to read overflow pages to get the whole key.
-Otherwise, the maximum local cell size (the amount of record stored locally, plus the cell header, etc.) is limited such that at least 4 cells will fit on any non-root page.
+Otherwise, the maximum local cell size (the amount of record stored locally, plus the cell header) is limited such that at least 4 cells will fit on any non-root page.
 The root page may only hold 3 cells due to the space occupied by the file header.
 
-#### Freelist
+### Freelist
 Sometimes, database pages end up becoming unused.
 This happens, for example, when a record with an overflow chain is erased.
 Unused database pages are managed using the freelist.
@@ -144,7 +159,7 @@ The last trunk page has its `NextPtr` field set to 0.
 Freelist leaf pages contain no pertinent information.
 They are not written to the WAL, nor are they stored in the pager cache.
 
-#### Pointer map
+### Pointer map
 Each cell that is moved between internal tree nodes must have its child's parent pointer updated.
 If parent pointers are embedded in the nodes, splits and merges become very expensive, since each cell that is transferred requires the child page to be updated.
 In addition to allowing the vacuum operation, pointer maps make splits and merges much more efficient by consolidating many parent pointers on a single page.
@@ -162,6 +177,12 @@ The first pointer map page is always on page 2, that is, the page right after th
 Each pointer map page holds `kPageSize / 5` entries: one for each of the `kPageSize / 5` pages directly following it.
 Every other pointer map page is located on the page following the last page referenced by the previous pointer map page.
 
+### Schema
+The schema is used to keep track of all trees in the database.
+It is represented on disk by the tree rooted on the first database page.
+This tree, the schema tree, is created when the database itself is created, and can never be dropped.
+It stores the name and root page ID of every other tree, as well as other per-tree attributes.
+
 ### WAL
 
 #### WAL file
@@ -176,13 +197,15 @@ This lets the number of frames added to the WAL be proportional to the number of
 
 #### shm file
 Since the database file is never written during a transaction, its contents quickly become stale.
-This means that pages that exist in the WAL must be read from the WAL, not the database file.
+This means that pages existing in the WAL must be read from the WAL, not the database file.
 The shm file is used to store the WAL index data structure, which provides a way to quickly locate pages in the WAL.
 We also use the shm file to coordinate locks on the WAL.
 
 ## Error handling
 `Status` objects are used describe errors in CalicoDB.
-If a method can fail, it will generally return a `Status`.
+If an operation can fail, it will always return, or otherwise expose, a `Status` object.
+If a system call fails during a read-write transaction, CalicoDB will refuse to perform any more work until the transaction has been aborted (the transaction handle has been `delete`ed).
+Otherwise, any routine that fails can be retried any number of times.
 
 ## Database file format
 The database file consists of 0 or more fixed-size pages.
@@ -190,8 +213,8 @@ A freshly-created database is just an empty database file.
 When the first bucket is created, the first 3 database pages are initialized in-memory.
 The first page in the file, called the root page, contains the file header and serves as the [schema tree's][#schema] root node.
 The second page is always a [pointer map](#pointer-map) page.
-The third page is the root node of the tree representing the first user bucket.
-As the database is modified, additional pages are created by extending the database file.
+The third page is the root node of the tree representing the newly-created bucket.
+As the database grows, additional pages are allocated by extending the database file.
 
 ## Performance
 CalicoDB runs in a single thread, and is very much I/O-bound as a result.

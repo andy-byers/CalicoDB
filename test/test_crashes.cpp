@@ -483,7 +483,7 @@ protected:
             run_until_completion([&db] {
                 return db->update([](auto &tx) {
                     Bucket b;
-                    Cursor *c;
+                    Cursor *c = nullptr;
                     auto s = tx.create_bucket(BucketOptions(), "BUCKET", &b);
                     if (s.is_ok()) {
                         c = tx.new_cursor(b);
@@ -517,6 +517,7 @@ protected:
                     while (s.is_ok() && c->is_valid()) {
                         s = tx.erase(*c);
                     }
+                    delete c;
                     return s;
                 });
             });

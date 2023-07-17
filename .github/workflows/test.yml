@@ -8,7 +8,7 @@ permissions:
 
 jobs:
   build-and-test:
-    name: Build & Test (${{ matrix.compiler }} on ${{ matrix.os }})
+    name: Build & Test (${{ matrix.build_type }}, ${{ matrix.compiler }} on ${{ matrix.os }}))
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
@@ -23,11 +23,6 @@ jobs:
           - compiler: gcc
             CC: gcc
             CXX: g++
-          # Build fuzzers with clang on ubuntu-latest only.
-          - compiler: clang
-            os: ubuntu-latest
-            build_type: Release
-            fuzz: -DCALICODB_BuildFuzzers=On -DCALICODB_FuzzerStandalone=On
 
     env:
       BUILD_DIR: "${{ github.workspace }}/build"
@@ -41,8 +36,8 @@ jobs:
       - name: Setup
         run: >-
           cmake -S "${{ github.workspace }}" -B "${{ env.BUILD_DIR }}"
-          -DCMAKE_BUILD_TYPE=${{ env.BUILD_TYPE }} ${{ matrix.fuzz }}
-          -DCMAKE_CXXFLAGS='-fsanitize=address,undefined'
+          -DCMAKE_BUILD_TYPE=${{ env.BUILD_TYPE }}
+          -DCALICODB_BuildFuzzers=On -DCALICODB_FuzzerStandalone=On
 
       - name: Build
         run: >-

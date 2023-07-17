@@ -109,7 +109,7 @@ public:
 
     auto resize_file(const std::string &filename, std::size_t size) -> Status override
     {
-        if (filename == m_file.name) {
+        if (file_exists(filename)) {
             const auto page_count = size / kPageSize;
             CALICODB_EXPECT_EQ(size, page_count * kPageSize);
             m_file.resize(page_count);
@@ -120,7 +120,7 @@ public:
 
     auto file_size(const std::string &filename, std::size_t &size_out) const -> Status override
     {
-        if (filename == m_file.name) {
+        if (file_exists(filename)) {
             size_out = m_file.pages.size() * kPageSize;
             return Status::ok();
         }
@@ -129,7 +129,7 @@ public:
 
     auto remove_file(const std::string &filename) -> Status override
     {
-        if (filename == m_file.name) {
+        if (file_exists(filename)) {
             m_file.name.clear();
             return Status::ok();
         }
@@ -165,7 +165,6 @@ private:
     struct PagedFile {
         std::vector<std::string> pages;
         std::string name;
-        bool exists = false;
 
         [[nodiscard]] auto fetch_page(Id id, bool extend) -> char *
         {
@@ -176,6 +175,8 @@ private:
                 }
                 resize(idx + 1);
             }
+            CALICODB_EXPECT_LT(idx, pages.size());
+            CALICODB_EXPECT_EQ(pages[idx].size(), kPageSize);
             return pages[idx].data();
         }
 

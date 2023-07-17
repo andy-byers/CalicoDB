@@ -1,18 +1,9 @@
 cmake_minimum_required(VERSION 3.14)
 
-set(CMAKE_CXX_FLAGS_RELWITHASSERTIONS "-O3"
-        CACHE STRING "C++ compiler flags for a RelWithAssertions build" FORCE)
-set(CMAKE_C_FLAGS_RELWITHASSERTIONS "-O3"
-        CACHE STRING "C compiler flags for a RelWithAssertions build" FORCE)
-set(CMAKE_TRY_COMPILE_TARGET_TYPE "STATIC_LIBRARY")
-
 project(calicodb
         LANGUAGES CXX
         VERSION 0.0.1)
 set(CMAKE_CXX_STANDARD 17)
-
-set(CALICODB_INCLUDE_DIR "${PROJECT_SOURCE_DIR}/include")
-set(CALICODB_SOURCE_DIR "${PROJECT_SOURCE_DIR}/src")
 
 set(MAIN_PROJECT Off)
 if (CMAKE_CURRENT_SOURCE_DIR STREQUAL CMAKE_SOURCE_DIR)
@@ -22,6 +13,9 @@ endif()
 option(CALICODB_BuildFuzzers "Build the fuzz targets" Off)
 option(CALICODB_BuildTests "Build the tests" ${MAIN_PROJECT})
 option(CALICODB_Install "Install the CMake targets during the install step" ${MAIN_PROJECT})
+option(CALICODB_WithASan "Build with ASan" Off)
+option(CALICODB_WithUBSan "Build with UBSan" Off)
+option(CALICODB_WithTSan "Build with TSan" Off)
 
 # Add applicable warnings from @lefticus/cpp-best-practices.
 set(CALICODB_FLAGS "")
@@ -58,27 +52,41 @@ endif()
 
 file(GLOB_RECURSE
         CALICODB_SOURCES
-        "${CALICODB_SOURCE_DIR}/*.cpp"
-        "${CALICODB_SOURCE_DIR}/*.h")
+        "${PROJECT_SOURCE_DIR}/src/*.cpp"
+        "${PROJECT_SOURCE_DIR}/src/*.h")
 add_library(calicodb STATIC
-        "${CALICODB_INCLUDE_DIR}/calicodb/cursor.h"
-        "${CALICODB_INCLUDE_DIR}/calicodb/db.h"
-        "${CALICODB_INCLUDE_DIR}/calicodb/env.h"
-        "${CALICODB_INCLUDE_DIR}/calicodb/options.h"
-        "${CALICODB_INCLUDE_DIR}/calicodb/slice.h"
-        "${CALICODB_INCLUDE_DIR}/calicodb/status.h"
-        "${CALICODB_INCLUDE_DIR}/calicodb/tx.h"
+        "${PROJECT_SOURCE_DIR}/include/calicodb/cursor.h"
+        "${PROJECT_SOURCE_DIR}/include/calicodb/db.h"
+        "${PROJECT_SOURCE_DIR}/include/calicodb/env.h"
+        "${PROJECT_SOURCE_DIR}/include/calicodb/options.h"
+        "${PROJECT_SOURCE_DIR}/include/calicodb/slice.h"
+        "${PROJECT_SOURCE_DIR}/include/calicodb/status.h"
+        "${PROJECT_SOURCE_DIR}/include/calicodb/tx.h"
         "${CALICODB_SOURCES}")
 target_include_directories(calicodb
-        PUBLIC  $<BUILD_INTERFACE:${CALICODB_INCLUDE_DIR}>
-                $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>
-        PRIVATE "${CALICODB_SOURCE_DIR}")
+        PUBLIC  $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/include>
+                $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>)
 target_compile_options(calicodb
         PRIVATE "${CALICODB_FLAGS}")
 target_compile_definitions(calicodb
         PUBLIC CALICODB_VERSION_MAJOR=${PROJECT_VERSION_MAJOR}
                CALICODB_VERSION_MINOR=${PROJECT_VERSION_MINOR}
                CALICODB_VERSION_PATCH=${PROJECT_VERSION_PATCH})
+
+if(CALICODB_WithASan)
+    target_compile_options(calicodb PUBLIC -fsanitize=address)
+    target_link_options(calicodb PUBLIC -fsanitize=address)
+endif()
+
+if(CALICODB_WithUBSan)
+    target_compile_options(calicodb PUBLIC -fsanitize=undefined)
+    target_link_options(calicodb PUBLIC -fsanitize=undefined)
+endif()
+
+if(CALICODB_WithTSan)
+    target_compile_options(calicodb PUBLIC -fsanitize=thread)
+    target_link_options(calicodb PUBLIC -fsanitize=thread)
+endif()
 
 if(CALICODB_BuildTests OR CALICODB_BuildFuzzers)
     add_subdirectory(utils)
@@ -118,7 +126,7 @@ if(CALICODB_Install)
             RUNTIME DESTINATION "${CMAKE_INSTALL_BINDIR}"
             LIBRARY DESTINATION "${CMAKE_INSTALL_LIBDIR}"
             ARCHIVE DESTINATION "${CMAKE_INSTALL_LIBDIR}")
-    install(DIRECTORY "${CALICODB_INCLUDE_DIR}/calicodb"
+    install(DIRECTORY "${PROJECT_SOURCE_DIR}/include/calicodb"
             DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}")
 
     install(EXPORT "${TARGETS_NAME}"
