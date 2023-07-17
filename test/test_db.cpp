@@ -1039,18 +1039,11 @@ TEST_F(TransactionTests, ReadsMostRecentSnapshot)
 {
     U64 key_limit = 0;
     auto should_records_exist = false;
-    auto should_database_exist = true;
     m_env->m_write_callback = [&] {
         DB *db;
         Options options;
         options.env = m_env;
         auto s = DB::open(options, m_db_name, db);
-        if (!should_database_exist && s.is_busy()) {
-            // This happens when this callback is called by a write during the final checkpoint, after an exclusive
-            // lock has been taken on the database file to make sure we are the last connection. It is too late at
-            // this point, the checkpoint will run and the WAL will be unlinked.
-            return;
-        }
         ASSERT_OK(s);
         s = db->view([key_limit](auto &tx) {
             return check_range(tx, "BUCKET", 0, key_limit, true);
@@ -1064,20 +1057,18 @@ TEST_F(TransactionTests, ReadsMostRecentSnapshot)
     ASSERT_OK(m_db->update([&](auto &tx) {
         // WARNING: If too big of a transaction is performed, the system may run out of file
         //          descriptors. The closing of the database file must sometimes be deferred
-        //          in the callback's Env, since this connection will have a write lock until
-        //          Db::update() returns.
-        for (std::size_t i = 0; i < 25; ++i) {
+        //          until after the transaction completes, since this connection will have a
+        //          write lock until DB::update() returns.
+        for (std::size_t i = 0; i < 10; ++i) {
             static constexpr U64 kScale = 5;
             EXPECT_OK(put_range(tx, BucketOptions(), "BUCKET", i * kScale, (i + 1) * kScale));
             EXPECT_OK(tx.commit());
             should_records_exist = true;
             key_limit = (i + 1) * kScale;
         }
-        should_database_exist = false;
         return Status::ok();
     }));
 
-    should_database_exist = true;
     m_env->m_write_callback();
 }
 

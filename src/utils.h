@@ -22,7 +22,7 @@
 #endif // CALICODB_TEST
 #endif // !NDEBUG
 
-#define CALICODB_EXPECT_TRUE(expr) CALICODB_EXPECT_(expr, __FILE__, __LINE__)
+#define CALICODB_EXPECT_TRUE(expr) assert(expr)
 #define CALICODB_EXPECT_FALSE(expr) CALICODB_EXPECT_TRUE(!(expr))
 #define CALICODB_EXPECT_EQ(lhs, rhs) CALICODB_EXPECT_TRUE((lhs) == (rhs))
 #define CALICODB_EXPECT_NE(lhs, rhs) CALICODB_EXPECT_TRUE((lhs) != (rhs))
@@ -42,14 +42,6 @@
 
 namespace calicodb
 {
-
-inline auto expect_impl(bool cond, const char *repr, const char *file, int line) -> void
-{
-    if (!cond) {
-        std::fprintf(stderr, "expectation (%s) failed at %s:%d\n", repr, file, line);
-        std::abort();
-    }
-}
 
 template <class Callback>
 auto busy_wait(BusyHandler *handler, const Callback &callback) -> Status
