@@ -43,7 +43,7 @@
 namespace calicodb
 {
 
-inline constexpr auto expect_impl(bool cond, const char *repr, const char *file, int line) -> void
+inline auto expect_impl(bool cond, const char *repr, const char *file, int line) -> void
 {
     if (!cond) {
         std::fprintf(stderr, "expectation (%s) failed at %s:%d\n", repr, file, line);

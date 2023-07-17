@@ -8,14 +8,14 @@ permissions:
 
 jobs:
   build-and-test:
-    name: Build & Test (${{ matrix.compiler }} on ${{ matrix.os }}) (sanitizer=${{ matrix.sanitize }}))
+    name: Build & Test (${{ matrix.compiler }} on ${{ matrix.os }}, sanitizer=${{ matrix.sanitize }}))
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
         compiler: [clang, gcc]
         os: [ubuntu-latest, macos-latest]
-        build_type: [Debug, Release]
         sanitize: [none, address, thread]
+        build_type: [Debug, Release]
         include:
           # Compiler environment variables for each build type.
           - compiler: clang
@@ -24,6 +24,7 @@ jobs:
           - compiler: gcc
             CC: gcc
             CXX: g++
+          # Flags for running with sanitizers.
           - sanitize: address
             flags: -DCALICODB_WithASan=On -DCALICODB_WithUBSan=On
           - sanitize: thread

@@ -1051,6 +1051,7 @@ TEST_F(TransactionTests, ReadsMostRecentSnapshot)
             // this point, the checkpoint will run and the WAL will be unlinked.
             return;
         }
+        ASSERT_OK(s);
         s = db->view([key_limit](auto &tx) {
             return check_range(tx, "BUCKET", 0, key_limit, true);
         });
@@ -1061,8 +1062,12 @@ TEST_F(TransactionTests, ReadsMostRecentSnapshot)
         ASSERT_OK(s);
     };
     ASSERT_OK(m_db->update([&](auto &tx) {
-        for (std::size_t i = 0; i < 50; ++i) {
-            static constexpr U64 kScale = 10;
+        // WARNING: If too big of a transaction is performed, the system may run out of file
+        //          descriptors. The closing of the database file must sometimes be deferred
+        //          in the callback's Env, since this connection will have a write lock until
+        //          Db::update() returns.
+        for (std::size_t i = 0; i < 25; ++i) {
+            static constexpr U64 kScale = 5;
             EXPECT_OK(put_range(tx, BucketOptions(), "BUCKET", i * kScale, (i + 1) * kScale));
             EXPECT_OK(tx.commit());
             should_records_exist = true;
