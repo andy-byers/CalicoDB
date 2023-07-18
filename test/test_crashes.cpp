@@ -167,8 +167,6 @@ public:
     }
 };
 
-#undef MAYBE_CRASH
-
 class TestCrashes : public testing::Test
 {
 protected:
@@ -176,7 +174,7 @@ protected:
     CrashEnv *m_env;
 
     explicit TestCrashes()
-        : m_filename(testing::TempDir() + "crashes"),
+        : m_filename(testing::TempDir() + "calicodb_crashes"),
           m_env(new CrashEnv(Env::default_env()))
     {
     }
@@ -566,6 +564,293 @@ TEST_F(TestCrashes, CursorModificationFaults)
     run_cursor_mod_test({true, true, false});
     run_cursor_mod_test({true, false, true});
     run_cursor_mod_test({true, true, true});
+}
+
+// NOTE: This Env can only be used to drop writes during commit or checkpoint. Otherwise, there will
+//       be some writes that look like they worked, but when the same page is read back, it will look
+//       like nothing was written. We rely on sync() returning an error to indicate dropped data.
+class DropEnv : public EnvWrapper
+{
+public:
+    using ShouldDrop = std::function<bool()>;
+    ShouldDrop m_should_drop;
+
+    std::string m_drop_file;
+    std::size_t m_dropped_bytes = 0;
+
+    explicit DropEnv(Env &env)
+        : EnvWrapper(env)
+    {
+    }
+
+    ~DropEnv() override = default;
+
+    [[nodiscard]] auto should_drop(const std::string &filename) const -> bool
+    {
+        return filename == m_drop_file && (!m_should_drop || m_should_drop());
+    }
+
+    auto new_file(const std::string &filename, OpenMode mode, File *&file_out) -> Status override
+    {
+        class DropFile : public FileWrapper
+        {
+            const std::string m_filename;
+            DropEnv *m_env;
+
+        public:
+            explicit DropFile(DropEnv &env, std::string filename, File &base)
+                : FileWrapper(base),
+                  m_filename(std::move(filename)),
+                  m_env(&env)
+            {
+            }
+
+            ~DropFile() override
+            {
+                delete m_target;
+            }
+
+            auto write(std::size_t offset, const Slice &data) -> Status override
+            {
+                if (m_env->should_drop(m_filename)) {
+                    m_env->m_dropped_bytes += data.size();
+                    return Status::ok();
+                }
+                return FileWrapper::write(offset, data);
+            }
+
+            auto sync() -> Status override
+            {
+                if (m_env->m_drop_file == m_filename) {
+                    // If there were any dropped writes, sync() must return an error, otherwise the database
+                    // cannot figure out that something has gone wrong. It'll likely show up as corruption
+                    // later on.
+                    return kFaultStatus;
+                }
+                return FileWrapper::sync();
+            }
+        };
+        auto s = target()->new_file(filename, mode, file_out);
+        if (s.is_ok()) {
+            file_out = new DropFile(*this, filename, *file_out);
+        }
+        return s;
+    }
+};
+
+#undef MAYBE_CRASH
+
+class TestDroppedWrites : public testing::Test
+{
+public:
+    const std::string m_filename;
+    DropEnv m_env;
+    DB *m_db = nullptr;
+
+    explicit TestDroppedWrites()
+        : m_filename(testing::TempDir() + "calicodb_dropped_writes"),
+          m_env(Env::default_env())
+    {
+    }
+
+    ~TestDroppedWrites() override
+    {
+        delete m_db;
+    }
+
+    auto reopen_db(bool clear = false) -> void
+    {
+        delete m_db;
+        m_db = nullptr;
+        if (clear) {
+            (void)DB::destroy(Options(), m_filename);
+        }
+
+        Options options;
+        options.env = &m_env;
+        options.auto_checkpoint = 0;
+        options.sync_mode = Options::kSyncFull;
+        ASSERT_OK(DB::open(options, m_filename, m_db));
+    }
+
+    struct DropParameters {
+        DropEnv::ShouldDrop drop_callback;
+        std::string drop_file;
+    };
+    auto perform_writes(const DropParameters &param, std::size_t num_writes, std::size_t iteration)
+    {
+        // Don't drop any records until the commit.
+        m_env.m_drop_file = "";
+        return m_db->update([num_writes, iteration, &param, this](auto &tx) {
+            Bucket b;
+            auto s = tx.create_bucket(BucketOptions(), "bucket", &b);
+            for (std::size_t i = 0; i < num_writes && s.is_ok(); ++i) {
+                s = tx.put(b, numeric_key(i), numeric_key(i + iteration * num_writes));
+            }
+            EXPECT_OK(s);
+            m_env.m_should_drop = param.drop_callback;
+            m_env.m_drop_file = param.drop_file;
+            s = tx.commit();
+            if (!s.is_ok()) {
+                EXPECT_EQ(kFaultStatus, s);
+                EXPECT_EQ(kFaultStatus, tx.commit());
+            }
+            return s;
+        });
+    }
+
+    auto perform_checkpoint(const DropParameters &param, bool reset)
+    {
+        m_env.m_should_drop = param.drop_callback;
+        m_env.m_drop_file = param.drop_file;
+        auto s = m_db->checkpoint(reset);
+        if (!s.is_ok()) {
+            EXPECT_EQ(kFaultStatus, s);
+            EXPECT_EQ(kFaultStatus, m_db->checkpoint(reset));
+        }
+        return s;
+    }
+
+    auto check_records(std::size_t num_writes, std::size_t iteration)
+    {
+        return m_db->view([=](const auto &tx) {
+            Bucket b;
+            auto s = tx.open_bucket("bucket", b);
+            for (std::size_t i = 0; i < num_writes && s.is_ok(); ++i) {
+                std::string value;
+                s = tx.get(b, numeric_key(i), &value);
+                if (s.is_ok()) {
+                    EXPECT_EQ(value, numeric_key(i + iteration * num_writes));
+                }
+            }
+            return s;
+        });
+    }
+
+    enum DropType {
+        kDropAll,      // Drop all writes
+        kDropRandom,   // Drop 25% of writes at random
+        kDropOdd,      // Drop every other write
+        kDropFirstFew, // Drop the first few writes
+    };
+    std::default_random_engine m_drop_rng;
+    std::size_t m_drop_counter = 0;
+
+    auto create_drop_param(std::string filename, DropType type)
+    {
+        m_drop_counter = 0;
+
+        DropParameters drop_param;
+        drop_param.drop_file = std::move(filename);
+        switch (type) {
+            case kDropRandom:
+                drop_param.drop_callback = [this] {
+                    std::uniform_int_distribution dist;
+                    return dist(m_drop_rng) % 4 == 0;
+                };
+                break;
+            case kDropOdd:
+                drop_param.drop_callback = [this] {
+                    return m_drop_counter++ & 1;
+                };
+                break;
+            case kDropFirstFew:
+                drop_param.drop_callback = [this] {
+                    return m_drop_counter++ < 4;
+                };
+                break;
+            case kDropAll:
+                // Use the default callback.
+                break;
+            default:
+                ADD_FAILURE() << "unrecognized drop type " << type;
+        }
+        return drop_param;
+    }
+
+    auto run_transaction_test(DropType drop_type, bool reopen_after_failure)
+    {
+        m_env.m_drop_file = "";
+        reopen_db(true);
+
+        static constexpr std::size_t kNumWrites = 1'000;
+        ASSERT_OK(perform_writes({}, kNumWrites, 0));
+
+        // Only the WAL is written during a transaction.
+        const auto drop_param = create_drop_param(m_filename + kDefaultWalSuffix, drop_type);
+
+        ASSERT_EQ(kFaultStatus, perform_writes(drop_param, kNumWrites, 1));
+        ASSERT_OK(check_records(kNumWrites, 0));
+
+        if (reopen_after_failure) {
+            m_env.m_drop_file = "";
+            reopen_db(false);
+        }
+
+        ASSERT_OK(perform_checkpoint({}, true));
+        ASSERT_OK(check_records(kNumWrites, 0));
+        ASSERT_OK(perform_writes({}, kNumWrites, 1));
+        ASSERT_OK(check_records(kNumWrites, 1));
+
+        std::cout << "dropped " << m_env.m_dropped_bytes << " bytes\n";
+        m_env.m_dropped_bytes = 0;
+    }
+
+    auto run_checkpoint_test(DropType drop_type, bool reopen_after_failure)
+    {
+        m_env.m_drop_file = "";
+        reopen_db(true);
+
+        static constexpr std::size_t kNumWrites = 1'000;
+        ASSERT_OK(perform_writes({}, kNumWrites, 0));
+        ASSERT_OK(perform_checkpoint({}, true));
+
+        const auto drop_param = create_drop_param(m_filename, drop_type);
+
+        ASSERT_OK(perform_writes({}, kNumWrites, 1));
+        ASSERT_EQ(kFaultStatus, perform_checkpoint(drop_param, true));
+        // Any records contained in the pages being checkpointed should continue being read from
+        // the WAL: the backfill count was not increased due to the failed call to File::sync().
+        ASSERT_OK(check_records(kNumWrites, 1));
+
+        if (reopen_after_failure) {
+            m_env.m_drop_file = "";
+            reopen_db(false);
+        }
+
+        ASSERT_OK(perform_writes({}, kNumWrites, 2));
+        ASSERT_OK(perform_checkpoint({}, true));
+        ASSERT_OK(check_records(kNumWrites, 2));
+
+        std::cout << "dropped " << m_env.m_dropped_bytes << " bytes\n";
+        m_env.m_dropped_bytes = 0;
+    }
+};
+
+TEST_F(TestDroppedWrites, Transactions)
+{
+    run_transaction_test(kDropAll, false);
+    run_transaction_test(kDropOdd, false);
+    run_transaction_test(kDropRandom, false);
+    run_transaction_test(kDropFirstFew, false);
+
+    run_transaction_test(kDropAll, true);
+    run_transaction_test(kDropOdd, true);
+    run_transaction_test(kDropRandom, true);
+    run_transaction_test(kDropFirstFew, true);
+}
+
+TEST_F(TestDroppedWrites, Checkpoints)
+{
+    run_checkpoint_test(kDropAll, false);
+    run_checkpoint_test(kDropOdd, false);
+    run_checkpoint_test(kDropRandom, false);
+    run_checkpoint_test(kDropFirstFew, false);
+
+    run_checkpoint_test(kDropAll, true);
+    run_checkpoint_test(kDropOdd, true);
+    run_checkpoint_test(kDropRandom, true);
+    run_checkpoint_test(kDropFirstFew, true);
 }
 
 } // namespace calicodb::test

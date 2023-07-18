@@ -88,8 +88,18 @@ auto Pager::open(const Parameters &param, Pager *&out) -> Status
     }
     if (s.is_ok()) {
         out = new Pager(*wal, param);
-        if (0 == out->m_bufmgr.available()) {
+        if (out->m_bufmgr.available() > 0) {
+            // Start and stop a read transaction to make sure the WAL index exists.
+            s = out->start_reader();
+            if (s.is_ok()) {
+                out->finish();
+            } else if (s.is_busy()) {
+                s = Status::ok();
+            }
+        } else {
             s = Status::invalid_argument("not enough memory for page cache");
+        }
+        if (!s.is_ok()) {
             delete out;
         }
     }
@@ -275,13 +285,6 @@ auto Pager::checkpoint(bool reset) -> Status
 {
     CALICODB_EXPECT_EQ(m_mode, kOpen);
     CALICODB_EXPECT_TRUE(assert_state());
-    // Start and stop a read transaction to make sure the WAL index exists.
-    auto s = start_reader();
-    if (s.is_ok()) {
-        finish();
-    } else if (!s.is_busy()) {
-        return s;
-    }
     return m_wal->checkpoint(reset);
 }
 
