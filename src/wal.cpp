@@ -1520,10 +1520,6 @@ auto WalImpl::transfer_contents(bool reset) -> Status
             }
             unlock_exclusive(READ_LOCK(0), 1);
         }
-
-        if (!s.is_ok()) {
-            return s;
-        }
     }
     if (s.is_ok() && reset) {
         CALICODB_EXPECT_TRUE(m_writer_lock);

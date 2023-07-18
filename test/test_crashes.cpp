@@ -677,20 +677,19 @@ public:
         DropEnv::ShouldDrop drop_callback;
         std::string drop_file;
     };
-    auto perform_writes(const DropParameters &param, std::size_t num_writes, std::size_t iteration)
+    auto perform_writes(const DropParameters &param, std::size_t num_writes, std::size_t version)
     {
         // Don't drop any records until the commit.
         m_env.m_drop_file = "";
-        return m_db->update([num_writes, iteration, &param, this](auto &tx) {
+        return m_db->update([num_writes, version, &param, this](auto &tx) {
             Bucket b;
-            auto s = tx.create_bucket(BucketOptions(), "bucket", &b);
-            for (std::size_t i = 0; i < num_writes && s.is_ok(); ++i) {
-                s = tx.put(b, numeric_key(i), numeric_key(i + iteration * num_writes));
+            EXPECT_OK(tx.create_bucket(BucketOptions(), "bucket", &b));
+            for (std::size_t i = 0; i < num_writes; ++i) {
+                EXPECT_OK(tx.put(b, numeric_key(i), numeric_key(i + version * num_writes)));
             }
-            EXPECT_OK(s);
             m_env.m_should_drop = param.drop_callback;
             m_env.m_drop_file = param.drop_file;
-            s = tx.commit();
+            auto s = tx.commit();
             if (!s.is_ok()) {
                 EXPECT_EQ(kFaultStatus, s);
                 EXPECT_EQ(kFaultStatus, tx.commit());
@@ -711,7 +710,7 @@ public:
         return s;
     }
 
-    auto check_records(std::size_t num_writes, std::size_t iteration)
+    auto check_records(std::size_t num_writes, std::size_t version)
     {
         return m_db->view([=](const auto &tx) {
             Bucket b;
@@ -720,7 +719,7 @@ public:
                 std::string value;
                 s = tx.get(b, numeric_key(i), &value);
                 if (s.is_ok()) {
-                    EXPECT_EQ(value, numeric_key(i + iteration * num_writes));
+                    EXPECT_EQ(value, numeric_key(i + version * num_writes));
                 }
             }
             return s;
