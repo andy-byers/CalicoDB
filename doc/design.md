@@ -184,16 +184,18 @@ This tree, the schema tree, is created when the database itself is created, and 
 It stores the name and root page ID of every other tree, as well as other per-tree attributes.
 
 ### WAL
+The WAL is based off of SQLite's WAL design.
 
 #### WAL file
 As described in [Architecture](#architecture), a database named `~/cats` will store its WAL in a file named `~/cats-wal`.
-This file, hereafter called the WAL file, is opened the first time a transaction is started on the database.
+This file, hereafter called the WAL file, is opened when the first connection is made to `~/cats` (a connection is just an open `DB *` in some executing program).
 The WAL file consists of a fixed-length header, followed by 0 or more WAL frames.
 Each WAL frame contains a single database page, along with some metadata.
+The WAL file is removed from disk when the last connection closes.
 
 Most writes to the WAL are sequential, the exception being when a page is written out more than once within a transaction.
 In that case, the most-recent version of the page will be overwritten.
-This lets the number of frames added to the WAL be proportional to the number of pages modified during a given transaction.
+This prevents long-running transactions from causing the WAL to grow very large.
 
 #### shm file
 Since the database file is never written during a transaction, its contents quickly become stale.

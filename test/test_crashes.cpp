@@ -167,19 +167,19 @@ public:
     }
 };
 
-class TestCrashes : public testing::Test
+class CrashTests : public testing::Test
 {
 protected:
     const std::string m_filename;
     CrashEnv *m_env;
 
-    explicit TestCrashes()
+    explicit CrashTests()
         : m_filename(testing::TempDir() + "calicodb_crashes"),
           m_env(new CrashEnv(Env::default_env()))
     {
     }
 
-    ~TestCrashes() override
+    ~CrashTests() override
     {
         delete m_env;
     }
@@ -337,7 +337,7 @@ protected:
         };
         std::size_t src_counters[kNumSrcLocations] = {};
 
-        std::cout << "TestCrashes::Operations({\n  .inject_faults = " << std::boolalpha << param.inject_faults
+        std::cout << "CrashTests::Operations({\n  .inject_faults = " << std::boolalpha << param.inject_faults
                   << ",\n  .test_checkpoint = " << param.test_checkpoint << ",\n})\n\n";
 
         Options options;
@@ -527,7 +527,7 @@ protected:
     }
 };
 
-TEST_F(TestCrashes, Operations)
+TEST_F(CrashTests, Operations)
 {
     // Sanity check. No faults.
     run_operations_test({false, false});
@@ -540,7 +540,7 @@ TEST_F(TestCrashes, Operations)
     run_operations_test({true, true, true});
 }
 
-TEST_F(TestCrashes, OpenClose)
+TEST_F(CrashTests, OpenClose)
 {
     // Sanity check. No faults.
     run_open_close_test({false, 1});
@@ -553,7 +553,7 @@ TEST_F(TestCrashes, OpenClose)
     run_open_close_test({true, 3});
 }
 
-TEST_F(TestCrashes, CursorModificationFaults)
+TEST_F(CrashTests, CursorModificationFaults)
 {
     // Sanity check. No faults.
     run_cursor_mod_test({false, false});
@@ -640,20 +640,20 @@ public:
 
 #undef MAYBE_CRASH
 
-class TestDroppedWrites : public testing::Test
+class DataLossTests : public testing::Test
 {
 public:
     const std::string m_filename;
     DropEnv m_env;
     DB *m_db = nullptr;
 
-    explicit TestDroppedWrites()
+    explicit DataLossTests()
         : m_filename(testing::TempDir() + "calicodb_dropped_writes"),
           m_env(Env::default_env())
     {
     }
 
-    ~TestDroppedWrites() override
+    ~DataLossTests() override
     {
         delete m_db;
     }
@@ -727,16 +727,19 @@ public:
     }
 
     enum DropType {
-        kDropAll,      // Drop all writes
-        kDropRandom,   // Drop 25% of writes at random
-        kDropOdd,      // Drop every other write
-        kDropFirstFew, // Drop the first few writes
+        kDropAll,           // Drop all writes
+        kDropRandom,        // Drop 25% of writes at random
+        kDropOdd,           // Drop every other write
+        kDropOnlyFirstFew,  // Drop only the first few writes
+        kDropAfterFirstFew, // Drop all but the first few writes
+        kDropTypeCount
     };
     std::default_random_engine m_drop_rng;
     std::size_t m_drop_counter = 0;
 
     auto create_drop_param(std::string filename, DropType type)
     {
+        static constexpr std::size_t kFirstFew = 4;
         m_drop_counter = 0;
 
         DropParameters drop_param;
@@ -753,9 +756,14 @@ public:
                     return m_drop_counter++ & 1;
                 };
                 break;
-            case kDropFirstFew:
+            case kDropOnlyFirstFew:
                 drop_param.drop_callback = [this] {
-                    return m_drop_counter++ < 4;
+                    return m_drop_counter++ < kFirstFew;
+                };
+                break;
+            case kDropAfterFirstFew:
+                drop_param.drop_callback = [this] {
+                    return kFirstFew <= m_drop_counter++;
                 };
                 break;
             case kDropAll:
@@ -824,32 +832,26 @@ public:
         std::cout << "dropped " << m_env.m_dropped_bytes << " bytes\n";
         m_env.m_dropped_bytes = 0;
     }
+
+    auto run_test(void (DataLossTests::*cb)(DropType, bool))
+    {
+        for (DropType drop_type = kDropAll;
+             drop_type < kDropTypeCount;
+             drop_type = static_cast<DropType>(drop_type + 1)) {
+            (this->*cb)(drop_type, false);
+            (this->*cb)(drop_type, true);
+        }
+    }
 };
 
-TEST_F(TestDroppedWrites, Transactions)
+TEST_F(DataLossTests, Transactions)
 {
-    run_transaction_test(kDropAll, false);
-    run_transaction_test(kDropOdd, false);
-    run_transaction_test(kDropRandom, false);
-    run_transaction_test(kDropFirstFew, false);
-
-    run_transaction_test(kDropAll, true);
-    run_transaction_test(kDropOdd, true);
-    run_transaction_test(kDropRandom, true);
-    run_transaction_test(kDropFirstFew, true);
+    run_test(&DataLossTests::run_transaction_test);
 }
 
-TEST_F(TestDroppedWrites, Checkpoints)
+TEST_F(DataLossTests, Checkpoints)
 {
-    run_checkpoint_test(kDropAll, false);
-    run_checkpoint_test(kDropOdd, false);
-    run_checkpoint_test(kDropRandom, false);
-    run_checkpoint_test(kDropFirstFew, false);
-
-    run_checkpoint_test(kDropAll, true);
-    run_checkpoint_test(kDropOdd, true);
-    run_checkpoint_test(kDropRandom, true);
-    run_checkpoint_test(kDropFirstFew, true);
+    run_test(&DataLossTests::run_checkpoint_test);
 }
 
 } // namespace calicodb::test

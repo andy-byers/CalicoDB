@@ -12,4 +12,5 @@ function(build_fuzzer NAME)
 endfunction()
 
 build_fuzzer(db_bucket)
+build_fuzzer(db_format)
 build_fuzzer(db_model)
