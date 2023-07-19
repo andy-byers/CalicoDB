@@ -72,8 +72,6 @@ public:
 
     auto acquire(Id page_id, Node &node_out, bool write = false) const -> Status
     {
-        CALICODB_EXPECT_FALSE(PointerMap::is_map(page_id));
-
         PageRef *ref;
         auto s = m_pager->acquire(page_id, ref);
         if (s.is_ok()) {
