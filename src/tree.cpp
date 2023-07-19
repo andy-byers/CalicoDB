@@ -496,7 +496,10 @@ auto Tree::corrupted_page(Id page_id) const -> Status
     append_fmt_string(msg, "corruption detected (root=%u, page=%u)",
                       root().value, page_id.value);
     auto s = Status::corruption(msg);
-    m_pager->set_status(s);
+    if (m_pager->mode() >= Pager::kWrite) {
+        // Pager status should never be set unless a rollback is needed.
+        m_pager->set_status(s);
+    }
     return s;
 }
 

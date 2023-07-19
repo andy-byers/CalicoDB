@@ -72,13 +72,11 @@ public:
 
     auto acquire(Id page_id, Node &node_out, bool write = false) const -> Status
     {
-        CALICODB_EXPECT_FALSE(PointerMap::is_map(page_id));
-
         PageRef *ref;
         auto s = m_pager->acquire(page_id, ref);
         if (s.is_ok()) {
             if (Node::from_existing_page(*ref, node_out)) {
-                m_pager->release(ref);
+                m_pager->release(node_out.ref);
                 return corrupted_page(page_id);
             }
             if (write) {

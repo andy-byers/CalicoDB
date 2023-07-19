@@ -1,8 +1,9 @@
 cmake_minimum_required(VERSION 3.14)
+set(CMAKE_TRY_COMPILE_TARGET_TYPE "STATIC_LIBRARY")
 
 project(calicodb
         LANGUAGES CXX
-        VERSION 0.1.0)
+        VERSION 0.1.1)
 set(CMAKE_CXX_STANDARD 17)
 
 set(MAIN_PROJECT Off)

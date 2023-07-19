@@ -1214,7 +1214,7 @@ auto WalImpl::encode_frame(const WalFrameHdr &hdr, const char *page, char *out) 
 auto WalImpl::decode_frame(const char *frame, WalFrameHdr &out) -> bool
 {
     static constexpr std::size_t kDataFields = sizeof(U32) * 2;
-    if (std::memcmp(m_hdr.salt, &frame[kDataFields], 8) != 0) {
+    if (0 != std::memcmp(m_hdr.salt, &frame[kDataFields], 8)) {
         return false;
     }
     const auto pgno = get_u32(&frame[0]);
@@ -1507,21 +1507,18 @@ auto WalImpl::transfer_contents(bool reset) -> Status
                 }
             }
             if (s.is_ok()) {
-                ATOMIC_STORE(&info->backfill, max_safe_frame);
+                if (max_safe_frame == m_hdr.max_frame) {
+                    s = m_env->resize_file(m_db_name, m_hdr.page_count * kPageSize);
+                    if (s.is_ok() && sync_on_ckpt) {
+                        ++m_stat->counters[Stat::kSyncDB];
+                        s = m_db->sync();
+                    }
+                }
+                if (s.is_ok()) {
+                    ATOMIC_STORE(&info->backfill, max_safe_frame);
+                }
             }
             unlock_exclusive(READ_LOCK(0), 1);
-        }
-
-        if (!s.is_ok()) {
-            return s;
-        }
-
-        if (max_safe_frame == m_hdr.max_frame) {
-            s = m_env->resize_file(m_db_name, m_hdr.page_count * kPageSize);
-            if (s.is_ok() && sync_on_ckpt) {
-                ++m_stat->counters[Stat::kSyncDB];
-                s = m_db->sync();
-            }
         }
     }
     if (s.is_ok() && reset) {

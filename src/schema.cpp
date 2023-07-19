@@ -106,7 +106,9 @@ auto Schema::corrupted_root_id(const Slice &name, const Slice &value) -> Status
     std::string message("root entry for bucket \"" + name.to_string() + "\" is corrupted: ");
     message.append(escape_string(value));
     auto s = Status::corruption(message);
-    m_pager->set_status(s);
+    if (m_pager->mode() > Pager::kRead) {
+        m_pager->set_status(s);
+    }
     return s;
 }
 

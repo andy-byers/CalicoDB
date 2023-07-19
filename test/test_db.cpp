@@ -623,6 +623,48 @@ TEST_F(DBTests, RollbackUpdate)
     } while (change_options(true));
 }
 
+TEST_F(DBTests, ScanWholeDatabase)
+{
+    static constexpr std::size_t kNumBuckets = 32;
+    static constexpr std::size_t kRecordsPerBucket = 100;
+
+    ASSERT_OK(m_db->update([](auto &tx) {
+        Bucket b;
+        for (std::size_t i = 0; i < kNumBuckets; ++i) {
+            EXPECT_OK(put_range(tx, BucketOptions(), numeric_key(i), 0, kRecordsPerBucket));
+        }
+        return Status::ok();
+    }));
+
+    ASSERT_OK(m_db->view([](const auto &tx) {
+        auto &schema = tx.schema();
+        schema.seek_first();
+        for (std::size_t i = 0; i < kNumBuckets; ++i) {
+            EXPECT_TRUE(schema.is_valid());
+            Bucket b;
+            EXPECT_EQ(schema.key(), numeric_key(i));
+            EXPECT_OK(tx.open_bucket(schema.key(), b));
+            auto *c = tx.new_cursor(b);
+            c->seek_first();
+            for (std::size_t j = 0; j < kRecordsPerBucket; ++j) {
+                const auto [k, v] = make_kv(j);
+                EXPECT_TRUE(c->is_valid());
+                EXPECT_EQ(c->key(), k);
+                EXPECT_EQ(c->value(), v);
+                c->next();
+            }
+            EXPECT_FALSE(c->is_valid());
+            EXPECT_OK(c->status());
+            delete c;
+
+            schema.next();
+        }
+        EXPECT_FALSE(schema.is_valid());
+        EXPECT_OK(schema.status());
+        return Status::ok();
+    }));
+}
+
 TEST_F(DBTests, VacuumEmptyDB)
 {
     do {

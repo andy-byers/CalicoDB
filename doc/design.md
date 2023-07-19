@@ -53,7 +53,7 @@ Internal nodes are used to direct searches to the correct external node.
 They contain only keys, called pivot keys in this document.
 CalicoDB uses the suffix truncation described in [2] to reduce pivot key lengths (see [Rebalancing](#rebalancing)).
 
-All nodes use a type of "slotted pages" layout that consists of 5 regions:
+All nodes use a type of "slotted pages" layout that consists of the following 5 regions:
 1. Header(s)
 2. Indirection vector
 3. Gap space
@@ -61,18 +61,19 @@ All nodes use a type of "slotted pages" layout that consists of 5 regions:
 5. Free blocks and fragments
 
 The headers are always stored at the start of the page.
-If the node is located on the first database page (it is the root node of the schema tree), there will also be a file header at offset 0, after which the node header is placed.
+If the node is located on the first database page (it is the root node of the schema tree), there will be a file header at offset 0, after which the node header is placed.
 The indirection vector is located right after the header(s).
 Its purpose is to keep track of the offset of every cell on the page, sorted by key.
 Each time a cell is added to or removed from the node, the indirection vector is updated.
 Indirection vector values are contiguous and fixed-length, making binary search simple and quick.
 For an empty node (the indirection vector has 0 length), the gap space will occupy everything from after the headers to the end of the page.
-When the first cell is added, the indirection vector grows by the size of a cell pointer, and the cell itself is written at the end of the gap space.
+When the first cell is added, the indirection vector grows by the size of a cell pointer, and the cell itself is written at the end of the gap space (flush with the end of the page).
 Like the first cell, additional cells are written at the end of the gap space, shrinking the gap space and growing the cell content area and indirection vector.
 When the node can no longer fit another cell, it overflows, and the tree must be rebalanced to make room.
 Also, nodes (besides the root when the tree is empty) are not allowed to become empty.
 If a node becomes empty, it is considered to be "underflowing".
 Rebalancing is required to restore the tree invariants.
+
 A free block is created each time a cell is erased from a node.
 Free blocks are maintained as an intrusive list and threaded through the node.
 Each free block must store its own size, as well as the offset of the next free block (or 0 if there is not another free block).
@@ -81,7 +82,7 @@ If less than 4 bytes are released back to the node, there will not be enough roo
 In this case, the memory region becomes a fragment.
 The total size of all fragments on a page is kept in the node header.
 When a free blocks is created, an attempt is made to merge it with an adjacent free block, consuming intervening fragments if possible.
-Note that fragments are only created when only part of a free block is used to fulfill an allocation, and less than 4 bytes were left over.
+Note that fragments are only created when only part of a free block is used to fulfill an allocation, and less than 4 bytes are left over.
 Cell headers are padded to 4 bytes, so the smallest possible cell will become a free block.
 
 #### Rebalancing
@@ -160,10 +161,6 @@ Freelist leaf pages contain no pertinent information.
 They are not written to the WAL, nor are they stored in the pager cache.
 
 ### Pointer map
-Each cell that is moved between internal tree nodes must have its child's parent pointer updated.
-If parent pointers are embedded in the nodes, splits and merges become very expensive, since each cell that is transferred requires the child page to be updated.
-In addition to allowing the vacuum operation, pointer maps make splits and merges much more efficient by consolidating many parent pointers on a single page.
-
 The pointer map is a collection of pointer map entries for every non-pointer map page in the database.
 Each pointer map entry consists of the following fields:
 
@@ -177,6 +174,30 @@ The first pointer map page is always on page 2, that is, the page right after th
 Each pointer map page holds `kPageSize / 5` entries: one for each of the `kPageSize / 5` pages directly following it.
 Every other pointer map page is located on the page following the last page referenced by the previous pointer map page.
 
+Each cell that is moved between internal tree nodes must have its child's parent pointer updated.
+If parent pointers are embedded in the nodes, splits and merges become very expensive, since each cell that is transferred requires the child page to be updated.
+Pointer maps make splits and merges much more efficient by consolidating many parent pointers on a single page.
+
+Pointer maps also help with the vacuum operation.
+When the database is vacuumed, all freelist pages are collected at the end of the file.
+This requires us to be able to swap any other database page with a freelist page.
+Of course, each database page has 1 or more other pages that reference it, so each of these references must be updated to point to the new location.
+Using the pointer map, we can locate any page's "parent" page.
+Parent page types are given in the following table.
+Note that there is no distinction between internal and external nodes here: that information is stored in the page header.
+`kTreeNode` and `kTreeRoot` can be either internal or external, and `kTree*` refers to any tree node.
+
+| Page type        | Parent page type                       |
+|:-----------------|:---------------------------------------|
+| `kTreeNode`      | `kTree*`                               |
+| `kTreeRoot`      | `kEmpty`<sup>1</sup>                   |
+| `kOverflowHead`  | `kTree*`                               |
+| `kOverflowLink`  | `kOverflowHead`                        |
+| `kFreelistTrunk` | `kFreelistTrunk`, `kEmpty`<sup>1</sup> |
+| `kFreelistLeaf`  | `kFreelistTrunk`                       |
+
+<sup>1</sup> `kEmpty` means "no parent".
+
 ### Schema
 The schema is used to keep track of all trees in the database.
 It is represented on disk by the tree rooted on the first database page.
@@ -184,16 +205,18 @@ This tree, the schema tree, is created when the database itself is created, and 
 It stores the name and root page ID of every other tree, as well as other per-tree attributes.
 
 ### WAL
+The WAL is based off of SQLite's WAL design.
 
 #### WAL file
 As described in [Architecture](#architecture), a database named `~/cats` will store its WAL in a file named `~/cats-wal`.
-This file, hereafter called the WAL file, is opened the first time a transaction is started on the database.
+This file, hereafter called the WAL file, is opened when the first connection is made to `~/cats` (a connection is just an open `DB *` in some executing program).
 The WAL file consists of a fixed-length header, followed by 0 or more WAL frames.
 Each WAL frame contains a single database page, along with some metadata.
+The WAL file is removed from disk when the last connection closes.
 
 Most writes to the WAL are sequential, the exception being when a page is written out more than once within a transaction.
 In that case, the most-recent version of the page will be overwritten.
-This lets the number of frames added to the WAL be proportional to the number of pages modified during a given transaction.
+This prevents long-running transactions from causing the WAL to grow very large.
 
 #### shm file
 Since the database file is never written during a transaction, its contents quickly become stale.

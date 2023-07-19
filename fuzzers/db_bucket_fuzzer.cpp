@@ -136,7 +136,7 @@ public:
 extern "C" int LLVMFuzzerTestOneInput(const U8 *data, std::size_t size)
 {
     FuzzerStream stream(data, size);
-    Fuzzer fuzzer("/tmp/calicodb_db_fuzzer");
+    Fuzzer fuzzer("/tmp/calicodb_db_bucket_fuzzer");
     while (fuzzer.fuzz(stream)) {
     }
 
