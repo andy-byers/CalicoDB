@@ -62,6 +62,8 @@ public:
                 }
                 return s;
             });
+
+            delete db;
         }
 
         CHECK_TRUE(
