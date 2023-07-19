@@ -653,8 +653,14 @@ TEST_F(DBTests, ScanWholeDatabase)
                 EXPECT_EQ(c->value(), v);
                 c->next();
             }
+            EXPECT_FALSE(c->is_valid());
+            EXPECT_OK(c->status());
+            delete c;
+
             schema.next();
         }
+        EXPECT_FALSE(schema.is_valid());
+        EXPECT_OK(schema.status());
         return Status::ok();
     }));
 }
