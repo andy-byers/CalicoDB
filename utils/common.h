@@ -44,6 +44,11 @@ public:
         return m_target->write(offset, in);
     }
 
+    auto resize(std::size_t size) -> Status override
+    {
+        return m_target->resize(size);
+    }
+
     auto sync() -> Status override
     {
         return m_target->sync();

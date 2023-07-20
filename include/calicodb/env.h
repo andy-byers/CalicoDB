@@ -37,7 +37,6 @@ public:
     };
     virtual auto new_file(const std::string &filename, OpenMode mode, File *&out) -> Status = 0;
     virtual auto new_logger(const std::string &filename, Logger *&out) -> Status = 0;
-    virtual auto resize_file(const std::string &filename, std::size_t size) -> Status = 0;
     virtual auto file_size(const std::string &filename, std::size_t &out) const -> Status = 0;
     virtual auto remove_file(const std::string &filename) -> Status = 0;
     [[nodiscard]] virtual auto file_exists(const std::string &filename) const -> bool = 0;
@@ -88,6 +87,9 @@ public:
     // Write `in` to the file at the given offset.
     virtual auto write(std::size_t offset, const Slice &in) -> Status = 0;
 
+    // Set the file `size`
+    virtual auto resize(std::size_t size) -> Status = 0;
+
     // Synchronize with the underlying filesystem.
     virtual auto sync() -> Status = 0;
 
@@ -133,7 +135,6 @@ public:
 
     auto new_logger(const std::string &filename, Logger *&out) -> Status override;
     auto new_file(const std::string &filename, OpenMode mode, File *&out) -> Status override;
-    auto resize_file(const std::string &filename, std::size_t size) -> Status override;
     auto file_size(const std::string &filename, std::size_t &out) const -> Status override;
     auto remove_file(const std::string &filename) -> Status override;
     [[nodiscard]] auto file_exists(const std::string &filename) const -> bool override;

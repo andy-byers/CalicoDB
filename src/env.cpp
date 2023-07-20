@@ -64,11 +64,6 @@ auto EnvWrapper::file_exists(const std::string &filename) const -> bool
     return m_target->file_exists(filename);
 }
 
-auto EnvWrapper::resize_file(const std::string &filename, std::size_t size) -> Status
-{
-    return m_target->resize_file(filename, size);
-}
-
 auto EnvWrapper::file_size(const std::string &filename, std::size_t &out) const -> Status
 {
     return m_target->file_size(filename, out);

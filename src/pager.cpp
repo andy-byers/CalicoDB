@@ -70,7 +70,6 @@ auto Pager::open(const Parameters &param, Pager *&out) -> Status
 
     const Wal::Parameters wal_param = {
         param.wal_name,
-        param.db_name,
         param.env,
         param.db_file,
         param.log,

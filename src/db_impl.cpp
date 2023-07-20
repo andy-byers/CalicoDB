@@ -109,11 +109,12 @@ DBImpl::~DBImpl()
 
 auto DBImpl::destroy(const Options &options, const std::string &filename) -> Status
 {
-    // Make sure `filename` refers to a CalicoDB database.
-    DB *db;
     auto copy = options;
     copy.error_if_exists = false;
     copy.create_if_missing = false;
+    copy.lock_mode = Options::kLockExclusive;
+
+    DB *db;
     auto s = DB::open(copy, filename, db);
     if (s.is_ok()) {
         // The file header is not checked until a transaction is started. Run a read
@@ -122,38 +123,26 @@ auto DBImpl::destroy(const Options &options, const std::string &filename) -> Sta
         s = db->view([](auto &) {
             return Status::ok();
         });
-        delete db;
-    }
-
-    // Remove the database files from the Env.
-    if (s.is_ok()) {
-        auto *env = options.env;
-        if (env == nullptr) {
-            env = &Env::default_env();
-        }
-        s = env->remove_file(filename);
         if (s.is_ok()) {
-            log(options.info_log, R"(destroyed database file "%s")", filename.c_str());
-        }
+            auto *env = options.env;
+            if (env == nullptr) {
+                env = &Env::default_env();
+            }
+            // Remove the database file from disk. The WAL file should be cleaned up
+            // automatically.
+            s = env->remove_file(filename);
 
-        // Destroy the WAL file, if it exists. If the DB was closed properly above, then neither
-        // the WAL nor shm files should exist. This is to handle cases where that didn't happen.
-        const auto wal_name = options.wal_filename.empty()
-                                  ? filename + kDefaultWalSuffix
-                                  : options.wal_filename;
-        if (env->file_exists(wal_name)) {
-            const auto t = env->remove_file(wal_name);
+            // This DB doesn't use a shm file, since it was opened in exclusive locking
+            // mode. shm files left by other connections must be removed manually.
+            auto t = env->remove_file(filename + kDefaultShmSuffix);
             if (t.is_ok()) {
-                log(options.info_log, R"(destroyed WAL file "%s")", wal_name.c_str());
+                log(options.info_log, R"(removed leftover shm file "%s%s")",
+                    filename.c_str(), kDefaultShmSuffix);
+            } else if (s.is_ok() && !t.is_not_found()) {
+                s = t;
             }
         }
-        const auto shm_name = filename + kDefaultShmSuffix;
-        if (env->file_exists(shm_name)) {
-            const auto t = env->remove_file(shm_name);
-            if (t.is_ok()) {
-                log(options.info_log, R"(destroyed shm file "%s")", shm_name.c_str());
-            }
-        }
+        delete db;
     }
     return s;
 }

@@ -196,7 +196,6 @@ static constexpr std::size_t kOpenCloseTimeout = 100;
         }
         return fd;
     }
-    errno = EINTR;
     return -1;
 }
 [[nodiscard]] static auto posix_close(int fd) -> int
@@ -208,7 +207,6 @@ static constexpr std::size_t kOpenCloseTimeout = 100;
         }
         return rc;
     }
-    errno = EINTR;
     return -1;
 }
 
@@ -261,10 +259,10 @@ static constexpr std::size_t kOpenCloseTimeout = 100;
     return posix_write(file, in);
 }
 
-[[nodiscard]] static auto posix_truncate(const std::string &filename, std::size_t size) -> int
+[[nodiscard]] static auto posix_truncate(int fd, std::size_t size) -> int
 {
     for (;;) {
-        const auto rc = truncate(filename.c_str(), static_cast<off_t>(size));
+        const auto rc = ftruncate(fd, static_cast<off_t>(size));
         if (rc && errno == EINTR) {
             continue;
         }
@@ -295,6 +293,7 @@ public:
 
     auto read(std::size_t offset, std::size_t size, char *scratch, Slice *out) -> Status override;
     auto write(std::size_t offset, const Slice &in) -> Status override;
+    auto resize(std::size_t size) -> Status override;
     auto sync() -> Status override;
     auto file_lock(FileLockMode mode) -> Status override;
     auto file_unlock() -> void override;
@@ -558,14 +557,6 @@ PosixEnv::PosixEnv()
     seed_prng_state(m_rng, static_cast<U32>(time(nullptr)));
 }
 
-auto PosixEnv::resize_file(const std::string &filename, std::size_t size) -> Status
-{
-    if (posix_truncate(filename, size)) {
-        return posix_error(errno);
-    }
-    return Status::ok();
-}
-
 auto PosixEnv::remove_file(const std::string &filename) -> Status
 {
     if (unlink(filename.c_str())) {
@@ -699,6 +690,14 @@ auto PosixFile::read(std::size_t offset, std::size_t size, char *scratch, Slice 
 auto PosixFile::write(std::size_t offset, const Slice &in) -> Status
 {
     if (seek_and_write(file, offset, in)) {
+        return posix_error(errno);
+    }
+    return Status::ok();
+}
+
+auto PosixFile::resize(std::size_t size) -> Status
+{
+    if (posix_truncate(file, size)) {
         return posix_error(errno);
     }
     return Status::ok();
@@ -920,7 +919,7 @@ auto ShmNode::take_dms_lock() -> int
         // The DMS byte is unlocked, meaning this must be the first connection.
         rc = posix_shm_lock(*this, F_WRLCK, kShmDMS, 1);
         if (rc == 0) {
-            rc = posix_truncate(filename, 0);
+            rc = posix_truncate(file, 0);
         }
     } else if (lock.l_type == F_WRLCK) {
         // A different connection was the first connection, and is in the

@@ -341,6 +341,13 @@ protected:
 
     auto SetUp() -> void override
     {
+        reset();
+    }
+
+    auto reset() -> void
+    {
+        delete m_logger;
+        m_logger = nullptr;
         std::filesystem::remove_all(m_log_filename);
         ASSERT_OK(Env::default_env().new_logger(m_log_filename, m_logger));
     }
@@ -373,7 +380,7 @@ TEST_F(LoggerTests, HandlesMessages)
 {
     std::string msg;
     for (std::size_t n = 0; n < 512; ++n) {
-        ASSERT_OK(Env::default_env().resize_file(m_log_filename, 0));
+        reset();
 
         msg.resize(n, '$');
         log(m_logger, "%s", msg.c_str());
@@ -387,7 +394,7 @@ TEST_F(LoggerTests, HandlesLongMessages)
 {
     std::string msg;
     for (std::size_t n = 1'000; n < 10'000; n *= 10) {
-        ASSERT_OK(Env::default_env().resize_file(m_log_filename, 0));
+        reset();
 
         msg.resize(n, '$');
         log(m_logger, "%s", msg.c_str());
@@ -1042,7 +1049,6 @@ TEST(EnvWrappers, WrapperEnvWorksAsExpected)
     ASSERT_OK(w_env.new_file("file", Env::kCreate, file));
     ASSERT_OK(w_env.new_logger("sink", sink));
     ASSERT_TRUE(w_env.file_exists("file"));
-    ASSERT_OK(w_env.resize_file("file", 0));
     volatile void *ptr;
     delete file;
     std::size_t size;
@@ -1089,7 +1095,7 @@ TEST(TempEnv, TempEnv)
     EXPECT_OK(file->read(0, kPageSize, out_page.data(), &read));
     EXPECT_EQ(read, in_page);
 
-    EXPECT_OK(env->resize_file("temp", 0));
+    EXPECT_OK(file->resize(0));
     EXPECT_OK(file->read(0, kPageSize, out_page.data(), &read));
     EXPECT_TRUE(read.is_empty());
 

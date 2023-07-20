@@ -29,8 +29,8 @@ public:
         // Write the fuzzer input to a file.
         File *file;
         CHECK_OK(Env::default_env().new_file(m_filename, Env::kCreate, file));
+        CHECK_OK(file->resize(data.size()));
         CHECK_OK(file->write(0, data));
-        CHECK_OK(Env::default_env().resize_file(m_filename, data.size()));
         delete file;
 
         // Attempt to open the file as a database.

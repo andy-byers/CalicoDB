@@ -112,8 +112,8 @@ protected:
 
     explicit DBTests()
         : m_test_dir(testing::TempDir()),
-          m_db_name(m_test_dir + "db"),
-          m_alt_wal_name(m_test_dir + "wal"),
+          m_db_name(m_test_dir + "calicodb_test_db"),
+          m_alt_wal_name(m_db_name + "_alternate_wal"),
           m_env(new CallbackEnv(Env::default_env()))
     {
         (void)DB::destroy(Options(), m_db_name);
@@ -900,6 +900,32 @@ TEST(OldWalTests, HandlesOldWalFile)
     delete db;
 }
 
+TEST(DestructionTests, DestructionBehavior)
+{
+    const auto db_name = testing::TempDir() + "calicodb_test_db";
+    const auto wal_name = db_name + kDefaultWalSuffix;
+    const auto shm_name = db_name + kDefaultShmSuffix;
+    (void)Env::default_env().remove_file(db_name);
+    (void)Env::default_env().remove_file(wal_name);
+    (void)Env::default_env().remove_file(shm_name);
+
+    DB *db;
+    ASSERT_OK(DB::open(Options(), db_name, db));
+    ASSERT_TRUE(Env::default_env().file_exists(db_name));
+    ASSERT_TRUE(Env::default_env().file_exists(wal_name));
+    ASSERT_TRUE(Env::default_env().file_exists(shm_name));
+
+    delete db;
+    ASSERT_TRUE(Env::default_env().file_exists(db_name));
+    ASSERT_FALSE(Env::default_env().file_exists(wal_name));
+    ASSERT_FALSE(Env::default_env().file_exists(shm_name));
+
+    ASSERT_OK(DB::destroy(Options(), db_name));
+    ASSERT_FALSE(Env::default_env().file_exists(db_name));
+    ASSERT_FALSE(Env::default_env().file_exists(wal_name));
+    ASSERT_FALSE(Env::default_env().file_exists(shm_name));
+}
+
 TEST(DestructionTests, OnlyDeletesCalicoDatabases)
 {
     (void)Env::default_env().remove_file("./testdb");
@@ -917,16 +943,8 @@ TEST(DestructionTests, OnlyDeletesCalicoDatabases)
 
     // Identifier is incorrect.
     ASSERT_OK(file->write(0, "CalicoDB format 0"));
-    ASSERT_NOK(DB::destroy(Options(), "./testdb"));
-
-    ASSERT_OK(Env::default_env().remove_file("./testdb"));
-
-    DB *db;
-    ASSERT_OK(DB::open(Options(), "./testdb", db));
-    ASSERT_OK(DB::destroy(Options(), "./testdb"));
-
-    delete db;
     delete file;
+    ASSERT_NOK(DB::destroy(Options(), "./testdb"));
 }
 
 TEST(DestructionTests, OnlyDeletesCalicoWals)
@@ -959,12 +977,16 @@ TEST(DestructionTests, DeletesWalAndShm)
     options.env = new FakeEnv;
 
     DB *db;
-    // Create the DB file.
     ASSERT_OK(DB::open(options, "./test", db));
     delete db;
 
+    ASSERT_TRUE(options.env->file_exists("./test"));
+    ASSERT_FALSE(options.env->file_exists("./test-wal"));
+    ASSERT_FALSE(options.env->file_exists("./test-shm"));
+
     File *file;
-    // Create fake WAL and shm files.
+    // The DB closed successfully, so the WAL and shm files were deleted. Pretend
+    // that didn't happen.
     ASSERT_OK(options.env->new_file("./test-wal", Env::kCreate, file));
     delete file;
     ASSERT_OK(options.env->new_file("./test-shm", Env::kCreate, file));
