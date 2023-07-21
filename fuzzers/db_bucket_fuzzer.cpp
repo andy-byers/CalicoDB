@@ -6,6 +6,7 @@
 #include "calicodb/db.h"
 #include "calicodb/env.h"
 #include "fuzzer.h"
+#include "tree.h"
 #include <memory>
 
 namespace calicodb
@@ -37,6 +38,11 @@ public:
     ~Fuzzer()
     {
         delete m_db;
+    }
+
+    static auto check_bucket(const Bucket &b) -> void
+    {
+        static_cast<const Tree *>(b.state)->TEST_validate();
     }
 
     auto fuzz(FuzzerStream &stream) -> bool
@@ -125,6 +131,11 @@ public:
                 }
                 CHECK_OK(s);
                 CHECK_OK(tx.status());
+            }
+            for (std::size_t i = 0; i < kMaxBuckets; ++i) {
+                if (cursors[i] != nullptr) {
+                    check_bucket(buckets[i]);
+                }
             }
             return Status::ok();
         });

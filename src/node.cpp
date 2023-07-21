@@ -456,71 +456,87 @@ auto Node::defrag(char *scratch) -> int
     return 0;
 }
 
-auto Node::assert_state() const -> bool
+auto Node::validate(char *scratch) const -> int
 {
-    bool used[kPageSize] = {};
-    const auto account = [&used](auto from, auto size) {
-        auto lower = used + long(from);
-        auto upper = used + long(from) + long(size);
-        CALICODB_EXPECT_TRUE(!std::any_of(lower, upper, [](auto u) {
-            return u;
-        }));
+    const auto account = [&scratch](auto from, auto size) {
+        auto lower = scratch + long(from);
+        auto upper = scratch + long(from) + long(size);
+        if (std::any_of(lower, upper, [](auto u) { return u; })) {
+            return -1;
+        }
         std::fill(lower, upper, true);
+        return 0;
     };
+    std::memset(scratch, 0, kPageSize);
+
     // Header(s) and cell pointers.
-    account(0, cell_area_offset(*this));
+    if (account(0, cell_area_offset(*this))) {
+        return -1;
+    }
     // Make sure the header fields are not obviously wrong.
-    CALICODB_EXPECT_TRUE(NodeHdr::get_frag_count(hdr()) < static_cast<U8>(-1) * 2);
-    CALICODB_EXPECT_TRUE(NodeHdr::get_cell_count(hdr()) < static_cast<U16>(-1));
-    CALICODB_EXPECT_TRUE(NodeHdr::get_free_start(hdr()) < static_cast<U16>(-1));
+    if (Node::kMaxFragCount < NodeHdr::get_frag_count(hdr()) ||
+        kPageSize / 2 < NodeHdr::get_cell_count(hdr()) ||
+        kPageSize < NodeHdr::get_free_start(hdr())) {
+        return -1;
+    }
 
     // Gap space.
-    account(cell_area_offset(*this), gap_size);
+    if (account(cell_area_offset(*this), gap_size)) {
+        return -1;
+    }
 
     // Free list blocks.
     std::vector<U32> offsets;
     auto i = NodeHdr::get_free_start(hdr());
     const char *data = ref->page;
     while (i) {
-        const auto size = get_u16(data + i + kSlotWidth);
-        account(i, size);
+        if (account(i, get_u16(data + i + kSlotWidth))) {
+            return -1;
+        }
         offsets.emplace_back(i);
         i = get_u16(data + i);
     }
     const auto offsets_copy = offsets;
     std::sort(begin(offsets), end(offsets));
-    CALICODB_EXPECT_EQ(offsets, offsets_copy);
+    if (offsets != offsets_copy) {
+        return -1;
+    }
 
     // Cell bodies. Also makes sure the cells are in order where possible.
     for (i = 0; i < NodeHdr::get_cell_count(hdr()); ++i) {
-        Cell lhs_cell = {};
-        CALICODB_EXPECT_EQ(0, read(i, lhs_cell));
-        CALICODB_EXPECT_TRUE(lhs_cell.footprint >= kMinCellHeaderSize);
-        account(get_ivec_slot(*this, i), lhs_cell.footprint);
+        Cell left_cell;
+        if (U32 ivec_slot; read(i, left_cell) ||
+                           kPageSize <= (ivec_slot = get_ivec_slot(*this, i)) ||
+                           account(ivec_slot, left_cell.footprint)) {
+            return -1;
+        }
 
         if (i + 1 < NodeHdr::get_cell_count(hdr())) {
-            Cell rhs_cell = {};
-            CALICODB_EXPECT_EQ(0, read(i + 1, rhs_cell));
-            const Slice lhs_key(lhs_cell.key, std::min(lhs_cell.key_size, lhs_cell.local_pl_size));
-            const Slice rhs_key(rhs_cell.key, std::min(rhs_cell.key_size, rhs_cell.local_pl_size));
-            CALICODB_EXPECT_LE(lhs_key, rhs_key);
-            if (lhs_key == rhs_key) {
-                const auto lhs_has_ovfl = lhs_cell.key_size > lhs_cell.local_pl_size;
-                const auto rhs_has_ovfl = rhs_cell.key_size > rhs_cell.local_pl_size;
-                // If the keys appear to be equal, then there must be some part of rhs_key on
-                // an overflow page that causes it to ultimately compare greater than lhs_key.
-                CALICODB_EXPECT_TRUE(lhs_has_ovfl || (lhs_has_ovfl && rhs_has_ovfl));
+            Cell right_cell;
+            if (read(i + 1, right_cell)) {
+                return -1;
+            }
+            const Slice left_local(left_cell.key, std::min(left_cell.key_size, left_cell.local_pl_size));
+            const Slice right_local(right_cell.key, std::min(right_cell.key_size, right_cell.local_pl_size));
+            const auto right_has_ovfl = right_cell.key_size > right_cell.local_pl_size;
+            if (right_local < left_local || (left_local == right_local && !right_has_ovfl)) {
+                return -1;
             }
         }
     }
 
     // Every byte should be accounted for, except for fragments.
-    U32 total_bytes = NodeHdr::get_frag_count(hdr());
-    for (auto c : used) {
-        total_bytes += c != '\x00';
+    auto total_bytes = NodeHdr::get_frag_count(hdr());
+    for (i = 0; i < kPageSize; ++i) {
+        total_bytes += scratch[i] != '\x00';
     }
-    CALICODB_EXPECT_EQ(kPageSize, total_bytes);
-    (void)total_bytes;
+    return -(total_bytes != kPageSize);
+}
+
+auto Node::assert_state() const -> bool
+{
+    char scratch[kPageSize];
+    CALICODB_EXPECT_EQ(0, validate(scratch));
     return true;
 }
 

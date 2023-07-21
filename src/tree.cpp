@@ -239,7 +239,7 @@ public:
             if (NodeHdr::get_next_id(m_node.hdr()).is_null()) {
                 Cell boundary;
                 if (m_node.read(0, boundary)) {
-                    m_status = m_tree->corrupted_page(m_node.ref->page_id);
+                    m_status = m_tree->corrupted_node(m_node.ref->page_id);
                     return false;
                 }
                 const auto cmp_length = std::min(
@@ -310,7 +310,7 @@ class UserCursor : public Cursor
 
         Cell cell;
         if (m_c.m_node.read(m_c.m_idx, cell)) {
-            return m_c.m_tree->corrupted_page(m_c.page_id());
+            return m_c.m_tree->corrupted_node(m_c.page_id());
         }
         auto s = m_c.m_tree->read_key(cell, m_key_buffer, &m_key);
         if (s.is_ok()) {
@@ -490,12 +490,34 @@ public:
 
 static constexpr U32 kCellPtrSize = sizeof(U16);
 
-auto Tree::corrupted_page(Id page_id) const -> Status
+[[nodiscard]] static auto corrupted_page(Id page_id, PointerMap::Type page_type = PointerMap::kEmpty) -> Status
 {
-    std::string msg;
-    append_fmt_string(msg, "corruption detected (root=%u, page=%u)",
-                      root().value, page_id.value);
-    auto s = Status::corruption(msg);
+    const char *type_name;
+    switch (page_type) {
+        case PointerMap::kTreeNode:
+        case PointerMap::kTreeRoot:
+            type_name = "tree node";
+            break;
+        case PointerMap::kOverflowHead:
+        case PointerMap::kOverflowLink:
+            type_name = "overflow page";
+            break;
+        case PointerMap::kFreelistTrunk:
+        case PointerMap::kFreelistLeaf:
+            type_name = "freelist page";
+            break;
+        default:
+            type_name = "page";
+    }
+    std::string message;
+    append_fmt_string(message, "corruption detected on %s with ID %u",
+                      type_name, page_id.value);
+    return Status::corruption(message);
+}
+
+auto Tree::corrupted_node(Id page_id) const -> Status
+{
+    auto s = corrupted_page(page_id, PointerMap::kTreeNode);
     if (m_pager->mode() >= Pager::kWrite) {
         // Pager status should never be set unless a rollback is needed.
         m_pager->set_status(s);
@@ -611,6 +633,12 @@ struct PayloadManager {
         if (length) {
             auto pgno = read_overflow_id(cell);
             while (!pgno.is_null()) {
+                if (pgno.as_index() >= pager.page_count()) {
+                    // Page ID is past the end of the file. Also note that if pgno.is_null(), pager.acquire()
+                    // will return a Status::corruption() (this happens if the end of the chain is reached
+                    // before `length` reaches 0).
+                    return corrupted_page(pgno, PointerMap::kOverflowLink);
+                }
                 PageRef *ovfl;
                 s = pager.acquire(pgno, ovfl);
                 if (!s.is_ok()) {
@@ -673,7 +701,7 @@ auto Tree::read_key(Node &node, U32 index, std::string &scratch, Slice *key_out,
 {
     Cell cell;
     if (node.read(index, cell)) {
-        return corrupted_page(node.ref->page_id);
+        return corrupted_node(node.ref->page_id);
     }
     return read_key(cell, scratch, key_out, limit);
 }
@@ -696,7 +724,7 @@ auto Tree::read_value(Node &node, U32 index, std::string &scratch, Slice *value_
 {
     Cell cell;
     if (node.read(index, cell)) {
-        return corrupted_page(node.ref->page_id);
+        return corrupted_node(node.ref->page_id);
     }
     return read_value(cell, scratch, value_out);
 }
@@ -717,7 +745,7 @@ auto Tree::write_key(Node &node, U32 index, const Slice &key) -> Status
 {
     Cell cell;
     if (node.read(index, cell)) {
-        return corrupted_page(node.ref->page_id);
+        return corrupted_node(node.ref->page_id);
     }
     return PayloadManager::access(*m_pager, cell, 0,
                                   static_cast<U32>(key.size()),
@@ -728,7 +756,7 @@ auto Tree::write_value(Node &node, U32 index, const Slice &value) -> Status
 {
     Cell cell;
     if (node.read(index, cell)) {
-        return corrupted_page(node.ref->page_id);
+        return corrupted_node(node.ref->page_id);
     }
     return PayloadManager::access(*m_pager, cell, cell.key_size,
                                   static_cast<U32>(value.size()),
@@ -864,7 +892,7 @@ auto Tree::post_pivot(Node &parent, U32 idx, Cell &pivot, Id child_id) -> Status
         m_ovfl = {pivot, parent.ref->page_id, idx};
         write_child_id(pivot, child_id);
     } else {
-        return corrupted_page(parent.ref->page_id);
+        return corrupted_node(parent.ref->page_id);
     }
     auto s = fix_parent_id(
         child_id,
@@ -880,7 +908,7 @@ auto Tree::insert_cell(Node &node, U32 idx, const Cell &cell) -> Status
 {
     const auto rc = node.write(idx, cell, m_node_scratch);
     if (rc < 0) {
-        return corrupted_page(node.ref->page_id);
+        return corrupted_node(node.ref->page_id);
     } else if (rc == 0) {
         CALICODB_EXPECT_FALSE(m_ovfl.exists());
         // NOTE: The overflow cell may need to be detached, if the node it is backed by will be released
@@ -903,14 +931,14 @@ auto Tree::remove_cell(Node &node, U32 idx) -> Status
 {
     Cell cell;
     if (node.read(idx, cell)) {
-        return corrupted_page(node.ref->page_id);
+        return corrupted_node(node.ref->page_id);
     }
     Status s;
     if (cell.local_pl_size != cell.total_pl_size) {
         s = free_overflow(read_overflow_id(cell));
     }
     if (s.is_ok() && node.erase(idx, cell.footprint)) {
-        s = corrupted_page(node.ref->page_id);
+        s = corrupted_node(node.ref->page_id);
     }
     return s;
 }
@@ -941,7 +969,7 @@ auto Tree::fix_links(Node &node, Id parent_id) -> Status
     for (U32 i = 0, n = NodeHdr::get_cell_count(node.hdr()); i < n; ++i) {
         Cell cell;
         if (node.read(i, cell)) {
-            return corrupted_page(node.ref->page_id);
+            return corrupted_node(node.ref->page_id);
         }
         // Fix the back pointer for the head of an overflow chain rooted at `node`.
         auto s = maybe_fix_overflow_chain(cell, parent_id);
@@ -1107,13 +1135,13 @@ auto Tree::split_nonroot_fast(TreeCursor &c, Node &parent, Node right) -> Status
 
         Cell right_cell;
         if (right.read(0, right_cell)) {
-            s = corrupted_page(right.ref->page_id);
+            s = corrupted_node(right.ref->page_id);
             goto cleanup;
         }
 
         Cell left_cell;
         if (left.read(NodeHdr::get_cell_count(left.hdr()) - 1, left_cell)) {
-            s = corrupted_page(right.ref->page_id);
+            s = corrupted_node(right.ref->page_id);
             goto cleanup;
         }
         const PivotOptions opt = {
@@ -1126,7 +1154,7 @@ auto Tree::split_nonroot_fast(TreeCursor &c, Node &parent, Node right) -> Status
     } else {
         auto cell_count = NodeHdr::get_cell_count(left.hdr());
         if (left.read(cell_count - 1, pivot)) {
-            s = corrupted_page(left.ref->page_id);
+            s = corrupted_node(left.ref->page_id);
             goto cleanup;
         }
         NodeHdr::put_next_id(right.hdr(), NodeHdr::get_next_id(left.hdr()));
@@ -1209,11 +1237,10 @@ auto Tree::redistribute_cells(Node &left, Node &right, Node &parent, U32 pivot_i
         p_left = &left;
         p_right = &tmp;
     }
-    // Create a temporary node that uses the defragmentation scratch as its backing buffer.
-    // This is where the new copy of the nonempty sibling node will be built.
+    // Create a temporary node that uses a scratch buffer as its backing buffer. This is where the
+    // new copy of the nonempty sibling node will be built.
     auto ref = *p_src->ref;
-    char tmp_node_scratch[kPageSize]; // TODO: Get an unused buffer from the pager, create the node there then rekey it.
-    ref.page = tmp_node_scratch;
+    ref.page = m_split_scratch;
     tmp = Node::from_new_page(ref, p_src->is_leaf());
     // The new node is empty, so just copy over the pointer fields.
     NodeHdr::put_prev_id(tmp.hdr(), NodeHdr::get_prev_id(p_src->hdr()));
@@ -1248,7 +1275,7 @@ auto Tree::redistribute_cells(Node &left, Node &right, Node &parent, U32 pivot_i
             continue;
         }
         if (p_src->read(i++, cell)) {
-            return corrupted_page(p_src->ref->page_id);
+            return corrupted_node(p_src->ref->page_id);
         }
         right_accum += cell.footprint;
         *cell_itr++ = cell;
@@ -1259,7 +1286,7 @@ auto Tree::redistribute_cells(Node &left, Node &right, Node &parent, U32 pivot_i
     // separating `left` and `right` (the cell pointing to `left`).
     if (!is_split) {
         if (parent.read(pivot_idx, cell)) {
-            return corrupted_page(parent.ref->page_id);
+            return corrupted_node(parent.ref->page_id);
         }
         if (p_src->is_leaf()) {
             if (cell.local_pl_size != cell.total_pl_size) {
@@ -1428,7 +1455,7 @@ auto Tree::fix_root(TreeCursor &c) -> Status
             Cell cell;
             c.m_idx = NodeHdr::get_cell_count(child.hdr()) / 2;
             if (child.read(c.m_idx, cell)) {
-                s = corrupted_page(node.ref->page_id);
+                s = corrupted_node(node.ref->page_id);
                 release(std::move(child));
             } else {
                 m_ovfl.cell = cell;
@@ -1439,7 +1466,7 @@ auto Tree::fix_root(TreeCursor &c) -> Status
             }
         } else {
             if (merge_root(node, child, m_node_scratch)) {
-                s = corrupted_page(node.ref->page_id);
+                s = corrupted_node(node.ref->page_id);
                 release(std::move(child));
             } else {
                 s = free(std::move(child));
@@ -1456,6 +1483,7 @@ Tree::Tree(Pager &pager, Stat &stat, char *scratch, const Id *root_id)
     : m_cursor(new TreeCursor(*this)),
       m_stat(&stat),
       m_node_scratch(scratch + kPageSize),
+      m_split_scratch(scratch + kPageSize * 2),
       m_cell_scratch{
           scratch,
           scratch + kCellBufferLen,
@@ -1551,7 +1579,7 @@ auto Tree::put(TreeCursor &c, const Slice &key, const Slice &value) -> Status
                         m_cell_scratch[1],
                         &ovfl);
                     if (rc) {
-                        s = corrupted_page(c.page_id());
+                        s = corrupted_node(c.page_id());
                     } else {
                         CALICODB_EXPECT_FALSE(m_ovfl.exists());
                         m_ovfl = {ovfl, c.page_id(), c.m_idx};
@@ -1613,7 +1641,7 @@ auto Tree::emplace(Node &node, const Slice &key, const Slice &value, U32 index, 
     } else if (local_offset == 0) {
         overflow = true;
     } else {
-        return corrupted_page(node.ref->page_id);
+        return corrupted_node(node.ref->page_id);
     }
     // Write the cell header.
     std::memcpy(ptr, header, hdr_size + pad_size);
@@ -1763,7 +1791,7 @@ auto Tree::vacuum_step(PageRef &free, PointerMap::Entry entry, Schema &schema, I
             for (U32 i = 0, n = NodeHdr::get_cell_count(parent.hdr()); i < n; ++i) {
                 Cell cell;
                 if (parent.read(i, cell)) {
-                    s = corrupted_page(parent.ref->page_id);
+                    s = corrupted_node(parent.ref->page_id);
                     break;
                 }
                 found = cell.local_pl_size < cell.total_pl_size &&
@@ -1776,7 +1804,7 @@ auto Tree::vacuum_step(PageRef &free, PointerMap::Entry entry, Schema &schema, I
             const auto page_id = parent.ref->page_id;
             release(std::move(parent));
             if (s.is_ok() && !found) {
-                s = corrupted_page(page_id);
+                s = corrupted_node(page_id);
             }
             break;
         }
@@ -1805,7 +1833,7 @@ auto Tree::vacuum_step(PageRef &free, PointerMap::Entry entry, Schema &schema, I
                     }
                 }
                 if (!found) {
-                    s = corrupted_page(parent.ref->page_id);
+                    s = corrupted_node(parent.ref->page_id);
                 }
                 release(std::move(parent));
             }
@@ -1851,7 +1879,7 @@ auto Tree::vacuum_step(PageRef &free, PointerMap::Entry entry, Schema &schema, I
             break;
         }
         default:
-            return corrupted_page(PointerMap::lookup(last_id));
+            return corrupted_node(PointerMap::lookup(last_id));
     }
 
     if (s.is_ok()) {
@@ -2049,7 +2077,7 @@ auto Tree::destroy(Tree &tree) -> Status
         }
         Cell cell;
         if (node.read(info.idx, cell)) {
-            return tree.corrupted_page(node.ref->page_id);
+            return tree.corrupted_node(node.ref->page_id);
         }
         if (cell.local_pl_size < cell.total_pl_size) {
             return tree.free_overflow(read_overflow_id(cell));
@@ -2173,7 +2201,7 @@ public:
                 for (U32 i = 0; i < info.ncells; ++i) {
                     Cell cell;
                     if (node.read(i, cell)) {
-                        return tree.corrupted_page(node.ref->page_id);
+                        return tree.corrupted_node(node.ref->page_id);
                     }
                     msg.append("  Cell(");
                     if (!node.is_leaf()) {

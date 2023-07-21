@@ -104,6 +104,7 @@ protected:
     {
         close();
         delete m_file;
+        delete m_wal_file;
         delete m_env;
     }
 
@@ -142,6 +143,8 @@ protected:
             s = Pager::open(param, m_pager);
         }
         if (s.is_ok()) {
+            delete m_wal_file;
+            m_wal_file = nullptr;
             s = m_env->new_file("wal", Env::kReadWrite, m_wal_file);
         }
         if (!s.is_ok()) {

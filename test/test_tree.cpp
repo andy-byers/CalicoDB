@@ -28,7 +28,7 @@ public:
 
     TreeTestHarness()
         : m_env(new_temp_env()),
-          m_scratch(kPageSize * 2, '\0')
+          m_scratch(Tree::kRequiredBufferSize, '\0')
     {
         EXPECT_OK(m_env->new_file("db", Env::kCreate, m_file));
 
@@ -939,7 +939,7 @@ class MultiTreeTests : public TreeTests
 public:
     MultiTreeTests()
         : payload_values(kInitialRecordCount),
-          m_scratch(kPageSize * 2, '\0')
+          m_scratch(Tree::kRequiredBufferSize, '\0')
     {
         for (auto &value : payload_values) {
             value = random.Generate(kPageSize / 2);

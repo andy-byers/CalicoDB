@@ -89,6 +89,8 @@ struct Cell {
 
 // Simple construct representing a tree node
 struct Node final {
+    static constexpr U32 kMaxFragCount = 0x80;
+
     PageRef *ref;
     int (*parser)(char *, const char *, Cell *);
     U32 usable_space;
@@ -148,7 +150,8 @@ struct Node final {
     [[nodiscard]] auto read(U32 index, Cell &cell_out) const -> int;
     auto erase(U32 index, U32 cell_size) -> int; // TODO: Figure out a better place to check for corruption
 
-    auto assert_state() const -> bool;
+    [[nodiscard]] auto validate(char *scratch) const -> int;
+    [[nodiscard]] auto assert_state() const -> bool;
 };
 
 } // namespace calicodb

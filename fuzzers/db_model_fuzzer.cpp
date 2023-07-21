@@ -6,6 +6,7 @@
 #include "fuzzer.h"
 #include "logging.h"
 #include "model.h"
+#include "tree.h"
 
 namespace calicodb
 {
@@ -477,6 +478,7 @@ auto Fuzzer::fuzz(FuzzerStream &stream) -> bool
     }
     CHECK_OK(s);
     CHECK_OK(m_tx->status());
+    static_cast<const Tree *>(m_b.state)->TEST_validate();
     return true;
 }
 
