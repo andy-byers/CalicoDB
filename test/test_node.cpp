@@ -117,31 +117,31 @@ TEST_F(BlockAllocatorTests, MergesAdjacentBlocks)
     // ..........#####...............#####.....
     ASSERT_EQ(0, BlockAllocator::release(m_node, m_base + 10, 5));
     ASSERT_EQ(0, BlockAllocator::release(m_node, m_base + 30, 5));
-    ASSERT_EQ(BlockAllocator::freelist_size(m_node), 10);
+    ASSERT_EQ(NodeHdr::get_free_total(m_node.hdr()), 10);
 
     // .....##########...............#####.....
     ASSERT_EQ(0, BlockAllocator::release(m_node, m_base + 5, 5));
-    ASSERT_EQ(BlockAllocator::freelist_size(m_node), 15);
+    ASSERT_EQ(NodeHdr::get_free_total(m_node.hdr()), 15);
 
     // .....##########...............##########
     ASSERT_EQ(0, BlockAllocator::release(m_node, m_base + 35, 5));
-    ASSERT_EQ(BlockAllocator::freelist_size(m_node), 20);
+    ASSERT_EQ(NodeHdr::get_free_total(m_node.hdr()), 20);
 
     // .....###############..........##########
     ASSERT_EQ(0, BlockAllocator::release(m_node, m_base + 15, 5));
-    ASSERT_EQ(BlockAllocator::freelist_size(m_node), 25);
+    ASSERT_EQ(NodeHdr::get_free_total(m_node.hdr()), 25);
 
     // .....###############.....###############
     ASSERT_EQ(0, BlockAllocator::release(m_node, m_base + 25, 5));
-    ASSERT_EQ(BlockAllocator::freelist_size(m_node), 30);
+    ASSERT_EQ(NodeHdr::get_free_total(m_node.hdr()), 30);
 
     // .....###################################
     ASSERT_EQ(0, BlockAllocator::release(m_node, m_base + 20, 5));
-    ASSERT_EQ(BlockAllocator::freelist_size(m_node), 35);
+    ASSERT_EQ(NodeHdr::get_free_total(m_node.hdr()), 35);
 
     // ########################################
     ASSERT_EQ(0, BlockAllocator::release(m_node, m_base, 5));
-    ASSERT_EQ(BlockAllocator::freelist_size(m_node), m_size);
+    ASSERT_EQ(NodeHdr::get_free_total(m_node.hdr()), m_size);
 }
 
 TEST_F(BlockAllocatorTests, ConsumesAdjacentFragments)
@@ -155,22 +155,22 @@ TEST_F(BlockAllocatorTests, ConsumesAdjacentFragments)
 
     // .....##########**...........**#####*....
     ASSERT_EQ(0, BlockAllocator::release(m_node, m_base + 5, 4));
-    ASSERT_EQ(BlockAllocator::freelist_size(m_node), 15);
+    ASSERT_EQ(NodeHdr::get_free_total(m_node.hdr()), 15);
     ASSERT_EQ(NodeHdr::get_frag_count(m_node.hdr()), 5);
 
     // .....#################......**#####*....
     ASSERT_EQ(0, BlockAllocator::release(m_node, m_base + 17, 5));
-    ASSERT_EQ(BlockAllocator::freelist_size(m_node), 22);
+    ASSERT_EQ(NodeHdr::get_free_total(m_node.hdr()), 22);
     ASSERT_EQ(NodeHdr::get_frag_count(m_node.hdr()), 3);
 
     // .....##############################*....
     ASSERT_EQ(0, BlockAllocator::release(m_node, m_base + 22, 6));
-    ASSERT_EQ(BlockAllocator::freelist_size(m_node), 30);
+    ASSERT_EQ(NodeHdr::get_free_total(m_node.hdr()), 30);
     ASSERT_EQ(NodeHdr::get_frag_count(m_node.hdr()), 1);
 
     // .....##############################*....
     ASSERT_EQ(0, BlockAllocator::release(m_node, m_base + 36, 4));
-    ASSERT_EQ(BlockAllocator::freelist_size(m_node), 35);
+    ASSERT_EQ(NodeHdr::get_free_total(m_node.hdr()), 35);
     ASSERT_EQ(NodeHdr::get_frag_count(m_node.hdr()), 0);
 }
 
@@ -185,7 +185,7 @@ TEST_F(BlockAllocatorTests, ExternalNodesConsume3ByteFragments)
 
     // ###########
     ASSERT_EQ(0, BlockAllocator::release(m_node, m_base + 0, 4));
-    ASSERT_EQ(BlockAllocator::freelist_size(m_node), m_size - NodeHdr::get_frag_count(m_node.hdr()));
+    ASSERT_EQ(NodeHdr::get_free_total(m_node.hdr()), m_size - NodeHdr::get_frag_count(m_node.hdr()));
     ASSERT_EQ(NodeHdr::get_frag_count(m_node.hdr()), 0);
 }
 
@@ -201,7 +201,7 @@ TEST_F(BlockAllocatorTests, InternalNodesConsume3ByteFragments)
 
     // ###########
     ASSERT_EQ(0, BlockAllocator::release(m_node, m_base + 0, 4));
-    ASSERT_EQ(BlockAllocator::freelist_size(m_node), m_size);
+    ASSERT_EQ(NodeHdr::get_free_total(m_node.hdr()), m_size);
     ASSERT_EQ(NodeHdr::get_frag_count(m_node.hdr()), 0);
 }
 
@@ -232,7 +232,7 @@ TEST_F(NodeTests, CellLifecycle)
                       Slice(cell_out.key, cell_out.key_size));
         }
 
-        while (NodeHdr::get_cell_count(m_node.hdr()) > 0) {
+        while (0 < NodeHdr::get_cell_count(m_node.hdr())) {
             Cell cell_out = {};
             ASSERT_EQ(0, m_node.read(0, cell_out));
             ASSERT_EQ(0, m_node.erase(0, cell_out.footprint));

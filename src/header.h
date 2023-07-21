@@ -72,7 +72,8 @@ struct FileHdr {
 //     9       2     Cell count
 //     11      2     Cell area start
 //     13      2     Freelist start
-//     15      1     Fragment count
+//     15      2     Freelist count
+//     17      1     Fragment count
 struct NodeHdr {
     enum Type : char {
         kExternal = '\x01',
@@ -143,6 +144,15 @@ struct NodeHdr {
     static auto put_free_start(char *root, U32 value) -> void
     {
         put_u16(root + kFreeStartOffset, static_cast<U16>(value));
+    }
+
+    [[nodiscard]] static auto get_free_total(const char *root) -> U32
+    {
+        return get_u16(root + kFreeCountOffset);
+    }
+    static auto put_free_total(char *root, U32 value) -> void
+    {
+        put_u16(root + kFreeCountOffset, static_cast<U16>(value));
     }
 
     [[nodiscard]] static auto get_frag_count(const char *root) -> U32

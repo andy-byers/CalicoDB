@@ -14,7 +14,6 @@ namespace calicodb
 struct Node;
 
 struct BlockAllocator {
-    [[nodiscard]] static auto freelist_size(const Node &node) -> int;
     [[nodiscard]] static auto allocate(Node &node, U32 needed_size) -> int;
     [[nodiscard]] static auto release(Node &node, U32 block_start, U32 block_size) -> int;
     [[nodiscard]] static auto defragment(Node &node, char *scratch, int skip = -1) -> int;
@@ -150,7 +149,8 @@ struct Node final {
     [[nodiscard]] auto read(U32 index, Cell &cell_out) const -> int;
     auto erase(U32 index, U32 cell_size) -> int; // TODO: Figure out a better place to check for corruption
 
-    [[nodiscard]] auto validate(char *scratch) const -> int;
+    [[nodiscard]] auto check_freelist() const -> int;
+    [[nodiscard]] auto check_state(char *scratch) const -> int;
     [[nodiscard]] auto assert_state() const -> bool;
 };
 
