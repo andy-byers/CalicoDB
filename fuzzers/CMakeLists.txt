@@ -14,3 +14,11 @@ endfunction()
 build_fuzzer(db_bucket)
 build_fuzzer(db_format)
 build_fuzzer(db_model)
+
+#add_library(libsqlite
+#        shell.c
+#        sqlite3.c
+#        sqlite3.h
+#        sqlite3ext.h)
+add_executable(sqlite_format_fuzzer sqlite_format_fuzzer.cpp)
+target_link_libraries(sqlite_format_fuzzer ${CMAKE_CURRENT_SOURCE_DIR}/sqlite_asan)

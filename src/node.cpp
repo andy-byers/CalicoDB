@@ -22,10 +22,10 @@ static constexpr U32 kSlotWidth = sizeof(U16);
 
 [[nodiscard]] static auto cell_area_offset(const Node &node) -> U32
 {
-    return cell_slots_offset(node) + static_cast<U32>(NodeHdr::get_cell_count(node.hdr()) * kSlotWidth);
+    return cell_slots_offset(node) + NodeHdr::get_cell_count(node.hdr()) * kSlotWidth;
 }
 
-[[nodiscard]] static auto get_ivec_slot(const Node &node, U32 index)
+[[nodiscard]] static auto get_ivec_slot(const Node &node, U32 index) -> U32
 {
     CALICODB_EXPECT_LT(index, NodeHdr::get_cell_count(node.hdr()));
     return kPageMask & get_u16(node.ref->page + cell_slots_offset(node) + index * kSlotWidth);
