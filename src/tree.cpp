@@ -1644,8 +1644,7 @@ auto Tree::emplace(Node &node, const Slice &key, const Slice &value, U32 index, 
     // bounds write (this only happens if the node is corrupted).
     ptr = m_cell_scratch[0];
     const auto local_offset = node.alloc(
-        index,
-        static_cast<U32>(cell_size));
+        index, static_cast<U32>(cell_size));
     if (local_offset > 0) {
         ptr = node.ref->page + local_offset;
         overflow = false;

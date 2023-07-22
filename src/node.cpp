@@ -139,7 +139,7 @@ auto Node::alloc(U32 index, U32 size) -> int
 
     // Attempt to allocate `size` contiguous bytes within `node`.
     int offset = 0;
-    if (kMaxFragCount > NodeHdr::get_frag_count(hdr()) + kMinBlockSize - 1) {
+    if (NodeHdr::get_frag_count(hdr()) + kMinBlockSize - 1 <= kMaxFragCount) {
         offset = BlockAllocator::allocate(*this, size);
     }
     if (offset == 0) {
