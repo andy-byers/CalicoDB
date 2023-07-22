@@ -14,6 +14,7 @@ namespace calicodb
 struct Node;
 
 struct BlockAllocator {
+    [[nodiscard]] static auto freelist_size(const Node &node) -> int;
     [[nodiscard]] static auto allocate(Node &node, U32 needed_size) -> int;
     [[nodiscard]] static auto release(Node &node, U32 block_start, U32 block_size) -> int;
     [[nodiscard]] static auto defragment(Node &node, int skip = -1) -> int;
