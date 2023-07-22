@@ -78,7 +78,7 @@ public:
         auto s = m_pager->acquire(page_id, ref);
         if (s.is_ok()) {
             if (Node::from_existing_page(*ref, node_out)) {
-                m_pager->release(node_out.ref);
+                m_pager->release(ref);
                 return corrupted_node(page_id);
             }
             if (write) {

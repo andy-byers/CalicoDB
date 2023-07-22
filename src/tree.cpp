@@ -88,21 +88,13 @@ class TreeCursor
     auto seek_to_first_leaf() -> void
     {
         reset();
+        m_idx = 0;
         m_status = m_tree->acquire(m_tree->root(), m_node);
-        if (!m_status.is_ok()) {
-            return;
-        }
-        for (Node lowest;;) {
-            m_idx = 0;
+        while (m_status.is_ok()) {
             if (m_node.is_leaf()) {
                 break;
             }
-            const auto next_id = m_node.read_child_id(0);
-            m_status = m_tree->acquire(next_id, lowest);
-            if (!m_status.is_ok()) {
-                break;
-            }
-            move_to_child(std::move(lowest));
+            move_to_child(m_node.read_child_id(0));
         }
     }
 
@@ -110,22 +102,14 @@ class TreeCursor
     {
         reset();
         m_status = m_tree->acquire(m_tree->root(), m_node);
-        if (!m_status.is_ok()) {
-            return;
-        }
-        for (Node highest;;) {
+        while (m_status.is_ok()) {
             const auto ncells = NodeHdr::get_cell_count(m_node.hdr());
             m_idx = ncells;
             if (m_node.is_leaf()) {
                 m_idx -= m_idx > 0;
                 break;
             }
-            const auto next_id = m_node.read_child_id(ncells);
-            m_status = m_tree->acquire(next_id, highest);
-            if (!m_status.is_ok()) {
-                break;
-            }
-            move_to_child(std::move(highest));
+            move_to_child(m_node.read_child_id(ncells));
         }
     }
 
@@ -204,13 +188,27 @@ public:
         m_node = std::move(m_node_path[--m_level]);
     }
 
-    auto move_to_child(Node child) -> void
+    auto assign_child(Node child) -> void
     {
         CALICODB_EXPECT_TRUE(has_node());
         m_idx_path[m_level] = m_idx;
         m_node_path[m_level] = std::move(m_node);
         m_node = std::move(child);
         ++m_level;
+    }
+
+    auto move_to_child(Id child_id) -> void
+    {
+        CALICODB_EXPECT_TRUE(has_node());
+        if (m_level < static_cast<int>(kMaxDepth - 1)) {
+            Node child;
+            m_status = m_tree->acquire(child_id, child);
+            if (m_status.is_ok()) {
+                assign_child(std::move(child));
+            }
+        } else {
+            m_status = m_tree->corrupted_node(child_id);
+        }
     }
 
     auto correct_leaf() -> void
@@ -259,13 +257,7 @@ public:
                 if (m_node.is_leaf()) {
                     return found;
                 }
-                Node child;
-                const auto child_id = m_node.read_child_id(m_idx);
-                CALICODB_EXPECT_NE(child_id, m_node.ref->page_id); // Infinite loop.
-                m_status = m_tree->acquire(child_id, child);
-                if (m_status.is_ok()) {
-                    move_to_child(std::move(child));
-                }
+                move_to_child(m_node.read_child_id(m_idx));
             }
         }
         return false;
@@ -683,8 +675,9 @@ auto Tree::create(Pager &pager, Id *root_id_out) -> Status
     auto s = pager.allocate(page);
     if (s.is_ok()) {
         auto *hdr = page->page + page_offset(page->page_id);
+        //        Node::from_new_page(*page, true);
         std::memset(hdr, 0, NodeHdr::kSize);
-        NodeHdr::put_type(hdr, NodeHdr::kExternal);
+        NodeHdr::put_type(hdr, true);
         NodeHdr::put_cell_start(hdr, kPageSize);
 
         s = PointerMap::write_entry(pager, page->page_id,
@@ -1060,7 +1053,7 @@ auto Tree::split_root(TreeCursor &c) -> Status
 
         // Overflow cell is now in the child. m_ovfl.idx stays the same.
         m_ovfl.pid = child.ref->page_id;
-        c.move_to_child(std::move(child));
+        c.assign_child(std::move(child));
         c.m_idx_path[1] = c.m_idx_path[0];
         c.m_idx_path[0] = 0;
     }
@@ -1461,7 +1454,7 @@ auto Tree::fix_root(TreeCursor &c) -> Status
                 m_ovfl.cell = cell;
                 detach_cell(m_ovfl.cell, m_cell_scratch[0]);
                 child.erase(c.m_idx, cell.footprint);
-                c.move_to_child(std::move(child));
+                c.assign_child(std::move(child));
                 s = split_nonroot(c);
             }
         } else {
@@ -2275,6 +2268,7 @@ public:
 
         CHECK_OK(InorderTraversal::traverse(tree, [&tree](const auto &node, const auto &info) {
             if (info.idx == info.ncells) {
+                CHECK_TRUE(node.assert_state());
                 return Status::ok();
             }
             Cell cell;
@@ -2298,10 +2292,6 @@ public:
                     accumulated += U32(get_readable_content(*page, size_limit).size());
                 });
                 CHECK_EQ(requested, accumulated);
-            }
-
-            if (info.idx == 0) {
-                CHECK_TRUE(node.assert_state());
             }
             return Status::ok();
         }));

@@ -75,9 +75,10 @@ struct FileHdr {
 //     15      2     Freelist count
 //     17      1     Fragment count
 struct NodeHdr {
-    enum Type : char {
-        kExternal = '\x01',
-        kInternal = '\x02',
+    enum Type : int {
+        kInvalid = 0,
+        kInternal = 1,
+        kExternal = 2,
     };
 
     enum {
@@ -94,11 +95,18 @@ struct NodeHdr {
 
     [[nodiscard]] static auto get_type(const char *root) -> Type
     {
-        return Type{root[kTypeOffset]};
+        switch (root[kTypeOffset]) {
+            case kInternal:
+                return kInternal;
+            case kExternal:
+                return kExternal;
+            default:
+                return kInvalid;
+        }
     }
-    static auto put_type(char *root, Type value) -> void
+    static auto put_type(char *root, bool is_external) -> void
     {
-        root[kTypeOffset] = value;
+        root[kTypeOffset] = static_cast<char>(kInternal + is_external);
     }
 
     [[nodiscard]] static auto get_next_id(const char *root) -> Id

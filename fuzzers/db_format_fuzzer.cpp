@@ -56,9 +56,9 @@ public:
                         delete c;
                         schema.next();
                     }
-                    if (s.is_ok()) {
-                        s = schema.status();
-                    }
+                }
+                if (s.is_ok()) {
+                    s = schema.status();
                 }
                 return s;
             });

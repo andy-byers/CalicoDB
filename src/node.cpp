@@ -360,37 +360,49 @@ static constexpr int (*kParsers[2])(char *, const char *, Cell *) = {
     external_parse_cell,
 };
 
+static constexpr U32 kMaxCellCount = (kPageSize - NodeHdr::kSize) /
+                                     (kMinCellHeaderSize + kSlotWidth);
+
 auto Node::from_existing_page(PageRef &page, Node &node_out) -> int
 {
-    node_out.ref = &page;
-    node_out.parser = kParsers[node_out.is_leaf()];
-
-    const auto gap_upper = NodeHdr::get_cell_start(node_out.hdr());
-    const auto gap_lower = cell_area_offset(node_out);
+    const auto hdr_offset = page_offset(page.page_id);
+    const auto *hdr = page.page + hdr_offset;
+    const auto type = NodeHdr::get_type(hdr);
+    if (type == NodeHdr::kInvalid) {
+        return -1;
+    }
+    const auto ncells = NodeHdr::get_cell_count(hdr);
+    if (ncells > kMaxCellCount) {
+        return -1;
+    }
+    const auto gap_upper = NodeHdr::get_cell_start(hdr);
+    const auto gap_lower = hdr_offset + NodeHdr::kSize + ncells * kSlotWidth;
     if (gap_upper < gap_lower) {
         return -1;
     }
+    node_out.ref = &page;
+    node_out.parser = kParsers[type - NodeHdr::kInternal];
     node_out.gap_size = gap_upper - gap_lower;
     node_out.usable_space = node_out.gap_size +
-                            NodeHdr::get_free_total(node_out.hdr()) +
-                            NodeHdr::get_frag_count(node_out.hdr());
+                            NodeHdr::get_free_total(hdr) +
+                            NodeHdr::get_frag_count(hdr);
     return 0;
 }
 
 auto Node::from_new_page(PageRef &page, bool is_leaf) -> Node
 {
-    const auto total_space = static_cast<U32>(
-        kPageSize - page_offset(page.page_id) - NodeHdr::kSize);
-
     Node node;
     node.ref = &page;
     node.parser = kParsers[is_leaf];
+
+    const auto total_space = static_cast<U32>(
+        kPageSize - cell_slots_offset(node));
     node.gap_size = total_space;
     node.usable_space = total_space;
 
     std::memset(node.hdr(), 0, NodeHdr::kSize);
     NodeHdr::put_cell_start(node.hdr(), kPageSize);
-    NodeHdr::put_type(node.hdr(), is_leaf ? NodeHdr::kExternal : NodeHdr::kInternal);
+    NodeHdr::put_type(node.hdr(), is_leaf);
     return node;
 }
 

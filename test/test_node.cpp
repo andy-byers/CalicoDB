@@ -93,7 +93,7 @@ class BlockAllocatorTests : public NodeTests
 public:
     explicit BlockAllocatorTests()
     {
-        NodeHdr::put_type(m_node.hdr(), NodeHdr::kInternal);
+        NodeHdr::put_type(m_node.hdr(), false);
     }
 
     ~BlockAllocatorTests() override = default;
@@ -177,7 +177,7 @@ TEST_F(BlockAllocatorTests, ConsumesAdjacentFragments)
 TEST_F(BlockAllocatorTests, ExternalNodesConsume3ByteFragments)
 {
     reserve_for_test(11);
-    NodeHdr::put_type(m_node.hdr(), NodeHdr::kExternal);
+    NodeHdr::put_type(m_node.hdr(), true);
     NodeHdr::put_frag_count(m_node.hdr(), 3);
 
     // ....***####
