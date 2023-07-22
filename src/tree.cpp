@@ -41,10 +41,7 @@ class TreeCursor
         CALICODB_EXPECT_TRUE(has_node());
         const auto diff = 2 * right - 1;
         auto n = m_level - 1;
-        for (;; --n) {
-            if (n < 0) {
-                return;
-            }
+        for (; n >= 0; --n) {
             const auto idx = static_cast<int>(m_idx_path[n]) + diff;
             const auto ncells = static_cast<int>(NodeHdr::get_cell_count(m_node_path[n].hdr()));
             if (0 <= idx && idx <= ncells) {
@@ -297,6 +294,8 @@ class UserCursor : public Cursor
 
     auto fetch_payload() -> Status
     {
+        CALICODB_EXPECT_TRUE(m_c.has_key());
+
         m_key.clear();
         m_value.clear();
 
@@ -307,6 +306,12 @@ class UserCursor : public Cursor
         auto s = m_c.m_tree->read_key(cell, m_key_buffer, &m_key);
         if (s.is_ok()) {
             s = m_c.m_tree->read_value(cell, m_value_buffer, &m_value);
+        }
+        if (!s.is_ok()) {
+            m_key_buffer.clear();
+            m_value_buffer.clear();
+            m_key.clear();
+            m_value.clear();
         }
         return s;
     }
@@ -658,6 +663,14 @@ struct PayloadManager {
                     break;
                 }
             }
+        }
+        if (s.is_ok() && length) {
+            std::string message;
+            const auto repr_len = std::min(cell.key_size, 4U);
+            append_fmt_string(message, R"(missing %u bytes from record "%s"%s)",
+                              length, escape_string(Slice(cell.key, repr_len)).c_str(),
+                              repr_len == cell.key_size ? "" : "...");
+            return Status::corruption(message);
         }
         return s;
     }
