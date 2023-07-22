@@ -41,7 +41,10 @@ class TreeCursor
         CALICODB_EXPECT_TRUE(has_node());
         const auto diff = 2 * right - 1;
         auto n = m_level - 1;
-        for (; n >= 0; --n) {
+        for (;; --n) {
+            if (n < 0) {
+                return;
+            }
             const auto idx = static_cast<int>(m_idx_path[n]) + diff;
             const auto ncells = static_cast<int>(NodeHdr::get_cell_count(m_node_path[n].hdr()));
             if (0 <= idx && idx <= ncells) {
@@ -243,7 +246,7 @@ public:
                                Slice(boundary.key, cmp_length) <= key;
             }
         }
-        if (!found_target) {
+        if (!found_target && !m_status.is_corruption()) {
             reset();
             m_status = m_tree->acquire(m_tree->root(), m_node);
         }
@@ -567,11 +570,11 @@ static auto write_child_id(Cell &cell, Id child_id)
     put_u32(cell.ptr, child_id.value);
 }
 
-[[nodiscard]] static auto merge_root(Node &root, Node &child, char *scratch)
+[[nodiscard]] static auto merge_root(Node &root, Node &child)
 {
     CALICODB_EXPECT_EQ(NodeHdr::get_next_id(root.hdr()), child.ref->page_id);
     if (NodeHdr::get_free_start(child.hdr()) > 0) {
-        if (child.defrag(scratch)) {
+        if (child.defrag()) {
             return -1;
         }
     }
@@ -889,7 +892,7 @@ static auto detach_cell(Cell &cell, char *backing) -> void
 
 auto Tree::post_pivot(Node &parent, U32 idx, Cell &pivot, Id child_id) -> Status
 {
-    const auto rc = parent.write(idx, pivot, m_node_scratch);
+    const auto rc = parent.write(idx, pivot);
     if (rc > 0) {
         parent.write_child_id(idx, child_id);
     } else if (rc == 0) {
@@ -912,7 +915,7 @@ auto Tree::post_pivot(Node &parent, U32 idx, Cell &pivot, Id child_id) -> Status
 
 auto Tree::insert_cell(Node &node, U32 idx, const Cell &cell) -> Status
 {
-    const auto rc = node.write(idx, cell, m_node_scratch);
+    const auto rc = node.write(idx, cell);
     if (rc < 0) {
         return corrupted_node(node.ref->page_id);
     } else if (rc == 0) {
@@ -1053,7 +1056,7 @@ auto Tree::split_root(TreeCursor &c) -> Status
             child.usable_space += FileHdr::kSize;
         }
 
-        root = Node::from_new_page(*root.ref, false);
+        root = Node::from_new_page(*root.ref, m_node_scratch, false);
         NodeHdr::put_next_id(root.hdr(), child.ref->page_id);
 
         s = fix_parent_id(
@@ -1247,7 +1250,7 @@ auto Tree::redistribute_cells(Node &left, Node &right, Node &parent, U32 pivot_i
     // new copy of the nonempty sibling node will be built.
     auto ref = *p_src->ref;
     ref.page = m_split_scratch;
-    tmp = Node::from_new_page(ref, p_src->is_leaf());
+    tmp = Node::from_new_page(ref, m_node_scratch, p_src->is_leaf());
     // The new node is empty, so just copy over the pointer fields.
     NodeHdr::put_prev_id(tmp.hdr(), NodeHdr::get_prev_id(p_src->hdr()));
     NodeHdr::put_next_id(tmp.hdr(), NodeHdr::get_next_id(p_src->hdr()));
@@ -1471,7 +1474,7 @@ auto Tree::fix_root(TreeCursor &c) -> Status
                 s = split_nonroot(c);
             }
         } else {
-            if (merge_root(node, child, m_node_scratch)) {
+            if (merge_root(node, child)) {
                 s = corrupted_node(node.ref->page_id);
                 release(std::move(child));
             } else {
@@ -1547,6 +1550,9 @@ auto Tree::put(Cursor &c, const Slice &key, const Slice &value) -> Status
             uc.seek(key);
             s = uc.status();
         }
+    }
+    if (uc.m_c.m_status.is_ok()) {
+        uc.m_c.m_status = s;
     }
     return s;
 }
@@ -1639,8 +1645,7 @@ auto Tree::emplace(Node &node, const Slice &key, const Slice &value, U32 index, 
     ptr = m_cell_scratch[0];
     const auto local_offset = node.alloc(
         index,
-        static_cast<U32>(cell_size),
-        m_node_scratch);
+        static_cast<U32>(cell_size));
     if (local_offset > 0) {
         ptr = node.ref->page + local_offset;
         overflow = false;
@@ -1744,6 +1749,8 @@ auto Tree::erase(Cursor &c) -> Status
             uc.seek(saved_key);
         }
         s = uc.status();
+    } else if (tc.m_status.is_ok()) {
+        tc.m_status = s;
     }
     return s;
 }

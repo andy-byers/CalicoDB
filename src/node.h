@@ -16,7 +16,7 @@ struct Node;
 struct BlockAllocator {
     [[nodiscard]] static auto allocate(Node &node, U32 needed_size) -> int;
     [[nodiscard]] static auto release(Node &node, U32 block_start, U32 block_size) -> int;
-    [[nodiscard]] static auto defragment(Node &node, char *scratch, int skip = -1) -> int;
+    [[nodiscard]] static auto defragment(Node &node, int skip = -1) -> int;
 };
 
 // NOTE: Cell headers are padded out to kMinCellHeaderSize, which corresponds to the size of a free block
@@ -92,11 +92,12 @@ struct Node final {
 
     PageRef *ref;
     int (*parser)(char *, const char *, Cell *);
+    char *scratch;
     U32 usable_space;
     U32 gap_size;
 
-    [[nodiscard]] static auto from_existing_page(PageRef &page, Node &node_out) -> int;
-    [[nodiscard]] static auto from_new_page(PageRef &page, bool is_leaf) -> Node;
+    [[nodiscard]] static auto from_existing_page(PageRef &page, char *scratch, Node &node_out) -> int;
+    [[nodiscard]] static auto from_new_page(PageRef &page, char *scratch, bool is_leaf) -> Node;
 
     explicit Node()
         : ref(nullptr)
@@ -111,6 +112,7 @@ struct Node final {
     Node(Node &&rhs) noexcept
         : ref(rhs.ref),
           parser(rhs.parser),
+          scratch(rhs.scratch),
           usable_space(rhs.usable_space),
           gap_size(rhs.gap_size)
     {
@@ -122,6 +124,7 @@ struct Node final {
         if (this != &rhs) {
             ref = rhs.ref;
             parser = rhs.parser;
+            scratch = rhs.scratch;
             usable_space = rhs.usable_space;
             gap_size = rhs.gap_size;
 
@@ -143,14 +146,14 @@ struct Node final {
     [[nodiscard]] auto read_child_id(U32 index) const -> Id;
     auto write_child_id(U32 index, Id child_id) -> void;
 
-    [[nodiscard]] auto defrag(char *scratch) -> int;
-    [[nodiscard]] auto alloc(U32 index, U32 size, char *scratch) -> int;
-    [[nodiscard]] auto write(U32 index, const Cell &cell, char *scratch) -> int;
+    [[nodiscard]] auto defrag() -> int;
+    [[nodiscard]] auto alloc(U32 index, U32 size) -> int;
+    [[nodiscard]] auto write(U32 index, const Cell &cell) -> int;
     [[nodiscard]] auto read(U32 index, Cell &cell_out) const -> int;
-    auto erase(U32 index, U32 cell_size) -> int; // TODO: Figure out a better place to check for corruption
+    auto erase(U32 index, U32 cell_size) -> int;
 
     [[nodiscard]] auto check_freelist() const -> int;
-    [[nodiscard]] auto check_state(char *scratch) const -> int;
+    [[nodiscard]] auto check_state() const -> int;
     [[nodiscard]] auto assert_state() const -> bool;
 };
 

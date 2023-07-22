@@ -67,7 +67,7 @@ public:
         auto s = m_pager->allocate(ref);
         if (s.is_ok()) {
             CALICODB_EXPECT_FALSE(PointerMap::is_map(ref->page_id));
-            node_out = Node::from_new_page(*ref, is_external);
+            node_out = Node::from_new_page(*ref, m_node_scratch, is_external);
         }
         return s;
     }
@@ -77,7 +77,7 @@ public:
         PageRef *ref;
         auto s = m_pager->acquire(page_id, ref);
         if (s.is_ok()) {
-            if (Node::from_existing_page(*ref, node_out)) {
+            if (Node::from_existing_page(*ref, m_node_scratch, node_out)) {
                 m_pager->release(ref);
                 return corrupted_node(page_id);
             }
@@ -100,18 +100,6 @@ public:
 
     auto release(Node node) const -> void
     {
-        if (node.ref != nullptr && m_pager->mode() == Pager::kDirty) {
-            // If the pager is in kWrite mode and a page is marked dirty, it immediately
-            // transitions to kDirty mode. So, if this node is dirty, then the pager must
-            // be in kDirty mode (unless there was an error).
-            if (Node::kMaxFragCount < NodeHdr::get_frag_count(node.hdr())) {
-                // Fragment count is too large. Defragment the node to get rid of all fragments.
-                if (node.defrag(m_node_scratch)) {
-                    // Sets the pager error status.
-                    (void)corrupted_node(node.ref->page_id);
-                }
-            }
-        }
         m_pager->release(node.ref);
     }
 

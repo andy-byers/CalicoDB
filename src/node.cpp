@@ -9,6 +9,7 @@ namespace calicodb
 
 static constexpr U16 kPageMask = kPageSize - 1;
 static constexpr U32 kSlotWidth = sizeof(U16);
+static constexpr U32 kMinBlockSize = 2 * kSlotWidth;
 
 [[nodiscard]] static auto node_header_offset(const Node &node)
 {
@@ -119,7 +120,7 @@ static auto remove_ivec_slot(Node &node, U32 index)
     return -1;
 }
 
-auto Node::alloc(U32 index, U32 size, char *scratch) -> int
+auto Node::alloc(U32 index, U32 size) -> int
 {
     CALICODB_EXPECT_LE(index, NodeHdr::get_cell_count(hdr()));
 
@@ -129,7 +130,7 @@ auto Node::alloc(U32 index, U32 size, char *scratch) -> int
 
     // We don't have room to insert the cell pointer.
     if (gap_size < kSlotWidth) {
-        if (defrag(scratch)) {
+        if (defrag()) {
             return -1;
         }
     }
@@ -137,11 +138,14 @@ auto Node::alloc(U32 index, U32 size, char *scratch) -> int
     insert_ivec_slot(*this, index, kPageSize - 1);
 
     // Attempt to allocate `size` contiguous bytes within `node`.
-    auto offset = BlockAllocator::allocate(*this, size);
+    int offset = 0;
+    if (kMaxFragCount > NodeHdr::get_frag_count(hdr()) + kMinBlockSize - 1) {
+        offset = BlockAllocator::allocate(*this, size);
+    }
     if (offset == 0) {
         // There is enough space in `node`, it just isn't contiguous. Defragment and try again. Note that
         // we pass `index` so that defragment() skips the cell we haven't filled in yet.
-        if (BlockAllocator::defragment(*this, scratch, static_cast<int>(index))) {
+        if (BlockAllocator::defragment(*this, static_cast<int>(index))) {
             return -1;
         }
         offset = BlockAllocator::allocate(*this, size);
@@ -172,8 +176,6 @@ static auto set_next_pointer(Node &node, U32 offset, U32 value) -> void
     CALICODB_EXPECT_LT(value, kPageSize);
     return put_u16(node.ref->page + offset, static_cast<U16>(value));
 }
-
-static constexpr U32 kMinBlockSize = 2 * kSlotWidth;
 
 static auto set_block_size(Node &node, U32 offset, U32 value) -> void
 {
@@ -269,8 +271,11 @@ auto BlockAllocator::release(Node &node, U32 block_start, U32 block_size) -> int
     // Blocks of less than kMinBlockSize bytes are too small to hold the free block header,
     // so they must become fragment bytes.
     if (block_size < kMinBlockSize) {
-        NodeHdr::put_frag_count(node.hdr(), frag_count + block_size);
-        return 0;
+        if (frag_count + block_size <= Node::kMaxFragCount) {
+            NodeHdr::put_frag_count(node.hdr(), frag_count + block_size);
+            return 0;
+        }
+        return defragment(node);
     }
     // The free block list is sorted by start position. Find where the
     // new block should go.
@@ -322,36 +327,42 @@ auto BlockAllocator::release(Node &node, U32 block_start, U32 block_size) -> int
     return 0;
 }
 
-auto BlockAllocator::defragment(Node &node, char *scratch, int skip) -> int
+auto BlockAllocator::defragment(Node &node, int skip) -> int
 {
     const auto n = NodeHdr::get_cell_count(node.hdr());
+    const auto cell_start = NodeHdr::get_cell_start(node.hdr());
     const auto to_skip = skip >= 0 ? static_cast<U32>(skip) : n;
     auto *ptr = node.ref->page;
     U32 end = kPageSize;
 
     // Copy everything before the indirection vector.
-    std::memcpy(scratch, ptr, cell_slots_offset(node));
+    std::memcpy(node.scratch, ptr, cell_slots_offset(node));
     for (U32 index = 0; index < n; ++index) {
         if (index != to_skip) {
             // Pack cells at the end of the scratch page and write the indirection
             // vector.
             Cell cell;
-            if (node.read(index, cell)) {
+            if (node.read(index, cell) || end < cell_start + cell.footprint) {
                 return -1;
             }
             end -= cell.footprint;
-            std::memcpy(scratch + end, cell.ptr, cell.footprint);
-            put_u16(scratch + cell_slots_offset(node) + index * kSlotWidth,
+            std::memcpy(node.scratch + end, cell.ptr, cell.footprint);
+            put_u16(node.scratch + cell_slots_offset(node) + index * kSlotWidth,
                     static_cast<U16>(end));
         }
     }
-    std::memcpy(ptr, scratch, kPageSize);
+    std::memcpy(ptr, node.scratch, kPageSize);
 
     NodeHdr::put_free_total(node.hdr(), 0);
     NodeHdr::put_free_start(node.hdr(), 0);
     NodeHdr::put_frag_count(node.hdr(), 0);
     NodeHdr::put_cell_start(node.hdr(), end);
     node.gap_size = end - cell_area_offset(node);
+
+    const auto gap_adjust = skip < 0 ? 0 : kSlotWidth;
+    if (node.gap_size + gap_adjust != node.usable_space) {
+        return -1;
+    }
     return 0;
 }
 
@@ -363,7 +374,7 @@ static constexpr int (*kParsers[2])(char *, const char *, Cell *) = {
 static constexpr U32 kMaxCellCount = (kPageSize - NodeHdr::kSize) /
                                      (kMinCellHeaderSize + kSlotWidth);
 
-auto Node::from_existing_page(PageRef &page, Node &node_out) -> int
+auto Node::from_existing_page(PageRef &page, char *scratch, Node &node_out) -> int
 {
     const auto hdr_offset = page_offset(page.page_id);
     const auto *hdr = page.page + hdr_offset;
@@ -381,6 +392,7 @@ auto Node::from_existing_page(PageRef &page, Node &node_out) -> int
         return -1;
     }
     node_out.ref = &page;
+    node_out.scratch = scratch;
     node_out.parser = kParsers[type - NodeHdr::kInternal];
     node_out.gap_size = gap_upper - gap_lower;
     node_out.usable_space = node_out.gap_size +
@@ -389,10 +401,11 @@ auto Node::from_existing_page(PageRef &page, Node &node_out) -> int
     return 0;
 }
 
-auto Node::from_new_page(PageRef &page, bool is_leaf) -> Node
+auto Node::from_new_page(PageRef &page, char *scratch, bool is_leaf) -> Node
 {
     Node node;
     node.ref = &page;
+    node.scratch = scratch;
     node.parser = kParsers[is_leaf];
 
     const auto total_space = static_cast<U32>(
@@ -436,9 +449,9 @@ auto Node::read(U32 index, Cell &cell_out) const -> int
         &cell_out);
 }
 
-auto Node::write(U32 index, const Cell &cell, char *scratch) -> int
+auto Node::write(U32 index, const Cell &cell) -> int
 {
-    const auto offset = alloc(index, cell.footprint, scratch);
+    const auto offset = alloc(index, cell.footprint);
     if (offset > 0) {
         std::memcpy(ref->page + offset, cell.ptr, cell.footprint);
     }
@@ -458,9 +471,9 @@ auto Node::erase(U32 index, U32 cell_size) -> int
     return rc;
 }
 
-auto Node::defrag(char *scratch) -> int
+auto Node::defrag() -> int
 {
-    if (BlockAllocator::defragment(*this, scratch)) {
+    if (BlockAllocator::defragment(*this)) {
         return -1;
     }
     CALICODB_EXPECT_EQ(usable_space, gap_size);
@@ -499,9 +512,9 @@ auto Node::check_freelist() const -> int
     return 0;
 }
 
-auto Node::check_state(char *scratch) const -> int
+auto Node::check_state() const -> int
 {
-    const auto account = [&scratch](auto from, auto size) {
+    const auto account = [this](auto from, auto size) {
         if (from > kPageSize || from + size > kPageSize) {
             return -1;
         }
@@ -579,8 +592,7 @@ auto Node::check_state(char *scratch) const -> int
 
 auto Node::assert_state() const -> bool
 {
-    char scratch[kPageSize];
-    CALICODB_EXPECT_EQ(0, check_state(scratch));
+    CALICODB_EXPECT_EQ(0, check_state());
     return true;
 }
 

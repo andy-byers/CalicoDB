@@ -38,8 +38,7 @@ public:
         auto s = DB::open(Options(), m_filename, db);
 
         if (s.is_ok()) {
-            // Scan the whole database.
-            s = db->view([](const auto &tx) {
+            s = db->update([](auto &tx) {
                 Status s;
                 auto &schema = tx.schema();
                 schema.seek_first();
@@ -47,14 +46,28 @@ public:
                     Bucket b;
                     s = tx.open_bucket(schema.key(), b);
                     if (s.is_ok()) {
-                        auto *c = tx.new_cursor(b);
-                        c->seek_first();
+                        std::unique_ptr<Cursor> c(tx.new_cursor(b));
+                        c->seek_last();
                         while (c->is_valid()) {
-                            c->next();
+                            // NOTE: s == c->status() should always be true after put() returns.
+                            s = tx.put(*c, c->key(), "value");
+                            if (s.is_ok()) {
+                                c->previous();
+                            } else {
+                                CHECK_TRUE(s == c->status());
+                            }
                         }
-                        s = c->status();
-                        delete c;
-                        schema.next();
+                        if (s.is_ok()) {
+                            // Catch errors from c->previous().
+                            s = c->status();
+                        }
+                        if (s.is_ok()) {
+                            c->seek_first();
+                            while (c->is_valid()) {
+                                s = tx.erase(*c);
+                            }
+                            schema.next();
+                        }
                     }
                 }
                 if (s.is_ok()) {
