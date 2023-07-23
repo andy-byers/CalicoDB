@@ -138,7 +138,7 @@ auto Node::alloc(U32 index, U32 size) -> int
     insert_ivec_slot(*this, index, kPageSize - 1);
 
     // Attempt to allocate `size` contiguous bytes within `node`.
-    int offset = 0;
+    U32 offset = 0;
     if (NodeHdr::get_frag_count(hdr()) + kMinBlockSize - 1 <= kMaxFragCount) {
         offset = BlockAllocator::allocate(*this, size);
     }
@@ -151,14 +151,11 @@ auto Node::alloc(U32 index, U32 size) -> int
         offset = BlockAllocator::allocate(*this, size);
     }
     // We already made sure we had enough room to fulfill the request. If we had to defragment, the call
-    // to allocate() following defragmentation should succeed. If offset < 0 at this point, then corruption
-    // was detected in the `node`.
-    CALICODB_EXPECT_NE(offset, 0);
-    if (offset > 0) {
-        put_ivec_slot(*this, index, static_cast<U32>(offset));
-        usable_space -= size + kSlotWidth;
-    }
-    return offset;
+    // to allocate() following defragmentation should succeed.
+    CALICODB_EXPECT_GT(offset, 0);
+    put_ivec_slot(*this, index, static_cast<U32>(offset));
+    usable_space -= size + kSlotWidth;
+    return static_cast<int>(offset);
 }
 
 [[nodiscard]] static auto get_next_pointer(const Node &node, U32 offset) -> U32
