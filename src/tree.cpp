@@ -1957,7 +1957,6 @@ auto Tree::vacuum(Schema &schema) -> Status
     Status s;
     auto &root = m_pager->get_root();
 
-    const auto free_head = FileHdr::get_freelist_head(root.page);
     // Count the number of pages in the freelist, since we don't keep this information stored
     // anywhere. This involves traversing the list of freelist trunk pages. Luckily, these pages
     // are likely to be accessed again soon, so it may not hurt have them in the pager cache.
