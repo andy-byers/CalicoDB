@@ -143,15 +143,16 @@ auto Node::alloc(U32 index, U32 size) -> int
         offset = BlockAllocator::allocate(*this, size);
     }
     if (offset == 0) {
-        // There is enough space in `node`, it just isn't contiguous. Defragment and try again. Note that
+        // There is enough space in `node`, it just isn't contiguous. Either that, or there
+        // is a chance the fragment count might overflow. Defragment and try again. Note that
         // we pass `index` so that defragment() skips the cell we haven't filled in yet.
         if (BlockAllocator::defragment(*this, static_cast<int>(index))) {
             return -1;
         }
         offset = BlockAllocator::allocate(*this, size);
     }
-    // We already made sure we had enough room to fulfill the request. If we had to defragment, the call
-    // to allocate() following defragmentation should succeed.
+    // We already made sure we had enough room to fulfill the request. If we had to defragment,
+    // the call to allocate() should succeed.
     CALICODB_EXPECT_GT(offset, 0);
     put_ivec_slot(*this, index, static_cast<U32>(offset));
     usable_space -= size + kSlotWidth;
@@ -557,9 +558,9 @@ auto Node::check_state() const -> int
     // Cell bodies. Also makes sure the cells are in order where possible.
     for (i = 0; i < NodeHdr::get_cell_count(hdr()); ++i) {
         Cell left_cell;
-        if (U32 ivec_slot; read(i, left_cell) ||
-                           kPageSize <= (ivec_slot = get_ivec_slot(*this, i)) ||
-                           account(ivec_slot, left_cell.footprint)) {
+        if (auto ivec_slot = get_ivec_slot(*this, i);
+            read(i, left_cell) ||
+            account(ivec_slot, left_cell.footprint)) {
             return -1;
         }
 

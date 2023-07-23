@@ -14,14 +14,36 @@ namespace calicodb
 struct Node;
 
 struct BlockAllocator {
+    // Count the total number of bytes in the intra-node freelist
+    // Returns a nonnegative number on success and -1 on failure. This routine should
+    // fail if the freelist is not valid. The following properties are checked:
+    // (1) All free blocks are entirely contained within the cell content area
+    // (2) Free blocks are sorted by offset, and no 2 free blocks overlap
+    // (3) Any 2 adjacent free blocks are separated by at least 4 bytes (otherwise,
+    //     there is a fragment between the two blocks that should have been consumed
+    //     by release()).
     [[nodiscard]] static auto freelist_size(const Node &node) -> int;
-    [[nodiscard]] static auto allocate(Node &node, U32 needed_size) -> U32;
+
+    // Release unused memory back to the node
+    // Returns 0 on success and -1 on failure. The freelist (and gap) was already
+    // validated when the node was created, so this routine must ensure that those
+    // invariants are maintained.
     [[nodiscard]] static auto release(Node &node, U32 block_start, U32 block_size) -> int;
+
+    // Allocate memory for a cell
+    // Returns the offset of the allocated region on success. Returns 0 if the node
+    // doesn't have `needed_size` contiguous bytes available. This routine should
+    // never encounter corruption.
+    [[nodiscard]] static auto allocate(Node &node, U32 needed_size) -> U32;
+
+    // Get rid of the fragmentation present in a `node`
+    // Returns 0 on success and -1 on failure. If `skip` is set to the index of a
+    // particular cell, that cell will be skipped during processing.
     [[nodiscard]] static auto defragment(Node &node, int skip = -1) -> int;
 };
 
-// NOTE: Cell headers are padded out to kMinCellHeaderSize, which corresponds to the size of a free block
-//       header.
+// NOTE: Cell headers are padded out to kMinCellHeaderSize, which corresponds to the size
+//       of a free block header.
 static constexpr U32 kMinCellHeaderSize =
     sizeof(U16) +
     sizeof(U16);
@@ -56,7 +78,7 @@ static constexpr U32 kMaxCellHeaderSize =
 //     4       child_id
 //     varint  key_size
 //     n       key
-//    [4       overflow_id]
+//     4       overflow_id*
 //
 // External cell format:
 //     Size    Name
@@ -65,8 +87,11 @@ static constexpr U32 kMaxCellHeaderSize =
 //     varint  key_size
 //     n       key
 //     m       value
-//    [4       overflow_id]
+//     4       overflow_id*
 //
+// * overflow_id field is only present when the cell payload is unable to
+//   fit entirely within the node page. In this case, it holds the page ID
+//   of the first overflow chain page that the payload has spilled onto.
 struct Cell {
     // Pointer to the start of the cell.
     char *ptr;

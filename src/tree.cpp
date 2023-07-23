@@ -87,15 +87,7 @@ class TreeCursor
 
     auto seek_to_first_leaf() -> void
     {
-        reset();
-        m_idx = 0;
-        m_status = m_tree->acquire(m_tree->root(), m_node);
-        while (m_status.is_ok()) {
-            if (m_node.is_leaf()) {
-                break;
-            }
-            move_to_child(m_node.read_child_id(0));
-        }
+        seek_to_leaf("");
     }
 
     auto seek_to_last_leaf() -> void
@@ -103,13 +95,12 @@ class TreeCursor
         reset();
         m_status = m_tree->acquire(m_tree->root(), m_node);
         while (m_status.is_ok()) {
-            const auto ncells = NodeHdr::get_cell_count(m_node.hdr());
-            m_idx = ncells;
+            m_idx = NodeHdr::get_cell_count(m_node.hdr());
             if (m_node.is_leaf()) {
                 m_idx -= m_idx > 0;
                 break;
             }
-            move_to_child(m_node.read_child_id(ncells));
+            move_to_child(NodeHdr::get_next_id(m_node.hdr()));
         }
     }
 
@@ -144,8 +135,7 @@ class TreeCursor
             }
         }
 
-        const U32 shift = exact * !m_node.is_leaf();
-        m_idx = lower + shift;
+        m_idx = lower + exact * !m_node.is_leaf();
         return exact;
     }
 
