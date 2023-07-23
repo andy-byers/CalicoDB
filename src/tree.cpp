@@ -1941,25 +1941,6 @@ static auto vacuum_end_page(U32 db_size, U32 free_size) -> Id
     return end_page;
 }
 
-// The CalicoDB database file format does not store the number of free pages; this number must be determined
-// by iterating through the freelist trunk pages. At present, this only happens when a vacuum is performed.
-[[nodiscard]] static auto determine_freelist_size(Pager &pager, Id free_head, U32 &size_out) -> Status
-{
-    Status s;
-    size_out = 0;
-    while (!free_head.is_null()) {
-        PageRef *trunk;
-        s = pager.acquire(free_head, trunk);
-        if (!s.is_ok()) {
-            return s;
-        }
-        size_out += 1 + get_u32(trunk->page + sizeof(U32));
-        free_head.value = get_u32(trunk->page);
-        pager.release(trunk);
-    }
-    return s;
-}
-
 static constexpr auto is_freelist_type(PointerMap::Type type) -> bool
 {
     return type == PointerMap::kFreelistTrunk ||
@@ -1980,10 +1961,9 @@ auto Tree::vacuum(Schema &schema) -> Status
     // Count the number of pages in the freelist, since we don't keep this information stored
     // anywhere. This involves traversing the list of freelist trunk pages. Luckily, these pages
     // are likely to be accessed again soon, so it may not hurt have them in the pager cache.
-    U32 free_size;
-    s = determine_freelist_size(*m_pager, free_head, free_size);
+    const auto free_len = FileHdr::get_freelist_length(root.page);
     // Determine what the last page in the file should be after this vacuum is run to completion.
-    const auto end_page = vacuum_end_page(db_size, free_size);
+    const auto end_page = vacuum_end_page(db_size, free_len);
     for (; s.is_ok() && db_size > end_page.value; --db_size) {
         const Id last_page_id(db_size);
         if (!PointerMap::is_map(last_page_id)) {
@@ -2025,6 +2005,7 @@ auto Tree::vacuum(Schema &schema) -> Status
     if (s.is_ok() && db_size < m_pager->page_count()) {
         m_pager->mark_dirty(root);
         FileHdr::put_freelist_head(root.page, Id::null());
+        FileHdr::put_freelist_length(root.page, 0);
         m_pager->set_page_count(db_size);
     }
     return s;
