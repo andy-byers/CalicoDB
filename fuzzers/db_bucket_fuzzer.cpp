@@ -5,6 +5,7 @@
 #include "calicodb/cursor.h"
 #include "calicodb/db.h"
 #include "calicodb/env.h"
+#include "fake_env.h"
 #include "fuzzer.h"
 #include "tree.h"
 #include <memory>
@@ -17,21 +18,20 @@ class Fuzzer
     static constexpr std::size_t kMaxBuckets = 8;
 
     Options m_options;
-    std::string m_filename;
     DB *m_db = nullptr;
 
     auto reopen_db() -> void
     {
         delete m_db;
-        CHECK_OK(DB::open(m_options, m_filename, m_db));
+        CHECK_OK(DB::open(m_options, "MemDB", m_db));
     }
 
 public:
-    explicit Fuzzer(std::string filename)
-        : m_filename(std::move(filename))
+    explicit Fuzzer(Env &env)
     {
-        Env::default_env().srand(42);
-        (void)DB::destroy(m_options, m_filename);
+        env.srand(42);
+        m_options.env = &env;
+        m_options.cache_size = 0;
         reopen_db();
     }
 
@@ -61,6 +61,7 @@ public:
             kOpSelect,
             kOpCommit,
             kOpFinish,
+            kOpCheck,
             kOpCount
         };
 
@@ -119,6 +120,13 @@ public:
                         s = tx.drop_bucket(std::to_string(idx));
                         c = nullptr;
                         break;
+                    case kOpCheck:
+                        for (std::size_t i = 0; i < kMaxBuckets; ++i) {
+                            if (cursors[i] != nullptr) {
+                                check_bucket(buckets[i]);
+                            }
+                        }
+                        break;
                     default:
                         return Status::not_supported("ROLLBACK");
                 }
@@ -132,11 +140,6 @@ public:
                 CHECK_OK(s);
                 CHECK_OK(tx.status());
             }
-            for (std::size_t i = 0; i < kMaxBuckets; ++i) {
-                if (cursors[i] != nullptr) {
-                    check_bucket(buckets[i]);
-                }
-            }
             return Status::ok();
         });
         CHECK_TRUE(s.is_ok() || s.to_string() == "not supported: ROLLBACK");
@@ -146,11 +149,11 @@ public:
 
 extern "C" int LLVMFuzzerTestOneInput(const U8 *data, std::size_t size)
 {
+    FakeEnv env;
     FuzzerStream stream(data, size);
-    Fuzzer fuzzer("/tmp/calicodb_db_bucket_fuzzer");
+    Fuzzer fuzzer(env);
     while (fuzzer.fuzz(stream)) {
     }
-
     return 0;
 }
 

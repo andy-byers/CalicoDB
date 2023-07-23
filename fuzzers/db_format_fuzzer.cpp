@@ -14,28 +14,28 @@ namespace calicodb
 
 class Fuzzer
 {
+    static constexpr auto *kFilename = "MemDB";
     Options m_options;
-    std::string m_filename;
 
 public:
-    explicit Fuzzer(std::string filename)
-        : m_filename(std::move(filename))
+    explicit Fuzzer(Env &env)
     {
-        Env::default_env().srand(42);
+        env.srand(42);
+        m_options.env = &env;
     }
 
     auto fuzz(const Slice &data) -> void
     {
         // Write the fuzzer input to a file.
         File *file;
-        CHECK_OK(Env::default_env().new_file(m_filename, Env::kCreate, file));
+        CHECK_OK(m_options.env->new_file(kFilename, Env::kCreate, file));
         CHECK_OK(file->resize(data.size()));
         CHECK_OK(file->write(0, data));
         delete file;
 
         // Attempt to open the file as a database.
         DB *db;
-        auto s = DB::open(Options(), m_filename, db);
+        auto s = DB::open(m_options, kFilename, db);
 
         if (s.is_ok()) {
             s = db->update([](auto &tx) {
@@ -49,12 +49,10 @@ public:
                         std::unique_ptr<Cursor> c(tx.new_cursor(b));
                         c->seek_last();
                         while (c->is_valid()) {
-                            // NOTE: s == c->status() should always be true after put() returns.
                             s = tx.put(*c, c->key(), "value");
+                            CHECK_TRUE(s == c->status());
                             if (s.is_ok()) {
                                 c->previous();
-                            } else {
-                                CHECK_TRUE(s == c->status());
                             }
                         }
                         if (s.is_ok()) {
@@ -65,6 +63,7 @@ public:
                             c->seek_first();
                             while (c->is_valid()) {
                                 s = tx.erase(*c);
+                                CHECK_TRUE(s == c->status());
                             }
                             schema.next();
                         }
@@ -88,7 +87,8 @@ public:
 
 extern "C" int LLVMFuzzerTestOneInput(const U8 *data, std::size_t size)
 {
-    Fuzzer fuzzer("/tmp/calicodb_db_format_fuzzer");
+    FakeEnv env;
+    Fuzzer fuzzer(env);
     fuzzer.fuzz(Slice(reinterpret_cast<const char *>(data), size));
     return 0;
 }

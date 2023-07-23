@@ -345,11 +345,11 @@ class Fuzzer
     }
 
 public:
-    explicit Fuzzer(Options *options)
+    explicit Fuzzer(Env &env)
     {
-        if (options) {
-            m_options = *options;
-        }
+        env.srand(42);
+        m_options.env = &env;
+        m_options.cache_size = 0;
         reopen_db();
     }
 
@@ -383,6 +383,7 @@ auto Fuzzer::fuzz(FuzzerStream &stream) -> bool
         kReopenDB,
         kReopenTx,
         kReopenBucket,
+        kValidateDB,
         kOpCount
     } op_type = OperationType(U32(stream.extract_fixed(1)[0]) % kOpCount);
 
@@ -401,6 +402,7 @@ auto Fuzzer::fuzz(FuzzerStream &stream) -> bool
         "kReopenDB",
         "kReopenTx",
         "kReopenBucket",
+        "kValidateDB",
     };
     const auto sample_len = std::min(stream.length(), 8UL);
     const auto missing_len = stream.length() - sample_len;
@@ -463,6 +465,9 @@ auto Fuzzer::fuzz(FuzzerStream &stream) -> bool
         case kReopenBucket:
             reopen_bucket();
             break;
+        case kValidateDB:
+            static_cast<const Tree *>(m_b.state)->TEST_validate();
+            break;
         default: // kReopenDB
             reopen_db();
     }
@@ -478,23 +483,16 @@ auto Fuzzer::fuzz(FuzzerStream &stream) -> bool
     }
     CHECK_OK(s);
     CHECK_OK(m_tx->status());
-    static_cast<const Tree *>(m_b.state)->TEST_validate();
     return true;
 }
 
 extern "C" int LLVMFuzzerTestOneInput(const U8 *data, std::size_t size)
 {
     FakeEnv env;
-    env.srand(42);
-    Options options;
-    options.env = &env;     // Use a fake Env that doesn't write to disk.
-    options.cache_size = 0; // Use the smallest possible cache.
-
-    Fuzzer fuzzer(&options);
+    Fuzzer fuzzer(env);
     FuzzerStream stream(data, size);
     while (fuzzer.fuzz(stream)) {
     }
-
     return 0;
 }
 
