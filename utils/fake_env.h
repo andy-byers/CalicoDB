@@ -5,9 +5,9 @@
 #ifndef CALICODB_UTILS_FAKE_ENV_H
 #define CALICODB_UTILS_FAKE_ENV_H
 
+#include "calicodb/env.h"
 #include <unordered_map>
 #include <vector>
-#include "calicodb/env.h"
 
 namespace calicodb
 {
@@ -23,7 +23,6 @@ public:
     auto new_logger(const std::string &filename, Logger *&out) -> Status override;
     auto new_file(const std::string &filename, OpenMode mode, File *&out) -> Status override;
     [[nodiscard]] auto file_exists(const std::string &filename) const -> bool override;
-    auto resize_file(const std::string &filename, std::size_t size) -> Status override;
     [[nodiscard]] auto file_size(const std::string &filename, std::size_t &out) const -> Status override;
     auto remove_file(const std::string &filename) -> Status override;
 
@@ -60,6 +59,7 @@ public:
     ~FakeFile() override = default;
     auto read(std::size_t offset, std::size_t size, char *scratch, Slice *out) -> Status override;
     auto write(std::size_t offset, const Slice &in) -> Status override;
+    auto resize(std::size_t size) -> Status override;
     auto sync() -> Status override;
     auto file_lock(FileLockMode) -> Status override { return Status::ok(); }
     auto shm_map(std::size_t r, bool extend, volatile void *&out) -> Status override;

@@ -73,6 +73,11 @@ auto Freelist::push(Pager &pager, PageRef *&page) -> Status
     }
 
 cleanup:
+    if (s.is_ok()) {
+        pager.mark_dirty(root);
+        const auto freelist_len = FileHdr::get_freelist_length(root.page);
+        FileHdr::put_freelist_length(root.page, freelist_len + 1);
+    }
     pager.release(trunk);
     pager.release(page, Pager::kDiscard);
     return s;
@@ -83,9 +88,9 @@ cleanup:
 auto Freelist::pop(Pager &pager, Id &id_out) -> Status
 {
     auto &root = pager.get_root();
+    const auto free_length = FileHdr::get_freelist_length(root.page);
     auto free_head = FileHdr::get_freelist_head(root.page);
-    if (free_head.is_null()) {
-        // Freelist is empty.
+    if (free_length == 0) {
         return Status::invalid_argument();
     } else if (free_head.value > pager.page_count()) {
         return Status::corruption();
@@ -113,6 +118,10 @@ auto Freelist::pop(Pager &pager, Id &id_out) -> Status
             }
         }
         pager.release(trunk);
+        if (s.is_ok()) {
+            pager.mark_dirty(root);
+            FileHdr::put_freelist_length(root.page, free_length - 1);
+        }
     }
     return s;
 }

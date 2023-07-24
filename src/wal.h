@@ -109,8 +109,7 @@ class Wal
 {
 public:
     struct Parameters {
-        const char *wal_name;
-        const char *db_name;
+        const char *filename;
         Env *env;
         File *db_file;
         Logger *info_log;

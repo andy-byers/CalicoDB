@@ -23,7 +23,6 @@ public:
     auto new_file(const std::string &filename, OpenMode mode, File *&out) -> Status override;
     [[nodiscard]] auto file_exists(const std::string &filename) const -> bool override;
     auto remove_file(const std::string &filename) -> Status override;
-    auto resize_file(const std::string &filename, std::size_t size) -> Status override;
     [[nodiscard]] auto file_size(const std::string &filename, std::size_t &out) const -> Status override;
 
     auto srand(unsigned seed) -> void override;

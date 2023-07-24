@@ -89,6 +89,7 @@ protected:
     static constexpr std::size_t kManyPages = kMinFrameCount * 100;
 
     Env *m_env;
+    File *m_wal_file = nullptr;
     Pager *m_pager = nullptr;
     File *m_file = nullptr;
     Status m_status;
@@ -103,6 +104,7 @@ protected:
     {
         close();
         delete m_file;
+        delete m_wal_file;
         delete m_env;
     }
 
@@ -139,6 +141,11 @@ protected:
                 true,
             };
             s = Pager::open(param, m_pager);
+        }
+        if (s.is_ok()) {
+            delete m_wal_file;
+            m_wal_file = nullptr;
+            s = m_env->new_file("wal", Env::kReadWrite, m_wal_file);
         }
         if (!s.is_ok()) {
             ADD_FAILURE() << s.to_string();
@@ -292,12 +299,12 @@ TEST_F(PagerTests, Commit)
         if (iteration % 3 > 0) {
             // Make sure we actually have all the data we need in the WAL. The root page is
             // not in the WAL, but it is blank anyway.
-            ASSERT_OK(m_env->resize_file("db", 0));
+            ASSERT_OK(m_file->resize(0));
             // Transfer the lost pages back.
             ASSERT_OK(m_pager->checkpoint(iteration % 3 == 1));
             // Everything should be back in the database file. The next reader shouldn't read
             // any pages from the WAL.
-            ASSERT_OK(m_env->resize_file("wal", 0));
+            ASSERT_OK(m_wal_file->resize(0));
         }
         pager_view([this] {
             for (std::size_t i = 0; i < kManyPages; ++i) {
@@ -327,9 +334,9 @@ TEST_F(PagerTests, Rollback)
             }
         });
         if (iteration % 3 > 0) {
-            ASSERT_OK(m_env->resize_file("db", 0));
+            ASSERT_OK(m_file->resize(0));
             ASSERT_OK(m_pager->checkpoint(iteration % 3 == 1));
-            ASSERT_OK(m_env->resize_file("wal", 0));
+            ASSERT_OK(m_wal_file->resize(0));
         }
         pager_view([this, page_count] {
             ASSERT_EQ(m_pager->page_count(), page_count);

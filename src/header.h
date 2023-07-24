@@ -27,8 +27,9 @@ namespace calicodb
 //     0       18    Identifier string
 //     18      4     Number of pages in the DB
 //     22      4     Freelist head
-//     26      1     File format version
-//     27      37    Reserved
+//     26      4     Freelist length
+//     30      1     File format version
+//     31      33    Reserved
 struct FileHdr {
     static constexpr char kFmtString[18] = "CalicoDB format 1";
     static constexpr char kFmtVersion = 1;
@@ -39,7 +40,8 @@ struct FileHdr {
     enum {
         kPageCountOffset = sizeof(kFmtString),
         kFreelistHeadOffset = kPageCountOffset + sizeof(U32),
-        kFmtVersionOffset = kFreelistHeadOffset + sizeof(U32),
+        kFreelistLengthOffset = kFreelistHeadOffset + sizeof(U32),
+        kFmtVersionOffset = kFreelistLengthOffset + sizeof(U32),
         kReservedOffset = kFmtVersionOffset + sizeof(char),
         kSize = kReservedOffset + 37
     };
@@ -61,6 +63,15 @@ struct FileHdr {
     {
         put_u32(root + kFreelistHeadOffset, value.value);
     }
+
+    [[nodiscard]] static auto get_freelist_length(const char *root) -> U32
+    {
+        return get_u32(root + kFreelistLengthOffset);
+    }
+    static auto put_freelist_length(char *root, U32 value) -> void
+    {
+        put_u32(root + kFreelistLengthOffset, value);
+    }
 };
 
 // Node Header Format:
@@ -74,9 +85,10 @@ struct FileHdr {
 //     13      2     Freelist start
 //     15      1     Fragment count
 struct NodeHdr {
-    enum Type : char {
-        kExternal = '\x01',
-        kInternal = '\x02',
+    enum Type : int {
+        kInvalid = 0,
+        kInternal = 1,
+        kExternal = 2,
     };
 
     enum {
@@ -86,18 +98,24 @@ struct NodeHdr {
         kCellCountOffset = kPrevIdOffset + sizeof(U32),
         kCellStartOffset = kCellCountOffset + sizeof(U16),
         kFreeStartOffset = kCellStartOffset + sizeof(U16),
-        kFreeCountOffset = kFreeStartOffset + sizeof(U16),
-        kFragCountOffset = kFreeCountOffset + sizeof(U16),
+        kFragCountOffset = kFreeStartOffset + sizeof(U16),
         kSize = kFragCountOffset + sizeof(U8)
     };
 
     [[nodiscard]] static auto get_type(const char *root) -> Type
     {
-        return Type{root[kTypeOffset]};
+        switch (root[kTypeOffset]) {
+            case kInternal:
+                return kInternal;
+            case kExternal:
+                return kExternal;
+            default:
+                return kInvalid;
+        }
     }
-    static auto put_type(char *root, Type value) -> void
+    static auto put_type(char *root, bool is_external) -> void
     {
-        root[kTypeOffset] = value;
+        root[kTypeOffset] = static_cast<char>(kInternal + is_external);
     }
 
     [[nodiscard]] static auto get_next_id(const char *root) -> Id

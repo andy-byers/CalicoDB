@@ -982,7 +982,6 @@ private:
     HashIndexHdr m_hdr = {};
     HashIndex m_index;
 
-    const char *m_db_name;
     const char *m_wal_name;
     const Options::SyncMode m_sync_mode;
     const Options::LockMode m_lock_mode;
@@ -1015,7 +1014,7 @@ private:
 auto Wal::open(const Parameters &param, Wal *&out) -> Status
 {
     File *wal_file;
-    auto s = param.env->new_file(param.wal_name, Env::kCreate, wal_file);
+    auto s = param.env->new_file(param.filename, Env::kCreate, wal_file);
     if (s.is_ok()) {
         out = new WalImpl(param, *wal_file);
     }
@@ -1026,8 +1025,7 @@ Wal::~Wal() = default;
 
 WalImpl::WalImpl(const Parameters &param, File &wal_file)
     : m_index(m_hdr, param.lock_mode == Options::kLockNormal ? param.db_file : nullptr),
-      m_db_name(param.db_name),
-      m_wal_name(param.wal_name),
+      m_wal_name(param.filename),
       m_sync_mode(param.sync_mode),
       m_lock_mode(param.lock_mode),
       m_frame(WalFrameHdr::kSize + kPageSize, '\0'),
@@ -1508,7 +1506,7 @@ auto WalImpl::transfer_contents(bool reset) -> Status
             }
             if (s.is_ok()) {
                 if (max_safe_frame == m_hdr.max_frame) {
-                    s = m_env->resize_file(m_db_name, m_hdr.page_count * kPageSize);
+                    s = m_db->resize(m_hdr.page_count * kPageSize);
                     if (s.is_ok() && sync_on_ckpt) {
                         ++m_stat->counters[Stat::kSyncDB];
                         s = m_db->sync();

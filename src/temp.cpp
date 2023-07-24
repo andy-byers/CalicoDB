@@ -75,6 +75,14 @@ public:
                 return Status::ok();
             }
 
+            auto resize(std::size_t size) -> Status override
+            {
+                const auto page_count = size / kPageSize;
+                CALICODB_EXPECT_EQ(size, page_count * kPageSize);
+                m_file->resize(page_count);
+                return Status::ok();
+            }
+
             auto sync() -> Status override
             {
                 return Status::ok();
@@ -105,17 +113,6 @@ public:
 
         file_out = new TempFile(m_file);
         return Status::ok();
-    }
-
-    auto resize_file(const std::string &filename, std::size_t size) -> Status override
-    {
-        if (file_exists(filename)) {
-            const auto page_count = size / kPageSize;
-            CALICODB_EXPECT_EQ(size, page_count * kPageSize);
-            m_file.resize(page_count);
-            return Status::ok();
-        }
-        return Status::invalid_argument();
     }
 
     auto file_size(const std::string &filename, std::size_t &size_out) const -> Status override

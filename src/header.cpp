@@ -42,7 +42,7 @@ auto FileHdr::make_supported_db(char *root) -> void
     put_u32(root + kPageCountOffset, 1);
 
     // Initialize the root page of the schema tree.
-    NodeHdr::put_type(root + FileHdr::kSize, NodeHdr::kExternal);
+    NodeHdr::put_type(root + FileHdr::kSize, true);
     NodeHdr::put_cell_start(root + FileHdr::kSize, kPageSize);
 }
 

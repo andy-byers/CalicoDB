@@ -18,7 +18,7 @@ public:
     {
         m_ref.page = m_backing.data();
         m_ref.page_id = Id(3);
-        m_node = Node::from_new_page(m_ref, true);
+        m_node = Node::from_new_page(m_ref, m_scratch.data(), true);
     }
 
     ~NodeTests() override = default;
@@ -83,7 +83,7 @@ public:
         }
 
         std::memset(m_ref.page, 0, kPageSize);
-        m_node = Node::from_new_page(m_ref, is_leaf);
+        m_node = Node::from_new_page(m_ref, m_scratch.data(), is_leaf);
         return true;
     }
 };
@@ -93,13 +93,17 @@ class BlockAllocatorTests : public NodeTests
 public:
     explicit BlockAllocatorTests()
     {
-        NodeHdr::put_type(m_node.hdr(), NodeHdr::kInternal);
+        NodeHdr::put_type(m_node.hdr(), false);
     }
 
     ~BlockAllocatorTests() override = default;
 
     auto reserve_for_test(U32 n) -> void
     {
+        // Make the gap large so BlockAllocator doesn't get confused.
+        NodeHdr::put_cell_start(
+            m_node.hdr(),
+            page_offset(m_node.ref->page_id) + NodeHdr::kSize);
         ASSERT_LT(n, kPageSize - FileHdr::kSize - NodeHdr::kSize)
             << "reserve_for_test(" << n << ") leaves no room for possible headers";
         m_size = n;
@@ -177,7 +181,7 @@ TEST_F(BlockAllocatorTests, ConsumesAdjacentFragments)
 TEST_F(BlockAllocatorTests, ExternalNodesConsume3ByteFragments)
 {
     reserve_for_test(11);
-    NodeHdr::put_type(m_node.hdr(), NodeHdr::kExternal);
+    NodeHdr::put_type(m_node.hdr(), true);
     NodeHdr::put_frag_count(m_node.hdr(), 3);
 
     // ....***####
@@ -191,7 +195,7 @@ TEST_F(BlockAllocatorTests, ExternalNodesConsume3ByteFragments)
 
 TEST_F(BlockAllocatorTests, InternalNodesConsume3ByteFragments)
 {
-    m_node = Node::from_new_page(m_ref, false);
+    m_node = Node::from_new_page(m_ref, m_scratch.data(), false);
 
     reserve_for_test(11);
     NodeHdr::put_frag_count(m_node.hdr(), 3);
@@ -212,7 +216,7 @@ TEST_F(NodeTests, CellLifecycle)
         auto target_space = m_node.usable_space;
         for (U32 i = 0;; ++i) {
             const auto cell_in = make_cell(i);
-            const auto rc = m_node.write(i, cell_in, m_scratch.data());
+            const auto rc = m_node.write(i, cell_in);
             if (rc == 0) {
                 break;
             }
@@ -232,7 +236,7 @@ TEST_F(NodeTests, CellLifecycle)
                       Slice(cell_out.key, cell_out.key_size));
         }
 
-        while (NodeHdr::get_cell_count(m_node.hdr()) > 0) {
+        while (0 < NodeHdr::get_cell_count(m_node.hdr())) {
             Cell cell_out = {};
             ASSERT_EQ(0, m_node.read(0, cell_out));
             ASSERT_EQ(0, m_node.erase(0, cell_out.footprint));
@@ -240,7 +244,7 @@ TEST_F(NodeTests, CellLifecycle)
             ASSERT_EQ(m_node.usable_space, target_space);
         }
         ASSERT_TRUE(m_node.assert_state());
-        ASSERT_EQ(0, m_node.defrag(m_scratch.data()));
+        ASSERT_EQ(0, m_node.defrag());
         ASSERT_EQ(m_node.usable_space, target_space);
 
     } while (change_node_type(++type));
@@ -253,7 +257,7 @@ TEST_F(NodeTests, OverwriteOnEraseBehavior)
     for (auto t : {kExternalNode, kInternalNode}) {
         ASSERT_TRUE(change_node_type(t));
         const auto cell_in = make_cell(0);
-        ASSERT_LT(0, m_node.write(0, cell_in, m_scratch.data()));
+        ASSERT_LT(0, m_node.write(0, cell_in));
 
         Cell cell_out;
         ASSERT_EQ(0, m_node.read(0, cell_out));

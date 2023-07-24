@@ -57,6 +57,12 @@ auto FakeFile::write(std::size_t offset, const Slice &in) -> Status
     return m_env->write_file_at(*m_state, offset, in);
 }
 
+auto FakeFile::resize(std::size_t size) -> Status
+{
+    m_state->buffer.resize(size);
+    return Status::ok();
+}
+
 auto FakeFile::sync() -> Status
 {
     return Status::ok();
@@ -112,16 +118,6 @@ auto FakeEnv::remove_file(const std::string &filename) -> Status
     // through open file descriptors, so if anyone has this file open, they should still be able to
     // access it.
     itr->second.created = false;
-    return Status::ok();
-}
-
-auto FakeEnv::resize_file(const std::string &filename, std::size_t size) -> Status
-{
-    auto itr = m_state.find(filename);
-    if (itr == end(m_state)) {
-        return Status::not_found('"' + filename + "\" does not exist");
-    }
-    itr->second.buffer.resize(size);
     return Status::ok();
 }
 

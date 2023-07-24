@@ -42,6 +42,8 @@ class TreeCursor;
 class Tree final
 {
 public:
+    static constexpr std::size_t kRequiredBufferSize = 3 * kPageSize;
+
     ~Tree();
     auto release_nodes() const -> void;
 
@@ -65,7 +67,7 @@ public:
         auto s = m_pager->allocate(ref);
         if (s.is_ok()) {
             CALICODB_EXPECT_FALSE(PointerMap::is_map(ref->page_id));
-            node_out = Node::from_new_page(*ref, is_external);
+            node_out = Node::from_new_page(*ref, m_node_scratch, is_external);
         }
         return s;
     }
@@ -75,9 +77,9 @@ public:
         PageRef *ref;
         auto s = m_pager->acquire(page_id, ref);
         if (s.is_ok()) {
-            if (Node::from_existing_page(*ref, node_out)) {
-                m_pager->release(node_out.ref);
-                return corrupted_page(page_id);
+            if (Node::from_existing_page(*ref, m_node_scratch, node_out)) {
+                m_pager->release(ref);
+                return corrupted_node(page_id);
             }
             if (write) {
                 upgrade(node_out);
@@ -98,18 +100,6 @@ public:
 
     auto release(Node node) const -> void
     {
-        if (node.ref != nullptr && m_pager->mode() == Pager::kDirty) {
-            // If the pager is in kWrite mode and a page is marked dirty, it immediately
-            // transitions to kDirty mode. So, if this node is dirty, then the pager must
-            // be in kDirty mode (unless there was an error).
-            if (0x80 < NodeHdr::get_frag_count(node.hdr())) {
-                // Fragment count is too large. Defragment the node to get rid of all fragments.
-                if (node.defrag(m_node_scratch)) {
-                    // Sets the pager error status.
-                    (void)corrupted_page(node.ref->page_id);
-                }
-            }
-        }
         m_pager->release(node.ref);
     }
 
@@ -136,7 +126,7 @@ private:
     auto put(TreeCursor &c, const Slice &key, const Slice &value) -> Status;
     auto erase(TreeCursor &c) -> Status;
 
-    auto corrupted_page(Id page_id) const -> Status;
+    auto corrupted_node(Id page_id) const -> Status;
 
     auto redistribute_cells(Node &left, Node &right, Node &parent, U32 pivot_idx) -> Status;
     auto resolve_overflow(TreeCursor &c) -> Status;
@@ -202,8 +192,9 @@ private:
         U32 idx;
     } m_ovfl;
 
-    // Scratch memory for defragmenting nodes.
+    // Scratch memory for manipulating nodes.
     char *const m_node_scratch;
+    char *const m_split_scratch;
 
     // Scratch memory for cells that aren't embedded in nodes. Use m_cell_scratch[n] to get a pointer to
     // the start of cell scratch buffer n, where n < kNumCellBuffers.

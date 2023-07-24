@@ -3,13 +3,13 @@
 // LICENSE.md. See AUTHORS.md for a list of contributor names.
 
 #include "node.h"
-#include <algorithm>
-#include <vector>
 
 namespace calicodb
 {
 
+static constexpr U16 kPageMask = kPageSize - 1;
 static constexpr U32 kSlotWidth = sizeof(U16);
+static constexpr U32 kMinBlockSize = 2 * kSlotWidth;
 
 [[nodiscard]] static auto node_header_offset(const Node &node)
 {
@@ -23,22 +23,22 @@ static constexpr U32 kSlotWidth = sizeof(U16);
 
 [[nodiscard]] static auto cell_area_offset(const Node &node) -> U32
 {
-    return cell_slots_offset(node) + static_cast<U32>(NodeHdr::get_cell_count(node.hdr()) * kSlotWidth);
+    return cell_slots_offset(node) + NodeHdr::get_cell_count(node.hdr()) * kSlotWidth;
 }
 
-[[nodiscard]] static auto get_ivec_slot(const Node &node, U32 index)
+[[nodiscard]] static auto get_ivec_slot(const Node &node, U32 index) -> U32
 {
     CALICODB_EXPECT_LT(index, NodeHdr::get_cell_count(node.hdr()));
-    return get_u16(node.ref->page + cell_slots_offset(node) + index * kSlotWidth);
+    return kPageMask & get_u16(node.ref->page + cell_slots_offset(node) + index * kSlotWidth);
 }
 
-static auto put_ivec_slot(Node &node, U32 index, U32 pointer)
+static auto put_ivec_slot(Node &node, U32 index, U32 slot)
 {
     CALICODB_EXPECT_LT(index, NodeHdr::get_cell_count(node.hdr()));
-    return put_u16(node.ref->page + cell_slots_offset(node) + index * kSlotWidth, static_cast<U16>(pointer));
+    return put_u16(node.ref->page + cell_slots_offset(node) + index * kSlotWidth, static_cast<U16>(slot));
 }
 
-static auto insert_ivec_slot(Node &node, U32 index, U32 pointer)
+static auto insert_ivec_slot(Node &node, U32 index, U32 slot)
 {
     CALICODB_EXPECT_GE(node.gap_size, kSlotWidth);
     const auto count = NodeHdr::get_cell_count(node.hdr());
@@ -48,7 +48,7 @@ static auto insert_ivec_slot(Node &node, U32 index, U32 pointer)
     auto *data = node.ref->page + offset;
 
     std::memmove(data + kSlotWidth, data, size);
-    put_u16(data, static_cast<U16>(pointer));
+    put_u16(data, static_cast<U16>(slot));
 
     node.gap_size -= kSlotWidth;
     NodeHdr::put_cell_count(node.hdr(), count + 1);
@@ -120,7 +120,7 @@ static auto remove_ivec_slot(Node &node, U32 index)
     return -1;
 }
 
-auto Node::alloc(U32 index, U32 size, char *scratch) -> int
+auto Node::alloc(U32 index, U32 size) -> int
 {
     CALICODB_EXPECT_LE(index, NodeHdr::get_cell_count(hdr()));
 
@@ -128,9 +128,9 @@ auto Node::alloc(U32 index, U32 size, char *scratch) -> int
         return 0;
     }
 
-    // We don't have room to insert the cell pointer.
     if (gap_size < kSlotWidth) {
-        if (defrag(scratch)) {
+        // We don't have room in the gap to insert the cell pointer.
+        if (defrag()) {
             return -1;
         }
     }
@@ -138,24 +138,25 @@ auto Node::alloc(U32 index, U32 size, char *scratch) -> int
     insert_ivec_slot(*this, index, kPageSize - 1);
 
     // Attempt to allocate `size` contiguous bytes within `node`.
-    auto offset = BlockAllocator::allocate(*this, size);
+    U32 offset = 0;
+    if (NodeHdr::get_frag_count(hdr()) + kMinBlockSize - 1 <= kMaxFragCount) {
+        offset = BlockAllocator::allocate(*this, size);
+    }
     if (offset == 0) {
-        // There is enough space in `node`, it just isn't contiguous. Defragment and try again. Note that
+        // There is enough space in `node`, it just isn't contiguous. Either that, or there
+        // is a chance the fragment count might overflow. Defragment and try again. Note that
         // we pass `index` so that defragment() skips the cell we haven't filled in yet.
-        if (BlockAllocator::defragment(*this, scratch, static_cast<int>(index))) {
+        if (BlockAllocator::defragment(*this, static_cast<int>(index))) {
             return -1;
         }
         offset = BlockAllocator::allocate(*this, size);
     }
-    // We already made sure we had enough room to fulfill the request. If we had to defragment, the call
-    // to allocate() following defragmentation should succeed. If offset < 0 at this point, then corruption
-    // was detected in the `node`.
-    CALICODB_EXPECT_NE(offset, 0);
-    if (offset > 0) {
-        put_ivec_slot(*this, index, static_cast<U32>(offset));
-        usable_space -= size + kSlotWidth;
-    }
-    return offset;
+    // We already made sure we had enough room to fulfill the request. If we had to defragment,
+    // the call to allocate() should succeed.
+    CALICODB_EXPECT_GT(offset, 0);
+    put_ivec_slot(*this, index, static_cast<U32>(offset));
+    usable_space -= size + kSlotWidth;
+    return static_cast<int>(offset);
 }
 
 [[nodiscard]] static auto get_next_pointer(const Node &node, U32 offset) -> U32
@@ -174,8 +175,6 @@ static auto set_next_pointer(Node &node, U32 offset, U32 value) -> void
     return put_u16(node.ref->page + offset, static_cast<U16>(value));
 }
 
-static constexpr U32 kMinBlockSize = 2 * kSlotWidth;
-
 static auto set_block_size(Node &node, U32 offset, U32 value) -> void
 {
     CALICODB_EXPECT_GE(value, kMinBlockSize);
@@ -183,59 +182,63 @@ static auto set_block_size(Node &node, U32 offset, U32 value) -> void
     return put_u16(node.ref->page + offset + kSlotWidth, static_cast<U16>(value));
 }
 
-static auto take_free_space(Node &node, U32 ptr0, U32 ptr1, U32 needed_size) -> int
+static auto take_free_space(Node &node, U32 ptr0, U32 ptr1, U32 needed_size) -> U32
 {
-    CALICODB_EXPECT_LT(ptr0, kPageSize);
-    CALICODB_EXPECT_LT(ptr1, kPageSize);
-    CALICODB_EXPECT_LT(needed_size, kPageSize);
+    CALICODB_EXPECT_LE(ptr1 + kMinBlockSize, kPageSize);
+    CALICODB_EXPECT_LT(ptr0 + kMinBlockSize, ptr1);
+    CALICODB_EXPECT_LE(needed_size, node.usable_space);
 
     const auto ptr2 = get_next_pointer(node, ptr1);
-    const auto free_size = get_block_size(node, ptr1);
+    const auto block_len = get_block_size(node, ptr1);
 
-    CALICODB_EXPECT_GE(free_size, needed_size);
-    const auto diff = free_size - needed_size;
+    CALICODB_EXPECT_GE(block_len, needed_size);
+    const auto leftover_len = block_len - needed_size;
 
-    if (diff < kMinBlockSize) {
+    if (leftover_len < kMinBlockSize) {
         const auto frag_count = NodeHdr::get_frag_count(node.hdr());
-        NodeHdr::put_frag_count(node.hdr(), frag_count + diff);
+        NodeHdr::put_frag_count(node.hdr(), frag_count + leftover_len);
         if (ptr0 == 0) {
             NodeHdr::put_free_start(node.hdr(), ptr2);
         } else {
             set_next_pointer(node, ptr0, ptr2);
         }
     } else {
-        set_block_size(node, ptr1, diff);
+        set_block_size(node, ptr1, leftover_len);
     }
-    return static_cast<int>(ptr1 + diff);
+    return ptr1 + leftover_len;
 }
 
-static auto allocate_from_freelist(Node &node, U32 needed_size) -> int
+static auto allocate_from_freelist(Node &node, U32 needed_size) -> U32
 {
-    U32 prev_ptr = 0;
-    auto curr_ptr = NodeHdr::get_free_start(node.hdr());
+    auto block_ofs = NodeHdr::get_free_start(node.hdr());
+    U32 prev_ofs = 0;
 
-    while (curr_ptr) {
-        if (needed_size <= get_block_size(node, curr_ptr)) {
-            return take_free_space(node, prev_ptr, curr_ptr, needed_size);
+    while (block_ofs) {
+        // Ensured by BlockAllocator::freelist_size(), which is called each time a node is
+        // created from a page.
+        CALICODB_EXPECT_LE(prev_ofs + kMinBlockSize, block_ofs);
+        const auto block_len = get_block_size(node, block_ofs);
+        if (needed_size <= block_len) {
+            return take_free_space(node, prev_ofs, block_ofs, needed_size);
         }
-        prev_ptr = curr_ptr;
-        curr_ptr = get_next_pointer(node, curr_ptr);
+        prev_ofs = block_ofs;
+        block_ofs = get_next_pointer(node, block_ofs);
     }
     return 0;
 }
 
-static auto allocate_from_gap(Node &node, U32 needed_size) -> int
+static auto allocate_from_gap(Node &node, U32 needed_size) -> U32
 {
     if (node.gap_size >= needed_size) {
         node.gap_size -= needed_size;
         const auto offset = NodeHdr::get_cell_start(node.hdr()) - needed_size;
         NodeHdr::put_cell_start(node.hdr(), offset);
-        return static_cast<int>(offset);
+        return offset;
     }
-    return 0;
+    return 0U;
 }
 
-auto BlockAllocator::allocate(Node &node, U32 needed_size) -> int
+auto BlockAllocator::allocate(Node &node, U32 needed_size) -> U32
 {
     CALICODB_EXPECT_LT(needed_size, kPageSize);
     if (const auto offset = allocate_from_gap(node, needed_size)) {
@@ -244,112 +247,139 @@ auto BlockAllocator::allocate(Node &node, U32 needed_size) -> int
     return allocate_from_freelist(node, needed_size);
 }
 
-auto BlockAllocator::release(Node &node, U32 block_start, U32 block_size) -> int
+auto BlockAllocator::release(Node &node, U32 block_ofs, U32 block_len) -> int
 {
     // Largest possible fragment that can be reclaimed in this process. All cell headers
     // are padded out to 4 bytes, so anything smaller must be a fragment.
     static constexpr U32 kFragmentCutoff = 3;
-    auto frag_count = NodeHdr::get_frag_count(node.hdr());
+    const auto frag_count = NodeHdr::get_frag_count(node.hdr());
     auto free_start = NodeHdr::get_free_start(node.hdr());
-    CALICODB_EXPECT_NE(block_size, 0);
+    U32 frag_diff = 0;
+
+    CALICODB_EXPECT_GE(block_ofs, NodeHdr::get_cell_start(node.hdr()));
+    CALICODB_EXPECT_LE(block_ofs + block_len, kPageSize);
+    CALICODB_EXPECT_NE(block_len, 0);
 
     // Blocks of less than kMinBlockSize bytes are too small to hold the free block header,
     // so they must become fragment bytes.
-    if (block_size < kMinBlockSize) {
-        NodeHdr::put_frag_count(node.hdr(), frag_count + block_size);
-        return 0;
+    if (block_len < kMinBlockSize) {
+        if (frag_count + block_len <= Node::kMaxFragCount) {
+            NodeHdr::put_frag_count(node.hdr(), frag_count + block_len);
+            return 0;
+        }
+        return defragment(node);
     }
     // The free block list is sorted by start position. Find where the
     // new block should go.
     U32 prev = 0;
     auto next = free_start;
-    while (next > 0 && next < block_start) {
+    while (next && next < block_ofs) {
         prev = next;
         next = get_next_pointer(node, next);
+        // This condition is ensured by freelist_size() and the logic below.
+        CALICODB_EXPECT_TRUE(!next || prev + kMinBlockSize <= next);
     }
 
     if (prev != 0) {
         // Merge with the predecessor block.
         const auto before_end = prev + get_block_size(node, prev);
-        if (before_end + kFragmentCutoff >= block_start) {
-            const auto diff = block_start - before_end;
-            block_start = prev;
-            block_size += get_block_size(node, prev) + diff;
-            frag_count -= diff;
+        if (before_end > block_ofs) {
+            return -1;
+        } else if (before_end + kFragmentCutoff >= block_ofs) {
+            const auto diff = block_ofs - before_end;
+            block_ofs = prev;
+            block_len += get_block_size(node, prev) + diff;
+            frag_diff += diff;
         }
     }
-    if (block_start != prev) {
+    if (block_ofs != prev) {
         // There was no left merge. Point the "before" pointer to where the new free
         // block will be inserted.
         if (prev == 0) {
-            free_start = block_start;
+            free_start = block_ofs;
         } else {
-            set_next_pointer(node, prev, block_start);
+            set_next_pointer(node, prev, block_ofs);
         }
     }
 
     if (next != 0) {
         // Merge with the successor block.
-        const auto current_end = block_start + block_size;
-        if (current_end + kFragmentCutoff >= next) {
+        const auto current_end = block_ofs + block_len;
+        if (current_end > next) {
+            return -1;
+        } else if (current_end + kFragmentCutoff >= next) {
             const auto diff = next - current_end;
-            block_size += get_block_size(node, next) + diff;
-            frag_count -= diff;
+            block_len += get_block_size(node, next) + diff;
             next = get_next_pointer(node, next);
+            frag_diff += diff;
         }
     }
     // If there was a left merge, this will set the next pointer and block size of
     // the free block at "prev".
-    set_next_pointer(node, block_start, next);
-    set_block_size(node, block_start, block_size);
-    NodeHdr::put_frag_count(node.hdr(), frag_count);
+    set_next_pointer(node, block_ofs, next);
+    set_block_size(node, block_ofs, block_len);
+    NodeHdr::put_frag_count(node.hdr(), frag_count - frag_diff);
     NodeHdr::put_free_start(node.hdr(), free_start);
-    return 0;
-}
-
-auto BlockAllocator::defragment(Node &node, char *scratch, int skip) -> int
-{
-    const auto n = NodeHdr::get_cell_count(node.hdr());
-    const auto to_skip = skip >= 0 ? static_cast<U32>(skip) : n;
-    auto *ptr = node.ref->page;
-    U32 end = kPageSize;
-
-    // Copy everything before the indirection vector.
-    std::memcpy(scratch, ptr, cell_slots_offset(node));
-    for (U32 index = 0; index < n; ++index) {
-        if (index != to_skip) {
-            // Pack cells at the end of the scratch page and write the indirection
-            // vector.
-            Cell cell;
-            if (node.read(index, cell)) {
-                return -1;
-            }
-            end -= cell.footprint;
-            std::memcpy(scratch + end, cell.ptr, cell.footprint);
-            put_u16(scratch + cell_slots_offset(node) + index * kSlotWidth,
-                    static_cast<U16>(end));
-        }
-    }
-    std::memcpy(ptr, scratch, kPageSize);
-
-    NodeHdr::put_free_start(node.hdr(), 0);
-    NodeHdr::put_frag_count(node.hdr(), 0);
-    NodeHdr::put_cell_start(node.hdr(), end);
-    node.gap_size = end - cell_area_offset(node);
     return 0;
 }
 
 auto BlockAllocator::freelist_size(const Node &node) -> int
 {
-    U32 size = 0;
-    for (auto ptr = NodeHdr::get_free_start(node.hdr()); ptr;) {
-        if (ptr >= kPageSize - kMinBlockSize + 1) {
+    U32 total_len = 0;
+    auto prev_end = NodeHdr::get_cell_start(node.hdr()) - kMinBlockSize;
+    for (auto block_ofs = NodeHdr::get_free_start(node.hdr()); block_ofs;) {
+        if (block_ofs + kMinBlockSize > kPageSize || // Free block header is out of bounds
+            prev_end + kMinBlockSize > block_ofs) {  // Out-of-order blocks or missed fragment
             return -1;
         }
-        size += get_block_size(node, ptr);
-        ptr = get_next_pointer(node, ptr);
+        const auto block_len = get_block_size(node, block_ofs);
+        const auto next_ofs = get_next_pointer(node, block_ofs);
+        if (block_ofs + block_len > kPageSize) { // Free block body is out of bounds
+            return -1;
+        }
+        prev_end = block_ofs + block_len;
+        block_ofs = next_ofs;
+        total_len += block_len;
     }
-    return static_cast<int>(size);
+    return static_cast<int>(total_len);
+}
+
+auto BlockAllocator::defragment(Node &node, int skip) -> int
+{
+    const auto n = NodeHdr::get_cell_count(node.hdr());
+    const auto cell_start = NodeHdr::get_cell_start(node.hdr());
+    const auto to_skip = skip >= 0 ? static_cast<U32>(skip) : n;
+    auto *ptr = node.ref->page;
+    U32 end = kPageSize;
+
+    // Copy everything before the indirection vector.
+    std::memcpy(node.scratch, ptr, cell_slots_offset(node));
+    for (U32 index = 0; index < n; ++index) {
+        if (index != to_skip) {
+            // Pack cells at the end of the scratch page and write the indirection
+            // vector.
+            Cell cell;
+            if (node.read(index, cell) || end < cell_start + cell.footprint) {
+                return -1;
+            }
+            end -= cell.footprint;
+            std::memcpy(node.scratch + end, cell.ptr, cell.footprint);
+            put_u16(node.scratch + cell_slots_offset(node) + index * kSlotWidth,
+                    static_cast<U16>(end));
+        }
+    }
+    std::memcpy(ptr, node.scratch, kPageSize);
+
+    NodeHdr::put_free_start(node.hdr(), 0);
+    NodeHdr::put_frag_count(node.hdr(), 0);
+    NodeHdr::put_cell_start(node.hdr(), end);
+    node.gap_size = end - cell_area_offset(node);
+
+    const auto gap_adjust = skip < 0 ? 0 : kSlotWidth;
+    if (node.gap_size + gap_adjust != node.usable_space) {
+        return -1;
+    }
+    return 0;
 }
 
 static constexpr int (*kParsers[2])(char *, const char *, Cell *) = {
@@ -357,41 +387,58 @@ static constexpr int (*kParsers[2])(char *, const char *, Cell *) = {
     external_parse_cell,
 };
 
-auto Node::from_existing_page(PageRef &page, Node &node_out) -> int
-{
-    node_out.ref = &page;
-    node_out.parser = kParsers[node_out.is_leaf()];
+static constexpr U32 kMaxCellCount = (kPageSize - NodeHdr::kSize) /
+                                     (kMinCellHeaderSize + kSlotWidth);
 
-    const auto gap_upper = NodeHdr::get_cell_start(node_out.hdr());
-    const auto gap_lower = cell_area_offset(node_out);
+auto Node::from_existing_page(PageRef &page, char *scratch, Node &node_out) -> int
+{
+    const auto hdr_offset = page_offset(page.page_id);
+    const auto *hdr = page.page + hdr_offset;
+    const auto type = NodeHdr::get_type(hdr);
+    if (type == NodeHdr::kInvalid) {
+        return -1;
+    }
+    const auto ncells = NodeHdr::get_cell_count(hdr);
+    if (ncells > kMaxCellCount) {
+        return -1;
+    }
+    const auto gap_upper = NodeHdr::get_cell_start(hdr);
+    const auto gap_lower = hdr_offset + NodeHdr::kSize + ncells * kSlotWidth;
     if (gap_upper < gap_lower) {
         return -1;
     }
-    const auto free_size = BlockAllocator::freelist_size(node_out);
-    if (free_size < 0) {
+    Node node;
+    node.ref = &page;
+
+    const auto total_freelist_bytes = BlockAllocator::freelist_size(node);
+    if (total_freelist_bytes < 0) {
         return -1;
     }
-    node_out.gap_size = gap_upper - gap_lower;
-    node_out.usable_space = node_out.gap_size +
-                            NodeHdr::get_frag_count(node_out.hdr()) +
-                            static_cast<U32>(free_size);
+    node.scratch = scratch;
+    node.parser = kParsers[type - NodeHdr::kInternal];
+    node.gap_size = gap_upper - gap_lower;
+    node.usable_space = node.gap_size +
+                        static_cast<U32>(total_freelist_bytes) +
+                        NodeHdr::get_frag_count(hdr);
+    node_out = std::move(node);
     return 0;
 }
 
-auto Node::from_new_page(PageRef &page, bool is_leaf) -> Node
+auto Node::from_new_page(PageRef &page, char *scratch, bool is_leaf) -> Node
 {
-    const auto total_space = static_cast<U32>(
-        kPageSize - page_offset(page.page_id) - NodeHdr::kSize);
-
     Node node;
     node.ref = &page;
+    node.scratch = scratch;
     node.parser = kParsers[is_leaf];
+
+    const auto total_space = static_cast<U32>(
+        kPageSize - cell_slots_offset(node));
     node.gap_size = total_space;
     node.usable_space = total_space;
 
     std::memset(node.hdr(), 0, NodeHdr::kSize);
     NodeHdr::put_cell_start(node.hdr(), kPageSize);
-    NodeHdr::put_type(node.hdr(), is_leaf ? NodeHdr::kExternal : NodeHdr::kInternal);
+    NodeHdr::put_type(node.hdr(), is_leaf);
     return node;
 }
 
@@ -419,15 +466,20 @@ auto Node::write_child_id(U32 index, Id child_id) -> void
 
 auto Node::read(U32 index, Cell &cell_out) const -> int
 {
+    const auto offset = get_ivec_slot(*this, index);
+    if (offset < NodeHdr::get_cell_start(hdr())) {
+        // NOTE: parser() checks the upper boundary.
+        return -1;
+    }
     return parser(
-        ref->page + get_ivec_slot(*this, index),
+        ref->page + offset,
         ref->page + kPageSize,
         &cell_out);
 }
 
-auto Node::write(U32 index, const Cell &cell, char *scratch) -> int
+auto Node::write(U32 index, const Cell &cell) -> int
 {
-    const auto offset = alloc(index, cell.footprint, scratch);
+    const auto offset = alloc(index, cell.footprint);
     if (offset > 0) {
         std::memcpy(ref->page + offset, cell.ptr, cell.footprint);
     }
@@ -447,80 +499,96 @@ auto Node::erase(U32 index, U32 cell_size) -> int
     return rc;
 }
 
-auto Node::defrag(char *scratch) -> int
+auto Node::defrag() -> int
 {
-    if (BlockAllocator::defragment(*this, scratch)) {
+    if (BlockAllocator::defragment(*this)) {
         return -1;
     }
     CALICODB_EXPECT_EQ(usable_space, gap_size);
     return 0;
 }
 
-auto Node::assert_state() const -> bool
+auto Node::check_state() const -> int
 {
-    bool used[kPageSize] = {};
-    const auto account = [&used](auto from, auto size) {
-        auto lower = used + long(from);
-        auto upper = used + long(from) + long(size);
-        CALICODB_EXPECT_TRUE(!std::any_of(lower, upper, [](auto u) {
-            return u;
-        }));
-        std::fill(lower, upper, true);
+    const auto account = [this](auto from, auto size) {
+        if (from > kPageSize || from + size > kPageSize) {
+            return -1;
+        }
+        for (auto *ptr = scratch + from; ptr != scratch + from + size; ++ptr) {
+            if (*ptr) {
+                return -1;
+            } else {
+                *ptr = 1;
+            }
+        }
+        return 0;
     };
+    std::memset(scratch, 0, kPageSize);
+
     // Header(s) and cell pointers.
-    account(0, cell_area_offset(*this));
+    if (account(0U, cell_area_offset(*this))) {
+        return -1;
+    }
     // Make sure the header fields are not obviously wrong.
-    CALICODB_EXPECT_TRUE(NodeHdr::get_frag_count(hdr()) < static_cast<U8>(-1) * 2);
-    CALICODB_EXPECT_TRUE(NodeHdr::get_cell_count(hdr()) < static_cast<U16>(-1));
-    CALICODB_EXPECT_TRUE(NodeHdr::get_free_start(hdr()) < static_cast<U16>(-1));
+    if (Node::kMaxFragCount < NodeHdr::get_frag_count(hdr()) ||
+        kPageSize / 2 < NodeHdr::get_cell_count(hdr()) ||
+        kPageSize < NodeHdr::get_free_start(hdr())) {
+        return -1;
+    }
 
     // Gap space.
-    account(cell_area_offset(*this), gap_size);
+    if (account(cell_area_offset(*this), gap_size)) {
+        return -1;
+    }
 
     // Free list blocks.
-    std::vector<U32> offsets;
     auto i = NodeHdr::get_free_start(hdr());
     const char *data = ref->page;
     while (i) {
-        const auto size = get_u16(data + i + kSlotWidth);
-        account(i, size);
-        offsets.emplace_back(i);
+        if (account(i, get_u16(data + i + kSlotWidth))) {
+            return -1;
+        }
         i = get_u16(data + i);
     }
-    const auto offsets_copy = offsets;
-    std::sort(begin(offsets), end(offsets));
-    CALICODB_EXPECT_EQ(offsets, offsets_copy);
+
+    if (kMaxFragCount < NodeHdr::get_frag_count(hdr())) {
+        return -1;
+    }
 
     // Cell bodies. Also makes sure the cells are in order where possible.
     for (i = 0; i < NodeHdr::get_cell_count(hdr()); ++i) {
-        Cell lhs_cell = {};
-        CALICODB_EXPECT_EQ(0, read(i, lhs_cell));
-        CALICODB_EXPECT_TRUE(lhs_cell.footprint >= kMinCellHeaderSize);
-        account(get_ivec_slot(*this, i), lhs_cell.footprint);
+        Cell left_cell;
+        if (auto ivec_slot = get_ivec_slot(*this, i);
+            read(i, left_cell) ||
+            account(ivec_slot, left_cell.footprint)) {
+            return -1;
+        }
 
         if (i + 1 < NodeHdr::get_cell_count(hdr())) {
-            Cell rhs_cell = {};
-            CALICODB_EXPECT_EQ(0, read(i + 1, rhs_cell));
-            const Slice lhs_key(lhs_cell.key, std::min(lhs_cell.key_size, lhs_cell.local_pl_size));
-            const Slice rhs_key(rhs_cell.key, std::min(rhs_cell.key_size, rhs_cell.local_pl_size));
-            CALICODB_EXPECT_LE(lhs_key, rhs_key);
-            if (lhs_key == rhs_key) {
-                const auto lhs_has_ovfl = lhs_cell.key_size > lhs_cell.local_pl_size;
-                const auto rhs_has_ovfl = rhs_cell.key_size > rhs_cell.local_pl_size;
-                // If the keys appear to be equal, then there must be some part of rhs_key on
-                // an overflow page that causes it to ultimately compare greater than lhs_key.
-                CALICODB_EXPECT_TRUE(lhs_has_ovfl || (lhs_has_ovfl && rhs_has_ovfl));
+            Cell right_cell;
+            if (read(i + 1, right_cell)) {
+                return -1;
+            }
+            const Slice left_local(left_cell.key, std::min(left_cell.key_size, left_cell.local_pl_size));
+            const Slice right_local(right_cell.key, std::min(right_cell.key_size, right_cell.local_pl_size));
+            const auto right_has_ovfl = right_cell.key_size > right_cell.local_pl_size;
+            if (right_local < left_local || (left_local == right_local && !right_has_ovfl)) {
+                return -1;
             }
         }
     }
 
     // Every byte should be accounted for, except for fragments.
-    U32 total_bytes = NodeHdr::get_frag_count(hdr());
-    for (auto c : used) {
-        total_bytes += c != '\x00';
+    auto total_bytes = NodeHdr::get_frag_count(hdr());
+    for (i = 0; i < kPageSize; ++i) {
+        total_bytes += scratch[i] == '\x01';
     }
-    CALICODB_EXPECT_EQ(kPageSize, total_bytes);
-    (void)total_bytes;
+    return -(total_bytes != kPageSize);
+}
+
+auto Node::assert_state() const -> bool
+{
+    CALICODB_EXPECT_EQ(0, check_state());
     return true;
 }
 

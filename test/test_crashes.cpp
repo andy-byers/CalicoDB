@@ -7,9 +7,11 @@
 #include "calicodb/env.h"
 #include "common.h"
 #include "db_impl.h"
+#include "fake_env.h"
 #include "logging.h"
 #include "pager.h"
 #include "test.h"
+#include <filesystem>
 
 namespace calicodb::test
 {
@@ -55,12 +57,6 @@ public:
         return target()->remove_file(filename);
     }
 
-    auto resize_file(const std::string &filename, std::size_t file_size) -> Status override
-    {
-        MAYBE_CRASH(this);
-        return target()->resize_file(filename, file_size);
-    }
-
     auto new_file(const std::string &filename, OpenMode mode, File *&file_out) -> Status override
     {
         MAYBE_CRASH(this);
@@ -89,7 +85,7 @@ public:
                 const auto crash_state = m_env->m_crashes_enabled;
                 m_env->m_crashes_enabled = false;
 
-                ASSERT_OK(m_env->resize_file(m_filename, m_backup.size()));
+                ASSERT_OK(resize(m_backup.size()));
                 ASSERT_OK(write(0, m_backup));
 
                 m_env->m_crashes_enabled = crash_state;
@@ -566,96 +562,264 @@ TEST_F(CrashTests, CursorModificationFaults)
     run_cursor_mod_test({true, true, true});
 }
 
-// NOTE: This Env can only be used to drop writes during commit or checkpoint. Otherwise, there will
-//       be some writes that look like they worked, but when the same page is read back, it will look
-//       like nothing was written. We rely on sync() returning an error to indicate dropped data.
-class DropEnv : public EnvWrapper
-{
-public:
-    using ShouldDrop = std::function<bool()>;
-    ShouldDrop m_should_drop;
+#undef MAYBE_CRASH
 
+class DataLossEnv : public EnvWrapper
+{
+    class DataLossFile : public FileWrapper
+    {
+        friend class DataLossEnv;
+
+        const std::string m_filename;
+        DataLossEnv *m_env;
+
+    public:
+        explicit DataLossFile(DataLossEnv &env, std::string filename, File &base)
+            : FileWrapper(base),
+              m_filename(std::move(filename)),
+              m_env(&env)
+        {
+        }
+
+        ~DataLossFile() override
+        {
+            (void)sync_impl();
+            delete m_target;
+        }
+
+        auto initialize_buffer(std::size_t file_size) -> void
+        {
+            m_env->m_buffer.resize(file_size);
+            EXPECT_OK(FileWrapper::read(0, file_size, m_env->m_buffer.data(), nullptr));
+        }
+
+        auto perform_writes() -> void
+        {
+            std::uniform_int_distribution dist;
+            const Slice buffer(m_env->m_buffer);
+            const auto &wr = m_env->m_writes;
+            const auto loss_type = m_env->m_loss_type;
+            auto itr = cbegin(wr);
+            for (std::size_t i = 0; i < wr.size(); ++i, ++itr) {
+                auto [ofs, len] = *itr;
+                if ((loss_type == kLoseEarly && i < wr.size() / 2) ||
+                    (loss_type == kLoseLate && i >= wr.size() / 2) ||
+                    (loss_type == kLoseRandom && dist(m_env->m_rng) % 4 == 0) ||
+                    loss_type == kLoseAll) {
+                    m_env->m_dropped_bytes += len;
+                    continue;
+                }
+                ASSERT_OK(FileWrapper::write(ofs, buffer.range(ofs, len)));
+            }
+            // Refresh the buffer.
+            EXPECT_OK(FileWrapper::read(0, m_env->m_buffer.size(), m_env->m_buffer.data(), nullptr));
+        }
+
+        auto write(std::size_t offset, const Slice &data) -> Status override
+        {
+            EXPECT_FALSE(data.is_empty());
+            if (m_filename != m_env->m_drop_file) {
+                return FileWrapper::write(offset, data);
+            }
+            if (m_env->m_buffer.size() < offset + data.size()) {
+                m_env->m_buffer.resize(offset + data.size());
+            }
+            std::memcpy(m_env->m_buffer.data() + offset, data.data(), data.size());
+            const auto itr = m_env->m_writes.find(offset);
+            if (itr == end(m_env->m_writes)) {
+                m_env->m_writes.insert(itr, {offset, data.size()});
+            } else {
+                // Writes must never overlap.
+                EXPECT_EQ(itr->second, data.size());
+            }
+            return Status::ok();
+        }
+
+        auto read(std::size_t offset, std::size_t length, char *scratch, Slice *slice_out) -> Status override
+        {
+            if (m_filename != m_env->m_drop_file) {
+                return FileWrapper::read(offset, length, scratch, slice_out);
+            }
+            std::size_t len = 0;
+            if (offset < m_env->m_buffer.size()) {
+                len = std::min(length, m_env->m_buffer.size() - offset);
+                std::memcpy(scratch, m_env->m_buffer.data() + offset, len);
+            }
+            if (slice_out) {
+                *slice_out = Slice(scratch, len);
+            }
+            return Status::ok();
+        }
+
+        auto resize(std::size_t size) -> Status override
+        {
+            m_env->m_buffer.resize(size);
+            m_env->m_writes.erase(m_env->m_writes.lower_bound(size),
+                                  end(m_env->m_writes));
+            return FileWrapper::resize(size);
+        }
+
+        auto sync() -> Status override
+        {
+            return sync_impl();
+        }
+
+        auto sync_impl() -> Status
+        {
+            if (m_filename == m_env->m_drop_file) {
+                // If there were any dropped writes, sync() must return an error, otherwise the database
+                // cannot figure out that something has gone wrong. It'll likely show up as corruption
+                // later on.
+                perform_writes();
+                return kFaultStatus;
+            }
+            return Status::ok();
+        }
+    };
+
+public:
+    std::default_random_engine m_rng;
+    enum DataLossType {
+        kLoseRandom,
+        kLoseEarly,
+        kLoseLate,
+        kLoseAll,
+        kTypeCount,
+    } m_loss_type;
+    std::map<std::size_t, std::size_t> m_writes;
+    std::string m_buffer;
     std::string m_drop_file;
     std::size_t m_dropped_bytes = 0;
 
-    explicit DropEnv(Env &env)
-        : EnvWrapper(env)
+    explicit DataLossEnv(Env &env)
+        : EnvWrapper(env),
+          m_rng(42)
     {
     }
 
-    ~DropEnv() override = default;
+    ~DataLossEnv() override = default;
 
-    [[nodiscard]] auto should_drop(const std::string &filename) const -> bool
-    {
-        return filename == m_drop_file && (!m_should_drop || m_should_drop());
-    }
-
+    // WARNING: m_drop_file must be set before this method is called
     auto new_file(const std::string &filename, OpenMode mode, File *&file_out) -> Status override
     {
-        class DropFile : public FileWrapper
-        {
-            const std::string m_filename;
-            DropEnv *m_env;
-
-        public:
-            explicit DropFile(DropEnv &env, std::string filename, File &base)
-                : FileWrapper(base),
-                  m_filename(std::move(filename)),
-                  m_env(&env)
-            {
-            }
-
-            ~DropFile() override
-            {
-                delete m_target;
-            }
-
-            auto write(std::size_t offset, const Slice &data) -> Status override
-            {
-                if (m_env->should_drop(m_filename)) {
-                    m_env->m_dropped_bytes += data.size();
-                    return Status::ok();
-                }
-                return FileWrapper::write(offset, data);
-            }
-
-            auto sync() -> Status override
-            {
-                if (m_env->m_drop_file == m_filename) {
-                    // If there were any dropped writes, sync() must return an error, otherwise the database
-                    // cannot figure out that something has gone wrong. It'll likely show up as corruption
-                    // later on.
-                    return kFaultStatus;
-                }
-                return FileWrapper::sync();
-            }
-        };
         auto s = target()->new_file(filename, mode, file_out);
         if (s.is_ok()) {
-            file_out = new DropFile(*this, filename, *file_out);
+            auto *file = new DataLossFile(*this, filename, *file_out);
+            file_out = file;
+            if (filename == m_drop_file) {
+                std::size_t file_size;
+                EXPECT_OK(EnvWrapper::file_size(filename, file_size));
+                file->initialize_buffer(file_size);
+            }
         }
         return s;
     }
 };
 
-#undef MAYBE_CRASH
+TEST(DataLossEnvTests, NormalOperations)
+{
+    const auto filename = testing::TempDir() + "calicodb_data_loss_env_tests";
+    DataLossEnv env(Env::default_env());
+    (void)env.remove_file(filename);
+
+    File *file;
+    ASSERT_OK(env.new_file(filename, Env::kCreate | Env::kReadWrite, file));
+
+    ASSERT_OK(file->write(0, "0123"));
+    ASSERT_OK(file->write(4, "4567"));
+    ASSERT_OK(file->write(8, "8901"));
+
+    char buffer[4];
+    for (int i = 0; i < 2; ++i) {
+        ASSERT_OK(file->read_exact(0, 4, buffer));
+        ASSERT_EQ(Slice(buffer, 4), "0123");
+        ASSERT_OK(file->read_exact(4, 4, buffer));
+        ASSERT_EQ(Slice(buffer, 4), "4567");
+        ASSERT_OK(file->read_exact(8, 4, buffer));
+        ASSERT_EQ(Slice(buffer, 4), "8901");
+        ASSERT_OK(file->sync());
+    }
+    delete file;
+    ASSERT_OK(env.remove_file(filename));
+}
+
+TEST(DataLossEnvTests, DroppedWrites)
+{
+    const auto filename = testing::TempDir() + "calicodb_data_loss_env_tests";
+    DataLossEnv env(Env::default_env());
+    (void)env.remove_file(filename);
+
+    env.m_drop_file = filename;
+    env.m_loss_type = DataLossEnv::kLoseEarly;
+
+    File *file;
+    ASSERT_OK(env.new_file(filename, Env::kCreate | Env::kReadWrite, file));
+
+    ASSERT_OK(file->write(0, "0123"));
+    ASSERT_OK(file->write(4, "4567"));
+    ASSERT_OK(file->write(8, "8901"));
+
+    char buffer[4];
+    for (int i = 0; i < 2; ++i) {
+        ASSERT_OK(file->read_exact(0, 4, buffer));
+        if (i == 0) {
+            // The first round of reads comes out of the "page cache" (m_buffer member
+            // of DataLossFile).
+            ASSERT_EQ(Slice(buffer, 4), "0123");
+        } else {
+            // Further reads should not see the first write.
+            ASSERT_EQ(Slice(buffer, 4), Slice("\0\0\0\0", 4));
+        }
+        ASSERT_OK(file->read_exact(4, 4, buffer));
+        ASSERT_EQ(Slice(buffer, 4), "4567");
+        ASSERT_OK(file->read_exact(8, 4, buffer));
+        ASSERT_EQ(Slice(buffer, 4), "8901");
+
+        // This is where the data is actually dropped.
+        ASSERT_NOK(file->sync());
+    }
+
+    ASSERT_OK(file->write(0, "0123"));
+    ASSERT_OK(file->write(4, "0000"));
+    ASSERT_OK(file->write(8, "0000"));
+    ASSERT_OK(file->write(12, "0000"));
+    ASSERT_OK(file->write(16, "0000"));
+    // Gets rid of all writes except for the first 2.
+    ASSERT_OK(file->resize(8));
+    // Gets rid of the second write.
+    env.m_loss_type = DataLossEnv::kLoseLate;
+    ASSERT_NOK(file->sync());
+
+    ASSERT_OK(file->read_exact(0, 4, buffer));
+    ASSERT_EQ(Slice(buffer, 4), "0123");
+    ASSERT_OK(file->read_exact(4, 4, buffer));
+    ASSERT_EQ(Slice(buffer, 4), "4567"); // Reverted
+    Slice read;
+    ASSERT_OK(file->read(8, 4, buffer, &read));
+    ASSERT_TRUE(read.is_empty());
+    ASSERT_OK(file->read(12, 4, buffer, &read));
+    ASSERT_TRUE(read.is_empty());
+
+    delete file;
+    ASSERT_OK(env.remove_file(filename));
+}
 
 class DataLossTests : public testing::Test
 {
 public:
     const std::string m_filename;
-    DropEnv m_env;
+    DataLossEnv *m_env = nullptr;
     DB *m_db = nullptr;
 
     explicit DataLossTests()
-        : m_filename(testing::TempDir() + "calicodb_dropped_writes"),
-          m_env(Env::default_env())
+        : m_filename(testing::TempDir() + "calicodb_dropped_writes")
     {
     }
 
     ~DataLossTests() override
     {
         delete m_db;
+        delete m_env;
     }
 
     auto reopen_db(bool clear = false) -> void
@@ -663,32 +827,36 @@ public:
         delete m_db;
         m_db = nullptr;
         if (clear) {
-            (void)DB::destroy(Options(), m_filename);
+            std::filesystem::remove_all(m_filename);
+            std::filesystem::remove_all(m_filename + kDefaultWalSuffix);
+            std::filesystem::remove_all(m_filename + kDefaultShmSuffix);
         }
+        delete m_env;
+        m_env = new DataLossEnv(Env::default_env());
 
         Options options;
-        options.env = &m_env;
+        options.env = m_env;
         options.auto_checkpoint = 0;
         options.sync_mode = Options::kSyncFull;
         ASSERT_OK(DB::open(options, m_filename, m_db));
     }
 
     struct DropParameters {
-        DropEnv::ShouldDrop drop_callback;
-        std::string drop_file;
+        DataLossEnv::DataLossType loss_type;
+        std::string loss_file;
     };
     auto perform_writes(const DropParameters &param, std::size_t num_writes, std::size_t version)
     {
         // Don't drop any records until the commit.
-        m_env.m_drop_file = "";
+        m_env->m_drop_file = "";
         return m_db->update([num_writes, version, &param, this](auto &tx) {
             Bucket b;
             EXPECT_OK(tx.create_bucket(BucketOptions(), "bucket", &b));
             for (std::size_t i = 0; i < num_writes; ++i) {
                 EXPECT_OK(tx.put(b, numeric_key(i), numeric_key(i + version * num_writes)));
             }
-            m_env.m_should_drop = param.drop_callback;
-            m_env.m_drop_file = param.drop_file;
+            m_env->m_loss_type = param.loss_type;
+            m_env->m_drop_file = param.loss_file;
             auto s = tx.commit();
             if (!s.is_ok()) {
                 EXPECT_EQ(kFaultStatus, s);
@@ -700,8 +868,8 @@ public:
 
     auto perform_checkpoint(const DropParameters &param, bool reset)
     {
-        m_env.m_should_drop = param.drop_callback;
-        m_env.m_drop_file = param.drop_file;
+        m_env->m_loss_type = param.loss_type;
+        m_env->m_drop_file = param.loss_file;
         auto s = m_db->checkpoint(reset);
         if (!s.is_ok()) {
             EXPECT_EQ(kFaultStatus, s);
@@ -726,93 +894,56 @@ public:
         });
     }
 
-    enum DropType {
-        kDropAll,           // Drop all writes
-        kDropRandom,        // Drop 25% of writes at random
-        kDropOdd,           // Drop every other write
-        kDropOnlyFirstFew,  // Drop only the first few writes
-        kDropAfterFirstFew, // Drop all but the first few writes
-        kDropTypeCount
-    };
-    std::default_random_engine m_drop_rng;
-    std::size_t m_drop_counter = 0;
-
-    auto create_drop_param(std::string filename, DropType type)
+    static auto loss_type_to_string(DataLossEnv::DataLossType type)
     {
-        static constexpr std::size_t kFirstFew = 4;
-        m_drop_counter = 0;
-
-        DropParameters drop_param;
-        drop_param.drop_file = std::move(filename);
         switch (type) {
-            case kDropRandom:
-                drop_param.drop_callback = [this] {
-                    std::uniform_int_distribution dist;
-                    return dist(m_drop_rng) % 4 == 0;
-                };
-                break;
-            case kDropOdd:
-                drop_param.drop_callback = [this] {
-                    return m_drop_counter++ & 1;
-                };
-                break;
-            case kDropOnlyFirstFew:
-                drop_param.drop_callback = [this] {
-                    return m_drop_counter++ < kFirstFew;
-                };
-                break;
-            case kDropAfterFirstFew:
-                drop_param.drop_callback = [this] {
-                    return kFirstFew <= m_drop_counter++;
-                };
-                break;
-            case kDropAll:
-                // Use the default callback.
-                break;
+            case DataLossEnv::kLoseRandom:
+                return "kLoseRandom";
+            case DataLossEnv::kLoseEarly:
+                return "kLoseEarly";
+            case DataLossEnv::kLoseLate:
+                return "kLoseLate";
+            case DataLossEnv::kLoseAll:
+                return "kLoseAll";
             default:
-                ADD_FAILURE() << "unrecognized drop type " << type;
+                return "<unrecognized>";
         }
-        return drop_param;
     }
 
-    auto run_transaction_test(DropType drop_type, bool reopen_after_failure)
+    auto run_transaction_test(DataLossEnv::DataLossType loss_type, bool reopen_after_failure)
     {
-        m_env.m_drop_file = "";
         reopen_db(true);
 
         static constexpr std::size_t kNumWrites = 1'000;
         ASSERT_OK(perform_writes({}, kNumWrites, 0));
 
         // Only the WAL is written during a transaction.
-        const auto drop_param = create_drop_param(m_filename + kDefaultWalSuffix, drop_type);
+        const DropParameters drop_param = {loss_type, m_filename + kDefaultWalSuffix};
 
         ASSERT_EQ(kFaultStatus, perform_writes(drop_param, kNumWrites, 1));
         ASSERT_OK(check_records(kNumWrites, 0));
 
         if (reopen_after_failure) {
-            m_env.m_drop_file = "";
+            const auto temp = m_env->m_dropped_bytes;
             reopen_db(false);
+            m_env->m_dropped_bytes = temp;
         }
 
         ASSERT_OK(perform_checkpoint({}, true));
         ASSERT_OK(check_records(kNumWrites, 0));
         ASSERT_OK(perform_writes({}, kNumWrites, 1));
         ASSERT_OK(check_records(kNumWrites, 1));
-
-        std::cout << "dropped " << m_env.m_dropped_bytes << " bytes\n";
-        m_env.m_dropped_bytes = 0;
     }
 
-    auto run_checkpoint_test(DropType drop_type, bool reopen_after_failure)
+    auto run_checkpoint_test(DataLossEnv::DataLossType loss_type, bool reopen_after_failure)
     {
-        m_env.m_drop_file = "";
         reopen_db(true);
 
         static constexpr std::size_t kNumWrites = 1'000;
         ASSERT_OK(perform_writes({}, kNumWrites, 0));
         ASSERT_OK(perform_checkpoint({}, true));
 
-        const auto drop_param = create_drop_param(m_filename, drop_type);
+        const DropParameters drop_param = {loss_type, m_filename};
 
         ASSERT_OK(perform_writes({}, kNumWrites, 1));
         ASSERT_EQ(kFaultStatus, perform_checkpoint(drop_param, true));
@@ -821,25 +952,29 @@ public:
         ASSERT_OK(check_records(kNumWrites, 1));
 
         if (reopen_after_failure) {
-            m_env.m_drop_file = "";
+            const auto temp = m_env->m_dropped_bytes;
             reopen_db(false);
+            m_env->m_dropped_bytes = temp;
         }
 
         ASSERT_OK(perform_writes({}, kNumWrites, 2));
         ASSERT_OK(perform_checkpoint({}, true));
         ASSERT_OK(check_records(kNumWrites, 2));
-
-        std::cout << "dropped " << m_env.m_dropped_bytes << " bytes\n";
-        m_env.m_dropped_bytes = 0;
     }
 
-    auto run_test(void (DataLossTests::*cb)(DropType, bool))
+    auto run_test(void (DataLossTests::*cb)(DataLossEnv::DataLossType, bool))
     {
-        for (DropType drop_type = kDropAll;
-             drop_type < kDropTypeCount;
-             drop_type = static_cast<DropType>(drop_type + 1)) {
-            (this->*cb)(drop_type, false);
-            (this->*cb)(drop_type, true);
+        for (DataLossEnv::DataLossType loss_type = DataLossEnv::kLoseRandom;
+             loss_type < DataLossEnv::kTypeCount;
+             loss_type = static_cast<DataLossEnv::DataLossType>(loss_type + 1)) {
+            for (int i = 0; i < 2; ++i) {
+                const auto reopen_after_failure = i == 1;
+                (this->*cb)(loss_type, reopen_after_failure);
+                std::cout << loss_type_to_string(loss_type)
+                          << (reopen_after_failure ? " (reopen)" : "")
+                          << ": dropped " << m_env->m_dropped_bytes << " bytes\n";
+                m_env->m_dropped_bytes = 0;
+            }
         }
     }
 };
