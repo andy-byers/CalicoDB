@@ -714,17 +714,18 @@ auto Tree::find_parent_id(Id page_id, Id &out) const -> Status
     return s;
 }
 
-auto Tree::fix_parent_id(Id page_id, Id parent_id, PointerMap::Type type) -> Status
+auto Tree::fix_parent_id(Id page_id, Id parent_id, PointerMap::Type type, Status &s) -> void
 {
-    return PointerMap::write_entry(*m_pager, page_id, {parent_id, type});
+    if (s.is_ok()) {
+        s = PointerMap::write_entry(*m_pager, page_id, {parent_id, type});
+    }
 }
 
-auto Tree::maybe_fix_overflow_chain(const Cell &cell, Id parent_id) -> Status
+auto Tree::maybe_fix_overflow_chain(const Cell &cell, Id parent_id, Status &s) -> void
 {
-    if (cell.local_pl_size != cell.total_pl_size) {
-        return fix_parent_id(read_overflow_id(cell), parent_id, PointerMap::kOverflowHead);
+    if (s.is_ok() && cell.local_pl_size != cell.total_pl_size) {
+        fix_parent_id(read_overflow_id(cell), parent_id, PointerMap::kOverflowHead, s);
     }
-    return Status::ok();
 }
 
 auto Tree::make_pivot(const PivotOptions &opt, Cell &pivot_out) -> Status
@@ -833,13 +834,9 @@ auto Tree::post_pivot(Node &parent, U32 idx, Cell &pivot, Id child_id) -> Status
     } else {
         return corrupted_node(parent.ref->page_id);
     }
-    auto s = fix_parent_id(
-        child_id,
-        parent.ref->page_id,
-        PointerMap::kTreeNode);
-    if (s.is_ok()) {
-        s = maybe_fix_overflow_chain(pivot, parent.ref->page_id);
-    }
+    Status s;
+    fix_parent_id(child_id, parent.ref->page_id, PointerMap::kTreeNode, s);
+    maybe_fix_overflow_chain(pivot, parent.ref->page_id, s);
     return s;
 }
 
@@ -854,16 +851,16 @@ auto Tree::insert_cell(Node &node, U32 idx, const Cell &cell) -> Status
         //       before it can be written to another node (without that node itself overflowing).
         m_ovfl = {cell, node.ref->page_id, idx};
     }
+    Status s;
     if (!node.is_leaf()) {
-        auto s = fix_parent_id(
+        fix_parent_id(
             read_child_id(cell),
             node.ref->page_id,
-            PointerMap::kTreeNode);
-        if (!s.is_ok()) {
-            return s;
-        }
+            PointerMap::kTreeNode,
+            s);
     }
-    return maybe_fix_overflow_chain(cell, node.ref->page_id);
+    maybe_fix_overflow_chain(cell, node.ref->page_id, s);
+    return s;
 }
 
 auto Tree::remove_cell(Node &node, U32 idx) -> Status
@@ -905,38 +902,38 @@ auto Tree::fix_links(Node &node, Id parent_id) -> Status
     if (parent_id.is_null()) {
         parent_id = node.ref->page_id;
     }
-    for (U32 i = 0, n = NodeHdr::get_cell_count(node.hdr()); i < n; ++i) {
+    Status s;
+    for (U32 i = 0, n = NodeHdr::get_cell_count(node.hdr()); s.is_ok() && i < n; ++i) {
         Cell cell;
         if (node.read(i, cell)) {
-            return corrupted_node(node.ref->page_id);
+            s = corrupted_node(node.ref->page_id);
         }
         // Fix the back pointer for the head of an overflow chain rooted at `node`.
-        auto s = maybe_fix_overflow_chain(cell, parent_id);
-        if (s.is_ok() && !node.is_leaf()) {
+        maybe_fix_overflow_chain(cell, parent_id, s);
+        if (!node.is_leaf()) {
             // Fix the parent pointer for the current child node.
-            s = fix_parent_id(
+            fix_parent_id(
                 read_child_id(cell),
                 parent_id,
-                PointerMap::kTreeNode);
-        }
-        if (!s.is_ok()) {
-            return s;
+                PointerMap::kTreeNode,
+                s);
         }
     }
-    Status s;
     if (!node.is_leaf()) {
-        s = fix_parent_id(
+        fix_parent_id(
             NodeHdr::get_next_id(node.hdr()),
             parent_id,
-            PointerMap::kTreeNode);
+            PointerMap::kTreeNode,
+            s);
     }
-    if (s.is_ok() && m_ovfl.exists()) {
-        s = maybe_fix_overflow_chain(m_ovfl.cell, parent_id);
-        if (s.is_ok() && !node.is_leaf()) {
-            s = fix_parent_id(
+    if (m_ovfl.exists()) {
+        maybe_fix_overflow_chain(m_ovfl.cell, parent_id, s);
+        if (!node.is_leaf()) {
+            fix_parent_id(
                 read_child_id(m_ovfl.cell),
                 parent_id,
-                PointerMap::kTreeNode);
+                PointerMap::kTreeNode,
+                s);
         }
     }
     return s;
@@ -989,10 +986,11 @@ auto Tree::split_root(TreeCursor &c) -> Status
         root = Node::from_new_page(*root.ref, m_node_scratch, false);
         NodeHdr::put_next_id(root.hdr(), child.ref->page_id);
 
-        s = fix_parent_id(
+        fix_parent_id(
             child.ref->page_id,
             root.ref->page_id,
-            PointerMap::kTreeNode);
+            PointerMap::kTreeNode,
+            s);
         if (s.is_ok()) {
             s = fix_links(child);
         }
@@ -1072,16 +1070,16 @@ auto Tree::split_nonroot_fast(TreeCursor &c, Node &parent, Node right) -> Status
         // NOTE: The pivot doesn't need to be detached, since only the child ID is overwritten by erase().
         left.erase(cell_count - 1, pivot.footprint);
 
-        s = fix_parent_id(
+        fix_parent_id(
             NodeHdr::get_next_id(right.hdr()),
             right.ref->page_id,
-            PointerMap::kTreeNode);
-        if (s.is_ok()) {
-            s = fix_parent_id(
-                NodeHdr::get_next_id(left.hdr()),
-                left.ref->page_id,
-                PointerMap::kTreeNode);
-        }
+            PointerMap::kTreeNode,
+            s);
+        fix_parent_id(
+            NodeHdr::get_next_id(left.hdr()),
+            left.ref->page_id,
+            PointerMap::kTreeNode,
+            s);
     }
     if (s.is_ok()) {
         CALICODB_EXPECT_GT(c.m_level, 0);
@@ -1093,10 +1091,11 @@ auto Tree::split_nonroot_fast(TreeCursor &c, Node &parent, Node right) -> Status
             parent.write_child_id(
                 pivot_idx + !m_ovfl.exists(),
                 right.ref->page_id);
-            s = fix_parent_id(
+            fix_parent_id(
                 right.ref->page_id,
                 parent.ref->page_id,
-                PointerMap::kTreeNode);
+                PointerMap::kTreeNode,
+                s);
         }
     }
 
@@ -1261,7 +1260,7 @@ auto Tree::redistribute_cells(Node &left, Node &right, Node &parent, U32 pivot_i
         } else {
             const auto next_id = read_child_id(cells[U32(idx)]);
             NodeHdr::put_next_id(p_left->hdr(), next_id);
-            s = fix_parent_id(next_id, p_left->ref->page_id, PointerMap::kTreeNode);
+            fix_parent_id(next_id, p_left->ref->page_id, PointerMap::kTreeNode, s);
         }
         if (s.is_ok()) {
             // Post the pivot. This may cause the `parent` to overflow.

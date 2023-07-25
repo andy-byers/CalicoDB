@@ -188,10 +188,10 @@ struct PointerMap {
     [[nodiscard]] static auto lookup(Id page_id) -> Id;
 
     // Read an entry from the pointer map.
-    [[nodiscard]] static auto read_entry(Pager &pager, Id page_id, Entry &entry) -> Status;
+    static auto read_entry(Pager &pager, Id page_id, Entry &entry) -> Status;
 
     // Write an entry to the pointer map.
-    [[nodiscard]] static auto write_entry(Pager &pager, Id page_id, Entry entry) -> Status;
+    static auto write_entry(Pager &pager, Id page_id, Entry entry) -> Status;
 };
 
 } // namespace calicodb
