@@ -124,8 +124,9 @@ public:
     }
 
 private:
-    explicit Pager(Wal &wal, const Parameters &param);
+    explicit Pager(const Parameters &param);
     [[nodiscard]] auto dirtylist_contains(const PageRef &ref) const -> bool;
+    auto open_wal() -> Status;
     auto refresh_state() -> Status;
     auto read_page(PageRef &out, size_t *size_out) -> Status;
     [[nodiscard]] auto read_page_from_file(PageRef &ref, std::size_t *size_out) const -> Status;
@@ -140,10 +141,17 @@ private:
 
     Status *const m_status;
     Logger *const m_log;
+    Env *const m_env;
     File *const m_file;
-    Wal *const m_wal;
     Stat *const m_stat;
     BusyHandler *const m_busy;
+
+    const Options::LockMode m_lock_mode;
+    const Options::SyncMode m_sync_mode;
+    const bool m_persistent;
+
+    const char *const m_wal_name;
+    Wal *m_wal = nullptr;
 
     U32 m_page_count = 0;
     bool m_refresh = true;

@@ -894,9 +894,12 @@ TEST(OldWalTests, HandlesOldWalFile)
     dbopt.env = &env;
     dbopt.wal_filename = kOldWal;
     ASSERT_OK(DB::open(dbopt, "./testdb", db));
+    ASSERT_OK(db->update([](auto &tx) {
+        return tx.create_bucket(BucketOptions(), "BUCKET", nullptr);
+    }));
 
     ASSERT_OK(env.file_size(kOldWal, file_size));
-    ASSERT_EQ(0, file_size);
+    ASSERT_GT(file_size, kPageSize * 3);
     delete db;
 }
 
@@ -911,6 +914,9 @@ TEST(DestructionTests, DestructionBehavior)
 
     DB *db;
     ASSERT_OK(DB::open(Options(), db_name, db));
+    ASSERT_OK(db->update([](auto &tx) {
+        return tx.create_bucket(BucketOptions(), "BUCKET", nullptr);
+    }));
     ASSERT_TRUE(Env::default_env().file_exists(db_name));
     ASSERT_TRUE(Env::default_env().file_exists(wal_name));
     ASSERT_TRUE(Env::default_env().file_exists(shm_name));
