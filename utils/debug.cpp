@@ -59,9 +59,7 @@ auto print_database_overview(std::ostream &os, Pager &pager) -> void
                     auto n = NodeHdr::get_cell_count(
                         page->page + page_id.is_root() * FileHdr::kSize);
                     if (NodeHdr::get_type(page->page) == NodeHdr::kExternal) {
-                        append_fmt_string(info, "Ex,N=%u,Sib=(%u,%u)", n,
-                                          NodeHdr::get_prev_id(page->page).value,
-                                          NodeHdr::get_next_id(page->page).value);
+                        append_fmt_string(info, "Ex,N=%u", n);
                     } else {
                         info = "In,N=";
                         append_number(info, n);

@@ -63,59 +63,55 @@ auto Pager::read_page_from_file(PageRef &ref, std::size_t *size_out) const -> St
     return s;
 }
 
+auto Pager::open_wal() -> Status
+{
+    CALICODB_EXPECT_EQ(m_wal, nullptr);
+    const Wal::Parameters wal_param = {
+        m_wal_name,
+        m_env,
+        m_file,
+        m_log,
+        m_stat,
+        m_busy,
+        m_sync_mode,
+        m_lock_mode,
+    };
+    if (m_persistent) {
+        return Wal::open(wal_param, m_wal);
+    }
+    m_wal = new_temp_wal(wal_param);
+    return Status::ok();
+}
+
 auto Pager::open(const Parameters &param, Pager *&out) -> Status
 {
     CALICODB_EXPECT_GE(param.frame_count, kMinFrameCount);
     CALICODB_EXPECT_LE(param.frame_count * kPageSize, kMaxCacheSize);
 
-    const Wal::Parameters wal_param = {
-        param.wal_name,
-        param.env,
-        param.db_file,
-        param.log,
-        param.stat,
-        param.busy,
-        param.sync_mode,
-        param.lock_mode,
-    };
-    Wal *wal;
     Status s;
-    if (param.persistent) {
-        s = Wal::open(wal_param, wal);
-    } else {
-        wal = new_temp_wal(wal_param);
-    }
-    if (s.is_ok()) {
-        out = new Pager(*wal, param);
-        if (out->m_bufmgr.available() > 0) {
-            // Start and stop a read transaction to make sure the WAL index exists.
-            s = out->start_reader();
-            if (s.is_ok()) {
-                out->finish();
-            } else if (s.is_busy()) {
-                s = Status::ok();
-            }
-        } else {
-            s = Status::invalid_argument("not enough memory for page cache");
-        }
-        if (!s.is_ok()) {
-            delete out;
-        }
+    out = new Pager(param);
+    if (out->m_bufmgr.available() == 0) {
+        s = Status::invalid_argument("not enough memory for page cache"); // TODO: OOM error type?
     }
     if (!s.is_ok()) {
+        delete out;
         out = nullptr;
     }
     return s;
 }
 
-Pager::Pager(Wal &wal, const Parameters &param)
+Pager::Pager(const Parameters &param)
     : m_bufmgr(param.frame_count, *param.stat),
       m_status(param.status),
       m_log(param.log),
+      m_env(param.env),
       m_file(param.db_file),
-      m_wal(&wal),
       m_stat(param.stat),
-      m_busy(param.busy)
+      m_busy(param.busy),
+      m_lock_mode(param.lock_mode),
+      m_sync_mode(param.sync_mode),
+      m_persistent(param.persistent),
+      m_wal_name(param.wal_name)
 {
     CALICODB_EXPECT_NE(m_file, nullptr);
     CALICODB_EXPECT_NE(m_status, nullptr);
@@ -149,14 +145,19 @@ Pager::~Pager()
 auto Pager::start_reader() -> Status
 {
     CALICODB_EXPECT_NE(kError, m_mode);
-    CALICODB_EXPECT_NE(nullptr, m_wal);
     CALICODB_EXPECT_TRUE(assert_state());
 
     if (m_mode != kOpen) {
-        return Status::ok();
+        return *m_status;
     }
-    m_wal->finish_reader();
-
+    if (m_wal) {
+        m_wal->finish_reader();
+    } else {
+        auto s = open_wal();
+        if (!s.is_ok()) {
+            return s;
+        }
+    }
     bool changed;
     auto s = busy_wait(m_busy, [this, &changed] {
         return m_wal->start_reader(changed);
@@ -248,8 +249,9 @@ auto Pager::finish() -> void
         // Get rid of dirty pages, or all cached pages if there was a fault.
         purge_pages(m_mode == kError);
     }
-
-    m_wal->finish_reader();
+    if (m_mode >= kRead) {
+        m_wal->finish_reader();
+    }
     *m_status = Status::ok();
     m_mode = kOpen;
 }
@@ -284,13 +286,21 @@ auto Pager::checkpoint(bool reset) -> Status
 {
     CALICODB_EXPECT_EQ(m_mode, kOpen);
     CALICODB_EXPECT_TRUE(assert_state());
+    if (m_wal == nullptr) {
+        // Ensure that the WAL and WAL index have been created.
+        auto s = start_reader();
+        if (!s.is_ok()) {
+            return s;
+        }
+        finish();
+    }
     return m_wal->checkpoint(reset);
 }
 
 auto Pager::auto_checkpoint(std::size_t frame_limit) -> Status
 {
     CALICODB_EXPECT_GT(frame_limit, 0);
-    if (frame_limit < m_wal->last_frame_count()) {
+    if (!m_wal || frame_limit < m_wal->last_frame_count()) {
         return checkpoint(false);
     }
     return Status::ok();
@@ -589,8 +599,6 @@ static auto decode_entry(const char *data) -> PointerMap::Entry
 
 auto PointerMap::lookup(Id page_id) -> Id
 {
-    CALICODB_EXPECT_FALSE(page_id.is_null());
-
     // Root page (1) has no parents, and page 2 is the first pointer map page. If `page_id` is a pointer map
     // page, `page_id` will be returned.
     if (page_id.value < kFirstMapPage) {
@@ -601,37 +609,37 @@ auto PointerMap::lookup(Id page_id) -> Id
     return Id(idx * kMapSz + kFirstMapPage);
 }
 
-auto PointerMap::read_entry(Pager &pager, Id page_id, Entry &out) -> Status
+auto PointerMap::read_entry(Pager &pager, Id page_id, Entry &entry_out) -> Status
 {
     const auto mid = lookup(page_id);
-    CALICODB_EXPECT_LE(kFirstMapPage, mid.value);
-    CALICODB_EXPECT_NE(mid, page_id);
-
     const auto offset = entry_offset(mid, page_id);
-    CALICODB_EXPECT_LE(offset + kEntrySize, kPageSize);
+    if (offset + kEntrySize > kPageSize) {
+        return Status::corruption();
+    }
 
     PageRef *map;
     auto s = pager.acquire(mid, map);
     if (s.is_ok()) {
-        out = decode_entry(map->page + offset);
+        entry_out = decode_entry(map->page + offset);
         pager.release(map);
+        if (entry_out.type <= kEmpty || entry_out.type >= kTypeCount) {
+            s = Status::corruption();
+        }
     }
     return s;
 }
 
 auto PointerMap::write_entry(Pager &pager, Id page_id, Entry entry) -> Status
 {
-    CALICODB_EXPECT_NE(page_id, entry.back_ptr);
     const auto mid = lookup(page_id);
-    CALICODB_EXPECT_LE(kFirstMapPage, mid.value);
-    CALICODB_EXPECT_NE(mid, page_id);
-
-    const auto offset = entry_offset(mid, page_id);
-    CALICODB_EXPECT_LE(offset + kEntrySize, kPageSize);
 
     PageRef *map;
     auto s = pager.acquire(mid, map);
     if (s.is_ok()) {
+        const auto offset = entry_offset(mid, page_id);
+        if (offset + kEntrySize > kPageSize) {
+            return Status::corruption();
+        }
         const auto [back_ptr, type] = decode_entry(
             map->page + offset);
         if (entry.back_ptr != back_ptr || entry.type != type) {

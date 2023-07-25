@@ -14,7 +14,7 @@ namespace calicodb
 
 class Fuzzer
 {
-    static constexpr auto *kFilename = "MemDB";
+    static constexpr auto *kFilename = "./MemDB";
     Options m_options;
 
 public:

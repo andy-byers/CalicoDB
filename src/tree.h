@@ -158,8 +158,8 @@ private:
     auto insert_cell(Node &node, U32 idx, const Cell &cell) -> Status;
     auto remove_cell(Node &node, U32 idx) -> Status;
     auto find_parent_id(Id page_id, Id &out) const -> Status;
-    auto fix_parent_id(Id page_id, Id parent_id, PointerMap::Type type) -> Status;
-    auto maybe_fix_overflow_chain(const Cell &cell, Id parent_id) -> Status;
+    auto fix_parent_id(Id page_id, Id parent_id, PointerMap::Type type, Status &s) -> void;
+    auto maybe_fix_overflow_chain(const Cell &cell, Id parent_id, Status &s) -> void;
     auto fix_links(Node &node, Id parent_id = Id::null()) -> Status;
 
     // Internal cursor used to traverse the tree structure
