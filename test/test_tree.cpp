@@ -565,6 +565,7 @@ TEST_P(CursorTests, SeeksForward)
     auto cursor = make_cursor();
     cursor->seek_first();
     std::size_t i = 0;
+
     while (cursor->is_valid()) {
         ASSERT_TRUE(cursor->is_valid());
         ASSERT_EQ(cursor->key(), make_long_key(i++));
@@ -612,6 +613,7 @@ TEST_P(CursorTests, SeeksBackward)
     auto cursor = make_cursor();
     cursor->seek_last();
     std::size_t i = 0;
+
     while (cursor->is_valid()) {
         ASSERT_EQ(cursor->key(), make_long_key(kInitialRecordCount - 1 - i++));
         ASSERT_EQ(cursor->value(), make_value('*'));
@@ -926,13 +928,11 @@ TEST_F(PointerMapTests, FindsCorrectMapPages)
     }
 }
 
-#ifndef NDEBUG
-TEST_F(PointerMapTests, LookupNullIdDeathTest)
+TEST_F(PointerMapTests, LookupBeforeFirstMap)
 {
-    ASSERT_DEATH((void)PointerMap::lookup(Id(0)), "");
-    ASSERT_DEATH((void)PointerMap::is_map(Id(0)), "");
+    ASSERT_TRUE(PointerMap::lookup(Id(0)).is_null());
+    ASSERT_TRUE(PointerMap::lookup(Id(1)).is_null());
 }
-#endif // NDEBUG
 
 class MultiTreeTests : public TreeTests
 {

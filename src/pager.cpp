@@ -599,8 +599,6 @@ static auto decode_entry(const char *data) -> PointerMap::Entry
 
 auto PointerMap::lookup(Id page_id) -> Id
 {
-    CALICODB_EXPECT_FALSE(page_id.is_null());
-
     // Root page (1) has no parents, and page 2 is the first pointer map page. If `page_id` is a pointer map
     // page, `page_id` will be returned.
     if (page_id.value < kFirstMapPage) {
@@ -611,37 +609,37 @@ auto PointerMap::lookup(Id page_id) -> Id
     return Id(idx * kMapSz + kFirstMapPage);
 }
 
-auto PointerMap::read_entry(Pager &pager, Id page_id, Entry &out) -> Status
+auto PointerMap::read_entry(Pager &pager, Id page_id, Entry &entry_out) -> Status
 {
     const auto mid = lookup(page_id);
-    CALICODB_EXPECT_LE(kFirstMapPage, mid.value);
-    CALICODB_EXPECT_NE(mid, page_id);
-
     const auto offset = entry_offset(mid, page_id);
-    CALICODB_EXPECT_LE(offset + kEntrySize, kPageSize);
+    if (offset + kEntrySize > kPageSize) {
+        return Status::corruption();
+    }
 
     PageRef *map;
     auto s = pager.acquire(mid, map);
     if (s.is_ok()) {
-        out = decode_entry(map->page + offset);
+        entry_out = decode_entry(map->page + offset);
         pager.release(map);
+        if (entry_out.type <= kEmpty || entry_out.type >= kTypeCount) {
+            s = Status::corruption();
+        }
     }
     return s;
 }
 
 auto PointerMap::write_entry(Pager &pager, Id page_id, Entry entry) -> Status
 {
-    CALICODB_EXPECT_NE(page_id, entry.back_ptr);
     const auto mid = lookup(page_id);
-    CALICODB_EXPECT_LE(kFirstMapPage, mid.value);
-    CALICODB_EXPECT_NE(mid, page_id);
-
-    const auto offset = entry_offset(mid, page_id);
-    CALICODB_EXPECT_LE(offset + kEntrySize, kPageSize);
 
     PageRef *map;
     auto s = pager.acquire(mid, map);
     if (s.is_ok()) {
+        const auto offset = entry_offset(mid, page_id);
+        if (offset + kEntrySize > kPageSize) {
+            return Status::corruption();
+        }
         const auto [back_ptr, type] = decode_entry(
             map->page + offset);
         if (entry.back_ptr != back_ptr || entry.type != type) {

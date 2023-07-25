@@ -36,53 +36,52 @@ class TreeCursor
     U32 m_idx_path[kMaxDepth - 1];
     int m_level = 0;
 
-    auto shift_history_path(bool right) -> void
+    auto move_to_right_sibling() -> void
     {
         CALICODB_EXPECT_TRUE(has_node());
-        const auto diff = 2 * right - 1;
-        auto n = m_level - 1;
-        for (;; --n) {
-            if (n < 0) {
+        CALICODB_EXPECT_TRUE(m_node.is_leaf());
+        for (U32 adjust = 0;; adjust = 1) {
+            const auto ncells = NodeHdr::get_cell_count(m_node.hdr());
+            if (++m_idx < ncells + adjust) {
+                break;
+            } else if (m_level == 0) {
+                reset();
                 return;
             }
-            const auto idx = static_cast<int>(m_idx_path[n]) + diff;
-            const auto ncells = static_cast<int>(NodeHdr::get_cell_count(m_node_path[n].hdr()));
-            if (0 <= idx && idx <= ncells) {
-                m_idx_path[n] = static_cast<U32>(idx);
-                break;
-            }
+            move_to_parent();
+            CALICODB_EXPECT_FALSE(m_node.is_leaf());
         }
-        auto idx = m_idx_path[n];
-        auto pid = m_node_path[n].read_child_id(idx);
-        for (++n; n < m_level; ++n) {
-            Node next;
-            m_status = m_tree->acquire(pid, next);
+        while (!m_node.is_leaf()) {
+            move_to_child(m_node.read_child_id(m_idx));
             if (!m_status.is_ok()) {
-                break;
+                return;
             }
-            m_tree->release(std::move(m_node_path[n]));
-            const auto ncells = NodeHdr::get_cell_count(next.hdr());
-            idx = right ? 0 : ncells;
-            pid = next.read_child_id(idx);
-            m_node_path[n] = std::move(next);
-            m_idx_path[n] = idx;
+            m_idx = 0;
         }
     }
 
-    auto move_to_right_sibling(Node right) -> void
+    auto move_to_left_sibling() -> void
     {
-        release_nodes(kCurrentLevel);
-        m_idx = 0;
-        m_node = std::move(right);
-        shift_history_path(true);
-    }
-
-    auto move_to_left_sibling(Node left) -> void
-    {
-        release_nodes(kCurrentLevel);
-        m_idx = NodeHdr::get_cell_count(left.hdr()) - 1;
-        m_node = std::move(left);
-        shift_history_path(false);
+        CALICODB_EXPECT_TRUE(has_node());
+        CALICODB_EXPECT_TRUE(m_node.is_leaf());
+        for (;;) {
+            if (m_idx > 0) {
+                --m_idx;
+                break;
+            } else if (m_level == 0) {
+                reset();
+                return;
+            }
+            move_to_parent();
+            CALICODB_EXPECT_FALSE(m_node.is_leaf());
+        }
+        while (!m_node.is_leaf()) {
+            move_to_child(m_node.read_child_id(m_idx));
+            if (!m_status.is_ok()) {
+                return;
+            }
+            m_idx = NodeHdr::get_cell_count(m_node.hdr()) - m_node.is_leaf();
+        }
     }
 
     auto seek_to_first_leaf() -> void
@@ -175,7 +174,9 @@ public:
     {
         CALICODB_EXPECT_GT(m_level, 0);
         release_nodes(kCurrentLevel);
-        m_node = std::move(m_node_path[--m_level]);
+        --m_level;
+        m_idx = m_idx_path[m_level];
+        m_node = std::move(m_node_path[m_level]);
     }
 
     auto assign_child(Node child) -> void
@@ -205,42 +206,17 @@ public:
     {
         CALICODB_EXPECT_TRUE(has_node());
         CALICODB_EXPECT_TRUE(m_node.is_leaf());
-        if (m_idx == NodeHdr::get_cell_count(m_node.hdr()) &&
-            !NodeHdr::get_next_id(m_node.hdr()).is_null()) {
-            Node next;
-            const auto next_id = NodeHdr::get_next_id(m_node.hdr());
-            m_status = m_tree->acquire(next_id, next);
-            if (m_status.is_ok()) {
-                move_to_right_sibling(std::move(next));
-            }
+        if (m_idx == NodeHdr::get_cell_count(m_node.hdr())) {
+            move_to_right_sibling();
         }
     }
 
     auto seek_to_leaf(const Slice &key) -> bool
     {
-        auto found_target = false;
-        if (has_key()) {
-            CALICODB_EXPECT_TRUE(m_node.is_leaf());
-            // This block handles cases where the cursor is already positioned on the target node. This
-            // means that (a) this tree is the most-recently-accessed tree in the database, and (b) the
-            // last operation didn't cause an overflow or underflow.
-            if (NodeHdr::get_next_id(m_node.hdr()).is_null()) {
-                Cell boundary;
-                if (m_node.read(0, boundary)) {
-                    m_status = m_tree->corrupted_node(m_node.ref->page_id);
-                    return false;
-                }
-                const auto cmp_length = std::min(
-                    boundary.key_size, static_cast<U32>(key.size() + 1));
-                found_target = cmp_length <= boundary.local_pl_size &&
-                               Slice(boundary.key, cmp_length) <= key;
-            }
-        }
-        if (!found_target && !m_status.is_corruption()) {
+        if (!m_status.is_corruption()) {
             reset();
             m_status = m_tree->acquire(m_tree->root(), m_node);
         }
-
         while (m_status.is_ok()) {
             const auto found = search_node(key);
             if (m_status.is_ok()) {
@@ -410,26 +386,9 @@ public:
         if (!m_c.has_key()) {
             return;
         }
-        if (++m_c.m_idx < NodeHdr::get_cell_count(m_c.m_node.hdr())) {
-            auto s = fetch_payload();
-            if (!s.is_ok()) {
-                m_c.reset(s);
-            }
-            return;
-        }
-        const auto next_id = NodeHdr::get_next_id(m_c.m_node.hdr());
-
-        if (next_id.is_null()) {
-            m_c.reset();
-        } else {
-            Node right;
-            m_c.m_status = m_c.m_tree->acquire(next_id, right);
-            if (m_c.m_status.is_ok()) {
-                m_c.move_to_right_sibling(std::move(right));
-                if (m_c.m_status.is_ok()) {
-                    m_c.m_status = fetch_payload();
-                }
-            }
+        m_c.move_to_right_sibling();
+        if (m_c.has_key()) {
+            m_c.m_status = fetch_payload();
         }
     }
 
@@ -442,28 +401,9 @@ public:
         if (!m_c.has_key()) {
             return;
         }
-        if (m_c.m_idx > 0) {
-            --m_c.m_idx;
-            auto s = fetch_payload();
-            if (!s.is_ok()) {
-                m_c.release_nodes(TreeCursor::kAllLevels);
-                m_c.m_status = s;
-            }
-            return;
-        }
-        const auto prev_id = NodeHdr::get_prev_id(m_c.m_node.hdr());
-
-        if (prev_id.is_null()) {
-            m_c.reset();
-        } else {
-            Node left;
-            m_c.m_status = m_c.m_tree->acquire(prev_id, left);
-            if (m_c.m_status.is_ok()) {
-                m_c.move_to_left_sibling(std::move(left));
-                if (m_c.m_status.is_ok()) {
-                    m_c.m_status = fetch_payload();
-                }
-            }
+        m_c.move_to_left_sibling();
+        if (m_c.has_key()) {
+            m_c.m_status = fetch_payload();
         }
     }
 
@@ -884,7 +824,7 @@ auto Tree::post_pivot(Node &parent, U32 idx, Cell &pivot, Id child_id) -> Status
 {
     const auto rc = parent.write(idx, pivot);
     if (rc > 0) {
-        parent.write_child_id(idx, child_id);
+        put_u32(parent.ref->page + rc, child_id.value);
     } else if (rc == 0) {
         CALICODB_EXPECT_FALSE(m_ovfl.exists());
         detach_cell(pivot, m_cell_scratch[0]);
@@ -1084,22 +1024,6 @@ auto Tree::split_nonroot(TreeCursor &c) -> Status
         s = redistribute_cells(left, node, parent, pivot_idx);
     }
 
-    if (s.is_ok() && node.is_leaf()) {
-        // Add the new node to the leaf sibling chain.
-        const auto prev_id = NodeHdr::get_prev_id(node.hdr());
-        if (!prev_id.is_null()) {
-            Node left_sibling;
-            s = acquire(prev_id, left_sibling, true);
-            if (s.is_ok()) {
-                NodeHdr::put_next_id(left_sibling.hdr(), left.ref->page_id);
-                NodeHdr::put_prev_id(left.hdr(), left_sibling.ref->page_id);
-                release(std::move(left_sibling));
-            }
-        }
-        NodeHdr::put_prev_id(node.hdr(), left.ref->page_id);
-        NodeHdr::put_next_id(left.hdr(), node.ref->page_id);
-    }
-
     release(std::move(left));
     c.move_to_parent();
     return s;
@@ -1118,20 +1042,6 @@ auto Tree::split_nonroot_fast(TreeCursor &c, Node &parent, Node right) -> Status
 
     Cell pivot;
     if (left.is_leaf()) {
-        const auto next_id = NodeHdr::get_next_id(left.hdr());
-        if (!next_id.is_null()) {
-            Node right_sibling;
-            s = acquire(next_id, right_sibling, true);
-            if (!s.is_ok()) {
-                goto cleanup;
-            }
-            NodeHdr::put_prev_id(right_sibling.hdr(), right.ref->page_id);
-            NodeHdr::put_next_id(right.hdr(), right_sibling.ref->page_id);
-            release(std::move(right_sibling));
-        }
-        NodeHdr::put_prev_id(right.hdr(), left.ref->page_id);
-        NodeHdr::put_next_id(left.hdr(), right.ref->page_id);
-
         Cell right_cell;
         if (right.read(0, right_cell)) {
             s = corrupted_node(right.ref->page_id);
@@ -1241,9 +1151,10 @@ auto Tree::redistribute_cells(Node &left, Node &right, Node &parent, U32 pivot_i
     auto ref = *p_src->ref;
     ref.page = m_split_scratch;
     tmp = Node::from_new_page(ref, m_node_scratch, p_src->is_leaf());
-    // The new node is empty, so just copy over the pointer fields.
-    NodeHdr::put_prev_id(tmp.hdr(), NodeHdr::get_prev_id(p_src->hdr()));
-    NodeHdr::put_next_id(tmp.hdr(), NodeHdr::get_next_id(p_src->hdr()));
+    if (!p_src->is_leaf()) {
+        // The new node is empty, so only the next pointer from p_src is relevant.
+        NodeHdr::put_next_id(tmp.hdr(), NodeHdr::get_next_id(p_src->hdr()));
+    }
     CALICODB_EXPECT_EQ(0, NodeHdr::get_cell_count(tmp.hdr()));
     CALICODB_EXPECT_EQ(0, NodeHdr::get_free_start(tmp.hdr()));
     CALICODB_EXPECT_EQ(0, NodeHdr::get_frag_count(tmp.hdr()));
@@ -1356,18 +1267,6 @@ auto Tree::redistribute_cells(Node &left, Node &right, Node &parent, U32 pivot_i
             // Post the pivot. This may cause the `parent` to overflow.
             s = post_pivot(parent, pivot_idx, cells[U32(idx)], p_left->ref->page_id);
             --idx;
-        }
-    } else if (p_src->is_leaf()) {
-        // p_left must be freed by the caller. Go ahead and remove it from the sibling chain here.
-        const auto prev_id = NodeHdr::get_prev_id(p_left->hdr());
-        NodeHdr::put_prev_id(p_right->hdr(), prev_id);
-        if (!prev_id.is_null()) {
-            Node left_sibling;
-            s = acquire(prev_id, left_sibling, true);
-            if (s.is_ok()) {
-                NodeHdr::put_next_id(left_sibling.hdr(), p_right->ref->page_id);
-                release(std::move(left_sibling));
-            }
         }
     }
     if (!s.is_ok()) {
@@ -1849,34 +1748,6 @@ auto Tree::vacuum_step(PageRef &free, PointerMap::Entry entry, Schema &schema, I
                 return s;
             }
             s = fix_links(last, free.page_id);
-            if (!s.is_ok()) {
-                goto tree_node_cleanup;
-            }
-            if (last.is_leaf()) {
-                // Fix sibling links. fix_links() only fixes back pointers (parent pointers and overflow chain
-                // head back pointers).
-                const auto prev_id = NodeHdr::get_prev_id(last.hdr());
-                if (!prev_id.is_null()) {
-                    Node prev;
-                    s = acquire(prev_id, prev, true);
-                    if (!s.is_ok()) {
-                        goto tree_node_cleanup;
-                    }
-                    NodeHdr::put_next_id(prev.hdr(), free.page_id);
-                    release(std::move(prev));
-                }
-                const auto next_id = NodeHdr::get_next_id(last.hdr());
-                if (!next_id.is_null()) {
-                    Node next;
-                    s = acquire(next_id, next, true);
-                    if (!s.is_ok()) {
-                        goto tree_node_cleanup;
-                    }
-                    NodeHdr::put_prev_id(next.hdr(), free.page_id);
-                    release(std::move(next));
-                }
-            }
-        tree_node_cleanup:
             release(std::move(last));
             break;
         }
@@ -2284,27 +2155,6 @@ public:
             }
             return Status::ok();
         }));
-
-        auto &c = *tree.m_cursor;
-        c.seek_to_first_leaf();
-        if (!c.has_key()) {
-            return;
-        }
-        auto node = std::move(c.m_node);
-        c.reset();
-
-        while (!NodeHdr::get_next_id(node.hdr()).is_null()) {
-            Node right;
-            CHECK_OK(tree.acquire(NodeHdr::get_next_id(node.hdr()), right, false));
-            std::string lhs_buffer, rhs_buffer;
-            CHECK_OK(const_cast<Tree &>(tree).read_key(node, 0, lhs_buffer, nullptr));
-            CHECK_OK(const_cast<Tree &>(tree).read_key(right, 0, rhs_buffer, nullptr));
-            CHECK_TRUE(lhs_buffer < rhs_buffer);
-            CHECK_EQ(NodeHdr::get_prev_id(right.hdr()), node.ref->page_id);
-            tree.release(std::move(node));
-            node = std::move(right);
-        }
-        tree.release(std::move(node));
     }
 };
 
@@ -2344,7 +2194,7 @@ auto Tree::new_cursor() -> Cursor *
 
 auto Tree::use_cursor(Cursor *c) const -> void
 {
-    if (m_last_c != nullptr && c != m_last_c) {
+    if (m_last_c && c != m_last_c) {
         auto *uc = reinterpret_cast<UserCursor *>(m_last_c);
         if (uc->is_valid()) {
             uc->save_position();
@@ -2352,7 +2202,7 @@ auto Tree::use_cursor(Cursor *c) const -> void
             uc->m_c.reset();
         }
     }
-    if (c != nullptr) {
+    if (c) {
         m_cursor->reset();
     }
     m_last_c = c;

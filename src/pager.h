@@ -169,6 +169,7 @@ struct PointerMap {
         kOverflowLink,
         kFreelistTrunk,
         kFreelistLeaf,
+        kTypeCount
     };
 
     struct Entry {

@@ -43,7 +43,7 @@ struct FileHdr {
         kFreelistLengthOffset = kFreelistHeadOffset + sizeof(U32),
         kFmtVersionOffset = kFreelistLengthOffset + sizeof(U32),
         kReservedOffset = kFmtVersionOffset + sizeof(char),
-        kSize = kReservedOffset + 37
+        kSize = 64
     };
 
     [[nodiscard]] static auto get_page_count(const char *root) -> U32
@@ -78,12 +78,11 @@ struct FileHdr {
 //     Offset  Size  Name
 //    --------------------------
 //     0       1     Node type
-//     1       4     Next ID
-//     5       4     Previous ID
-//     9       2     Cell count
-//     11      2     Cell area start
-//     13      2     Freelist start
-//     15      1     Fragment count
+//     1       2     Cell count
+//     3       2     Cell area start
+//     5       2     Freelist start
+//     7       1     Fragment count
+//     8       4     Next ID
 struct NodeHdr {
     enum Type : int {
         kInvalid = 0,
@@ -93,13 +92,12 @@ struct NodeHdr {
 
     enum {
         kTypeOffset,
-        kNextIdOffset = kTypeOffset + sizeof(Type),
-        kPrevIdOffset = kNextIdOffset + sizeof(U32),
-        kCellCountOffset = kPrevIdOffset + sizeof(U32),
+        kCellCountOffset = kTypeOffset + sizeof(Type),
         kCellStartOffset = kCellCountOffset + sizeof(U16),
         kFreeStartOffset = kCellStartOffset + sizeof(U16),
         kFragCountOffset = kFreeStartOffset + sizeof(U16),
-        kSize = kFragCountOffset + sizeof(U8)
+        kNextIdOffset = kFragCountOffset + sizeof(char),
+        kSize = kNextIdOffset + sizeof(U32)
     };
 
     [[nodiscard]] static auto get_type(const char *root) -> Type
@@ -125,15 +123,6 @@ struct NodeHdr {
     static auto put_next_id(char *root, Id value) -> void
     {
         put_u32(root + kNextIdOffset, value.value);
-    }
-
-    [[nodiscard]] static auto get_prev_id(const char *root) -> Id
-    {
-        return Id(get_u32(root + kPrevIdOffset));
-    }
-    static auto put_prev_id(char *root, Id value) -> void
-    {
-        put_u32(root + kPrevIdOffset, value.value);
     }
 
     [[nodiscard]] static auto get_cell_count(const char *root) -> U32
