@@ -375,7 +375,7 @@ auto Pager::ensure_available_buffer() -> Status
 auto Pager::allocate(PageRef *&page_out) -> Status
 {
     CALICODB_EXPECT_GE(m_mode, kWrite);
-    static constexpr std::size_t kMaxPageCount = 0xFF'FF'FF'FE;
+    static constexpr U32 kMaxPageCount = 0xFF'FF'FF'FF;
     if (m_page_count == kMaxPageCount) {
         std::string message("reached the maximum allowed DB size (~");
         append_number(message, kMaxPageCount * kPageSize / 1'048'576);
