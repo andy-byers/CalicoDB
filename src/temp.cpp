@@ -277,6 +277,11 @@ public:
         return 0;
     }
 
+    [[nodiscard]] auto db_size() const -> U32 override
+    {
+        return static_cast<U32>(m_env->m_file.pages.size());
+    }
+
 private:
     auto write_back_committed() -> void
     {

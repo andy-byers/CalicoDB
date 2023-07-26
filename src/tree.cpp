@@ -49,7 +49,6 @@ class TreeCursor
                 return;
             }
             move_to_parent();
-            CALICODB_EXPECT_FALSE(m_node.is_leaf());
         }
         while (!m_node.is_leaf()) {
             move_to_child(m_node.read_child_id(m_idx));
@@ -73,7 +72,6 @@ class TreeCursor
                 return;
             }
             move_to_parent();
-            CALICODB_EXPECT_FALSE(m_node.is_leaf());
         }
         while (!m_node.is_leaf()) {
             move_to_child(m_node.read_child_id(m_idx));

@@ -7,6 +7,7 @@
 #include "freelist.h"
 #include "header.h"
 #include "logging.h"
+#include "node.h"
 #include "stat.h"
 #include "temp.h"
 
@@ -111,6 +112,7 @@ Pager::Pager(const Parameters &param)
       m_lock_mode(param.lock_mode),
       m_sync_mode(param.sync_mode),
       m_persistent(param.persistent),
+      m_db_name(param.db_name),
       m_wal_name(param.wal_name)
 {
     CALICODB_EXPECT_NE(m_file, nullptr);
@@ -171,8 +173,6 @@ auto Pager::start_reader() -> Status
             s = refresh_state();
         }
         if (s.is_ok()) {
-            m_page_count = FileHdr::get_page_count(
-                m_bufmgr.root()->page);
             m_mode = kRead;
         }
     }
@@ -212,7 +212,7 @@ auto Pager::commit() -> Status
     if (m_mode == kDirty) {
         // Update the page count if necessary.
         auto &root = get_root();
-        if (m_page_count != FileHdr::get_page_count(root.page)) {
+        if (m_page_count != m_saved_page_count) {
             mark_dirty(root);
             FileHdr::put_page_count(root.page, m_page_count);
         }
@@ -224,6 +224,7 @@ auto Pager::commit() -> Status
         // Write all dirty pages to the WAL.
         s = flush_dirty_pages();
         if (s.is_ok()) {
+            m_saved_page_count = m_page_count;
             m_mode = kWrite;
         } else {
             set_status(s);
@@ -237,14 +238,17 @@ auto Pager::finish() -> void
     CALICODB_EXPECT_TRUE(assert_state());
 
     if (m_mode >= kDirty) {
-        m_wal->rollback([this](auto id) {
-            if (id.is_root()) {
-                m_refresh = true;
-            } else if (auto *ref = m_bufmgr.get(id)) {
-                // Get rid of obsolete cached pages that aren't dirty anymore.
-                purge_page(*ref);
-            }
-        });
+        if (m_mode == kDirty) {
+            m_wal->rollback([this](auto id) {
+                if (id.is_root()) {
+                    m_refresh = true;
+                } else if (auto *ref = m_bufmgr.get(id)) {
+                    // Get rid of obsolete cached pages that aren't dirty anymore.
+                    purge_page(*ref);
+                }
+            });
+            m_page_count = m_wal->db_size();
+        }
         m_wal->finish_writer();
         // Get rid of dirty pages, or all cached pages if there was a fault.
         purge_pages(m_mode == kError);
@@ -300,7 +304,7 @@ auto Pager::checkpoint(bool reset) -> Status
 auto Pager::auto_checkpoint(std::size_t frame_limit) -> Status
 {
     CALICODB_EXPECT_GT(frame_limit, 0);
-    if (!m_wal || frame_limit < m_wal->last_frame_count()) {
+    if (m_wal && frame_limit < m_wal->last_frame_count()) {
         return checkpoint(false);
     }
     return Status::ok();
@@ -334,6 +338,7 @@ auto Pager::flush_dirty_pages() -> Status
 
 auto Pager::set_page_count(U32 page_count) -> void
 {
+    CALICODB_EXPECT_GE(m_mode, kWrite);
     for (auto i = page_count; i < m_page_count; ++i) {
         if (auto *out_of_range = m_bufmgr.query(Id::from_index(i))) {
             purge_page(*out_of_range);
@@ -375,7 +380,7 @@ auto Pager::ensure_available_buffer() -> Status
 auto Pager::allocate(PageRef *&page_out) -> Status
 {
     CALICODB_EXPECT_GE(m_mode, kWrite);
-    static constexpr std::size_t kMaxPageCount = 0xFF'FF'FF'FE;
+    static constexpr U32 kMaxPageCount = 0xFF'FF'FF'FF;
     if (m_page_count == kMaxPageCount) {
         std::string message("reached the maximum allowed DB size (~");
         append_number(message, kMaxPageCount * kPageSize / 1'048'576);
@@ -387,17 +392,16 @@ auto Pager::allocate(PageRef *&page_out) -> Status
     auto s = Freelist::pop(*this, id);
     if (s.is_invalid_argument()) {
         // If the freelist was empty, get a page from the end of the file.
-        const auto allocate_from_eof = [&page_out, this] {
-            return acquire(Id::from_index(m_page_count), page_out);
-        };
-        s = allocate_from_eof();
-
-        // Since this is a fresh page from the end of the file, it could be a pointer map page. If so,
-        // it is already blank, so just skip it and allocate another. It'll get filled in as the pages
-        // following it are used by the tree layer.
-        if (s.is_ok() && PointerMap::is_map(page_out->page_id)) {
-            release(page_out);
-            s = allocate_from_eof();
+        auto page_id = Id::from_index(m_page_count);
+        if (PointerMap::is_map(page_id)) {
+            ++page_id.value;
+        }
+        s = ensure_available_buffer();
+        if (s.is_ok()) {
+            page_out = m_bufmgr.alloc(page_id);
+            m_bufmgr.ref(*page_out);
+            std::memset(page_out->page, 0, kPageSize);
+            m_page_count = page_id.value;
         }
     } else if (s.is_ok()) {
         // id contains an unused page ID.
@@ -416,9 +420,7 @@ auto Pager::acquire(Id page_id, PageRef *&page_out) -> Status
     page_out = nullptr;
     Status s;
 
-    if (page_id.is_null() || m_page_count < page_id.as_index()) {
-        // This allows `page_id` to be equal to the page count, which effectively adds a page
-        // to the database. This is what Pager::allocate() does if the freelist is empty.
+    if (page_id.is_null() || page_id.value > m_page_count) {
         return Status::corruption();
     } else if (page_id.is_root()) {
         // The root is in memory for the duration of the transaction, and we don't bother with
@@ -429,12 +431,7 @@ auto Pager::acquire(Id page_id, PageRef *&page_out) -> Status
                (s = ensure_available_buffer()).is_ok()) {
         // The page is not in the cache, and there is a buffer available to read it into.
         page_out = m_bufmgr.alloc(page_id);
-        if (page_id.as_index() < m_page_count) {
-            s = read_page(*page_out, nullptr);
-        } else {
-            std::memset(page_out->page, 0, kPageSize);
-            m_page_count = page_id.value;
-        }
+        s = read_page(*page_out, nullptr);
     }
     if (s.is_ok()) {
         m_bufmgr.ref(*page_out);
@@ -494,9 +491,8 @@ auto Pager::initialize_root() -> void
     CALICODB_EXPECT_EQ(m_mode, kWrite);
     CALICODB_EXPECT_EQ(m_page_count, 0);
     m_page_count = 1;
-    m_mode = kDirty;
 
-    // Initialize the file header.
+    mark_dirty(get_root());
     FileHdr::make_supported_db(get_root().page);
 }
 
@@ -520,6 +516,25 @@ auto Pager::refresh_state() -> Status
             s = FileHdr::check_db_support(root);
         } else if (read_size > 0) {
             s = Status::corruption();
+        }
+        if (s.is_ok()) {
+            m_page_count = m_wal->db_size();
+            if (m_page_count == 0) {
+                const auto hdr_db_size = FileHdr::get_page_count(
+                    m_bufmgr.root()->page);
+                std::size_t file_size;
+                s = m_env->file_size(m_db_name, file_size);
+                if (s.is_ok()) {
+                    // Number of complete database pages in the file.
+                    const auto actual_db_size = file_size / kPageSize;
+                    if (actual_db_size == hdr_db_size) {
+                        m_page_count = static_cast<U32>(actual_db_size);
+                        m_saved_page_count = m_page_count;
+                    } else {
+                        s = Status::corruption();
+                    }
+                }
+            }
         }
         if (s.is_ok()) {
             m_refresh = false;

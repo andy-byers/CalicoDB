@@ -854,6 +854,10 @@ TEST_F(PointerMapTests, FirstPointerMapIsPage2)
 
 TEST_F(PointerMapTests, ReadsAndWritesEntries)
 {
+    PageRef *page;
+    ASSERT_OK(m_pager->allocate(page));
+    m_pager->release(page);
+
     ASSERT_OK(PointerMap::write_entry(*m_pager, Id(3), PointerMap::Entry{Id(33), PointerMap::kTreeNode}));
     ASSERT_OK(PointerMap::write_entry(*m_pager, Id(4), PointerMap::Entry{Id(44), PointerMap::kFreelistLeaf}));
     ASSERT_OK(PointerMap::write_entry(*m_pager, Id(5), PointerMap::Entry{Id(55), PointerMap::kOverflowLink}));

@@ -149,11 +149,13 @@ private:
     const Options::LockMode m_lock_mode;
     const Options::SyncMode m_sync_mode;
     const bool m_persistent;
-
+    const char *const m_db_name;
     const char *const m_wal_name;
+
     Wal *m_wal = nullptr;
 
     U32 m_page_count = 0;
+    U32 m_saved_page_count = 0;
     bool m_refresh = true;
 };
 

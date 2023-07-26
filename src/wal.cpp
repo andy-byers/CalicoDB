@@ -177,10 +177,13 @@ auto HashIndex::lookup(Key key, Value lower, Value &out) -> Status
     if (lower == 0) {
         lower = 1;
     }
+    Status s;
     const auto min_group_number = index_group_number(lower);
-
     for (auto n = index_group_number(m_hdr->max_frame);; --n) {
-        CALICODB_TRY(map_group(n, false));
+        s = map_group(n, false);
+        if (!s.is_ok()) {
+            break;
+        }
         CALICODB_EXPECT_TRUE(m_groups[n]);
         HashGroup group(n, m_groups[n]);
         // The guard above prevents considering groups that haven't been allocated yet.
@@ -211,7 +214,7 @@ auto HashIndex::lookup(Key key, Value lower, Value &out) -> Status
             break;
         }
     }
-    return Status::ok();
+    return s;
 }
 
 auto HashIndex::fetch(Value value) -> Key
@@ -286,7 +289,11 @@ auto HashIndex::map_group(std::size_t group_number, bool extend) -> Status
         if (m_file) {
             CALICODB_TRY(m_file->shm_map(group_number, extend, ptr));
         } else {
-            ptr = new char[File::kShmRegionSize];
+            auto *buf = new char[File::kShmRegionSize];
+            if (group_number == 0) {
+                std::memset(buf, 0, kIndexHdrSize);
+            }
+            ptr = buf;
         }
         m_groups[group_number] = reinterpret_cast<volatile char *>(ptr);
     }
@@ -425,7 +432,7 @@ HashIterator::HashIterator(HashIndex &source)
 
 HashIterator::~HashIterator()
 {
-    operator delete(m_state, std::align_val_t{alignof(State)});
+    operator delete (m_state, std::align_val_t{alignof(State)});
 }
 
 auto HashIterator::init(U32 backfill) -> Status
@@ -450,7 +457,7 @@ auto HashIterator::init(U32 backfill) -> Status
         (m_num_groups - 1) * sizeof(State::Group) + // Additional groups.
         last_value * sizeof(Hash);                  // Indices to sort.
     m_state = reinterpret_cast<State *>(
-        operator new(state_size, std::align_val_t{alignof(State)}));
+        operator new (state_size, std::align_val_t{alignof(State)}));
     std::memset(m_state, 0, state_size);
 
     // Temporary buffer for the mergesort routine. Freed before returning from this routine.
@@ -680,6 +687,12 @@ public:
         // NOTE: This value is used to determine if an automatic checkpoint should be run. It doesn't need to
         //       be totally up-to-date. It must, however, be less than or equal to the actual maximum frame.
         return m_hdr.max_frame;
+    }
+
+    [[nodiscard]] auto db_size() const -> U32 override
+    {
+        CALICODB_EXPECT_GE(m_reader_lock, 0);
+        return m_hdr.page_count;
     }
 
 private:
@@ -1372,7 +1385,7 @@ auto WalImpl::write(PageRef *dirty, std::size_t db_size) -> Status
             write_index_header();
         }
     }
-    return Status::ok();
+    return s;
 }
 
 auto WalImpl::checkpoint(bool reset) -> Status

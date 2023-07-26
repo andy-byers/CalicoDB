@@ -246,14 +246,15 @@ TEST_F(PagerTests, AcquirePage)
 {
     pager_update([this] {
         allocate_page();
-        ASSERT_EQ(3, m_pager->page_count());
+        allocate_page();
+        allocate_page();
+        ASSERT_EQ(5, m_pager->page_count());
 
         PageRef *page;
         for (U32 n = 1; n < 5; ++n) {
             ASSERT_OK(m_pager->acquire(Id(n), page));
             m_pager->release(page);
-            // Pager::acquire() can increase the database size by 1.
-            ASSERT_EQ(n <= 3 ? 3 : n, m_pager->page_count());
+            ASSERT_EQ(5, m_pager->page_count());
         }
         // Attempt to skip page 5.
         ASSERT_TRUE(m_pager->acquire(Id(6), page).is_corruption());
@@ -266,8 +267,10 @@ TEST_F(PagerTests, NOOP)
     pager_view([] {});
     ASSERT_OK(m_pager->checkpoint(true));
     ASSERT_OK(m_pager->checkpoint(false));
-    m_pager->set_page_count(0);
-    m_pager->set_status(Status::ok());
+    pager_update([this] {
+        m_pager->set_page_count(0);
+        m_pager->set_status(Status::ok());
+    });
 
     std::size_t file_size;
     // Database size is 0 before the first checkpoint.
