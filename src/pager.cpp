@@ -7,6 +7,7 @@
 #include "freelist.h"
 #include "header.h"
 #include "logging.h"
+#include "node.h"
 #include "stat.h"
 #include "temp.h"
 
@@ -303,7 +304,7 @@ auto Pager::checkpoint(bool reset) -> Status
 auto Pager::auto_checkpoint(std::size_t frame_limit) -> Status
 {
     CALICODB_EXPECT_GT(frame_limit, 0);
-    if (!m_wal || frame_limit < m_wal->last_frame_count()) {
+    if (m_wal && frame_limit < m_wal->last_frame_count()) {
         return checkpoint(false);
     }
     return Status::ok();
@@ -490,9 +491,8 @@ auto Pager::initialize_root() -> void
     CALICODB_EXPECT_EQ(m_mode, kWrite);
     CALICODB_EXPECT_EQ(m_page_count, 0);
     m_page_count = 1;
-    m_mode = kDirty;
 
-    // Initialize the file header.
+    mark_dirty(get_root());
     FileHdr::make_supported_db(get_root().page);
 }
 
@@ -529,6 +529,7 @@ auto Pager::refresh_state() -> Status
                     const auto actual_db_size = file_size / kPageSize;
                     if (actual_db_size == hdr_db_size) {
                         m_page_count = static_cast<U32>(actual_db_size);
+                        m_saved_page_count = m_page_count;
                     } else {
                         s = Status::corruption();
                     }

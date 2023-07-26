@@ -114,18 +114,18 @@ auto Schema::corrupted_root_id(const Slice &name, const Slice &value) -> Status
 
 auto Schema::create_bucket(const BucketOptions &options, const Slice &name, Bucket *b_out) -> Status
 {
-    Status s;
     if (m_pager->page_count() == 0) {
         // Initialize the database file header, as well as the schema tree's root page.
         m_pager->initialize_root();
     }
 
-    Id root_id;
+    Status s;
     std::string value;
     if (s.is_ok()) {
         s = m_map.get(name, &value);
     }
 
+    Id root_id;
     if (s.is_not_found()) {
         s = Tree::create(*m_pager, &root_id);
         if (s.is_ok()) {

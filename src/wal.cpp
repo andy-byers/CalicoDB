@@ -289,7 +289,11 @@ auto HashIndex::map_group(std::size_t group_number, bool extend) -> Status
         if (m_file) {
             CALICODB_TRY(m_file->shm_map(group_number, extend, ptr));
         } else {
-            ptr = new char[File::kShmRegionSize];
+            auto *buf = new char[File::kShmRegionSize];
+            if (group_number == 0) {
+                std::memset(buf, 0, kIndexHdrSize);
+            }
+            ptr = buf;
         }
         m_groups[group_number] = reinterpret_cast<volatile char *>(ptr);
     }
@@ -428,7 +432,7 @@ HashIterator::HashIterator(HashIndex &source)
 
 HashIterator::~HashIterator()
 {
-    operator delete(m_state, std::align_val_t{alignof(State)});
+    operator delete (m_state, std::align_val_t{alignof(State)});
 }
 
 auto HashIterator::init(U32 backfill) -> Status
@@ -453,7 +457,7 @@ auto HashIterator::init(U32 backfill) -> Status
         (m_num_groups - 1) * sizeof(State::Group) + // Additional groups.
         last_value * sizeof(Hash);                  // Indices to sort.
     m_state = reinterpret_cast<State *>(
-        operator new(state_size, std::align_val_t{alignof(State)}));
+        operator new (state_size, std::align_val_t{alignof(State)}));
     std::memset(m_state, 0, state_size);
 
     // Temporary buffer for the mergesort routine. Freed before returning from this routine.

@@ -324,12 +324,15 @@ protected:
     auto reopen_db(bool clear, Env *env = nullptr) -> Status
     {
         close_db();
-        if (clear) {
-            (void)DB::destroy(Options(), m_db_name);
-        }
         Options options;
         options.busy = &m_busy;
         options.env = env ? env : m_env;
+        if (clear) {
+            (void)options.env->remove_file(m_db_name);
+            (void)options.env->remove_file(m_db_name + kDefaultWalSuffix);
+            (void)options.env->remove_file(m_db_name + kDefaultShmSuffix);
+            (void)options.env->remove_file(m_alt_wal_name);
+        }
         if (m_config & kExclusiveLockMode) {
             options.lock_mode = Options::kLockExclusive;
         }
@@ -359,7 +362,7 @@ protected:
     {
         m_config = Config(m_config + 1);
         EXPECT_OK(reopen_db(clear));
-        return m_config <= kMaxConfig;
+        return m_config < kMaxConfig;
     }
 
     [[nodiscard]] auto file_size(const std::string &filename) const -> std::size_t
