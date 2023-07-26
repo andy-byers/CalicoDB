@@ -177,10 +177,13 @@ auto HashIndex::lookup(Key key, Value lower, Value &out) -> Status
     if (lower == 0) {
         lower = 1;
     }
+    Status s;
     const auto min_group_number = index_group_number(lower);
-
     for (auto n = index_group_number(m_hdr->max_frame);; --n) {
-        CALICODB_TRY(map_group(n, false));
+        s = map_group(n, false);
+        if (!s.is_ok()) {
+            break;
+        }
         CALICODB_EXPECT_TRUE(m_groups[n]);
         HashGroup group(n, m_groups[n]);
         // The guard above prevents considering groups that haven't been allocated yet.
@@ -211,7 +214,7 @@ auto HashIndex::lookup(Key key, Value lower, Value &out) -> Status
             break;
         }
     }
-    return Status::ok();
+    return s;
 }
 
 auto HashIndex::fetch(Value value) -> Key
@@ -1378,7 +1381,7 @@ auto WalImpl::write(PageRef *dirty, std::size_t db_size) -> Status
             write_index_header();
         }
     }
-    return Status::ok();
+    return s;
 }
 
 auto WalImpl::checkpoint(bool reset) -> Status

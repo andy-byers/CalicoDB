@@ -111,6 +111,7 @@ Pager::Pager(const Parameters &param)
       m_lock_mode(param.lock_mode),
       m_sync_mode(param.sync_mode),
       m_persistent(param.persistent),
+      m_db_name(param.db_name),
       m_wal_name(param.wal_name)
 {
     CALICODB_EXPECT_NE(m_file, nullptr);
@@ -171,8 +172,6 @@ auto Pager::start_reader() -> Status
             s = refresh_state();
         }
         if (s.is_ok()) {
-            m_page_count = FileHdr::get_page_count(
-                m_bufmgr.root()->page);
             m_mode = kRead;
         }
     }
@@ -212,7 +211,7 @@ auto Pager::commit() -> Status
     if (m_mode == kDirty) {
         // Update the page count if necessary.
         auto &root = get_root();
-        if (m_page_count != FileHdr::get_page_count(root.page)) {
+        if (m_page_count != m_saved_page_count) {
             mark_dirty(root);
             FileHdr::put_page_count(root.page, m_page_count);
         }
@@ -224,6 +223,7 @@ auto Pager::commit() -> Status
         // Write all dirty pages to the WAL.
         s = flush_dirty_pages();
         if (s.is_ok()) {
+            m_saved_page_count = m_page_count;
             m_mode = kWrite;
         } else {
             set_status(s);
@@ -237,14 +237,17 @@ auto Pager::finish() -> void
     CALICODB_EXPECT_TRUE(assert_state());
 
     if (m_mode >= kDirty) {
-        m_wal->rollback([this](auto id) {
-            if (id.is_root()) {
-                m_refresh = true;
-            } else if (auto *ref = m_bufmgr.get(id)) {
-                // Get rid of obsolete cached pages that aren't dirty anymore.
-                purge_page(*ref);
-            }
-        });
+        if (m_mode == kDirty) {
+            m_wal->rollback([this](auto id) {
+                if (id.is_root()) {
+                    m_refresh = true;
+                } else if (auto *ref = m_bufmgr.get(id)) {
+                    // Get rid of obsolete cached pages that aren't dirty anymore.
+                    purge_page(*ref);
+                }
+            });
+            m_page_count = m_wal->db_size();
+        }
         m_wal->finish_writer();
         // Get rid of dirty pages, or all cached pages if there was a fault.
         purge_pages(m_mode == kError);
@@ -334,6 +337,7 @@ auto Pager::flush_dirty_pages() -> Status
 
 auto Pager::set_page_count(U32 page_count) -> void
 {
+    CALICODB_EXPECT_GE(m_mode, kWrite);
     for (auto i = page_count; i < m_page_count; ++i) {
         if (auto *out_of_range = m_bufmgr.query(Id::from_index(i))) {
             purge_page(*out_of_range);
@@ -512,6 +516,24 @@ auto Pager::refresh_state() -> Status
             s = FileHdr::check_db_support(root);
         } else if (read_size > 0) {
             s = Status::corruption();
+        }
+        if (s.is_ok()) {
+            m_page_count = m_wal->db_size();
+            if (m_page_count == 0) {
+                const auto hdr_db_size = FileHdr::get_page_count(
+                    m_bufmgr.root()->page);
+                std::size_t file_size;
+                s = m_env->file_size(m_db_name, file_size);
+                if (s.is_ok()) {
+                    // Number of complete database pages in the file.
+                    const auto actual_db_size = file_size / kPageSize;
+                    if (actual_db_size == hdr_db_size) {
+                        m_page_count = actual_db_size;
+                    } else {
+                        s = Status::corruption();
+                    }
+                }
+            }
         }
         if (s.is_ok()) {
             m_refresh = false;

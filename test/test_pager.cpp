@@ -267,8 +267,10 @@ TEST_F(PagerTests, NOOP)
     pager_view([] {});
     ASSERT_OK(m_pager->checkpoint(true));
     ASSERT_OK(m_pager->checkpoint(false));
-    m_pager->set_page_count(0);
-    m_pager->set_status(Status::ok());
+    pager_update([this] {
+        m_pager->set_page_count(0);
+        m_pager->set_status(Status::ok());
+    });
 
     std::size_t file_size;
     // Database size is 0 before the first checkpoint.
