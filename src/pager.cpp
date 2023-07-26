@@ -525,8 +525,9 @@ auto Pager::refresh_state() -> Status
                 std::size_t file_size;
                 s = m_env->file_size(m_db_name, file_size);
                 if (s.is_ok()) {
-                    // Number of complete database pages in the file.
-                    const auto actual_db_size = file_size / kPageSize;
+                    // Number of pages in the database file, rounded up to the nearest page.
+                    const auto actual_db_size =
+                        (file_size + kPageSize - 1) / kPageSize;
                     if (actual_db_size == hdr_db_size) {
                         m_page_count = static_cast<U32>(actual_db_size);
                         m_saved_page_count = m_page_count;
