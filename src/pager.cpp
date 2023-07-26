@@ -528,7 +528,7 @@ auto Pager::refresh_state() -> Status
                     // Number of complete database pages in the file.
                     const auto actual_db_size = file_size / kPageSize;
                     if (actual_db_size == hdr_db_size) {
-                        m_page_count = actual_db_size;
+                        m_page_count = static_cast<U32>(actual_db_size);
                     } else {
                         s = Status::corruption();
                     }

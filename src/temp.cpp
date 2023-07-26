@@ -277,9 +277,9 @@ public:
         return 0;
     }
 
-    [[nodiscard]] auto db_size() const -> std::size_t override
+    [[nodiscard]] auto db_size() const -> U32 override
     {
-        return m_env->m_file.pages.size();
+        return static_cast<U32>(m_env->m_file.pages.size());
     }
 
 private:

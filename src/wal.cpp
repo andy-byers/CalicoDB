@@ -685,7 +685,7 @@ public:
         return m_hdr.max_frame;
     }
 
-    [[nodiscard]] auto db_size() const -> std::size_t override
+    [[nodiscard]] auto db_size() const -> U32 override
     {
         CALICODB_EXPECT_GE(m_reader_lock, 0);
         return m_hdr.page_count;

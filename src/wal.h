@@ -153,7 +153,7 @@ public:
     virtual auto finish_reader() -> void = 0;
 
     [[nodiscard]] virtual auto last_frame_count() const -> std::size_t = 0;
-    [[nodiscard]] virtual auto db_size() const -> std::size_t = 0;
+    [[nodiscard]] virtual auto db_size() const -> U32 = 0;
 };
 
 } // namespace calicodb
