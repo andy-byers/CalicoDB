@@ -45,6 +45,7 @@ struct FileHdr {
         kReservedOffset = kFmtVersionOffset + sizeof(char),
         kSize = 64
     };
+    static_assert(kReservedOffset < kSize);
 
     [[nodiscard]] static auto get_page_count(const char *root) -> U32
     {
@@ -83,6 +84,7 @@ struct FileHdr {
 //     5       2     Freelist start
 //     7       1     Fragment count
 //     8       4     Next ID
+// TODO: Only internal nodes need a "Next ID".
 struct NodeHdr {
     enum Type : int {
         kInvalid = 0,
@@ -114,15 +116,6 @@ struct NodeHdr {
     static auto put_type(char *root, bool is_external) -> void
     {
         root[kTypeOffset] = static_cast<char>(kInternal + is_external);
-    }
-
-    [[nodiscard]] static auto get_next_id(const char *root) -> Id
-    {
-        return Id(get_u32(root + kNextIdOffset));
-    }
-    static auto put_next_id(char *root, Id value) -> void
-    {
-        put_u32(root + kNextIdOffset, value.value);
     }
 
     [[nodiscard]] static auto get_cell_count(const char *root) -> U32
@@ -160,6 +153,15 @@ struct NodeHdr {
     static auto put_frag_count(char *root, U32 value) -> void
     {
         root[kFragCountOffset] = static_cast<char>(value);
+    }
+
+    [[nodiscard]] static auto get_next_id(const char *root) -> Id
+    {
+        return Id(get_u32(root + kNextIdOffset));
+    }
+    static auto put_next_id(char *root, Id value) -> void
+    {
+        put_u32(root + kNextIdOffset, value.value);
     }
 };
 

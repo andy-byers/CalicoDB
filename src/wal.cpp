@@ -682,6 +682,12 @@ public:
         return m_hdr.max_frame;
     }
 
+    [[nodiscard]] auto db_size() const -> std::size_t override
+    {
+        CALICODB_EXPECT_GE(m_reader_lock, 0);
+        return m_hdr.page_count;
+    }
+
 private:
     auto lock_shared(std::size_t r) -> Status
     {

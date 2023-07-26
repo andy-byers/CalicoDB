@@ -277,6 +277,11 @@ public:
         return 0;
     }
 
+    [[nodiscard]] auto db_size() const -> std::size_t override
+    {
+        return m_env->m_file.pages.size();
+    }
+
 private:
     auto write_back_committed() -> void
     {

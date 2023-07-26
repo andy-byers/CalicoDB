@@ -387,17 +387,16 @@ auto Pager::allocate(PageRef *&page_out) -> Status
     auto s = Freelist::pop(*this, id);
     if (s.is_invalid_argument()) {
         // If the freelist was empty, get a page from the end of the file.
-        const auto allocate_from_eof = [&page_out, this] {
-            return acquire(Id::from_index(m_page_count), page_out);
-        };
-        s = allocate_from_eof();
-
-        // Since this is a fresh page from the end of the file, it could be a pointer map page. If so,
-        // it is already blank, so just skip it and allocate another. It'll get filled in as the pages
-        // following it are used by the tree layer.
-        if (s.is_ok() && PointerMap::is_map(page_out->page_id)) {
-            release(page_out);
-            s = allocate_from_eof();
+        auto page_id = Id::from_index(m_page_count);
+        if (PointerMap::is_map(page_id)) {
+            ++page_id.value;
+        }
+        s = ensure_available_buffer();
+        if (s.is_ok()) {
+            page_out = m_bufmgr.alloc(page_id);
+            m_bufmgr.ref(*page_out);
+            std::memset(page_out->page, 0, kPageSize);
+            m_page_count = page_id.value;
         }
     } else if (s.is_ok()) {
         // id contains an unused page ID.
@@ -416,9 +415,7 @@ auto Pager::acquire(Id page_id, PageRef *&page_out) -> Status
     page_out = nullptr;
     Status s;
 
-    if (page_id.is_null() || m_page_count < page_id.as_index()) {
-        // This allows `page_id` to be equal to the page count, which effectively adds a page
-        // to the database. This is what Pager::allocate() does if the freelist is empty.
+    if (page_id.is_null() || page_id.value > m_page_count) {
         return Status::corruption();
     } else if (page_id.is_root()) {
         // The root is in memory for the duration of the transaction, and we don't bother with
@@ -429,12 +426,7 @@ auto Pager::acquire(Id page_id, PageRef *&page_out) -> Status
                (s = ensure_available_buffer()).is_ok()) {
         // The page is not in the cache, and there is a buffer available to read it into.
         page_out = m_bufmgr.alloc(page_id);
-        if (page_id.as_index() < m_page_count) {
-            s = read_page(*page_out, nullptr);
-        } else {
-            std::memset(page_out->page, 0, kPageSize);
-            m_page_count = page_id.value;
-        }
+        s = read_page(*page_out, nullptr);
     }
     if (s.is_ok()) {
         m_bufmgr.ref(*page_out);
