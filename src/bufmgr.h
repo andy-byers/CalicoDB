@@ -91,10 +91,12 @@ public:
     Bufmgr(Bufmgr &) = delete;
 
 private:
-    [[nodiscard]] auto buffer_slot(std::size_t index) -> char *
+    static constexpr std::size_t kOverrunLen = 4;
+
+    [[nodiscard]] auto buffer_slot(std::size_t idx) -> char *
     {
-        CALICODB_EXPECT_LT(index, m_frame_count);
-        return m_buffer + index * kPageSize;
+        CALICODB_EXPECT_LT(idx, m_frame_count);
+        return m_buffer + idx * (kPageSize + kOverrunLen);
     }
 
     // Pin an available buffer to a page reference

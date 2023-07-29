@@ -209,9 +209,34 @@ public:
         }
     }
 
+    [[nodiscard]] auto on_last_node() const -> bool
+    {
+        CALICODB_EXPECT_TRUE(has_node());
+        for (int i = 0; i < m_level; ++i) {
+            const auto &node = m_node_path[i];
+            if (m_idx_path[i] < NodeHdr::get_cell_count(node.hdr())) {
+                return false;
+            }
+        }
+        return true;
+    }
+
     auto seek_to_leaf(const Slice &key) -> bool
     {
-        if (!m_status.is_corruption()) {
+        auto on_correct_node = false;
+        if (has_key() && on_last_node()) {
+            CALICODB_EXPECT_TRUE(m_node.is_leaf());
+            // This block handles cases where the cursor is already positioned on the target node. This
+            // means that (a) this tree is the most-recently-accessed tree in the database, and (b) the
+            // last operation didn't cause an overflow or underflow.
+            std::string boundary;
+            m_status = m_tree->read_key(m_node, 0, boundary, nullptr);
+            if (!m_status.is_ok()) {
+                return false;
+            }
+            on_correct_node = boundary <= key;
+        }
+        if (!on_correct_node && !m_status.is_corruption()) {
             reset();
             m_status = m_tree->acquire(m_tree->root(), m_node);
         }
@@ -619,7 +644,6 @@ auto Tree::create(Pager &pager, Id *root_id_out) -> Status
     auto s = pager.allocate(page);
     if (s.is_ok()) {
         auto *hdr = page->page + page_offset(page->page_id);
-        //        Node::from_new_page(*page, true);
         std::memset(hdr, 0, NodeHdr::kSize);
         NodeHdr::put_type(hdr, true);
         NodeHdr::put_cell_start(hdr, kPageSize);
@@ -1014,7 +1038,8 @@ auto Tree::split_nonroot(TreeCursor &c) -> Status
     const auto pivot_idx = c.m_idx_path[c.m_level - 1];
 
     if (s.is_ok()) {
-        if (m_ovfl.idx == NodeHdr::get_cell_count(node.hdr())) {
+        const auto ncells = NodeHdr::get_cell_count(node.hdr());
+        if (m_ovfl.idx >= ncells && c.on_last_node()) {
             return split_nonroot_fast(c, parent, std::move(left));
         }
         s = redistribute_cells(left, node, parent, pivot_idx);
@@ -1068,32 +1093,22 @@ auto Tree::split_nonroot_fast(TreeCursor &c, Node &parent, Node right) -> Status
         // NOTE: The pivot doesn't need to be detached, since only the child ID is overwritten by erase().
         left.erase(cell_count - 1, pivot.footprint);
 
-        fix_parent_id(
-            NodeHdr::get_next_id(right.hdr()),
-            right.ref->page_id,
-            PointerMap::kTreeNode,
-            s);
-        fix_parent_id(
-            NodeHdr::get_next_id(left.hdr()),
-            left.ref->page_id,
-            PointerMap::kTreeNode,
-            s);
+        fix_parent_id(NodeHdr::get_next_id(right.hdr()), right.ref->page_id,
+                      PointerMap::kTreeNode, s);
+        fix_parent_id(NodeHdr::get_next_id(left.hdr()), left.ref->page_id,
+                      PointerMap::kTreeNode, s);
     }
     if (s.is_ok()) {
         CALICODB_EXPECT_GT(c.m_level, 0);
         const auto pivot_idx = c.m_idx_path[c.m_level - 1];
 
-        // Post the pivot into the parent node. This call will fix the sibling's parent pointer.
+        // Post the pivot into the parent node. This call will fix the left's parent pointer.
         s = post_pivot(parent, pivot_idx, pivot, left.ref->page_id);
         if (s.is_ok()) {
-            parent.write_child_id(
-                pivot_idx + !m_ovfl.exists(),
-                right.ref->page_id);
-            fix_parent_id(
-                right.ref->page_id,
-                parent.ref->page_id,
-                PointerMap::kTreeNode,
-                s);
+            CALICODB_EXPECT_EQ(NodeHdr::get_next_id(parent.hdr()), left.ref->page_id);
+            NodeHdr::put_next_id(parent.hdr(), right.ref->page_id);
+            fix_parent_id(right.ref->page_id, parent.ref->page_id,
+                          PointerMap::kTreeNode, s);
         }
     }
 
@@ -1162,7 +1177,7 @@ auto Tree::redistribute_cells(Node &left, Node &right, Node &parent, U32 pivot_i
     // code path must never be hit, since it doesn't handle that case in particular. This routine
     // also expects that the child pointer in `parent` at `pivor_idx+1` points to `right` There
     // may not be a pointer to `left` in `parent` yet.
-    CALICODB_EXPECT_TRUE(!is_split || (m_ovfl.idx < cell_count && p_src == &right));
+    CALICODB_EXPECT_TRUE(!is_split || p_src == &right);
 
     // Cells that need to be redistributed, in order.
     std::vector<Cell> cells(cell_count + m_ovfl.exists());
@@ -1170,7 +1185,7 @@ auto Tree::redistribute_cells(Node &left, Node &right, Node &parent, U32 pivot_i
     U32 right_accum = 0;
     Cell cell;
 
-    for (U32 i = 0; i < cell_count;) {
+    for (U32 i = 0; i <= cell_count;) {
         if (m_ovfl.exists() && i == m_ovfl.idx) {
             right_accum += m_ovfl.cell.footprint;
             // Move the overflow cell backing to an unused scratch buffer. The `parent` may overflow
@@ -1180,6 +1195,8 @@ auto Tree::redistribute_cells(Node &left, Node &right, Node &parent, U32 pivot_i
             *cell_itr++ = m_ovfl.cell;
             m_ovfl.clear();
             continue;
+        } else if (i == cell_count) {
+            break;
         }
         if (p_src->read(i++, cell)) {
             return corrupted_node(p_src->ref->page_id);
@@ -1528,13 +1545,13 @@ auto Tree::emplace(Node &node, const Slice &key, const Slice &value, U32 index, 
     // write the cell to scratch memory. allocate_block() should not return an offset
     // that would interfere with the node header/indirection vector or cause an out-of-
     // bounds write (this only happens if the node is corrupted).
-    ptr = m_cell_scratch[0];
     const auto local_offset = node.alloc(
         index, static_cast<U32>(cell_size));
     if (local_offset > 0) {
         ptr = node.ref->page + local_offset;
         overflow = false;
     } else if (local_offset == 0) {
+        ptr = m_cell_scratch[0];
         overflow = true;
     } else {
         return corrupted_node(node.ref->page_id);
@@ -1613,7 +1630,6 @@ auto Tree::erase(Cursor &c) -> Status
     } else if (!c.is_valid()) {
         return Status::invalid_argument();
     }
-    Status s;
     auto &uc = reinterpret_cast<UserCursor &>(c);
     auto &tc = uc.m_c;
     use_cursor(&uc);
@@ -1626,14 +1642,14 @@ auto Tree::erase(Cursor &c) -> Status
         saved_key = std::move(uc.m_key_buffer);
         saved_key.resize(uc.m_key.size());
     }
-    s = erase(tc);
+    auto s = erase(tc);
     if (s.is_ok()) {
         if (tc.has_node()) {
             uc.ensure_correct_leaf();
         } else {
             uc.seek(saved_key);
         }
-        s = uc.status();
+        s = tc.m_status;
     } else if (tc.m_status.is_ok()) {
         tc.m_status = s;
     }

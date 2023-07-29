@@ -124,23 +124,26 @@ struct EnvWithFiles final {
         kDifferentName,
     };
 
-    [[nodiscard]] auto open_file(std::size_t id, Env::OpenMode mode) const -> File *
+    [[nodiscard]] auto open_file(std::size_t id, Env::OpenMode mode, bool clear = false) const -> File *
     {
         File *file;
         const auto filename = m_dirname + make_filename(id);
         EXPECT_TRUE(env->new_file(filename, mode, file).is_ok())
             << "failed to " << ((mode & Env::kCreate) ? "create" : "open") << " file \"" << filename << '"';
+        if (clear) {
+            EXPECT_OK(file->resize(0));
+        }
         return file;
     }
 
-    auto open_unowned_file(NextFileName name, Env::OpenMode mode) -> File *
+    auto open_unowned_file(NextFileName name, Env::OpenMode mode, bool clear = false) -> File *
     {
         std::lock_guard lock(mutex);
         if (name == kDifferentName) {
             ++last_id;
         }
         const auto id = last_id;
-        auto *file = open_file(id, mode);
+        auto *file = open_file(id, mode, clear);
         files.emplace_back(file);
         return file;
     }
@@ -212,12 +215,16 @@ static constexpr auto kVersionLength = kVersionLengthInU32 * sizeof(U32);
 static constexpr auto kBadVersion = static_cast<U32>(-1);
 static auto read_file_version(File &file) -> U32
 {
+    Slice version_slice;
     std::string version_string(kVersionLength, '\0');
-    EXPECT_OK(file.read_exact(
+    EXPECT_OK(file.read(
         kFileVersionOffset,
         kVersionLength,
-        version_string.data()));
-    const auto version = get_u32(version_string.data());
+        version_string.data(),
+        &version_slice));
+    const auto version = version_slice.is_empty()
+                             ? 0
+                             : get_u32(version_slice.data());
     for (std::size_t i = 1; i < kVersionLengthInU32; ++i) {
         EXPECT_EQ(version, get_u32(version_string.data() + sizeof(U32) * i));
     }
@@ -794,7 +801,7 @@ public:
         delete tempfile;
     }
 
-    auto set_up() -> void
+    auto set_up(bool clear = false) -> void
     {
         if (m_env == nullptr) {
             m_env = &Env::default_env();
@@ -804,7 +811,8 @@ public:
         ASSERT_GT(kNumEnvs, 0) << "REQUIRES: kNumEnvs > 0";
         m_helper.open_unowned_file(
             EnvWithFiles::kSameName,
-            Env::kCreate);
+            Env::kCreate,
+            clear);
     }
 
     template <class Test>
@@ -835,6 +843,7 @@ public:
     template <class IsWriter>
     auto run_reader_writer_test(std::size_t writers_per_thread, const IsWriter &is_writer) -> void
     {
+        set_up(true);
         run_test([&is_writer, this](auto) {
             for (std::size_t i = 0; i < kNumThreads; ++i) {
                 set_up();
@@ -858,13 +867,12 @@ public:
 
     auto run_shm_lifetime_test(bool unlink) -> void
     {
+        for (std::size_t i = 0; i < kNumThreads; ++i) {
+            set_up(true);
+        }
         run_test([this, unlink](auto) {
-            for (std::size_t i = 0; i < kNumThreads; ++i) {
-                set_up();
-            }
             std::vector<std::thread> threads;
             while (threads.size() < kNumThreads) {
-                const auto t = threads.size();
                 threads.emplace_back([this, unlink] {
                     for (std::size_t r = 0; r < kNumRounds; ++r) {
                         shm_lifetime_test_routine(
@@ -896,11 +904,10 @@ public:
         ASSERT_OK(env.new_file(m_dirname + "0000000000", Env::kCreate, file));
         volatile void *ptr;
         ASSERT_OK(file->shm_map(0, true, ptr));
+        std::memset(const_cast<void *>(ptr), 0, File::kShmRegionSize);
         run_test([&](auto) {
             for (std::size_t i = 0; i < kNumThreads; ++i) {
                 set_up();
-                m_helper.open_unowned_file(EnvWithFiles::kSameName, Env::kCreate);
-                volatile void *ptr;
                 ASSERT_OK(m_helper.files[i]->shm_map(0, true, ptr));
             }
             std::vector<std::thread> threads;
@@ -932,12 +939,12 @@ public:
         ASSERT_LE(num_writes, kNumRounds);
         auto &env = Env::default_env();
         SharedCount count(env, "shared_count");
+        count.store(0);
 
         run_test([&](auto) {
             auto &env = Env::default_env();
             std::vector<std::thread> threads;
             while (threads.size() < kNumThreads) {
-                const auto t = threads.size();
                 threads.emplace_back([&env, num_writes] {
                     for (std::size_t r = 0; r < kNumRounds; ++r) {
                         SharedCount count(env, "shared_count");

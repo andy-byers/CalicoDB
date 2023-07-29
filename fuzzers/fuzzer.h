@@ -1,11 +1,14 @@
 // Copyright (c) 2022, The CalicoDB Authors. All rights reserved.
 // This source code is licensed under the MIT License, which can be found in
 // LICENSE.md. See AUTHORS.md for a list of contributor names.
+//
+// Some code was modified from https://github.com/CodeIntelligenceTesting/cifuzz.
 
 #ifndef CALICODB_FUZZERS_FUZZER_H
 #define CALICODB_FUZZERS_FUZZER_H
 
 #include "utils.h"
+#include <climits>
 #include <iostream>
 
 namespace calicodb
@@ -41,62 +44,108 @@ namespace calicodb
         }                                                                                              \
     } while (0)
 
-class FuzzerStream
+class FuzzedInputProvider
 {
-    static constexpr char kFakeData[kPageSize] = {};
-
-    const U8 **m_ptr;
-    std::size_t *m_len;
+    const U8 *m_ptr;
+    std::size_t m_len;
 
 public:
-    explicit FuzzerStream(const U8 *&ptr, std::size_t &len)
-        : m_ptr(&ptr),
-          m_len(&len)
+    explicit FuzzedInputProvider(const U8 *ptr, std::size_t len)
+        : m_ptr(ptr),
+          m_len(len)
     {
     }
 
     [[nodiscard]] auto is_empty() const -> bool
     {
-        return *m_len == 0;
+        return m_len == 0;
     }
 
     [[nodiscard]] auto length() const -> std::size_t
     {
-        return *m_len;
+        return m_len;
     }
 
-    [[nodiscard]] auto extract_random() -> Slice
+    [[nodiscard]] auto extract_random(std::size_t max_len) -> std::string
     {
-        std::size_t next_len = 0;
-        for (U32 i = 0; i < std::min(2UL, *m_len); ++i) {
-            // Determine a length for the binary string.
-            next_len = ((next_len << 8) | (*m_ptr)[i]) & 0xFFFF;
+        std::string result;
+        result.reserve(std::min(max_len, m_len));
+        for (size_t i = 0; i < max_len && m_len != 0; ++i) {
+            char next = static_cast<char>(m_ptr[0]);
+            advance(1);
+            if (next == '\\' && m_len != 0) {
+                next = static_cast<char>(m_ptr[0]);
+                advance(1);
+                if (next != '\\') {
+                    break;
+                }
+            }
+            result += next;
         }
-        return extract_fixed(std::min(*m_len, next_len));
+        result.shrink_to_fit();
+        return result;
     }
 
-    [[nodiscard]] auto extract_fake_random() -> Slice
+    [[nodiscard]] auto extract_random() -> std::string
     {
-        if (*m_len == 0) {
-            return "";
+        return extract_random(m_len);
+    }
+
+    auto advance(std::size_t len) -> void
+    {
+        CHECK_TRUE(len <= m_len);
+        m_len -= len;
+        m_ptr += len;
+    }
+
+    template <class T>
+    auto extract_integral() -> T
+    {
+        return extract_integral_in_range(std::numeric_limits<T>::min(),
+                                         std::numeric_limits<T>::max());
+    }
+
+    template <class T>
+    auto extract_integral_in_range(T min, T max) -> T
+    {
+        static_assert(std::is_integral<T>::value, "An integral type is required.");
+        static_assert(sizeof(T) <= sizeof(uint64_t), "Unsupported integral type.");
+        CALICODB_EXPECT_TRUE(min <= max);
+
+        auto range = static_cast<uint64_t>(max) - min;
+        uint64_t result = 0;
+        size_t offset = 0;
+        while (offset < sizeof(T) * CHAR_BIT && (range >> offset) > 0 && m_len != 0) {
+            --m_len;
+            result = (result << CHAR_BIT) | m_ptr[m_len];
+            offset += CHAR_BIT;
         }
-        const auto len = static_cast<std::size_t>(**m_ptr) * 16;
-        (void)extract_fixed(1);
-        return Slice(kFakeData, kPageSize).truncate(len);
+        if (range != std::numeric_limits<decltype(range)>::max()) {
+            result = result % (range + 1);
+        }
+        return static_cast<T>(min + result);
+    }
+
+    // This routine returns a std::string with length based on the next fuzzer integer. We seem to get
+    // better coverage this way. This may be due to the fact that changing the record values doesn't
+    // actually change the tree structure: all that matters for record values is their length.
+    [[nodiscard]] auto extract_random_record_value() -> std::string
+    {
+        const auto len = extract_integral_in_range<std::size_t>(0, kPageSize * 3);
+        return std::string(len, '\0');
     }
 
     [[nodiscard]] auto extract_fixed(std::size_t len) -> Slice
     {
         const auto fixed = peek(len);
-        *m_ptr += fixed.size();
-        *m_len -= fixed.size();
+        advance(fixed.size());
         return fixed;
     }
 
     [[nodiscard]] auto peek(std::size_t len) -> Slice
     {
-        CALICODB_EXPECT_LE(len, *m_len);
-        return {reinterpret_cast<const char *>(*m_ptr), len};
+        CHECK_TRUE(len <= m_len);
+        return {reinterpret_cast<const char *>(m_ptr), len};
     }
 };
 

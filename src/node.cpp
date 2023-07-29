@@ -442,25 +442,22 @@ auto Node::from_new_page(PageRef &page, char *scratch, bool is_leaf) -> Node
     return node;
 }
 
-auto Node::read_child_id(U32 index) const -> Id
+auto Node::read_child_id(U32 idx) const -> Id
 {
     CALICODB_EXPECT_FALSE(is_leaf());
-    const auto cell_count = NodeHdr::get_cell_count(hdr());
-    CALICODB_EXPECT_LE(index, cell_count);
-    if (index == cell_count) {
+    if (idx >= NodeHdr::get_cell_count(hdr())) {
         return NodeHdr::get_next_id(hdr());
     }
-    return Id(get_u32(ref->page + get_ivec_slot(*this, index)));
+    return Id(get_u32(ref->page + get_ivec_slot(*this, idx)));
 }
 
-auto Node::write_child_id(U32 index, Id child_id) -> void
+auto Node::write_child_id(U32 idx, Id child_id) -> void
 {
     CALICODB_EXPECT_FALSE(is_leaf());
-    CALICODB_EXPECT_LE(index, NodeHdr::get_cell_count(hdr()));
-    if (index == NodeHdr::get_cell_count(hdr())) {
+    if (idx >= NodeHdr::get_cell_count(hdr())) {
         NodeHdr::put_next_id(hdr(), child_id);
     } else {
-        put_u32(ref->page + get_ivec_slot(*this, index), child_id.value);
+        put_u32(ref->page + get_ivec_slot(*this, idx), child_id.value);
     }
 }
 

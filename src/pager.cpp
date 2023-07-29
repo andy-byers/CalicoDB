@@ -239,15 +239,14 @@ auto Pager::finish() -> void
 
     if (m_mode >= kDirty) {
         if (m_mode == kDirty) {
+            // Get rid of obsolete cached pages that aren't dirty anymore.
             m_wal->rollback([this](auto id) {
-                if (id.is_root()) {
-                    m_refresh = true;
-                } else if (auto *ref = m_bufmgr.get(id)) {
-                    // Get rid of obsolete cached pages that aren't dirty anymore.
+                PageRef *ref;
+                if (!id.is_root() && (ref = m_bufmgr.get(id))) {
                     purge_page(*ref);
                 }
             });
-            m_page_count = m_wal->db_size();
+            m_refresh = true;
         }
         m_wal->finish_writer();
         // Get rid of dirty pages, or all cached pages if there was a fault.
@@ -266,9 +265,7 @@ auto Pager::purge_pages(bool purge_all) -> void
         auto *save = p;
         p = p->next_dirty;
         m_dirtylist.remove(*save);
-        if (save->page_id.is_root()) {
-            m_refresh = true;
-        } else {
+        if (!save->page_id.is_root()) {
             m_bufmgr.erase(save->page_id);
         }
     }

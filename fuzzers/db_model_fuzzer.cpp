@@ -7,6 +7,7 @@
 #include "logging.h"
 #include "model.h"
 #include "tree.h"
+#include "tx_impl.h"
 
 namespace calicodb
 {
@@ -360,10 +361,10 @@ public:
         delete m_db;
     }
 
-    auto fuzz(FuzzerStream &stream) -> bool;
+    auto fuzz(FuzzedInputProvider &stream) -> bool;
 };
 
-auto Fuzzer::fuzz(FuzzerStream &stream) -> bool
+auto Fuzzer::fuzz(FuzzedInputProvider &stream) -> bool
 {
     if (stream.is_empty()) {
         return false;
@@ -411,9 +412,12 @@ auto Fuzzer::fuzz(FuzzerStream &stream) -> bool
               << sample << R"(" + <)" << missing_len << " bytes>\n";
 #endif // FUZZER_TRACE
 
-    std::string value;
-    Slice key;
+    std::string key, value;
     Status s;
+
+    auto &schema = m_tx->schema();
+    schema.seek_first();
+    CHECK_TRUE(schema.is_valid());
 
     switch (op_type) {
         case kBucketGet:
@@ -421,7 +425,7 @@ auto Fuzzer::fuzz(FuzzerStream &stream) -> bool
             break;
         case kBucketPut:
             key = stream.extract_random();
-            s = m_tx->put(m_b, key, stream.extract_fake_random());
+            s = m_tx->put(m_b, key, stream.extract_random_record_value());
             m_c->seek(key); // TODO
             break;
         case kBucketErase:
@@ -448,7 +452,7 @@ auto Fuzzer::fuzz(FuzzerStream &stream) -> bool
             break;
         case kCursorPut:
             key = stream.extract_random();
-            s = m_tx->put(*m_c, key, stream.extract_fake_random());
+            s = m_tx->put(*m_c, key, stream.extract_random_record_value());
             break;
         case kCursorErase:
             s = m_tx->erase(*m_c);
@@ -490,7 +494,7 @@ extern "C" int LLVMFuzzerTestOneInput(const U8 *data, std::size_t size)
 {
     FakeEnv env;
     Fuzzer fuzzer(env);
-    FuzzerStream stream(data, size);
+    FuzzedInputProvider stream(data, size);
     while (fuzzer.fuzz(stream)) {
     }
     return 0;

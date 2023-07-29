@@ -15,8 +15,7 @@ namespace calicodb
 Bufmgr::Bufmgr(std::size_t frame_count, Stat &stat)
     : m_buffer(reinterpret_cast<char *>(
           operator new[](
-              kPageSize *frame_count,
-              std::align_val_t(kPageSize),
+              (kPageSize + kOverrunLen) * frame_count,
               std::nothrow_t()))),
       m_frame_count(frame_count),
       m_stat(&stat)
@@ -35,7 +34,7 @@ Bufmgr::Bufmgr(std::size_t frame_count, Stat &stat)
 
 Bufmgr::~Bufmgr()
 {
-    operator delete[](m_buffer, std::align_val_t(kPageSize));
+    operator delete[](m_buffer);
 }
 
 auto Bufmgr::query(Id page_id) -> PageRef *
@@ -119,9 +118,8 @@ auto Bufmgr::unpin(PageRef &ref) -> void
 
     // The pointer put back into the available pool must (a) not belong to the root
     // page, and (b) point to the start of a page in the buffer.
-    CALICODB_EXPECT_GE(ref.page, m_buffer + kPageSize);
-    CALICODB_EXPECT_LE(ref.page, m_buffer + (m_frame_count - 1) * kPageSize);
-    CALICODB_EXPECT_EQ(reinterpret_cast<std::uintptr_t>(ref.page) % kPageSize, 0);
+    CALICODB_EXPECT_GE(ref.page, m_buffer + (kPageSize + kOverrunLen));
+    CALICODB_EXPECT_LE(ref.page, m_buffer + (m_frame_count - 1) * (kPageSize + kOverrunLen));
 
     m_available.emplace_back(ref.page);
 }
