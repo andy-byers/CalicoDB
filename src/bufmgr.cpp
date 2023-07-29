@@ -37,7 +37,7 @@ Bufmgr::~Bufmgr()
     operator delete[](m_buffer);
 }
 
-auto Bufmgr::query(Id page_id) -> PageRef *
+auto Bufmgr::query(Id page_id) const -> PageRef *
 {
     auto itr = m_map.find(page_id);
     if (itr == end(m_map)) {

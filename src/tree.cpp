@@ -40,6 +40,7 @@ class TreeCursor
     {
         CALICODB_EXPECT_TRUE(has_node());
         CALICODB_EXPECT_TRUE(m_node.is_leaf());
+        const auto leaf_level = m_level;
         for (U32 adjust = 0;; adjust = 1) {
             const auto ncells = NodeHdr::get_cell_count(m_node.hdr());
             if (++m_idx < ncells + adjust) {
@@ -56,6 +57,9 @@ class TreeCursor
                 return;
             }
             m_idx = 0;
+        }
+        if (m_level != leaf_level) {
+            m_status = Status::corruption();
         }
     }
 
@@ -1748,7 +1752,8 @@ auto Tree::vacuum_step(PageRef &free, PointerMap::Entry entry, Schema &schema, I
                 if (!s.is_ok()) {
                     return s;
                 } else if (parent.is_leaf()) {
-                    return corrupted_node(parent.ref->page_id);
+                    release(std::move(parent));
+                    return corrupted_node(entry.back_ptr);
                 }
                 bool found = false;
                 for (U32 i = 0, n = NodeHdr::get_cell_count(parent.hdr()); !found && i <= n; ++i) {

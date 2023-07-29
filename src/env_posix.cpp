@@ -322,7 +322,10 @@ public:
     {
     }
 
-    ~PosixLogger() override = default;
+    ~PosixLogger() override
+    {
+        (void)posix_close(m_file);
+    }
 
     // Modified from LevelDB.
     auto logv(const char *fmt, std::va_list args) -> void override

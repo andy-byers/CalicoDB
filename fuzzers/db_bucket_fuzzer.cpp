@@ -45,10 +45,8 @@ public:
         static_cast<const Tree *>(b.state)->TEST_validate();
     }
 
-    auto fuzz(FuzzedInputProvider &stream) -> bool
+    auto consume_input(FuzzedInputProvider &stream) -> void
     {
-        static constexpr std::size_t kMinStreamLen = 2;
-
         enum OperationType : char {
             kOpNext,
             kOpPrevious,
@@ -62,7 +60,7 @@ public:
             kOpCommit,
             kOpFinish,
             kOpCheck,
-            kOpCount
+            kMaxValue = kOpCheck
         };
 
         reopen_db();
@@ -71,15 +69,15 @@ public:
             std::unique_ptr<Cursor> cursors[kMaxBuckets];
             Bucket buckets[kMaxBuckets];
 
-            while (stream.length() > kMinStreamLen) {
-                const auto idx = std::size_t(stream.extract_fixed(1)[0]) % kMaxBuckets;
+            while (!stream.is_empty()) {
+                const auto idx = stream.extract_integral_in_range<U16>(0, kMaxBuckets - 1);
                 if (cursors[idx] == nullptr) {
                     CHECK_OK(tx.create_bucket(BucketOptions(), std::to_string(idx), &buckets[idx]));
                     cursors[idx] = std::unique_ptr<Cursor>(tx.new_cursor(buckets[idx]));
                 }
                 Status s;
                 auto *c = cursors[idx].get();
-                switch (OperationType{stream.extract_fixed(1)[0]} % kOpCount) {
+                switch (stream.extract_enum<OperationType>()) {
                     case kOpNext:
                         if (c->is_valid()) {
                             c->next();
@@ -143,7 +141,6 @@ public:
             return Status::ok();
         });
         CHECK_TRUE(s.is_ok() || s.to_string() == "not supported: ROLLBACK");
-        return stream.length() > kMinStreamLen;
     }
 };
 
@@ -152,8 +149,7 @@ extern "C" int LLVMFuzzerTestOneInput(const U8 *data, std::size_t size)
     FakeEnv env;
     FuzzedInputProvider stream(data, size);
     Fuzzer fuzzer(env);
-    while (fuzzer.fuzz(stream)) {
-    }
+    fuzzer.consume_input(stream);
     return 0;
 }
 

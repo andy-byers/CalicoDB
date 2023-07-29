@@ -43,7 +43,7 @@ public:
     [[nodiscard]] auto get(Id page_id) -> PageRef *;
 
     // Similar to get(), except that the cache ordering is not altered
-    [[nodiscard]] auto query(Id page_id) -> PageRef *;
+    [[nodiscard]] auto query(Id page_id) const -> PageRef *;
 
     // Determine the next unreferenced page that should be evicted based on the
     // cache replacement policy

@@ -151,6 +151,7 @@ auto Node::alloc(U32 index, U32 size) -> int
         }
         offset = BlockAllocator::allocate(*this, size);
     }
+    CALICODB_EXPECT_LE(offset + size, kPageSize);
     // We already made sure we had enough room to fulfill the request. If we had to defragment,
     // the call to allocate() should succeed.
     CALICODB_EXPECT_GT(offset, 0);
@@ -404,7 +405,7 @@ auto Node::from_existing_page(PageRef &page, char *scratch, Node &node_out) -> i
     }
     const auto gap_upper = NodeHdr::get_cell_start(hdr);
     const auto gap_lower = hdr_offset + NodeHdr::kSize + ncells * kSlotWidth;
-    if (gap_upper < gap_lower) {
+    if (gap_upper < gap_lower || gap_upper > kPageSize) {
         return -1;
     }
     Node node;
@@ -421,6 +422,8 @@ auto Node::from_existing_page(PageRef &page, char *scratch, Node &node_out) -> i
                         static_cast<U32>(total_freelist_bytes) +
                         NodeHdr::get_frag_count(hdr);
     node_out = std::move(node);
+    if (node.usable_space > kPageSize) {
+    }
     return 0;
 }
 
