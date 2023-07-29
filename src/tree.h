@@ -17,26 +17,27 @@ class Schema;
 class Tree;
 class TreeCursor;
 
-[[nodiscard]] inline auto truncate_suffix(const Slice &lhs, const Slice &rhs) -> Slice
+[[nodiscard]] inline auto truncate_suffix(const Slice &lhs, const Slice &rhs, Slice &prefix_out) -> int
 {
-    CALICODB_EXPECT_FALSE(rhs.is_empty());
-    // If this is true, then 1 of these 2 things must be true:
-    //   1. There is some index at which the byte in `rhs` compares greater than the
-    //      corresponding byte in `lhs`.
-    //   2. `rhs` is longer than `lhs`, but they are otherwise identical.
-    CALICODB_EXPECT_LT(lhs, rhs);
-
     const auto end = std::min(
         lhs.size(), rhs.size());
 
     std::size_t n = 0;
     for (; n < end; ++n) {
-        if (lhs[n] != rhs[n]) {
+        const auto u = static_cast<U8>(lhs[n]);
+        const auto v = static_cast<U8>(rhs[n]);
+        if (u < v) {
             break;
+        } else if (u > v) {
+            return -1;
         }
     }
+    if (n >= rhs.size()) {
+        return -1;
+    }
     // `lhs` < result <= `rhs`
-    return rhs.range(0, n + 1);
+    prefix_out = rhs.range(0, n + 1);
+    return 0;
 }
 
 class Tree final

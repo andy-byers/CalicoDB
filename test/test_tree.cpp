@@ -1333,7 +1333,8 @@ INSTANTIATE_TEST_SUITE_P(
 TEST(SuffixTruncationTests, SuffixTruncation)
 {
     const auto checked_truncate_suffix = [](const auto &lhs, const auto &rhs) {
-        const auto prefix = truncate_suffix(lhs, rhs);
+        Slice prefix;
+        EXPECT_EQ(0, truncate_suffix(lhs, rhs, prefix));
         // lhs < prefix <= rhs
         EXPECT_FALSE(prefix.is_empty());
         EXPECT_LT(lhs, prefix);
@@ -1358,6 +1359,14 @@ TEST(SuffixTruncationTests, SuffixTruncation)
     // lhs may be empty, but since lhs < rhs, rhs must not be empty.
     ASSERT_EQ("0", checked_truncate_suffix("", "0"));
     ASSERT_EQ("0", checked_truncate_suffix("", "00"));
+}
+
+TEST(SuffixTruncationTests, SuffixTruncationCorruption)
+{
+    Slice prefix;
+    ASSERT_EQ(-1, truncate_suffix("42", "", prefix));
+    ASSERT_EQ(-1, truncate_suffix("42", "42", prefix));
+    ASSERT_EQ(-1, truncate_suffix("43", "42", prefix));
 }
 
 class CursorModificationTests

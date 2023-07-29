@@ -1050,6 +1050,31 @@ TEST_F(DBOpenTests, FailsIfMissingDb)
     ASSERT_TRUE(DB::open(options, m_db_name, m_db).is_invalid_argument());
 }
 
+TEST_F(DBOpenTests, abc)
+{
+    delete m_db;
+    for (int i = 0; i < 25; ++i) {
+        Options options;
+        ASSERT_OK(DB::open(options, testing::TempDir() + "format_instance_" + numeric_key(i), m_db));
+        ASSERT_OK(m_db->update([i](auto &tx) {
+            Bucket b1, b2;
+            auto s = tx.create_bucket(BucketOptions(), "b1", &b1);
+            if (s.is_ok()) {
+                s = tx.create_bucket(BucketOptions(), "b2", &b2);
+            }
+            for (int j = 0; j <= i * 10 && s.is_ok(); ++j) {
+                s = tx.put(b1, numeric_key(j), numeric_key(j));
+                if (s.is_ok()) {
+                    s = tx.put(b2, numeric_key(100000 - j), numeric_key(50000 - j));
+                }
+            }
+            return s;
+        }));
+        delete m_db;
+        m_db = nullptr;
+    }
+}
+
 TEST_F(DBOpenTests, FailsIfDbExists)
 {
     Options options;

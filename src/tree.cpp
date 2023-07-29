@@ -778,10 +778,13 @@ auto Tree::make_pivot(const PivotOptions &opt, Cell &pivot_out) -> Status
             }
         }
     }
-    auto *ptr = opt.scratch + sizeof(U32); // Skip the left child ID.
-    auto prefix = truncate_suffix(keys[0], keys[1]);
+    Slice prefix;
+    if (truncate_suffix(keys[0], keys[1], prefix)) {
+        return Status::corruption();
+    }
     pivot_out.ptr = opt.scratch;
     pivot_out.total_pl_size = static_cast<U32>(prefix.size());
+    auto *ptr = pivot_out.ptr + sizeof(U32); // Skip the left child ID.
     pivot_out.key = encode_varint(ptr, pivot_out.total_pl_size);
     pivot_out.local_pl_size = compute_local_pl_size(prefix.size(), 0);
     pivot_out.footprint = pivot_out.local_pl_size + U32(pivot_out.key - opt.scratch);
@@ -1204,6 +1207,14 @@ auto Tree::redistribute_cells(Node &left, Node &right, Node &parent, U32 pivot_i
         right_accum += cell.footprint;
         *cell_itr++ = cell;
     }
+    const auto accounted_for = right_accum + p_src->usable_space +
+                               page_offset(p_src->ref->page_id) +
+                               NodeHdr::kSize + cell_count * kCellPtrSize -
+                               (is_split ? cells[m_ovfl.idx].footprint : 0);
+    if (kPageSize != accounted_for) {
+        return corrupted_node(p_src->ref->page_id);
+    }
+
     CALICODB_EXPECT_FALSE(m_ovfl.exists());
     // The pivot cell from `parent` may need to be added to the redistribution set. If a pivot exists
     // at all, it must be removed. If the `left` node already existed, then there must be a pivot
@@ -1736,8 +1747,9 @@ auto Tree::vacuum_step(PageRef &free, PointerMap::Entry entry, Schema &schema, I
                 s = acquire(entry.back_ptr, parent, true);
                 if (!s.is_ok()) {
                     return s;
+                } else if (parent.is_leaf()) {
+                    return corrupted_node(parent.ref->page_id);
                 }
-                CALICODB_EXPECT_FALSE(parent.is_leaf());
                 bool found = false;
                 for (U32 i = 0, n = NodeHdr::get_cell_count(parent.hdr()); !found && i <= n; ++i) {
                     const auto child_id = parent.read_child_id(i);
