@@ -45,7 +45,7 @@ public:
         static_cast<const Tree *>(b.state)->TEST_validate();
     }
 
-    auto fuzz(FuzzerStream &stream) -> bool
+    auto fuzz(FuzzedInputProvider &stream) -> bool
     {
         static constexpr std::size_t kMinStreamLen = 2;
 
@@ -99,12 +99,12 @@ public:
                         break;
                     case kOpModify:
                         if (c->is_valid()) {
-                            s = tx.put(*c, c->key(), stream.extract_fake_random());
+                            s = tx.put(*c, c->key(), stream.extract_random_record_value());
                             break;
                         }
                         [[fallthrough]];
                     case kOpPut:
-                        s = tx.put(*c, stream.extract_random(), stream.extract_fake_random());
+                        s = tx.put(*c, stream.extract_random(), stream.extract_random_record_value());
                         break;
                     case kOpErase:
                         s = tx.erase(*c);
@@ -150,7 +150,7 @@ public:
 extern "C" int LLVMFuzzerTestOneInput(const U8 *data, std::size_t size)
 {
     FakeEnv env;
-    FuzzerStream stream(data, size);
+    FuzzedInputProvider stream(data, size);
     Fuzzer fuzzer(env);
     while (fuzzer.fuzz(stream)) {
     }
