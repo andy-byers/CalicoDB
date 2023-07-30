@@ -21,12 +21,14 @@ public:
         kCorruption,
         kNotFound,
         kBusy,
+        kAborted,
         kMaxCode
     };
 
     enum SubCode : char {
         kNone,
         kRetry,
+        kNoMemory,
         kMaxSubCode
     };
 
@@ -94,9 +96,22 @@ public:
     {
         return Status(kBusy, msg);
     }
+    static auto aborted(SubCode msg = kNone) -> Status
+    {
+        return Status(kAborted, msg);
+    }
+    static auto aborted(const Slice &msg) -> Status
+    {
+        return Status(kAborted, msg);
+    }
+
     static auto retry() -> Status
     {
         return Status(kBusy, kRetry);
+    }
+    static auto no_memory() -> Status
+    {
+        return Status(kAborted, kNoMemory);
     }
 
     // Return true if the status is OK, false otherwise
@@ -128,9 +143,18 @@ public:
     {
         return m_code == kBusy;
     }
+    [[nodiscard]] auto is_aborted() const -> bool
+    {
+        return m_code == kAborted;
+    }
+
     [[nodiscard]] auto is_retry() const -> bool
     {
         return m_code == kBusy && m_subc == kRetry;
+    }
+    [[nodiscard]] auto is_no_memory() const -> bool
+    {
+        return m_code == kAborted && m_subc == kNoMemory;
     }
 
     [[nodiscard]] auto code() const -> Code

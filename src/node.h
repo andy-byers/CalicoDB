@@ -73,21 +73,21 @@ static constexpr U32 kMaxCellHeaderSize =
 }
 
 // Internal cell format:
-//     Size    Name
-//    -----------------------
-//     4       child_id
-//     varint  key_size
-//     n       key
-//     4       overflow_id*
+//     Size   | Name
+//    --------|---------------
+//     4      | child_id
+//     varint | key_size
+//     n      | key
+//     4      | overflow_id*
 //
 // External cell format:
-//     Size    Name
-//    -----------------------
-//     varint  value_size
-//     varint  key_size
-//     n       key
-//     m       value
-//     4       overflow_id*
+//     Size   | Name
+//    --------|---------------
+//     varint | value_size
+//     varint | key_size
+//     n      | key
+//     m      | value
+//     4      | overflow_id*
 //
 // * overflow_id field is only present when the cell payload is unable to
 //   fit entirely within the node page. In this case, it holds the page ID
@@ -161,7 +161,7 @@ struct Node final {
 
     [[nodiscard]] auto hdr() const -> char *
     {
-        return ref->page + page_offset(ref->page_id);
+        return ref->get_data() + page_offset(ref->page_id);
     }
 
     [[nodiscard]] auto is_leaf() const -> bool

@@ -98,9 +98,9 @@ public:
         m_pager->mark_dirty(*node.ref);
     }
 
-    auto release(Node node) const -> void
+    auto release(Node node, Pager::ReleaseAction action = Pager::kKeep) const -> void
     {
-        m_pager->release(node.ref);
+        m_pager->release(node.ref, action);
     }
 
     [[nodiscard]] auto root() const -> Id
@@ -146,7 +146,7 @@ private:
 
     auto emplace(Node &node, const Slice &key, const Slice &value, U32 index, bool &overflow) -> Status;
     auto free_overflow(Id head_id) -> Status;
-    auto vacuum_step(PageRef &free, PointerMap::Entry entry, Schema &schema, Id last_id) -> Status;
+    auto vacuum_step(PageRef *&free, PointerMap::Entry entry, Schema &schema, Id last_id) -> Status;
 
     struct PivotOptions {
         const Cell *cells[2];

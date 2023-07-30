@@ -48,11 +48,6 @@ public:
         return m_page_count;
     }
 
-    [[nodiscard]] auto buffer_count() const -> std::size_t
-    {
-        return m_bufmgr.available() + m_bufmgr.occupied();
-    }
-
     [[nodiscard]] auto mode() const -> Mode
     {
         return m_mode;
@@ -109,6 +104,9 @@ public:
     // Release a referenced page back to the pager
     // This routine is a NOOP if page was already released.
     auto release(PageRef *&page, ReleaseAction action = kKeep) -> void;
+
+    auto get_unused_page(PageRef *&page_out) -> Status;
+    auto move_page(PageRef &page, Id location) -> void;
 
     auto status() const -> Status
     {

@@ -143,6 +143,9 @@ TEST(Status, StatusMessages)
     ASSERT_EQ("busy", Status::busy().to_string());
     ASSERT_EQ("busy: msg", Status::busy("msg").to_string());
     ASSERT_EQ("busy: retry", Status::retry().to_string());
+    ASSERT_EQ("aborted", Status::aborted().to_string());
+    ASSERT_EQ("aborted: msg", Status::aborted("msg").to_string());
+    ASSERT_EQ("aborted: no memory", Status::no_memory().to_string());
     // Choice of `Status::invalid_argument()` is arbitrary, any `Code-SubCode` combo
     // is technically legal, but may not be semantically valid (for example, it makes
     // no sense to retry when a read-only transaction attempts to write: repeating that
@@ -152,23 +155,29 @@ TEST(Status, StatusMessages)
 
 TEST(Status, StatusCodes)
 {
-    ASSERT_TRUE(Status::invalid_argument().is_invalid_argument());
-    ASSERT_EQ(Status::invalid_argument().code(), Status::kInvalidArgument);
-    ASSERT_TRUE(Status::io_error().is_io_error());
-    ASSERT_EQ(Status::io_error().code(), Status::kIOError);
-    ASSERT_TRUE(Status::not_supported().is_not_supported());
-    ASSERT_EQ(Status::not_supported().code(), Status::kNotSupported);
-    ASSERT_TRUE(Status::corruption().is_corruption());
-    ASSERT_EQ(Status::corruption().code(), Status::kCorruption);
-    ASSERT_TRUE(Status::not_found().is_not_found());
-    ASSERT_EQ(Status::not_found().code(), Status::kNotFound);
-    ASSERT_TRUE(Status::busy().is_busy());
-    ASSERT_EQ(Status::busy().code(), Status::kBusy);
-    ASSERT_TRUE(Status::retry().is_retry());
-    ASSERT_EQ(Status::retry().code(), Status::kBusy);
-    ASSERT_EQ(Status::retry().subcode(), Status::kRetry);
-    ASSERT_TRUE(Status::ok().is_ok());
-    ASSERT_EQ(Status::ok().code(), Status::kOK);
+#define CHECK_CODE(_Label, _Code)                \
+    ASSERT_TRUE(Status::_Label().is_##_Label()); \
+    ASSERT_EQ(Status::_Label().code(), Status::_Code)
+#define CHECK_SUBCODE(_Label, _Code, _SubCode)         \
+    ASSERT_TRUE(Status::_Label().is_##_Label());       \
+    ASSERT_EQ(Status::_Label().code(), Status::_Code); \
+    ASSERT_EQ(Status::_Label().subcode(), Status::_SubCode)
+
+    CHECK_CODE(ok, kOK);
+
+    CHECK_CODE(invalid_argument, kInvalidArgument);
+    CHECK_CODE(io_error, kIOError);
+    CHECK_CODE(not_supported, kNotSupported);
+    CHECK_CODE(corruption, kCorruption);
+    CHECK_CODE(not_found, kNotFound);
+    CHECK_CODE(busy, kBusy);
+    CHECK_CODE(aborted, kAborted);
+
+    CHECK_SUBCODE(retry, kBusy, kRetry);
+    CHECK_SUBCODE(no_memory, kAborted, kNoMemory);
+
+#undef CHECK_CODE
+#undef CHECK_SUBCODE
 }
 
 TEST(Status, Copy)
