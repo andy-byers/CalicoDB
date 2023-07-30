@@ -10,6 +10,7 @@
 #include "stat.h"
 #include "utils.h"
 #include <functional>
+#include <memory>
 
 namespace calicodb
 {
@@ -1187,8 +1188,9 @@ auto Tree::redistribute_cells(Node &left, Node &right, Node &parent, U32 pivot_i
     CALICODB_EXPECT_TRUE(!is_split || p_src == &right);
 
     // Cells that need to be redistributed, in order.
-    std::vector<Cell> cells(cell_count + m_ovfl.exists());
-    auto cell_itr = begin(cells);
+    std::unique_ptr<Cell[]> cell_buffer(new Cell[cell_count + 2]);
+    auto *cells = cell_buffer.get() + 1;
+    auto *cell_itr = cells;
     U32 right_accum = 0;
     Cell cell;
 
@@ -1241,30 +1243,30 @@ auto Tree::redistribute_cells(Node &left, Node &right, Node &parent, U32 pivot_i
             write_child_id(cell, NodeHdr::get_next_id(p_left->hdr()));
             right_accum += cell.footprint;
             if (p_src == &left) {
-                cells.emplace_back(cell);
+                *cell_itr++ = cell;
             } else {
-                cells.insert(begin(cells), cell);
+                --cells;
+                *cells = cell;
             }
         }
         parent.erase(pivot_idx, cell.footprint);
     }
-    CALICODB_EXPECT_GE(cells.size(), is_split ? 4 : 1);
+    const auto ncells = static_cast<int>(cell_itr - cells);
+    CALICODB_EXPECT_GE(ncells, is_split ? 4 : 1);
 
     auto sep = -1;
     for (U32 left_accum = 0; right_accum > p_left->usable_space / 2 &&
                              right_accum > left_accum &&
-                             2 + sep++ < int(cells.size());) {
-        left_accum += cells[U32(sep)].footprint;
-        right_accum -= cells[U32(sep)].footprint;
+                             2 + sep++ < ncells;) {
+        left_accum += cells[sep].footprint;
+        right_accum -= cells[sep].footprint;
     }
-    if (sep == 0) {
-        sep = 1;
-    }
+    sep += sep == 0;
 
     Status s;
-    auto idx = int(cells.size()) - 1;
+    auto idx = ncells - 1;
     for (; idx > sep; --idx) {
-        s = insert_cell(*p_right, 0, cells[U32(idx)]);
+        s = insert_cell(*p_right, 0, cells[idx]);
         CALICODB_EXPECT_FALSE(m_ovfl.exists());
         if (!s.is_ok()) {
             return s;
@@ -1279,22 +1281,22 @@ auto Tree::redistribute_cells(Node &left, Node &right, Node &parent, U32 pivot_i
         if (p_src->is_leaf()) {
             ++idx; // Backtrack to the last cell written to p_right.
             const PivotOptions opt = {
-                {&cells[U32(idx) - 1],
-                 &cells[U32(idx)]},
+                {&cells[idx - 1],
+                 &cells[idx]},
                 m_cell_scratch[2],
                 parent.ref->page_id,
             };
             s = make_pivot(opt, pivot);
-            cells[U32(idx)] = pivot;
+            cells[idx] = pivot;
 
         } else {
-            const auto next_id = read_child_id(cells[U32(idx)]);
+            const auto next_id = read_child_id(cells[idx]);
             NodeHdr::put_next_id(p_left->hdr(), next_id);
             fix_parent_id(next_id, p_left->ref->page_id, PointerMap::kTreeNode, s);
         }
         if (s.is_ok()) {
             // Post the pivot. This may cause the `parent` to overflow.
-            s = post_pivot(parent, pivot_idx, cells[U32(idx)], p_left->ref->page_id);
+            s = post_pivot(parent, pivot_idx, cells[idx], p_left->ref->page_id);
             --idx;
         }
     }
@@ -1304,7 +1306,7 @@ auto Tree::redistribute_cells(Node &left, Node &right, Node &parent, U32 pivot_i
 
     // Write the rest of the cells to p_left.
     for (; idx >= 0; --idx) {
-        s = insert_cell(*p_left, 0, cells[U32(idx)]);
+        s = insert_cell(*p_left, 0, cells[idx]);
         if (!s.is_ok()) {
             return s;
         }
