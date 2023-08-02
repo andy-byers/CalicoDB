@@ -39,41 +39,64 @@ public:
 
         if (s.is_ok()) {
             s = db->update([](auto &tx) {
-                Status s;
-                auto &schema = tx.schema();
-                schema.seek_first();
-                while (s.is_ok() && schema.is_valid()) {
-                    Bucket b;
-                    s = tx.open_bucket(schema.key(), b);
-                    if (s.is_ok()) {
-                        std::unique_ptr<Cursor> c(tx.new_cursor(b));
-                        c->seek_last();
-                        while (c->is_valid()) {
-                            s = tx.put(*c, c->key(), "value");
-                            CHECK_TRUE(s == c->status());
-                            if (s.is_ok()) {
-                                c->previous();
-                            }
-                        }
-                        if (s.is_ok()) {
-                            // Catch errors from c->previous().
-                            s = c->status();
-                        }
-                        if (s.is_ok()) {
-                            c->seek_first();
-                            while (c->is_valid()) {
-                                s = tx.erase(*c);
-                                CHECK_TRUE(s == c->status());
-                            }
-                            schema.next();
-                        }
-                    }
+                Bucket b1, b2;
+                auto s = tx.open_bucket("b1", b1);
+                if (s.is_ok()) {
+                    s = tx.open_bucket("b2", b2);
                 }
                 if (s.is_ok()) {
-                    s = schema.status();
+                    // Copy all records from b1 to b2.
+                    std::unique_ptr<Cursor> c(tx.new_cursor(b1));
+                    c->seek_last();
+                    while (c->is_valid() && s.is_ok()) {
+                        s = tx.put(b2, c->key(), c->value());
+                        if (s.is_ok()) {
+                            c->previous();
+                        }
+                    }
+                    if (s.is_ok()) {
+                        s = c->status();
+                    }
+                    if (s.is_ok()) {
+                        // Copy reverse mapping from b2 to b1.
+                        c.reset(tx.new_cursor(b2));
+                        c->seek_first();
+                        while (c->is_valid() && s.is_ok()) {
+                            s = tx.put(b1, c->value(), c->key());
+                            c->next();
+                        }
+                        if (s.is_ok()) {
+                            s = c->status();
+                        }
+                        // Erase some records from b2.
+                        c->seek_first();
+                        while (c->is_valid() && s.is_ok()) {
+                            if (c->key() < c->value()) {
+                                s = tx.erase(*c);
+                                CHECK_TRUE(s == c->status());
+                            } else {
+                                c->next();
+                            }
+                        }
+                        if (s.is_ok()) {
+                            s = c->status();
+                        }
+                    }
+                    c.reset();
+
+                    if (s.is_ok()) {
+                        s = tx.drop_bucket("b2");
+                    }
+                    if (s.is_ok()) {
+                        s = tx.vacuum();
+                    }
                 }
                 return s;
             });
+
+            if (s.is_ok()) {
+                s = db->checkpoint(true);
+            }
 
             delete db;
         }

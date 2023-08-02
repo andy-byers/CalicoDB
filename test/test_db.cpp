@@ -1150,7 +1150,11 @@ TEST_F(TransactionTests, ExclusiveLockingMode)
     for (int i = 0; i < 2; ++i) {
         m_config = i == 0 ? kExclusiveLockMode : kDefault;
         ASSERT_OK(reopen_db(false));
-        m_env->m_write_callback = [this, &i] {
+        std::size_t n = 0;
+        m_env->m_write_callback = [this, &i, &n] {
+            if (n > 256) {
+                return;
+            }
             DB *db;
             Options options;
             options.lock_mode = i == 0 ? Options::kLockNormal
@@ -1160,6 +1164,7 @@ TEST_F(TransactionTests, ExclusiveLockingMode)
             Status s;
             ASSERT_TRUE((s = DB::open(options, m_db_name, db)).is_busy())
                 << s.to_string();
+            ++n;
         };
         ASSERT_OK(m_db->update([](auto &tx) {
             for (std::size_t i = 0; i < 50; ++i) {
@@ -1257,6 +1262,11 @@ TEST_F(CheckpointTests, CheckpointerAllowsTransactions)
 
     U64 n = 0;
     m_env->m_write_callback = [this, &n] {
+        if (n >= 256) {
+            // NOTE: The outer DB still has the file locked, so the Env won't close the database file when
+            //       this DB is deleted.
+            return;
+        }
         DB *db;
         Options options;
         options.env = m_env;

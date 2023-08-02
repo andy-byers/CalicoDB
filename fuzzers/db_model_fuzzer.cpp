@@ -385,8 +385,8 @@ auto Fuzzer::fuzz(FuzzedInputProvider &stream) -> bool
         kReopenTx,
         kReopenBucket,
         kValidateDB,
-        kOpCount
-    } op_type = OperationType(U32(stream.extract_fixed(1)[0]) % kOpCount);
+        kMaxValue = kValidateDB
+    } op_type = stream.extract_enum<OperationType>();
 
 #ifdef FUZZER_TRACE
     static constexpr const char *kOperationTypeNames[kOpCount] = {

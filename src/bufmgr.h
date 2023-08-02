@@ -41,7 +41,7 @@ public:
     }
 
     // Similar to get(), except that the cache ordering is not altered
-    [[nodiscard]] auto query(Id page_id) -> PageRef *;
+    [[nodiscard]] auto query(Id page_id) const -> PageRef *;
 
     // Return a pointer to a specific cache entry, if it exists, nullptr otherwise
     // This method may alter the cache ordering.

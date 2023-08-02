@@ -61,18 +61,22 @@ auto check_status(const char *expr, const Status &s) -> testing::AssertionResult
 auto read_file_to_string(Env &env, const std::string &filename) -> std::string
 {
     std::size_t file_size;
-    const auto s = env.file_size(filename, file_size);
-    if (s.is_io_error()) {
-        // File was unlinked.
+    auto s = env.file_size(filename, file_size);
+    if (!s.is_ok()) {
+        if (!s.is_io_error()) {
+            ADD_FAILURE() << s.to_string();
+        }
         return "";
     }
     std::string buffer(file_size, '\0');
 
     File *file;
-    EXPECT_OK(env.new_file(filename, Env::kReadOnly, file));
-    EXPECT_OK(file->read_exact(0, file_size, buffer.data()));
+    s = env.new_file(filename, Env::kReadOnly, file);
+    if (s.is_ok()) {
+        s = file->read_exact(0, file_size, buffer.data());
+    }
     delete file;
-
+    EXPECT_OK(s);
     return buffer;
 }
 

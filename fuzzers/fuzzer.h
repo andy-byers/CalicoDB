@@ -105,6 +105,7 @@ public:
                                          std::numeric_limits<T>::max());
     }
 
+    // Produces a value in range [min, max]
     template <class T>
     auto extract_integral_in_range(T min, T max) -> T
     {
@@ -126,9 +127,9 @@ public:
         return static_cast<T>(min + result);
     }
 
-    // This routine returns a std::string with length based on the next fuzzer integer. We seem to get
-    // better coverage this way. This may be due to the fact that changing the record values doesn't
-    // actually change the tree structure: all that matters for record values is their length.
+    // This routine returns a std::string with length based on the next fuzzed integer. We seem to get
+    // better coverage this way. This may be due to the fact that changing record payload bytes doesn't
+    // actually change the tree structure: all that matters for record payloads is their length.
     [[nodiscard]] auto extract_random_record_value() -> std::string
     {
         const auto len = extract_integral_in_range<std::size_t>(0, kPageSize * 3);
@@ -140,6 +141,14 @@ public:
         const auto fixed = peek(len);
         advance(fixed.size());
         return fixed;
+    }
+    
+    // NOTE: T::kMaxValue must be aliased to the largest enumerator value
+    template <typename T> auto extract_enum() -> T
+    {
+        static_assert(std::is_enum<T>::value, "|T| must be an enum type.");
+        return static_cast<T>(
+            extract_integral_in_range<U32>(0, static_cast<U32>(T::kMaxValue)));
     }
 
     [[nodiscard]] auto peek(std::size_t len) -> Slice

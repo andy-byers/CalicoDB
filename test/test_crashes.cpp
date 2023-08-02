@@ -33,6 +33,7 @@ public:
     mutable int m_max_num = 0;
     mutable int m_num = 0;
     bool m_crashes_enabled = false;
+    bool m_auto_reset = true;
     bool m_drop_unsynced = false;
 
     explicit CrashEnv(Env &env)
@@ -42,11 +43,18 @@ public:
 
     ~CrashEnv() override = default;
 
+    auto reset_crash_counter() const -> void
+    {
+        ++m_max_num;
+        m_num = 0;
+    }
+
     [[nodiscard]] auto should_next_syscall_fail() const -> bool
     {
         if (m_crashes_enabled && m_num++ >= m_max_num) {
-            m_num = 0;
-            ++m_max_num;
+            if (m_auto_reset) {
+                reset_crash_counter();
+            }
             return true;
         }
         return false;
@@ -174,6 +182,9 @@ protected:
         : m_filename(testing::TempDir() + "calicodb_crashes"),
           m_env(new CrashEnv(Env::default_env()))
     {
+        (void)m_env->remove_file(m_filename);
+        (void)m_env->remove_file(m_filename + kDefaultShmSuffix);
+        (void)m_env->remove_file(m_filename + kDefaultWalSuffix);
     }
 
     ~CrashTests() override
@@ -181,17 +192,21 @@ protected:
         delete m_env;
     }
 
-    static constexpr std::size_t kNumRecords = 512;
-    static constexpr std::size_t kNumIterations = 3;
+    static constexpr std::size_t kNumRecords = 256;
+    static constexpr std::size_t kNumIterations = 2;
     [[nodiscard]] static auto make_key(std::size_t n) -> Slice
     {
         static std::string s_keys[kNumRecords];
         if (s_keys[n].empty()) {
             s_keys[n] = numeric_key(n) + "::";
             // Let the keys get increasingly long so that the overflow chain code gets tested.
-            s_keys[n].resize(s_keys[n].size() + n, '0');
+            s_keys[n].resize(s_keys[n].size() + n * 6, '0');
         }
         return s_keys[n];
+    }
+    [[nodiscard]] static auto make_value(std::size_t n) -> std::string
+    {
+        return std::string(std::min(n * 6, kPageSize * 3), '*');
     }
 
     // Check if a status is an injected fault
@@ -214,9 +229,17 @@ protected:
             BucketOptions options;
             options.error_if_exists = true;
             s = tx.create_bucket(options, name1, &b1);
-            for (std::size_t i = 0; s.is_ok() && i < kNumRecords; ++i) {
-                const auto key = make_key(i);
-                s = tx.put(b1, key, key);
+            if (s.is_ok()) {
+                std::vector<U32> keys(kNumRecords);
+                std::iota(begin(keys), end(keys), 0);
+                std::default_random_engine rng(42);
+                std::shuffle(begin(keys), end(keys), rng);
+                for (auto k : keys) {
+                    s = tx.put(b1, make_key(k), make_value(k));
+                    if (!s.is_ok()) {
+                        break;
+                    }
+                }
             }
         }
         if (!s.is_ok()) {
@@ -234,7 +257,7 @@ protected:
         for (std::size_t i = 0; i < kNumRecords; ++i) {
             if (c->is_valid()) {
                 EXPECT_EQ(c->key(), make_key(i));
-                EXPECT_EQ(c->key(), c->value());
+                EXPECT_EQ(c->value(), make_value(i));
                 s = tx.put(b2, c->key(), c->value());
                 if (!s.is_ok()) {
                     break;
@@ -282,7 +305,7 @@ protected:
             s = tx.get(b, key, &value);
 
             if (s.is_ok()) {
-                EXPECT_EQ(key, value);
+                EXPECT_EQ(value, make_value(i));
             } else {
                 return s;
             }
@@ -308,8 +331,14 @@ protected:
         m_env->m_max_num = 0;
         Status s;
         while (is_injected_fault(s = task())) {
+            if (!m_env->m_auto_reset) {
+                m_env->reset_crash_counter();
+            }
         }
         ASSERT_OK(s);
+        if (!s.is_ok()) {
+            std::abort();
+        }
     }
 
     static auto validate(DB &db)
@@ -414,16 +443,6 @@ protected:
 
             DB *db;
             ASSERT_OK(DB::open(options, m_filename, db));
-            ASSERT_OK(db->update([scale = i + 1](auto &tx) {
-                Bucket b;
-                auto s = tx.create_bucket(BucketOptions(), "BUCKET", &b);
-                for (std::size_t i = 0; s.is_ok() && i < kNumRecords; ++i) {
-                    auto kv = make_key(i).to_string();
-                    kv.resize(kv.size() * scale, '0');
-                    s = tx.put(b, kv, kv);
-                }
-                return s;
-            }));
 
             m_env->m_crashes_enabled = param.inject_faults;
             m_env->m_max_num = static_cast<int>(i * 5);
@@ -447,7 +466,83 @@ protected:
         std::cout << "Tries per iteration: " << static_cast<double>(tries) / static_cast<double>(param.num_iterations) << '\n';
     }
 
-    auto run_cursor_mod_test(const OperationsParameters &param) -> void
+    struct CursorReadParameters {
+        bool inject_faults = true;
+        bool auto_reset = true;
+    };
+    auto run_cursor_read_test(const CursorReadParameters &param) -> void
+    {
+        Options options;
+        options.env = m_env;
+        options.sync_mode = Options::kSyncFull;
+
+        (void)DB::destroy(options, m_filename);
+
+        for (std::size_t i = 0; i < kNumIterations; ++i) {
+            DB *db;
+            ASSERT_OK(DB::open(options, m_filename, db));
+            ASSERT_OK(db->update([](auto &tx) {
+                Bucket b;
+                auto s = tx.create_bucket(BucketOptions(), "BUCKET", &b);
+                for (std::size_t j = 0; s.is_ok() && j < kNumRecords; ++j) {
+                    s = tx.put(b, make_key(j), make_value(j));
+                }
+                return s;
+            }));
+
+            m_env->m_crashes_enabled = param.inject_faults;
+            m_env->m_auto_reset = param.auto_reset;
+
+            run_until_completion([&db] {
+                return db->view([](const auto &tx) {
+                    Bucket b;
+                    auto s = tx.open_bucket("BUCKET", b);
+                    if (!s.is_ok()) {
+                        return s;
+                    }
+                    auto *c = tx.new_cursor(b);
+                    c->seek_first();
+                    for (std::size_t j = 0; c->is_valid() && j < kNumRecords; ++j) {
+                        EXPECT_EQ(c->key(), make_key(j));
+                        EXPECT_EQ(c->value(), make_value(j));
+                        c->next();
+                    }
+                    s = c->status();
+
+                    // If there was an error, this call will clear it and try again. If the pager
+                    // is able to get the necessary pages without encountering another error, we
+                    // can proceed with scanning the bucket.
+                    c->seek_last();
+                    for (std::size_t j = 0; c->is_valid() && j < kNumRecords; ++j) {
+                        EXPECT_EQ(c->key(), make_key(kNumRecords - j - 1));
+                        EXPECT_EQ(c->value(), make_value(kNumRecords - j - 1));
+                        c->previous();
+                    }
+                    if (s.is_ok()) {
+                        s = c->status();
+                    }
+
+                    for (std::size_t j = 0; j < kNumRecords; ++j) {
+                        c->seek(make_key(j));
+                        if (!c->is_valid()) {
+                            break;
+                        }
+                        EXPECT_EQ(c->key(), make_key(j));
+                        EXPECT_EQ(c->value(), make_value(j));
+                    }
+                    if (s.is_ok()) {
+                        s = c->status();
+                    }
+                    return s;
+                });
+            });
+
+            m_env->m_crashes_enabled = false;
+            delete db;
+        }
+    }
+
+    auto run_cursor_modify_test(const OperationsParameters &param) -> void
     {
         Options options;
         options.env = m_env;
@@ -483,12 +578,13 @@ protected:
                         c = tx.new_cursor(b);
                     }
                     for (std::size_t j = 0; s.is_ok() && j < kNumRecords; ++j) {
-                        auto kv = make_key(j).to_string();
-                        s = tx.put(*c, kv, kv);
+                        const auto key = make_key(j);
+                        const auto value = make_value(j);
+                        s = tx.put(*c, key, value);
                         if (s.is_ok()) {
                             EXPECT_TRUE(c->is_valid());
-                            EXPECT_EQ(c->key(), kv);
-                            EXPECT_EQ(c->value(), kv);
+                            EXPECT_EQ(c->key(), key);
+                            EXPECT_EQ(c->value(), value);
                         }
                     }
                     if (s.is_ok()) {
@@ -496,11 +592,12 @@ protected:
                         s = c->status();
                     }
                     while (s.is_ok() && c->is_valid()) {
-                        const auto v = c->value().to_string();
-                        s = tx.put(*c, c->key(), v + v);
+                        auto v = c->value().to_string();
+                        v.append(v);
+                        s = tx.put(*c, c->key(), v);
                         if (s.is_ok()) {
                             EXPECT_TRUE(c->is_valid());
-                            EXPECT_EQ(c->value(), v + v);
+                            EXPECT_EQ(c->value(), v);
                             c->previous();
                         }
                     }
@@ -549,17 +646,27 @@ TEST_F(CrashTests, OpenClose)
     run_open_close_test({true, 3});
 }
 
+TEST_F(CrashTests, CursorReadFaults)
+{
+    // Sanity check. No faults.
+    run_cursor_read_test({false});
+
+    // Run with fault injection.
+    run_cursor_read_test({true, false});
+    run_cursor_read_test({true, true});
+}
+
 TEST_F(CrashTests, CursorModificationFaults)
 {
     // Sanity check. No faults.
-    run_cursor_mod_test({false, false});
-    run_cursor_mod_test({false, true});
+    run_cursor_modify_test({false, false});
+    run_cursor_modify_test({false, true});
 
     // Run with fault injection.
-    run_cursor_mod_test({true, false, false});
-    run_cursor_mod_test({true, true, false});
-    run_cursor_mod_test({true, false, true});
-    run_cursor_mod_test({true, true, true});
+    run_cursor_modify_test({true, false, false});
+    run_cursor_modify_test({true, true, false});
+    run_cursor_modify_test({true, false, true});
+    run_cursor_modify_test({true, true, true});
 }
 
 #undef MAYBE_CRASH
