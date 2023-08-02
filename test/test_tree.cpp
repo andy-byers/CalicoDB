@@ -261,6 +261,7 @@ TEST_F(TreeTests, ResolvesOverflowsOnLeftmostPosition)
 {
     for (std::size_t i = 0; i < 100; ++i) {
         ASSERT_OK(m_tree->put(make_long_key(99 - i), make_value('*', true)));
+        validate();
     }
     validate();
 }
@@ -815,7 +816,7 @@ TEST_F(MultiCursorTests, CursorManagement)
 
 TEST_F(MultiCursorTests, LotsOfCursors)
 {
-    for (std::size_t i = 1; i < m_pager->buffer_count() * 10; ++i) {
+    for (std::size_t i = 1; i < kMinFrameCount * 10; ++i) {
         add_cursor();
     }
     for (auto *c : m_cursors) {
@@ -1113,7 +1114,7 @@ TEST_F(MultiTreeTests, SavedCursors)
     std::vector<Cursor *> cs;
     Status s;
 
-    while (s.is_ok()) {
+    for (int iteration = 0; iteration < 10; ++iteration) {
         // Create a new tree and add some records.
         tids.emplace_back(tids.size());
         create_tree(tids.back());
@@ -1148,9 +1149,6 @@ TEST_F(MultiTreeTests, SavedCursors)
             }
         }
     }
-
-    // Should be an "out of frames" error.   TODO: This error can be made to not happen. Cursors need a callback or something to call
-    ASSERT_TRUE(s.is_invalid_argument()); // TODO: to tell the schema to use the current tree and save cursors belonging to other trees.
 
     for (const auto *c : cs) {
         delete c;

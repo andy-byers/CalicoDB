@@ -62,7 +62,7 @@ static auto compare_hdr(const volatile Shared *shared, const Local *local) -> in
 // Must be true for the above routines to work properly.
 static_assert(0 == sizeof(HashIndexHdr) % sizeof(U64));
 
-static constexpr std::size_t kReadmarkNotUsed = 0xFFFFFFFF;
+static constexpr std::size_t kReadmarkNotUsed = 0xFF'FF'FF'FF;
 static constexpr std::size_t kWriteLock = 0;
 static constexpr std::size_t kNotWriteLock = 1;
 static constexpr std::size_t kCheckpointLock = 1;
@@ -432,7 +432,7 @@ HashIterator::HashIterator(HashIndex &source)
 
 HashIterator::~HashIterator()
 {
-    operator delete (m_state, std::align_val_t{alignof(State)});
+    operator delete(m_state, std::align_val_t{alignof(State)});
 }
 
 auto HashIterator::init(U32 backfill) -> Status
@@ -443,9 +443,6 @@ auto HashIterator::init(U32 backfill) -> Status
     const auto last_value = hdr->max_frame;
     CALICODB_EXPECT_GT(last_value, 0);
 
-    // TODO: Hopefully this makes this struct hack thing OK in C++... I would have tried to
-    //       use std::aligned_storage, but there is that buffer of U16s allocated right
-    //       after the array of State::Groups.
     static_assert(std::is_pod_v<State>);
     static_assert(std::is_pod_v<State::Group>);
     static_assert(0 == (alignof(State) & (alignof(Hash) - 1)));
@@ -457,7 +454,7 @@ auto HashIterator::init(U32 backfill) -> Status
         (m_num_groups - 1) * sizeof(State::Group) + // Additional groups.
         last_value * sizeof(Hash);                  // Indices to sort.
     m_state = reinterpret_cast<State *>(
-        operator new (state_size, std::align_val_t{alignof(State)}));
+        operator new(state_size, std::align_val_t{alignof(State)}));
     std::memset(m_state, 0, state_size);
 
     // Temporary buffer for the mergesort routine. Freed before returning from this routine.
@@ -496,7 +493,7 @@ auto HashIterator::init(U32 backfill) -> Status
 
 auto HashIterator::read(Entry &out) -> bool
 {
-    static constexpr U32 kBadResult = 0xFFFFFFFF;
+    static constexpr U32 kBadResult = 0xFF'FF'FF'FF;
     CALICODB_EXPECT_LT(m_prior, kBadResult);
     auto result = kBadResult;
 
@@ -1024,12 +1021,15 @@ private:
     //                                            and no writer is connected that can keep the shm file up-to-date
 };
 
-auto Wal::open(const Parameters &param, Wal *&out) -> Status
+auto Wal::open(const Parameters &param, Wal *&wal_out) -> Status
 {
     File *wal_file;
     auto s = param.env->new_file(param.filename, Env::kCreate, wal_file);
     if (s.is_ok()) {
-        out = new WalImpl(param, *wal_file);
+        wal_out = new (std::nothrow) WalImpl(param, *wal_file);
+        if (wal_out == nullptr) {
+            s = Status::no_memory();
+        }
     }
     return s;
 }
@@ -1267,13 +1267,14 @@ auto WalImpl::read(Id page_id, char *&page) -> Status
     return Status::ok();
 }
 
-auto WalImpl::write(PageRef *dirty, std::size_t db_size) -> Status
+auto WalImpl::write(PageRef *first_ref, std::size_t db_size) -> Status
 {
     CALICODB_EXPECT_TRUE(m_writer_lock);
-    CALICODB_EXPECT_TRUE(dirty);
+    CALICODB_EXPECT_NE(first_ref, nullptr);
 
     const auto is_commit = db_size > 0;
     volatile auto *live = m_index.header();
+    auto *dirty = first_ref->get_dirty_hdr();
     U32 first_frame = 0;
 
     // Check if the WAL's copy of the index header differs from what is on the first index page.
@@ -1320,6 +1321,7 @@ auto WalImpl::write(PageRef *dirty, std::size_t db_size) -> Status
     auto next_frame = m_hdr.max_frame + 1;
     auto offset = frame_offset(next_frame);
     for (auto *p = dirty; p; p = p->dirty) {
+        auto *ref = p->get_page_ref();
         U32 frame;
 
         // Condition ensures that if this set of pages completes a transaction, then
@@ -1330,27 +1332,29 @@ auto WalImpl::write(PageRef *dirty, std::size_t db_size) -> Status
             // Check to see if the page has been written to the WAL already by the
             // current transaction. If so, overwrite it and indicate that checksums
             // need to be recomputed from here on commit.
-            CALICODB_TRY(m_index.lookup(p->page_id.value, first_frame, frame));
+            CALICODB_TRY(m_index.lookup(ref->page_id.value, first_frame, frame));
             if (frame) {
                 if (m_redo_cksum == 0 || frame < m_redo_cksum) {
                     m_redo_cksum = frame;
                 }
                 CALICODB_TRY(m_wal->write(
                     frame_offset(frame) + WalFrameHdr::kSize,
-                    Slice(p->page, kPageSize)));
+                    Slice(ref->get_data(), kPageSize)));
                 m_stat->counters[Stat::kWriteWal] += kPageSize;
                 continue;
             }
         }
         // Page has not been written during the current transaction. Create a new
-        // WAL frame for it.
+        // WAL frame for it. Note that we don't clear the dirty flag on this path.
+        // It will be cleared below when the page ID-to-frame number mapping is
+        // created for the new frame.
         WalFrameHdr header;
-        header.pgno = p->page_id.value;
+        header.pgno = ref->page_id.value;
         header.db_size = p->dirty == nullptr ? static_cast<U32>(db_size) : 0;
-        encode_frame(header, p->page, m_frame.data());
+        encode_frame(header, ref->get_data(), m_frame.data());
         CALICODB_TRY(m_wal->write(offset, m_frame));
         m_stat->counters[Stat::kWriteWal] += m_frame.size();
-        p->flag = PageRef::kExtra;
+        ref->set_flag(PageRef::kExtra);
 
         CALICODB_EXPECT_EQ(offset, frame_offset(next_frame));
         offset += m_frame.size();
@@ -1364,9 +1368,10 @@ auto WalImpl::write(PageRef *dirty, std::size_t db_size) -> Status
     Status s;
     next_frame = m_hdr.max_frame + 1;
     for (auto *p = dirty; s.is_ok() && p; p = p->dirty) {
-        if (p->flag & PageRef::kExtra) {
-            s = m_index.assign(p->page_id.value, next_frame++);
-            p->flag = PageRef::kNormal;
+        auto *ref = p->get_page_ref();
+        if (ref->get_flag(PageRef::kExtra)) {
+            s = m_index.assign(ref->page_id.value, next_frame++);
+            ref->clear_flag(PageRef::kExtra);
         }
     }
     if (s.is_ok()) {

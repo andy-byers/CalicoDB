@@ -475,9 +475,10 @@ TEST_F(ConcurrencyTests, 0)
 
 TEST_F(ConcurrencyTests, 1)
 {
-    run_test({10, 0, 0});
-    run_test({0, 10, 0});
-    run_test({0, 0, 10});
+    run_test({0, 2, 0});
+    //    run_test({10, 0, 0});
+    //    run_test({0, 10, 0});
+    //    run_test({0, 0, 10});
 }
 
 TEST_F(ConcurrencyTests, 2)

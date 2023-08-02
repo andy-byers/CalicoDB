@@ -14,18 +14,21 @@ class NodeTests : public testing::Test
 public:
     explicit NodeTests()
         : m_backing(kPageSize, '\0'),
-          m_scratch(kPageSize, '\0')
+          m_scratch(kPageSize, '\0'),
+          m_ref(alloc_page())
     {
-        m_ref.page = m_backing.data();
-        m_ref.page_id = Id(3);
-        m_node = Node::from_new_page(m_ref, m_scratch.data(), true);
+        m_ref->page_id = Id(3);
+        m_node = Node::from_new_page(*m_ref, m_scratch.data(), true);
     }
 
-    ~NodeTests() override = default;
+    ~NodeTests() override
+    {
+        delete m_ref;
+    }
 
     std::string m_backing;
     std::string m_scratch;
-    PageRef m_ref;
+    PageRef *const m_ref;
     Node m_node;
 
     // Use 2 bytes for the keys.
@@ -63,27 +66,27 @@ public:
         bool is_leaf;
         switch (type) {
             case kInternalRoot:
-                m_ref.page_id.value = 1;
+                m_ref->page_id.value = 1;
                 is_leaf = false;
                 break;
             case kExternalRoot:
-                m_ref.page_id.value = 1;
+                m_ref->page_id.value = 1;
                 is_leaf = true;
                 break;
             case kInternalNode:
-                m_ref.page_id.value = 3;
+                m_ref->page_id.value = 3;
                 is_leaf = false;
                 break;
             case kExternalNode:
-                m_ref.page_id.value = 3;
+                m_ref->page_id.value = 3;
                 is_leaf = true;
                 break;
             default:
                 return false;
         }
 
-        std::memset(m_ref.page, 0, kPageSize);
-        m_node = Node::from_new_page(m_ref, m_scratch.data(), is_leaf);
+        std::memset(m_ref->get_data(), 0, kPageSize);
+        m_node = Node::from_new_page(*m_ref, m_scratch.data(), is_leaf);
         return true;
     }
 };
@@ -195,7 +198,7 @@ TEST_F(BlockAllocatorTests, ExternalNodesConsume3ByteFragments)
 
 TEST_F(BlockAllocatorTests, InternalNodesConsume3ByteFragments)
 {
-    m_node = Node::from_new_page(m_ref, m_scratch.data(), false);
+    m_node = Node::from_new_page(*m_ref, m_scratch.data(), false);
 
     reserve_for_test(11);
     NodeHdr::put_frag_count(m_node.hdr(), 3);

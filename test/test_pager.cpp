@@ -14,9 +14,15 @@
 namespace calicodb::test
 {
 
+// Buffer manager tests were adapted from LevelDB.
 class BufmgrTests : public testing::Test
 {
 public:
+    static constexpr U32 kCacheSize = 1'000;
+    Dirtylist m_dirtylist;
+    Stat m_stat;
+    Bufmgr mgr;
+
     explicit BufmgrTests()
         : mgr(kMinFrameCount, m_stat)
     {
@@ -24,64 +30,209 @@ public:
 
     ~BufmgrTests() override = default;
 
-    Stat m_stat;
-    Bufmgr mgr;
+    auto insert_and_reference(U32 key, U32 value) -> PageRef *
+    {
+        auto *ref = mgr.next_victim();
+        if (ref == nullptr) {
+            ref = mgr.allocate();
+            EXPECT_NE(ref, nullptr);
+        } else {
+            if (ref->get_flag(PageRef::kDirty)) {
+                m_dirtylist.remove(*ref);
+            }
+            mgr.erase(ref->page_id);
+        }
+        if (ref) {
+            ref->page_id.value = key;
+            put_u32(ref->get_data(), value);
+            mgr.register_page(*ref);
+            mgr.ref(*ref);
+        } else {
+            ADD_FAILURE() << "OOM when allocating a page reference";
+        }
+        return ref;
+    }
+
+    auto insert(U32 key, U32 value) -> void
+    {
+        if (auto *ref = insert_and_reference(key, value)) {
+            mgr.unref(*ref);
+        }
+    }
+
+    auto erase(U32 key) -> bool
+    {
+        return mgr.erase(Id(key));
+    }
+
+    auto lookup(U32 key) -> int
+    {
+        if (auto *ref = mgr.lookup(Id(key))) {
+            return static_cast<int>(get_u32(ref->get_data()));
+        }
+        return -1;
+    }
 };
 
-TEST_F(BufmgrTests, EmptyBehavior)
+TEST_F(BufmgrTests, HitAndMiss)
 {
-    ASSERT_EQ(mgr.occupied(), 0);
-    ASSERT_EQ(mgr.occupied(), 0);
-    ASSERT_EQ(mgr.get(Id(2)), nullptr);
-    ASSERT_EQ(mgr.next_victim(), nullptr);
+    ASSERT_EQ(-1, lookup(100));
+
+    insert(100, 101);
+    ASSERT_EQ(101, lookup(100));
+    ASSERT_EQ(-1, lookup(200));
+    ASSERT_EQ(-1, lookup(300));
+
+    insert(200, 201);
+    ASSERT_EQ(101, lookup(100));
+    ASSERT_EQ(201, lookup(200));
+    ASSERT_EQ(-1, lookup(300));
 }
 
-TEST_F(BufmgrTests, OldestReferenceIsEvictedFirst)
+TEST_F(BufmgrTests, Erase)
 {
-    (void)mgr.alloc(Id(5));
-    (void)mgr.alloc(Id(4));
-    (void)mgr.alloc(Id(3));
-    (void)mgr.alloc(Id(2));
-    ASSERT_EQ(mgr.occupied(), 4);
+    erase(200);
 
-    ASSERT_EQ(mgr.get(Id(5))->page_id, Id(5));
-    ASSERT_EQ(mgr.get(Id(4))->page_id, Id(4));
+    insert(100, 101);
+    insert(200, 201);
+    erase(100);
+    ASSERT_EQ(-1, lookup(100));
+    ASSERT_EQ(201, lookup(200));
 
-    ASSERT_EQ(mgr.next_victim()->page_id, Id(3));
-    mgr.erase(mgr.next_victim()->page_id);
-    ASSERT_EQ(mgr.next_victim()->page_id, Id(2));
-    mgr.erase(mgr.next_victim()->page_id);
-    ASSERT_EQ(mgr.next_victim()->page_id, Id(5));
-    mgr.erase(mgr.next_victim()->page_id);
-    ASSERT_EQ(mgr.next_victim()->page_id, Id(4));
-    mgr.erase(mgr.next_victim()->page_id);
-    ASSERT_EQ(mgr.occupied(), 0);
+    erase(100);
+    ASSERT_EQ(-1, lookup(100));
+    ASSERT_EQ(201, lookup(200));
 }
 
-TEST_F(BufmgrTests, ReplacementPolicyIgnoresQuery)
+TEST_F(BufmgrTests, EvictionPolicy)
 {
-    (void)mgr.alloc(Id(3));
-    (void)mgr.alloc(Id(2));
+    insert(100, 101);
+    insert(200, 201);
+    insert(300, 301);
+    auto *h = mgr.lookup(Id(300));
+    ASSERT_NE(h, nullptr);
+    mgr.ref(*h);
 
-    (void)mgr.query(Id(3));
-
-    ASSERT_EQ(mgr.next_victim()->page_id, Id(3));
-    mgr.erase(mgr.next_victim()->page_id);
-    ASSERT_EQ(mgr.next_victim()->page_id, Id(2));
-    mgr.erase(mgr.next_victim()->page_id);
+    // Frequently used entry must be kept around,
+    // as must things that are still in use.
+    for (U32 i = 0; i < kCacheSize + 100; i++) {
+        insert(1000 + i, 2000 + i);
+        ASSERT_EQ(2000 + i, lookup(1000 + i));
+        ASSERT_EQ(101, lookup(100));
+    }
+    ASSERT_EQ(101, lookup(100));
+    ASSERT_EQ(-1, lookup(200));
+    ASSERT_EQ(301, lookup(300));
+    mgr.unref(*h);
 }
 
-TEST_F(BufmgrTests, RefcountsAreConsideredDuringEviction)
+TEST_F(BufmgrTests, UseExceedsCacheSize)
 {
-    (void)mgr.alloc(Id(3));
-    (void)mgr.alloc(Id(2));
+    // Overfill the cache, keeping handles on all inserted entries.
+    std::vector<PageRef *> h;
+    for (U32 i = 0; i < kCacheSize + 100; i++) {
+        h.push_back(insert_and_reference(1000 + i, 2000 + i));
+    }
 
-    mgr.query(Id(3))->refcount = 2;
+    // Check that all the entries can be found in the cache.
+    for (U32 i = 0; i < h.size(); i++) {
+        ASSERT_EQ(2000 + i, lookup(1000 + i));
+    }
 
-    ASSERT_EQ(mgr.next_victim()->page_id, Id(2));
-    mgr.erase(mgr.next_victim()->page_id);
-    ASSERT_EQ(mgr.next_victim(), nullptr);
+    for (auto *ref : h) {
+        mgr.unref(*ref);
+    }
 }
+
+#ifndef NDEBUG
+TEST_F(BufmgrTests, DeathTests)
+{
+    auto *ref1 = insert_and_reference(2, 2);
+    auto *ref2 = insert_and_reference(3, 2);
+    ASSERT_DEATH(insert(2, 2), "");
+    ASSERT_DEATH(insert(3, 3), "");
+    mgr.unref(*ref1);
+    mgr.unref(*ref2);
+}
+#endif // NDEBUG
+
+class DirtylistTests : public BufmgrTests
+{
+public:
+    auto add(U32 key) -> void
+    {
+        auto *ref = insert_and_reference(key, key);
+        ASSERT_NE(ref, nullptr);
+        m_dirtylist.add(*ref);
+        mgr.unref(*ref);
+    }
+
+    auto remove(U32 key) -> void
+    {
+        auto *ref = mgr.lookup(Id(key));
+        ASSERT_NE(ref, nullptr);
+        remove(*ref);
+    }
+    auto remove(PageRef &ref) -> void
+    {
+        m_dirtylist.remove(ref);
+    }
+
+    // NOTE: This is destructive.
+    auto sort_and_check() -> void
+    {
+        std::vector<U32> pgno;
+        auto *list = m_dirtylist.sort();
+        for (auto *p = list; p; p = p->dirty) {
+            pgno.emplace_back(p->get_page_ref()->page_id.value);
+            p->get_page_ref()->clear_flag(PageRef::kDirty);
+        }
+        ASSERT_TRUE(std::is_sorted(begin(pgno), end(pgno)));
+    }
+};
+
+TEST_F(DirtylistTests, AddAndRemove)
+{
+    add(2);
+    add(3);
+    add(4);
+
+    remove(2);
+    remove(3);
+    remove(4);
+}
+
+TEST_F(DirtylistTests, SortSortedPages)
+{
+    for (U32 i = 0; i < 1'000; ++i) {
+        add(i + 2);
+        if (i % kMinFrameCount + 1 == kMinFrameCount) {
+            sort_and_check();
+        }
+    }
+}
+
+TEST_F(DirtylistTests, SortUnsortedPages)
+{
+    std::default_random_engine rng(42);
+    std::vector<U32> pgno(1'000);
+    std::iota(begin(pgno), end(pgno), 2);
+    std::shuffle(begin(pgno), end(pgno), rng);
+    for (U32 i = 0; i < 1'000; ++i) {
+        add(pgno[i]);
+        if (i % kMinFrameCount + 1 == kMinFrameCount) {
+            sort_and_check();
+        }
+    }
+}
+
+#ifndef NDEBUG
+TEST_F(DirtylistTests, DeathTest)
+{
+    // An empty dirtylist must not be sorted.
+    ASSERT_DEATH(sort_and_check(), "");
+}
+#endif // NDEBUG
 
 class PagerTests : public testing::Test
 {
@@ -167,14 +318,11 @@ protected:
     std::vector<Id> m_page_ids;
     auto allocate_page(PageRef *&page_out) -> Id
     {
-        if (m_pager->page_count() == 0) {
-            m_pager->initialize_root();
-        }
-
         EXPECT_OK(m_pager->allocate(page_out));
         if (m_page_ids.empty() || m_page_ids.back() < page_out->page_id) {
             m_page_ids.emplace_back(page_out->page_id);
         }
+        std::memset(page_out->get_data(), 0, kPageSize);
         return page_out->page_id;
     }
     auto allocate_page() -> Id
@@ -187,8 +335,8 @@ protected:
     auto alter_page(PageRef &page) -> void
     {
         m_pager->mark_dirty(page);
-        const auto value = get_u32(page.page + kPageSize - 4);
-        put_u32(page.page + kPageSize - 4, value + 1);
+        const auto value = get_u32(page.get_data() + kPageSize - 4);
+        put_u32(page.get_data() + kPageSize - 4, value + 1);
     }
     auto alter_page(std::size_t index) -> void
     {
@@ -199,7 +347,7 @@ protected:
     }
     auto read_page(const PageRef &page) -> U32
     {
-        return get_u32(page.page + kPageSize - 4);
+        return get_u32(page.get_data() + kPageSize - 4);
     }
     auto read_page(std::size_t index) -> U32
     {
@@ -225,6 +373,9 @@ protected:
     {
         ASSERT_OK(m_pager->start_reader());
         ASSERT_OK(m_pager->start_writer());
+        if (m_pager->page_count() == 0) {
+            m_pager->initialize_root();
+        }
         fn();
         m_pager->finish();
     }
@@ -233,7 +384,6 @@ protected:
 TEST_F(PagerTests, AllocatePage)
 {
     pager_update([this] {
-        ASSERT_EQ(0, m_pager->page_count());
         // Pager layer skips pointer map pages, and the root already exists.
         ASSERT_EQ(Id(3), allocate_page());
         ASSERT_EQ(Id(4), allocate_page());
@@ -283,15 +433,18 @@ TEST_F(PagerTests, Commit)
     for (int iteration = 0; iteration < 6; ++iteration) {
         reopen(iteration < 3 ? Options::kLockNormal : Options::kLockExclusive);
         pager_update([this] {
+            // Alter each page.
             for (std::size_t i = 0; i < kManyPages; ++i) {
                 PageRef *page;
                 allocate_page(page);
                 alter_page(*page);
+
                 m_pager->release(
                     page,
-                    // kNoCache should be ignored, since the page is dirty.
+                    // kNoCache should be ignored since the page is dirty.
                     Pager::kNoCache);
             }
+            // Alter every other page.
             for (std::size_t i = 0; i < kManyPages; ++i) {
                 PageRef *page;
                 ASSERT_OK(m_pager->acquire(m_page_ids[i], page));
@@ -348,7 +501,7 @@ TEST_F(PagerTests, Rollback)
         pager_view([this, page_count] {
             ASSERT_EQ(m_pager->page_count(), page_count);
             for (std::size_t i = 0; i < kManyPages; ++i) {
-                ASSERT_EQ(i <= kManyPages / 2, read_page(i));
+                ASSERT_EQ(i <= kManyPages / 2, read_page(i) != 0);
             }
         });
     }
@@ -375,7 +528,7 @@ TEST_F(PagerTests, Truncation)
 
     pager_view([this] {
         for (std::size_t i = 0; i < kManyPages; ++i) {
-            EXPECT_EQ(i <= kManyPages / 2, read_page(i)) << i;
+            EXPECT_EQ(i <= kManyPages / 2, read_page(i) != 0) << i;
         }
     });
 }
@@ -426,6 +579,42 @@ TEST_F(PagerTests, ReportsOutOfRangePages)
     pager_update([this] {
         PageRef *page;
         ASSERT_NOK(m_pager->acquire(Id(100), page));
+        ASSERT_NOK(m_pager->acquire(Id(200), page));
+        ASSERT_NOK(m_pager->acquire(Id(300), page));
+    });
+}
+
+TEST_F(PagerTests, MovePage)
+{
+    static constexpr U32 kSpecialValue = 123'456;
+    static constexpr U32 kNumPages = 32;
+    pager_update([this] {
+        for (U32 i = 0; i < kNumPages; ++i) {
+            PageRef *pg;
+            ASSERT_OK(m_pager->allocate(pg));
+            m_pager->mark_dirty(*pg);
+            put_u32(pg->get_data(), pg->page_id.value);
+            m_pager->release(pg, Pager::kDiscard);
+        }
+        PageRef *pg;
+        ASSERT_OK(m_pager->get_unused_page(pg));
+        m_pager->mark_dirty(*pg);
+        put_u32(pg->get_data(), kSpecialValue);
+
+        m_pager->move_page(*pg, Id(3));
+        for (; pg->page_id.value != kNumPages;) {
+            m_pager->move_page(*pg, Id(pg->page_id.value + 1));
+        }
+        ASSERT_EQ(get_u32(pg->get_data()), kSpecialValue);
+
+        m_pager->release(pg);
+        ASSERT_OK(m_pager->commit());
+    });
+    pager_view([this] {
+        PageRef *pg;
+        ASSERT_OK(m_pager->acquire(Id(kNumPages), pg));
+        ASSERT_EQ(get_u32(pg->get_data()), kSpecialValue);
+        m_pager->release(pg);
     });
 }
 
@@ -438,6 +627,15 @@ TEST_F(PagerTests, DeathTest)
     ASSERT_DEATH((void)m_pager->start_writer(), "");
     ASSERT_OK(m_pager->start_reader());
     ASSERT_DEATH((void)m_pager->checkpoint(true), "");
+
+    pager_update([this] {
+        PageRef *a, *b;
+        ASSERT_OK(m_pager->allocate(a));
+        ASSERT_OK(m_pager->allocate(b));
+        ASSERT_DEATH(m_pager->move_page(*a, b->page_id), "");
+        m_pager->release(a);
+        m_pager->release(b);
+    });
 }
 #endif // NDEBUG
 

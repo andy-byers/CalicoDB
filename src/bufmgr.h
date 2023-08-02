@@ -26,7 +26,9 @@ struct Stat;
 class Bufmgr final
 {
 public:
-    explicit Bufmgr(std::size_t frame_count, Stat &stat);
+    friend class Pager;
+
+    explicit Bufmgr(std::size_t min_buffers, Stat &stat);
     ~Bufmgr();
 
     // Get a reference to the root page, which is always in-memory, but is not
@@ -35,31 +37,27 @@ public:
     // using a different method. This method must be used.
     [[nodiscard]] auto root() -> PageRef *
     {
-        return &m_root;
+        return m_root;
     }
-
-    // Return a pointer to a specific cache entry, if it exists, nullptr otherwise
-    // This method may alter the cache ordering.
-    [[nodiscard]] auto get(Id page_id) -> PageRef *;
 
     // Similar to get(), except that the cache ordering is not altered
     [[nodiscard]] auto query(Id page_id) const -> PageRef *;
 
-    // Determine the next unreferenced page that should be evicted based on the
-    // cache replacement policy
-    [[nodiscard]] auto next_victim() -> PageRef *;
+    // Return a pointer to a specific cache entry, if it exists, nullptr otherwise
+    // This method may alter the cache ordering.
+    [[nodiscard]] auto lookup(Id page_id) -> PageRef *;
 
-    // Create a new cache entry for page `page_id` which must not already exist
-    // Returns the address of the cache entry, which is guaranteed to remain constant
-    // as long the entry exists in the cache (until Bufmgr::erase() is called on
-    // `page_id`).
-    [[nodiscard]] auto alloc(Id page_id) -> PageRef *;
+    [[nodiscard]] auto next_victim() -> PageRef *;
+    [[nodiscard]] auto allocate() -> PageRef *;
+    auto register_page(PageRef &ref) -> void;
+    auto shrink_to_fit() -> void;
 
     // Erase a specific entry, if it exists
     // This is the only way that an entry can be removed from the cache. Eviction
     // works by first calling "next_victim()" and then erasing the returned entry.
     // Returns true if the entry was erased, false otherwise.
     auto erase(Id page_id) -> bool;
+    auto purge() -> void;
 
     // Increment the reference count associated with a page reference
     auto ref(PageRef &ref) -> void;
@@ -68,75 +66,84 @@ public:
     // REQUIRES: Refcount of `ref` is not already 0
     auto unref(PageRef &ref) -> void;
 
-    // Return the number of entries in the cache
-    [[nodiscard]] auto occupied() const -> std::size_t
-    {
-        return m_map.size();
-    }
-
-    // Return the number of available buffers
-    [[nodiscard]] auto available() const -> std::size_t
-    {
-        return m_available.size();
-    }
-
     // Return the number of live page references
     [[nodiscard]] auto refsum() const -> unsigned
     {
         return m_refsum;
     }
 
+    auto assert_state() const -> bool;
+
     // Disable move and copy.
     void operator=(Bufmgr &) = delete;
     Bufmgr(Bufmgr &) = delete;
 
 private:
-    static constexpr std::size_t kOverrunLen = 4;
-
-    [[nodiscard]] auto buffer_slot(std::size_t idx) -> char *
-    {
-        CALICODB_EXPECT_LT(idx, m_frame_count);
-        return m_buffer + idx * (kPageSize + kOverrunLen);
-    }
-
-    // Pin an available buffer to a page reference
-    auto pin(PageRef &ref) -> void;
-
-    // Return a page reference's backing buffer to the pool of unused buffers
-    auto unpin(PageRef &ref) -> void;
-
-    // LRU cache state variables. The storage for PageRef instances generally
-    // resides in "m_list". Pointers are handed out by various methods, which
-    // should remain stable until the underlying entry is erased.
-    using MapEntry = std::list<PageRef>::iterator;
-    std::unordered_map<Id, MapEntry, Id::Hash> m_map;
-    std::list<PageRef> m_list;
+    // Page cache components:
+    //     Member   | Purpose
+    //    ----------|---------------------------------------------------------------
+    //     m_map    | Maps each cached page ID to a page reference: a structure that
+    //              | contains the page contents from disk, as well as some other
+    //              | metadata. Each page reference in m_map can also be found in
+    //              | either m_lru or m_in_use.
+    //     m_lru    | LRU-ordered list containing page references. Elements are
+    //              | considered valid if ref->get_flag(PageRef::kCached) evaluates
+    //              | to true.
+    //     m_in_use | List containing page references that have a nonzero refcount
+    //              | field. Unordered.
+    std::unordered_map<Id, PageRef *, Id::Hash> m_map;
+    PageRef m_in_use;
+    PageRef m_lru;
 
     // Root page is stored separately. It is accessed very often, so it makes
     // sense to keep it in a dedicated location rather than having to find it
     // in the hash map each time.
-    PageRef m_root;
+    PageRef *const m_root;
 
-    // Storage for cached pages. Aligned to the page size.
-    char *const m_buffer = nullptr;
-
-    // List of pointers to available buffer slots.
-    std::list<char *> m_available;
-
-    // Used to perform bounds checking in assertions.
-    std::size_t m_frame_count = 0;
+    const std::size_t m_min_buffers;
+    std::size_t m_num_buffers;
 
     Stat *const m_stat;
 
     unsigned m_refsum = 0;
 };
 
-struct Dirtylist {
-    auto remove(PageRef &ref) -> PageRef *;
-    auto add(PageRef &ref) -> void;
-    auto sort() -> void;
+class Dirtylist
+{
+    DirtyHdr m_head;
 
-    PageRef *head = nullptr;
+public:
+    explicit Dirtylist()
+        : m_head{nullptr, &m_head, &m_head}
+    {
+    }
+
+    [[nodiscard]] auto begin() -> DirtyHdr *
+    {
+        return m_head.next;
+    }
+
+    [[nodiscard]] auto begin() const -> const DirtyHdr *
+    {
+        return m_head.next;
+    }
+
+    [[nodiscard]] auto end() -> DirtyHdr *
+    {
+        return &m_head;
+    }
+
+    [[nodiscard]] auto end() const -> const DirtyHdr *
+    {
+        return &m_head;
+    }
+
+    [[nodiscard]] auto is_empty() const -> bool;
+    auto remove(PageRef &ref) -> DirtyHdr *;
+    auto add(PageRef &ref) -> void;
+    auto sort() -> DirtyHdr *;
+
+    [[nodiscard]] auto TEST_contains(const PageRef &ref) const -> bool;
 };
 
 } // namespace calicodb

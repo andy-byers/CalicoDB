@@ -11,6 +11,7 @@
 #include "logging.h"
 #include "pager.h"
 #include "test.h"
+#include "tree.h"
 #include <filesystem>
 
 namespace calicodb::test
@@ -255,7 +256,6 @@ protected:
                 EXPECT_EQ(c->key(), make_key(i));
                 EXPECT_EQ(c->value(), make_value(i));
                 s = tx.put(b2, c->key(), c->value());
-
                 if (!s.is_ok()) {
                     break;
                 }
