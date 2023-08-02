@@ -90,20 +90,21 @@ inline auto alloc_page() -> PageRef *
         kPageSize +
         kSpilloverLen;
     auto *ref = static_cast<PageRef *>(std::aligned_alloc(
-        alignof(PageRef),
-        kPageRefSize));
-    std::memset(ref, 0, kPageRefSize);
-
-    ref->page_id = Id::null();
-    ref->flag = PageRef::kNormal;
-    ref->refs = 0;
-    ref->prev = ref;
-    ref->next = ref;
+        alignof(PageRef), kPageRefSize));
+    *ref = {
+        Id::null(),
+        0,
+        ref,
+        ref,
+        PageRef::kNormal,
+    };
 
     auto *hdr = ref->get_dirty_hdr();
-    hdr->dirty = nullptr;
-    hdr->prev = nullptr;
-    hdr->next = nullptr;
+    *hdr = {
+        nullptr,
+        hdr,
+        hdr,
+    };
 
     // DirtyHdr must be properly aligned.
     CALICODB_EXPECT_EQ(0, reinterpret_cast<std::uintptr_t>(hdr) % alignof(DirtyHdr));
