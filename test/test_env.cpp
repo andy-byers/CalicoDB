@@ -902,9 +902,9 @@ public:
         auto &env = Env::default_env();
         File *file; // Keep this shm open to read from at the end...
         ASSERT_OK(env.new_file(m_dirname + "0000000000", Env::kCreate, file));
+        ASSERT_OK(file->resize(0));
         volatile void *ptr;
         ASSERT_OK(file->shm_map(0, true, ptr));
-        std::memset(const_cast<void *>(ptr), 0, File::kShmRegionSize);
         run_test([&](auto) {
             for (std::size_t i = 0; i < kNumThreads; ++i) {
                 set_up();
