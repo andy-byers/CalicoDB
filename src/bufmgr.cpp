@@ -232,9 +232,6 @@ auto Dirtylist::is_empty() const -> bool
 
 auto Dirtylist::remove(PageRef &ref) -> DirtyHdr *
 {
-    CALICODB_EXPECT_FALSE(list_is_empty(m_head));
-    CALICODB_EXPECT_TRUE(ref.get_flag(PageRef::kDirty));
-    CALICODB_EXPECT_TRUE(TEST_contains(ref));
     auto *hdr = ref.get_dirty_hdr();
     list_remove(*hdr);
     ref.clear_flag(PageRef::kDirty);
@@ -244,7 +241,6 @@ auto Dirtylist::remove(PageRef &ref) -> DirtyHdr *
 auto Dirtylist::add(PageRef &ref) -> void
 {
     CALICODB_EXPECT_FALSE(ref.get_flag(PageRef::kDirty));
-    CALICODB_EXPECT_FALSE(TEST_contains(ref));
     list_add_head(*ref.get_dirty_hdr(), m_head);
     ref.set_flag(PageRef::kDirty);
 }

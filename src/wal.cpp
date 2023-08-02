@@ -1139,6 +1139,8 @@ auto WalImpl::recover_index() -> Status
                         info->readmark[i] = kReadmarkNotUsed;
                     }
                     unlock_exclusive(READ_LOCK(i), 1);
+                } else if (!s.is_busy()) {
+                    break;
                 }
             }
             log(m_log, "recovered %u WAL frames", m_hdr.max_frame);

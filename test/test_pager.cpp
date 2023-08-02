@@ -191,6 +191,14 @@ public:
     }
 };
 
+TEST_F(DirtylistTests, RemoveEntryNotInList)
+{
+    auto *ref = insert_and_reference(1, 1);
+    remove(*ref);
+    remove(*ref);
+    mgr.unref(*ref);
+}
+
 TEST_F(DirtylistTests, AddAndRemove)
 {
     add(2);

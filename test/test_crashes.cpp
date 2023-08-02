@@ -182,6 +182,9 @@ protected:
         : m_filename(testing::TempDir() + "calicodb_crashes"),
           m_env(new CrashEnv(Env::default_env()))
     {
+        (void)m_env->remove_file(m_filename);
+        (void)m_env->remove_file(m_filename + kDefaultShmSuffix);
+        (void)m_env->remove_file(m_filename + kDefaultWalSuffix);
     }
 
     ~CrashTests() override
@@ -333,6 +336,9 @@ protected:
             }
         }
         ASSERT_OK(s);
+        if (!s.is_ok()) {
+            std::abort();
+        }
     }
 
     static auto validate(DB &db)

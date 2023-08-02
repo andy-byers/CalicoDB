@@ -101,9 +101,10 @@ private:
 public:
     explicit RandomGenerator(std::size_t size = 2 * 1'024 * 1'024 /* 2 MiB */)
         : m_data(size, '\0'),
-          m_pos(size),
           m_rng(42)
     {
+        std::independent_bits_engine<Engine, CHAR_BIT, unsigned char> engine(m_rng);
+        std::generate(begin(m_data), end(m_data), std::ref(engine));
     }
 
     auto Generate(std::size_t len) const -> std::string_view
@@ -111,9 +112,7 @@ public:
         if (m_pos + len > m_data.size()) {
             m_pos = 0;
             assert(len < m_data.size());
-            // Generate data each time the end is passed, rather than once in the constructor.
-            std::independent_bits_engine<Engine, CHAR_BIT, unsigned char> engine(m_rng);
-            std::generate(begin(m_data), end(m_data), std::ref(engine));
+            std::shuffle(begin(m_data), end(m_data), m_rng);
         }
         m_pos += len;
         return {m_data.data() + m_pos - len, static_cast<std::size_t>(len)};
