@@ -206,6 +206,7 @@ auto Bufmgr::assert_state() const -> bool
         CALICODB_EXPECT_EQ(p, itr->second);
         CALICODB_EXPECT_GT(p->refs, 0);
         refsum += p->refs;
+        (void)itr;
     }
     for (auto p = m_lru.next; p != &m_lru; p = p->next) {
         if (p->get_flag(PageRef::kDirty)) {
