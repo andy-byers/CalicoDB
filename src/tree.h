@@ -67,7 +67,7 @@ public:
         PageRef *ref;
         auto s = m_pager->allocate(ref);
         if (s.is_ok()) {
-            if (ref->refcount == 1) {
+            if (ref->refs == 1) {
                 CALICODB_EXPECT_FALSE(PointerMap::is_map(ref->page_id));
                 node_out = Node::from_new_page(*ref, m_node_scratch, is_external);
             } else {
