@@ -1280,12 +1280,12 @@ TEST_F(CheckpointTests, CheckpointerAllowsTransactions)
     m_env->m_write_callback = {};
 }
 
-class VacuumTests : public DBTests
+class DBVacuumTests : public DBTests
 {
 protected:
-    explicit VacuumTests() = default;
+    explicit DBVacuumTests() = default;
 
-    ~VacuumTests() override = default;
+    ~DBVacuumTests() override = default;
 
     auto test_configurations_impl(const std::vector<U8> &bitmaps) const -> void
     {
@@ -1341,7 +1341,7 @@ protected:
     }
 };
 
-TEST_F(VacuumTests, SingleBucket)
+TEST_F(DBVacuumTests, SingleBucket)
 {
     test_configurations({
         0b10000000,
@@ -1351,7 +1351,7 @@ TEST_F(VacuumTests, SingleBucket)
     });
 }
 
-TEST_F(VacuumTests, MultipleBuckets)
+TEST_F(DBVacuumTests, MultipleBuckets)
 {
     test_configurations({
         0b10000000,
@@ -1379,7 +1379,7 @@ TEST_F(VacuumTests, MultipleBuckets)
     });
 }
 
-TEST_F(VacuumTests, SanityCheck)
+TEST_F(DBVacuumTests, SanityCheck)
 {
     test_configurations({
         0b11111111,

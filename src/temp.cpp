@@ -229,10 +229,12 @@ public:
         return Status::ok();
     }
 
-    auto write(PageRef *dirty, std::size_t db_size) -> Status override
+    auto write(PageRef *first_ref, std::size_t db_size) -> Status override
     {
+        auto *dirty = first_ref->get_dirty_hdr();
         for (auto *p = dirty; p; p = p->dirty) {
-            m_pages.insert_or_assign(p->page_id, std::string(p->page, kPageSize));
+            auto *ref = p->get_page_ref();
+            m_pages.insert_or_assign(ref->page_id, std::string(ref->get_data(), kPageSize));
             m_stat->counters[Stat::kWriteWal] += kPageSize;
         }
         if (db_size > 0) {
@@ -300,7 +302,7 @@ private:
 
 auto new_temp_wal(const Wal::Parameters &param) -> Wal *
 {
-    return new TempWal(reinterpret_cast<TempEnv &>(*param.env), *param.stat);
+    return new (std::nothrow) TempWal(reinterpret_cast<TempEnv &>(*param.env), *param.stat);
 }
 
 } // namespace calicodb

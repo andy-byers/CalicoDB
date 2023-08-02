@@ -57,8 +57,8 @@ auto print_database_overview(std::ostream &os, Pager &pager) -> void
                     [[fallthrough]];
                 case PointerMap::kTreeNode: {
                     auto n = NodeHdr::get_cell_count(
-                        page->page + page_id.is_root() * FileHdr::kSize);
-                    if (NodeHdr::get_type(page->page) == NodeHdr::kExternal) {
+                        page->get_data() + page_id.is_root() * FileHdr::kSize);
+                    if (NodeHdr::get_type(page->get_data()) == NodeHdr::kExternal) {
                         append_fmt_string(info, "Ex,N=%u", n);
                     } else {
                         info = "In,N=";
@@ -75,15 +75,15 @@ auto print_database_overview(std::ostream &os, Pager &pager) -> void
                     break;
                 case PointerMap::kFreelistTrunk:
                     append_fmt_string(
-                        info, "N=%u,Next=%u", get_u32(page->page + 4), get_u32(page->page));
+                        info, "N=%u,Next=%u", get_u32(page->get_data() + 4), get_u32(page->get_data()));
                     type = "Freelist";
                     break;
                 case PointerMap::kOverflowHead:
-                    append_fmt_string(info, "Next=%u", get_u32(page->page));
+                    append_fmt_string(info, "Next=%u", get_u32(page->get_data()));
                     type = "OvflHead";
                     break;
                 case PointerMap::kOverflowLink:
-                    append_fmt_string(info, "Next=%u", get_u32(page->page));
+                    append_fmt_string(info, "Next=%u", get_u32(page->get_data()));
                     type = "OvflLink";
                     break;
                 default:

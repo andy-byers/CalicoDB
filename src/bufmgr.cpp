@@ -12,29 +12,80 @@
 namespace calicodb
 {
 
-Bufmgr::Bufmgr(std::size_t frame_count, Stat &stat)
-    : m_buffer(reinterpret_cast<char *>(
-          operator new[](
-              (kPageSize + kOverrunLen) * frame_count,
-              std::nothrow_t()))),
-      m_frame_count(frame_count),
+template <class Entry>
+static auto list_add_between(Entry &entry, Entry &prev, Entry &next) -> void
+{
+    next.prev = &entry;
+    entry.next = &next;
+    entry.prev = &prev;
+    prev.next = &entry;
+}
+
+template <class Entry>
+static auto list_add_head(Entry &ref, Entry &head) -> void
+{
+    list_add_between(ref, head, *head.next);
+}
+
+template <class Entry>
+static auto list_add_tail(Entry &entry, Entry &head) -> void
+{
+    list_add_between(entry, *head.prev, head);
+}
+
+template <class Entry>
+static auto list_remove(Entry &entry) -> void
+{
+    entry.next->prev = entry.prev;
+    entry.prev->next = entry.next;
+}
+
+template <class Entry>
+[[nodiscard]] static auto list_is_empty(const Entry &entry) -> bool
+{
+    return &entry == entry.next;
+}
+
+Bufmgr::Bufmgr(std::size_t min_buffers, Stat &stat)
+    : m_root(alloc_page()),
+      m_min_buffers(min_buffers),
       m_stat(&stat)
 {
-    if (m_buffer == nullptr) {
-        // If the allocation failed, don't build m_available. All the pointers will
-        // be junk anyway.
-        return;
+    // We don't call alloc_page() for the dummy list heads, so the circular
+    // connections must be initialized manually.
+    m_in_use.prev = &m_in_use;
+    m_in_use.next = &m_in_use;
+    m_lru.prev = &m_lru;
+    m_lru.next = &m_lru;
+
+    if (m_root) {
+        m_root->page_id = Id::root();
     }
-    for (std::size_t i = 1; i < m_frame_count; ++i) {
-        m_available.emplace_back(buffer_slot(i));
+
+    for (m_num_buffers = 0; m_num_buffers < m_min_buffers; ++m_num_buffers) {
+        if (auto *ref = alloc_page()) {
+            list_add_tail(*ref, m_lru);
+        } else {
+            break;
+        }
     }
-    m_root.page_id = Id::root();
-    m_root.page = buffer_slot(0);
+
+    m_map.reserve(min_buffers);
 }
 
 Bufmgr::~Bufmgr()
 {
-    operator delete[](m_buffer);
+    free_page(m_root);
+
+    // The pager should have released any referenced pages before the buffer manager
+    // is destroyed.
+    CALICODB_EXPECT_TRUE(list_is_empty(m_in_use));
+
+    for (auto *p = m_lru.next; p != &m_lru;) {
+        auto *ptr = p;
+        p = p->next;
+        free_page(ptr);
+    }
 }
 
 auto Bufmgr::query(Id page_id) -> PageRef *
@@ -46,7 +97,7 @@ auto Bufmgr::query(Id page_id) -> PageRef *
     return &*itr->second;
 }
 
-auto Bufmgr::get(Id page_id) -> PageRef *
+auto Bufmgr::lookup(Id page_id) -> PageRef *
 {
     CALICODB_EXPECT_FALSE(page_id.is_root());
     auto itr = m_map.find(page_id);
@@ -55,20 +106,34 @@ auto Bufmgr::get(Id page_id) -> PageRef *
         return nullptr;
     }
     ++m_stat->counters[Stat::kCacheHits];
-    m_list.splice(end(m_list), m_list, itr->second);
+    if (itr->second->refs == 0) {
+        list_remove(*itr->second);
+        list_add_head(*itr->second, m_lru);
+    }
     return &*itr->second;
 }
 
-auto Bufmgr::alloc(Id page_id) -> PageRef *
+auto Bufmgr::next_victim() -> PageRef *
 {
-    // The root page is already in a buffer slot. Use root() to get a reference.
-    CALICODB_EXPECT_FALSE(page_id.is_root());
-    CALICODB_EXPECT_EQ(query(page_id), nullptr);
-    auto [itr, _] = m_map.emplace(
-        page_id, m_list.emplace(end(m_list)));
-    itr->second->page_id = page_id;
-    pin(*itr->second);
-    return &*itr->second;
+    return list_is_empty(m_lru) ? nullptr : m_lru.prev;
+}
+
+auto Bufmgr::allocate() -> PageRef *
+{
+    auto *ref = alloc_page();
+    list_add_tail(*ref, m_lru);
+    ++m_num_buffers;
+    return ref;
+}
+
+auto Bufmgr::register_page(PageRef &page) -> void
+{
+    if (Id::root() < page.page_id) {
+        CALICODB_EXPECT_TRUE(query(page.page_id) == nullptr);
+        CALICODB_EXPECT_FALSE(page.get_flag(PageRef::kCached));
+        m_map.insert_or_assign(page.page_id, &page);
+        page.set_flag(PageRef::kCached);
+    }
 }
 
 auto Bufmgr::erase(Id page_id) -> bool
@@ -77,117 +142,121 @@ auto Bufmgr::erase(Id page_id) -> bool
     if (itr == end(m_map)) {
         return false;
     }
-    // Root page is not stored in the cache.
-    CALICODB_EXPECT_FALSE(page_id.is_root());
-    CALICODB_EXPECT_EQ(0, itr->second->refcount);
-    unpin(*itr->second);
-    m_list.erase(itr->second);
+    CALICODB_EXPECT_LT(Id::root(), page_id);
+    auto &ref = itr->second;
+    CALICODB_EXPECT_TRUE(ref->get_flag(PageRef::kCached));
+    list_remove(*ref);
+    list_add_tail(*ref, m_lru);
+    ref->clear_flag(PageRef::kCached);
     m_map.erase(itr);
     return true;
 }
 
-auto Bufmgr::next_victim() -> PageRef *
+auto Bufmgr::purge() -> void
 {
-    // NOTE: If this method is being called repeatedly (i.e. to evict all cached pages),
-    // then there shouldn't be any outstanding references. The first page in the list
-    // should be returned each time this method is called in that case.
-    for (auto &ref : m_list) {
-        if (ref.refcount == 0) {
-            return &ref;
-        }
+    CALICODB_EXPECT_TRUE(list_is_empty(m_in_use));
+    CALICODB_EXPECT_EQ(m_refsum, 0);
+    for (const auto &[page_id, ref] : m_map) {
+        ref->flag = PageRef::kNormal;
     }
-    return nullptr;
-}
-
-auto Bufmgr::pin(PageRef &ref) -> void
-{
-    CALICODB_EXPECT_FALSE(ref.page_id.is_null());
-    CALICODB_EXPECT_FALSE(ref.page_id.is_root());
-    CALICODB_EXPECT_FALSE(m_available.empty());
-    CALICODB_EXPECT_EQ(ref.refcount, 0);
-
-    ref.page = m_available.back();
-    m_available.pop_back();
-}
-
-auto Bufmgr::unpin(PageRef &ref) -> void
-{
-    CALICODB_EXPECT_FALSE(ref.page_id.is_null());
-    CALICODB_EXPECT_FALSE(ref.page_id.is_root());
-    CALICODB_EXPECT_EQ(ref.refcount, 0);
-
-    // The pointer put back into the available pool must (a) not belong to the root
-    // page, and (b) point to the start of a page in the buffer.
-    CALICODB_EXPECT_GE(ref.page, m_buffer + (kPageSize + kOverrunLen));
-    CALICODB_EXPECT_LE(ref.page, m_buffer + (m_frame_count - 1) * (kPageSize + kOverrunLen));
-
-    m_available.emplace_back(ref.page);
+    m_map.clear();
 }
 
 auto Bufmgr::ref(PageRef &ref) -> void
 {
-    CALICODB_EXPECT_FALSE(ref.page_id.is_null());
-
-    ++ref.refcount;
+    ++ref.refs;
     ++m_refsum;
+    if (ref.refs == 1) {
+        list_remove(ref);
+        list_add_head(ref, m_in_use);
+    }
 }
 
 auto Bufmgr::unref(PageRef &ref) -> void
 {
-    CALICODB_EXPECT_FALSE(ref.page_id.is_null());
-    CALICODB_EXPECT_LT(0, ref.refcount);
-    CALICODB_EXPECT_LT(0, m_refsum);
+    CALICODB_EXPECT_GT(ref.refs, 0);
+    CALICODB_EXPECT_GT(m_refsum, 0);
 
-    --ref.refcount;
+    --ref.refs;
     --m_refsum;
+    if (ref.refs == 0) {
+        list_remove(ref);
+        list_add_head(ref, m_lru);
+    }
 }
 
-auto Dirtylist::remove(PageRef &ref) -> PageRef *
+auto Bufmgr::shrink_to_fit() -> void
 {
-    CALICODB_EXPECT_TRUE(head);
-    CALICODB_EXPECT_FALSE(head->prev_dirty);
-    CALICODB_EXPECT_TRUE(ref.flag & PageRef::kDirty);
-    ref.flag = PageRef::kNormal;
+    CALICODB_EXPECT_EQ(m_refsum, 0);
+    while (m_num_buffers > m_min_buffers) {
+        auto *lru = m_lru.prev;
+        m_map.erase(lru->page_id);
+        list_remove(*lru);
+        delete lru;
+    }
+}
 
-    if (ref.prev_dirty) {
-        ref.prev_dirty->next_dirty = ref.next_dirty;
-    } else {
-        CALICODB_EXPECT_EQ(&ref, head);
-        head = ref.next_dirty;
+auto Bufmgr::assert_state() const -> bool
+{
+    // Make sure the refcounts add up to the "refsum".
+    U32 refsum = 0;
+    for (auto p = m_in_use.next; p != &m_in_use; p = p->next) {
+        const auto itr = m_map.find(p->page_id);
+        CALICODB_EXPECT_NE(itr, end(m_map));
+        CALICODB_EXPECT_EQ(p, itr->second);
+        CALICODB_EXPECT_GT(p->refs, 0);
+        refsum += p->refs;
+        (void)itr;
     }
-    auto *next = ref.next_dirty;
-    if (next) {
-        next->prev_dirty = ref.prev_dirty;
+    for (auto p = m_lru.next; p != &m_lru; p = p->next) {
+        if (p->get_flag(PageRef::kDirty)) {
+            // Pages that are dirty must remain in the cache. Otherwise, we risk having 2 dirty
+            // copies of the same page in the dirtylist at the same time.
+            CALICODB_EXPECT_TRUE(p->get_flag(PageRef::kCached));
+        }
+        if (p->get_flag(PageRef::kCached)) {
+            const auto itr = m_map.find(p->page_id);
+            if (itr != end(m_map)) {
+                CALICODB_EXPECT_EQ(p, itr->second);
+            }
+        }
+        CALICODB_EXPECT_EQ(p->refs, 0);
     }
-    ref.dirty = nullptr;
-    ref.prev_dirty = nullptr;
-    ref.next_dirty = nullptr;
-    return next;
+    return refsum == m_refsum;
+}
+
+auto Dirtylist::is_empty() const -> bool
+{
+    return list_is_empty(m_head);
+}
+
+auto Dirtylist::remove(PageRef &ref) -> DirtyHdr *
+{
+    CALICODB_EXPECT_FALSE(list_is_empty(m_head));
+    CALICODB_EXPECT_TRUE(ref.get_flag(PageRef::kDirty));
+    CALICODB_EXPECT_TRUE(TEST_contains(ref));
+    auto *hdr = ref.get_dirty_hdr();
+    list_remove(*hdr);
+    ref.clear_flag(PageRef::kDirty);
+    return hdr->next;
 }
 
 auto Dirtylist::add(PageRef &ref) -> void
 {
-    CALICODB_EXPECT_FALSE(ref.flag & PageRef::kDirty);
-    if (head) {
-        CALICODB_EXPECT_FALSE(head->prev_dirty);
-        head->prev_dirty = &ref;
-    }
-    ref.flag = PageRef::kDirty;
-    ref.dirty = nullptr;
-    ref.prev_dirty = nullptr;
-    ref.next_dirty = head;
-    head = &ref;
+    CALICODB_EXPECT_FALSE(ref.get_flag(PageRef::kDirty));
+    CALICODB_EXPECT_FALSE(TEST_contains(ref));
+    list_add_head(*ref.get_dirty_hdr(), m_head);
+    ref.set_flag(PageRef::kDirty);
 }
 
-static auto dirtylist_merge(PageRef &lhs_ref, PageRef &rhs_ref) -> PageRef *
+static auto dirtylist_merge(DirtyHdr *lhs, DirtyHdr *rhs) -> DirtyHdr *
 {
-    PageRef result;
+    DirtyHdr result = {};
     auto *tail = &result;
-    auto *lhs = &lhs_ref;
-    auto *rhs = &rhs_ref;
-
+    CALICODB_EXPECT_TRUE(lhs && rhs);
     for (;;) {
-        if (lhs->page_id < rhs->page_id) {
+        if (lhs->get_page_ref()->page_id <
+            rhs->get_page_ref()->page_id) {
             tail->dirty = lhs;
             tail = lhs;
             lhs = lhs->dirty;
@@ -209,20 +278,21 @@ static auto dirtylist_merge(PageRef &lhs_ref, PageRef &rhs_ref) -> PageRef *
 }
 
 // NOTE: Sorting routine is from SQLite (src/pcache.c).
-auto Dirtylist::sort() -> void
+auto Dirtylist::sort() -> DirtyHdr *
 {
 #ifndef NDEBUG
-    auto *old_head = head;
+    auto *old_head = begin();
 #endif // NDEBUG
 
-    for (auto *p = head; p; p = p->next_dirty) {
-        p->dirty = p->next_dirty;
+    CALICODB_EXPECT_FALSE(is_empty());
+    for (auto *p = begin(); p != end(); p = p->next) {
+        p->dirty = p->next == end() ? nullptr : p->next;
     }
 
     static constexpr std::size_t kNSortBuckets = 32;
-    auto *in = head;
-    PageRef *arr[kNSortBuckets] = {};
-    PageRef *ptr;
+    auto *in = begin();
+    DirtyHdr *arr[kNSortBuckets] = {};
+    DirtyHdr *ptr;
 
     while (in) {
         ptr = in;
@@ -231,41 +301,59 @@ auto Dirtylist::sort() -> void
 
         std::size_t i = 0;
         for (; i < kNSortBuckets - 1; ++i) {
-            if (arr[i] == nullptr) {
+            if (arr[i]) {
+                ptr = dirtylist_merge(arr[i], ptr);
+                arr[i] = nullptr;
+            } else {
                 arr[i] = ptr;
                 break;
-            } else {
-                ptr = dirtylist_merge(*arr[i], *ptr);
-                arr[i] = nullptr;
             }
         }
         if (i == kNSortBuckets - 1) {
-            arr[i] = dirtylist_merge(*arr[i], *ptr);
+            arr[i] = dirtylist_merge(arr[i], ptr);
         }
     }
     ptr = arr[0];
     for (std::size_t i = 1; i < kNSortBuckets; ++i) {
-        if (arr[i] == nullptr) {
-            continue;
+        if (arr[i]) {
+            ptr = ptr ? dirtylist_merge(ptr, arr[i]) : arr[i];
         }
-        ptr = ptr ? dirtylist_merge(*ptr, *arr[i]) : arr[i];
     }
-    head = ptr;
+    m_head.prev = end();
+    m_head.next = end();
 
 #ifndef NDEBUG
     // Make sure the list was sorted correctly.
-    for (PageRef *transient = head, *permanent = old_head; transient;) {
+    for (DirtyHdr *transient = ptr, *permanent = old_head; transient;) {
+        CALICODB_EXPECT_NE(permanent, end());
         auto *next = transient->dirty;
         if (next != nullptr) {
-            CALICODB_EXPECT_LT(transient->page_id, next->page_id);
+            CALICODB_EXPECT_LT(transient->get_page_ref()->page_id,
+                               next->get_page_ref()->page_id);
         }
         transient = next;
 
         // Traverse the non-transient list as well. It should be the same length.
-        CALICODB_EXPECT_EQ(!next, !permanent->next_dirty);
-        permanent = permanent->next_dirty;
+        CALICODB_EXPECT_EQ(!next, permanent->next == end());
+        permanent = permanent->next;
     }
 #endif // NDEBUG
+    return ptr;
+}
+
+auto Dirtylist::TEST_contains(const PageRef &ref) const -> bool
+{
+    auto found = false;
+    for (const auto *p = begin(); p != end(); p = p->next) {
+        CALICODB_EXPECT_TRUE(p->next == end() ||
+                             p->next->prev == p);
+        if (p->get_page_ref()->page_id == ref.page_id) {
+            CALICODB_EXPECT_EQ(p, ref.get_dirty_hdr());
+            CALICODB_EXPECT_FALSE(found);
+            found = true;
+        }
+    }
+    return found;
 }
 
 } // namespace calicodb
