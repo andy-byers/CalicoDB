@@ -17,10 +17,10 @@ class Semaphore
 {
     mutable std::mutex m_mu;
     std::condition_variable m_cv;
-    std::size_t m_available;
+    size_t m_available;
 
 public:
-    explicit Semaphore(std::size_t n = 0)
+    explicit Semaphore(size_t n = 0)
         : m_available(n)
     {
     }
@@ -37,7 +37,7 @@ public:
         --m_available;
     }
 
-    auto signal(std::size_t n = 1) -> void
+    auto signal(size_t n = 1) -> void
     {
         m_mu.lock();
         m_available += n;
@@ -52,11 +52,11 @@ class Barrier
     Semaphore m_phase_1;
     Semaphore m_phase_2;
     mutable std::mutex m_mu;
-    const std::size_t m_max_count;
-    std::size_t m_count = 0;
+    const size_t m_max_count;
+    size_t m_count = 0;
 
 public:
-    explicit Barrier(std::size_t max_count)
+    explicit Barrier(size_t max_count)
         : m_max_count(max_count)
     {
     }
@@ -143,12 +143,12 @@ public:
 
 TEST(ConcurrencyTestsTools, BarrierIsReusable)
 {
-    static constexpr std::size_t kNumThreads = 20;
+    static constexpr size_t kNumThreads = 20;
     Barrier barrier(kNumThreads + 1);
 
     std::atomic<int> counter(0);
     std::vector<std::thread> threads;
-    for (std::size_t i = 0; i < kNumThreads; ++i) {
+    for (size_t i = 0; i < kNumThreads; ++i) {
         threads.emplace_back([&counter, &barrier] {
             barrier.wait();
             ++counter;
@@ -198,7 +198,7 @@ protected:
 
     struct Connection {
         Operation op;
-        std::size_t op_args[4] = {};
+        size_t op_args[4] = {};
         const char *filename = nullptr;
         BusyHandler *busy = nullptr;
         Env *env = nullptr;
@@ -217,14 +217,14 @@ protected:
     }
 
     struct ConsistencyTestParameters {
-        std::size_t num_readers = 0;
-        std::size_t num_writers = 0;
-        std::size_t num_checkpointers = 0;
+        size_t num_readers = 0;
+        size_t num_writers = 0;
+        size_t num_checkpointers = 0;
 
         // These parameters should not be set manually. run_test() will iterate over various
         // combinations of them.
-        std::size_t num_iterations = 0;
-        std::size_t num_records = 0;
+        size_t num_iterations = 0;
+        size_t num_records = 0;
         bool checkpoint_reset = false;
         bool delay_barrier = false;
         bool delay_sync = false;
@@ -244,11 +244,11 @@ protected:
 
         std::vector<Connection> connections;
         tmp.op = test_reader;
-        for (std::size_t i = 0; i < param.num_readers; ++i) {
+        for (size_t i = 0; i < param.num_readers; ++i) {
             connections.emplace_back(tmp);
         }
         tmp.op = test_writer;
-        for (std::size_t i = 0; i < param.num_writers; ++i) {
+        for (size_t i = 0; i < param.num_writers; ++i) {
             connections.emplace_back(tmp);
         }
         // Write some records to the WAL.
@@ -256,7 +256,7 @@ protected:
 
         tmp.op = test_checkpointer;
         tmp.op_args[1] = param.checkpoint_reset;
-        for (std::size_t i = 0; i < param.num_checkpointers; ++i) {
+        for (size_t i = 0; i < param.num_checkpointers; ++i) {
             connections.emplace_back(tmp);
         }
         // Write the WAL back to the database. If `param.checkpoint_reset` is true, then the WAL will be
@@ -281,8 +281,8 @@ protected:
 
         for (const auto &co : connections) {
             // Check the results (only readers output anything).
-            for (std::size_t i = 0; i + 1 < co.result.size(); ++i) {
-                U64 n;
+            for (size_t i = 0; i + 1 < co.result.size(); ++i) {
+                uint64_t n;
                 Slice slice(co.result[i]);
                 ASSERT_LE(slice, co.result[i + 1]);
                 ASSERT_TRUE(consume_decimal_number(slice, &n));
@@ -292,9 +292,9 @@ protected:
     }
     auto run_test(const ConsistencyTestParameters &param) -> void
     {
-        for (std::size_t i = 1; i <= 4; ++i) {
-            for (std::size_t j = 1; j <= 4; ++j) {
-                for (std::size_t k = 1; k <= 4; ++k) {
+        for (size_t i = 1; i <= 4; ++i) {
+            for (size_t j = 1; j <= 4; ++j) {
+                for (size_t k = 1; k <= 4; ++k) {
                     run_test_instance({
                         param.num_readers,
                         param.num_writers,
@@ -349,7 +349,7 @@ protected:
         Options options;
         options.create_if_missing = false;
         auto s = reopen_connection(co, &options);
-        for (std::size_t n = 0; s.is_ok() && n < co.op_args[0]; ++n) {
+        for (size_t n = 0; s.is_ok() && n < co.op_args[0]; ++n) {
             barrier_wait(barrier);
 
             s = co.db->view([&co, barrier](const auto &tx) {
@@ -366,7 +366,7 @@ protected:
                     return t;
                 }
                 // Iterate through the records twice. The same value should be read each time.
-                for (std::size_t i = 0; i < co.op_args[1] * 2; ++i) {
+                for (size_t i = 0; i < co.op_args[1] * 2; ++i) {
                     std::string value;
                     // If the bucket exists, then it must contain co.op_arg records (the first writer to run
                     // makes sure of this).
@@ -399,7 +399,7 @@ protected:
         barrier_wait(barrier);
 
         auto s = reopen_connection(co, nullptr);
-        for (std::size_t n = 0; s.is_ok() && n < co.op_args[0]; ++n) {
+        for (size_t n = 0; s.is_ok() && n < co.op_args[0]; ++n) {
             barrier_wait(barrier);
 
             s = co.db->update([&co, barrier](auto &tx) {
@@ -407,8 +407,8 @@ protected:
 
                 Bucket b;
                 auto t = tx.create_bucket(BucketOptions(), "BUCKET", &b);
-                for (std::size_t i = 0; t.is_ok() && i < co.op_args[1]; ++i) {
-                    U64 result = 1;
+                for (size_t i = 0; t.is_ok() && i < co.op_args[1]; ++i) {
+                    uint64_t result = 1;
                     std::string value;
                     t = tx.get(b, numeric_key(i), &value);
                     if (t.is_not_found()) {
@@ -449,7 +449,7 @@ protected:
         Options options;
         options.create_if_missing = false;
         auto s = reopen_connection(co, &options);
-        for (std::size_t n = 0; s.is_ok() && n < co.op_args[0]; ++n) {
+        for (size_t n = 0; s.is_ok() && n < co.op_args[0]; ++n) {
             barrier_wait(barrier);
             barrier_wait(barrier);
             s = co.db->checkpoint(co.op_args[1]);

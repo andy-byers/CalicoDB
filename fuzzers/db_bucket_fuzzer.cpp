@@ -15,7 +15,7 @@ namespace calicodb
 
 class Fuzzer
 {
-    static constexpr std::size_t kMaxBuckets = 8;
+    static constexpr size_t kMaxBuckets = 8;
 
     Options m_options;
     DB *m_db = nullptr;
@@ -70,7 +70,7 @@ public:
             Bucket buckets[kMaxBuckets];
 
             while (!stream.is_empty()) {
-                const auto idx = stream.extract_integral_in_range<U16>(0, kMaxBuckets - 1);
+                const auto idx = stream.extract_integral_in_range<uint16_t>(0, kMaxBuckets - 1);
                 if (cursors[idx] == nullptr) {
                     CHECK_OK(tx.create_bucket(BucketOptions(), std::to_string(idx), &buckets[idx]));
                     cursors[idx] = std::unique_ptr<Cursor>(tx.new_cursor(buckets[idx]));
@@ -119,7 +119,7 @@ public:
                         c = nullptr;
                         break;
                     case kOpCheck:
-                        for (std::size_t i = 0; i < kMaxBuckets; ++i) {
+                        for (size_t i = 0; i < kMaxBuckets; ++i) {
                             if (cursors[i] != nullptr) {
                                 check_bucket(buckets[i]);
                             }
@@ -144,7 +144,7 @@ public:
     }
 };
 
-extern "C" int LLVMFuzzerTestOneInput(const U8 *data, std::size_t size)
+extern "C" int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size)
 {
     FakeEnv env;
     FuzzedInputProvider stream(data, size);

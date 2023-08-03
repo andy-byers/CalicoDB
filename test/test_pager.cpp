@@ -18,19 +18,19 @@ namespace calicodb::test
 class BufmgrTests : public testing::Test
 {
 public:
-    static constexpr U32 kCacheSize = 1'000;
+    static constexpr uint32_t kCacheSize = 1'000;
     Dirtylist m_dirtylist;
     Stat m_stat;
     Bufmgr mgr;
 
     explicit BufmgrTests()
-        : mgr(kMinFrameCount, m_stat)
+        : mgr(32, m_stat)
     {
     }
 
     ~BufmgrTests() override = default;
 
-    auto insert_and_reference(U32 key, U32 value) -> PageRef *
+    auto insert_and_reference(uint32_t key, uint32_t value) -> PageRef *
     {
         auto *ref = mgr.next_victim();
         if (ref == nullptr) {
@@ -53,19 +53,19 @@ public:
         return ref;
     }
 
-    auto insert(U32 key, U32 value) -> void
+    auto insert(uint32_t key, uint32_t value) -> void
     {
         if (auto *ref = insert_and_reference(key, value)) {
             mgr.unref(*ref);
         }
     }
 
-    auto erase(U32 key) -> bool
+    auto erase(uint32_t key) -> bool
     {
         return mgr.erase(Id(key));
     }
 
-    auto lookup(U32 key) -> int
+    auto lookup(uint32_t key) -> int
     {
         if (auto *ref = mgr.lookup(Id(key))) {
             return static_cast<int>(get_u32(ref->get_data()));
@@ -115,7 +115,7 @@ TEST_F(BufmgrTests, EvictionPolicy)
 
     // Frequently used entry must be kept around,
     // as must things that are still in use.
-    for (U32 i = 0; i < kCacheSize + 100; i++) {
+    for (uint32_t i = 0; i < kCacheSize + 100; i++) {
         insert(1000 + i, 2000 + i);
         ASSERT_EQ(2000 + i, lookup(1000 + i));
         ASSERT_EQ(101, lookup(100));
@@ -130,12 +130,12 @@ TEST_F(BufmgrTests, UseExceedsCacheSize)
 {
     // Overfill the cache, keeping handles on all inserted entries.
     std::vector<PageRef *> h;
-    for (U32 i = 0; i < kCacheSize + 100; i++) {
+    for (uint32_t i = 0; i < kCacheSize + 100; i++) {
         h.push_back(insert_and_reference(1000 + i, 2000 + i));
     }
 
     // Check that all the entries can be found in the cache.
-    for (U32 i = 0; i < h.size(); i++) {
+    for (uint32_t i = 0; i < h.size(); i++) {
         ASSERT_EQ(2000 + i, lookup(1000 + i));
     }
 
@@ -159,7 +159,7 @@ TEST_F(BufmgrTests, DeathTests)
 class DirtylistTests : public BufmgrTests
 {
 public:
-    auto add(U32 key) -> void
+    auto add(uint32_t key) -> void
     {
         auto *ref = insert_and_reference(key, key);
         ASSERT_NE(ref, nullptr);
@@ -167,7 +167,7 @@ public:
         mgr.unref(*ref);
     }
 
-    auto remove(U32 key) -> void
+    auto remove(uint32_t key) -> void
     {
         auto *ref = mgr.lookup(Id(key));
         ASSERT_NE(ref, nullptr);
@@ -181,7 +181,7 @@ public:
     // NOTE: This is destructive.
     auto sort_and_check() -> void
     {
-        std::vector<U32> pgno;
+        std::vector<uint32_t> pgno;
         auto *list = m_dirtylist.sort();
         for (auto *p = list; p; p = p->dirty) {
             pgno.emplace_back(p->get_page_ref()->page_id.value);
@@ -190,14 +190,6 @@ public:
         ASSERT_TRUE(std::is_sorted(begin(pgno), end(pgno)));
     }
 };
-
-TEST_F(DirtylistTests, RemoveEntryNotInList)
-{
-    auto *ref = insert_and_reference(1, 1);
-    remove(*ref);
-    remove(*ref);
-    mgr.unref(*ref);
-}
 
 TEST_F(DirtylistTests, AddAndRemove)
 {
@@ -212,7 +204,7 @@ TEST_F(DirtylistTests, AddAndRemove)
 
 TEST_F(DirtylistTests, SortSortedPages)
 {
-    for (U32 i = 0; i < 1'000; ++i) {
+    for (uint32_t i = 0; i < 1'000; ++i) {
         add(i + 2);
         if (i % kMinFrameCount + 1 == kMinFrameCount) {
             sort_and_check();
@@ -223,10 +215,10 @@ TEST_F(DirtylistTests, SortSortedPages)
 TEST_F(DirtylistTests, SortUnsortedPages)
 {
     std::default_random_engine rng(42);
-    std::vector<U32> pgno(1'000);
+    std::vector<uint32_t> pgno(1'000);
     std::iota(begin(pgno), end(pgno), 2);
     std::shuffle(begin(pgno), end(pgno), rng);
-    for (U32 i = 0; i < 1'000; ++i) {
+    for (uint32_t i = 0; i < pgno.size(); ++i) {
         add(pgno[i]);
         if (i % kMinFrameCount + 1 == kMinFrameCount) {
             sort_and_check();
@@ -239,13 +231,17 @@ TEST_F(DirtylistTests, DeathTest)
 {
     // An empty dirtylist must not be sorted.
     ASSERT_DEATH(sort_and_check(), "");
+
+    auto *ref = insert_and_reference(1, 1);
+    ASSERT_DEATH(remove(*ref), "");
+    mgr.unref(*ref);
 }
 #endif // NDEBUG
 
 class PagerTests : public testing::Test
 {
 protected:
-    static constexpr std::size_t kManyPages = kMinFrameCount * 100;
+    static constexpr size_t kManyPages = kMinFrameCount * 100;
 
     Env *m_env;
     File *m_wal_file = nullptr;
@@ -346,18 +342,18 @@ protected:
         const auto value = get_u32(page.get_data() + kPageSize - 4);
         put_u32(page.get_data() + kPageSize - 4, value + 1);
     }
-    auto alter_page(std::size_t index) -> void
+    auto alter_page(size_t index) -> void
     {
         PageRef *page;
         EXPECT_OK(m_pager->acquire(m_page_ids.at(index), page));
         alter_page(*page);
         m_pager->release(page);
     }
-    auto read_page(const PageRef &page) -> U32
+    auto read_page(const PageRef &page) -> uint32_t
     {
         return get_u32(page.get_data() + kPageSize - 4);
     }
-    auto read_page(std::size_t index) -> U32
+    auto read_page(size_t index) -> uint32_t
     {
         if (m_page_ids.at(index).value > m_pager->page_count()) {
             return 0;
@@ -409,7 +405,7 @@ TEST_F(PagerTests, AcquirePage)
         ASSERT_EQ(5, m_pager->page_count());
 
         PageRef *page;
-        for (U32 n = 1; n < 5; ++n) {
+        for (uint32_t n = 1; n < 5; ++n) {
             ASSERT_OK(m_pager->acquire(Id(n), page));
             m_pager->release(page);
             ASSERT_EQ(5, m_pager->page_count());
@@ -430,7 +426,7 @@ TEST_F(PagerTests, NOOP)
         m_pager->set_status(Status::ok());
     });
 
-    std::size_t file_size;
+    size_t file_size;
     // Database size is 0 before the first checkpoint.
     ASSERT_OK(m_env->file_size("db", file_size));
     ASSERT_EQ(file_size, 0);
@@ -442,7 +438,7 @@ TEST_F(PagerTests, Commit)
         reopen(iteration < 3 ? Options::kLockNormal : Options::kLockExclusive);
         pager_update([this] {
             // Alter each page.
-            for (std::size_t i = 0; i < kManyPages; ++i) {
+            for (size_t i = 0; i < kManyPages; ++i) {
                 PageRef *page;
                 allocate_page(page);
                 alter_page(*page);
@@ -453,7 +449,7 @@ TEST_F(PagerTests, Commit)
                     Pager::kNoCache);
             }
             // Alter every other page.
-            for (std::size_t i = 0; i < kManyPages; ++i) {
+            for (size_t i = 0; i < kManyPages; ++i) {
                 PageRef *page;
                 ASSERT_OK(m_pager->acquire(m_page_ids[i], page));
                 alter_page(*page);
@@ -475,7 +471,7 @@ TEST_F(PagerTests, Commit)
             ASSERT_OK(m_wal_file->resize(0));
         }
         pager_view([this] {
-            for (std::size_t i = 0; i < kManyPages; ++i) {
+            for (size_t i = 0; i < kManyPages; ++i) {
                 const auto value = read_page(i);
                 ASSERT_EQ(1 + (i & 1), value);
             }
@@ -487,9 +483,9 @@ TEST_F(PagerTests, Rollback)
 {
     for (int iteration = 0; iteration < 6; ++iteration) {
         reopen(iteration < 3 ? Options::kLockNormal : Options::kLockExclusive);
-        std::size_t page_count = 0;
+        size_t page_count = 0;
         pager_update([this, &page_count] {
-            for (std::size_t i = 0; i < kManyPages; ++i) {
+            for (size_t i = 0; i < kManyPages; ++i) {
                 PageRef *page;
                 allocate_page(page);
                 alter_page(*page);
@@ -508,7 +504,7 @@ TEST_F(PagerTests, Rollback)
         }
         pager_view([this, page_count] {
             ASSERT_EQ(m_pager->page_count(), page_count);
-            for (std::size_t i = 0; i < kManyPages; ++i) {
+            for (size_t i = 0; i < kManyPages; ++i) {
                 ASSERT_EQ(i <= kManyPages / 2, read_page(i) != 0);
             }
         });
@@ -518,10 +514,10 @@ TEST_F(PagerTests, Rollback)
 TEST_F(PagerTests, Truncation)
 {
     pager_update([this] {
-        for (std::size_t i = 0; i < kManyPages; ++i) {
+        for (size_t i = 0; i < kManyPages; ++i) {
             allocate_page();
         }
-        for (std::size_t i = 0; i < kManyPages; ++i) {
+        for (size_t i = 0; i < kManyPages; ++i) {
             alter_page(i);
         }
         m_pager->set_page_count(m_page_ids.at(kManyPages / 2).value);
@@ -530,12 +526,12 @@ TEST_F(PagerTests, Truncation)
 
     ASSERT_OK(m_pager->checkpoint(true));
 
-    std::size_t file_size;
+    size_t file_size;
     ASSERT_OK(m_env->file_size("db", file_size));
     ASSERT_EQ(file_size, kPageSize * m_page_ids.at(kManyPages / 2).value);
 
     pager_view([this] {
-        for (std::size_t i = 0; i < kManyPages; ++i) {
+        for (size_t i = 0; i < kManyPages; ++i) {
             EXPECT_EQ(i <= kManyPages / 2, read_page(i) != 0) << i;
         }
     });
@@ -546,11 +542,11 @@ TEST_F(PagerTests, Freelist)
     pager_update([this] {
         PageRef *page;
         // Fill up several trunk pages.
-        for (std::size_t i = 0; i < kPageSize; ++i) {
+        for (size_t i = 0; i < kPageSize; ++i) {
             allocate_page(page);
             m_pager->release(page);
         }
-        for (std::size_t i = 0; i < kPageSize; ++i) {
+        for (size_t i = 0; i < kPageSize; ++i) {
             ASSERT_OK(m_pager->acquire(m_page_ids.at(i), page));
             ASSERT_OK(m_pager->destroy(page));
         }
@@ -559,7 +555,7 @@ TEST_F(PagerTests, Freelist)
     pager_update([this] {
         ASSERT_EQ(m_page_ids.back().value, m_pager->page_count());
         PageRef *page;
-        for (std::size_t i = 0; i < kPageSize; ++i) {
+        for (size_t i = 0; i < kPageSize; ++i) {
             allocate_page(page);
             m_pager->release(page);
         }
@@ -594,10 +590,10 @@ TEST_F(PagerTests, ReportsOutOfRangePages)
 
 TEST_F(PagerTests, MovePage)
 {
-    static constexpr U32 kSpecialValue = 123'456;
-    static constexpr U32 kNumPages = 32;
+    static constexpr uint32_t kSpecialValue = 123'456;
+    static constexpr uint32_t kNumPages = 32;
     pager_update([this] {
-        for (U32 i = 0; i < kNumPages; ++i) {
+        for (uint32_t i = 0; i < kNumPages; ++i) {
             PageRef *pg;
             ASSERT_OK(m_pager->allocate(pg));
             m_pager->mark_dirty(*pg);
@@ -662,7 +658,7 @@ protected:
         delete m_index;
     }
 
-    auto append(U32 key)
+    auto append(uint32_t key)
     {
         ASSERT_OK(m_index->assign(key, ++m_header.max_frame));
     }
@@ -688,10 +684,10 @@ TEST_F(HashIndexTests, FirstSegmentFrameBounds)
     append(3);
     append(4);
 
-    const U32 min_frame(2);
+    const uint32_t min_frame(2);
     m_header.max_frame = 3;
 
-    U32 value;
+    uint32_t value;
     ASSERT_OK(m_index->lookup(1, min_frame, value));
     ASSERT_FALSE(value);
     ASSERT_OK(m_index->lookup(2, min_frame, value));
@@ -704,14 +700,14 @@ TEST_F(HashIndexTests, FirstSegmentFrameBounds)
 
 TEST_F(HashIndexTests, SecondSegmentFrameBounds)
 {
-    for (U32 i = 1; i <= 6'000; ++i) {
+    for (uint32_t i = 1; i <= 6'000; ++i) {
         append(i);
     }
 
-    const U32 min_frame = 5'000;
+    const uint32_t min_frame = 5'000;
     m_header.max_frame = 5'500;
 
-    U32 value;
+    uint32_t value;
     ASSERT_OK(m_index->lookup(1, min_frame, value));
     ASSERT_FALSE(value);
     ASSERT_OK(m_index->lookup(4'999, min_frame, value));
@@ -728,7 +724,7 @@ TEST_F(HashIndexTests, SecondSegmentFrameBounds)
 
 TEST_F(HashIndexTests, Cleanup)
 {
-    U32 value;
+    uint32_t value;
     append(1);
     append(2);
     append(3);
@@ -765,9 +761,9 @@ TEST_F(HashIndexTests, Cleanup)
 
 TEST_F(HashIndexTests, ReadsAndWrites)
 {
-    std::vector<U32> keys;
+    std::vector<uint32_t> keys;
     // Write 2 full index buckets + a few extra entries.
-    for (U32 i = 0; i < 4'096 * 2; ++i) {
+    for (uint32_t i = 0; i < 4'096 * 2; ++i) {
         keys.emplace_back(i);
     }
     std::default_random_engine rng(42);
@@ -777,13 +773,13 @@ TEST_F(HashIndexTests, ReadsAndWrites)
         append(id);
     }
 
-    const U32 lower = 1'234;
+    const uint32_t lower = 1'234;
     m_header.max_frame = 5'000;
 
-    U32 value = 1;
+    uint32_t value = 1;
     for (const auto &key : keys) {
         ASSERT_EQ(m_index->fetch(value), key);
-        U32 current;
+        uint32_t current;
         ASSERT_OK(m_index->lookup(key, lower, current));
         if (m_header.max_frame < value || value < lower) {
             ASSERT_FALSE(current);
@@ -796,14 +792,14 @@ TEST_F(HashIndexTests, ReadsAndWrites)
 
 TEST_F(HashIndexTests, SimulateUsage)
 {
-    static constexpr std::size_t kNumTestFrames = 10'000;
+    static constexpr size_t kNumTestFrames = 10'000;
 
     RandomGenerator random;
-    std::map<U32, U32> simulated;
+    std::map<uint32_t, uint32_t> simulated;
 
-    for (std::size_t iteration = 0; iteration < 2; ++iteration) {
-        U32 lower = 1;
-        for (std::size_t frame = 1; frame <= kNumTestFrames; ++frame) {
+    for (size_t iteration = 0; iteration < 2; ++iteration) {
+        uint32_t lower = 1;
+        for (size_t frame = 1; frame <= kNumTestFrames; ++frame) {
             if (const auto r = random.Next(10); r == 0) {
                 // Run a commit. The calls that validate the page-frame mapping below
                 // will ignore frames below "lower". This is not exactly how the WAL works,
@@ -814,8 +810,8 @@ TEST_F(HashIndexTests, SimulateUsage)
             } else {
                 // Perform a write, but only if the page does not already exist in a frame
                 // in the range "lower" to "m_header.max_frame", inclusive.
-                U32 value;
-                const U32 key = static_cast<U32>(random.Next(1, kNumTestFrames));
+                uint32_t value;
+                const uint32_t key = static_cast<uint32_t>(random.Next(1, kNumTestFrames));
                 ASSERT_OK(m_index->lookup(key, lower, value));
                 if (value < lower) {
                     append(key);
@@ -823,7 +819,7 @@ TEST_F(HashIndexTests, SimulateUsage)
                 }
             }
         }
-        U32 result;
+        uint32_t result;
         for (const auto &[key, value] : simulated) {
             ASSERT_OK(m_index->lookup(key, lower, result));
             ASSERT_EQ(result, value);
@@ -852,7 +848,7 @@ TEST_F(HashIteratorTests, EmptyIndexDeathTest)
 
 class HashIteratorParamTests
     : public HashIndexTestBase,
-      public testing::TestWithParam<std::tuple<std::size_t, std::size_t>>
+      public testing::TestWithParam<std::tuple<size_t, size_t>>
 {
 protected:
     HashIteratorParamTests()
@@ -868,16 +864,16 @@ protected:
         m_header.max_frame = 0;
         m_index->cleanup();
 
-        for (std::size_t d = 0; d < m_num_copies; ++d) {
-            for (std::size_t i = 0; i < m_num_pages; ++i) {
-                append(static_cast<U32>(m_num_pages - i));
+        for (size_t d = 0; d < m_num_copies; ++d) {
+            for (size_t i = 0; i < m_num_pages; ++i) {
+                append(static_cast<uint32_t>(m_num_pages - i));
             }
         }
         HashIterator itr(*m_index);
         ASSERT_OK(itr.init());
         HashIterator::Entry entry;
 
-        for (std::size_t i = 0;; ++i) {
+        for (size_t i = 0;; ++i) {
             if (itr.read(entry)) {
                 // Keys (page IDs) are always read in order. Values (frame IDs) should be
                 // the most-recent values set for the associated key.
@@ -890,8 +886,8 @@ protected:
         }
     }
 
-    std::size_t m_num_pages = 0;
-    std::size_t m_num_copies = 0;
+    size_t m_num_pages = 0;
+    size_t m_num_copies = 0;
 };
 
 TEST_P(HashIteratorParamTests, ReorderingAndDeduplication)

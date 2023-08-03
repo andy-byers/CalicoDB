@@ -22,18 +22,63 @@ struct DirtyHdr {
 };
 
 struct PageRef {
-    Id page_id;
-    U32 refs;
-
     PageRef *prev;
     PageRef *next;
 
-    enum Flag {
+    Id page_id;
+    uint16_t refs;
+
+    enum Flag : uint16_t {
         kNormal = 0,
         kCached = 1,
         kDirty = 2,
         kExtra = 4,
     } flag;
+
+    static auto alloc() -> PageRef *
+    {
+        static_assert(std::is_trivially_copyable_v<DirtyHdr>);
+        static_assert(std::is_trivially_copyable_v<PageRef>);
+        static_assert(alignof(PageRef) == alignof(void *));
+        static_assert(alignof(DirtyHdr) == alignof(void *));
+        static_assert(sizeof(PageRef) == 3 * sizeof(void *));
+
+        // Allocate this many bytes of extra space at the end of the page buffer to catch
+        // out-of-bounds reads and writes that might occur if the database is corrupted.
+        static constexpr size_t kSpilloverLen = alignof(PageRef);
+
+        auto *ref = static_cast<PageRef *>(std::aligned_alloc(
+            alignof(PageRef),
+            sizeof(PageRef) +
+                sizeof(DirtyHdr) +
+                kPageSize +
+                kSpilloverLen));
+        if (ref) {
+            *ref = {
+                ref,
+                ref,
+                Id::null(),
+                0,
+                PageRef::kNormal,
+            };
+
+            auto *hdr = ref->get_dirty_hdr();
+            *hdr = {
+                nullptr,
+                hdr,
+                hdr,
+            };
+
+            // DirtyHdr must be properly aligned.
+            CALICODB_EXPECT_EQ(0, reinterpret_cast<std::uintptr_t>(hdr) % alignof(DirtyHdr));
+        }
+        return ref;
+    }
+
+    static auto free(PageRef *ref) -> void
+    {
+        std::free(ref);
+    }
 
     [[nodiscard]] auto get_flag(Flag f) const -> bool
     {
@@ -77,46 +122,7 @@ auto DirtyHdr::get_page_ref() const -> const PageRef *
     return const_cast<DirtyHdr *>(this)->get_page_ref();
 }
 
-inline auto alloc_page() -> PageRef *
-{
-    static_assert(std::is_trivially_copyable_v<DirtyHdr>);
-    static_assert(std::is_trivially_copyable_v<PageRef>);
-    static_assert(alignof(PageRef) == alignof(DirtyHdr));
-    static constexpr std::size_t kSpilloverLen = alignof(PageRef);
-
-    static constexpr std::size_t kPageRefSize =
-        sizeof(PageRef) +
-        sizeof(DirtyHdr) +
-        kPageSize +
-        kSpilloverLen;
-    auto *ref = static_cast<PageRef *>(std::aligned_alloc(
-        alignof(PageRef), kPageRefSize));
-    *ref = {
-        Id::null(),
-        0,
-        ref,
-        ref,
-        PageRef::kNormal,
-    };
-
-    auto *hdr = ref->get_dirty_hdr();
-    *hdr = {
-        nullptr,
-        hdr,
-        hdr,
-    };
-
-    // DirtyHdr must be properly aligned.
-    CALICODB_EXPECT_EQ(0, reinterpret_cast<std::uintptr_t>(hdr) % alignof(DirtyHdr));
-    return ref;
-}
-
-inline auto free_page(PageRef *ref) -> void
-{
-    std::free(ref);
-}
-
-[[nodiscard]] inline auto page_offset(Id page_id) -> U32
+[[nodiscard]] inline auto page_offset(Id page_id) -> uint32_t
 {
     return FileHdr::kSize * page_id.is_root();
 }

@@ -57,26 +57,20 @@ auto busy_wait(BusyHandler *handler, const Callback &callback) -> Status
     }
 }
 
-static constexpr std::size_t kMinFrameCount = 18;
-static constexpr std::size_t kMaxCacheSize = 1 << 30;
+static constexpr size_t kMinFrameCount = 1;
+static constexpr size_t kMaxCacheSize = 1 << 30;
 static constexpr auto kDefaultWalSuffix = "-wal";
 static constexpr auto kDefaultShmSuffix = "-shm";
-
-// Fixed-width unsigned integers for use in the database file format
-using U8 = std::uint8_t;
-using U16 = std::uint16_t;
-using U32 = std::uint32_t;
-using U64 = std::uint64_t;
 
 // Additional file locking modes that cannot be requested directly
 enum { kLockUnlocked = 0 };
 
 struct Id {
-    static constexpr U32 kNull = 0;
-    static constexpr U32 kRoot = 1;
+    static constexpr uint32_t kNull = 0;
+    static constexpr uint32_t kRoot = 1;
 
     struct Hash {
-        auto operator()(const Id &id) const -> U64
+        auto operator()(const Id &id) const -> uint64_t
         {
             return id.value;
         }
@@ -86,11 +80,11 @@ struct Id {
 
     template <class T>
     explicit constexpr Id(T t)
-        : value(static_cast<U32>(t))
+        : value(static_cast<uint32_t>(t))
     {
     }
 
-    [[nodiscard]] static constexpr auto from_index(std::size_t index) -> Id
+    [[nodiscard]] static constexpr auto from_index(size_t index) -> Id
     {
         return Id(index + 1);
     }
@@ -115,13 +109,13 @@ struct Id {
         return value == kRoot;
     }
 
-    [[nodiscard]] constexpr auto as_index() const -> std::size_t
+    [[nodiscard]] constexpr auto as_index() const -> size_t
     {
         CALICODB_EXPECT_NE(value, null().value);
         return value - 1;
     }
 
-    U32 value = kNull;
+    uint32_t value = kNull;
 };
 
 template <class T>

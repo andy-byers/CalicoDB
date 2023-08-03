@@ -22,10 +22,10 @@ class TreeCursor;
     const auto end = std::min(
         lhs.size(), rhs.size());
 
-    std::size_t n = 0;
+    size_t n = 0;
     for (; n < end; ++n) {
-        const auto u = static_cast<U8>(lhs[n]);
-        const auto v = static_cast<U8>(rhs[n]);
+        const auto u = static_cast<uint8_t>(lhs[n]);
+        const auto v = static_cast<uint8_t>(rhs[n]);
         if (u < v) {
             break;
         } else if (u > v) {
@@ -43,7 +43,7 @@ class TreeCursor;
 class Tree final
 {
 public:
-    static constexpr std::size_t kRequiredBufferSize = 3 * kPageSize;
+    static constexpr size_t kRequiredBufferSize = 3 * kPageSize;
 
     ~Tree();
     auto release_nodes() const -> void;
@@ -134,23 +134,23 @@ private:
 
     auto corrupted_node(Id page_id) const -> Status;
 
-    auto redistribute_cells(Node &left, Node &right, Node &parent, U32 pivot_idx) -> Status;
+    auto redistribute_cells(Node &left, Node &right, Node &parent, uint32_t pivot_idx) -> Status;
     auto resolve_overflow(TreeCursor &c) -> Status;
     auto split_root(TreeCursor &c) -> Status;
     auto split_nonroot(TreeCursor &c) -> Status;
     auto split_nonroot_fast(TreeCursor &c, Node &parent, Node right) -> Status;
     auto resolve_underflow(TreeCursor &c) -> Status;
     auto fix_root(TreeCursor &c) -> Status;
-    auto fix_nonroot(TreeCursor &c, Node &parent, U32 index) -> Status;
+    auto fix_nonroot(TreeCursor &c, Node &parent, uint32_t index) -> Status;
 
-    auto read_key(const Cell &cell, std::string &scratch, Slice *key_out, U32 limit = 0) const -> Status;
+    auto read_key(const Cell &cell, std::string &scratch, Slice *key_out, uint32_t limit = 0) const -> Status;
     auto read_value(const Cell &cell, std::string &scratch, Slice *value_out) const -> Status;
-    auto read_key(Node &node, U32 index, std::string &scratch, Slice *key_out, U32 limit = 0) const -> Status;
-    auto read_value(Node &node, U32 index, std::string &scratch, Slice *value_out) const -> Status;
-    auto write_key(Node &node, U32 index, const Slice &key) -> Status;
-    auto write_value(Node &node, U32 index, const Slice &value) -> Status;
+    auto read_key(Node &node, uint32_t index, std::string &scratch, Slice *key_out, uint32_t limit = 0) const -> Status;
+    auto read_value(Node &node, uint32_t index, std::string &scratch, Slice *value_out) const -> Status;
+    auto write_key(Node &node, uint32_t index, const Slice &key) -> Status;
+    auto write_value(Node &node, uint32_t index, const Slice &value) -> Status;
 
-    auto emplace(Node &node, const Slice &key, const Slice &value, U32 index, bool &overflow) -> Status;
+    auto emplace(Node &node, const Slice &key, const Slice &value, uint32_t index, bool &overflow) -> Status;
     auto free_overflow(Id head_id) -> Status;
     auto vacuum_step(PageRef *&free, PointerMap::Entry entry, Schema &schema, Id last_id) -> Status;
 
@@ -160,9 +160,9 @@ private:
         Id parent_id;
     };
     auto make_pivot(const PivotOptions &opt, Cell &pivot_out) -> Status;
-    auto post_pivot(Node &node, U32 idx, Cell &cell, Id child_id) -> Status;
-    auto insert_cell(Node &node, U32 idx, const Cell &cell) -> Status;
-    auto remove_cell(Node &node, U32 idx) -> Status;
+    auto post_pivot(Node &node, uint32_t idx, Cell &cell, Id child_id) -> Status;
+    auto insert_cell(Node &node, uint32_t idx, const Cell &cell) -> Status;
+    auto remove_cell(Node &node, uint32_t idx) -> Status;
     auto find_parent_id(Id page_id, Id &out) const -> Status;
     auto fix_parent_id(Id page_id, Id parent_id, PointerMap::Type type, Status &s) -> void;
     auto maybe_fix_overflow_chain(const Cell &cell, Id parent_id, Status &s) -> void;
@@ -195,7 +195,7 @@ private:
 
         Cell cell;
         Id pid;
-        U32 idx;
+        uint32_t idx;
     } m_ovfl;
 
     // Scratch memory for manipulating nodes.
@@ -204,7 +204,7 @@ private:
 
     // Scratch memory for cells that aren't embedded in nodes. Use m_cell_scratch[n] to get a pointer to
     // the start of cell scratch buffer n, where n < kNumCellBuffers.
-    static constexpr std::size_t kNumCellBuffers = 4;
+    static constexpr size_t kNumCellBuffers = 4;
     static constexpr auto kCellBufferLen = kPageSize / kNumCellBuffers;
     char *const m_cell_scratch[kNumCellBuffers];
 

@@ -37,7 +37,7 @@ public:
     };
     virtual auto new_file(const std::string &filename, OpenMode mode, File *&out) -> Status = 0;
     virtual auto new_logger(const std::string &filename, Logger *&out) -> Status = 0;
-    virtual auto file_size(const std::string &filename, std::size_t &out) const -> Status = 0;
+    virtual auto file_size(const std::string &filename, size_t &out) const -> Status = 0;
     virtual auto remove_file(const std::string &filename) -> Status = 0;
     [[nodiscard]] virtual auto file_exists(const std::string &filename) const -> bool = 0;
 
@@ -77,18 +77,18 @@ public:
     // Reads into `scratch`, which must point to at least `size` bytes of available
     // memory. On success, sets "*out" to point to the data that was read, which may
     // be less than what was requested, but only if `out` is not nullptr.
-    virtual auto read(std::size_t offset, std::size_t size, char *scratch, Slice *out) -> Status = 0;
+    virtual auto read(size_t offset, size_t size, char *scratch, Slice *out) -> Status = 0;
 
     // Read exactly `size` bytes from the file at the given offset.
     //
     // Return a "not found" status if there is not enough data remaining in the file.
-    virtual auto read_exact(std::size_t offset, std::size_t size, char *scratch) -> Status;
+    virtual auto read_exact(size_t offset, size_t size, char *scratch) -> Status;
 
     // Write `in` to the file at the given offset.
-    virtual auto write(std::size_t offset, const Slice &in) -> Status = 0;
+    virtual auto write(size_t offset, const Slice &in) -> Status = 0;
 
     // Set the file `size`
-    virtual auto resize(std::size_t size) -> Status = 0;
+    virtual auto resize(size_t size) -> Status = 0;
 
     // Synchronize with the underlying filesystem.
     virtual auto sync() -> Status = 0;
@@ -101,11 +101,11 @@ public:
 
     // Size of a shared memory region, i.e. the number of bytes pointed to by `out`
     // when `shm_map()` returns successfully.
-    static constexpr std::size_t kShmRegionSize = 1'024 * 32;
-    static constexpr std::size_t kShmLockCount = 8;
+    static constexpr size_t kShmRegionSize = 1'024 * 32;
+    static constexpr size_t kShmLockCount = 8;
 
-    virtual auto shm_map(std::size_t r, bool extend, volatile void *&out) -> Status = 0;
-    virtual auto shm_lock(std::size_t r, std::size_t n, ShmLockFlag flags) -> Status = 0;
+    virtual auto shm_map(size_t r, bool extend, volatile void *&out) -> Status = 0;
+    virtual auto shm_lock(size_t r, size_t n, ShmLockFlag flags) -> Status = 0;
     virtual auto shm_unmap(bool unlink) -> void = 0;
     virtual auto shm_barrier() -> void = 0;
 };
@@ -135,7 +135,7 @@ public:
 
     auto new_logger(const std::string &filename, Logger *&out) -> Status override;
     auto new_file(const std::string &filename, OpenMode mode, File *&out) -> Status override;
-    auto file_size(const std::string &filename, std::size_t &out) const -> Status override;
+    auto file_size(const std::string &filename, size_t &out) const -> Status override;
     auto remove_file(const std::string &filename) -> Status override;
     [[nodiscard]] auto file_exists(const std::string &filename) const -> bool override;
 

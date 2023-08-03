@@ -81,7 +81,7 @@ public:
                 const auto crash_state = m_env->m_crashes_enabled;
                 m_env->m_crashes_enabled = false;
 
-                std::size_t file_size;
+                size_t file_size;
                 ASSERT_OK(m_env->file_size(m_filename, file_size));
                 m_backup.resize(file_size);
                 ASSERT_OK(read_exact(0, file_size, m_backup.data()));
@@ -113,13 +113,13 @@ public:
                 delete m_target;
             }
 
-            auto read(std::size_t offset, std::size_t size, char *scratch, Slice *out) -> Status override
+            auto read(size_t offset, size_t size, char *scratch, Slice *out) -> Status override
             {
                 MAYBE_CRASH(m_env);
                 return FileWrapper::read(offset, size, scratch, out);
             }
 
-            auto write(std::size_t offset, const Slice &in) -> Status override
+            auto write(size_t offset, const Slice &in) -> Status override
             {
                 MAYBE_CRASH(m_env);
                 return FileWrapper::write(offset, in);
@@ -150,13 +150,13 @@ public:
                 return FileWrapper::file_lock(mode);
             }
 
-            auto shm_map(std::size_t r, bool extend, volatile void *&out) -> Status override
+            auto shm_map(size_t r, bool extend, volatile void *&out) -> Status override
             {
                 MAYBE_CRASH(m_env);
                 return FileWrapper::shm_map(r, extend, out);
             }
 
-            auto shm_lock(std::size_t r, std::size_t n, ShmLockFlag flags) -> Status override
+            auto shm_lock(size_t r, size_t n, ShmLockFlag flags) -> Status override
             {
                 if (flags & kShmLock) {
                     MAYBE_CRASH(m_env);
@@ -192,9 +192,9 @@ protected:
         delete m_env;
     }
 
-    static constexpr std::size_t kNumRecords = 256;
-    static constexpr std::size_t kNumIterations = 2;
-    [[nodiscard]] static auto make_key(std::size_t n) -> Slice
+    static constexpr size_t kNumRecords = 256;
+    static constexpr size_t kNumIterations = 2;
+    [[nodiscard]] static auto make_key(size_t n) -> Slice
     {
         static std::string s_keys[kNumRecords];
         if (s_keys[n].empty()) {
@@ -204,7 +204,7 @@ protected:
         }
         return s_keys[n];
     }
-    [[nodiscard]] static auto make_value(std::size_t n) -> std::string
+    [[nodiscard]] static auto make_value(size_t n) -> std::string
     {
         return std::string(std::min(n * 6, kPageSize * 3), '*');
     }
@@ -215,7 +215,7 @@ protected:
         return s.to_string() == "I/O error: <FAULT>";
     }
 
-    [[nodiscard]] static auto writer_task(Tx &tx, std::size_t iteration) -> Status
+    [[nodiscard]] static auto writer_task(Tx &tx, size_t iteration) -> Status
     {
         EXPECT_OK(tx.status());
 
@@ -230,7 +230,7 @@ protected:
             options.error_if_exists = true;
             s = tx.create_bucket(options, name1, &b1);
             if (s.is_ok()) {
-                std::vector<U32> keys(kNumRecords);
+                std::vector<uint32_t> keys(kNumRecords);
                 std::iota(begin(keys), end(keys), 0);
                 std::default_random_engine rng(42);
                 std::shuffle(begin(keys), end(keys), rng);
@@ -254,7 +254,7 @@ protected:
 
         auto *c = tx.new_cursor(b1);
         c->seek_first();
-        for (std::size_t i = 0; i < kNumRecords; ++i) {
+        for (size_t i = 0; i < kNumRecords; ++i) {
             if (c->is_valid()) {
                 EXPECT_EQ(c->key(), make_key(i));
                 EXPECT_EQ(c->value(), make_value(i));
@@ -280,7 +280,7 @@ protected:
         return s;
     }
 
-    static auto reader_task(const Tx &tx, std::size_t iteration) -> Status
+    static auto reader_task(const Tx &tx, size_t iteration) -> Status
     {
         EXPECT_OK(tx.status());
 
@@ -299,7 +299,7 @@ protected:
         if (!s.is_ok()) {
             return s;
         }
-        for (std::size_t i = 0; i < kNumRecords; ++i) {
+        for (size_t i = 0; i < kNumRecords; ++i) {
             const auto key = make_key(i);
             std::string value;
             s = tx.get(b, key, &value);
@@ -312,7 +312,7 @@ protected:
         }
         auto *c = tx.new_cursor(b);
         c->seek_first();
-        for (std::size_t i = 0; i < kNumRecords; ++i) {
+        for (size_t i = 0; i < kNumRecords; ++i) {
             if (c->is_valid()) {
                 EXPECT_EQ(c->key(), make_key(i));
             } else {
@@ -360,7 +360,7 @@ protected:
             kSrcCheckpoint,
             kNumSrcLocations,
         };
-        std::size_t src_counters[kNumSrcLocations] = {};
+        size_t src_counters[kNumSrcLocations] = {};
 
         std::cout << "CrashTests::Operations({\n  .inject_faults = " << std::boolalpha << param.inject_faults
                   << ",\n  .test_checkpoint = " << param.test_checkpoint << ",\n})\n\n";
@@ -377,7 +377,7 @@ protected:
 
         (void)DB::destroy(options, m_filename);
 
-        for (std::size_t i = 0; i < kNumIterations; ++i) {
+        for (size_t i = 0; i < kNumIterations; ++i) {
             m_env->m_crashes_enabled = param.inject_faults;
 
             DB *db;
@@ -429,15 +429,15 @@ protected:
 
     struct OpenCloseParameters {
         bool inject_faults = false;
-        std::size_t num_iterations = 1;
+        size_t num_iterations = 1;
     };
     auto run_open_close_test(const OpenCloseParameters &param) -> void
     {
         Options options;
         options.env = m_env;
 
-        std::size_t tries = 0;
-        for (std::size_t i = 0; i < param.num_iterations; ++i) {
+        size_t tries = 0;
+        for (size_t i = 0; i < param.num_iterations; ++i) {
             m_env->m_crashes_enabled = false;
             (void)DB::destroy(options, m_filename);
 
@@ -478,13 +478,13 @@ protected:
 
         (void)DB::destroy(options, m_filename);
 
-        for (std::size_t i = 0; i < kNumIterations; ++i) {
+        for (size_t i = 0; i < kNumIterations; ++i) {
             DB *db;
             ASSERT_OK(DB::open(options, m_filename, db));
             ASSERT_OK(db->update([](auto &tx) {
                 Bucket b;
                 auto s = tx.create_bucket(BucketOptions(), "BUCKET", &b);
-                for (std::size_t j = 0; s.is_ok() && j < kNumRecords; ++j) {
+                for (size_t j = 0; s.is_ok() && j < kNumRecords; ++j) {
                     s = tx.put(b, make_key(j), make_value(j));
                 }
                 return s;
@@ -502,7 +502,7 @@ protected:
                     }
                     auto *c = tx.new_cursor(b);
                     c->seek_first();
-                    for (std::size_t j = 0; c->is_valid() && j < kNumRecords; ++j) {
+                    for (size_t j = 0; c->is_valid() && j < kNumRecords; ++j) {
                         EXPECT_EQ(c->key(), make_key(j));
                         EXPECT_EQ(c->value(), make_value(j));
                         c->next();
@@ -513,7 +513,7 @@ protected:
                     // is able to get the necessary pages without encountering another error, we
                     // can proceed with scanning the bucket.
                     c->seek_last();
-                    for (std::size_t j = 0; c->is_valid() && j < kNumRecords; ++j) {
+                    for (size_t j = 0; c->is_valid() && j < kNumRecords; ++j) {
                         EXPECT_EQ(c->key(), make_key(kNumRecords - j - 1));
                         EXPECT_EQ(c->value(), make_value(kNumRecords - j - 1));
                         c->previous();
@@ -522,7 +522,7 @@ protected:
                         s = c->status();
                     }
 
-                    for (std::size_t j = 0; j < kNumRecords; ++j) {
+                    for (size_t j = 0; j < kNumRecords; ++j) {
                         c->seek(make_key(j));
                         if (!c->is_valid()) {
                             break;
@@ -556,7 +556,7 @@ protected:
 
         (void)DB::destroy(options, m_filename);
 
-        for (std::size_t i = 0; i < kNumIterations; ++i) {
+        for (size_t i = 0; i < kNumIterations; ++i) {
             m_env->m_crashes_enabled = param.inject_faults;
 
             DB *db;
@@ -577,7 +577,7 @@ protected:
                     if (s.is_ok()) {
                         c = tx.new_cursor(b);
                     }
-                    for (std::size_t j = 0; s.is_ok() && j < kNumRecords; ++j) {
+                    for (size_t j = 0; s.is_ok() && j < kNumRecords; ++j) {
                         const auto key = make_key(j);
                         const auto value = make_value(j);
                         s = tx.put(*c, key, value);
@@ -694,7 +694,7 @@ class DataLossEnv : public EnvWrapper
             delete m_target;
         }
 
-        auto initialize_buffer(std::size_t file_size) -> void
+        auto initialize_buffer(size_t file_size) -> void
         {
             m_env->m_buffer.resize(file_size);
             EXPECT_OK(FileWrapper::read(0, file_size, m_env->m_buffer.data(), nullptr));
@@ -707,7 +707,7 @@ class DataLossEnv : public EnvWrapper
             const auto &wr = m_env->m_writes;
             const auto loss_type = m_env->m_loss_type;
             auto itr = cbegin(wr);
-            for (std::size_t i = 0; i < wr.size(); ++i, ++itr) {
+            for (size_t i = 0; i < wr.size(); ++i, ++itr) {
                 auto [ofs, len] = *itr;
                 if ((loss_type == kLoseEarly && i < wr.size() / 2) ||
                     (loss_type == kLoseLate && i >= wr.size() / 2) ||
@@ -722,7 +722,7 @@ class DataLossEnv : public EnvWrapper
             EXPECT_OK(FileWrapper::read(0, m_env->m_buffer.size(), m_env->m_buffer.data(), nullptr));
         }
 
-        auto write(std::size_t offset, const Slice &data) -> Status override
+        auto write(size_t offset, const Slice &data) -> Status override
         {
             EXPECT_FALSE(data.is_empty());
             if (m_filename != m_env->m_drop_file) {
@@ -742,12 +742,12 @@ class DataLossEnv : public EnvWrapper
             return Status::ok();
         }
 
-        auto read(std::size_t offset, std::size_t length, char *scratch, Slice *slice_out) -> Status override
+        auto read(size_t offset, size_t length, char *scratch, Slice *slice_out) -> Status override
         {
             if (m_filename != m_env->m_drop_file) {
                 return FileWrapper::read(offset, length, scratch, slice_out);
             }
-            std::size_t len = 0;
+            size_t len = 0;
             if (offset < m_env->m_buffer.size()) {
                 len = std::min(length, m_env->m_buffer.size() - offset);
                 std::memcpy(scratch, m_env->m_buffer.data() + offset, len);
@@ -758,7 +758,7 @@ class DataLossEnv : public EnvWrapper
             return Status::ok();
         }
 
-        auto resize(std::size_t size) -> Status override
+        auto resize(size_t size) -> Status override
         {
             m_env->m_buffer.resize(size);
             m_env->m_writes.erase(m_env->m_writes.lower_bound(size),
@@ -793,10 +793,10 @@ public:
         kLoseAll,
         kTypeCount,
     } m_loss_type;
-    std::map<std::size_t, std::size_t> m_writes;
+    std::map<size_t, size_t> m_writes;
     std::string m_buffer;
     std::string m_drop_file;
-    std::size_t m_dropped_bytes = 0;
+    size_t m_dropped_bytes = 0;
 
     explicit DataLossEnv(Env &env)
         : EnvWrapper(env),
@@ -814,7 +814,7 @@ public:
             auto *file = new DataLossFile(*this, filename, *file_out);
             file_out = file;
             if (filename == m_drop_file) {
-                std::size_t file_size;
+                size_t file_size;
                 EXPECT_OK(EnvWrapper::file_size(filename, file_size));
                 file->initialize_buffer(file_size);
             }
@@ -952,14 +952,14 @@ public:
         DataLossEnv::DataLossType loss_type;
         std::string loss_file;
     };
-    auto perform_writes(const DropParameters &param, std::size_t num_writes, std::size_t version)
+    auto perform_writes(const DropParameters &param, size_t num_writes, size_t version)
     {
         // Don't drop any records until the commit.
         m_env->m_drop_file = "";
         return m_db->update([num_writes, version, &param, this](auto &tx) {
             Bucket b;
             EXPECT_OK(tx.create_bucket(BucketOptions(), "bucket", &b));
-            for (std::size_t i = 0; i < num_writes; ++i) {
+            for (size_t i = 0; i < num_writes; ++i) {
                 EXPECT_OK(tx.put(b, numeric_key(i), numeric_key(i + version * num_writes)));
             }
             m_env->m_loss_type = param.loss_type;
@@ -985,12 +985,12 @@ public:
         return s;
     }
 
-    auto check_records(std::size_t num_writes, std::size_t version)
+    auto check_records(size_t num_writes, size_t version)
     {
         return m_db->view([=](const auto &tx) {
             Bucket b;
             auto s = tx.open_bucket("bucket", b);
-            for (std::size_t i = 0; i < num_writes && s.is_ok(); ++i) {
+            for (size_t i = 0; i < num_writes && s.is_ok(); ++i) {
                 std::string value;
                 s = tx.get(b, numeric_key(i), &value);
                 if (s.is_ok()) {
@@ -1021,7 +1021,7 @@ public:
     {
         reopen_db(true);
 
-        static constexpr std::size_t kNumWrites = 1'000;
+        static constexpr size_t kNumWrites = 1'000;
         ASSERT_OK(perform_writes({}, kNumWrites, 0));
 
         // Only the WAL is written during a transaction.
@@ -1046,7 +1046,7 @@ public:
     {
         reopen_db(true);
 
-        static constexpr std::size_t kNumWrites = 1'000;
+        static constexpr size_t kNumWrites = 1'000;
         ASSERT_OK(perform_writes({}, kNumWrites, 0));
         ASSERT_OK(perform_checkpoint({}, true));
 

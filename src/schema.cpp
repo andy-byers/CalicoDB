@@ -177,9 +177,9 @@ auto Schema::open_bucket(const Slice &name, Bucket &b_out) -> Status
 
 auto Schema::decode_root_id(const Slice &data, Id &out) -> bool
 {
-    U32 num;
+    uint32_t num;
     if (decode_varint(data.data(), data.data() + data.size(), num)) {
-        out.value = static_cast<U32>(num);
+        out.value = static_cast<uint32_t>(num);
         return true;
     }
     return false;
@@ -196,7 +196,7 @@ auto Schema::decode_and_check_root_id(const Slice &data, Id &out) -> bool
 auto Schema::encode_root_id(Id id, std::string &root_id_out) -> void
 {
     if (root_id_out.size() < kVarintMaxLength) {
-        // More than enough for a U32.
+        // More than enough for a uint32_t.
         root_id_out.resize(kVarintMaxLength);
     }
     const auto *end = encode_varint(root_id_out.data(), id.value);

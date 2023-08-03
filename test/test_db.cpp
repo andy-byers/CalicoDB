@@ -81,13 +81,13 @@ public:
                 delete m_target;
             }
 
-            auto read(std::size_t offset, std::size_t size, char *scratch, Slice *out) -> Status override
+            auto read(size_t offset, size_t size, char *scratch, Slice *out) -> Status override
             {
                 m_env->call_read_callback();
                 return FileWrapper::read(offset, size, scratch, out);
             }
 
-            auto write(std::size_t offset, const Slice &in) -> Status override
+            auto write(size_t offset, const Slice &in) -> Status override
             {
                 m_env->call_write_callback();
                 return FileWrapper::write(offset, in);
@@ -105,7 +105,7 @@ public:
 class DBTests : public testing::Test
 {
 protected:
-    static constexpr std::size_t kMaxRounds = 1'000;
+    static constexpr size_t kMaxRounds = 1'000;
     const std::string m_test_dir;
     const std::string m_db_name;
     const std::string m_alt_wal_name;
@@ -130,13 +130,13 @@ protected:
         ASSERT_OK(reopen_db(false));
     }
 
-    [[nodiscard]] static auto make_kv(std::size_t kv, std::size_t round = 0) -> std::pair<std::string, std::string>
+    [[nodiscard]] static auto make_kv(size_t kv, size_t round = 0) -> std::pair<std::string, std::string>
     {
         EXPECT_LE(0, kv);
         EXPECT_LE(0, round);
         // 3 pages is long enough to generate both types of overflow pages (kOverflowHead
         // and kOverflowLink).
-        static constexpr std::size_t kMaxKV = kPageSize * 3;
+        static constexpr size_t kMaxKV = kPageSize * 3;
         const auto key_length = (round + 1) * kMaxKV / kMaxRounds;
         auto key_str = numeric_key<kMaxKV>(kv);
         key_str = key_str.substr(kMaxKV - key_length);
@@ -148,12 +148,12 @@ protected:
         return {key_str, val_str};
     }
 
-    [[nodiscard]] static auto put(Tx &tx, const Bucket &b, std::size_t kv, std::size_t round = 0) -> Status
+    [[nodiscard]] static auto put(Tx &tx, const Bucket &b, size_t kv, size_t round = 0) -> Status
     {
         const auto [k, v] = make_kv(kv, round);
         return tx.put(b, k, v);
     }
-    [[nodiscard]] static auto put(Tx &tx, const BucketOptions &options, const std::string &bname, std::size_t kv, std::size_t round = 0) -> Status
+    [[nodiscard]] static auto put(Tx &tx, const BucketOptions &options, const std::string &bname, size_t kv, size_t round = 0) -> Status
     {
         Bucket b;
         auto s = tx.create_bucket(options, bname, &b);
@@ -163,15 +163,15 @@ protected:
         return s;
     }
 
-    [[nodiscard]] static auto put_range(Tx &tx, const Bucket &b, std::size_t kv1, std::size_t kv2, std::size_t round = 0) -> Status
+    [[nodiscard]] static auto put_range(Tx &tx, const Bucket &b, size_t kv1, size_t kv2, size_t round = 0) -> Status
     {
         Status s;
-        for (std::size_t kv = kv1; s.is_ok() && kv < kv2; ++kv) {
+        for (size_t kv = kv1; s.is_ok() && kv < kv2; ++kv) {
             s = put(tx, b, kv, round);
         }
         return s;
     }
-    [[nodiscard]] static auto put_range(Tx &tx, const BucketOptions &options, const std::string &bname, std::size_t kv1, std::size_t kv2, std::size_t round = 0) -> Status
+    [[nodiscard]] static auto put_range(Tx &tx, const BucketOptions &options, const std::string &bname, size_t kv1, size_t kv2, size_t round = 0) -> Status
     {
         Bucket b;
         auto s = tx.create_bucket(options, bname, &b);
@@ -181,12 +181,12 @@ protected:
         return s;
     }
 
-    [[nodiscard]] static auto erase(Tx &tx, const Bucket &b, std::size_t kv, std::size_t round = 0) -> Status
+    [[nodiscard]] static auto erase(Tx &tx, const Bucket &b, size_t kv, size_t round = 0) -> Status
     {
         const auto [k, _] = make_kv(kv, round);
         return tx.erase(b, k);
     }
-    [[nodiscard]] static auto erase(Tx &tx, const BucketOptions &options, const std::string &bname, std::size_t kv, std::size_t round = 0) -> Status
+    [[nodiscard]] static auto erase(Tx &tx, const BucketOptions &options, const std::string &bname, size_t kv, size_t round = 0) -> Status
     {
         Bucket b;
         auto s = tx.create_bucket(options, bname, &b);
@@ -196,15 +196,15 @@ protected:
         return s;
     }
 
-    [[nodiscard]] static auto erase_range(Tx &tx, const Bucket &b, std::size_t kv1, std::size_t kv2, std::size_t round = 0) -> Status
+    [[nodiscard]] static auto erase_range(Tx &tx, const Bucket &b, size_t kv1, size_t kv2, size_t round = 0) -> Status
     {
         Status s;
-        for (std::size_t kv = kv1; s.is_ok() && kv < kv2; ++kv) {
+        for (size_t kv = kv1; s.is_ok() && kv < kv2; ++kv) {
             s = erase(tx, b, kv, round);
         }
         return s;
     }
-    [[nodiscard]] static auto erase_range(Tx &tx, const BucketOptions &options, const std::string &bname, std::size_t kv1, std::size_t kv2, std::size_t round = 0) -> Status
+    [[nodiscard]] static auto erase_range(Tx &tx, const BucketOptions &options, const std::string &bname, size_t kv1, size_t kv2, size_t round = 0) -> Status
     {
         Bucket b;
         auto s = tx.create_bucket(options, bname, &b);
@@ -214,14 +214,14 @@ protected:
         return s;
     }
 
-    [[nodiscard]] static auto check(Tx &tx, const Bucket &b, std::size_t kv, bool exists, std::size_t round = 0) -> Status
+    [[nodiscard]] static auto check(Tx &tx, const Bucket &b, size_t kv, bool exists, size_t round = 0) -> Status
     {
         std::string result;
         const auto [k, v] = make_kv(kv, round);
         auto s = tx.get(b, k, &result);
         if (s.is_ok()) {
             EXPECT_TRUE(exists);
-            U64 n;
+            uint64_t n;
             Slice slice(result);
             EXPECT_TRUE(consume_decimal_number(slice, &n));
             EXPECT_EQ(kv, n);
@@ -230,7 +230,7 @@ protected:
         }
         return s;
     }
-    [[nodiscard]] static auto check(Tx &tx, const BucketOptions &options, const std::string &bname, std::size_t kv, bool exists, std::size_t round = 0) -> Status
+    [[nodiscard]] static auto check(Tx &tx, const BucketOptions &options, const std::string &bname, size_t kv, bool exists, size_t round = 0) -> Status
     {
         Bucket b;
         auto s = tx.create_bucket(options, bname, &b);
@@ -240,7 +240,7 @@ protected:
         return s;
     }
 
-    [[nodiscard]] static auto check_range(const Tx &tx, const Bucket &b, std::size_t kv1, std::size_t kv2, bool exists, std::size_t round = 0) -> Status
+    [[nodiscard]] static auto check_range(const Tx &tx, const Bucket &b, size_t kv1, size_t kv2, bool exists, size_t round = 0) -> Status
     {
         auto *c = tx.new_cursor(b);
         // Run some extra seek*() calls.
@@ -254,7 +254,7 @@ protected:
             s = c->status();
         }
         if (s.is_ok() && exists) {
-            for (std::size_t kv = kv1; kv < kv2; ++kv) {
+            for (size_t kv = kv1; kv < kv2; ++kv) {
                 const auto [k, v] = make_kv(kv, round);
                 if (kv == kv1) {
                     c->seek(k);
@@ -270,7 +270,7 @@ protected:
                 c->next();
             }
             if (s.is_ok()) {
-                for (std::size_t i = 0; i < kv2 - kv1; ++i) {
+                for (size_t i = 0; i < kv2 - kv1; ++i) {
                     const auto [k, v] = make_kv(kv2 - i - 1, round);
                     if (i == 0) {
                         c->seek(k);
@@ -286,7 +286,7 @@ protected:
                 }
             }
         } else {
-            for (std::size_t kv = kv1; kv < kv2; ++kv) {
+            for (size_t kv = kv1; kv < kv2; ++kv) {
                 const auto [k, v] = make_kv(kv, round);
                 c->seek(k);
                 if (c->is_valid()) {
@@ -301,7 +301,7 @@ protected:
         delete c;
         return s;
     }
-    [[nodiscard]] static auto check_range(const Tx &tx, const std::string &bname, std::size_t kv1, std::size_t kv2, bool exists, std::size_t round = 0) -> Status
+    [[nodiscard]] static auto check_range(const Tx &tx, const std::string &bname, size_t kv1, size_t kv2, bool exists, size_t round = 0) -> Status
     {
         Bucket b;
         auto s = tx.open_bucket(bname, b);
@@ -365,14 +365,14 @@ protected:
         return m_config < kMaxConfig;
     }
 
-    [[nodiscard]] auto file_size(const std::string &filename) const -> std::size_t
+    [[nodiscard]] auto file_size(const std::string &filename) const -> size_t
     {
-        std::size_t file_size;
+        size_t file_size;
         EXPECT_OK(m_env->file_size(filename, file_size));
         return file_size;
     }
 
-    static constexpr std::size_t kMaxBuckets = 13;
+    static constexpr size_t kMaxBuckets = 13;
     static constexpr const char kBucketStr[kMaxBuckets + 2] = "BUCKET_NAMING_";
     Config m_config = kDefault;
     CallbackEnv *m_env = nullptr;
@@ -507,7 +507,7 @@ TEST_F(DBTests, ReadonlyTx)
 
 TEST_F(DBTests, UpdateThenView)
 {
-    std::size_t round = 0;
+    size_t round = 0;
     do {
         BucketOptions tbopt;
         tbopt.error_if_exists = true;
@@ -549,7 +549,7 @@ TEST_F(DBTests, RollbackRootUpdate)
     do {
         ASSERT_TRUE(m_db->update([](auto &tx) {
                             Bucket b;
-                            for (std::size_t i = 0; i < 10; ++i) {
+                            for (size_t i = 0; i < 10; ++i) {
                                 auto s = tx.create_bucket(BucketOptions(), numeric_key(i), &b);
                                 if (!s.is_ok()) {
                                     return s;
@@ -567,7 +567,7 @@ TEST_F(DBTests, RollbackRootUpdate)
         ASSERT_OK(m_db->view([](const auto &tx) {
             Bucket b;
             Status s;
-            for (std::size_t i = 0; i < 10 && s.is_ok(); ++i) {
+            for (size_t i = 0; i < 10 && s.is_ok(); ++i) {
                 s = tx.open_bucket(numeric_key(i), b);
                 if (i <= 5) {
                     EXPECT_OK(s);
@@ -583,7 +583,7 @@ TEST_F(DBTests, RollbackRootUpdate)
 
 TEST_F(DBTests, RollbackUpdate)
 {
-    std::size_t round = 0;
+    size_t round = 0;
     do {
         for (int i = 0; i < 3; ++i) {
             ASSERT_TRUE(m_db->update([i, round](auto &tx) {
@@ -628,12 +628,12 @@ TEST_F(DBTests, RollbackUpdate)
 
 TEST_F(DBTests, ScanWholeDatabase)
 {
-    static constexpr std::size_t kNumBuckets = 32;
-    static constexpr std::size_t kRecordsPerBucket = 100;
+    static constexpr size_t kNumBuckets = 32;
+    static constexpr size_t kRecordsPerBucket = 100;
 
     ASSERT_OK(m_db->update([](auto &tx) {
         Bucket b;
-        for (std::size_t i = 0; i < kNumBuckets; ++i) {
+        for (size_t i = 0; i < kNumBuckets; ++i) {
             EXPECT_OK(put_range(tx, BucketOptions(), numeric_key(i), 0, kRecordsPerBucket));
         }
         return Status::ok();
@@ -642,14 +642,14 @@ TEST_F(DBTests, ScanWholeDatabase)
     ASSERT_OK(m_db->view([](const auto &tx) {
         auto &schema = tx.schema();
         schema.seek_first();
-        for (std::size_t i = 0; i < kNumBuckets; ++i) {
+        for (size_t i = 0; i < kNumBuckets; ++i) {
             EXPECT_TRUE(schema.is_valid());
             Bucket b;
             EXPECT_EQ(schema.key(), numeric_key(i));
             EXPECT_OK(tx.open_bucket(schema.key(), b));
             auto *c = tx.new_cursor(b);
             c->seek_first();
-            for (std::size_t j = 0; j < kRecordsPerBucket; ++j) {
+            for (size_t j = 0; j < kRecordsPerBucket; ++j) {
                 const auto [k, v] = make_kv(j);
                 EXPECT_TRUE(c->is_valid());
                 EXPECT_EQ(c->key(), k);
@@ -731,13 +731,13 @@ TEST_F(DBTests, CorruptedRootIDs)
 TEST_F(DBTests, AutoCheckpoint)
 {
     Options options;
-    for (std::size_t i = 1; i < 100; i += i) {
+    for (size_t i = 1; i < 100; i += i) {
         delete m_db;
         m_db = nullptr;
 
         options.auto_checkpoint = i;
         ASSERT_OK(DB::open(options, m_db_name, m_db));
-        for (std::size_t j = 0; j < 10; ++j) {
+        for (size_t j = 0; j < 10; ++j) {
             ASSERT_OK(m_db->update([j](auto &tx) {
                 return put_range(tx, BucketOptions(), "b", j * 1'000, (j + 1) * 1'000);
             }));
@@ -837,14 +837,14 @@ TEST_F(DBTests, BucketExistence)
 
 TEST_F(DBTests, SpaceAmplification)
 {
-    static constexpr std::size_t kInputSize = 1'024 * 1'024;
-    static constexpr std::size_t kNumRecords = kInputSize / 256;
+    static constexpr size_t kInputSize = 1'024 * 1'024;
+    static constexpr size_t kNumRecords = kInputSize / 256;
 
     RandomGenerator random;
     ASSERT_OK(m_db->update([&random](auto &tx) {
         Bucket b;
         auto s = tx.create_bucket(BucketOptions(), "b", &b);
-        for (std::size_t i = 0; s.is_ok() && i < kNumRecords; ++i) {
+        for (size_t i = 0; s.is_ok() && i < kNumRecords; ++i) {
             const auto key = random.Generate(kInputSize / kNumRecords / 2);
             const auto val = random.Generate(key.size());
             s = tx.put(b, key, val);
@@ -853,7 +853,7 @@ TEST_F(DBTests, SpaceAmplification)
     }));
 
     close_db();
-    std::size_t file_size;
+    size_t file_size;
     ASSERT_OK(m_env->file_size(m_db_name, file_size));
     const auto space_amp = static_cast<double>(file_size) / static_cast<double>(kInputSize);
     std::cout << "SpaceAmplification: " << space_amp << '\n';
@@ -887,7 +887,7 @@ TEST(OldWalTests, HandlesOldWalFile)
     ASSERT_OK(env.new_file(kOldWal, Env::kCreate, oldwal));
     ASSERT_OK(oldwal->write(42, ":3"));
 
-    std::size_t file_size;
+    size_t file_size;
     ASSERT_OK(env.file_size(kOldWal, file_size));
     ASSERT_NE(0, file_size);
     delete oldwal;
@@ -1110,7 +1110,7 @@ protected:
 
 TEST_F(TransactionTests, ReadsMostRecentSnapshot)
 {
-    U64 key_limit = 0;
+    uint64_t key_limit = 0;
     auto should_records_exist = false;
     m_env->m_write_callback = [&] {
         DB *db;
@@ -1132,8 +1132,8 @@ TEST_F(TransactionTests, ReadsMostRecentSnapshot)
         //          descriptors. The closing of the database file must sometimes be deferred
         //          until after the transaction completes, since this connection will have a
         //          write lock until DB::update() returns.
-        for (std::size_t i = 0; i < 10; ++i) {
-            static constexpr U64 kScale = 5;
+        for (size_t i = 0; i < 10; ++i) {
+            static constexpr uint64_t kScale = 5;
             EXPECT_OK(put_range(tx, BucketOptions(), "BUCKET", i * kScale, (i + 1) * kScale));
             EXPECT_OK(tx.commit());
             should_records_exist = true;
@@ -1150,7 +1150,7 @@ TEST_F(TransactionTests, ExclusiveLockingMode)
     for (int i = 0; i < 2; ++i) {
         m_config = i == 0 ? kExclusiveLockMode : kDefault;
         ASSERT_OK(reopen_db(false));
-        std::size_t n = 0;
+        size_t n = 0;
         m_env->m_write_callback = [this, &i, &n] {
             if (n > 256) {
                 return;
@@ -1167,7 +1167,7 @@ TEST_F(TransactionTests, ExclusiveLockingMode)
             ++n;
         };
         ASSERT_OK(m_db->update([](auto &tx) {
-            for (std::size_t i = 0; i < 50; ++i) {
+            for (size_t i = 0; i < 50; ++i) {
                 EXPECT_OK(put_range(tx, BucketOptions(), "BUCKET", i * 10, (i + 1) * 10));
                 EXPECT_OK(tx.commit());
             }
@@ -1179,9 +1179,9 @@ TEST_F(TransactionTests, ExclusiveLockingMode)
 
 TEST_F(TransactionTests, IgnoresFutureVersions)
 {
-    static constexpr U64 kN = 5;
+    static constexpr uint64_t kN = 5;
     auto has_open_db = false;
-    U64 n = 0;
+    uint64_t n = 0;
 
     ASSERT_OK(m_db->update([](auto &tx) {
         return put_range(tx, BucketOptions(), "BUCKET", 0, kN);
@@ -1207,7 +1207,7 @@ TEST_F(TransactionTests, IgnoresFutureVersions)
     };
 
     (void)m_db->view([&n](auto &tx) {
-        for (std::size_t i = 0; i < kN; ++i) {
+        for (size_t i = 0; i < kN; ++i) {
             EXPECT_OK(check_range(tx, "BUCKET", 0, kN, true));
             EXPECT_OK(check_range(tx, "BUCKET", kN, kN * (n + 1), false));
         }
@@ -1247,7 +1247,7 @@ TEST_F(CheckpointTests, CheckpointerBlocksOtherCheckpointers)
 
 TEST_F(CheckpointTests, CheckpointerAllowsTransactions)
 {
-    static constexpr std::size_t kSavedCount = 100;
+    static constexpr size_t kSavedCount = 100;
 
     // Set up a DB with some records in both the database file and the WAL.
     ASSERT_OK(m_db->update([](auto &tx) {
@@ -1260,7 +1260,7 @@ TEST_F(CheckpointTests, CheckpointerAllowsTransactions)
         return put_range(tx, BucketOptions(), "before", 0, kSavedCount / 2, 1);
     }));
 
-    U64 n = 0;
+    uint64_t n = 0;
     m_env->m_write_callback = [this, &n] {
         if (n >= 256) {
             // NOTE: The outer DB still has the file locked, so the Env won't close the database file when
@@ -1297,19 +1297,19 @@ protected:
 
     ~DBVacuumTests() override = default;
 
-    auto test_configurations_impl(const std::vector<U8> &bitmaps) const -> void
+    auto test_configurations_impl(const std::vector<uint8_t> &bitmaps) const -> void
     {
         static constexpr auto *kName = "12345678_BUCKET_NAMES";
-        static constexpr std::size_t kN = 10;
+        static constexpr size_t kN = 10;
         (void)m_db->update([&bitmaps](auto &tx) {
             Bucket buckets[8];
-            for (std::size_t i = 0; i < 8; ++i) {
+            for (size_t i = 0; i < 8; ++i) {
                 EXPECT_OK(tx.create_bucket(BucketOptions(), kName + i, &buckets[i]));
             }
-            std::vector<std::size_t> bs;
-            std::vector<std::size_t> is;
-            for (std::size_t b = 0; b < bitmaps.size(); ++b) {
-                for (std::size_t i = 0; i < 8; ++i) {
+            std::vector<size_t> bs;
+            std::vector<size_t> is;
+            for (size_t b = 0; b < bitmaps.size(); ++b) {
+                for (size_t i = 0; i < 8; ++i) {
                     if ((bitmaps[b] >> i) & 1) {
                         EXPECT_OK(put_range(tx, buckets[i], b * kN, (b + 1) * kN));
                         bs.emplace_back(b);
@@ -1317,14 +1317,14 @@ protected:
                     }
                 }
             }
-            for (std::size_t n = 0; n < bs.size(); ++n) {
+            for (size_t n = 0; n < bs.size(); ++n) {
                 if (0 == (n & 1)) {
                     EXPECT_OK(erase_range(tx, buckets[is[n]], bs[n] * kN, (bs[n] + 1) * kN));
                 }
             }
             EXPECT_OK(tx.vacuum());
 
-            for (std::size_t n = 0; n < bs.size(); ++n) {
+            for (size_t n = 0; n < bs.size(); ++n) {
                 EXPECT_OK(check_range(tx, buckets[is[n]], bs[n] * kN, (bs[n] + 1) * kN, n & 1));
                 if (n & 1) {
                     // Erase the rest of the records. The database should be empty after this
@@ -1334,17 +1334,17 @@ protected:
             }
             EXPECT_OK(tx.vacuum());
 
-            for (std::size_t n = 0; n < bs.size(); ++n) {
+            for (size_t n = 0; n < bs.size(); ++n) {
                 EXPECT_OK(check_range(tx, buckets[is[n]], bs[n] * kN, (bs[n] + 1) * kN, false));
             }
             return Status::ok();
         });
     }
-    auto test_configurations(std::vector<U8> bitmaps) const -> void
+    auto test_configurations(std::vector<uint8_t> bitmaps) const -> void
     {
-        for (U32 i = 0; i < 8; ++i) {
+        for (uint32_t i = 0; i < 8; ++i) {
             for (auto &b : bitmaps) {
-                b = static_cast<U8>((b << 1) | (b >> 7));
+                b = static_cast<uint8_t>((b << 1) | (b >> 7));
             }
             test_configurations_impl(bitmaps);
         }

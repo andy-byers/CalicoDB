@@ -28,7 +28,7 @@ class Bufmgr final
 public:
     friend class Pager;
 
-    explicit Bufmgr(std::size_t min_buffers, Stat &stat);
+    explicit Bufmgr(size_t min_buffers, Stat &stat);
     ~Bufmgr();
 
     // Get a reference to the root page, which is always in-memory, but is not
@@ -100,8 +100,8 @@ private:
     // in the hash map each time.
     PageRef *const m_root;
 
-    const std::size_t m_min_buffers;
-    std::size_t m_num_buffers;
+    const size_t m_min_buffers;
+    size_t m_num_buffers;
 
     Stat *const m_stat;
 

@@ -10,7 +10,7 @@
 #include <filesystem>
 #include <string>
 
-extern "C" int LLVMFuzzerTestOneInput(const calicodb::U8 *data, std::size_t size);
+extern "C" int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size);
 
 auto main(int argc, const char *argv[]) -> int
 {
@@ -23,7 +23,7 @@ auto main(int argc, const char *argv[]) -> int
         std::fseek(fp, 0, SEEK_END);
         const auto rc = std::ftell(fp);
         CHECK_TRUE(0 <= rc);
-        auto file_size = static_cast<std::size_t>(rc);
+        auto file_size = static_cast<size_t>(rc);
         std::fseek(fp, 0, SEEK_SET);
 
         std::string buffer(file_size, '\0');
@@ -32,7 +32,7 @@ auto main(int argc, const char *argv[]) -> int
 
         std::fclose(fp);
 
-        const auto *data = reinterpret_cast<const calicodb::U8 *>(buffer.data());
+        const auto *data = reinterpret_cast<const uint8_t *>(buffer.data());
         LLVMFuzzerTestOneInput(data, file_size);
         std::fprintf(stderr, "Done:    %s: (%zu bytes)\n", filename, file_size);
     };

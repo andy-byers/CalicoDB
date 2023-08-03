@@ -28,13 +28,13 @@ struct BlockAllocator {
     // Returns 0 on success and -1 on failure. The freelist (and gap) was already
     // validated when the node was created, so this routine must ensure that those
     // invariants are maintained.
-    [[nodiscard]] static auto release(Node &node, U32 block_start, U32 block_size) -> int;
+    [[nodiscard]] static auto release(Node &node, uint32_t block_start, uint32_t block_size) -> int;
 
     // Allocate memory for a cell
     // Returns the offset of the allocated region on success. Returns 0 if the node
     // doesn't have `needed_size` contiguous bytes available. This routine should
     // never encounter corruption.
-    [[nodiscard]] static auto allocate(Node &node, U32 needed_size) -> U32;
+    [[nodiscard]] static auto allocate(Node &node, uint32_t needed_size) -> uint32_t;
 
     // Get rid of the fragmentation present in a `node`
     // Returns 0 on success and -1 on failure. If `skip` is set to the index of a
@@ -44,32 +44,32 @@ struct BlockAllocator {
 
 // NOTE: Cell headers are padded out to kMinCellHeaderSize, which corresponds to the size
 //       of a free block header.
-static constexpr U32 kMinCellHeaderSize =
-    sizeof(U16) +
-    sizeof(U16);
-static constexpr U32 kMaxCellHeaderSize =
+static constexpr uint32_t kMinCellHeaderSize =
+    sizeof(uint16_t) +
+    sizeof(uint16_t);
+static constexpr uint32_t kMaxCellHeaderSize =
     kVarintMaxLength + // Value size  (5 B)
     kVarintMaxLength + // Key size    (5 B)
-    sizeof(U32);       // Overflow ID (4 B)
+    sizeof(uint32_t);  // Overflow ID (4 B)
 
 // Determine how many bytes of payload can be stored locally (not on an overflow chain)
-[[nodiscard]] static constexpr auto compute_local_pl_size(std::size_t key_size, std::size_t value_size) -> U32
+[[nodiscard]] static constexpr auto compute_local_pl_size(size_t key_size, size_t value_size) -> uint32_t
 {
     // SQLite's computation for min and max local payload sizes. If kMaxLocal is exceeded, then 1 or more
     // overflow chain pages will be required to store this payload.
-    constexpr const U32 kMinLocal =
-        (kPageSize - NodeHdr::kSize) * 32 / 256 - kMaxCellHeaderSize - sizeof(U16);
-    constexpr const U32 kMaxLocal =
-        (kPageSize - NodeHdr::kSize) * 64 / 256 - kMaxCellHeaderSize - sizeof(U16);
+    constexpr const uint32_t kMinLocal =
+        (kPageSize - NodeHdr::kSize) * 32 / 256 - kMaxCellHeaderSize - sizeof(uint16_t);
+    constexpr const uint32_t kMaxLocal =
+        (kPageSize - NodeHdr::kSize) * 64 / 256 - kMaxCellHeaderSize - sizeof(uint16_t);
     if (key_size + value_size <= kMaxLocal) {
         // The whole payload can be stored locally.
-        return static_cast<U32>(key_size + value_size);
+        return static_cast<uint32_t>(key_size + value_size);
     } else if (key_size > kMaxLocal) {
         // The first part of the key will occupy the entire local payload.
         return kMaxLocal;
     }
     // Try to prevent the key from being split.
-    return std::max(kMinLocal, static_cast<U32>(key_size));
+    return std::max(kMinLocal, static_cast<uint32_t>(key_size));
 }
 
 // Internal cell format:
@@ -100,27 +100,27 @@ struct Cell {
     char *key;
 
     // Number of bytes contained in the key.
-    U32 key_size;
+    uint32_t key_size;
 
     // Number of bytes contained in both the key and the value.
-    U32 total_pl_size;
+    uint32_t total_pl_size;
 
     // Number of payload bytes stored locally (embedded in a node).
-    U32 local_pl_size;
+    uint32_t local_pl_size;
 
     // Number of bytes occupied by this cell when embedded.
-    U32 footprint;
+    uint32_t footprint;
 };
 
 // Simple construct representing a tree node
 struct Node final {
-    static constexpr U32 kMaxFragCount = 0x80;
+    static constexpr uint32_t kMaxFragCount = 0x80;
 
     PageRef *ref;
     int (*parser)(char *, const char *, Cell *);
     char *scratch;
-    U32 usable_space;
-    U32 gap_size;
+    uint32_t usable_space;
+    uint32_t gap_size;
 
     [[nodiscard]] static auto from_existing_page(PageRef &page, char *scratch, Node &node_out) -> int;
     [[nodiscard]] static auto from_new_page(PageRef &page, char *scratch, bool is_leaf) -> Node;
@@ -169,14 +169,14 @@ struct Node final {
         return hdr()[NodeHdr::kTypeOffset] == NodeHdr::kExternal;
     }
 
-    [[nodiscard]] auto read_child_id(U32 index) const -> Id;
-    auto write_child_id(U32 index, Id child_id) -> void;
+    [[nodiscard]] auto read_child_id(uint32_t index) const -> Id;
+    auto write_child_id(uint32_t index, Id child_id) -> void;
 
     [[nodiscard]] auto defrag() -> int;
-    [[nodiscard]] auto alloc(U32 index, U32 size) -> int;
-    [[nodiscard]] auto write(U32 index, const Cell &cell) -> int;
-    [[nodiscard]] auto read(U32 index, Cell &cell_out) const -> int;
-    auto erase(U32 index, U32 cell_size) -> int;
+    [[nodiscard]] auto alloc(uint32_t index, uint32_t size) -> int;
+    [[nodiscard]] auto write(uint32_t index, const Cell &cell) -> int;
+    [[nodiscard]] auto read(uint32_t index, Cell &cell_out) const -> int;
+    auto erase(uint32_t index, uint32_t cell_size) -> int;
 
     [[nodiscard]] auto check_state() const -> int;
     [[nodiscard]] auto assert_state() const -> bool;

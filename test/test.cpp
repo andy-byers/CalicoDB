@@ -60,7 +60,7 @@ auto check_status(const char *expr, const Status &s) -> testing::AssertionResult
 
 auto read_file_to_string(Env &env, const std::string &filename) -> std::string
 {
-    std::size_t file_size;
+    size_t file_size;
     auto s = env.file_size(filename, file_size);
     if (!s.is_ok()) {
         if (!s.is_io_error()) {
@@ -85,11 +85,11 @@ auto write_string_to_file(Env &env, const std::string &filename, const std::stri
     File *file;
     ASSERT_OK(env.new_file(filename, Env::kCreate, file));
 
-    std::size_t write_pos;
+    size_t write_pos;
     if (offset < 0) {
         ASSERT_OK(env.file_size(filename, write_pos));
     } else {
-        write_pos = static_cast<std::size_t>(offset);
+        write_pos = static_cast<size_t>(offset);
     }
     ASSERT_OK(file->write(write_pos, buffer));
     ASSERT_OK(file->sync());

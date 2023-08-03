@@ -46,8 +46,8 @@ template <class Entry>
     return &entry == entry.next;
 }
 
-Bufmgr::Bufmgr(std::size_t min_buffers, Stat &stat)
-    : m_root(alloc_page()),
+Bufmgr::Bufmgr(size_t min_buffers, Stat &stat)
+    : m_root(PageRef::alloc()),
       m_min_buffers(min_buffers),
       m_stat(&stat)
 {
@@ -63,7 +63,7 @@ Bufmgr::Bufmgr(std::size_t min_buffers, Stat &stat)
     }
 
     for (m_num_buffers = 0; m_num_buffers < m_min_buffers; ++m_num_buffers) {
-        if (auto *ref = alloc_page()) {
+        if (auto *ref = PageRef::alloc()) {
             list_add_tail(*ref, m_lru);
         } else {
             break;
@@ -75,7 +75,7 @@ Bufmgr::Bufmgr(std::size_t min_buffers, Stat &stat)
 
 Bufmgr::~Bufmgr()
 {
-    free_page(m_root);
+    PageRef::free(m_root);
 
     // The pager should have released any referenced pages before the buffer manager
     // is destroyed.
@@ -84,7 +84,7 @@ Bufmgr::~Bufmgr()
     for (auto *p = m_lru.next; p != &m_lru;) {
         auto *ptr = p;
         p = p->next;
-        free_page(ptr);
+        PageRef::free(ptr);
     }
 }
 
@@ -120,9 +120,11 @@ auto Bufmgr::next_victim() -> PageRef *
 
 auto Bufmgr::allocate() -> PageRef *
 {
-    auto *ref = alloc_page();
-    list_add_tail(*ref, m_lru);
-    ++m_num_buffers;
+    auto *ref = PageRef::alloc();
+    if (ref) {
+        list_add_tail(*ref, m_lru);
+        ++m_num_buffers;
+    }
     return ref;
 }
 
@@ -192,14 +194,15 @@ auto Bufmgr::shrink_to_fit() -> void
         auto *lru = m_lru.prev;
         m_map.erase(lru->page_id);
         list_remove(*lru);
-        delete lru;
+        PageRef::free(lru);
+        --m_num_buffers;
     }
 }
 
 auto Bufmgr::assert_state() const -> bool
 {
     // Make sure the refcounts add up to the "refsum".
-    U32 refsum = 0;
+    uint32_t refsum = 0;
     for (auto p = m_in_use.next; p != &m_in_use; p = p->next) {
         const auto itr = m_map.find(p->page_id);
         CALICODB_EXPECT_NE(itr, end(m_map));
@@ -232,7 +235,9 @@ auto Dirtylist::is_empty() const -> bool
 
 auto Dirtylist::remove(PageRef &ref) -> DirtyHdr *
 {
+    CALICODB_EXPECT_TRUE(ref.get_flag(PageRef::kDirty));
     auto *hdr = ref.get_dirty_hdr();
+    auto *next = hdr->next;
     list_remove(*hdr);
     ref.clear_flag(PageRef::kDirty);
     return hdr->next;
@@ -285,7 +290,7 @@ auto Dirtylist::sort() -> DirtyHdr *
         p->dirty = p->next == end() ? nullptr : p->next;
     }
 
-    static constexpr std::size_t kNSortBuckets = 32;
+    static constexpr size_t kNSortBuckets = 32;
     auto *in = begin();
     DirtyHdr *arr[kNSortBuckets] = {};
     DirtyHdr *ptr;
@@ -295,7 +300,7 @@ auto Dirtylist::sort() -> DirtyHdr *
         in = in->dirty;
         ptr->dirty = nullptr;
 
-        std::size_t i = 0;
+        size_t i = 0;
         for (; i < kNSortBuckets - 1; ++i) {
             if (arr[i]) {
                 ptr = dirtylist_merge(arr[i], ptr);
@@ -310,7 +315,7 @@ auto Dirtylist::sort() -> DirtyHdr *
         }
     }
     ptr = arr[0];
-    for (std::size_t i = 1; i < kNSortBuckets; ++i) {
+    for (size_t i = 1; i < kNSortBuckets; ++i) {
         if (arr[i]) {
             ptr = ptr ? dirtylist_merge(ptr, arr[i]) : arr[i];
         }

@@ -19,16 +19,16 @@ struct PageRef;
 struct Stat;
 
 struct HashIndexHdr {
-    U32 version;
-    U32 unused0;
-    U32 change;
-    U16 is_init;
-    U16 unused1;
-    U32 max_frame;
-    U32 page_count;
-    U32 frame_cksum[2];
-    U32 salt[2];
-    U32 cksum[2];
+    uint32_t version;
+    uint32_t unused0;
+    uint32_t change;
+    uint16_t is_init;
+    uint16_t unused1;
+    uint32_t max_frame;
+    uint32_t page_count;
+    uint32_t frame_cksum[2];
+    uint32_t salt[2];
+    uint32_t cksum[2];
 };
 
 class HashIndex final
@@ -36,8 +36,8 @@ class HashIndex final
 public:
     friend class HashIterator;
 
-    using Key = U32;
-    using Value = U32;
+    using Key = uint32_t;
+    using Value = uint32_t;
 
     explicit HashIndex(HashIndexHdr &header, File *file);
     [[nodiscard]] auto fetch(Value value) -> Key;
@@ -51,7 +51,7 @@ public:
 private:
     friend class WalImpl;
 
-    auto map_group(std::size_t group_number, bool extend) -> Status;
+    auto map_group(size_t group_number, bool extend) -> Status;
 
     // Storage for hash table groups.
     std::vector<volatile char *> m_groups;
@@ -80,7 +80,7 @@ public:
 
     // Create an iterator over the contents of the provided hash index.
     explicit HashIterator(HashIndex &index);
-    auto init(U32 backfill = 0) -> Status;
+    auto init(uint32_t backfill = 0) -> Status;
 
     // Return the next hash entry.
     //
@@ -92,16 +92,16 @@ private:
     struct State {
         struct Group {
             Key *keys;
-            U16 *index;
-            U32 size;
-            U32 next;
-            U32 base;
+            uint16_t *index;
+            uint32_t size;
+            uint32_t next;
+            uint32_t base;
         } groups[1];
     };
 
     HashIndex *m_source = nullptr;
     State *m_state = nullptr;
-    std::size_t m_num_groups = 0;
+    size_t m_num_groups = 0;
     Key m_prior = 0;
 };
 
@@ -141,7 +141,7 @@ public:
     virtual auto start_writer() -> Status = 0;
 
     // Write new versions of the given pages to the WAL.
-    virtual auto write(PageRef *dirty, std::size_t db_size) -> Status = 0;
+    virtual auto write(PageRef *dirty, size_t db_size) -> Status = 0;
 
     using Undo = std::function<void(Id)>;
     virtual auto rollback(const Undo &undo) -> void = 0;
@@ -152,8 +152,8 @@ public:
     // READER -> UNLOCKED
     virtual auto finish_reader() -> void = 0;
 
-    [[nodiscard]] virtual auto last_frame_count() const -> std::size_t = 0;
-    [[nodiscard]] virtual auto db_size() const -> U32 = 0;
+    [[nodiscard]] virtual auto last_frame_count() const -> size_t = 0;
+    [[nodiscard]] virtual auto db_size() const -> uint32_t = 0;
 };
 
 } // namespace calicodb

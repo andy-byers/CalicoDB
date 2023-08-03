@@ -15,8 +15,8 @@ namespace calicodb::test
 class BoundaryValueTests : public testing::Test
 {
 protected:
-    static constexpr std::size_t kLargeValueLength =
-        std::numeric_limits<U32>::max();
+    static constexpr size_t kLargeValueLength =
+        std::numeric_limits<uint32_t>::max();
     const std::string m_filename;
     const char *m_backing;
     const Slice m_largest_slice;
@@ -108,10 +108,10 @@ TEST_F(StressTests, LotsOfBuckets)
 {
     // There isn't really a limit on the number of buckets one can create. Just create a
     // bunch of them.
-    static constexpr std::size_t kNumBuckets = 100'000;
+    static constexpr size_t kNumBuckets = 100'000;
     ASSERT_OK(m_db->update([](auto &tx) {
         Status s;
-        for (std::size_t i = 0; s.is_ok() && i < kNumBuckets; ++i) {
+        for (size_t i = 0; s.is_ok() && i < kNumBuckets; ++i) {
             Bucket b;
             const auto name = numeric_key(i);
             s = tx.create_bucket(BucketOptions(), name, &b);
@@ -123,7 +123,7 @@ TEST_F(StressTests, LotsOfBuckets)
     }));
     ASSERT_OK(m_db->view([](auto &tx) {
         Status s;
-        for (std::size_t i = 0; s.is_ok() && i < kNumBuckets; ++i) {
+        for (size_t i = 0; s.is_ok() && i < kNumBuckets; ++i) {
             Bucket b;
             const auto name = numeric_key(i);
             s = tx.open_bucket(name, b);
@@ -146,7 +146,7 @@ TEST_F(StressTests, CursorLimit)
         Bucket b;
         auto s = tx.create_bucket(BucketOptions(), "bucket", &b);
         std::vector<Cursor *> cursors;
-        for (std::size_t i = 0; s.is_ok() && i < 1'000; ++i) {
+        for (size_t i = 0; s.is_ok() && i < 1'000; ++i) {
             auto *c = tx.new_cursor(b);
             if (c) {
                 cursors.emplace_back(c);
@@ -156,9 +156,9 @@ TEST_F(StressTests, CursorLimit)
             }
         }
 
-        for (std::size_t i = 0; s.is_ok() && i < cursors.size(); ++i) {
+        for (size_t i = 0; s.is_ok() && i < cursors.size(); ++i) {
             cursors[i]->seek_first();
-            for (std::size_t j = 0; cursors[i]->is_valid() && j < i; ++j) {
+            for (size_t j = 0; cursors[i]->is_valid() && j < i; ++j) {
                 cursors[i]->next();
             }
             EXPECT_TRUE(cursors[i]->is_valid());
@@ -174,20 +174,20 @@ TEST_F(StressTests, CursorLimit)
 
 TEST_F(StressTests, LargeVacuum)
 {
-    static constexpr std::size_t kNumRecords = 1'234;
-    static constexpr std::size_t kTotalBuckets = 2'500;
-    static constexpr std::size_t kDroppedBuckets = kTotalBuckets / 10;
+    static constexpr size_t kNumRecords = 1'234;
+    static constexpr size_t kTotalBuckets = 2'500;
+    static constexpr size_t kDroppedBuckets = kTotalBuckets / 10;
     ASSERT_OK(m_db->update([](auto &tx) {
         Status s;
-        for (std::size_t i = 0; s.is_ok() && i < kTotalBuckets; ++i) {
+        for (size_t i = 0; s.is_ok() && i < kTotalBuckets; ++i) {
             Bucket b;
             const auto name = numeric_key(i);
             s = tx.create_bucket(BucketOptions(), name, &b);
-            for (std::size_t j = 0; s.is_ok() && j < kNumRecords; ++j) {
+            for (size_t j = 0; s.is_ok() && j < kNumRecords; ++j) {
                 s = tx.put(b, numeric_key(j), numeric_key(j));
             }
         }
-        for (std::size_t i = 0; s.is_ok() && i < kDroppedBuckets; ++i) {
+        for (size_t i = 0; s.is_ok() && i < kDroppedBuckets; ++i) {
             s = tx.drop_bucket(numeric_key(i));
         }
         if (s.is_ok()) {
@@ -198,7 +198,7 @@ TEST_F(StressTests, LargeVacuum)
     }));
     ASSERT_OK(m_db->view([](auto &tx) {
         Status s;
-        for (std::size_t i = 0; s.is_ok() && i < kTotalBuckets; ++i) {
+        for (size_t i = 0; s.is_ok() && i < kTotalBuckets; ++i) {
             Bucket b;
             s = tx.open_bucket(numeric_key(i), b);
             if (i < kDroppedBuckets) {
@@ -207,7 +207,7 @@ TEST_F(StressTests, LargeVacuum)
             } else if (s.is_ok()) {
                 auto *c = tx.new_cursor(b);
                 c->seek_first();
-                for (std::size_t j = 0; j < kNumRecords; ++j) {
+                for (size_t j = 0; j < kNumRecords; ++j) {
                     EXPECT_TRUE(c->is_valid());
                     EXPECT_EQ(numeric_key(j), c->key());
                     EXPECT_EQ(numeric_key(j), c->value());
