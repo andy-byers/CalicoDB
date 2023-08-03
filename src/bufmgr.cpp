@@ -237,7 +237,7 @@ auto Dirtylist::remove(PageRef &ref) -> DirtyHdr *
 {
     CALICODB_EXPECT_TRUE(ref.get_flag(PageRef::kDirty));
     auto *hdr = ref.get_dirty_hdr();
-    auto *next = hdr->next;
+    // NOTE: hdr->next is still valid after this call.
     list_remove(*hdr);
     ref.clear_flag(PageRef::kDirty);
     return hdr->next;
