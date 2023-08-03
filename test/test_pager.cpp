@@ -40,7 +40,7 @@ public:
             if (ref->get_flag(PageRef::kDirty)) {
                 m_dirtylist.remove(*ref);
             }
-            mgr.erase(ref->page_id);
+            mgr.erase(*ref);
         }
         if (ref) {
             ref->page_id.value = key;
@@ -62,7 +62,11 @@ public:
 
     auto erase(uint32_t key) -> bool
     {
-        return mgr.erase(Id(key));
+        if (auto *ref = mgr.query(Id(key))) {
+            mgr.erase(*ref);
+            return true;
+        }
+        return false;
     }
 
     auto lookup(uint32_t key) -> int
