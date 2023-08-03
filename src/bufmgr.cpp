@@ -94,7 +94,7 @@ auto Bufmgr::query(Id page_id) const -> PageRef *
     if (itr == end(m_map)) {
         return nullptr;
     }
-    return &*itr->second;
+    return itr->second;
 }
 
 auto Bufmgr::lookup(Id page_id) -> PageRef *
@@ -110,7 +110,7 @@ auto Bufmgr::lookup(Id page_id) -> PageRef *
         list_remove(*itr->second);
         list_add_head(*itr->second, m_lru);
     }
-    return &*itr->second;
+    return itr->second;
 }
 
 auto Bufmgr::next_victim() -> PageRef *
@@ -138,20 +138,14 @@ auto Bufmgr::register_page(PageRef &page) -> void
     }
 }
 
-auto Bufmgr::erase(Id page_id) -> bool
+auto Bufmgr::erase(PageRef &ref) -> void
 {
-    const auto itr = m_map.find(page_id);
-    if (itr == end(m_map)) {
-        return false;
+    if (ref.get_flag(PageRef::kCached)) {
+        ref.clear_flag(PageRef::kCached);
+        m_map.erase(ref.page_id);
+        list_remove(ref);
+        list_add_tail(ref, m_lru);
     }
-    CALICODB_EXPECT_LT(Id::root(), page_id);
-    auto &ref = itr->second;
-    CALICODB_EXPECT_TRUE(ref->get_flag(PageRef::kCached));
-    list_remove(*ref);
-    list_add_tail(*ref, m_lru);
-    ref->clear_flag(PageRef::kCached);
-    m_map.erase(itr);
-    return true;
 }
 
 auto Bufmgr::purge() -> void

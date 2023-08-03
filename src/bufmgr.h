@@ -56,7 +56,7 @@ public:
     // This is the only way that an entry can be removed from the cache. Eviction
     // works by first calling "next_victim()" and then erasing the returned entry.
     // Returns true if the entry was erased, false otherwise.
-    auto erase(Id page_id) -> bool;
+    auto erase(PageRef &ref) -> void;
     auto purge() -> void;
 
     // Increment the reference count associated with a page reference

@@ -19,7 +19,7 @@ auto Pager::purge_page(PageRef &victim) -> void
     if (victim.get_flag(PageRef::kDirty)) {
         m_dirtylist.remove(victim);
     }
-    m_bufmgr.erase(victim.page_id);
+    m_bufmgr.erase(victim);
 }
 
 auto Pager::read_page(PageRef &page_out, size_t *size_out) -> Status
@@ -38,7 +38,7 @@ auto Pager::read_page(PageRef &page_out, size_t *size_out) -> Status
     }
 
     if (!s.is_ok()) {
-        m_bufmgr.erase(page_out.page_id);
+        m_bufmgr.erase(page_out);
         if (m_mode > kRead) {
             set_status(s);
         }
@@ -238,7 +238,7 @@ auto Pager::move_page(PageRef &page, Id destination) -> void
     // Caller must have called Pager::release(<page at `destination`>, Pager::kDiscard).
     CALICODB_EXPECT_EQ(m_bufmgr.query(destination), nullptr);
     CALICODB_EXPECT_EQ(page.refs, 1);
-    m_bufmgr.erase(page.page_id);
+    m_bufmgr.erase(page);
     page.page_id = destination;
     if (page.get_flag(PageRef::kDirty)) {
         m_bufmgr.register_page(page);
@@ -370,6 +370,7 @@ auto Pager::ensure_available_buffer() -> Status
             m_dirtylist.remove(*victim);
         } else {
             set_status(s);
+            return s;
         }
     }
 
@@ -377,7 +378,7 @@ auto Pager::ensure_available_buffer() -> Status
     // next time m_bufmgr.next_victim() is called, it just can't be found using its page ID
     // anymore. This is a NOOP if the page reference was just allocated.
     if (victim->get_flag(PageRef::kCached)) {
-        m_bufmgr.erase(victim->page_id);
+        m_bufmgr.erase(*victim);
     }
     return s;
 }
@@ -510,7 +511,7 @@ auto Pager::release(PageRef *&page, ReleaseAction action) -> void
                         CALICODB_EXPECT_GE(m_mode, kDirty);
                         m_dirtylist.remove(*page);
                     }
-                    m_bufmgr.erase(page->page_id);
+                    m_bufmgr.erase(*page);
                 }
             }
         }
