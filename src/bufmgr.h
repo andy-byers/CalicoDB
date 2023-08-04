@@ -28,7 +28,7 @@ class Bufmgr final
 public:
     friend class Pager;
 
-    explicit Bufmgr(std::size_t min_buffers, Stat &stat);
+    explicit Bufmgr(size_t min_buffers, Stat &stat);
     ~Bufmgr();
 
     // Get a reference to the root page, which is always in-memory, but is not
@@ -56,7 +56,7 @@ public:
     // This is the only way that an entry can be removed from the cache. Eviction
     // works by first calling "next_victim()" and then erasing the returned entry.
     // Returns true if the entry was erased, false otherwise.
-    auto erase(Id page_id) -> bool;
+    auto erase(PageRef &ref) -> void;
     auto purge() -> void;
 
     // Increment the reference count associated with a page reference
@@ -100,8 +100,8 @@ private:
     // in the hash map each time.
     PageRef *const m_root;
 
-    const std::size_t m_min_buffers;
-    std::size_t m_num_buffers;
+    const size_t m_min_buffers;
+    size_t m_num_buffers;
 
     Stat *const m_stat;
 

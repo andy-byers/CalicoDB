@@ -16,8 +16,8 @@ namespace calicodb
 
 class Pager;
 
-template <std::size_t Length = 16>
-static auto numeric_key(std::size_t key, char padding = '0') -> std::string
+template <size_t Length = 16>
+static auto numeric_key(size_t key, char padding = '0') -> std::string
 {
     const auto key_string = std::to_string(key);
     assert(Length >= key_string.size());
@@ -34,17 +34,17 @@ public:
 
     ~FileWrapper() override = default;
 
-    auto read(std::size_t offset, std::size_t size, char *scratch, Slice *out) -> Status override
+    auto read(size_t offset, size_t size, char *scratch, Slice *out) -> Status override
     {
         return m_target->read(offset, size, scratch, out);
     }
 
-    auto write(std::size_t offset, const Slice &in) -> Status override
+    auto write(size_t offset, const Slice &in) -> Status override
     {
         return m_target->write(offset, in);
     }
 
-    auto resize(std::size_t size) -> Status override
+    auto resize(size_t size) -> Status override
     {
         return m_target->resize(size);
     }
@@ -64,12 +64,12 @@ public:
         return m_target->file_unlock();
     }
 
-    auto shm_map(std::size_t r, bool extend, volatile void *&out) -> Status override
+    auto shm_map(size_t r, bool extend, volatile void *&out) -> Status override
     {
         return m_target->shm_map(r, extend, out);
     }
 
-    auto shm_lock(std::size_t r, std::size_t n, ShmLockFlag flags) -> Status override
+    auto shm_lock(size_t r, size_t n, ShmLockFlag flags) -> Status override
     {
         return m_target->shm_lock(r, n, flags);
     }
@@ -95,11 +95,11 @@ private:
     using Engine = std::default_random_engine;
 
     mutable std::string m_data;
-    mutable std::size_t m_pos = 0;
+    mutable size_t m_pos = 0;
     mutable Engine m_rng; // Not in LevelDB.
 
 public:
-    explicit RandomGenerator(std::size_t size = 2 * 1'024 * 1'024 /* 2 MiB */)
+    explicit RandomGenerator(size_t size = 2 * 1'024 * 1'024 /* 2 MiB */)
         : m_data(size, '\0'),
           m_rng(42)
     {
@@ -107,7 +107,7 @@ public:
         std::generate(begin(m_data), end(m_data), std::ref(engine));
     }
 
-    auto Generate(std::size_t len) const -> std::string_view
+    auto Generate(size_t len) const -> std::string_view
     {
         if (m_pos + len > m_data.size()) {
             m_pos = 0;
@@ -115,7 +115,7 @@ public:
             std::shuffle(begin(m_data), end(m_data), m_rng);
         }
         m_pos += len;
-        return {m_data.data() + m_pos - len, static_cast<std::size_t>(len)};
+        return {m_data.data() + m_pos - len, static_cast<size_t>(len)};
     }
 
     // Not in LevelDB.

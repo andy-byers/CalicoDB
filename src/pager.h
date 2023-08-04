@@ -34,7 +34,7 @@ public:
         Status *status;
         Stat *stat;
         BusyHandler *busy;
-        std::size_t frame_count;
+        size_t frame_count;
         Options::SyncMode sync_mode;
         Options::LockMode lock_mode;
         bool persistent;
@@ -42,7 +42,7 @@ public:
 
     ~Pager();
 
-    [[nodiscard]] auto page_count() const -> U32
+    [[nodiscard]] auto page_count() const -> uint32_t
     {
         CALICODB_EXPECT_LT(kOpen, m_mode);
         return m_page_count;
@@ -61,7 +61,7 @@ public:
     auto finish() -> void;
 
     auto checkpoint(bool reset) -> Status;
-    auto auto_checkpoint(std::size_t frame_limit) -> Status;
+    auto auto_checkpoint(size_t frame_limit) -> Status;
 
     auto allocate(PageRef *&page_out) -> Status;
     auto acquire(Id page_id, PageRef *&page_out) -> Status;
@@ -74,7 +74,7 @@ public:
     auto mark_dirty(PageRef &page) -> void;
     [[nodiscard]] auto get_root() -> PageRef &;
 
-    auto set_page_count(U32 page_count) -> void;
+    auto set_page_count(uint32_t page_count) -> void;
     auto assert_state() const -> bool;
     auto purge_pages(bool purge_all) -> void;
     auto initialize_root() -> void;
@@ -123,11 +123,10 @@ public:
 
 private:
     explicit Pager(const Parameters &param);
-    [[nodiscard]] auto dirtylist_contains(const PageRef &ref) const -> bool;
     auto open_wal() -> Status;
     auto refresh_state() -> Status;
     auto read_page(PageRef &out, size_t *size_out) -> Status;
-    [[nodiscard]] auto read_page_from_file(PageRef &ref, std::size_t *size_out) const -> Status;
+    [[nodiscard]] auto read_page_from_file(PageRef &ref, size_t *size_out) const -> Status;
     auto ensure_available_buffer() -> Status;
     auto flush_dirty_pages() -> Status;
     auto purge_page(PageRef &victim) -> void;
@@ -152,13 +151,13 @@ private:
 
     Wal *m_wal = nullptr;
 
-    U32 m_page_count = 0;
-    U32 m_saved_page_count = 0;
+    uint32_t m_page_count = 0;
+    uint32_t m_saved_page_count = 0;
     bool m_refresh = true;
 };
 
 // The first pointer map page is always on page 2, right after the root page.
-static constexpr std::size_t kFirstMapPage = 2;
+static constexpr size_t kFirstMapPage = 2;
 
 struct PointerMap {
     enum Type : char {

@@ -9,12 +9,12 @@
 namespace calicodb
 {
 
-static constexpr std::size_t kTrunkCapacity = (kPageSize - 2 * sizeof(U32)) / sizeof(U32);
+static constexpr size_t kTrunkCapacity = (kPageSize - 2 * sizeof(uint32_t)) / sizeof(uint32_t);
 
 template <class Char>
-static auto get_leaf_ptr(Char *base, std::size_t index) -> Char *
+static auto get_leaf_ptr(Char *base, size_t index) -> Char *
 {
-    return base + (index + 2) * sizeof(U32);
+    return base + (index + 2) * sizeof(uint32_t);
 }
 
 auto Freelist::push(Pager &pager, PageRef *&page) -> Status
@@ -36,11 +36,11 @@ auto Freelist::push(Pager &pager, PageRef *&page) -> Status
     } else if (!free_head.is_null()) {
         s = pager.acquire(free_head, trunk);
         if (s.is_ok()) {
-            const auto n = get_u32(trunk->get_data() + sizeof(U32));
+            const auto n = get_u32(trunk->get_data() + sizeof(uint32_t));
             if (n < kTrunkCapacity) {
                 // trunk has enough room for a new leaf page.
                 pager.mark_dirty(*trunk);
-                put_u32(trunk->get_data() + sizeof(U32), n + 1);
+                put_u32(trunk->get_data() + sizeof(uint32_t), n + 1);
                 put_u32(get_leaf_ptr(trunk->get_data(), n), page->page_id.value);
                 s = PointerMap::write_entry(
                     pager, page->page_id, {free_head, PointerMap::kFreelistLeaf});
@@ -63,7 +63,7 @@ auto Freelist::push(Pager &pager, PageRef *&page) -> Status
         // trunk page. Only need to modify the first 8 bytes.
         pager.mark_dirty(*page);
         put_u32(page->get_data(), free_head.value);
-        put_u32(page->get_data() + sizeof(U32), 0);
+        put_u32(page->get_data() + sizeof(uint32_t), 0);
         // Point the new head's back pointer at Id::null().
         free_head = page->page_id;
         // Release the page before it gets discarded below.
@@ -98,7 +98,7 @@ auto Freelist::pop(Pager &pager, Id &id_out) -> Status
     PageRef *trunk;
     auto s = pager.acquire(free_head, trunk);
     if (s.is_ok()) {
-        const auto n = get_u32(trunk->get_data() + sizeof(U32));
+        const auto n = get_u32(trunk->get_data() + sizeof(uint32_t));
         if (n > kTrunkCapacity) {
             s = Status::corruption();
         } else if (n > 0) {
@@ -106,7 +106,7 @@ auto Freelist::pop(Pager &pager, Id &id_out) -> Status
             auto *ptr = get_leaf_ptr(trunk->get_data(), n - 1);
             id_out.value = get_u32(ptr);
             put_u32(ptr, 0);
-            put_u32(trunk->get_data() + sizeof(U32), n - 1);
+            put_u32(trunk->get_data() + sizeof(uint32_t), n - 1);
         } else {
             id_out = free_head;
             free_head.value = get_u32(trunk->get_data());
@@ -140,7 +140,7 @@ auto Freelist::assert_state(Pager &pager) -> bool
     while (!free_head.is_null()) {
         s = pager.acquire(free_head, head);
         CALICODB_EXPECT_TRUE(s.is_ok());
-        const auto n = get_u32(head->get_data() + sizeof(U32));
+        const auto n = get_u32(head->get_data() + sizeof(uint32_t));
         CALICODB_EXPECT_LE(n, kTrunkCapacity);
 
         PointerMap::Entry entry;
@@ -149,7 +149,7 @@ auto Freelist::assert_state(Pager &pager) -> bool
         CALICODB_EXPECT_EQ(entry.back_ptr, last_id);
         CALICODB_EXPECT_EQ(entry.type, PointerMap::kFreelistTrunk);
 
-        for (std::size_t i = 0; i < n; ++i) {
+        for (size_t i = 0; i < n; ++i) {
             const Id leaf_id(get_u32(get_leaf_ptr(head->get_data(), i)));
             CALICODB_EXPECT_FALSE(leaf_id.is_null());
             CALICODB_EXPECT_LE(leaf_id.value, pager.page_count());

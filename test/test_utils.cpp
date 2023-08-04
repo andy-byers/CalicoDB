@@ -14,16 +14,16 @@ namespace calicodb::test
 TEST(Encoding, Fixed32)
 {
     std::string s;
-    for (U32 v = 0; v < 100000; v++) {
-        s.resize(s.size() + sizeof(U32));
-        put_u32(s.data() + s.size() - sizeof(U32), v);
+    for (uint32_t v = 0; v < 100000; v++) {
+        s.resize(s.size() + sizeof(uint32_t));
+        put_u32(s.data() + s.size() - sizeof(uint32_t), v);
     }
 
     const char *p = s.data();
-    for (U32 v = 0; v < 100000; v++) {
-        U32 actual = get_u32(p);
+    for (uint32_t v = 0; v < 100000; v++) {
+        uint32_t actual = get_u32(p);
         ASSERT_EQ(v, actual);
-        p += sizeof(U32);
+        p += sizeof(uint32_t);
     }
 }
 
@@ -31,28 +31,28 @@ TEST(Coding, Fixed64)
 {
     std::string s;
     for (int power = 0; power <= 63; power++) {
-        U64 v = static_cast<U64>(1) << power;
-        s.resize(s.size() + sizeof(U64) * 3);
-        put_u64(s.data() + s.size() - sizeof(U64) * 3, v - 1);
-        put_u64(s.data() + s.size() - sizeof(U64) * 2, v + 0);
-        put_u64(s.data() + s.size() - sizeof(U64) * 1, v + 1);
+        uint64_t v = static_cast<uint64_t>(1) << power;
+        s.resize(s.size() + sizeof(uint64_t) * 3);
+        put_u64(s.data() + s.size() - sizeof(uint64_t) * 3, v - 1);
+        put_u64(s.data() + s.size() - sizeof(uint64_t) * 2, v + 0);
+        put_u64(s.data() + s.size() - sizeof(uint64_t) * 1, v + 1);
     }
 
     const char *p = s.data();
     for (int power = 0; power <= 63; power++) {
-        U64 v = static_cast<U64>(1) << power;
-        U64 actual;
+        uint64_t v = static_cast<uint64_t>(1) << power;
+        uint64_t actual;
         actual = get_u64(p);
         ASSERT_EQ(v - 1, actual);
-        p += sizeof(U64);
+        p += sizeof(uint64_t);
 
         actual = get_u64(p);
         ASSERT_EQ(v + 0, actual);
-        p += sizeof(U64);
+        p += sizeof(uint64_t);
 
         actual = get_u64(p);
         ASSERT_EQ(v + 1, actual);
-        p += sizeof(U64);
+        p += sizeof(uint64_t);
     }
 }
 
@@ -78,7 +78,7 @@ TEST(Encoding, EncodingOutput)
     ASSERT_EQ(0x08, static_cast<int>(dst[7]));
 }
 
-auto append_varint(std::string *s, U32 v) -> void
+auto append_varint(std::string *s, uint32_t v) -> void
 {
     const auto len = varint_length(v);
     s->resize(s->size() + len);
@@ -457,7 +457,7 @@ TEST(Slice, Clear)
 
 static constexpr auto constexpr_slice_test(Slice s, Slice answer) -> int
 {
-    for (std::size_t i = 0; i < s.size(); ++i) {
+    for (size_t i = 0; i < s.size(); ++i) {
         if (s[i] != answer[i]) {
             return -1;
         }

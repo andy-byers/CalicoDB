@@ -22,7 +22,7 @@ Logger::Logger() = default;
 
 Logger::~Logger() = default;
 
-auto File::read_exact(std::size_t offset, std::size_t size, char *scratch) -> Status
+auto File::read_exact(size_t offset, size_t size, char *scratch) -> Status
 {
     Slice slice;
     auto s = read(offset, size, scratch, &slice);
@@ -64,7 +64,7 @@ auto EnvWrapper::file_exists(const std::string &filename) const -> bool
     return m_target->file_exists(filename);
 }
 
-auto EnvWrapper::file_size(const std::string &filename, std::size_t &out) const -> Status
+auto EnvWrapper::file_size(const std::string &filename, size_t &out) const -> Status
 {
     return m_target->file_size(filename, out);
 }

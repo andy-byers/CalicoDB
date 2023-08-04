@@ -27,14 +27,14 @@ class TreeCursor
     Status m_status;
 
     Node m_node;
-    U32 m_idx = 0;
+    uint32_t m_idx = 0;
 
     // *_path members are used to track the path taken from the tree's root to the current
     // position. At any given time, the elements with indices less than the current level
     // are valid.
-    static constexpr std::size_t kMaxDepth = 17 + 1;
+    static constexpr size_t kMaxDepth = 17 + 1;
     Node m_node_path[kMaxDepth - 1];
-    U32 m_idx_path[kMaxDepth - 1];
+    uint32_t m_idx_path[kMaxDepth - 1];
     int m_level = 0;
 
     auto move_to_right_sibling() -> void
@@ -42,7 +42,7 @@ class TreeCursor
         CALICODB_EXPECT_TRUE(has_node());
         CALICODB_EXPECT_TRUE(m_node.is_leaf());
         const auto leaf_level = m_level;
-        for (U32 adjust = 0;; adjust = 1) {
+        for (uint32_t adjust = 0;; adjust = 1) {
             const auto ncells = NodeHdr::get_cell_count(m_node.hdr());
             if (++m_idx < ncells + adjust) {
                 break;
@@ -114,7 +114,7 @@ class TreeCursor
         std::string key_buffer;
         auto exact = false;
         auto upper = NodeHdr::get_cell_count(m_node.hdr());
-        U32 lower = 0;
+        uint32_t lower = 0;
 
         while (lower < upper) {
             Slice rhs;
@@ -124,7 +124,7 @@ class TreeCursor
             // so we still have necessary length information to break ties. This lets us avoid
             // reading overflow chains if it isn't really necessary.
             m_status = m_tree->read_key(m_node, mid, key_buffer, &rhs,
-                                        static_cast<U32>(key.size() + 1));
+                                        static_cast<uint32_t>(key.size() + 1));
             if (!m_status.is_ok()) {
                 break;
             }
@@ -446,7 +446,7 @@ public:
     }
 };
 
-static constexpr U32 kCellPtrSize = sizeof(U16);
+static constexpr uint32_t kCellPtrSize = sizeof(uint16_t);
 
 [[nodiscard]] static auto corrupted_page(Id page_id, PointerMap::Type page_type = PointerMap::kEmpty) -> Status
 {
@@ -488,12 +488,12 @@ auto Tree::get_tree(Cursor &c) -> Tree *
     return static_cast<UserCursor *>(c.token())->m_c.m_tree;
 }
 
-[[nodiscard]] static auto cell_slots_offset(const Node &node) -> U32
+[[nodiscard]] static auto cell_slots_offset(const Node &node) -> uint32_t
 {
     return page_offset(node.ref->page_id) + NodeHdr::kSize;
 }
 
-[[nodiscard]] static auto cell_area_offset(const Node &node) -> U32
+[[nodiscard]] static auto cell_area_offset(const Node &node) -> uint32_t
 {
     return cell_slots_offset(node) + NodeHdr::get_cell_count(node.hdr()) * kCellPtrSize;
 }
@@ -558,15 +558,15 @@ static auto write_child_id(Cell &cell, Id child_id)
     return NodeHdr::get_cell_count(node.hdr()) == 0;
 }
 
-static constexpr U32 kLinkContentOffset = sizeof(U32);
-static constexpr U32 kLinkContentSize = kPageSize - kLinkContentOffset;
+static constexpr uint32_t kLinkContentOffset = sizeof(uint32_t);
+static constexpr uint32_t kLinkContentSize = kPageSize - kLinkContentOffset;
 
 struct PayloadManager {
     static auto access(
         Pager &pager,
         const Cell &cell,   // The `cell` containing the payload being accessed
-        U32 offset,         // `offset` within the payload being accessed
-        U32 length,         // Number of bytes to access
+        uint32_t offset,    // `offset` within the payload being accessed
+        uint32_t length,    // Number of bytes to access
         const char *in_buf, // Write buffer of size at least `length` bytes, or nullptr if not a write
         char *out_buf       // Read buffer of size at least `length` bytes, or nullptr if not a read
         ) -> Status
@@ -602,7 +602,7 @@ struct PayloadManager {
                 if (!s.is_ok()) {
                     break;
                 }
-                U32 len;
+                uint32_t len;
                 if (offset >= kLinkContentSize) {
                     offset -= kLinkContentSize;
                     len = 0;
@@ -663,7 +663,7 @@ auto Tree::create(Pager &pager, Id *root_id_out) -> Status
     return s;
 }
 
-auto Tree::read_key(Node &node, U32 index, std::string &scratch, Slice *key_out, U32 limit) const -> Status
+auto Tree::read_key(Node &node, uint32_t index, std::string &scratch, Slice *key_out, uint32_t limit) const -> Status
 {
     Cell cell;
     if (node.read(index, cell)) {
@@ -671,7 +671,7 @@ auto Tree::read_key(Node &node, U32 index, std::string &scratch, Slice *key_out,
     }
     return read_key(cell, scratch, key_out, limit);
 }
-auto Tree::read_key(const Cell &cell, std::string &scratch, Slice *key_out, U32 limit) const -> Status
+auto Tree::read_key(const Cell &cell, std::string &scratch, Slice *key_out, uint32_t limit) const -> Status
 {
     if (limit == 0 || limit > cell.key_size) {
         limit = cell.key_size;
@@ -686,7 +686,7 @@ auto Tree::read_key(const Cell &cell, std::string &scratch, Slice *key_out, U32 
     return s;
 }
 
-auto Tree::read_value(Node &node, U32 index, std::string &scratch, Slice *value_out) const -> Status
+auto Tree::read_value(Node &node, uint32_t index, std::string &scratch, Slice *value_out) const -> Status
 {
     Cell cell;
     if (node.read(index, cell)) {
@@ -707,25 +707,25 @@ auto Tree::read_value(const Cell &cell, std::string &scratch, Slice *value_out) 
     return s;
 }
 
-auto Tree::write_key(Node &node, U32 index, const Slice &key) -> Status
+auto Tree::write_key(Node &node, uint32_t index, const Slice &key) -> Status
 {
     Cell cell;
     if (node.read(index, cell)) {
         return corrupted_node(node.ref->page_id);
     }
     return PayloadManager::access(*m_pager, cell, 0,
-                                  static_cast<U32>(key.size()),
+                                  static_cast<uint32_t>(key.size()),
                                   key.data(), nullptr);
 }
 
-auto Tree::write_value(Node &node, U32 index, const Slice &value) -> Status
+auto Tree::write_value(Node &node, uint32_t index, const Slice &value) -> Status
 {
     Cell cell;
     if (node.read(index, cell)) {
         return corrupted_node(node.ref->page_id);
     }
     return PayloadManager::access(*m_pager, cell, cell.key_size,
-                                  static_cast<U32>(value.size()),
+                                  static_cast<uint32_t>(value.size()),
                                   value.data(), nullptr);
 }
 
@@ -759,7 +759,7 @@ auto Tree::make_pivot(const PivotOptions &opt, Cell &pivot_out) -> Status
 {
     std::string buffers[2];
     Slice keys[2];
-    for (std::size_t i = 0; i < 2; ++i) {
+    for (size_t i = 0; i < 2; ++i) {
         const auto local_key_size = std::min(
             opt.cells[i]->key_size,
             opt.cells[i]->local_pl_size);
@@ -769,7 +769,7 @@ auto Tree::make_pivot(const PivotOptions &opt, Cell &pivot_out) -> Status
         // The left key must be less than the right key. If this cannot be seen in the local
         // keys, then 1 of the 2 must be overflowing. The nonlocal part is needed to perform
         // suffix truncation.
-        for (std::size_t i = 0; i < 2; ++i) {
+        for (size_t i = 0; i < 2; ++i) {
             if (opt.cells[i]->key_size > keys[i].size()) {
                 // Read just enough of the key to determine the ordering.
                 auto s = read_key(
@@ -788,11 +788,11 @@ auto Tree::make_pivot(const PivotOptions &opt, Cell &pivot_out) -> Status
         return Status::corruption();
     }
     pivot_out.ptr = opt.scratch;
-    pivot_out.total_pl_size = static_cast<U32>(prefix.size());
-    auto *ptr = pivot_out.ptr + sizeof(U32); // Skip the left child ID.
+    pivot_out.total_pl_size = static_cast<uint32_t>(prefix.size());
+    auto *ptr = pivot_out.ptr + sizeof(uint32_t); // Skip the left child ID.
     pivot_out.key = encode_varint(ptr, pivot_out.total_pl_size);
     pivot_out.local_pl_size = compute_local_pl_size(prefix.size(), 0);
-    pivot_out.footprint = pivot_out.local_pl_size + U32(pivot_out.key - opt.scratch);
+    pivot_out.footprint = pivot_out.local_pl_size + uint32_t(pivot_out.key - opt.scratch);
     std::memcpy(pivot_out.key, prefix.data(), pivot_out.local_pl_size);
     prefix.advance(pivot_out.local_pl_size);
 
@@ -810,7 +810,7 @@ auto Tree::make_pivot(const PivotOptions &opt, Cell &pivot_out) -> Status
             if (!s.is_ok()) {
                 break;
             }
-            const auto copy_size = std::min<std::size_t>(
+            const auto copy_size = std::min<size_t>(
                 prefix.size(), kLinkContentSize);
             std::memcpy(dst->get_data() + kLinkContentOffset,
                         prefix.data(),
@@ -833,7 +833,7 @@ auto Tree::make_pivot(const PivotOptions &opt, Cell &pivot_out) -> Status
         if (s.is_ok()) {
             CALICODB_EXPECT_NE(nullptr, prev);
             put_u32(prev->get_data(), 0);
-            pivot_out.footprint += sizeof(U32);
+            pivot_out.footprint += sizeof(uint32_t);
         }
         m_pager->release(prev, Pager::kNoCache);
     }
@@ -851,7 +851,7 @@ static auto detach_cell(Cell &cell, char *backing) -> void
     }
 }
 
-auto Tree::post_pivot(Node &parent, U32 idx, Cell &pivot, Id child_id) -> Status
+auto Tree::post_pivot(Node &parent, uint32_t idx, Cell &pivot, Id child_id) -> Status
 {
     const auto rc = parent.write(idx, pivot);
     if (rc > 0) {
@@ -870,7 +870,7 @@ auto Tree::post_pivot(Node &parent, U32 idx, Cell &pivot, Id child_id) -> Status
     return s;
 }
 
-auto Tree::insert_cell(Node &node, U32 idx, const Cell &cell) -> Status
+auto Tree::insert_cell(Node &node, uint32_t idx, const Cell &cell) -> Status
 {
     const auto rc = node.write(idx, cell);
     if (rc < 0) {
@@ -893,7 +893,7 @@ auto Tree::insert_cell(Node &node, U32 idx, const Cell &cell) -> Status
     return s;
 }
 
-auto Tree::remove_cell(Node &node, U32 idx) -> Status
+auto Tree::remove_cell(Node &node, uint32_t idx) -> Status
 {
     Cell cell;
     if (node.read(idx, cell)) {
@@ -933,7 +933,7 @@ auto Tree::fix_links(Node &node, Id parent_id) -> Status
         parent_id = node.ref->page_id;
     }
     Status s;
-    for (U32 i = 0, n = NodeHdr::get_cell_count(node.hdr()); s.is_ok() && i < n; ++i) {
+    for (uint32_t i = 0, n = NodeHdr::get_cell_count(node.hdr()); s.is_ok() && i < n; ++i) {
         Cell cell;
         if (node.read(i, cell)) {
             s = corrupted_node(node.ref->page_id);
@@ -1150,7 +1150,7 @@ auto Tree::resolve_underflow(TreeCursor &c) -> Status
 // which needs to be put in either `left` or `right`, depending on its index and which cell is
 // chosen as the new pivot. When called from erase(), the `left` node may be left totally empty,
 // in which case, it should be freed.
-auto Tree::redistribute_cells(Node &left, Node &right, Node &parent, U32 pivot_idx) -> Status
+auto Tree::redistribute_cells(Node &left, Node &right, Node &parent, uint32_t pivot_idx) -> Status
 {
     upgrade(parent);
 
@@ -1196,10 +1196,10 @@ auto Tree::redistribute_cells(Node &left, Node &right, Node &parent, U32 pivot_i
     std::unique_ptr<Cell[]> cell_buffer(new Cell[cell_count + 2]);
     auto *cells = cell_buffer.get() + 1;
     auto *cell_itr = cells;
-    U32 right_accum = 0;
+    uint32_t right_accum = 0;
     Cell cell;
 
-    for (U32 i = 0; i <= cell_count;) {
+    for (uint32_t i = 0; i <= cell_count;) {
         if (m_ovfl.exists() && i == m_ovfl.idx) {
             right_accum += m_ovfl.cell.footprint;
             // Move the overflow cell backing to an unused scratch buffer. The `parent` may overflow
@@ -1260,9 +1260,9 @@ auto Tree::redistribute_cells(Node &left, Node &right, Node &parent, U32 pivot_i
     CALICODB_EXPECT_GE(ncells, is_split ? 4 : 1);
 
     auto sep = -1;
-    for (U32 left_accum = 0; right_accum > p_left->usable_space / 2 &&
-                             right_accum > left_accum &&
-                             2 + sep++ < ncells;) {
+    for (uint32_t left_accum = 0; right_accum > p_left->usable_space / 2 &&
+                                  right_accum > left_accum &&
+                                  2 + sep++ < ncells;) {
         left_accum += cells[sep].footprint;
         right_accum -= cells[sep].footprint;
     }
@@ -1326,7 +1326,7 @@ auto Tree::redistribute_cells(Node &left, Node &right, Node &parent, U32 pivot_i
     return s;
 }
 
-auto Tree::fix_nonroot(TreeCursor &c, Node &parent, U32 idx) -> Status
+auto Tree::fix_nonroot(TreeCursor &c, Node &parent, uint32_t idx) -> Status
 {
     auto &node = c.m_node;
     CALICODB_EXPECT_NE(node.ref->page_id, root());
@@ -1482,7 +1482,7 @@ auto Tree::put(Cursor &c, const Slice &key, const Slice &value) -> Status
 
 auto Tree::put(TreeCursor &c, const Slice &key, const Slice &value) -> Status
 {
-    static constexpr auto kMaxLength = std::numeric_limits<U32>::max();
+    static constexpr auto kMaxLength = std::numeric_limits<uint32_t>::max();
     if (key.size() > kMaxLength) {
         return Status::invalid_argument("key is too long");
     } else if (value.size() > kMaxLength) {
@@ -1533,7 +1533,7 @@ auto Tree::put(const Slice &key, const Slice &value) -> Status
     return put(*m_cursor, key, value);
 }
 
-auto Tree::emplace(Node &node, const Slice &key, const Slice &value, U32 index, bool &overflow) -> Status
+auto Tree::emplace(Node &node, const Slice &key, const Slice &value, uint32_t index, bool &overflow) -> Status
 {
     CALICODB_EXPECT_TRUE(node.is_leaf());
     auto k = key.size();
@@ -1553,11 +1553,11 @@ auto Tree::emplace(Node &node, const Slice &key, const Slice &value, U32 index, 
     // of bytes needed for the cell.
     char header[kVarintMaxLength * 2];
     auto *ptr = header;
-    ptr = encode_varint(ptr, static_cast<U32>(value.size()));
-    ptr = encode_varint(ptr, static_cast<U32>(key.size()));
+    ptr = encode_varint(ptr, static_cast<uint32_t>(value.size()));
+    ptr = encode_varint(ptr, static_cast<uint32_t>(key.size()));
     const auto hdr_size = static_cast<std::uintptr_t>(ptr - header);
     const auto pad_size = hdr_size > kMinCellHeaderSize ? 0 : kMinCellHeaderSize - hdr_size;
-    const auto cell_size = local_pl_size + hdr_size + pad_size + sizeof(U32) * has_remote;
+    const auto cell_size = local_pl_size + hdr_size + pad_size + sizeof(uint32_t) * has_remote;
     // External cell headers are padded out to 4 bytes.
     std::memset(ptr, 0, pad_size);
 
@@ -1566,7 +1566,7 @@ auto Tree::emplace(Node &node, const Slice &key, const Slice &value, U32 index, 
     // that would interfere with the node header/indirection vector or cause an out-of-
     // bounds write (this only happens if the node is corrupted).
     const auto local_offset = node.alloc(
-        index, static_cast<U32>(cell_size));
+        index, static_cast<uint32_t>(cell_size));
     if (local_offset > 0) {
         ptr = node.ref->get_data() + local_offset;
         overflow = false;
@@ -1590,7 +1590,7 @@ auto Tree::emplace(Node &node, const Slice &key, const Slice &value, U32 index, 
 
     Status s;
     while (s.is_ok()) {
-        const auto n = std::min(len, static_cast<U32>(src.size()));
+        const auto n = std::min(len, static_cast<uint32_t>(src.size()));
         // Copy a chunk of the payload to a page. ptr either points to where the local payload
         // should go in node, or somewhere in prev, which holds the overflow page being written.
         std::memcpy(ptr, src.data(), n);
@@ -1611,7 +1611,7 @@ auto Tree::emplace(Node &node, const Slice &key, const Slice &value, U32 index, 
             if (s.is_ok()) {
                 put_u32(next_ptr, ovfl->page_id.value);
                 len = kLinkContentSize;
-                ptr = ovfl->get_data() + sizeof(U32);
+                ptr = ovfl->get_data() + sizeof(uint32_t);
                 next_ptr = ovfl->get_data();
                 if (prev) {
                     m_pager->release(prev, Pager::kNoCache);
@@ -1722,7 +1722,7 @@ auto Tree::vacuum_step(PageRef *&free, PointerMap::Entry entry, Schema &schema, 
                 return s;
             }
             bool found = false;
-            for (U32 i = 0, n = NodeHdr::get_cell_count(parent.hdr()); i < n; ++i) {
+            for (uint32_t i = 0, n = NodeHdr::get_cell_count(parent.hdr()); i < n; ++i) {
                 Cell cell;
                 if (parent.read(i, cell)) {
                     s = corrupted_node(parent.ref->page_id);
@@ -1761,7 +1761,7 @@ auto Tree::vacuum_step(PageRef *&free, PointerMap::Entry entry, Schema &schema, 
                     return corrupted_node(entry.back_ptr);
                 }
                 bool found = false;
-                for (U32 i = 0, n = NodeHdr::get_cell_count(parent.hdr()); !found && i <= n; ++i) {
+                for (uint32_t i = 0, n = NodeHdr::get_cell_count(parent.hdr()); !found && i <= n; ++i) {
                     const auto child_id = parent.read_child_id(i);
                     found = child_id == last_id;
                     if (found) {
@@ -1825,7 +1825,7 @@ auto Tree::vacuum_step(PageRef *&free, PointerMap::Entry entry, Schema &schema, 
 // Determine what the last page number should be after a vacuum operation completes on a database with the
 // given number of pages `db_size` and number of freelist (trunk + leaf) pages `free_size`. This computation
 // was taken from SQLite (src/btree.c:finalDbSize()).
-static auto vacuum_end_page(U32 db_size, U32 free_size) -> Id
+static auto vacuum_end_page(uint32_t db_size, uint32_t free_size) -> Id
 {
     // Number of entries that can fit on a pointer map page.
     static constexpr auto kEntriesPerMap = kPageSize / 5;
@@ -1913,9 +1913,9 @@ class InorderTraversal
 {
 public:
     struct TraversalInfo {
-        U32 idx;
-        U32 ncells;
-        U32 level;
+        uint32_t idx;
+        uint32_t ncells;
+        uint32_t level;
     };
     using Callback = std::function<Status(Node &, const TraversalInfo &)>;
 
@@ -1932,10 +1932,10 @@ public:
     }
 
 private:
-    static auto traverse_impl(const Tree &tree, Node node, const Callback &cb, U32 level) -> Status
+    static auto traverse_impl(const Tree &tree, Node node, const Callback &cb, uint32_t level) -> Status
     {
         Status s;
-        for (U32 i = 0, n = NodeHdr::get_cell_count(node.hdr()); s.is_ok() && i <= n; ++i) {
+        for (uint32_t i = 0, n = NodeHdr::get_cell_count(node.hdr()); s.is_ok() && i <= n; ++i) {
             if (!node.is_leaf()) {
                 const auto save_id = node.ref->page_id;
                 const auto next_id = node.read_child_id(i);
@@ -2012,14 +2012,14 @@ class TreePrinter
 {
     struct StructuralData {
         std::vector<std::string> levels;
-        std::vector<U32> spaces;
+        std::vector<uint32_t> spaces;
     };
 
-    static auto add_to_level(StructuralData &data, const std::string &message, U32 target) -> void
+    static auto add_to_level(StructuralData &data, const std::string &message, uint32_t target) -> void
     {
         // If target is equal to levels.size(), add spaces to all levels.
         CHECK_TRUE(target <= data.levels.size());
-        U32 i = 0;
+        uint32_t i = 0;
 
         auto s_itr = begin(data.spaces);
         auto L_itr = begin(data.levels);
@@ -2031,14 +2031,14 @@ class TreePrinter
                 L_itr->append(message);
                 *s_itr = 0;
             } else {
-                *s_itr += U32(message.size());
+                *s_itr += uint32_t(message.size());
             }
             ++L_itr;
             ++s_itr;
         }
     }
 
-    static auto ensure_level_exists(StructuralData &data, U32 level) -> void
+    static auto ensure_level_exists(StructuralData &data, uint32_t level) -> void
     {
         while (level >= data.levels.size()) {
             data.levels.emplace_back();
@@ -2089,7 +2089,7 @@ public:
                 std::string msg;
                 append_fmt_string(msg, "%sternalNode(%u)\n", node.is_leaf() ? "Ex" : "In",
                                   node.ref->page_id.value);
-                for (U32 i = 0; i < info.ncells; ++i) {
+                for (uint32_t i = 0; i < info.ncells; ++i) {
                     Cell cell;
                     if (node.read(i, cell)) {
                         return tree.corrupted_node(node.ref->page_id);
@@ -2131,7 +2131,7 @@ class TreeValidator
         }
     }
 
-    [[nodiscard]] static auto get_readable_content(const PageRef &page, U32 size_limit) -> Slice
+    [[nodiscard]] static auto get_readable_content(const PageRef &page, uint32_t size_limit) -> Slice
     {
         return Slice(page.get_data(), kPageSize).range(kLinkContentOffset, std::min(size_limit, kLinkContentSize));
     }
@@ -2175,7 +2175,7 @@ public:
             auto accumulated = cell.local_pl_size;
             auto requested = cell.key_size;
             if (node.is_leaf()) {
-                U32 value_size = 0;
+                uint32_t value_size = 0;
                 CHECK_TRUE(decode_varint(cell.ptr, node.ref->get_data() + kPageSize, value_size));
                 requested += value_size;
             }
@@ -2186,8 +2186,8 @@ public:
                 CHECK_OK(tree.m_pager->acquire(overflow_id, head));
                 traverse_chain(*tree.m_pager, head, [&](auto &page) {
                     CHECK_TRUE(requested > accumulated);
-                    const auto size_limit = std::min(static_cast<U32>(kPageSize), requested - accumulated);
-                    accumulated += U32(get_readable_content(*page, size_limit).size());
+                    const auto size_limit = std::min(static_cast<uint32_t>(kPageSize), requested - accumulated);
+                    accumulated += uint32_t(get_readable_content(*page, size_limit).size());
                 });
                 CHECK_EQ(requested, accumulated);
             }

@@ -24,7 +24,7 @@ struct Stat {
         kTypeCount
     };
 
-    U64 counters[kTypeCount] = {};
+    uint64_t counters[kTypeCount] = {};
 };
 
 } // namespace calicodb

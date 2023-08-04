@@ -17,7 +17,7 @@ class Slice final
 public:
     constexpr Slice() = default;
 
-    constexpr Slice(const char *data, std::size_t size)
+    constexpr Slice(const char *data, size_t size)
         : m_data(data),
           m_size(size)
     {
@@ -51,18 +51,18 @@ public:
         return m_data;
     }
 
-    [[nodiscard]] constexpr auto size() const -> std::size_t
+    [[nodiscard]] constexpr auto size() const -> size_t
     {
         return m_size;
     }
 
-    constexpr auto operator[](std::size_t index) const -> const char &
+    constexpr auto operator[](size_t index) const -> const char &
     {
         assert(index < m_size);
         return m_data[index];
     }
 
-    [[nodiscard]] constexpr auto range(std::size_t offset, std::size_t size) const -> Slice
+    [[nodiscard]] constexpr auto range(size_t offset, size_t size) const -> Slice
     {
         assert(size <= m_size);
         assert(offset <= m_size);
@@ -70,7 +70,7 @@ public:
         return {m_data + offset, size};
     }
 
-    [[nodiscard]] constexpr auto range(std::size_t offset) const -> Slice
+    [[nodiscard]] constexpr auto range(size_t offset) const -> Slice
     {
         assert(offset <= m_size);
         return range(offset, m_size - offset);
@@ -82,7 +82,7 @@ public:
         m_size = 0;
     }
 
-    constexpr auto advance(std::size_t n = 1) -> Slice
+    constexpr auto advance(size_t n = 1) -> Slice
     {
         assert(n <= m_size);
         m_data += n;
@@ -90,7 +90,7 @@ public:
         return *this;
     }
 
-    constexpr auto truncate(std::size_t size) -> Slice
+    constexpr auto truncate(size_t size) -> Slice
     {
         assert(size <= m_size);
         m_size = size;
@@ -126,7 +126,7 @@ public:
 
 private:
     const char *m_data = "";
-    std::size_t m_size = 0;
+    size_t m_size = 0;
 };
 
 inline auto operator<(const Slice &lhs, const Slice &rhs) -> bool

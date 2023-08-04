@@ -46,11 +46,11 @@ namespace calicodb
 
 class FuzzedInputProvider
 {
-    const U8 *m_ptr;
-    std::size_t m_len;
+    const uint8_t *m_ptr;
+    size_t m_len;
 
 public:
-    explicit FuzzedInputProvider(const U8 *ptr, std::size_t len)
+    explicit FuzzedInputProvider(const uint8_t *ptr, size_t len)
         : m_ptr(ptr),
           m_len(len)
     {
@@ -61,12 +61,12 @@ public:
         return m_len == 0;
     }
 
-    [[nodiscard]] auto length() const -> std::size_t
+    [[nodiscard]] auto length() const -> size_t
     {
         return m_len;
     }
 
-    [[nodiscard]] auto extract_random(std::size_t max_len) -> std::string
+    [[nodiscard]] auto extract_random(size_t max_len) -> std::string
     {
         std::string result;
         result.reserve(std::min(max_len, m_len));
@@ -91,7 +91,7 @@ public:
         return extract_random(m_len);
     }
 
-    auto advance(std::size_t len) -> void
+    auto advance(size_t len) -> void
     {
         CHECK_TRUE(len <= m_len);
         m_len -= len;
@@ -132,26 +132,27 @@ public:
     // actually change the tree structure: all that matters for record payloads is their length.
     [[nodiscard]] auto extract_random_record_value() -> std::string
     {
-        const auto len = extract_integral_in_range<std::size_t>(0, kPageSize * 3);
+        const auto len = extract_integral_in_range<size_t>(0, kPageSize * 3);
         return std::string(len, '\0');
     }
 
-    [[nodiscard]] auto extract_fixed(std::size_t len) -> Slice
+    [[nodiscard]] auto extract_fixed(size_t len) -> Slice
     {
         const auto fixed = peek(len);
         advance(fixed.size());
         return fixed;
     }
-    
+
     // NOTE: T::kMaxValue must be aliased to the largest enumerator value
-    template <typename T> auto extract_enum() -> T
+    template <typename T>
+    auto extract_enum() -> T
     {
         static_assert(std::is_enum<T>::value, "|T| must be an enum type.");
         return static_cast<T>(
-            extract_integral_in_range<U32>(0, static_cast<U32>(T::kMaxValue)));
+            extract_integral_in_range<uint32_t>(0, static_cast<uint32_t>(T::kMaxValue)));
     }
 
-    [[nodiscard]] auto peek(std::size_t len) -> Slice
+    [[nodiscard]] auto peek(size_t len) -> Slice
     {
         CHECK_TRUE(len <= m_len);
         return {reinterpret_cast<const char *>(m_ptr), len};

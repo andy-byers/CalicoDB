@@ -40,7 +40,7 @@ public:
 
             ~TempFile() override = default;
 
-            auto read(std::size_t offset, std::size_t size, char *scratch, Slice *data_out) -> Status override
+            auto read(size_t offset, size_t size, char *scratch, Slice *data_out) -> Status override
             {
                 const auto page_id = Id::from_index(offset / kPageSize);
 
@@ -62,7 +62,7 @@ public:
                 return Status::ok();
             }
 
-            auto write(std::size_t offset, const Slice &data) -> Status override
+            auto write(size_t offset, const Slice &data) -> Status override
             {
                 const auto page_id = Id::from_index(offset / kPageSize);
 
@@ -75,7 +75,7 @@ public:
                 return Status::ok();
             }
 
-            auto resize(std::size_t size) -> Status override
+            auto resize(size_t size) -> Status override
             {
                 const auto page_count = size / kPageSize;
                 CALICODB_EXPECT_EQ(size, page_count * kPageSize);
@@ -93,12 +93,12 @@ public:
                 return Status::ok();
             }
 
-            auto shm_map(std::size_t, bool, volatile void *&) -> Status override
+            auto shm_map(size_t, bool, volatile void *&) -> Status override
             {
                 return Status::not_supported();
             }
 
-            auto shm_lock(std::size_t, std::size_t, ShmLockFlag) -> Status override
+            auto shm_lock(size_t, size_t, ShmLockFlag) -> Status override
             {
                 return Status::not_supported();
             }
@@ -115,7 +115,7 @@ public:
         return Status::ok();
     }
 
-    auto file_size(const std::string &filename, std::size_t &size_out) const -> Status override
+    auto file_size(const std::string &filename, size_t &size_out) const -> Status override
     {
         if (file_exists(filename)) {
             size_out = m_file.pages.size() * kPageSize;
@@ -177,7 +177,7 @@ private:
             return pages[idx].data();
         }
 
-        auto resize(std::size_t page_count) -> void
+        auto resize(size_t page_count) -> void
         {
             pages.resize(page_count, std::string(kPageSize, '\0'));
         }
@@ -229,7 +229,7 @@ public:
         return Status::ok();
     }
 
-    auto write(PageRef *first_ref, std::size_t db_size) -> Status override
+    auto write(PageRef *first_ref, size_t db_size) -> Status override
     {
         auto *dirty = first_ref->get_dirty_hdr();
         for (auto *p = dirty; p; p = p->dirty) {
@@ -274,14 +274,14 @@ public:
         return Status::ok();
     }
 
-    [[nodiscard]] auto last_frame_count() const -> std::size_t override
+    [[nodiscard]] auto last_frame_count() const -> size_t override
     {
         return 0;
     }
 
-    [[nodiscard]] auto db_size() const -> U32 override
+    [[nodiscard]] auto db_size() const -> uint32_t override
     {
-        return static_cast<U32>(m_env->m_file.pages.size());
+        return static_cast<uint32_t>(m_env->m_file.pages.size());
     }
 
 private:

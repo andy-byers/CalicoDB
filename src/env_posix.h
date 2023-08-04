@@ -13,7 +13,7 @@ namespace calicodb
 
 class PosixEnv : public Env
 {
-    U16 m_rng[3] = {};
+    uint16_t m_rng[3] = {};
 
 public:
     explicit PosixEnv();
@@ -23,7 +23,7 @@ public:
     auto new_file(const std::string &filename, OpenMode mode, File *&out) -> Status override;
     [[nodiscard]] auto file_exists(const std::string &filename) const -> bool override;
     auto remove_file(const std::string &filename) -> Status override;
-    [[nodiscard]] auto file_size(const std::string &filename, std::size_t &out) const -> Status override;
+    [[nodiscard]] auto file_size(const std::string &filename, size_t &out) const -> Status override;
 
     auto srand(unsigned seed) -> void override;
     [[nodiscard]] auto rand() -> unsigned override;

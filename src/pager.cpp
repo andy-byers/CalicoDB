@@ -19,7 +19,7 @@ auto Pager::purge_page(PageRef &victim) -> void
     if (victim.get_flag(PageRef::kDirty)) {
         m_dirtylist.remove(victim);
     }
-    m_bufmgr.erase(victim.page_id);
+    m_bufmgr.erase(victim);
 }
 
 auto Pager::read_page(PageRef &page_out, size_t *size_out) -> Status
@@ -38,7 +38,7 @@ auto Pager::read_page(PageRef &page_out, size_t *size_out) -> Status
     }
 
     if (!s.is_ok()) {
-        m_bufmgr.erase(page_out.page_id);
+        m_bufmgr.erase(page_out);
         if (m_mode > kRead) {
             set_status(s);
         }
@@ -46,7 +46,7 @@ auto Pager::read_page(PageRef &page_out, size_t *size_out) -> Status
     return s;
 }
 
-auto Pager::read_page_from_file(PageRef &ref, std::size_t *size_out) const -> Status
+auto Pager::read_page_from_file(PageRef &ref, size_t *size_out) const -> Status
 {
     Slice slice;
     const auto offset = ref.page_id.as_index() * kPageSize;
@@ -238,7 +238,7 @@ auto Pager::move_page(PageRef &page, Id destination) -> void
     // Caller must have called Pager::release(<page at `destination`>, Pager::kDiscard).
     CALICODB_EXPECT_EQ(m_bufmgr.query(destination), nullptr);
     CALICODB_EXPECT_EQ(page.refs, 1);
-    m_bufmgr.erase(page.page_id);
+    m_bufmgr.erase(page);
     page.page_id = destination;
     if (page.get_flag(PageRef::kDirty)) {
         m_bufmgr.register_page(page);
@@ -304,7 +304,7 @@ auto Pager::checkpoint(bool reset) -> Status
     return m_wal->checkpoint(reset);
 }
 
-auto Pager::auto_checkpoint(std::size_t frame_limit) -> Status
+auto Pager::auto_checkpoint(size_t frame_limit) -> Status
 {
     CALICODB_EXPECT_GT(frame_limit, 0);
     if (m_wal && frame_limit < m_wal->last_frame_count()) {
@@ -338,7 +338,7 @@ auto Pager::flush_dirty_pages() -> Status
     return m_wal->write(p->get_page_ref(), m_page_count);
 }
 
-auto Pager::set_page_count(U32 page_count) -> void
+auto Pager::set_page_count(uint32_t page_count) -> void
 {
     CALICODB_EXPECT_GE(m_mode, kWrite);
     for (auto i = page_count; i < m_page_count; ++i) {
@@ -370,6 +370,7 @@ auto Pager::ensure_available_buffer() -> Status
             m_dirtylist.remove(*victim);
         } else {
             set_status(s);
+            return s;
         }
     }
 
@@ -377,7 +378,7 @@ auto Pager::ensure_available_buffer() -> Status
     // next time m_bufmgr.next_victim() is called, it just can't be found using its page ID
     // anymore. This is a NOOP if the page reference was just allocated.
     if (victim->get_flag(PageRef::kCached)) {
-        m_bufmgr.erase(victim->page_id);
+        m_bufmgr.erase(*victim);
     }
     return s;
 }
@@ -389,7 +390,7 @@ auto Pager::allocate(PageRef *&page_out) -> Status
     CALICODB_EXPECT_GE(m_mode, kWrite);
     page_out = nullptr;
 
-    static constexpr U32 kMaxPageCount = 0xFF'FF'FF'FF;
+    static constexpr uint32_t kMaxPageCount = 0xFF'FF'FF'FF;
     if (m_page_count == kMaxPageCount) {
         std::string message("reached the maximum allowed DB size (~");
         append_number(message, kMaxPageCount * kPageSize / 1'048'576);
@@ -510,7 +511,7 @@ auto Pager::release(PageRef *&page, ReleaseAction action) -> void
                         CALICODB_EXPECT_GE(m_mode, kDirty);
                         m_dirtylist.remove(*page);
                     }
-                    m_bufmgr.erase(page->page_id);
+                    m_bufmgr.erase(*page);
                 }
             }
         }
@@ -538,7 +539,7 @@ auto Pager::refresh_state() -> Status
     // Read the most-recent version of the database root page. This copy of the root may be located in
     // either the WAL, or the database file. If the database file is empty, and the WAL has never been
     // written, then a blank page is obtained here.
-    std::size_t read_size = 0;
+    size_t read_size = 0;
     s = read_page(*m_bufmgr.root(), &read_size);
     if (s.is_ok()) {
         if (read_size == kPageSize) {
@@ -553,14 +554,14 @@ auto Pager::refresh_state() -> Status
             if (m_page_count == 0) {
                 const auto hdr_db_size = FileHdr::get_page_count(
                     m_bufmgr.root()->get_data());
-                std::size_t file_size;
+                size_t file_size;
                 s = m_env->file_size(m_db_name, file_size);
                 if (s.is_ok()) {
                     // Number of pages in the database file, rounded up to the nearest page.
                     const auto actual_db_size =
                         (file_size + kPageSize - 1) / kPageSize;
                     if (actual_db_size == hdr_db_size) {
-                        m_page_count = static_cast<U32>(actual_db_size);
+                        m_page_count = static_cast<uint32_t>(actual_db_size);
                         m_saved_page_count = m_page_count;
                     } else {
                         s = Status::corruption();
@@ -617,10 +618,10 @@ auto Pager::assert_state() const -> bool
 }
 
 static constexpr auto kEntrySize =
-    sizeof(char) + // Type (1 B)
-    sizeof(U32);   // Back pointer (4 B)
+    sizeof(char) +    // Type (1 B)
+    sizeof(uint32_t); // Back pointer (4 B)
 
-static auto entry_offset(Id map_id, Id page_id) -> std::size_t
+static auto entry_offset(Id map_id, Id page_id) -> size_t
 {
     CALICODB_EXPECT_LT(map_id, page_id);
     return (page_id.value - map_id.value - 1) * kEntrySize;

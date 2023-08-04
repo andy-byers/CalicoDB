@@ -58,19 +58,19 @@ TEST(PathParserTests, JoinsComponents)
     ASSERT_EQ(join_paths("dirname", "basename"), "dirname/basename");
 }
 
-static auto make_filename(std::size_t n)
+static auto make_filename(size_t n)
 {
     return numeric_key<10>(n);
 }
 static auto write_out_randomly(RandomGenerator &random, File &writer, const Slice &message) -> void
 {
-    constexpr std::size_t kChunks = 20;
+    constexpr size_t kChunks = 20;
     ASSERT_GT(message.size(), kChunks) << "File is too small for this test";
     Slice in(message);
-    std::size_t counter = 0;
+    size_t counter = 0;
 
     while (!in.is_empty()) {
-        const auto chunk_size = std::min<std::size_t>(in.size(), random.Next(message.size() / kChunks));
+        const auto chunk_size = std::min<size_t>(in.size(), random.Next(message.size() / kChunks));
         auto chunk = in.range(0, chunk_size);
 
         ASSERT_TRUE(writer.write(counter, chunk).is_ok());
@@ -79,16 +79,16 @@ static auto write_out_randomly(RandomGenerator &random, File &writer, const Slic
     }
     ASSERT_TRUE(in.is_empty());
 }
-[[nodiscard]] static auto read_back_randomly(RandomGenerator &random, File &reader, std::size_t size) -> std::string
+[[nodiscard]] static auto read_back_randomly(RandomGenerator &random, File &reader, size_t size) -> std::string
 {
-    static constexpr std::size_t kChunks = 20;
+    static constexpr size_t kChunks = 20;
     EXPECT_GT(size, kChunks) << "File is too small for this test";
     std::string backing(size, '\x00');
     auto *out_data = backing.data();
-    std::size_t counter = 0;
+    size_t counter = 0;
 
     while (counter < size) {
-        const auto chunk_size = std::min<std::size_t>(size - counter, random.Next(size / kChunks));
+        const auto chunk_size = std::min<size_t>(size - counter, random.Next(size / kChunks));
         const auto s = reader.read_exact(counter, chunk_size, out_data);
         EXPECT_TRUE(s.is_ok()) << "Error: " << s.to_string().data();
         out_data += chunk_size;
@@ -124,7 +124,7 @@ struct EnvWithFiles final {
         kDifferentName,
     };
 
-    [[nodiscard]] auto open_file(std::size_t id, Env::OpenMode mode, bool clear = false) const -> File *
+    [[nodiscard]] auto open_file(size_t id, Env::OpenMode mode, bool clear = false) const -> File *
     {
         File *file;
         const auto filename = m_dirname + make_filename(id);
@@ -152,7 +152,7 @@ struct EnvWithFiles final {
     std::string m_dirname;
     std::vector<File *> files;
     Env *env = nullptr;
-    std::size_t last_id = 0;
+    size_t last_id = 0;
 };
 
 // Helper for testing shared memory
@@ -164,7 +164,7 @@ public:
     {
     }
 
-    auto read(std::size_t offset, std::size_t size) -> std::string
+    auto read(size_t offset, size_t size) -> std::string
     {
         std::string out(size, '\0');
         auto *ptr = out.data();
@@ -172,7 +172,7 @@ public:
             volatile void *mem;
             EXPECT_OK(m_file->shm_map(r, true, mem));
             const volatile char *begin = reinterpret_cast<volatile char *>(mem);
-            std::size_t copy_offset = 0;
+            size_t copy_offset = 0;
             if (ptr == out.data()) {
                 copy_offset = offset % File::kShmRegionSize;
             }
@@ -184,7 +184,7 @@ public:
         return out;
     }
 
-    auto write(std::size_t offset, const Slice &in) -> void
+    auto write(size_t offset, const Slice &in) -> void
     {
         const auto r1 = offset / File::kShmRegionSize;
         Slice copy(in);
@@ -193,7 +193,7 @@ public:
             EXPECT_OK(m_file->shm_map(r, true, mem));
             EXPECT_TRUE(mem);
             volatile char *begin = reinterpret_cast<volatile char *>(mem);
-            std::size_t copy_offset = 0;
+            size_t copy_offset = 0;
             if (r == r1) {
                 copy_offset = offset % File::kShmRegionSize;
             }
@@ -207,13 +207,13 @@ private:
     File *m_file;
 };
 
-static constexpr std::size_t kFileVersionOffset = 1024;
-static constexpr std::size_t kVersionLengthInU32 = 128;
-static constexpr auto kVersionLength = kVersionLengthInU32 * sizeof(U32);
+static constexpr size_t kFileVersionOffset = 1024;
+static constexpr size_t kVersionLengthInuint32_t = 128;
+static constexpr auto kVersionLength = kVersionLengthInuint32_t * sizeof(uint32_t);
 
 // REQUIRES: kShared or greater file_lock is held on "file"
-static constexpr auto kBadVersion = static_cast<U32>(-1);
-static auto read_file_version(File &file) -> U32
+static constexpr auto kBadVersion = static_cast<uint32_t>(-1);
+static auto read_file_version(File &file) -> uint32_t
 {
     Slice version_slice;
     std::string version_string(kVersionLength, '\0');
@@ -225,13 +225,13 @@ static auto read_file_version(File &file) -> U32
     const auto version = version_slice.is_empty()
                              ? 0
                              : get_u32(version_slice.data());
-    for (std::size_t i = 1; i < kVersionLengthInU32; ++i) {
-        EXPECT_EQ(version, get_u32(version_string.data() + sizeof(U32) * i));
+    for (size_t i = 1; i < kVersionLengthInuint32_t; ++i) {
+        EXPECT_EQ(version, get_u32(version_string.data() + sizeof(uint32_t) * i));
     }
     return version;
 }
 // REQUIRES: kShared file_lock is held on byte "index" of "shm"
-static auto read_shm_version(File &file, std::size_t index) -> U32
+static auto read_shm_version(File &file, size_t index) -> uint32_t
 {
     SharedBuffer sh(file);
 
@@ -239,46 +239,46 @@ static auto read_shm_version(File &file, std::size_t index) -> U32
     const auto offset = (index + 1) * File::kShmRegionSize - kVersionLength / 2;
     const auto version_string = sh.read(offset, kVersionLength);
     const auto version = get_u32(version_string.data());
-    for (std::size_t i = 1; i < kVersionLengthInU32; ++i) {
-        EXPECT_EQ(version, get_u32(version_string.data() + sizeof(U32) * i));
+    for (size_t i = 1; i < kVersionLengthInuint32_t; ++i) {
+        EXPECT_EQ(version, get_u32(version_string.data() + sizeof(uint32_t) * i));
     }
     return version;
 }
 // REQUIRES: kExclusive file_lock is held on "file"
-static auto write_file_version(File &file, U32 version) -> void
+static auto write_file_version(File &file, uint32_t version) -> void
 {
     std::string version_string(kVersionLength, '\0');
-    for (std::size_t i = 0; i < kVersionLengthInU32; ++i) {
-        put_u32(version_string.data() + sizeof(U32) * i, version);
+    for (size_t i = 0; i < kVersionLengthInuint32_t; ++i) {
+        put_u32(version_string.data() + sizeof(uint32_t) * i, version);
     }
     EXPECT_OK(file.write(
         kFileVersionOffset,
         version_string));
 }
 // REQUIRES: kExclusive file_lock is held on byte "index" of "shm"
-static auto write_shm_version(File &file, U32 version, std::size_t index) -> void
+static auto write_shm_version(File &file, uint32_t version, size_t index) -> void
 {
     std::string version_string(kVersionLength, '\0');
-    for (std::size_t i = 0; i < kVersionLengthInU32; ++i) {
-        put_u32(version_string.data() + sizeof(U32) * i, version);
+    for (size_t i = 0; i < kVersionLengthInuint32_t; ++i) {
+        put_u32(version_string.data() + sizeof(uint32_t) * i, version);
     }
     SharedBuffer sh(file);
     const auto offset = (index + 1) * File::kShmRegionSize - kVersionLength / 2;
     sh.write(offset, version_string);
 }
-static auto sum_shm_versions(File &file) -> U32
+static auto sum_shm_versions(File &file) -> uint32_t
 {
-    U32 total = 0;
-    for (std::size_t i = 0; i < File::kShmLockCount; ++i) {
+    uint32_t total = 0;
+    for (size_t i = 0; i < File::kShmLockCount; ++i) {
         total += read_shm_version(file, i);
     }
     return total;
 }
 
-class FileTests : public testing::TestWithParam<std::size_t>
+class FileTests : public testing::TestWithParam<size_t>
 {
 public:
-    const std::size_t kCount = GetParam();
+    const size_t kCount = GetParam();
 
     explicit FileTests()
     {
@@ -293,7 +293,7 @@ public:
         const auto message = m_random.Generate(1'024);
         auto *original = m_helper.open_unowned_file(EnvWithFiles::kDifferentName, Env::kCreate);
         write_out_randomly(m_random, *original, message);
-        for (std::size_t i = 0; i < kCount; ++i) {
+        for (size_t i = 0; i < kCount; ++i) {
             auto *file = m_helper.open_unowned_file(EnvWithFiles::kSameName, Env::kReadOnly);
             ASSERT_EQ(message, read_back_randomly(m_random, *file, message.size()));
         }
@@ -308,11 +308,11 @@ protected:
 
 TEST_P(FileTests, OpenAndClose)
 {
-    for (std::size_t i = 0; i < 2; ++i) {
+    for (size_t i = 0; i < 2; ++i) {
         auto *file = m_helper.open_unowned_file(
             EnvWithFiles::kSameName,
             Env::kCreate);
-        for (std::size_t j = 0; j < 2; ++j) {
+        for (size_t j = 0; j < 2; ++j) {
             ASSERT_OK(m_helper.env->new_file("shmfile", Env::kCreate, file));
             ASSERT_NE(file, nullptr);
             delete file;
@@ -386,7 +386,7 @@ TEST_F(LoggerTests, LogsFormattedText)
 TEST_F(LoggerTests, HandlesMessages)
 {
     std::string msg;
-    for (std::size_t n = 0; n < 512; ++n) {
+    for (size_t n = 0; n < 512; ++n) {
         reset();
 
         msg.resize(n, '$');
@@ -400,7 +400,7 @@ TEST_F(LoggerTests, HandlesMessages)
 TEST_F(LoggerTests, HandlesLongMessages)
 {
     std::string msg;
-    for (std::size_t n = 1'000; n < 10'000; n *= 10) {
+    for (size_t n = 1'000; n < 10'000; n *= 10) {
         reset();
 
         msg.resize(n, '$');
@@ -411,10 +411,10 @@ TEST_F(LoggerTests, HandlesLongMessages)
     }
 }
 
-class EnvLockStateTests : public testing::TestWithParam<std::size_t>
+class EnvLockStateTests : public testing::TestWithParam<size_t>
 {
 public:
-    const std::size_t kReplicates = GetParam();
+    const size_t kReplicates = GetParam();
     std::string m_filename;
 
     explicit EnvLockStateTests()
@@ -483,7 +483,7 @@ public:
     template <class Test>
     auto run_test(const Test &&test)
     {
-        for (std::size_t i = 0; i < kReplicates; ++i) {
+        for (size_t i = 0; i < kReplicates; ++i) {
             test();
         }
     }
@@ -607,7 +607,7 @@ TEST_F(EnvShmTests, LockCompatibility)
     ASSERT_OK(c->shm_map(0, true, ptr));
 
     // Shared locks can overlap, but they can only be 1 byte long.
-    for (std::size_t i = 0; i < 8; ++i) {
+    for (size_t i = 0; i < 8; ++i) {
         ASSERT_OK(a->shm_lock(i, 1, kShmLock | kShmReader));
         if (i < 4) {
             ASSERT_OK(b->shm_lock(i, 1, kShmLock | kShmReader));
@@ -663,7 +663,7 @@ static auto busy_wait_file_lock(File &file, bool is_writer) -> void
     } while (s.is_busy());
     ASSERT_OK(s);
 }
-static auto busy_wait_shm_lock(File &file, std::size_t r, std::size_t n, ShmLockFlag flags) -> void
+static auto busy_wait_shm_lock(File &file, size_t r, size_t n, ShmLockFlag flags) -> void
 {
     CALICODB_EXPECT_LE(r + n, File::kShmLockCount);
     for (;;) {
@@ -705,13 +705,13 @@ static auto shm_lifetime_test_routine(Env &env, const std::string &filename, boo
 
     delete file;
 }
-static auto shm_reader_writer_test_routine(File &file, std::size_t r, std::size_t n, bool is_writer) -> void
+static auto shm_reader_writer_test_routine(File &file, size_t r, size_t n, bool is_writer) -> void
 {
     ASSERT_TRUE(is_writer || n == 1);
     const auto lock_flag = is_writer ? kShmWriter : kShmReader;
     busy_wait_shm_lock(file, r, n, kShmLock | lock_flag);
 
-    for (std::size_t i = r; i < r + n; ++i) {
+    for (size_t i = r; i < r + n; ++i) {
         const auto version = read_shm_version(file, i);
         if (is_writer) {
             write_shm_version(file, version + 1, i);
@@ -722,7 +722,7 @@ static auto shm_reader_writer_test_routine(File &file, std::size_t r, std::size_
 
 class SharedCount
 {
-    volatile U32 *m_ptr = nullptr;
+    volatile uint32_t *m_ptr = nullptr;
     File *m_file = nullptr;
 
 public:
@@ -732,7 +732,7 @@ public:
         EXPECT_OK(env.new_file(name, Env::kCreate | Env::kReadWrite, m_file));
         EXPECT_OK(m_file->shm_map(0, true, ptr));
         EXPECT_TRUE(ptr);
-        m_ptr = reinterpret_cast<volatile U32 *>(ptr);
+        m_ptr = reinterpret_cast<volatile uint32_t *>(ptr);
     }
 
     ~SharedCount()
@@ -748,15 +748,15 @@ public:
         kAcqRel = __ATOMIC_ACQ_REL,
         kSeqCst = __ATOMIC_SEQ_CST,
     };
-    auto load(MemoryOrder order = kAcquire) const -> U32
+    auto load(MemoryOrder order = kAcquire) const -> uint32_t
     {
         return __atomic_load_n(m_ptr, order);
     }
-    auto store(U32 value, MemoryOrder order = kRelease) -> void
+    auto store(uint32_t value, MemoryOrder order = kRelease) -> void
     {
         __atomic_store_n(m_ptr, value, order);
     }
-    auto increase(U32 n, MemoryOrder order = kRelaxed) -> U32
+    auto increase(uint32_t n, MemoryOrder order = kRelaxed) -> uint32_t
     {
         return __atomic_add_fetch(m_ptr, n, order);
     }
@@ -777,15 +777,15 @@ public:
 // Locking between threads in the same process must be coordinated through the
 // global inode list.
 struct EnvConcurrencyTestsParam {
-    std::size_t num_envs = 0;
-    std::size_t num_threads = 0;
+    size_t num_envs = 0;
+    size_t num_threads = 0;
 };
 class EnvConcurrencyTests : public testing::TestWithParam<EnvConcurrencyTestsParam>
 {
 public:
-    const std::size_t kNumEnvs = GetParam().num_envs;
-    const std::size_t kNumThreads = GetParam().num_threads;
-    static constexpr std::size_t kNumRounds = 500;
+    const size_t kNumEnvs = GetParam().num_envs;
+    const size_t kNumThreads = GetParam().num_threads;
+    static constexpr size_t kNumRounds = 500;
     std::string m_dirname;
 
     ~EnvConcurrencyTests() override = default;
@@ -818,7 +818,7 @@ public:
     template <class Test>
     auto run_test(const Test &test)
     {
-        for (std::size_t n = 0; n < kNumEnvs; ++n) {
+        for (size_t n = 0; n < kNumEnvs; ++n) {
             const auto pid = fork();
             ASSERT_NE(-1, pid) << strerror(errno);
             if (pid) {
@@ -828,7 +828,7 @@ public:
             test(n);
             std::exit(testing::Test::HasFailure());
         }
-        for (std::size_t n = 0; n < kNumEnvs; ++n) {
+        for (size_t n = 0; n < kNumEnvs; ++n) {
             int s;
             const auto pid = wait(&s);
             ASSERT_NE(pid, -1)
@@ -841,18 +841,18 @@ public:
     }
 
     template <class IsWriter>
-    auto run_reader_writer_test(std::size_t writers_per_thread, const IsWriter &is_writer) -> void
+    auto run_reader_writer_test(size_t writers_per_thread, const IsWriter &is_writer) -> void
     {
         set_up(true);
         run_test([&is_writer, this](auto) {
-            for (std::size_t i = 0; i < kNumThreads; ++i) {
+            for (size_t i = 0; i < kNumThreads; ++i) {
                 set_up();
             }
             std::vector<std::thread> threads;
             while (threads.size() < kNumThreads) {
                 const auto t = threads.size();
                 threads.emplace_back([&is_writer, t, this] {
-                    for (std::size_t r = 0; r < kNumRounds; ++r) {
+                    for (size_t r = 0; r < kNumRounds; ++r) {
                         file_reader_writer_test_routine(*m_env, *m_helper.files[t], is_writer(r));
                     }
                 });
@@ -867,14 +867,14 @@ public:
 
     auto run_shm_lifetime_test(bool unlink) -> void
     {
-        for (std::size_t i = 0; i < kNumThreads; ++i) {
+        for (size_t i = 0; i < kNumThreads; ++i) {
             set_up(true);
         }
         run_test([this, unlink](auto) {
             std::vector<std::thread> threads;
             while (threads.size() < kNumThreads) {
                 threads.emplace_back([this, unlink] {
-                    for (std::size_t r = 0; r < kNumRounds; ++r) {
+                    for (size_t r = 0; r < kNumRounds; ++r) {
                         shm_lifetime_test_routine(
                             *m_helper.env, m_dirname + make_filename(0), unlink);
                     }
@@ -886,16 +886,16 @@ public:
         });
     }
 
-    auto run_shm_reader_writer_test(std::size_t writer_n, std::size_t num_writers) -> void
+    auto run_shm_reader_writer_test(size_t writer_n, size_t num_writers) -> void
     {
-        std::vector<std::size_t> indices(kNumRounds);
+        std::vector<size_t> indices(kNumRounds);
         std::iota(begin(indices), end(indices), 0);
         std::default_random_engine rng(42);
         std::shuffle(begin(indices), end(indices), rng);
         indices.resize(num_writers);
 
         std::vector<bool> flags(kNumRounds);
-        for (std::size_t i = 0; i < num_writers; ++i) {
+        for (size_t i = 0; i < num_writers; ++i) {
             flags[indices[i]] = true;
         }
 
@@ -906,7 +906,7 @@ public:
         volatile void *ptr;
         ASSERT_OK(file->shm_map(0, true, ptr));
         run_test([&](auto) {
-            for (std::size_t i = 0; i < kNumThreads; ++i) {
+            for (size_t i = 0; i < kNumThreads; ++i) {
                 set_up();
                 ASSERT_OK(m_helper.files[i]->shm_map(0, true, ptr));
             }
@@ -914,7 +914,7 @@ public:
             while (threads.size() < kNumThreads) {
                 const auto t = threads.size();
                 threads.emplace_back([t, this, &flags, writer_n] {
-                    for (std::size_t r = 0; r < kNumRounds; ++r) {
+                    for (size_t r = 0; r < kNumRounds; ++r) {
                         shm_reader_writer_test_routine(
                             *m_helper.files[t],
                             r % (File::kShmLockCount - flags[r] * (writer_n - 1)),
@@ -934,7 +934,7 @@ public:
         m_helper.cleanup_files();
     }
 
-    auto run_shm_atomic_test(std::size_t num_writes) -> void
+    auto run_shm_atomic_test(size_t num_writes) -> void
     {
         ASSERT_LE(num_writes, kNumRounds);
         auto &env = Env::default_env();
@@ -946,7 +946,7 @@ public:
             std::vector<std::thread> threads;
             while (threads.size() < kNumThreads) {
                 threads.emplace_back([&env, num_writes] {
-                    for (std::size_t r = 0; r < kNumRounds; ++r) {
+                    for (size_t r = 0; r < kNumRounds; ++r) {
                         SharedCount count(env, "shared_count");
                         if (r < num_writes) {
                             count.increase(1);
@@ -1058,7 +1058,7 @@ TEST(EnvWrappers, WrapperEnvWorksAsExpected)
     ASSERT_TRUE(w_env.file_exists("file"));
     volatile void *ptr;
     delete file;
-    std::size_t size;
+    size_t size;
     ASSERT_OK(w_env.file_size("file", size));
     ASSERT_EQ(size, 0);
     w_env.srand(123);

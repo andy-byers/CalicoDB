@@ -39,19 +39,19 @@ struct FileHdr {
 
     enum {
         kPageCountOffset = sizeof(kFmtString),
-        kFreelistHeadOffset = kPageCountOffset + sizeof(U32),
-        kFreelistLengthOffset = kFreelistHeadOffset + sizeof(U32),
-        kFmtVersionOffset = kFreelistLengthOffset + sizeof(U32),
+        kFreelistHeadOffset = kPageCountOffset + sizeof(uint32_t),
+        kFreelistLengthOffset = kFreelistHeadOffset + sizeof(uint32_t),
+        kFmtVersionOffset = kFreelistLengthOffset + sizeof(uint32_t),
         kReservedOffset = kFmtVersionOffset + sizeof(char),
         kSize = 64
     };
     static_assert(kReservedOffset < kSize);
 
-    [[nodiscard]] static auto get_page_count(const char *root) -> U32
+    [[nodiscard]] static auto get_page_count(const char *root) -> uint32_t
     {
         return get_u32(root + kPageCountOffset);
     }
-    static auto put_page_count(char *root, U32 value) -> void
+    static auto put_page_count(char *root, uint32_t value) -> void
     {
         put_u32(root + kPageCountOffset, value);
     }
@@ -65,11 +65,11 @@ struct FileHdr {
         put_u32(root + kFreelistHeadOffset, value.value);
     }
 
-    [[nodiscard]] static auto get_freelist_length(const char *root) -> U32
+    [[nodiscard]] static auto get_freelist_length(const char *root) -> uint32_t
     {
         return get_u32(root + kFreelistLengthOffset);
     }
-    static auto put_freelist_length(char *root, U32 value) -> void
+    static auto put_freelist_length(char *root, uint32_t value) -> void
     {
         put_u32(root + kFreelistLengthOffset, value);
     }
@@ -95,11 +95,11 @@ struct NodeHdr {
     enum {
         kTypeOffset,
         kCellCountOffset = kTypeOffset + sizeof(Type),
-        kCellStartOffset = kCellCountOffset + sizeof(U16),
-        kFreeStartOffset = kCellStartOffset + sizeof(U16),
-        kFragCountOffset = kFreeStartOffset + sizeof(U16),
+        kCellStartOffset = kCellCountOffset + sizeof(uint16_t),
+        kFreeStartOffset = kCellStartOffset + sizeof(uint16_t),
+        kFragCountOffset = kFreeStartOffset + sizeof(uint16_t),
         kNextIdOffset = kFragCountOffset + sizeof(char),
-        kSize = kNextIdOffset + sizeof(U32)
+        kSize = kNextIdOffset + sizeof(uint32_t)
     };
 
     [[nodiscard]] static auto get_type(const char *root) -> Type
@@ -118,39 +118,39 @@ struct NodeHdr {
         root[kTypeOffset] = static_cast<char>(kInternal + is_external);
     }
 
-    [[nodiscard]] static auto get_cell_count(const char *root) -> U32
+    [[nodiscard]] static auto get_cell_count(const char *root) -> uint32_t
     {
         return get_u16(root + kCellCountOffset);
     }
-    static auto put_cell_count(char *root, U32 value) -> void
+    static auto put_cell_count(char *root, uint32_t value) -> void
     {
-        put_u16(root + kCellCountOffset, static_cast<U16>(value));
+        put_u16(root + kCellCountOffset, static_cast<uint16_t>(value));
     }
 
-    [[nodiscard]] static auto get_cell_start(const char *root) -> U32
+    [[nodiscard]] static auto get_cell_start(const char *root) -> uint32_t
     {
         return get_u16(root + kCellStartOffset);
     }
-    static auto put_cell_start(char *root, U32 value) -> void
+    static auto put_cell_start(char *root, uint32_t value) -> void
     {
-        put_u16(root + kCellStartOffset, static_cast<U16>(value));
+        put_u16(root + kCellStartOffset, static_cast<uint16_t>(value));
     }
 
-    [[nodiscard]] static auto get_free_start(const char *root) -> U32
+    [[nodiscard]] static auto get_free_start(const char *root) -> uint32_t
     {
         return get_u16(root + kFreeStartOffset);
     }
-    static auto put_free_start(char *root, U32 value) -> void
+    static auto put_free_start(char *root, uint32_t value) -> void
     {
-        put_u16(root + kFreeStartOffset, static_cast<U16>(value));
+        put_u16(root + kFreeStartOffset, static_cast<uint16_t>(value));
     }
 
-    [[nodiscard]] static auto get_frag_count(const char *root) -> U32
+    [[nodiscard]] static auto get_frag_count(const char *root) -> uint32_t
     {
         // This cast prevents sign extension.
-        return static_cast<U8>(root[kFragCountOffset]);
+        return static_cast<uint8_t>(root[kFragCountOffset]);
     }
-    static auto put_frag_count(char *root, U32 value) -> void
+    static auto put_frag_count(char *root, uint32_t value) -> void
     {
         root[kFragCountOffset] = static_cast<char>(value);
     }

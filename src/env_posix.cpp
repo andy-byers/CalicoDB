@@ -29,9 +29,10 @@ struct ShmNode;
 static constexpr int kFilePermissions = 0644; // -rw-r--r--
 
 // Constants for SQLite-style shared memory locking
-// There are "File::kShmLockCount" lock bytes available. See include/.../env.h for more details.
-static constexpr std::size_t kShmLock0 = 120;
-static constexpr std::size_t kShmDMS = kShmLock0 + File::kShmLockCount;
+// There are "File::kShmLockCount" lock bytes available. See include/calicodb/env.h
+// for more details.
+static constexpr size_t kShmLock0 = 120;
+static constexpr size_t kShmDMS = kShmLock0 + File::kShmLockCount;
 
 struct FileId final {
     auto operator==(const FileId &rhs) const -> bool
@@ -45,7 +46,7 @@ struct FileId final {
     }
 
     dev_t device = 0;
-    U64 inode = 0;
+    uint64_t inode = 0;
 };
 
 struct ShmNode final {
@@ -63,7 +64,7 @@ struct ShmNode final {
 
     // List of PosixShm objects that reference this ShmNode.
     PosixShm *refs = nullptr;
-    std::size_t refcount = 0;
+    size_t refcount = 0;
 
     // Locks held by PosixShm instances in this process. 0 means unlocked, -1 an
     // exclusive lock, and a positive integer N means that N shared locks are
@@ -149,7 +150,7 @@ struct INode final {
     return fcntl(file, F_SETLK, &lock);
 }
 
-[[nodiscard]] static auto posix_shm_lock(ShmNode &snode, short type, std::size_t offset, std::size_t n) -> int
+[[nodiscard]] static auto posix_shm_lock(ShmNode &snode, short type, size_t offset, size_t n) -> int
 {
     CALICODB_EXPECT_GE(snode.file, 0);
     CALICODB_EXPECT_TRUE(n == 1 || type != F_RDLCK);
@@ -186,10 +187,10 @@ struct INode final {
     return Status::busy(std::strerror(EBUSY));
 }
 
-static constexpr std::size_t kOpenCloseTimeout = 100;
+static constexpr size_t kOpenCloseTimeout = 100;
 [[nodiscard]] static auto posix_open(const std::string &filename, int mode) -> int
 {
-    for (std::size_t t = 0; t < kOpenCloseTimeout; ++t) {
+    for (size_t t = 0; t < kOpenCloseTimeout; ++t) {
         const auto fd = open(filename.c_str(), mode | O_CLOEXEC, kFilePermissions);
         if (fd < 0 && errno == EINTR) {
             continue;
@@ -200,7 +201,7 @@ static constexpr std::size_t kOpenCloseTimeout = 100;
 }
 [[nodiscard]] static auto posix_close(int fd) -> int
 {
-    for (std::size_t t = 0; t < kOpenCloseTimeout; ++t) {
+    for (size_t t = 0; t < kOpenCloseTimeout; ++t) {
         const auto rc = close(fd);
         if (rc < 0 && errno == EINTR) {
             continue;
@@ -210,7 +211,7 @@ static constexpr std::size_t kOpenCloseTimeout = 100;
     return -1;
 }
 
-[[nodiscard]] static auto posix_read(int file, std::size_t size, char *scratch, Slice *out) -> int
+[[nodiscard]] static auto posix_read(int file, size_t size, char *scratch, Slice *out) -> int
 {
     auto rest = size;
     while (rest > 0) {
@@ -223,7 +224,7 @@ static constexpr std::size_t kOpenCloseTimeout = 100;
             }
             return -1;
         }
-        rest -= static_cast<std::size_t>(n);
+        rest -= static_cast<size_t>(n);
     }
     std::memset(scratch + size - rest, 0, rest);
     if (out != nullptr) {
@@ -236,7 +237,7 @@ static constexpr std::size_t kOpenCloseTimeout = 100;
     while (!in.is_empty()) {
         const auto n = write(file, in.data(), in.size());
         if (n >= 0) {
-            in.advance(static_cast<std::size_t>(n));
+            in.advance(static_cast<size_t>(n));
         } else if (errno != EINTR) {
             return -1;
         }
@@ -244,14 +245,14 @@ static constexpr std::size_t kOpenCloseTimeout = 100;
     return 0;
 }
 
-[[nodiscard]] static auto seek_and_read(int file, std::size_t offset, std::size_t size, char *scratch, Slice *out) -> int
+[[nodiscard]] static auto seek_and_read(int file, size_t offset, size_t size, char *scratch, Slice *out) -> int
 {
     if (const auto rc = lseek(file, static_cast<off_t>(offset), SEEK_SET); rc < 0) {
         return -1;
     }
     return posix_read(file, size, scratch, out);
 }
-[[nodiscard]] static auto seek_and_write(int file, std::size_t offset, Slice in) -> int
+[[nodiscard]] static auto seek_and_write(int file, size_t offset, Slice in) -> int
 {
     if (const auto rc = lseek(file, static_cast<off_t>(offset), SEEK_SET); rc < 0) {
         return -1;
@@ -259,7 +260,7 @@ static constexpr std::size_t kOpenCloseTimeout = 100;
     return posix_write(file, in);
 }
 
-[[nodiscard]] static auto posix_truncate(int fd, std::size_t size) -> int
+[[nodiscard]] static auto posix_truncate(int fd, size_t size) -> int
 {
     for (;;) {
         const auto rc = ftruncate(fd, static_cast<off_t>(size));
@@ -271,12 +272,12 @@ static constexpr std::size_t kOpenCloseTimeout = 100;
 }
 
 struct PosixShm {
-    auto lock(std::size_t r, std::size_t n, ShmLockFlag flags) -> Status;
+    auto lock(size_t r, size_t n, ShmLockFlag flags) -> Status;
 
     ShmNode *snode = nullptr;
     PosixShm *next = nullptr;
-    U16 reader_mask = 0;
-    U16 writer_mask = 0;
+    uint16_t reader_mask = 0;
+    uint16_t writer_mask = 0;
 };
 
 class PosixFile : public File
@@ -291,15 +292,15 @@ public:
 
     auto close() -> Status;
 
-    auto read(std::size_t offset, std::size_t size, char *scratch, Slice *out) -> Status override;
-    auto write(std::size_t offset, const Slice &in) -> Status override;
-    auto resize(std::size_t size) -> Status override;
+    auto read(size_t offset, size_t size, char *scratch, Slice *out) -> Status override;
+    auto write(size_t offset, const Slice &in) -> Status override;
+    auto resize(size_t size) -> Status override;
     auto sync() -> Status override;
     auto file_lock(FileLockMode mode) -> Status override;
     auto file_unlock() -> void override;
 
-    auto shm_map(std::size_t r, bool extend, volatile void *&out) -> Status override;
-    auto shm_lock(std::size_t r, std::size_t n, ShmLockFlag flags) -> Status override;
+    auto shm_map(size_t r, bool extend, volatile void *&out) -> Status override;
+    auto shm_lock(size_t r, size_t n, ShmLockFlag flags) -> Status override;
     auto shm_unmap(bool unlink) -> void override;
     auto shm_barrier() -> void override;
 
@@ -341,7 +342,7 @@ public:
         auto L = sizeof(fix);
 
         for (int i = 0; i < 2; ++i) {
-            auto offset = static_cast<std::size_t>(std::snprintf(
+            auto offset = static_cast<size_t>(std::snprintf(
                 p, L, "%04d/%02d/%02d-%02d:%02d:%02d.%06d ",
                 now_tm.tm_year + 1900, now_tm.tm_mon + 1,
                 now_tm.tm_mday, now_tm.tm_hour, now_tm.tm_min,
@@ -349,7 +350,7 @@ public:
 
             std::va_list args_copy;
             va_copy(args_copy, args);
-            offset += static_cast<std::size_t>(std::vsnprintf(
+            offset += static_cast<size_t>(std::vsnprintf(
                 p + offset, L - offset, fmt, args_copy));
             va_end(args_copy);
 
@@ -382,7 +383,7 @@ struct PosixFs final {
         if (pgsz < 0) {
             page_size = 4'096;
         } else {
-            page_size = static_cast<std::size_t>(pgsz);
+            page_size = static_cast<size_t>(pgsz);
         }
         if (page_size < File::kShmRegionSize) {
             mmap_scale = 1;
@@ -517,7 +518,7 @@ struct PosixFs final {
 
         if (--snode->refcount == 0) {
             const auto interval = mmap_scale;
-            for (std::size_t i = 0; i < snode->regions.size(); i += interval) {
+            for (size_t i = 0; i < snode->regions.size(); i += interval) {
                 munmap(snode->regions[i], File::kShmRegionSize);
             }
             if (unlink_if_last) {
@@ -539,17 +540,17 @@ struct PosixFs final {
     INode *inode_list = nullptr;
 
     // OS page size for mmap().
-    std::size_t page_size = 0;
+    size_t page_size = 0;
 
     // The OS page size may be greater than the shared memory region
     // size (File::kShmRegionSize). If so, then mmap() must allocate this
     // number of regions each time it is called.
-    std::size_t mmap_scale = 0;
+    size_t mmap_scale = 0;
 };
 
 PosixFs PosixFs::s_fs;
 
-static auto seed_prng_state(U16 *state, U32 seed) -> void
+static auto seed_prng_state(uint16_t *state, uint32_t seed) -> void
 {
     state[0] = 0x330E;
     std::memcpy(&state[1], &seed, sizeof(seed));
@@ -557,7 +558,7 @@ static auto seed_prng_state(U16 *state, U32 seed) -> void
 
 PosixEnv::PosixEnv()
 {
-    seed_prng_state(m_rng, static_cast<U32>(time(nullptr)));
+    seed_prng_state(m_rng, static_cast<uint32_t>(time(nullptr)));
 }
 
 auto PosixEnv::remove_file(const std::string &filename) -> Status
@@ -573,13 +574,13 @@ auto PosixEnv::file_exists(const std::string &filename) const -> bool
     return access(filename.c_str(), F_OK) == 0;
 }
 
-auto PosixEnv::file_size(const std::string &filename, std::size_t &out) const -> Status
+auto PosixEnv::file_size(const std::string &filename, size_t &out) const -> Status
 {
     struct stat st = {};
     if (stat(filename.c_str(), &st)) {
         return posix_error(errno);
     }
-    out = static_cast<std::size_t>(st.st_size);
+    out = static_cast<size_t>(st.st_size);
     return Status::ok();
 }
 
@@ -682,7 +683,7 @@ auto PosixFile::close() -> Status
     return Status::ok();
 }
 
-auto PosixFile::read(std::size_t offset, std::size_t size, char *scratch, Slice *out) -> Status
+auto PosixFile::read(size_t offset, size_t size, char *scratch, Slice *out) -> Status
 {
     if (seek_and_read(file, offset, size, scratch, out)) {
         return posix_error(errno);
@@ -690,7 +691,7 @@ auto PosixFile::read(std::size_t offset, std::size_t size, char *scratch, Slice 
     return Status::ok();
 }
 
-auto PosixFile::write(std::size_t offset, const Slice &in) -> Status
+auto PosixFile::write(size_t offset, const Slice &in) -> Status
 {
     if (seek_and_write(file, offset, in)) {
         return posix_error(errno);
@@ -698,7 +699,7 @@ auto PosixFile::write(std::size_t offset, const Slice &in) -> Status
     return Status::ok();
 }
 
-auto PosixFile::resize(std::size_t size) -> Status
+auto PosixFile::resize(size_t size) -> Status
 {
     if (posix_truncate(file, size)) {
         return posix_error(errno);
@@ -735,7 +736,7 @@ auto PosixFile::shm_unmap(bool unlink) -> void
     }
 }
 
-auto PosixFile::shm_map(std::size_t r, bool extend, volatile void *&out) -> Status
+auto PosixFile::shm_map(size_t r, bool extend, volatile void *&out) -> Status
 {
     if (shm == nullptr) {
         CALICODB_TRY(PosixFs::s_fs.ref_snode(*this, shm));
@@ -757,12 +758,12 @@ auto PosixFile::shm_map(std::size_t r, bool extend, volatile void *&out) -> Stat
 
     Status s;
     if (snode->regions.size() < request) {
-        std::size_t file_size;
+        size_t file_size;
         if (struct stat st = {}; fstat(snode->file, &st)) {
             s = posix_error(errno);
             goto cleanup;
         } else {
-            file_size = static_cast<std::size_t>(st.st_size);
+            file_size = static_cast<size_t>(st.st_size);
         }
         if (file_size < request * File::kShmRegionSize) {
             if (!extend) {
@@ -790,7 +791,7 @@ auto PosixFile::shm_map(std::size_t r, bool extend, volatile void *&out) -> Stat
                 break;
             }
             // Store a pointer to the start of each memory region.
-            for (std::size_t i = 0; i < mmap_scale; ++i) {
+            for (size_t i = 0; i < mmap_scale; ++i) {
                 snode->regions.emplace_back(reinterpret_cast<char *>(p) + File::kShmRegionSize * i);
             }
         }
@@ -805,7 +806,7 @@ cleanup:
     return s;
 }
 
-auto PosixFile::shm_lock(std::size_t r, std::size_t n, ShmLockFlag flags) -> Status
+auto PosixFile::shm_lock(size_t r, size_t n, ShmLockFlag flags) -> Status
 {
     if (shm) {
         return shm->lock(r, n, flags);
@@ -821,7 +822,7 @@ auto PosixFile::shm_barrier() -> void
     PosixFs::s_fs.mutex.unlock();
 }
 
-auto PosixShm::lock(std::size_t r, std::size_t n, ShmLockFlag flags) -> Status
+auto PosixShm::lock(size_t r, size_t n, ShmLockFlag flags) -> Status
 {
     CALICODB_EXPECT_LE(r + n, File::kShmLockCount);
     CALICODB_EXPECT_GT(n, 0);
@@ -833,7 +834,7 @@ auto PosixShm::lock(std::size_t r, std::size_t n, ShmLockFlag flags) -> Status
     CALICODB_EXPECT_TRUE(n == 1 || (flags & kShmWriter));
 
     auto *state = snode->locks;
-    const auto mask = static_cast<U16>((1 << (r + n)) - (1 << r));
+    const auto mask = static_cast<uint16_t>((1 << (r + n)) - (1 << r));
     CALICODB_EXPECT_TRUE(n > 1 || mask == (1 << r));
     std::lock_guard guard(snode->mutex);
     CALICODB_EXPECT_TRUE(snode->check_locks());
@@ -888,7 +889,7 @@ auto PosixShm::lock(std::size_t r, std::size_t n, ShmLockFlag flags) -> Status
         // (otherwise, this thread forgot to release its reader lock on one of
         // these bytes before attempting a writer lock).
         CALICODB_EXPECT_FALSE(reader_mask & mask);
-        for (std::size_t i = r; i < r + n; ++i) {
+        for (size_t i = r; i < r + n; ++i) {
             if ((writer_mask & (1 << i)) == 0 && state[i]) {
                 // Some other thread in this process has a lock.
                 return posix_busy();
@@ -947,7 +948,7 @@ auto ShmNode::check_locks() const -> bool
     int check[File::kShmLockCount] = {};
 
     for (auto *p = refs; p; p = p->next) {
-        for (std::size_t i = 0; i < File::kShmLockCount; ++i) {
+        for (size_t i = 0; i < File::kShmLockCount; ++i) {
             if (p->writer_mask & (1 << i)) {
                 CALICODB_EXPECT_FALSE(check[i]);
                 check[i] = -1;

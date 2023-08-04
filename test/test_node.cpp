@@ -15,7 +15,7 @@ public:
     explicit NodeTests()
         : m_backing(kPageSize, '\0'),
           m_scratch(kPageSize, '\0'),
-          m_ref(alloc_page())
+          m_ref(PageRef::alloc())
     {
         m_ref->page_id = Id(3);
         m_node = Node::from_new_page(*m_ref, m_scratch.data(), true);
@@ -23,7 +23,7 @@ public:
 
     ~NodeTests() override
     {
-        delete m_ref;
+        PageRef::free(m_ref);
     }
 
     std::string m_backing;
@@ -34,9 +34,9 @@ public:
     // Use 2 bytes for the keys.
     char m_external_cell[6] = {'\x00', '\x02', '\x00', '\x00'};
     char m_internal_cell[7] = {'\x00', '\x00', '\x00', '\x00', '\x02'};
-    [[nodiscard]] auto make_cell(U32 k) -> Cell
+    [[nodiscard]] auto make_cell(uint32_t k) -> Cell
     {
-        EXPECT_LE(k, std::numeric_limits<U16>::max());
+        EXPECT_LE(k, std::numeric_limits<uint16_t>::max());
         Cell cell = {
             m_internal_cell,
             m_internal_cell + 5,
@@ -55,7 +55,7 @@ public:
         return cell;
     }
 
-    using TestNodeType = U32;
+    using TestNodeType = uint32_t;
     static constexpr TestNodeType kExternalNode = 0;
     static constexpr TestNodeType kExternalRoot = 1;
     static constexpr TestNodeType kInternalNode = 2;
@@ -101,7 +101,7 @@ public:
 
     ~BlockAllocatorTests() override = default;
 
-    auto reserve_for_test(U32 n) -> void
+    auto reserve_for_test(uint32_t n) -> void
     {
         // Make the gap large so BlockAllocator doesn't get confused.
         NodeHdr::put_cell_start(
@@ -113,8 +113,8 @@ public:
         m_base = kPageSize - n;
     }
 
-    U32 m_size = 0;
-    U32 m_base = 0;
+    uint32_t m_size = 0;
+    uint32_t m_base = 0;
 };
 
 TEST_F(BlockAllocatorTests, MergesAdjacentBlocks)
@@ -214,10 +214,10 @@ TEST_F(BlockAllocatorTests, InternalNodesConsume3ByteFragments)
 
 TEST_F(NodeTests, CellLifecycle)
 {
-    U32 type = 0;
+    uint32_t type = 0;
     do {
         auto target_space = m_node.usable_space;
-        for (U32 i = 0;; ++i) {
+        for (uint32_t i = 0;; ++i) {
             const auto cell_in = make_cell(i);
             const auto rc = m_node.write(i, cell_in);
             if (rc == 0) {
@@ -229,7 +229,7 @@ TEST_F(NodeTests, CellLifecycle)
             ASSERT_TRUE(m_node.assert_state());
         }
 
-        for (U32 j = 0; j < NodeHdr::get_cell_count(m_node.hdr()); ++j) {
+        for (uint32_t j = 0; j < NodeHdr::get_cell_count(m_node.hdr()); ++j) {
             const auto cell_in = make_cell(j);
             Cell cell_out = {};
             ASSERT_EQ(0, m_node.read(j, cell_out));

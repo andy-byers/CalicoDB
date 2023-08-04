@@ -26,7 +26,7 @@ auto FakeEnv::put_file_contents(const std::string &filename, std::string content
     file->second.created = true;
 }
 
-auto FakeEnv::read_file_at(const FileState &mem, std::size_t offset, std::size_t size, char *scratch, Slice *out) -> Status
+auto FakeEnv::read_file_at(const FileState &mem, size_t offset, size_t size, char *scratch, Slice *out) -> Status
 {
     if (offset < mem.buffer.size()) {
         const auto read_size = std::min(size, mem.buffer.size() - offset);
@@ -38,7 +38,7 @@ auto FakeEnv::read_file_at(const FileState &mem, std::size_t offset, std::size_t
     return Status::ok();
 }
 
-auto FakeEnv::write_file_at(FileState &mem, std::size_t offset, const Slice &in) -> Status
+auto FakeEnv::write_file_at(FileState &mem, size_t offset, const Slice &in) -> Status
 {
     if (const auto write_end = offset + in.size(); mem.buffer.size() < write_end) {
         mem.buffer.resize(write_end);
@@ -47,17 +47,17 @@ auto FakeEnv::write_file_at(FileState &mem, std::size_t offset, const Slice &in)
     return Status::ok();
 }
 
-auto FakeFile::read(std::size_t offset, std::size_t size, char *scratch, Slice *out) -> Status
+auto FakeFile::read(size_t offset, size_t size, char *scratch, Slice *out) -> Status
 {
     return m_env->read_file_at(*m_state, offset, size, scratch, out);
 }
 
-auto FakeFile::write(std::size_t offset, const Slice &in) -> Status
+auto FakeFile::write(size_t offset, const Slice &in) -> Status
 {
     return m_env->write_file_at(*m_state, offset, in);
 }
 
-auto FakeFile::resize(std::size_t size) -> Status
+auto FakeFile::resize(size_t size) -> Status
 {
     m_state->buffer.resize(size);
     return Status::ok();
@@ -68,7 +68,7 @@ auto FakeFile::sync() -> Status
     return Status::ok();
 }
 
-auto FakeFile::shm_map(std::size_t r, bool, volatile void *&out) -> Status
+auto FakeFile::shm_map(size_t r, bool, volatile void *&out) -> Status
 {
     while (m_shm.size() <= r) {
         m_shm.emplace_back();
@@ -121,7 +121,7 @@ auto FakeEnv::remove_file(const std::string &filename) -> Status
     return Status::ok();
 }
 
-auto FakeEnv::file_size(const std::string &filename, std::size_t &out) const -> Status
+auto FakeEnv::file_size(const std::string &filename, size_t &out) const -> Status
 {
     auto itr = m_state.find(filename);
     if (itr == cend(m_state) || !itr->second.created) {

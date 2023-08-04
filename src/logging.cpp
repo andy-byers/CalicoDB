@@ -24,7 +24,7 @@ auto append_fmt_string(std::string &str, const char *fmt, ...) -> void
 
     CALICODB_EXPECT_GE(len, 0);
     const auto offset = str.size();
-    str.resize(offset + static_cast<std::size_t>(len) + 1);
+    str.resize(offset + static_cast<size_t>(len) + 1);
     len = std::vsnprintf(
         str.data() + offset,
         str.size() - offset,
@@ -35,7 +35,7 @@ auto append_fmt_string(std::string &str, const char *fmt, ...) -> void
     CALICODB_EXPECT_TRUE(0 <= len && len <= int(str.size()));
 }
 
-auto append_number(std::string &out, std::size_t value) -> void
+auto append_number(std::string &out, size_t value) -> void
 {
     char buffer[30];
     std::snprintf(buffer, sizeof(buffer), "%llu", static_cast<unsigned long long>(value));
@@ -44,7 +44,7 @@ auto append_number(std::string &out, std::size_t value) -> void
 
 auto append_escaped_string(std::string &out, const Slice &value) -> void
 {
-    for (std::size_t i = 0; i < value.size(); ++i) {
+    for (size_t i = 0; i < value.size(); ++i) {
         const auto chr = value[i];
         if (chr >= ' ' && chr <= '~') {
             out.push_back(chr);
@@ -56,7 +56,7 @@ auto append_escaped_string(std::string &out, const Slice &value) -> void
     }
 }
 
-auto number_to_string(std::size_t value) -> std::string
+auto number_to_string(size_t value) -> std::string
 {
     std::string out;
     append_number(out, value);
@@ -71,16 +71,16 @@ auto escape_string(const Slice &value) -> std::string
 }
 
 // Modified from LevelDB.
-auto consume_decimal_number(Slice &in, U64 *val) -> bool
+auto consume_decimal_number(Slice &in, uint64_t *val) -> bool
 {
     // Constants that will be optimized away.
-    static constexpr const U64 kMaxUint64 = std::numeric_limits<U64>::max();
+    static constexpr const uint64_t kMaxUint64 = std::numeric_limits<uint64_t>::max();
     static constexpr const char kLastDigitOfMaxUint64 = '0' + static_cast<char>(kMaxUint64 % 10);
 
-    U64 value = 0;
+    uint64_t value = 0;
 
     // reinterpret_cast-ing from char* to uint8_t* to avoid signedness.
-    const auto *start = reinterpret_cast<const U8 *>(in.data());
+    const auto *start = reinterpret_cast<const uint8_t *>(in.data());
 
     const auto *end = start + in.size();
     const auto *current = start;
@@ -102,7 +102,7 @@ auto consume_decimal_number(Slice &in, U64 *val) -> bool
         *val = value;
     }
     CALICODB_EXPECT_GE(current, start);
-    const auto digits_consumed = static_cast<std::size_t>(current - start);
+    const auto digits_consumed = static_cast<size_t>(current - start);
     in.advance(digits_consumed);
     return digits_consumed != 0;
 }
