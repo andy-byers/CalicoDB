@@ -1341,7 +1341,7 @@ auto WalImpl::write(PageRef *first_ref, size_t db_size) -> Status
                 }
                 CALICODB_TRY(m_wal->write(
                     frame_offset(frame) + WalFrameHdr::kSize,
-                    Slice(ref->get_data(), kPageSize)));
+                    Slice(ref->data, kPageSize)));
                 m_stat->counters[Stat::kWriteWal] += kPageSize;
                 continue;
             }
@@ -1353,7 +1353,7 @@ auto WalImpl::write(PageRef *first_ref, size_t db_size) -> Status
         WalFrameHdr header;
         header.pgno = ref->page_id.value;
         header.db_size = p->dirty == nullptr ? static_cast<uint32_t>(db_size) : 0;
-        encode_frame(header, ref->get_data(), m_frame.data());
+        encode_frame(header, ref->data, m_frame.data());
         CALICODB_TRY(m_wal->write(offset, m_frame));
         m_stat->counters[Stat::kWriteWal] += m_frame.size();
         ref->set_flag(PageRef::kExtra);

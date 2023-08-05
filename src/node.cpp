@@ -29,13 +29,13 @@ static constexpr uint32_t kMinBlockSize = 2 * kSlotWidth;
 [[nodiscard]] static auto get_ivec_slot(const Node &node, uint32_t index) -> uint32_t
 {
     CALICODB_EXPECT_LT(index, NodeHdr::get_cell_count(node.hdr()));
-    return kPageMask & get_u16(node.ref->get_data() + cell_slots_offset(node) + index * kSlotWidth);
+    return kPageMask & get_u16(node.ref->data + cell_slots_offset(node) + index * kSlotWidth);
 }
 
 static auto put_ivec_slot(Node &node, uint32_t index, uint32_t slot)
 {
     CALICODB_EXPECT_LT(index, NodeHdr::get_cell_count(node.hdr()));
-    return put_u16(node.ref->get_data() + cell_slots_offset(node) + index * kSlotWidth, static_cast<uint16_t>(slot));
+    return put_u16(node.ref->data + cell_slots_offset(node) + index * kSlotWidth, static_cast<uint16_t>(slot));
 }
 
 static auto insert_ivec_slot(Node &node, uint32_t index, uint32_t slot)
@@ -45,7 +45,7 @@ static auto insert_ivec_slot(Node &node, uint32_t index, uint32_t slot)
     CALICODB_EXPECT_LE(index, count);
     const auto offset = cell_slots_offset(node) + index * kSlotWidth;
     const auto size = (count - index) * kSlotWidth;
-    auto *data = node.ref->get_data() + offset;
+    auto *data = node.ref->data + offset;
 
     std::memmove(data + kSlotWidth, data, size);
     put_u16(data, static_cast<uint16_t>(slot));
@@ -60,7 +60,7 @@ static auto remove_ivec_slot(Node &node, uint32_t index)
     CALICODB_EXPECT_LT(index, count);
     const auto offset = cell_slots_offset(node) + index * kSlotWidth;
     const auto size = (count - index) * kSlotWidth;
-    auto *data = node.ref->get_data() + offset;
+    auto *data = node.ref->data + offset;
 
     std::memmove(data, data + kSlotWidth, size);
 
@@ -162,25 +162,25 @@ auto Node::alloc(uint32_t index, uint32_t size) -> int
 
 [[nodiscard]] static auto get_next_pointer(const Node &node, uint32_t offset) -> uint32_t
 {
-    return get_u16(node.ref->get_data() + offset);
+    return get_u16(node.ref->data + offset);
 }
 
 [[nodiscard]] static auto get_block_size(const Node &node, uint32_t offset) -> uint32_t
 {
-    return get_u16(node.ref->get_data() + offset + kSlotWidth);
+    return get_u16(node.ref->data + offset + kSlotWidth);
 }
 
 static auto set_next_pointer(Node &node, uint32_t offset, uint32_t value) -> void
 {
     CALICODB_EXPECT_LT(value, kPageSize);
-    return put_u16(node.ref->get_data() + offset, static_cast<uint16_t>(value));
+    return put_u16(node.ref->data + offset, static_cast<uint16_t>(value));
 }
 
 static auto set_block_size(Node &node, uint32_t offset, uint32_t value) -> void
 {
     CALICODB_EXPECT_GE(value, kMinBlockSize);
     CALICODB_EXPECT_LT(value, kPageSize);
-    return put_u16(node.ref->get_data() + offset + kSlotWidth, static_cast<uint16_t>(value));
+    return put_u16(node.ref->data + offset + kSlotWidth, static_cast<uint16_t>(value));
 }
 
 static auto take_free_space(Node &node, uint32_t ptr0, uint32_t ptr1, uint32_t needed_size) -> uint32_t
@@ -350,7 +350,7 @@ auto BlockAllocator::defragment(Node &node, int skip) -> int
     const auto n = NodeHdr::get_cell_count(node.hdr());
     const auto cell_start = NodeHdr::get_cell_start(node.hdr());
     const auto to_skip = skip >= 0 ? static_cast<uint32_t>(skip) : n;
-    auto *ptr = node.ref->get_data();
+    auto *ptr = node.ref->data;
     uint32_t end = kPageSize;
 
     // Copy everything before the indirection vector.
@@ -394,7 +394,7 @@ static constexpr uint32_t kMaxCellCount = (kPageSize - NodeHdr::kSize) /
 auto Node::from_existing_page(PageRef &page, char *scratch, Node &node_out) -> int
 {
     const auto hdr_offset = page_offset(page.page_id);
-    const auto *hdr = page.get_data() + hdr_offset;
+    const auto *hdr = page.data + hdr_offset;
     const auto type = NodeHdr::get_type(hdr);
     if (type == NodeHdr::kInvalid) {
         return -1;
@@ -451,7 +451,7 @@ auto Node::read_child_id(uint32_t idx) const -> Id
     if (idx >= NodeHdr::get_cell_count(hdr())) {
         return NodeHdr::get_next_id(hdr());
     }
-    return Id(get_u32(ref->get_data() + get_ivec_slot(*this, idx)));
+    return Id(get_u32(ref->data + get_ivec_slot(*this, idx)));
 }
 
 auto Node::write_child_id(uint32_t idx, Id child_id) -> void
@@ -460,7 +460,7 @@ auto Node::write_child_id(uint32_t idx, Id child_id) -> void
     if (idx >= NodeHdr::get_cell_count(hdr())) {
         NodeHdr::put_next_id(hdr(), child_id);
     } else {
-        put_u32(ref->get_data() + get_ivec_slot(*this, idx), child_id.value);
+        put_u32(ref->data + get_ivec_slot(*this, idx), child_id.value);
     }
 }
 
@@ -472,8 +472,8 @@ auto Node::read(uint32_t index, Cell &cell_out) const -> int
         return -1;
     }
     return parser(
-        ref->get_data() + offset,
-        ref->get_data() + kPageSize,
+        ref->data + offset,
+        ref->data + kPageSize,
         &cell_out);
 }
 
@@ -481,7 +481,7 @@ auto Node::write(uint32_t index, const Cell &cell) -> int
 {
     const auto offset = alloc(index, cell.footprint);
     if (offset > 0) {
-        std::memcpy(ref->get_data() + offset, cell.ptr, cell.footprint);
+        std::memcpy(ref->data + offset, cell.ptr, cell.footprint);
     }
     return offset;
 }
@@ -543,7 +543,7 @@ auto Node::check_state() const -> int
 
     // Free list blocks.
     auto i = NodeHdr::get_free_start(hdr());
-    const char *data = ref->get_data();
+    const char *data = ref->data;
     while (i) {
         if (account(i, get_u16(data + i + kSlotWidth))) {
             return -1;

@@ -1399,4 +1399,63 @@ TEST_F(DBVacuumTests, SanityCheck)
     });
 }
 
+class TempDBTests : public DBTests
+{
+public:
+    ~TempDBTests() override = default;
+
+    auto SetUp() -> void override
+    {
+        DBTests::SetUp();
+        m_config = kInMemory;
+        ASSERT_OK(reopen_db(true));
+    }
+};
+
+TEST_F(TempDBTests, Test)
+{
+    static constexpr int kTestSize = 500;
+    static constexpr int kLimit = 1'000'000;
+    static constexpr int kStep = 100;
+
+    int rs[kTestSize];
+    for (auto &r : rs) {
+        ASSERT_OK(m_db->update([&r](auto &tx) {
+            r = rand() % kLimit;
+            return put_range(tx, BucketOptions(), "BUCKET", r, r + kStep);
+        }));
+    }
+
+    for (size_t ofs = kTestSize / 2, i = ofs; i < kTestSize; ++i) {
+        ASSERT_OK(m_db->update([&r1 = rs[i], r0 = rs[i - ofs]](auto &tx) {
+            auto s = erase_range(tx, BucketOptions(), "BUCKET", r1, r1 + kStep);
+            r1 = r0;
+            return s;
+        }));
+    }
+
+    for (size_t i = 0; i < kTestSize / 2; ++i) {
+        ASSERT_OK(m_db->update([&r = rs[i]](auto &tx) {
+            return put_range(tx, BucketOptions(), "BUCKET", r, r + kStep, 1);
+        }));
+    }
+
+    ASSERT_OK(m_db->update([](auto &tx) {
+        return tx.vacuum();
+    }));
+
+    for (auto &r : rs) {
+        ASSERT_OK(m_db->view([r](auto &tx) {
+            return check_range(tx, "BUCKET", r, r + kStep, true, 1);
+        }));
+    }
+
+    ASSERT_OK(m_db->view([](auto &tx) {
+        return check_range(tx, "BUCKET", kLowerBound - kStep, kLowerBound, false);
+    }));
+    ASSERT_OK(m_db->view([](auto &tx) {
+        return check_range(tx, "BUCKET", kUpperBound, kUpperBound + kStep, false);
+    }));
+}
+
 } // namespace calicodb::test

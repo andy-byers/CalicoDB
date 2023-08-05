@@ -85,7 +85,7 @@ public:
                 return false;
         }
 
-        std::memset(m_ref->get_data(), 0, kPageSize);
+        std::memset(m_ref->data, 0, kPageSize);
         m_node = Node::from_new_page(*m_ref, m_scratch.data(), is_leaf);
         return true;
     }

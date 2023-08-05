@@ -234,7 +234,7 @@ public:
         auto *dirty = first_ref->get_dirty_hdr();
         for (auto *p = dirty; p; p = p->dirty) {
             auto *ref = p->get_page_ref();
-            m_pages.insert_or_assign(ref->page_id, std::string(ref->get_data(), kPageSize));
+            m_pages.insert_or_assign(ref->page_id, std::string(ref->data, kPageSize));
             m_stat->counters[Stat::kWriteWal] += kPageSize;
         }
         if (db_size > 0) {

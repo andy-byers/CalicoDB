@@ -44,7 +44,7 @@ public:
         }
         if (ref) {
             ref->page_id.value = key;
-            put_u32(ref->get_data(), value);
+            put_u32(ref->data, value);
             mgr.register_page(*ref);
             mgr.ref(*ref);
         } else {
@@ -72,7 +72,7 @@ public:
     auto lookup(uint32_t key) -> int
     {
         if (auto *ref = mgr.lookup(Id(key))) {
-            return static_cast<int>(get_u32(ref->get_data()));
+            return static_cast<int>(get_u32(ref->data));
         }
         return -1;
     }
@@ -330,7 +330,7 @@ protected:
         if (m_page_ids.empty() || m_page_ids.back() < page_out->page_id) {
             m_page_ids.emplace_back(page_out->page_id);
         }
-        std::memset(page_out->get_data(), 0, kPageSize);
+        std::memset(page_out->data, 0, kPageSize);
         return page_out->page_id;
     }
     auto allocate_page() -> Id
@@ -343,8 +343,8 @@ protected:
     auto alter_page(PageRef &page) -> void
     {
         m_pager->mark_dirty(page);
-        const auto value = get_u32(page.get_data() + kPageSize - 4);
-        put_u32(page.get_data() + kPageSize - 4, value + 1);
+        const auto value = get_u32(page.data + kPageSize - 4);
+        put_u32(page.data + kPageSize - 4, value + 1);
     }
     auto alter_page(size_t index) -> void
     {
@@ -355,7 +355,7 @@ protected:
     }
     auto read_page(const PageRef &page) -> uint32_t
     {
-        return get_u32(page.get_data() + kPageSize - 4);
+        return get_u32(page.data + kPageSize - 4);
     }
     auto read_page(size_t index) -> uint32_t
     {
@@ -601,19 +601,19 @@ TEST_F(PagerTests, MovePage)
             PageRef *pg;
             ASSERT_OK(m_pager->allocate(pg));
             m_pager->mark_dirty(*pg);
-            put_u32(pg->get_data(), pg->page_id.value);
+            put_u32(pg->data, pg->page_id.value);
             m_pager->release(pg, Pager::kDiscard);
         }
         PageRef *pg;
         ASSERT_OK(m_pager->get_unused_page(pg));
         m_pager->mark_dirty(*pg);
-        put_u32(pg->get_data(), kSpecialValue);
+        put_u32(pg->data, kSpecialValue);
 
         m_pager->move_page(*pg, Id(3));
         for (; pg->page_id.value != kNumPages;) {
             m_pager->move_page(*pg, Id(pg->page_id.value + 1));
         }
-        ASSERT_EQ(get_u32(pg->get_data()), kSpecialValue);
+        ASSERT_EQ(get_u32(pg->data), kSpecialValue);
 
         m_pager->release(pg);
         ASSERT_OK(m_pager->commit());
@@ -621,7 +621,7 @@ TEST_F(PagerTests, MovePage)
     pager_view([this] {
         PageRef *pg;
         ASSERT_OK(m_pager->acquire(Id(kNumPages), pg));
-        ASSERT_EQ(get_u32(pg->get_data()), kSpecialValue);
+        ASSERT_EQ(get_u32(pg->data), kSpecialValue);
         m_pager->release(pg);
     });
 }
