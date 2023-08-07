@@ -9,11 +9,12 @@
 namespace calicodb
 {
 
-TxImpl::TxImpl(Pager &pager, const Status &status, Stat &stat, char *scratch)
+TxImpl::TxImpl(Pager &pager, const Status &status, Stat &stat, char *scratch, bool writable)
     : m_schema_obj(pager, status, stat, scratch),
       m_status(&status),
       m_schema(m_schema_obj.new_cursor()),
-      m_pager(&pager)
+      m_pager(&pager),
+      m_writable(writable)
 {
 }
 
@@ -27,8 +28,16 @@ TxImpl::~TxImpl()
     }
 }
 
+#define ENSURE_WRITABLE \
+    do { \
+        if (!m_writable) { \
+            return Status::not_supported("transaction is readonly"); \
+        } \
+    } while (0)
+
 auto TxImpl::create_bucket(const BucketOptions &options, const Slice &name, Bucket *b_out) -> Status
 {
+    ENSURE_WRITABLE;
     auto s = *m_status;
     if (s.is_ok()) {
         s = m_schema_obj.create_bucket(options, name, b_out);
@@ -47,6 +56,7 @@ auto TxImpl::open_bucket(const Slice &name, Bucket &b_out) const -> Status
 
 auto TxImpl::drop_bucket(const Slice &name) -> Status
 {
+    ENSURE_WRITABLE;
     auto s = *m_status;
     if (s.is_ok()) {
         s = m_schema_obj.drop_bucket(name);
@@ -56,6 +66,7 @@ auto TxImpl::drop_bucket(const Slice &name) -> Status
 
 auto TxImpl::commit() -> Status
 {
+    ENSURE_WRITABLE;
     auto s = *m_status;
     if (s.is_ok()) {
         s = m_pager->commit();
@@ -65,6 +76,7 @@ auto TxImpl::commit() -> Status
 
 auto TxImpl::vacuum() -> Status
 {
+    ENSURE_WRITABLE;
     auto s = *m_status;
     if (s.is_ok()) {
         s = m_schema_obj.vacuum();
@@ -90,6 +102,7 @@ auto TxImpl::get(const Bucket &b, const Slice &key, std::string *value) const ->
 
 auto TxImpl::put(const Bucket &b, const Slice &key, const Slice &value) -> Status
 {
+    ENSURE_WRITABLE;
     auto s = *m_status;
     if (s.is_ok()) {
         m_schema_obj.use_bucket(b);
@@ -100,6 +113,7 @@ auto TxImpl::put(const Bucket &b, const Slice &key, const Slice &value) -> Statu
 
 auto TxImpl::put(Cursor &c, const Slice &key, const Slice &value) -> Status
 {
+    ENSURE_WRITABLE;
     auto s = *m_status;
     if (s.is_ok()) {
         auto *tree = Tree::get_tree(c);
@@ -111,6 +125,7 @@ auto TxImpl::put(Cursor &c, const Slice &key, const Slice &value) -> Status
 
 auto TxImpl::erase(const Bucket &b, const Slice &key) -> Status
 {
+    ENSURE_WRITABLE;
     auto s = *m_status;
     if (s.is_ok()) {
         m_schema_obj.use_bucket(b);
@@ -121,6 +136,7 @@ auto TxImpl::erase(const Bucket &b, const Slice &key) -> Status
 
 auto TxImpl::erase(Cursor &c) -> Status
 {
+    ENSURE_WRITABLE;
     auto s = *m_status;
     if (s.is_ok()) {
         auto *tree = Tree::get_tree(c);
@@ -129,5 +145,7 @@ auto TxImpl::erase(Cursor &c) -> Status
     }
     return s;
 }
+
+#undef ENSURE_WRITABLE
 
 } // namespace calicodb

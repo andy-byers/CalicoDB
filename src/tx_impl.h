@@ -17,7 +17,7 @@ struct Stat;
 class TxImpl : public Tx
 {
 public:
-    explicit TxImpl(Pager &pager, const Status &status, Stat &stat, char *scratch);
+    explicit TxImpl(Pager &pager, const Status &status, Stat &stat, char *scratch, bool writable);
     ~TxImpl() override;
 
     [[nodiscard]] auto status() const -> Status override
@@ -61,6 +61,7 @@ private:
     TxImpl **m_backref = nullptr;
     Cursor *m_schema;
     Pager *m_pager;
+    const bool m_writable;
 };
 
 inline auto tx_impl(Tx *tx) -> TxImpl *

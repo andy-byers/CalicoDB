@@ -50,7 +50,8 @@ public:
         // TODO: Parse the options string into a human-readable format, save it internally and return a slice to it.
         //       We should skip the varint root ID or convert it into a decimal string.
         CALICODB_EXPECT_TRUE(is_valid());
-        return m_c->value();
+        // return m_c->value();
+        return "";
     }
 
     auto seek(const Slice &key) -> void override

@@ -76,17 +76,18 @@ public:
     // readonly transaction. The caller is responsible for calling delete on the Tx pointer when
     // it is no longer needed.
     // NOTE: Consider using the DB::view()/DB::update() API instead.
-    virtual auto new_tx(const Tx *&tx_out) const -> Status = 0;
+    virtual auto new_tx(Tx *&tx_out) const -> Status = 0;
     virtual auto new_tx(WriteTag, Tx *&tx_out) -> Status = 0;
 };
 
 template <class Fn>
 auto DB::view(Fn &&fn) const -> Status
 {
-    const Tx *tx;
+    Tx *tx;
     auto s = new_tx(tx);
     if (s.is_ok()) {
-        s = fn(*tx);
+        const auto *const_tx = tx;
+        s = fn(*const_tx);
         delete tx;
     }
     return s;

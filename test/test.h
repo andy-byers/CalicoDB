@@ -5,7 +5,10 @@
 #ifndef CALICODB_TEST_TEST_H
 #define CALICODB_TEST_TEST_H
 
+#include "calicodb/cursor.h"
+#include "calicodb/db.h"
 #include "calicodb/env.h"
+#include "stest/rule.h"
 #include <gtest/gtest.h>
 
 namespace calicodb

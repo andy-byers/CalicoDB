@@ -162,12 +162,9 @@ Transactions can also be run manually.
 The caller is responsible for `delete`ing the `Tx` handle when it is no longer needed.
 
 ```C++
-const calicodb::Tx *reader;
+calicodb::Tx *reader;
 
-// Start a readonly transaction. This overload of DB::new_tx() only accepts 
-// a const Tx *. This means that the resulting transaction object cannot be 
-// used to change the database contents, since only const methods are
-// available on it.
+// Start a readonly transaction.
 s = db->new_tx(reader);
 if (!s.is_ok()) {
 }

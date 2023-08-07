@@ -226,7 +226,12 @@ auto DBImpl::prepare_tx(bool write, TxType *&tx_out) const -> Status
         s = m_pager->start_writer();
     }
     if (s.is_ok()) {
-        m_tx = new TxImpl(*m_pager, m_status, m_stat, m_scratch);
+        m_tx = new TxImpl(
+            *m_pager,
+            m_status,
+            m_stat,
+            m_scratch,
+            write);
         m_tx->m_backref = &m_tx;
         tx_out = m_tx;
     } else {
@@ -240,7 +245,7 @@ auto DBImpl::new_tx(WriteTag, Tx *&tx_out) -> Status
     return prepare_tx(true, tx_out);
 }
 
-auto DBImpl::new_tx(const Tx *&tx_out) const -> Status
+auto DBImpl::new_tx(Tx *&tx_out) const -> Status
 {
     return prepare_tx(false, tx_out);
 }
