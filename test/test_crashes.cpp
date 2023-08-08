@@ -220,22 +220,22 @@ protected:
         EXPECT_OK(tx.status());
 
         Status s;
-        Bucket b1, b2;
+        Cursor *c1, *c2;
         const auto name1 = std::to_string(iteration);
         const auto name2 = std::to_string((iteration + 1) % kNumIterations);
 
-        s = tx.open_bucket(name1, b1);
+        s = tx.open_bucket(name1, c1);
         if (s.is_invalid_argument()) {
             BucketOptions options;
             options.error_if_exists = true;
-            s = tx.create_bucket(options, name1, &b1);
+            s = tx.create_bucket(options, name1, &c1);
             if (s.is_ok()) {
                 std::vector<uint32_t> keys(kNumRecords);
                 std::iota(begin(keys), end(keys), 0);
                 std::default_random_engine rng(42);
                 std::shuffle(begin(keys), end(keys), rng);
                 for (auto k : keys) {
-                    s = tx.put(b1, make_key(k), make_value(k));
+                    s = tx.put(*c1, make_key(k), make_value(k));
                     if (!s.is_ok()) {
                         break;
                     }
@@ -244,31 +244,33 @@ protected:
         }
         if (!s.is_ok()) {
             EXPECT_EQ(s, tx.status());
+            delete c1;
             return s;
         }
-        s = tx.create_bucket(BucketOptions(), name2, &b2);
+        s = tx.create_bucket(BucketOptions(), name2, &c2);
         if (!s.is_ok()) {
             EXPECT_EQ(s, tx.status());
+            delete c1;
             return s;
         }
 
-        auto *c = tx.new_cursor(b1);
-        c->seek_first();
+        c1->seek_first();
         for (size_t i = 0; i < kNumRecords; ++i) {
-            if (c->is_valid()) {
-                EXPECT_EQ(c->key(), make_key(i));
-                EXPECT_EQ(c->value(), make_value(i));
-                s = tx.put(b2, c->key(), c->value());
+            if (c1->is_valid()) {
+                EXPECT_EQ(c1->key(), make_key(i));
+                EXPECT_EQ(c1->value(), make_value(i));
+                s = tx.put(*c2, c1->key(), c1->value());
                 if (!s.is_ok()) {
                     break;
                 }
-                c->next();
+                c1->next();
             } else {
-                s = c->status();
+                s = c1->status();
                 break;
             }
         }
-        delete c;
+        delete c1;
+        delete c2;
 
         if (s.is_ok()) {
             s = tx.drop_bucket(name1);
@@ -294,15 +296,15 @@ protected:
             return schema.status();
         }
 
-        Bucket b;
-        auto s = tx.open_bucket(b_name, b);
+        Cursor *c;
+        auto s = tx.open_bucket(b_name, c);
         if (!s.is_ok()) {
             return s;
         }
         for (size_t i = 0; i < kNumRecords; ++i) {
             const auto key = make_key(i);
             std::string value;
-            s = tx.get(b, key, &value);
+            s = tx.get(*c, key, &value);
 
             if (s.is_ok()) {
                 EXPECT_EQ(value, make_value(i));
@@ -310,7 +312,6 @@ protected:
                 return s;
             }
         }
-        auto *c = tx.new_cursor(b);
         c->seek_first();
         for (size_t i = 0; i < kNumRecords; ++i) {
             if (c->is_valid()) {
@@ -482,10 +483,10 @@ protected:
             DB *db;
             ASSERT_OK(DB::open(options, m_filename, db));
             ASSERT_OK(db->update([](auto &tx) {
-                Bucket b;
-                auto s = tx.create_bucket(BucketOptions(), "BUCKET", &b);
+                Cursor *c;
+                auto s = tx.create_bucket(BucketOptions(), "BUCKET", &c);
                 for (size_t j = 0; s.is_ok() && j < kNumRecords; ++j) {
-                    s = tx.put(b, make_key(j), make_value(j));
+                    s = tx.put(*c, make_key(j), make_value(j));
                 }
                 return s;
             }));
@@ -495,12 +496,11 @@ protected:
 
             run_until_completion([&db] {
                 return db->view([](const auto &tx) {
-                    Bucket b;
-                    auto s = tx.open_bucket("BUCKET", b);
+                    Cursor *c;
+                    auto s = tx.open_bucket("BUCKET", c);
                     if (!s.is_ok()) {
                         return s;
                     }
-                    auto *c = tx.new_cursor(b);
                     c->seek_first();
                     for (size_t j = 0; c->is_valid() && j < kNumRecords; ++j) {
                         EXPECT_EQ(c->key(), make_key(j));
@@ -571,12 +571,8 @@ protected:
 
             run_until_completion([&db] {
                 return db->update([](auto &tx) {
-                    Bucket b;
-                    Cursor *c = nullptr;
-                    auto s = tx.create_bucket(BucketOptions(), "BUCKET", &b);
-                    if (s.is_ok()) {
-                        c = tx.new_cursor(b);
-                    }
+                    Cursor *c;
+                    auto s = tx.create_bucket(BucketOptions(), "BUCKET", &c);
                     for (size_t j = 0; s.is_ok() && j < kNumRecords; ++j) {
                         const auto key = make_key(j);
                         const auto value = make_value(j);
@@ -957,10 +953,10 @@ public:
         // Don't drop any records until the commit.
         m_env->m_drop_file = "";
         return m_db->update([num_writes, version, &param, this](auto &tx) {
-            Bucket b;
-            EXPECT_OK(tx.create_bucket(BucketOptions(), "bucket", &b));
+            Cursor *c;
+            EXPECT_OK(tx.create_bucket(BucketOptions(), "bucket", &c));
             for (size_t i = 0; i < num_writes; ++i) {
-                EXPECT_OK(tx.put(b, numeric_key(i), numeric_key(i + version * num_writes)));
+                EXPECT_OK(tx.put(*c, numeric_key(i), numeric_key(i + version * num_writes)));
             }
             m_env->m_loss_type = param.loss_type;
             m_env->m_drop_file = param.loss_file;
@@ -988,11 +984,11 @@ public:
     auto check_records(size_t num_writes, size_t version)
     {
         return m_db->view([=](const auto &tx) {
-            Bucket b;
-            auto s = tx.open_bucket("bucket", b);
+            Cursor *c;
+            auto s = tx.open_bucket("bucket", c);
             for (size_t i = 0; i < num_writes && s.is_ok(); ++i) {
                 std::string value;
-                s = tx.get(b, numeric_key(i), &value);
+                s = tx.get(*c, numeric_key(i), &value);
                 if (s.is_ok()) {
                     EXPECT_EQ(value, numeric_key(i + version * num_writes));
                 }

@@ -148,77 +148,81 @@ protected:
         return {key_str, val_str};
     }
 
-    [[nodiscard]] static auto put(Tx &tx, const Bucket &b, size_t kv, size_t round = 0) -> Status
+    [[nodiscard]] static auto put(Tx &tx, Cursor &c, size_t kv, size_t round = 0) -> Status
     {
         const auto [k, v] = make_kv(kv, round);
-        return tx.put(b, k, v);
+        return tx.put(c, k, v);
     }
     [[nodiscard]] static auto put(Tx &tx, const BucketOptions &options, const std::string &bname, size_t kv, size_t round = 0) -> Status
     {
-        Bucket b;
-        auto s = tx.create_bucket(options, bname, &b);
+        Cursor *c;
+        auto s = tx.create_bucket(options, bname, &c);
         if (s.is_ok()) {
-            s = put(tx, b, kv, round);
+            s = put(tx, *c, kv, round);
+            delete c;
         }
         return s;
     }
 
-    [[nodiscard]] static auto put_range(Tx &tx, const Bucket &b, size_t kv1, size_t kv2, size_t round = 0) -> Status
+    [[nodiscard]] static auto put_range(Tx &tx, Cursor &c, size_t kv1, size_t kv2, size_t round = 0) -> Status
     {
         Status s;
         for (size_t kv = kv1; s.is_ok() && kv < kv2; ++kv) {
-            s = put(tx, b, kv, round);
+            s = put(tx, c, kv, round);
         }
         return s;
     }
     [[nodiscard]] static auto put_range(Tx &tx, const BucketOptions &options, const std::string &bname, size_t kv1, size_t kv2, size_t round = 0) -> Status
     {
-        Bucket b;
-        auto s = tx.create_bucket(options, bname, &b);
+        Cursor *c;
+        auto s = tx.create_bucket(options, bname, &c);
         if (s.is_ok()) {
-            s = put_range(tx, b, kv1, kv2, round);
+            s = put_range(tx, *c, kv1, kv2, round);
+            delete c;
         }
         return s;
     }
 
-    [[nodiscard]] static auto erase(Tx &tx, const Bucket &b, size_t kv, size_t round = 0) -> Status
+    [[nodiscard]] static auto erase(Tx &tx, Cursor &c, size_t kv, size_t round = 0) -> Status
     {
         const auto [k, _] = make_kv(kv, round);
-        return tx.erase(b, k);
+        return tx.erase(c, k);
     }
     [[nodiscard]] static auto erase(Tx &tx, const BucketOptions &options, const std::string &bname, size_t kv, size_t round = 0) -> Status
     {
-        Bucket b;
-        auto s = tx.create_bucket(options, bname, &b);
+        Cursor *c;
+        auto s = tx.create_bucket(options, bname, &c);
         if (s.is_ok()) {
-            s = erase(tx, b, kv, round);
+            s = erase(tx, *c, kv, round);
+            delete c;
         }
         return s;
     }
 
-    [[nodiscard]] static auto erase_range(Tx &tx, const Bucket &b, size_t kv1, size_t kv2, size_t round = 0) -> Status
+    [[nodiscard]] static auto erase_range(Tx &tx, Cursor &c, size_t kv1, size_t kv2, size_t round = 0) -> Status
     {
         Status s;
         for (size_t kv = kv1; s.is_ok() && kv < kv2; ++kv) {
-            s = erase(tx, b, kv, round);
+            s = erase(tx, c, kv, round);
         }
         return s;
     }
     [[nodiscard]] static auto erase_range(Tx &tx, const BucketOptions &options, const std::string &bname, size_t kv1, size_t kv2, size_t round = 0) -> Status
     {
-        Bucket b;
-        auto s = tx.create_bucket(options, bname, &b);
+        Cursor *c;
+        auto s = tx.create_bucket(options, bname, &c);
         if (s.is_ok()) {
-            s = erase_range(tx, b, kv1, kv2, round);
+            s = erase_range(tx, *c, kv1, kv2, round);
+            delete c;
         }
         return s;
     }
 
-    [[nodiscard]] static auto check(Tx &tx, const Bucket &b, size_t kv, bool exists, size_t round = 0) -> Status
+    [[nodiscard]] static auto check(Tx &tx, Cursor &c, size_t kv, bool exists, size_t round = 0) -> Status
     {
         std::string result;
         const auto [k, v] = make_kv(kv, round);
-        auto s = tx.get(b, k, &result);
+        auto s = tx.get(c, k, &result);
         if (s.is_ok()) {
             EXPECT_TRUE(exists);
             uint64_t n;
@@ -232,81 +236,81 @@ protected:
     }
     [[nodiscard]] static auto check(Tx &tx, const BucketOptions &options, const std::string &bname, size_t kv, bool exists, size_t round = 0) -> Status
     {
-        Bucket b;
-        auto s = tx.create_bucket(options, bname, &b);
+        Cursor *c;
+        auto s = tx.create_bucket(options, bname, &c);
         if (s.is_ok()) {
-            s = check(tx, b, kv, exists, round);
+            s = check(tx, *c, kv, exists, round);
+            delete c;
         }
         return s;
     }
 
-    [[nodiscard]] static auto check_range(const Tx &tx, const Bucket &b, size_t kv1, size_t kv2, bool exists, size_t round = 0) -> Status
+    [[nodiscard]] static auto check_range(const Tx &, Cursor &c, size_t kv1, size_t kv2, bool exists, size_t round = 0) -> Status
     {
-        auto *c = tx.new_cursor(b);
         // Run some extra seek*() calls.
         if (kv1 & 1) {
-            c->seek_first();
+            c.seek_first();
         } else {
-            c->seek_last();
+            c.seek_last();
         }
         Status s;
-        if (c->status().is_io_error()) {
-            s = c->status();
+        if (c.status().is_io_error()) {
+            s = c.status();
         }
         if (s.is_ok() && exists) {
             for (size_t kv = kv1; kv < kv2; ++kv) {
                 const auto [k, v] = make_kv(kv, round);
                 if (kv == kv1) {
-                    c->seek(k);
+                    c.seek(k);
                 }
-                if (c->is_valid()) {
-                    EXPECT_EQ(k, c->key().to_string());
-                    EXPECT_EQ(v, c->value().to_string());
+                if (c.is_valid()) {
+                    EXPECT_EQ(k, c.key().to_string());
+                    EXPECT_EQ(v, c.value().to_string());
                 } else {
-                    EXPECT_TRUE(c->status().is_io_error());
-                    s = c->status();
+                    EXPECT_TRUE(c.status().is_io_error());
+                    s = c.status();
                     break;
                 }
-                c->next();
+                c.next();
             }
             if (s.is_ok()) {
                 for (size_t i = 0; i < kv2 - kv1; ++i) {
                     const auto [k, v] = make_kv(kv2 - i - 1, round);
                     if (i == 0) {
-                        c->seek(k);
+                        c.seek(k);
                     }
-                    if (c->is_valid()) {
-                        EXPECT_EQ(k, c->key().to_string());
-                        EXPECT_EQ(v, c->value().to_string());
+                    if (c.is_valid()) {
+                        EXPECT_EQ(k, c.key().to_string());
+                        EXPECT_EQ(v, c.value().to_string());
                     } else {
-                        s = c->status();
+                        s = c.status();
                         break;
                     }
-                    c->previous();
+                    c.previous();
                 }
             }
         } else {
             for (size_t kv = kv1; kv < kv2; ++kv) {
                 const auto [k, v] = make_kv(kv, round);
-                c->seek(k);
-                if (c->is_valid()) {
-                    EXPECT_NE(k, c->key().to_string());
-                } else if (!c->status().is_ok()) {
-                    EXPECT_TRUE((c->status().is_io_error()));
-                    s = c->status();
+                c.seek(k);
+                if (c.is_valid()) {
+                    EXPECT_NE(k, c.key().to_string());
+                } else if (!c.status().is_ok()) {
+                    EXPECT_TRUE((c.status().is_io_error()));
+                    s = c.status();
                     break;
                 }
             }
         }
-        delete c;
         return s;
     }
     [[nodiscard]] static auto check_range(const Tx &tx, const std::string &bname, size_t kv1, size_t kv2, bool exists, size_t round = 0) -> Status
     {
-        Bucket b;
-        auto s = tx.open_bucket(bname, b);
+        Cursor *c;
+        auto s = tx.open_bucket(bname, c);
         if (s.is_ok()) {
-            s = check_range(tx, b, kv1, kv2, exists, round);
+            s = check_range(tx, *c, kv1, kv2, exists, round);
+            delete c;
         }
         return s;
     }
@@ -444,10 +448,9 @@ TEST_F(DBTests, NewTx)
 
     std::vector<std::string> values;
     auto s = m_db->view([&values](const auto &tx) {
-        Bucket b;
-        auto s = tx.open_bucket("bucket", b);
+        Cursor *c;
+        auto s = tx.open_bucket("bucket", c);
         if (s.is_ok()) {
-            auto *c = tx.new_cursor(b);
             c->seek_first();
             while (c->is_valid()) {
                 if (c->key().starts_with("common-prefix")) {
@@ -465,10 +468,10 @@ TEST_F(DBTests, NewTx)
 TEST_F(DBTests, NewBucket)
 {
     ASSERT_OK(m_db->update([](auto &tx) {
-        Bucket b;
+        Cursor *c;
         BucketOptions tbopt;
-        EXPECT_NOK(tx.open_bucket("BUCKET", b));
-        EXPECT_OK(tx.create_bucket(tbopt, "BUCKET", &b));
+        EXPECT_NOK(tx.open_bucket("BUCKET", c));
+        EXPECT_OK(tx.create_bucket(tbopt, "BUCKET", &c));
         return Status::ok();
     }));
 }
@@ -476,12 +479,13 @@ TEST_F(DBTests, NewBucket)
 TEST_F(DBTests, BucketBehavior)
 {
     ASSERT_OK(m_db->update([](auto &tx) {
-        Bucket b;
-        EXPECT_OK(tx.create_bucket(BucketOptions(), "BUCKET", &b));
-        EXPECT_OK(tx.put(b, "key", "value"));
+        Cursor *c;
+        EXPECT_OK(tx.create_bucket(BucketOptions(), "BUCKET", &c));
+        EXPECT_OK(tx.put(*c, "key", "value"));
         std::string value;
-        EXPECT_OK(tx.get(b, "key", &value));
+        EXPECT_OK(tx.get(*c, "key", &value));
         EXPECT_EQ("value", value);
+        delete c;
         return Status::ok();
     }));
 }
@@ -495,14 +499,11 @@ TEST_F(DBTests, ReadonlyTxDisallowsWrites)
     Tx *tx;
     ASSERT_OK(m_db->new_tx(tx));
 
-    Bucket b;
-    ASSERT_NOK(tx->create_bucket(BucketOptions(), "BUCKET", &b));
-    ASSERT_OK(tx->open_bucket("BUCKET", b));
+    Cursor *c;
+    ASSERT_NOK(tx->create_bucket(BucketOptions(), "BUCKET", &c));
+    ASSERT_OK(tx->open_bucket("BUCKET", c));
 
-    auto *c = tx->new_cursor(b);
-    ASSERT_EQ(tx->put(b, "key", "value").code(), Status::kNotSupported);
     ASSERT_EQ(tx->put(*c, "key", "value").code(), Status::kNotSupported);
-    ASSERT_EQ(tx->erase(b, "key").code(), Status::kNotSupported);
     ASSERT_EQ(tx->erase(*c).code(), Status::kNotSupported);
     ASSERT_EQ(tx->drop_bucket("BUCKET").code(), Status::kNotSupported);
     ASSERT_EQ(tx->vacuum().code(), Status::kNotSupported);
@@ -515,16 +516,15 @@ TEST_F(DBTests, ReadonlyTx)
 {
     do {
         ASSERT_OK(m_db->update([](auto &tx) {
-            Bucket b;
-            EXPECT_OK(tx.create_bucket(BucketOptions(), "BUCKET", &b));
+            Cursor *c;
+            EXPECT_OK(tx.create_bucket(BucketOptions(), "BUCKET", &c));
+            delete c;
             return Status::ok();
         }));
         ASSERT_OK(m_db->view([](auto &tx) {
-            Bucket b;
-            EXPECT_OK(tx.open_bucket("BUCKET", b));
-            auto *c = tx.new_cursor(b);
+            Cursor *c;
+            EXPECT_OK(tx.open_bucket("BUCKET", c));
             delete c;
-            c = &tx.schema();
             return Status::ok();
         }));
     } while (change_options(true));
@@ -538,25 +538,27 @@ TEST_F(DBTests, UpdateThenView)
         tbopt.error_if_exists = true;
         for (int i = 0; i < 3; ++i) {
             ASSERT_OK(m_db->update([i, tbopt, round](auto &tx) {
-                Bucket b;
-                auto s = tx.create_bucket(tbopt, kBucketStr + i, &b);
+                Cursor *c;
+                auto s = tx.create_bucket(tbopt, kBucketStr + i, &c);
                 if (s.is_ok()) {
-                    s = put_range(tx, b, 0, 1'000, round);
+                    s = put_range(tx, *c, 0, 1'000, round);
                     if (s.is_ok()) {
-                        s = erase_range(tx, b, 250, 750, round);
+                        s = erase_range(tx, *c, 250, 750, round);
                     }
+                    delete c;
                 }
                 return s;
             }));
         }
         for (int i = 0; i < 3; ++i) {
             ASSERT_OK(m_db->view([round, i](auto &tx) {
-                Bucket b;
-                auto s = tx.open_bucket(kBucketStr + i, b);
+                Cursor *c;
+                auto s = tx.open_bucket(kBucketStr + i, c);
                 if (s.is_ok()) {
-                    EXPECT_OK(check_range(tx, b, 0, 250, true, round));
-                    EXPECT_OK(check_range(tx, b, 250, 750, false, round));
-                    EXPECT_OK(check_range(tx, b, 750, 1'000, true, round));
+                    EXPECT_OK(check_range(tx, *c, 0, 250, true, round));
+                    EXPECT_OK(check_range(tx, *c, 250, 750, false, round));
+                    EXPECT_OK(check_range(tx, *c, 750, 1'000, true, round));
+                    delete c;
                 }
                 return s;
             }));
@@ -573,9 +575,9 @@ TEST_F(DBTests, RollbackRootUpdate)
 {
     do {
         ASSERT_TRUE(m_db->update([](auto &tx) {
-                            Bucket b;
+                            Cursor *c;
                             for (size_t i = 0; i < 10; ++i) {
-                                auto s = tx.create_bucket(BucketOptions(), numeric_key(i), &b);
+                                auto s = tx.create_bucket(BucketOptions(), numeric_key(i), &c);
                                 if (!s.is_ok()) {
                                     return s;
                                 }
@@ -590,16 +592,18 @@ TEST_F(DBTests, RollbackRootUpdate)
                         })
                         .to_string() == "not found: 42");
         ASSERT_OK(m_db->view([](const auto &tx) {
-            Bucket b;
+            Cursor *c;
             Status s;
             for (size_t i = 0; i < 10 && s.is_ok(); ++i) {
-                s = tx.open_bucket(numeric_key(i), b);
+                s = tx.open_bucket(numeric_key(i), c);
                 if (i <= 5) {
                     EXPECT_OK(s);
                 } else {
                     EXPECT_NOK(s);
+                    EXPECT_EQ(c, nullptr);
                     s = Status::ok();
                 }
+                delete c;
             }
             return s;
         }));
@@ -612,10 +616,10 @@ TEST_F(DBTests, RollbackUpdate)
     do {
         for (int i = 0; i < 3; ++i) {
             ASSERT_TRUE(m_db->update([i, round](auto &tx) {
-                                Bucket b;
-                                auto s = tx.create_bucket(BucketOptions(), kBucketStr + i, &b);
+                                Cursor *c;
+                                auto s = tx.create_bucket(BucketOptions(), kBucketStr + i, &c);
                                 if (s.is_ok()) {
-                                    s = put_range(tx, b, 0, 500, round);
+                                    s = put_range(tx, *c, 0, 500, round);
                                     if (s.is_ok()) {
                                         // We have access to the Tx here, so we can actually call
                                         // Tx::commit() as many times as we want before we return.
@@ -623,13 +627,14 @@ TEST_F(DBTests, RollbackUpdate)
                                         // commit before calling delete on the Tx.
                                         s = tx.commit();
                                         if (s.is_ok()) {
-                                            s = put_range(tx, b, 500, 1'000, round);
+                                            s = put_range(tx, *c, 500, 1'000, round);
                                             if (s.is_ok()) {
                                                 // Cause the rest of the changes to be rolled back.
                                                 return Status::not_found("42");
                                             }
                                         }
                                     }
+                                    delete c;
                                 }
                                 return s;
                             })
@@ -637,11 +642,12 @@ TEST_F(DBTests, RollbackUpdate)
         }
         for (int i = 0; i < 3; ++i) {
             ASSERT_OK(m_db->view([round, i](const auto &tx) {
-                Bucket b;
-                auto s = tx.open_bucket(kBucketStr + i, b);
+                Cursor *c;
+                auto s = tx.open_bucket(kBucketStr + i, c);
                 if (s.is_ok()) {
-                    EXPECT_OK(check_range(tx, b, 0, 500, true, round));
-                    EXPECT_OK(check_range(tx, b, 500, 1'000, false, round));
+                    EXPECT_OK(check_range(tx, *c, 0, 500, true, round));
+                    EXPECT_OK(check_range(tx, *c, 500, 1'000, false, round));
+                    delete c;
                 }
                 return s;
             }));
@@ -657,7 +663,7 @@ TEST_F(DBTests, ScanWholeDatabase)
     static constexpr size_t kRecordsPerBucket = 100;
 
     ASSERT_OK(m_db->update([](auto &tx) {
-        Bucket b;
+        Cursor *c;
         for (size_t i = 0; i < kNumBuckets; ++i) {
             EXPECT_OK(put_range(tx, BucketOptions(), numeric_key(i), 0, kRecordsPerBucket));
         }
@@ -669,10 +675,9 @@ TEST_F(DBTests, ScanWholeDatabase)
         schema.seek_first();
         for (size_t i = 0; i < kNumBuckets; ++i) {
             EXPECT_TRUE(schema.is_valid());
-            Bucket b;
+            Cursor *c;
             EXPECT_EQ(schema.key(), numeric_key(i));
-            EXPECT_OK(tx.open_bucket(schema.key(), b));
-            auto *c = tx.new_cursor(b);
+            EXPECT_OK(tx.open_bucket(schema.key(), c));
             c->seek_first();
             for (size_t j = 0; j < kRecordsPerBucket; ++j) {
                 const auto [k, v] = make_kv(j);
@@ -813,7 +818,7 @@ TEST_F(DBTests, RerootBuckets)
         return tx.vacuum();
     }));
     ASSERT_OK(m_db->view([](auto &tx) {
-        Bucket c, e;
+        Cursor *c, *e;
         auto &schema = tx.schema();
         schema.seek_first();
         EXPECT_TRUE(schema.is_valid());
@@ -828,6 +833,8 @@ TEST_F(DBTests, RerootBuckets)
         schema.next();
         schema.next();
         EXPECT_FALSE(schema.is_valid());
+        delete c;
+        delete e;
         return Status::ok();
     }));
 }
@@ -836,8 +843,10 @@ TEST_F(DBTests, BucketExistence)
 {
     // Cannot Tx::open_bucket() a bucket that doesn't exist, even in a read-write transaction.
     const auto try_open_bucket = [](const auto &tx) {
-        Bucket b;
-        return tx.open_bucket("bucket", b);
+        Cursor *c;
+        auto s = tx.open_bucket("bucket", c);
+        delete c;
+        return s;
     };
     ASSERT_NOK(m_db->view(try_open_bucket));
     ASSERT_NOK(m_db->update(try_open_bucket));
@@ -855,8 +864,10 @@ TEST_F(DBTests, BucketExistence)
 
     // Now the bucket can be opened.
     ASSERT_OK(m_db->view([](auto &tx) {
-        Bucket b;
-        return tx.open_bucket("bucket", b);
+        Cursor *c;
+        auto s = tx.open_bucket("bucket", c);
+        delete c;
+        return s;
     }));
 }
 
@@ -867,13 +878,14 @@ TEST_F(DBTests, SpaceAmplification)
 
     RandomGenerator random;
     ASSERT_OK(m_db->update([&random](auto &tx) {
-        Bucket b;
-        auto s = tx.create_bucket(BucketOptions(), "b", &b);
+        Cursor *c;
+        auto s = tx.create_bucket(BucketOptions(), "b", &c);
         for (size_t i = 0; s.is_ok() && i < kNumRecords; ++i) {
             const auto key = random.Generate(kInputSize / kNumRecords / 2);
             const auto val = random.Generate(key.size());
-            s = tx.put(b, key, val);
+            s = tx.put(*c, key, val);
         }
+        delete c;
         return s;
     }));
 
@@ -893,10 +905,13 @@ TEST_F(DBTests, VacuumDroppedBuckets)
         return Status::ok();
     }));
     ASSERT_OK(m_db->update([](auto &tx) {
-        Bucket a, b, c;
+        Cursor *a, *b, *c;
         EXPECT_OK(tx.open_bucket("a", a));
         EXPECT_OK(tx.open_bucket("b", b));
         EXPECT_OK(tx.open_bucket("c", c));
+        delete a;
+        delete b;
+        delete c;
         EXPECT_OK(tx.drop_bucket("a"));
         EXPECT_OK(tx.drop_bucket("c"));
         return tx.vacuum();
@@ -1327,16 +1342,16 @@ protected:
         static constexpr auto *kName = "12345678_BUCKET_NAMES";
         static constexpr size_t kN = 10;
         (void)m_db->update([&bitmaps](auto &tx) {
-            Bucket buckets[8];
+            Cursor *cursors[8];
             for (size_t i = 0; i < 8; ++i) {
-                EXPECT_OK(tx.create_bucket(BucketOptions(), kName + i, &buckets[i]));
+                EXPECT_OK(tx.create_bucket(BucketOptions(), kName + i, &cursors[i]));
             }
             std::vector<size_t> bs;
             std::vector<size_t> is;
             for (size_t b = 0; b < bitmaps.size(); ++b) {
                 for (size_t i = 0; i < 8; ++i) {
                     if ((bitmaps[b] >> i) & 1) {
-                        EXPECT_OK(put_range(tx, buckets[i], b * kN, (b + 1) * kN));
+                        EXPECT_OK(put_range(tx, *cursors[i], b * kN, (b + 1) * kN));
                         bs.emplace_back(b);
                         is.emplace_back(i);
                     }
@@ -1344,23 +1359,23 @@ protected:
             }
             for (size_t n = 0; n < bs.size(); ++n) {
                 if (0 == (n & 1)) {
-                    EXPECT_OK(erase_range(tx, buckets[is[n]], bs[n] * kN, (bs[n] + 1) * kN));
+                    EXPECT_OK(erase_range(tx, *cursors[is[n]], bs[n] * kN, (bs[n] + 1) * kN));
                 }
             }
             EXPECT_OK(tx.vacuum());
 
             for (size_t n = 0; n < bs.size(); ++n) {
-                EXPECT_OK(check_range(tx, buckets[is[n]], bs[n] * kN, (bs[n] + 1) * kN, n & 1));
+                EXPECT_OK(check_range(tx, *cursors[is[n]], bs[n] * kN, (bs[n] + 1) * kN, n & 1));
                 if (n & 1) {
                     // Erase the rest of the records. The database should be empty after this
                     // loop completes.
-                    EXPECT_OK(erase_range(tx, buckets[is[n]], bs[n] * kN, (bs[n] + 1) * kN));
+                    EXPECT_OK(erase_range(tx, *cursors[is[n]], bs[n] * kN, (bs[n] + 1) * kN));
                 }
             }
             EXPECT_OK(tx.vacuum());
 
             for (size_t n = 0; n < bs.size(); ++n) {
-                EXPECT_OK(check_range(tx, buckets[is[n]], bs[n] * kN, (bs[n] + 1) * kN, false));
+                EXPECT_OK(check_range(tx, *cursors[is[n]], bs[n] * kN, (bs[n] + 1) * kN, false));
             }
             return Status::ok();
         });

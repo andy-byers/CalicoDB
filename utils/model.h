@@ -18,7 +18,6 @@
 #include <list>
 #include <map>
 
-
 #define CHECK_TRUE(cond)                                 \
     do {                                                 \
         if (!(cond)) {                                   \
@@ -89,7 +88,7 @@ public:
 
 class ModelTx;
 
-template<class Map>
+template <class Map>
 class ModelCursorBase : public Cursor
 {
     static constexpr bool kIsSchema = std::is_same_v<Map, KVStore>;
@@ -171,7 +170,8 @@ public:
     {
         if (m_c->is_valid()) {
             const auto key = m_saved
-                                 ? m_saved_key : m_itr->first;
+                                 ? m_saved_key
+                                 : m_itr->first;
             CHECK_EQ(key, m_c->key().to_string());
 
             std::string value;
@@ -248,38 +248,10 @@ class ModelTx : public Tx
     KVStore *const m_base;
     Tx *const m_tx;
 
+    auto open_model_cursor(Cursor &c, KVMap &map) const -> Cursor *;
     auto save_cursors(Cursor *exclude = nullptr) const -> void;
     mutable std::list<Cursor *> m_cursors;
     mutable ModelCursorBase<KVStore> m_schema;
-
-    struct ModelBucket {
-        void *real_state;
-        KVMap *fake_state;
-    };
-    mutable std::list<ModelBucket> m_buckets;
-
-    auto add_model_bucket(const ModelBucket &b) -> Bucket
-    {
-        m_buckets.push_back(b);
-        return Bucket{static_cast<void *>(&m_buckets.back())};
-    }
-    auto add_model_bucket(const ModelBucket &b) const -> Bucket
-    {
-        m_buckets.push_back(b);
-        return Bucket{static_cast<void *>(&m_buckets.back())};
-    }
-    auto clear_model_buckets() -> void
-    {
-        m_buckets.clear();
-    }
-    static auto get_real_bucket(Bucket b) -> Bucket
-    {
-        return Bucket{static_cast<ModelBucket *>(b.state)->real_state};
-    }
-    static auto get_fake_bucket(Bucket b) -> KVMap *
-    {
-        return static_cast<ModelBucket *>(b.state)->fake_state;
-    }
 
 public:
     explicit ModelTx(KVStore &store, Tx &tx)
@@ -307,8 +279,8 @@ public:
         return m_schema;
     }
 
-    auto create_bucket(const BucketOptions &options, const Slice &name, Bucket *b_out) -> Status override;
-    [[nodiscard]] auto open_bucket(const Slice &name, Bucket &b_out) const -> Status override;
+    auto create_bucket(const BucketOptions &options, const Slice &name, Cursor **c_out) -> Status override;
+    [[nodiscard]] auto open_bucket(const Slice &name, Cursor *&c_out) const -> Status override;
 
     auto drop_bucket(const Slice &name) -> Status override
     {
@@ -335,30 +307,27 @@ public:
         return s;
     }
 
-    [[nodiscard]] auto new_cursor(const Bucket &b) const -> Cursor * override;
-
-    [[nodiscard]] auto get(const Bucket &b, const Slice &key, std::string *value_out) const -> Status override
+    [[nodiscard]] auto get(Cursor &c, const Slice &key, std::string *value_out) const -> Status override
     {
-        const auto &fake = *get_fake_bucket(b);
-        const auto itr = fake.find(key.to_string());
-        auto s = m_tx->get(get_real_bucket(b), key, value_out);
+        auto &model_c = reinterpret_cast<ModelCursorBase<KVMap> &>(c);
+        const auto itr = model_c.m_map->find(key.to_string());
+        auto s = m_tx->get(c, key, value_out);
         if (s.is_ok()) {
-            CHECK_TRUE(itr != end(fake));
+            CHECK_TRUE(itr != end(*model_c.m_map));
             CHECK_EQ(itr->first, key.to_string());
             CHECK_EQ(itr->second, *value_out);
         } else if (s.is_not_found()) {
-            CHECK_TRUE(itr == end(fake));
+            CHECK_TRUE(itr == end(*model_c.m_map));
         }
         return s;
     }
 
-    auto put(const Bucket &b, const Slice &key, const Slice &value) -> Status override;
     auto put(Cursor &c, const Slice &key, const Slice &value) -> Status override;
-    auto erase(const Bucket &b, const Slice &key) -> Status override;
+    auto erase(Cursor &c, const Slice &key) -> Status override;
     auto erase(Cursor &c) -> Status override;
 };
 
-template<class Map>
+template <class Map>
 ModelCursorBase<Map>::~ModelCursorBase()
 {
     if constexpr (!kIsSchema) {
@@ -368,7 +337,7 @@ ModelCursorBase<Map>::~ModelCursorBase()
 }
 
 //
-//class ModelCursor : public Cursor
+// class ModelCursor : public Cursor
 //{
 //    friend class ModelTx;
 //
@@ -401,7 +370,7 @@ ModelCursorBase<Map>::~ModelCursorBase()
 //        return {false, ""};
 //    }
 //
-//public:
+// public:
 //    explicit ModelCursor(Cursor &c, const ModelTx &tx, KVMap &map, std::list<ModelCursor *>::iterator backref)
 //        : m_backref(backref),
 //          m_c(&c),
@@ -499,7 +468,6 @@ ModelCursorBase<Map>::~ModelCursorBase()
 //        m_c->previous();
 //    }
 //};
-
 
 } // namespace calicodb
 

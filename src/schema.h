@@ -24,14 +24,23 @@ public:
     explicit Schema(Pager &pager, const Status &status, Stat &stat, char *scratch);
     ~Schema() = default;
 
-    [[nodiscard]] auto new_cursor() -> Cursor *;
+    [[nodiscard]] auto cursor() -> Cursor &
+    {
+        return *m_cursor;
+    }
 
     auto close() -> void;
-    auto create_bucket(const BucketOptions &options, const Slice &name, Bucket *b_out) -> Status;
-    auto open_bucket(const Slice &name, Bucket &b_out) -> Status;
+    auto create_bucket(const BucketOptions &options, const Slice &name, Cursor **c_out) -> Status;
+    auto open_bucket(const Slice &name, Cursor *&c_out) -> Status;
     auto drop_bucket(const Slice &name) -> Status;
 
-    auto use_bucket(const Bucket &b) -> void;
+    auto unpack_and_use(Cursor &c) -> std::pair<Tree &, CursorImpl &>;
+    auto use_tree(Tree &tree) -> void;
+
+    static auto get_cursor_impl(Cursor &c) -> CursorImpl &
+    {
+        return *reinterpret_cast<CursorImpl *>(c.token());
+    }
 
     auto vacuum() -> Status;
 
@@ -43,7 +52,7 @@ public:
 private:
     [[nodiscard]] auto decode_and_check_root_id(const Slice &data, Id &out) -> bool;
     auto corrupted_root_id(const Slice &name, const Slice &value) -> Status;
-    auto construct_bucket_state(Id root_id) -> Bucket;
+    auto construct_or_reference_tree(Id root_id) -> Tree *;
 
     template <class T>
     using HashMap = std::unordered_map<Id, T, Id::Hash>;
@@ -70,6 +79,8 @@ private:
     char *const m_scratch;
     Stat *const m_stat;
     Tree m_map;
+
+    Cursor *const m_cursor;
 
     // Pointer to the most-recently-accessed tree.
     const Tree *m_recent = nullptr;

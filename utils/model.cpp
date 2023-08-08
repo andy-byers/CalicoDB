@@ -57,9 +57,8 @@ ModelTx::~ModelTx()
 auto ModelTx::check_consistency() const -> void
 {
     for (const auto &[name, map] : m_temp) {
-        Bucket b;
-        CHECK_OK(m_tx->open_bucket(name, b));
-        auto *c = m_tx->new_cursor(b);
+        Cursor *c;
+        CHECK_OK(m_tx->open_bucket(name, c));
         c->seek_first();
         while (c->is_valid()) {
             const auto key = c->key().to_string();
@@ -83,83 +82,73 @@ auto ModelTx::save_cursors(Cursor *exclude) const -> void
     }
 }
 
-auto ModelTx::create_bucket(const BucketOptions &options, const Slice &name, Bucket *b_out) -> Status
+auto ModelTx::create_bucket(const BucketOptions &options, const Slice &name, Cursor **c_out) -> Status
 {
-    Bucket b;
-    auto s = m_tx->create_bucket(options, name, &b);
+    Cursor *c = nullptr;
+    auto **c_ptr = c_out ? &c : nullptr;
+    auto s = m_tx->create_bucket(options, name, c_ptr);
     if (s.is_ok()) {
         // NOOP if `name` already exists.
         auto [itr, _] = m_temp.insert({name.to_string(), {}});
-        b = add_model_bucket({b.state, &itr->second});
-        if (b_out) {
-            *b_out = b;
+        if (c_out) {
+            CHECK_TRUE(c != nullptr);
+            *c_out = open_model_cursor(*c, itr->second);
+            ;
         }
     }
     return s;
 }
 
-auto ModelTx::open_bucket(const Slice &name, Bucket &b_out) const -> Status
+auto ModelTx::open_bucket(const Slice &name, Cursor *&c_out) const -> Status
 {
-    Bucket b;
-    auto s = m_tx->open_bucket(name, b);
+    Cursor *c;
+    auto s = m_tx->open_bucket(name, c);
     if (s.is_ok()) {
         auto itr = m_temp.find(name.to_string());
         CHECK_TRUE(itr != end(m_temp));
-        b_out = add_model_bucket({b.state, &itr->second});
+        c_out = open_model_cursor(*c, itr->second);
     }
     return s;
 }
 
-auto ModelTx::new_cursor(const Bucket &b) const -> Cursor *
+auto ModelTx::open_model_cursor(Cursor &c, KVMap &map) const -> Cursor *
 {
     m_cursors.emplace_front();
-    auto *c = new ModelCursorBase<KVMap>(
-        *m_tx->new_cursor(get_real_bucket(b)),
+    auto *model_c = new ModelCursorBase<KVMap>(
+        c,
         *this,
-        *get_fake_bucket(b),
+        map,
         begin(m_cursors));
-    m_cursors.front() = c;
-    return c;
-}
-
-auto ModelTx::put(const Bucket &b, const Slice &key, const Slice &value) -> Status
-{
-    save_cursors();
-    get_fake_bucket(b)->insert_or_assign(key.to_string(), value.to_string());
-    return m_tx->put(get_real_bucket(b), key, value);
+    m_cursors.front() = model_c;
+    return model_c;
 }
 
 auto ModelTx::put(Cursor &c, const Slice &key, const Slice &value) -> Status
 {
-    auto &mc = reinterpret_cast<ModelCursorBase<KVMap> &>(c);
-    save_cursors(&mc);
-    mc.load_position();
-    mc.m_itr = mc.map().insert_or_assign(mc.m_itr, key.to_string(), value.to_string());
-    mc.m_saved = false;
-    auto s = m_tx->put(*mc.m_c, key, value);
-    if (s.is_ok()) {
-        mc.check_record();
-    }
-    return s;
+    save_cursors();
+    auto &model_c = reinterpret_cast<ModelCursorBase<KVMap> &>(c);
+    model_c.m_map->insert_or_assign(key.to_string(), value.to_string());
+    return m_tx->put(c, key, value);
 }
 
-auto ModelTx::erase(const Bucket &b, const Slice &key) -> Status
+auto ModelTx::erase(Cursor &c, const Slice &key) -> Status
 {
     save_cursors();
-    get_fake_bucket(b)->erase(key.to_string());
-    return m_tx->erase(get_real_bucket(b), key);
+    auto &model_c = reinterpret_cast<ModelCursorBase<KVMap> &>(c);
+    model_c.m_map->erase(key.to_string());
+    return m_tx->erase(c, key);
 }
 
 auto ModelTx::erase(Cursor &c) -> Status
 {
-    auto &mc = reinterpret_cast<ModelCursorBase<KVMap> &>(c);
-    save_cursors(&mc);
-    mc.load_position();
-    auto s = m_tx->erase(*mc.m_c);
+    auto &model_c = reinterpret_cast<ModelCursorBase<KVMap> &>(c);
+    save_cursors(&model_c);
+    model_c.load_position();
+    auto s = m_tx->erase(model_c);
     if (s.is_ok()) {
-        mc.m_itr = mc.map().erase(mc.m_itr);
-        mc.m_saved = false;
-        mc.check_record();
+        model_c.m_itr = model_c.m_map->erase(model_c.m_itr);
+        model_c.m_saved = false;
+        model_c.check_record();
     }
     return s;
 }

@@ -3,12 +3,12 @@
 // LICENSE.md. See AUTHORS.md for a list of contributor names.
 
 #include "test.h"
-#include "utils.h"
 #include "bounded_scenario.h"
-#include "scenario.h"
 #include "random_scenario.h"
 #include "rule_sequence_scenario.h"
+#include "scenario.h"
 #include "sequence_scenario.h"
+#include "utils.h"
 #include <gtest/gtest.h>
 
 namespace calicodb::test
@@ -16,7 +16,7 @@ namespace calicodb::test
 
 using namespace stest;
 
-template<size_t MaxCount, class State>
+template <size_t MaxCount, class State>
 class CountingRule : public stest::Rule<State>
 {
 public:

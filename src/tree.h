@@ -15,7 +15,7 @@ namespace calicodb
 
 class Schema;
 class Tree;
-class TreeCursor;
+class CursorImpl;
 
 [[nodiscard]] inline auto truncate_suffix(const Slice &lhs, const Slice &rhs, Slice &prefix_out) -> int
 {
@@ -51,16 +51,14 @@ public:
     explicit Tree(Pager &pager, Stat &stat, char *scratch, const Id *root_id);
     static auto create(Pager &pager, Id *out) -> Status;
     static auto destroy(Tree &tree) -> Status;
-    static auto get_tree(Cursor &c) -> Tree *;
+    static auto get_tree(CursorImpl &c) -> Tree *;
 
     auto new_cursor() -> Cursor *;
-    auto put(const Slice &key, const Slice &value) -> Status;
-    auto get(const Slice &key, std::string *value) const -> Status;
-    auto erase(const Slice &key) -> Status;
+    auto get(CursorImpl &c, const Slice &key, std::string *value) const -> Status;
+    auto put(CursorImpl &c, const Slice &key, const Slice &value) -> Status;
+    auto erase(CursorImpl &c) -> Status;
+    auto erase(CursorImpl &c, const Slice &key) -> Status;
     auto vacuum(Schema &schema) -> Status;
-
-    auto put(Cursor &c, const Slice &key, const Slice &value) -> Status;
-    auto erase(Cursor &c) -> Status;
 
     auto allocate(bool is_external, Node &node_out) -> Status
     {
@@ -124,24 +122,20 @@ private:
     friend class InorderTraversal;
     friend class Schema;
     friend class SchemaCursor;
-    friend class TreeCursor;
+    friend class CursorImpl;
     friend class TreePrinter;
     friend class TreeValidator;
-    friend class UserCursor;
-
-    auto put(TreeCursor &c, const Slice &key, const Slice &value) -> Status;
-    auto erase(TreeCursor &c) -> Status;
 
     auto corrupted_node(Id page_id) const -> Status;
 
     auto redistribute_cells(Node &left, Node &right, Node &parent, uint32_t pivot_idx) -> Status;
-    auto resolve_overflow(TreeCursor &c) -> Status;
-    auto split_root(TreeCursor &c) -> Status;
-    auto split_nonroot(TreeCursor &c) -> Status;
-    auto split_nonroot_fast(TreeCursor &c, Node &parent, Node right) -> Status;
-    auto resolve_underflow(TreeCursor &c) -> Status;
-    auto fix_root(TreeCursor &c) -> Status;
-    auto fix_nonroot(TreeCursor &c, Node &parent, uint32_t index) -> Status;
+    auto resolve_overflow(CursorImpl &c) -> Status;
+    auto split_root(CursorImpl &c) -> Status;
+    auto split_nonroot(CursorImpl &c) -> Status;
+    auto split_nonroot_fast(CursorImpl &c, Node &parent, Node right) -> Status;
+    auto resolve_underflow(CursorImpl &c) -> Status;
+    auto fix_root(CursorImpl &c) -> Status;
+    auto fix_nonroot(CursorImpl &c, Node &parent, uint32_t index) -> Status;
 
     auto read_key(const Cell &cell, std::string &scratch, Slice *key_out, uint32_t limit = 0) const -> Status;
     auto read_value(const Cell &cell, std::string &scratch, Slice *value_out) const -> Status;
@@ -167,9 +161,6 @@ private:
     auto fix_parent_id(Id page_id, Id parent_id, PointerMap::Type type, Status &s) -> void;
     auto maybe_fix_overflow_chain(const Cell &cell, Id parent_id, Status &s) -> void;
     auto fix_links(Node &node, Id parent_id = Id::null()) -> Status;
-
-    // Internal cursor used to traverse the tree structure
-    TreeCursor *const m_cursor;
 
     auto use_cursor(Cursor *c) const -> void;
     mutable Cursor *m_last_c = nullptr;
@@ -200,7 +191,6 @@ private:
 
     // Scratch memory for manipulating nodes.
     char *const m_node_scratch;
-    char *const m_split_scratch;
 
     // Scratch memory for cells that aren't embedded in nodes. Use m_cell_scratch[n] to get a pointer to
     // the start of cell scratch buffer n, where n < kNumCellBuffers.
@@ -210,6 +200,84 @@ private:
 
     Pager *const m_pager;
     const Id *const m_root_id;
+};
+
+class CursorImpl : public Cursor
+{
+    friend class InorderTraversal;
+    friend class Tree;
+    friend class TreeValidator;
+
+    Tree *const m_tree;
+    Status m_status;
+
+    Node m_node;
+    uint32_t m_idx = 0;
+
+    // *_path members are used to track the path taken from the tree's root to the current
+    // position. At any given time, the elements with indices less than the current level
+    // are valid.
+    static constexpr size_t kMaxDepth = 17 + 1;
+    Node m_node_path[kMaxDepth - 1];
+    uint32_t m_idx_path[kMaxDepth - 1];
+    int m_level = 0;
+
+    std::string m_key_buffer;
+    std::string m_value_buffer;
+    Slice m_key;
+    Slice m_value;
+    bool m_saved = false;
+
+    auto fetch_payload() -> Status;
+    auto prepare() -> void;
+    auto save_position() -> void;
+    auto ensure_position_loaded() -> void;
+    auto ensure_correct_leaf() -> void;
+    auto move_to_right_sibling() -> void;
+    auto move_to_left_sibling() -> void;
+    auto seek_to_first_leaf() -> void;
+    auto seek_to_last_leaf() -> void;
+    auto search_node(const Slice &key) -> bool;
+    explicit CursorImpl(Tree &tree);
+
+public:
+    ~CursorImpl() override;
+    [[nodiscard]] auto has_node() const -> bool;
+    [[nodiscard]] auto has_key() const -> bool;
+    [[nodiscard]] auto page_id() const -> Id;
+    auto reset(const Status &s = Status::ok()) -> void;
+    auto move_to_parent() -> void;
+    auto assign_child(Node child) -> void;
+    auto move_to_child(Id child_id) -> void;
+    auto correct_leaf() -> void;
+    [[nodiscard]] auto on_last_node() const -> bool;
+    auto seek_to_leaf(const Slice &key) -> bool;
+
+    enum ReleaseType {
+        kCurrentLevel,
+        kAllLevels,
+    };
+
+    auto release_nodes(ReleaseType type) -> void;
+    [[nodiscard]] auto key() const -> Slice override;
+    [[nodiscard]] auto value() const -> Slice override;
+    [[nodiscard]] auto is_valid() const -> bool override;
+    auto status() const -> Status override;
+    auto seek_first() -> void override;
+    auto seek_last() -> void override;
+    auto next() -> void override;
+    auto previous() -> void override;
+    auto seek(const Slice &key) -> void override;
+
+    [[nodiscard]] auto token() -> void * override
+    {
+        return this;
+    }
+
+    auto TEST_validate() const -> void
+    {
+        m_tree->TEST_validate();
+    }
 };
 
 } // namespace calicodb

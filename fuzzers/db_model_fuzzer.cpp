@@ -20,7 +20,6 @@ class Fuzzer
     DB *m_db = nullptr;
     Tx *m_tx = nullptr;
     Cursor *m_c = nullptr;
-    Bucket m_b;
 
     auto reopen_db() -> void
     {
@@ -47,8 +46,7 @@ class Fuzzer
         delete m_c;
         // This should be a NOOP if the bucket handle has already been created
         // since this transaction was started. The same exact handle is returned.
-        CHECK_OK(m_tx->create_bucket(BucketOptions(), "BUCKET", &m_b));
-        m_c = m_tx->new_cursor(m_b);
+        CHECK_OK(m_tx->create_bucket(BucketOptions(), "BUCKET", &m_c));
     }
 
 public:
@@ -127,14 +125,17 @@ auto Fuzzer::fuzz(FuzzedInputProvider &stream) -> bool
 
     switch (op_type) {
         case kBucketGet:
-            s = m_tx->get(m_b, stream.extract_random(), &value);
+            s = m_tx->get(*m_c, stream.extract_random(), &value);
             break;
         case kBucketPut:
             key = stream.extract_random();
-            s = m_tx->put(m_b, key, stream.extract_random_record_value());
+            s = m_tx->put(*m_c, key, stream.extract_random_record_value());
             break;
         case kBucketErase:
-            s = m_tx->erase(m_b, stream.extract_random());
+            s = m_tx->erase(*m_c, stream.extract_random());
+            break;
+        case kCursorErase:
+            s = m_tx->erase(*m_c);
             break;
         case kCursorSeek:
             key = stream.extract_random();
@@ -153,13 +154,6 @@ auto Fuzzer::fuzz(FuzzedInputProvider &stream) -> bool
             } else {
                 m_c->seek_last();
             }
-            break;
-        case kCursorPut:
-            key = stream.extract_random();
-            s = m_tx->put(*m_c, key, stream.extract_random_record_value());
-            break;
-        case kCursorErase:
-            s = m_tx->erase(*m_c);
             break;
         case kTxVacuum:
             s = m_tx->vacuum();
