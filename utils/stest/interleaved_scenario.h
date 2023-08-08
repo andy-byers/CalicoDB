@@ -40,7 +40,7 @@ protected:
 
         for (size_t num_seen = 0; num_seen < m_scenarios.size;) {
             assert(num_iterations++ < 0xFF'FF'FF'FF);
-            const auto i = rand() % m_scenarios.size;
+            const auto i = static_cast<size_t>(rand()) % m_scenarios.size;
             if (m_seen[i]) {
                 continue;
             }
