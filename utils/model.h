@@ -248,6 +248,15 @@ class ModelTx : public Tx
     KVStore *const m_base;
     Tx *const m_tx;
 
+    template <class Target>
+    auto use_cursor(Cursor &c) const -> ModelCursorBase<Target> &
+    {
+        auto &m = reinterpret_cast<ModelCursorBase<Target> &>(c);
+        save_cursors(&m);
+        m.load_position();
+        return m;
+    }
+
     auto open_model_cursor(Cursor &c, KVMap &map) const -> Cursor *;
     auto save_cursors(Cursor *exclude = nullptr) const -> void;
     mutable std::list<Cursor *> m_cursors;
@@ -309,15 +318,23 @@ public:
 
     [[nodiscard]] auto get(Cursor &c, const Slice &key, std::string *value_out) const -> Status override
     {
-        auto &model_c = reinterpret_cast<ModelCursorBase<KVMap> &>(c);
-        const auto itr = model_c.m_map->find(key.to_string());
+        const auto &m = use_cursor<KVMap>(c);
+        m.m_itr = m.m_map->lower_bound(key.to_string());
         auto s = m_tx->get(c, key, value_out);
         if (s.is_ok()) {
-            CHECK_TRUE(itr != end(*model_c.m_map));
-            CHECK_EQ(itr->first, key.to_string());
-            CHECK_EQ(itr->second, *value_out);
+            CHECK_TRUE(m.m_itr != end(*m.m_map));
+            CHECK_EQ(m.m_itr->first, key.to_string());
+            CHECK_EQ(m.m_itr->second, *value_out);
+            CHECK_EQ(m.m_itr->first, m.m_c->key().to_string());
+            CHECK_EQ(m.m_itr->second, m.m_c->value().to_string());
         } else if (s.is_not_found()) {
-            CHECK_TRUE(itr == end(*model_c.m_map));
+            if (m.m_itr != end(*m.m_map)) {
+                CHECK_TRUE(m.m_itr->first > key);
+                CHECK_EQ(m.m_itr->first, m.m_c->key().to_string());
+                CHECK_EQ(m.m_itr->second, m.m_c->value().to_string());
+            }
+        } else {
+            m.m_itr = end(*m.m_map);
         }
         return s;
     }
@@ -335,139 +352,6 @@ ModelCursorBase<Map>::~ModelCursorBase()
         delete m_c;
     }
 }
-
-//
-// class ModelCursor : public Cursor
-//{
-//    friend class ModelTx;
-//
-//    std::list<ModelCursor *>::iterator m_backref;
-//    Cursor *const m_c;
-//    const ModelTx *const m_tx;
-//    mutable KVMap::const_iterator m_itr;
-//    KVMap *m_map;
-//
-//    mutable std::string m_saved_key;
-//    mutable std::string m_saved_val;
-//    mutable bool m_saved;
-//
-//    auto save_position() const -> void
-//    {
-//        if (m_c->is_valid()) {
-//            m_saved_key = m_c->key().to_string();
-//            m_saved_val = m_c->value().to_string();
-//            m_saved = true;
-//        }
-//    }
-//
-//    auto load_position() const -> std::pair<bool, std::string>
-//    {
-//        if (m_saved) {
-//            m_saved = false;
-//            m_itr = m_map->find(m_saved_key);
-//            return {true, m_saved_key};
-//        }
-//        return {false, ""};
-//    }
-//
-// public:
-//    explicit ModelCursor(Cursor &c, const ModelTx &tx, KVMap &map, std::list<ModelCursor *>::iterator backref)
-//        : m_backref(backref),
-//          m_c(&c),
-//          m_tx(&tx),
-//          m_itr(end(map)),
-//          m_map(&map),
-//          m_saved(false)
-//    {
-//    }
-//
-//    ~ModelCursor() override;
-//
-//    [[nodiscard]] auto kv_map() -> KVMap &
-//    {
-//        return *m_map;
-//    }
-//
-//    [[nodiscard]] auto token() -> void * override
-//    {
-//        return m_c->token();
-//    }
-//
-//    [[nodiscard]] auto is_valid() const -> bool override
-//    {
-//        CHECK_EQ(m_c->is_valid(), m_itr != end(*m_map) || m_saved);
-//        return m_c->is_valid();
-//    }
-//
-//    [[nodiscard]] auto status() const -> Status override
-//    {
-//        return m_c->status();
-//    }
-//
-//    [[nodiscard]] auto key() const -> Slice override
-//    {
-//        if (m_c->is_valid()) {
-//            const auto key = m_saved
-//                                 ? m_saved_key : m_itr->first;
-//            CHECK_EQ(key, m_c->key().to_string());
-//        }
-//        return m_c->key();
-//    }
-//
-//    [[nodiscard]] auto value() const -> Slice override
-//    {
-//        if (m_c->is_valid()) {
-//            const auto value = m_saved
-//                                   ? m_saved_val : m_itr->second;
-//            CHECK_EQ(value, m_c->value().to_string());
-//        }
-//        return m_c->value();
-//    }
-//
-//    auto seek(const Slice &key) -> void override
-//    {
-//        m_saved = false;
-//        m_itr = m_map->lower_bound(key.to_string());
-//        m_c->seek(key);
-//    }
-//
-//    auto seek_first() -> void override
-//    {
-//        m_saved = false;
-//        m_itr = begin(*m_map);
-//        m_c->seek_first();
-//    }
-//
-//    auto seek_last() -> void override
-//    {
-//        m_saved = false;
-//        m_itr = end(*m_map);
-//        if (!m_map->empty()) {
-//            --m_itr;
-//        }
-//        m_c->seek_last();
-//    }
-//
-//    auto next() -> void override
-//    {
-//        load_position();
-//        if (m_itr != end(*m_map)) {
-//            ++m_itr;
-//        }
-//        m_c->next();
-//    }
-//
-//    auto previous() -> void override
-//    {
-//        load_position();
-//        if (m_itr == begin(*m_map)) {
-//            m_itr = end(*m_map);
-//        } else {
-//            --m_itr;
-//        }
-//        m_c->previous();
-//    }
-//};
 
 } // namespace calicodb
 

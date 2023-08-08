@@ -46,9 +46,9 @@ public:
     static constexpr size_t kRequiredBufferSize = 3 * kPageSize;
 
     ~Tree();
-    auto release_nodes() const -> void;
+    auto save_all_cursors() const -> void;
 
-    explicit Tree(Pager &pager, Stat &stat, char *scratch, const Id *root_id);
+    explicit Tree(Pager &pager, Stat &stat, char *scratch, const Id *root_id, bool writable);
     static auto create(Pager &pager, Id *out) -> Status;
     static auto destroy(Tree &tree) -> Status;
     static auto get_tree(CursorImpl &c) -> Tree *;
@@ -162,8 +162,21 @@ private:
     auto maybe_fix_overflow_chain(const Cell &cell, Id parent_id, Status &s) -> void;
     auto fix_links(Node &node, Id parent_id = Id::null()) -> Status;
 
-    auto use_cursor(Cursor *c) const -> void;
-    mutable Cursor *m_last_c = nullptr;
+    struct CursorEntry {
+        CursorImpl *cursor;
+        CursorEntry *prev_entry;
+        CursorEntry *next_entry;
+    };
+
+    mutable CursorEntry m_active_list;
+    mutable CursorEntry m_inactive_list;
+
+    enum CursorAction {
+        kInitNormal,
+        kInitShutdown,
+    };
+
+    auto manage_cursors(Cursor *c, CursorAction type) const -> void;
 
     // Various tree operation counts are tracked in this variable.
     Stat *m_stat;
@@ -200,6 +213,7 @@ private:
 
     Pager *const m_pager;
     const Id *const m_root_id;
+    const bool m_writable;
 };
 
 class CursorImpl : public Cursor
@@ -207,6 +221,8 @@ class CursorImpl : public Cursor
     friend class InorderTraversal;
     friend class Tree;
     friend class TreeValidator;
+
+    Tree::CursorEntry m_list_entry = {};
 
     Tree *const m_tree;
     Status m_status;
@@ -229,7 +245,7 @@ class CursorImpl : public Cursor
     bool m_saved = false;
 
     auto fetch_payload() -> Status;
-    auto prepare() -> void;
+    auto prepare(Tree::CursorAction type) -> void;
     auto save_position() -> void;
     auto ensure_position_loaded() -> void;
     auto ensure_correct_leaf() -> void;
@@ -251,7 +267,13 @@ public:
     auto move_to_child(Id child_id) -> void;
     auto correct_leaf() -> void;
     [[nodiscard]] auto on_last_node() const -> bool;
-    auto seek_to_leaf(const Slice &key) -> bool;
+
+    enum SeekType {
+        kSeekReader,
+        kSeekWriter,
+    };
+
+    auto seek_to_leaf(const Slice &key, SeekType type) -> bool;
 
     enum ReleaseType {
         kCurrentLevel,

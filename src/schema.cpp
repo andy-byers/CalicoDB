@@ -85,7 +85,7 @@ Schema::Schema(Pager &pager, const Status &status, Stat &stat, char *scratch)
       m_pager(&pager),
       m_scratch(scratch),
       m_stat(&stat),
-      m_map(pager, stat, scratch, nullptr),
+      m_map(pager, stat, scratch, nullptr, pager.mode() >= Pager::kWrite),
       m_cursor(new SchemaCursor(*m_map.new_cursor()))
 {
 }
@@ -96,7 +96,7 @@ auto Schema::close() -> void
         delete state.tree;
     }
     delete m_cursor;
-    m_map.release_nodes();
+    m_map.save_all_cursors();
 }
 
 auto Schema::corrupted_root_id(const Slice &name, const Slice &value) -> Status
@@ -217,7 +217,8 @@ auto Schema::construct_or_reference_tree(Id root_id) -> Tree *
             *m_pager,
             *m_stat,
             m_scratch,
-            &itr->second.root);
+            &itr->second.root,
+            m_pager->mode() >= Pager::kWrite);
     }
     return itr->second.tree;
 }
@@ -233,7 +234,7 @@ auto Schema::unpack_and_use(Cursor &c) -> std::pair<Tree &, CursorImpl &>
 auto Schema::use_tree(Tree &tree) -> void
 {
     if (m_recent && m_recent != &tree) {
-        m_recent->release_nodes();
+        m_recent->save_all_cursors();
     }
     m_recent = &tree;
 }
@@ -256,12 +257,13 @@ auto Schema::drop_bucket(const Slice &name) -> Status
     auto itr = m_trees.find(root_id);
     if (itr != end(m_trees)) {
         use_tree(*itr->second.tree);
-        itr->second.tree->release_nodes();
+        itr->second.tree->save_all_cursors();
         delete itr->second.tree;
         m_recent = nullptr;
         m_trees.erase(root_id);
     }
-    Tree drop(*m_pager, *m_stat, m_scratch, &root_id);
+    Tree drop(*m_pager, *m_stat, m_scratch,
+              &root_id, m_pager->mode() >= Pager::kWrite);
     s = Tree::destroy(drop);
     if (s.is_ok()) {
         s = m_map.erase(get_cursor_impl(*m_cursor), name);
@@ -342,9 +344,9 @@ auto Schema::vacuum_finish() -> Status
 auto Schema::vacuum() -> Status
 {
     for (auto &[_, tree] : m_trees) {
-        tree.tree->release_nodes();
+        tree.tree->save_all_cursors();
     }
-    m_map.release_nodes();
+    m_map.save_all_cursors();
     m_recent = nullptr;
     return m_map.vacuum(*this);
 }

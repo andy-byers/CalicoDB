@@ -120,12 +120,12 @@ public:
 
     [[nodiscard]] auto begin() -> DirtyHdr *
     {
-        return m_head.next;
+        return m_head.next_entry;
     }
 
     [[nodiscard]] auto begin() const -> const DirtyHdr *
     {
-        return m_head.next;
+        return m_head.next_entry;
     }
 
     [[nodiscard]] auto end() -> DirtyHdr *

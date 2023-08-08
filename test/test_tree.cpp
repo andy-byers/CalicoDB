@@ -92,7 +92,7 @@ public:
     {
         EXPECT_OK(m_pager->start_reader());
         EXPECT_OK(m_pager->start_writer());
-        m_tree = new Tree(*m_pager, m_stat, m_scratch.data(), nullptr);
+        m_tree = new Tree(*m_pager, m_stat, m_scratch.data(), nullptr, true);
         m_c = reinterpret_cast<CursorImpl *>(m_tree->new_cursor());
     }
 
@@ -100,13 +100,13 @@ public:
     {
         delete m_c;
         m_c = nullptr;
-        m_tree->release_nodes();
+        m_tree->save_all_cursors();
         m_pager->finish();
     }
 
     auto validate() const -> void
     {
-        m_tree->release_nodes();
+        m_tree->save_all_cursors();
         m_tree->TEST_validate();
         ASSERT_TRUE(Freelist::assert_state(*m_pager));
         m_pager->assert_state();
@@ -300,7 +300,7 @@ static auto init_tree(TreeTestHarness &test, InitFlag flags = kInitNormal)
                                    TreeTestHarness::make_value('*', flags & kInitLongValues)));
     }
     test.validate();
-    test.m_tree->release_nodes();
+    test.m_tree->save_all_cursors();
 }
 
 TEST_F(TreeTests, PrintStructure)
@@ -553,7 +553,7 @@ TEST_P(CursorTests, AccountsForNodeBoundaries)
         ASSERT_OK(m_tree->erase(*m_c, make_long_key(i + 3)));
         ASSERT_OK(m_tree->erase(*m_c, make_long_key(i + 4)));
     }
-    m_tree->release_nodes();
+    m_tree->save_all_cursors();
     auto cursor = make_cursor();
     for (size_t i = 0; i + 10 < kInitialRecordCount; i += 5) {
         cursor->seek(make_long_key(i + 1));

@@ -277,9 +277,9 @@ auto Pager::purge_pages(bool purge_all) -> void
 {
     m_refresh = true;
 
-    for (auto *p = m_dirtylist.begin(); p != m_dirtylist.end();) {
-        auto *save = p->get_page_ref();
-        p = p->next;
+    for (auto *dirty = m_dirtylist.begin(); dirty != m_dirtylist.end();) {
+        auto *save = dirty->get_page_ref();
+        dirty = dirty->next_entry;
         purge_page(*save);
     }
     CALICODB_EXPECT_TRUE(m_dirtylist.is_empty());
@@ -315,27 +315,27 @@ auto Pager::auto_checkpoint(size_t frame_limit) -> Status
 
 auto Pager::flush_dirty_pages() -> Status
 {
-    auto *p = m_dirtylist.begin();
-    while (p != m_dirtylist.end()) {
-        auto *page = p->get_page_ref();
+    auto *dirty = m_dirtylist.begin();
+    while (dirty != m_dirtylist.end()) {
+        auto *page = dirty->get_page_ref();
         CALICODB_EXPECT_TRUE(page->get_flag(PageRef::kDirty));
         if (page->page_id.value > m_page_count) {
             // This page is past the current end of the file due to a vacuum operation
             // decreasing the page count. Just remove the page from the dirty list. It
             // wouldn't be transferred back to the DB on checkpoint anyway since it is
             // out of bounds.
-            p = m_dirtylist.remove(*page);
+            dirty = m_dirtylist.remove(*page);
         } else {
             page->clear_flag(PageRef::kDirty);
-            p = p->next;
+            dirty = dirty->next_entry;
         }
     }
     // These pages are no longer considered dirty. If the call to Wal::write() fails,
     // this connection must purge the whole cache.
-    p = m_dirtylist.sort();
-    CALICODB_EXPECT_NE(p, nullptr);
+    dirty = m_dirtylist.sort();
+    CALICODB_EXPECT_NE(dirty, nullptr);
 
-    return m_wal->write(p->get_page_ref(), m_page_count);
+    return m_wal->write(dirty->get_page_ref(), m_page_count);
 }
 
 auto Pager::set_page_count(uint32_t page_count) -> void

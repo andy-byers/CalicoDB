@@ -6,6 +6,7 @@
 #define CALICODB_PAGE_H
 
 #include "header.h"
+#include "list.h"
 
 namespace calicodb
 {
@@ -14,8 +15,8 @@ struct PageRef;
 
 struct DirtyHdr {
     DirtyHdr *dirty;
-    DirtyHdr *prev;
-    DirtyHdr *next;
+    DirtyHdr *prev_entry;
+    DirtyHdr *next_entry;
 
     [[nodiscard]] inline auto get_page_ref() -> PageRef *;
     [[nodiscard]] inline auto get_page_ref() const -> const PageRef *;
@@ -23,8 +24,8 @@ struct DirtyHdr {
 
 struct PageRef {
     char *data;
-    PageRef *prev;
-    PageRef *next;
+    PageRef *prev_entry;
+    PageRef *next_entry;
 
     Id page_id;
     uint16_t refs;

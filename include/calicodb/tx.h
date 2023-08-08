@@ -13,7 +13,6 @@ namespace calicodb
 struct BucketOptions;
 class Cursor;
 
-// TODO: Comments are outdated!
 // Transaction on a CalicoDB database
 // The lifetime of a transaction is the same as that of the Tx object representing it (see
 // DB::new_tx()).
@@ -44,24 +43,23 @@ public:
 
     // Create a new bucket
     // Returns an OK status on success and a non-OK status on failure. If c_out is nonnull,
-    // opens a cursor over the bucket contents and stores it in `*c_out`. The bucket can
+    // opens a cursor over the bucket contents and stores it in `*c_out`. The bucket can be
     // accessed via this cursor until the transaction is finished, or until `name` is dropped
-    // using Tx::drop_bucket(). Returns a non-OK status on failure. Note that the bucket will
-    // not persist in the database unless Tx::commit() is called after the bucket has been
-    // created but before the transaction is finished.
+    // using Tx::drop_bucket(). Note that the bucket will not persist in the database unless
+    // Tx::commit() is called after the bucket has been created but before the transaction
+    // is finished.
     virtual auto create_bucket(const BucketOptions &options, const Slice &name, Cursor **c_out) -> Status = 0;
 
     // Open an existing bucket
     // On success, stores a cursor over the bucket contents in `c_out` and returns an OK
-    // status. If the bucket named `name` does not exist already, a status for which
+    // status. If the bucket named `name` does not already exist, a status for which
     // Status::is_invalid_argument() evaluates to true is returned.
     virtual auto open_bucket(const Slice &name, Cursor *&c_out) const -> Status = 0;
 
     // Remove a bucket from the database
     // If a bucket named `name` exists, this method will attempt to remove it. If `name`
     // does not exist, returns a status for which Status::is_invalid_argument() evaluates
-    // to true. If a cursor was obtained for `name` during this transaction, it must be
-    // delete'd before this routine is called.
+    // to true.
     virtual auto drop_bucket(const Slice &name) -> Status = 0;
 
     // Defragment the database
@@ -98,7 +96,7 @@ public:
     // invalidated, or placed on a nearby record).
     virtual auto put(Cursor &c, const Slice &key, const Slice &value) -> Status = 0;
 
-    // Erase a record from the bucket referenced by `c`
+    // Ensure that no record with key `key` exists in the bucket referenced by `c`
     // On success, leaves `c` on the record following the erased record and returns an
     // OK status. Returns a non-OK status if an error was encountered. It is not an error
     // if `key` does not exist.

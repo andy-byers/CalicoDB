@@ -114,41 +114,49 @@ auto ModelTx::open_bucket(const Slice &name, Cursor *&c_out) const -> Status
 auto ModelTx::open_model_cursor(Cursor &c, KVMap &map) const -> Cursor *
 {
     m_cursors.emplace_front();
-    auto *model_c = new ModelCursorBase<KVMap>(
+    auto *m = new ModelCursorBase<KVMap>(
         c,
         *this,
         map,
         begin(m_cursors));
-    m_cursors.front() = model_c;
-    return model_c;
+    m_cursors.front() = m;
+    return m;
 }
 
 auto ModelTx::put(Cursor &c, const Slice &key, const Slice &value) -> Status
 {
-    save_cursors();
-    auto &model_c = reinterpret_cast<ModelCursorBase<KVMap> &>(c);
-    model_c.m_map->insert_or_assign(key.to_string(), value.to_string());
-    return m_tx->put(c, key, value);
+    auto &m = use_cursor<KVMap>(c);
+    auto s = m_tx->put(c, key, value);
+    if (s.is_ok()) {
+        m.m_itr = m.m_map->insert_or_assign(m.m_itr, key.to_string(), value.to_string());
+    } else {
+        m.m_itr = end(*m.m_map);
+    }
+    return s;
 }
 
 auto ModelTx::erase(Cursor &c, const Slice &key) -> Status
 {
-    save_cursors();
-    auto &model_c = reinterpret_cast<ModelCursorBase<KVMap> &>(c);
-    model_c.m_map->erase(key.to_string());
-    return m_tx->erase(c, key);
+    auto &m = use_cursor<KVMap>(c);
+    auto s = m_tx->erase(c, key);
+    if (s.is_ok()) {
+        m.m_itr = m.m_map->lower_bound(key.to_string());
+        if (m.m_itr != end(*m.m_map) && m.m_itr->first == key) {
+            m.m_itr = m.m_map->erase(m.m_itr);
+        }
+    }
+    return s;
 }
 
 auto ModelTx::erase(Cursor &c) -> Status
 {
-    auto &model_c = reinterpret_cast<ModelCursorBase<KVMap> &>(c);
-    save_cursors(&model_c);
-    model_c.load_position();
-    auto s = m_tx->erase(model_c);
+    auto &m = use_cursor<KVMap>(c);
+    auto s = m_tx->erase(m);
     if (s.is_ok()) {
-        model_c.m_itr = model_c.m_map->erase(model_c.m_itr);
-        model_c.m_saved = false;
-        model_c.check_record();
+        m.m_itr = m.m_map->erase(m.m_itr);
+        m.check_record();
+    } else {
+        m.m_itr = end(*m.m_map);
     }
     return s;
 }

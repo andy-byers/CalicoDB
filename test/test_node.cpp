@@ -279,4 +279,15 @@ TEST_F(NodeTests, OverwriteOnEraseBehavior)
     }
 }
 
+TEST(NodeHeaderTests, ReportsInvalidNodeType)
+{
+    char type;
+
+    type = NodeHdr::kInvalid;
+    ASSERT_EQ(NodeHdr::kInvalid, NodeHdr::get_type(&type));
+
+    type = 100;
+    ASSERT_EQ(NodeHdr::kInvalid, NodeHdr::get_type(&type));
+}
+
 } // namespace calicodb::test

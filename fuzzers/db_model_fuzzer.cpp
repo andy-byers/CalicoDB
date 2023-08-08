@@ -8,8 +8,6 @@
 #include "model.h"
 #include "tree.h"
 
-#define FUZZER_TRACE "remove me!"
-
 namespace calicodb
 {
 

@@ -2,12 +2,14 @@
 // This source code is licensed under the MIT License, which can be found in
 // LICENSE.md. See AUTHORS.md for a list of contributor names.
 
+#include "db_impl.h"
 #include "model.h"
 #include "stest/bounded_scenario.h"
 #include "stest/random_scenario.h"
 #include "stest/rule_scenario.h"
 #include "stest/sequence_scenario.h"
 #include "test.h"
+#include "tx_impl.h"
 #include <gtest/gtest.h>
 
 namespace calicodb::test
@@ -87,7 +89,7 @@ struct DatabaseState {
 
     struct BucketSelection {
         Cursor **cursor_addr;
-        Slice bucket_name;
+        size_t bucket_id;
 
         explicit operator bool() const
         {
@@ -99,7 +101,7 @@ struct DatabaseState {
         for (size_t i = 0; i < kMaxBuckets; ++i) {
             for (auto *&c : buckets[i].cursors) {
                 if ((c != nullptr) == find_existing) {
-                    return BucketSelection{&c, kBucketNames[i]};
+                    return BucketSelection{&c, i};
                 }
             }
         }
@@ -113,7 +115,7 @@ struct DatabaseState {
             if (!seen[i]) {
                 for (auto *&c : buckets[i].cursors) {
                     if ((c != nullptr) == find_existing) {
-                        return BucketSelection{&c, kBucketNames[i]};
+                        return BucketSelection{&c, i};
                     }
                 }
                 seen[i] = true;
@@ -135,14 +137,17 @@ struct DatabaseState {
     {
         check_status(kOKMask);
         auto b = bucket_selector(false);
-        s = tx->open_bucket(b.bucket_name, *b.cursor_addr);
+        s = tx->open_bucket(kBucketNames[b.bucket_id], *b.cursor_addr);
+        if (s.is_invalid_argument()) {
+            s = Status::ok();
+        }
     }
 
     auto create_bucket() -> void
     {
         check_status(kOKMask);
         const auto b = bucket_selector(false);
-        s = tx->create_bucket(b_opt, b.bucket_name, b.cursor_addr);
+        s = tx->create_bucket(b_opt, kBucketNames[b.bucket_id], b.cursor_addr);
     }
 
     auto close_bucket() -> void
@@ -158,7 +163,11 @@ struct DatabaseState {
     {
         check_status(kOKMask);
         if (const auto b = bucket_selector(true)) {
-            s = tx->drop_bucket(b.bucket_name);
+            s = tx->drop_bucket(kBucketNames[b.bucket_id]);
+            for (auto *&c : buckets[b.bucket_id].cursors) {
+                delete c;
+                c = nullptr;
+            }
         }
     }
 
@@ -330,15 +339,15 @@ struct DatabaseState {
     }
 };
 
-class OpenDatabaseRule : public Rule<DatabaseState>
+class OpenDBRule : public Rule<DatabaseState>
 {
 public:
-    explicit OpenDatabaseRule(const char *name)
+    explicit OpenDBRule(const char *name)
         : Rule<DatabaseState>(name)
     {
     }
 
-    ~OpenDatabaseRule() override = default;
+    ~OpenDBRule() override = default;
 
     auto precondition(const DatabaseState &state) -> bool override
     {
@@ -352,15 +361,15 @@ protected:
     }
 };
 
-class CloseDatabaseRule : public Rule<DatabaseState>
+class CloseDBRule : public Rule<DatabaseState>
 {
 public:
-    explicit CloseDatabaseRule(const char *name)
+    explicit CloseDBRule(const char *name)
         : Rule<DatabaseState>(name)
     {
     }
 
-    ~CloseDatabaseRule() override = default;
+    ~CloseDBRule() override = default;
 
     auto precondition(const DatabaseState &state) -> bool override
     {
@@ -612,9 +621,33 @@ protected:
     }
 };
 
+class ValidateDBRule : public Rule<DatabaseState>
+{
+public:
+    explicit ValidateDBRule(const char *name)
+        : Rule<DatabaseState>(name)
+    {
+    }
+
+    ~ValidateDBRule() override = default;
+
+    auto precondition(const DatabaseState &state) -> bool override
+    {
+        return state.has_readable_tx();
+    }
+
+protected:
+    auto action(DatabaseState &state) -> void override
+    {
+        state.check_status(DatabaseState::kOKMask);
+        reinterpret_cast<const ModelDB *>(state.db)->check_consistency();
+    }
+};
+
 struct Routines {
-    OpenDatabaseRule open_db_rule;
-    CloseDatabaseRule close_db_rule;
+    OpenDBRule open_db_rule;
+    CloseDBRule close_db_rule;
+    ValidateDBRule validate_db_rule;
     StartReadonlyTransactionRule start_readonly_tx_rule;
     StartReadWriteTransactionRule start_read_write_tx_rule;
     FinishTransactionRule finish_tx_rule;
@@ -630,6 +663,7 @@ struct Routines {
 
     RuleScenario<DatabaseState> open_db;
     RuleScenario<DatabaseState> close_db;
+    RuleScenario<DatabaseState> validate_db;
     RuleScenario<DatabaseState> read_records;
     RuleScenario<DatabaseState> start_readonly_tx;
     RuleScenario<DatabaseState> start_read_write_tx;
@@ -698,6 +732,7 @@ struct Routines {
     explicit Routines()
         : open_db_rule("OpenDB"),
           close_db_rule("CloseDB"),
+          validate_db_rule("ValidateDBRule"),
           start_readonly_tx_rule("StartReadonlyTx"),
           start_read_write_tx_rule("StartReadWriteTx"),
           finish_tx_rule("FinishTx"),
@@ -713,6 +748,7 @@ struct Routines {
 
           open_db(open_db_rule),
           close_db(close_db_rule),
+          validate_db(validate_db_rule),
           read_records(read_records_rule),
           start_readonly_tx(start_readonly_tx_rule),
           start_read_write_tx(start_read_write_tx_rule),
@@ -750,6 +786,7 @@ TEST(STestDB, SanityCheck)
         &g_routines.open_db,
         &g_routines.start_read_write_tx,
         &g_routines.many_all_read_write_ops,
+        &g_routines.validate_db,
         &g_routines.finish_tx,
         &g_routines.close_db,
     };
@@ -757,24 +794,24 @@ TEST(STestDB, SanityCheck)
         &g_routines.open_db,
         &g_routines.start_read_write_tx,
         &g_routines.many_reads_and_writes,
+        &g_routines.validate_db,
         &g_routines.finish_tx,
         &g_routines.close_db,
     };
     Scenario<DatabaseState> *array_3[] = {
         &g_routines.open_db,
         &g_routines.start_readonly_tx,
-        &g_routines.many_reads,
+        &g_routines.many_all_readonly_ops,
+        &g_routines.validate_db,
         &g_routines.finish_tx,
         &g_routines.close_db,
     };
 
-    SequenceScenario<DatabaseState> sequence_1("", array_1, ARRAY_SIZE(array_1));
-    SequenceScenario<DatabaseState> sequence_2("", array_2, ARRAY_SIZE(array_2));
-    SequenceScenario<DatabaseState> sequence_3("", array_3, ARRAY_SIZE(array_3));
+    SequenceScenario<DatabaseState> sequence_1("1", array_1, ARRAY_SIZE(array_1));
+    SequenceScenario<DatabaseState> sequence_2("2", array_2, ARRAY_SIZE(array_2));
+    SequenceScenario<DatabaseState> sequence_3("3", array_3, ARRAY_SIZE(array_3));
 
     (void)DB::destroy(state.db_opt, state.filename);
-
-    s_debug_file = stderr;
 
     sequence_1.run(state);
     ASSERT_OK(state.s);
