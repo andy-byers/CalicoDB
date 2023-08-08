@@ -18,6 +18,11 @@ namespace calicodb::test
 using namespace stest;
 
 struct DatabaseState {
+    ~DatabaseState()
+    {
+        finish_tx();
+        close_db();
+    }
     static constexpr uint32_t kMaxKeyLen = 256;
     static constexpr uint32_t kMaxValueLen = 1'024;
     RandomGenerator rng;
@@ -72,19 +77,6 @@ struct DatabaseState {
     struct BucketState final {
         static constexpr size_t kCursorsPerBucket = 3;
         Cursor *cursors[kCursorsPerBucket] = {};
-
-        ~BucketState()
-        {
-            close_cursors();
-        }
-
-        auto close_cursors() -> void
-        {
-            for (const auto *c : cursors) {
-                delete c;
-                c = nullptr;
-            }
-        }
     } buckets[kMaxBuckets];
 
     struct BucketSelection {
@@ -236,18 +228,22 @@ struct DatabaseState {
             if (!try_attach_cursor(c, i)) {
                 break;
             }
-            // These need to be converted into std::strings, since the cursor is
-            // about to be moved.
-            const auto key_from_cursor = c.key().to_string();
-            const auto value_from_cursor = c.value().to_string();
-            // Make sure the record looks the same from the cursor as it does from
-            // Tx::get().
-            std::string value_from_get;
-            s = tx->get(c, c.key(), &value_from_get);
-            if (s.is_ok()) {
-                ASSERT_EQ(key_from_cursor, c.key());
-                ASSERT_EQ(value_from_cursor, c.value());
-                ASSERT_EQ(value_from_cursor, value_from_get);
+            const auto key = random_chunk(kMaxKeyLen);
+            c.seek(key);
+            if (c.is_valid()) {
+                // These need to be converted into std::strings, since the cursor is
+                // about to be moved.
+                const auto key_from_cursor = c.key().to_string();
+                const auto value_from_cursor = c.value().to_string();
+                // Make sure the record looks the same from the cursor as it does from
+                // Tx::get().
+                std::string value_from_get;
+                s = tx->get(c, c.key(), &value_from_get);
+                if (s.is_ok()) {
+                    ASSERT_EQ(key_from_cursor, c.key());
+                    ASSERT_EQ(value_from_cursor, c.value());
+                    ASSERT_EQ(value_from_cursor, value_from_get);
+                }
             }
         }
     }
@@ -263,14 +259,19 @@ struct DatabaseState {
             if (!try_attach_cursor(c, i)) {
                 break;
             }
-            s = tx->erase(c);
+            c.seek(rng.Generate(kMaxKeyLen));
+            if (c.is_valid()) {
+                s = tx->erase(c);
+            }
         }
     }
 
     auto check_status(uint32_t mask) const -> void
     {
         ASSERT_EQ(mask, mask & (1 << s.code())) << s.to_string();
-        ASSERT_EQ(mask, mask & (1 << tx->status().code())) << tx->status().to_string();
+        if (tx) {
+            ASSERT_EQ(s, tx->status()) << tx->status().to_string();
+        }
     }
 
     [[nodiscard]] auto has_readable_tx() const -> bool
