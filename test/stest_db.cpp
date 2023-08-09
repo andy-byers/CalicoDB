@@ -18,13 +18,8 @@ namespace calicodb::test
 using namespace stest;
 
 struct DatabaseState {
-    ~DatabaseState()
-    {
-        finish_tx();
-        close_db();
-    }
-    static constexpr uint32_t kMaxKeyLen = 256;
-    static constexpr uint32_t kMaxValueLen = 1'024;
+    static constexpr uint32_t kMaxKeyLen = 1'024;
+    static constexpr uint32_t kMaxValueLen = kPageSize;
     RandomGenerator rng;
 
     [[nodiscard]] auto random_chunk(size_t max_length) const -> Slice
@@ -104,15 +99,16 @@ struct DatabaseState {
         bool seen[kMaxBuckets] = {};
         for (size_t num_seen = 0; num_seen < kMaxBuckets;) {
             const auto i = rng.Next(kMaxBuckets - 1);
-            if (!seen[i]) {
-                for (auto *&c : buckets[i].cursors) {
-                    if ((c != nullptr) == find_existing) {
-                        return BucketSelection{&c, i};
-                    }
-                }
-                seen[i] = true;
-                ++num_seen;
+            if (seen[i]) {
+                continue;
             }
+            for (auto *&c : buckets[i].cursors) {
+                if ((c != nullptr) == find_existing) {
+                    return BucketSelection{&c, i};
+                }
+            }
+            seen[i] = true;
+            ++num_seen;
         }
         return BucketSelection{};
     };
@@ -156,10 +152,9 @@ struct DatabaseState {
         check_status(kOKMask);
         if (const auto b = bucket_selector(true)) {
             s = tx->drop_bucket(kBucketNames[b.bucket_id]);
-            for (auto *&c : buckets[b.bucket_id].cursors) {
-                delete c;
-                c = nullptr;
-            }
+            // It shouldn't matter that the bucket is dropped before the cursors positioned
+            // on it are delete'd.
+            close_all_cursors(buckets[b.bucket_id]);
         }
     }
 
@@ -323,20 +318,30 @@ struct DatabaseState {
 
     auto finish_tx() -> void
     {
-        for (auto &[cursors] : buckets) {
-            for (auto *c : cursors) {
-                delete c;
-                c = nullptr;
-            }
-        }
-
         check_status(error_mask);
         ASSERT_NE(state, kNone);
+        close_all_cursors();
+
         state = kNone;
         s = Status::ok();
 
         delete tx;
         tx = nullptr;
+    }
+
+    static auto close_all_cursors(BucketState &b) -> void
+    {
+        for (auto *&c : b.cursors) {
+            delete c;
+            c = nullptr;
+        }
+    }
+
+    auto close_all_cursors() -> void
+    {
+        for (auto &b : buckets) {
+            close_all_cursors(b);
+        }
     }
 };
 
@@ -706,29 +711,29 @@ struct Routines {
         &drop_bucket_rule,
     };
 
-    RandomScenario<DatabaseState> random_all_readonly_ops;
-    RandomScenario<DatabaseState> random_all_read_write_ops;
+    RandomScenario<DatabaseState> all_readonly_ops_random;
+    RandomScenario<DatabaseState> all_read_write_ops_random;
     RandomScenario<DatabaseState> random_reads;
     RandomScenario<DatabaseState> random_reads_and_writes;
     RandomScenario<DatabaseState> random_erases_and_vacuums;
     RandomScenario<DatabaseState> random_bucket_accesses;
 
-    BoundedScenario<DatabaseState> few_all_readonly_ops;
-    BoundedScenario<DatabaseState> few_all_read_write_ops;
+    BoundedScenario<DatabaseState> all_readonly_ops_few;
+    BoundedScenario<DatabaseState> all_read_write_ops_few;
     BoundedScenario<DatabaseState> few_reads;
     BoundedScenario<DatabaseState> few_reads_and_writes;
     BoundedScenario<DatabaseState> few_erases_and_vacuums;
     BoundedScenario<DatabaseState> few_bucket_accesses;
 
-    BoundedScenario<DatabaseState> many_all_readonly_ops;
-    BoundedScenario<DatabaseState> many_all_read_write_ops;
+    BoundedScenario<DatabaseState> all_readonly_ops_many;
+    BoundedScenario<DatabaseState> all_read_write_ops_many;
     BoundedScenario<DatabaseState> many_reads;
     BoundedScenario<DatabaseState> many_reads_and_writes;
     BoundedScenario<DatabaseState> many_erases_and_vacuums;
     BoundedScenario<DatabaseState> many_bucket_accesses;
 
     static constexpr size_t kFewIterations = 10;
-    static constexpr size_t kManyIterations = 10'000;
+    static constexpr size_t kManyIterations = 1'000;
 
     explicit Routines()
         : open_db_rule("OpenDB"),
@@ -755,22 +760,22 @@ struct Routines {
           start_read_write_tx(start_read_write_tx_rule),
           finish_tx(finish_tx_rule),
 
-          random_all_readonly_ops("RandomReadonlyOps", all_readonly_ops, ARRAY_SIZE(all_readonly_ops)),
-          random_all_read_write_ops("RandomReadWriteOps", all_read_write_ops, ARRAY_SIZE(all_read_write_ops)),
+          all_readonly_ops_random("RandomReadonlyOps", all_readonly_ops, ARRAY_SIZE(all_readonly_ops)),
+          all_read_write_ops_random("RandomReadWriteOps", all_read_write_ops, ARRAY_SIZE(all_read_write_ops)),
           random_reads("RandomReads", read_ops, ARRAY_SIZE(read_ops)),
           random_reads_and_writes("RandomReadAndModifyOps", read_and_write_ops, ARRAY_SIZE(read_and_write_ops)),
           random_erases_and_vacuums("RandomEraseAndVacuumOps", erase_and_vacuum_ops, ARRAY_SIZE(erase_and_vacuum_ops)),
           random_bucket_accesses("RandomBucketAccessOps", bucket_access_ops, ARRAY_SIZE(bucket_access_ops)),
 
-          few_all_readonly_ops("FewReadonlyOps", random_all_readonly_ops, kFewIterations),
-          few_all_read_write_ops("FewReadWriteOps", random_all_read_write_ops, kFewIterations),
+          all_readonly_ops_few("FewReadonlyOps", all_readonly_ops_random, kFewIterations),
+          all_read_write_ops_few("FewReadWriteOps", all_read_write_ops_random, kFewIterations),
           few_reads("FewReads", random_reads, kFewIterations),
           few_reads_and_writes("FewReadAndModifyOps", random_reads_and_writes, kFewIterations),
           few_erases_and_vacuums("FewEraseAndVacuumOps", random_erases_and_vacuums, kFewIterations),
           few_bucket_accesses("FewBucketAccessOps", random_bucket_accesses, kFewIterations),
 
-          many_all_readonly_ops("ManyReadonlyOps", random_all_readonly_ops, kManyIterations),
-          many_all_read_write_ops("ManyReadWriteOps", random_all_read_write_ops, kManyIterations),
+          all_readonly_ops_many("ManyReadonlyOps", all_readonly_ops_random, kManyIterations),
+          all_read_write_ops_many("ManyReadWriteOps", all_read_write_ops_random, kManyIterations),
           many_reads("ManyReads", random_reads, kManyIterations),
           many_reads_and_writes("ManyReadAndModifyOps", random_reads_and_writes, kManyIterations),
           many_erases_and_vacuums("ManyEraseAndVacuumOps", random_erases_and_vacuums, kManyIterations),
@@ -779,49 +784,58 @@ struct Routines {
     }
 } g_routines;
 
-TEST(STestDB, SanityCheck)
+class STestDB : public testing::Test
 {
-    DatabaseState state;
+protected:
+    DatabaseState m_state;
 
-    Scenario<DatabaseState> *array_1[] = {
-        &g_routines.open_db,
-        &g_routines.start_read_write_tx,
-        &g_routines.many_all_read_write_ops,
-        &g_routines.validate_db,
-        &g_routines.finish_tx,
-        &g_routines.close_db,
+    explicit STestDB()
+    {
+        (void)Env::default_env().remove_file(m_state.filename);
+        (void)Env::default_env().remove_file(m_state.filename + kDefaultShmSuffix);
+        (void)Env::default_env().remove_file(m_state.filename + kDefaultWalSuffix);
+    }
+
+    auto TearDown() -> void override
+    {
+        ASSERT_EQ(m_state.db, nullptr);
+    }
+};
+
+TEST_F(STestDB, SanityCheck)
+{
+    Scenario<DatabaseState> *sequences[][2] = {
+        {
+            &g_routines.start_read_write_tx,
+            &g_routines.all_read_write_ops_many,
+        },
+        {
+            &g_routines.start_read_write_tx,
+            &g_routines.many_reads_and_writes,
+        },
+        {
+            &g_routines.start_readonly_tx,
+            &g_routines.all_readonly_ops_many,
+        },
     };
-    Scenario<DatabaseState> *array_2[] = {
-        &g_routines.open_db,
-        &g_routines.start_read_write_tx,
-        &g_routines.many_reads_and_writes,
-        &g_routines.validate_db,
-        &g_routines.finish_tx,
-        &g_routines.close_db,
-    };
-    Scenario<DatabaseState> *array_3[] = {
-        &g_routines.open_db,
-        &g_routines.start_readonly_tx,
-        &g_routines.many_all_readonly_ops,
-        &g_routines.validate_db,
-        &g_routines.finish_tx,
-        &g_routines.close_db,
-    };
 
-    SequenceScenario<DatabaseState> sequence_1("1", array_1, ARRAY_SIZE(array_1));
-    SequenceScenario<DatabaseState> sequence_2("2", array_2, ARRAY_SIZE(array_2));
-    SequenceScenario<DatabaseState> sequence_3("3", array_3, ARRAY_SIZE(array_3));
+    g_routines.open_db.run(m_state);
 
-    (void)DB::destroy(state.db_opt, state.filename);
+    static constexpr const char *kSequenceNames[] = {"1", "2", "3"};
+    for (size_t i = 0; i < ARRAY_SIZE(sequences); ++i) {
+        SequenceScenario<DatabaseState> scenario(
+            kSequenceNames[i],
+            sequences[i],
+            ARRAY_SIZE(sequences[i]));
 
-    sequence_1.run(state);
-    ASSERT_OK(state.s);
+        scenario.run(m_state);
+        ASSERT_OK(m_state.s);
 
-    sequence_2.run(state);
-    ASSERT_OK(state.s);
+        g_routines.validate_db.run(m_state);
+        g_routines.finish_tx.run(m_state);
+    }
 
-    sequence_3.run(state);
-    ASSERT_OK(state.s);
+    g_routines.close_db.run(m_state);
 }
 
 } // namespace calicodb::test

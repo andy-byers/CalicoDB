@@ -453,7 +453,7 @@ auto HashIterator::init(uint32_t backfill) -> Status
         sizeof(State) +                             // Includes storage for 1 group ("groups[1]").
         (m_num_groups - 1) * sizeof(State::Group) + // Additional groups.
         last_value * sizeof(Hash);                  // Indices to sort.
-    m_state = reinterpret_cast<State *>(
+    m_state = static_cast<State *>(
         operator new(state_size, std::align_val_t{alignof(State)}));
     std::memset(m_state, 0, state_size);
 
@@ -481,11 +481,16 @@ auto HashIterator::init(uint32_t backfill) -> Status
         for (size_t j = 0; j < group_size; ++j) {
             index[j] = static_cast<Hash>(j);
         }
-        mergesort(const_cast<const Key *>(group.keys), index, temp, group_size);
-        m_state->groups[i].base = group.base + 1;
-        m_state->groups[i].size = group_size;
-        m_state->groups[i].keys = const_cast<Key *>(group.keys);
-        m_state->groups[i].index = index;
+
+        auto *keys = const_cast<Key *>(group.keys);
+        mergesort(keys, index, temp, group_size);
+        m_state->groups[i] = {
+            keys,
+            index,
+            group_size,
+            0,
+            group.base + 1,
+        };
     }
     delete[] temp;
     return s;

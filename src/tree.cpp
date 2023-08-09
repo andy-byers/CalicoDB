@@ -2190,8 +2190,10 @@ auto Tree::manage_cursors(Cursor *c, CursorAction type) const -> void
     CALICODB_EXPECT_TRUE(c || type == kInitShutdown);
     if (m_writable || type == kInitShutdown) {
         // Clear the active cursor list.
-        while (!IntrusiveList::is_empty(m_active_list)) {
-            auto *ptr = m_active_list.next_entry;
+        auto *entry = m_active_list.next_entry;
+        while (entry != &m_active_list) {
+            auto *ptr = entry;
+            entry = ptr->next_entry;
             // Skip saving the target cursor `c`, since it may already be on the correct
             // node, and it is about to be used.
             if (c != ptr->cursor) {
@@ -2200,9 +2202,9 @@ auto Tree::manage_cursors(Cursor *c, CursorAction type) const -> void
                 } else {
                     ptr->cursor->reset();
                 }
+                IntrusiveList::remove(*ptr);
+                IntrusiveList::add_head(*ptr, m_inactive_list);
             }
-            IntrusiveList::remove(*ptr);
-            IntrusiveList::add_head(*ptr, m_inactive_list);
         }
     }
     if (auto *impl = reinterpret_cast<CursorImpl *>(c)) {

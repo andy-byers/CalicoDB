@@ -218,8 +218,8 @@ b_opt.error_if_exists = true;
 s = tx->create_bucket(b_opt, "cats", &c);
 if (s.is_ok()) {
     // c holds a cursor over the bucket "cats". The bucket will remain open
-    // until c is delete'd, which must happen before either the transaction
-    // is finished, or "cats" is dropped with Tx::drop_bucket(). 
+    // until c is delete'd, which must happen before the transaction is
+    // finished. 
 }
 
 // Release memory occupied by the cursor.
