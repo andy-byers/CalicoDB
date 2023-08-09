@@ -283,7 +283,7 @@ struct PosixShm {
 class PosixFile : public File
 {
 public:
-    explicit PosixFile(std::string filename_, Env::OpenMode mode_, int file_);
+    explicit PosixFile(std::string filename, Env::OpenMode mode, int file);
 
     ~PosixFile() override
     {
@@ -642,9 +642,9 @@ auto PosixEnv::sleep(unsigned micros) -> void
     }
 }
 
-PosixFile::PosixFile(std::string filename_, Env::OpenMode, int file_)
-    : filename(std::move(filename_)),
-      file(file_)
+PosixFile::PosixFile(std::string filename, Env::OpenMode, int file)
+    : filename(std::move(filename)),
+      file(file)
 {
     CALICODB_EXPECT_GE(file, 0);
 }

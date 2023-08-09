@@ -25,11 +25,9 @@ public:
     void operator=(Cursor &) = delete;
 
     // Return an opaque handle representing the cursor
-    // This method is intended for internal use.
-    [[nodiscard]] virtual auto token() -> void *
-    {
-        return this;
-    }
+    // NOTE: Classes that extend Cursor must keep track of the Cursor * returned by
+    //       Tx::*_bucket() and return its address from this method.
+    [[nodiscard]] virtual auto token() -> void * = 0;
 
     // Return true if the cursor is valid (positioned on a record), false otherwise
     // This method must return true before any of the methods key(), value(),

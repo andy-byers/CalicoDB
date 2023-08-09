@@ -162,12 +162,9 @@ Transactions can also be run manually.
 The caller is responsible for `delete`ing the `Tx` handle when it is no longer needed.
 
 ```C++
-const calicodb::Tx *reader;
+calicodb::Tx *reader;
 
-// Start a readonly transaction. This overload of DB::new_tx() only accepts 
-// a const Tx *. This means that the resulting transaction object cannot be 
-// used to change the database contents, since only const methods are
-// available on it.
+// Start a readonly transaction.
 s = db->new_tx(reader);
 if (!s.is_ok()) {
 }
@@ -202,12 +199,11 @@ auto *tx = writer;
 
 ### Buckets
 In CalicoDB, buckets are persistent mappings from string keys to string values.
-Each open bucket is represented by an opaque `calicodb::Bucket` handle.
-The actual bucket state is managed by the `calicodb::Tx` that opened the bucket.
-Buckets are implicitly closed when the transaction finishes.
+Each open bucket is represented by a `calicodb::Cursor` over its contents.
+Multiple cursors can be opened on each bucket.
 
 ```C++
-calicodb::Bucket b;
+calicodb::Cursor *c;
 
 // Set some initialization options. Enforces that the bucket "cats" must
 // not exist. Note that readonly transactions cannot create new buckets by
@@ -219,35 +215,22 @@ b_opt.error_if_exists = true;
 
 // Create the bucket. Note that this bucket will not persist in the database 
 // unless Tx::commit() is called prior to the transaction ending.
-s = tx->create_bucket(b_opt, "cats", &b);
+s = tx->create_bucket(b_opt, "cats", &c);
+if (s.is_ok()) {
+    // c holds a cursor over the bucket "cats". The bucket will remain open
+    // until c is delete'd, which must happen before the transaction is
+    // finished. 
+}
+
+// Release memory occupied by the cursor.
+delete c;
+
+// Since the bucket "cats" already exists, we can open it via the following:
+s = tx->open_bucket("cats", c);
 if (s.is_ok()) {
     // b holds the handle for the open bucket "cats". The bucket will remain 
     // open until either tx is delete'd, or "cats" is dropped with 
     // Tx::drop_bucket(). 
-}
-
-std::string value;
-s = tx->get(b, "lilly", &value);
-if (s.is_ok()) {
-    // `value` holds the value associated with the key "lilly".
-} else if (s.is_not_found()) {
-    // The key "lilly" does not exist in "cats".
-} else {
-    // An I/O error occurred.
-}
-
-s = tx->put(b, "lilly", "calico");
-if (s.is_ok()) {
-    // The value for key "lilly" in bucket "cats" has been set to "calico".
-} else {
-    // An I/O error occurred.
-}
-
-s = tx->erase(b, "lilly");
-if (s.is_ok()) {
-    // Bucket "cats" is guaranteed to not have a record with key "lilly".
-} else {
-    // An I/O error occurred. It is not an error if the key does not exist.
 }
 
 // Remove the bucket named "fish" from the database.
@@ -262,8 +245,6 @@ Cursors are used to perform full-bucket scans and range queries.
 They can also be used to help modify the database during [read-write transactions](#read-write-transactions).
 
 ```C++
-calicodb::Cursor *c = tx->new_cursor(b);
-
 // Scan the entire bucket forwards.
 c->seek_first();
 while (c->is_valid()) {

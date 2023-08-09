@@ -85,7 +85,7 @@ public:
                 return false;
         }
 
-        std::memset(m_ref->get_data(), 0, kPageSize);
+        std::memset(m_ref->data, 0, kPageSize);
         m_node = Node::from_new_page(*m_ref, m_scratch.data(), is_leaf);
         return true;
     }
@@ -277,6 +277,17 @@ TEST_F(NodeTests, OverwriteOnEraseBehavior)
             }
         }
     }
+}
+
+TEST(NodeHeaderTests, ReportsInvalidNodeType)
+{
+    char type;
+
+    type = NodeHdr::kInvalid;
+    ASSERT_EQ(NodeHdr::kInvalid, NodeHdr::get_type(&type));
+
+    type = 100;
+    ASSERT_EQ(NodeHdr::kInvalid, NodeHdr::get_type(&type));
 }
 
 } // namespace calicodb::test

@@ -14,3 +14,5 @@ target_include_directories(calicodb_utils
                "${PROJECT_SOURCE_DIR}/utils")
 target_compile_options(calicodb_utils
         PUBLIC "${CALICODB_OPTIONS}")
+
+add_subdirectory(stest)

@@ -25,7 +25,7 @@ auto Pager::purge_page(PageRef &victim) -> void
 auto Pager::read_page(PageRef &page_out, size_t *size_out) -> Status
 {
     // Try to read the page from the WAL.
-    auto *page = page_out.get_data();
+    auto *page = page_out.data;
     auto s = m_wal->read(page_out.page_id, page);
     if (s.is_ok()) {
         if (page == nullptr) {
@@ -50,10 +50,10 @@ auto Pager::read_page_from_file(PageRef &ref, size_t *size_out) const -> Status
 {
     Slice slice;
     const auto offset = ref.page_id.as_index() * kPageSize;
-    auto s = m_file->read(offset, kPageSize, ref.get_data(), &slice);
+    auto s = m_file->read(offset, kPageSize, ref.data, &slice);
     if (s.is_ok()) {
         m_stat->counters[Stat::kReadDB] += slice.size();
-        std::memset(ref.get_data() + slice.size(), 0, kPageSize - slice.size());
+        std::memset(ref.data + slice.size(), 0, kPageSize - slice.size());
         if (size_out) {
             *size_out = slice.size();
         }
@@ -215,7 +215,7 @@ auto Pager::commit() -> Status
         auto &root = get_root();
         if (m_page_count != m_saved_page_count) {
             mark_dirty(root);
-            FileHdr::put_page_count(root.get_data(), m_page_count);
+            FileHdr::put_page_count(root.data, m_page_count);
         }
         if (m_dirtylist.is_empty()) {
             // Ensure that there is always a WAL frame to store the DB size.
@@ -277,9 +277,9 @@ auto Pager::purge_pages(bool purge_all) -> void
 {
     m_refresh = true;
 
-    for (auto *p = m_dirtylist.begin(); p != m_dirtylist.end();) {
-        auto *save = p->get_page_ref();
-        p = p->next;
+    for (auto *dirty = m_dirtylist.begin(); dirty != m_dirtylist.end();) {
+        auto *save = dirty->get_page_ref();
+        dirty = dirty->next_entry;
         purge_page(*save);
     }
     CALICODB_EXPECT_TRUE(m_dirtylist.is_empty());
@@ -315,27 +315,27 @@ auto Pager::auto_checkpoint(size_t frame_limit) -> Status
 
 auto Pager::flush_dirty_pages() -> Status
 {
-    auto *p = m_dirtylist.begin();
-    while (p != m_dirtylist.end()) {
-        auto *page = p->get_page_ref();
+    auto *dirty = m_dirtylist.begin();
+    while (dirty != m_dirtylist.end()) {
+        auto *page = dirty->get_page_ref();
         CALICODB_EXPECT_TRUE(page->get_flag(PageRef::kDirty));
         if (page->page_id.value > m_page_count) {
             // This page is past the current end of the file due to a vacuum operation
             // decreasing the page count. Just remove the page from the dirty list. It
             // wouldn't be transferred back to the DB on checkpoint anyway since it is
             // out of bounds.
-            p = m_dirtylist.remove(*page);
+            dirty = m_dirtylist.remove(*page);
         } else {
             page->clear_flag(PageRef::kDirty);
-            p = p->next;
+            dirty = dirty->next_entry;
         }
     }
     // These pages are no longer considered dirty. If the call to Wal::write() fails,
     // this connection must purge the whole cache.
-    p = m_dirtylist.sort();
-    CALICODB_EXPECT_NE(p, nullptr);
+    dirty = m_dirtylist.sort();
+    CALICODB_EXPECT_NE(dirty, nullptr);
 
-    return m_wal->write(p->get_page_ref(), m_page_count);
+    return m_wal->write(dirty->get_page_ref(), m_page_count);
 }
 
 auto Pager::set_page_count(uint32_t page_count) -> void
@@ -526,7 +526,7 @@ auto Pager::initialize_root() -> void
     m_page_count = 1;
 
     mark_dirty(get_root());
-    FileHdr::make_supported_db(get_root().get_data());
+    FileHdr::make_supported_db(get_root().data);
 }
 
 auto Pager::refresh_state() -> Status
@@ -545,7 +545,7 @@ auto Pager::refresh_state() -> Status
         if (read_size == kPageSize) {
             // Make sure the file is a CalicoDB database, and that the database file format can be
             // understood by this version of the library.
-            s = FileHdr::check_db_support(m_bufmgr.root()->get_data());
+            s = FileHdr::check_db_support(m_bufmgr.root()->data);
         } else if (read_size > 0) {
             s = Status::corruption();
         }
@@ -553,7 +553,7 @@ auto Pager::refresh_state() -> Status
             m_page_count = m_wal->db_size();
             if (m_page_count == 0) {
                 const auto hdr_db_size = FileHdr::get_page_count(
-                    m_bufmgr.root()->get_data());
+                    m_bufmgr.root()->data);
                 size_t file_size;
                 s = m_env->file_size(m_db_name, file_size);
                 if (s.is_ok()) {
@@ -658,7 +658,7 @@ auto PointerMap::read_entry(Pager &pager, Id page_id, Entry &entry_out) -> Statu
     PageRef *map;
     auto s = pager.acquire(mid, map);
     if (s.is_ok()) {
-        entry_out = decode_entry(map->get_data() + offset);
+        entry_out = decode_entry(map->data + offset);
         pager.release(map);
         if (entry_out.type <= kEmpty || entry_out.type >= kTypeCount) {
             s = Status::corruption();
@@ -679,10 +679,10 @@ auto PointerMap::write_entry(Pager &pager, Id page_id, Entry entry) -> Status
             return Status::corruption();
         }
         const auto [back_ptr, type] = decode_entry(
-            map->get_data() + offset);
+            map->data + offset);
         if (entry.back_ptr != back_ptr || entry.type != type) {
             pager.mark_dirty(*map);
-            auto *data = map->get_data() + offset;
+            auto *data = map->data + offset;
             *data++ = entry.type;
             put_u32(data, entry.back_ptr.value);
         }

@@ -47,21 +47,21 @@ protected:
 TEST_F(BoundaryValueTests, BoundaryPayload)
 {
     ASSERT_OK(m_db->update([this](auto &tx) {
-        Bucket b;
-        auto s = tx.create_bucket(BucketOptions(), "bucket", &b);
+        Cursor *c;
+        auto s = tx.create_bucket(BucketOptions(), "bucket", &c);
         if (s.is_ok()) {
             // Put a maximally-sized record.
-            s = tx.put(b, m_largest_slice, m_largest_slice);
+            s = tx.put(*c, m_largest_slice, m_largest_slice);
         }
         return s;
     }));
 
     ASSERT_OK(m_db->view([this](const auto &tx) {
-        Bucket b;
+        Cursor *c;
         auto s = tx.open_bucket("bucket", b);
         if (s.is_ok()) {
             std::string value;
-            s = tx.get(b, m_largest_slice, &value);
+            s = tx.get(*c, m_largest_slice, &value);
             EXPECT_EQ(value, m_largest_slice);
         }
         return s;
@@ -71,11 +71,11 @@ TEST_F(BoundaryValueTests, BoundaryPayload)
 TEST_F(BoundaryValueTests, OverflowPayload)
 {
     ASSERT_OK(m_db->update([this](auto &tx) {
-        Bucket b;
-        auto s = tx.create_bucket(BucketOptions(), "bucket", &b);
+        Cursor *c;
+        auto s = tx.create_bucket(BucketOptions(), "bucket", &c);
         if (s.is_ok()) {
-            EXPECT_TRUE((s = tx.put(b, m_overflow_slice, "v")).is_invalid_argument()) << s.to_string();
-            EXPECT_TRUE((s = tx.put(b, "k", m_overflow_slice)).is_invalid_argument()) << s.to_string();
+            EXPECT_TRUE((s = tx.put(*c, m_overflow_slice, "v")).is_invalid_argument()) << s.to_string();
+            EXPECT_TRUE((s = tx.put(*c, "k", m_overflow_slice)).is_invalid_argument()) << s.to_string();
         }
         return Status::ok();
     }));
@@ -112,11 +112,11 @@ TEST_F(StressTests, LotsOfBuckets)
     ASSERT_OK(m_db->update([](auto &tx) {
         Status s;
         for (size_t i = 0; s.is_ok() && i < kNumBuckets; ++i) {
-            Bucket b;
+            Cursor *c;
             const auto name = numeric_key(i);
-            s = tx.create_bucket(BucketOptions(), name, &b);
+            s = tx.create_bucket(BucketOptions(), name, &c);
             if (s.is_ok()) {
-                s = tx.put(b, name, name);
+                s = tx.put(*c, name, name);
             }
         }
         return s;
@@ -124,11 +124,10 @@ TEST_F(StressTests, LotsOfBuckets)
     ASSERT_OK(m_db->view([](auto &tx) {
         Status s;
         for (size_t i = 0; s.is_ok() && i < kNumBuckets; ++i) {
-            Bucket b;
+            Cursor *c;
             const auto name = numeric_key(i);
-            s = tx.open_bucket(name, b);
+            s = tx.open_bucket(name, c);
             if (s.is_ok()) {
-                auto *c = tx.new_cursor(b);
                 c->seek_first();
                 EXPECT_TRUE(c->is_valid());
                 EXPECT_EQ(name, c->key());
@@ -143,14 +142,14 @@ TEST_F(StressTests, LotsOfBuckets)
 TEST_F(StressTests, CursorLimit)
 {
     ASSERT_OK(m_db->update([](auto &tx) {
-        Bucket b;
-        auto s = tx.create_bucket(BucketOptions(), "bucket", &b);
+        Status s;
         std::vector<Cursor *> cursors;
         for (size_t i = 0; s.is_ok() && i < 1'000; ++i) {
-            auto *c = tx.new_cursor(b);
-            if (c) {
+            Cursor *c;
+            s = tx.create_bucket(BucketOptions(), "bucket", &c);
+            if (s.is_ok()) {
                 cursors.emplace_back(c);
-                s = tx.put(b, numeric_key(i), numeric_key(i));
+                s = tx.put(*c, numeric_key(i), numeric_key(i));
             } else {
                 break;
             }
@@ -180,11 +179,11 @@ TEST_F(StressTests, LargeVacuum)
     ASSERT_OK(m_db->update([](auto &tx) {
         Status s;
         for (size_t i = 0; s.is_ok() && i < kTotalBuckets; ++i) {
-            Bucket b;
+            Cursor *c;
             const auto name = numeric_key(i);
-            s = tx.create_bucket(BucketOptions(), name, &b);
+            s = tx.create_bucket(BucketOptions(), name, &c);
             for (size_t j = 0; s.is_ok() && j < kNumRecords; ++j) {
-                s = tx.put(b, numeric_key(j), numeric_key(j));
+                s = tx.put(*c, numeric_key(j), numeric_key(j));
             }
         }
         for (size_t i = 0; s.is_ok() && i < kDroppedBuckets; ++i) {
@@ -199,13 +198,12 @@ TEST_F(StressTests, LargeVacuum)
     ASSERT_OK(m_db->view([](auto &tx) {
         Status s;
         for (size_t i = 0; s.is_ok() && i < kTotalBuckets; ++i) {
-            Bucket b;
-            s = tx.open_bucket(numeric_key(i), b);
+            Cursor *c;
+            s = tx.open_bucket(numeric_key(i), c);
             if (i < kDroppedBuckets) {
                 EXPECT_TRUE(s.is_invalid_argument()) << s.to_string();
                 s = Status::ok();
             } else if (s.is_ok()) {
-                auto *c = tx.new_cursor(b);
                 c->seek_first();
                 for (size_t j = 0; j < kNumRecords; ++j) {
                     EXPECT_TRUE(c->is_valid());

@@ -29,7 +29,7 @@ public:
     auto open(const Options &sanitized) -> Status;
 
     [[nodiscard]] auto get_property(const Slice &name, std::string *out) const -> bool override;
-    auto new_tx(const Tx *&tx) const -> Status override;
+    auto new_tx(Tx *&tx) const -> Status override;
     auto new_tx(WriteTag, Tx *&tx) -> Status override;
     auto checkpoint(bool reset) -> Status override;
 

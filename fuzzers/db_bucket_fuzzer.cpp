@@ -40,9 +40,9 @@ public:
         delete m_db;
     }
 
-    static auto check_bucket(const Bucket &b) -> void
+    static auto check_bucket(Cursor &c) -> void
     {
-        static_cast<const Tree *>(b.state)->TEST_validate();
+        reinterpret_cast<const CursorImpl &>(c).TEST_validate();
     }
 
     auto consume_input(FuzzedInputProvider &stream) -> void
@@ -67,13 +67,13 @@ public:
 
         const auto s = m_db->update([&stream](auto &tx) {
             std::unique_ptr<Cursor> cursors[kMaxBuckets];
-            Bucket buckets[kMaxBuckets];
 
             while (!stream.is_empty()) {
                 const auto idx = stream.extract_integral_in_range<uint16_t>(0, kMaxBuckets - 1);
                 if (cursors[idx] == nullptr) {
-                    CHECK_OK(tx.create_bucket(BucketOptions(), std::to_string(idx), &buckets[idx]));
-                    cursors[idx] = std::unique_ptr<Cursor>(tx.new_cursor(buckets[idx]));
+                    Cursor *cursor;
+                    CHECK_OK(tx.create_bucket(BucketOptions(), std::to_string(idx), &cursor));
+                    cursors[idx].reset(cursor);
                 }
                 Status s;
                 auto *c = cursors[idx].get();
@@ -119,9 +119,9 @@ public:
                         c = nullptr;
                         break;
                     case kOpCheck:
-                        for (size_t i = 0; i < kMaxBuckets; ++i) {
-                            if (cursors[i] != nullptr) {
-                                check_bucket(buckets[i]);
+                        for (const auto &to_check : cursors) {
+                            if (to_check) {
+                                check_bucket(*to_check);
                             }
                         }
                         break;

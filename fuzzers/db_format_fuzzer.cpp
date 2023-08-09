@@ -39,53 +39,53 @@ public:
 
         if (s.is_ok()) {
             s = db->update([](auto &tx) {
-                Bucket b1, b2;
-                auto s = tx.open_bucket("b1", b1);
+                Cursor *c1 = nullptr;
+                Cursor *c2 = nullptr;
+                auto s = tx.open_bucket("b1", c1);
                 if (s.is_ok()) {
-                    s = tx.open_bucket("b2", b2);
+                    s = tx.open_bucket("b2", c2);
                 }
                 if (s.is_ok()) {
-                    // Copy all records from b1 to b2.
-                    std::unique_ptr<Cursor> c(tx.new_cursor(b1));
-                    c->seek_last();
-                    while (c->is_valid() && s.is_ok()) {
-                        s = tx.put(b2, c->key(), c->value());
+                    // Copy all records from c1 to c2.
+                    c1->seek_last();
+                    while (c1->is_valid() && s.is_ok()) {
+                        s = tx.put(*c2, c1->key(), c1->value());
                         if (s.is_ok()) {
-                            c->previous();
+                            c1->previous();
                         }
                     }
                     if (s.is_ok()) {
-                        s = c->status();
+                        s = c1->status();
                     }
                     if (s.is_ok()) {
-                        // Copy reverse mapping from b2 to b1.
-                        c.reset(tx.new_cursor(b2));
-                        c->seek_first();
-                        while (c->is_valid() && s.is_ok()) {
-                            s = tx.put(b1, c->value(), c->key());
-                            c->next();
+                        // Copy reverse mapping from c2 to c1.
+                        c2->seek_first();
+                        while (c2->is_valid() && s.is_ok()) {
+                            s = tx.put(*c1, c2->value(), c2->key());
+                            c2->next();
                         }
                         if (s.is_ok()) {
-                            s = c->status();
+                            s = c2->status();
                         }
-                        // Erase some records from b2.
-                        c->seek_first();
-                        while (c->is_valid() && s.is_ok()) {
-                            if (c->key() < c->value()) {
-                                s = tx.erase(*c);
-                                CHECK_TRUE(s == c->status());
+                        // Erase some records from c2.
+                        c2->seek_first();
+                        while (c2->is_valid() && s.is_ok()) {
+                            if (c2->key() < c2->value()) {
+                                s = tx.erase(*c2);
+                                CHECK_TRUE(s == c2->status());
                             } else {
-                                c->next();
+                                c2->next();
                             }
                         }
                         if (s.is_ok()) {
-                            s = c->status();
+                            s = c2->status();
                         }
                     }
-                    c.reset();
+                    delete c1;
+                    delete c2;
 
                     if (s.is_ok()) {
-                        s = tx.drop_bucket("b2");
+                        s = tx.drop_bucket("c2");
                     }
                     if (s.is_ok()) {
                         s = tx.vacuum();

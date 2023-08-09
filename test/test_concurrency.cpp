@@ -355,10 +355,10 @@ protected:
             s = co.db->view([&co, barrier](const auto &tx) {
                 barrier_wait(barrier);
 
-                Bucket b;
+                Cursor *c;
                 // Oddly enough, if we name this Status "s", some platforms complain about shadowing,
                 // even though s is not captured in this lambda.
-                auto t = tx.open_bucket("BUCKET", b);
+                auto t = tx.open_bucket("BUCKET", c);
                 if (t.is_invalid_argument()) {
                     // Writer hasn't created the bucket yet.
                     return Status::ok();
@@ -370,7 +370,7 @@ protected:
                     std::string value;
                     // If the bucket exists, then it must contain co.op_arg records (the first writer to run
                     // makes sure of this).
-                    t = tx.get(b, numeric_key(i % co.op_args[1]), &value);
+                    t = tx.get(*c, numeric_key(i % co.op_args[1]), &value);
                     if (!t.is_ok()) {
                         break;
                     } else if (i == 0) {
@@ -379,6 +379,7 @@ protected:
                         EXPECT_EQ(value, co.result.back()) << "non repeatable read";
                     }
                 }
+                delete c;
                 return t;
             });
         }
@@ -405,12 +406,12 @@ protected:
             s = co.db->update([&co, barrier](auto &tx) {
                 barrier_wait(barrier);
 
-                Bucket b;
-                auto t = tx.create_bucket(BucketOptions(), "BUCKET", &b);
+                Cursor *c;
+                auto t = tx.create_bucket(BucketOptions(), "BUCKET", &c);
                 for (size_t i = 0; t.is_ok() && i < co.op_args[1]; ++i) {
                     uint64_t result = 1;
                     std::string value;
-                    t = tx.get(b, numeric_key(i), &value);
+                    t = tx.get(*c, numeric_key(i), &value);
                     if (t.is_not_found()) {
                         t = Status::ok();
                     } else if (t.is_ok()) {
@@ -421,7 +422,7 @@ protected:
                         break;
                     }
                     if (t.is_ok()) {
-                        t = tx.put(b, numeric_key(i), numeric_key(result));
+                        t = tx.put(*c, numeric_key(i), numeric_key(result));
                     }
                 }
                 EXPECT_OK(t);

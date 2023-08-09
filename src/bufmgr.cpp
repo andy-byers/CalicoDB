@@ -6,45 +6,10 @@
 #include "calicodb/env.h"
 #include "calicodb/options.h"
 #include "encoding.h"
-#include "header.h"
 #include "stat.h"
 
 namespace calicodb
 {
-
-template <class Entry>
-static auto list_add_between(Entry &entry, Entry &prev, Entry &next) -> void
-{
-    next.prev = &entry;
-    entry.next = &next;
-    entry.prev = &prev;
-    prev.next = &entry;
-}
-
-template <class Entry>
-static auto list_add_head(Entry &ref, Entry &head) -> void
-{
-    list_add_between(ref, head, *head.next);
-}
-
-template <class Entry>
-static auto list_add_tail(Entry &entry, Entry &head) -> void
-{
-    list_add_between(entry, *head.prev, head);
-}
-
-template <class Entry>
-static auto list_remove(Entry &entry) -> void
-{
-    entry.next->prev = entry.prev;
-    entry.prev->next = entry.next;
-}
-
-template <class Entry>
-[[nodiscard]] static auto list_is_empty(const Entry &entry) -> bool
-{
-    return &entry == entry.next;
-}
 
 Bufmgr::Bufmgr(size_t min_buffers, Stat &stat)
     : m_root(PageRef::alloc()),
@@ -53,10 +18,8 @@ Bufmgr::Bufmgr(size_t min_buffers, Stat &stat)
 {
     // We don't call alloc_page() for the dummy list heads, so the circular
     // connections must be initialized manually.
-    m_in_use.prev = &m_in_use;
-    m_in_use.next = &m_in_use;
-    m_lru.prev = &m_lru;
-    m_lru.next = &m_lru;
+    IntrusiveList::initialize(m_in_use);
+    IntrusiveList::initialize(m_lru);
 
     if (m_root) {
         m_root->page_id = Id::root();
@@ -64,7 +27,7 @@ Bufmgr::Bufmgr(size_t min_buffers, Stat &stat)
 
     for (m_num_buffers = 0; m_num_buffers < m_min_buffers; ++m_num_buffers) {
         if (auto *ref = PageRef::alloc()) {
-            list_add_tail(*ref, m_lru);
+            IntrusiveList::add_tail(*ref, m_lru);
         } else {
             break;
         }
@@ -79,11 +42,11 @@ Bufmgr::~Bufmgr()
 
     // The pager should have released any referenced pages before the buffer manager
     // is destroyed.
-    CALICODB_EXPECT_TRUE(list_is_empty(m_in_use));
+    CALICODB_EXPECT_TRUE(IntrusiveList::is_empty(m_in_use));
 
-    for (auto *p = m_lru.next; p != &m_lru;) {
+    for (auto *p = m_lru.next_entry; p != &m_lru;) {
         auto *ptr = p;
-        p = p->next;
+        p = p->next_entry;
         PageRef::free(ptr);
     }
 }
@@ -107,22 +70,22 @@ auto Bufmgr::lookup(Id page_id) -> PageRef *
     }
     ++m_stat->counters[Stat::kCacheHits];
     if (itr->second->refs == 0) {
-        list_remove(*itr->second);
-        list_add_head(*itr->second, m_lru);
+        IntrusiveList::remove(*itr->second);
+        IntrusiveList::add_head(*itr->second, m_lru);
     }
     return itr->second;
 }
 
 auto Bufmgr::next_victim() -> PageRef *
 {
-    return list_is_empty(m_lru) ? nullptr : m_lru.prev;
+    return IntrusiveList::is_empty(m_lru) ? nullptr : m_lru.prev_entry;
 }
 
 auto Bufmgr::allocate() -> PageRef *
 {
     auto *ref = PageRef::alloc();
     if (ref) {
-        list_add_tail(*ref, m_lru);
+        IntrusiveList::add_tail(*ref, m_lru);
         ++m_num_buffers;
     }
     return ref;
@@ -143,14 +106,14 @@ auto Bufmgr::erase(PageRef &ref) -> void
     if (ref.get_flag(PageRef::kCached)) {
         ref.clear_flag(PageRef::kCached);
         m_map.erase(ref.page_id);
-        list_remove(ref);
-        list_add_tail(ref, m_lru);
+        IntrusiveList::remove(ref);
+        IntrusiveList::add_tail(ref, m_lru);
     }
 }
 
 auto Bufmgr::purge() -> void
 {
-    CALICODB_EXPECT_TRUE(list_is_empty(m_in_use));
+    CALICODB_EXPECT_TRUE(IntrusiveList::is_empty(m_in_use));
     CALICODB_EXPECT_EQ(m_refsum, 0);
     for (const auto &[page_id, ref] : m_map) {
         ref->flag = PageRef::kNormal;
@@ -163,8 +126,8 @@ auto Bufmgr::ref(PageRef &ref) -> void
     ++ref.refs;
     ++m_refsum;
     if (ref.refs == 1) {
-        list_remove(ref);
-        list_add_head(ref, m_in_use);
+        IntrusiveList::remove(ref);
+        IntrusiveList::add_head(ref, m_in_use);
     }
 }
 
@@ -176,8 +139,8 @@ auto Bufmgr::unref(PageRef &ref) -> void
     --ref.refs;
     --m_refsum;
     if (ref.refs == 0) {
-        list_remove(ref);
-        list_add_head(ref, m_lru);
+        IntrusiveList::remove(ref);
+        IntrusiveList::add_head(ref, m_lru);
     }
 }
 
@@ -185,9 +148,9 @@ auto Bufmgr::shrink_to_fit() -> void
 {
     CALICODB_EXPECT_EQ(m_refsum, 0);
     while (m_num_buffers > m_min_buffers) {
-        auto *lru = m_lru.prev;
+        auto *lru = m_lru.prev_entry;
         m_map.erase(lru->page_id);
-        list_remove(*lru);
+        IntrusiveList::remove(*lru);
         PageRef::free(lru);
         --m_num_buffers;
     }
@@ -197,7 +160,7 @@ auto Bufmgr::assert_state() const -> bool
 {
     // Make sure the refcounts add up to the "refsum".
     uint32_t refsum = 0;
-    for (auto p = m_in_use.next; p != &m_in_use; p = p->next) {
+    for (auto p = m_in_use.next_entry; p != &m_in_use; p = p->next_entry) {
         const auto itr = m_map.find(p->page_id);
         CALICODB_EXPECT_NE(itr, end(m_map));
         CALICODB_EXPECT_EQ(p, itr->second);
@@ -205,7 +168,7 @@ auto Bufmgr::assert_state() const -> bool
         refsum += p->refs;
         (void)itr;
     }
-    for (auto p = m_lru.next; p != &m_lru; p = p->next) {
+    for (auto p = m_lru.next_entry; p != &m_lru; p = p->next_entry) {
         if (p->get_flag(PageRef::kDirty)) {
             // Pages that are dirty must remain in the cache. Otherwise, we risk having 2 dirty
             // copies of the same page in the dirtylist at the same time.
@@ -224,23 +187,23 @@ auto Bufmgr::assert_state() const -> bool
 
 auto Dirtylist::is_empty() const -> bool
 {
-    return list_is_empty(m_head);
+    return IntrusiveList::is_empty(m_head);
 }
 
 auto Dirtylist::remove(PageRef &ref) -> DirtyHdr *
 {
     CALICODB_EXPECT_TRUE(ref.get_flag(PageRef::kDirty));
     auto *hdr = ref.get_dirty_hdr();
-    // NOTE: hdr->next is still valid after this call.
-    list_remove(*hdr);
+    // NOTE: hdr->next_entry is still valid after this call.
+    IntrusiveList::remove(*hdr);
     ref.clear_flag(PageRef::kDirty);
-    return hdr->next;
+    return hdr->next_entry;
 }
 
 auto Dirtylist::add(PageRef &ref) -> void
 {
     CALICODB_EXPECT_FALSE(ref.get_flag(PageRef::kDirty));
-    list_add_head(*ref.get_dirty_hdr(), m_head);
+    IntrusiveList::add_head(*ref.get_dirty_hdr(), m_head);
     ref.set_flag(PageRef::kDirty);
 }
 
@@ -280,8 +243,8 @@ auto Dirtylist::sort() -> DirtyHdr *
 #endif // NDEBUG
 
     CALICODB_EXPECT_FALSE(is_empty());
-    for (auto *p = begin(); p != end(); p = p->next) {
-        p->dirty = p->next == end() ? nullptr : p->next;
+    for (auto *p = begin(); p != end(); p = p->next_entry) {
+        p->dirty = p->next_entry == end() ? nullptr : p->next_entry;
     }
 
     static constexpr size_t kNSortBuckets = 32;
@@ -314,8 +277,8 @@ auto Dirtylist::sort() -> DirtyHdr *
             ptr = ptr ? dirtylist_merge(ptr, arr[i]) : arr[i];
         }
     }
-    m_head.prev = end();
-    m_head.next = end();
+    m_head.prev_entry = end();
+    m_head.next_entry = end();
 
 #ifndef NDEBUG
     // Make sure the list was sorted correctly.
@@ -329,8 +292,8 @@ auto Dirtylist::sort() -> DirtyHdr *
         transient = next;
 
         // Traverse the non-transient list as well. It should be the same length.
-        CALICODB_EXPECT_EQ(!next, permanent->next == end());
-        permanent = permanent->next;
+        CALICODB_EXPECT_EQ(!next, permanent->next_entry == end());
+        permanent = permanent->next_entry;
     }
 #endif // NDEBUG
     return ptr;
@@ -339,9 +302,9 @@ auto Dirtylist::sort() -> DirtyHdr *
 auto Dirtylist::TEST_contains(const PageRef &ref) const -> bool
 {
     auto found = false;
-    for (const auto *p = begin(); p != end(); p = p->next) {
-        CALICODB_EXPECT_TRUE(p->next == end() ||
-                             p->next->prev == p);
+    for (const auto *p = begin(); p != end(); p = p->next_entry) {
+        CALICODB_EXPECT_TRUE(p->next_entry == end() ||
+                             p->next_entry->prev_entry == p);
         if (p->get_page_ref()->page_id == ref.page_id) {
             CALICODB_EXPECT_EQ(p, ref.get_dirty_hdr());
             CALICODB_EXPECT_FALSE(found);

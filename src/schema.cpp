@@ -50,7 +50,8 @@ public:
         // TODO: Parse the options string into a human-readable format, save it internally and return a slice to it.
         //       We should skip the varint root ID or convert it into a decimal string.
         CALICODB_EXPECT_TRUE(is_valid());
-        return m_c->value();
+        // return m_c->value();
+        return "";
     }
 
     auto seek(const Slice &key) -> void override
@@ -84,13 +85,9 @@ Schema::Schema(Pager &pager, const Status &status, Stat &stat, char *scratch)
       m_pager(&pager),
       m_scratch(scratch),
       m_stat(&stat),
-      m_map(pager, stat, scratch, nullptr)
+      m_map(pager, stat, scratch, nullptr, pager.mode() >= Pager::kWrite),
+      m_cursor(new SchemaCursor(*m_map.new_cursor()))
 {
-}
-
-auto Schema::new_cursor() -> Cursor *
-{
-    return new SchemaCursor(*m_map.new_cursor());
 }
 
 auto Schema::close() -> void
@@ -98,13 +95,15 @@ auto Schema::close() -> void
     for (const auto &[_, state] : m_trees) {
         delete state.tree;
     }
-    m_map.release_nodes();
+    delete m_cursor;
+    m_map.save_all_cursors();
 }
 
 auto Schema::corrupted_root_id(const Slice &name, const Slice &value) -> Status
 {
-    std::string message("root entry for bucket \"" + name.to_string() + "\" is corrupted: ");
-    message.append(escape_string(value));
+    std::string message;
+    append_fmt_string(message, R"(root entry for bucket "%s" is corrupted: %s)",
+                      name.to_string().c_str(), escape_string(value).c_str());
     auto s = Status::corruption(message);
     if (m_pager->mode() > Pager::kRead) {
         m_pager->set_status(s);
@@ -112,18 +111,15 @@ auto Schema::corrupted_root_id(const Slice &name, const Slice &value) -> Status
     return s;
 }
 
-auto Schema::create_bucket(const BucketOptions &options, const Slice &name, Bucket *b_out) -> Status
+auto Schema::create_bucket(const BucketOptions &options, const Slice &name, Cursor **c_out) -> Status
 {
     if (m_pager->page_count() == 0) {
         // Initialize the database file header, as well as the schema tree's root page.
         m_pager->initialize_root();
     }
 
-    Status s;
     std::string value;
-    if (s.is_ok()) {
-        s = m_map.get(name, &value);
-    }
+    auto s = m_map.get(get_cursor_impl(*m_cursor), name, &value);
 
     Id root_id;
     if (s.is_not_found()) {
@@ -131,7 +127,7 @@ auto Schema::create_bucket(const BucketOptions &options, const Slice &name, Buck
         if (s.is_ok()) {
             // TODO: Encode persistent bucket options here.
             encode_root_id(root_id, value);
-            s = m_map.put(name, value);
+            s = m_map.put(get_cursor_impl(*m_cursor), name, value);
         }
     } else if (s.is_ok()) {
         if (!decode_and_check_root_id(value, root_id)) {
@@ -142,14 +138,21 @@ auto Schema::create_bucket(const BucketOptions &options, const Slice &name, Buck
         }
     }
 
-    if (s.is_ok() && b_out) {
-        *b_out = construct_bucket_state(root_id);
+    if (c_out) {
+        if (s.is_ok()) {
+            auto *tree = construct_or_reference_tree(root_id);
+            *c_out = tree->new_cursor();
+        } else {
+            *c_out = nullptr;
+        }
     }
     return s;
 }
 
-auto Schema::open_bucket(const Slice &name, Bucket &b_out) -> Status
+auto Schema::open_bucket(const Slice &name, Cursor *&c_out) -> Status
 {
+    c_out = nullptr;
+
     Status s;
     if (m_pager->page_count() == 0) {
         return Status::invalid_argument();
@@ -157,7 +160,7 @@ auto Schema::open_bucket(const Slice &name, Bucket &b_out) -> Status
 
     std::string value;
     if (s.is_ok()) {
-        s = m_map.get(name, &value);
+        s = m_map.get(get_cursor_impl(*m_cursor), name, &value);
     }
 
     Id root_id;
@@ -171,7 +174,8 @@ auto Schema::open_bucket(const Slice &name, Bucket &b_out) -> Status
     } else {
         return s;
     }
-    b_out = construct_bucket_state(root_id);
+    auto *tree = construct_or_reference_tree(root_id);
+    c_out = tree->new_cursor();
     return s;
 }
 
@@ -203,7 +207,7 @@ auto Schema::encode_root_id(Id id, std::string &root_id_out) -> void
     root_id_out.resize(static_cast<std::uintptr_t>(end - root_id_out.data()));
 }
 
-auto Schema::construct_bucket_state(Id root_id) -> Bucket
+auto Schema::construct_or_reference_tree(Id root_id) -> Tree *
 {
     auto itr = m_trees.find(root_id);
     if (itr == end(m_trees) || !itr->second.tree) {
@@ -213,24 +217,32 @@ auto Schema::construct_bucket_state(Id root_id) -> Bucket
             *m_pager,
             *m_stat,
             m_scratch,
-            &itr->second.root);
+            &itr->second.root,
+            m_pager->mode() >= Pager::kWrite);
     }
-    return Bucket{itr->second.tree};
+    return itr->second.tree;
 }
 
-auto Schema::use_bucket(const Bucket &b) -> void
+auto Schema::unpack_and_use(Cursor &c) -> std::pair<Tree &, CursorImpl &>
 {
-    CALICODB_EXPECT_NE(b.state, nullptr);
-    if (m_recent && m_recent != b.state) {
-        m_recent->release_nodes();
+    auto *c_impl = static_cast<CursorImpl *>(c.token());
+    auto *tree = Tree::get_tree(*c_impl);
+    use_tree(*tree);
+    return {*tree, *c_impl};
+}
+
+auto Schema::use_tree(Tree &tree) -> void
+{
+    if (m_recent && m_recent != &tree) {
+        m_recent->save_all_cursors();
     }
-    m_recent = reinterpret_cast<const Tree *>(b.state);
+    m_recent = &tree;
 }
 
 auto Schema::drop_bucket(const Slice &name) -> Status
 {
     std::string value;
-    auto s = m_map.get(name, &value);
+    auto s = m_map.get(get_cursor_impl(*m_cursor), name, &value);
     if (s.is_not_found()) {
         return Status::invalid_argument(
             "table \"" + name.to_string() + "\" does not exist");
@@ -244,16 +256,17 @@ auto Schema::drop_bucket(const Slice &name) -> Status
     }
     auto itr = m_trees.find(root_id);
     if (itr != end(m_trees)) {
-        use_bucket(Bucket{itr->second.tree});
-        itr->second.tree->release_nodes();
+        use_tree(*itr->second.tree);
+        itr->second.tree->save_all_cursors();
         delete itr->second.tree;
         m_recent = nullptr;
         m_trees.erase(root_id);
     }
-    Tree drop(*m_pager, *m_stat, m_scratch, &root_id);
+    Tree drop(*m_pager, *m_stat, m_scratch,
+              &root_id, m_pager->mode() >= Pager::kWrite);
     s = Tree::destroy(drop);
     if (s.is_ok()) {
-        s = m_map.erase(name);
+        s = m_map.erase(get_cursor_impl(*m_cursor), name);
     }
     return s;
 }
@@ -299,7 +312,7 @@ auto Schema::vacuum_finish() -> Status
             std::string value;
             encode_root_id(root->second, value);
             // Update the database schema with the new root page ID for this tree.
-            s = m_map.put(*c, c->key(), value);
+            s = m_map.put(get_cursor_impl(*c), c->key(), value);
             if (!s.is_ok()) {
                 break;
             }
@@ -331,9 +344,9 @@ auto Schema::vacuum_finish() -> Status
 auto Schema::vacuum() -> Status
 {
     for (auto &[_, tree] : m_trees) {
-        tree.tree->release_nodes();
+        tree.tree->save_all_cursors();
     }
-    m_map.release_nodes();
+    m_map.save_all_cursors();
     m_recent = nullptr;
     return m_map.vacuum(*this);
 }

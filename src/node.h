@@ -161,7 +161,7 @@ struct Node final {
 
     [[nodiscard]] auto hdr() const -> char *
     {
-        return ref->get_data() + page_offset(ref->page_id);
+        return ref->data + page_offset(ref->page_id);
     }
 
     [[nodiscard]] auto is_leaf() const -> bool

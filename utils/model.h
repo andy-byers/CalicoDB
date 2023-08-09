@@ -15,70 +15,268 @@
 #include "common.h"
 #include "logging.h"
 #include <iostream>
+#include <list>
 #include <map>
+
+#define CHECK_TRUE(cond)                                 \
+    do {                                                 \
+        if (!(cond)) {                                   \
+            std::cerr << "expected `" << #cond << "`\n"; \
+            std::abort();                                \
+        }                                                \
+    } while (0)
+
+#define CHECK_FALSE(cond) \
+    CHECK_TRUE(!(cond))
+
+#define CHECK_OK(expr)                                             \
+    do {                                                           \
+        if (auto assert_s = (expr); !assert_s.is_ok()) {           \
+            std::fprintf(                                          \
+                stderr,                                            \
+                "expected `(" #expr ").is_ok()` but got \"%s\"\n", \
+                assert_s.to_string().c_str());                     \
+            std::abort();                                          \
+        }                                                          \
+    } while (0)
+
+#define CHECK_EQ(lhs, rhs)                                                                             \
+    do {                                                                                               \
+        if ((lhs) != (rhs)) {                                                                          \
+            std::cerr << "expected `" << #lhs "` (" << (lhs) << ") == `" #rhs "` (" << (rhs) << ")\n"; \
+            std::abort();                                                                              \
+        }                                                                                              \
+    } while (0)
 
 namespace calicodb
 {
 
 using KVMap = std::map<std::string, std::string>;
-class ModelCursor;
+using KVStore = std::map<std::string, KVMap>;
 
 class ModelDB : public DB
 {
-    KVMap *m_store;
-    bool m_owns_store;
+    KVStore *const m_store;
+    DB *const m_db;
 
 public:
-    explicit ModelDB(KVMap *store)
-        : m_store(store)
+    static auto open(const Options &options, const std::string &filename, KVStore &store, DB *&db_out) -> Status;
+
+    explicit ModelDB(KVStore &store, DB &db)
+        : m_store(&store),
+          m_db(&db)
     {
-        if (m_store) {
-            m_owns_store = false;
-        } else {
-            m_store = new KVMap;
-            m_owns_store = true;
-        }
     }
 
     ~ModelDB() override;
 
-    auto get_property(const Slice &, std::string *) const -> bool override
+    auto check_consistency() const -> void;
+
+    auto get_property(const Slice &name, std::string *value_out) const -> bool override
     {
-        return false;
+        return m_db->get_property(name, value_out);
     }
 
     auto new_tx(WriteTag, Tx *&tx_out) -> Status override;
-    [[nodiscard]] auto new_tx(const Tx *&tx_out) const -> Status override;
+    [[nodiscard]] auto new_tx(Tx *&tx_out) const -> Status override;
 
-    auto checkpoint(bool) -> Status override
+    auto checkpoint(bool reset) -> Status override
     {
-        return Status::ok();
+        return m_db->checkpoint(reset);
     }
 };
 
-class ModelTx : public Tx
+class ModelTx;
+
+template <class Map>
+class ModelCursorBase : public Cursor
 {
-    friend class ModelCursor;
+    static constexpr bool kIsSchema = std::is_same_v<Map, KVStore>;
 
-    KVMap m_temp;
-    KVMap *m_base;
-    Cursor *m_schema;
+    friend class ModelTx;
 
-    auto save_cursor() const -> void;
-    auto load_cursor() const -> std::pair<bool, std::string>;
-    mutable ModelCursor *m_last_c = nullptr;
+    std::list<Cursor *>::iterator m_backref;
+    Cursor *const m_c;
+    const ModelTx *const m_tx;
+
+    mutable typename Map::const_iterator m_itr;
+    Map *m_map;
+
     mutable std::string m_saved_key;
     mutable std::string m_saved_val;
-    mutable bool m_saved = false;
+    mutable bool m_saved;
+
+    auto save_position() const -> void
+    {
+        if (!m_saved && m_c->is_valid()) {
+            m_saved_key = m_c->key().to_string();
+            m_saved_val = m_c->value().to_string();
+            // The element at m_itr may have been erased. This will cause m_itr to be
+            // invalidated, but we won't be able to tell, since it probably won't equal
+            // end(*m_map). This makes sure the iterator can still be used as a hint in
+            // ModelTx::put().
+            m_itr = end(*m_map);
+            m_saved = true;
+        }
+    }
+
+    auto load_position() const -> std::pair<bool, std::string>
+    {
+        if (m_saved) {
+            m_saved = false;
+            m_itr = m_map->find(m_saved_key);
+            return {true, m_saved_key};
+        }
+        return {false, ""};
+    }
 
 public:
-    explicit ModelTx(KVMap &base)
-        : m_temp(base),
-          m_base(&base)
+    explicit ModelCursorBase(Cursor &c, const ModelTx &tx, Map &map, std::list<Cursor *>::iterator backref)
+        : m_backref(backref),
+          m_c(&c),
+          m_tx(&tx),
+          m_itr(end(map)),
+          m_map(&map),
+          m_saved(false)
     {
     }
 
+    ~ModelCursorBase() override;
+
+    [[nodiscard]] auto map() -> Map &
+    {
+        return *m_map;
+    }
+
+    [[nodiscard]] auto token() -> void * override
+    {
+        return m_c->token();
+    }
+
+    [[nodiscard]] auto is_valid() const -> bool override
+    {
+        CHECK_EQ(m_c->is_valid(),
+                 m_itr != end(*m_map) || m_saved);
+        check_record();
+        return m_c->is_valid();
+    }
+
+    [[nodiscard]] auto status() const -> Status override
+    {
+        return m_c->status();
+    }
+
+    auto check_record() const -> void
+    {
+        if (m_c->is_valid()) {
+            const auto key = m_saved
+                                 ? m_saved_key
+                                 : m_itr->first;
+            CHECK_EQ(key, m_c->key().to_string());
+
+            std::string value;
+            if constexpr (!kIsSchema) {
+                value = m_saved ? m_saved_val : m_itr->second;
+            }
+            CHECK_EQ(value, m_c->value().to_string());
+        }
+    }
+
+    [[nodiscard]] auto key() const -> Slice override
+    {
+        return m_c->key();
+    }
+
+    [[nodiscard]] auto value() const -> Slice override
+    {
+        return m_c->value();
+    }
+
+    auto seek(const Slice &key) -> void override
+    {
+        m_saved = false;
+        m_itr = m_map->lower_bound(key.to_string());
+        m_c->seek(key);
+    }
+
+    auto seek_first() -> void override
+    {
+        m_saved = false;
+        m_itr = begin(*m_map);
+        m_c->seek_first();
+    }
+
+    auto seek_last() -> void override
+    {
+        m_saved = false;
+        m_itr = end(*m_map);
+        if (!m_map->empty()) {
+            --m_itr;
+        }
+        m_c->seek_last();
+    }
+
+    auto next() -> void override
+    {
+        load_position();
+        if (m_itr != end(*m_map)) {
+            ++m_itr;
+        }
+        m_c->next();
+    }
+
+    auto previous() -> void override
+    {
+        load_position();
+        if (m_itr == begin(*m_map)) {
+            m_itr = end(*m_map);
+        } else {
+            --m_itr;
+        }
+        m_c->previous();
+    }
+};
+
+template class ModelCursorBase<KVMap>;
+
+class ModelTx : public Tx
+{
+    friend class ModelCursorBase<KVMap>;
+    friend class ModelCursorBase<KVStore>;
+
+    mutable KVStore m_temp;
+    KVStore *const m_base;
+    Tx *const m_tx;
+
+    template <class Target>
+    auto use_cursor(Cursor &c) const -> ModelCursorBase<Target> &
+    {
+        auto &m = reinterpret_cast<ModelCursorBase<Target> &>(c);
+        save_cursors(&m);
+        m.load_position();
+        return m;
+    }
+
+    auto open_model_cursor(Cursor &c, KVMap &map) const -> Cursor *;
+    auto save_cursors(Cursor *exclude = nullptr) const -> void;
+    mutable std::list<Cursor *> m_cursors;
+    mutable ModelCursorBase<KVStore> m_schema;
+
+public:
+    explicit ModelTx(KVStore &store, Tx &tx)
+        : m_temp(store),
+          m_base(&store),
+          m_tx(&tx),
+          m_schema(tx.schema(), *this, m_temp, end(m_cursors))
+    {
+        m_cursors.emplace_front(&m_schema);
+        m_schema.m_backref = begin(m_cursors);
+    }
+
     ~ModelTx() override;
+
+    // WARNING: Invalidates all open cursors.
+    auto check_consistency() const -> void;
 
     [[nodiscard]] auto status() const -> Status override
     {
@@ -87,130 +285,73 @@ public:
 
     [[nodiscard]] auto schema() const -> Cursor & override
     {
-        return *m_schema; // TODO
+        return m_schema;
     }
 
-    auto create_bucket(const BucketOptions &options, const Slice &name, Bucket *tb_out) -> Status override;
-    [[nodiscard]] auto open_bucket(const Slice &name, Bucket &tb_out) const -> Status override;
+    auto create_bucket(const BucketOptions &options, const Slice &name, Cursor **c_out) -> Status override;
+    [[nodiscard]] auto open_bucket(const Slice &name, Cursor *&c_out) const -> Status override;
 
-    auto drop_bucket(const Slice &) -> Status override
+    auto drop_bucket(const Slice &name) -> Status override
     {
-        return Status::ok();
-    }
-
-    auto vacuum() -> Status override
-    {
-        save_cursor();
-        return Status::ok();
-    }
-
-    auto commit() -> Status override
-    {
-        *m_base = m_temp;
-        return Status::ok();
-    }
-
-    [[nodiscard]] auto new_cursor(const Bucket &) const -> Cursor * override;
-
-    [[nodiscard]] auto get(const Bucket &, const Slice &key, std::string *value) const -> Status override
-    {
-        Status s;
-        const auto itr = m_temp.find(key.to_string());
-        if (itr == end(m_temp)) {
-            s = Status::not_found();
-        }
-        if (value) {
-            *value = s.is_ok() ? itr->second : "";
+        auto s = m_tx->drop_bucket(name);
+        if (s.is_ok()) {
+            const auto num_erased = m_temp.erase(name.to_string());
+            CHECK_EQ(s.is_ok(), num_erased);
         }
         return s;
     }
 
-    auto put(const Bucket &, const Slice &key, const Slice &value) -> Status override;
+    auto vacuum() -> Status override
+    {
+        save_cursors();
+        return m_tx->vacuum();
+    }
+
+    auto commit() -> Status override
+    {
+        auto s = m_tx->commit();
+        if (s.is_ok()) {
+            *m_base = m_temp;
+        }
+        return s;
+    }
+
+    [[nodiscard]] auto get(Cursor &c, const Slice &key, std::string *value_out) const -> Status override
+    {
+        const auto &m = use_cursor<KVMap>(c);
+        m.m_itr = m.m_map->lower_bound(key.to_string());
+        auto s = m_tx->get(c, key, value_out);
+        if (s.is_ok()) {
+            CHECK_TRUE(m.m_itr != end(*m.m_map));
+            CHECK_EQ(m.m_itr->first, key.to_string());
+            CHECK_EQ(m.m_itr->second, *value_out);
+            CHECK_EQ(m.m_itr->first, m.m_c->key().to_string());
+            CHECK_EQ(m.m_itr->second, m.m_c->value().to_string());
+        } else if (s.is_not_found()) {
+            if (m.m_itr != end(*m.m_map)) {
+                CHECK_TRUE(m.m_itr->first > key);
+                CHECK_EQ(m.m_itr->first, m.m_c->key().to_string());
+                CHECK_EQ(m.m_itr->second, m.m_c->value().to_string());
+            }
+        } else {
+            m.m_itr = end(*m.m_map);
+        }
+        return s;
+    }
+
     auto put(Cursor &c, const Slice &key, const Slice &value) -> Status override;
-    auto erase(const Bucket &, const Slice &key) -> Status override;
+    auto erase(Cursor &c, const Slice &key) -> Status override;
     auto erase(Cursor &c) -> Status override;
 };
 
-class ModelCursor : public Cursor
+template <class Map>
+ModelCursorBase<Map>::~ModelCursorBase()
 {
-    const ModelTx *const m_tx;
-    KVMap::const_iterator m_itr;
-    const KVMap *m_map;
-
-public:
-    explicit ModelCursor(const ModelTx &tx, const KVMap &map)
-        : m_tx(&tx),
-          m_itr(end(map)),
-          m_map(&map)
-    {
+    if constexpr (!kIsSchema) {
+        m_tx->m_cursors.erase(m_backref);
+        delete m_c;
     }
-
-    ~ModelCursor() override;
-
-    [[nodiscard]] auto token() -> void * override
-    {
-        return nullptr;
-    }
-
-    [[nodiscard]] auto is_valid() const -> bool override
-    {
-        return m_itr != end(*m_map) || m_tx->m_saved;
-    }
-
-    [[nodiscard]] auto status() const -> Status override
-    {
-        return Status::ok();
-    }
-
-    [[nodiscard]] auto key() const -> Slice override
-    {
-        return m_tx->m_saved ? m_tx->m_saved_key : m_itr->first;
-    }
-
-    [[nodiscard]] auto value() const -> Slice override
-    {
-        return m_tx->m_saved ? m_tx->m_saved_val : m_itr->second;
-    }
-
-    auto seek(const Slice &key) -> void override
-    {
-        m_tx->m_saved = false;
-        m_itr = m_map->lower_bound(key.to_string());
-    }
-
-    auto seek_first() -> void override
-    {
-        m_tx->m_saved = false;
-        m_itr = begin(*m_map);
-    }
-
-    auto seek_last() -> void override
-    {
-        m_tx->m_saved = false;
-        m_itr = end(*m_map);
-        if (!m_map->empty()) {
-            --m_itr;
-        }
-    }
-
-    auto next() -> void override
-    {
-        m_tx->load_cursor();
-        if (m_itr != end(*m_map)) {
-            ++m_itr;
-        }
-    }
-
-    auto previous() -> void override
-    {
-        m_tx->load_cursor();
-        if (m_itr == begin(*m_map)) {
-            m_itr = end(*m_map);
-        } else {
-            --m_itr;
-        }
-    }
-};
+}
 
 } // namespace calicodb
 

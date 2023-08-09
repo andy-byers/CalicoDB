@@ -9,10 +9,17 @@ FetchContent_Declare(googletest
 FetchContent_MakeAvailable(googletest)
 include(GoogleTest)
 
+# Documentation consistency checks.
+add_subdirectory(doc_tests)
+
+# CMake tests. Adapted from @nlohmann/json.
+add_subdirectory(cmake_tests/fetch_content)
+add_subdirectory(cmake_tests/add_subdirectory)
+
 function(build_test NAME)
     add_executable(${NAME} ${NAME}.cpp test.cpp test.h)
     target_compile_options(${NAME} PRIVATE ${CALICODB_FLAGS})
-    target_link_libraries(${NAME} calicodb_utils gtest_main)
+    target_link_libraries(${NAME} PRIVATE calicodb_utils gtest_main)
     target_include_directories(${NAME} PUBLIC "${CALICODB_SOURCE_DIR}")
     add_test(NAME ${NAME} COMMAND ${NAME})
 endfunction()
@@ -24,11 +31,11 @@ build_test(test_db)
 build_test(test_env)
 build_test(test_node)
 build_test(test_pager)
+build_test(test_stest)
 build_test(test_tree)
 build_test(test_utils)
 
-add_subdirectory(doc_tests)
-
-# CMake tests were adapted from @nlohmann/json.
-add_subdirectory(cmake_tests/fetch_content)
-add_subdirectory(cmake_tests/add_subdirectory)
+# Scenario tests using /utils/stest.
+build_test(stest_db)
+target_link_libraries(test_db PRIVATE stest)
+target_link_libraries(test_stest PRIVATE stest)

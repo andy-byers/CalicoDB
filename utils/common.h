@@ -107,7 +107,7 @@ public:
         std::generate(begin(m_data), end(m_data), std::ref(engine));
     }
 
-    auto Generate(size_t len) const -> std::string_view
+    auto Generate(size_t len) const -> Slice
     {
         if (m_pos + len > m_data.size()) {
             m_pos = 0;
@@ -119,16 +119,16 @@ public:
     }
 
     // Not in LevelDB.
-    auto Next(std::uint64_t t_max) const -> std::uint64_t
+    auto Next(uint64_t t_max) const -> uint64_t
     {
-        std::uniform_int_distribution<std::uint64_t> dist(0, t_max);
+        std::uniform_int_distribution<uint64_t> dist(0, t_max);
         return dist(m_rng);
     }
 
     // Not in LevelDB.
-    auto Next(std::uint64_t t_min, std::uint64_t t_max) const -> std::uint64_t
+    auto Next(uint64_t t_min, uint64_t t_max) const -> uint64_t
     {
-        std::uniform_int_distribution<std::uint64_t> dist(t_min, t_max);
+        std::uniform_int_distribution<uint64_t> dist(t_min, t_max);
         return dist(m_rng);
     }
 };

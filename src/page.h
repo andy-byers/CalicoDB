@@ -6,6 +6,7 @@
 #define CALICODB_PAGE_H
 
 #include "header.h"
+#include "list.h"
 
 namespace calicodb
 {
@@ -14,16 +15,17 @@ struct PageRef;
 
 struct DirtyHdr {
     DirtyHdr *dirty;
-    DirtyHdr *prev;
-    DirtyHdr *next;
+    DirtyHdr *prev_entry;
+    DirtyHdr *next_entry;
 
     [[nodiscard]] inline auto get_page_ref() -> PageRef *;
     [[nodiscard]] inline auto get_page_ref() const -> const PageRef *;
 };
 
 struct PageRef {
-    PageRef *prev;
-    PageRef *next;
+    char *data;
+    PageRef *prev_entry;
+    PageRef *next_entry;
 
     Id page_id;
     uint16_t refs;
@@ -41,7 +43,7 @@ struct PageRef {
         static_assert(std::is_trivially_copyable_v<PageRef>);
         static_assert(alignof(PageRef) == alignof(void *));
         static_assert(alignof(DirtyHdr) == alignof(void *));
-        static_assert(sizeof(PageRef) == 3 * sizeof(void *));
+        static_assert(sizeof(PageRef) == 4 * sizeof(void *));
 
         // Allocate this many bytes of extra space at the end of the page buffer to catch
         // out-of-bounds reads and writes that might occur if the database is corrupted.
@@ -55,6 +57,7 @@ struct PageRef {
                 kSpilloverLen));
         if (ref) {
             *ref = {
+                reinterpret_cast<char *>(ref + 1) + sizeof(DirtyHdr),
                 ref,
                 ref,
                 Id::null(),
@@ -91,15 +94,6 @@ struct PageRef {
     auto clear_flag(Flag f) -> void
     {
         flag = static_cast<Flag>(flag & ~f);
-    }
-
-    [[nodiscard]] auto get_data() -> char *
-    {
-        return reinterpret_cast<char *>(this + 1) + sizeof(DirtyHdr);
-    }
-    [[nodiscard]] auto get_data() const -> const char *
-    {
-        return const_cast<PageRef *>(this)->get_data();
     }
 
     [[nodiscard]] auto get_dirty_hdr() -> DirtyHdr *
