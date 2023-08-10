@@ -228,6 +228,7 @@ class CursorImpl : public Cursor
     Status m_status;
 
     Node m_node;
+    Cell m_cell;
     uint32_t m_idx = 0;
 
     // *_path members are used to track the path taken from the tree's root to the current
@@ -291,14 +292,14 @@ public:
     auto previous() -> void override;
     auto seek(const Slice &key) -> void override;
 
-    [[nodiscard]] auto token() -> void * override
+    [[nodiscard]] auto handle() -> void * override
     {
         return this;
     }
 
-    auto TEST_validate() const -> void
+    auto TEST_tree() const -> Tree &
     {
-        m_tree->TEST_validate();
+        return *m_tree;
     }
 };
 

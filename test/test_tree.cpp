@@ -947,781 +947,808 @@ TEST_F(PointerMapTests, LookupBeforeFirstMap)
     ASSERT_TRUE(PointerMap::lookup(Id(0)).is_null());
     ASSERT_TRUE(PointerMap::lookup(Id(1)).is_null());
 }
-//
-// class MultiTreeTests : public TreeTests
-//{
-// public:
-//    MultiTreeTests()
-//        : payload_values(kInitialRecordCount),
-//          m_scratch(Tree::kRequiredBufferSize, '\0')
-//    {
-//        for (auto &value : payload_values) {
-//            value = random.Generate(kPageSize / 2);
-//        }
-//    }
-//
-//    ~MultiTreeTests() override = default;
-//
-//    auto SetUp() -> void override
-//    {
-//        TreeTests::SetUp();
-//        m_schema = new Schema(
-//            *m_pager,
-//            m_status,
-//            m_stat,
-//            m_scratch.data());
-//    }
-//
-//    auto TearDown() -> void override
-//    {
-//        multi_tree.clear();
-//        m_schema->close();
-//        delete m_schema;
-//        m_pager->finish();
-//    }
-//
-//    auto create_tree(size_t tid)
-//    {
-//        Id root;
-//        Bucket b;
-//        EXPECT_OK(m_schema->create_bucket(
-//            BucketOptions(),
-//            numeric_key(tid),
-//            &b));
-//        EXPECT_EQ(multi_tree.find(tid), end(multi_tree));
-//        multi_tree.emplace(tid, static_cast<Tree *>(b.state));
-//    }
-//
-//    auto fill_tree(size_t tid)
-//    {
-//        for (size_t i = 0; i < kInitialRecordCount; ++i) {
-//            const auto value = payload_values[(i + tid) % payload_values.size()];
-//            ASSERT_OK(multi_tree.at(tid)->put(make_long_key(i), value));
-//        }
-//        multi_tree.at(tid)->TEST_validate();
-//    }
-//
-//    auto check_tree(size_t tid)
-//    {
-//        std::string value;
-//        for (size_t i = 0; i < kInitialRecordCount; ++i) {
-//            ASSERT_OK(multi_tree.at(tid)->get(make_long_key(i), &value));
-//            ASSERT_EQ(value, payload_values[(i + tid) % payload_values.size()]);
-//        }
-//    }
-//
-//    auto clear_tree(size_t tid)
-//    {
-//        for (size_t i = 0; i < kInitialRecordCount; ++i) {
-//            ASSERT_OK(multi_tree.at(tid)->erase(make_long_key(i)));
-//        }
-//    }
-//
-//    auto drop_tree(size_t tid)
-//    {
-//        ASSERT_NE(multi_tree.find(tid), end(multi_tree));
-//        ASSERT_OK(m_schema->drop_bucket(numeric_key(tid)));
-//        multi_tree.erase(tid);
-//    }
-//
-//    Schema *m_schema = nullptr;
-//    std::unordered_map<size_t, Tree *> multi_tree;
-//    std::vector<std::string> payload_values;
-//    std::string m_scratch;
-//};
-//
-// TEST_F(MultiTreeTests, CreateAdditionalTrees)
-//{
-//    create_tree(1);
-//    create_tree(2);
-//    create_tree(3);
-//}
-//
-// TEST_F(MultiTreeTests, DuplicateKeysAreAllowedBetweenTrees)
-//{
-//    create_tree(1);
-//    create_tree(2);
-//
-//    auto &hello_tree = multi_tree.at(1);
-//    auto &world_tree = multi_tree.at(2);
-//    ASSERT_OK(hello_tree->put("same_key", "hello"));
-//    ASSERT_OK(world_tree->put("same_key", "world"));
-//
-//    std::string value;
-//    ASSERT_OK(hello_tree->get("same_key", &value));
-//    ASSERT_EQ(value, "hello");
-//    ASSERT_OK(world_tree->get("same_key", &value));
-//    ASSERT_EQ(value, "world");
-//}
-//
-// TEST_F(MultiTreeTests, NonRootTreeSplitsAndMerges)
-//{
-//    create_tree(1);
-//    fill_tree(1);
-//    clear_tree(1);
-//}
-//
-// TEST_F(MultiTreeTests, MultipleSplitsAndMerges_1)
-//{
-//    for (size_t tid = 0; tid < 10; ++tid) {
-//        create_tree(tid);
-//    }
-//    for (size_t tid = 0; tid < 10; ++tid) {
-//        fill_tree(tid);
-//    }
-//    for (size_t tid = 0; tid < 10; ++tid) {
-//        check_tree(tid);
-//    }
-//    for (size_t tid = 0; tid < 10; ++tid) {
-//        clear_tree(tid);
-//    }
-//}
-//
-// TEST_F(MultiTreeTests, MultipleSplitsAndMerges_2)
-//{
-//    for (size_t tid = 0; tid < 10; ++tid) {
-//        create_tree(tid);
-//        fill_tree(tid);
-//        check_tree(tid);
-//        clear_tree(tid);
-//    }
-//}
-//
-// TEST_F(MultiTreeTests, TreeDestruction_1)
-//{
-//    for (size_t i = 0; i < 2; ++i) {
-//        create_tree(1);
-//        fill_tree(1);
-//        drop_tree(1);
-//    }
-//    create_tree(1);
-//    fill_tree(1);
-//    check_tree(1);
-//    clear_tree(1);
-//}
-//
-// TEST_F(MultiTreeTests, TreeDestruction_2)
-//{
-//    for (size_t tid = 0; tid < 10; ++tid) {
-//        create_tree(tid);
-//        fill_tree(tid);
-//    }
-//    for (size_t tid = 0; tid < 10; ++tid) {
-//        drop_tree(tid);
-//    }
-//    for (size_t tid = 0; tid < 10; ++tid) {
-//        create_tree(tid);
-//        fill_tree(tid);
-//        check_tree(tid);
-//        clear_tree(tid);
-//    }
-//}
-//
-// TEST_F(MultiTreeTests, SavedCursors)
-//{
-//    std::vector<size_t> tids;
-//    std::vector<Cursor *> cs;
-//    Status s;
-//
-//    for (int iteration = 0; iteration < 10; ++iteration) {
-//        // Create a new tree and add some records.
-//        tids.emplace_back(tids.size());
-//        create_tree(tids.back());
-//        for (size_t i = 0; s.is_ok() && i < kInitialRecordCount; ++i) {
-//            const auto value = payload_values[i];
-//            s = multi_tree.at(tids.back())->put(make_long_key(i), value);
-//        }
-//        if (!s.is_ok()) {
-//            break;
-//        }
-//        // Advance or wrap the cursors, all of which should be live again (not "saved").
-//        for (auto *c : cs) {
-//            if (c->is_valid()) {
-//                c->next();
-//            } else if (c->status().is_ok()) {
-//                c->seek_first();
-//            } else {
-//                s = c->status();
-//                break;
-//            }
-//        }
-//        if (!s.is_ok()) {
-//            break;
-//        }
-//        // Add a new cursor to every tree.
-//        for (auto tid : tids) {
-//            cs.emplace_back(multi_tree.at(tid)->new_cursor());
-//            cs.back()->seek_first();
-//            if (!cs.back()->is_valid()) {
-//                s = cs.back()->status();
-//                break;
-//            }
-//        }
-//    }
-//
-//    for (const auto *c : cs) {
-//        delete c;
-//    }
-//}
-//
-// TEST_F(MultiTreeTests, VacuumRoots)
-//{
-//    create_tree(0);
-//    fill_tree(0);
-//    create_tree(1);
-//    fill_tree(1);
-//
-//    create_tree(2);
-//    drop_tree(0);
-//    fill_tree(2);
-//    drop_tree(1);
-//
-//    ASSERT_OK(m_schema->vacuum());
-//}
-//
-// template <class T>
-// class PermutationGenerator
-//{
-//    std::vector<T> m_values;
-//    std::vector<size_t> m_indices;
-//
-// public:
-//    explicit PermutationGenerator(std::vector<T> values)
-//        : m_values(std::move(values)),
-//          m_indices(m_values.size())
-//    {
-//        std::iota(begin(m_indices), end(m_indices), 0);
-//    }
-//
-//    [[nodiscard]] auto operator()(std::vector<T> &out) -> bool
-//    {
-//        if (out.size() != m_values.size()) {
-//            out.resize(m_values.size());
-//        }
-//        const auto not_reset = std::next_permutation(
-//            begin(m_indices), end(m_indices));
-//        auto value = begin(out);
-//        for (const auto &index : m_indices) {
-//            *value++ = m_values[index];
-//        }
-//        return not_reset;
-//    }
-//};
-//
-// TEST(PermutationGeneratorTests, GeneratesAllPermutationsInLexicographicalOrder)
-//{
-//    std::vector<int> result;
-//    PermutationGenerator<int> generator({1, 2, 3});
-//
-//    for (int iteration = 0; iteration < 2; ++iteration) {
-//        ASSERT_TRUE(generator(result));
-//        ASSERT_EQ((std::vector<int>{1, 3, 2}), result);
-//        ASSERT_TRUE(generator(result));
-//        ASSERT_EQ((std::vector<int>{2, 1, 3}), result);
-//        ASSERT_TRUE(generator(result));
-//        ASSERT_EQ((std::vector<int>{2, 3, 1}), result);
-//        ASSERT_TRUE(generator(result));
-//        ASSERT_EQ((std::vector<int>{3, 1, 2}), result);
-//        ASSERT_TRUE(generator(result));
-//        ASSERT_EQ((std::vector<int>{3, 2, 1}), result);
-//        ASSERT_FALSE(generator(result));
-//        ASSERT_EQ((std::vector<int>{1, 2, 3}), result);
-//    }
-//}
-//
-// class RebalanceTests
-//    : public TreeTestHarness,
-//      public testing::TestWithParam<uint32_t>
-//{
-// public:
-//    static constexpr size_t kValueSizes[] = {10, 100, 500, kPageSize};
-//    ~RebalanceTests() override = default;
-//
-//    auto SetUp() -> void override
-//    {
-//        open();
-//    }
-//    auto TearDown() -> void override
-//    {
-//        close();
-//    }
-//
-//    struct RecordInfo {
-//        size_t key = 0;
-//        size_t value_size = 0;
-//
-//        auto operator<(const RecordInfo &rhs) const -> bool
-//        {
-//            return key < rhs.key;
-//        }
-//    };
-//
-//    auto run(const std::vector<size_t> &size_idx) -> void
-//    {
-//        std::vector<RecordInfo> info;
-//        info.reserve(size_idx.size());
-//        for (size_t i = 0; i < size_idx.size(); ++i) {
-//            info.emplace_back(RecordInfo{i, kValueSizes[size_idx[i]]});
-//        }
-//        PermutationGenerator<RecordInfo> generator(info);
-//        while (generator(info)) {
-//            size_t iteration = 0;
-//            for (size_t i = 0; i < GetParam(); ++i) {
-//                for (const auto &[k, value_size] : info) {
-//                    ASSERT_OK(m_tree->put(*m_c,
-//                        numeric_key(iteration * info.size() + k),
-//                        m_random.Generate(value_size)));
-//                }
-//                ++iteration;
-//            }
-//            validate();
-//
-//            iteration = 0;
-//            for (size_t i = 0; i < GetParam(); ++i) {
-//                for (const auto &[k, _] : info) {
-//                    ASSERT_OK(m_tree->erase(*m_c, numeric_key(iteration * info.size() + k)));
-//                }
-//                ++iteration;
-//            }
-//        }
-//    }
-//
-// protected:
-//    RandomGenerator m_random;
-//};
-//
-// TEST_P(RebalanceTests, SanityCheck)
-//{
-//    run({0, 0, 0, 0, 0});
-//    run({1, 1, 1, 1});
-//    run({2, 2, 2});
-//}
-//
-// TEST_P(RebalanceTests, A)
-//{
-//    run({0, 0, 0, 0, 0, 3});
-//    run({1, 1, 1, 1, 1, 3});
-//    run({2, 2, 2, 2, 2, 3});
-//}
-//
-// TEST_P(RebalanceTests, B)
-//{
-//    run({0, 0, 0, 0, 3, 3});
-//    run({1, 1, 1, 1, 3, 3});
-//    run({2, 2, 2, 2, 3, 3});
-//}
-//
-// TEST_P(RebalanceTests, C)
-//{
-//    run({0, 0, 0, 3, 3, 3});
-//    run({1, 1, 1, 3, 3, 3});
-//    run({2, 2, 2, 3, 3, 3});
-//}
-//
-// TEST_P(RebalanceTests, D)
-//{
-//    run({0, 0, 3, 3, 3, 3});
-//    run({1, 1, 3, 3, 3, 3});
-//    run({2, 2, 3, 3, 3, 3});
-//}
-//
-// TEST_P(RebalanceTests, E)
-//{
-//    run({0, 3, 3, 3, 3, 3});
-//    run({1, 3, 3, 3, 3, 3});
-//    run({2, 3, 3, 3, 3, 3});
-//}
-//
-// INSTANTIATE_TEST_SUITE_P(
-//    RebalanceTests,
-//    RebalanceTests,
-//    ::testing::Values(1, 2, 5));
-//
-// TEST(SuffixTruncationTests, SuffixTruncation)
-//{
-//    const auto checked_truncate_suffix = [](const auto &lhs, const auto &rhs) {
-//        Slice prefix;
-//        EXPECT_EQ(0, truncate_suffix(lhs, rhs, prefix));
-//        // lhs < prefix <= rhs
-//        EXPECT_FALSE(prefix.is_empty());
-//        EXPECT_LT(lhs, prefix);
-//        EXPECT_LE(prefix, rhs);
-//        return prefix;
-//    };
-//
-//    ASSERT_EQ("1", checked_truncate_suffix("0", "1"));
-//    ASSERT_EQ("1", checked_truncate_suffix("00", "1"));
-//    ASSERT_EQ("1", checked_truncate_suffix("0", "11"));
-//    ASSERT_EQ("1", checked_truncate_suffix("00", "11"));
-//    ASSERT_EQ("01", checked_truncate_suffix("0", "01"));
-//    ASSERT_EQ("01", checked_truncate_suffix("00", "01"));
-//    ASSERT_EQ("10", checked_truncate_suffix("1", "10"));
-//
-//    // Examples are from https://dl.acm.org/doi/pdf/10.1145/320521.320530.
-//    ASSERT_EQ("An", checked_truncate_suffix("A", "An"));
-//    ASSERT_EQ("As", checked_truncate_suffix("And", "As"));
-//    ASSERT_EQ("Solv", checked_truncate_suffix("Solutions", "Solve"));
-//    ASSERT_EQ("S", checked_truncate_suffix("Problems", "Solution"));
-//
-//    // lhs may be empty, but since lhs < rhs, rhs must not be empty.
-//    ASSERT_EQ("0", checked_truncate_suffix("", "0"));
-//    ASSERT_EQ("0", checked_truncate_suffix("", "00"));
-//}
-//
-// TEST(SuffixTruncationTests, SuffixTruncationCorruption)
-//{
-//    Slice prefix;
-//    ASSERT_EQ(-1, truncate_suffix("42", "", prefix));
-//    ASSERT_EQ(-1, truncate_suffix("42", "42", prefix));
-//    ASSERT_EQ(-1, truncate_suffix("43", "42", prefix));
-//}
-//
-// class CursorModificationTests
-//    : public TreeTestHarness,
-//      public testing::Test
-//{
-// public:
-//    ~CursorModificationTests() override = default;
-//
-//    auto SetUp() -> void override
-//    {
-//        open();
-//    }
-//    auto TearDown() -> void override
-//    {
-//        close();
-//    }
-//};
-//
-// TEST_F(CursorModificationTests, QuickCheck)
-//{
-//    std::unique_ptr<Cursor> c(m_tree->new_cursor());
-//    ASSERT_FALSE(c->is_valid());
-//
-//    for (std::ptrdiff_t i = 0; i < 2; ++i) {
-//        for (const auto *key : {"BB", "CC", "AA"}) {
-//            const auto *value = key + i;
-//            ASSERT_OK(m_tree->put(*m_c, *c, key, value));
-//            ASSERT_TRUE(c->is_valid());
-//            ASSERT_EQ(Slice(key), c->key());
-//            ASSERT_EQ(Slice(value), c->value());
-//        }
-//    }
-//
-//    for (const auto *key : {"AA", "BB", "CC"}) {
-//        ASSERT_TRUE(c->is_valid());
-//        ASSERT_EQ(Slice(key), c->key());
-//        ASSERT_EQ(Slice(key + 1), c->value());
-//        ASSERT_OK(m_tree->erase(*m_c, *c));
-//    }
-//
-//    ASSERT_FALSE(c->is_valid());
-//}
-//
-// TEST_F(CursorModificationTests, SeekAndPut)
-//{
-//    auto num_records = kInitialRecordCount;
-//    for (size_t i = 0; i < num_records; ++i) {
-//        ASSERT_OK(m_tree->put(*m_c, make_long_key(i * 2), make_value(false)));
-//    }
-//    for (size_t iteration = 0; iteration < 2; ++iteration) {
-//        auto step = num_records / 10;
-//        std::unique_ptr<Cursor> c(m_tree->new_cursor());
-//        if (iteration == 0) {
-//            c->seek_first();
-//        } else {
-//            c->seek_last();
-//        }
-//        for (size_t i = 0; c->is_valid() && i < kInitialRecordCount; ++i) {
-//            ASSERT_OK(m_tree->put(*m_c, *c, make_long_key(i * 2 + iteration), make_value(true)));
-//            ++num_records;
-//            for (size_t j = 0; c->is_valid() && j < step; ++j) {
-//                if (iteration == 0) {
-//                    c->next();
-//                } else {
-//                    c->previous();
-//                }
-//            }
-//        }
-//        ASSERT_OK(c->status());
-//        ASSERT_FALSE(c->is_valid());
-//        validate();
-//    }
-//}
-//
-// TEST_F(CursorModificationTests, PutWithoutCursor)
-//{
-//    init_tree(*this, kInitNormal);
-//    std::unique_ptr<Cursor> c(m_tree->new_cursor());
-//    c->seek_first();
-//    ASSERT_TRUE(c->is_valid());
-//
-//    for (InitFlag flag = kInitNormal + 1; flag <= kInitFlagMax; ++flag) {
-//        init_tree(*this, flag);
-//        ASSERT_TRUE(c->is_valid());
-//        ASSERT_EQ(make_normal_key(0), c->key());
-//        ASSERT_EQ(make_value('*', false), c->value());
-//    }
-//}
-//
-// TEST_F(CursorModificationTests, EraseAllRecordsFromLeft)
-//{
-//    init_tree(*this, kInitLongKeys | kInitLongValues);
-//    std::unique_ptr<Cursor> c(m_tree->new_cursor());
-//    c->seek_first();
-//    for (size_t i = 0; i < kInitialRecordCount; ++i) {
-//        ASSERT_TRUE(c->is_valid());
-//        ASSERT_OK(m_tree->erase(*m_c, *c));
-//    }
-//    ASSERT_FALSE(c->is_valid());
-//    validate();
-//}
-//
-// TEST_F(CursorModificationTests, EraseAllRecordsFromRight)
-//{
-//    init_tree(*this, kInitLongKeys | kInitLongValues);
-//    std::unique_ptr<Cursor> c(m_tree->new_cursor());
-//    for (size_t i = 0; i < kInitialRecordCount; ++i) {
-//        c->seek_last();
-//        // Cursor immediately falls off the edge of the key range.
-//        ASSERT_OK(m_tree->erase(*m_c, *c));
-//        ASSERT_FALSE(c->is_valid());
-//    }
-//    validate();
-//}
-//
-// TEST_F(CursorModificationTests, SeekAndEraseForward)
-//{
-//    init_tree(*this, kInitLongKeys | kInitLongValues);
-//    auto num_records = kInitialRecordCount;
-//    while (num_records > 0) {
-//        const auto step = num_records / 4;
-//        std::unique_ptr<Cursor> c(m_tree->new_cursor());
-//        c->seek_first();
-//        while (num_records > 0 && c->is_valid()) {
-//            ASSERT_OK(m_tree->erase(*m_c, *c));
-//            --num_records;
-//            for (size_t i = 0; c->is_valid() && i < step; ++i) {
-//                c->next();
-//            }
-//        }
-//        ASSERT_OK(c->status());
-//        ASSERT_FALSE(c->is_valid());
-//        validate();
-//    }
-//}
-//
-// TEST_F(CursorModificationTests, SeekAndEraseBackward)
-//{
-//    init_tree(*this, kInitLongKeys | kInitLongValues);
-//    auto num_records = kInitialRecordCount;
-//    while (num_records > 0) {
-//        const auto step = num_records / 4;
-//        std::unique_ptr<Cursor> c(m_tree->new_cursor());
-//        c->seek_last();
-//        for (auto first = true; num_records > 0 && c->is_valid();) {
-//            ASSERT_OK(m_tree->erase(*m_c, *c));
-//            if (first) {
-//                // Erasing the last record causes the cursor to immediately fall off the
-//                // edge of the key range.
-//                ASSERT_FALSE(c->is_valid());
-//                c->seek_last();
-//                first = false;
-//            }
-//            --num_records;
-//            for (size_t i = 0; c->is_valid() && i < step; ++i) {
-//                c->previous();
-//            }
-//        }
-//        ASSERT_OK(c->status());
-//        ASSERT_FALSE(c->is_valid());
-//        validate();
-//    }
-//}
-//
-// TEST_F(CursorModificationTests, ModifyExistingRecords)
-//{
-//    for (size_t i = 0; i < kInitialRecordCount; ++i) {
-//        ASSERT_OK(m_tree->put(*m_c, numeric_key(i), ""));
-//    }
-//
-//    static constexpr size_t kSize = 25;
-//    for (size_t iteration = 0; iteration < kSize; ++iteration) {
-//        std::unique_ptr<Cursor> c(m_tree->new_cursor());
-//        if (iteration == 0) {
-//            c->seek_first();
-//        } else {
-//            c->seek_last();
-//        }
-//        while (c->is_valid()) {
-//            const std::string value((iteration + 1) * kSize, '*');
-//            ASSERT_OK(m_tree->put(*m_c, *c, c->key(), value));
-//
-//            if (iteration == 0) {
-//                c->next();
-//            } else {
-//                c->previous();
-//            }
-//        }
-//        ASSERT_OK(c->status());
-//        validate();
-//    }
-//
-//    std::unique_ptr<Cursor> c(m_tree->new_cursor());
-//    c->seek_first();
-//    for (size_t i = 0; i < kInitialRecordCount; ++i) {
-//        ASSERT_TRUE(c->is_valid());
-//        ASSERT_EQ(c->key(), numeric_key(i));
-//        ASSERT_EQ(c->value(), std::string(kSize * kSize, '*'));
-//        c->next();
-//    }
-//    ASSERT_FALSE(c->is_valid());
-//    ASSERT_OK(c->status());
-//}
-//
-// TEST_F(CursorModificationTests, UntrackedCursors)
-//{
-//    init_tree(*this, kInitLongValues);
-//
-//    std::unique_ptr<Cursor> c1(m_tree->new_cursor());
-//    std::unique_ptr<Cursor> c2(m_tree->new_cursor());
-//    c1->seek_first();
-//    c2->seek_last();
-//
-//    for (size_t i = 0; i < kInitialRecordCount; ++i) {
-//        ASSERT_OK(m_tree->erase(*m_c, make_normal_key(i)));
-//    }
-//
-//    ASSERT_TRUE(c1->is_valid());
-//    ASSERT_EQ(c1->key(), make_normal_key(0));
-//    ASSERT_TRUE(c2->is_valid());
-//    ASSERT_EQ(c2->key(), make_normal_key(kInitialRecordCount - 1));
-//
-//    c1->next();
-//    c2->previous();
-//
-//    ASSERT_FALSE(c1->is_valid());
-//    ASSERT_FALSE(c2->is_valid());
-//
-//    c1->seek_first();
-//    c1->seek_last();
-//
-//    ASSERT_FALSE(c1->is_valid());
-//    ASSERT_FALSE(c2->is_valid());
-//}
-//
-// class VacuumTests : public MultiTreeTests
-//{
-// public:
-//    explicit VacuumTests() = default;
-//
-//    ~VacuumTests() override = default;
-//
-//    auto SetUp() -> void override
-//    {
-//        MultiTreeTests::SetUp();
-//        m_root = m_tree;
-//        create_tree(1);
-//        m_tree = multi_tree.at(1);
-//    }
-//
-//    auto TearDown() -> void override
-//    {
-//        m_tree = m_root;
-//        MultiTreeTests::TearDown();
-//    }
-//
-//    Tree *m_root;
-//};
-//
-// TEST_F(VacuumTests, VacuumEmptyTree)
-//{
-//    ASSERT_OK(m_schema->vacuum());
-//    validate();
-//}
-//
-// TEST_F(VacuumTests, VacuumFreelist)
-//{
-//    std::unique_ptr<Cursor> c(m_tree->new_cursor());
-//    for (InitFlag flag = kInitNormal; flag <= kInitFlagMax; ++flag) {
-//        init_tree(*this, flag);
-//
-//        c->seek_first();
-//        while (c->is_valid()) {
-//            ASSERT_OK(m_tree->erase(*m_c, *c));
-//        }
-//
-//        ASSERT_OK(m_schema->vacuum());
-//        validate();
-//    }
-//}
-//
-// TEST_F(VacuumTests, VacuumOverflowChains)
-//{
-//    const std::string kv[][2] = {
-//        {'_' + make_normal_key(1), make_value('a', true)},
-//        {'_' + make_long_key(2), make_value('b', false)},
-//        {'_' + make_long_key(3), make_value('c', true)},
-//    };
-//    init_tree(*this);
-//    ASSERT_OK(m_tree->put(*m_c, kv[0][0], kv[0][1]));
-//    ASSERT_OK(m_tree->put(*m_c, kv[1][0], kv[1][1]));
-//    ASSERT_OK(m_tree->put(*m_c, kv[2][0], kv[2][1]));
-//
-//    for (size_t i = 0; i < kInitialRecordCount; ++i) {
-//        ASSERT_OK(m_tree->erase(*m_c, make_long_key(i)));
-//    }
-//
-//    ASSERT_OK(m_schema->vacuum());
-//    validate();
-//
-//    std::string value;
-//    ASSERT_OK(m_tree->get(*m_c, kv[0][0], &value));
-//    ASSERT_EQ(value, kv[0][1]);
-//    ASSERT_OK(m_tree->get(*m_c, kv[1][0], &value));
-//    ASSERT_EQ(value, kv[1][1]);
-//    ASSERT_OK(m_tree->get(*m_c, kv[2][0], &value));
-//    ASSERT_EQ(value, kv[2][1]);
-//}
-//
-// TEST_F(VacuumTests, VacuumPartialRange)
-//{
-//    std::unique_ptr<Cursor> c(m_tree->new_cursor());
-//    for (size_t i = 0; i < 2; ++i) {
-//        init_tree(*this, kInitLongKeys | (i == 0 ? 0 : kInitLongValues));
-//
-//        c->seek_first();
-//        const auto batch_size = kInitialRecordCount / 3 * (i + 1);
-//        for (size_t n = 0; c->is_valid() && n < batch_size; ++n) {
-//            ASSERT_OK(m_tree->erase(*m_c, *c));
-//        }
-//
-//        ASSERT_OK(m_schema->vacuum());
-//        validate();
-//
-//        for (size_t n = batch_size; n < kInitialRecordCount; ++n) {
-//            ASSERT_OK(m_tree->get(*m_c, make_long_key(n), nullptr));
-//        }
-//    }
-//}
-//
-// TEST_F(VacuumTests, VacuumSchemaTree)
-//{
-//    static constexpr size_t kSize = 1'234;
-//    // Add records to m_tree.
-//    init_tree(*this, kInitLongValues);
-//    std::unique_ptr<Cursor> c(m_schema->new_cursor());
-//    std::vector<Bucket> buckets;
-//    for (size_t i = 0; i < kSize; i += 2) {
-//        buckets.emplace_back();
-//        ASSERT_OK(m_schema->create_bucket(BucketOptions(), numeric_key(i), &buckets.back()));
-//        ASSERT_OK(m_schema->create_bucket(BucketOptions(), numeric_key(i + 1), nullptr));
-//    }
-//    c->seek_first();
-//    for (size_t i = 0; i < kSize; ++i) {
-//        ASSERT_OK(m_tree->erase(*m_c, make_normal_key(i)));
-//    }
-//    ASSERT_OK(m_schema->vacuum());
-//}
+
+class MultiTreeTests : public TreeTests
+{
+public:
+    MultiTreeTests()
+        : payload_values(kInitialRecordCount),
+          m_scratch(Tree::kRequiredBufferSize, '\0')
+    {
+        for (auto &value : payload_values) {
+            value = random.Generate(kPageSize / 2).to_string();
+        }
+    }
+
+    ~MultiTreeTests() override = default;
+
+    auto SetUp() -> void override
+    {
+        TreeTests::SetUp();
+        m_schema = new Schema(
+            *m_pager,
+            m_status,
+            m_stat,
+            m_scratch.data());
+    }
+
+    auto TearDown() -> void override
+    {
+        multi_tree.clear();
+        m_schema->close();
+        delete m_schema;
+        m_pager->finish();
+        TreeTests::TearDown();
+    }
+
+    auto create_tree(size_t tid)
+    {
+        Id root;
+        Cursor *c;
+        EXPECT_OK(m_schema->create_bucket(
+            BucketOptions(),
+            numeric_key(tid),
+            &c));
+        EXPECT_EQ(multi_tree.find(tid), end(multi_tree));
+        auto *impl = reinterpret_cast<CursorImpl *>(c);
+        multi_tree.emplace(tid, TreeWrapper{impl, &impl->TEST_tree()});
+    }
+
+    auto fill_tree(size_t tid)
+    {
+        auto &[c, tree] = multi_tree.at(tid);
+        for (size_t i = 0; i < kInitialRecordCount; ++i) {
+            const auto value = payload_values[(i + tid) % payload_values.size()];
+            ASSERT_OK(tree->put(*c, make_long_key(i), value));
+        }
+        tree->TEST_validate();
+    }
+
+    auto check_tree(size_t tid)
+    {
+        const auto &[c, tree] = multi_tree.at(tid);
+        for (size_t i = 0; i < kInitialRecordCount; ++i) {
+            std::string value;
+            ASSERT_OK(tree->get(*c, make_long_key(i), &value));
+            ASSERT_EQ(value, payload_values[(i + tid) % payload_values.size()]);
+        }
+    }
+
+    auto clear_tree(size_t tid)
+    {
+        auto &[c, tree] = multi_tree.at(tid);
+        for (size_t i = 0; i < kInitialRecordCount; ++i) {
+            ASSERT_OK(tree->erase(*c, make_long_key(i)));
+        }
+    }
+
+    auto drop_tree(size_t tid)
+    {
+        ASSERT_NE(multi_tree.find(tid), end(multi_tree));
+        ASSERT_OK(m_schema->drop_bucket(numeric_key(tid)));
+        multi_tree.erase(tid);
+    }
+
+    struct TreeWrapper {
+        CursorImpl *c;
+        Tree *tree;
+    };
+
+    Schema *m_schema = nullptr;
+    std::unordered_map<size_t, TreeWrapper> multi_tree;
+    std::vector<std::string> payload_values;
+    std::string m_scratch;
+};
+
+TEST_F(MultiTreeTests, CreateAdditionalTrees)
+{
+    create_tree(1);
+    create_tree(2);
+    create_tree(3);
+}
+
+TEST_F(MultiTreeTests, DuplicateKeysAreAllowedBetweenTrees)
+{
+    create_tree(1);
+    create_tree(2);
+
+    auto &hello_tree = multi_tree.at(1);
+    auto &world_tree = multi_tree.at(2);
+    ASSERT_OK(hello_tree.tree->put(*hello_tree.c, "same_key", "hello"));
+    ASSERT_OK(world_tree.tree->put(*world_tree.c, "same_key", "world"));
+
+    std::string value;
+    ASSERT_OK(hello_tree.tree->get(*hello_tree.c, "same_key", &value));
+    ASSERT_EQ(value, "hello");
+    ASSERT_OK(world_tree.tree->get(*world_tree.c, "same_key", &value));
+    ASSERT_EQ(value, "world");
+}
+
+TEST_F(MultiTreeTests, NonRootTreeSplitsAndMerges)
+{
+    create_tree(1);
+    fill_tree(1);
+    clear_tree(1);
+}
+
+TEST_F(MultiTreeTests, MultipleSplitsAndMerges_1)
+{
+    for (size_t tid = 0; tid < 10; ++tid) {
+        create_tree(tid);
+    }
+    for (size_t tid = 0; tid < 10; ++tid) {
+        fill_tree(tid);
+    }
+    for (size_t tid = 0; tid < 10; ++tid) {
+        check_tree(tid);
+    }
+    for (size_t tid = 0; tid < 10; ++tid) {
+        clear_tree(tid);
+    }
+}
+
+TEST_F(MultiTreeTests, MultipleSplitsAndMerges_2)
+{
+    for (size_t tid = 0; tid < 10; ++tid) {
+        create_tree(tid);
+        fill_tree(tid);
+        check_tree(tid);
+        clear_tree(tid);
+    }
+}
+
+TEST_F(MultiTreeTests, TreeDestruction_1)
+{
+    for (size_t i = 0; i < 2; ++i) {
+        create_tree(1);
+        fill_tree(1);
+        drop_tree(1);
+    }
+    create_tree(1);
+    fill_tree(1);
+    check_tree(1);
+    clear_tree(1);
+}
+
+TEST_F(MultiTreeTests, TreeDestruction_2)
+{
+    for (size_t tid = 0; tid < 10; ++tid) {
+        create_tree(tid);
+        fill_tree(tid);
+    }
+    for (size_t tid = 0; tid < 10; ++tid) {
+        drop_tree(tid);
+    }
+    for (size_t tid = 0; tid < 10; ++tid) {
+        create_tree(tid);
+        fill_tree(tid);
+        check_tree(tid);
+        clear_tree(tid);
+    }
+}
+
+TEST_F(MultiTreeTests, SavedCursors)
+{
+    std::vector<size_t> tids;
+    std::vector<Cursor *> cs;
+
+    for (int iteration = 0; iteration < 50; ++iteration) {
+        // Create a new tree and add some records.
+        tids.emplace_back(tids.size());
+        create_tree(tids.back());
+        for (size_t i = 0; i < kInitialRecordCount; ++i) {
+            auto &[c, tree] = multi_tree.at(tids.back());
+            const auto value = payload_values[i];
+            ASSERT_OK(tree->put(*c, make_long_key(i), value));
+        }
+        // Advance or wrap the cursors, all of which should be live again (not "saved").
+        for (auto *c : cs) {
+            if (c->is_valid()) {
+                c->next();
+            } else if (c->status().is_ok()) {
+                c->seek_first();
+            } else {
+                ASSERT_OK(c->status());
+                break;
+            }
+        }
+    }
+
+    for (const auto *c : cs) {
+        delete c;
+    }
+}
+
+TEST_F(MultiTreeTests, VacuumRoots)
+{
+    create_tree(0);
+    fill_tree(0);
+    create_tree(1);
+    fill_tree(1);
+
+    create_tree(2);
+    drop_tree(0);
+    fill_tree(2);
+    drop_tree(1);
+
+    ASSERT_OK(m_schema->vacuum());
+}
+
+template <class T>
+class PermutationGenerator
+{
+    std::vector<T> m_values;
+    std::vector<size_t> m_indices;
+
+public:
+    explicit PermutationGenerator(std::vector<T> values)
+        : m_values(std::move(values)),
+          m_indices(m_values.size())
+    {
+        std::iota(begin(m_indices), end(m_indices), 0);
+    }
+
+    [[nodiscard]] auto operator()(std::vector<T> &out) -> bool
+    {
+        if (out.size() != m_values.size()) {
+            out.resize(m_values.size());
+        }
+        const auto not_reset = std::next_permutation(
+            begin(m_indices), end(m_indices));
+        auto value = begin(out);
+        for (const auto &index : m_indices) {
+            *value++ = m_values[index];
+        }
+        return not_reset;
+    }
+};
+
+TEST(PermutationGeneratorTests, GeneratesAllPermutationsInLexicographicalOrder)
+{
+    std::vector<int> result;
+    PermutationGenerator<int> generator({1, 2, 3});
+
+    for (int iteration = 0; iteration < 2; ++iteration) {
+        ASSERT_TRUE(generator(result));
+        ASSERT_EQ((std::vector<int>{1, 3, 2}), result);
+        ASSERT_TRUE(generator(result));
+        ASSERT_EQ((std::vector<int>{2, 1, 3}), result);
+        ASSERT_TRUE(generator(result));
+        ASSERT_EQ((std::vector<int>{2, 3, 1}), result);
+        ASSERT_TRUE(generator(result));
+        ASSERT_EQ((std::vector<int>{3, 1, 2}), result);
+        ASSERT_TRUE(generator(result));
+        ASSERT_EQ((std::vector<int>{3, 2, 1}), result);
+        ASSERT_FALSE(generator(result));
+        ASSERT_EQ((std::vector<int>{1, 2, 3}), result);
+    }
+}
+
+class RebalanceTests
+    : public TreeTestHarness,
+      public testing::TestWithParam<uint32_t>
+{
+public:
+    static constexpr size_t kValueSizes[] = {10, 100, 500, kPageSize};
+    ~RebalanceTests() override = default;
+
+    auto SetUp() -> void override
+    {
+        open();
+    }
+    auto TearDown() -> void override
+    {
+        close();
+    }
+
+    struct RecordInfo {
+        size_t key = 0;
+        size_t value_size = 0;
+
+        auto operator<(const RecordInfo &rhs) const -> bool
+        {
+            return key < rhs.key;
+        }
+    };
+
+    auto run(const std::vector<size_t> &size_idx) -> void
+    {
+        std::vector<RecordInfo> info;
+        info.reserve(size_idx.size());
+        for (size_t i = 0; i < size_idx.size(); ++i) {
+            info.emplace_back(RecordInfo{i, kValueSizes[size_idx[i]]});
+        }
+        PermutationGenerator<RecordInfo> generator(info);
+        while (generator(info)) {
+            size_t iteration = 0;
+            for (size_t i = 0; i < GetParam(); ++i) {
+                for (const auto &[k, value_size] : info) {
+                    ASSERT_OK(m_tree->put(*m_c,
+                                          numeric_key(iteration * info.size() + k),
+                                          m_random.Generate(value_size)));
+                }
+                ++iteration;
+            }
+            validate();
+
+            iteration = 0;
+            for (size_t i = 0; i < GetParam(); ++i) {
+                for (const auto &[k, _] : info) {
+                    ASSERT_OK(m_tree->erase(*m_c, numeric_key(iteration * info.size() + k)));
+                }
+                ++iteration;
+            }
+        }
+    }
+
+protected:
+    RandomGenerator m_random;
+};
+
+TEST_P(RebalanceTests, SanityCheck)
+{
+    run({0, 0, 0, 0, 0});
+    run({1, 1, 1, 1});
+    run({2, 2, 2});
+}
+
+TEST_P(RebalanceTests, A)
+{
+    run({0, 0, 0, 0, 0, 3});
+    run({1, 1, 1, 1, 1, 3});
+    run({2, 2, 2, 2, 2, 3});
+}
+
+TEST_P(RebalanceTests, B)
+{
+    run({0, 0, 0, 0, 3, 3});
+    run({1, 1, 1, 1, 3, 3});
+    run({2, 2, 2, 2, 3, 3});
+}
+
+TEST_P(RebalanceTests, C)
+{
+    run({0, 0, 0, 3, 3, 3});
+    run({1, 1, 1, 3, 3, 3});
+    run({2, 2, 2, 3, 3, 3});
+}
+
+TEST_P(RebalanceTests, D)
+{
+    run({0, 0, 3, 3, 3, 3});
+    run({1, 1, 3, 3, 3, 3});
+    run({2, 2, 3, 3, 3, 3});
+}
+
+TEST_P(RebalanceTests, E)
+{
+    run({0, 3, 3, 3, 3, 3});
+    run({1, 3, 3, 3, 3, 3});
+    run({2, 3, 3, 3, 3, 3});
+}
+
+INSTANTIATE_TEST_SUITE_P(
+    RebalanceTests,
+    RebalanceTests,
+    ::testing::Values(1, 2, 5));
+
+TEST(SuffixTruncationTests, SuffixTruncation)
+{
+    const auto checked_truncate_suffix = [](const auto &lhs, const auto &rhs) {
+        Slice prefix;
+        EXPECT_EQ(0, truncate_suffix(lhs, rhs, prefix));
+        // lhs < prefix <= rhs
+        EXPECT_FALSE(prefix.is_empty());
+        EXPECT_LT(lhs, prefix);
+        EXPECT_LE(prefix, rhs);
+        return prefix;
+    };
+
+    ASSERT_EQ("1", checked_truncate_suffix("0", "1"));
+    ASSERT_EQ("1", checked_truncate_suffix("00", "1"));
+    ASSERT_EQ("1", checked_truncate_suffix("0", "11"));
+    ASSERT_EQ("1", checked_truncate_suffix("00", "11"));
+    ASSERT_EQ("01", checked_truncate_suffix("0", "01"));
+    ASSERT_EQ("01", checked_truncate_suffix("00", "01"));
+    ASSERT_EQ("10", checked_truncate_suffix("1", "10"));
+
+    // Examples are from https://dl.acm.org/doi/pdf/10.1145/320521.320530.
+    ASSERT_EQ("An", checked_truncate_suffix("A", "An"));
+    ASSERT_EQ("As", checked_truncate_suffix("And", "As"));
+    ASSERT_EQ("Solv", checked_truncate_suffix("Solutions", "Solve"));
+    ASSERT_EQ("S", checked_truncate_suffix("Problems", "Solution"));
+
+    // lhs may be empty, but since lhs < rhs, rhs must not be empty.
+    ASSERT_EQ("0", checked_truncate_suffix("", "0"));
+    ASSERT_EQ("0", checked_truncate_suffix("", "00"));
+}
+
+TEST(SuffixTruncationTests, SuffixTruncationCorruption)
+{
+    Slice prefix;
+    ASSERT_EQ(-1, truncate_suffix("42", "", prefix));
+    ASSERT_EQ(-1, truncate_suffix("42", "42", prefix));
+    ASSERT_EQ(-1, truncate_suffix("43", "42", prefix));
+}
+
+class CursorModificationTests
+    : public TreeTestHarness,
+      public testing::Test
+{
+public:
+    ~CursorModificationTests() override = default;
+
+    auto SetUp() -> void override
+    {
+        open();
+    }
+    auto TearDown() -> void override
+    {
+        close();
+    }
+};
+
+TEST_F(CursorModificationTests, QuickCheck)
+{
+    for (std::ptrdiff_t i = 0; i < 2; ++i) {
+        for (const auto *key : {"BB", "CC", "AA"}) {
+            const auto *value = key + i;
+            ASSERT_OK(m_tree->put(*m_c, key, value));
+            ASSERT_TRUE(m_c->is_valid());
+            ASSERT_EQ(Slice(key), m_c->key());
+            ASSERT_EQ(Slice(value), m_c->value());
+        }
+    }
+
+    for (const auto *key : {"AA", "BB", "CC"}) {
+        ASSERT_TRUE(m_c->is_valid());
+        ASSERT_EQ(Slice(key), m_c->key());
+        ASSERT_EQ(Slice(key + 1), m_c->value());
+        ASSERT_OK(m_tree->erase(*m_c));
+    }
+
+    ASSERT_FALSE(m_c->is_valid());
+}
+
+TEST_F(CursorModificationTests, SeekAndPut)
+{
+    auto num_records = kInitialRecordCount;
+    for (size_t i = 0; i < num_records; ++i) {
+        ASSERT_OK(m_tree->put(*m_c, make_long_key(i * 2), make_value(false)));
+    }
+    for (size_t iteration = 0; iteration < 2; ++iteration) {
+        auto step = num_records / 10;
+        if (iteration == 0) {
+            m_c->seek_first();
+        } else {
+            m_c->seek_last();
+        }
+        for (size_t i = 0; m_c->is_valid() && i < kInitialRecordCount; ++i) {
+            ASSERT_OK(m_tree->put(*m_c, make_long_key(i * 2 + iteration), make_value(true)));
+            ++num_records;
+            for (size_t j = 0; m_c->is_valid() && j < step; ++j) {
+                if (iteration == 0) {
+                    m_c->next();
+                } else {
+                    m_c->previous();
+                }
+            }
+        }
+        ASSERT_OK(m_c->status());
+        ASSERT_FALSE(m_c->is_valid());
+        validate();
+    }
+}
+
+TEST_F(CursorModificationTests, PutWithoutCursor)
+{
+    init_tree(*this, kInitNormal);
+    std::unique_ptr<Cursor> c(m_tree->new_cursor());
+    c->seek_first();
+    ASSERT_TRUE(c->is_valid());
+
+    for (InitFlag flag = kInitNormal + 1; flag <= kInitFlagMax; ++flag) {
+        init_tree(*this, flag);
+        ASSERT_TRUE(c->is_valid());
+        ASSERT_EQ(make_normal_key(0), c->key());
+        ASSERT_EQ(make_value('*', false), c->value());
+    }
+}
+
+TEST_F(CursorModificationTests, EraseAllRecordsFromLeft)
+{
+    init_tree(*this, kInitLongKeys | kInitLongValues);
+    m_c->seek_first();
+    for (size_t i = 0; i < kInitialRecordCount; ++i) {
+        ASSERT_TRUE(m_c->is_valid());
+        ASSERT_OK(m_tree->erase(*m_c));
+    }
+    ASSERT_FALSE(m_c->is_valid());
+    validate();
+}
+
+TEST_F(CursorModificationTests, EraseAllRecordsFromRight)
+{
+    init_tree(*this, kInitLongKeys | kInitLongValues);
+    for (size_t i = 0; i < kInitialRecordCount; ++i) {
+        m_c->seek_last();
+        // Cursor immediately falls off the edge of the key range.
+        ASSERT_OK(m_tree->erase(*m_c));
+        ASSERT_FALSE(m_c->is_valid());
+    }
+    validate();
+}
+
+TEST_F(CursorModificationTests, SeekAndEraseForward)
+{
+    init_tree(*this, kInitLongKeys | kInitLongValues);
+    auto num_records = kInitialRecordCount;
+    while (num_records > 0) {
+        const auto step = num_records / 4;
+        m_c->seek_first();
+        while (num_records > 0 && m_c->is_valid()) {
+            ASSERT_OK(m_tree->erase(*m_c));
+            --num_records;
+            for (size_t i = 0; m_c->is_valid() && i < step; ++i) {
+                m_c->next();
+            }
+        }
+        ASSERT_OK(m_c->status());
+        ASSERT_FALSE(m_c->is_valid());
+        validate();
+    }
+}
+
+TEST_F(CursorModificationTests, SeekAndEraseBackward)
+{
+    init_tree(*this, kInitLongKeys | kInitLongValues);
+    auto num_records = kInitialRecordCount;
+    while (num_records > 0) {
+        const auto step = num_records / 4;
+        m_c->seek_last();
+        for (auto first = true; num_records > 0 && m_c->is_valid();) {
+            ASSERT_OK(m_tree->erase(*m_c));
+            if (first) {
+                // Erasing the last record causes the cursor to immediately fall off the
+                // edge of the key range.
+                ASSERT_FALSE(m_c->is_valid());
+                m_c->seek_last();
+                first = false;
+            }
+            --num_records;
+            for (size_t i = 0; m_c->is_valid() && i < step; ++i) {
+                m_c->previous();
+            }
+        }
+        ASSERT_OK(m_c->status());
+        ASSERT_FALSE(m_c->is_valid());
+        validate();
+    }
+}
+
+TEST_F(CursorModificationTests, OverwriteSequential)
+{
+    for (size_t i = 0; i < kInitialRecordCount; ++i) {
+        ASSERT_OK(m_tree->put(*m_c, numeric_key(i), ""));
+    }
+
+    static constexpr size_t kSize = 250;
+    static constexpr size_t kNumIterations = 5;
+    for (size_t iteration = 0; iteration < kNumIterations; ++iteration) {
+        if (iteration == 0) {
+            m_c->seek_first();
+        } else {
+            m_c->seek_last();
+        }
+        while (m_c->is_valid()) {
+            const std::string value((iteration + 1) * kSize, '*');
+            ASSERT_OK(m_tree->put(*m_c, m_c->key(), value));
+
+            if (iteration == 0) {
+                m_c->next();
+            } else {
+                m_c->previous();
+            }
+        }
+        ASSERT_OK(m_c->status());
+        validate();
+    }
+
+    m_c->seek_first();
+    for (size_t i = 0; i < kInitialRecordCount; ++i) {
+        ASSERT_TRUE(m_c->is_valid());
+        ASSERT_EQ(m_c->key(), numeric_key(i));
+        ASSERT_EQ(m_c->value(), std::string(kSize * kNumIterations, '*'));
+        m_c->next();
+    }
+    ASSERT_FALSE(m_c->is_valid());
+    ASSERT_OK(m_c->status());
+}
+
+TEST_F(CursorModificationTests, OverwriteRandom)
+{
+    for (size_t i = 0; i < kInitialRecordCount; ++i) {
+        ASSERT_OK(m_tree->put(*m_c, numeric_key(i), ""));
+    }
+
+    static constexpr size_t kSize = 250;
+    static constexpr size_t kNumIterations = 5;
+    for (size_t iteration = 0; iteration < kNumIterations; ++iteration) {
+        if (iteration == 0) {
+            m_c->seek_first();
+        } else {
+            m_c->seek_last();
+        }
+        while (m_c->is_valid()) {
+            const std::string value((iteration + 1) * kSize, '*');
+            ASSERT_OK(m_tree->put(*m_c, m_c->key(), value));
+
+            if (iteration == 0) {
+                m_c->next();
+            } else {
+                m_c->previous();
+            }
+        }
+        ASSERT_OK(m_c->status());
+        validate();
+    }
+
+    m_c->seek_first();
+    for (size_t i = 0; i < kInitialRecordCount; ++i) {
+        ASSERT_TRUE(m_c->is_valid());
+        ASSERT_EQ(m_c->key(), numeric_key(i));
+        ASSERT_EQ(m_c->value(), std::string(kSize * kNumIterations, '*'));
+        m_c->next();
+    }
+    ASSERT_FALSE(m_c->is_valid());
+    ASSERT_OK(m_c->status());
+}
+
+TEST_F(CursorModificationTests, UntrackedCursors)
+{
+    init_tree(*this, kInitLongValues);
+
+    std::unique_ptr<Cursor> c1(m_tree->new_cursor());
+    std::unique_ptr<Cursor> c2(m_tree->new_cursor());
+    c1->seek_first();
+    c2->seek_last();
+
+    for (size_t i = 0; i < kInitialRecordCount; ++i) {
+        ASSERT_OK(m_tree->erase(*m_c, make_normal_key(i)));
+    }
+
+    ASSERT_TRUE(c1->is_valid());
+    ASSERT_EQ(c1->key(), make_normal_key(0));
+    ASSERT_TRUE(c2->is_valid());
+    ASSERT_EQ(c2->key(), make_normal_key(kInitialRecordCount - 1));
+
+    c1->next();
+    c2->previous();
+
+    ASSERT_FALSE(c1->is_valid());
+    ASSERT_FALSE(c2->is_valid());
+
+    c1->seek_first();
+    c1->seek_last();
+
+    ASSERT_FALSE(c1->is_valid());
+    ASSERT_FALSE(c2->is_valid());
+}
+
+class VacuumTests : public MultiTreeTests
+{
+public:
+    explicit VacuumTests() = default;
+
+    ~VacuumTests() override = default;
+
+    auto SetUp() -> void override
+    {
+        MultiTreeTests::SetUp();
+        m_root = m_tree;
+        m_root_c = m_c;
+        create_tree(1);
+        m_tree = multi_tree.at(1).tree;
+        m_c = multi_tree.at(1).c;
+    }
+
+    auto TearDown() -> void override
+    {
+        m_tree = m_root;
+        m_c = m_root_c;
+        MultiTreeTests::TearDown();
+    }
+
+    CursorImpl *m_root_c;
+    Tree *m_root;
+};
+
+TEST_F(VacuumTests, VacuumEmptyTree)
+{
+    ASSERT_OK(m_schema->vacuum());
+    validate();
+}
+
+TEST_F(VacuumTests, VacuumFreelist)
+{
+    for (InitFlag flag = kInitNormal; flag <= kInitFlagMax; ++flag) {
+        init_tree(*this, flag);
+
+        m_c->seek_first();
+        while (m_c->is_valid()) {
+            ASSERT_OK(m_tree->erase(*m_c));
+        }
+
+        ASSERT_OK(m_schema->vacuum());
+        validate();
+    }
+}
+
+TEST_F(VacuumTests, VacuumOverflowChains)
+{
+    const std::string kv[][2] = {
+        {'_' + make_normal_key(1), make_value('a', true)},
+        {'_' + make_long_key(2), make_value('b', false)},
+        {'_' + make_long_key(3), make_value('c', true)},
+    };
+    init_tree(*this);
+    ASSERT_OK(m_tree->put(*m_c, kv[0][0], kv[0][1]));
+    ASSERT_OK(m_tree->put(*m_c, kv[1][0], kv[1][1]));
+    ASSERT_OK(m_tree->put(*m_c, kv[2][0], kv[2][1]));
+
+    for (size_t i = 0; i < kInitialRecordCount; ++i) {
+        ASSERT_OK(m_tree->erase(*m_c, make_long_key(i)));
+    }
+
+    ASSERT_OK(m_schema->vacuum());
+    validate();
+
+    std::string value;
+    ASSERT_OK(m_tree->get(*m_c, kv[0][0], &value));
+    ASSERT_EQ(value, kv[0][1]);
+    ASSERT_OK(m_tree->get(*m_c, kv[1][0], &value));
+    ASSERT_EQ(value, kv[1][1]);
+    ASSERT_OK(m_tree->get(*m_c, kv[2][0], &value));
+    ASSERT_EQ(value, kv[2][1]);
+}
+
+TEST_F(VacuumTests, VacuumPartialRange)
+{
+    for (size_t i = 0; i < 2; ++i) {
+        init_tree(*this, kInitLongKeys | (i == 0 ? 0 : kInitLongValues));
+
+        m_c->seek_first();
+        const auto batch_size = kInitialRecordCount / 3 * (i + 1);
+        for (size_t n = 0; m_c->is_valid() && n < batch_size; ++n) {
+            ASSERT_OK(m_tree->erase(*m_c));
+        }
+
+        ASSERT_OK(m_schema->vacuum());
+        validate();
+
+        for (size_t n = batch_size; n < kInitialRecordCount; ++n) {
+            ASSERT_OK(m_tree->get(*m_c, make_long_key(n), nullptr));
+        }
+    }
+}
+
+TEST_F(VacuumTests, VacuumSchemaTree)
+{
+    static constexpr size_t kSize = 1'234;
+    // Add records to m_tree.
+    init_tree(*this, kInitLongValues);
+    auto &c = m_schema->cursor();
+    std::vector<Cursor *> cursors;
+    for (size_t i = 0; i < kSize; i += 2) {
+        cursors.emplace_back();
+        ASSERT_OK(m_schema->create_bucket(BucketOptions(), numeric_key(i), &cursors.back()));
+        ASSERT_OK(m_schema->create_bucket(BucketOptions(), numeric_key(i + 1), nullptr));
+    }
+    c.seek_first();
+    for (size_t i = 0; i < kSize; ++i) {
+        ASSERT_OK(m_tree->erase(*m_c, make_normal_key(i)));
+    }
+    ASSERT_OK(m_schema->vacuum());
+}
 
 } // namespace calicodb::test

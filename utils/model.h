@@ -148,9 +148,9 @@ public:
         return *m_map;
     }
 
-    [[nodiscard]] auto token() -> void * override
+    [[nodiscard]] auto handle() -> void * override
     {
-        return m_c->token();
+        return m_c->handle();
     }
 
     [[nodiscard]] auto is_valid() const -> bool override
