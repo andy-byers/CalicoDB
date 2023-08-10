@@ -658,7 +658,7 @@ auto Tree::make_pivot(const PivotOptions &opt, Cell &pivot_out) -> Status
                     *opt.cells[i],
                     buffers[i].data(),
                     &keys[i],
-                    buffers[i].size());
+                    static_cast<uint32_t>(buffers[i].size()));
                 if (!s.is_ok()) {
                     return s;
                 }
