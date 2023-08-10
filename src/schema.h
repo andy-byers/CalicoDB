@@ -39,7 +39,7 @@ public:
 
     static auto get_cursor_impl(Cursor &c) -> CursorImpl &
     {
-        return *reinterpret_cast<CursorImpl *>(c.token());
+        return *reinterpret_cast<CursorImpl *>(c.handle());
     }
 
     auto vacuum() -> Status;

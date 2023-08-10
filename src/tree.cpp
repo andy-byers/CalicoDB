@@ -22,8 +22,7 @@ auto CursorImpl::fetch_payload() -> Status
     m_key.clear();
     m_value.clear();
 
-    Cell cell;
-    if (m_node.read(m_idx, cell)) {
+    if (m_node.read(m_idx, m_cell)) {
         return m_tree->corrupted_node(page_id());
     }
     // TODO: Currently, we are reading the record into a few std::strings, even
@@ -37,9 +36,9 @@ auto CursorImpl::fetch_payload() -> Status
     //       values are of different lengths, we could just write the new record
     //       and then erase the old one afterward. If there is an overflow, just
     //       erase the old record and perform a split as usual.
-    auto s = m_tree->read_key(cell, m_key_buffer, &m_key);
+    auto s = m_tree->read_key(m_cell, m_key_buffer, &m_key);
     if (s.is_ok()) {
-        s = m_tree->read_value(cell, m_value_buffer, &m_value);
+        s = m_tree->read_value(m_cell, m_value_buffer, &m_value);
     }
     if (!s.is_ok()) {
         m_key_buffer.clear();
@@ -165,11 +164,15 @@ auto CursorImpl::search_node(const Slice &key) -> bool
     while (lower < upper) {
         Slice rhs;
         const auto mid = (lower + upper) / 2;
+        if (m_node.read(mid, m_cell)) {
+            m_status = m_tree->corrupted_node(page_id());
+            return false;
+        }
         // This call to Tree::read_key() may return a partial key, if the whole key wasn't
         // needed for the comparison. We read at most 1 byte more than is present in `key`
         // so we still have necessary length information to break ties. This lets us avoid
         // reading overflow chains if it isn't really necessary.
-        m_status = m_tree->read_key(m_node, mid, key_buffer, &rhs,
+        m_status = m_tree->read_key(m_cell, key_buffer, &rhs,
                                     static_cast<uint32_t>(key.size() + 1));
         if (!m_status.is_ok()) {
             break;
@@ -1423,7 +1426,7 @@ auto Tree::get(CursorImpl &c, const Slice &key, std::string *value) const -> Sta
         s = Status::not_found();
     } else if (value) {
         Slice slice;
-        s = read_value(c.m_node, c.m_idx, *value, &slice);
+        s = read_value(c.m_cell, *value, &slice);
         value->resize(slice.size());
     }
     return s;
@@ -1455,22 +1458,20 @@ auto Tree::put(CursorImpl &c, const Slice &key, const Slice &value) -> Status
             // it will be written to m_cell_scratch[0] instead.
             s = emplace(c.m_node, key, value, c.m_idx, overflow);
 
-            if (s.is_ok()) {
-                if (overflow) {
-                    // There wasn't enough room for the cell in `node`, so it was built in
-                    // m_cell_scratch[0] instead.
-                    Cell ovfl;
-                    const auto rc = c.m_node.parser(
-                        m_cell_scratch[0],
-                        m_cell_scratch[1],
-                        &ovfl);
-                    if (rc) {
-                        s = corrupted_node(c.page_id());
-                    } else {
-                        CALICODB_EXPECT_FALSE(m_ovfl.exists());
-                        m_ovfl = {ovfl, c.page_id(), c.m_idx};
-                        s = resolve_overflow(c);
-                    }
+            if (s.is_ok() && overflow) {
+                // There wasn't enough room for the cell in `node`, so it was built in
+                // m_cell_scratch[0] instead.
+                Cell ovfl;
+                const auto rc = c.m_node.parser(
+                    m_cell_scratch[0],
+                    m_cell_scratch[1],
+                    &ovfl);
+                if (rc) {
+                    s = corrupted_node(c.page_id());
+                } else {
+                    CALICODB_EXPECT_FALSE(m_ovfl.exists());
+                    m_ovfl = {ovfl, c.page_id(), c.m_idx};
+                    s = resolve_overflow(c);
                 }
             }
         }

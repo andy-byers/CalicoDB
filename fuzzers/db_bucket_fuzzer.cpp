@@ -5,8 +5,8 @@
 #include "calicodb/cursor.h"
 #include "calicodb/db.h"
 #include "calicodb/env.h"
-#include "fake_env.h"
 #include "fuzzer.h"
+#include "model.h"
 #include "tree.h"
 #include <memory>
 
@@ -19,18 +19,18 @@ class Fuzzer
 
     Options m_options;
     DB *m_db = nullptr;
+    KVStore m_store;
 
     auto reopen_db() -> void
     {
         delete m_db;
-        CHECK_OK(DB::open(m_options, "MemDB", m_db));
+        CHECK_OK(ModelDB::open(m_options, "MemDB", m_store, m_db));
     }
 
 public:
-    explicit Fuzzer(Env &env)
+    explicit Fuzzer()
     {
-        env.srand(42);
-        m_options.env = &env;
+        m_options.temp_database = true;
         m_options.cache_size = 0;
         reopen_db();
     }
@@ -42,7 +42,7 @@ public:
 
     static auto check_bucket(Cursor &c) -> void
     {
-        reinterpret_cast<const CursorImpl &>(c).TEST_validate();
+        reinterpret_cast<const CursorImpl &>(c).TEST_tree().TEST_validate();
     }
 
     auto consume_input(FuzzedInputProvider &stream) -> void
@@ -65,7 +65,7 @@ public:
 
         reopen_db();
 
-        const auto s = m_db->update([&stream](auto &tx) {
+        const auto s = m_db->update([&stream, &db = *m_db](auto &tx) {
             std::unique_ptr<Cursor> cursors[kMaxBuckets];
 
             while (!stream.is_empty()) {
@@ -124,6 +124,8 @@ public:
                                 check_bucket(*to_check);
                             }
                         }
+                        reinterpret_cast<ModelDB &>(db).check_consistency();
+                        reinterpret_cast<ModelTx &>(tx).check_consistency();
                         break;
                     default:
                         return Status::not_supported("ROLLBACK");
@@ -146,9 +148,8 @@ public:
 
 extern "C" int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size)
 {
-    FakeEnv env;
     FuzzedInputProvider stream(data, size);
-    Fuzzer fuzzer(env);
+    Fuzzer fuzzer;
     fuzzer.consume_input(stream);
     return 0;
 }

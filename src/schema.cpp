@@ -25,9 +25,9 @@ public:
         delete m_c;
     }
 
-    [[nodiscard]] auto token() -> void * override
+    [[nodiscard]] auto handle() -> void * override
     {
-        return m_c->token();
+        return m_c->handle();
     }
 
     [[nodiscard]] auto is_valid() const -> bool override
@@ -225,7 +225,7 @@ auto Schema::construct_or_reference_tree(Id root_id) -> Tree *
 
 auto Schema::unpack_and_use(Cursor &c) -> std::pair<Tree &, CursorImpl &>
 {
-    auto *c_impl = static_cast<CursorImpl *>(c.token());
+    auto *c_impl = static_cast<CursorImpl *>(c.handle());
     auto *tree = Tree::get_tree(*c_impl);
     use_tree(*tree);
     return {*tree, *c_impl};
