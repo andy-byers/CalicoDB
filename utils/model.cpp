@@ -125,10 +125,12 @@ auto ModelTx::open_model_cursor(Cursor &c, KVMap &map) const -> Cursor *
 
 auto ModelTx::put(Cursor &c, const Slice &key, const Slice &value) -> Status
 {
+    const auto key_copy = key.to_string();
+    const auto value_copy = value.to_string();
     auto &m = use_cursor<KVMap>(c);
     auto s = m_tx->put(c, key, value);
     if (s.is_ok()) {
-        m.m_itr = m.m_map->insert_or_assign(m.m_itr, key.to_string(), value.to_string());
+        m.m_itr = m.m_map->insert_or_assign(m.m_itr, key_copy, value_copy);
     } else {
         m.m_itr = end(*m.m_map);
     }
@@ -137,11 +139,12 @@ auto ModelTx::put(Cursor &c, const Slice &key, const Slice &value) -> Status
 
 auto ModelTx::erase(Cursor &c, const Slice &key) -> Status
 {
+    const auto key_copy = key.to_string();
     auto &m = use_cursor<KVMap>(c);
     auto s = m_tx->erase(c, key);
     if (s.is_ok()) {
-        m.m_itr = m.m_map->lower_bound(key.to_string());
-        if (m.m_itr != end(*m.m_map) && m.m_itr->first == key) {
+        m.m_itr = m.m_map->lower_bound(key_copy);
+        if (m.m_itr != end(*m.m_map) && m.m_itr->first == key_copy) {
             m.m_itr = m.m_map->erase(m.m_itr);
         }
     }
