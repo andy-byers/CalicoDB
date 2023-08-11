@@ -18,66 +18,49 @@ namespace calicodb
 auto CursorImpl::fetch_payload() -> Status
 {
     CALICODB_EXPECT_TRUE(has_key());
+    const auto buffer_len = m_key.size() + m_value.size();
 
     m_key.clear();
     m_value.clear();
 
-    if (m_node.read(m_idx, m_cell)) {
+    Cell cell;
+    if (m_node.read(m_idx, cell)) {
         return m_tree->corrupted_node(page_id());
     }
-    // TODO: Currently, we are reading the record into a few std::strings, even
-    //       if it isn't spread out over multiple pages. This is to avoid a call
-    //       to memcpy with an overlapping source and destination that occurs
-    //       when Tree::put(*c, c->key(), "value") is called. Tree::put() should
-    //       be modified to either just overwrite the value part, or erase the
-    //       old cell and make sure the new one isn't overlapping the old one
-    //       somehow. We should probably only do the overwrite if the values are
-    //       the same length, so we don't have to mess with the varints. If the
-    //       values are of different lengths, we could just write the new record
-    //       and then erase the old one afterward. If there is an overflow, just
-    //       erase the old record and perform a split as usual.
-    auto s = m_tree->read_key(m_cell, m_key_buffer, &m_key);
-    if (s.is_ok()) {
-        s = m_tree->read_value(m_cell, m_value_buffer, &m_value);
+    Status s;
+    if (cell.total_pl_size > buffer_len) {
+        auto *ptr = static_cast<char *>(std::realloc(
+            m_user_payload, cell.total_pl_size));
+        if (ptr == nullptr) {
+            s = Status::no_memory();
+        } else {
+            m_user_payload = ptr;
+        }
     }
-    if (!s.is_ok()) {
-        m_key_buffer.clear();
-        m_value_buffer.clear();
-        m_key.clear();
-        m_value.clear();
+    if (cell.total_pl_size > 0) {
+        if (s.is_ok()) {
+            s = m_tree->read_key(cell, m_user_payload, &m_key);
+        }
+        if (s.is_ok()) {
+            s = m_tree->read_value(cell, m_user_payload + m_key.size(), &m_value);
+        }
+        if (!s.is_ok()) {
+            m_key.clear();
+            m_value.clear();
+        }
     }
     return s;
 }
 
-auto CursorImpl::prepare(Tree::CursorAction type) -> void
-{
-    m_tree->manage_cursors(this, type);
-}
-
-auto CursorImpl::save_position() -> void
-{
-    // TODO: This routine should write the current key to the key buffer, if it isn't already
-    //       written there, to facilitate returning slices out of m_node for key() and value()
-    //       while the cursor is active. When the cursor is saved, return slices of the key
-    //       and value buffer.
-    CALICODB_EXPECT_TRUE(has_key());
-    release_nodes(kAllLevels);
-    m_saved = m_status.is_ok();
-}
-
-auto CursorImpl::ensure_position_loaded() -> void
-{
-    if (m_saved) {
-        seek_to_leaf(m_key, kSeekReader);
-    }
-}
-
-auto CursorImpl::ensure_correct_leaf() -> void
+auto CursorImpl::ensure_correct_leaf(bool read_payload) -> void
 {
     if (has_node()) {
-        correct_leaf();
+        CALICODB_EXPECT_TRUE(m_node.is_leaf());
+        if (m_idx == NodeHdr::get_cell_count(m_node.hdr())) {
+            move_to_right_sibling();
+        }
     }
-    if (has_key()) {
+    if (read_payload && has_key()) {
         m_status = fetch_payload();
     }
 }
@@ -132,11 +115,6 @@ auto CursorImpl::move_to_left_sibling() -> void
     }
 }
 
-auto CursorImpl::seek_to_first_leaf() -> void
-{
-    seek_to_leaf("", kSeekWriter);
-}
-
 auto CursorImpl::seek_to_last_leaf() -> void
 {
     reset();
@@ -163,16 +141,21 @@ auto CursorImpl::search_node(const Slice &key) -> bool
 
     while (lower < upper) {
         Slice rhs;
+        Cell cell;
         const auto mid = (lower + upper) / 2;
-        if (m_node.read(mid, m_cell)) {
+        if (m_node.read(mid, cell)) {
             m_status = m_tree->corrupted_node(page_id());
             return false;
+        }
+        // TODO: Only use the key buffer if the key is overflowing.
+        if (key_buffer.size() < cell.key_size) {
+            key_buffer.resize(cell.key_size);
         }
         // This call to Tree::read_key() may return a partial key, if the whole key wasn't
         // needed for the comparison. We read at most 1 byte more than is present in `key`
         // so we still have necessary length information to break ties. This lets us avoid
         // reading overflow chains if it isn't really necessary.
-        m_status = m_tree->read_key(m_cell, key_buffer, &rhs,
+        m_status = m_tree->read_key(cell, key_buffer.data(), &rhs,
                                     static_cast<uint32_t>(key.size() + 1));
         if (!m_status.is_ok()) {
             break;
@@ -203,31 +186,7 @@ CursorImpl::~CursorImpl()
         IntrusiveList::remove(m_list_entry);
         reset();
     }
-}
-
-// Return true if the cursor is positioned on a valid node, false otherwise
-[[nodiscard]] auto CursorImpl::has_node() const -> bool
-{
-    return m_status.is_ok() && m_node.ref != nullptr;
-}
-
-// Return true if the cursor is positioned on a valid key, false otherwise
-[[nodiscard]] auto CursorImpl::has_key() const -> bool
-{
-    return has_node() && m_idx < NodeHdr::get_cell_count(m_node.hdr());
-}
-
-[[nodiscard]] auto CursorImpl::page_id() const -> Id
-{
-    CALICODB_EXPECT_TRUE(has_node());
-    return m_node.ref->page_id;
-}
-
-auto CursorImpl::reset(const Status &s) -> void
-{
-    release_nodes(kAllLevels);
-    m_status = s;
-    m_level = 0;
+    std::free(m_user_payload);
 }
 
 auto CursorImpl::move_to_parent() -> void
@@ -259,15 +218,6 @@ auto CursorImpl::move_to_child(Id child_id) -> void
         }
     } else {
         m_status = m_tree->corrupted_node(child_id);
-    }
-}
-
-auto CursorImpl::correct_leaf() -> void
-{
-    CALICODB_EXPECT_TRUE(has_node());
-    CALICODB_EXPECT_TRUE(m_node.is_leaf());
-    if (m_idx == NodeHdr::get_cell_count(m_node.hdr())) {
-        move_to_right_sibling();
     }
 }
 
@@ -310,8 +260,8 @@ auto CursorImpl::seek_to_leaf(const Slice &key, SeekType type) -> bool
         const auto found_exact_key = search_node(key);
         if (m_status.is_ok()) {
             if (m_node.is_leaf()) {
-                if (type == kSeekReader) {
-                    ensure_correct_leaf();
+                if (type >= kSeekNormal) {
+                    ensure_correct_leaf(type != kSeekNormal);
                 }
                 return found_exact_key;
             }
@@ -330,28 +280,6 @@ auto CursorImpl::release_nodes(ReleaseType type) -> void
     for (int i = 0; i < m_level; ++i) {
         m_tree->release(std::move(m_node_path[i]));
     }
-}
-
-auto CursorImpl::key() const -> Slice
-{
-    CALICODB_EXPECT_TRUE(is_valid());
-    return m_key;
-}
-
-auto CursorImpl::value() const -> Slice
-{
-    CALICODB_EXPECT_TRUE(is_valid());
-    return m_value;
-}
-
-auto CursorImpl::is_valid() const -> bool
-{
-    return has_key() || m_saved;
-}
-
-auto CursorImpl::status() const -> Status
-{
-    return m_status;
 }
 
 auto CursorImpl::seek_first() -> void
@@ -637,19 +565,19 @@ auto Tree::read_key(Node &node, uint32_t index, std::string &scratch, Slice *key
     if (node.read(index, cell)) {
         return corrupted_node(node.ref->page_id);
     }
-    return read_key(cell, scratch, key_out, limit);
+    if (scratch.size() < cell.key_size) {
+        scratch.resize(cell.key_size);
+    }
+    return read_key(cell, scratch.data(), key_out, limit);
 }
-auto Tree::read_key(const Cell &cell, std::string &scratch, Slice *key_out, uint32_t limit) const -> Status
+auto Tree::read_key(const Cell &cell, char *scratch, Slice *key_out, uint32_t limit) const -> Status
 {
     if (limit == 0 || limit > cell.key_size) {
         limit = cell.key_size;
     }
-    if (scratch.size() < limit) {
-        scratch.resize(limit);
-    }
-    auto s = PayloadManager::access(*m_pager, cell, 0, limit, nullptr, scratch.data());
+    auto s = PayloadManager::access(*m_pager, cell, 0, limit, nullptr, scratch);
     if (s.is_ok() && key_out) {
-        *key_out = Slice(scratch).truncate(limit);
+        *key_out = Slice(scratch, limit);
     }
     return s;
 }
@@ -660,38 +588,23 @@ auto Tree::read_value(Node &node, uint32_t index, std::string &scratch, Slice *v
     if (node.read(index, cell)) {
         return corrupted_node(node.ref->page_id);
     }
-    return read_value(cell, scratch, value_out);
+    if (scratch.size() < cell.total_pl_size - cell.key_size) {
+        scratch.resize(cell.total_pl_size - cell.key_size);
+    }
+    return read_value(cell, scratch.data(), value_out);
 }
-auto Tree::read_value(const Cell &cell, std::string &scratch, Slice *value_out) const -> Status
+auto Tree::read_value(const Cell &cell, char *scratch, Slice *value_out) const -> Status
 {
     const auto value_size = cell.total_pl_size - cell.key_size;
-    if (scratch.size() < value_size) {
-        scratch.resize(value_size);
-    }
-    auto s = PayloadManager::access(*m_pager, cell, cell.key_size, value_size, nullptr, scratch.data());
+    auto s = PayloadManager::access(*m_pager, cell, cell.key_size, value_size, nullptr, scratch);
     if (s.is_ok() && value_out) {
-        *value_out = Slice(scratch).truncate(value_size);
+        *value_out = Slice(scratch, value_size);
     }
     return s;
 }
 
-auto Tree::write_key(Node &node, uint32_t index, const Slice &key) -> Status
+auto Tree::overwrite_value(const Cell &cell, const Slice &value) -> Status
 {
-    Cell cell;
-    if (node.read(index, cell)) {
-        return corrupted_node(node.ref->page_id);
-    }
-    return PayloadManager::access(*m_pager, cell, 0,
-                                  static_cast<uint32_t>(key.size()),
-                                  key.data(), nullptr);
-}
-
-auto Tree::write_value(Node &node, uint32_t index, const Slice &value) -> Status
-{
-    Cell cell;
-    if (node.read(index, cell)) {
-        return corrupted_node(node.ref->page_id);
-    }
     return PayloadManager::access(*m_pager, cell, cell.key_size,
                                   static_cast<uint32_t>(value.size()),
                                   value.data(), nullptr);
@@ -740,11 +653,12 @@ auto Tree::make_pivot(const PivotOptions &opt, Cell &pivot_out) -> Status
         for (size_t i = 0; i < 2; ++i) {
             if (opt.cells[i]->key_size > keys[i].size()) {
                 // Read just enough of the key to determine the ordering.
+                buffers[i].resize(opt.cells[1 - i]->key_size + 1);
                 auto s = read_key(
                     *opt.cells[i],
-                    buffers[i],
+                    buffers[i].data(),
                     &keys[i],
-                    opt.cells[1 - i]->key_size + 1);
+                    static_cast<uint32_t>(buffers[i].size()));
                 if (!s.is_ok()) {
                     return s;
                 }
@@ -1419,6 +1333,7 @@ auto Tree::get(CursorImpl &c, const Slice &key, std::string *value) const -> Sta
 {
     Status s;
     manage_cursors(&c, kInitNormal);
+    // This call may invalidate `key`. See the definition of Tree::get() for details.
     const auto key_exists = c.seek_to_leaf(key, CursorImpl::kSeekReader);
     if (!c.m_status.is_ok()) {
         s = c.m_status;
@@ -1426,7 +1341,7 @@ auto Tree::get(CursorImpl &c, const Slice &key, std::string *value) const -> Sta
         s = Status::not_found();
     } else if (value) {
         Slice slice;
-        s = read_value(c.m_cell, *value, &slice);
+        s = read_value(c.m_node, c.m_idx, *value, &slice);
         value->resize(slice.size());
     }
     return s;
@@ -1450,32 +1365,27 @@ auto Tree::put(CursorImpl &c, const Slice &key, const Slice &value) -> Status
         if (key_exists) {
             s = remove_cell(c.m_node, c.m_idx);
         }
-        if (s.is_ok()) {
-            bool overflow;
-            // Attempt to write a cell representing the `key` and `value` directly to the page.
-            // This routine also populates any overflow pages necessary to hold a `key` and/or
-            // `value` that won't fit on a single node page. If the cell cannot fit in `node`,
-            // it will be written to m_cell_scratch[0] instead.
-            s = emplace(c.m_node, key, value, c.m_idx, overflow);
+        bool overflow;
+        // Attempt to write a cell representing the `key` and `value` directly to the page.
+        // This routine also populates any overflow pages necessary to hold a `key` and/or
+        // `value` that won't fit on a single node page. If the cell cannot fit in `node`,
+        // it will be written to m_cell_scratch[0] instead.
+        s = emplace(c.m_node, key, value, c.m_idx, overflow);
 
-            if (s.is_ok() && overflow) {
-                // There wasn't enough room for the cell in `node`, so it was built in
-                // m_cell_scratch[0] instead.
-                Cell ovfl;
-                const auto rc = c.m_node.parser(
-                    m_cell_scratch[0],
-                    m_cell_scratch[1],
-                    &ovfl);
-                if (rc) {
-                    s = corrupted_node(c.page_id());
-                } else {
-                    CALICODB_EXPECT_FALSE(m_ovfl.exists());
-                    m_ovfl = {ovfl, c.page_id(), c.m_idx};
-                    s = resolve_overflow(c);
-                }
+        if (s.is_ok() && overflow) {
+            // There wasn't enough room for the cell in `node`, so it was built in
+            // m_cell_scratch[0] instead.
+            Cell ovfl;
+            if (c.m_node.parser(m_cell_scratch[0], m_cell_scratch[1], &ovfl)) {
+                s = corrupted_node(c.page_id());
+            } else {
+                CALICODB_EXPECT_FALSE(m_ovfl.exists());
+                m_ovfl = {ovfl, c.page_id(), c.m_idx};
+                s = resolve_overflow(c);
             }
         }
     }
+
     if (s.is_ok()) {
         if (c.has_key()) {
             // Cursor is already on the correct record.
@@ -1596,6 +1506,9 @@ auto Tree::emplace(Node &node, const Slice &key, const Slice &value, uint32_t in
 auto Tree::erase(CursorImpl &c, const Slice &key) -> Status
 {
     manage_cursors(&c, kInitNormal);
+    // This call may invalidate `key`, if `key` was returned by `c->key()`. In
+    // this case, seek_to_leaf() with kSeekReader should cause `c->key()` to
+    // return the same key bytes that `key` formerly held.
     const auto key_exists = c.seek_to_leaf(
         key, CursorImpl::kSeekReader);
     auto s = c.m_status;
@@ -1618,11 +1531,7 @@ auto Tree::erase(CursorImpl &c) -> Status
     if (1 == NodeHdr::get_cell_count(c.m_node.hdr())) {
         // This node will underflow when the record is removed. Make sure the key is saved so that
         // the correct position can be found after underflow resolution.
-        // TODO: m_key_buffer must contain the key that `c` is on. This will break once
-        //       we add the optimization where c.key() and c.value() return slices into
-        //       a node, rather than slices into m_key_buffer.
-        saved_key = std::move(c.m_key_buffer);
-        saved_key.resize(c.m_key.size());
+        saved_key = c.m_key.to_string();
     }
     Status s;
     if (c.m_idx < NodeHdr::get_cell_count(c.m_node.hdr())) {
@@ -1634,7 +1543,7 @@ auto Tree::erase(CursorImpl &c) -> Status
     }
     if (s.is_ok()) {
         if (c.has_node()) {
-            c.ensure_correct_leaf();
+            c.ensure_correct_leaf(true);
         } else {
             c.seek(saved_key);
         }
