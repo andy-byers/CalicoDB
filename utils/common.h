@@ -11,6 +11,7 @@
 #include <algorithm>
 #include <climits>
 #include <functional>
+#include <memory>
 #include <random>
 
 namespace calicodb
