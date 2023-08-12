@@ -20,10 +20,7 @@ public:
     {
     }
 
-    ~SchemaCursor() override
-    {
-        delete m_c;
-    }
+    ~SchemaCursor() override = default;
 
     [[nodiscard]] auto handle() -> void * override
     {
@@ -86,7 +83,8 @@ Schema::Schema(Pager &pager, const Status &status, Stat &stat, char *scratch)
       m_scratch(scratch),
       m_stat(&stat),
       m_map(pager, stat, scratch, nullptr, pager.mode() >= Pager::kWrite),
-      m_cursor(new SchemaCursor(*m_map.new_cursor()))
+      m_cursor(reinterpret_cast<CursorImpl *>(m_map.new_cursor())),
+      m_schema(new SchemaCursor(*m_cursor))
 {
 }
 
@@ -95,6 +93,7 @@ auto Schema::close() -> void
     for (const auto &[_, state] : m_trees) {
         delete state.tree;
     }
+    delete m_schema;
     delete m_cursor;
     m_map.save_all_cursors();
 }
@@ -118,61 +117,54 @@ auto Schema::create_bucket(const BucketOptions &options, const Slice &name, Curs
         m_pager->initialize_root();
     }
 
-    std::string value;
-    auto s = m_map.get(get_cursor_impl(*m_cursor), name, &value);
-
     Id root_id;
-    if (s.is_not_found()) {
+    const auto bucket_exists = m_cursor->seek_to_leaf(
+        name, CursorImpl::kSeekReader);
+    auto s = m_cursor->status();
+    if (!s.is_ok()) {
+        // There was a low-level I/O error. Do nothing.
+    } else if (bucket_exists) {
+        if (!decode_and_check_root_id(m_cursor->value(), root_id)) {
+            s = corrupted_root_id(name.to_string(), m_cursor->value());
+        } else if (options.error_if_exists) {
+            s = Status::invalid_argument(
+                "bucket \"" + name.to_string() + "\" already exists");
+        }
+    } else {
         s = Tree::create(*m_pager, &root_id);
         if (s.is_ok()) {
             // TODO: Encode persistent bucket options here.
-            encode_root_id(root_id, value);
-            s = m_map.put(get_cursor_impl(*m_cursor), name, value);
-        }
-    } else if (s.is_ok()) {
-        if (!decode_and_check_root_id(value, root_id)) {
-            s = corrupted_root_id(name.to_string(), value);
-        } else if (options.error_if_exists) {
-            s = Status::invalid_argument(
-                "table \"" + name.to_string() + "\" already exists");
+            char buf[kVarintMaxLength];
+            const auto len = encode_root_id(root_id, buf);
+            s = m_map.put(*m_cursor, name, Slice(buf, len));
         }
     }
 
-    if (c_out) {
-        if (s.is_ok()) {
-            auto *tree = construct_or_reference_tree(root_id);
-            *c_out = tree->new_cursor();
-        } else {
-            *c_out = nullptr;
-        }
+    if (s.is_ok() && c_out) {
+        auto *tree = construct_or_reference_tree(root_id);
+        *c_out = tree->new_cursor();
     }
     return s;
 }
 
 auto Schema::open_bucket(const Slice &name, Cursor *&c_out) -> Status
 {
-    c_out = nullptr;
-
-    Status s;
     if (m_pager->page_count() == 0) {
         return Status::invalid_argument();
     }
 
-    std::string value;
-    if (s.is_ok()) {
-        s = m_map.get(get_cursor_impl(*m_cursor), name, &value);
-    }
+    const auto bucket_exists = m_cursor->seek_to_leaf(
+        name, CursorImpl::kSeekReader);
+    auto s = m_cursor->status();
 
     Id root_id;
-    if (s.is_ok()) {
-        if (!decode_and_check_root_id(value, root_id)) {
-            return corrupted_root_id(name.to_string(), value);
-        }
-    } else if (s.is_not_found()) {
+    if (!s.is_ok()) {
+        return s;
+    } else if (!bucket_exists) {
         return Status::invalid_argument(
             "table \"" + name.to_string() + "\" does not exist");
-    } else {
-        return s;
+    } else if (!decode_and_check_root_id(m_cursor->value(), root_id)) {
+        return corrupted_root_id(name.to_string(), m_cursor->value());
     }
     auto *tree = construct_or_reference_tree(root_id);
     c_out = tree->new_cursor();
@@ -197,14 +189,10 @@ auto Schema::decode_and_check_root_id(const Slice &data, Id &out) -> bool
     return true;
 }
 
-auto Schema::encode_root_id(Id id, std::string &root_id_out) -> void
+auto Schema::encode_root_id(Id id, char *root_id_out) -> size_t
 {
-    if (root_id_out.size() < kVarintMaxLength) {
-        // More than enough for a uint32_t.
-        root_id_out.resize(kVarintMaxLength);
-    }
-    const auto *end = encode_varint(root_id_out.data(), id.value);
-    root_id_out.resize(static_cast<std::uintptr_t>(end - root_id_out.data()));
+    const auto *end = encode_varint(root_id_out, id.value);
+    return static_cast<size_t>(end - root_id_out);
 }
 
 auto Schema::construct_or_reference_tree(Id root_id) -> Tree *
@@ -241,18 +229,18 @@ auto Schema::use_tree(Tree &tree) -> void
 
 auto Schema::drop_bucket(const Slice &name) -> Status
 {
-    std::string value;
-    auto s = m_map.get(get_cursor_impl(*m_cursor), name, &value);
-    if (s.is_not_found()) {
+    const auto key_exists = m_cursor->seek_to_leaf(
+        name, CursorImpl::kSeekReader);
+    auto s = m_cursor->status();
+    if (!s.is_ok()) {
+        return s;
+    } else if (!key_exists) {
         return Status::invalid_argument(
             "table \"" + name.to_string() + "\" does not exist");
-    } else if (!s.is_ok()) {
-        return s;
     }
-
     Id root_id;
-    if (!decode_and_check_root_id(value, root_id)) {
-        return corrupted_root_id(name, value);
+    if (!decode_and_check_root_id(m_cursor->value(), root_id)) {
+        return corrupted_root_id(name, m_cursor->value());
     }
     auto itr = m_trees.find(root_id);
     if (itr != end(m_trees)) {
@@ -266,7 +254,7 @@ auto Schema::drop_bucket(const Slice &name) -> Status
               &root_id, m_pager->mode() >= Pager::kWrite);
     s = Tree::destroy(drop);
     if (s.is_ok()) {
-        s = m_map.erase(get_cursor_impl(*m_cursor), name);
+        s = m_map.erase(*m_cursor, name);
     }
     return s;
 }
@@ -309,10 +297,10 @@ auto Schema::vacuum_finish() -> Status
         }
         const auto root = m_reroot.find(old_id);
         if (root != end(m_reroot)) {
-            std::string value;
-            encode_root_id(root->second, value);
+            char buf[kVarintMaxLength];
+            const auto len = encode_root_id(root->second, buf);
             // Update the database schema with the new root page ID for this tree.
-            s = m_map.put(get_cursor_impl(*c), c->key(), value);
+            s = m_map.put(reinterpret_cast<CursorImpl &>(*c), c->key(), Slice(buf, len));
             if (!s.is_ok()) {
                 break;
             }

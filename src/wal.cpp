@@ -985,7 +985,7 @@ private:
     [[nodiscard]] static auto frame_offset(uint32_t frame) -> size_t
     {
         CALICODB_EXPECT_GT(frame, 0);
-        return kWalHdrSize + (frame - 1) * (WalFrameHdr::kSize + kPageSize);
+        return kWalHdrSize + (frame - 1) * kFrameSize;
     }
 
     auto transfer_contents(bool reset) -> Status;
@@ -1002,7 +1002,8 @@ private:
     const Options::LockMode m_lock_mode;
 
     // Storage for a single WAL frame.
-    std::string m_frame;
+    static constexpr size_t kFrameSize = WalFrameHdr::kSize + kPageSize;
+    char m_frame[kFrameSize];
 
     uint32_t m_redo_cksum = 0;
     uint32_t m_ckpt_number = 0;
@@ -1046,7 +1047,6 @@ WalImpl::WalImpl(const Parameters &param, File &wal_file)
       m_wal_name(param.filename),
       m_sync_mode(param.sync_mode),
       m_lock_mode(param.lock_mode),
-      m_frame(WalFrameHdr::kSize + kPageSize, '\0'),
       m_env(param.env),
       m_db(param.db_file),
       m_log(param.info_log),
@@ -1078,7 +1078,7 @@ auto WalImpl::rewrite_checksums(uint32_t end) -> Status
         cksum_offset,
         sizeof(cksum_buffer),
         cksum_buffer));
-    m_stat->counters[Stat::kReadWal] += m_frame.size();
+    m_stat->counters[Stat::kReadWal] += kFrameSize;
 
     m_hdr.frame_cksum[0] = get_u32(&m_frame[0]);
     m_hdr.frame_cksum[1] = get_u32(&m_frame[sizeof(uint32_t)]);
@@ -1088,15 +1088,15 @@ auto WalImpl::rewrite_checksums(uint32_t end) -> Status
 
     for (; redo < end; ++redo) {
         const auto offset = frame_offset(redo);
-        CALICODB_TRY(m_wal->read_exact(offset, m_frame.size(), m_frame.data()));
-        m_stat->counters[Stat::kReadWal] += m_frame.size();
+        CALICODB_TRY(m_wal->read_exact(offset, kFrameSize, m_frame));
+        m_stat->counters[Stat::kReadWal] += kFrameSize;
 
         WalFrameHdr hdr;
         hdr.pgno = get_u32(&m_frame[0]);
         hdr.db_size = get_u32(&m_frame[4]);
-        encode_frame(hdr, &m_frame[WalFrameHdr::kSize], m_frame.data());
+        encode_frame(hdr, &m_frame[WalFrameHdr::kSize], m_frame);
 
-        CALICODB_TRY(m_wal->write(offset, Slice(m_frame).truncate(WalFrameHdr::kSize)));
+        CALICODB_TRY(m_wal->write(offset, Slice(m_frame, WalFrameHdr::kSize)));
         m_stat->counters[Stat::kWriteWal] += WalFrameHdr::kSize;
     }
     return Status::ok();
@@ -1183,17 +1183,17 @@ auto WalImpl::recover_index() -> Status
                 return cleanup(Status::invalid_argument(message));
             }
 
-            const auto last_frame = static_cast<uint32_t>((file_size - kWalHdrSize) / m_frame.size());
+            const auto last_frame = static_cast<uint32_t>((file_size - kWalHdrSize) / kFrameSize);
             for (uint32_t n_group = 0; n_group <= index_group_number(last_frame); ++n_group) {
                 const auto last = std::min(last_frame, kNIndexKeys0 + n_group * kNIndexKeys);
                 const auto first = 1 + (n_group == 0 ? 0 : kNIndexKeys0 + (n_group - 1) * kNIndexKeys);
                 for (auto n_frame = first; n_frame <= last; ++n_frame) {
                     const auto offset = frame_offset(n_frame);
-                    CALICODB_TRY(m_wal->read_exact(offset, m_frame.size(), m_frame.data()));
-                    m_stat->counters[Stat::kReadWal] += m_frame.size();
+                    CALICODB_TRY(m_wal->read_exact(offset, kFrameSize, m_frame));
+                    m_stat->counters[Stat::kReadWal] += kFrameSize;
 
                     WalFrameHdr hdr;
-                    if (!decode_frame(m_frame.data(), hdr)) {
+                    if (!decode_frame(m_frame, hdr)) {
                         break;
                     }
                     CALICODB_TRY(m_index.assign(hdr.pgno, n_frame));
@@ -1264,10 +1264,10 @@ auto WalImpl::read(Id page_id, char *&page) -> Status
             CALICODB_TRY(m_wal->read_exact(
                 frame_offset(frame) + WalFrameHdr::kSize,
                 kPageSize,
-                m_frame.data()));
+                m_frame));
             m_stat->counters[Stat::kReadWal] += kPageSize;
 
-            std::memcpy(ptr, m_frame.data(), kPageSize);
+            std::memcpy(ptr, m_frame, kPageSize);
             page = ptr;
         }
     }
@@ -1358,13 +1358,13 @@ auto WalImpl::write(PageRef *first_ref, size_t db_size) -> Status
         WalFrameHdr header;
         header.pgno = ref->page_id.value;
         header.db_size = p->dirty == nullptr ? static_cast<uint32_t>(db_size) : 0;
-        encode_frame(header, ref->data, m_frame.data());
-        CALICODB_TRY(m_wal->write(offset, m_frame));
-        m_stat->counters[Stat::kWriteWal] += m_frame.size();
+        encode_frame(header, ref->data, m_frame);
+        CALICODB_TRY(m_wal->write(offset, Slice(m_frame, kFrameSize)));
+        m_stat->counters[Stat::kWriteWal] += kFrameSize;
         ref->set_flag(PageRef::kExtra);
 
         CALICODB_EXPECT_EQ(offset, frame_offset(next_frame));
-        offset += m_frame.size();
+        offset += kFrameSize;
         ++next_frame;
     }
 
@@ -1521,12 +1521,12 @@ auto WalImpl::transfer_contents(bool reset) -> Status
                 s = m_wal->read_exact(
                     frame_offset(entry.value) + WalFrameHdr::kSize,
                     kPageSize,
-                    m_frame.data());
+                    m_frame);
                 if (s.is_ok()) {
                     m_stat->counters[Stat::kWriteDB] += kPageSize;
                     s = m_db->write(
                         (entry.key - 1) * kPageSize,
-                        Slice(m_frame.data(), kPageSize));
+                        Slice(m_frame, kPageSize));
                 }
             }
             if (s.is_ok()) {

@@ -137,14 +137,20 @@ private:
     auto fix_root(CursorImpl &c) -> Status;
     auto fix_nonroot(CursorImpl &c, Node &parent, uint32_t index) -> Status;
 
+    struct KeyScratch {
+        char *buf;
+        size_t len;
+    };
+
+    auto extract_key(Node &node, uint32_t index, KeyScratch &scratch, Slice &key_out, uint32_t limit = 0) const -> Status;
+    auto extract_key(const Cell &cell, KeyScratch &scratch, Slice &key_out, uint32_t limit = 0) const -> Status;
     auto read_key(const Cell &cell, char *scratch, Slice *key_out, uint32_t limit = 0) const -> Status;
     auto read_value(const Cell &cell, char *scratch, Slice *value_out) const -> Status;
-    auto read_key(Node &node, uint32_t index, std::string &scratch, Slice *key_out, uint32_t limit = 0) const -> Status;
     auto read_value(Node &node, uint32_t index, std::string &scratch, Slice *value_out) const -> Status;
     auto overwrite_value(const Cell &cell, const Slice &value) -> Status;
-
     auto emplace(Node &node, const Slice &key, const Slice &value, uint32_t index, bool &overflow) -> Status;
     auto free_overflow(Id head_id) -> Status;
+
     auto vacuum_step(PageRef *&free, PointerMap::Entry entry, Schema &schema, Id last_id) -> Status;
 
     struct PivotOptions {
@@ -172,13 +178,13 @@ private:
 
     enum CursorAction {
         kInitNormal,
-        kInitShutdown,
+        kInitSaveCursors,
     };
 
     auto manage_cursors(Cursor *c, CursorAction type) const -> void;
 
     // Various tree operation counts are tracked in this variable.
-    Stat *m_stat;
+    Stat *const m_stat;
 
     // When the node pointed at by m_c overflows, store the cell that couldn't fit on the page here. The
     // location that the overflow cell should be placed is copied into the pid and idx fields from m_c.
@@ -200,6 +206,9 @@ private:
         Id pid;
         uint32_t idx;
     } m_ovfl;
+
+    // Scratch buffers for holding overflowing keys. See extract_key().
+    KeyScratch m_key_scratch[2] = {};
 
     // Scratch memory for manipulating nodes.
     char *const m_node_scratch;
@@ -277,7 +286,7 @@ class CursorImpl : public Cursor
 
     auto seek_to_last_leaf() -> void;
 
-    auto fetch_payload() -> Status;
+    auto fetch_user_payload() -> Status;
     auto move_to_right_sibling() -> void;
     auto move_to_left_sibling() -> void;
     auto search_node(const Slice &key) -> bool;

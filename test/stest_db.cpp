@@ -256,7 +256,11 @@ struct DatabaseState {
             }
             c.seek(rng.Generate(kMaxKeyLen));
             if (c.is_valid()) {
-                s = tx->erase(c);
+                if (i & 1) {
+                    s = tx->erase(c);
+                } else {
+                    s = tx->erase(c, c.key());
+                }
             }
         }
     }

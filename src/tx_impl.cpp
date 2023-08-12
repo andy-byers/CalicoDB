@@ -35,6 +35,9 @@ TxImpl::~TxImpl()
 
 auto TxImpl::create_bucket(const BucketOptions &options, const Slice &name, Cursor **c_out) -> Status
 {
+    if (c_out) {
+        *c_out = nullptr;
+    }
     ENSURE_WRITABLE;
     auto s = *m_status;
     if (s.is_ok()) {
@@ -45,6 +48,7 @@ auto TxImpl::create_bucket(const BucketOptions &options, const Slice &name, Curs
 
 auto TxImpl::open_bucket(const Slice &name, Cursor *&c_out) const -> Status
 {
+    c_out = nullptr;
     auto s = *m_status;
     if (s.is_ok()) {
         s = m_schema.open_bucket(name, c_out);

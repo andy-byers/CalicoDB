@@ -220,15 +220,15 @@ protected:
         EXPECT_OK(tx.status());
 
         Status s;
-        Cursor *c1, *c2;
+        TestCursor c1, c2;
         const auto name1 = std::to_string(iteration);
         const auto name2 = std::to_string((iteration + 1) % kNumIterations);
 
-        s = tx.open_bucket(name1, c1);
+        s = test_open_bucket(tx, name1, c1);
         if (s.is_invalid_argument()) {
             BucketOptions options;
             options.error_if_exists = true;
-            s = tx.create_bucket(options, name1, &c1);
+            s = test_create_and_open_bucket(tx, options, name1, c1);
             if (s.is_ok()) {
                 std::vector<uint32_t> keys(kNumRecords);
                 std::iota(begin(keys), end(keys), 0);
@@ -244,13 +244,11 @@ protected:
         }
         if (!s.is_ok()) {
             EXPECT_EQ(s, tx.status());
-            delete c1;
             return s;
         }
-        s = tx.create_bucket(BucketOptions(), name2, &c2);
+        s = test_create_and_open_bucket(tx, BucketOptions(), name2, c2);
         if (!s.is_ok()) {
             EXPECT_EQ(s, tx.status());
-            delete c1;
             return s;
         }
 
@@ -269,8 +267,8 @@ protected:
                 break;
             }
         }
-        delete c1;
-        delete c2;
+        c1.reset();
+        c2.reset();
 
         if (s.is_ok()) {
             s = tx.drop_bucket(name1);
@@ -296,8 +294,8 @@ protected:
             return schema.status();
         }
 
-        Cursor *c;
-        auto s = tx.open_bucket(b_name, c);
+        TestCursor c;
+        auto s = test_open_bucket(tx, b_name, c);
         if (!s.is_ok()) {
             return s;
         }
@@ -323,7 +321,6 @@ protected:
             c->next();
         }
         EXPECT_FALSE(c->is_valid()) << "key = \"" << c->key().to_string() << '\"';
-        delete c;
         return s;
     }
 
@@ -483,10 +480,26 @@ protected:
             DB *db;
             ASSERT_OK(DB::open(options, m_filename, db));
             ASSERT_OK(db->update([](auto &tx) {
-                Cursor *c;
-                auto s = tx.create_bucket(BucketOptions(), "BUCKET", &c);
+                TestCursor c, keep_open;
+                auto s = test_create_and_open_bucket(tx, BucketOptions(), "BUCKET", c);
+                if (!s.is_ok()) {
+                    return s;
+                }
+                if (s.is_ok()) {
+                    s = test_open_bucket(tx, "BUCKET", keep_open);
+                }
+                if (!s.is_ok()) {
+                    return s;
+                }
+                keep_open->seek_first();
                 for (size_t j = 0; s.is_ok() && j < kNumRecords; ++j) {
                     s = tx.put(*c, make_key(j), make_value(j));
+                }
+                if (!c->status().is_ok()) {
+                    const auto before_status = c->status();
+                    EXPECT_NOK(before_status);
+                    keep_open->seek_first();
+                    EXPECT_EQ(before_status, c->status());
                 }
                 return s;
             }));
@@ -496,8 +509,8 @@ protected:
 
             run_until_completion([&db] {
                 return db->view([](const auto &tx) {
-                    Cursor *c;
-                    auto s = tx.open_bucket("BUCKET", c);
+                    TestCursor c;
+                    auto s = test_open_bucket(tx, "BUCKET", c);
                     if (!s.is_ok()) {
                         return s;
                     }
@@ -571,8 +584,8 @@ protected:
 
             run_until_completion([&db] {
                 return db->update([](auto &tx) {
-                    Cursor *c;
-                    auto s = tx.create_bucket(BucketOptions(), "BUCKET", &c);
+                    TestCursor c;
+                    auto s = test_create_and_open_bucket(tx, BucketOptions(), "BUCKET", c);
                     for (size_t j = 0; s.is_ok() && j < kNumRecords; ++j) {
                         const auto key = make_key(j);
                         const auto value = make_value(j);
@@ -604,7 +617,6 @@ protected:
                     while (s.is_ok() && c->is_valid()) {
                         s = tx.erase(*c);
                     }
-                    delete c;
                     return s;
                 });
             });
@@ -953,8 +965,8 @@ public:
         // Don't drop any records until the commit.
         m_env->m_drop_file = "";
         return m_db->update([num_writes, version, &param, this](auto &tx) {
-            Cursor *c;
-            EXPECT_OK(tx.create_bucket(BucketOptions(), "bucket", &c));
+            TestCursor c;
+            EXPECT_OK(test_create_and_open_bucket(tx, BucketOptions(), "bucket", c));
             for (size_t i = 0; i < num_writes; ++i) {
                 EXPECT_OK(tx.put(*c, numeric_key(i), numeric_key(i + version * num_writes)));
             }
@@ -984,8 +996,8 @@ public:
     auto check_records(size_t num_writes, size_t version)
     {
         return m_db->view([=](const auto &tx) {
-            Cursor *c;
-            auto s = tx.open_bucket("bucket", c);
+            TestCursor c;
+            auto s = test_open_bucket(tx, "bucket", c);
             for (size_t i = 0; i < num_writes && s.is_ok(); ++i) {
                 std::string value;
                 s = tx.get(*c, numeric_key(i), &value);

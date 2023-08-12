@@ -18,6 +18,9 @@ class Pager;
 struct Stat;
 
 // Representation of the database schema
+// NOTE: The routines *_bucket(), where * is "create" or "open", do not set their
+//       `c_out` parameter to nullptr on failure. It is the responsibility of the
+//       caller to do so.
 class Schema final
 {
 public:
@@ -37,15 +40,10 @@ public:
     auto unpack_and_use(Cursor &c) -> std::pair<Tree &, CursorImpl &>;
     auto use_tree(Tree &tree) -> void;
 
-    static auto get_cursor_impl(Cursor &c) -> CursorImpl &
-    {
-        return *reinterpret_cast<CursorImpl *>(c.handle());
-    }
-
     auto vacuum() -> Status;
 
     [[nodiscard]] static auto decode_root_id(const Slice &data, Id &out) -> bool;
-    static auto encode_root_id(Id id, std::string &out) -> void;
+    [[nodiscard]] static auto encode_root_id(Id id, char *root_id_out) -> size_t;
 
     auto TEST_validate() const -> void;
 
@@ -80,7 +78,8 @@ private:
     Stat *const m_stat;
     Tree m_map;
 
-    Cursor *const m_cursor;
+    CursorImpl *const m_cursor;
+    Cursor *const m_schema;
 
     // Pointer to the most-recently-accessed tree.
     const Tree *m_recent = nullptr;

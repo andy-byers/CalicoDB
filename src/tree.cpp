@@ -15,7 +15,7 @@
 namespace calicodb
 {
 
-auto CursorImpl::fetch_payload() -> Status
+auto CursorImpl::fetch_user_payload() -> Status
 {
     CALICODB_EXPECT_TRUE(has_key());
     const auto buffer_len = m_key.size() + m_value.size();
@@ -61,7 +61,7 @@ auto CursorImpl::ensure_correct_leaf(bool read_payload) -> void
         }
     }
     if (read_payload && has_key()) {
-        m_status = fetch_payload();
+        m_status = fetch_user_payload();
     }
 }
 
@@ -134,29 +134,19 @@ auto CursorImpl::search_node(const Slice &key) -> bool
     CALICODB_EXPECT_TRUE(m_status.is_ok());
     CALICODB_EXPECT_NE(m_node.ref, nullptr);
 
-    std::string key_buffer;
     auto exact = false;
     auto upper = NodeHdr::get_cell_count(m_node.hdr());
     uint32_t lower = 0;
 
     while (lower < upper) {
         Slice rhs;
-        Cell cell;
         const auto mid = (lower + upper) / 2;
-        if (m_node.read(mid, cell)) {
-            m_status = m_tree->corrupted_node(page_id());
-            return false;
-        }
-        // TODO: Only use the key buffer if the key is overflowing.
-        if (key_buffer.size() < cell.key_size) {
-            key_buffer.resize(cell.key_size);
-        }
-        // This call to Tree::read_key() may return a partial key, if the whole key wasn't
-        // needed for the comparison. We read at most 1 byte more than is present in `key`
-        // so we still have necessary length information to break ties. This lets us avoid
+        // This call to Tree::extract_key() may return a partial key, if the whole key wasn't
+        // needed for the comparison. We read at most 1 byte more than is present in `key` so
+        // that we still have the necessary length information to break ties. This lets us avoid
         // reading overflow chains if it isn't really necessary.
-        m_status = m_tree->read_key(cell, key_buffer.data(), &rhs,
-                                    static_cast<uint32_t>(key.size() + 1));
+        m_status = m_tree->extract_key(m_node, mid, m_tree->m_key_scratch[0], rhs,
+                                       static_cast<uint32_t>(key.size() + 1));
         if (!m_status.is_ok()) {
             break;
         }
@@ -242,11 +232,12 @@ auto CursorImpl::seek_to_leaf(const Slice &key, SeekType type) -> bool
     auto on_correct_node = false;
     if (has_key() && on_last_node()) {
         CALICODB_EXPECT_TRUE(m_node.is_leaf());
+
         // This block handles cases where the cursor is already positioned on the target node. This
         // means that (a) this tree is the most-recently-accessed tree in the database, and (b) the
         // last operation didn't cause an overflow or underflow.
-        std::string boundary;
-        m_status = m_tree->read_key(m_node, 0, boundary, nullptr);
+        Slice boundary;
+        m_status = m_tree->extract_key(m_node, 0, m_tree->m_key_scratch[0], boundary);
         if (!m_status.is_ok()) {
             return false;
         }
@@ -287,7 +278,7 @@ auto CursorImpl::seek_first() -> void
     prepare(Tree::kInitNormal);
     seek_to_first_leaf();
     if (has_key()) {
-        m_status = fetch_payload();
+        m_status = fetch_user_payload();
     }
 }
 
@@ -296,7 +287,7 @@ auto CursorImpl::seek_last() -> void
     prepare(Tree::kInitNormal);
     seek_to_last_leaf();
     if (has_key()) {
-        m_status = fetch_payload();
+        m_status = fetch_user_payload();
     }
 }
 
@@ -313,7 +304,7 @@ auto CursorImpl::next() -> void
     }
     move_to_right_sibling();
     if (has_key()) {
-        m_status = fetch_payload();
+        m_status = fetch_user_payload();
     }
 }
 
@@ -327,7 +318,7 @@ auto CursorImpl::previous() -> void
     }
     move_to_left_sibling();
     if (has_key()) {
-        m_status = fetch_payload();
+        m_status = fetch_user_payload();
     }
 }
 
@@ -536,7 +527,7 @@ struct PayloadManager {
 
 auto Tree::save_all_cursors() const -> void
 {
-    manage_cursors(nullptr, kInitShutdown);
+    manage_cursors(nullptr, kInitSaveCursors);
 }
 
 auto Tree::create(Pager &pager, Id *root_id_out) -> Status
@@ -559,17 +550,37 @@ auto Tree::create(Pager &pager, Id *root_id_out) -> Status
     return s;
 }
 
-auto Tree::read_key(Node &node, uint32_t index, std::string &scratch, Slice *key_out, uint32_t limit) const -> Status
+auto Tree::extract_key(Node &node, uint32_t index, KeyScratch &scratch, Slice &key_out, uint32_t limit) const -> Status
 {
     Cell cell;
     if (node.read(index, cell)) {
         return corrupted_node(node.ref->page_id);
     }
-    if (scratch.size() < cell.key_size) {
-        scratch.resize(cell.key_size);
-    }
-    return read_key(cell, scratch.data(), key_out, limit);
+    return extract_key(cell, scratch, key_out, limit);
 }
+
+auto Tree::extract_key(const Cell &cell, KeyScratch &scratch, Slice &key_out, uint32_t limit) const -> Status
+{
+    if (limit == 0 || limit > cell.key_size) {
+        limit = cell.key_size;
+    }
+    if (limit <= cell.local_pl_size) {
+        key_out = Slice(cell.key, limit);
+        return Status::ok();
+    }
+    if (limit > scratch.len) {
+        auto *buf = static_cast<char *>(std::realloc(
+            scratch.buf, limit));
+        if (buf) {
+            scratch.buf = buf;
+            scratch.len = limit;
+        } else {
+            return Status::no_memory();
+        }
+    }
+    return read_key(cell, scratch.buf, &key_out, limit);
+}
+
 auto Tree::read_key(const Cell &cell, char *scratch, Slice *key_out, uint32_t limit) const -> Status
 {
     if (limit == 0 || limit > cell.key_size) {
@@ -593,6 +604,7 @@ auto Tree::read_value(Node &node, uint32_t index, std::string &scratch, Slice *v
     }
     return read_value(cell, scratch.data(), value_out);
 }
+
 auto Tree::read_value(const Cell &cell, char *scratch, Slice *value_out) const -> Status
 {
     const auto value_size = cell.total_pl_size - cell.key_size;
@@ -638,7 +650,6 @@ auto Tree::maybe_fix_overflow_chain(const Cell &cell, Id parent_id, Status &s) -
 
 auto Tree::make_pivot(const PivotOptions &opt, Cell &pivot_out) -> Status
 {
-    std::string buffers[2];
     Slice keys[2];
     for (size_t i = 0; i < 2; ++i) {
         const auto local_key_size = std::min(
@@ -653,12 +664,11 @@ auto Tree::make_pivot(const PivotOptions &opt, Cell &pivot_out) -> Status
         for (size_t i = 0; i < 2; ++i) {
             if (opt.cells[i]->key_size > keys[i].size()) {
                 // Read just enough of the key to determine the ordering.
-                buffers[i].resize(opt.cells[1 - i]->key_size + 1);
-                auto s = read_key(
+                auto s = extract_key(
                     *opt.cells[i],
-                    buffers[i].data(),
-                    &keys[i],
-                    static_cast<uint32_t>(buffers[i].size()));
+                    m_key_scratch[i],
+                    keys[i],
+                    opt.cells[1 - i]->key_size + 1);
                 if (!s.is_ok()) {
                     return s;
                 }
@@ -1315,6 +1325,10 @@ Tree::Tree(Pager &pager, Stat &stat, char *scratch, const Id *root_id, bool writ
 
 Tree::~Tree()
 {
+    for (const auto &scratch : m_key_scratch) {
+        std::free(scratch.buf);
+    }
+
     // Make sure all cursors are in the inactive list with their nodes released.
     save_all_cursors();
 
@@ -1363,14 +1377,25 @@ auto Tree::put(CursorImpl &c, const Slice &key, const Slice &value) -> Status
     if (s.is_ok()) {
         upgrade(c.m_node);
         if (key_exists) {
+            Cell cell;
+            if (c.m_node.read(c.m_idx, cell)) {
+                return corrupted_node(c.m_node.ref->page_id);
+            }
+            const auto value_length = cell.total_pl_size - cell.key_size;
+            if (value_length == value.size()) {
+                s = overwrite_value(cell, value);
+                goto cleanup;
+            }
             s = remove_cell(c.m_node, c.m_idx);
         }
         bool overflow;
-        // Attempt to write a cell representing the `key` and `value` directly to the page.
-        // This routine also populates any overflow pages necessary to hold a `key` and/or
-        // `value` that won't fit on a single node page. If the cell cannot fit in `node`,
-        // it will be written to m_cell_scratch[0] instead.
-        s = emplace(c.m_node, key, value, c.m_idx, overflow);
+        if (s.is_ok()) {
+            // Attempt to write a cell representing the `key` and `value` directly to the page.
+            // This routine also populates any overflow pages necessary to hold a `key` and/or
+            // `value` that won't fit on a single node page. If the cell itself cannot fit in
+            // `node`, it will be written to m_cell_scratch[0] instead.
+            s = emplace(c.m_node, key, value, c.m_idx, overflow);
+        }
 
         if (s.is_ok() && overflow) {
             // There wasn't enough room for the cell in `node`, so it was built in
@@ -1386,10 +1411,11 @@ auto Tree::put(CursorImpl &c, const Slice &key, const Slice &value) -> Status
         }
     }
 
+cleanup:
     if (s.is_ok()) {
         if (c.has_key()) {
             // Cursor is already on the correct record.
-            s = c.fetch_payload();
+            s = c.fetch_user_payload();
         } else {
             // There must have been a SMO. The rebalancing routine clears the cursor,
             // since it is left on an internal node. Seek back to where the record
@@ -2097,8 +2123,8 @@ auto Tree::new_cursor() -> Cursor *
 
 auto Tree::manage_cursors(Cursor *c, CursorAction type) const -> void
 {
-    CALICODB_EXPECT_TRUE(c || type == kInitShutdown);
-    if (m_writable || type == kInitShutdown) {
+    CALICODB_EXPECT_TRUE(c || type == kInitSaveCursors);
+    if (m_writable || type == kInitSaveCursors) {
         // Clear the active cursor list.
         auto *entry = m_active_list.next_entry;
         while (entry != &m_active_list) {
@@ -2110,7 +2136,8 @@ auto Tree::manage_cursors(Cursor *c, CursorAction type) const -> void
                 if (ptr->cursor->is_valid()) {
                     ptr->cursor->save_position();
                 } else {
-                    ptr->cursor->reset();
+                    // Don't get rid of the cursor status: it may contain error info.
+                    ptr->cursor->reset(ptr->cursor->m_status);
                 }
                 IntrusiveList::remove(*ptr);
                 IntrusiveList::add_head(*ptr, m_inactive_list);
