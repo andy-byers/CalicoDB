@@ -24,14 +24,14 @@ public:
     // On success, stores a pointer to the heap-allocated database in `*db` and returns OK. On
     // failure, sets `*db` to nullptr and returns a non-OK status. The user is responsible for
     // calling delete on the database handle when it is no longer needed.
-    static auto open(const Options &options, const std::string &filename, DB *&db_out) -> Status;
+    static auto open(const Options &options, const char *filename, DB *&db_out) -> Status;
 
     // Delete the contents of the specified database from stable storage
     // Deletes every file associated with the database named `filename` and returns OK on
     // success. Returns a non-OK status on failure. `options` should hold the same options
     // that were used to create the database (`options` must at least specify the WAL and
     // info log paths, if non-default values were used).
-    static auto destroy(const Options &options, const std::string &filename) -> Status;
+    static auto destroy(const Options &options, const char *filename) -> Status;
 
     explicit DB();
     virtual ~DB();

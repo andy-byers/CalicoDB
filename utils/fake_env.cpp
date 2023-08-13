@@ -7,7 +7,7 @@
 namespace calicodb
 {
 
-auto FakeEnv::get_file_contents(const std::string &filename) const -> std::string
+auto FakeEnv::get_file_contents(const char *filename) const -> std::string
 {
     const auto file = m_state.find(filename);
     if (file == end(m_state) || !file->second.created) {
@@ -16,7 +16,7 @@ auto FakeEnv::get_file_contents(const std::string &filename) const -> std::strin
     return file->second.buffer;
 }
 
-auto FakeEnv::put_file_contents(const std::string &filename, std::string contents) -> void
+auto FakeEnv::put_file_contents(const char *filename, std::string contents) -> void
 {
     auto file = m_state.find(filename);
     if (file == end(m_state)) {
@@ -70,6 +70,7 @@ auto FakeFile::sync() -> Status
 
 auto FakeFile::shm_map(size_t r, bool, volatile void *&out) -> Status
 {
+    out = nullptr;
     while (m_shm.size() <= r) {
         m_shm.emplace_back();
         m_shm.back().resize(File::kShmRegionSize);
@@ -85,12 +86,13 @@ auto FakeFile::shm_unmap(bool unlink) -> void
     }
 }
 
-auto FakeEnv::new_logger(const std::string &, Logger *&) -> Status
+auto FakeEnv::new_logger(const char *, Logger *&logger_out) -> Status
 {
-    return Status::ok();
+    logger_out = nullptr;
+    return Status::not_supported();
 }
 
-auto FakeEnv::new_file(const std::string &filename, OpenMode mode, File *&out) -> Status
+auto FakeEnv::new_file(const char *filename, OpenMode mode, File *&out) -> Status
 {
     auto itr = m_state.find(filename);
     if (itr == end(m_state)) {
@@ -108,11 +110,11 @@ auto FakeEnv::new_file(const std::string &filename, OpenMode mode, File *&out) -
     return Status::ok();
 }
 
-auto FakeEnv::remove_file(const std::string &filename) -> Status
+auto FakeEnv::remove_file(const char *filename) -> Status
 {
     auto itr = m_state.find(filename);
     if (itr == end(m_state)) {
-        return Status::not_found('"' + filename + "\" does not exist");
+        return Status::not_found("file does not exist");
     }
     // Don't actually get rid of any memory. We should be able to unlink a file and still access it
     // through open file descriptors, so if anyone has this file open, they should still be able to
@@ -121,7 +123,7 @@ auto FakeEnv::remove_file(const std::string &filename) -> Status
     return Status::ok();
 }
 
-auto FakeEnv::file_size(const std::string &filename, size_t &out) const -> Status
+auto FakeEnv::file_size(const char *filename, size_t &out) const -> Status
 {
     auto itr = m_state.find(filename);
     if (itr == cend(m_state) || !itr->second.created) {
@@ -131,7 +133,7 @@ auto FakeEnv::file_size(const std::string &filename, size_t &out) const -> Statu
     return Status::ok();
 }
 
-auto FakeEnv::file_exists(const std::string &filename) const -> bool
+auto FakeEnv::file_exists(const char *filename) const -> bool
 {
     if (const auto &itr = m_state.find(filename); itr != end(m_state)) {
         return itr->second.created;

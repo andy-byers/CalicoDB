@@ -5,6 +5,7 @@
 #ifndef CALICODB_PAGE_H
 #define CALICODB_PAGE_H
 
+#include "alloc.h"
 #include "header.h"
 #include "list.h"
 
@@ -49,12 +50,12 @@ struct PageRef {
         // out-of-bounds reads and writes that might occur if the database is corrupted.
         static constexpr size_t kSpilloverLen = alignof(PageRef);
 
-        auto *ref = static_cast<PageRef *>(std::aligned_alloc(
-            alignof(PageRef),
+        auto *ref = static_cast<PageRef *>(Alloc::alloc(
             sizeof(PageRef) +
                 sizeof(DirtyHdr) +
                 kPageSize +
-                kSpilloverLen));
+                kSpilloverLen,
+            alignof(PageRef)));
         if (ref) {
             *ref = {
                 reinterpret_cast<char *>(ref + 1) + sizeof(DirtyHdr),
@@ -80,7 +81,7 @@ struct PageRef {
 
     static auto free(PageRef *ref) -> void
     {
-        std::free(ref);
+        Alloc::free(ref);
     }
 
     [[nodiscard]] auto get_flag(Flag f) const -> bool

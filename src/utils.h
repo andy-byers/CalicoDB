@@ -59,6 +59,7 @@ auto busy_wait(BusyHandler *handler, const Callback &callback) -> Status
 
 static constexpr size_t kMinFrameCount = 1;
 static constexpr size_t kMaxCacheSize = 1 << 30;
+static constexpr size_t kTreeBufferLen = 3 * kPageSize;
 static constexpr auto kDefaultWalSuffix = "-wal";
 static constexpr auto kDefaultShmSuffix = "-shm";
 

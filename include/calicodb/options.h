@@ -29,7 +29,7 @@ struct Options final {
 
     // Alternate filename to use for the WAL. If empty, creates the WAL at
     // "dbname-wal", where "dbname" is the name of the database.
-    std::string wal_filename;
+    const char *wal_filename = "";
 
     // Destination for info log messages.
     Logger *info_log = nullptr;

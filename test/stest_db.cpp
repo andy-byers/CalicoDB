@@ -10,6 +10,7 @@
 #include "stest/sequence_scenario.h"
 #include "test.h"
 #include "tx_impl.h"
+#include <filesystem>
 #include <gtest/gtest.h>
 
 namespace calicodb::test
@@ -267,9 +268,9 @@ struct DatabaseState {
 
     auto check_status(uint32_t mask) const -> void
     {
-        ASSERT_EQ(mask, mask & (1 << s.code())) << s.to_string();
+        ASSERT_EQ(mask, mask & (1 << s.code())) << s.type_name() << ": " << s.message();
         if (tx) {
-            ASSERT_EQ(s, tx->status()) << tx->status().to_string();
+            ASSERT_EQ(s, tx->status()) << tx->status().type_name() << ": " << tx->status().message();
         }
     }
 
@@ -285,7 +286,7 @@ struct DatabaseState {
 
     auto open_db() -> void
     {
-        s = ModelDB::open(db_opt, filename, model_store, db);
+        s = ModelDB::open(db_opt, filename.c_str(), model_store, db);
     }
 
     auto close_db() -> void
@@ -795,9 +796,9 @@ protected:
 
     explicit STestDB()
     {
-        (void)Env::default_env().remove_file(m_state.filename);
-        (void)Env::default_env().remove_file(m_state.filename + kDefaultShmSuffix);
-        (void)Env::default_env().remove_file(m_state.filename + kDefaultWalSuffix);
+        std::filesystem::remove_all(m_state.filename);
+        std::filesystem::remove_all(m_state.filename + kDefaultShmSuffix);
+        std::filesystem::remove_all(m_state.filename + kDefaultWalSuffix);
     }
 
     auto TearDown() -> void override

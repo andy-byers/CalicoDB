@@ -60,14 +60,15 @@ public:
         return false;
     }
 
-    auto remove_file(const std::string &filename) -> Status override
+    auto remove_file(const char *filename) -> Status override
     {
         MAYBE_CRASH(this);
         return target()->remove_file(filename);
     }
 
-    auto new_file(const std::string &filename, OpenMode mode, File *&file_out) -> Status override
+    auto new_file(const char *filename, OpenMode mode, File *&file_out) -> Status override
     {
+        file_out = nullptr;
         MAYBE_CRASH(this);
 
         class CrashFile : public FileWrapper
@@ -82,7 +83,7 @@ public:
                 m_env->m_crashes_enabled = false;
 
                 size_t file_size;
-                ASSERT_OK(m_env->file_size(m_filename, file_size));
+                ASSERT_OK(m_env->file_size(m_filename.c_str(), file_size));
                 m_backup.resize(file_size);
                 ASSERT_OK(read_exact(0, file_size, m_backup.data()));
 
@@ -152,6 +153,7 @@ public:
 
             auto shm_map(size_t r, bool extend, volatile void *&out) -> Status override
             {
+                out = nullptr;
                 MAYBE_CRASH(m_env);
                 return FileWrapper::shm_map(r, extend, out);
             }
@@ -182,9 +184,12 @@ protected:
         : m_filename(testing::TempDir() + "calicodb_crashes"),
           m_env(new CrashEnv(Env::default_env()))
     {
-        (void)m_env->remove_file(m_filename);
-        (void)m_env->remove_file(m_filename + kDefaultShmSuffix);
-        (void)m_env->remove_file(m_filename + kDefaultWalSuffix);
+        auto db_name = m_filename;
+        auto shm_name = m_filename + kDefaultWalSuffix;
+        auto wal_name = m_filename + kDefaultShmSuffix;
+        (void)m_env->remove_file(db_name.c_str());
+        (void)m_env->remove_file(shm_name.c_str());
+        (void)m_env->remove_file(wal_name.c_str());
     }
 
     ~CrashTests() override
@@ -212,7 +217,8 @@ protected:
     // Check if a status is an injected fault
     static auto is_injected_fault(const Status &s) -> bool
     {
-        return s.to_string() == "I/O error: <FAULT>";
+        return s.code() == Status::kIOError &&
+               0 == std::strcmp(s.message(), "<FAULT>");
     }
 
     [[nodiscard]] static auto writer_task(Tx &tx, size_t iteration) -> Status
@@ -341,7 +347,7 @@ protected:
 
     static auto validate(DB &db)
     {
-        db_impl(&db)->TEST_pager().assert_state();
+        reinterpret_cast<DBImpl &>(db).TEST_pager().assert_state();
     }
 
     struct OperationsParameters {
@@ -373,7 +379,7 @@ protected:
         // the fault.
         m_env->m_drop_unsynced = param.test_sync_mode;
 
-        (void)DB::destroy(options, m_filename);
+        (void)DB::destroy(options, m_filename.c_str());
 
         for (size_t i = 0; i < kNumIterations; ++i) {
             m_env->m_crashes_enabled = param.inject_faults;
@@ -381,7 +387,7 @@ protected:
             DB *db;
             run_until_completion([this, &options, &db, &src_counters] {
                 ++src_counters[kSrcOpen];
-                auto s = DB::open(options, m_filename, db);
+                auto s = DB::open(options, m_filename.c_str(), db);
                 if (!s.is_ok()) {
                     EXPECT_TRUE(is_injected_fault(s));
                 }
@@ -437,10 +443,10 @@ protected:
         size_t tries = 0;
         for (size_t i = 0; i < param.num_iterations; ++i) {
             m_env->m_crashes_enabled = false;
-            (void)DB::destroy(options, m_filename);
+            (void)DB::destroy(options, m_filename.c_str());
 
             DB *db;
-            ASSERT_OK(DB::open(options, m_filename, db));
+            ASSERT_OK(DB::open(options, m_filename.c_str(), db));
 
             m_env->m_crashes_enabled = param.inject_faults;
             m_env->m_max_num = static_cast<int>(i * 5);
@@ -450,7 +456,7 @@ protected:
 
             run_until_completion([this, &options, &db, &tries] {
                 ++tries;
-                auto s = DB::open(options, m_filename, db);
+                auto s = DB::open(options, m_filename.c_str(), db);
                 if (!s.is_ok()) {
                     EXPECT_TRUE(is_injected_fault(s));
                 }
@@ -474,11 +480,11 @@ protected:
         options.env = m_env;
         options.sync_mode = Options::kSyncFull;
 
-        (void)DB::destroy(options, m_filename);
+        (void)DB::destroy(options, m_filename.c_str());
 
         for (size_t i = 0; i < kNumIterations; ++i) {
             DB *db;
-            ASSERT_OK(DB::open(options, m_filename, db));
+            ASSERT_OK(DB::open(options, m_filename.c_str(), db));
             ASSERT_OK(db->update([](auto &tx) {
                 TestCursor c, keep_open;
                 auto s = test_create_and_open_bucket(tx, BucketOptions(), "BUCKET", c);
@@ -567,14 +573,14 @@ protected:
         // the fault.
         m_env->m_drop_unsynced = param.test_sync_mode;
 
-        (void)DB::destroy(options, m_filename);
+        (void)DB::destroy(options, m_filename.c_str());
 
         for (size_t i = 0; i < kNumIterations; ++i) {
             m_env->m_crashes_enabled = param.inject_faults;
 
             DB *db;
             run_until_completion([this, &options, &db] {
-                auto s = DB::open(options, m_filename, db);
+                auto s = DB::open(options, m_filename.c_str(), db);
                 if (!s.is_ok()) {
                     EXPECT_TRUE(is_injected_fault(s));
                 }
@@ -815,7 +821,7 @@ public:
     ~DataLossEnv() override = default;
 
     // WARNING: m_drop_file must be set before this method is called
-    auto new_file(const std::string &filename, OpenMode mode, File *&file_out) -> Status override
+    auto new_file(const char *filename, OpenMode mode, File *&file_out) -> Status override
     {
         auto s = target()->new_file(filename, mode, file_out);
         if (s.is_ok()) {
@@ -835,10 +841,10 @@ TEST(DataLossEnvTests, NormalOperations)
 {
     const auto filename = testing::TempDir() + "calicodb_data_loss_env_tests";
     DataLossEnv env(Env::default_env());
-    (void)env.remove_file(filename);
+    (void)env.remove_file(filename.c_str());
 
     File *file;
-    ASSERT_OK(env.new_file(filename, Env::kCreate | Env::kReadWrite, file));
+    ASSERT_OK(env.new_file(filename.c_str(), Env::kCreate | Env::kReadWrite, file));
 
     ASSERT_OK(file->write(0, "0123"));
     ASSERT_OK(file->write(4, "4567"));
@@ -855,20 +861,20 @@ TEST(DataLossEnvTests, NormalOperations)
         ASSERT_OK(file->sync());
     }
     delete file;
-    ASSERT_OK(env.remove_file(filename));
+    ASSERT_OK(env.remove_file(filename.c_str()));
 }
 
 TEST(DataLossEnvTests, DroppedWrites)
 {
     const auto filename = testing::TempDir() + "calicodb_data_loss_env_tests";
     DataLossEnv env(Env::default_env());
-    (void)env.remove_file(filename);
+    (void)env.remove_file(filename.c_str());
 
     env.m_drop_file = filename;
     env.m_loss_type = DataLossEnv::kLoseEarly;
 
     File *file;
-    ASSERT_OK(env.new_file(filename, Env::kCreate | Env::kReadWrite, file));
+    ASSERT_OK(env.new_file(filename.c_str(), Env::kCreate | Env::kReadWrite, file));
 
     ASSERT_OK(file->write(0, "0123"));
     ASSERT_OK(file->write(4, "4567"));
@@ -916,7 +922,7 @@ TEST(DataLossEnvTests, DroppedWrites)
     ASSERT_TRUE(read.is_empty());
 
     delete file;
-    ASSERT_OK(env.remove_file(filename));
+    ASSERT_OK(env.remove_file(filename.c_str()));
 }
 
 class DataLossTests : public testing::Test
@@ -953,7 +959,7 @@ public:
         options.env = m_env;
         options.auto_checkpoint = 0;
         options.sync_mode = Options::kSyncFull;
-        ASSERT_OK(DB::open(options, m_filename, m_db));
+        ASSERT_OK(DB::open(options, m_filename.c_str(), m_db));
     }
 
     struct DropParameters {

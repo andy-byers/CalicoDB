@@ -90,7 +90,7 @@ protected:
     explicit StressTests()
         : m_filename(testing::TempDir() + "db")
     {
-        (void)DB::destroy(Options(), m_filename);
+        (void)DB::destroy(Options(), m_filename.c_str());
     }
 
     ~StressTests() override
@@ -100,7 +100,7 @@ protected:
 
     auto SetUp() -> void override
     {
-        ASSERT_OK(DB::open(Options(), m_filename, m_db));
+        ASSERT_OK(DB::open(Options(), m_filename.c_str(), m_db));
     }
 };
 
@@ -197,7 +197,8 @@ TEST_F(StressTests, LargeVacuum)
             TestCursor c;
             s = test_open_bucket(tx, numeric_key(i), c);
             if (i < kDroppedBuckets) {
-                EXPECT_TRUE(s.is_invalid_argument()) << s.to_string();
+                EXPECT_TRUE(s.is_invalid_argument()) << s.type_name() << ": "
+                                                     << s.message();
                 s = Status::ok();
             } else if (s.is_ok()) {
                 c->seek_first();

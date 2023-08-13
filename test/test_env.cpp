@@ -17,47 +17,6 @@
 namespace calicodb::test
 {
 
-TEST(PathParserTests, ExtractsDirnames)
-{
-    // NOTE: Expects the POSIX version of dirname().
-    ASSERT_EQ(split_path("dirname/basename").first, "dirname");
-    ASSERT_EQ(split_path(".dirname/basename").first, ".dirname");
-    ASSERT_EQ(split_path(".dirname.ext/basename").first, ".dirname.ext");
-    ASSERT_EQ(split_path("/dirname/basename").first, "/dirname");
-    ASSERT_EQ(split_path("/dirname/extra/basename").first, "/dirname/extra");
-    ASSERT_EQ(split_path("/dirname/extra.ext/basename").first, "/dirname/extra.ext");
-    ASSERT_EQ(split_path("/dirname///basename//").first, "/dirname");
-    ASSERT_EQ(split_path("basename").first, ".");
-    ASSERT_EQ(split_path("basename/").first, ".");
-    ASSERT_EQ(split_path("/basename").first, "/");
-    ASSERT_EQ(split_path("/basename/").first, "/"); // basename() strips trailing '/'.
-    ASSERT_EQ(split_path("").first, ".");
-    ASSERT_EQ(split_path("/").first, "/");
-}
-
-TEST(PathParserTests, ExtractsBasenames)
-{
-    ASSERT_EQ(split_path("dirname/basename").second, "basename");
-    ASSERT_EQ(split_path("dirname/.basename").second, ".basename");
-    ASSERT_EQ(split_path(".dirname/basename").second, "basename");
-    ASSERT_EQ(split_path("/dirname/basename").second, "basename");
-    ASSERT_EQ(split_path("/dirname/basename.ext").second, "basename.ext");
-    ASSERT_EQ(split_path("/dirname/extra/basename").second, "basename");
-    ASSERT_EQ(split_path("/dirname/extra.ext/basename").second, "basename");
-    ASSERT_EQ(split_path("basename").second, "basename");
-    ASSERT_EQ(split_path("basename/").second, "basename");
-    ASSERT_EQ(split_path("/basename").second, "basename");
-    ASSERT_EQ(split_path("/basename/").second, "basename");
-    ASSERT_EQ(split_path("").second, ".");
-    // basename == dirname in this case. We can still join the components to get a valid path.
-    ASSERT_EQ(split_path("/").second, "/");
-}
-
-TEST(PathParserTests, JoinsComponents)
-{
-    ASSERT_EQ(join_paths("dirname", "basename"), "dirname/basename");
-}
-
 static auto make_filename(size_t n)
 {
     return numeric_key<10>(n);
@@ -90,7 +49,7 @@ static auto write_out_randomly(RandomGenerator &random, File &writer, const Slic
     while (counter < size) {
         const auto chunk_size = std::min<size_t>(size - counter, random.Next(size / kChunks));
         const auto s = reader.read_exact(counter, chunk_size, out_data);
-        EXPECT_TRUE(s.is_ok()) << "Error: " << s.to_string().data();
+        EXPECT_TRUE(s.is_ok()) << "Error: " << s.type_name() << ": " << s.message();
         out_data += chunk_size;
         counter += chunk_size;
     }
@@ -128,7 +87,7 @@ struct EnvWithFiles final {
     {
         File *file;
         const auto filename = m_dirname + make_filename(id);
-        EXPECT_TRUE(env->new_file(filename, mode, file).is_ok())
+        EXPECT_TRUE(env->new_file(filename.c_str(), mode, file).is_ok())
             << "failed to " << ((mode & Env::kCreate) ? "create" : "open") << " file \"" << filename << '"';
         if (clear) {
             EXPECT_OK(file->resize(0));
@@ -356,7 +315,7 @@ protected:
         delete m_logger;
         m_logger = nullptr;
         std::filesystem::remove_all(m_log_filename);
-        ASSERT_OK(Env::default_env().new_logger(m_log_filename, m_logger));
+        ASSERT_OK(Env::default_env().new_logger(m_log_filename.c_str(), m_logger));
     }
 
     const std::string m_log_filename;
@@ -366,15 +325,15 @@ protected:
 TEST_F(LoggerTests, LogNullptrIsNOOP)
 {
     log(nullptr, "nothing %d", 42);
-    ASSERT_TRUE(read_file_to_string(Env::default_env(), m_log_filename).empty());
+    ASSERT_TRUE(read_file_to_string(Env::default_env(), m_log_filename.c_str()).empty());
 }
 
 TEST_F(LoggerTests, LogsFormattedText)
 {
     log(m_logger, "%u foo", 123);
-    const auto msg1 = read_file_to_string(Env::default_env(), m_log_filename);
+    const auto msg1 = read_file_to_string(Env::default_env(), m_log_filename.c_str());
     log(m_logger, "bar %d", 42);
-    const auto msg2 = read_file_to_string(Env::default_env(), m_log_filename);
+    const auto msg2 = read_file_to_string(Env::default_env(), m_log_filename.c_str());
 
     // Make sure both text and header info were written.
     ASSERT_EQ(kHdrLen, msg1.find("123 foo\n"));
@@ -392,7 +351,7 @@ TEST_F(LoggerTests, HandlesMessages)
         msg.resize(n, '$');
         log(m_logger, "%s", msg.c_str());
 
-        const auto res = read_file_to_string(Env::default_env(), m_log_filename);
+        const auto res = read_file_to_string(Env::default_env(), m_log_filename.c_str());
         ASSERT_EQ(msg + '\n', res.substr(kHdrLen)); // Account for the datetime header and trailing newline.
     }
 }
@@ -406,7 +365,7 @@ TEST_F(LoggerTests, HandlesLongMessages)
         msg.resize(n, '$');
         log(m_logger, "%s", msg.c_str());
 
-        const auto res = read_file_to_string(Env::default_env(), m_log_filename);
+        const auto res = read_file_to_string(Env::default_env(), m_log_filename.c_str());
         ASSERT_EQ(msg + '\n', res.substr(kHdrLen)); // Account for the datetime header and trailing newline.
     }
 }
@@ -426,10 +385,10 @@ public:
 
     ~EnvLockStateTests() override
     {
-        (void)m_env->remove_file(m_filename);
+        (void)m_env->remove_file(m_filename.c_str());
     }
 
-    auto new_file(const std::string &filename) -> File *
+    auto new_file(const char *filename) -> File *
     {
         File *file;
         EXPECT_OK(m_env->new_file(
@@ -442,7 +401,7 @@ public:
 
     auto test_sequence(bool) -> void
     {
-        auto *f = new_file(m_filename);
+        auto *f = new_file(m_filename.c_str());
         ASSERT_OK(f->file_lock(kFileShared));
         ASSERT_OK(f->file_lock(kFileExclusive));
         f->file_unlock();
@@ -450,9 +409,9 @@ public:
 
     auto test_shared() -> void
     {
-        auto *a = new_file(m_filename);
-        auto *b = new_file(m_filename);
-        auto *c = new_file(m_filename);
+        auto *a = new_file(m_filename.c_str());
+        auto *b = new_file(m_filename.c_str());
+        auto *c = new_file(m_filename.c_str());
         ASSERT_OK(a->file_lock(kFileShared));
         ASSERT_OK(b->file_lock(kFileShared));
         ASSERT_OK(c->file_lock(kFileShared));
@@ -463,8 +422,8 @@ public:
 
     auto test_exclusive() -> void
     {
-        auto *a = new_file(m_filename);
-        auto *b = new_file(m_filename);
+        auto *a = new_file(m_filename.c_str());
+        auto *b = new_file(m_filename.c_str());
 
         ASSERT_OK(a->file_lock(kFileShared));
         ASSERT_OK(a->file_lock(kFileExclusive));
@@ -512,7 +471,7 @@ TEST_P(EnvLockStateTests, Exclusive)
 
 TEST_P(EnvLockStateTests, NOOPs)
 {
-    auto *f = new_file(m_filename);
+    auto *f = new_file(m_filename.c_str());
 
     ASSERT_OK(f->file_lock(kFileShared));
     ASSERT_OK(f->file_lock(kFileShared));
@@ -530,7 +489,7 @@ TEST_P(EnvLockStateTests, NOOPs)
 #ifndef NDEBUG
 TEST_P(EnvLockStateTests, InvalidRequestDeathTest)
 {
-    auto *f = new_file(m_filename);
+    auto *f = new_file(m_filename.c_str());
     // kUnlocked -> kShared is the only allowed transition out of kUnlocked.
     ASSERT_DEATH((void)f->file_lock(kFileExclusive), "");
 }
@@ -671,7 +630,7 @@ static auto busy_wait_shm_lock(File &file, size_t r, size_t n, ShmLockFlag flags
         if (s.is_ok()) {
             return;
         } else if (!s.is_busy()) {
-            ADD_FAILURE() << s.to_string();
+            ADD_FAILURE() << s.type_name() << ": " << s.message();
         }
         std::this_thread::yield();
     }
@@ -688,7 +647,7 @@ static auto file_reader_writer_test_routine(Env &, File &file, bool is_writer) -
     }
     file.file_unlock();
 }
-static auto shm_lifetime_test_routine(Env &env, const std::string &filename, bool unlink) -> void
+static auto shm_lifetime_test_routine(Env &env, const char *filename, bool unlink) -> void
 {
     File *file;
     ASSERT_OK(env.new_file(filename, Env::kCreate, file));
@@ -729,7 +688,7 @@ public:
     explicit SharedCount(Env &env, const std::string &name)
     {
         volatile void *ptr;
-        EXPECT_OK(env.new_file(name, Env::kCreate | Env::kReadWrite, m_file));
+        EXPECT_OK(env.new_file(name.c_str(), Env::kCreate | Env::kReadWrite, m_file));
         EXPECT_OK(m_file->shm_map(0, true, ptr));
         EXPECT_TRUE(ptr);
         m_ptr = reinterpret_cast<volatile uint32_t *>(ptr);
@@ -796,7 +755,8 @@ public:
         // Create the file and zero out the version.
         auto &tempenv = Env::default_env();
         File *tempfile;
-        ASSERT_OK(tempenv.new_file(m_dirname + "/0000000000", Env::kCreate, tempfile));
+        const auto filename = m_dirname + "/0000000000";
+        ASSERT_OK(tempenv.new_file(filename.c_str(), Env::kCreate, tempfile));
         write_file_version(*tempfile, 0);
         delete tempfile;
     }
@@ -875,8 +835,9 @@ public:
             while (threads.size() < kNumThreads) {
                 threads.emplace_back([this, unlink] {
                     for (size_t r = 0; r < kNumRounds; ++r) {
+                        const auto filename = m_dirname + make_filename(0);
                         shm_lifetime_test_routine(
-                            *m_helper.env, m_dirname + make_filename(0), unlink);
+                            *m_helper.env, filename.c_str(), unlink);
                     }
                 });
             }
@@ -901,7 +862,8 @@ public:
 
         auto &env = Env::default_env();
         File *file; // Keep this shm open to read from at the end...
-        ASSERT_OK(env.new_file(m_dirname + "0000000000", Env::kCreate, file));
+        const auto filename = m_dirname + "0000000000";
+        ASSERT_OK(env.new_file(filename.c_str(), Env::kCreate, file));
         ASSERT_OK(file->resize(0));
         volatile void *ptr;
         ASSERT_OK(file->shm_map(0, true, ptr));
@@ -1054,7 +1016,7 @@ TEST(EnvWrappers, WrapperEnvWorksAsExpected)
     File *file;
     Logger *sink;
     ASSERT_OK(w_env.new_file("file", Env::kCreate, file));
-    ASSERT_OK(w_env.new_logger("sink", sink));
+    ASSERT_TRUE(w_env.new_logger("sink", sink).is_not_supported());
     ASSERT_TRUE(w_env.file_exists("file"));
     volatile void *ptr;
     delete file;

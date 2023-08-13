@@ -29,15 +29,15 @@
 #define CHECK_FALSE(cond) \
     CHECK_TRUE(!(cond))
 
-#define CHECK_OK(expr)                                             \
-    do {                                                           \
-        if (auto assert_s = (expr); !assert_s.is_ok()) {           \
-            std::fprintf(                                          \
-                stderr,                                            \
-                "expected `(" #expr ").is_ok()` but got \"%s\"\n", \
-                assert_s.to_string().c_str());                     \
-            std::abort();                                          \
-        }                                                          \
+#define CHECK_OK(expr)                                                 \
+    do {                                                               \
+        if (auto assert_s = (expr); !assert_s.is_ok()) {               \
+            std::fprintf(                                              \
+                stderr,                                                \
+                "expected `(" #expr ").is_ok()` but got \"%s: %s\"\n", \
+                assert_s.type_name(), assert_s.message());             \
+            std::abort();                                              \
+        }                                                              \
     } while (0)
 
 #define CHECK_EQ(lhs, rhs)                                                                             \
@@ -60,7 +60,7 @@ class ModelDB : public DB
     DB *const m_db;
 
 public:
-    static auto open(const Options &options, const std::string &filename, KVStore &store, DB *&db_out) -> Status;
+    static auto open(const Options &options, const char *filename, KVStore &store, DB *&db_out) -> Status;
 
     explicit ModelDB(KVStore &store, DB &db)
         : m_store(&store),

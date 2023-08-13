@@ -80,7 +80,7 @@ s = calicodb::Status::ok();
 std::printf("code = %d, subcode = %d\n", int(s.code()), int(s.subcode()));
 
 // A human-readable string representing the status can be created with:
-std::printf("s = %s\n", s.to_string().c_str());
+std::printf("s = %s: %s\n", s.type_name(), s.message());
 
 // Non-OK statuses must be created through one of the static methods. Note that a status can 
 // have either a message, or a subcode, but not both.

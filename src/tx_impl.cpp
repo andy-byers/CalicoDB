@@ -9,11 +9,12 @@
 namespace calicodb
 {
 
-TxImpl::TxImpl(Pager &pager, const Status &status, Stat &stat, char *scratch, bool writable)
-    : m_schema(pager, status, stat, scratch),
-      m_status(&status),
-      m_pager(&pager),
-      m_writable(writable)
+TxImpl::TxImpl(const Parameters &param)
+    : m_schema(*param.pager, *param.status, *param.stat, param.scratch),
+      m_errors(param.errors),
+      m_status(param.status),
+      m_pager(param.pager),
+      m_writable(param.writable)
 {
 }
 

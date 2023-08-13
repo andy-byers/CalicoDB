@@ -3,6 +3,7 @@
 // LICENSE.md. See AUTHORS.md for a list of contributor names.
 
 #include "pager.h"
+#include "alloc.h"
 #include "calicodb/env.h"
 #include "freelist.h"
 #include "header.h"
@@ -90,14 +91,14 @@ auto Pager::open(const Parameters &param, Pager *&pager_out) -> Status
     CALICODB_EXPECT_LE(param.frame_count * kPageSize, kMaxCacheSize);
 
     Status s;
-    pager_out = new (std::nothrow) Pager(param);
+    pager_out = Alloc::new_object<Pager>(param);
     if (pager_out == nullptr ||
         pager_out->m_bufmgr.root() == nullptr ||
         pager_out->m_bufmgr.m_num_buffers != param.frame_count) {
         s = Status::no_memory();
     }
     if (!s.is_ok()) {
-        delete pager_out;
+        Alloc::delete_object(pager_out);
         pager_out = nullptr;
     }
     return s;
@@ -139,10 +140,11 @@ Pager::~Pager()
     // Regardless of lock mode, this is where the database file lock is released. The
     // database file should not be accessed after this point.
     m_file->file_unlock();
-    delete m_wal;
+    Alloc::delete_object(m_wal);
 
     if (!s.is_ok()) {
-        log(m_log, "failed to close pager: %s", s.to_string().c_str());
+        log(m_log, "failed to close pager due to %s (%s)",
+            s.type_name(), s.message());
     }
 }
 
@@ -392,9 +394,7 @@ auto Pager::allocate(PageRef *&page_out) -> Status
 
     static constexpr uint32_t kMaxPageCount = 0xFF'FF'FF'FF;
     if (m_page_count == kMaxPageCount) {
-        std::string message("reached the maximum allowed DB size (~");
-        append_number(message, kMaxPageCount * kPageSize / 1'048'576);
-        return Status::not_supported(message + " MB)");
+        return Status::not_supported("reached the maximum allowed DB size");
     }
 
     // Try to get a page from the freelist first.
@@ -582,7 +582,7 @@ auto Pager::set_status(const Status &error) const -> void
         *m_status = error;
         m_mode = kError;
 
-        log(m_log, "pager error: %s", error.to_string().c_str());
+        log(m_log, "pager error: %s (%s)", error.type_name(), error.message());
     }
 }
 

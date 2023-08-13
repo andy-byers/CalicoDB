@@ -11,7 +11,7 @@
 namespace calicodb
 {
 
-auto ModelDB::open(const Options &options, const std::string &filename, KVStore &store, DB *&db_out) -> Status
+auto ModelDB::open(const Options &options, const char *filename, KVStore &store, DB *&db_out) -> Status
 {
     DB *db;
     auto s = DB::open(options, filename, db);

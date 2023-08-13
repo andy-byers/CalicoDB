@@ -3,6 +3,7 @@
 // LICENSE.md. See AUTHORS.md for a list of contributor names.
 
 #include "wal.h"
+#include "alloc.h"
 #include "calicodb/db.h"
 #include "calicodb/env.h"
 #include "encoding.h"
@@ -131,9 +132,10 @@ static constexpr auto next_index_hash(Hash hash) -> Hash
 
 static auto too_many_collisions(Key key) -> Status
 {
-    std::string message;
-    append_fmt_string(message, "too many WAL index collisions for page %u", key);
-    return Status::corruption(message);
+    (void)key;
+    //    std::string message;
+    //    append_fmt_string(message, "too many WAL index collisions for page %u", key);
+    return Status::corruption("message");
 }
 
 struct HashGroup {
@@ -284,20 +286,23 @@ auto HashIndex::map_group(size_t group_number, bool extend) -> Status
     while (group_number >= m_groups.size()) {
         m_groups.emplace_back();
     }
+    Status s;
     if (m_groups[group_number] == nullptr) {
         volatile void *ptr;
         if (m_file) {
-            CALICODB_TRY(m_file->shm_map(group_number, extend, ptr));
+            s = m_file->shm_map(group_number, extend, ptr);
         } else {
-            auto *buf = new char[File::kShmRegionSize];
-            if (group_number == 0) {
+            auto *buf = Alloc::alloc(File::kShmRegionSize);
+            if (buf == nullptr) {
+                s = Status::no_memory();
+            } else if (group_number == 0) {
                 std::memset(buf, 0, kIndexHdrSize);
             }
             ptr = buf;
         }
         m_groups[group_number] = reinterpret_cast<volatile char *>(ptr);
     }
-    return Status::ok();
+    return s;
 }
 
 auto HashIndex::groups() const -> const std::vector<volatile char *> &
@@ -432,7 +437,7 @@ HashIterator::HashIterator(HashIndex &source)
 
 HashIterator::~HashIterator()
 {
-    operator delete(m_state, std::align_val_t{alignof(State)});
+    Alloc::free(reinterpret_cast<char *>(m_state));
 }
 
 auto HashIterator::init(uint32_t backfill) -> Status
@@ -445,20 +450,38 @@ auto HashIterator::init(uint32_t backfill) -> Status
 
     static_assert(std::is_pod_v<State>);
     static_assert(std::is_pod_v<State::Group>);
-    static_assert(0 == (alignof(State) & (alignof(Hash) - 1)));
+    static_assert(alignof(State) == Alloc::kMinAlignment);
+    static_assert(alignof(State) == alignof(State::Group));
 
     // Allocate internal buffers.
+    static constexpr size_t kAlignmentMask = Alloc::kMinAlignment - 1;
     m_num_groups = index_group_number(last_value) + 1;
-    const auto state_size =
+    const auto min_state_size =
         sizeof(State) +                             // Includes storage for 1 group ("groups[1]").
         (m_num_groups - 1) * sizeof(State::Group) + // Additional groups.
         last_value * sizeof(Hash);                  // Indices to sort.
-    m_state = static_cast<State *>(
-        operator new(state_size, std::align_val_t{alignof(State)}));
+    auto round_up = alignof(State) - (min_state_size & kAlignmentMask);
+    const auto state_size = min_state_size + (round_up & kAlignmentMask);
+    m_state = static_cast<State *>(Alloc::alloc(state_size, alignof(State)));
+    if (m_state == nullptr) {
+        return Status::no_memory();
+    }
     std::memset(m_state, 0, state_size);
 
-    // Temporary buffer for the mergesort routine. Freed before returning from this routine.
-    auto *temp = new Hash[last_value < kNIndexKeys ? last_value : kNIndexKeys]();
+    // Temporary buffer for mergesort. Freed before returning from this routine. Possibly a bit
+    // larger than necessary due to platform alignment requirements (see alloc.h).
+    const auto min_temp_size = (last_value < kNIndexKeys
+                                    ? last_value
+                                    : kNIndexKeys) *
+                               sizeof(Hash);
+    round_up = Alloc::kMinAlignment - (min_temp_size & kAlignmentMask);
+    const auto temp_size = min_temp_size + (round_up & kAlignmentMask);
+    auto *temp = static_cast<Hash *>(Alloc::alloc(
+        temp_size, Alloc::kMinAlignment));
+    if (temp == nullptr) {
+        return Status::no_memory();
+    }
+    std::memset(temp, 0, temp_size);
 
     Status s;
     for (uint32_t i = index_group_number(backfill + 1); i < m_num_groups; ++i) {
@@ -476,7 +499,9 @@ auto HashIterator::init(uint32_t backfill) -> Status
         }
 
         // Pointer into the special index buffer located right after the group array.
-        auto *index = reinterpret_cast<Hash *>(&m_state->groups[m_num_groups]) + group.base;
+        auto *index = reinterpret_cast<Hash *>(
+                          &m_state->groups[m_num_groups]) +
+                      group.base;
 
         for (size_t j = 0; j < group_size; ++j) {
             index[j] = static_cast<Hash>(j);
@@ -492,7 +517,7 @@ auto HashIterator::init(uint32_t backfill) -> Status
             group.base + 1,
         };
     }
-    delete[] temp;
+    Alloc::free(temp);
     return s;
 }
 
@@ -620,8 +645,8 @@ public:
         if (s.is_ok()) {
             s = m_env->remove_file(m_wal_name);
             if (!s.is_ok()) {
-                log(m_log, R"(failed to unlink WAL at "%s": %s)",
-                    m_wal_name, s.to_string().c_str());
+                log(m_log, R"(failed to unlink WAL at "%s": %s (%s))",
+                    m_wal_name, s.type_name(), s.message());
             }
         }
         m_index.close();
@@ -793,13 +818,13 @@ private:
             }
         }
         if (success && m_hdr.version != kWalVersion) {
-            std::string message;
-            append_fmt_string(
-                message,
-                "version mismatch (encountered %u but expected %u)",
-                m_hdr.version,
-                kWalVersion);
-            return Status::not_supported(message);
+            //            std::string message;
+            //            append_fmt_string(
+            //                message,
+            //                "version mismatch (encountered %u but expected %u)",
+            //                m_hdr.version,
+            //                kWalVersion);
+            return Status::not_supported("message");
         }
         return s;
     }
@@ -1032,7 +1057,7 @@ auto Wal::open(const Parameters &param, Wal *&wal_out) -> Status
     File *wal_file;
     auto s = param.env->new_file(param.filename, Env::kCreate, wal_file);
     if (s.is_ok()) {
-        wal_out = new (std::nothrow) WalImpl(param, *wal_file);
+        wal_out = Alloc::new_object<WalImpl>(param, *wal_file);
         if (wal_out == nullptr) {
             s = Status::no_memory();
         }
@@ -1058,7 +1083,7 @@ WalImpl::WalImpl(const Parameters &param, File &wal_file)
 
 WalImpl::~WalImpl()
 {
-    delete m_wal;
+    Alloc::delete_object(m_wal);
     m_index.close();
 }
 
@@ -1178,9 +1203,9 @@ auto WalImpl::recover_index() -> Status
             // if the version number is understood.
             const auto version = get_u32(&header[4]);
             if (version != kWalVersion) {
-                std::string message;
-                append_fmt_string(message, "found WAL version %u but expected %u", version, kWalVersion);
-                return cleanup(Status::invalid_argument(message));
+                //                std::string message;
+                //                append_fmt_string(message, "found WAL version %u but expected %u", version, kWalVersion);
+                return cleanup(Status::invalid_argument("message"));
             }
 
             const auto last_frame = static_cast<uint32_t>((file_size - kWalHdrSize) / kFrameSize);

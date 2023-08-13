@@ -3,6 +3,7 @@
 // LICENSE.md. See AUTHORS.md for a list of contributor names.
 
 #include "temp.h"
+#include "alloc.h"
 #include "page.h"
 #include "stat.h"
 #include "wal.h"
@@ -20,13 +21,13 @@ class TempEnv : public Env
 public:
     ~TempEnv() override = default;
 
-    auto new_logger(const std::string &, Logger *&logger_out) -> Status override
+    auto new_logger(const char *, Logger *&logger_out) -> Status override
     {
         logger_out = nullptr;
         return Status::ok();
     }
 
-    auto new_file(const std::string &filename, OpenMode, File *&file_out) -> Status override
+    auto new_file(const char *filename, OpenMode, File *&file_out) -> Status override
     {
         class TempFile : public File
         {
@@ -108,14 +109,13 @@ public:
             auto file_unlock() -> void override {}
         };
         CALICODB_EXPECT_TRUE(m_file.name.empty());
-        CALICODB_EXPECT_FALSE(filename.empty());
         m_file.name = filename;
 
-        file_out = new TempFile(m_file);
-        return Status::ok();
+        file_out = new (std::nothrow) TempFile(m_file);
+        return file_out ? Status::ok() : Status::no_memory();
     }
 
-    auto file_size(const std::string &filename, size_t &size_out) const -> Status override
+    auto file_size(const char *filename, size_t &size_out) const -> Status override
     {
         if (file_exists(filename)) {
             size_out = m_file.pages.size() * kPageSize;
@@ -124,7 +124,7 @@ public:
         return Status::invalid_argument();
     }
 
-    auto remove_file(const std::string &filename) -> Status override
+    auto remove_file(const char *filename) -> Status override
     {
         if (file_exists(filename)) {
             m_file.name.clear();
@@ -133,7 +133,7 @@ public:
         return Status::invalid_argument();
     }
 
-    [[nodiscard]] auto file_exists(const std::string &filename) const -> bool override
+    [[nodiscard]] auto file_exists(const char *filename) const -> bool override
     {
         return !m_file.name.empty() && m_file.name == filename;
     }
@@ -186,7 +186,7 @@ private:
 
 auto new_temp_env() -> Env *
 {
-    return new TempEnv;
+    return new(std::nothrow) TempEnv;
 }
 
 class TempWal : public Wal
@@ -302,7 +302,7 @@ private:
 
 auto new_temp_wal(const Wal::Parameters &param) -> Wal *
 {
-    return new (std::nothrow) TempWal(reinterpret_cast<TempEnv &>(*param.env), *param.stat);
+    return Alloc::new_object<TempWal>(reinterpret_cast<TempEnv &>(*param.env), *param.stat);
 }
 
 } // namespace calicodb

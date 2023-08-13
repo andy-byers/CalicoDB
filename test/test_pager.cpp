@@ -311,7 +311,7 @@ protected:
             s = m_env->new_file("wal", Env::kReadWrite, m_wal_file);
         }
         if (!s.is_ok()) {
-            ADD_FAILURE() << s.to_string();
+            ADD_FAILURE() << s.type_name() << ": " << s.message();
             delete m_file;
             return false;
         }

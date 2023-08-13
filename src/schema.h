@@ -5,8 +5,8 @@
 #ifndef CALICODB_SCHEMA_H
 #define CALICODB_SCHEMA_H
 
-#include "calicodb/cursor.h"
 #include "calicodb/db.h"
+#include "cursor_impl.h"
 #include "tree.h"
 #include "utils.h"
 #include <unordered_map>
@@ -25,11 +25,10 @@ class Schema final
 {
 public:
     explicit Schema(Pager &pager, const Status &status, Stat &stat, char *scratch);
-    ~Schema() = default;
 
     [[nodiscard]] auto cursor() -> Cursor &
     {
-        return *m_cursor;
+        return *m_schema;
     }
 
     auto close() -> void;
@@ -49,7 +48,7 @@ public:
 
 private:
     [[nodiscard]] auto decode_and_check_root_id(const Slice &data, Id &out) -> bool;
-    auto corrupted_root_id(const Slice &name, const Slice &value) -> Status;
+    auto corrupted_root_id() -> Status;
     auto construct_or_reference_tree(Id root_id) -> Tree *;
 
     template <class T>
@@ -76,9 +75,14 @@ private:
     Pager *const m_pager;
     char *const m_scratch;
     Stat *const m_stat;
-    Tree m_map;
 
-    CursorImpl *const m_cursor;
+    // The schema tree and a cursor over its contents. When m_cursor.is_valid(),
+    // m_cursor.value() returns a non-human-readable string containing information
+    // about the bucket that m_cursor is positioned on.
+    Tree m_map;
+    CursorImpl m_cursor;
+
+    // Wrapper over m_cursor, returns a human-readable string for Cursor::value().
     Cursor *const m_schema;
 
     // Pointer to the most-recently-accessed tree.

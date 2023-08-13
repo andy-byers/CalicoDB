@@ -10,6 +10,7 @@
 namespace calicodb
 {
 
+class ErrorState;
 struct Bucket;
 struct BucketOptions;
 struct Stat;
@@ -17,7 +18,15 @@ struct Stat;
 class TxImpl : public Tx
 {
 public:
-    explicit TxImpl(Pager &pager, const Status &status, Stat &stat, char *scratch, bool writable);
+    struct Parameters {
+        const Status *status;
+        ErrorState *errors;
+        Pager *pager;
+        Stat *stat;
+        char *scratch;
+        bool writable;
+    };
+    explicit TxImpl(const Parameters &param);
     ~TxImpl() override;
 
     [[nodiscard]] auto status() const -> Status override
@@ -51,20 +60,12 @@ private:
     friend class DBImpl;
 
     mutable Schema m_schema;
+    ErrorState *const m_errors;
     const Status *const m_status;
     Pager *const m_pager;
     TxImpl **m_backref = nullptr;
     const bool m_writable;
 };
-
-inline auto tx_impl(Tx *tx) -> TxImpl *
-{
-    return reinterpret_cast<TxImpl *>(tx);
-}
-inline auto tx_impl(const Tx *tx) -> const TxImpl *
-{
-    return reinterpret_cast<const TxImpl *>(tx);
-}
 
 } // namespace calicodb
 

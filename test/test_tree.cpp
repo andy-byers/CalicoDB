@@ -3,6 +3,7 @@
 // LICENSE.md. See AUTHORS.md for a list of contributor names.
 
 #include "common.h"
+#include "cursor_impl.h"
 #include "encoding.h"
 #include "freelist.h"
 #include "schema.h"
@@ -29,7 +30,7 @@ public:
 
     TreeTestHarness()
         : m_env(new_temp_env()),
-          m_scratch(Tree::kRequiredBufferSize, '\0')
+          m_scratch(kTreeBufferLen, '\0')
     {
         EXPECT_OK(m_env->new_file("db", Env::kCreate, m_file));
 
@@ -93,7 +94,7 @@ public:
         EXPECT_OK(m_pager->start_reader());
         EXPECT_OK(m_pager->start_writer());
         m_tree = new Tree(*m_pager, m_stat, m_scratch.data(), nullptr, true);
-        m_c = reinterpret_cast<CursorImpl *>(m_tree->new_cursor());
+        m_c = new CursorImpl(*m_tree);
     }
 
     auto close() const -> void
@@ -501,7 +502,7 @@ protected:
 
 TEST_F(EmptyTreeCursorTests, EmptyTreeBehavior)
 {
-    std::unique_ptr<Cursor> cursor(m_tree->new_cursor());
+    auto cursor = std::make_unique<CursorImpl>(*m_tree);
     cursor->seek_first();
     ASSERT_FALSE(cursor->is_valid());
     cursor->seek_last();
@@ -532,9 +533,9 @@ protected:
     {
         switch (GetParam()) {
             case 0:
-                return std::unique_ptr<Cursor>(m_tree->new_cursor());
+                return std::make_unique<CursorImpl>(*m_tree);
             case 1:
-                return std::unique_ptr<Cursor>(m_tree->new_cursor());
+                return std::make_unique<CursorImpl>(*m_tree);
 
                 // TODO                return std::unique_ptr<Cursor>(&m_schema->cursor());
         }
@@ -768,9 +769,8 @@ protected:
 
     auto add_cursor() -> Cursor *
     {
-        auto *c = m_tree->new_cursor();
-        m_cursors.emplace_back(c);
-        return c;
+        m_cursors.emplace_back(new CursorImpl(*m_tree));
+        return m_cursors.back();
     }
 
     auto del_cursor(size_t idx) -> void
@@ -953,7 +953,7 @@ class MultiTreeTests : public TreeTests
 public:
     MultiTreeTests()
         : payload_values(kInitialRecordCount),
-          m_scratch(Tree::kRequiredBufferSize, '\0')
+          m_scratch(kTreeBufferLen, '\0')
     {
         for (auto &value : payload_values) {
             value = random.Generate(kPageSize / 2).to_string();
@@ -1443,7 +1443,7 @@ TEST_F(CursorModificationTests, SeekAndPut)
 TEST_F(CursorModificationTests, PutWithoutCursor)
 {
     init_tree(*this, kInitNormal);
-    std::unique_ptr<Cursor> c(m_tree->new_cursor());
+    auto c = std::make_unique<CursorImpl>(*m_tree);
     c->seek_first();
     ASSERT_TRUE(c->is_valid());
 
@@ -1608,8 +1608,8 @@ TEST_F(CursorModificationTests, UntrackedCursors)
 {
     init_tree(*this, kInitLongValues);
 
-    std::unique_ptr<Cursor> c1(m_tree->new_cursor());
-    std::unique_ptr<Cursor> c2(m_tree->new_cursor());
+    auto c1 = std::make_unique<CursorImpl>(*m_tree);
+    auto c2 = std::make_unique<CursorImpl>(*m_tree);
     c1->seek_first();
     c2->seek_last();
 

@@ -122,7 +122,9 @@ public:
     }
 
 private:
+    friend class Alloc;
     explicit Pager(const Parameters &param);
+
     auto open_wal() -> Status;
     auto refresh_state() -> Status;
     auto read_page(PageRef &out, size_t *size_out) -> Status;

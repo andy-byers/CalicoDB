@@ -7,6 +7,7 @@
 #include "logging.h"
 #include "test.h"
 #include <condition_variable>
+#include <filesystem>
 #include <thread>
 
 namespace calicodb::test
@@ -98,7 +99,7 @@ public:
 
     ~DelayEnv() override = default;
 
-    auto new_file(const std::string &filename, OpenMode mode, File *&file_out) -> Status override
+    auto new_file(const char *filename, OpenMode mode, File *&file_out) -> Status override
     {
         class DelayFile : public FileWrapper
         {
@@ -183,9 +184,9 @@ protected:
         : m_filename(testing::TempDir() + "concurrency"),
           m_env(new DelayEnv(Env::default_env()))
     {
-        (void)m_env->remove_file(m_filename);
-        (void)m_env->remove_file(m_filename + kDefaultWalSuffix);
-        (void)m_env->remove_file(m_filename + kDefaultShmSuffix);
+        std::filesystem::remove_all(m_filename);
+        std::filesystem::remove_all(m_filename + kDefaultWalSuffix);
+        std::filesystem::remove_all(m_filename + kDefaultShmSuffix);
     }
 
     ~ConcurrencyTests() override
@@ -231,7 +232,7 @@ protected:
     };
     auto run_test_instance(const ConsistencyTestParameters &param) -> void
     {
-        (void)DB::destroy(Options(), m_filename);
+        (void)DB::destroy(Options(), m_filename.c_str());
 
         const auto nt = param.num_readers + param.num_writers + param.num_checkpointers;
         Barrier barrier(nt);
