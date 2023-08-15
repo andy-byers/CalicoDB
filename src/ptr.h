@@ -183,6 +183,14 @@ public:
         std::exchange(this->ref(), ptr);
         m_len = len;
     }
+
+    auto resize(size_t len) -> void
+    {
+        if (auto *ptr = Alloc::realloc_string(get(), len + 1)) {
+            release(); // Don't free the old pointer.
+            reset(ptr);
+        }
+    }
 };
 
 } // namespace calicodb

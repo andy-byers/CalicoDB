@@ -485,10 +485,10 @@ protected:
         for (size_t i = 0; i < kNumIterations; ++i) {
             set_fault_injection_type(param.fault_type);
 
-            DB *db;
-            run_until_completion([this, i, &options, &db, &src_counters, &param] {
+            run_until_completion([this, i, &options, &src_counters, &param] {
+                UserPtr<DB> db;
                 ++src_counters[kSrcOpen];
-                auto s = DB::open(options, m_filename.c_str(), db);
+                auto s = DB::open(options, m_filename.c_str(), db.ref());
                 if (!s.is_ok()) {
                     EXPECT_TRUE(is_injected_fault(s));
                     return s;
@@ -521,12 +521,12 @@ protected:
                 }
                 if (!s.is_ok()) {
                     EXPECT_TRUE(is_injected_fault(s));
+                    return s;
                 }
+                CALICODB_EXPECT_TRUE(db.is_valid());
+                validate(*db);
                 return s;
             });
-            validate(*db);
-
-            delete db;
         }
 
         std::cout << " Location       | Hits per iteration\n";
@@ -730,7 +730,6 @@ protected:
                 });
             });
             validate(*db);
-
             delete db;
         }
     }
@@ -738,21 +737,21 @@ protected:
 
 TEST_F(CrashTests, Operations)
 {
-    //    // Sanity check. No faults.
-    //    run_operations_test({kNoFaults,  false});
-    //    run_operations_test({kNoFaults,  true});
-    //
-    //    // Run with syscall fault injection.
-    //    run_operations_test({kSyscallFaults, false, false});
-    //    run_operations_test({kSyscallFaults, true, false});
-    //    run_operations_test({kSyscallFaults, false, true});
-    //    run_operations_test({kSyscallFaults, true, true});
+    // Sanity check. No faults.
+    run_operations_test({kNoFaults, false});
+    run_operations_test({kNoFaults, true});
+
+    // Run with syscall fault injection.
+    run_operations_test({kSyscallFaults, false, false});
+    run_operations_test({kSyscallFaults, true, false});
+    run_operations_test({kSyscallFaults, false, true});
+    run_operations_test({kSyscallFaults, true, true});
 
     // Run with OOM fault injection.
     run_operations_test({kOOMFaults, false, false});
-    //    run_operations_test({kOOMFaults, true, false});
-    //    run_operations_test({kOOMFaults, false, true});
-    //    run_operations_test({kOOMFaults, true, true});
+    run_operations_test({kOOMFaults, true, false});
+    run_operations_test({kOOMFaults, false, true});
+    run_operations_test({kOOMFaults, true, true});
 }
 
 TEST_F(CrashTests, OpenClose)

@@ -44,8 +44,9 @@ public:
     // If the property named `name` exists, returns true and stores the property value in
     // `*value_out`. Otherwise, false is returned and `value_out->clear()` is called. The
     // `value_out` parameter is optional: if passed a nullptr, this method performs an
-    // existence check.
-    virtual auto get_property(const Slice &name, std::string *value_out) const -> bool = 0;
+    // existence check. The `value_out` Slice is invalidated both when the database is
+    // closed and when this routine is called again.
+    virtual auto get_property(const Slice &name, Slice *value_out) const -> bool = 0;
 
     // Write modified pages from the write-ahead log (WAL) back to the database file
     // If `reset` is true, steps are taken to make sure that the next writer will reset the WAL

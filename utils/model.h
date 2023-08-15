@@ -72,7 +72,7 @@ public:
 
     auto check_consistency() const -> void;
 
-    auto get_property(const Slice &name, std::string *value_out) const -> bool override
+    auto get_property(const Slice &name, Slice *value_out) const -> bool override
     {
         return m_db->get_property(name, value_out);
     }

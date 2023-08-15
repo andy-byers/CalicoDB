@@ -491,11 +491,14 @@ struct PosixFs final {
 
     [[nodiscard]] auto ref_snode(PosixFile &file, PosixShm *&shm_out) const -> Status
     {
+        ObjectPtr shm_storage(Alloc::new_object<PosixShm>());
+        if (!shm_storage.is_valid()) {
+            return Status::no_memory();
+        }
         auto *inode = file.inode;
         std::unique_lock main_guard(mutex);
         auto *snode = inode->snode.get();
         if (snode == nullptr) {
-            Status s;
             // Allocate storage for the shm node.
             ObjectPtr<ShmNode> new_snode(Alloc::new_object<ShmNode>());
             if (!new_snode.is_valid()) {
@@ -519,7 +522,7 @@ struct PosixFs final {
                 return posix_error(errno);
             }
             // WARNING: If another process unlinks the file after we opened it above, the
-            // attempt to take the DMS lock here will fail.
+            //          attempt to take the DMS lock here will fail.
             if (new_snode->take_dms_lock()) {
                 return Status::busy();
             }
@@ -532,11 +535,8 @@ struct PosixFs final {
         ++snode->refcount;
         main_guard.unlock();
 
-        shm_out = Alloc::new_object<PosixShm>();
         std::lock_guard node_guard(snode->mutex);
-        if (shm_out == nullptr) {
-            return Status::no_memory();
-        }
+        shm_out = shm_storage.release();
         shm_out->snode = snode;
         shm_out->next = snode->refs;
         snode->refs = shm_out;

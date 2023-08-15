@@ -9,6 +9,7 @@
 #include "encoding.h"
 #include "logging.h"
 #include "page.h"
+#include "ptr.h"
 #include "stat.h"
 
 namespace calicodb
@@ -613,7 +614,7 @@ static auto compute_checksum(const Slice &in, const uint32_t *initial, uint32_t 
 class WalImpl : public Wal
 {
 public:
-    explicit WalImpl(const Parameters &param, File &wal_file);
+    explicit WalImpl(const Parameters &param, UserPtr<File> wal_file);
     ~WalImpl() override;
 
     auto read(Id page_id, char *&page) -> Status override;
@@ -636,12 +637,9 @@ public:
 
     auto close() -> Status override
     {
-        // NOTE: Caller will unlock the database file. Only consider removing the WAL if this
-        // is the last active connection. If there are other connections not currently running
-        // transactions, the next read-write transaction will create a new WAL.
-        auto s = checkpoint(true);
         // This will not block. This connection has an exclusive lock on the database file,
         // so no other connections are active right now.
+        auto s = checkpoint(true);
         if (s.is_ok()) {
             s = m_env->remove_file(m_wal_name);
             if (!s.is_ok()) {
@@ -1022,7 +1020,7 @@ private:
     HashIndexHdr m_hdr = {};
     HashIndex m_index;
 
-    const char *m_wal_name;
+    const char *const m_wal_name;
     const Options::SyncMode m_sync_mode;
     const Options::LockMode m_lock_mode;
 
@@ -1033,10 +1031,11 @@ private:
     uint32_t m_redo_cksum = 0;
     uint32_t m_ckpt_number = 0;
 
+    UserPtr<File> m_wal;
+
     Env *const m_env = nullptr;
     File *const m_db = nullptr;
     Logger *const m_log = nullptr;
-    File *const m_wal = nullptr;
     Stat *const m_stat = nullptr;
     BusyHandler *const m_busy = nullptr;
 
@@ -1054,10 +1053,10 @@ private:
 
 auto Wal::open(const Parameters &param, Wal *&wal_out) -> Status
 {
-    File *wal_file;
-    auto s = param.env->new_file(param.filename, Env::kCreate, wal_file);
+    UserPtr<File> wal_file;
+    auto s = param.env->new_file(param.filename, Env::kCreate, wal_file.ref());
     if (s.is_ok()) {
-        wal_out = Alloc::new_object<WalImpl>(param, *wal_file);
+        wal_out = Alloc::new_object<WalImpl>(param, std::move(wal_file));
         if (wal_out == nullptr) {
             s = Status::no_memory();
         }
@@ -1067,15 +1066,15 @@ auto Wal::open(const Parameters &param, Wal *&wal_out) -> Status
 
 Wal::~Wal() = default;
 
-WalImpl::WalImpl(const Parameters &param, File &wal_file)
+WalImpl::WalImpl(const Parameters &param, UserPtr<File> wal_file)
     : m_index(m_hdr, param.lock_mode == Options::kLockNormal ? param.db_file : nullptr),
       m_wal_name(param.filename),
       m_sync_mode(param.sync_mode),
       m_lock_mode(param.lock_mode),
+      m_wal(std::move(wal_file)),
       m_env(param.env),
       m_db(param.db_file),
       m_log(param.info_log),
-      m_wal(&wal_file),
       m_stat(param.stat),
       m_busy(param.busy)
 {
@@ -1083,7 +1082,6 @@ WalImpl::WalImpl(const Parameters &param, File &wal_file)
 
 WalImpl::~WalImpl()
 {
-    delete m_wal;
     m_index.close();
 }
 

@@ -153,42 +153,42 @@ auto DBImpl::destroy(const Options &options, const char *filename) -> Status
     return s;
 }
 
-auto DBImpl::get_property(const Slice &name, std::string *out) const -> bool
+auto DBImpl::get_property(const Slice &name, Slice *out) const -> bool
 {
     if (out) {
         out->clear();
     }
     if (name.starts_with("calicodb.")) {
         const auto prop = name.range(std::strlen("calicodb."));
-        std::string buffer;
 
         if (prop == "stats") {
-            if (out == nullptr) {
-                return true;
+            if (out) {
+                m_property.reset();
+                append_fmt_string(
+                    m_property,
+                    "Name               Value\n"
+                    "------------------------\n"
+                    "DB read(MB)   %10.4f\n"
+                    "DB write(MB)  %10.4f\n"
+                    "DB sync       %10llu\n"
+                    "WAL read(MB)  %10.4f\n"
+                    "WAL write(MB) %10.4f\n"
+                    "WAL sync      %10llu\n"
+                    "SMO count     %10llu\n"
+                    "Cache hit %%   %10.4f\n",
+                    static_cast<double>(m_stat.counters[Stat::kReadDB]) / 1'048'576.0,
+                    static_cast<double>(m_stat.counters[Stat::kWriteDB]) / 1'048'576.0,
+                    m_stat.counters[Stat::kSyncDB],
+                    static_cast<double>(m_stat.counters[Stat::kReadWal]) / 1'048'576.0,
+                    static_cast<double>(m_stat.counters[Stat::kWriteWal]) / 1'048'576.0,
+                    m_stat.counters[Stat::kSyncWal],
+                    m_stat.counters[Stat::kSMOCount],
+                    static_cast<double>(m_stat.counters[Stat::kCacheHits]) /
+                        static_cast<double>(m_stat.counters[Stat::kCacheHits] +
+                                            m_stat.counters[Stat::kCacheMisses]));
+                // Exclude the '\0' that is included in m_property.len().
+                *out = Slice(m_property.get(), m_property.len() - 1);
             }
-            append_fmt_string(
-                buffer,
-                "Name               Value\n"
-                "------------------------\n"
-                "DB read(MB)   %10.4f\n"
-                "DB write(MB)  %10.4f\n"
-                "DB sync       %10llu\n"
-                "WAL read(MB)  %10.4f\n"
-                "WAL write(MB) %10.4f\n"
-                "WAL sync      %10llu\n"
-                "SMO count     %10llu\n"
-                "Cache hit %%   %10.4f\n",
-                static_cast<double>(m_stat.counters[Stat::kReadDB]) / 1'048'576.0,
-                static_cast<double>(m_stat.counters[Stat::kWriteDB]) / 1'048'576.0,
-                m_stat.counters[Stat::kSyncDB],
-                static_cast<double>(m_stat.counters[Stat::kReadWal]) / 1'048'576.0,
-                static_cast<double>(m_stat.counters[Stat::kWriteWal]) / 1'048'576.0,
-                m_stat.counters[Stat::kSyncWal],
-                m_stat.counters[Stat::kSMOCount],
-                static_cast<double>(m_stat.counters[Stat::kCacheHits]) /
-                    static_cast<double>(m_stat.counters[Stat::kCacheHits] +
-                                        m_stat.counters[Stat::kCacheMisses]));
-            out->append(buffer);
             return true;
         }
     }
@@ -233,12 +233,14 @@ auto DBImpl::prepare_tx(bool write, TxType *&tx_out) const -> Status
     }
     if (s.is_ok()) {
         CALICODB_EXPECT_TRUE(m_status.is_ok());
-        m_tx = new (std::nothrow) TxImpl({&m_status,
-                                          &m_errors,
-                                          m_pager.get(),
-                                          &m_stat,
-                                          m_scratch.get(),
-                                          write});
+        m_tx = new (std::nothrow) TxImpl({
+            &m_status,
+            &m_errors,
+            m_pager.get(),
+            &m_stat,
+            m_scratch.get(),
+            write,
+        });
         if (m_tx && m_tx->m_schema.cursor()) {
             m_tx->m_backref = &m_tx;
             // The Schema object sets the pager status to Status::no_memory() if it was unable to

@@ -29,7 +29,7 @@ public:
     static auto destroy(const Options &options, const char *filename) -> Status;
     auto open(const Options &sanitized) -> Status;
 
-    [[nodiscard]] auto get_property(const Slice &name, std::string *out) const -> bool override;
+    [[nodiscard]] auto get_property(const Slice &name, Slice *out) const -> bool override;
     auto new_tx(Tx *&tx) const -> Status override;
     auto new_tx(WriteTag, Tx *&tx) -> Status override;
     auto checkpoint(bool reset) -> Status override;
@@ -54,6 +54,7 @@ private:
     mutable TxImpl *m_tx = nullptr;
     mutable Stat m_stat;
     mutable StringPtr m_scratch;
+    mutable StringPtr m_property;
     mutable ObjectPtr<Pager> m_pager;
 
     UserPtr<File> m_file;

@@ -394,13 +394,13 @@ protected:
 
 TEST_F(DBTests, GetProperty)
 {
-    std::string value;
+    Slice value;
     ASSERT_TRUE(m_db->get_property("calicodb.stats", nullptr));
     ASSERT_TRUE(m_db->get_property("calicodb.stats", &value));
-    ASSERT_FALSE(value.empty());
+    ASSERT_FALSE(value.is_empty());
     ASSERT_FALSE(m_db->get_property("nonexistent", nullptr));
     ASSERT_FALSE(m_db->get_property("nonexistent", &value));
-    ASSERT_TRUE(value.empty());
+    ASSERT_TRUE(value.is_empty());
 }
 
 TEST_F(DBTests, ConvenienceFunctions)

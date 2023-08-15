@@ -143,7 +143,7 @@ Pager::~Pager()
     Alloc::delete_object(m_wal);
 
     if (!s.is_ok()) {
-        log(m_log, "failed to close pager due to %s (%s)",
+        log(m_log, "failed pager shutdown due to %s (%s)",
             s.type_name(), s.message());
     }
 }
