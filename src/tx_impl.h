@@ -36,7 +36,7 @@ public:
 
     [[nodiscard]] auto schema() const -> Cursor & override
     {
-        return m_schema.cursor();
+        return *m_schema.cursor();
     }
 
     auto create_bucket(const BucketOptions &options, const Slice &name, Cursor **c_out) -> Status override;
@@ -45,7 +45,6 @@ public:
     auto vacuum() -> Status override;
     auto commit() -> Status override;
 
-    auto get(Cursor &c, const Slice &key, std::string *value) const -> Status override;
     auto put(Cursor &c, const Slice &key, const Slice &value) -> Status override;
     auto erase(Cursor &c, const Slice &key) -> Status override;
     auto erase(Cursor &c) -> Status override;
@@ -56,6 +55,23 @@ public:
     }
 
 private:
+    template <class Operation>
+    auto run_write_operation(const Operation &operation) const -> Status
+    {
+        Status s;
+        if (!m_writable) {
+            s = Status::not_supported("transaction is readonly");
+        } else if (m_status->is_ok()) {
+            s = operation();
+            if (!s.is_ok()) {
+                m_pager->set_status(s);
+            }
+        } else {
+            s = *m_status;
+        }
+        return s;
+    }
+
     // m_backref is not known until after the constructor runs. Let DBImpl set it.
     friend class DBImpl;
 

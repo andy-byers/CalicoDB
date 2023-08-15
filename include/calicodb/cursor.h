@@ -51,6 +51,8 @@ public:
     // REQUIRES: is_valid()
     [[nodiscard]] virtual auto value() const -> Slice = 0;
 
+    virtual auto find(const Slice &key) -> void = 0;
+
     // Move the cursor to the record with a key that is greater than or equal to
     // the given key
     // Invalidates the cursor if a read fails or the key is out of range.

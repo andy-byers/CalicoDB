@@ -578,11 +578,17 @@ auto Pager::refresh_state() -> Status
 
 auto Pager::set_status(const Status &error) const -> void
 {
-    if (m_status->is_ok() && (error.is_io_error() || error.is_corruption())) {
-        *m_status = error;
-        m_mode = kError;
+    if (m_status->is_ok() && m_mode >= kWrite) {
+        const auto is_fatal_error = error.is_io_error() ||
+                                    error.is_corruption() ||
+                                    error.is_aborted();
+        if (is_fatal_error) {
+            *m_status = error;
+            m_mode = kError;
 
-        log(m_log, "pager error: %s (%s)", error.type_name(), error.message());
+            log(m_log, "pager error: %s (%s)",
+                error.type_name(), error.message());
+        }
     }
 }
 

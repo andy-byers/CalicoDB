@@ -239,7 +239,7 @@ auto DBImpl::prepare_tx(bool write, TxType *&tx_out) const -> Status
                                           &m_stat,
                                           m_scratch.get(),
                                           write});
-        if (m_tx) {
+        if (m_tx && m_tx->m_schema.cursor()) {
             m_tx->m_backref = &m_tx;
             // The Schema object sets the pager status to Status::no_memory() if it was unable to
             // acquire memory for its bucket cursor. m_tx will be cleaned up below in this case.

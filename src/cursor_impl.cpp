@@ -326,4 +326,16 @@ auto CursorImpl::seek(const Slice &key) -> void
     seek_to_leaf(key, kSeekReader);
 }
 
+auto CursorImpl::find(const Slice &key) -> void
+{
+    prepare(Tree::kInitNormal);
+    if (seek_to_leaf(key, kSeekReader)) {
+        // Found a record with the given `key`.
+    } else if (m_status.is_ok()) {
+        reset(Status::not_found());
+    } else {
+        release_nodes(kAllLevels);
+    }
+}
+
 } // namespace calicodb

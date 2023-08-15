@@ -78,7 +78,7 @@ auto DB::open(const Options &options, const char *filename, DB *&db) -> Status
         sanitized.env = &Env::default_env();
     }
 
-    impl = new(std::nothrow) DBImpl({
+    impl = new (std::nothrow) DBImpl({
         sanitized,
         std::move(db_name_storage),
         std::move(wal_name_storage),

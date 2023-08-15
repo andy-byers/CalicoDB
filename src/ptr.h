@@ -31,13 +31,7 @@ public:
     {
     }
 
-    auto operator=(PtrWrapper<Object> &&rhs) noexcept -> PtrWrapper<Object> &
-    {
-        if (this != &rhs) {
-            m_ptr = rhs.release();
-        }
-        return *this;
-    }
+    auto operator=(PtrWrapper<Object> &&rhs) noexcept -> PtrWrapper<Object> & = default;
 
     auto operator*() -> Object &
     {
@@ -79,7 +73,7 @@ public:
         return m_ptr;
     }
 
-    [[nodiscard]] auto release() -> Object *
+    auto release() -> Object *
     {
         return std::exchange(m_ptr, nullptr);
     }
@@ -102,7 +96,14 @@ public:
     }
 
     UserPtr(UserPtr<Object> &&) noexcept = default;
-    auto operator=(UserPtr<Object> &&) noexcept -> UserPtr<Object> & = default;
+    auto operator=(UserPtr<Object> &&rhs) noexcept -> UserPtr<Object> &
+    {
+        if (this != &rhs) {
+            reset(rhs.get());
+            rhs.release();
+        }
+        return *this;
+    }
 
     auto reset(Object *ptr = nullptr) -> void
     {
@@ -126,7 +127,14 @@ public:
     }
 
     ObjectPtr(ObjectPtr<Object> &&) noexcept = default;
-    auto operator=(ObjectPtr<Object> &&) noexcept -> ObjectPtr<Object> & = default;
+    auto operator=(ObjectPtr<Object> &&rhs) noexcept -> ObjectPtr<Object> &
+    {
+        if (this != &rhs) {
+            reset(rhs.get());
+            rhs.release();
+        }
+        return *this;
+    }
 
     auto reset(Object *ptr = nullptr) -> void
     {
@@ -152,7 +160,14 @@ public:
     }
 
     StringPtr(StringPtr &&) noexcept = default;
-    auto operator=(StringPtr &&) noexcept -> StringPtr & = default;
+    auto operator=(StringPtr &&rhs) noexcept -> StringPtr &
+    {
+        if (this != &rhs) {
+            reset(rhs.get());
+            rhs.release();
+        }
+        return *this;
+    }
 
     [[nodiscard]] auto len() const -> size_t
     {
@@ -162,10 +177,11 @@ public:
         return m_len;
     }
 
-    auto reset(char *ptr = nullptr) -> void
+    auto reset(char *ptr = nullptr, size_t len = 0) -> void
     {
         Alloc::free(this->get());
         std::exchange(this->ref(), ptr);
+        m_len = len;
     }
 };
 

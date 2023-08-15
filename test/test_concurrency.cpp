@@ -368,20 +368,21 @@ protected:
                 }
                 // Iterate through the records twice. The same value should be read each time.
                 for (size_t i = 0; i < co.op_args[1] * 2; ++i) {
-                    std::string value;
                     // If the bucket exists, then it must contain co.op_arg records (the first writer to run
                     // makes sure of this).
-                    t = tx.get(*c, numeric_key(i % co.op_args[1]), &value);
-                    if (!t.is_ok()) {
+                    c->find(numeric_key(i % co.op_args[1]));
+                    if (!c->is_valid()) {
+                        t = c->status();
                         break;
                     } else if (i == 0) {
-                        co.result.emplace_back(value);
+                        const auto value = c->value();
+                        co.result.emplace_back(value.data(), value.size());
                     } else {
-                        EXPECT_EQ(value, co.result.back()) << "non repeatable read";
+                        EXPECT_EQ(c->value(), co.result.back()) << "non repeatable read";
                     }
                 }
                 delete c;
-                return t;
+                return t.is_not_found() ? Status::ok() : t;
             });
         }
 
@@ -411,14 +412,13 @@ protected:
                 auto t = tx.create_bucket(BucketOptions(), "BUCKET", &c);
                 for (size_t i = 0; t.is_ok() && i < co.op_args[1]; ++i) {
                     uint64_t result = 1;
-                    std::string value;
-                    t = tx.get(*c, numeric_key(i), &value);
-                    if (t.is_not_found()) {
-                        t = Status::ok();
-                    } else if (t.is_ok()) {
-                        Slice slice(value);
+                    c->find(numeric_key(i));
+                    if (c->is_valid()) {
+                        Slice slice(c->value());
                         EXPECT_TRUE(consume_decimal_number(slice, &result));
                         ++result;
+                    } else if (c->status().is_not_found()) {
+                        t = Status::ok();
                     } else {
                         break;
                     }

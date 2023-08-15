@@ -9,17 +9,19 @@ namespace calicodb
 {
 
 static Alloc::Hook s_hook = nullptr;
+static void *s_hook_arg = nullptr;
 
-auto Alloc::set_hook(Hook hook) -> void
+auto Alloc::set_hook(Hook hook, void *arg) -> void
 {
     s_hook = hook;
+    s_hook_arg = arg;
 }
 
 auto Alloc::alloc(size_t len) -> void *
 {
     CALICODB_EXPECT_NE(len, 0);
 
-    if (s_hook && s_hook()) {
+    if (s_hook && s_hook(s_hook_arg)) {
         return nullptr;
     }
     return std::malloc(len);
@@ -33,7 +35,7 @@ auto Alloc::alloc(size_t len, size_t alignment) -> void *
     CALICODB_EXPECT_EQ(alignment & (alignment - 1), 0);
     CALICODB_EXPECT_GT(alignment, 0);
 
-    if (s_hook && s_hook()) {
+    if (s_hook && s_hook(s_hook_arg)) {
         return nullptr;
     }
     return std::aligned_alloc(alignment, len);
@@ -43,7 +45,7 @@ auto Alloc::realloc(void *ptr, size_t len) -> void *
 {
     CALICODB_EXPECT_NE(len, 0);
 
-    if (s_hook && s_hook()) {
+    if (s_hook && s_hook(s_hook_arg)) {
         return nullptr;
     }
     return std::realloc(ptr, len);

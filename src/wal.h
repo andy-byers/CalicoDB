@@ -99,7 +99,7 @@ private:
         } groups[1];
     };
 
-    HashIndex *m_source = nullptr;
+    HashIndex *const m_source;
     State *m_state = nullptr;
     size_t m_num_groups = 0;
     Key m_prior = 0;

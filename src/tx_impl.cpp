@@ -27,26 +27,6 @@ TxImpl::~TxImpl()
     }
 }
 
-#define ENSURE_WRITABLE                                              \
-    do {                                                             \
-        if (!m_writable) {                                           \
-            return Status::not_supported("transaction is readonly"); \
-        }                                                            \
-    } while (0)
-
-auto TxImpl::create_bucket(const BucketOptions &options, const Slice &name, Cursor **c_out) -> Status
-{
-    if (c_out) {
-        *c_out = nullptr;
-    }
-    ENSURE_WRITABLE;
-    auto s = *m_status;
-    if (s.is_ok()) {
-        s = m_schema.create_bucket(options, name, c_out);
-    }
-    return s;
-}
-
 auto TxImpl::open_bucket(const Slice &name, Cursor *&c_out) const -> Status
 {
     c_out = nullptr;
@@ -57,79 +37,59 @@ auto TxImpl::open_bucket(const Slice &name, Cursor *&c_out) const -> Status
     return s;
 }
 
+auto TxImpl::create_bucket(const BucketOptions &options, const Slice &name, Cursor **c_out) -> Status
+{
+    if (c_out) {
+        *c_out = nullptr;
+    }
+    return run_write_operation([&schema = m_schema, &options, &name, c_out] {
+        return schema.create_bucket(options, name, c_out);
+    });
+}
+
 auto TxImpl::drop_bucket(const Slice &name) -> Status
 {
-    ENSURE_WRITABLE;
-    auto s = *m_status;
-    if (s.is_ok()) {
-        s = m_schema.drop_bucket(name);
-    }
-    return s;
+    return run_write_operation([&schema = m_schema, &name] {
+        return schema.drop_bucket(name);
+    });
 }
 
 auto TxImpl::commit() -> Status
 {
-    ENSURE_WRITABLE;
-    auto s = *m_status;
-    if (s.is_ok()) {
-        s = m_pager->commit();
-    }
-    return s;
+    return run_write_operation([&pager = *m_pager] {
+        return pager.commit();
+    });
 }
 
 auto TxImpl::vacuum() -> Status
 {
-    ENSURE_WRITABLE;
-    auto s = *m_status;
-    if (s.is_ok()) {
-        s = m_schema.vacuum();
-    }
-    return s;
-}
-
-auto TxImpl::get(Cursor &c, const Slice &key, std::string *value) const -> Status
-{
-    auto s = *m_status;
-    if (s.is_ok()) {
-        const auto [tree, c_impl] = m_schema.unpack_and_use(c);
-        s = tree.get(c_impl, key, value);
-    }
-    return s;
+    return run_write_operation([&schema = m_schema] {
+        return schema.vacuum();
+    });
 }
 
 auto TxImpl::put(Cursor &c, const Slice &key, const Slice &value) -> Status
 {
-    ENSURE_WRITABLE;
-    auto s = *m_status;
-    if (s.is_ok()) {
-        const auto [tree, c_impl] = m_schema.unpack_and_use(c);
-        s = tree.put(c_impl, key, value);
-    }
-    return s;
+    return run_write_operation([&schema = m_schema, &c, &key, &value] {
+        const auto [tree, c_impl] = schema.unpack_and_use(c);
+        return tree.put(c_impl, key, value);
+    });
 }
 
 auto TxImpl::erase(Cursor &c, const Slice &key) -> Status
 {
-    ENSURE_WRITABLE;
-    auto s = *m_status;
-    if (s.is_ok()) {
-        const auto [tree, c_impl] = m_schema.unpack_and_use(c);
-        s = tree.erase(c_impl, key);
-    }
-    return s;
+    return run_write_operation([&schema = m_schema, &c, &key] {
+        const auto [tree, c_impl] = schema.unpack_and_use(c);
+        return tree.erase(c_impl, key);
+    });
 }
 
 auto TxImpl::erase(Cursor &c) -> Status
 {
-    ENSURE_WRITABLE;
-    auto s = *m_status;
-    if (s.is_ok()) {
-        const auto [tree, c_impl] = m_schema.unpack_and_use(c);
-        s = tree.erase(c_impl);
-    }
-    return s;
+    return run_write_operation([&schema = m_schema, &c] {
+        const auto [tree, c_impl] = schema.unpack_and_use(c);
+        return tree.erase(c_impl);
+    });
 }
-
-#undef ENSURE_WRITABLE
 
 } // namespace calicodb

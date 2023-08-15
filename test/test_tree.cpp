@@ -1737,7 +1737,7 @@ TEST_F(VacuumTests, VacuumSchemaTree)
     static constexpr size_t kSize = 1'234;
     // Add records to m_tree.
     init_tree(*this, kInitLongValues);
-    auto &c = m_schema->cursor();
+    auto &c = *m_schema->cursor();
     std::vector<Cursor *> cursors;
     for (size_t i = 0; i < kSize; i += 2) {
         cursors.emplace_back();

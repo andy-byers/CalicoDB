@@ -1083,7 +1083,7 @@ WalImpl::WalImpl(const Parameters &param, File &wal_file)
 
 WalImpl::~WalImpl()
 {
-    Alloc::delete_object(m_wal);
+    delete m_wal;
     m_index.close();
 }
 

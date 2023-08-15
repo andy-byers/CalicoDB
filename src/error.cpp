@@ -13,13 +13,6 @@ static constexpr const char *kErrorFmt[] = {
     "corruption detected on %s with ID %u",
 };
 
-ErrorState::~ErrorState()
-{
-    for (const auto &[buf, _] : m_errors) {
-        Alloc::free(buf);
-    }
-}
-
 auto ErrorState::format_error(ErrorCode code, ...) -> const char *
 {
     CALICODB_EXPECT_LE(code, 0);
@@ -32,27 +25,29 @@ auto ErrorState::format_error(ErrorCode code, ...) -> const char *
 
     std::va_list args_copy;
     va_copy(args_copy, args);
-    auto rc = std::vsnprintf(error.buf, error.len, fmt, args_copy);
+    auto rc = std::vsnprintf(error.get(), error.len(), fmt, args_copy);
     va_end(args_copy);
     // This code does not handle std::vsnprintf() failures.
     CALICODB_EXPECT_GE(rc, 0);
     const auto len = static_cast<size_t>(rc) + 1;
 
-    if (len > error.len) {
-        // Make sure the buffer has enough space to fit the error message.
-        if (auto *buf = Alloc::realloc_string(error.buf, len)) {
-            error.buf = buf;
-            error.len = len;
+    if (len > error.len()) {
+        // Make sure the buffer has enough space to fit the error message. len includes space
+        // for a '\0'.
+        if (auto *buf = Alloc::realloc_string(error.get(), len)) {
+            // Discard the old pointer so it doesn't get freed.
+            error.release();
+            error.reset(buf, len);
         } else {
             return "out of memory in ErrorState::format_error()";
         }
-        rc = std::vsnprintf(error.buf, error.len, fmt, args);
+        rc = std::vsnprintf(error.get(), error.len(), fmt, args);
 
         CALICODB_EXPECT_GE(rc, 0);
         CALICODB_EXPECT_EQ(rc + 1, static_cast<int>(len));
     }
     va_end(args);
-    return error.buf;
+    return error.get();
 }
 
 } // namespace calicodb

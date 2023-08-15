@@ -186,7 +186,7 @@ private:
 
 auto new_temp_env() -> Env *
 {
-    return new(std::nothrow) TempEnv;
+    return new (std::nothrow) TempEnv;
 }
 
 class TempWal : public Wal

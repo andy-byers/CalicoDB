@@ -224,23 +224,7 @@ struct DatabaseState {
             if (!try_attach_cursor(c, i)) {
                 break;
             }
-            const auto key = random_chunk(kMaxKeyLen);
-            c.seek(key);
-            if (c.is_valid()) {
-                // These need to be converted into std::strings, since the cursor is
-                // about to be moved.
-                const auto key_from_cursor = c.key().to_string();
-                const auto value_from_cursor = c.value().to_string();
-                // Make sure the record looks the same from the cursor as it does from
-                // Tx::get().
-                std::string value_from_get;
-                s = tx->get(c, c.key(), &value_from_get);
-                if (s.is_ok()) {
-                    ASSERT_EQ(key_from_cursor, c.key());
-                    ASSERT_EQ(value_from_cursor, c.value());
-                    ASSERT_EQ(value_from_cursor, value_from_get);
-                }
-            }
+            c.seek(random_chunk(kMaxKeyLen));
         }
     }
 

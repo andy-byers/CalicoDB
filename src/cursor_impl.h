@@ -131,6 +131,7 @@ public:
     auto seek_last() -> void override;
     auto next() -> void override;
     auto previous() -> void override;
+    auto find(const Slice &key) -> void override;
     auto seek(const Slice &key) -> void override;
 
     [[nodiscard]] auto handle() -> void * override

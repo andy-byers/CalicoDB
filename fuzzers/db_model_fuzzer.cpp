@@ -123,7 +123,8 @@ auto Fuzzer::fuzz(FuzzedInputProvider &stream) -> bool
 
     switch (op_type) {
         case kBucketGet:
-            s = m_tx->get(*m_c, stream.extract_random(), &value);
+            m_c->find(stream.extract_random());
+            s = m_c->status();
             break;
         case kBucketPut:
             key = stream.extract_random();

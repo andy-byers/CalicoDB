@@ -192,6 +192,13 @@ public:
         return m_c->value();
     }
 
+    auto find(const Slice &key) -> void override
+    {
+        m_saved = false;
+        m_itr = m_map->find(key.to_string());
+        m_c->find(key);
+    }
+
     auto seek(const Slice &key) -> void override
     {
         m_saved = false;
@@ -312,29 +319,6 @@ public:
         auto s = m_tx->commit();
         if (s.is_ok()) {
             *m_base = m_temp;
-        }
-        return s;
-    }
-
-    [[nodiscard]] auto get(Cursor &c, const Slice &key, std::string *value_out) const -> Status override
-    {
-        const auto &m = use_cursor<KVMap>(c);
-        m.m_itr = m.m_map->lower_bound(key.to_string());
-        auto s = m_tx->get(c, key, value_out);
-        if (s.is_ok()) {
-            CHECK_TRUE(m.m_itr != end(*m.m_map));
-            CHECK_EQ(m.m_itr->first, key.to_string());
-            CHECK_EQ(m.m_itr->second, *value_out);
-            CHECK_EQ(m.m_itr->first, m.m_c->key().to_string());
-            CHECK_EQ(m.m_itr->second, m.m_c->value().to_string());
-        } else if (s.is_not_found()) {
-            if (m.m_itr != end(*m.m_map)) {
-                CHECK_TRUE(m.m_itr->first > key);
-                CHECK_EQ(m.m_itr->first, m.m_c->key().to_string());
-                CHECK_EQ(m.m_itr->second, m.m_c->value().to_string());
-            }
-        } else {
-            m.m_itr = end(*m.m_map);
         }
         return s;
     }

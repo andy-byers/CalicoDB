@@ -26,9 +26,9 @@ class Schema final
 public:
     explicit Schema(Pager &pager, const Status &status, Stat &stat, char *scratch);
 
-    [[nodiscard]] auto cursor() -> Cursor &
+    [[nodiscard]] auto cursor() -> Cursor *
     {
-        return *m_schema;
+        return m_schema;
     }
 
     auto close() -> void;

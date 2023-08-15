@@ -23,8 +23,8 @@ public:
 
     // Called in alloc() and realloc(). If the result is nonzero, a nullptr is returned
     // immediately, before the system allocator is called. Used for injecting OOM errors.
-    using Hook = int (*)();
-    static auto set_hook(Hook hook) -> void;
+    using Hook = int (*)(void *);
+    static auto set_hook(Hook hook, void *arg) -> void;
 
     [[nodiscard]] static auto alloc(size_t len) -> void *;
     [[nodiscard]] static auto alloc(size_t len, size_t alignment) -> void *;

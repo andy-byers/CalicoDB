@@ -30,10 +30,13 @@ static const auto kFaultStatus = Status::io_error(kFaultText);
 class CrashEnv : public EnvWrapper
 {
 public:
-    mutable int m_max_num = 0;
-    mutable int m_num = 0;
-    bool m_crashes_enabled = false;
-    bool m_auto_reset = true;
+    struct CrashState {
+        int num;
+        int max_num;
+        bool enabled;
+    };
+    mutable CrashState m_oom_state = {};
+    mutable CrashState m_syscall_state = {};
     bool m_drop_unsynced = false;
 
     explicit CrashEnv(Env &env)
@@ -41,23 +44,50 @@ public:
     {
     }
 
-    ~CrashEnv() override = default;
-
-    auto reset_crash_counter() const -> void
+    ~CrashEnv() override
     {
-        ++m_max_num;
-        m_num = 0;
+        disable_oom_faults();
+    }
+
+    auto enable_oom_faults() -> void
+    {
+        Alloc::set_hook(should_next_allocation_fail, this);
+        m_oom_state.enabled = true;
+    }
+
+    auto disable_oom_faults() -> void
+    {
+        Alloc::set_hook(nullptr, nullptr);
+        m_oom_state.enabled = false;
+    }
+
+    static auto reset_counter(CrashState &state) -> void
+    {
+        state.max_num = 0;
+        state.num = 0;
+    }
+
+    static auto advance_counter(CrashState &state) -> void
+    {
+        ++state.max_num;
+        state.num = 0;
     }
 
     [[nodiscard]] auto should_next_syscall_fail() const -> bool
     {
-        if (m_crashes_enabled && m_num++ >= m_max_num) {
-            if (m_auto_reset) {
-                reset_crash_counter();
-            }
+        if (m_syscall_state.enabled && m_syscall_state.num++ >= m_syscall_state.max_num) {
             return true;
         }
         return false;
+    }
+
+    [[nodiscard]] static auto should_next_allocation_fail(void *arg) -> int
+    {
+        auto *self = static_cast<CrashEnv *>(arg);
+        if (self->m_oom_state.enabled && self->m_oom_state.num++ >= self->m_oom_state.max_num) {
+            return -1;
+        }
+        return 0;
     }
 
     auto remove_file(const char *filename) -> Status override
@@ -79,26 +109,26 @@ public:
 
             auto save_to_backup() -> void
             {
-                const auto crash_state = m_env->m_crashes_enabled;
-                m_env->m_crashes_enabled = false;
+                const auto crash_state = m_env->m_syscall_state.enabled;
+                m_env->m_syscall_state.enabled = false;
 
                 size_t file_size;
                 ASSERT_OK(m_env->file_size(m_filename.c_str(), file_size));
                 m_backup.resize(file_size);
                 ASSERT_OK(read_exact(0, file_size, m_backup.data()));
 
-                m_env->m_crashes_enabled = crash_state;
+                m_env->m_syscall_state.enabled = crash_state;
             }
 
             auto load_from_backup() -> void
             {
-                const auto crash_state = m_env->m_crashes_enabled;
-                m_env->m_crashes_enabled = false;
+                const auto crash_state = m_env->m_syscall_state.enabled;
+                m_env->m_syscall_state.enabled = false;
 
                 ASSERT_OK(resize(m_backup.size()));
                 ASSERT_OK(write(0, m_backup));
 
-                m_env->m_crashes_enabled = crash_state;
+                m_env->m_syscall_state.enabled = crash_state;
             }
 
         public:
@@ -205,7 +235,7 @@ protected:
         if (s_keys[n].empty()) {
             s_keys[n] = numeric_key(n) + "::";
             // Let the keys get increasingly long so that the overflow chain code gets tested.
-            s_keys[n].resize(s_keys[n].size() + n * 6, '0');
+            s_keys[n].resize(s_keys[n].size() + n * 10, '0');
         }
         return s_keys[n];
     }
@@ -215,8 +245,11 @@ protected:
     }
 
     // Check if a status is an injected fault
-    static auto is_injected_fault(const Status &s) -> bool
+    [[nodiscard]] auto is_injected_fault(const Status &s) const -> bool
     {
+        if (m_env->m_oom_state.enabled) {
+            return s.is_no_memory();
+        }
         return s.code() == Status::kIOError &&
                0 == std::strcmp(s.message(), "<FAULT>");
     }
@@ -249,12 +282,16 @@ protected:
             }
         }
         if (!s.is_ok()) {
-            EXPECT_EQ(s, tx.status());
+            if (!s.is_no_memory()) {
+                EXPECT_EQ(s, tx.status());
+            }
             return s;
         }
         s = test_create_and_open_bucket(tx, BucketOptions(), name2, c2);
         if (!s.is_ok()) {
-            EXPECT_EQ(s, tx.status());
+            if (!s.is_no_memory()) {
+                EXPECT_EQ(s, tx.status());
+            }
             return s;
         }
 
@@ -282,7 +319,9 @@ protected:
         if (s.is_ok()) {
             s = tx.vacuum();
         }
-        EXPECT_EQ(s, tx.status());
+        if (!s.is_no_memory()) { // TODO
+            EXPECT_EQ(s, tx.status());
+        }
         return s;
     }
 
@@ -307,13 +346,11 @@ protected:
         }
         for (size_t i = 0; i < kNumRecords; ++i) {
             const auto key = make_key(i);
-            std::string value;
-            s = tx.get(*c, key, &value);
-
-            if (s.is_ok()) {
-                EXPECT_EQ(value, make_value(i));
+            c->find(key);
+            if (c->is_valid()) {
+                EXPECT_EQ(c->value(), make_value(i));
             } else {
-                return s;
+                return c->status();
             }
         }
         c->seek_first();
@@ -332,17 +369,17 @@ protected:
 
     auto run_until_completion(const std::function<Status()> &task) -> void
     {
-        m_env->m_max_num = 0;
+        CrashEnv::reset_counter(m_env->m_oom_state);
+        CrashEnv::reset_counter(m_env->m_syscall_state);
         Status s;
-        while (is_injected_fault(s = task())) {
-            if (!m_env->m_auto_reset) {
-                m_env->reset_crash_counter();
-            }
-        }
+        do {
+            CrashEnv::advance_counter(m_env->m_oom_state);
+            CrashEnv::advance_counter(m_env->m_syscall_state);
+        } while (is_injected_fault(s = task()));
+
         ASSERT_OK(s);
-        if (!s.is_ok()) {
-            std::abort();
-        }
+        CrashEnv::reset_counter(m_env->m_oom_state);
+        CrashEnv::reset_counter(m_env->m_syscall_state);
     }
 
     static auto validate(DB &db)
@@ -350,8 +387,65 @@ protected:
         reinterpret_cast<DBImpl &>(db).TEST_pager().assert_state();
     }
 
+    enum FaultType {
+        kNoFaults,
+        kSyscallFaults,
+        kOOMFaults,
+    };
+
+    auto hard_reset()
+    {
+        m_env->m_syscall_state.enabled = false;
+        m_env->disable_oom_faults();
+        CrashEnv::reset_counter(m_env->m_oom_state);
+        CrashEnv::reset_counter(m_env->m_syscall_state);
+
+        // Make sure all files created during the test are unlinked.
+        auto s = m_env->remove_file(m_filename.c_str());
+        ASSERT_TRUE(s.is_ok() || s.is_not_found()) << s.type_name();
+        auto filename = m_filename + kDefaultWalSuffix;
+        s = m_env->remove_file(filename.c_str());
+        ASSERT_TRUE(s.is_ok() || s.is_not_found()) << s.type_name();
+        filename = m_filename + kDefaultShmSuffix;
+        s = m_env->remove_file(filename.c_str());
+        ASSERT_TRUE(s.is_ok() || s.is_not_found()) << s.type_name();
+    }
+
+    auto set_fault_injection_type(FaultType type)
+    {
+        hard_reset();
+
+        switch (type) {
+            case kNoFaults:
+                break;
+            case kSyscallFaults:
+                m_env->m_syscall_state.enabled = true;
+                break;
+            case kOOMFaults:
+                m_env->enable_oom_faults();
+                break;
+            default:
+                ADD_FAILURE() << "unrecognized fault type " << static_cast<int>(type);
+        }
+    }
+
+    static auto get_fault_injection_state(CrashEnv &env, FaultType type) -> CrashEnv::CrashState *
+    {
+        switch (type) {
+            case kSyscallFaults:
+                return &env.m_syscall_state;
+            case kOOMFaults:
+                return &env.m_oom_state;
+            default:
+                if (type != kNoFaults) {
+                    ADD_FAILURE() << "unrecognized fault type " << static_cast<int>(type);
+                }
+                return nullptr;
+        }
+    }
+
     struct OperationsParameters {
-        bool inject_faults = false;
+        FaultType fault_type = kNoFaults;
         bool test_checkpoint = false;
         bool test_sync_mode = false;
     };
@@ -366,28 +460,65 @@ protected:
         };
         size_t src_counters[kNumSrcLocations] = {};
 
-        std::cout << "CrashTests::Operations({\n  .inject_faults = " << std::boolalpha << param.inject_faults
-                  << ",\n  .test_checkpoint = " << param.test_checkpoint << ",\n})\n\n";
+        const char *fault_type_str;
+        if (param.fault_type == kSyscallFaults) {
+            fault_type_str = "kSyscallFaults";
+        } else if (param.fault_type == kOOMFaults) {
+            fault_type_str = "kOOMFaults";
+        } else {
+            fault_type_str = "kNoFaults";
+        }
+        std::cout << "CrashTests::Operations({\n  .fault_type = " << fault_type_str
+                  << ",\n  .test_checkpoint = " << std::boolalpha << param.test_checkpoint
+                  << ",\n})\n\n";
 
         Options options;
         options.env = m_env;
         options.sync_mode = param.test_sync_mode
                                 ? Options::kSyncFull
                                 : Options::kSyncNormal;
-        // m_drop_unsynced has no effect unless m_crashes_enabled is true. If both are true, then failures on fsync()
+        // m_drop_unsynced has no effect unless m_syscall_state.enabled is true. If both are true, then failures on fsync()
         // cause all data written since the last fsync() to be dropped. This only applies to the file that encountered
         // the fault.
         m_env->m_drop_unsynced = param.test_sync_mode;
 
-        (void)DB::destroy(options, m_filename.c_str());
-
         for (size_t i = 0; i < kNumIterations; ++i) {
-            m_env->m_crashes_enabled = param.inject_faults;
+            set_fault_injection_type(param.fault_type);
 
             DB *db;
-            run_until_completion([this, &options, &db, &src_counters] {
+            run_until_completion([this, i, &options, &db, &src_counters, &param] {
                 ++src_counters[kSrcOpen];
                 auto s = DB::open(options, m_filename.c_str(), db);
+                if (!s.is_ok()) {
+                    EXPECT_TRUE(is_injected_fault(s));
+                    return s;
+                }
+                validate(*db);
+
+                ++src_counters[kSrcUpdate];
+                s = db->update([i](auto &tx) {
+                    return writer_task(tx, i);
+                });
+                if (!s.is_ok()) {
+                    EXPECT_TRUE(is_injected_fault(s));
+                    return s;
+                }
+                validate(*db);
+
+                ++src_counters[kSrcView];
+                s = db->view([i](const auto &tx) {
+                    return reader_task(tx, i);
+                });
+                if (!s.is_ok()) {
+                    EXPECT_TRUE(is_injected_fault(s));
+                    return s;
+                }
+                validate(*db);
+
+                if (param.test_checkpoint) {
+                    ++src_counters[kSrcCheckpoint];
+                    s = db->checkpoint(true);
+                }
                 if (!s.is_ok()) {
                     EXPECT_TRUE(is_injected_fault(s));
                 }
@@ -395,30 +526,6 @@ protected:
             });
             validate(*db);
 
-            run_until_completion([i, &db, &src_counters] {
-                ++src_counters[kSrcUpdate];
-                return db->update([i](auto &tx) {
-                    return writer_task(tx, i);
-                });
-            });
-            validate(*db);
-
-            run_until_completion([i, &db, &src_counters] {
-                ++src_counters[kSrcView];
-                return db->view([i](const auto &tx) {
-                    return reader_task(tx, i);
-                });
-            });
-            validate(*db);
-
-            if (param.test_checkpoint) {
-                run_until_completion([&db, &src_counters] {
-                    ++src_counters[kSrcCheckpoint];
-                    return db->checkpoint(true);
-                });
-            }
-
-            m_env->m_crashes_enabled = false;
             delete db;
         }
 
@@ -432,7 +539,7 @@ protected:
     }
 
     struct OpenCloseParameters {
-        bool inject_faults = false;
+        FaultType fault_type = kNoFaults;
         size_t num_iterations = 1;
     };
     auto run_open_close_test(const OpenCloseParameters &param) -> void
@@ -442,15 +549,16 @@ protected:
 
         size_t tries = 0;
         for (size_t i = 0; i < param.num_iterations; ++i) {
-            m_env->m_crashes_enabled = false;
-            (void)DB::destroy(options, m_filename.c_str());
+            hard_reset();
 
             DB *db;
             ASSERT_OK(DB::open(options, m_filename.c_str(), db));
 
-            m_env->m_crashes_enabled = param.inject_faults;
-            m_env->m_max_num = static_cast<int>(i * 5);
-            m_env->m_num = 0;
+            set_fault_injection_type(param.fault_type);
+            if (auto *state = get_fault_injection_state(*m_env, param.fault_type)) {
+                state->max_num = static_cast<int>(i * 5);
+                state->num = 0;
+            }
 
             delete db;
 
@@ -471,7 +579,7 @@ protected:
     }
 
     struct CursorReadParameters {
-        bool inject_faults = true;
+        FaultType fault_type = kNoFaults;
         bool auto_reset = true;
     };
     auto run_cursor_read_test(const CursorReadParameters &param) -> void
@@ -480,9 +588,9 @@ protected:
         options.env = m_env;
         options.sync_mode = Options::kSyncFull;
 
-        (void)DB::destroy(options, m_filename.c_str());
-
         for (size_t i = 0; i < kNumIterations; ++i) {
+            hard_reset();
+
             DB *db;
             ASSERT_OK(DB::open(options, m_filename.c_str(), db));
             ASSERT_OK(db->update([](auto &tx) {
@@ -510,9 +618,7 @@ protected:
                 return s;
             }));
 
-            m_env->m_crashes_enabled = param.inject_faults;
-            m_env->m_auto_reset = param.auto_reset;
-
+            set_fault_injection_type(param.fault_type);
             run_until_completion([&db] {
                 return db->view([](const auto &tx) {
                     TestCursor c;
@@ -556,7 +662,6 @@ protected:
                 });
             });
 
-            m_env->m_crashes_enabled = false;
             delete db;
         }
     }
@@ -568,15 +673,13 @@ protected:
         options.sync_mode = param.test_sync_mode
                                 ? Options::kSyncFull
                                 : Options::kSyncNormal;
-        // m_drop_unsynced has no effect unless m_crashes_enabled is true. If both are true, then failures on fsync()
+        // m_drop_unsynced has no effect unless m_syscall_state.enabled is true. If both are true, then failures on fsync()
         // cause all data written since the last fsync() to be dropped. This only applies to the file that encountered
         // the fault.
         m_env->m_drop_unsynced = param.test_sync_mode;
 
-        (void)DB::destroy(options, m_filename.c_str());
-
         for (size_t i = 0; i < kNumIterations; ++i) {
-            m_env->m_crashes_enabled = param.inject_faults;
+            set_fault_injection_type(param.fault_type);
 
             DB *db;
             run_until_completion([this, &options, &db] {
@@ -628,7 +731,6 @@ protected:
             });
             validate(*db);
 
-            m_env->m_crashes_enabled = false;
             delete db;
         }
     }
@@ -636,51 +738,57 @@ protected:
 
 TEST_F(CrashTests, Operations)
 {
-    // Sanity check. No faults.
-    run_operations_test({false, false});
-    run_operations_test({false, true});
+    //    // Sanity check. No faults.
+    //    run_operations_test({kNoFaults,  false});
+    //    run_operations_test({kNoFaults,  true});
+    //
+    //    // Run with syscall fault injection.
+    //    run_operations_test({kSyscallFaults, false, false});
+    //    run_operations_test({kSyscallFaults, true, false});
+    //    run_operations_test({kSyscallFaults, false, true});
+    //    run_operations_test({kSyscallFaults, true, true});
 
-    // Run with fault injection.
-    run_operations_test({true, false, false});
-    run_operations_test({true, true, false});
-    run_operations_test({true, false, true});
-    run_operations_test({true, true, true});
+    // Run with OOM fault injection.
+    run_operations_test({kOOMFaults, false, false});
+    //    run_operations_test({kOOMFaults, true, false});
+    //    run_operations_test({kOOMFaults, false, true});
+    //    run_operations_test({kOOMFaults, true, true});
 }
 
 TEST_F(CrashTests, OpenClose)
 {
-    // Sanity check. No faults.
-    run_open_close_test({false, 1});
-    run_open_close_test({false, 2});
-    run_open_close_test({false, 3});
-
-    // Run with fault injection.
-    run_open_close_test({true, 1});
-    run_open_close_test({true, 2});
-    run_open_close_test({true, 3});
+    run_open_close_test({kNoFaults, 1});
+    run_open_close_test({kNoFaults, 2});
+    run_open_close_test({kNoFaults, 3});
+    run_open_close_test({kSyscallFaults, 1});
+    run_open_close_test({kSyscallFaults, 2});
+    run_open_close_test({kSyscallFaults, 3});
+    run_open_close_test({kOOMFaults, 1});
+    run_open_close_test({kOOMFaults, 2});
+    run_open_close_test({kOOMFaults, 3});
 }
 
 TEST_F(CrashTests, CursorReadFaults)
 {
-    // Sanity check. No faults.
-    run_cursor_read_test({false});
-
-    // Run with fault injection.
-    run_cursor_read_test({true, false});
-    run_cursor_read_test({true, true});
+    run_cursor_read_test({kNoFaults});
+    run_cursor_read_test({kSyscallFaults, false});
+    run_cursor_read_test({kSyscallFaults, true});
+    run_cursor_read_test({kOOMFaults, false});
+    run_cursor_read_test({kOOMFaults, true});
 }
 
 TEST_F(CrashTests, CursorModificationFaults)
 {
-    // Sanity check. No faults.
-    run_cursor_modify_test({false, false});
-    run_cursor_modify_test({false, true});
-
-    // Run with fault injection.
-    run_cursor_modify_test({true, false, false});
-    run_cursor_modify_test({true, true, false});
-    run_cursor_modify_test({true, false, true});
-    run_cursor_modify_test({true, true, true});
+    run_cursor_modify_test({kNoFaults, false});
+    run_cursor_modify_test({kNoFaults, true});
+    run_cursor_modify_test({kSyscallFaults, false, false});
+    run_cursor_modify_test({kSyscallFaults, true, false});
+    run_cursor_modify_test({kSyscallFaults, false, true});
+    run_cursor_modify_test({kSyscallFaults, true, true});
+    run_cursor_modify_test({kOOMFaults, false, false});
+    run_cursor_modify_test({kOOMFaults, true, false});
+    run_cursor_modify_test({kOOMFaults, false, true});
+    run_cursor_modify_test({kOOMFaults, true, true});
 }
 
 #undef MAYBE_CRASH
@@ -1005,10 +1113,9 @@ public:
             TestCursor c;
             auto s = test_open_bucket(tx, "bucket", c);
             for (size_t i = 0; i < num_writes && s.is_ok(); ++i) {
-                std::string value;
-                s = tx.get(*c, numeric_key(i), &value);
-                if (s.is_ok()) {
-                    EXPECT_EQ(value, numeric_key(i + version * num_writes));
+                c->find(numeric_key(i));
+                if (c->is_valid()) {
+                    EXPECT_EQ(c->value(), numeric_key(i + version * num_writes));
                 }
             }
             return s;

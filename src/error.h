@@ -6,18 +6,28 @@
 #define CALICODB_ERROR_H
 
 #include "encoding.h"
+#include "ptr.h"
 #include "utils.h"
 
 namespace calicodb
 {
 
+// TODO: There's probably a better way to do this. At least, we need to be careful not to
+//       trash pointers that are still being used. Since these messages will be assigned to
+//       Status objects, returned during a transaction, we could maybe guarantee that they will
+//       remain valid as long as the transaction is running. The goal is to provide detailed
+//       error messages, without having to allocate memory in the Status class, since we have
+//       to consider that heap allocation can fail, and we can't use exceptions...
+
+// Produces and stores error messages using predefined format strings
+// Note that each call to format_error() for a given ErrorCode will invalidate the last
+// error message written for that ErrorCode (only 1 buffer is used per code).
 class ErrorState final
 {
 public:
     explicit ErrorState() = default;
     ErrorState(ErrorState &) = delete;
     auto operator=(ErrorState &) -> void = delete;
-    ~ErrorState();
 
     enum ErrorCodeType : int {
         kCorruptedPage,
@@ -35,10 +45,7 @@ public:
     [[nodiscard]] auto format_error(ErrorCode code, ...) -> const char *;
 
 private:
-    struct {
-        char *buf;
-        size_t len;
-    } m_errors[kNumCodes] = {};
+    StringPtr m_errors[kNumCodes];
 };
 
 } // namespace calicodb

@@ -217,21 +217,23 @@ protected:
         return s;
     }
 
-    [[nodiscard]] static auto check(Tx &tx, Cursor &c, size_t kv, bool exists, size_t round = 0) -> Status
+    [[nodiscard]] static auto check(Tx &, Cursor &c, size_t kv, bool exists, size_t round = 0) -> Status
     {
         std::string result;
         const auto [k, v] = make_kv(kv, round);
-        auto s = tx.get(c, k, &result);
-        if (s.is_ok()) {
+        c.find(k);
+        if (c.is_valid()) {
             EXPECT_TRUE(exists);
             uint64_t n;
             Slice slice(result);
             EXPECT_TRUE(consume_decimal_number(slice, &n));
             EXPECT_EQ(kv, n);
-        } else if (s.is_not_found()) {
+        } else if (c.status().is_not_found()) {
             EXPECT_FALSE(exists);
+        } else {
+            return c.status();
         }
-        return s;
+        return Status::ok();
     }
     [[nodiscard]] static auto check(Tx &tx, const BucketOptions &options, const std::string &bname, size_t kv, bool exists, size_t round = 0) -> Status
     {
@@ -413,16 +415,18 @@ TEST_F(DBTests, ConvenienceFunctions)
 
 TEST_F(DBTests, NewTx)
 {
+    // Junk addresses used to make sure new_tx() clears its out pointer parameter
+    // on failure.
     Tx *reader1, *reader2 = reinterpret_cast<Tx *>(42);
     Tx *writer1, *writer2 = reinterpret_cast<Tx *>(42);
 
-    ASSERT_OK(m_db->new_tx(WriteTag{}, writer1));
+    ASSERT_OK(m_db->new_tx(WriteTag(), writer1));
     ASSERT_NE(nullptr, writer2);
-    ASSERT_NOK(m_db->new_tx(WriteTag{}, writer2));
+    ASSERT_NOK(m_db->new_tx(WriteTag(), writer2));
     ASSERT_EQ(nullptr, writer2);
     delete writer1;
 
-    ASSERT_OK(m_db->new_tx(WriteTag{}, writer2));
+    ASSERT_OK(m_db->new_tx(WriteTag(), writer2));
     ASSERT_NE(nullptr, reader2);
     ASSERT_NOK(m_db->new_tx(reader2));
     ASSERT_EQ(nullptr, reader2);
@@ -430,7 +434,7 @@ TEST_F(DBTests, NewTx)
 
     ASSERT_OK(m_db->new_tx(reader2));
     ASSERT_NE(nullptr, writer2);
-    ASSERT_NOK(m_db->new_tx(WriteTag{}, writer2));
+    ASSERT_NOK(m_db->new_tx(WriteTag(), writer2));
     ASSERT_EQ(nullptr, writer2);
     delete reader2;
 
@@ -440,22 +444,12 @@ TEST_F(DBTests, NewTx)
     ASSERT_EQ(nullptr, reader2);
     delete reader1;
 
-    std::vector<std::string> values;
-    auto s = m_db->view([&values](const auto &tx) {
-        TestCursor c;
-        auto s = test_open_bucket(tx, "bucket", c);
-        if (s.is_ok()) {
-            c->seek_first();
-            while (c->is_valid()) {
-                if (c->key().starts_with("common-prefix")) {
-                    values.emplace_back(c->value().to_string());
-                }
-                c->next();
-            }
-            s = c->status();
-        }
-        return s;
-    });
+    ASSERT_OK(m_db->update([](auto &tx) {
+        return put_range(tx, BucketOptions(), "bucket", 0, 100);
+    }));
+    ASSERT_OK(m_db->view([](const auto &tx) {
+        return check_range(tx, "bucket", 0, 100, true);
+    }));
 }
 
 TEST_F(DBTests, NewBucket)
@@ -475,9 +469,9 @@ TEST_F(DBTests, BucketBehavior)
         TestCursor c;
         EXPECT_OK(test_create_and_open_bucket(tx, BucketOptions(), "BUCKET", c));
         EXPECT_OK(tx.put(*c, "key", "value"));
-        std::string value;
-        EXPECT_OK(tx.get(*c, "key", &value));
-        EXPECT_EQ("value", value);
+        c->find("key");
+        EXPECT_OK(c->status());
+        EXPECT_EQ("value", c->value());
         return Status::ok();
     }));
 }

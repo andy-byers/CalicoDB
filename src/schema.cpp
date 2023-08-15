@@ -53,6 +53,11 @@ public:
         return "";
     }
 
+    auto find(const Slice &key) -> void override
+    {
+        return m_c->find(key);
+    }
+
     auto seek(const Slice &key) -> void override
     {
         return m_c->seek(key);
@@ -88,9 +93,6 @@ Schema::Schema(Pager &pager, const Status &status, Stat &stat, char *scratch)
       m_cursor(m_map),
       m_schema(Alloc::new_object<SchemaCursor>(m_cursor))
 {
-    if (m_schema == nullptr) {
-        m_pager->set_status(Status::no_memory());
-    }
 }
 
 auto Schema::close() -> void
@@ -143,8 +145,12 @@ auto Schema::create_bucket(const BucketOptions &options, const Slice &name, Curs
     }
 
     if (s.is_ok() && c_out) {
-        auto *tree = construct_or_reference_tree(root_id);
-        *c_out = new (std::nothrow) CursorImpl(*tree);
+        if (auto *tree = construct_or_reference_tree(root_id)) {
+            *c_out = new (std::nothrow) CursorImpl(*tree);
+        }
+        if (*c_out == nullptr) {
+            s = Status::no_memory();
+        }
     }
     return s;
 }
@@ -167,8 +173,12 @@ auto Schema::open_bucket(const Slice &name, Cursor *&c_out) -> Status
     } else if (!decode_and_check_root_id(m_cursor.value(), root_id)) {
         return corrupted_root_id();
     }
-    auto *tree = construct_or_reference_tree(root_id);
-    c_out = new (std::nothrow) CursorImpl(*tree);
+    if (auto *tree = construct_or_reference_tree(root_id)) {
+        c_out = new (std::nothrow) CursorImpl(*tree);
+    }
+    if (c_out == nullptr) {
+        s = Status::no_memory();
+    }
     return s;
 }
 
@@ -208,6 +218,11 @@ auto Schema::construct_or_reference_tree(Id root_id) -> Tree *
             m_scratch,
             &itr->second.root,
             m_pager->mode() >= Pager::kWrite);
+        if (itr->second.tree == nullptr) {
+            // Out of memory.
+            m_trees.erase(itr);
+            return nullptr;
+        }
     }
     return itr->second.tree;
 }
@@ -287,7 +302,7 @@ auto Schema::vacuum_finish() -> Status
 {
     m_cursor.seek_first();
 
-    Status s;
+    auto s = m_cursor.status();
     while (m_cursor.is_valid()) {
         Id old_id;
         if (!decode_and_check_root_id(m_cursor.value(), old_id)) {
