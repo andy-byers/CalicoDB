@@ -56,7 +56,7 @@ struct ShmNode final {
 
     mutable std::mutex mutex;
 
-    StringPtr filename;
+    UniqueBuffer filename;
     int file = -1;
 
     bool is_unlocked = false;
@@ -289,7 +289,7 @@ struct PosixShm {
 class PosixFile : public File
 {
 public:
-    explicit PosixFile(StringPtr filename)
+    explicit PosixFile(UniqueBuffer filename)
         : filename(std::move(filename))
     {
     }
@@ -313,7 +313,7 @@ public:
     auto shm_unmap(bool unlink) -> void override;
     auto shm_barrier() -> void override;
 
-    StringPtr filename;
+    UniqueBuffer filename;
     ObjectPtr<PosixShm> shm;
     INode *inode = nullptr;
     int file = -1;
@@ -371,7 +371,7 @@ public:
             if (offset + 1 >= L) {
                 if (i == 0) {
                     L = offset + 2; // +1 for '\n'
-                    var = Alloc::alloc_string(L);
+                    var = static_cast<char *>(Alloc::alloc(L));
                     if (var == nullptr) {
                         // Write just this generic message if the system could not fulfill the allocation.
                         static constexpr const char kNoMemory[] = "could not log message: no memory for temp buffer\n";
@@ -491,8 +491,8 @@ struct PosixFs final {
 
     [[nodiscard]] auto ref_snode(PosixFile &file, PosixShm *&shm_out) const -> Status
     {
-        ObjectPtr shm_storage(Alloc::new_object<PosixShm>());
-        if (!shm_storage.is_valid()) {
+        ObjectPtr<PosixShm> shm_storage(Alloc::new_object<PosixShm>());
+        if (!shm_storage) {
             return Status::no_memory();
         }
         auto *inode = file.inode;
@@ -501,22 +501,26 @@ struct PosixFs final {
         if (snode == nullptr) {
             // Allocate storage for the shm node.
             ObjectPtr<ShmNode> new_snode(Alloc::new_object<ShmNode>());
-            if (!new_snode.is_valid()) {
+            if (!new_snode) {
                 return Status::no_memory();
             }
 
-            // Allocate storage for the shm filename.
+            // Allocate storage for the shm filename, including a '\0'. Note that the base
+            // filename already has its '\0' included in its length, hence the "- 1"s.
             const auto suffix_len = std::strlen(kDefaultShmSuffix);
-            new_snode->filename.reset(Alloc::combine(
-                Slice(file.filename.get(), file.filename.len()),
-                Slice(kDefaultShmSuffix, suffix_len)));
-            if (!new_snode->filename.is_valid()) {
+            auto *storage_ptr = Alloc::combine(
+                Slice(file.filename.ptr(), file.filename.len() - 1),
+                Slice(kDefaultShmSuffix, suffix_len));
+            if (storage_ptr == nullptr) {
                 return Status::no_memory();
             }
+            new_snode->filename.reset(
+                storage_ptr,
+                file.filename.len() + suffix_len - 1);
 
             // Open the shm file.
             new_snode->file = posix_open(
-                new_snode->filename.get(),
+                new_snode->filename.ptr(),
                 O_CREAT | O_NOFOLLOW | O_RDWR);
             if (new_snode->file < 0) {
                 return posix_error(errno);
@@ -570,7 +574,7 @@ struct PosixFs final {
                 // using this shm file.
                 if (0 == posix_shm_lock(*snode, F_WRLCK, kShmDMS, 1)) {
                     // This should drop the lock we just took.
-                    unlink(snode->filename.get());
+                    unlink(snode->filename.ptr());
                 }
             }
             inode->snode.reset();
@@ -636,20 +640,19 @@ auto PosixEnv::new_file(const char *filename, OpenMode mode, File *&out) -> Stat
         (is_create ? O_CREAT : 0) |
         (is_readonly ? O_RDONLY : O_RDWR);
 
-    INode *ino = nullptr;
-    PosixFile *file = nullptr;
-    auto s = Status::no_memory();
-
-    // Allocate storage for the filename.
+    // Allocate storage for the filename. Alloc::to_string() adds a '\0'.
     const Slice filename_slice(filename, std::strlen(filename));
-    StringPtr filename_storage(Alloc::to_string(filename_slice),
-                               filename_slice.size());
-    if (!filename_storage.is_valid()) {
-        goto cleanup;
+    auto *storage_ptr = Alloc::to_string(filename_slice);
+    if (storage_ptr == nullptr) {
+        return Status::no_memory();
     }
+    auto s = Status::no_memory();
+    INode *ino = nullptr;
+
     // Allocate storage for the File instance. Files are exposed to the user, so just use regular
     // operator new(). The Alloc API is only used for internal structures.
-    file = new (std::nothrow) PosixFile(std::move(filename_storage));
+    auto *file = new (std::nothrow) PosixFile(
+        UniqueBuffer(storage_ptr, filename_slice.size() + 1));
     if (file == nullptr) {
         goto cleanup;
     }
@@ -730,7 +733,7 @@ auto PosixFile::close() -> Status
         return Status::ok();
     }
     CALICODB_EXPECT_TRUE(inode);
-    CALICODB_EXPECT_FALSE(shm.is_valid());
+    CALICODB_EXPECT_FALSE(shm);
     file_unlock();
 
     PosixFs::s_fs.mutex.lock();
@@ -799,7 +802,7 @@ auto PosixFile::sync() -> Status
 
 auto PosixFile::shm_unmap(bool unlink) -> void
 {
-    if (shm.is_valid()) {
+    if (shm) {
         PosixFs::s_fs.unref_snode(*shm, unlink);
         shm.reset();
     }
@@ -808,10 +811,10 @@ auto PosixFile::shm_unmap(bool unlink) -> void
 auto PosixFile::shm_map(size_t r, bool extend, volatile void *&out) -> Status
 {
     out = nullptr;
-    if (!shm.is_valid()) {
+    if (!shm) {
         CALICODB_TRY(PosixFs::s_fs.ref_snode(*this, shm.ref()));
     }
-    CALICODB_EXPECT_TRUE(shm.is_valid());
+    CALICODB_EXPECT_TRUE(shm);
     auto *snode = shm->snode;
     CALICODB_EXPECT_TRUE(snode);
     std::lock_guard guard(snode->mutex);
@@ -876,7 +879,7 @@ cleanup:
 
 auto PosixFile::shm_lock(size_t r, size_t n, ShmLockFlag flags) -> Status
 {
-    if (shm.is_valid()) {
+    if (shm) {
         return shm->lock(r, n, flags);
     }
     return Status::io_error("shm is unmapped");

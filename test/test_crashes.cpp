@@ -523,7 +523,7 @@ protected:
                     EXPECT_TRUE(is_injected_fault(s));
                     return s;
                 }
-                CALICODB_EXPECT_TRUE(db.is_valid());
+                CALICODB_EXPECT_TRUE(db);
                 validate(*db);
                 return s;
             });

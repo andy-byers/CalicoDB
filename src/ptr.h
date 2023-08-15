@@ -6,32 +6,80 @@
 #define CALICODB_PTR_H
 
 #include "alloc.h"
+#include "utils.h"
 #include <memory>
 #include <utility>
 
 namespace calicodb
 {
 
-template <class Object>
-class PtrWrapper
+struct ObjectDestructor {
+    template <class Object>
+    auto operator()(Object *ptr) const -> void
+    {
+        Alloc::delete_object(ptr);
+    }
+};
+
+struct UserObjectDestructor {
+    template <class Object>
+    auto operator()(Object *ptr) const -> void
+    {
+        delete ptr;
+    }
+};
+
+struct DefaultDestructor {
+    auto operator()(void *ptr) const -> void
+    {
+        Alloc::free(ptr);
+    }
+};
+
+template <class Object, class Destructor = DefaultDestructor>
+class UniquePtr : public Destructor
 {
     Object *m_ptr;
 
+    auto destroy() const
+    {
+        Destructor::operator()(m_ptr);
+    }
+
 public:
-    explicit PtrWrapper(Object *ptr = nullptr)
+    explicit UniquePtr(Object *ptr = nullptr)
         : m_ptr(ptr)
     {
     }
 
-    PtrWrapper(const PtrWrapper<Object> &) = delete;
-    auto operator=(const PtrWrapper<Object> &) -> PtrWrapper<Object> & = delete;
-
-    PtrWrapper(PtrWrapper<Object> &&rhs) noexcept
-        : m_ptr(rhs.release())
+    template <class D>
+    explicit UniquePtr(Object *ptr, D &&destructor)
+        : Destructor(std::forward<D>(destructor)),
+          m_ptr(ptr)
     {
     }
 
-    auto operator=(PtrWrapper<Object> &&rhs) noexcept -> PtrWrapper<Object> & = default;
+    ~UniquePtr()
+    {
+        destroy();
+    }
+
+    UniquePtr(const UniquePtr &rhs) noexcept = delete;
+    auto operator=(const UniquePtr &rhs) noexcept -> UniquePtr & = delete;
+
+    UniquePtr(UniquePtr &&rhs) noexcept
+        : Destructor(rhs),
+          m_ptr(std::exchange(rhs.m_ptr, nullptr))
+    {
+    }
+
+    auto operator=(UniquePtr &&rhs) noexcept -> UniquePtr &
+    {
+        if (this != &rhs) {
+            reset(rhs.release());
+        }
+        return *this;
+    }
 
     auto operator*() -> Object &
     {
@@ -53,7 +101,7 @@ public:
         return m_ptr;
     }
 
-    [[nodiscard]] auto is_valid() const -> bool
+    operator bool() const
     {
         return m_ptr != nullptr;
     }
@@ -73,125 +121,107 @@ public:
         return m_ptr;
     }
 
+    auto reset(Object *ptr = nullptr) -> void
+    {
+        destroy();
+        m_ptr = ptr;
+    }
+
     auto release() -> Object *
     {
         return std::exchange(m_ptr, nullptr);
     }
 };
 
-template <class Object>
-class UserPtr final : public PtrWrapper<Object>
+class UniqueBuffer final
 {
+    UniquePtr<char> m_ptr;
+    size_t m_len;
+
 public:
-    explicit UserPtr(Object *ptr = nullptr)
-        : PtrWrapper<Object>(ptr)
+    explicit UniqueBuffer()
+        : m_len(0)
     {
     }
 
-    ~UserPtr()
+    explicit UniqueBuffer(char *ptr, size_t len)
+        : m_ptr(ptr),
+          m_len(len)
     {
-        // This type of object is as part of the public API. It must be disposed-of using
-        // operator delete(), since the Alloc interface is not exposed.
-        delete this->get();
+        CALICODB_EXPECT_EQ(ptr == nullptr, len == 0);
     }
 
-    UserPtr(UserPtr<Object> &&) noexcept = default;
-    auto operator=(UserPtr<Object> &&rhs) noexcept -> UserPtr<Object> &
+    UniqueBuffer(UniqueBuffer &&rhs) noexcept
+        : m_ptr(std::move(rhs.m_ptr)),
+          m_len(std::exchange(rhs.m_len, 0))
+    {
+    }
+
+    auto operator=(UniqueBuffer &&rhs) noexcept -> UniqueBuffer &
     {
         if (this != &rhs) {
-            reset(rhs.get());
-            rhs.release();
+            m_ptr = std::move(rhs.m_ptr);
+            m_len = std::exchange(rhs.m_len, 0);
         }
         return *this;
     }
 
-    auto reset(Object *ptr = nullptr) -> void
+    [[nodiscard]] auto is_empty() const -> bool
     {
-        delete this->get();
-        std::exchange(this->ref(), ptr);
-    }
-};
-
-template <class Object>
-class ObjectPtr final : public PtrWrapper<Object>
-{
-public:
-    explicit ObjectPtr(Object *ptr = nullptr)
-        : PtrWrapper<Object>(ptr)
-    {
-    }
-
-    ~ObjectPtr()
-    {
-        Alloc::delete_object(this->get());
-    }
-
-    ObjectPtr(ObjectPtr<Object> &&) noexcept = default;
-    auto operator=(ObjectPtr<Object> &&rhs) noexcept -> ObjectPtr<Object> &
-    {
-        if (this != &rhs) {
-            reset(rhs.get());
-            rhs.release();
-        }
-        return *this;
-    }
-
-    auto reset(Object *ptr = nullptr) -> void
-    {
-        Alloc::delete_object(this->get());
-        std::exchange(this->ref(), ptr);
-    }
-};
-
-class StringPtr final : public PtrWrapper<char>
-{
-    mutable size_t m_len;
-
-public:
-    explicit StringPtr(char *ptr = nullptr, size_t len = 0)
-        : PtrWrapper<char>(ptr),
-          m_len(len ? len : std::strlen(ptr ? ptr : ""))
-    {
-    }
-
-    ~StringPtr()
-    {
-        Alloc::free(this->get());
-    }
-
-    StringPtr(StringPtr &&) noexcept = default;
-    auto operator=(StringPtr &&rhs) noexcept -> StringPtr &
-    {
-        if (this != &rhs) {
-            reset(rhs.get());
-            rhs.release();
-        }
-        return *this;
+        return m_len == 0;
     }
 
     [[nodiscard]] auto len() const -> size_t
     {
-        if (m_len == 0 && get()) {
-            m_len = std::strlen(get());
-        }
         return m_len;
     }
 
-    auto reset(char *ptr = nullptr, size_t len = 0) -> void
+    [[nodiscard]] auto ptr() -> char *
     {
-        Alloc::free(this->get());
-        std::exchange(this->ref(), ptr);
+        return m_ptr.get();
+    }
+
+    [[nodiscard]] auto ptr() const -> const char *
+    {
+        return m_ptr.get();
+    }
+
+    [[nodiscard]] auto ref() -> char *&
+    {
+        return m_ptr.ref();
+    }
+
+    auto reset(char *ptr, size_t len) -> void
+    {
+        CALICODB_EXPECT_EQ(ptr == nullptr, len == 0);
+        m_ptr.reset(ptr);
         m_len = len;
+    }
+
+    auto release() -> char *
+    {
+        m_len = 0;
+        return std::exchange(ref(), nullptr);
     }
 
     auto resize(size_t len) -> void
     {
-        if (auto *ptr = Alloc::realloc_string(get(), len + 1)) {
-            release(); // Don't free the old pointer.
-            reset(ptr);
+        CALICODB_EXPECT_GT(len, 0); // Use reset(nullptr, 0) to free the buffer early.
+        auto *ptr = static_cast<char *>(Alloc::realloc(m_ptr.get(), len));
+        if (ptr) {
+            m_ptr.release();
+        } else {
+            len = 0;
         }
+        m_ptr.reset(ptr);
+        m_len = len;
     }
 };
+
+template <class Object>
+using ObjectPtr = UniquePtr<Object, ObjectDestructor>;
+template <class Object>
+using UserPtr = UniquePtr<Object, UserObjectDestructor>;
 
 } // namespace calicodb
 

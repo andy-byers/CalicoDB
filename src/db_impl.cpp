@@ -14,7 +14,7 @@ namespace calicodb
 
 auto DBImpl::open(const Options &sanitized) -> Status
 {
-    auto s = m_env->new_file(m_db_filename.get(), Env::kReadWrite, m_file.ref());
+    auto s = m_env->new_file(m_db_filename.ptr(), Env::kReadWrite, m_file.ref());
     if (s.is_ok()) {
         if (sanitized.error_if_exists) {
             return Status::invalid_argument("database already exists");
@@ -27,14 +27,14 @@ auto DBImpl::open(const Options &sanitized) -> Status
         // failed call to DB::destroy(), or it is an unrelated file that coincidentally has the
         // same name as this database's WAL file. Either way, we must get rid of it here,
         // otherwise we'll end up checkpointing it.
-        s = m_env->remove_file(m_wal_filename.get());
+        s = m_env->remove_file(m_wal_filename.ptr());
         if (s.is_ok()) {
-            log(m_log, R"(removed old WAL file "%s")", m_wal_filename.get());
+            log(m_log, R"(removed old WAL file "%s")", m_wal_filename.ptr());
         } else if (!s.is_not_found()) {
             return s;
         }
-        log(m_log, R"(creating missing database "%s")", m_db_filename.get());
-        s = m_env->new_file(m_db_filename.get(), Env::kCreate, m_file.ref());
+        log(m_log, R"(creating missing database "%s")", m_db_filename.ptr());
+        s = m_env->new_file(m_db_filename.ptr(), Env::kCreate, m_file.ref());
     }
     if (s.is_ok()) {
         s = busy_wait(m_busy, [this] {
@@ -49,8 +49,8 @@ auto DBImpl::open(const Options &sanitized) -> Status
         return s;
     }
     const Pager::Parameters pager_param = {
-        m_db_filename.get(),
-        m_wal_filename.get(),
+        m_db_filename.ptr(),
+        m_wal_filename.ptr(),
         m_file.get(),
         m_env,
         m_log,
@@ -68,7 +68,7 @@ auto DBImpl::open(const Options &sanitized) -> Status
     // work needed when DB::checkpoint() is actually called. If this is actually the first
     // connection, then fsync() must be called on each file before it is used, to make sure
     // there isn't any data left in the kernel page cache.
-    const auto needs_ckpt = m_env->file_exists(m_wal_filename.get());
+    const auto needs_ckpt = m_env->file_exists(m_wal_filename.ptr());
     s = Pager::open(pager_param, m_pager.ref());
     if (s.is_ok() && needs_ckpt) {
         s = m_pager->checkpoint(false);
@@ -163,7 +163,7 @@ auto DBImpl::get_property(const Slice &name, Slice *out) const -> bool
 
         if (prop == "stats") {
             if (out) {
-                m_property.reset();
+                m_property.reset(nullptr, 0);
                 append_fmt_string(
                     m_property,
                     "Name               Value\n"
@@ -187,7 +187,7 @@ auto DBImpl::get_property(const Slice &name, Slice *out) const -> bool
                         static_cast<double>(m_stat.counters[Stat::kCacheHits] +
                                             m_stat.counters[Stat::kCacheMisses]));
                 // Exclude the '\0' that is included in m_property.len().
-                *out = Slice(m_property.get(), m_property.len() - 1);
+                *out = Slice(m_property.ptr(), m_property.len() - 1);
             }
             return true;
         }
@@ -238,7 +238,7 @@ auto DBImpl::prepare_tx(bool write, TxType *&tx_out) const -> Status
             &m_errors,
             m_pager.get(),
             &m_stat,
-            m_scratch.get(),
+            m_scratch.ptr(),
             write,
         });
         if (m_tx && m_tx->m_schema.cursor()) {

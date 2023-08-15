@@ -131,12 +131,9 @@ static constexpr auto next_index_hash(Hash hash) -> Hash
     return (hash + 1) & (kNIndexHashes - 1);
 }
 
-static auto too_many_collisions(Key key) -> Status
+static auto too_many_collisions() -> Status
 {
-    (void)key;
-    //    std::string message;
-    //    append_fmt_string(message, "too many WAL index collisions for page %u", key);
-    return Status::corruption("message");
+    return Status::corruption("too many WAL index collisions");
 }
 
 struct HashGroup {
@@ -201,7 +198,7 @@ auto HashIndex::lookup(Key key, Value lower, Value &out) -> Status
         // inclusive).
         while ((relative = ATOMIC_LOAD(&group.hash[key_hash]))) {
             if (collisions-- == 0) {
-                return too_many_collisions(key);
+                return too_many_collisions();
             }
             const auto absolute = relative + group.base;
             const auto found =
@@ -274,7 +271,7 @@ auto HashIndex::assign(Key key, Value value) -> Status
     // hash slots than frames, so this search will always terminate.
     for (; ATOMIC_LOAD(&group.hash[key_hash]); key_hash = next_index_hash(key_hash)) {
         if (collisions-- == 0) {
-            return too_many_collisions(key);
+            return too_many_collisions();
         }
     }
     group.keys[relative - 1] = key;

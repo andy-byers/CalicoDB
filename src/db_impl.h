@@ -39,9 +39,9 @@ public:
 private:
     struct Parameters {
         Options sanitized;
-        StringPtr db_name;
-        StringPtr wal_name;
-        StringPtr scratch;
+        UniqueBuffer db_name;
+        UniqueBuffer wal_name;
+        UniqueBuffer scratch;
     };
     friend class Alloc;
     explicit DBImpl(Parameters param);
@@ -53,8 +53,8 @@ private:
     mutable Status m_status;
     mutable TxImpl *m_tx = nullptr;
     mutable Stat m_stat;
-    mutable StringPtr m_scratch;
-    mutable StringPtr m_property;
+    mutable UniqueBuffer m_scratch;
+    mutable UniqueBuffer m_property;
     mutable ObjectPtr<Pager> m_pager;
 
     UserPtr<File> m_file;
@@ -63,8 +63,8 @@ private:
     BusyHandler *const m_busy;
 
     const size_t m_auto_ckpt;
-    const StringPtr m_db_filename;
-    const StringPtr m_wal_filename;
+    const UniqueBuffer m_db_filename;
+    const UniqueBuffer m_wal_filename;
     const bool m_owns_log;
     const bool m_owns_env;
 };

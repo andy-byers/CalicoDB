@@ -59,7 +59,7 @@ auto Alloc::free(void *ptr) -> void
 auto Alloc::to_string(const Slice &slice) -> char *
 {
     // `slice` is assumed to not include a '\0' at the end.
-    auto *str = alloc_string(slice.size() + 1);
+    auto *str = static_cast<char *>(alloc(slice.size() + 1));
     if (str) {
         std::memcpy(str, slice.data(), slice.size());
         str[slice.size()] = '\0';
@@ -69,7 +69,7 @@ auto Alloc::to_string(const Slice &slice) -> char *
 
 auto Alloc::combine(const Slice &left, const Slice &right) -> char *
 {
-    auto *str = alloc_string(left.size() + right.size() + 1);
+    auto *str = static_cast<char *>(alloc(left.size() + right.size() + 1));
     if (str) {
         std::memcpy(str, left.data(), left.size());
         std::memcpy(str + left.size(), right.data(), right.size());

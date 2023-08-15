@@ -255,10 +255,10 @@ auto Tree::extract_key(const Cell &cell, KeyScratch &scratch, Slice &key_out, ui
         return Status::ok();
     }
     if (limit > scratch.len) {
-        auto *buf = Alloc::realloc_string(
+        auto *buf = Alloc::realloc(
             scratch.buf, limit);
         if (buf) {
-            scratch.buf = buf;
+            scratch.buf = static_cast<char *>(buf);
             scratch.len = limit;
         } else {
             return Status::no_memory();

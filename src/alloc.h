@@ -56,16 +56,6 @@ public:
         }
     }
 
-    static auto alloc_string(size_t len) -> char *
-    {
-        return static_cast<char *>(alloc(len));
-    }
-
-    static auto realloc_string(char *ptr, size_t len) -> char *
-    {
-        return static_cast<char *>(realloc(ptr, len));
-    }
-
     [[nodiscard]] static auto to_string(const Slice &slice) -> char *;
     [[nodiscard]] static auto combine(const Slice &left, const Slice &right) -> char *;
 };

@@ -12,6 +12,79 @@
 namespace calicodb::test
 {
 
+TEST(UniquePtr, PointerWidth)
+{
+    static_assert(sizeof(UniquePtr<int, DefaultDestructor>) == sizeof(void *));
+    static_assert(sizeof(UniquePtr<int, ObjectDestructor>) == sizeof(void *));
+    static_assert(sizeof(UniquePtr<int, UserObjectDestructor>) == sizeof(void *));
+
+    struct Destructor1 {
+        auto operator()(void *) -> void
+        {
+        }
+    };
+
+    static_assert(sizeof(UniquePtr<int, Destructor1>) == sizeof(void *));
+
+    struct Destructor2 {
+        uint8_t u8;
+        auto operator()(void *) -> void
+        {
+        }
+    };
+
+    // Struct gets padded out to the size of 2 pointers.
+    static_assert(sizeof(UniquePtr<int, Destructor2>) == sizeof(void *) * 2);
+}
+
+TEST(UniquePtr, DestructorIsCalled)
+{
+    int destruction_count = 0;
+
+    struct Destructor {
+        int *const count;
+
+        explicit Destructor(int &count)
+            : count(&count)
+        {
+        }
+
+        auto operator()(int *ptr) const -> void
+        {
+            // Ignore calls that result in "delete nullptr".
+            *count += ptr != nullptr;
+            delete ptr;
+        }
+    } destructor(destruction_count);
+
+    {
+        UniquePtr<int, Destructor> ptr(new int(123), destructor);
+        (void)ptr;
+    }
+    ASSERT_EQ(destruction_count, 1);
+
+    UniquePtr<int, Destructor> ptr(new int(123), destructor);
+    ptr.reset();
+    ASSERT_EQ(destruction_count, 2);
+
+    ptr.reset(new int(123));
+    ASSERT_EQ(destruction_count, 2);
+
+    delete ptr.release();
+    ASSERT_EQ(destruction_count, 2);
+
+    UniquePtr<int, Destructor> ptr2(new int(42), destructor);
+    ptr = std::move(ptr2);
+    ASSERT_EQ(destruction_count, 2);
+
+    auto ptr3 = std::move(ptr);
+    ASSERT_EQ(*ptr3, 42);
+    ASSERT_EQ(destruction_count, 2);
+
+    ptr3.reset();
+    ASSERT_EQ(destruction_count, 3);
+}
+
 TEST(Encoding, Fixed32)
 {
     std::string s;

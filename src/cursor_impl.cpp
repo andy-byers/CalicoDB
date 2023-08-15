@@ -24,12 +24,12 @@ auto CursorImpl::fetch_user_payload() -> Status
     }
     Status s;
     if (cell.total_pl_size > buffer_len) {
-        auto *ptr = Alloc::realloc_string(
+        auto *ptr = Alloc::realloc(
             m_user_payload, cell.total_pl_size);
         if (ptr == nullptr) {
             s = Status::no_memory();
         } else {
-            m_user_payload = ptr;
+            m_user_payload = static_cast<char *>(ptr);
         }
     }
     if (cell.total_pl_size > 0) {

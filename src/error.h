@@ -45,7 +45,7 @@ public:
     [[nodiscard]] auto format_error(ErrorCode code, ...) -> const char *;
 
 private:
-    StringPtr m_errors[kNumCodes];
+    UniqueBuffer m_errors[kNumCodes];
 };
 
 } // namespace calicodb

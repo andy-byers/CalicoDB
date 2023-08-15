@@ -26,36 +26,42 @@ static constexpr auto clip_to_range(T &t, V min, V max) -> void
 auto DB::open(const Options &options, const char *filename, DB *&db) -> Status
 {
     DBImpl *impl = nullptr;
-    StringPtr scratch_storage;
     auto sanitized = options;
     clip_to_range(sanitized.cache_size, kMinFrameCount * kPageSize, kMaxCacheSize);
 
-    const auto db_name_len = std::strlen(filename);
-    StringPtr db_name_storage(
-        Alloc::to_string(Slice(filename, db_name_len)),
-        db_name_len);
-    if (!db_name_storage.is_valid()) {
+    // Allocate storage for the database filename.
+    auto filename_len = std::strlen(filename);
+    auto *storage_ptr = Alloc::to_string(
+        Slice(filename, filename_len));
+    if (storage_ptr == nullptr) {
         return Status::no_memory();
     }
+    UniqueBuffer db_name(storage_ptr, filename_len + 1);
 
-    StringPtr wal_name_storage;
+    // Determine and allocate storage for the WAL filename.
     auto s = Status::no_memory();
-    if (0 == std::strcmp(sanitized.wal_filename, "")) {
-        const auto suffix_len = std::strlen(kDefaultWalSuffix);
-        wal_name_storage.reset(Alloc::combine(
-            Slice(filename, db_name_len),
-            Slice(kDefaultWalSuffix, suffix_len)));
+    if (const auto wal_filename_len = std::strlen(sanitized.wal_filename)) {
+        const Slice wal_filename(sanitized.wal_filename, wal_filename_len);
+        storage_ptr = Alloc::to_string(wal_filename);
+        filename_len = wal_filename_len;
     } else {
-        wal_name_storage.reset(Alloc::to_string(sanitized.wal_filename));
+        const auto suffix_len = std::strlen(kDefaultWalSuffix);
+        storage_ptr = Alloc::combine(
+            Slice(filename, filename_len),
+            Slice(kDefaultWalSuffix, suffix_len));
+        filename_len = filename_len + suffix_len;
     }
-    if (!wal_name_storage.is_valid()) {
-        goto cleanup;
+    if (storage_ptr == nullptr) {
+        return Status::no_memory();
     }
+    UniqueBuffer wal_name(storage_ptr, filename_len + 1);
 
-    scratch_storage.reset(Alloc::alloc_string(kTreeBufferLen));
-    if (!scratch_storage.is_valid()) {
-        goto cleanup;
+    // Allocate scratch memory for working with database pages.
+    storage_ptr = static_cast<char *>(Alloc::alloc(kTreeBufferLen));
+    if (storage_ptr == nullptr) {
+        return Status::no_memory();
     }
+    UniqueBuffer scratch(storage_ptr, kTreeBufferLen);
 
     if (sanitized.temp_database) {
         if (sanitized.env != nullptr) {
@@ -80,9 +86,9 @@ auto DB::open(const Options &options, const char *filename, DB *&db) -> Status
 
     impl = new (std::nothrow) DBImpl({
         sanitized,
-        std::move(db_name_storage),
-        std::move(wal_name_storage),
-        std::move(scratch_storage),
+        std::move(db_name),
+        std::move(wal_name),
+        std::move(scratch),
     });
     if (impl) {
         s = impl->open(sanitized);
