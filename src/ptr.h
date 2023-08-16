@@ -37,7 +37,7 @@ struct DefaultDestructor {
 };
 
 template <class Object, class Destructor = DefaultDestructor>
-class UniquePtr : public Destructor
+class UniquePtr : private Destructor
 {
     Object *m_ptr;
 
@@ -52,9 +52,9 @@ public:
     {
     }
 
-    template <class D>
-    explicit UniquePtr(Object *ptr, D &&destructor)
-        : Destructor(std::forward<D>(destructor)),
+    template <class Dx>
+    explicit UniquePtr(Object *ptr, Dx &&destructor)
+        : Destructor(std::forward<Dx>(destructor)),
           m_ptr(ptr)
     {
     }
@@ -168,7 +168,8 @@ public:
 
     [[nodiscard]] auto is_empty() const -> bool
     {
-        return m_len == 0;
+        // Emptiness only depends on the pointer. The size may be nonzero.
+        return !m_ptr;
     }
 
     [[nodiscard]] auto len() const -> size_t
@@ -215,6 +216,21 @@ public:
         }
         m_ptr.reset(ptr);
         m_len = len;
+    }
+
+    // NOTE: A null byte is added at the end of the buffer.
+    static auto from_slice(const Slice &slice, const Slice &extra = "") -> UniqueBuffer
+    {
+        const auto len = slice.size() + extra.size();
+
+        UniqueBuffer buf;
+        buf.resize(len + 1);
+        if (!buf.is_empty()) {
+            std::memcpy(buf.ptr(), slice.data(), slice.size());
+            std::memcpy(buf.ptr() + slice.size(), extra.data(), extra.size());
+            buf.ptr()[len] = '\0';
+        }
+        return buf;
     }
 };
 

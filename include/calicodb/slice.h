@@ -25,10 +25,10 @@ public:
     }
 
     constexpr Slice(const char *data)
-        : m_data(data)
+        : m_data(data),
+          m_size(std::char_traits<char>::length(m_data))
     {
         assert(m_data != nullptr);
-        m_size = std::char_traits<char>::length(m_data);
     }
 
     constexpr Slice(const std::string_view &rhs)

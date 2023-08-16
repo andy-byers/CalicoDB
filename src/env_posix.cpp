@@ -9,13 +9,11 @@
 #include <ctime>
 #include <fcntl.h>
 #include <libgen.h>
-#include <list>
 #include <mutex>
 #include <sys/mman.h>
 #include <sys/stat.h>
 #include <sys/time.h>
 #include <unistd.h>
-#include <vector>
 
 namespace calicodb
 {
@@ -62,7 +60,8 @@ struct ShmNode final {
     bool is_unlocked = false;
 
     // 32-KB blocks of shared memory.
-    std::vector<char *> regions; // TODO: No std::vector<T> allowed...
+    UniquePtr<char *> regions;
+    size_t num_regions = 0;
 
     // List of PosixShm objects that reference this ShmNode.
     PosixShm *refs = nullptr;
@@ -84,6 +83,11 @@ struct ShmNode final {
     [[nodiscard]] auto check_locks() const -> bool;
 };
 
+struct UnusedFile {
+    int file;
+    UnusedFile *next;
+};
+
 struct INode final {
     FileId key;
     mutable std::mutex mutex;
@@ -91,7 +95,7 @@ struct INode final {
     int lock = kLockUnlocked;
 
     // List of file descriptors that are waiting to be closed.
-    std::list<int> pending; // TODO: Can't use std::list<T>, it throws on allocation failure...
+    UnusedFile *unused = nullptr;
 
     // Number of PosixFile instances referencing this inode.
     int refcount = 0;
@@ -149,7 +153,7 @@ struct INode final {
 //     }
 // }
 
-[[nodiscard]] static auto posix_file_lock(int file, const struct flock &lock) -> int
+static auto posix_file_lock(int file, const struct flock &lock) -> int
 {
     return fcntl(file, F_SETLK, &lock);
 }
@@ -289,8 +293,9 @@ struct PosixShm {
 class PosixFile : public File
 {
 public:
-    explicit PosixFile(UniqueBuffer filename)
-        : filename(std::move(filename))
+    explicit PosixFile(UniqueBuffer filename, UniquePtr<UnusedFile> prealloc)
+        : filename(std::move(filename)),
+          prealloc(std::move(prealloc))
     {
     }
 
@@ -314,6 +319,7 @@ public:
     auto shm_barrier() -> void override;
 
     UniqueBuffer filename;
+    UniquePtr<UnusedFile> prealloc;
     ObjectPtr<PosixShm> shm;
     INode *inode = nullptr;
     int file = -1;
@@ -424,10 +430,13 @@ struct PosixFs final {
     static auto close_pending_files(INode &inode) -> void
     {
         // REQUIRES: Mutex "inode.mutex" is locked by the caller
-        for (auto fd : inode.pending) {
-            close(fd);
+        for (auto *p = inode.unused; p;) {
+            auto *entry = p;
+            close(p->file);
+            p = p->next;
+            Alloc::free(entry);
         }
-        inode.pending.clear();
+        inode.unused = nullptr;
     }
 
     [[nodiscard]] static auto ref_inode(int fd, INode *&ino_out) -> Status
@@ -507,16 +516,12 @@ struct PosixFs final {
 
             // Allocate storage for the shm filename, including a '\0'. Note that the base
             // filename already has its '\0' included in its length, hence the "- 1"s.
-            const auto suffix_len = std::strlen(kDefaultShmSuffix);
-            auto *storage_ptr = Alloc::combine(
+            new_snode->filename = UniqueBuffer::from_slice(
                 Slice(file.filename.ptr(), file.filename.len() - 1),
-                Slice(kDefaultShmSuffix, suffix_len));
-            if (storage_ptr == nullptr) {
+                Slice(kDefaultShmSuffix, std::strlen(kDefaultShmSuffix)));
+            if (new_snode->filename.is_empty()) {
                 return Status::no_memory();
             }
-            new_snode->filename.reset(
-                storage_ptr,
-                file.filename.len() + suffix_len - 1);
 
             // Open the shm file.
             new_snode->file = posix_open(
@@ -566,8 +571,8 @@ struct PosixFs final {
 
         if (--snode->refcount == 0) {
             const auto interval = mmap_scale;
-            for (size_t i = 0; i < snode->regions.size(); i += interval) {
-                munmap(snode->regions[i], File::kShmRegionSize);
+            for (size_t i = 0; i < snode->num_regions; i += interval) {
+                munmap(snode->regions.get()[i], File::kShmRegionSize);
             }
             if (unlink_if_last) {
                 // Take a write lock on the DMS byte to make sure no other processes are
@@ -642,17 +647,25 @@ auto PosixEnv::new_file(const char *filename, OpenMode mode, File *&out) -> Stat
 
     // Allocate storage for the filename. Alloc::to_string() adds a '\0'.
     const Slice filename_slice(filename, std::strlen(filename));
-    auto *storage_ptr = Alloc::to_string(filename_slice);
-    if (storage_ptr == nullptr) {
+    auto filename_storage = UniqueBuffer::from_slice(filename_slice);
+    if (filename_storage.is_empty()) {
         return Status::no_memory();
     }
+
+    // Allocate storage for an UnusedFile.
+    auto *prealloc_storage = Alloc::alloc(sizeof(UnusedFile));
+    if (prealloc_storage == nullptr) {
+        return Status::no_memory();
+    }
+    UniquePtr<UnusedFile> prealloc(static_cast<UnusedFile *>(prealloc_storage));
     auto s = Status::no_memory();
     INode *ino = nullptr;
 
     // Allocate storage for the File instance. Files are exposed to the user, so just use regular
     // operator new(). The Alloc API is only used for internal structures.
     auto *file = new (std::nothrow) PosixFile(
-        UniqueBuffer(storage_ptr, filename_slice.size() + 1));
+        std::move(filename_storage),
+        std::move(prealloc));
     if (file == nullptr) {
         goto cleanup;
     }
@@ -740,11 +753,13 @@ auto PosixFile::close() -> Status
     inode->mutex.lock();
 
     if (inode->nlocks) {
-        // Some other thread in this process has a lock on this file from
-        // a different file descriptor. Closing this file descriptor will
-        // cause other threads to lose their locks. Defer close() until
-        // the other locks have been released.
-        inode->pending.emplace_back(fd);
+        // Some other thread in this process has a lock on this file from a different
+        // file descriptor. Closing this file descriptor will cause other threads to
+        // lose their locks. Defer close() until the other locks have been released.
+        // This uses the UnusedFile created when the file was opened.
+        prealloc->file = fd;
+        prealloc->next = inode->unused;
+        inode->unused = prealloc.release();
         fd = -1;
     }
     inode->mutex.unlock();
@@ -812,7 +827,10 @@ auto PosixFile::shm_map(size_t r, bool extend, volatile void *&out) -> Status
 {
     out = nullptr;
     if (!shm) {
-        CALICODB_TRY(PosixFs::s_fs.ref_snode(*this, shm.ref()));
+        auto s = PosixFs::s_fs.ref_snode(*this, shm.ref());
+        if (!s.is_ok()) {
+            return s;
+        }
     }
     CALICODB_EXPECT_TRUE(shm);
     auto *snode = shm->snode;
@@ -830,7 +848,7 @@ auto PosixFile::shm_map(size_t r, bool extend, volatile void *&out) -> Status
     const auto request = (r + mmap_scale) / mmap_scale * mmap_scale;
 
     Status s;
-    if (snode->regions.size() < request) {
+    if (snode->num_regions < request) {
         size_t file_size;
         if (struct stat st = {}; fstat(snode->file, &st)) {
             s = posix_error(errno);
@@ -852,27 +870,38 @@ auto PosixFile::shm_map(size_t r, bool extend, volatile void *&out) -> Status
             }
         }
 
-        while (snode->regions.size() < request) {
+        // Make room for a pointer to the requested shm region.
+        if (auto **realloc_ptr = static_cast<char **>(Alloc::realloc(
+                snode->regions.get(), request * sizeof(char *)))) {
+            snode->regions.release();
+            snode->regions.reset(realloc_ptr);
+        } else {
+            s = Status::no_memory();
+            goto cleanup;
+        }
+
+        while (snode->num_regions < request) {
             // Map "mmap_scale" shared memory regions into this address space.
             auto *p = mmap(
                 nullptr, File::kShmRegionSize * mmap_scale,
-                PROT_READ | PROT_WRITE,
-                MAP_SHARED, snode->file,
-                static_cast<ssize_t>(File::kShmRegionSize * snode->regions.size()));
+                PROT_READ | PROT_WRITE, MAP_SHARED, snode->file,
+                static_cast<ssize_t>(File::kShmRegionSize * snode->num_regions));
             if (p == MAP_FAILED) {
                 s = posix_error(errno);
                 break;
             }
             // Store a pointer to the start of each memory region.
             for (size_t i = 0; i < mmap_scale; ++i) {
-                snode->regions.emplace_back(reinterpret_cast<char *>(p) + File::kShmRegionSize * i);
+                const auto n = snode->num_regions++;
+                snode->regions.get()[n] = reinterpret_cast<char *>(p) +
+                                          File::kShmRegionSize * i;
             }
         }
     }
 
 cleanup:
-    if (r < snode->regions.size()) {
-        out = snode->regions[r];
+    if (r < snode->num_regions) {
+        out = snode->regions.get()[r];
     }
     return s;
 }
@@ -1121,7 +1150,7 @@ auto PosixFile::file_unlock() -> void
     CALICODB_EXPECT_GT(inode->nlocks, 0);
 
     if (--inode->nlocks == 0) {
-        (void)posix_file_lock(file, lock);
+        posix_file_lock(file, lock);
         PosixFs::close_pending_files(*inode);
         inode->lock = kLockUnlocked;
     }

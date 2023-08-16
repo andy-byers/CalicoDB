@@ -16,33 +16,25 @@ namespace calicodb
 class Alloc
 {
 public:
-    // posix_memalign() is called on POSIX, and it has pretty strict requirements on the
-    // alignment. It must be an integer multiple of sizeof(void *) that is also a power-of-2.
-    // Source: https://en.cppreference.com/w/cpp/memory/c/aligned_alloc
-    static constexpr size_t kMinAlignment = sizeof(void *);
-
     // Called in alloc() and realloc(). If the result is nonzero, a nullptr is returned
     // immediately, before the system allocator is called. Used for injecting OOM errors.
     using Hook = int (*)(void *);
     static auto set_hook(Hook hook, void *arg) -> void;
 
     [[nodiscard]] static auto alloc(size_t len) -> void *;
-    [[nodiscard]] static auto alloc(size_t len, size_t alignment) -> void *;
-    // Note that realloc() doesn't accept an alignment parameter. This routine must not be
-    // used on storage obtained using alloc(size_t).
     [[nodiscard]] static auto realloc(void *ptr, size_t len) -> void *;
     static auto free(void *ptr) -> void;
 
     template <class Object, class... Args>
     [[nodiscard]] static auto new_object(Args &&...args) -> Object *
     {
-        Object *object = nullptr; // May be aligned more strictly than necessary.
-        const auto alignment = alignof(Object) < kMinAlignment
-                                   ? kMinAlignment
-                                   : alignof(Object);
-        auto *storage = alloc(sizeof(Object), alignment);
-        if (storage) {
+        Object *object;
+        // NOTE: This probably won't work for types that require a stricter alignment than
+        //       alignof(std::max_align_t).
+        if (auto *storage = alloc(sizeof(Object))) {
             object = new (storage) Object(std::forward<Args &&>(args)...);
+        } else {
+            object = nullptr;
         }
         return object;
     }
@@ -55,9 +47,6 @@ public:
             free(ptr);
         }
     }
-
-    [[nodiscard]] static auto to_string(const Slice &slice) -> char *;
-    [[nodiscard]] static auto combine(const Slice &left, const Slice &right) -> char *;
 };
 
 } // namespace calicodb

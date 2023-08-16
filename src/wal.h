@@ -8,7 +8,6 @@
 #include "calicodb/db.h"
 #include "utils.h"
 #include <functional>
-#include <vector>
 
 namespace calicodb
 {
@@ -44,7 +43,7 @@ public:
     auto lookup(Key key, Value lower, Value &out) -> Status;
     auto assign(Key key, Value value) -> Status;
     [[nodiscard]] auto header() -> volatile HashIndexHdr *;
-    [[nodiscard]] auto groups() const -> const std::vector<volatile char *> &;
+    [[nodiscard]] auto groups() const -> volatile char **;
     auto cleanup() -> void;
     auto close() -> void;
 
@@ -54,7 +53,8 @@ private:
     auto map_group(size_t group_number, bool extend) -> Status;
 
     // Storage for hash table groups.
-    std::vector<volatile char *> m_groups;
+    volatile char **m_groups = nullptr;
+    size_t m_num_groups = 0;
 
     // Address of the hash table header kept in memory. This version of the header corresponds
     // to the current transaction. The one stored in the first table group corresponds to the

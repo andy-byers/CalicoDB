@@ -161,7 +161,7 @@ HashIndex::HashIndex(HashIndexHdr &header, File *file)
 
 auto HashIndex::header() -> volatile HashIndexHdr *
 {
-    CALICODB_EXPECT_FALSE(m_groups.empty());
+    CALICODB_EXPECT_FALSE(m_num_groups == 0);
     CALICODB_EXPECT_TRUE(m_groups[0]);
     return reinterpret_cast<volatile HashIndexHdr *>(m_groups[0]);
 }
@@ -220,10 +220,10 @@ auto HashIndex::lookup(Key key, Value lower, Value &out) -> Status
 auto HashIndex::fetch(Value value) -> Key
 {
     const auto n = index_group_number(value);
-    if (n >= m_groups.size()) {
+    if (n >= m_num_groups) {
         return 0;
     }
-    CALICODB_EXPECT_LT(n, m_groups.size());
+    CALICODB_EXPECT_LT(n, m_num_groups);
     CALICODB_EXPECT_TRUE(m_groups[n]);
     const HashGroup group(n, m_groups[n]);
     if (group.base) {
@@ -281,9 +281,20 @@ auto HashIndex::assign(Key key, Value value) -> Status
 
 auto HashIndex::map_group(size_t group_number, bool extend) -> Status
 {
-    while (group_number >= m_groups.size()) {
-        m_groups.emplace_back();
+    if (m_num_groups <= group_number) {
+        static constexpr size_t kPtrWidth = sizeof(volatile char *);
+        const auto needed_len = group_number + 1;
+        if (auto **groups = static_cast<volatile char **>(Alloc::realloc(
+                m_groups, needed_len * kPtrWidth))) {
+            std::memset(groups + m_num_groups, 0,
+                        (needed_len - m_num_groups) * kPtrWidth);
+            m_groups = groups;
+            m_num_groups = needed_len;
+        } else {
+            return Status::no_memory();
+        }
     }
+
     Status s;
     if (m_groups[group_number] == nullptr) {
         volatile void *ptr;
@@ -303,7 +314,7 @@ auto HashIndex::map_group(size_t group_number, bool extend) -> Status
     return s;
 }
 
-auto HashIndex::groups() const -> const std::vector<volatile char *> &
+auto HashIndex::groups() const -> volatile char **
 {
     return m_groups;
 }
@@ -336,12 +347,9 @@ auto HashIndex::close() -> void
     if (m_file) {
         m_file->shm_unmap(true);
         m_file = nullptr;
-    } else {
-        for (const auto *ptr : m_groups) {
-            delete[] ptr;
-        }
     }
-    m_groups.clear();
+    Alloc::free(m_groups);
+    m_groups = nullptr;
 }
 
 // Merge 2 sorted lists.
@@ -435,7 +443,7 @@ HashIterator::HashIterator(HashIndex &source)
 
 HashIterator::~HashIterator()
 {
-    Alloc::free(reinterpret_cast<char *>(m_state));
+    Alloc::free(m_state);
 }
 
 auto HashIterator::init(uint32_t backfill) -> Status
@@ -448,37 +456,33 @@ auto HashIterator::init(uint32_t backfill) -> Status
 
     static_assert(std::is_pod_v<State>);
     static_assert(std::is_pod_v<State::Group>);
-    static_assert(alignof(State) == Alloc::kMinAlignment);
+    static_assert(alignof(State) == sizeof(void *));
     static_assert(alignof(State) == alignof(State::Group));
 
     // Allocate internal buffers.
-    static constexpr size_t kAlignmentMask = Alloc::kMinAlignment - 1;
+    static constexpr size_t kAlignmentMask = alignof(State) - 1;
     m_num_groups = index_group_number(last_value) + 1;
-    const auto min_state_size =
-        sizeof(State) +                             // Includes storage for 1 group ("groups[1]").
+    const auto state_size =
+        sizeof(State) +                             // Includes storage for 1 group ("groups[1]" member).
         (m_num_groups - 1) * sizeof(State::Group) + // Additional groups.
         last_value * sizeof(Hash);                  // Indices to sort.
-    auto round_up = alignof(State) - (min_state_size & kAlignmentMask);
-    const auto state_size = min_state_size + (round_up & kAlignmentMask);
-    m_state = static_cast<State *>(Alloc::alloc(state_size, alignof(State)));
+    m_state = static_cast<State *>(Alloc::alloc(state_size));
     if (m_state == nullptr) {
         return Status::no_memory();
     }
+    CALICODB_EXPECT_TRUE(is_aligned(m_state, alignof(State)));
     std::memset(m_state, 0, state_size);
 
     // Temporary buffer for mergesort. Freed before returning from this routine. Possibly a bit
     // larger than necessary due to platform alignment requirements (see alloc.h).
-    const auto min_temp_size = (last_value < kNIndexKeys
-                                    ? last_value
-                                    : kNIndexKeys) *
-                               sizeof(Hash);
-    round_up = Alloc::kMinAlignment - (min_temp_size & kAlignmentMask);
-    const auto temp_size = min_temp_size + (round_up & kAlignmentMask);
-    auto *temp = static_cast<Hash *>(Alloc::alloc(
-        temp_size, Alloc::kMinAlignment));
+    const auto temp_size =
+        (last_value < kNIndexKeys ? last_value : kNIndexKeys) * sizeof(Hash);
+    auto *temp = static_cast<Hash *>(Alloc::alloc(temp_size));
     if (temp == nullptr) {
+        // m_state will be freed in the destructor.
         return Status::no_memory();
     }
+    CALICODB_EXPECT_TRUE(is_aligned(temp, alignof(Hash)));
     std::memset(temp, 0, temp_size);
 
     Status s;
@@ -748,10 +752,10 @@ private:
 
     [[nodiscard]] auto get_ckpt_info() -> volatile CkptInfo *
     {
-        CALICODB_EXPECT_FALSE(m_index.groups().empty());
-        CALICODB_EXPECT_TRUE(m_index.groups().front());
+        CALICODB_EXPECT_NE(m_index.groups(), nullptr);
+        CALICODB_EXPECT_NE(m_index.groups()[0], nullptr);
         return reinterpret_cast<volatile CkptInfo *>(
-            &m_index.groups().front()[sizeof(HashIndexHdr) * 2]);
+            &m_index.groups()[0][sizeof(HashIndexHdr) * 2]);
     }
     [[nodiscard]] auto try_index_header(bool &changed) -> bool
     {
@@ -786,11 +790,13 @@ private:
     }
     auto read_index_header(bool &changed) -> Status
     {
-        CALICODB_TRY(m_index.map_group(0, m_writer_lock));
-        CALICODB_EXPECT_FALSE(m_index.m_groups.empty());
+        auto s = m_index.map_group(0, m_writer_lock);
+        if (!s.is_ok()) {
+            return s;
+        }
+        CALICODB_EXPECT_GT(m_index.m_num_groups, 0);
         CALICODB_EXPECT_TRUE(m_index.m_groups[0] || !m_writer_lock);
 
-        Status s;
         auto success = false;
         if (m_index.m_groups[0]) {
             success = try_index_header(changed);
@@ -813,13 +819,7 @@ private:
             }
         }
         if (success && m_hdr.version != kWalVersion) {
-            //            std::string message;
-            //            append_fmt_string(
-            //                message,
-            //                "version mismatch (encountered %u but expected %u)",
-            //                m_hdr.version,
-            //                kWalVersion);
-            return Status::not_supported("message");
+            return Status::not_supported("WAL version mismatch");
         }
         return s;
     }
@@ -904,7 +904,7 @@ private:
         if (!use_wal) {
             s = read_index_header(changed);
             if (s.is_busy()) {
-                if (!m_index.m_groups.front()) {
+                if (m_index.m_groups[0] == nullptr) {
                     // First shm region has not been mapped.
                     s = Status::retry();
                 } else if ((s = lock_shared(kRecoveryLock)).is_ok()) {
@@ -917,8 +917,8 @@ private:
             }
         }
 
-        CALICODB_EXPECT_FALSE(m_index.groups().empty());
-        CALICODB_EXPECT_TRUE(m_index.groups().front());
+        CALICODB_EXPECT_NE(m_index.groups(), nullptr);
+        CALICODB_EXPECT_NE(m_index.groups()[0], nullptr);
 
         volatile auto *info = get_ckpt_info();
         if (!use_wal && ATOMIC_LOAD(&info->backfill) == m_hdr.max_frame) {
@@ -1301,7 +1301,7 @@ auto WalImpl::write(PageRef *first_ref, size_t db_size) -> Status
 
     const auto is_commit = db_size > 0;
     volatile auto *live = m_index.header();
-    auto *dirty = first_ref->get_dirty_hdr();
+    auto *dirty = &first_ref->dirty_hdr;
     uint32_t first_frame = 0;
 
     // Check if the WAL's copy of the index header differs from what is on the first index page.

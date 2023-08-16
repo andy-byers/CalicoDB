@@ -33,7 +33,7 @@ TEST(UniquePtr, PointerWidth)
         }
     };
 
-    // Struct gets padded out to the size of 2 pointers.
+    // Object gets padded out to the size of 2 pointers.
     static_assert(sizeof(UniquePtr<int, Destructor2>) == sizeof(void *) * 2);
 }
 

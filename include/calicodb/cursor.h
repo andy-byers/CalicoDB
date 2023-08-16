@@ -12,9 +12,9 @@ namespace calicodb
 {
 
 // Cursor for iterating over the records in a bucket
-// Cursors must be obtained by passing an open Bucket to Tx::new_cursor(). It should be
-// noted that a freshly-allocated cursor is not considered valid (is_valid() returns
-// false) until one of its seek*() methods is called.
+// Cursors must be obtained by calling Tx::open_bucket() or Tx::create_bucket(). It
+// should be noted that a freshly-allocated cursor is not considered valid (is_valid()
+// returns false) until find() or one of the seek*() methods returns an OK status.
 class Cursor
 {
 public:
@@ -39,7 +39,7 @@ public:
     // If is_valid() returns true, this method will always return an OK status.
     // Otherwise, the returned status will indicate the reason why the cursor is
     // invalid. If the status is OK, then the cursor is out of bounds but otherwise
-    // valid. Cursors in this state can call, one of the seek*() to put themselves
+    // valid. Invalid cursors can call find() or one of the seek*() to put themselves
     // back on a valid record.
     virtual auto status() const -> Status = 0;
 
@@ -51,10 +51,14 @@ public:
     // REQUIRES: is_valid()
     [[nodiscard]] virtual auto value() const -> Slice = 0;
 
+    // Move the cursor to the first record with a key that is equal to the given `key`
+    // Invalidates the cursor if a read fails or the key does not exist. If no errors
+    // are encountered and the record does not exist, the cursor status is set to a
+    // status for which Status::is_not_found() evaluates to true.
     virtual auto find(const Slice &key) -> void = 0;
 
-    // Move the cursor to the record with a key that is greater than or equal to
-    // the given key
+    // Move the cursor to the first record with a key that is greater than or equal
+    // to the given `key`
     // Invalidates the cursor if a read fails or the key is out of range.
     virtual auto seek(const Slice &key) -> void = 0;
 

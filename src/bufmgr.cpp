@@ -193,17 +193,17 @@ auto Dirtylist::is_empty() const -> bool
 auto Dirtylist::remove(PageRef &ref) -> DirtyHdr *
 {
     CALICODB_EXPECT_TRUE(ref.get_flag(PageRef::kDirty));
-    auto *hdr = ref.get_dirty_hdr();
-    // NOTE: hdr->next_entry is still valid after this call.
-    IntrusiveList::remove(*hdr);
+    // NOTE: ref.dirty_hdr.next_entry is still valid after this call (IntrusiveList::remove() does not
+    //       reinitialize the entry it removes from the list).
+    IntrusiveList::remove(ref.dirty_hdr);
     ref.clear_flag(PageRef::kDirty);
-    return hdr->next_entry;
+    return ref.dirty_hdr.next_entry;
 }
 
 auto Dirtylist::add(PageRef &ref) -> void
 {
     CALICODB_EXPECT_FALSE(ref.get_flag(PageRef::kDirty));
-    IntrusiveList::add_head(*ref.get_dirty_hdr(), m_head);
+    IntrusiveList::add_head(ref.dirty_hdr, m_head);
     ref.set_flag(PageRef::kDirty);
 }
 
@@ -306,7 +306,7 @@ auto Dirtylist::TEST_contains(const PageRef &ref) const -> bool
         CALICODB_EXPECT_TRUE(p->next_entry == end() ||
                              p->next_entry->prev_entry == p);
         if (p->get_page_ref()->page_id == ref.page_id) {
-            CALICODB_EXPECT_EQ(p, ref.get_dirty_hdr());
+            CALICODB_EXPECT_EQ(p, &ref.dirty_hdr);
             CALICODB_EXPECT_FALSE(found);
             found = true;
         }

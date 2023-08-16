@@ -132,18 +132,17 @@ auto DBImpl::destroy(const Options &options, const char *filename) -> Status
 
             // This DB doesn't use a shm file, since it was opened in exclusive locking
             // mode. shm files left by other connections must be removed manually.
-            auto *path_buffer = Alloc::combine(
+            auto path_buffer = UniqueBuffer::from_slice(
                 Slice(filename, std::strlen(filename)),
                 Slice(kDefaultShmSuffix, std::strlen(kDefaultShmSuffix)));
-            if (path_buffer) {
-                auto t = env->remove_file(path_buffer);
+            if (!path_buffer.is_empty()) {
+                auto t = env->remove_file(path_buffer.ptr());
                 if (t.is_ok()) {
                     log(options.info_log, R"(removed leftover shm file "%s")",
-                        path_buffer);
+                        path_buffer.ptr());
                 } else if (s.is_ok() && !t.is_not_found()) {
                     s = t;
                 }
-                Alloc::free(path_buffer);
             } else {
                 s = Status::no_memory();
             }
@@ -158,8 +157,9 @@ auto DBImpl::get_property(const Slice &name, Slice *out) const -> bool
     if (out) {
         out->clear();
     }
-    if (name.starts_with("calicodb.")) {
-        const auto prop = name.range(std::strlen("calicodb."));
+    static constexpr char kBasePrefix[] = "calicodb.";
+    if (name.starts_with(kBasePrefix)) {
+        const auto prop = name.range(std::strlen(kBasePrefix));
 
         if (prop == "stats") {
             if (out) {

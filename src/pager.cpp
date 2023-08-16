@@ -364,7 +364,7 @@ auto Pager::ensure_available_buffer() -> Status
         CALICODB_EXPECT_EQ(m_mode, kDirty);
         // Clear the transient list pointer, since we are writing just this page to the WAL.
         // The transient list is not valid unless Dirtylist::sort() was called.
-        victim->get_dirty_hdr()->dirty = nullptr;
+        victim->dirty_hdr.dirty = nullptr;
 
         // DB page count is 0 here because this write is not part of a commit.
         s = m_wal->write(victim, 0);

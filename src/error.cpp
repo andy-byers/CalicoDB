@@ -38,10 +38,7 @@ auto ErrorState::format_error(ErrorCode code, ...) -> const char *
         if (error.is_empty()) {
             return "out of memory in ErrorState::format_error()";
         }
-        rc = std::vsnprintf(error.ptr(), error.len(), fmt, args);
-
-        CALICODB_EXPECT_GE(rc, 0);
-        CALICODB_EXPECT_EQ(rc + 1, static_cast<int>(len));
+        std::vsnprintf(error.ptr(), error.len(), fmt, args);
     }
     va_end(args);
     return error.ptr();

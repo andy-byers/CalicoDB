@@ -231,7 +231,7 @@ public:
 
     auto write(PageRef *first_ref, size_t db_size) -> Status override
     {
-        auto *dirty = first_ref->get_dirty_hdr();
+        auto *dirty = &first_ref->dirty_hdr;
         for (auto *p = dirty; p; p = p->dirty) {
             auto *ref = p->get_page_ref();
             m_pages.insert_or_assign(ref->page_id, std::string(ref->data, kPageSize));

@@ -29,40 +29,38 @@ auto DB::open(const Options &options, const char *filename, DB *&db) -> Status
     auto sanitized = options;
     clip_to_range(sanitized.cache_size, kMinFrameCount * kPageSize, kMaxCacheSize);
 
-    // Allocate storage for the database filename.
+    // Allocate storage for the database filename. Note that if the filename is empty, a single byte
+    // will be allocated to hold a '\0', so we won't attempt to allocate 0 bytes.
     auto filename_len = std::strlen(filename);
-    auto *storage_ptr = Alloc::to_string(
+    auto db_name = UniqueBuffer::from_slice(
         Slice(filename, filename_len));
-    if (storage_ptr == nullptr) {
+    if (db_name.is_empty()) {
         return Status::no_memory();
     }
-    UniqueBuffer db_name(storage_ptr, filename_len + 1);
 
     // Determine and allocate storage for the WAL filename.
-    auto s = Status::no_memory();
+    UniqueBuffer wal_name;
     if (const auto wal_filename_len = std::strlen(sanitized.wal_filename)) {
-        const Slice wal_filename(sanitized.wal_filename, wal_filename_len);
-        storage_ptr = Alloc::to_string(wal_filename);
-        filename_len = wal_filename_len;
+        wal_name = UniqueBuffer::from_slice(
+            Slice(sanitized.wal_filename, wal_filename_len));
     } else {
         const auto suffix_len = std::strlen(kDefaultWalSuffix);
-        storage_ptr = Alloc::combine(
+        wal_name = UniqueBuffer::from_slice(
             Slice(filename, filename_len),
             Slice(kDefaultWalSuffix, suffix_len));
-        filename_len = filename_len + suffix_len;
     }
-    if (storage_ptr == nullptr) {
+    if (wal_name.is_empty()) {
         return Status::no_memory();
     }
-    UniqueBuffer wal_name(storage_ptr, filename_len + 1);
 
     // Allocate scratch memory for working with database pages.
-    storage_ptr = static_cast<char *>(Alloc::alloc(kTreeBufferLen));
-    if (storage_ptr == nullptr) {
+    auto *scratch_ptr = static_cast<char *>(Alloc::alloc(kTreeBufferLen));
+    if (scratch_ptr == nullptr) {
         return Status::no_memory();
     }
-    UniqueBuffer scratch(storage_ptr, kTreeBufferLen);
+    UniqueBuffer scratch(scratch_ptr, kTreeBufferLen);
 
+    auto s = Status::no_memory();
     if (sanitized.temp_database) {
         if (sanitized.env != nullptr) {
             log(sanitized.info_log,
@@ -92,8 +90,6 @@ auto DB::open(const Options &options, const char *filename, DB *&db) -> Status
     });
     if (impl) {
         s = impl->open(sanitized);
-    } else {
-        s = Status::no_memory();
     }
 
 cleanup:
