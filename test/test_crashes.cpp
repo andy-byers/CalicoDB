@@ -580,7 +580,6 @@ protected:
 
     struct CursorReadParameters {
         FaultType fault_type = kNoFaults;
-        bool auto_reset = true;
     };
     auto run_cursor_read_test(const CursorReadParameters &param) -> void
     {
@@ -735,18 +734,24 @@ protected:
     }
 };
 
-TEST_F(CrashTests, Operations)
+TEST_F(CrashTests, Operations_None)
 {
     // Sanity check. No faults.
     run_operations_test({kNoFaults, false});
     run_operations_test({kNoFaults, true});
+}
 
+TEST_F(CrashTests, Operations_Syscall)
+{
     // Run with syscall fault injection.
     run_operations_test({kSyscallFaults, false, false});
     run_operations_test({kSyscallFaults, true, false});
     run_operations_test({kSyscallFaults, false, true});
     run_operations_test({kSyscallFaults, true, true});
+}
 
+TEST_F(CrashTests, Operations_OOM)
+{
     // Run with OOM fault injection.
     run_operations_test({kOOMFaults, false, false});
     run_operations_test({kOOMFaults, true, false});
@@ -754,36 +759,52 @@ TEST_F(CrashTests, Operations)
     run_operations_test({kOOMFaults, true, true});
 }
 
-TEST_F(CrashTests, OpenClose)
+TEST_F(CrashTests, OpenClose_None)
 {
-    run_open_close_test({kNoFaults, 1});
-    run_open_close_test({kNoFaults, 2});
     run_open_close_test({kNoFaults, 3});
-    run_open_close_test({kSyscallFaults, 1});
-    run_open_close_test({kSyscallFaults, 2});
+}
+
+TEST_F(CrashTests, OpenClose_Syscall)
+{
     run_open_close_test({kSyscallFaults, 3});
-    run_open_close_test({kOOMFaults, 1});
-    run_open_close_test({kOOMFaults, 2});
+}
+
+TEST_F(CrashTests, OpenClose_OOM)
+{
     run_open_close_test({kOOMFaults, 3});
 }
 
-TEST_F(CrashTests, CursorReadFaults)
+TEST_F(CrashTests, CursorRead_None)
 {
     run_cursor_read_test({kNoFaults});
-    run_cursor_read_test({kSyscallFaults, false});
-    run_cursor_read_test({kSyscallFaults, true});
-    run_cursor_read_test({kOOMFaults, false});
-    run_cursor_read_test({kOOMFaults, true});
 }
 
-TEST_F(CrashTests, CursorModificationFaults)
+TEST_F(CrashTests, CursorRead_Syscall)
+{
+    run_cursor_read_test({kSyscallFaults});
+}
+
+TEST_F(CrashTests, CursorRead_OOM)
+{
+    run_cursor_read_test({kOOMFaults});
+}
+
+TEST_F(CrashTests, CursorModification_None)
 {
     run_cursor_modify_test({kNoFaults, false});
     run_cursor_modify_test({kNoFaults, true});
+}
+
+TEST_F(CrashTests, CursorModification_Syscall)
+{
     run_cursor_modify_test({kSyscallFaults, false, false});
     run_cursor_modify_test({kSyscallFaults, true, false});
     run_cursor_modify_test({kSyscallFaults, false, true});
     run_cursor_modify_test({kSyscallFaults, true, true});
+}
+
+TEST_F(CrashTests, CursorModification_OOM)
+{
     run_cursor_modify_test({kOOMFaults, false, false});
     run_cursor_modify_test({kOOMFaults, true, false});
     run_cursor_modify_test({kOOMFaults, false, true});

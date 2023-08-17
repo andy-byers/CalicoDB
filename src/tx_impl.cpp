@@ -4,7 +4,6 @@
 
 #include "tx_impl.h"
 #include "encoding.h"
-#include "tree.h"
 
 namespace calicodb
 {

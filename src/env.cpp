@@ -3,9 +3,6 @@
 // LICENSE.md. See AUTHORS.md for a list of contributor names.
 
 #include "calicodb/env.h"
-#include "env_posix.h"
-#include "logging.h"
-#include "utils.h"
 
 namespace calicodb
 {

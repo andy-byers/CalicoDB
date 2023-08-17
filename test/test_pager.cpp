@@ -24,11 +24,16 @@ public:
     Bufmgr mgr;
 
     explicit BufmgrTests()
-        : mgr(32, m_stat)
+        : mgr(m_stat)
     {
     }
 
     ~BufmgrTests() override = default;
+
+    auto SetUp() -> void override
+    {
+        ASSERT_EQ(mgr.preallocate(32), 0);
+    }
 
     auto insert_and_reference(uint32_t key, uint32_t value) -> PageRef *
     {
@@ -389,6 +394,13 @@ protected:
     }
 };
 
+TEST_F(PagerTests, LastPageIsNotPointerMap)
+{
+    // If this particular page ends up being a pointer map, we would need to alter the
+    // guard at the beginning of Pager::allocate() to prevent the page ID from wrapping.
+    ASSERT_FALSE(PointerMap::is_map(Id::from_index(std::numeric_limits<uint32_t>::max() - 1)));
+}
+
 TEST_F(PagerTests, AllocatePage)
 {
     pager_update([this] {
@@ -541,47 +553,6 @@ TEST_F(PagerTests, Truncation)
     });
 }
 
-TEST_F(PagerTests, Freelist)
-{
-    pager_update([this] {
-        PageRef *page;
-        // Fill up several trunk pages.
-        for (size_t i = 0; i < kPageSize; ++i) {
-            allocate_page(page);
-            m_pager->release(page);
-        }
-        for (size_t i = 0; i < kPageSize; ++i) {
-            ASSERT_OK(m_pager->acquire(m_page_ids.at(i), page));
-            ASSERT_OK(m_pager->destroy(page));
-        }
-        ASSERT_OK(m_pager->commit());
-    });
-    pager_update([this] {
-        ASSERT_EQ(m_page_ids.back().value, m_pager->page_count());
-        PageRef *page;
-        for (size_t i = 0; i < kPageSize; ++i) {
-            allocate_page(page);
-            m_pager->release(page);
-        }
-        ASSERT_OK(m_pager->commit());
-    });
-    pager_view([this] {
-        ASSERT_EQ(m_page_ids.back().value, m_pager->page_count());
-    });
-}
-
-TEST_F(PagerTests, FreelistCorruption)
-{
-    pager_update([this] {
-        PageRef *page;
-        allocate_page(page);
-        page->page_id.value = m_pager->page_count() + 1;
-        ASSERT_NOK(m_pager->destroy(page));
-        auto *root = &m_pager->get_root();
-        ASSERT_NOK(m_pager->destroy(root));
-    });
-}
-
 TEST_F(PagerTests, ReportsOutOfRangePages)
 {
     pager_update([this] {
@@ -646,6 +617,161 @@ TEST_F(PagerTests, DeathTest)
     });
 }
 #endif // NDEBUG
+
+class FreelistTests : public PagerTests
+{
+public:
+    decltype(m_page_ids) m_ordering;
+    std::default_random_engine m_rng;
+
+    explicit FreelistTests()
+        : m_rng(42)
+    {
+    }
+
+    auto SetUp() -> void override
+    {
+        PagerTests::SetUp();
+    }
+
+    auto shuffle_order() -> void
+    {
+        std::shuffle(begin(m_ordering), end(m_ordering), m_rng);
+    }
+
+    static constexpr size_t kFreelistLen = kPageSize * 5;
+    auto populate_freelist(bool shuffle) -> void
+    {
+        pager_update([this, shuffle] {
+            PageRef *page;
+            for (size_t i = 0; i < kFreelistLen; ++i) {
+                allocate_page(page);
+                m_pager->release(page);
+            }
+            m_ordering = m_page_ids;
+            if (shuffle) {
+                shuffle_order();
+            }
+            for (auto id : m_ordering) {
+                ASSERT_OK(m_pager->acquire(id, page));
+                ASSERT_OK(Freelist::add(*m_pager, page));
+            }
+            ASSERT_OK(m_pager->commit());
+        });
+    }
+
+    auto test_pop_any()
+    {
+        pager_update([this] {
+            PageRef *page;
+            std::vector<Id> freelist_page_ids(m_page_ids.size());
+            for (size_t i = 0; i < m_page_ids.size(); ++i) {
+                ASSERT_OK(Freelist::remove(*m_pager, Freelist::kRemoveAny,
+                                           Id::null(), page));
+                ASSERT_NE(page, nullptr);
+                freelist_page_ids[i] = page->page_id;
+                m_pager->release(page);
+            }
+            std::sort(begin(freelist_page_ids), end(freelist_page_ids));
+            ASSERT_EQ(freelist_page_ids, m_page_ids);
+            ASSERT_OK(m_pager->commit());
+        });
+    }
+
+    auto test_pop_exact_found()
+    {
+        pager_update([this] {
+            std::vector<Id> freelist_page_ids;
+            shuffle_order();
+            PageRef *page;
+            for (auto exact : m_ordering) {
+                freelist_page_ids.emplace_back(exact);
+                ASSERT_OK(Freelist::remove(*m_pager, Freelist::kRemoveExact,
+                                           freelist_page_ids.back(), page))
+                    << "failed to pop page " << exact.value;
+                ASSERT_FALSE(freelist_page_ids.back().is_null());
+                ASSERT_EQ(freelist_page_ids.back(), exact);
+                m_pager->release(page);
+            }
+            std::sort(begin(freelist_page_ids), end(freelist_page_ids));
+            ASSERT_EQ(freelist_page_ids, m_page_ids);
+            ASSERT_OK(m_pager->commit());
+        });
+    }
+
+    auto test_pop_exact_not_found()
+    {
+        pager_update([this] {
+            PageRef *page;
+            for (size_t i = 0; i < m_ordering.size(); i += 2) {
+                ASSERT_OK(Freelist::remove(*m_pager, Freelist::kRemoveExact,
+                                           m_ordering[i], page))
+                    << "failed to pop page " << m_ordering[i].value;
+                m_pager->release(page);
+            }
+            ASSERT_OK(m_pager->commit());
+        });
+
+        for (size_t i = 0; i < m_ordering.size(); i += 2) {
+            pager_update([this, i] {
+                PageRef *page;
+                auto s = Freelist::remove(*m_pager, Freelist::kRemoveExact,
+                                          m_ordering[i], page);
+                ASSERT_TRUE(s.is_corruption()) << s.type_name();
+                ASSERT_EQ(page, nullptr);
+                ASSERT_OK(m_pager->commit());
+            });
+        }
+    }
+};
+
+TEST_F(FreelistTests, PopAnySequential)
+{
+    populate_freelist(false);
+    test_pop_any();
+}
+
+TEST_F(FreelistTests, PopAnyRandom)
+{
+    populate_freelist(true);
+    test_pop_any();
+}
+
+TEST_F(FreelistTests, PopExactSequentialFound)
+{
+    populate_freelist(false);
+    test_pop_exact_found();
+}
+
+TEST_F(FreelistTests, PopExactRandomFound)
+{
+    populate_freelist(true);
+    test_pop_exact_found();
+}
+
+TEST_F(FreelistTests, PopExactSequentialNotFound)
+{
+    populate_freelist(false);
+    test_pop_exact_not_found();
+}
+
+TEST_F(FreelistTests, PopExactRandomNotFound)
+{
+    populate_freelist(true);
+    test_pop_exact_not_found();
+}
+
+TEST_F(FreelistTests, FreelistCorruption)
+{
+    pager_update([this] {
+        PageRef *page;
+        allocate_page(page);
+        page->page_id.value = m_pager->page_count() + 1;
+        ASSERT_NOK(Freelist::add(*m_pager, page));
+        auto *root = &m_pager->get_root();
+        ASSERT_NOK(Freelist::add(*m_pager, root));
+    });
+}
 
 class HashIndexTestBase
 {

@@ -13,16 +13,24 @@ namespace calicodb
 class Pager;
 struct PageRef;
 
-struct Freelist {
+class Freelist
+{
+public:
     // Add a `page` to the freelist
     // The page does not need to be marked dirty prior to calling this routine. If the page
     // is converted into a freelist leaf page, it doesn't need to be logged. If it becomes
     // a freelist trunk page, it will be marked dirty in this routine.
-    static auto push(Pager &pager, PageRef *&page) -> Status;
+    static auto add(Pager &pager, PageRef *&page) -> Status;
+
+    enum RemoveType {
+        kRemoveAny,
+        kRemoveExact,
+    };
 
     // Attempt to remove a page from the freelist
     // If the freelist is empty, returns a status for which Status::is_invalid_argument()
-    static auto pop(Pager &pager, Id &id_out) -> Status;
+    // evaluates to true.
+    static auto remove(Pager &pager, RemoveType type, Id nearby, PageRef *&page_out) -> Status;
 
     // Make sure the freelist is consistent
     static auto assert_state(Pager &pager) -> bool;

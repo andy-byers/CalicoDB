@@ -21,7 +21,8 @@ public:
     using Hook = int (*)(void *);
     static auto set_hook(Hook hook, void *arg) -> void;
 
-    [[nodiscard]] static auto alloc(size_t len) -> void *;
+    [[nodiscard]] static auto calloc(size_t len, size_t size) -> void *;
+    [[nodiscard]] static auto malloc(size_t len) -> void *;
     [[nodiscard]] static auto realloc(void *ptr, size_t len) -> void *;
     static auto free(void *ptr) -> void;
 
@@ -31,7 +32,7 @@ public:
         Object *object;
         // NOTE: This probably won't work for types that require a stricter alignment than
         //       alignof(std::max_align_t).
-        if (auto *storage = alloc(sizeof(Object))) {
+        if (auto *storage = malloc(sizeof(Object))) {
             object = new (storage) Object(std::forward<Args &&>(args)...);
         } else {
             object = nullptr;

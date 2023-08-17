@@ -17,25 +17,35 @@ auto Alloc::set_hook(Hook hook, void *arg) -> void
     s_hook_arg = arg;
 }
 
-auto Alloc::alloc(size_t len) -> void *
-{
-    CALICODB_EXPECT_NE(len, 0);
+#define ALLOCATION_HOOK                     \
+    do {                                    \
+        if (s_hook && s_hook(s_hook_arg)) { \
+            return nullptr;                 \
+        }                                   \
+    } while (0)
 
-    if (s_hook && s_hook(s_hook_arg)) {
-        return nullptr;
-    }
-    return std::malloc(len);
+auto Alloc::calloc(size_t len, size_t size) -> void *
+{
+    CALICODB_EXPECT_NE(len | size, 0);
+    ALLOCATION_HOOK;
+    return std::calloc(len, size);
 }
 
-auto Alloc::realloc(void *ptr, size_t len) -> void *
+auto Alloc::malloc(size_t size) -> void *
 {
-    CALICODB_EXPECT_NE(len, 0);
-
-    if (s_hook && s_hook(s_hook_arg)) {
-        return nullptr;
-    }
-    return std::realloc(ptr, len);
+    CALICODB_EXPECT_NE(size, 0);
+    ALLOCATION_HOOK;
+    return std::malloc(size);
 }
+
+auto Alloc::realloc(void *ptr, size_t size) -> void *
+{
+    CALICODB_EXPECT_NE(size, 0);
+    ALLOCATION_HOOK;
+    return std::realloc(ptr, size);
+}
+
+#undef ALLOCATION_HOOK
 
 auto Alloc::free(void *ptr) -> void
 {

@@ -70,12 +70,7 @@ auto print_database_overview(std::ostream &os, Pager &pager) -> void
                     }
                     break;
                 }
-                case PointerMap::kFreelistLeaf:
-                    type = "Unused";
-                    break;
-                case PointerMap::kFreelistTrunk:
-                    append_fmt_string(
-                        info, "N=%u,Next=%u", get_u32(page->data + 4), get_u32(page->data));
+                case PointerMap::kFreelistPage:
                     type = "Freelist";
                     break;
                 case PointerMap::kOverflowHead:

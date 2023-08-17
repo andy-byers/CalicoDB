@@ -92,9 +92,7 @@ auto Pager::open(const Parameters &param, Pager *&pager_out) -> Status
 
     Status s;
     pager_out = Alloc::new_object<Pager>(param);
-    if (pager_out == nullptr ||
-        pager_out->m_bufmgr.root() == nullptr ||
-        pager_out->m_bufmgr.m_num_buffers != param.frame_count) {
+    if (!pager_out || pager_out->m_bufmgr.preallocate(param.frame_count)) {
         s = Status::no_memory();
     }
     if (!s.is_ok()) {
@@ -105,7 +103,7 @@ auto Pager::open(const Parameters &param, Pager *&pager_out) -> Status
 }
 
 Pager::Pager(const Parameters &param)
-    : m_bufmgr(param.frame_count, *param.stat),
+    : m_bufmgr(*param.stat),
       m_status(param.status),
       m_log(param.log),
       m_env(param.env),
@@ -269,8 +267,8 @@ auto Pager::finish() -> void
     }
     if (m_mode >= kRead) {
         m_wal->finish_reader();
+        m_bufmgr.shrink_to_fit();
     }
-    m_bufmgr.shrink_to_fit();
     *m_status = Status::ok();
     m_mode = kOpen;
 }
@@ -361,7 +359,7 @@ auto Pager::ensure_available_buffer() -> Status
 
     Status s;
     if (victim->get_flag(PageRef::kDirty)) {
-        CALICODB_EXPECT_EQ(m_mode, kDirty);
+        CALICODB_EXPECT_GE(m_mode, kDirty);
         // Clear the transient list pointer, since we are writing just this page to the WAL.
         // The transient list is not valid unless Dirtylist::sort() was called.
         victim->dirty_hdr.dirty = nullptr;
@@ -397,24 +395,13 @@ auto Pager::allocate(PageRef *&page_out) -> Status
         return Status::not_supported("reached the maximum allowed DB size");
     }
 
-    // Try to get a page from the freelist first.
-    Id id;
-    auto s = Freelist::pop(*this, id);
-    if (s.is_invalid_argument()) {
-        // If the freelist was empty, get a page from the end of the file.
-        auto page_id = Id::from_index(m_page_count);
-        page_id.value += PointerMap::is_map(page_id);
-        s = get_unused_page(page_out);
-        if (s.is_ok()) {
-            page_out->page_id = page_id;
-            m_bufmgr.register_page(*page_out);
-            m_page_count = page_id.value;
-        }
-    } else if (s.is_ok()) {
-        // id contains an unused page ID.
-        s = acquire(id, page_out);
-    }
+    auto page_id = Id::from_index(m_page_count);
+    page_id.value += PointerMap::is_map(page_id);
+    auto s = get_unused_page(page_out);
     if (s.is_ok()) {
+        page_out->page_id = page_id;
+        m_bufmgr.register_page(*page_out);
+        m_page_count = page_id.value;
         // Callers of this routine will always modify `page_out`. Mark it dirty here for
         // convenience. Note that it might already be dirty, if it is a freelist trunk
         // page that has been modified recently.
@@ -426,10 +413,10 @@ auto Pager::allocate(PageRef *&page_out) -> Status
 auto Pager::acquire(Id page_id, PageRef *&page_out) -> Status
 {
     CALICODB_EXPECT_GE(m_mode, kRead);
-    page_out = nullptr;
     Status s;
 
     if (page_id.is_null() || page_id.value > m_page_count) {
+        page_out = nullptr;
         return Status::corruption();
     } else if (page_id.is_root()) {
         // The root is in memory for the duration of the transaction, and we don't bother with
@@ -447,13 +434,14 @@ auto Pager::acquire(Id page_id, PageRef *&page_out) -> Status
     }
     if (s.is_ok()) {
         m_bufmgr.ref(*page_out);
+    } else {
+        page_out = nullptr;
     }
     return s;
 }
 
 auto Pager::get_unused_page(PageRef *&page_out) -> Status
 {
-    page_out = nullptr;
     auto s = ensure_available_buffer();
     if (s.is_ok()) {
         // Increment the refcount, but don't register the page in the lookup table (we don't know its
@@ -463,14 +451,10 @@ auto Pager::get_unused_page(PageRef *&page_out) -> Status
         m_bufmgr.ref(*page_out);
         CALICODB_EXPECT_EQ(page_out->flag, PageRef::kNormal);
         CALICODB_EXPECT_EQ(page_out->refs, 1);
+    } else {
+        page_out = nullptr;
     }
     return s;
-}
-
-auto Pager::destroy(PageRef *&page) -> Status
-{
-    CALICODB_EXPECT_GE(m_mode, kWrite);
-    return Freelist::push(*this, page);
 }
 
 auto Pager::get_root() -> PageRef &

@@ -9,7 +9,6 @@
 #include "cursor_impl.h"
 #include "tree.h"
 #include "utils.h"
-#include <unordered_map>
 
 namespace calicodb
 {
@@ -49,27 +48,24 @@ public:
 private:
     [[nodiscard]] auto decode_and_check_root_id(const Slice &data, Id &out) -> bool;
     auto corrupted_root_id() -> Status;
-    auto construct_or_reference_tree(Id root_id) -> Tree *;
+    auto construct_or_reference_tree(const Slice &name, Id root_id) -> Tree *;
+    auto find_open_tree(const Slice &name) -> Tree *;
 
-    template <class T>
-    using HashMap = std::unordered_map<Id, T, Id::Hash>;
+    template <class Action>
+    auto map_trees(Action &&action) const -> void
+    {
+        for (auto *t = m_trees.next_entry; t != &m_trees;) {
+            // Don't access t after action() is called: it may get destroyed.
+            auto *next_t = t->next_entry;
+            if (action(*t)) {
+                t = next_t;
+            } else {
+                break;
+            }
+        }
+    }
 
     friend class Tree;
-
-    // Change the root page of a bucket from `old_id` to `new_id` during vacuum
-    auto vacuum_reroot(Id old_id, Id new_id) -> void;
-
-    // Write updated root page IDs for buckets that were closed during vacuum, if any
-    // buckets were rerooted
-    auto vacuum_finish() -> Status;
-
-    struct RootedTree {
-        Tree *tree = nullptr;
-        Id root;
-    };
-
-    HashMap<RootedTree> m_trees;
-    HashMap<Id> m_reroot;
 
     const Status *const m_status;
     Pager *const m_pager;
@@ -81,6 +77,9 @@ private:
     // about the bucket that m_cursor is positioned on.
     Tree m_map;
     CursorImpl m_cursor;
+
+    // List containing a tree for each open bucket (including the schema tree).
+    mutable Tree::ListEntry m_trees = {};
 
     // Wrapper over m_cursor, returns a human-readable string for Cursor::value().
     Cursor *const m_schema;

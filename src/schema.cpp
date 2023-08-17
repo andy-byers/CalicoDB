@@ -11,6 +11,7 @@ namespace calicodb
 {
 
 static constexpr size_t kMaxRootEntryLen = kVarintMaxLength;
+static const Status kNoBucket = Status::invalid_argument("bucket does not exist");
 
 class SchemaCursor : public Cursor
 {
@@ -89,18 +90,21 @@ Schema::Schema(Pager &pager, const Status &status, Stat &stat, char *scratch)
       m_pager(&pager),
       m_scratch(scratch),
       m_stat(&stat),
-      m_map(pager, stat, scratch, nullptr, pager.mode() >= Pager::kWrite),
+      m_map(pager, stat, scratch, Id::root(), UniqueBuffer()),
       m_cursor(m_map),
       m_schema(Alloc::new_object<SchemaCursor>(m_cursor))
 {
+    IntrusiveList::initialize(m_trees);
 }
 
 auto Schema::close() -> void
 {
-    for (const auto &[_, state] : m_trees) {
-        Alloc::delete_object(state.tree);
-    }
-    m_trees.clear();
+    map_trees([](auto &t) {
+        Alloc::delete_object(t.tree);
+        return true;
+    });
+    IntrusiveList::initialize(m_trees);
+
     m_cursor.reset();
     Alloc::delete_object(m_schema);
     m_map.save_all_cursors();
@@ -123,19 +127,17 @@ auto Schema::create_bucket(const BucketOptions &options, const Slice &name, Curs
     }
 
     Id root_id;
-    const auto bucket_exists = m_cursor.seek_to_leaf(
-        name, CursorImpl::kSeekReader);
+    m_cursor.find(name);
     auto s = m_cursor.status();
-    if (!s.is_ok()) {
-        // There was a low-level I/O error. Do nothing.
-    } else if (bucket_exists) {
+    if (m_cursor.is_valid()) {
+        CALICODB_EXPECT_TRUE(s.is_ok());
         if (!decode_and_check_root_id(m_cursor.value(), root_id)) {
             s = corrupted_root_id();
         } else if (options.error_if_exists) {
             s = Status::invalid_argument("bucket already exists");
         }
-    } else {
-        s = Tree::create(*m_pager, &root_id);
+    } else if (s.is_ok()) {
+        s = m_map.create(&root_id);
         if (s.is_ok()) {
             // TODO: Encode persistent bucket options here.
             char buf[kMaxRootEntryLen];
@@ -145,7 +147,7 @@ auto Schema::create_bucket(const BucketOptions &options, const Slice &name, Curs
     }
 
     if (s.is_ok() && c_out) {
-        if (auto *tree = construct_or_reference_tree(root_id)) {
+        if (auto *tree = construct_or_reference_tree(name, root_id)) {
             *c_out = new (std::nothrow) CursorImpl(*tree);
         }
         if (*c_out == nullptr) {
@@ -161,19 +163,16 @@ auto Schema::open_bucket(const Slice &name, Cursor *&c_out) -> Status
         return Status::invalid_argument();
     }
 
-    const auto bucket_exists = m_cursor.seek_to_leaf(
-        name, CursorImpl::kSeekReader);
+    m_cursor.find(name);
     auto s = m_cursor.status();
 
     Id root_id;
-    if (!s.is_ok()) {
-        return s;
-    } else if (!bucket_exists) {
-        return Status::invalid_argument("bucket does not exist");
+    if (!m_cursor.is_valid()) {
+        return s.is_ok() ? kNoBucket : s;
     } else if (!decode_and_check_root_id(m_cursor.value(), root_id)) {
         return corrupted_root_id();
     }
-    if (auto *tree = construct_or_reference_tree(root_id)) {
+    if (auto *tree = construct_or_reference_tree(name, root_id)) {
         c_out = new (std::nothrow) CursorImpl(*tree);
     }
     if (c_out == nullptr) {
@@ -206,25 +205,37 @@ auto Schema::encode_root_id(Id id, char *root_id_out) -> size_t
     return static_cast<size_t>(end - root_id_out);
 }
 
-auto Schema::construct_or_reference_tree(Id root_id) -> Tree *
+auto Schema::find_open_tree(const Slice &name) -> Tree *
 {
-    auto itr = m_trees.find(root_id);
-    if (itr == end(m_trees) || !itr->second.tree) {
-        itr = m_trees.insert(itr, {root_id, {}});
-        itr->second.root = root_id;
-        itr->second.tree = Alloc::new_object<Tree>(
-            *m_pager,
-            *m_stat,
-            m_scratch,
-            &itr->second.root,
-            m_pager->mode() >= Pager::kWrite);
-        if (itr->second.tree == nullptr) {
-            // Out of memory.
-            m_trees.erase(itr);
+    for (auto *t = m_trees.next_entry; t != &m_trees; t = t->next_entry) {
+        if (t->name == name) {
+            return t->tree;
+        }
+    }
+    return nullptr;
+}
+
+auto Schema::construct_or_reference_tree(const Slice &name, Id root_id) -> Tree *
+{
+    if (auto *already_open = find_open_tree(name)) {
+        return already_open;
+    }
+
+    UniqueBuffer name_buf;
+    if (!root_id.is_root()) {
+        // If `name` is empty, a single byte will be allocated to store the '\0'.
+        name_buf = UniqueBuffer::from_slice(name);
+        if (name_buf.is_empty()) {
             return nullptr;
         }
     }
-    return itr->second.tree;
+
+    auto *tree = Alloc::new_object<Tree>(*m_pager, *m_stat, m_scratch,
+                                         root_id, std::move(name_buf));
+    if (tree) {
+        IntrusiveList::add_tail(tree->list_entry, m_trees);
+    }
+    return tree;
 }
 
 auto Schema::unpack_and_use(Cursor &c) -> std::pair<Tree &, CursorImpl &>
@@ -245,117 +256,64 @@ auto Schema::use_tree(Tree &tree) -> void
 
 auto Schema::drop_bucket(const Slice &name) -> Status
 {
-    const auto key_exists = m_cursor.seek_to_leaf(
-        name, CursorImpl::kSeekReader);
+    map_trees([](auto &t) {
+        t.tree->save_all_cursors();
+        return true;
+    });
+    m_cursor.find(name);
     auto s = m_cursor.status();
-    if (!s.is_ok()) {
-        return s;
-    } else if (!key_exists) {
-        return Status::invalid_argument("bucket does not exist");
+    if (!m_cursor.is_valid()) {
+        return s.is_ok() ? kNoBucket : s;
     }
     Id root_id;
     if (!decode_and_check_root_id(m_cursor.value(), root_id)) {
         return corrupted_root_id();
     }
-    auto itr = m_trees.find(root_id);
-    if (itr != end(m_trees)) {
-        use_tree(*itr->second.tree);
-        itr->second.tree->save_all_cursors();
-        Alloc::delete_object(itr->second.tree);
-        m_recent = nullptr;
-        m_trees.erase(root_id);
+    auto *drop = construct_or_reference_tree(name, root_id);
+    if (drop == nullptr) {
+        return Status::no_memory();
     }
-    Tree drop(*m_pager, *m_stat, m_scratch,
-              &root_id, m_pager->mode() >= Pager::kWrite);
-    s = Tree::destroy(drop);
+    m_map.save_all_cursors();
+    IntrusiveList::remove(drop->list_entry);
+    drop->save_all_cursors();
+    m_recent = nullptr;
+
+    Tree::Reroot rr;
+    s = m_map.destroy(*drop, rr);
     if (s.is_ok()) {
         s = m_map.erase(m_cursor, name);
     }
-    return s;
-}
-
-auto Schema::vacuum_reroot(Id old_id, Id new_id) -> void
-{
-    Id original_id;
-    auto itr = m_trees.find(old_id);
-    if (itr == end(m_trees)) {
-        RootedTree reroot;
-        reroot.root = old_id;
-        // This tree isn't open right now (and it hasn't been rerooted yet), but we need to keep track of the
-        // new root mapping. Create a dummy tree entry for this purpose.
-        m_trees.insert(itr, {new_id, reroot});
-        original_id = old_id;
-    } else {
-        // Reroot the tree. This tree is either open, or it has already been rerooted. Leave the root ID stored
-        // in the tree state set to the original root.
-        auto node = m_trees.extract(itr);
-        CALICODB_EXPECT_FALSE(!node);
-        node.key() = new_id;
-        original_id = node.mapped().root;
-        m_trees.insert(std::move(node));
-    }
-    // Map the original root ID to the newest root ID.
-    m_reroot.insert_or_assign(original_id, new_id);
-}
-
-auto Schema::vacuum_finish() -> Status
-{
-    m_cursor.seek_first();
-
-    auto s = m_cursor.status();
-    while (m_cursor.is_valid()) {
-        Id old_id;
-        if (!decode_and_check_root_id(m_cursor.value(), old_id)) {
-            s = corrupted_root_id();
-            break;
-        }
-        const auto root = m_reroot.find(old_id);
-        if (root != end(m_reroot)) {
-            char buf[kMaxRootEntryLen];
-            const auto len = encode_root_id(root->second, buf);
-            // Update the database schema with the new root page ID for this tree.
-            s = m_map.put(m_cursor, m_cursor.key(), Slice(buf, len));
-            if (!s.is_ok()) {
-                break;
+    if (s.is_ok() && rr.before != rr.after) {
+        map_trees([rr](auto &t) {
+            if (t.tree->m_root_id == rr.before) {
+                t.tree->m_root_id = rr.after;
+                return false;
             }
-            // Update the in-memory tree root stored by each bucket.
-            auto tree = m_trees.find(root->second);
-            CALICODB_EXPECT_NE(tree, end(m_trees));
-            if (tree->second.tree) {
-                tree->second.root = root->second;
-            } else {
-                // This tree is not actually open. The RootedTree entry exists so that vacuum_reroot() could
-                // find the original root ID.
-                m_trees.erase(tree);
-            }
-            m_reroot.erase(root);
-        }
-        m_cursor.next();
+            return true;
+        });
     }
-    if (s.is_ok() && !m_reroot.empty()) {
-        s = Status::corruption("vacuum missed root pages");
-    }
-    m_reroot.clear();
+
+    Alloc::delete_object(drop);
     return s;
 }
 
 auto Schema::vacuum() -> Status
 {
-    for (auto &[_, tree] : m_trees) {
-        tree.tree->save_all_cursors();
-    }
+    map_trees([](auto &t) {
+        t.tree->save_all_cursors();
+        return true;
+    });
     m_map.save_all_cursors();
     m_recent = nullptr;
-    return m_map.vacuum(*this);
+    return m_map.vacuum();
 }
 
 auto Schema::TEST_validate() const -> void
 {
-    for (const auto &[_, bucket] : m_trees) {
-        if (bucket.tree) {
-            bucket.tree->TEST_validate();
-        }
-    }
+    map_trees([](auto &t) {
+        t.tree->TEST_validate();
+        return true;
+    });
 }
 
 } // namespace calicodb

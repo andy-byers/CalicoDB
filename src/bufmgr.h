@@ -7,12 +7,6 @@
 
 #include "page.h"
 #include "utils.h"
-#include <list>
-#include <map>
-#include <optional>
-#include <set>
-#include <unordered_map>
-#include <vector>
 
 namespace calicodb
 {
@@ -22,14 +16,103 @@ class File;
 class Env;
 struct Stat;
 
+class PageTable
+{
+public:
+    PageTable()
+        : m_capacity(0),
+          m_size(0),
+          m_table(nullptr)
+    {
+    }
+
+    ~PageTable()
+    {
+        Alloc::free(m_table);
+    }
+
+    [[nodiscard]] auto preallocate(size_t cache_size) -> int
+    {
+        CALICODB_EXPECT_EQ(m_capacity, 0);
+        uint32_t capacity = 4;
+        while (capacity < cache_size) {
+            capacity *= 2;
+        }
+        if (auto *table = static_cast<PageRef **>(Alloc::calloc(
+                capacity, sizeof(PageRef *)))) {
+            m_capacity = capacity;
+            m_table = table;
+            return 0;
+        }
+        return -1;
+    }
+
+    auto clear() -> void
+    {
+        std::memset(m_table, 0, m_capacity * sizeof(PageRef *));
+    }
+
+    auto lookup(uint32_t key) -> PageRef *
+    {
+        return *find_pointer(key);
+    }
+
+    // NOTE: PageRef with key `ref->key()` must not exist.
+    auto insert(PageRef *ref) -> void
+    {
+        auto **ptr = find_pointer(ref->key());
+        CALICODB_EXPECT_NE(ptr, nullptr);
+        CALICODB_EXPECT_EQ(*ptr, nullptr);
+        ref->next_hash = nullptr;
+        *ptr = ref;
+        ++m_size;
+    }
+
+    auto remove(uint32_t key) -> PageRef *
+    {
+        auto **ptr = find_pointer(key);
+        auto *result = *ptr;
+        if (result != nullptr) {
+            *ptr = result->next_hash;
+            --m_size;
+        }
+        return result;
+    }
+
+private:
+    // The table consists of an array of buckets where each bucket is
+    // a linked list of cache entries that hash into the bucket.
+    uint32_t m_capacity;
+    uint32_t m_size;
+    PageRef **m_table;
+
+    // Return a pointer to slot that points to a cache entry that
+    // matches key/hash.  If there is no such cache entry, return a
+    // pointer to the trailing slot in the corresponding linked list.
+    [[nodiscard]] auto find_pointer(uint32_t key) const -> PageRef **
+    {
+        auto **ptr = &m_table[key & (m_capacity - 1)];
+        while (*ptr != nullptr && key != (*ptr)->key()) {
+            ptr = &(*ptr)->next_hash;
+        }
+        return ptr;
+    }
+};
+
 // Manages database pages that have been read from stable storage
 class Bufmgr final
 {
 public:
     friend class Pager;
 
-    explicit Bufmgr(size_t min_buffers, Stat &stat);
+    explicit Bufmgr(Stat &stat);
     ~Bufmgr();
+
+    // Allocate `min_buffers` page buffers for non-root pages, the root page buffer,
+    // and enough hash table slots to accommodate all non-root pages without incurring
+    // too many collisions. This method must only be called once, right after the
+    // constructor.
+    [[nodiscard]] auto preallocate(size_t min_buffers) -> int;
 
     // Get a reference to the root page, which is always in-memory, but is not
     // addressable in the cache
@@ -91,16 +174,16 @@ private:
     //              | to true.
     //     m_in_use | List containing page references that have a nonzero refcount
     //              | field. Unordered.
-    std::unordered_map<Id, PageRef *, Id::Hash> m_map;
+    mutable PageTable m_table;
     PageRef m_in_use;
     PageRef m_lru;
 
     // Root page is stored separately. It is accessed very often, so it makes
     // sense to keep it in a dedicated location rather than having to find it
     // in the hash map each time.
-    PageRef *const m_root;
+    PageRef *m_root;
 
-    const size_t m_min_buffers;
+    size_t m_min_buffers;
     size_t m_num_buffers;
 
     Stat *const m_stat;

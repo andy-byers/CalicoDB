@@ -53,7 +53,7 @@ auto DB::open(const Options &options, const char *filename, DB *&db) -> Status
     }
 
     // Allocate scratch memory for working with database pages.
-    auto *scratch_ptr = static_cast<char *>(Alloc::alloc(kTreeBufferLen));
+    auto *scratch_ptr = static_cast<char *>(Alloc::malloc(kTreeBufferLen));
     if (scratch_ptr == nullptr) {
         return Status::no_memory();
     }

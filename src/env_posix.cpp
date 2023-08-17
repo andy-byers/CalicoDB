@@ -377,7 +377,7 @@ public:
             if (offset + 1 >= L) {
                 if (i == 0) {
                     L = offset + 2; // +1 for '\n'
-                    var = static_cast<char *>(Alloc::alloc(L));
+                    var = static_cast<char *>(Alloc::malloc(L));
                     if (var == nullptr) {
                         // Write just this generic message if the system could not fulfill the allocation.
                         static constexpr const char kNoMemory[] = "could not log message: no memory for temp buffer\n";
@@ -653,7 +653,7 @@ auto PosixEnv::new_file(const char *filename, OpenMode mode, File *&out) -> Stat
     }
 
     // Allocate storage for an UnusedFile.
-    auto *prealloc_storage = Alloc::alloc(sizeof(UnusedFile));
+    auto *prealloc_storage = Alloc::malloc(sizeof(UnusedFile));
     if (prealloc_storage == nullptr) {
         return Status::no_memory();
     }

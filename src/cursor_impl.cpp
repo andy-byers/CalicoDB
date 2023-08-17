@@ -329,11 +329,7 @@ auto CursorImpl::seek(const Slice &key) -> void
 auto CursorImpl::find(const Slice &key) -> void
 {
     prepare(Tree::kInitNormal);
-    if (seek_to_leaf(key, kSeekReader)) {
-        // Found a record with the given `key`.
-    } else if (m_status.is_ok()) {
-        reset(Status::not_found());
-    } else {
+    if (!seek_to_leaf(key, kSeekReader)) {
         release_nodes(kAllLevels);
     }
 }

@@ -5,10 +5,11 @@
 #ifndef CALICODB_TREE_H
 #define CALICODB_TREE_H
 
-#include "calicodb/cursor.h"
+#include "freelist.h"
 #include "header.h"
 #include "node.h"
 #include "pager.h"
+#include "ptr.h"
 
 namespace calicodb
 {
@@ -43,24 +44,42 @@ class CursorImpl;
 class Tree final
 {
 public:
+    struct ListEntry {
+        Slice name;
+        Tree *const tree;
+        ListEntry *prev_entry;
+        ListEntry *next_entry;
+    } list_entry;
+
     ~Tree();
     auto save_all_cursors() const -> void;
 
-    explicit Tree(Pager &pager, Stat &stat, char *scratch, const Id *root_id, bool writable);
-    static auto create(Pager &pager, Id *out) -> Status;
-    static auto destroy(Tree &tree) -> Status;
+    explicit Tree(Pager &pager, Stat &stat, char *scratch, Id root_id, UniqueBuffer name);
     static auto get_tree(CursorImpl &c) -> Tree *;
 
-    auto get(CursorImpl &c, const Slice &key, std::string *value) const -> Status;
+    struct Reroot {
+        Id before;
+        Id after;
+    };
+    // Must be called on the schema tree.
+    auto create(Id *out) -> Status;
+    auto destroy(Tree &tree, Reroot &rr) -> Status;
+
     auto put(CursorImpl &c, const Slice &key, const Slice &value) -> Status;
     auto erase(CursorImpl &c) -> Status;
     auto erase(CursorImpl &c, const Slice &key) -> Status;
-    auto vacuum(Schema &schema) -> Status;
+    auto vacuum() -> Status;
 
-    auto allocate(bool is_external, Node &node_out) -> Status
+    enum AllocationType {
+        kAllocateAny = Freelist::kRemoveAny,
+        kAllocateExact = Freelist::kRemoveExact,
+    };
+    auto allocate(AllocationType type, Id nearby, PageRef *&page_out) -> Status;
+
+    auto allocate_(bool is_external, Id nearby, Node &node_out) -> Status
     {
         PageRef *ref;
-        auto s = m_pager->allocate(ref);
+        auto s = allocate(kAllocateAny, nearby, ref);
         if (s.is_ok()) {
             if (ref->refs == 1) {
                 CALICODB_EXPECT_FALSE(PointerMap::is_map(ref->page_id));
@@ -89,11 +108,6 @@ public:
         return s;
     }
 
-    auto free(Node node) -> Status
-    {
-        return m_pager->destroy(node.ref);
-    }
-
     auto upgrade(Node &node) const -> void
     {
         m_pager->mark_dirty(*node.ref);
@@ -106,7 +120,7 @@ public:
 
     [[nodiscard]] auto root() const -> Id
     {
-        return m_root_id ? *m_root_id : Id::root();
+        return m_root_id;
     }
 
     auto print_structure(std::string &repr_out) const -> Status;
@@ -122,6 +136,8 @@ private:
     friend class CursorImpl;
     friend class TreePrinter;
     friend class TreeValidator;
+
+    auto relocate_page(Node &node, PointerMap::Type type, Id id) -> int;
 
     auto corrupted_node(Id page_id) const -> Status;
 
@@ -148,7 +164,7 @@ private:
     auto emplace(Node &node, const Slice &key, const Slice &value, uint32_t index, bool &overflow) -> Status;
     auto free_overflow(Id head_id) -> Status;
 
-    auto vacuum_step(PageRef *&free, PointerMap::Entry entry, Schema &schema, Id last_id) -> Status;
+    auto relocate_page(PageRef *&free, PointerMap::Entry entry, Id last_id) -> Status;
 
     struct PivotOptions {
         const Cell *cells[2];
@@ -216,8 +232,9 @@ private:
     static constexpr auto kCellBufferLen = kPageSize / kNumCellBuffers;
     char *const m_cell_scratch[kNumCellBuffers];
 
+    UniqueBuffer m_name;
     Pager *const m_pager;
-    const Id *const m_root_id;
+    Id m_root_id;
     const bool m_writable;
 };
 

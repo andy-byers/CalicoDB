@@ -301,7 +301,7 @@ auto HashIndex::map_group(size_t group_number, bool extend) -> Status
         if (m_file) {
             s = m_file->shm_map(group_number, extend, ptr);
         } else {
-            auto *buf = Alloc::alloc(File::kShmRegionSize);
+            auto *buf = Alloc::malloc(File::kShmRegionSize);
             if (buf == nullptr) {
                 s = Status::no_memory();
             } else if (group_number == 0) {
@@ -466,24 +466,22 @@ auto HashIterator::init(uint32_t backfill) -> Status
         sizeof(State) +                             // Includes storage for 1 group ("groups[1]" member).
         (m_num_groups - 1) * sizeof(State::Group) + // Additional groups.
         last_value * sizeof(Hash);                  // Indices to sort.
-    m_state = static_cast<State *>(Alloc::alloc(state_size));
+    m_state = static_cast<State *>(Alloc::malloc(state_size));
     if (m_state == nullptr) {
         return Status::no_memory();
     }
-    CALICODB_EXPECT_TRUE(is_aligned(m_state, alignof(State)));
     std::memset(m_state, 0, state_size);
 
     // Temporary buffer for mergesort. Freed before returning from this routine. Possibly a bit
     // larger than necessary due to platform alignment requirements (see alloc.h).
-    const auto temp_size =
-        (last_value < kNIndexKeys ? last_value : kNIndexKeys) * sizeof(Hash);
-    auto *temp = static_cast<Hash *>(Alloc::alloc(temp_size));
+    const auto temp_len =
+        (last_value < kNIndexKeys ? last_value : kNIndexKeys);
+    auto *temp = static_cast<Hash *>(Alloc::calloc(
+        temp_len, sizeof(Hash)));
     if (temp == nullptr) {
         // m_state will be freed in the destructor.
         return Status::no_memory();
     }
-    CALICODB_EXPECT_TRUE(is_aligned(temp, alignof(Hash)));
-    std::memset(temp, 0, temp_size);
 
     Status s;
     for (uint32_t i = index_group_number(backfill + 1); i < m_num_groups; ++i) {
@@ -501,19 +499,18 @@ auto HashIterator::init(uint32_t backfill) -> Status
         }
 
         // Pointer into the special index buffer located right after the group array.
-        auto *index = reinterpret_cast<Hash *>(
-                          &m_state->groups[m_num_groups]) +
-                      group.base;
+        auto *index_buf = group.base + reinterpret_cast<Hash *>(
+                                           m_state->groups + m_num_groups);
 
         for (size_t j = 0; j < group_size; ++j) {
-            index[j] = static_cast<Hash>(j);
+            index_buf[j] = static_cast<Hash>(j);
         }
 
         auto *keys = const_cast<Key *>(group.keys);
-        mergesort(keys, index, temp, group_size);
+        mergesort(keys, index_buf, temp, group_size);
         m_state->groups[i] = {
             keys,
-            index,
+            index_buf,
             group_size,
             0,
             group.base + 1,

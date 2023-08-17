@@ -25,6 +25,7 @@ struct DirtyHdr {
 
 struct PageRef {
     char *data;
+    PageRef *next_hash;
     PageRef *prev_entry;
     PageRef *next_entry;
     DirtyHdr dirty_hdr;
@@ -39,6 +40,11 @@ struct PageRef {
         kExtra = 4,
     } flag;
 
+    [[nodiscard]] auto key() const -> uint32_t
+    {
+        return page_id.value;
+    }
+
     static auto alloc() -> PageRef *
     {
         static_assert(std::is_trivially_copyable_v<DirtyHdr>);
@@ -48,7 +54,7 @@ struct PageRef {
         // out-of-bounds reads and writes that might occur if the database is corrupted.
         static constexpr size_t kSpilloverLen = sizeof(void *);
 
-        auto *ref = static_cast<PageRef *>(Alloc::alloc(
+        auto *ref = static_cast<PageRef *>(Alloc::malloc(
             sizeof(PageRef) + kPageSize + kSpilloverLen));
         if (ref) {
             CALICODB_EXPECT_TRUE(is_aligned(ref, alignof(PageRef)));
@@ -57,6 +63,7 @@ struct PageRef {
             *ref = {
                 // Page buffer is located right after the PageRef struct.
                 reinterpret_cast<char *>(ref + 1),
+                nullptr,
                 // Next 3 members already set by IntrusiveList::initialize(). Forward the values.
                 ref->prev_entry,
                 ref->next_entry,

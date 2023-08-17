@@ -11,19 +11,12 @@ namespace calicodb
 
 auto FileHdr::check_db_support(const char *root) -> Status
 {
-    Status s;
-    const Slice fmt_string(root, sizeof(kFmtString));
-    const auto bad_fmt_string = std::memcmp(
-        fmt_string.data(), kFmtString, fmt_string.size());
-    if (bad_fmt_string) {
-        s = Status::invalid_argument("file is not a CalicoDB database");
+    if (0 != std::memcmp(root, kFmtString, sizeof(kFmtString))) {
+        return Status::invalid_argument("file is not a CalicoDB database");
+    } else if (root[kFmtVersionOffset] > kFmtVersion) {
+        return Status::invalid_argument("CalicoDB version is not supported");
     }
-    const auto bad_fmt_version =
-        root[kFmtVersionOffset] > kFmtVersion;
-    if (s.is_ok() && bad_fmt_version) {
-        s = Status::invalid_argument("CalicoDB version is not supported");
-    }
-    return s;
+    return Status::ok();
 }
 
 auto FileHdr::make_supported_db(char *root) -> void
@@ -31,11 +24,13 @@ auto FileHdr::make_supported_db(char *root) -> void
     // Initialize the file header.
     std::memcpy(root, kFmtString, sizeof(kFmtString));
     root[kFmtVersionOffset] = kFmtVersion;
-    put_u32(root + kPageCountOffset, 1);
+    put_page_count(root, 1);
+    put_largest_root(root, Id::root());
 
     // Initialize the root page of the schema tree.
-    NodeHdr::put_type(root + FileHdr::kSize, true);
-    NodeHdr::put_cell_start(root + FileHdr::kSize, kPageSize);
+    root += FileHdr::kSize;
+    NodeHdr::put_type(root, true);
+    NodeHdr::put_cell_start(root, kPageSize);
 }
 
 } // namespace calicodb

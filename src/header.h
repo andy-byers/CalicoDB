@@ -28,8 +28,9 @@ namespace calicodb
 //     18      4     Number of pages in the DB
 //     22      4     Freelist head
 //     26      4     Freelist length
-//     30      1     File format version
-//     31      33    Reserved
+//     30      4     Largest root
+//     34      1     File format version
+//     35      29    Reserved
 struct FileHdr {
     static constexpr char kFmtString[18] = "CalicoDB format 1";
     static constexpr char kFmtVersion = 1;
@@ -41,7 +42,8 @@ struct FileHdr {
         kPageCountOffset = sizeof(kFmtString),
         kFreelistHeadOffset = kPageCountOffset + sizeof(uint32_t),
         kFreelistLengthOffset = kFreelistHeadOffset + sizeof(uint32_t),
-        kFmtVersionOffset = kFreelistLengthOffset + sizeof(uint32_t),
+        kLargestRootOffset = kFreelistLengthOffset + sizeof(uint32_t),
+        kFmtVersionOffset = kLargestRootOffset + sizeof(uint32_t),
         kReservedOffset = kFmtVersionOffset + sizeof(char),
         kSize = 64
     };
@@ -72,6 +74,15 @@ struct FileHdr {
     static auto put_freelist_length(char *root, uint32_t value) -> void
     {
         put_u32(root + kFreelistLengthOffset, value);
+    }
+
+    [[nodiscard]] static auto get_largest_root(const char *root) -> Id
+    {
+        return Id(get_u32(root + kLargestRootOffset));
+    }
+    static auto put_largest_root(char *root, Id value) -> void
+    {
+        put_u32(root + kLargestRootOffset, value.value);
     }
 };
 

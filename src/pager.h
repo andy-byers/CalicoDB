@@ -65,12 +65,6 @@ public:
 
     auto allocate(PageRef *&page_out) -> Status;
     auto acquire(Id page_id, PageRef *&page_out) -> Status;
-
-    // Push a database `page` onto the freelist
-    // Returns an OK status on success, and a non-OK status on failure. The caller can
-    // consider the `page` "released", regardless of the return status (release() is
-    // called on the `page` unconditionally).
-    auto destroy(PageRef *&page) -> Status;
     auto mark_dirty(PageRef &page) -> void;
     [[nodiscard]] auto get_root() -> PageRef &;
 
@@ -168,8 +162,7 @@ struct PointerMap {
         kTreeRoot,
         kOverflowHead,
         kOverflowLink,
-        kFreelistTrunk,
-        kFreelistLeaf,
+        kFreelistPage,
         kTypeCount
     };
 
