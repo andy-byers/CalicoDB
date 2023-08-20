@@ -136,6 +136,7 @@ auto Schema::create_bucket(const BucketOptions &options, const Slice &name, Curs
     }
 
     Id root_id;
+    use_tree(nullptr);
     m_cursor.find(name);
     auto s = m_cursor.status();
     if (m_cursor.is_valid()) {
@@ -323,7 +324,6 @@ auto Schema::drop_bucket(const Slice &name) -> Status
 auto Schema::vacuum() -> Status
 {
     use_tree(nullptr);
-    m_map.save_all_cursors();
     return m_map.vacuum();
 }
 

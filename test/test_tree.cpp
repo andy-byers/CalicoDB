@@ -10,6 +10,7 @@
 #include "temp.h"
 #include "test.h"
 #include "tree.h"
+#include <unordered_map>
 
 namespace calicodb::test
 {
