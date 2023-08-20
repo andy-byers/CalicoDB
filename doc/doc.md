@@ -272,7 +272,7 @@ c->find("lilly");
 if (c->is_valid()) {
     // c->value() contains the value for "lilly".
     assert(c->key() == "lilly");
-} else if (c->status().is_not_found()) {
+} else if (c->status().is_ok()) {
     // "lilly" was not found.
 } else {
     // An I/O error occurred.
