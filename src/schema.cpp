@@ -100,7 +100,7 @@ Schema::Schema(Pager &pager, const Status &status, Stat &stat, char *scratch)
 
 auto Schema::close() -> void
 {
-    map_trees([](auto &t) {
+    map_trees(false, [](auto &t) {
         Alloc::delete_object(t.tree);
         return true;
     });
@@ -206,7 +206,7 @@ auto Schema::encode_root_id(Id id, char *root_id_out) -> size_t
 auto Schema::find_open_tree(const Slice &name) -> Tree *
 {
     Tree *target = nullptr;
-    map_trees([name, &target](auto &t) {
+    map_trees(false, [name, &target](auto &t) {
         if (name == t.name) {
             target = t.tree;
             return false;
@@ -253,13 +253,12 @@ auto Schema::unpack_and_use(Cursor &c) -> std::pair<Tree &, CursorImpl &>
 
 auto Schema::use_tree(Tree *tree) -> void
 {
-    map_trees([tree](auto &t) {
+    map_trees(true, [tree](auto &t) {
         if (t.tree != tree) {
             t.tree->save_all_cursors();
         }
         return true;
-    },
-              true);
+    });
 }
 
 auto Schema::drop_bucket(const Slice &name) -> Status
@@ -288,7 +287,7 @@ auto Schema::drop_bucket(const Slice &name) -> Status
         s = m_map.erase(m_cursor, name);
     }
     if (s.is_ok() && rr.before != rr.after) {
-        map_trees([rr](auto &t) {
+        map_trees(false, [rr](auto &t) {
             if (t.tree->m_root_id == rr.before) {
                 t.tree->m_root_id = rr.after;
                 return false;
@@ -330,11 +329,10 @@ auto Schema::vacuum() -> Status
 
 auto Schema::TEST_validate() const -> void
 {
-    map_trees([](auto &t) {
+    map_trees(true, [](auto &t) {
         t.tree->TEST_validate();
         return true;
-    },
-              true);
+    });
 }
 
 } // namespace calicodb

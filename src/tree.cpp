@@ -13,6 +13,12 @@
 #include "utils.h"
 #include <functional>
 
+#ifdef CALICODB_TEST
+// Required for debug printing the tree structure.
+#include <string>
+#include <vector>
+#endif // CALICODB_TEST
+
 namespace calicodb
 {
 

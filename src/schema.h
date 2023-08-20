@@ -53,7 +53,7 @@ private:
     auto find_open_tree(const Slice &name) -> Tree *;
 
     template <class Action>
-    auto map_trees(Action &&action, bool include_schema = false) const -> void
+    auto map_trees(bool include_schema, Action &&action) const -> void
     {
         auto *t = &m_trees;
         do {
