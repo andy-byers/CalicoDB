@@ -230,7 +230,7 @@ auto Freelist::remove(Pager &pager, RemoveType type, Id nearby, PageRef *&page_o
                 auto smallest = abs_distance(
                     FreePage::get_leaf_id(*trunk, 0).value,
                     nearby.value);
-                for (size_t i = 1; i < leaf_count; i++) {
+                for (uint32_t i = 1; i < leaf_count; i++) {
                     const auto dist = abs_distance(
                         FreePage::get_leaf_id(*trunk, i).value,
                         nearby.value);
