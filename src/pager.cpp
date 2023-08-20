@@ -247,6 +247,15 @@ auto Pager::move_page(PageRef &page, Id destination) -> void
     }
 }
 
+auto Pager::undo_callback(void *arg, Id id) -> void
+{
+    PageRef *ref;
+    auto *pager = static_cast<Pager *>(arg);
+    if (!id.is_root() && (ref = pager->m_bufmgr.query(id))) {
+        pager->purge_page(*ref);
+    }
+}
+
 auto Pager::finish() -> void
 {
     CALICODB_EXPECT_TRUE(assert_state());
@@ -254,12 +263,7 @@ auto Pager::finish() -> void
     if (m_mode >= kDirty) {
         if (m_mode == kDirty) {
             // Get rid of obsolete cached pages that aren't dirty anymore.
-            m_wal->rollback([this](auto id) {
-                PageRef *ref;
-                if (!id.is_root() && (ref = m_bufmgr.query(id))) {
-                    purge_page(*ref);
-                }
-            });
+            m_wal->rollback(undo_callback, this);
         }
         m_wal->finish_writer();
         // Get rid of dirty pages, or all cached pages if there was a fault.

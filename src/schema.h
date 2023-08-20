@@ -36,7 +36,7 @@ public:
     auto drop_bucket(const Slice &name) -> Status;
 
     auto unpack_and_use(Cursor &c) -> std::pair<Tree &, CursorImpl &>;
-    auto use_tree(Tree &tree) -> void;
+    auto use_tree(Tree *tree) -> void;
 
     auto vacuum() -> Status;
 
@@ -47,22 +47,25 @@ public:
 
 private:
     [[nodiscard]] auto decode_and_check_root_id(const Slice &data, Id &out) -> bool;
+    auto open_cursor(const Slice &name, Id root_id, Cursor *&c_out) -> Status;
     auto corrupted_root_id() -> Status;
     auto construct_or_reference_tree(const Slice &name, Id root_id) -> Tree *;
     auto find_open_tree(const Slice &name) -> Tree *;
 
     template <class Action>
-    auto map_trees(Action &&action) const -> void
+    auto map_trees(Action &&action, bool include_schema = false) const -> void
     {
-        for (auto *t = m_trees.next_entry; t != &m_trees;) {
+        auto *t = &m_trees;
+        do {
             // Don't access t after action() is called: it may get destroyed.
             auto *next_t = t->next_entry;
-            if (action(*t)) {
-                t = next_t;
-            } else {
-                break;
+            if (t->tree != &m_map || include_schema) {
+                if (!action(*t)) {
+                    break;
+                }
             }
-        }
+            t = next_t;
+        } while (t != &m_trees);
     }
 
     friend class Tree;
@@ -83,9 +86,6 @@ private:
 
     // Wrapper over m_cursor, returns a human-readable string for Cursor::value().
     Cursor *const m_schema;
-
-    // Pointer to the most-recently-accessed tree.
-    const Tree *m_recent = nullptr;
 };
 
 } // namespace calicodb

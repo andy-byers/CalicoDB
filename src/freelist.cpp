@@ -69,7 +69,7 @@ auto Freelist::add(Pager &pager, PageRef *&page) -> Status
         if (s.is_ok()) {
             const auto n = get_u32(trunk->data + sizeof(uint32_t));
             if (n < kTrunkCapacity) {
-                // trunk has enough room for a new leaf page.
+                // Trunk has enough room for a new leaf page.
                 pager.mark_dirty(*trunk);
                 FreePage::put_leaf_count(*trunk, n + 1);
                 FreePage::put_leaf_id(*trunk, n, page->page_id.value);
@@ -199,7 +199,7 @@ auto Freelist::remove(Pager &pager, RemoveType type, Id nearby, PageRef *&page_o
                 }
             } else {
                 PageRef *new_trunk;
-                const Id new_id(get_u32(&trunk->data[8]));
+                const auto new_id = FreePage::get_leaf_id(*trunk, 0);
                 if (new_id.value > max_page) {
                     s = Status::corruption();
                     goto cleanup;
@@ -209,9 +209,11 @@ auto Freelist::remove(Pager &pager, RemoveType type, Id nearby, PageRef *&page_o
                     goto cleanup;
                 }
                 pager.mark_dirty(*new_trunk);
-                std::memcpy(&new_trunk->data[0], &trunk->data[0], 4);
-                put_u32(&new_trunk->data[4], leaf_count - 1);
-                std::memcpy(&new_trunk->data[8], &trunk->data[12], (leaf_count - 1) * 4);
+                std::memcpy(new_trunk->data, trunk->data, sizeof(uint32_t));
+                FreePage::put_leaf_count(*new_trunk, leaf_count - 1);
+                std::memcpy(FreePage::get_leaf_ptr(*new_trunk, 0),
+                            FreePage::get_leaf_ptr(*trunk, 1),
+                            (leaf_count - 1) * sizeof(uint32_t));
                 pager.release(new_trunk);
                 if (prev_trunk) {
                     pager.mark_dirty(*prev_trunk);
@@ -222,20 +224,19 @@ auto Freelist::remove(Pager &pager, RemoveType type, Id nearby, PageRef *&page_o
             }
             trunk = nullptr;
         } else if (leaf_count > 0) {
-            uint32_t closest = 0;
             Id page_id;
-            auto *data = trunk->data;
+            uint32_t closest = 0;
             if (!nearby.is_null()) {
-                auto dist = abs_distance(
+                auto smallest = abs_distance(
                     FreePage::get_leaf_id(*trunk, 0).value,
                     nearby.value);
                 for (size_t i = 1; i < leaf_count; i++) {
-                    const auto d2 = abs_distance(
+                    const auto dist = abs_distance(
                         FreePage::get_leaf_id(*trunk, i).value,
                         nearby.value);
-                    if (d2 < dist) {
+                    if (dist < smallest) {
                         closest = i;
-                        dist = d2;
+                        smallest = dist;
                     }
                 }
             }
@@ -248,9 +249,11 @@ auto Freelist::remove(Pager &pager, RemoveType type, Id nearby, PageRef *&page_o
             if (!search_list || page_id == nearby) {
                 pager.mark_dirty(*trunk);
                 if (closest < leaf_count - 1) {
-                    std::memcpy(&data[8 + closest * 4], &data[4 + leaf_count * 4], sizeof(uint32_t));
+                    std::memcpy(FreePage::get_leaf_ptr(*trunk, closest),
+                                FreePage::get_leaf_ptr(*trunk, leaf_count - 1),
+                                sizeof(uint32_t));
                 }
-                put_u32(&data[4], leaf_count - 1);
+                FreePage::put_leaf_count(*trunk, leaf_count - 1);
                 s = pager.acquire(page_id, page_out);
                 if (s.is_ok()) {
                     pager.mark_dirty(*page_out);

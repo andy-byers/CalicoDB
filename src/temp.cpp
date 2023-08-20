@@ -245,12 +245,12 @@ public:
         return Status::ok();
     }
 
-    auto rollback(const Undo &undo) -> void override
+    auto rollback(const Undo &undo, void *object) -> void override
     {
         // This routine will call undo() on frames in a different order than the normal WAL
         // class. This shouldn't make a difference to the pager (the only caller).
         for (const auto &[id, _] : m_pages) {
-            undo(id);
+            undo(object, id);
         }
         m_pages.clear();
     }

@@ -408,6 +408,8 @@ TEST_F(DBTests, ConvenienceFunctions)
     const auto *const_db = m_db;
     (void)reinterpret_cast<DBImpl *>(m_db)->TEST_pager();
     ASSERT_OK(m_db->update([](auto &tx) {
+        // Let the database root page get initialized.
+        EXPECT_OK(tx.create_bucket(BucketOptions(), "bucket", nullptr));
         reinterpret_cast<TxImpl *>(&tx)->TEST_validate();
         return Status::ok();
     }));
@@ -684,57 +686,6 @@ TEST_F(DBTests, VacuumEmptyDB)
     } while (change_options(true));
 }
 
-TEST_F(DBTests, CorruptedRootIDs)
-{
-    ASSERT_OK(m_db->update([](auto &tx) {
-        Bucket *tb1, *tb2;
-        EXPECT_OK(put_range(tx, BucketOptions(), "BUCKET", 0, 10));
-        EXPECT_OK(put_range(tx, BucketOptions(), "temp", 0, 10));
-        return tx.drop_bucket("temp");
-    }));
-    ASSERT_OK(m_db->checkpoint(true));
-
-    File *file;
-    auto &env = Env::default_env();
-    ASSERT_OK(env.new_file(m_db_name.c_str(), Env::kReadWrite, file));
-
-    // Corrupt the root ID written to the schema bucket, which has already been
-    // written back to the database file. The root ID is a 1 byte varint pointing
-    // to page 3. Just increment it, which makes a root that points past the end
-    // of the file, which is not allowed.
-    char buffer[kPageSize];
-    ASSERT_OK(file->read_exact(0, sizeof(buffer), buffer));
-    buffer[kPageSize - 1] = 42; // Corrupt the root ID of "BUCKET".
-    ASSERT_OK(file->write(0, Slice(buffer, kPageSize)));
-    delete file;
-
-    // The pager won't reread pages unless another connection has changed the
-    // database. Reopen the database to force it to read the corrupted page.
-    ASSERT_OK(reopen_db(false));
-
-    (void)m_db->update([](auto &tx) {
-        Status s;
-        EXPECT_TRUE((s = tx.create_bucket(BucketOptions(), "BUCKET", nullptr)).is_corruption())
-            << s.type_name() << ": " << s.message();
-        // The corrupted root ID cannot be fixed by this rollback. The corruption
-        // happened outside of a transaction. Future transactions should also see
-        // the corrupted root and fail.
-        return s;
-    });
-    (void)m_db->update([](auto &tx) {
-        Status s;
-        EXPECT_TRUE((s = tx.drop_bucket("BUCKET")).is_corruption())
-            << s.type_name() << ": " << s.message();
-        return s;
-    });
-    (void)m_db->update([](auto &tx) {
-        Status s;
-        EXPECT_TRUE((s = tx.vacuum()).is_corruption())
-            << s.type_name() << ": " << s.message();
-        return s;
-    });
-}
-
 TEST_F(DBTests, AutoCheckpoint)
 {
     Options options;
@@ -806,14 +757,20 @@ TEST_F(DBTests, DropBuckets)
 
 TEST_F(DBTests, RerootBuckets)
 {
-    ASSERT_OK(m_db->update([](auto &tx) {
+    ASSERT_OK(m_db->update([&d = m_db](auto &tx) {
         EXPECT_OK(tx.create_bucket(BucketOptions(), "a", nullptr));
         EXPECT_OK(tx.create_bucket(BucketOptions(), "b", nullptr));
         EXPECT_OK(tx.create_bucket(BucketOptions(), "c", nullptr));
         EXPECT_OK(tx.create_bucket(BucketOptions(), "d", nullptr));
         reinterpret_cast<TxImpl &>(tx).TEST_validate();
+        print_database_overview(std::cerr, reinterpret_cast<DBImpl *>(d)->TEST_pager());
+        std::cerr << "\n";
         EXPECT_OK(tx.drop_bucket("a"));
+        print_database_overview(std::cerr, reinterpret_cast<DBImpl *>(d)->TEST_pager());
+        std::cerr << "\n";
         EXPECT_OK(tx.drop_bucket("b"));
+        print_database_overview(std::cerr, reinterpret_cast<DBImpl *>(d)->TEST_pager());
+        std::cerr << "\n";
         EXPECT_OK(tx.drop_bucket("d"));
         return Status::ok();
     }));

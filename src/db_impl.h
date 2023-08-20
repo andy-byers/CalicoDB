@@ -34,7 +34,7 @@ public:
     auto new_tx(WriteTag, Tx *&tx) -> Status override;
     auto checkpoint(bool reset) -> Status override;
 
-    [[nodiscard]] auto TEST_pager() const -> const Pager &;
+    [[nodiscard]] auto TEST_pager() const -> Pager &;
 
 private:
     struct Parameters {

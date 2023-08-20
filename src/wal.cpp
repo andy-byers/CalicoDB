@@ -619,14 +619,14 @@ public:
     auto write(PageRef *dirty, size_t db_size) -> Status override;
     auto checkpoint(bool reset) -> Status override;
 
-    auto rollback(const Undo &undo) -> void override
+    auto rollback(const Undo &undo, void *object) -> void override
     {
         CALICODB_EXPECT_TRUE(m_writer_lock);
         const auto max_frame = m_hdr.max_frame;
         // Cast away volatile qualifier.
         m_hdr = *const_cast<const HashIndexHdr *>(m_index.header());
         for (auto frame = m_hdr.max_frame + 1; frame <= max_frame; ++frame) {
-            undo(Id(m_index.fetch(frame)));
+            undo(object, Id(m_index.fetch(frame)));
         }
         if (max_frame != m_hdr.max_frame) {
             m_index.cleanup();

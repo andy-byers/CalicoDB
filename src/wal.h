@@ -143,8 +143,8 @@ public:
     // Write new versions of the given pages to the WAL.
     virtual auto write(PageRef *dirty, size_t db_size) -> Status = 0;
 
-    using Undo = std::function<void(Id)>;
-    virtual auto rollback(const Undo &undo) -> void = 0;
+    using Undo = void (*)(void *, Id);
+    virtual auto rollback(const Undo &undo, void *object) -> void = 0;
 
     // WRITER -> READER
     virtual auto finish_writer() -> void = 0;

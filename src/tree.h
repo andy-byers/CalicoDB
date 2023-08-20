@@ -123,10 +123,9 @@ public:
         return m_root_id;
     }
 
-    auto print_structure(std::string &repr_out) const -> Status;
-    auto print_nodes(std::string &repr_out) const -> Status;
-
-    auto TEST_validate() const -> void;
+    auto print_structure(std::string &repr_out) -> Status;
+    auto print_nodes(std::string &repr_out) -> Status;
+    auto TEST_validate() -> void;
 
 private:
     friend class DBImpl;

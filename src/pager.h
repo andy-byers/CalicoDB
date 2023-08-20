@@ -127,6 +127,8 @@ private:
     auto flush_dirty_pages() -> Status;
     auto purge_page(PageRef &victim) -> void;
 
+    static auto undo_callback(void *arg, Id id) -> void;
+
     mutable Mode m_mode = kOpen;
 
     Bufmgr m_bufmgr;

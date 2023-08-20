@@ -92,6 +92,7 @@ Schema::Schema(Pager &pager, const Status &status, Stat &stat, char *scratch)
       m_stat(&stat),
       m_map(pager, stat, scratch, Id::root(), UniqueBuffer()),
       m_cursor(m_map),
+      m_trees{"", &m_map, nullptr, nullptr},
       m_schema(Alloc::new_object<SchemaCursor>(m_cursor))
 {
     IntrusiveList::initialize(m_trees);
@@ -117,6 +118,14 @@ auto Schema::corrupted_root_id() -> Status
         m_pager->set_status(s);
     }
     return s;
+}
+
+auto Schema::open_cursor(const Slice &name, Id root_id, Cursor *&c_out) -> Status
+{
+    if (auto *tree = construct_or_reference_tree(name, root_id)) {
+        c_out = new (std::nothrow) CursorImpl(*tree);
+    }
+    return c_out ? Status::ok() : Status::no_memory();
 }
 
 auto Schema::create_bucket(const BucketOptions &options, const Slice &name, Cursor **c_out) -> Status
@@ -147,12 +156,7 @@ auto Schema::create_bucket(const BucketOptions &options, const Slice &name, Curs
     }
 
     if (s.is_ok() && c_out) {
-        if (auto *tree = construct_or_reference_tree(name, root_id)) {
-            *c_out = new (std::nothrow) CursorImpl(*tree);
-        }
-        if (*c_out == nullptr) {
-            s = Status::no_memory();
-        }
+        s = open_cursor(name, root_id, *c_out);
     }
     return s;
 }
@@ -172,13 +176,7 @@ auto Schema::open_bucket(const Slice &name, Cursor *&c_out) -> Status
     } else if (!decode_and_check_root_id(m_cursor.value(), root_id)) {
         return corrupted_root_id();
     }
-    if (auto *tree = construct_or_reference_tree(name, root_id)) {
-        c_out = new (std::nothrow) CursorImpl(*tree);
-    }
-    if (c_out == nullptr) {
-        s = Status::no_memory();
-    }
-    return s;
+    return open_cursor(name, root_id, c_out);
 }
 
 auto Schema::decode_root_id(const Slice &data, Id &out) -> bool
@@ -207,12 +205,19 @@ auto Schema::encode_root_id(Id id, char *root_id_out) -> size_t
 
 auto Schema::find_open_tree(const Slice &name) -> Tree *
 {
-    for (auto *t = m_trees.next_entry; t != &m_trees; t = t->next_entry) {
-        if (t->name == name) {
-            return t->tree;
+    Tree *target = nullptr;
+    map_trees([name, &target](auto &t) {
+        if (name == t.name) {
+            target = t.tree;
+            return false;
+        } else if (IntrusiveList::is_empty(t.tree->m_active_list) &&
+                   IntrusiveList::is_empty(t.tree->m_inactive_list)) {
+            IntrusiveList::remove(t);
+            Alloc::delete_object(t.tree);
         }
-    }
-    return nullptr;
+        return true;
+    });
+    return target;
 }
 
 auto Schema::construct_or_reference_tree(const Slice &name, Id root_id) -> Tree *
@@ -242,24 +247,24 @@ auto Schema::unpack_and_use(Cursor &c) -> std::pair<Tree &, CursorImpl &>
 {
     auto *c_impl = static_cast<CursorImpl *>(c.handle());
     auto *tree = Tree::get_tree(*c_impl);
-    use_tree(*tree);
+    use_tree(tree);
     return {*tree, *c_impl};
 }
 
-auto Schema::use_tree(Tree &tree) -> void
+auto Schema::use_tree(Tree *tree) -> void
 {
-    if (m_recent && m_recent != &tree) {
-        m_recent->save_all_cursors();
-    }
-    m_recent = &tree;
+    map_trees([tree](auto &t) {
+        if (t.tree != tree) {
+            t.tree->save_all_cursors();
+        }
+        return true;
+    },
+              true);
 }
 
 auto Schema::drop_bucket(const Slice &name) -> Status
 {
-    map_trees([](auto &t) {
-        t.tree->save_all_cursors();
-        return true;
-    });
+    use_tree(nullptr);
     m_cursor.find(name);
     auto s = m_cursor.status();
     if (!m_cursor.is_valid()) {
@@ -273,10 +278,9 @@ auto Schema::drop_bucket(const Slice &name) -> Status
     if (drop == nullptr) {
         return Status::no_memory();
     }
-    m_map.save_all_cursors();
     IntrusiveList::remove(drop->list_entry);
     drop->save_all_cursors();
-    m_recent = nullptr;
+    m_map.save_all_cursors();
 
     Tree::Reroot rr;
     s = m_map.destroy(*drop, rr);
@@ -291,6 +295,26 @@ auto Schema::drop_bucket(const Slice &name) -> Status
             }
             return true;
         });
+        // TODO: This is unfortunate. Keep a reverse mapping?
+        auto found = false;
+        m_cursor.seek_first();
+        while (m_cursor.is_valid()) {
+            Id found_id;
+            if (!decode_and_check_root_id(m_cursor.value(), found_id)) {
+                return corrupted_root_id();
+            }
+            if (found_id == rr.before) {
+                char buf[kMaxRootEntryLen];
+                const auto len = encode_root_id(rr.after, buf);
+                s = m_map.put(m_cursor, m_cursor.key(), Slice(buf, len));
+                found = true;
+                break;
+            }
+            m_cursor.next();
+        }
+        if (s.is_ok() && !found) {
+            s = Status::corruption();
+        }
     }
 
     Alloc::delete_object(drop);
@@ -299,12 +323,8 @@ auto Schema::drop_bucket(const Slice &name) -> Status
 
 auto Schema::vacuum() -> Status
 {
-    map_trees([](auto &t) {
-        t.tree->save_all_cursors();
-        return true;
-    });
+    use_tree(nullptr);
     m_map.save_all_cursors();
-    m_recent = nullptr;
     return m_map.vacuum();
 }
 
@@ -313,7 +333,8 @@ auto Schema::TEST_validate() const -> void
     map_trees([](auto &t) {
         t.tree->TEST_validate();
         return true;
-    });
+    },
+              true);
 }
 
 } // namespace calicodb

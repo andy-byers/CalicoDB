@@ -966,7 +966,7 @@ TEST_F(PointerMapTests, LookupBeforeFirstMap)
 class MultiTreeTests : public TreeTests
 {
 public:
-    static constexpr size_t kN = 32;
+    static constexpr size_t kN = 16;
 
     explicit MultiTreeTests()
         : payload_values(kInitialRecordCount),

@@ -271,7 +271,7 @@ auto DBImpl::new_tx(Tx *&tx_out) const -> Status
     return prepare_tx(false, tx_out);
 }
 
-auto DBImpl::TEST_pager() const -> const Pager &
+auto DBImpl::TEST_pager() const -> Pager &
 {
     return *m_pager;
 }

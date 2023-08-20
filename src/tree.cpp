@@ -218,11 +218,11 @@ public:
         uint32_t ncells;
         uint32_t level;
     };
-    using Callback = std::function<Status(Node &, const TraversalInfo &)>;
 
     // Call the callback for every record and pivot in the tree, in sort order, plus once when the node
     // is no longer required for determining the rest of the traversal
-    static auto traverse(const Tree &tree, const Callback &cb) -> Status
+    template <class Callback>
+    static auto traverse(Tree &tree, const Callback &cb) -> Status
     {
         Node root;
         auto s = tree.acquire(tree.root(), root);
@@ -233,7 +233,8 @@ public:
     }
 
 private:
-    static auto traverse_impl(const Tree &tree, Node node, const Callback &cb, uint32_t level) -> Status
+    template <class Callback>
+    static auto traverse_impl(Tree &tree, Node node, const Callback &cb, uint32_t level) -> Status
     {
         Status s;
         for (uint32_t i = 0, n = NodeHdr::get_cell_count(node.hdr()); s.is_ok() && i <= n; ++i) {
@@ -252,7 +253,7 @@ private:
                 }
             }
             if (s.is_ok()) {
-                s = cb(node, {i, n, level});
+                s = cb(node, TraversalInfo{i, n, level});
             }
         }
         tree.release(std::move(node));
@@ -1538,7 +1539,6 @@ auto Tree::relocate_page(PageRef *&free, PointerMap::Entry entry, Id last_id) ->
             const auto new_location = free->page_id;
             m_pager->release(free, Pager::kDiscard);
             if (s.is_ok()) {
-                m_pager->mark_dirty(*last); // TODO: Not necessary?
                 m_pager->move_page(*last, new_location);
                 m_pager->release(last);
             }
@@ -1693,7 +1693,7 @@ class TreePrinter
     }
 
 public:
-    static auto print_structure(const Tree &tree, std::string &repr_out) -> Status
+    static auto print_structure(Tree &tree, std::string &repr_out) -> Status
     {
         StructuralData data;
         const auto print = [&data](auto &node, const auto &info) {
@@ -1726,9 +1726,9 @@ public:
         return s;
     }
 
-    static auto print_nodes(const Tree &tree, std::string &repr_out) -> Status
+    static auto print_nodes(Tree &tree, std::string &repr_out) -> Status
     {
-        const auto print = [&repr_out, &tree](auto &node, const auto &info) {
+        const auto print = [&tree, &repr_out](auto &node, const auto &info) {
             if (info.idx == info.ncells) {
                 std::string msg;
                 append_fmt_string(msg, "%sternalNode(%u)\n", node.is_leaf() ? "Ex" : "In",
@@ -1781,34 +1781,34 @@ class TreeValidator
     }
 
 public:
-    static auto validate(const Tree &tree) -> void
+    static auto validate(Tree &tree) -> void
     {
-        auto check_parent_child = [&tree](auto &node, auto index) -> void {
-            Node child;
-            CHECK_OK(tree.acquire(node.read_child_id(index), child, false));
+        CHECK_OK(InorderTraversal::traverse(tree, [&tree](auto &node, const auto &info) {
+            auto check_parent_child = [&tree](auto &node, auto index) -> void {
+                Node child;
+                CHECK_OK(tree.acquire(node.read_child_id(index), child, false));
 
-            Id parent_id;
-            CHECK_OK(tree.find_parent_id(child.ref->page_id, parent_id));
-            CHECK_TRUE(parent_id == node.ref->page_id);
+                Id parent_id;
+                CHECK_OK(tree.find_parent_id(child.ref->page_id, parent_id));
+                CHECK_TRUE(parent_id == node.ref->page_id);
 
-            tree.release(std::move(child));
-        };
-        CHECK_OK(InorderTraversal::traverse(tree, [f = std::move(check_parent_child)](const auto &node, const auto &info) {
+                tree.release(std::move(child));
+            };
             if (info.idx == info.ncells) {
                 return Status::ok();
             }
 
             if (!node.is_leaf()) {
-                f(node, info.idx);
+                check_parent_child(node, info.idx);
                 // Rightmost child.
                 if (info.idx + 1 == info.ncells) {
-                    f(node, info.idx + 1);
+                    check_parent_child(node, info.idx + 1);
                 }
             }
             return Status::ok();
         }));
 
-        CHECK_OK(InorderTraversal::traverse(tree, [&tree](const auto &node, const auto &info) {
+        CHECK_OK(InorderTraversal::traverse(tree, [&tree](auto &node, const auto &info) {
             if (info.idx == info.ncells) {
                 CHECK_TRUE(node.assert_state());
                 return Status::ok();
@@ -1840,17 +1840,17 @@ public:
     }
 };
 
-auto Tree::TEST_validate() const -> void
+auto Tree::TEST_validate() -> void
 {
     TreeValidator::validate(*this);
 }
 
-auto Tree::print_structure(std::string &repr_out) const -> Status
+auto Tree::print_structure(std::string &repr_out) -> Status
 {
     return TreePrinter::print_structure(*this, repr_out);
 }
 
-auto Tree::print_nodes(std::string &repr_out) const -> Status
+auto Tree::print_nodes(std::string &repr_out) -> Status
 {
     return TreePrinter::print_nodes(*this, repr_out);
 }
@@ -1861,7 +1861,7 @@ auto Tree::print_nodes(std::string &repr_out) const -> Status
 
 #else
 
-auto Tree::TEST_validate() const -> void
+auto Tree::TEST_validate() -> void
 {
 }
 
