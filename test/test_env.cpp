@@ -756,6 +756,7 @@ public:
         auto &tempenv = Env::default_env();
         File *tempfile;
         const auto filename = m_dirname + "/0000000000";
+        (void)tempenv.remove_file(filename.c_str());
         ASSERT_OK(tempenv.new_file(filename.c_str(), Env::kCreate, tempfile));
         write_file_version(*tempfile, 0);
         delete tempfile;
@@ -863,8 +864,8 @@ public:
         auto &env = Env::default_env();
         File *file; // Keep this shm open to read from at the end...
         const auto filename = m_dirname + "0000000000";
+        (void)env.remove_file(filename.c_str());
         ASSERT_OK(env.new_file(filename.c_str(), Env::kCreate, file));
-        ASSERT_OK(file->resize(0));
         volatile void *ptr;
         ASSERT_OK(file->shm_map(0, true, ptr));
         run_test([&](auto) {
