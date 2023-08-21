@@ -59,6 +59,7 @@ auto ModelTx::check_consistency() const -> void
     for (const auto &[name, map] : m_temp) {
         Cursor *c;
         CHECK_OK(m_tx->open_bucket(name, c));
+        auto copy = map;
         c->seek_first();
         while (c->is_valid()) {
             const auto key = c->key().to_string();
@@ -66,8 +67,10 @@ auto ModelTx::check_consistency() const -> void
             CHECK_TRUE(itr != end(map));
             CHECK_EQ(itr->first, key);
             CHECK_EQ(itr->second, c->value().to_string());
+            copy.erase(key);
             c->next();
         }
+        CHECK_TRUE(copy.empty());
         delete c;
     }
 }
@@ -84,29 +87,29 @@ auto ModelTx::save_cursors(Cursor *exclude) const -> void
 
 auto ModelTx::create_bucket(const BucketOptions &options, const Slice &name, Cursor **c_out) -> Status
 {
-    Cursor *c = nullptr;
-    auto **c_ptr = c_out ? &c : nullptr;
-    auto s = m_tx->create_bucket(options, name, c_ptr);
+    auto s = m_tx->create_bucket(options, name, c_out);
     if (s.is_ok()) {
         // NOOP if `name` already exists.
         auto [itr, _] = m_temp.insert({name.to_string(), {}});
         if (c_out) {
-            CHECK_TRUE(c != nullptr);
-            *c_out = open_model_cursor(*c, itr->second);
-            ;
+            CHECK_TRUE(*c_out != nullptr);
+            *c_out = open_model_cursor(**c_out, itr->second);
         }
+    } else if (c_out) {
+        CHECK_EQ(*c_out, nullptr);
     }
     return s;
 }
 
 auto ModelTx::open_bucket(const Slice &name, Cursor *&c_out) const -> Status
 {
-    Cursor *c;
-    auto s = m_tx->open_bucket(name, c);
+    auto s = m_tx->open_bucket(name, c_out);
     if (s.is_ok()) {
         auto itr = m_temp.find(name.to_string());
         CHECK_TRUE(itr != end(m_temp));
-        c_out = open_model_cursor(*c, itr->second);
+        c_out = open_model_cursor(*c_out, itr->second);
+    } else {
+        CHECK_EQ(c_out, nullptr);
     }
     return s;
 }
@@ -114,13 +117,9 @@ auto ModelTx::open_bucket(const Slice &name, Cursor *&c_out) const -> Status
 auto ModelTx::open_model_cursor(Cursor &c, KVMap &map) const -> Cursor *
 {
     m_cursors.emplace_front();
-    auto *m = new ModelCursorBase<KVMap>(
-        c,
-        *this,
-        map,
-        begin(m_cursors));
-    m_cursors.front() = m;
-    return m;
+    m_cursors.front() = new ModelCursorBase<KVMap>(
+        c, *this, map, begin(m_cursors));
+    return m_cursors.front();
 }
 
 auto ModelTx::put(Cursor &c, const Slice &key, const Slice &value) -> Status

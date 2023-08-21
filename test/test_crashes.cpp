@@ -6,12 +6,9 @@
 #include "calicodb/db.h"
 #include "calicodb/env.h"
 #include "common.h"
-#include "db_impl.h"
-#include "fake_env.h"
 #include "logging.h"
-#include "pager.h"
+#include "model.h"
 #include "test.h"
-#include "tree.h"
 #include <filesystem>
 
 namespace calicodb::test
@@ -75,7 +72,8 @@ public:
 
     [[nodiscard]] auto should_next_syscall_fail() const -> bool
     {
-        if (m_syscall_state.enabled && m_syscall_state.num++ >= m_syscall_state.max_num) {
+        if (m_syscall_state.enabled &&
+            m_syscall_state.num++ >= m_syscall_state.max_num) {
             return true;
         }
         return false;
@@ -83,8 +81,9 @@ public:
 
     [[nodiscard]] static auto should_next_allocation_fail(void *arg) -> int
     {
-        auto *self = static_cast<CrashEnv *>(arg);
-        if (self->m_oom_state.enabled && self->m_oom_state.num++ >= self->m_oom_state.max_num) {
+        if (auto *self = static_cast<CrashEnv *>(arg);
+            self->m_oom_state.enabled &&
+            self->m_oom_state.num++ >= self->m_oom_state.max_num) {
             return -1;
         }
         return 0;
@@ -209,6 +208,7 @@ class CrashTests : public testing::Test
 protected:
     const std::string m_filename;
     CrashEnv *m_env;
+    KVStore m_store;
 
     explicit CrashTests()
         : m_filename(testing::TempDir() + "calicodb_crashes"),
@@ -227,7 +227,7 @@ protected:
         delete m_env;
     }
 
-    static constexpr size_t kNumRecords = 256;
+    static constexpr size_t kNumRecords = 64;
     static constexpr size_t kNumIterations = 2;
     [[nodiscard]] static auto make_key(size_t n) -> Slice
     {
@@ -235,7 +235,7 @@ protected:
         if (s_keys[n].empty()) {
             s_keys[n] = numeric_key(n) + "::";
             // Let the keys get increasingly long so that the overflow chain code gets tested.
-            s_keys[n].resize(s_keys[n].size() + n * 10, '0');
+            s_keys[n].resize(s_keys[n].size() + n * 32, '0');
         }
         return s_keys[n];
     }
@@ -382,9 +382,21 @@ protected:
         CrashEnv::reset_counter(m_env->m_syscall_state);
     }
 
-    static auto validate(DB &db)
+    auto validate(DB &db)
     {
-        reinterpret_cast<DBImpl &>(db).TEST_pager().assert_state();
+        auto syscall_state = std::exchange(m_env->m_syscall_state,
+                                           CrashEnv::CrashState());
+        auto oom_state = std::exchange(m_env->m_oom_state,
+                                       CrashEnv::CrashState());
+
+        reinterpret_cast<ModelDB &>(db).check_consistency();
+        ASSERT_OK(db.view([](const auto &tx) {
+            reinterpret_cast<const ModelTx &>(tx).check_consistency();
+            return tx.status();
+        }));
+
+        m_env->m_syscall_state = syscall_state;
+        m_env->m_oom_state = oom_state;
     }
 
     enum FaultType {
@@ -400,6 +412,8 @@ protected:
         CrashEnv::reset_counter(m_env->m_oom_state);
         CrashEnv::reset_counter(m_env->m_syscall_state);
 
+        m_store.clear();
+
         // Make sure all files created during the test are unlinked.
         auto s = m_env->remove_file(m_filename.c_str());
         ASSERT_TRUE(s.is_ok() || s.is_not_found()) << s.type_name();
@@ -413,8 +427,6 @@ protected:
 
     auto set_fault_injection_type(FaultType type)
     {
-        hard_reset();
-
         switch (type) {
             case kNoFaults:
                 break;
@@ -446,7 +458,7 @@ protected:
 
     struct OperationsParameters {
         FaultType fault_type = kNoFaults;
-        bool test_checkpoint = false;
+        bool auto_checkpoint = false;
         bool test_sync_mode = false;
     };
     auto run_operations_test(const OperationsParameters &param) -> void
@@ -469,11 +481,12 @@ protected:
             fault_type_str = "kNoFaults";
         }
         std::cout << "CrashTests::Operations({\n  .fault_type = " << fault_type_str
-                  << ",\n  .test_checkpoint = " << std::boolalpha << param.test_checkpoint
+                  << ",\n  .auto_checkpoint = " << std::boolalpha << param.auto_checkpoint
                   << ",\n})\n\n";
 
         Options options;
         options.env = m_env;
+        options.auto_checkpoint = param.auto_checkpoint ? 500 : 0;
         options.sync_mode = param.test_sync_mode
                                 ? Options::kSyncFull
                                 : Options::kSyncNormal;
@@ -485,10 +498,10 @@ protected:
         for (size_t i = 0; i < kNumIterations; ++i) {
             set_fault_injection_type(param.fault_type);
 
-            run_until_completion([this, i, &options, &src_counters, &param] {
+            run_until_completion([this, i, &options, &src_counters] {
                 UserPtr<DB> db;
                 ++src_counters[kSrcOpen];
-                auto s = DB::open(options, m_filename.c_str(), db.ref());
+                auto s = ModelDB::open(options, m_filename.c_str(), m_store, db.ref());
                 if (!s.is_ok()) {
                     EXPECT_TRUE(is_injected_fault(s));
                     return s;
@@ -515,10 +528,8 @@ protected:
                 }
                 validate(*db);
 
-                if (param.test_checkpoint) {
-                    ++src_counters[kSrcCheckpoint];
-                    s = db->checkpoint(true);
-                }
+                ++src_counters[kSrcCheckpoint];
+                s = db->checkpoint(true);
                 if (!s.is_ok()) {
                     EXPECT_TRUE(is_injected_fault(s));
                     return s;
@@ -552,7 +563,7 @@ protected:
             hard_reset();
 
             DB *db;
-            ASSERT_OK(DB::open(options, m_filename.c_str(), db));
+            ASSERT_OK(ModelDB::open(options, m_filename.c_str(), m_store, db));
 
             set_fault_injection_type(param.fault_type);
             if (auto *state = get_fault_injection_state(*m_env, param.fault_type)) {
@@ -564,7 +575,7 @@ protected:
 
             run_until_completion([this, &options, &db, &tries] {
                 ++tries;
-                auto s = DB::open(options, m_filename.c_str(), db);
+                auto s = ModelDB::open(options, m_filename.c_str(), m_store, db);
                 if (!s.is_ok()) {
                     EXPECT_TRUE(is_injected_fault(s));
                 }
@@ -591,7 +602,7 @@ protected:
             hard_reset();
 
             DB *db;
-            ASSERT_OK(DB::open(options, m_filename.c_str(), db));
+            ASSERT_OK(ModelDB::open(options, m_filename.c_str(), m_store, db));
             ASSERT_OK(db->update([](auto &tx) {
                 TestCursor c, keep_open;
                 auto s = test_create_and_open_bucket(tx, BucketOptions(), "BUCKET", c);
@@ -682,7 +693,7 @@ protected:
 
             DB *db;
             run_until_completion([this, &options, &db] {
-                auto s = DB::open(options, m_filename.c_str(), db);
+                auto s = ModelDB::open(options, m_filename.c_str(), m_store, db);
                 if (!s.is_ok()) {
                     EXPECT_TRUE(is_injected_fault(s));
                 }

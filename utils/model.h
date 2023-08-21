@@ -155,9 +155,11 @@ public:
 
     [[nodiscard]] auto is_valid() const -> bool override
     {
-        CHECK_EQ(m_c->is_valid(),
-                 m_itr != end(*m_map) || m_saved);
-        check_record();
+        if (m_c->status().is_ok()) {
+            CHECK_EQ(m_c->is_valid(),
+                     m_itr != end(*m_map) || m_saved);
+            check_record();
+        }
         return m_c->is_valid();
     }
 
@@ -287,7 +289,7 @@ public:
 
     [[nodiscard]] auto status() const -> Status override
     {
-        return Status::ok();
+        return m_tx->status();
     }
 
     [[nodiscard]] auto schema() const -> Cursor & override
