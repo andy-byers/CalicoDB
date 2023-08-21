@@ -75,7 +75,6 @@ class CursorImpl : public Cursor
 
     auto seek_to_last_leaf() -> void;
 
-    auto fetch_user_payload() -> Status;
     auto move_to_right_sibling() -> void;
     auto move_to_left_sibling() -> void;
     auto search_node(const Slice &key) -> bool;
@@ -86,6 +85,7 @@ public:
     auto move_to_parent() -> void;
     auto assign_child(Node child) -> void;
     auto move_to_child(Id child_id) -> void;
+    auto fetch_user_payload() -> Status;
     [[nodiscard]] auto on_last_node() const -> bool;
 
     // Return true if the cursor is positioned on a valid node, false otherwise

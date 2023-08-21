@@ -134,14 +134,17 @@ auto Schema::create_bucket(const BucketOptions &options, const Slice &name, Curs
         // Initialize the database file header, as well as the schema tree's root page.
         m_pager->initialize_root();
     }
-
     Id root_id;
-    use_tree(nullptr);
-    m_cursor.find(name);
+    use_tree(&m_map);
+    const auto bucket_exists = m_cursor.seek_to_leaf(
+        name, CursorImpl::kSeekNormal);
     auto s = m_cursor.status();
-    if (m_cursor.is_valid()) {
+    if (bucket_exists) {
         CALICODB_EXPECT_TRUE(s.is_ok());
-        if (!decode_and_check_root_id(m_cursor.value(), root_id)) {
+        s = m_cursor.fetch_user_payload();
+        if (!s.is_ok()) {
+            return s; // Unable to read the existing schema record.
+        } else if (!decode_and_check_root_id(m_cursor.value(), root_id)) {
             s = corrupted_root_id();
         } else if (options.error_if_exists) {
             s = Status::invalid_argument("bucket already exists");
@@ -149,15 +152,17 @@ auto Schema::create_bucket(const BucketOptions &options, const Slice &name, Curs
     } else if (s.is_ok()) {
         s = m_map.create(&root_id);
         if (s.is_ok()) {
-            // TODO: Encode persistent bucket options here.
             char buf[kMaxRootEntryLen];
             const auto len = encode_root_id(root_id, buf);
+            // On success, this call will leave m_cursor is on the schema record of the bucket that we
+            // need to open a cursor on below. It may invalidate `name`, so m_cursor.key() is used
+            // instead. The 2 should be equivalent.
             s = m_map.put(m_cursor, name, Slice(buf, len));
         }
     }
 
     if (s.is_ok() && c_out) {
-        s = open_cursor(name, root_id, *c_out);
+        s = open_cursor(m_cursor.key(), root_id, *c_out);
     }
     return s;
 }
@@ -167,7 +172,9 @@ auto Schema::open_bucket(const Slice &name, Cursor *&c_out) -> Status
     if (m_pager->page_count() == 0) {
         return Status::invalid_argument();
     }
-
+    // NOTE: Cannot use `name` again: this routine may have been called like
+    //       open_bucket(schema.key(), c), where "schema" is the result of
+    //       Tx::schema(), which is actually m_cursor.
     m_cursor.find(name);
     auto s = m_cursor.status();
 
@@ -177,7 +184,7 @@ auto Schema::open_bucket(const Slice &name, Cursor *&c_out) -> Status
     } else if (!decode_and_check_root_id(m_cursor.value(), root_id)) {
         return corrupted_root_id();
     }
-    return open_cursor(name, root_id, c_out);
+    return open_cursor(m_cursor.key(), root_id, c_out);
 }
 
 auto Schema::decode_root_id(const Slice &data, Id &out) -> bool
@@ -264,17 +271,19 @@ auto Schema::use_tree(Tree *tree) -> void
 
 auto Schema::drop_bucket(const Slice &name) -> Status
 {
-    use_tree(nullptr);
+    use_tree(&m_map);
     m_cursor.find(name);
     auto s = m_cursor.status();
     if (!m_cursor.is_valid()) {
         return s.is_ok() ? kNoBucket : s;
     }
+    CALICODB_EXPECT_TRUE(s.is_ok());
+
     Id root_id;
     if (!decode_and_check_root_id(m_cursor.value(), root_id)) {
         return corrupted_root_id();
     }
-    auto *drop = construct_or_reference_tree(name, root_id);
+    auto *drop = construct_or_reference_tree(m_cursor.key(), root_id);
     if (drop == nullptr) {
         return Status::no_memory();
     }
@@ -285,7 +294,7 @@ auto Schema::drop_bucket(const Slice &name) -> Status
     Tree::Reroot rr;
     s = m_map.destroy(*drop, rr);
     if (s.is_ok()) {
-        s = m_map.erase(m_cursor, name);
+        s = m_map.erase(m_cursor);
     }
     if (s.is_ok() && rr.before != rr.after) {
         map_trees(false, [rr](auto &t) {

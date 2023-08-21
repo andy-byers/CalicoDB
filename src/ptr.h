@@ -232,6 +232,11 @@ public:
         }
         return buf;
     }
+
+    [[nodiscard]] auto as_slice() const -> Slice
+    {
+        return is_empty() ? "" : Slice(m_ptr.get(), m_len - 1);
+    }
 };
 
 template <class Object>

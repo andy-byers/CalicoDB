@@ -305,7 +305,7 @@ public:
         auto s = m_tx->drop_bucket(name);
         if (s.is_ok()) {
             const auto num_erased = m_temp.erase(name.to_string());
-            CHECK_EQ(s.is_ok(), num_erased);
+            CHECK_EQ(num_erased, 1);
         }
         return s;
     }

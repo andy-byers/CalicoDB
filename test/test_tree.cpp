@@ -967,7 +967,7 @@ TEST_F(PointerMapTests, LookupBeforeFirstMap)
 class MultiTreeTests : public TreeTests
 {
 public:
-    static constexpr size_t kN = 16;
+    static constexpr size_t kN = 32;
 
     explicit MultiTreeTests()
         : payload_values(kInitialRecordCount),
@@ -1209,7 +1209,7 @@ TEST_F(MultiTreeTests, DropC)
     check_roots(1);
 }
 
-TEST_F(MultiTreeTests, DropD)
+TEST_F(MultiTreeTests, DropSequential)
 {
     for (size_t tid = 0; tid < kN; ++tid) {
         create_tree(tid);
@@ -1219,6 +1219,28 @@ TEST_F(MultiTreeTests, DropD)
         drop_tree(tid);
     }
     for (size_t tid = 0; tid < kN; ++tid) {
+        create_tree(tid);
+        fill_tree(tid);
+        check_tree(tid);
+        clear_tree(tid);
+    }
+}
+
+TEST_F(MultiTreeTests, DropRandom)
+{
+    std::vector<size_t> order(kN);
+    std::iota(begin(order), end(order), 0);
+    std::default_random_engine rng(42);
+    std::shuffle(begin(order), end(order), rng);
+
+    for (size_t tid = 0; tid < kN; ++tid) {
+        create_tree(tid);
+        fill_tree(tid);
+    }
+    for (auto tid : order) {
+        drop_tree(tid);
+    }
+    for (auto tid : order) {
         create_tree(tid);
         fill_tree(tid);
         check_tree(tid);

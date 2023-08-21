@@ -426,16 +426,13 @@ auto Tree::read_key(const Cell &cell, char *scratch, Slice *key_out, uint32_t li
     return s;
 }
 
-auto Tree::read_value(Node &node, uint32_t index, std::string &scratch, Slice *value_out) const -> Status
+auto Tree::read_value(Node &node, uint32_t index, char *scratch, Slice *value_out) const -> Status
 {
     Cell cell;
     if (node.read(index, cell)) {
         return corrupted_node(node.ref->page_id);
     }
-    if (scratch.size() < cell.total_pl_size - cell.key_size) {
-        scratch.resize(cell.total_pl_size - cell.key_size);
-    }
-    return read_value(cell, scratch.data(), value_out);
+    return read_value(cell, scratch, value_out);
 }
 
 auto Tree::read_value(const Cell &cell, char *scratch, Slice *value_out) const -> Status

@@ -28,12 +28,19 @@ using StablePtr = char *;
 using ConstStablePtr = const char *;
 
 // Simple routines for working with the hash index header. The volatile-qualified
-// parameter should always be a pointer to the start of one of the copies of the
-// index header in shared memory. The other parameter should be a pointer to a
-// local copy of the header.
+// parameter must be a pointer to the start of one of the copies of the index header
+// in shared memory. The other parameter must be a pointer to a local copy of the
+// header.
+// Note that these routines are able to copy in chunks of uint64_t, because the
+// memory region starting at the first index header is either the address returned
+// by mmap()/VirtualAlloc(), or it is a pointer returned by malloc(). Either way,
+// it should be suitably aligned. HashIndexHdr has a size that is a multiple of 8,
+// so the second copy of the header should be properly aligned as well.
 template <class Src, class Dst>
 static auto read_hdr(const volatile Src *src, Dst *dst) -> void
 {
+    CALICODB_EXPECT_EQ(reinterpret_cast<std::uintptr_t>(src) & (alignof(uint64_t) - 1), 0);
+    CALICODB_EXPECT_EQ(reinterpret_cast<std::uintptr_t>(dst) & (alignof(uint64_t) - 1), 0);
     const volatile auto *src64 = reinterpret_cast<const volatile uint64_t *>(src);
     auto *dst64 = reinterpret_cast<uint64_t *>(dst);
     for (size_t i = 0; i < sizeof(HashIndexHdr) / sizeof *src64; ++i) {
@@ -43,6 +50,8 @@ static auto read_hdr(const volatile Src *src, Dst *dst) -> void
 template <class Src, class Dst>
 static auto write_hdr(const Src *src, volatile Dst *dst) -> void
 {
+    CALICODB_EXPECT_EQ(reinterpret_cast<std::uintptr_t>(src) & (alignof(uint64_t) - 1), 0);
+    CALICODB_EXPECT_EQ(reinterpret_cast<std::uintptr_t>(dst) & (alignof(uint64_t) - 1), 0);
     const auto *src64 = reinterpret_cast<const uint64_t *>(src);
     volatile auto *dst64 = reinterpret_cast<volatile uint64_t *>(dst);
     for (size_t i = 0; i < sizeof(HashIndexHdr) / sizeof *src64; ++i) {
@@ -161,8 +170,8 @@ HashIndex::HashIndex(HashIndexHdr &header, File *file)
 
 auto HashIndex::header() -> volatile HashIndexHdr *
 {
-    CALICODB_EXPECT_FALSE(m_num_groups == 0);
-    CALICODB_EXPECT_TRUE(m_groups[0]);
+    CALICODB_EXPECT_GT(m_num_groups, 0);
+    CALICODB_EXPECT_NE(m_groups[0], nullptr);
     return reinterpret_cast<volatile HashIndexHdr *>(m_groups[0]);
 }
 

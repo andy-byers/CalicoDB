@@ -7,6 +7,7 @@
 #include "common.h"
 #include "test.h"
 #include "utils.h"
+#include <filesystem>
 #include <gtest/gtest.h>
 
 namespace calicodb::test
@@ -88,9 +89,11 @@ protected:
     DB *m_db = nullptr;
 
     explicit StressTests()
-        : m_filename(testing::TempDir() + "db")
+        : m_filename(testing::TempDir() + "calicodb_stress_tests")
     {
-        (void)DB::destroy(Options(), m_filename.c_str());
+        std::filesystem::remove_all(m_filename);
+        std::filesystem::remove_all(m_filename + kDefaultWalSuffix);
+        std::filesystem::remove_all(m_filename + kDefaultShmSuffix);
     }
 
     ~StressTests() override

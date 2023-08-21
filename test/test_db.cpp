@@ -7,6 +7,7 @@
 #include "fake_env.h"
 #include "header.h"
 #include "logging.h"
+#include "model.h"
 #include "test.h"
 #include "tx_impl.h"
 #include <filesystem>
@@ -1397,5 +1398,53 @@ TEST_F(DBVacuumTests, SanityCheck)
         0b11111111,
     });
 }
+//
+// TEST(TestModelDB, TestModelDB)
+//{
+//    DB *db;
+//    KVStore store;
+//    FakeEnv env;
+//    Options options;
+//    options.env = &env;
+//    const auto filename = testing::TempDir() + "calicodb_test_model_db";
+//    ASSERT_OK(ModelDB::open(options, filename.c_str(), store, db));
+//    ASSERT_OK(db->update([](auto &tx) {
+//        EXPECT_OK(tx.create_bucket(BucketOptions(), "a", nullptr));
+//        EXPECT_OK(tx.create_bucket(BucketOptions(), "b", nullptr));
+//        EXPECT_OK(tx.create_bucket(BucketOptions(), "c", nullptr));
+//        return Status::ok();
+//    }));
+//    ASSERT_TRUE(env.file_exists(filename.c_str()));
+//    ASSERT_OK(db->update([](auto &tx) {
+//        Cursor *c;
+//        auto &schema = tx.schema();
+//        schema.seek_first();
+////        EXPECT_TRUE(schema.is_valid());
+//        EXPECT_EQ(schema.key(), "a");
+//        EXPECT_OK(tx.open_bucket(schema.key(), c));
+//        EXPECT_OK(tx.drop_bucket(schema.key())); // Drop bucket before delete cursor.
+//        delete c;
+//
+//        // NOTE: The schema cursor is used to fulfill create/open/drop bucket requests. Each time
+//        //       a *_bucket() method is called on the Tx object, the schema cursor may be moved.
+//        schema.seek_first();
+////        EXPECT_TRUE(schema.is_valid());
+//        EXPECT_EQ(schema.key(), "b");
+//        EXPECT_OK(tx.open_bucket(schema.key(), c));
+//        delete c;
+//        EXPECT_OK(tx.drop_bucket(schema.key())); // Drop bucket after delete cursor.
+//
+//        schema.seek_first();
+////        EXPECT_TRUE(schema.is_valid());
+//        EXPECT_EQ(schema.key(), "c");
+//        EXPECT_OK(tx.open_bucket(schema.key(), c));
+//        delete c;
+//
+//        reinterpret_cast<ModelTx &>(tx).check_consistency();
+//        return Status::ok();
+//    }));
+//    reinterpret_cast<ModelDB *>(db)->check_consistency();
+//    delete db;
+//}
 
 } // namespace calicodb::test

@@ -158,7 +158,7 @@ private:
     auto extract_key(const Cell &cell, KeyScratch &scratch, Slice &key_out, uint32_t limit = 0) const -> Status;
     auto read_key(const Cell &cell, char *scratch, Slice *key_out, uint32_t limit = 0) const -> Status;
     auto read_value(const Cell &cell, char *scratch, Slice *value_out) const -> Status;
-    auto read_value(Node &node, uint32_t index, std::string &scratch, Slice *value_out) const -> Status;
+    auto read_value(Node &node, uint32_t index, char *scratch, Slice *value_out) const -> Status;
     auto overwrite_value(const Cell &cell, const Slice &value) -> Status;
     auto emplace(Node &node, const Slice &key, const Slice &value, uint32_t index, bool &overflow) -> Status;
     auto free_overflow(Id head_id) -> Status;
