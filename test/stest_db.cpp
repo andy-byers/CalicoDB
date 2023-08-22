@@ -781,8 +781,8 @@ protected:
     explicit STestDB()
     {
         std::filesystem::remove_all(m_state.filename);
-        std::filesystem::remove_all(m_state.filename + kDefaultShmSuffix);
-        std::filesystem::remove_all(m_state.filename + kDefaultWalSuffix);
+        std::filesystem::remove_all(m_state.filename + kDefaultShmSuffix.to_string());
+        std::filesystem::remove_all(m_state.filename + kDefaultWalSuffix.to_string());
     }
 
     auto TearDown() -> void override

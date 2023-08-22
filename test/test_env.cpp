@@ -10,6 +10,7 @@
 #include "fake_env.h"
 #include "temp.h"
 #include "test.h"
+#include <csignal>
 #include <filesystem>
 #include <gtest/gtest.h>
 #include <mutex>
@@ -720,6 +721,11 @@ public:
     }
 };
 
+// void signal_handler(int signum)
+//{
+//     fprintf(stderr, "caught signal %d\n", signum);
+// }
+
 // Env multithreading tests
 //
 // Each Env instance created in a given process communicates with the same global
@@ -778,20 +784,22 @@ public:
     template <class Test>
     auto run_test(const Test &test)
     {
+        //        signal(SIGCHLD, SIG_IGN);
+
         std::vector<int> pipes(m_num_processes);
         for (size_t n = 0; n < m_num_processes; ++n) {
             int pipefd[2];
             ASSERT_EQ(pipe(pipefd), 0);
             pipes[n] = pipefd[0];
 
-            const auto pid = fork();
-            ASSERT_NE(-1, pid) << strerror(errno);
-            if (pid) {
+            if (const auto pid = fork()) {
+                ASSERT_GT(pid, 0) << strerror(errno);
                 close(pipefd[1]);
             } else {
                 close(pipefd[0]);
                 dup2(pipefd[1], STDOUT_FILENO);
                 dup2(pipefd[1], STDERR_FILENO);
+                std::cout << "hai\n";
                 test(n);
                 std::exit(testing::Test::HasFailure());
             }
@@ -811,6 +819,7 @@ public:
                         break;
                     }
                 }
+                std::cout << msg << '\n';
                 ADD_FAILURE()
                     << "exited " << (WIFEXITED(s) ? "" : "ab")
                     << "normally with exit status " << WEXITSTATUS(s)
@@ -848,7 +857,7 @@ public:
     auto run_shm_lifetime_test(bool unlink) -> void
     {
         for (size_t i = 0; i < m_num_threads; ++i) {
-            set_up(true);
+            set_up(i == 0);
         }
         run_test([this, unlink](auto) {
             std::vector<std::thread> threads;
@@ -1105,6 +1114,79 @@ TEST(TempEnv, TempEnv)
     Logger *logger;
     ASSERT_OK(env->new_logger("NOOP", logger));
     ASSERT_EQ(logger, nullptr);
+}
+
+// void sig_handler(int signum)
+//{
+//     printf("signal %d\n", signum);
+// }
+TEST(A, B)
+{
+    //    signal(SIGCHLD,SIG_IGN);
+
+    //    sigset_t unblock;
+    //
+    //    sigemptyset(&unblock);
+    //    sigaddset(&unblock, SIGCHLD);
+    //    sigprocmask(SIG_UNBLOCK, &unblock, nullptr);
+
+    if (const auto pid = fork()) {
+        sleep(1);
+        ASSERT_GT(pid, 0) << strerror(errno);
+        int s;
+        const auto wait_pid = wait(&s);
+        ASSERT_GE(wait_pid, 0);
+        //        do {
+        //            int s;
+        //            const auto wait_pid = wait(&s);
+        //            if (wait_pid >= 0) {
+        //                break;
+        //            } else if (errno != EINTR) {
+        //                ADD_FAILURE() << strerror(errno);
+        //            }
+        //        } while (errno == EINTR);
+    } else {
+        std::exit(0);
+    }
+    //    size_t m_num_processes = 1;
+    //    std::vector<int> pipes(m_num_processes);
+    //    for (size_t n = 0; n < m_num_processes; ++n) {
+    //        int pipefd[2];
+    //        ASSERT_EQ(pipe(pipefd), 0);
+    //        pipes[n] = pipefd[0];
+    //
+    //        if (const auto pid = fork()) {
+    //            ASSERT_GT(pid, 0) << strerror(errno);
+    //            close(pipefd[1]);
+    //        } else {
+    //            close(pipefd[0]);
+    //            dup2(pipefd[1], STDOUT_FILENO);
+    //            dup2(pipefd[1], STDERR_FILENO);
+    //
+    //            std::exit(testing::Test::HasFailure());
+    //        }
+    //    }
+    //    for (size_t n = 0; n < m_num_processes; ++n) {
+    //        int s;
+    //        const auto pid = wait(&s);
+    //        ASSERT_NE(pid, -1)
+    //            << "wait failed: " << strerror(errno);
+    //        if (WIFEXITED(s) && WEXITSTATUS(s) != 0) {
+    //            std::string msg;
+    //            for (char buf[256];;) {
+    //                if (const auto rc = read(pipes[n], buf, sizeof(buf))) {
+    //                    ASSERT_GT(rc, 0) << strerror(errno);
+    //                    msg.append(buf, static_cast<size_t>(rc));
+    //                } else {
+    //                    break;
+    //                }
+    //            }
+    //            ADD_FAILURE()
+    //                << "exited " << (WIFEXITED(s) ? "" : "ab")
+    //                << "normally with exit status " << WEXITSTATUS(s)
+    //                << '\n' << msg;
+    //        }
+    //    }
 }
 
 } // namespace calicodb::test

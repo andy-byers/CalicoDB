@@ -2,6 +2,7 @@
 // This source code is licensed under the MIT License, which can be found in
 // LICENSE.md. See AUTHORS.md for a list of contributor names.
 
+#include "calicodb/env.h"
 #include "node.h"
 #include <gtest/gtest.h>
 #include <limits>
@@ -12,11 +13,13 @@ namespace calicodb::test
 class NodeTests : public testing::Test
 {
 public:
+    Env *env;
     explicit NodeTests()
         : m_backing(kPageSize, '\0'),
           m_scratch(kPageSize, '\0'),
           m_ref(PageRef::alloc())
     {
+        env = &Env::default_env();
         m_ref->page_id = Id(3);
         m_node = Node::from_new_page(*m_ref, m_scratch.data(), true);
     }

@@ -324,7 +324,7 @@ protected:
     }
     auto close() -> void
     {
-        delete m_pager;
+        Alloc::delete_object(m_pager);
         m_pager = nullptr;
     }
 

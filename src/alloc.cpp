@@ -4,52 +4,141 @@
 
 #include "alloc.h"
 #include "utils.h"
+#include <limits>
 
 namespace calicodb
 {
 
-static Alloc::Hook s_hook = nullptr;
-static void *s_hook_arg = nullptr;
+// Prefix each allocation with its size, stored as an 8-byte unsigned integer.
+using Header = uint64_t;
 
-auto Alloc::set_hook(Hook hook, void *arg) -> void
+static constexpr auto kMaxLimit =
+    std::numeric_limits<size_t>::max() - kMaxAllocation;
+
+static struct Allocator {
+    std::mutex mutex;
+    Alloc::Methods methods = Alloc::kDefaultMethods;
+    uint64_t limit = kMaxLimit;
+    uint64_t bytes_used = 0;
+    Alloc::Hook hook = nullptr;
+    void *hook_arg = nullptr;
+} s_alloc;
+
+auto Alloc::bytes_used() -> size_t
 {
-    s_hook = hook;
-    s_hook_arg = arg;
+    std::lock_guard lock(s_alloc.mutex);
+    return s_alloc.bytes_used;
 }
 
-#define ALLOCATION_HOOK                     \
-    do {                                    \
-        if (s_hook && s_hook(s_hook_arg)) { \
-            return nullptr;                 \
-        }                                   \
+auto Alloc::set_hook(Hook fn, void *arg) -> void
+{
+    std::lock_guard lock(s_alloc.mutex);
+    s_alloc.hook = fn;
+    s_alloc.hook_arg = arg;
+}
+
+auto Alloc::set_limit(size_t limit) -> int
+{
+    std::lock_guard lock(s_alloc.mutex);
+    if (s_alloc.bytes_used > limit) {
+        return -1;
+    }
+    s_alloc.limit = limit ? limit : kMaxLimit;
+    return 0;
+}
+
+auto Alloc::set_methods(const Methods &methods) -> int
+{
+    std::lock_guard lock(s_alloc.mutex);
+    if (s_alloc.bytes_used) {
+        return -1;
+    }
+    s_alloc.methods = methods;
+    return 0;
+}
+
+static auto size_of_alloc(size_t size) -> size_t
+{
+    return size + sizeof(Header);
+}
+
+static auto size_of_alloc(void *ptr) -> size_t
+{
+    return size_of_alloc(static_cast<const Header *>(ptr)[-1]);
+}
+
+#define ALLOCATION_HOOK                                       \
+    do {                                                      \
+        if (s_alloc.hook && s_alloc.hook(s_alloc.hook_arg)) { \
+            return nullptr;                                   \
+        }                                                     \
     } while (0)
-
-auto Alloc::calloc(size_t len, size_t size) -> void *
-{
-    CALICODB_EXPECT_NE(len | size, 0);
-    ALLOCATION_HOOK;
-    return std::calloc(len, size);
-}
 
 auto Alloc::malloc(size_t size) -> void *
 {
-    CALICODB_EXPECT_NE(size, 0);
+    std::lock_guard lock(s_alloc.mutex);
     ALLOCATION_HOOK;
-    return std::malloc(size);
+
+    if (size == 0 || size > kMaxAllocation) {
+        return nullptr;
+    }
+    const auto with_hdr = size_of_alloc(size);
+    if (s_alloc.bytes_used + with_hdr > s_alloc.limit) {
+        return nullptr;
+    }
+    auto *ptr = static_cast<Header *>(
+        s_alloc.methods.malloc(with_hdr));
+    if (ptr) {
+        s_alloc.bytes_used += with_hdr;
+        *ptr++ = size;
+    }
+    return ptr;
 }
 
-auto Alloc::realloc(void *ptr, size_t size) -> void *
+auto Alloc::realloc(void *old_ptr, size_t new_size) -> void *
 {
-    CALICODB_EXPECT_NE(size, 0);
+    if (old_ptr == nullptr) {
+        return malloc(new_size);
+    } else if (new_size == 0) {
+        free(old_ptr);
+        return nullptr;
+    } else if (new_size > kMaxAllocation) {
+        return nullptr;
+    }
+    std::lock_guard lock(s_alloc.mutex);
     ALLOCATION_HOOK;
-    return std::realloc(ptr, size);
+
+    const auto old_with_hdr = size_of_alloc(old_ptr);
+    const auto new_with_hdr = size_of_alloc(new_size);
+    CALICODB_EXPECT_GT(old_with_hdr, sizeof(Header));
+    CALICODB_EXPECT_GE(s_alloc.bytes_used, old_with_hdr);
+    if (s_alloc.bytes_used - old_with_hdr + new_with_hdr > s_alloc.limit) {
+        return nullptr;
+    }
+
+    auto *new_ptr = static_cast<Header *>(
+        s_alloc.methods.realloc(static_cast<Header *>(old_ptr) - 1,
+                                new_size + sizeof(Header)));
+    if (new_ptr) {
+        CALICODB_EXPECT_GE(s_alloc.bytes_used, old_with_hdr);
+        s_alloc.bytes_used -= old_with_hdr;
+        s_alloc.bytes_used += new_with_hdr;
+        *new_ptr++ = new_size;
+    }
+    return new_ptr;
 }
 
 #undef ALLOCATION_HOOK
 
 auto Alloc::free(void *ptr) -> void
 {
-    std::free(ptr);
+    std::lock_guard lock(s_alloc.mutex);
+    if (ptr) {
+        CALICODB_EXPECT_GT(size_of_alloc(ptr), sizeof(Header));
+        CALICODB_EXPECT_GE(s_alloc.bytes_used, size_of_alloc(ptr));
+        s_alloc.bytes_used -= size_of_alloc(ptr);
+        s_alloc.methods.free(static_cast<Header *>(ptr) - 1);
+    }
 }
 
 } // namespace calicodb

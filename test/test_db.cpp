@@ -119,8 +119,8 @@ protected:
           m_env(new CallbackEnv(Env::default_env()))
     {
         std::filesystem::remove_all(m_db_name.c_str());
-        std::filesystem::remove_all(m_db_name + kDefaultWalSuffix);
-        std::filesystem::remove_all(m_db_name + kDefaultShmSuffix);
+        std::filesystem::remove_all(m_db_name + kDefaultWalSuffix.to_string());
+        std::filesystem::remove_all(m_db_name + kDefaultShmSuffix.to_string());
     }
 
     ~DBTests() override
@@ -333,8 +333,8 @@ protected:
         options.env = env ? env : m_env;
         if (clear) {
             std::filesystem::remove_all(m_db_name.c_str());
-            std::filesystem::remove_all(m_db_name + kDefaultWalSuffix);
-            std::filesystem::remove_all(m_db_name + kDefaultShmSuffix);
+            std::filesystem::remove_all(m_db_name + kDefaultWalSuffix.to_string());
+            std::filesystem::remove_all(m_db_name + kDefaultShmSuffix.to_string());
             std::filesystem::remove_all(m_alt_wal_name);
         }
         if (m_config & kExclusiveLockMode) {
@@ -904,8 +904,8 @@ TEST(OldWalTests, HandlesOldWalFile)
 TEST(DestructionTests, DestructionBehavior)
 {
     const auto db_name = testing::TempDir() + "calicodb_test_db";
-    const auto wal_name = db_name + kDefaultWalSuffix;
-    const auto shm_name = db_name + kDefaultShmSuffix;
+    const auto wal_name = db_name + kDefaultWalSuffix.to_string();
+    const auto shm_name = db_name + kDefaultShmSuffix.to_string();
     (void)Env::default_env().remove_file(db_name.c_str());
     (void)Env::default_env().remove_file(wal_name.c_str());
     (void)Env::default_env().remove_file(shm_name.c_str());

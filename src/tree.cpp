@@ -1206,10 +1206,9 @@ auto Tree::allocate(AllocationType type, Id nearby, PageRef *&page_out) -> Statu
 
 auto Tree::put(CursorImpl &c, const Slice &key, const Slice &value) -> Status
 {
-    static constexpr auto kMaxLength = std::numeric_limits<uint32_t>::max();
-    if (key.size() > kMaxLength) {
+    if (key.size() > kMaxAllocation) {
         return Status::invalid_argument("key is too long");
-    } else if (value.size() > kMaxLength) {
+    } else if (value.size() > kMaxAllocation) {
         return Status::invalid_argument("value is too long");
     }
 
@@ -1396,11 +1395,12 @@ auto Tree::erase(CursorImpl &c) -> Status
     }
     manage_cursors(&c, kInitNormal);
 
-    std::string saved_key;
+    Slice saved_key;
     if (1 == NodeHdr::get_cell_count(c.m_node.hdr())) {
         // This node will underflow when the record is removed. Make sure the key is saved so that
-        // the correct position can be found after underflow resolution.
-        saved_key = c.m_key.to_string();
+        // the correct position can be found after underflow resolution. The backing buffer for
+        // saved_key will not be freed/realloc'd until after the cursor position is found again.
+        saved_key = c.key();
     }
     Status s;
     if (c.m_idx < NodeHdr::get_cell_count(c.m_node.hdr())) {

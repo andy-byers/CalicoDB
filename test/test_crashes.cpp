@@ -215,8 +215,8 @@ protected:
           m_env(new CrashEnv(Env::default_env()))
     {
         auto db_name = m_filename;
-        auto shm_name = m_filename + kDefaultWalSuffix;
-        auto wal_name = m_filename + kDefaultShmSuffix;
+        auto shm_name = m_filename + kDefaultWalSuffix.to_string();
+        auto wal_name = m_filename + kDefaultShmSuffix.to_string();
         (void)m_env->remove_file(db_name.c_str());
         (void)m_env->remove_file(shm_name.c_str());
         (void)m_env->remove_file(wal_name.c_str());
@@ -417,10 +417,10 @@ protected:
         // Make sure all files created during the test are unlinked.
         auto s = m_env->remove_file(m_filename.c_str());
         ASSERT_TRUE(s.is_ok() || s.is_not_found()) << s.type_name();
-        auto filename = m_filename + kDefaultWalSuffix;
+        auto filename = m_filename + kDefaultWalSuffix.to_string();
         s = m_env->remove_file(filename.c_str());
         ASSERT_TRUE(s.is_ok() || s.is_not_found()) << s.type_name();
-        filename = m_filename + kDefaultShmSuffix;
+        filename = m_filename + kDefaultShmSuffix.to_string();
         s = m_env->remove_file(filename.c_str());
         ASSERT_TRUE(s.is_ok() || s.is_not_found()) << s.type_name();
     }
@@ -1088,8 +1088,8 @@ public:
         m_db = nullptr;
         if (clear) {
             std::filesystem::remove_all(m_filename);
-            std::filesystem::remove_all(m_filename + kDefaultWalSuffix);
-            std::filesystem::remove_all(m_filename + kDefaultShmSuffix);
+            std::filesystem::remove_all(m_filename + kDefaultWalSuffix.to_string());
+            std::filesystem::remove_all(m_filename + kDefaultShmSuffix.to_string());
         }
         delete m_env;
         m_env = new DataLossEnv(Env::default_env());
@@ -1177,7 +1177,7 @@ public:
         ASSERT_OK(perform_writes({}, kNumWrites, 0));
 
         // Only the WAL is written during a transaction.
-        const DropParameters drop_param = {loss_type, m_filename + kDefaultWalSuffix};
+        const DropParameters drop_param = {loss_type, m_filename + kDefaultWalSuffix.to_string()};
 
         ASSERT_EQ(kFaultStatus, perform_writes(drop_param, kNumWrites, 1));
         ASSERT_OK(check_records(kNumWrites, 0));

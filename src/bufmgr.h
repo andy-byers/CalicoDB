@@ -16,91 +16,6 @@ class File;
 class Env;
 struct Stat;
 
-class PageTable
-{
-public:
-    PageTable()
-        : m_capacity(0),
-          m_size(0),
-          m_table(nullptr)
-    {
-    }
-
-    ~PageTable()
-    {
-        Alloc::free(m_table);
-    }
-
-    [[nodiscard]] auto preallocate(size_t cache_size) -> int
-    {
-        CALICODB_EXPECT_EQ(m_capacity, 0);
-        uint32_t capacity = 4;
-        while (capacity < cache_size) {
-            capacity *= 2;
-        }
-        const auto table_size = capacity * sizeof(PageRef *);
-        if (auto *table = static_cast<PageRef **>(
-                Alloc::malloc(table_size))) {
-            std::memset(table, 0, table_size);
-            m_capacity = capacity;
-            m_table = table;
-            return 0;
-        }
-        return -1;
-    }
-
-    auto clear() -> void
-    {
-        std::memset(m_table, 0, m_capacity * sizeof(PageRef *));
-    }
-
-    auto lookup(uint32_t key) -> PageRef *
-    {
-        return *find_pointer(key);
-    }
-
-    // NOTE: PageRef with key `ref->key()` must not exist.
-    auto insert(PageRef *ref) -> void
-    {
-        auto **ptr = find_pointer(ref->key());
-        CALICODB_EXPECT_NE(ptr, nullptr);
-        CALICODB_EXPECT_EQ(*ptr, nullptr);
-        ref->next_hash = nullptr;
-        *ptr = ref;
-        ++m_size;
-    }
-
-    auto remove(uint32_t key) -> PageRef *
-    {
-        auto **ptr = find_pointer(key);
-        auto *result = *ptr;
-        if (result != nullptr) {
-            *ptr = result->next_hash;
-            --m_size;
-        }
-        return result;
-    }
-
-private:
-    // The table consists of an array of buckets where each bucket is
-    // a linked list of cache entries that hash into the bucket.
-    uint32_t m_capacity;
-    uint32_t m_size;
-    PageRef **m_table;
-
-    // Return a pointer to slot that points to a cache entry that
-    // matches key/hash.  If there is no such cache entry, return a
-    // pointer to the trailing slot in the corresponding linked list.
-    [[nodiscard]] auto find_pointer(uint32_t key) const -> PageRef **
-    {
-        auto **ptr = &m_table[key & (m_capacity - 1)];
-        while (*ptr != nullptr && key != (*ptr)->key()) {
-            ptr = &(*ptr)->next_hash;
-        }
-        return ptr;
-    }
-};
-
 // Manages database pages that have been read from stable storage
 class Bufmgr final
 {
@@ -164,20 +79,101 @@ public:
     Bufmgr(Bufmgr &) = delete;
 
 private:
-    // Page cache components:
-    //     Member   | Purpose
-    //    ----------|---------------------------------------------------------------
-    //     m_map    | Maps each cached page ID to a page reference: a structure that
-    //              | contains the page contents from disk, as well as some other
-    //              | metadata. Each page reference in m_map can also be found in
-    //              | either m_lru or m_in_use.
-    //     m_lru    | LRU-ordered list containing page references. Elements are
-    //              | considered valid if ref->get_flag(PageRef::kCached) evaluates
-    //              | to true.
-    //     m_in_use | List containing page references that have a nonzero refcount
-    //              | field. Unordered.
-    mutable PageTable m_table;
+    // Hash table modified from LevelDB. Maps each cached page ID to a page reference:
+    // a structure that contains the page contents from disk, as well as some other
+    // metadata. Each page reference in m_map can also be found in either m_lru or
+    // m_in_use.
+    class PageTable
+    {
+    public:
+        PageTable()
+            : m_capacity(0),
+              m_size(0),
+              m_table(nullptr)
+        {
+        }
+
+        ~PageTable()
+        {
+            Alloc::free(m_table);
+        }
+
+        [[nodiscard]] auto preallocate(size_t cache_size) -> int
+        {
+            CALICODB_EXPECT_EQ(m_capacity, 0);
+            uint32_t capacity = 4;
+            while (capacity < cache_size) {
+                capacity *= 2;
+            }
+            const auto table_size = capacity * sizeof(PageRef *);
+            if (auto *table = static_cast<PageRef **>(
+                    Alloc::malloc(table_size))) {
+                std::memset(table, 0, table_size);
+                m_capacity = capacity;
+                m_table = table;
+                return 0;
+            }
+            return -1;
+        }
+
+        auto clear() -> void
+        {
+            std::memset(m_table, 0, m_capacity * sizeof(PageRef *));
+        }
+
+        [[nodiscard]] auto lookup(uint32_t key) const -> PageRef *
+        {
+            return *find_pointer(key);
+        }
+
+        // NOTE: PageRef with key `ref->key()` must not exist.
+        auto insert(PageRef *ref) -> void
+        {
+            auto **ptr = find_pointer(ref->key());
+            CALICODB_EXPECT_NE(ptr, nullptr);
+            CALICODB_EXPECT_EQ(*ptr, nullptr);
+            ref->next_hash = nullptr;
+            *ptr = ref;
+            ++m_size;
+        }
+
+        auto remove(uint32_t key) -> PageRef *
+        {
+            auto **ptr = find_pointer(key);
+            auto *result = *ptr;
+            if (result != nullptr) {
+                *ptr = result->next_hash;
+                --m_size;
+            }
+            return result;
+        }
+
+    private:
+        // The table consists of an array of buckets where each bucket is
+        // a linked list of cache entries that hash into the bucket.
+        uint32_t m_capacity;
+        uint32_t m_size;
+        PageRef **m_table;
+
+        // Return a pointer to slot that points to a cache entry that
+        // matches key/hash.  If there is no such cache entry, return a
+        // pointer to the trailing slot in the corresponding linked list.
+        [[nodiscard]] auto find_pointer(uint32_t key) const -> PageRef **
+        {
+            auto **ptr = &m_table[key & (m_capacity - 1)];
+            while (*ptr != nullptr && key != (*ptr)->key()) {
+                ptr = &(*ptr)->next_hash;
+            }
+            return ptr;
+        }
+    } m_table;
+
+    // List containing page references that have a nonzero refcount field.
+    // Unordered.
     PageRef m_in_use;
+
+    // LRU-ordered list containing page references. Elements are considered
+    // valid if ref->get_flag(PageRef::kCached) evaluates to true.
     PageRef m_lru;
 
     // Root page is stored separately. It is accessed very often, so it makes
@@ -187,9 +183,7 @@ private:
 
     size_t m_min_buffers;
     size_t m_num_buffers;
-
     Stat *const m_stat;
-
     unsigned m_refsum = 0;
 };
 

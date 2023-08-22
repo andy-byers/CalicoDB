@@ -46,7 +46,7 @@ auto DB::open(const Options &options, const char *filename, DB *&db) -> Status
     } else {
         wal_name = UniqueBuffer::from_slice(
             Slice(filename, filename_len),
-            Slice(kDefaultWalSuffix, std::strlen(kDefaultWalSuffix)));
+            kDefaultWalSuffix);
     }
     if (wal_name.is_empty()) {
         return Status::no_memory();

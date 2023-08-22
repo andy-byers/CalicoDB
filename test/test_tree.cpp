@@ -49,20 +49,29 @@ public:
             Options::kLockNormal,
             false,
         };
-
-        EXPECT_OK(Pager::open(pager_param, m_pager));
-        EXPECT_OK(m_pager->start_reader());
-        EXPECT_OK(m_pager->start_writer());
-        m_pager->initialize_root();
-        EXPECT_OK(m_pager->commit());
-        m_pager->finish();
+        auto s = Pager::open(pager_param, m_pager);
+        if (s.is_ok()) {
+            s = m_pager->start_reader();
+            if (s.is_ok()) {
+                s = m_pager->start_writer();
+            }
+            if (s.is_ok()) {
+                m_pager->initialize_root();
+                s = m_pager->commit();
+            }
+            m_pager->finish();
+        }
+        if (!s.is_ok()) {
+            Alloc::delete_object(m_pager);
+            m_pager = nullptr;
+        }
     }
 
     ~TreeTestHarness()
     {
         EXPECT_EQ(m_c, nullptr);
         delete m_tree;
-        delete m_pager;
+        Alloc::delete_object(m_pager);
         delete m_file;
         delete m_env;
     }

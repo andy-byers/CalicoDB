@@ -13,38 +13,42 @@ namespace calicodb
 auto CursorImpl::fetch_user_payload() -> Status
 {
     CALICODB_EXPECT_TRUE(has_key());
-    const auto buffer_len = m_key.size() + m_value.size();
-
-    m_key.clear();
-    m_value.clear();
+    const auto key_buffer_len = std::exchange(m_key_len, 0);
+    const auto value_buffer_len = std::exchange(m_value_len, 0);
 
     Cell cell;
     if (m_node.read(m_idx, cell)) {
         return m_tree->corrupted_node(page_id());
     }
-    Status s;
-    if (cell.total_pl_size > buffer_len) {
-        auto *ptr = Alloc::realloc(
-            m_user_payload, cell.total_pl_size);
-        if (ptr == nullptr) {
-            s = Status::no_memory();
-        } else {
-            m_user_payload = static_cast<char *>(ptr);
+
+    Slice slice;
+    if (cell.key_size) {
+        if (cell.key_size > key_buffer_len) {
+            m_key_buf.resize(cell.key_size);
+            if (m_key_buf.is_empty()) {
+                return Status::no_memory();
+            }
         }
-    }
-    if (cell.total_pl_size > 0) {
-        if (s.is_ok()) {
-            s = m_tree->read_key(cell, m_user_payload, &m_key);
-        }
-        if (s.is_ok()) {
-            s = m_tree->read_value(cell, m_user_payload + m_key.size(), &m_value);
-        }
+        auto s = m_tree->read_key(cell, m_key_buf.ptr(), &slice);
         if (!s.is_ok()) {
-            m_key.clear();
-            m_value.clear();
+            return s;
         }
+        m_key_len = slice.size();
     }
-    return s;
+    if (const auto value_size = cell.total_pl_size - cell.key_size) {
+        if (value_size > value_buffer_len) {
+            m_value_buf.resize(value_size);
+            if (m_value_buf.is_empty()) {
+                return Status::no_memory();
+            }
+        }
+        auto s = m_tree->read_value(cell, m_value_buf.ptr(), &slice);
+        if (!s.is_ok()) {
+            return s;
+        }
+        m_value_len = slice.size();
+    }
+    return Status::ok();
 }
 
 auto CursorImpl::ensure_correct_leaf(bool read_payload) -> void
@@ -172,7 +176,6 @@ CursorImpl::~CursorImpl()
         IntrusiveList::remove(m_list_entry);
         reset();
     }
-    Alloc::free(m_user_payload);
 }
 
 auto CursorImpl::move_to_parent() -> void

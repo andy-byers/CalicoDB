@@ -134,7 +134,7 @@ auto DBImpl::destroy(const Options &options, const char *filename) -> Status
             // mode. shm files left by other connections must be removed manually.
             auto path_buffer = UniqueBuffer::from_slice(
                 Slice(filename, std::strlen(filename)),
-                Slice(kDefaultShmSuffix, std::strlen(kDefaultShmSuffix)));
+                kDefaultShmSuffix);
             if (!path_buffer.is_empty()) {
                 auto t = env->remove_file(path_buffer.ptr());
                 if (t.is_ok()) {

@@ -12,6 +12,126 @@
 namespace calicodb::test
 {
 
+class AllocTests : public testing::Test
+{
+public:
+    static constexpr size_t kFakeAllocationSize = 1'024;
+    alignas(uint64_t) static char s_fake_allocation[kFakeAllocationSize];
+    static uint64_t *s_alloc_size_ptr;
+    static void *s_alloc_data_ptr;
+
+    explicit AllocTests() = default;
+    ~AllocTests() override = default;
+
+    auto TearDown() -> void override
+    {
+        ASSERT_EQ(Alloc::bytes_used(), 0);
+        ASSERT_EQ(Alloc::set_limit(0), 0);
+        ASSERT_EQ(Alloc::set_methods(Alloc::kDefaultMethods), 0);
+    }
+};
+
+// The wrapper functions in alloc.cpp add a header of 8 bytes to each allocation, which is
+// used to store the number of bytes in the rest of the allocation.
+alignas(uint64_t) char AllocTests::s_fake_allocation[kFakeAllocationSize];
+uint64_t *AllocTests::s_alloc_size_ptr = reinterpret_cast<uint64_t *>(s_fake_allocation);
+void *AllocTests::s_alloc_data_ptr = s_alloc_size_ptr + 1;
+
+static constexpr Alloc::Methods kFakeMethods = {
+    [](auto) -> void * {
+        return AllocTests::s_fake_allocation;
+    },
+    [](auto *old_ptr, auto new_size) -> void * {
+        EXPECT_EQ(old_ptr, AllocTests::s_fake_allocation);
+        EXPECT_LE(new_size, AllocTests::kFakeAllocationSize);
+        return AllocTests::s_fake_allocation;
+    },
+    [](auto *ptr) {
+        EXPECT_EQ(ptr, AllocTests::s_fake_allocation);
+    },
+};
+
+TEST_F(AllocTests, Methods)
+{
+    auto *ptr = Alloc::malloc(123);
+    ASSERT_NE(ptr, nullptr);
+    auto *new_ptr = Alloc::realloc(ptr, 321);
+    ASSERT_NE(new_ptr, nullptr);
+
+    // Prevent malloc/realloc-free mismatch.
+    ASSERT_EQ(Alloc::set_methods(kFakeMethods), -1);
+    Alloc::free(new_ptr);
+
+    ASSERT_EQ(Alloc::set_methods(kFakeMethods), 0);
+    ASSERT_EQ(ptr = Alloc::malloc(123), AllocTests::s_alloc_data_ptr);
+    ASSERT_EQ(123, *AllocTests::s_alloc_size_ptr);
+    ASSERT_EQ(Alloc::realloc(ptr, 321), ptr);
+    ASSERT_EQ(321, *AllocTests::s_alloc_size_ptr);
+    ASSERT_EQ(Alloc::realloc(ptr, 42), ptr);
+    ASSERT_EQ(42, *AllocTests::s_alloc_size_ptr);
+    Alloc::free(nullptr);
+    Alloc::free(ptr);
+}
+
+TEST_F(AllocTests, Limit)
+{
+    Alloc::set_limit(100);
+    auto *a = Alloc::malloc(50 - sizeof(uint64_t));
+    ASSERT_NE(a, nullptr);
+
+    // 8-byte overhead causes this to exceed the limit.
+    auto *b = Alloc::malloc(50);
+    ASSERT_EQ(b, nullptr);
+
+    b = Alloc::malloc(50 - sizeof(uint64_t));
+    ASSERT_NE(b, nullptr);
+
+    // 0 bytes available, fail to get 1 byte.
+    auto *c = Alloc::realloc(a, 51 - sizeof(uint64_t));
+    ASSERT_EQ(c, nullptr);
+
+    c = Alloc::realloc(a, 20 - sizeof(uint64_t));
+    ASSERT_NE(c, nullptr);
+
+    // a was realloc'd.
+    Alloc::free(b);
+    Alloc::free(c);
+}
+
+TEST_F(AllocTests, LargeAllocations)
+{
+    // Don't actually allocate anything.
+    ASSERT_EQ(Alloc::set_methods(kFakeMethods), 0);
+
+    void *p;
+    ASSERT_EQ(nullptr, p = Alloc::malloc(kMaxAllocation + 1));
+    ASSERT_NE(nullptr, p = Alloc::malloc(kMaxAllocation));
+    Alloc::free(p);
+}
+
+#ifndef NDEBUG
+TEST_F(AllocTests, DeathTest)
+{
+    void *ptr;
+    ptr = Alloc::malloc(1);
+
+    auto *size_ptr = reinterpret_cast<uint64_t *>(ptr) - 1;
+    // Give back more memory than was allocated in-total. If more than 1 byte were already allocated, this
+    // corruption would go undetected.
+    *size_ptr = 2;
+    ASSERT_DEATH(Alloc::free(ptr), "Assert");
+    ASSERT_DEATH((void)Alloc::realloc(ptr, 123), "Assert");
+    // Actual allocations must not be zero-length. Alloc::malloc() returns a nullptr if 0 bytes are
+    // requested.
+    *size_ptr = 0;
+    ASSERT_DEATH(Alloc::free(ptr), "Assert");
+    ASSERT_DEATH((void)Alloc::realloc(ptr, 123), "Assert");
+
+    *size_ptr = 1;
+    Alloc::free(ptr);
+}
+#endif // NDEBUG
+
 TEST(UniquePtr, PointerWidth)
 {
     static_assert(sizeof(UniquePtr<int, DefaultDestructor>) == sizeof(void *));

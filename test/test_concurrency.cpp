@@ -185,8 +185,8 @@ protected:
           m_env(new DelayEnv(Env::default_env()))
     {
         std::filesystem::remove_all(m_filename);
-        std::filesystem::remove_all(m_filename + kDefaultWalSuffix);
-        std::filesystem::remove_all(m_filename + kDefaultShmSuffix);
+        std::filesystem::remove_all(m_filename + kDefaultWalSuffix.to_string());
+        std::filesystem::remove_all(m_filename + kDefaultShmSuffix.to_string());
     }
 
     ~ConcurrencyTests() override

@@ -92,8 +92,8 @@ protected:
         : m_filename(testing::TempDir() + "calicodb_stress_tests")
     {
         std::filesystem::remove_all(m_filename);
-        std::filesystem::remove_all(m_filename + kDefaultWalSuffix);
-        std::filesystem::remove_all(m_filename + kDefaultShmSuffix);
+        std::filesystem::remove_all(m_filename + kDefaultWalSuffix.to_string());
+        std::filesystem::remove_all(m_filename + kDefaultShmSuffix.to_string());
     }
 
     ~StressTests() override
