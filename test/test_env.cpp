@@ -639,8 +639,6 @@ static auto busy_wait_shm_lock(File &file, size_t r, size_t n, ShmLockFlag flags
 static auto file_reader_writer_test_routine(Env &, File &file, bool is_writer) -> void
 {
     busy_wait_file_lock(file, is_writer);
-
-    Status s;
     if (is_writer) {
         write_file_version(file, read_file_version(file) + 1);
     } else {
@@ -731,20 +729,20 @@ public:
 // between threads in the same process.
 //
 // This test fixture uses multiple processes/threads to access a one or more Envs.
-// The process is forked kNumEnvs times. The Env is not created until after the
-// fork(), so there are kNumEnvs independent Envs, each managing its own inode list.
+// The process is forked m_num_processes times. The Env is not created until after the
+// fork(), so there are m_num_processes independent Envs, each managing its own inode list.
 // Locking between processes must take place through the actual POSIX advisory locks.
 // Locking between threads in the same process must be coordinated through the
 // global inode list.
 struct EnvConcurrencyTestsParam {
-    size_t num_envs = 0;
+    size_t num_processes = 0;
     size_t num_threads = 0;
 };
 class EnvConcurrencyTests : public testing::TestWithParam<EnvConcurrencyTestsParam>
 {
 public:
-    const size_t kNumEnvs = GetParam().num_envs;
-    const size_t kNumThreads = GetParam().num_threads;
+    const size_t m_num_processes = GetParam().num_processes;
+    const size_t m_num_threads = GetParam().num_threads;
     static constexpr size_t kNumRounds = 500;
     std::string m_dirname;
 
@@ -770,7 +768,7 @@ public:
             m_helper.env = m_env;
         }
 
-        ASSERT_GT(kNumEnvs, 0) << "REQUIRES: kNumEnvs > 0";
+        ASSERT_GT(m_num_processes, 0) << "REQUIRES: m_num_processes > 0";
         m_helper.open_unowned_file(
             EnvWithFiles::kSameName,
             Env::kCreate,
@@ -780,25 +778,45 @@ public:
     template <class Test>
     auto run_test(const Test &test)
     {
-        for (size_t n = 0; n < kNumEnvs; ++n) {
+        std::vector<int> pipes(m_num_processes);
+        for (size_t n = 0; n < m_num_processes; ++n) {
+            int pipefd[2];
+            ASSERT_EQ(pipe(pipefd), 0);
+            pipes[n] = pipefd[0];
+
             const auto pid = fork();
             ASSERT_NE(-1, pid) << strerror(errno);
             if (pid) {
-                continue;
+                close(pipefd[1]);
+            } else {
+                close(pipefd[0]);
+                dup2(pipefd[1], STDOUT_FILENO);
+                dup2(pipefd[1], STDERR_FILENO);
+                test(n);
+                std::exit(testing::Test::HasFailure());
             }
-
-            test(n);
-            std::exit(testing::Test::HasFailure());
         }
-        for (size_t n = 0; n < kNumEnvs; ++n) {
+        for (size_t n = 0; n < m_num_processes; ++n) {
             int s;
             const auto pid = wait(&s);
             ASSERT_NE(pid, -1)
                 << "wait failed: " << strerror(errno);
-            ASSERT_TRUE(WIFEXITED(s) && WEXITSTATUS(s) == 0)
-                << "exited " << (WIFEXITED(s) ? "" : "ab")
-                << "normally with exit status "
-                << WEXITSTATUS(s);
+            if (WIFEXITED(s) && WEXITSTATUS(s) != 0) {
+                std::string msg;
+                for (char buf[256];;) {
+                    if (const auto rc = read(pipes[n], buf, sizeof(buf))) {
+                        ASSERT_GT(rc, 0) << strerror(errno);
+                        msg.append(buf, static_cast<size_t>(rc));
+                    } else {
+                        break;
+                    }
+                }
+                ADD_FAILURE()
+                    << "exited " << (WIFEXITED(s) ? "" : "ab")
+                    << "normally with exit status " << WEXITSTATUS(s)
+                    << '\n'
+                    << msg;
+            }
         }
     }
 
@@ -807,11 +825,11 @@ public:
     {
         set_up(true);
         run_test([&is_writer, this](auto) {
-            for (size_t i = 0; i < kNumThreads; ++i) {
+            for (size_t i = 0; i < m_num_threads; ++i) {
                 set_up();
             }
             std::vector<std::thread> threads;
-            while (threads.size() < kNumThreads) {
+            while (threads.size() < m_num_threads) {
                 const auto t = threads.size();
                 threads.emplace_back([&is_writer, t, this] {
                     for (size_t r = 0; r < kNumRounds; ++r) {
@@ -824,17 +842,17 @@ public:
             }
         });
         set_up();
-        ASSERT_EQ(writers_per_thread * kNumThreads, read_file_version(*m_helper.files.front()));
+        ASSERT_EQ(writers_per_thread * m_num_threads, read_file_version(*m_helper.files.front()));
     }
 
     auto run_shm_lifetime_test(bool unlink) -> void
     {
-        for (size_t i = 0; i < kNumThreads; ++i) {
+        for (size_t i = 0; i < m_num_threads; ++i) {
             set_up(true);
         }
         run_test([this, unlink](auto) {
             std::vector<std::thread> threads;
-            while (threads.size() < kNumThreads) {
+            while (threads.size() < m_num_threads) {
                 threads.emplace_back([this, unlink] {
                     for (size_t r = 0; r < kNumRounds; ++r) {
                         const auto filename = m_dirname + make_filename(0);
@@ -870,12 +888,12 @@ public:
         volatile void *ptr;
         ASSERT_OK(file->shm_map(0, true, ptr));
         run_test([&](auto) {
-            for (size_t i = 0; i < kNumThreads; ++i) {
+            for (size_t i = 0; i < m_num_threads; ++i) {
                 set_up();
                 ASSERT_OK(m_helper.files[i]->shm_map(0, true, ptr));
             }
             std::vector<std::thread> threads;
-            while (threads.size() < kNumThreads) {
+            while (threads.size() < m_num_threads) {
                 const auto t = threads.size();
                 threads.emplace_back([t, this, &flags, writer_n] {
                     for (size_t r = 0; r < kNumRounds; ++r) {
@@ -891,7 +909,7 @@ public:
             }
         });
 
-        ASSERT_EQ(num_writers * writer_n * kNumThreads * kNumEnvs, sum_shm_versions(*file));
+        ASSERT_EQ(num_writers * writer_n * m_num_threads * m_num_processes, sum_shm_versions(*file));
         file->shm_unmap(true);
         delete file;
         // Get rid of the shm for the next round.
@@ -908,7 +926,7 @@ public:
         run_test([&](auto) {
             auto &env = Env::default_env();
             std::vector<std::thread> threads;
-            while (threads.size() < kNumThreads) {
+            while (threads.size() < m_num_threads) {
                 threads.emplace_back([&env, num_writes] {
                     for (size_t r = 0; r < kNumRounds; ++r) {
                         SharedCount count(env, "shared_count");
@@ -922,7 +940,7 @@ public:
                 thread.join();
             }
         });
-        ASSERT_EQ(count.load(), kNumEnvs * kNumThreads * num_writes);
+        ASSERT_EQ(count.load(), m_num_processes * m_num_threads * num_writes);
     }
 
 protected:
@@ -931,19 +949,19 @@ protected:
 };
 TEST_P(EnvConcurrencyTests, SingleWriter)
 {
-    run_reader_writer_test(kNumEnvs, [](auto r) {
+    run_reader_writer_test(m_num_processes, [](auto r) {
         return r == kNumRounds / 2;
     });
 }
 TEST_P(EnvConcurrencyTests, MultipleWriters)
 {
-    run_reader_writer_test(kNumEnvs * kNumRounds / 10, [](auto r) {
+    run_reader_writer_test(m_num_processes * kNumRounds / 10, [](auto r) {
         return r % 10 == 9;
     });
 }
 TEST_P(EnvConcurrencyTests, Contention)
 {
-    run_reader_writer_test(kNumEnvs * kNumRounds / 2, [](auto r) {
+    run_reader_writer_test(m_num_processes * kNumRounds / 2, [](auto r) {
         return r & 1;
     });
 }
