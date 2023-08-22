@@ -2,6 +2,7 @@
 // This source code is licensed under the MIT License, which can be found in
 // LICENSE.md. See AUTHORS.md for a list of contributor names.
 
+#include "alloc.h"
 #include "calicodb/env.h"
 #include "common.h"
 #include "encoding.h"

@@ -38,8 +38,10 @@ public:
         while (capacity < cache_size) {
             capacity *= 2;
         }
-        if (auto *table = static_cast<PageRef **>(Alloc::calloc(
-                capacity, sizeof(PageRef *)))) {
+        const auto table_size = capacity * sizeof(PageRef *);
+        if (auto *table = static_cast<PageRef **>(
+                Alloc::malloc(table_size))) {
+            std::memset(table, 0, table_size);
             m_capacity = capacity;
             m_table = table;
             return 0;

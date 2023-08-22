@@ -918,7 +918,7 @@ auto Tree::redistribute_cells(Node &left, Node &right, Node &parent, uint32_t pi
 
     // Cells that need to be redistributed, in order.
     UniquePtr<Cell> cell_buffer(static_cast<Cell *>(
-        Alloc::calloc(cell_count + 2, sizeof(Cell))));
+        Alloc::malloc((cell_count + 2) * sizeof(Cell))));
     if (!cell_buffer) {
         m_pager->release(unused);
         return Status::no_memory();

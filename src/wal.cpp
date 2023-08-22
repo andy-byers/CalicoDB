@@ -485,12 +485,13 @@ auto HashIterator::init(uint32_t backfill) -> Status
     // larger than necessary due to platform alignment requirements (see alloc.h).
     const auto temp_len =
         (last_value < kNIndexKeys ? last_value : kNIndexKeys);
-    auto *temp = static_cast<Hash *>(Alloc::calloc(
-        temp_len, sizeof(Hash)));
+    auto *temp = static_cast<Hash *>(Alloc::malloc(
+        temp_len * sizeof(Hash)));
     if (temp == nullptr) {
         // m_state will be freed in the destructor.
         return Status::no_memory();
     }
+    std::memset(temp, 0, temp_len * sizeof(Hash));
 
     Status s;
     for (uint32_t i = index_group_number(backfill + 1); i < m_num_groups; ++i) {
