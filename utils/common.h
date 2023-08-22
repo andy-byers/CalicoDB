@@ -5,10 +5,13 @@
 #ifndef CALICODB_UTILS_COMMON_H
 #define CALICODB_UTILS_COMMON_H
 
+#include "calicodb/cursor.h"
 #include "calicodb/env.h"
+#include "calicodb/tx.h"
 #include <algorithm>
 #include <climits>
 #include <functional>
+#include <memory>
 #include <random>
 
 namespace calicodb
@@ -135,6 +138,24 @@ public:
 
 // Print information about each database page to `os`
 auto print_database_overview(std::ostream &os, Pager &pager) -> void;
+
+using TestCursor = std::unique_ptr<Cursor>;
+
+inline auto test_open_bucket(const Tx &tx, const Slice &name, TestCursor &c_out) -> Status
+{
+    Cursor *c;
+    auto s = tx.open_bucket(name, c);
+    c_out.reset(c);
+    return s;
+}
+
+inline auto test_create_and_open_bucket(Tx &tx, const BucketOptions &options, const Slice &name, TestCursor &c_out) -> Status
+{
+    Cursor *c;
+    auto s = tx.create_bucket(options, name, &c);
+    c_out.reset(c);
+    return s;
+}
 
 } // namespace calicodb
 

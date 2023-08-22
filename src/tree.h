@@ -5,10 +5,11 @@
 #ifndef CALICODB_TREE_H
 #define CALICODB_TREE_H
 
-#include "calicodb/cursor.h"
+#include "freelist.h"
 #include "header.h"
 #include "node.h"
 #include "pager.h"
+#include "ptr.h"
 
 namespace calicodb
 {
@@ -43,27 +44,42 @@ class CursorImpl;
 class Tree final
 {
 public:
-    static constexpr size_t kRequiredBufferSize = 3 * kPageSize;
+    struct ListEntry {
+        Slice name;
+        Tree *const tree;
+        ListEntry *prev_entry;
+        ListEntry *next_entry;
+    } list_entry;
 
     ~Tree();
     auto save_all_cursors() const -> void;
 
-    explicit Tree(Pager &pager, Stat &stat, char *scratch, const Id *root_id, bool writable);
-    static auto create(Pager &pager, Id *out) -> Status;
-    static auto destroy(Tree &tree) -> Status;
+    explicit Tree(Pager &pager, Stat &stat, char *scratch, Id root_id, UniqueBuffer name);
     static auto get_tree(CursorImpl &c) -> Tree *;
 
-    auto new_cursor() -> Cursor *;
-    auto get(CursorImpl &c, const Slice &key, std::string *value) const -> Status;
+    struct Reroot {
+        Id before;
+        Id after;
+    };
+    // Must be called on the schema tree.
+    auto create(Id *out) -> Status;
+    auto destroy(Tree &tree, Reroot &rr) -> Status;
+
     auto put(CursorImpl &c, const Slice &key, const Slice &value) -> Status;
     auto erase(CursorImpl &c) -> Status;
     auto erase(CursorImpl &c, const Slice &key) -> Status;
-    auto vacuum(Schema &schema) -> Status;
+    auto vacuum() -> Status;
 
-    auto allocate(bool is_external, Node &node_out) -> Status
+    enum AllocationType {
+        kAllocateAny = Freelist::kRemoveAny,
+        kAllocateExact = Freelist::kRemoveExact,
+    };
+    auto allocate(AllocationType type, Id nearby, PageRef *&page_out) -> Status;
+
+    auto allocate_(bool is_external, Id nearby, Node &node_out) -> Status
     {
         PageRef *ref;
-        auto s = m_pager->allocate(ref);
+        auto s = allocate(kAllocateAny, nearby, ref);
         if (s.is_ok()) {
             if (ref->refs == 1) {
                 CALICODB_EXPECT_FALSE(PointerMap::is_map(ref->page_id));
@@ -92,11 +108,6 @@ public:
         return s;
     }
 
-    auto free(Node node) -> Status
-    {
-        return m_pager->destroy(node.ref);
-    }
-
     auto upgrade(Node &node) const -> void
     {
         m_pager->mark_dirty(*node.ref);
@@ -109,13 +120,12 @@ public:
 
     [[nodiscard]] auto root() const -> Id
     {
-        return m_root_id ? *m_root_id : Id::root();
+        return m_root_id;
     }
 
-    auto print_structure(std::string &repr_out) const -> Status;
-    auto print_nodes(std::string &repr_out) const -> Status;
-
-    auto TEST_validate() const -> void;
+    auto print_structure(std::string &repr_out) -> Status;
+    auto print_nodes(std::string &repr_out) -> Status;
+    auto TEST_validate() -> void;
 
 private:
     friend class DBImpl;
@@ -125,6 +135,8 @@ private:
     friend class CursorImpl;
     friend class TreePrinter;
     friend class TreeValidator;
+
+    auto relocate_page(Node &node, PointerMap::Type type, Id id) -> int;
 
     auto corrupted_node(Id page_id) const -> Status;
 
@@ -137,15 +149,21 @@ private:
     auto fix_root(CursorImpl &c) -> Status;
     auto fix_nonroot(CursorImpl &c, Node &parent, uint32_t index) -> Status;
 
+    struct KeyScratch {
+        char *buf;
+        size_t len;
+    };
+
+    auto extract_key(Node &node, uint32_t index, KeyScratch &scratch, Slice &key_out, uint32_t limit = 0) const -> Status;
+    auto extract_key(const Cell &cell, KeyScratch &scratch, Slice &key_out, uint32_t limit = 0) const -> Status;
     auto read_key(const Cell &cell, char *scratch, Slice *key_out, uint32_t limit = 0) const -> Status;
     auto read_value(const Cell &cell, char *scratch, Slice *value_out) const -> Status;
-    auto read_key(Node &node, uint32_t index, std::string &scratch, Slice *key_out, uint32_t limit = 0) const -> Status;
-    auto read_value(Node &node, uint32_t index, std::string &scratch, Slice *value_out) const -> Status;
+    auto read_value(Node &node, uint32_t index, char *scratch, Slice *value_out) const -> Status;
     auto overwrite_value(const Cell &cell, const Slice &value) -> Status;
-
     auto emplace(Node &node, const Slice &key, const Slice &value, uint32_t index, bool &overflow) -> Status;
     auto free_overflow(Id head_id) -> Status;
-    auto vacuum_step(PageRef *&free, PointerMap::Entry entry, Schema &schema, Id last_id) -> Status;
+
+    auto relocate_page(PageRef *&free, PointerMap::Entry entry, Id last_id) -> Status;
 
     struct PivotOptions {
         const Cell *cells[2];
@@ -172,13 +190,13 @@ private:
 
     enum CursorAction {
         kInitNormal,
-        kInitShutdown,
+        kInitSaveCursors,
     };
 
     auto manage_cursors(Cursor *c, CursorAction type) const -> void;
 
     // Various tree operation counts are tracked in this variable.
-    Stat *m_stat;
+    Stat *const m_stat;
 
     // When the node pointed at by m_c overflows, store the cell that couldn't fit on the page here. The
     // location that the overflow cell should be placed is copied into the pid and idx fields from m_c.
@@ -201,6 +219,9 @@ private:
         uint32_t idx;
     } m_ovfl;
 
+    // Scratch buffers for holding overflowing keys. See extract_key().
+    KeyScratch m_key_scratch[2] = {};
+
     // Scratch memory for manipulating nodes.
     char *const m_node_scratch;
 
@@ -210,162 +231,10 @@ private:
     static constexpr auto kCellBufferLen = kPageSize / kNumCellBuffers;
     char *const m_cell_scratch[kNumCellBuffers];
 
+    UniqueBuffer m_name;
     Pager *const m_pager;
-    const Id *const m_root_id;
+    Id m_root_id;
     const bool m_writable;
-};
-
-class CursorImpl : public Cursor
-{
-    friend class InorderTraversal;
-    friend class Tree;
-    friend class TreeValidator;
-
-    Tree::CursorEntry m_list_entry = {};
-
-    Tree *const m_tree;
-    Status m_status;
-
-    Node m_node;
-    uint32_t m_idx = 0;
-
-    // *_path members are used to track the path taken from the tree's root to the current
-    // position. At any given time, the elements with indices less than the current level
-    // are valid.
-    static constexpr size_t kMaxDepth = 17 + 1;
-    Node m_node_path[kMaxDepth - 1];
-    uint32_t m_idx_path[kMaxDepth - 1];
-    int m_level = 0;
-
-    // A heap-allocated buffer used to store the current record. m_key and m_value are
-    // slices into this buffer. The buffer length is not stored explicitly, but it is
-    // always greater than or equal to the sum of the lengths of m_key and m_value.
-    char *m_user_payload = nullptr;
-    Slice m_key;
-    Slice m_value;
-    bool m_saved = false;
-
-    auto save_position() -> void
-    {
-        CALICODB_EXPECT_TRUE(has_key());
-        release_nodes(kAllLevels);
-        m_saved = m_status.is_ok();
-    }
-
-    // Seek back to the saved position. Does not read the payload.
-    auto ensure_position_loaded() -> void
-    {
-        if (m_saved) {
-            seek_to_leaf(m_key, kSeekNormal);
-        }
-    }
-
-    // When the cursor is being used to read records, this routine is used to move
-    // cursors that are one-past-the-end in a leaf node to the first position in
-    // the right sibling node.
-    auto ensure_correct_leaf(bool read_payload) -> void;
-
-    auto prepare(Tree::CursorAction type) -> void
-    {
-        m_tree->manage_cursors(this, type);
-    }
-
-    auto seek_to_first_leaf() -> void
-    {
-        seek_to_leaf("", kSeekReader);
-    }
-
-    auto seek_to_last_leaf() -> void;
-
-    auto fetch_payload() -> Status;
-    auto move_to_right_sibling() -> void;
-    auto move_to_left_sibling() -> void;
-    auto search_node(const Slice &key) -> bool;
-    explicit CursorImpl(Tree &tree);
-
-public:
-    ~CursorImpl() override;
-    auto move_to_parent() -> void;
-    auto assign_child(Node child) -> void;
-    auto move_to_child(Id child_id) -> void;
-    [[nodiscard]] auto on_last_node() const -> bool;
-
-    // Return true if the cursor is positioned on a valid node, false otherwise
-    [[nodiscard]] auto has_node() const -> bool
-    {
-        return m_status.is_ok() && m_node.ref != nullptr;
-    }
-
-    // Return true if the cursor is positioned on a valid key, false otherwise
-    [[nodiscard]] auto has_key() const -> bool
-    {
-        return has_node() && m_idx < NodeHdr::get_cell_count(m_node.hdr());
-    }
-
-    [[nodiscard]] auto page_id() const -> Id
-    {
-        CALICODB_EXPECT_TRUE(has_node());
-        return m_node.ref->page_id;
-    }
-
-    auto reset(const Status &s = Status::ok()) -> void
-    {
-        release_nodes(kAllLevels);
-        m_status = s;
-        m_level = 0;
-    }
-
-    enum SeekType {
-        kSeekWriter,
-        kSeekNormal,
-        kSeekReader,
-    };
-
-    auto seek_to_leaf(const Slice &key, SeekType type) -> bool;
-
-    enum ReleaseType {
-        kCurrentLevel,
-        kAllLevels,
-    };
-
-    auto release_nodes(ReleaseType type) -> void;
-    auto seek_first() -> void override;
-    auto seek_last() -> void override;
-    auto next() -> void override;
-    auto previous() -> void override;
-    auto seek(const Slice &key) -> void override;
-
-    [[nodiscard]] auto handle() -> void * override
-    {
-        return this;
-    }
-
-    auto key() const -> Slice override
-    {
-        CALICODB_EXPECT_TRUE(is_valid());
-        return m_key;
-    }
-
-    auto value() const -> Slice override
-    {
-        CALICODB_EXPECT_TRUE(is_valid());
-        return m_value;
-    }
-
-    [[nodiscard]] auto is_valid() const -> bool override
-    {
-        return has_key() || m_saved;
-    }
-
-    auto status() const -> Status override
-    {
-        return m_status;
-    }
-
-    auto TEST_tree() const -> Tree &
-    {
-        return *m_tree;
-    }
 };
 
 } // namespace calicodb

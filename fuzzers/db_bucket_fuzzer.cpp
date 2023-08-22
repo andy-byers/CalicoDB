@@ -2,9 +2,9 @@
 // This source code is licensed under the MIT License, which can be found in
 // LICENSE.md. See AUTHORS.md for a list of contributor names.
 
-#include "calicodb/cursor.h"
 #include "calicodb/db.h"
 #include "calicodb/env.h"
+#include "cursor_impl.h"
 #include "fuzzer.h"
 #include "model.h"
 #include "tree.h"
@@ -142,7 +142,7 @@ public:
             }
             return Status::ok();
         });
-        CHECK_TRUE(s.is_ok() || s.to_string() == "not supported: ROLLBACK");
+        CHECK_TRUE(s.is_ok() || (s.is_not_supported() && 0 == std::strcmp(s.message(), "ROLLBACK")));
     }
 };
 

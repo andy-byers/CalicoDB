@@ -421,9 +421,10 @@ auto Node::from_existing_page(PageRef &page, char *scratch, Node &node_out) -> i
     node.usable_space = node.gap_size +
                         static_cast<uint32_t>(total_freelist_bytes) +
                         NodeHdr::get_frag_count(hdr);
-    node_out = std::move(node);
     if (node.usable_space > kPageSize) {
+        return -1;
     }
+    node_out = std::move(node);
     return 0;
 }
 

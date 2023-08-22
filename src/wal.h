@@ -8,7 +8,6 @@
 #include "calicodb/db.h"
 #include "utils.h"
 #include <functional>
-#include <vector>
 
 namespace calicodb
 {
@@ -44,7 +43,7 @@ public:
     auto lookup(Key key, Value lower, Value &out) -> Status;
     auto assign(Key key, Value value) -> Status;
     [[nodiscard]] auto header() -> volatile HashIndexHdr *;
-    [[nodiscard]] auto groups() const -> const std::vector<volatile char *> &;
+    [[nodiscard]] auto groups() const -> volatile char **;
     auto cleanup() -> void;
     auto close() -> void;
 
@@ -54,7 +53,8 @@ private:
     auto map_group(size_t group_number, bool extend) -> Status;
 
     // Storage for hash table groups.
-    std::vector<volatile char *> m_groups;
+    volatile char **m_groups = nullptr;
+    size_t m_num_groups = 0;
 
     // Address of the hash table header kept in memory. This version of the header corresponds
     // to the current transaction. The one stored in the first table group corresponds to the
@@ -99,7 +99,7 @@ private:
         } groups[1];
     };
 
-    HashIndex *m_source = nullptr;
+    HashIndex *const m_source;
     State *m_state = nullptr;
     size_t m_num_groups = 0;
     Key m_prior = 0;
@@ -143,8 +143,8 @@ public:
     // Write new versions of the given pages to the WAL.
     virtual auto write(PageRef *dirty, size_t db_size) -> Status = 0;
 
-    using Undo = std::function<void(Id)>;
-    virtual auto rollback(const Undo &undo) -> void = 0;
+    using Undo = void (*)(void *, Id);
+    virtual auto rollback(const Undo &undo, void *object) -> void = 0;
 
     // WRITER -> READER
     virtual auto finish_writer() -> void = 0;

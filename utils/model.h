@@ -29,15 +29,15 @@
 #define CHECK_FALSE(cond) \
     CHECK_TRUE(!(cond))
 
-#define CHECK_OK(expr)                                             \
-    do {                                                           \
-        if (auto assert_s = (expr); !assert_s.is_ok()) {           \
-            std::fprintf(                                          \
-                stderr,                                            \
-                "expected `(" #expr ").is_ok()` but got \"%s\"\n", \
-                assert_s.to_string().c_str());                     \
-            std::abort();                                          \
-        }                                                          \
+#define CHECK_OK(expr)                                                 \
+    do {                                                               \
+        if (auto assert_s = (expr); !assert_s.is_ok()) {               \
+            std::fprintf(                                              \
+                stderr,                                                \
+                "expected `(" #expr ").is_ok()` but got \"%s: %s\"\n", \
+                assert_s.type_name(), assert_s.message());             \
+            std::abort();                                              \
+        }                                                              \
     } while (0)
 
 #define CHECK_EQ(lhs, rhs)                                                                             \
@@ -60,7 +60,7 @@ class ModelDB : public DB
     DB *const m_db;
 
 public:
-    static auto open(const Options &options, const std::string &filename, KVStore &store, DB *&db_out) -> Status;
+    static auto open(const Options &options, const char *filename, KVStore &store, DB *&db_out) -> Status;
 
     explicit ModelDB(KVStore &store, DB &db)
         : m_store(&store),
@@ -72,7 +72,7 @@ public:
 
     auto check_consistency() const -> void;
 
-    auto get_property(const Slice &name, std::string *value_out) const -> bool override
+    auto get_property(const Slice &name, Slice *value_out) const -> bool override
     {
         return m_db->get_property(name, value_out);
     }
@@ -155,9 +155,11 @@ public:
 
     [[nodiscard]] auto is_valid() const -> bool override
     {
-        CHECK_EQ(m_c->is_valid(),
-                 m_itr != end(*m_map) || m_saved);
-        check_record();
+        if (m_c->status().is_ok()) {
+            CHECK_EQ(m_c->is_valid(),
+                     m_itr != end(*m_map) || m_saved);
+            check_record();
+        }
         return m_c->is_valid();
     }
 
@@ -190,6 +192,13 @@ public:
     [[nodiscard]] auto value() const -> Slice override
     {
         return m_c->value();
+    }
+
+    auto find(const Slice &key) -> void override
+    {
+        m_saved = false;
+        m_itr = m_map->find(key.to_string());
+        m_c->find(key);
     }
 
     auto seek(const Slice &key) -> void override
@@ -280,7 +289,7 @@ public:
 
     [[nodiscard]] auto status() const -> Status override
     {
-        return Status::ok();
+        return m_tx->status();
     }
 
     [[nodiscard]] auto schema() const -> Cursor & override
@@ -296,7 +305,7 @@ public:
         auto s = m_tx->drop_bucket(name);
         if (s.is_ok()) {
             const auto num_erased = m_temp.erase(name.to_string());
-            CHECK_EQ(s.is_ok(), num_erased);
+            CHECK_EQ(num_erased, 1);
         }
         return s;
     }
@@ -312,29 +321,6 @@ public:
         auto s = m_tx->commit();
         if (s.is_ok()) {
             *m_base = m_temp;
-        }
-        return s;
-    }
-
-    [[nodiscard]] auto get(Cursor &c, const Slice &key, std::string *value_out) const -> Status override
-    {
-        const auto &m = use_cursor<KVMap>(c);
-        m.m_itr = m.m_map->lower_bound(key.to_string());
-        auto s = m_tx->get(c, key, value_out);
-        if (s.is_ok()) {
-            CHECK_TRUE(m.m_itr != end(*m.m_map));
-            CHECK_EQ(m.m_itr->first, key.to_string());
-            CHECK_EQ(m.m_itr->second, *value_out);
-            CHECK_EQ(m.m_itr->first, m.m_c->key().to_string());
-            CHECK_EQ(m.m_itr->second, m.m_c->value().to_string());
-        } else if (s.is_not_found()) {
-            if (m.m_itr != end(*m.m_map)) {
-                CHECK_TRUE(m.m_itr->first > key);
-                CHECK_EQ(m.m_itr->first, m.m_c->key().to_string());
-                CHECK_EQ(m.m_itr->second, m.m_c->value().to_string());
-            }
-        } else {
-            m.m_itr = end(*m.m_map);
         }
         return s;
     }

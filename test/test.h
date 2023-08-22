@@ -29,8 +29,8 @@ namespace test
 
 auto check_status(const char *expr, const Status &s) -> testing::AssertionResult;
 
-auto read_file_to_string(Env &env, const std::string &filename) -> std::string;
-auto write_string_to_file(Env &env, const std::string &filename, const std::string &buffer, long offset = -1) -> void;
+auto read_file_to_string(Env &env, const char *filename) -> std::string;
+auto write_string_to_file(Env &env, const char *filename, const std::string &buffer, long offset = -1) -> void;
 
 } // namespace test
 

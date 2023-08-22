@@ -7,6 +7,7 @@
 #include "logging.h"
 #include "test.h"
 #include <condition_variable>
+#include <filesystem>
 #include <thread>
 
 namespace calicodb::test
@@ -98,7 +99,7 @@ public:
 
     ~DelayEnv() override = default;
 
-    auto new_file(const std::string &filename, OpenMode mode, File *&file_out) -> Status override
+    auto new_file(const char *filename, OpenMode mode, File *&file_out) -> Status override
     {
         class DelayFile : public FileWrapper
         {
@@ -183,9 +184,9 @@ protected:
         : m_filename(testing::TempDir() + "concurrency"),
           m_env(new DelayEnv(Env::default_env()))
     {
-        (void)m_env->remove_file(m_filename);
-        (void)m_env->remove_file(m_filename + kDefaultWalSuffix);
-        (void)m_env->remove_file(m_filename + kDefaultShmSuffix);
+        std::filesystem::remove_all(m_filename);
+        std::filesystem::remove_all(m_filename + kDefaultWalSuffix);
+        std::filesystem::remove_all(m_filename + kDefaultShmSuffix);
     }
 
     ~ConcurrencyTests() override
@@ -231,7 +232,7 @@ protected:
     };
     auto run_test_instance(const ConsistencyTestParameters &param) -> void
     {
-        (void)DB::destroy(Options(), m_filename);
+        (void)DB::destroy(Options(), m_filename.c_str());
 
         const auto nt = param.num_readers + param.num_writers + param.num_checkpointers;
         Barrier barrier(nt);
@@ -367,20 +368,21 @@ protected:
                 }
                 // Iterate through the records twice. The same value should be read each time.
                 for (size_t i = 0; i < co.op_args[1] * 2; ++i) {
-                    std::string value;
                     // If the bucket exists, then it must contain co.op_arg records (the first writer to run
                     // makes sure of this).
-                    t = tx.get(*c, numeric_key(i % co.op_args[1]), &value);
-                    if (!t.is_ok()) {
+                    c->find(numeric_key(i % co.op_args[1]));
+                    if (!c->is_valid()) {
+                        t = c->status();
                         break;
                     } else if (i == 0) {
-                        co.result.emplace_back(value);
+                        const auto value = c->value();
+                        co.result.emplace_back(value.data(), value.size());
                     } else {
-                        EXPECT_EQ(value, co.result.back()) << "non repeatable read";
+                        EXPECT_EQ(c->value(), co.result.back()) << "non repeatable read";
                     }
                 }
                 delete c;
-                return t;
+                return t.is_not_found() ? Status::ok() : t;
             });
         }
 
@@ -410,14 +412,13 @@ protected:
                 auto t = tx.create_bucket(BucketOptions(), "BUCKET", &c);
                 for (size_t i = 0; t.is_ok() && i < co.op_args[1]; ++i) {
                     uint64_t result = 1;
-                    std::string value;
-                    t = tx.get(*c, numeric_key(i), &value);
-                    if (t.is_not_found()) {
-                        t = Status::ok();
-                    } else if (t.is_ok()) {
-                        Slice slice(value);
+                    c->find(numeric_key(i));
+                    if (c->is_valid()) {
+                        Slice slice(c->value());
                         EXPECT_TRUE(consume_decimal_number(slice, &result));
                         ++result;
+                    } else if (c->status().is_not_found()) {
+                        t = Status::ok();
                     } else {
                         break;
                     }
@@ -476,10 +477,9 @@ TEST_F(ConcurrencyTests, 0)
 
 TEST_F(ConcurrencyTests, 1)
 {
-    run_test({0, 2, 0});
-    //    run_test({10, 0, 0});
-    //    run_test({0, 10, 0});
-    //    run_test({0, 0, 10});
+    run_test({10, 0, 0});
+    run_test({0, 10, 0});
+    run_test({0, 0, 10});
 }
 
 TEST_F(ConcurrencyTests, 2)

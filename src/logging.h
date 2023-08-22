@@ -6,11 +6,14 @@
 #define CALICODB_LOGGING_H
 
 #include "calicodb/slice.h"
+#include "ptr.h"
 #include "utils.h"
 #include <cstdarg>
 
 namespace calicodb
 {
+
+auto append_fmt_string(UniqueBuffer &out, const char *fmt, ...) -> void;
 
 auto append_fmt_string(std::string &out, const char *fmt, ...) -> void;
 auto append_number(std::string &out, size_t value) -> void;

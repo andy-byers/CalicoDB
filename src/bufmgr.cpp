@@ -11,29 +11,16 @@
 namespace calicodb
 {
 
-Bufmgr::Bufmgr(size_t min_buffers, Stat &stat)
-    : m_root(PageRef::alloc()),
-      m_min_buffers(min_buffers),
+Bufmgr::Bufmgr(Stat &stat)
+    : m_root(nullptr),
+      m_min_buffers(0),
+      m_num_buffers(0),
       m_stat(&stat)
 {
     // We don't call alloc_page() for the dummy list heads, so the circular
     // connections must be initialized manually.
     IntrusiveList::initialize(m_in_use);
     IntrusiveList::initialize(m_lru);
-
-    if (m_root) {
-        m_root->page_id = Id::root();
-    }
-
-    for (m_num_buffers = 0; m_num_buffers < m_min_buffers; ++m_num_buffers) {
-        if (auto *ref = PageRef::alloc()) {
-            IntrusiveList::add_tail(*ref, m_lru);
-        } else {
-            break;
-        }
-    }
-
-    m_map.reserve(min_buffers);
 }
 
 Bufmgr::~Bufmgr()
@@ -51,29 +38,44 @@ Bufmgr::~Bufmgr()
     }
 }
 
+auto Bufmgr::preallocate(size_t min_buffers) -> int
+{
+    CALICODB_EXPECT_EQ(m_num_buffers, 0);
+    for (; m_num_buffers < min_buffers; ++m_num_buffers) {
+        if (auto *ref = PageRef::alloc()) {
+            IntrusiveList::add_tail(*ref, m_lru);
+        } else {
+            return -1;
+        }
+    }
+    m_root = PageRef::alloc();
+    if (!m_root || m_table.preallocate(min_buffers)) {
+        return -1;
+    }
+    m_root->page_id = Id::root();
+    m_min_buffers = min_buffers;
+    return 0;
+}
+
 auto Bufmgr::query(Id page_id) const -> PageRef *
 {
-    auto itr = m_map.find(page_id);
-    if (itr == end(m_map)) {
-        return nullptr;
-    }
-    return itr->second;
+    return m_table.lookup(page_id.value);
 }
 
 auto Bufmgr::lookup(Id page_id) -> PageRef *
 {
     CALICODB_EXPECT_FALSE(page_id.is_root());
-    auto itr = m_map.find(page_id);
-    if (itr == end(m_map)) {
+    auto *ref = m_table.lookup(page_id.value);
+    if (ref == nullptr) {
         ++m_stat->counters[Stat::kCacheMisses];
         return nullptr;
     }
     ++m_stat->counters[Stat::kCacheHits];
-    if (itr->second->refs == 0) {
-        IntrusiveList::remove(*itr->second);
-        IntrusiveList::add_head(*itr->second, m_lru);
+    if (ref->refs == 0) {
+        IntrusiveList::remove(*ref);
+        IntrusiveList::add_head(*ref, m_lru);
     }
-    return itr->second;
+    return ref;
 }
 
 auto Bufmgr::next_victim() -> PageRef *
@@ -96,7 +98,7 @@ auto Bufmgr::register_page(PageRef &page) -> void
     if (Id::root() < page.page_id) {
         CALICODB_EXPECT_TRUE(query(page.page_id) == nullptr);
         CALICODB_EXPECT_FALSE(page.get_flag(PageRef::kCached));
-        m_map.insert_or_assign(page.page_id, &page);
+        m_table.insert(&page);
         page.set_flag(PageRef::kCached);
     }
 }
@@ -105,7 +107,7 @@ auto Bufmgr::erase(PageRef &ref) -> void
 {
     if (ref.get_flag(PageRef::kCached)) {
         ref.clear_flag(PageRef::kCached);
-        m_map.erase(ref.page_id);
+        m_table.remove(ref.key());
         IntrusiveList::remove(ref);
         IntrusiveList::add_tail(ref, m_lru);
     }
@@ -115,10 +117,11 @@ auto Bufmgr::purge() -> void
 {
     CALICODB_EXPECT_TRUE(IntrusiveList::is_empty(m_in_use));
     CALICODB_EXPECT_EQ(m_refsum, 0);
-    for (const auto &[page_id, ref] : m_map) {
+    for (auto *ref = m_lru.next_entry;
+         ref != &m_lru; ref = ref->next_entry) {
         ref->flag = PageRef::kNormal;
     }
-    m_map.clear();
+    m_table.clear();
 }
 
 auto Bufmgr::ref(PageRef &ref) -> void
@@ -149,7 +152,7 @@ auto Bufmgr::shrink_to_fit() -> void
     CALICODB_EXPECT_EQ(m_refsum, 0);
     while (m_num_buffers > m_min_buffers) {
         auto *lru = m_lru.prev_entry;
-        m_map.erase(lru->page_id);
+        m_table.remove(lru->key());
         IntrusiveList::remove(*lru);
         PageRef::free(lru);
         --m_num_buffers;
@@ -161,12 +164,12 @@ auto Bufmgr::assert_state() const -> bool
     // Make sure the refcounts add up to the "refsum".
     uint32_t refsum = 0;
     for (auto p = m_in_use.next_entry; p != &m_in_use; p = p->next_entry) {
-        const auto itr = m_map.find(p->page_id);
-        CALICODB_EXPECT_NE(itr, end(m_map));
-        CALICODB_EXPECT_EQ(p, itr->second);
+        const auto *ref = m_table.lookup(p->key());
+        CALICODB_EXPECT_NE(ref, nullptr);
+        CALICODB_EXPECT_EQ(p, ref);
         CALICODB_EXPECT_GT(p->refs, 0);
         refsum += p->refs;
-        (void)itr;
+        (void)ref;
     }
     for (auto p = m_lru.next_entry; p != &m_lru; p = p->next_entry) {
         if (p->get_flag(PageRef::kDirty)) {
@@ -175,9 +178,9 @@ auto Bufmgr::assert_state() const -> bool
             CALICODB_EXPECT_TRUE(p->get_flag(PageRef::kCached));
         }
         if (p->get_flag(PageRef::kCached)) {
-            const auto itr = m_map.find(p->page_id);
-            if (itr != end(m_map)) {
-                CALICODB_EXPECT_EQ(p, itr->second);
+            const auto *ref = m_table.lookup(p->key());
+            if (ref != nullptr) {
+                CALICODB_EXPECT_EQ(p, ref);
             }
         }
         CALICODB_EXPECT_EQ(p->refs, 0);
@@ -193,17 +196,17 @@ auto Dirtylist::is_empty() const -> bool
 auto Dirtylist::remove(PageRef &ref) -> DirtyHdr *
 {
     CALICODB_EXPECT_TRUE(ref.get_flag(PageRef::kDirty));
-    auto *hdr = ref.get_dirty_hdr();
-    // NOTE: hdr->next_entry is still valid after this call.
-    IntrusiveList::remove(*hdr);
+    // NOTE: ref.dirty_hdr.next_entry is still valid after this call (IntrusiveList::remove() does not
+    //       reinitialize the entry it removes from the list).
+    IntrusiveList::remove(ref.dirty_hdr);
     ref.clear_flag(PageRef::kDirty);
-    return hdr->next_entry;
+    return ref.dirty_hdr.next_entry;
 }
 
 auto Dirtylist::add(PageRef &ref) -> void
 {
     CALICODB_EXPECT_FALSE(ref.get_flag(PageRef::kDirty));
-    IntrusiveList::add_head(*ref.get_dirty_hdr(), m_head);
+    IntrusiveList::add_head(ref.dirty_hdr, m_head);
     ref.set_flag(PageRef::kDirty);
 }
 
@@ -306,7 +309,7 @@ auto Dirtylist::TEST_contains(const PageRef &ref) const -> bool
         CALICODB_EXPECT_TRUE(p->next_entry == end() ||
                              p->next_entry->prev_entry == p);
         if (p->get_page_ref()->page_id == ref.page_id) {
-            CALICODB_EXPECT_EQ(p, ref.get_dirty_hdr());
+            CALICODB_EXPECT_EQ(p, &ref.dirty_hdr);
             CALICODB_EXPECT_FALSE(found);
             found = true;
         }

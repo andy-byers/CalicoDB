@@ -2,6 +2,7 @@
 // This source code is licensed under the MIT License, which can be found in
 // LICENSE.md. See AUTHORS.md for a list of contributor names.
 
+#include "alloc.h"
 #include "calicodb/env.h"
 #include "common.h"
 #include "encoding.h"
@@ -16,47 +17,6 @@
 
 namespace calicodb::test
 {
-
-TEST(PathParserTests, ExtractsDirnames)
-{
-    // NOTE: Expects the POSIX version of dirname().
-    ASSERT_EQ(split_path("dirname/basename").first, "dirname");
-    ASSERT_EQ(split_path(".dirname/basename").first, ".dirname");
-    ASSERT_EQ(split_path(".dirname.ext/basename").first, ".dirname.ext");
-    ASSERT_EQ(split_path("/dirname/basename").first, "/dirname");
-    ASSERT_EQ(split_path("/dirname/extra/basename").first, "/dirname/extra");
-    ASSERT_EQ(split_path("/dirname/extra.ext/basename").first, "/dirname/extra.ext");
-    ASSERT_EQ(split_path("/dirname///basename//").first, "/dirname");
-    ASSERT_EQ(split_path("basename").first, ".");
-    ASSERT_EQ(split_path("basename/").first, ".");
-    ASSERT_EQ(split_path("/basename").first, "/");
-    ASSERT_EQ(split_path("/basename/").first, "/"); // basename() strips trailing '/'.
-    ASSERT_EQ(split_path("").first, ".");
-    ASSERT_EQ(split_path("/").first, "/");
-}
-
-TEST(PathParserTests, ExtractsBasenames)
-{
-    ASSERT_EQ(split_path("dirname/basename").second, "basename");
-    ASSERT_EQ(split_path("dirname/.basename").second, ".basename");
-    ASSERT_EQ(split_path(".dirname/basename").second, "basename");
-    ASSERT_EQ(split_path("/dirname/basename").second, "basename");
-    ASSERT_EQ(split_path("/dirname/basename.ext").second, "basename.ext");
-    ASSERT_EQ(split_path("/dirname/extra/basename").second, "basename");
-    ASSERT_EQ(split_path("/dirname/extra.ext/basename").second, "basename");
-    ASSERT_EQ(split_path("basename").second, "basename");
-    ASSERT_EQ(split_path("basename/").second, "basename");
-    ASSERT_EQ(split_path("/basename").second, "basename");
-    ASSERT_EQ(split_path("/basename/").second, "basename");
-    ASSERT_EQ(split_path("").second, ".");
-    // basename == dirname in this case. We can still join the components to get a valid path.
-    ASSERT_EQ(split_path("/").second, "/");
-}
-
-TEST(PathParserTests, JoinsComponents)
-{
-    ASSERT_EQ(join_paths("dirname", "basename"), "dirname/basename");
-}
 
 static auto make_filename(size_t n)
 {
@@ -90,7 +50,7 @@ static auto write_out_randomly(RandomGenerator &random, File &writer, const Slic
     while (counter < size) {
         const auto chunk_size = std::min<size_t>(size - counter, random.Next(size / kChunks));
         const auto s = reader.read_exact(counter, chunk_size, out_data);
-        EXPECT_TRUE(s.is_ok()) << "Error: " << s.to_string().data();
+        EXPECT_TRUE(s.is_ok()) << "Error: " << s.type_name() << ": " << s.message();
         out_data += chunk_size;
         counter += chunk_size;
     }
@@ -128,7 +88,7 @@ struct EnvWithFiles final {
     {
         File *file;
         const auto filename = m_dirname + make_filename(id);
-        EXPECT_TRUE(env->new_file(filename, mode, file).is_ok())
+        EXPECT_TRUE(env->new_file(filename.c_str(), mode, file).is_ok())
             << "failed to " << ((mode & Env::kCreate) ? "create" : "open") << " file \"" << filename << '"';
         if (clear) {
             EXPECT_OK(file->resize(0));
@@ -356,7 +316,7 @@ protected:
         delete m_logger;
         m_logger = nullptr;
         std::filesystem::remove_all(m_log_filename);
-        ASSERT_OK(Env::default_env().new_logger(m_log_filename, m_logger));
+        ASSERT_OK(Env::default_env().new_logger(m_log_filename.c_str(), m_logger));
     }
 
     const std::string m_log_filename;
@@ -366,15 +326,15 @@ protected:
 TEST_F(LoggerTests, LogNullptrIsNOOP)
 {
     log(nullptr, "nothing %d", 42);
-    ASSERT_TRUE(read_file_to_string(Env::default_env(), m_log_filename).empty());
+    ASSERT_TRUE(read_file_to_string(Env::default_env(), m_log_filename.c_str()).empty());
 }
 
 TEST_F(LoggerTests, LogsFormattedText)
 {
     log(m_logger, "%u foo", 123);
-    const auto msg1 = read_file_to_string(Env::default_env(), m_log_filename);
+    const auto msg1 = read_file_to_string(Env::default_env(), m_log_filename.c_str());
     log(m_logger, "bar %d", 42);
-    const auto msg2 = read_file_to_string(Env::default_env(), m_log_filename);
+    const auto msg2 = read_file_to_string(Env::default_env(), m_log_filename.c_str());
 
     // Make sure both text and header info were written.
     ASSERT_EQ(kHdrLen, msg1.find("123 foo\n"));
@@ -392,7 +352,7 @@ TEST_F(LoggerTests, HandlesMessages)
         msg.resize(n, '$');
         log(m_logger, "%s", msg.c_str());
 
-        const auto res = read_file_to_string(Env::default_env(), m_log_filename);
+        const auto res = read_file_to_string(Env::default_env(), m_log_filename.c_str());
         ASSERT_EQ(msg + '\n', res.substr(kHdrLen)); // Account for the datetime header and trailing newline.
     }
 }
@@ -406,7 +366,7 @@ TEST_F(LoggerTests, HandlesLongMessages)
         msg.resize(n, '$');
         log(m_logger, "%s", msg.c_str());
 
-        const auto res = read_file_to_string(Env::default_env(), m_log_filename);
+        const auto res = read_file_to_string(Env::default_env(), m_log_filename.c_str());
         ASSERT_EQ(msg + '\n', res.substr(kHdrLen)); // Account for the datetime header and trailing newline.
     }
 }
@@ -426,10 +386,10 @@ public:
 
     ~EnvLockStateTests() override
     {
-        (void)m_env->remove_file(m_filename);
+        (void)m_env->remove_file(m_filename.c_str());
     }
 
-    auto new_file(const std::string &filename) -> File *
+    auto new_file(const char *filename) -> File *
     {
         File *file;
         EXPECT_OK(m_env->new_file(
@@ -442,7 +402,7 @@ public:
 
     auto test_sequence(bool) -> void
     {
-        auto *f = new_file(m_filename);
+        auto *f = new_file(m_filename.c_str());
         ASSERT_OK(f->file_lock(kFileShared));
         ASSERT_OK(f->file_lock(kFileExclusive));
         f->file_unlock();
@@ -450,9 +410,9 @@ public:
 
     auto test_shared() -> void
     {
-        auto *a = new_file(m_filename);
-        auto *b = new_file(m_filename);
-        auto *c = new_file(m_filename);
+        auto *a = new_file(m_filename.c_str());
+        auto *b = new_file(m_filename.c_str());
+        auto *c = new_file(m_filename.c_str());
         ASSERT_OK(a->file_lock(kFileShared));
         ASSERT_OK(b->file_lock(kFileShared));
         ASSERT_OK(c->file_lock(kFileShared));
@@ -463,8 +423,8 @@ public:
 
     auto test_exclusive() -> void
     {
-        auto *a = new_file(m_filename);
-        auto *b = new_file(m_filename);
+        auto *a = new_file(m_filename.c_str());
+        auto *b = new_file(m_filename.c_str());
 
         ASSERT_OK(a->file_lock(kFileShared));
         ASSERT_OK(a->file_lock(kFileExclusive));
@@ -512,7 +472,7 @@ TEST_P(EnvLockStateTests, Exclusive)
 
 TEST_P(EnvLockStateTests, NOOPs)
 {
-    auto *f = new_file(m_filename);
+    auto *f = new_file(m_filename.c_str());
 
     ASSERT_OK(f->file_lock(kFileShared));
     ASSERT_OK(f->file_lock(kFileShared));
@@ -530,7 +490,7 @@ TEST_P(EnvLockStateTests, NOOPs)
 #ifndef NDEBUG
 TEST_P(EnvLockStateTests, InvalidRequestDeathTest)
 {
-    auto *f = new_file(m_filename);
+    auto *f = new_file(m_filename.c_str());
     // kUnlocked -> kShared is the only allowed transition out of kUnlocked.
     ASSERT_DEATH((void)f->file_lock(kFileExclusive), "");
 }
@@ -671,7 +631,7 @@ static auto busy_wait_shm_lock(File &file, size_t r, size_t n, ShmLockFlag flags
         if (s.is_ok()) {
             return;
         } else if (!s.is_busy()) {
-            ADD_FAILURE() << s.to_string();
+            ADD_FAILURE() << s.type_name() << ": " << s.message();
         }
         std::this_thread::yield();
     }
@@ -679,8 +639,6 @@ static auto busy_wait_shm_lock(File &file, size_t r, size_t n, ShmLockFlag flags
 static auto file_reader_writer_test_routine(Env &, File &file, bool is_writer) -> void
 {
     busy_wait_file_lock(file, is_writer);
-
-    Status s;
     if (is_writer) {
         write_file_version(file, read_file_version(file) + 1);
     } else {
@@ -688,7 +646,7 @@ static auto file_reader_writer_test_routine(Env &, File &file, bool is_writer) -
     }
     file.file_unlock();
 }
-static auto shm_lifetime_test_routine(Env &env, const std::string &filename, bool unlink) -> void
+static auto shm_lifetime_test_routine(Env &env, const char *filename, bool unlink) -> void
 {
     File *file;
     ASSERT_OK(env.new_file(filename, Env::kCreate, file));
@@ -729,7 +687,7 @@ public:
     explicit SharedCount(Env &env, const std::string &name)
     {
         volatile void *ptr;
-        EXPECT_OK(env.new_file(name, Env::kCreate | Env::kReadWrite, m_file));
+        EXPECT_OK(env.new_file(name.c_str(), Env::kCreate | Env::kReadWrite, m_file));
         EXPECT_OK(m_file->shm_map(0, true, ptr));
         EXPECT_TRUE(ptr);
         m_ptr = reinterpret_cast<volatile uint32_t *>(ptr);
@@ -771,20 +729,20 @@ public:
 // between threads in the same process.
 //
 // This test fixture uses multiple processes/threads to access a one or more Envs.
-// The process is forked kNumEnvs times. The Env is not created until after the
-// fork(), so there are kNumEnvs independent Envs, each managing its own inode list.
+// The process is forked m_num_processes times. The Env is not created until after the
+// fork(), so there are m_num_processes independent Envs, each managing its own inode list.
 // Locking between processes must take place through the actual POSIX advisory locks.
 // Locking between threads in the same process must be coordinated through the
 // global inode list.
 struct EnvConcurrencyTestsParam {
-    size_t num_envs = 0;
+    size_t num_processes = 0;
     size_t num_threads = 0;
 };
 class EnvConcurrencyTests : public testing::TestWithParam<EnvConcurrencyTestsParam>
 {
 public:
-    const size_t kNumEnvs = GetParam().num_envs;
-    const size_t kNumThreads = GetParam().num_threads;
+    const size_t m_num_processes = GetParam().num_processes;
+    const size_t m_num_threads = GetParam().num_threads;
     static constexpr size_t kNumRounds = 500;
     std::string m_dirname;
 
@@ -796,7 +754,9 @@ public:
         // Create the file and zero out the version.
         auto &tempenv = Env::default_env();
         File *tempfile;
-        ASSERT_OK(tempenv.new_file(m_dirname + "/0000000000", Env::kCreate, tempfile));
+        const auto filename = m_dirname + "/0000000000";
+        (void)tempenv.remove_file(filename.c_str());
+        ASSERT_OK(tempenv.new_file(filename.c_str(), Env::kCreate, tempfile));
         write_file_version(*tempfile, 0);
         delete tempfile;
     }
@@ -808,7 +768,7 @@ public:
             m_helper.env = m_env;
         }
 
-        ASSERT_GT(kNumEnvs, 0) << "REQUIRES: kNumEnvs > 0";
+        ASSERT_GT(m_num_processes, 0) << "REQUIRES: m_num_processes > 0";
         m_helper.open_unowned_file(
             EnvWithFiles::kSameName,
             Env::kCreate,
@@ -818,25 +778,45 @@ public:
     template <class Test>
     auto run_test(const Test &test)
     {
-        for (size_t n = 0; n < kNumEnvs; ++n) {
+        std::vector<int> pipes(m_num_processes);
+        for (size_t n = 0; n < m_num_processes; ++n) {
+            int pipefd[2];
+            ASSERT_EQ(pipe(pipefd), 0);
+            pipes[n] = pipefd[0];
+
             const auto pid = fork();
             ASSERT_NE(-1, pid) << strerror(errno);
             if (pid) {
-                continue;
+                close(pipefd[1]);
+            } else {
+                close(pipefd[0]);
+                dup2(pipefd[1], STDOUT_FILENO);
+                dup2(pipefd[1], STDERR_FILENO);
+                test(n);
+                std::exit(testing::Test::HasFailure());
             }
-
-            test(n);
-            std::exit(testing::Test::HasFailure());
         }
-        for (size_t n = 0; n < kNumEnvs; ++n) {
+        for (size_t n = 0; n < m_num_processes; ++n) {
             int s;
             const auto pid = wait(&s);
             ASSERT_NE(pid, -1)
                 << "wait failed: " << strerror(errno);
-            ASSERT_TRUE(WIFEXITED(s) && WEXITSTATUS(s) == 0)
-                << "exited " << (WIFEXITED(s) ? "" : "ab")
-                << "normally with exit status "
-                << WEXITSTATUS(s);
+            if (WIFEXITED(s) && WEXITSTATUS(s) != 0) {
+                std::string msg;
+                for (char buf[256];;) {
+                    if (const auto rc = read(pipes[n], buf, sizeof(buf))) {
+                        ASSERT_GT(rc, 0) << strerror(errno);
+                        msg.append(buf, static_cast<size_t>(rc));
+                    } else {
+                        break;
+                    }
+                }
+                ADD_FAILURE()
+                    << "exited " << (WIFEXITED(s) ? "" : "ab")
+                    << "normally with exit status " << WEXITSTATUS(s)
+                    << '\n'
+                    << msg;
+            }
         }
     }
 
@@ -845,11 +825,11 @@ public:
     {
         set_up(true);
         run_test([&is_writer, this](auto) {
-            for (size_t i = 0; i < kNumThreads; ++i) {
+            for (size_t i = 0; i < m_num_threads; ++i) {
                 set_up();
             }
             std::vector<std::thread> threads;
-            while (threads.size() < kNumThreads) {
+            while (threads.size() < m_num_threads) {
                 const auto t = threads.size();
                 threads.emplace_back([&is_writer, t, this] {
                     for (size_t r = 0; r < kNumRounds; ++r) {
@@ -862,21 +842,22 @@ public:
             }
         });
         set_up();
-        ASSERT_EQ(writers_per_thread * kNumThreads, read_file_version(*m_helper.files.front()));
+        ASSERT_EQ(writers_per_thread * m_num_threads, read_file_version(*m_helper.files.front()));
     }
 
     auto run_shm_lifetime_test(bool unlink) -> void
     {
-        for (size_t i = 0; i < kNumThreads; ++i) {
+        for (size_t i = 0; i < m_num_threads; ++i) {
             set_up(true);
         }
         run_test([this, unlink](auto) {
             std::vector<std::thread> threads;
-            while (threads.size() < kNumThreads) {
+            while (threads.size() < m_num_threads) {
                 threads.emplace_back([this, unlink] {
                     for (size_t r = 0; r < kNumRounds; ++r) {
+                        const auto filename = m_dirname + make_filename(0);
                         shm_lifetime_test_routine(
-                            *m_helper.env, m_dirname + make_filename(0), unlink);
+                            *m_helper.env, filename.c_str(), unlink);
                     }
                 });
             }
@@ -901,17 +882,18 @@ public:
 
         auto &env = Env::default_env();
         File *file; // Keep this shm open to read from at the end...
-        ASSERT_OK(env.new_file(m_dirname + "0000000000", Env::kCreate, file));
-        ASSERT_OK(file->resize(0));
+        const auto filename = m_dirname + "0000000000";
+        (void)env.remove_file(filename.c_str());
+        ASSERT_OK(env.new_file(filename.c_str(), Env::kCreate, file));
         volatile void *ptr;
         ASSERT_OK(file->shm_map(0, true, ptr));
         run_test([&](auto) {
-            for (size_t i = 0; i < kNumThreads; ++i) {
+            for (size_t i = 0; i < m_num_threads; ++i) {
                 set_up();
                 ASSERT_OK(m_helper.files[i]->shm_map(0, true, ptr));
             }
             std::vector<std::thread> threads;
-            while (threads.size() < kNumThreads) {
+            while (threads.size() < m_num_threads) {
                 const auto t = threads.size();
                 threads.emplace_back([t, this, &flags, writer_n] {
                     for (size_t r = 0; r < kNumRounds; ++r) {
@@ -927,7 +909,7 @@ public:
             }
         });
 
-        ASSERT_EQ(num_writers * writer_n * kNumThreads * kNumEnvs, sum_shm_versions(*file));
+        ASSERT_EQ(num_writers * writer_n * m_num_threads * m_num_processes, sum_shm_versions(*file));
         file->shm_unmap(true);
         delete file;
         // Get rid of the shm for the next round.
@@ -944,7 +926,7 @@ public:
         run_test([&](auto) {
             auto &env = Env::default_env();
             std::vector<std::thread> threads;
-            while (threads.size() < kNumThreads) {
+            while (threads.size() < m_num_threads) {
                 threads.emplace_back([&env, num_writes] {
                     for (size_t r = 0; r < kNumRounds; ++r) {
                         SharedCount count(env, "shared_count");
@@ -958,7 +940,7 @@ public:
                 thread.join();
             }
         });
-        ASSERT_EQ(count.load(), kNumEnvs * kNumThreads * num_writes);
+        ASSERT_EQ(count.load(), m_num_processes * m_num_threads * num_writes);
     }
 
 protected:
@@ -967,19 +949,19 @@ protected:
 };
 TEST_P(EnvConcurrencyTests, SingleWriter)
 {
-    run_reader_writer_test(kNumEnvs, [](auto r) {
+    run_reader_writer_test(m_num_processes, [](auto r) {
         return r == kNumRounds / 2;
     });
 }
 TEST_P(EnvConcurrencyTests, MultipleWriters)
 {
-    run_reader_writer_test(kNumEnvs * kNumRounds / 10, [](auto r) {
+    run_reader_writer_test(m_num_processes * kNumRounds / 10, [](auto r) {
         return r % 10 == 9;
     });
 }
 TEST_P(EnvConcurrencyTests, Contention)
 {
-    run_reader_writer_test(kNumEnvs * kNumRounds / 2, [](auto r) {
+    run_reader_writer_test(m_num_processes * kNumRounds / 2, [](auto r) {
         return r & 1;
     });
 }
@@ -1054,7 +1036,7 @@ TEST(EnvWrappers, WrapperEnvWorksAsExpected)
     File *file;
     Logger *sink;
     ASSERT_OK(w_env.new_file("file", Env::kCreate, file));
-    ASSERT_OK(w_env.new_logger("sink", sink));
+    ASSERT_TRUE(w_env.new_logger("sink", sink).is_not_supported());
     ASSERT_TRUE(w_env.file_exists("file"));
     volatile void *ptr;
     delete file;

@@ -35,11 +35,6 @@ public:
     // Construct an OK status
     explicit Status() = default;
 
-    ~Status()
-    {
-        delete[] m_state;
-    }
-
     // Create an OK status
     static auto ok() -> Status
     {
@@ -52,7 +47,7 @@ public:
     {
         return Status(kInvalidArgument, msg);
     }
-    static auto invalid_argument(const Slice &msg) -> Status
+    static auto invalid_argument(const char *msg) -> Status
     {
         return Status(kInvalidArgument, msg);
     }
@@ -60,7 +55,7 @@ public:
     {
         return Status(kNotSupported, msg);
     }
-    static auto not_supported(const Slice &msg) -> Status
+    static auto not_supported(const char *msg) -> Status
     {
         return Status(kNotSupported, msg);
     }
@@ -68,7 +63,7 @@ public:
     {
         return Status(kCorruption, msg);
     }
-    static auto corruption(const Slice &msg) -> Status
+    static auto corruption(const char *msg) -> Status
     {
         return Status(kCorruption, msg);
     }
@@ -76,7 +71,7 @@ public:
     {
         return Status(kNotFound, msg);
     }
-    static auto not_found(const Slice &msg) -> Status
+    static auto not_found(const char *msg) -> Status
     {
         return Status(kNotFound, msg);
     }
@@ -84,7 +79,7 @@ public:
     {
         return Status(kIOError, msg);
     }
-    static auto io_error(const Slice &msg) -> Status
+    static auto io_error(const char *msg) -> Status
     {
         return Status(kIOError, msg);
     }
@@ -92,7 +87,7 @@ public:
     {
         return Status(kBusy, msg);
     }
-    static auto busy(const Slice &msg) -> Status
+    static auto busy(const char *msg) -> Status
     {
         return Status(kBusy, msg);
     }
@@ -100,7 +95,7 @@ public:
     {
         return Status(kAborted, msg);
     }
-    static auto aborted(const Slice &msg) -> Status
+    static auto aborted(const char *msg) -> Status
     {
         return Status(kAborted, msg);
     }
@@ -166,8 +161,8 @@ public:
         return m_subc;
     }
 
-    // Convert the status to a printable string.
-    [[nodiscard]] auto to_string() const -> std::string;
+    [[nodiscard]] auto type_name() const -> const char *;
+    [[nodiscard]] auto message() const -> const char *;
 
     auto operator==(const Status &rhs) const -> bool
     {
@@ -179,20 +174,20 @@ public:
     }
 
     // Status can be copied and moved.
-    Status(const Status &rhs);
-    auto operator=(const Status &rhs) -> Status &;
+    Status(const Status &rhs) = default;
+    auto operator=(const Status &rhs) -> Status & = default;
     Status(Status &&rhs) noexcept;
     auto operator=(Status &&rhs) noexcept -> Status &;
 
 private:
-    explicit Status(Code code, const Slice &msg);
+    explicit Status(Code code, const char *msg);
     explicit Status(Code code, SubCode subc = kNone)
         : m_code(code),
           m_subc(subc)
     {
     }
 
-    const char *m_state = nullptr;
+    const char *m_state = "";
     Code m_code = kOK;
     SubCode m_subc = kNone;
 };

@@ -3,9 +3,6 @@
 // LICENSE.md. See AUTHORS.md for a list of contributor names.
 
 #include "calicodb/env.h"
-#include "env_posix.h"
-#include "logging.h"
-#include "utils.h"
 
 namespace calicodb
 {
@@ -49,27 +46,27 @@ auto EnvWrapper::target() const -> const Env *
     return m_target;
 }
 
-auto EnvWrapper::new_file(const std::string &filename, OpenMode mode, File *&out) -> Status
+auto EnvWrapper::new_file(const char *filename, OpenMode mode, File *&out) -> Status
 {
     return m_target->new_file(filename, mode, out);
 }
 
-auto EnvWrapper::new_logger(const std::string &filename, Logger *&out) -> Status
+auto EnvWrapper::new_logger(const char *filename, Logger *&out) -> Status
 {
     return m_target->new_logger(filename, out);
 }
 
-auto EnvWrapper::file_exists(const std::string &filename) const -> bool
+auto EnvWrapper::file_exists(const char *filename) const -> bool
 {
     return m_target->file_exists(filename);
 }
 
-auto EnvWrapper::file_size(const std::string &filename, size_t &out) const -> Status
+auto EnvWrapper::file_size(const char *filename, size_t &out) const -> Status
 {
     return m_target->file_size(filename, out);
 }
 
-auto EnvWrapper::remove_file(const std::string &filename) -> Status
+auto EnvWrapper::remove_file(const char *filename) -> Status
 {
     return m_target->remove_file(filename);
 }

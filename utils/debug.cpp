@@ -39,7 +39,7 @@ auto print_database_overview(std::ostream &os, Pager &pager) -> void
             } else {
                 s = PointerMap::read_entry(pager, page_id, entry);
                 if (!s.is_ok()) {
-                    os << "error: " << s.to_string() << '\n';
+                    os << "error: " << s.type_name() << ": " << s.message() << '\n';
                     return;
                 }
                 parent_id = entry.back_ptr;
@@ -47,7 +47,7 @@ auto print_database_overview(std::ostream &os, Pager &pager) -> void
             PageRef *page;
             s = pager.acquire(page_id, page);
             if (!s.is_ok()) {
-                os << "error: " << s.to_string() << '\n';
+                os << "error: " << s.type_name() << ": " << s.message() << '\n';
                 return;
             }
 
@@ -70,12 +70,7 @@ auto print_database_overview(std::ostream &os, Pager &pager) -> void
                     }
                     break;
                 }
-                case PointerMap::kFreelistLeaf:
-                    type = "Unused";
-                    break;
-                case PointerMap::kFreelistTrunk:
-                    append_fmt_string(
-                        info, "N=%u,Next=%u", get_u32(page->data + 4), get_u32(page->data));
+                case PointerMap::kFreelistPage:
                     type = "Freelist";
                     break;
                 case PointerMap::kOverflowHead:

@@ -35,11 +35,11 @@ public:
         kReadOnly = 2,
         kReadWrite = 4,
     };
-    virtual auto new_file(const std::string &filename, OpenMode mode, File *&out) -> Status = 0;
-    virtual auto new_logger(const std::string &filename, Logger *&out) -> Status = 0;
-    virtual auto file_size(const std::string &filename, size_t &out) const -> Status = 0;
-    virtual auto remove_file(const std::string &filename) -> Status = 0;
-    [[nodiscard]] virtual auto file_exists(const std::string &filename) const -> bool = 0;
+    virtual auto new_file(const char *filename, OpenMode mode, File *&out) -> Status = 0;
+    virtual auto new_logger(const char *filename, Logger *&out) -> Status = 0;
+    virtual auto file_size(const char *filename, size_t &out) const -> Status = 0;
+    virtual auto remove_file(const char *filename) -> Status = 0;
+    [[nodiscard]] virtual auto file_exists(const char *filename) const -> bool = 0;
 
     virtual auto srand(unsigned seed) -> void = 0;
     virtual auto rand() -> unsigned = 0;
@@ -119,6 +119,7 @@ public:
     Logger(Logger &) = delete;
     void operator=(Logger &) = delete;
 
+    virtual auto append(const Slice &msg) -> void = 0;
     virtual auto logv(const char *fmt, std::va_list args) -> void = 0;
 };
 
@@ -133,11 +134,11 @@ public:
 
     ~EnvWrapper() override;
 
-    auto new_logger(const std::string &filename, Logger *&out) -> Status override;
-    auto new_file(const std::string &filename, OpenMode mode, File *&out) -> Status override;
-    auto file_size(const std::string &filename, size_t &out) const -> Status override;
-    auto remove_file(const std::string &filename) -> Status override;
-    [[nodiscard]] auto file_exists(const std::string &filename) const -> bool override;
+    auto new_logger(const char *filename, Logger *&out) -> Status override;
+    auto new_file(const char *filename, OpenMode mode, File *&out) -> Status override;
+    auto file_size(const char *filename, size_t &out) const -> Status override;
+    auto remove_file(const char *filename) -> Status override;
+    [[nodiscard]] auto file_exists(const char *filename) const -> bool override;
 
     auto srand(unsigned seed) -> void override;
     auto rand() -> unsigned override;

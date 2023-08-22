@@ -74,13 +74,6 @@ public:
     // given Tx: file locks are held until the Tx handle is delete'd.
     virtual auto commit() -> Status = 0;
 
-    // Get the `value` associated with the given `key` from the bucket referenced by `c`
-    // If a record with the given `key` exists, assigns to `*value` its associated value and
-    // returns an OK status. If the `key` does not exist, sets `*value` to nullptr and returns
-    // a "not found" status. If an error is encountered, returns a non-OK status as appropriate.
-    // Leaves the cursor on the target record on success, and invalidates it on failure.
-    virtual auto get(Cursor &c, const Slice &key, std::string *value) const -> Status = 0;
-
     // Create a mapping between `key` and `value` in the bucket referenced to by `c`
     // If a record with key `key` already exists, sets its value to `value`. Otherwise, a
     // new record is created. Returns an OK status on success, and a non-OK status on

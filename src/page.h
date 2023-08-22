@@ -5,6 +5,7 @@
 #ifndef CALICODB_PAGE_H
 #define CALICODB_PAGE_H
 
+#include "alloc.h"
 #include "header.h"
 #include "list.h"
 
@@ -24,8 +25,10 @@ struct DirtyHdr {
 
 struct PageRef {
     char *data;
+    PageRef *next_hash;
     PageRef *prev_entry;
     PageRef *next_entry;
+    DirtyHdr dirty_hdr;
 
     Id page_id;
     uint16_t refs;
@@ -37,50 +40,45 @@ struct PageRef {
         kExtra = 4,
     } flag;
 
+    [[nodiscard]] auto key() const -> uint32_t
+    {
+        return page_id.value;
+    }
+
     static auto alloc() -> PageRef *
     {
         static_assert(std::is_trivially_copyable_v<DirtyHdr>);
         static_assert(std::is_trivially_copyable_v<PageRef>);
-        static_assert(alignof(PageRef) == alignof(void *));
-        static_assert(alignof(DirtyHdr) == alignof(void *));
-        static_assert(sizeof(PageRef) == 4 * sizeof(void *));
 
         // Allocate this many bytes of extra space at the end of the page buffer to catch
         // out-of-bounds reads and writes that might occur if the database is corrupted.
-        static constexpr size_t kSpilloverLen = alignof(PageRef);
+        static constexpr size_t kSpilloverLen = sizeof(void *);
 
-        auto *ref = static_cast<PageRef *>(std::aligned_alloc(
-            alignof(PageRef),
-            sizeof(PageRef) +
-                sizeof(DirtyHdr) +
-                kPageSize +
-                kSpilloverLen));
+        auto *ref = static_cast<PageRef *>(Alloc::malloc(
+            sizeof(PageRef) + kPageSize + kSpilloverLen));
         if (ref) {
+            CALICODB_EXPECT_TRUE(is_aligned(ref, alignof(PageRef)));
+            IntrusiveList::initialize(*ref);
+            IntrusiveList::initialize(ref->dirty_hdr);
             *ref = {
-                reinterpret_cast<char *>(ref + 1) + sizeof(DirtyHdr),
-                ref,
-                ref,
+                // Page buffer is located right after the PageRef struct.
+                reinterpret_cast<char *>(ref + 1),
+                nullptr,
+                // Next 3 members already set by IntrusiveList::initialize(). Forward the values.
+                ref->prev_entry,
+                ref->next_entry,
+                ref->dirty_hdr,
                 Id::null(),
                 0,
                 PageRef::kNormal,
             };
-
-            auto *hdr = ref->get_dirty_hdr();
-            *hdr = {
-                nullptr,
-                hdr,
-                hdr,
-            };
-
-            // DirtyHdr must be properly aligned.
-            CALICODB_EXPECT_EQ(0, reinterpret_cast<std::uintptr_t>(hdr) % alignof(DirtyHdr));
         }
         return ref;
     }
 
     static auto free(PageRef *ref) -> void
     {
-        std::free(ref);
+        Alloc::free(ref);
     }
 
     [[nodiscard]] auto get_flag(Flag f) const -> bool
@@ -95,25 +93,18 @@ struct PageRef {
     {
         flag = static_cast<Flag>(flag & ~f);
     }
-
-    [[nodiscard]] auto get_dirty_hdr() -> DirtyHdr *
-    {
-        return reinterpret_cast<DirtyHdr *>(this + 1);
-    }
-    [[nodiscard]] auto get_dirty_hdr() const -> const DirtyHdr *
-    {
-        return const_cast<PageRef *>(this)->get_dirty_hdr();
-    }
 };
 
 auto DirtyHdr::get_page_ref() -> PageRef *
 {
-    return reinterpret_cast<PageRef *>(this) - 1;
+    auto *bytes = reinterpret_cast<char *>(this);
+    return reinterpret_cast<PageRef *>(bytes - offsetof(PageRef, dirty_hdr));
 }
 
 auto DirtyHdr::get_page_ref() const -> const PageRef *
 {
-    return const_cast<DirtyHdr *>(this)->get_page_ref();
+    const auto *bytes = reinterpret_cast<const char *>(this);
+    return reinterpret_cast<const PageRef *>(bytes - offsetof(PageRef, dirty_hdr));
 }
 
 [[nodiscard]] inline auto page_offset(Id page_id) -> uint32_t

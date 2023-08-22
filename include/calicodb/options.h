@@ -5,7 +5,7 @@
 #ifndef CALICODB_OPTIONS_H
 #define CALICODB_OPTIONS_H
 
-#include <string>
+#include <cstddef>
 
 namespace calicodb
 {
@@ -18,7 +18,7 @@ class Logger;
 static constexpr size_t kPageSize = 4'096;
 
 struct Options final {
-    // Size of the page cache in bytes. Must be at least 16 pages.
+    // Size of the page cache in bytes.
     size_t cache_size = 1'024 * kPageSize; // 4 MB
 
     // Run a checkpoint when the WAL has reached this number of frames. If
@@ -29,7 +29,7 @@ struct Options final {
 
     // Alternate filename to use for the WAL. If empty, creates the WAL at
     // "dbname-wal", where "dbname" is the name of the database.
-    std::string wal_filename;
+    const char *wal_filename = "";
 
     // Destination for info log messages.
     Logger *info_log = nullptr;

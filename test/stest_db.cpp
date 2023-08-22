@@ -10,6 +10,7 @@
 #include "stest/sequence_scenario.h"
 #include "test.h"
 #include "tx_impl.h"
+#include <filesystem>
 #include <gtest/gtest.h>
 
 namespace calicodb::test
@@ -223,23 +224,7 @@ struct DatabaseState {
             if (!try_attach_cursor(c, i)) {
                 break;
             }
-            const auto key = random_chunk(kMaxKeyLen);
-            c.seek(key);
-            if (c.is_valid()) {
-                // These need to be converted into std::strings, since the cursor is
-                // about to be moved.
-                const auto key_from_cursor = c.key().to_string();
-                const auto value_from_cursor = c.value().to_string();
-                // Make sure the record looks the same from the cursor as it does from
-                // Tx::get().
-                std::string value_from_get;
-                s = tx->get(c, c.key(), &value_from_get);
-                if (s.is_ok()) {
-                    ASSERT_EQ(key_from_cursor, c.key());
-                    ASSERT_EQ(value_from_cursor, c.value());
-                    ASSERT_EQ(value_from_cursor, value_from_get);
-                }
-            }
+            c.seek(random_chunk(kMaxKeyLen));
         }
     }
 
@@ -256,16 +241,20 @@ struct DatabaseState {
             }
             c.seek(rng.Generate(kMaxKeyLen));
             if (c.is_valid()) {
-                s = tx->erase(c);
+                if (i & 1) {
+                    s = tx->erase(c);
+                } else {
+                    s = tx->erase(c, c.key());
+                }
             }
         }
     }
 
     auto check_status(uint32_t mask) const -> void
     {
-        ASSERT_EQ(mask, mask & (1 << s.code())) << s.to_string();
+        ASSERT_EQ(mask, mask & (1 << s.code())) << s.type_name() << ": " << s.message();
         if (tx) {
-            ASSERT_EQ(s, tx->status()) << tx->status().to_string();
+            ASSERT_EQ(s, tx->status()) << tx->status().type_name() << ": " << tx->status().message();
         }
     }
 
@@ -281,7 +270,7 @@ struct DatabaseState {
 
     auto open_db() -> void
     {
-        s = ModelDB::open(db_opt, filename, model_store, db);
+        s = ModelDB::open(db_opt, filename.c_str(), model_store, db);
     }
 
     auto close_db() -> void
@@ -791,9 +780,9 @@ protected:
 
     explicit STestDB()
     {
-        (void)Env::default_env().remove_file(m_state.filename);
-        (void)Env::default_env().remove_file(m_state.filename + kDefaultShmSuffix);
-        (void)Env::default_env().remove_file(m_state.filename + kDefaultWalSuffix);
+        std::filesystem::remove_all(m_state.filename);
+        std::filesystem::remove_all(m_state.filename + kDefaultShmSuffix);
+        std::filesystem::remove_all(m_state.filename + kDefaultWalSuffix);
     }
 
     auto TearDown() -> void override

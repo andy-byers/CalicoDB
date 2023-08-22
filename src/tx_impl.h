@@ -10,6 +10,7 @@
 namespace calicodb
 {
 
+class ErrorState;
 struct Bucket;
 struct BucketOptions;
 struct Stat;
@@ -17,7 +18,15 @@ struct Stat;
 class TxImpl : public Tx
 {
 public:
-    explicit TxImpl(Pager &pager, const Status &status, Stat &stat, char *scratch, bool writable);
+    struct Parameters {
+        const Status *status;
+        ErrorState *errors;
+        Pager *pager;
+        Stat *stat;
+        char *scratch;
+        bool writable;
+    };
+    explicit TxImpl(const Parameters &param);
     ~TxImpl() override;
 
     [[nodiscard]] auto status() const -> Status override
@@ -27,7 +36,7 @@ public:
 
     [[nodiscard]] auto schema() const -> Cursor & override
     {
-        return m_schema.cursor();
+        return *m_schema.cursor();
     }
 
     auto create_bucket(const BucketOptions &options, const Slice &name, Cursor **c_out) -> Status override;
@@ -36,7 +45,6 @@ public:
     auto vacuum() -> Status override;
     auto commit() -> Status override;
 
-    auto get(Cursor &c, const Slice &key, std::string *value) const -> Status override;
     auto put(Cursor &c, const Slice &key, const Slice &value) -> Status override;
     auto erase(Cursor &c, const Slice &key) -> Status override;
     auto erase(Cursor &c) -> Status override;
@@ -47,24 +55,33 @@ public:
     }
 
 private:
+    template <class Operation>
+    auto run_write_operation(const Operation &operation) const -> Status
+    {
+        Status s;
+        if (!m_writable) {
+            s = Status::not_supported("transaction is readonly");
+        } else if (m_status->is_ok()) {
+            s = operation();
+            if (!s.is_ok()) {
+                m_pager->set_status(s);
+            }
+        } else {
+            s = *m_status;
+        }
+        return s;
+    }
+
     // m_backref is not known until after the constructor runs. Let DBImpl set it.
     friend class DBImpl;
 
     mutable Schema m_schema;
+    ErrorState *const m_errors;
     const Status *const m_status;
     Pager *const m_pager;
     TxImpl **m_backref = nullptr;
     const bool m_writable;
 };
-
-inline auto tx_impl(Tx *tx) -> TxImpl *
-{
-    return reinterpret_cast<TxImpl *>(tx);
-}
-inline auto tx_impl(const Tx *tx) -> const TxImpl *
-{
-    return reinterpret_cast<const TxImpl *>(tx);
-}
 
 } // namespace calicodb
 

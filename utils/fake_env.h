@@ -16,15 +16,15 @@ class FakeEnv : public Env
 {
 public:
     [[nodiscard]] virtual auto clone() const -> Env *;
-    [[nodiscard]] virtual auto get_file_contents(const std::string &filename) const -> std::string;
-    virtual auto put_file_contents(const std::string &filename, std::string contents) -> void;
+    [[nodiscard]] virtual auto get_file_contents(const char *filename) const -> std::string;
+    virtual auto put_file_contents(const char *filename, std::string contents) -> void;
 
     ~FakeEnv() override = default;
-    auto new_logger(const std::string &filename, Logger *&out) -> Status override;
-    auto new_file(const std::string &filename, OpenMode mode, File *&out) -> Status override;
-    [[nodiscard]] auto file_exists(const std::string &filename) const -> bool override;
-    [[nodiscard]] auto file_size(const std::string &filename, size_t &out) const -> Status override;
-    auto remove_file(const std::string &filename) -> Status override;
+    auto new_logger(const char *filename, Logger *&out) -> Status override;
+    auto new_file(const char *filename, OpenMode mode, File *&out) -> Status override;
+    [[nodiscard]] auto file_exists(const char *filename) const -> bool override;
+    [[nodiscard]] auto file_size(const char *filename, size_t &out) const -> Status override;
+    auto remove_file(const char *filename) -> Status override;
 
     auto srand(unsigned seed) -> void override;
     [[nodiscard]] auto rand() -> unsigned override;

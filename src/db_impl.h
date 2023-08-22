@@ -6,6 +6,8 @@
 #define CALICODB_DB_IMPL_H
 
 #include "calicodb/db.h"
+#include "error.h"
+#include "ptr.h"
 #include "stat.h"
 
 namespace calicodb
@@ -22,50 +24,50 @@ class DBImpl : public DB
 public:
     friend class DB;
 
-    explicit DBImpl(const Options &options, const Options &sanitized, std::string filename);
     ~DBImpl() override;
 
-    static auto destroy(const Options &options, const std::string &filename) -> Status;
+    static auto destroy(const Options &options, const char *filename) -> Status;
     auto open(const Options &sanitized) -> Status;
 
-    [[nodiscard]] auto get_property(const Slice &name, std::string *out) const -> bool override;
+    [[nodiscard]] auto get_property(const Slice &name, Slice *out) const -> bool override;
     auto new_tx(Tx *&tx) const -> Status override;
     auto new_tx(WriteTag, Tx *&tx) -> Status override;
     auto checkpoint(bool reset) -> Status override;
 
-    [[nodiscard]] auto TEST_pager() const -> const Pager &;
+    [[nodiscard]] auto TEST_pager() const -> Pager &;
 
 private:
+    struct Parameters {
+        Options sanitized;
+        UniqueBuffer db_name;
+        UniqueBuffer wal_name;
+        UniqueBuffer scratch;
+    };
+    friend class Alloc;
+    explicit DBImpl(Parameters param);
+
     template <class TxType>
     auto prepare_tx(bool write, TxType *&tx_out) const -> Status;
 
+    mutable ErrorState m_errors;
     mutable Status m_status;
     mutable TxImpl *m_tx = nullptr;
     mutable Stat m_stat;
-    char *m_scratch = nullptr;
+    mutable UniqueBuffer m_scratch;
+    mutable UniqueBuffer m_property;
+    mutable ObjectPtr<Pager> m_pager;
 
-    Pager *m_pager = nullptr;
-    File *m_file = nullptr;
-
-    Env *const m_env = nullptr;
-    Logger *const m_log = nullptr;
-    BusyHandler *const m_busy = nullptr;
+    UserPtr<File> m_file;
+    Env *const m_env;
+    Logger *const m_log;
+    BusyHandler *const m_busy;
 
     const size_t m_auto_ckpt;
-    const std::string m_db_filename;
-    const std::string m_wal_filename;
+    const UniqueBuffer m_db_filename;
+    const UniqueBuffer m_wal_filename;
     const bool m_owns_log;
     const bool m_owns_env;
 };
-
-inline auto db_impl(DB *db) -> DBImpl *
-{
-    return reinterpret_cast<DBImpl *>(db);
-}
-inline auto db_impl(const DB *db) -> const DBImpl *
-{
-    return reinterpret_cast<const DBImpl *>(db);
-}
 
 } // namespace calicodb
 

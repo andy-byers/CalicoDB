@@ -43,6 +43,12 @@
 namespace calicodb
 {
 
+[[nodiscard]] inline auto is_aligned(void *ptr, size_t alignment) -> bool
+{
+    CALICODB_EXPECT_NE(alignment, 0);
+    return reinterpret_cast<std::uintptr_t>(ptr) % alignment == 0;
+}
+
 template <class Callback>
 auto busy_wait(BusyHandler *handler, const Callback &callback) -> Status
 {
@@ -59,8 +65,9 @@ auto busy_wait(BusyHandler *handler, const Callback &callback) -> Status
 
 static constexpr size_t kMinFrameCount = 1;
 static constexpr size_t kMaxCacheSize = 1 << 30;
-static constexpr auto kDefaultWalSuffix = "-wal";
-static constexpr auto kDefaultShmSuffix = "-shm";
+static constexpr size_t kTreeBufferLen = 3 * kPageSize;
+static constexpr auto *kDefaultWalSuffix = "-wal"; // TODO: Make this a Slice
+static constexpr auto *kDefaultShmSuffix = "-shm"; // TODO: Make this a Slice
 
 // Additional file locking modes that cannot be requested directly
 enum { kLockUnlocked = 0 };

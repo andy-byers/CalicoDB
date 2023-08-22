@@ -65,12 +65,6 @@ public:
 
     auto allocate(PageRef *&page_out) -> Status;
     auto acquire(Id page_id, PageRef *&page_out) -> Status;
-
-    // Push a database `page` onto the freelist
-    // Returns an OK status on success, and a non-OK status on failure. The caller can
-    // consider the `page` "released", regardless of the return status (release() is
-    // called on the `page` unconditionally).
-    auto destroy(PageRef *&page) -> Status;
     auto mark_dirty(PageRef &page) -> void;
     [[nodiscard]] auto get_root() -> PageRef &;
 
@@ -122,7 +116,9 @@ public:
     }
 
 private:
+    friend class Alloc;
     explicit Pager(const Parameters &param);
+
     auto open_wal() -> Status;
     auto refresh_state() -> Status;
     auto read_page(PageRef &out, size_t *size_out) -> Status;
@@ -130,6 +126,8 @@ private:
     auto ensure_available_buffer() -> Status;
     auto flush_dirty_pages() -> Status;
     auto purge_page(PageRef &victim) -> void;
+
+    static auto undo_callback(void *arg, Id id) -> void;
 
     mutable Mode m_mode = kOpen;
 
@@ -166,8 +164,7 @@ struct PointerMap {
         kTreeRoot,
         kOverflowHead,
         kOverflowLink,
-        kFreelistTrunk,
-        kFreelistLeaf,
+        kFreelistPage,
         kTypeCount
     };
 

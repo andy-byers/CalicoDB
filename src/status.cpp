@@ -10,40 +10,9 @@
 namespace calicodb
 {
 
-static auto new_status_string(const Slice &msg) -> char *
-{
-    auto *p = new char[msg.size() + 1];
-    std::memcpy(p, msg.data(), msg.size());
-    p[msg.size()] = '\0';
-    return p;
-}
-
-static auto copy_status_string(const char *data) -> char *
-{
-    if (data) {
-        const auto length =
-            std::char_traits<char>::length(data);
-        return new_status_string(Slice(data, length));
-    }
-    return nullptr;
-}
-
-static constexpr const char *kSubCodeMessages[Status::kMaxSubCode] = {
-    "",          // kNone
-    "retry",     // kRetry
-    "no memory", // kNoMemory
-};
-
-Status::Status(Code code, const Slice &msg)
-    : m_state(new_status_string(msg)),
+Status::Status(Code code, const char *msg)
+    : m_state(msg),
       m_code(code)
-{
-}
-
-Status::Status(const Status &rhs)
-    : m_state(copy_status_string(rhs.m_state)),
-      m_code(rhs.m_code),
-      m_subc(rhs.m_subc)
 {
 }
 
@@ -52,20 +21,9 @@ Status::Status(Status &&rhs) noexcept
       m_code(rhs.m_code),
       m_subc(rhs.m_subc)
 {
-    rhs.m_state = nullptr;
+    rhs.m_state = "";
     rhs.m_code = kOK;
     rhs.m_subc = kNone;
-}
-
-auto Status::operator=(const Status &rhs) -> Status &
-{
-    if (this != &rhs) {
-        delete[] m_state;
-        m_state = copy_status_string(rhs.m_state);
-        m_code = rhs.m_code;
-        m_subc = rhs.m_subc;
-    }
-    return *this;
 }
 
 auto Status::operator=(Status &&rhs) noexcept -> Status &
@@ -76,50 +34,46 @@ auto Status::operator=(Status &&rhs) noexcept -> Status &
     return *this;
 }
 
-auto Status::to_string() const -> std::string
+auto Status::type_name() const -> const char *
 {
-    const char *type_name;
     switch (m_code) {
         case kOK:
             return "OK";
         case kInvalidArgument:
-            type_name = "invalid argument: ";
-            break;
+            return "invalid argument";
         case kIOError:
-            type_name = "I/O error: ";
-            break;
+            return "I/O error";
         case kNotSupported:
-            type_name = "not supported: ";
-            break;
+            return "not supported";
         case kCorruption:
-            type_name = "corruption: ";
-            break;
+            return "corruption";
         case kNotFound:
-            type_name = "not found: ";
-            break;
+            return "not found";
         case kBusy:
-            type_name = "busy: ";
-            break;
+            return "busy";
         case kAborted:
-            type_name = "aborted: ";
-            break;
+            return "aborted";
         default:
-            type_name = "unrecognized: ";
             // This is not possible, so long as the constructors that take a `Code`
             // are never exposed (and the static method "constructors" are correct).
             CALICODB_EXPECT_TRUE(false && "unrecognized code");
+            return "unrecognized code";
     }
-    std::string result(type_name);
-    if (m_subc != kNone) {
-        CALICODB_EXPECT_LT(m_subc, kMaxSubCode);
-        result.append(kSubCodeMessages[m_subc]);
-    } else if (m_state) {
-        result.append(m_state);
-    } else {
-        // Clip off the ": " if there is no message.
-        result.resize(result.size() - 2);
+}
+
+auto Status::message() const -> const char *
+{
+    switch (m_subc) {
+        case kNone:
+            return m_state ? m_state : "";
+        case kRetry:
+            return "retry";
+        case kNoMemory:
+            return "no memory";
+        default:
+            CALICODB_EXPECT_TRUE(false && "unrecognized subcode");
+            return "unrecognized subcode";
     }
-    return result;
 }
 
 } // namespace calicodb

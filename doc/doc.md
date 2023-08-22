@@ -80,7 +80,7 @@ s = calicodb::Status::ok();
 std::printf("code = %d, subcode = %d\n", int(s.code()), int(s.subcode()));
 
 // A human-readable string representing the status can be created with:
-std::printf("s = %s\n", s.to_string().c_str());
+std::printf("s = %s: %s\n", s.type_name(), s.message());
 
 // Non-OK statuses must be created through one of the static methods. Note that a status can 
 // have either a message, or a subcode, but not both.
@@ -121,7 +121,7 @@ const calicodb::Options options = {
 calicodb::DB *db;
 s = calicodb::DB::open(options, "/tmp/cats", db);
 
-// Handle failure. s.to_string() provides a string representation of the status.
+// Handle failure. s.message() provides a string representation of the status.
 if (!s.is_ok()) {
 
 }
@@ -267,7 +267,21 @@ while (c->is_valid() && c->key() < "lilly") {
     c->next();
 }
 
-// Insert a new record using a cursor.
+// Find an exact record.
+c->find("lilly");
+if (c->is_valid()) {
+    // c->value() contains the value for "lilly".
+    assert(c->key() == "lilly");
+} else if (c->status().is_ok()) {
+    // "lilly" was not found.
+} else {
+    // An I/O error occurred.
+    assert(!c->status().is_ok());
+}
+
+// Insert a new record. c is used to determine what bucket to put the record in.
+// If c is already positioned near where the new record should go, a root-to-leaf 
+// traversal may be avoided.
 s = tx->put(*c, "junie", "tabby");
 if (s.is_ok()) {
     // c is placed on the newly-inserted record.
@@ -287,8 +301,16 @@ if (s.is_ok()) {
 // Erase the record pointed to by the cursor.
 s = tx->erase(*c);
 if (s.is_ok()) {
-    // c is on the record immediately following the erased record, if
-    // such a record exists.
+    // c is on the record immediately following the erased record, if such a 
+    // record exists. Otherwise, c is invalidated.
+}
+
+// For convenience, an overload of erase() is provided that takes a key directly. 
+// It is not an error if the key does not exist in this case (Status::ok() is 
+// returned unless there was an actual system-level error).
+s = tx->erase(*c, "some key");
+if (s.is_ok()) {
+    // "some key" is guaranteed to be absent from the bucket that c represents.
 }
 
 delete c;
@@ -297,10 +319,13 @@ delete c;
 ### Database properties
 
 ```C++
-// Database properties are made available as strings.
-std::string prop;
+// Database properties are made available as slices. Each time this routine is called, the
+// last slice that was returned is invalidated (this also happens when the database is 
+// closed).
+calicodb::Slice prop;
 if (db->get_property("calicodb.stats", &prop)) {
-    std::puts(prop.c_str());
+    // The property always ends in a null-terminator, so it can be used as a C-style string.
+    std::puts(prop.data());
 }
 
 // Passing nullptr for the property value causes get_property() to perform a simple existence check, 

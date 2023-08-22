@@ -7,6 +7,7 @@
 #include "common.h"
 #include "test.h"
 #include "utils.h"
+#include <filesystem>
 #include <gtest/gtest.h>
 
 namespace calicodb::test
@@ -47,8 +48,8 @@ protected:
 TEST_F(BoundaryValueTests, BoundaryPayload)
 {
     ASSERT_OK(m_db->update([this](auto &tx) {
-        Cursor *c;
-        auto s = tx.create_bucket(BucketOptions(), "bucket", &c);
+        TestCursor c;
+        auto s = test_create_and_open_bucket(tx, BucketOptions(), "bucket", c);
         if (s.is_ok()) {
             // Put a maximally-sized record.
             s = tx.put(*c, m_largest_slice, m_largest_slice);
@@ -57,8 +58,8 @@ TEST_F(BoundaryValueTests, BoundaryPayload)
     }));
 
     ASSERT_OK(m_db->view([this](const auto &tx) {
-        Cursor *c;
-        auto s = tx.open_bucket("bucket", b);
+        TestCursor c;
+        auto s = test_open_bucket(tx, "bucket", b);
         if (s.is_ok()) {
             std::string value;
             s = tx.get(*c, m_largest_slice, &value);
@@ -71,8 +72,8 @@ TEST_F(BoundaryValueTests, BoundaryPayload)
 TEST_F(BoundaryValueTests, OverflowPayload)
 {
     ASSERT_OK(m_db->update([this](auto &tx) {
-        Cursor *c;
-        auto s = tx.create_bucket(BucketOptions(), "bucket", &c);
+        TestCursor c;
+        auto s = test_create_and_open_bucket(tx, BucketOptions(), "bucket", c);
         if (s.is_ok()) {
             EXPECT_TRUE((s = tx.put(*c, m_overflow_slice, "v")).is_invalid_argument()) << s.to_string();
             EXPECT_TRUE((s = tx.put(*c, "k", m_overflow_slice)).is_invalid_argument()) << s.to_string();
@@ -88,9 +89,11 @@ protected:
     DB *m_db = nullptr;
 
     explicit StressTests()
-        : m_filename(testing::TempDir() + "db")
+        : m_filename(testing::TempDir() + "calicodb_stress_tests")
     {
-        (void)DB::destroy(Options(), m_filename);
+        std::filesystem::remove_all(m_filename);
+        std::filesystem::remove_all(m_filename + kDefaultWalSuffix);
+        std::filesystem::remove_all(m_filename + kDefaultShmSuffix);
     }
 
     ~StressTests() override
@@ -100,7 +103,7 @@ protected:
 
     auto SetUp() -> void override
     {
-        ASSERT_OK(DB::open(Options(), m_filename, m_db));
+        ASSERT_OK(DB::open(Options(), m_filename.c_str(), m_db));
     }
 };
 
@@ -112,9 +115,9 @@ TEST_F(StressTests, LotsOfBuckets)
     ASSERT_OK(m_db->update([](auto &tx) {
         Status s;
         for (size_t i = 0; s.is_ok() && i < kNumBuckets; ++i) {
-            Cursor *c;
+            TestCursor c;
             const auto name = numeric_key(i);
-            s = tx.create_bucket(BucketOptions(), name, &c);
+            s = test_create_and_open_bucket(tx, BucketOptions(), name, c);
             if (s.is_ok()) {
                 s = tx.put(*c, name, name);
             }
@@ -124,15 +127,14 @@ TEST_F(StressTests, LotsOfBuckets)
     ASSERT_OK(m_db->view([](auto &tx) {
         Status s;
         for (size_t i = 0; s.is_ok() && i < kNumBuckets; ++i) {
-            Cursor *c;
+            TestCursor c;
             const auto name = numeric_key(i);
-            s = tx.open_bucket(name, c);
+            s = test_open_bucket(tx, name, c);
             if (s.is_ok()) {
                 c->seek_first();
                 EXPECT_TRUE(c->is_valid());
                 EXPECT_EQ(name, c->key());
                 EXPECT_EQ(name, c->value());
-                delete c;
             }
         }
         return s;
@@ -143,13 +145,13 @@ TEST_F(StressTests, CursorLimit)
 {
     ASSERT_OK(m_db->update([](auto &tx) {
         Status s;
-        std::vector<Cursor *> cursors;
-        for (size_t i = 0; s.is_ok() && i < 1'000; ++i) {
-            Cursor *c;
-            s = tx.create_bucket(BucketOptions(), "bucket", &c);
+        std::vector<TestCursor> cursors(1'000);
+        for (size_t i = 0; s.is_ok() && i < cursors.size(); ++i) {
+            s = test_create_and_open_bucket(tx, BucketOptions(), "bucket", cursors[i]);
             if (s.is_ok()) {
-                cursors.emplace_back(c);
-                s = tx.put(*c, numeric_key(i), numeric_key(i));
+                s = tx.put(*cursors[i],
+                           numeric_key(i),
+                           numeric_key(i));
             } else {
                 break;
             }
@@ -164,9 +166,6 @@ TEST_F(StressTests, CursorLimit)
             EXPECT_EQ(cursors[i]->key(), numeric_key(i));
             EXPECT_EQ(cursors[i]->value(), numeric_key(i));
         }
-        for (const auto *c : cursors) {
-            delete c;
-        }
         return s;
     }));
 }
@@ -179,9 +178,9 @@ TEST_F(StressTests, LargeVacuum)
     ASSERT_OK(m_db->update([](auto &tx) {
         Status s;
         for (size_t i = 0; s.is_ok() && i < kTotalBuckets; ++i) {
-            Cursor *c;
+            TestCursor c;
             const auto name = numeric_key(i);
-            s = tx.create_bucket(BucketOptions(), name, &c);
+            s = test_create_and_open_bucket(tx, BucketOptions(), name, c);
             for (size_t j = 0; s.is_ok() && j < kNumRecords; ++j) {
                 s = tx.put(*c, numeric_key(j), numeric_key(j));
             }
@@ -198,10 +197,11 @@ TEST_F(StressTests, LargeVacuum)
     ASSERT_OK(m_db->view([](auto &tx) {
         Status s;
         for (size_t i = 0; s.is_ok() && i < kTotalBuckets; ++i) {
-            Cursor *c;
-            s = tx.open_bucket(numeric_key(i), c);
+            TestCursor c;
+            s = test_open_bucket(tx, numeric_key(i), c);
             if (i < kDroppedBuckets) {
-                EXPECT_TRUE(s.is_invalid_argument()) << s.to_string();
+                EXPECT_TRUE(s.is_invalid_argument()) << s.type_name() << ": "
+                                                     << s.message();
                 s = Status::ok();
             } else if (s.is_ok()) {
                 c->seek_first();
@@ -211,7 +211,6 @@ TEST_F(StressTests, LargeVacuum)
                     EXPECT_EQ(numeric_key(j), c->value());
                     c->next();
                 }
-                delete c;
             }
         }
         return s;

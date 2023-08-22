@@ -16,7 +16,7 @@ auto PrintTo(const Slice &s, std::ostream *os) -> void
 
 auto PrintTo(const Status &s, std::ostream *os) -> void
 {
-    *os << s.to_string();
+    *os << s.type_name() << ": " << s.message();
 }
 
 auto PrintTo(const Cursor &c, std::ostream *os) -> void
@@ -54,17 +54,18 @@ auto check_status(const char *expr, const Status &s) -> testing::AssertionResult
     if (s.is_ok()) {
         return testing::AssertionSuccess();
     } else {
-        return testing::AssertionFailure() << expr << ": " << s.to_string();
+        return testing::AssertionFailure() << expr << ": " << s.type_name()
+                                           << ": " << s.message();
     }
 }
 
-auto read_file_to_string(Env &env, const std::string &filename) -> std::string
+auto read_file_to_string(Env &env, const char *filename) -> std::string
 {
     size_t file_size;
     auto s = env.file_size(filename, file_size);
     if (!s.is_ok()) {
         if (!s.is_io_error()) {
-            ADD_FAILURE() << s.to_string();
+            ADD_FAILURE() << s.type_name() << ": " << s.message();
         }
         return "";
     }
@@ -80,7 +81,7 @@ auto read_file_to_string(Env &env, const std::string &filename) -> std::string
     return buffer;
 }
 
-auto write_string_to_file(Env &env, const std::string &filename, const std::string &buffer, long offset) -> void
+auto write_string_to_file(Env &env, const char *filename, const std::string &buffer, long offset) -> void
 {
     File *file;
     ASSERT_OK(env.new_file(filename, Env::kCreate, file));
