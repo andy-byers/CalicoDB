@@ -90,7 +90,7 @@ Schema::Schema(Pager &pager, const Status &status, Stat &stat, char *scratch)
       m_pager(&pager),
       m_scratch(scratch),
       m_stat(&stat),
-      m_map(pager, stat, scratch, Id::root(), UniqueBuffer()),
+      m_map(pager, stat, scratch, Id::root(), UniqueString()),
       m_cursor(m_map),
       m_trees{"", &m_map, nullptr, nullptr},
       m_schema(Alloc::new_object<SchemaCursor>(m_cursor))
@@ -234,17 +234,17 @@ auto Schema::construct_or_reference_tree(const Slice &name, Id root_id) -> Tree 
         return already_open;
     }
 
-    UniqueBuffer name_buf;
+    UniqueString name_str;
     if (!root_id.is_root()) {
         // If `name` is empty, a single byte will be allocated to store the '\0'.
-        name_buf = UniqueBuffer::from_slice(name);
-        if (name_buf.is_empty()) {
+        name_str = UniqueString::from_slice(name);
+        if (name_str.is_empty()) {
             return nullptr;
         }
     }
 
     auto *tree = Alloc::new_object<Tree>(*m_pager, *m_stat, m_scratch,
-                                         root_id, std::move(name_buf));
+                                         root_id, std::move(name_str));
     if (tree) {
         IntrusiveList::add_tail(tree->list_entry, m_trees);
     }

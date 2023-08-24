@@ -1140,10 +1140,8 @@ auto Tree::fix_root(CursorImpl &c) -> Status
     return s;
 }
 
-Tree::Tree(Pager &pager, Stat &stat, char *scratch, Id root_id, UniqueBuffer name)
-    // "-1" because `name.len()` includes the '\0'.
-    : list_entry{name.is_empty() ? "" : Slice(name.ptr(), name.len() - 1),
-                 this, nullptr, nullptr},
+Tree::Tree(Pager &pager, Stat &stat, char *scratch, Id root_id, UniqueString name)
+    : list_entry{name.as_slice(), this, nullptr, nullptr},
       m_stat(&stat),
       m_node_scratch(scratch + kPageSize),
       m_cell_scratch{

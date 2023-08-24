@@ -10,7 +10,7 @@
 namespace calicodb
 {
 
-auto append_fmt_string(UniqueBuffer &str, const char *fmt, ...) -> void
+auto append_fmt_string(UniqueString &str, const char *fmt, ...) -> void
 {
     std::va_list args;
     va_start(args, fmt);
@@ -22,11 +22,7 @@ auto append_fmt_string(UniqueBuffer &str, const char *fmt, ...) -> void
 
     CALICODB_EXPECT_GE(len, 0);
     auto offset = str.len();
-    if (!str.is_empty() && str.ptr()[str.len() - 1] == '\0') {
-        // Consume trailing '\0', since it is included in str.len().
-        --offset;
-    }
-    str.resize(offset + static_cast<size_t>(len) + 1);
+    str.resize(offset + static_cast<size_t>(len));
     if (!str.is_empty()) {
         std::vsnprintf(str.ptr() + offset, str.len() - offset, fmt, args);
     }

@@ -13,7 +13,7 @@
 namespace calicodb
 {
 
-auto append_fmt_string(UniqueBuffer &out, const char *fmt, ...) -> void;
+auto append_fmt_string(UniqueString &out, const char *fmt, ...) -> void;
 
 auto append_fmt_string(std::string &out, const char *fmt, ...) -> void;
 auto append_number(std::string &out, size_t value) -> void;

@@ -14,7 +14,9 @@ namespace calicodb
 
 auto DBImpl::open(const Options &sanitized) -> Status
 {
-    auto s = m_env->new_file(m_db_filename.ptr(), Env::kReadWrite, m_file.ref());
+    auto s = m_env->new_file(m_db_filename.as_slice().data(),
+                             Env::kReadWrite,
+                             m_file.ref());
     if (s.is_ok()) {
         if (sanitized.error_if_exists) {
             return Status::invalid_argument("database already exists");
@@ -132,7 +134,7 @@ auto DBImpl::destroy(const Options &options, const char *filename) -> Status
 
             // This DB doesn't use a shm file, since it was opened in exclusive locking
             // mode. shm files left by other connections must be removed manually.
-            auto path_buffer = UniqueBuffer::from_slice(
+            auto path_buffer = UniqueString::from_slice(
                 Slice(filename, std::strlen(filename)),
                 kDefaultShmSuffix);
             if (!path_buffer.is_empty()) {
@@ -233,7 +235,7 @@ auto DBImpl::prepare_tx(bool write, TxType *&tx_out) const -> Status
     }
     if (s.is_ok()) {
         CALICODB_EXPECT_TRUE(m_status.is_ok());
-        m_tx = new (std::nothrow) TxImpl({
+        m_tx = new (std::nothrow) TxImpl(TxImpl::Parameters{
             &m_status,
             &m_errors,
             m_pager.get(),

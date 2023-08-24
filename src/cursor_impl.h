@@ -13,7 +13,9 @@ namespace calicodb
 
 class Schema;
 
-class CursorImpl : public Cursor
+class CursorImpl
+    : public Cursor,
+      public HeapObject
 {
     friend class InorderTraversal;
     friend class Tree;
@@ -37,8 +39,8 @@ class CursorImpl : public Cursor
 
     // Heap-allocated buffers used to store the current record. m_key and m_value are
     // slices into these buffers.
-    UniqueBuffer m_key_buf;
-    UniqueBuffer m_value_buf;
+    UniqueBuffer<char> m_key_buf;
+    UniqueBuffer<char> m_value_buf;
     size_t m_key_len = 0;
     size_t m_value_len = 0;
     bool m_saved = false;
@@ -82,6 +84,7 @@ class CursorImpl : public Cursor
 public:
     explicit CursorImpl(Tree &tree);
     ~CursorImpl() override;
+
     auto move_to_parent() -> void;
     auto assign_child(Node child) -> void;
     auto move_to_child(Id child_id) -> void;
@@ -142,15 +145,17 @@ public:
     auto key() const -> Slice override
     {
         CALICODB_EXPECT_TRUE(is_valid());
-        return Slice(m_key_buf.ptr(), m_key_buf.len())
-            .truncate(m_key_len);
+        CALICODB_EXPECT_LE(m_key_len, m_key_buf.len());
+        return m_key_len ? Slice(m_key_buf.ptr(), m_key_len)
+                         : Slice();
     }
 
     auto value() const -> Slice override
     {
         CALICODB_EXPECT_TRUE(is_valid());
-        return Slice(m_value_buf.ptr(), m_value_buf.len())
-            .truncate(m_value_len);
+        CALICODB_EXPECT_LE(m_value_len, m_value_buf.len());
+        return m_value_len ? Slice(m_value_buf.ptr(), m_value_len)
+                           : Slice();
     }
 
     [[nodiscard]] auto is_valid() const -> bool override

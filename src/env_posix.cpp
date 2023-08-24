@@ -3,12 +3,9 @@
 // LICENSE.md. See AUTHORS.md for a list of contributor names.
 
 #include "env_posix.h"
-#include "alloc.h"
-#include "logging.h"
 #include "ptr.h"
 #include <ctime>
 #include <fcntl.h>
-#include <libgen.h>
 #include <mutex>
 #include <sys/mman.h>
 #include <sys/stat.h>
@@ -54,7 +51,7 @@ struct ShmNode final {
 
     mutable std::mutex mutex;
 
-    UniqueBuffer filename;
+    UniqueString filename;
     int file = -1;
 
     bool is_unlocked = false;
@@ -249,10 +246,12 @@ struct PosixShm {
     uint16_t writer_mask = 0;
 };
 
-class PosixFile : public File
+class PosixFile
+    : public File,
+      public HeapObject
 {
 public:
-    explicit PosixFile(UniqueBuffer filename, UniquePtr<UnusedFile> prealloc)
+    explicit PosixFile(UniqueString filename, UniquePtr<UnusedFile> prealloc)
         : filename(std::move(filename)),
           prealloc(std::move(prealloc))
     {
@@ -277,7 +276,7 @@ public:
     auto shm_unmap(bool unlink) -> void override;
     auto shm_barrier() -> void override;
 
-    UniqueBuffer filename;
+    UniqueString filename;
     UniquePtr<UnusedFile> prealloc;
     ObjectPtr<PosixShm> shm;
     INode *inode = nullptr;
@@ -287,7 +286,9 @@ public:
     int local_lock = 0;
 };
 
-class PosixLogger : public Logger
+class PosixLogger
+    : public Logger,
+      public HeapObject
 {
     int m_file;
 
@@ -462,10 +463,9 @@ static struct PosixFs final {
                 return Status::no_memory();
             }
 
-            // Allocate storage for the shm filename, including a '\0'. Note that the base
-            // filename already has its '\0' included in its length, hence the "- 1"s.
-            new_snode->filename = UniqueBuffer::from_slice(
-                Slice(file.filename.ptr(), file.filename.len() - 1),
+            // Allocate storage for the shm filename.
+            new_snode->filename = UniqueString::from_slice(
+                file.filename.as_slice(),
                 kDefaultShmSuffix);
             if (new_snode->filename.is_empty()) {
                 return Status::no_memory();
@@ -569,6 +569,11 @@ PosixEnv::PosixEnv()
     seed_prng_state(m_rng, static_cast<uint32_t>(time(nullptr)));
 }
 
+auto PosixEnv::operator delete(void *ptr, size_t) -> void
+{
+    Alloc::free(ptr);
+}
+
 auto PosixEnv::remove_file(const char *filename) -> Status
 {
     if (unlink(filename)) {
@@ -604,17 +609,18 @@ auto PosixEnv::new_file(const char *filename, OpenMode mode, File *&out) -> Stat
 
     // Allocate storage for the filename. Alloc::to_string() adds a '\0'.
     const Slice filename_slice(filename, std::strlen(filename));
-    auto filename_storage = UniqueBuffer::from_slice(filename_slice);
+    auto filename_storage = UniqueString::from_slice(filename_slice);
     if (filename_storage.is_empty()) {
         return Status::no_memory();
     }
 
     // Allocate storage for an UnusedFile.
-    auto *prealloc_storage = Alloc::malloc(sizeof(UnusedFile));
-    if (prealloc_storage == nullptr) {
+    UniquePtr<UnusedFile> prealloc(static_cast<UnusedFile *>(
+        Alloc::malloc(sizeof(UnusedFile))));
+    if (!prealloc) {
         return Status::no_memory();
     }
-    UniquePtr<UnusedFile> prealloc(static_cast<UnusedFile *>(prealloc_storage));
+
     auto s = Status::no_memory();
     INode *ino = nullptr;
 

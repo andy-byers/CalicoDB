@@ -19,7 +19,9 @@ class Pager;
 class TxImpl;
 class Wal;
 
-class DBImpl : public DB
+class DBImpl
+    : public DB,
+      public HeapObject
 {
 public:
     friend class DB;
@@ -39,9 +41,9 @@ public:
 private:
     struct Parameters {
         Options sanitized;
-        UniqueBuffer db_name;
-        UniqueBuffer wal_name;
-        UniqueBuffer scratch;
+        UniqueString db_name;
+        UniqueString wal_name;
+        UniqueBuffer<char> scratch;
     };
     friend class Alloc;
     explicit DBImpl(Parameters param);
@@ -53,8 +55,8 @@ private:
     mutable Status m_status;
     mutable TxImpl *m_tx = nullptr;
     mutable Stat m_stat;
-    mutable UniqueBuffer m_scratch;
-    mutable UniqueBuffer m_property;
+    mutable UniqueBuffer<char> m_scratch;
+    mutable UniqueString m_property;
     mutable ObjectPtr<Pager> m_pager;
 
     UserPtr<File> m_file;
@@ -63,8 +65,8 @@ private:
     BusyHandler *const m_busy;
 
     const size_t m_auto_ckpt;
-    const UniqueBuffer m_db_filename;
-    const UniqueBuffer m_wal_filename;
+    const UniqueString m_db_filename;
+    const UniqueString m_wal_filename;
     const bool m_owns_log;
     const bool m_owns_env;
 };

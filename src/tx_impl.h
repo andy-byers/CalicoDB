@@ -15,7 +15,9 @@ struct Bucket;
 struct BucketOptions;
 struct Stat;
 
-class TxImpl : public Tx
+class TxImpl
+    : public Tx,
+      public HeapObject
 {
 public:
     struct Parameters {

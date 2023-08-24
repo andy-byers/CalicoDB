@@ -5,19 +5,24 @@
 #ifndef CALICODB_ENV_POSIX_H
 #define CALICODB_ENV_POSIX_H
 
+#include "alloc.h"
 #include "calicodb/env.h"
 #include "utils.h"
 
 namespace calicodb
 {
 
-class PosixEnv : public Env
+class PosixEnv
+    : public Env,
+      public HeapObject
 {
     uint16_t m_rng[3] = {};
 
 public:
     explicit PosixEnv();
     ~PosixEnv() override = default;
+
+    static auto operator delete(void *ptr, size_t) -> void;
 
     auto new_logger(const char *filename, Logger *&out) -> Status override;
     auto new_file(const char *filename, OpenMode mode, File *&out) -> Status override;

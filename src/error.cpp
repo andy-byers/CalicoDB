@@ -25,20 +25,20 @@ auto ErrorState::format_error(ErrorCode code, ...) -> const char *
 
     std::va_list args_copy;
     va_copy(args_copy, args);
-    auto rc = std::vsnprintf(error.ptr(), error.len(), fmt, args_copy);
+    const auto old_len = error.is_empty() ? 0 : error.len() + 1;
+    auto rc = std::vsnprintf(error.ptr(), old_len, fmt, args_copy);
     va_end(args_copy);
     // This code does not handle std::vsnprintf() failures.
     CALICODB_EXPECT_GE(rc, 0);
-    const auto len = static_cast<size_t>(rc) + 1;
+    const auto len = static_cast<size_t>(rc);
 
     if (len > error.len()) {
-        // Make sure the buffer has enough space to fit the error message. len includes space
-        // for a '\0'.
+        // Make sure the buffer has enough space to fit the error message.
         error.resize(len);
         if (error.is_empty()) {
             return "out of memory in ErrorState::format_error()";
         }
-        std::vsnprintf(error.ptr(), error.len(), fmt, args);
+        std::vsnprintf(error.ptr(), error.len() + 1, fmt, args);
     }
     va_end(args);
     return error.ptr();

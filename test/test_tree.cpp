@@ -103,8 +103,8 @@ public:
     {
         EXPECT_OK(m_pager->start_reader());
         EXPECT_OK(m_pager->start_writer());
-        m_tree = new Tree(*m_pager, m_stat, m_scratch.data(), Id::root(), UniqueBuffer());
-        m_c = new CursorImpl(*m_tree);
+        m_tree = new Tree(*m_pager, m_stat, m_scratch.data(), Id::root(), UniqueString());
+        m_c = new (std::nothrow) CursorImpl(*m_tree);
     }
 
     auto close() const -> void
@@ -527,7 +527,8 @@ protected:
 
 TEST_F(EmptyTreeCursorTests, EmptyTreeBehavior)
 {
-    auto cursor = std::make_unique<CursorImpl>(*m_tree);
+    std::unique_ptr<CursorImpl> cursor(new (std::nothrow) CursorImpl(*m_tree));
+    ASSERT_TRUE(cursor);
     cursor->seek_first();
     ASSERT_FALSE(cursor->is_valid());
     cursor->seek_last();
@@ -558,9 +559,8 @@ protected:
     {
         switch (GetParam()) {
             case 0:
-                return std::make_unique<CursorImpl>(*m_tree);
             case 1:
-                return std::make_unique<CursorImpl>(*m_tree);
+                return std::unique_ptr<CursorImpl>(new (std::nothrow) CursorImpl(*m_tree));
 
                 // TODO                return std::unique_ptr<Cursor>(&m_schema->cursor());
         }
@@ -794,7 +794,7 @@ protected:
 
     auto add_cursor() -> Cursor *
     {
-        m_cursors.emplace_back(new CursorImpl(*m_tree));
+        m_cursors.emplace_back(new (std::nothrow) CursorImpl(*m_tree));
         return m_cursors.back();
     }
 
@@ -1585,7 +1585,7 @@ TEST_F(CursorModificationTests, SeekAndPut)
 TEST_F(CursorModificationTests, PutWithoutCursor)
 {
     init_tree(*this, kInitNormal);
-    auto c = std::make_unique<CursorImpl>(*m_tree);
+    std::unique_ptr<CursorImpl> c(new (std::nothrow) CursorImpl(*m_tree));
     c->seek_first();
     ASSERT_TRUE(c->is_valid());
 
@@ -1750,8 +1750,8 @@ TEST_F(CursorModificationTests, UntrackedCursors)
 {
     init_tree(*this, kInitLongValues);
 
-    auto c1 = std::make_unique<CursorImpl>(*m_tree);
-    auto c2 = std::make_unique<CursorImpl>(*m_tree);
+    std::unique_ptr<CursorImpl> c1(new (std::nothrow) CursorImpl(*m_tree));
+    std::unique_ptr<CursorImpl> c2(new (std::nothrow) CursorImpl(*m_tree));
     c1->seek_first();
     c2->seek_last();
 

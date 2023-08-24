@@ -54,7 +54,7 @@ public:
     ~Tree();
     auto save_all_cursors() const -> void;
 
-    explicit Tree(Pager &pager, Stat &stat, char *scratch, Id root_id, UniqueBuffer name);
+    explicit Tree(Pager &pager, Stat &stat, char *scratch, Id root_id, UniqueString name);
     static auto get_tree(CursorImpl &c) -> Tree *;
 
     struct Reroot {
@@ -231,7 +231,7 @@ private:
     static constexpr auto kCellBufferLen = kPageSize / kNumCellBuffers;
     char *const m_cell_scratch[kNumCellBuffers];
 
-    UniqueBuffer m_name;
+    UniqueString m_name;
     Pager *const m_pager;
     Id m_root_id;
     const bool m_writable;

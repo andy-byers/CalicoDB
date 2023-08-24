@@ -19,10 +19,10 @@ static constexpr auto kMaxLimit =
 static struct Allocator {
     std::mutex mutex;
     Alloc::Methods methods = Alloc::kDefaultMethods;
-    uint64_t limit = kMaxLimit;
-    uint64_t bytes_used = 0;
     Alloc::Hook hook = nullptr;
     void *hook_arg = nullptr;
+    uint64_t limit = kMaxLimit;
+    uint64_t bytes_used = 0;
 } s_alloc;
 
 auto Alloc::bytes_used() -> size_t
@@ -77,12 +77,12 @@ static auto size_of_alloc(void *ptr) -> size_t
 
 auto Alloc::malloc(size_t size) -> void *
 {
-    std::lock_guard lock(s_alloc.mutex);
-    ALLOCATION_HOOK;
-
     if (size == 0 || size > kMaxAllocation) {
         return nullptr;
     }
+    std::lock_guard lock(s_alloc.mutex);
+    ALLOCATION_HOOK;
+
     const auto with_hdr = size_of_alloc(size);
     if (s_alloc.bytes_used + with_hdr > s_alloc.limit) {
         return nullptr;
@@ -133,13 +133,17 @@ auto Alloc::realloc(void *old_ptr, size_t new_size) -> void *
 
 auto Alloc::free(void *ptr) -> void
 {
-    std::lock_guard lock(s_alloc.mutex);
     if (ptr) {
+        std::lock_guard lock(s_alloc.mutex);
         CALICODB_EXPECT_GT(size_of_alloc(ptr), sizeof(Header));
         CALICODB_EXPECT_GE(s_alloc.bytes_used, size_of_alloc(ptr));
         s_alloc.bytes_used -= size_of_alloc(ptr);
         s_alloc.methods.free(static_cast<Header *>(ptr) - 1);
     }
 }
+
+HeapObject::HeapObject() = default;
+
+HeapObject::~HeapObject() = default;
 
 } // namespace calicodb

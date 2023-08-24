@@ -88,6 +88,28 @@ public:
     }
 };
 
+// Base class for objects that may need to be freed by the user
+// Allows "delete ptr" to be used for cleanup.
+struct HeapObject {
+    explicit HeapObject();
+    virtual ~HeapObject();
+
+    static auto operator new(size_t size) -> void *
+    {
+        return operator new(size, std::nothrow);
+    }
+
+    static auto operator new(size_t size, const std::nothrow_t &) noexcept -> void *
+    {
+        return Alloc::malloc(size);
+    }
+
+    static auto operator delete(void *ptr) -> void
+    {
+        Alloc::free(ptr);
+    }
+};
+
 } // namespace calicodb
 
 #endif // CALICODB_ALLOC_H

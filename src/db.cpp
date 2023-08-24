@@ -29,22 +29,21 @@ auto DB::open(const Options &options, const char *filename, DB *&db) -> Status
     auto sanitized = options;
     clip_to_range(sanitized.cache_size, kMinFrameCount * kPageSize, kMaxCacheSize);
 
-    // Allocate storage for the database filename. Note that if the filename is empty, a single byte
-    // will be allocated to hold a '\0', so we won't attempt to allocate 0 bytes.
+    // Allocate storage for the database filename.
     auto filename_len = std::strlen(filename);
-    auto db_name = UniqueBuffer::from_slice(
+    auto db_name = UniqueString::from_slice(
         Slice(filename, filename_len));
-    if (db_name.is_empty()) {
+    if (db_name.len() != filename_len) {
         return Status::no_memory();
     }
 
     // Determine and allocate storage for the WAL filename.
-    UniqueBuffer wal_name;
+    UniqueString wal_name;
     if (const auto wal_filename_len = std::strlen(sanitized.wal_filename)) {
-        wal_name = UniqueBuffer::from_slice(
+        wal_name = UniqueString::from_slice(
             Slice(sanitized.wal_filename, wal_filename_len));
     } else {
-        wal_name = UniqueBuffer::from_slice(
+        wal_name = UniqueString::from_slice(
             Slice(filename, filename_len),
             kDefaultWalSuffix);
     }
@@ -53,11 +52,11 @@ auto DB::open(const Options &options, const char *filename, DB *&db) -> Status
     }
 
     // Allocate scratch memory for working with database pages.
-    auto *scratch_ptr = static_cast<char *>(Alloc::malloc(kTreeBufferLen));
-    if (scratch_ptr == nullptr) {
+    UniqueBuffer<char> scratch;
+    scratch.resize(kTreeBufferLen);
+    if (scratch.is_empty()) {
         return Status::no_memory();
     }
-    UniqueBuffer scratch(scratch_ptr, kTreeBufferLen);
 
     auto s = Status::no_memory();
     if (sanitized.temp_database) {
