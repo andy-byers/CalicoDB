@@ -5,6 +5,7 @@
 #include "alloc.h"
 #include "utils.h"
 #include <limits>
+#include <mutex>
 
 namespace calicodb
 {
