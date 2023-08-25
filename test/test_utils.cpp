@@ -23,11 +23,17 @@ public:
     explicit AllocTests() = default;
     ~AllocTests() override = default;
 
+    auto SetUp() -> void override
+    {
+        ASSERT_EQ(Alloc::bytes_used(), 0);
+    }
+
     auto TearDown() -> void override
     {
         ASSERT_EQ(Alloc::bytes_used(), 0);
         ASSERT_EQ(Alloc::set_limit(0), 0);
         ASSERT_EQ(Alloc::set_methods(Alloc::kDefaultMethods), 0);
+        Alloc::set_hook(nullptr, nullptr);
     }
 };
 
@@ -41,14 +47,23 @@ static constexpr Alloc::Methods kFakeMethods = {
     [](auto) -> void * {
         return AllocTests::s_fake_allocation;
     },
-    [](auto *old_ptr, auto new_size) -> void * {
+    [](auto *old_ptr, auto) -> void * {
         EXPECT_EQ(old_ptr, AllocTests::s_fake_allocation);
-        EXPECT_LE(new_size, AllocTests::kFakeAllocationSize);
         return AllocTests::s_fake_allocation;
     },
     [](auto *ptr) {
         EXPECT_EQ(ptr, AllocTests::s_fake_allocation);
     },
+};
+
+static constexpr Alloc::Methods kFaultyMethods = {
+    [](auto) -> void * {
+        return nullptr;
+    },
+    [](auto *, auto) -> void * {
+        return nullptr;
+    },
+    [](auto *) {},
 };
 
 TEST_F(AllocTests, Methods)
@@ -63,14 +78,18 @@ TEST_F(AllocTests, Methods)
     Alloc::free(new_ptr);
 
     ASSERT_EQ(Alloc::set_methods(kFakeMethods), 0);
-    ASSERT_EQ(ptr = Alloc::malloc(123), AllocTests::s_alloc_data_ptr);
-    ASSERT_EQ(123, *AllocTests::s_alloc_size_ptr);
+    ASSERT_EQ(ptr = Alloc::malloc(123), s_alloc_data_ptr);
+    ASSERT_EQ(123, *s_alloc_size_ptr);
     ASSERT_EQ(Alloc::realloc(ptr, 321), ptr);
-    ASSERT_EQ(321, *AllocTests::s_alloc_size_ptr);
+    ASSERT_EQ(321, *s_alloc_size_ptr);
     ASSERT_EQ(Alloc::realloc(ptr, 42), ptr);
-    ASSERT_EQ(42, *AllocTests::s_alloc_size_ptr);
+    ASSERT_EQ(42, *s_alloc_size_ptr);
     Alloc::free(nullptr);
     Alloc::free(ptr);
+
+    ASSERT_EQ(Alloc::set_methods(kFaultyMethods), 0);
+    ASSERT_EQ(Alloc::malloc(123), nullptr);
+    ASSERT_EQ(Alloc::realloc(nullptr, 123), nullptr);
 }
 
 TEST_F(AllocTests, Limit)
@@ -93,9 +112,34 @@ TEST_F(AllocTests, Limit)
     c = Alloc::realloc(a, 20 - sizeof(uint64_t));
     ASSERT_NE(c, nullptr);
 
+    ASSERT_EQ(Alloc::set_limit(1), -1);
+    ASSERT_EQ(Alloc::set_limit(0), 0);
+
     // a was realloc'd.
     Alloc::free(b);
     Alloc::free(c);
+}
+
+TEST_F(AllocTests, AllocationHook)
+{
+    struct HookArg {
+        int rc = 0;
+    } hook_arg;
+
+    const auto hook = [](auto *arg) {
+        return static_cast<const HookArg *>(arg)->rc;
+    };
+
+    Alloc::set_hook(hook, &hook_arg);
+
+    void *ptr;
+    ASSERT_NE(ptr = Alloc::malloc(123), nullptr);
+    ASSERT_NE(ptr = Alloc::realloc(ptr, 321), nullptr);
+    Alloc::free(ptr);
+
+    hook_arg.rc = -1;
+    ASSERT_EQ(Alloc::malloc(123), nullptr);
+    ASSERT_EQ(Alloc::realloc(ptr, 321), nullptr);
 }
 
 TEST_F(AllocTests, LargeAllocations)
@@ -104,9 +148,68 @@ TEST_F(AllocTests, LargeAllocations)
     ASSERT_EQ(Alloc::set_methods(kFakeMethods), 0);
 
     void *p;
-    ASSERT_EQ(nullptr, p = Alloc::malloc(kMaxAllocation + 1));
+    ASSERT_EQ(nullptr, Alloc::malloc(kMaxAllocation + 1));
     ASSERT_NE(nullptr, p = Alloc::malloc(kMaxAllocation));
+    ASSERT_EQ(nullptr, Alloc::realloc(p, kMaxAllocation + 1));
+    ASSERT_NE(nullptr, p = Alloc::realloc(p, kMaxAllocation));
     Alloc::free(p);
+}
+
+TEST_F(AllocTests, ReallocSameSize)
+{
+    static constexpr size_t kSize = 42;
+
+    void *ptr;
+    ASSERT_NE(ptr = Alloc::malloc(kSize), nullptr);
+    ASSERT_NE(ptr = Alloc::realloc(ptr, kSize), nullptr);
+    Alloc::free(ptr);
+
+    static constexpr Alloc::Methods kFaultyRealloc = {
+        std::malloc,
+        [](auto *, auto) -> void * {
+            return nullptr;
+        },
+        std::free,
+    };
+    ASSERT_EQ(Alloc::set_methods(kFaultyRealloc), 0);
+    ASSERT_NE(ptr = Alloc::malloc(kSize), nullptr);
+    ASSERT_EQ(Alloc::realloc(ptr, kSize), nullptr);
+    ASSERT_GT(Alloc::bytes_used(), kSize);
+    Alloc::free(ptr);
+}
+
+TEST_F(AllocTests, SpecialCases)
+{
+    // NOOP
+    ASSERT_EQ(Alloc::malloc(0), nullptr);
+    ASSERT_EQ(Alloc::bytes_used(), 0);
+
+    // NOOP
+    ASSERT_EQ(Alloc::realloc(nullptr, 0), nullptr);
+    ASSERT_EQ(Alloc::bytes_used(), 0);
+
+    void *ptr;
+
+    // Equivalent to Alloc::malloc(1).
+    ASSERT_NE(ptr = Alloc::realloc(nullptr, 1), nullptr);
+    ASSERT_NE(ptr, nullptr);
+    ASSERT_NE(Alloc::bytes_used(), 0);
+
+    // Equivalent to Alloc::free(ptr).
+    ASSERT_EQ(Alloc::realloc(ptr, 0), nullptr);
+    ASSERT_EQ(Alloc::bytes_used(), 0);
+}
+
+TEST_F(AllocTests, HeapObject)
+{
+    struct CustomObject : public HeapObject {
+        int data[42];
+    };
+
+    auto *obj = new (std::nothrow) CustomObject;
+    ASSERT_GE(Alloc::bytes_used(), sizeof(CustomObject));
+    delete obj;
+    ASSERT_EQ(Alloc::bytes_used(), 0);
 }
 
 #ifndef NDEBUG
@@ -428,6 +531,13 @@ TEST(Status, StatusCodes)
 //     }
 // }
 
+static auto number_to_string(uint64_t number) -> std::string
+{
+    String str;
+    EXPECT_EQ(append_number(str, number), 0);
+    return str.c_str();
+}
+
 TEST(Logging, NumberToString)
 {
     ASSERT_EQ("0", number_to_string(0));
@@ -563,12 +673,12 @@ TEST(Logging, ConsumeDecimalNumberNoDigits)
 
 TEST(Logging, AppendFmtString)
 {
-    std::string str;
-    append_fmt_string(str, "hello %d %s", 42, "goodbye");
+    String str;
+    ASSERT_EQ(0, append_fmt_string(str, "hello %d %s", 42, "goodbye"));
     const std::string long_str(128, '*');
-    append_fmt_string(str, "%s", long_str.data());
-    append_fmt_string(str, "empty");
-    ASSERT_EQ(str, "hello 42 goodbye" + long_str + "empty");
+    ASSERT_EQ(0, append_fmt_string(str, "%s", long_str.data()));
+    ASSERT_EQ(0, append_fmt_string(str, "empty"));
+    ASSERT_EQ(str.c_str(), "hello 42 goodbye" + long_str + "empty");
 }
 
 TEST(Slice, Construction)

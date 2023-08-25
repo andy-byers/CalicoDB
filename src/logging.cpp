@@ -3,6 +3,7 @@
 // LICENSE.md. See AUTHORS.md for a list of contributor names.
 
 #include "logging.h"
+#include "calicodb/db.h"
 #include "calicodb/env.h"
 #include "utils.h"
 #include <limits>
@@ -10,23 +11,39 @@
 namespace calicodb
 {
 
-auto append_fmt_string(UniqueString &str, const char *fmt, ...) -> void
+auto append_fmt_string(String &str, const char *fmt, ...) -> int
 {
     std::va_list args;
     va_start(args, fmt);
+    const auto rc = append_fmt_string_va(str, fmt, args);
+    va_end(args);
+    return rc;
+}
 
+auto append_fmt_string_va(String &str, const char *fmt, std::va_list args) -> int
+{
     std::va_list args_copy;
     va_copy(args_copy, args);
-    auto len = std::vsnprintf(nullptr, 0, fmt, args_copy);
+    auto rc = std::vsnprintf(nullptr, 0, fmt, args_copy);
     va_end(args_copy);
 
-    CALICODB_EXPECT_GE(len, 0);
-    auto offset = str.len();
-    str.resize(offset + static_cast<size_t>(len));
-    if (!str.is_empty()) {
-        std::vsnprintf(str.ptr() + offset, str.len() - offset, fmt, args);
+    if (rc < 0) {
+        CALICODB_EXPECT_TRUE(false && "std::vsnprintf(nullptr, 0, ...) failed");
+        return -1;
     }
-    va_end(args);
+    const auto len = static_cast<size_t>(rc);
+    const auto end = std::strlen(str.c_str());
+    if (realloc_string(str, end + len)) {
+        return -1;
+    }
+    // realloc_string() adds a '\0'.
+    rc = std::vsnprintf(str.data() + end, len + 1, fmt, args);
+
+    if (rc < 0) {
+        CALICODB_EXPECT_TRUE(false && "std::vsnprintf(ptr, len, ...) failed");
+        return -1;
+    }
+    return 0;
 }
 
 auto append_fmt_string(std::string &str, const char *fmt, ...) -> void
@@ -54,39 +71,21 @@ auto append_fmt_string(std::string &str, const char *fmt, ...) -> void
     CALICODB_EXPECT_TRUE(0 <= len && len <= int(str.size()));
 }
 
-auto append_number(std::string &out, size_t value) -> void
+auto append_number(String &out, uint64_t value) -> int
 {
-    char buffer[30];
-    std::snprintf(buffer, sizeof(buffer), "%llu", static_cast<unsigned long long>(value));
-    out.append(buffer);
-}
-
-auto append_escaped_string(std::string &out, const Slice &value) -> void
-{
-    for (size_t i = 0; i < value.size(); ++i) {
-        const auto chr = value[i];
-        if (chr >= ' ' && chr <= '~') {
-            out.push_back(chr);
-        } else {
-            char buffer[10];
-            std::snprintf(buffer, sizeof(buffer), "\\x%02x", static_cast<unsigned>(chr) & 0xFF);
-            out.append(buffer);
-        }
+    char buf[30];
+    auto rc = std::snprintf(buf, sizeof(buf), "%llu", static_cast<unsigned long long>(value));
+    if (rc < 0) {
+        CALICODB_DEBUG_TRAP;
+        rc = 0;
     }
-}
-
-auto number_to_string(size_t value) -> std::string
-{
-    std::string out;
-    append_number(out, value);
-    return out;
-}
-
-auto escape_string(const Slice &value) -> std::string
-{
-    std::string out;
-    append_escaped_string(out, value);
-    return out;
+    const auto end = std::strlen(out.c_str());
+    const auto len = static_cast<size_t>(rc);
+    if (realloc_string(out, end + len)) {
+        return -1;
+    }
+    std::memcpy(out.data() + end, buf, len);
+    return 0;
 }
 
 // Modified from LevelDB.

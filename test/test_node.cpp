@@ -293,4 +293,97 @@ TEST(NodeHeaderTests, ReportsInvalidNodeType)
     ASSERT_EQ(NodeHdr::kInvalid, NodeHdr::get_type(&type));
 }
 
+class CorruptedNodeTests : public NodeTests
+{
+public:
+    auto assert_corrupted_node() -> void
+    {
+        Node corrupted;
+        ASSERT_NE(Node::from_existing_page(*m_node.ref, m_scratch.data(), corrupted), 0);
+    }
+    auto assert_valid_node() -> void
+    {
+        Node valid;
+        ASSERT_EQ(Node::from_existing_page(*m_node.ref, m_scratch.data(), valid), 0);
+    }
+};
+
+TEST_F(CorruptedNodeTests, SanityCheck)
+{
+    assert_valid_node();
+}
+
+TEST_F(CorruptedNodeTests, InvalidType)
+{
+    m_node.hdr()[NodeHdr::kTypeOffset] = 0;
+    assert_corrupted_node();
+    m_node.hdr()[NodeHdr::kTypeOffset] = 42;
+    assert_corrupted_node();
+}
+
+TEST_F(CorruptedNodeTests, InvalidCellCount)
+{
+    NodeHdr::put_cell_count(m_node.hdr(), std::numeric_limits<uint16_t>::max());
+    assert_corrupted_node();
+    // Lower bound of the gap is greater than the upper bound.
+    NodeHdr::put_cell_count(m_node.hdr(), 512);
+    NodeHdr::put_cell_start(m_node.hdr(), NodeHdr::kSize);
+    assert_corrupted_node();
+}
+
+TEST_F(CorruptedNodeTests, InvalidCellStart)
+{
+    NodeHdr::put_cell_start(m_node.hdr(), kPageSize + 1);
+    assert_corrupted_node();
+}
+
+class CorruptedNodeFreelistTests : public CorruptedNodeTests
+{
+public:
+    static constexpr size_t kNumBlocks = 3;
+    char *m_ptrs[kNumBlocks];
+    uint32_t m_reset[kNumBlocks];
+
+    auto SetUp() -> void override
+    {
+        char *cell_ptrs[kNumBlocks * 2];
+        size_t cell_sizes[kNumBlocks * 2];
+        for (size_t i = 0; i < kNumBlocks * 2; ++i) {
+            auto cell = make_cell(i);
+            ASSERT_GT(m_node.write(i, cell), 0);
+            // Fill the cell with pointers into m_node.
+            ASSERT_EQ(m_node.read(i, cell), 0);
+            cell_sizes[i] = cell.footprint;
+            cell_ptrs[i] = cell.ptr;
+        }
+        for (size_t i = 0; i < kNumBlocks; ++i) {
+            // Erase every other cell so that the free blocks don't merge.
+            ASSERT_EQ(m_node.erase(i, cell_sizes[i * 2]), 0);
+            m_ptrs[i] = cell_ptrs[i * 2];
+            m_reset[i] = get_u32(m_ptrs[i]); // Free block header
+        }
+    }
+};
+
+TEST_F(CorruptedNodeFreelistTests, StartOutOfBounds)
+{
+    NodeHdr::put_free_start(m_node.hdr(), kPageSize);
+    assert_corrupted_node();
+}
+
+TEST_F(CorruptedNodeFreelistTests, InvalidFreeBlockHeader)
+{
+    for (size_t i = 0; i < kNumBlocks; ++i) {
+        put_u16(m_ptrs[i], kPageSize);
+        assert_corrupted_node();
+        put_u32(m_ptrs[i], m_reset[i]);
+
+        put_u16(m_ptrs[i] + 2, kPageSize);
+        assert_corrupted_node();
+        put_u32(m_ptrs[i], m_reset[i]);
+
+        assert_valid_node();
+    }
+}
+
 } // namespace calicodb::test

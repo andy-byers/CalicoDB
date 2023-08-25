@@ -270,6 +270,8 @@ protected:
         delete m_file;
         delete m_wal_file;
         delete m_env;
+
+        EXPECT_EQ(Alloc::bytes_used(), 0);
     }
 
     auto SetUp() -> void override
@@ -784,8 +786,10 @@ protected:
 
     ~HashIndexTestBase()
     {
+        m_index->close();
         delete m_shm;
         delete m_index;
+        EXPECT_EQ(Alloc::bytes_used(), 0);
     }
 
     auto append(uint32_t key)

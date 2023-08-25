@@ -51,7 +51,7 @@ struct ShmNode final {
 
     mutable std::mutex mutex;
 
-    UniqueString filename;
+    String filename;
     int file = -1;
 
     bool is_unlocked = false;
@@ -251,7 +251,7 @@ class PosixFile
       public HeapObject
 {
 public:
-    explicit PosixFile(UniqueString filename, UniquePtr<UnusedFile> prealloc)
+    explicit PosixFile(String filename, UniquePtr<UnusedFile> prealloc)
         : filename(std::move(filename)),
           prealloc(std::move(prealloc))
     {
@@ -276,7 +276,7 @@ public:
     auto shm_unmap(bool unlink) -> void override;
     auto shm_barrier() -> void override;
 
-    UniqueString filename;
+    String filename;
     UniquePtr<UnusedFile> prealloc;
     ObjectPtr<PosixShm> shm;
     INode *inode = nullptr;
@@ -464,16 +464,16 @@ static struct PosixFs final {
             }
 
             // Allocate storage for the shm filename.
-            new_snode->filename = UniqueString::from_slice(
-                file.filename.as_slice(),
-                kDefaultShmSuffix);
-            if (new_snode->filename.is_empty()) {
+            if (build_string(
+                    new_snode->filename,
+                    string_as_slice(file.filename),
+                    kDefaultShmSuffix)) {
                 return Status::no_memory();
             }
 
             // Open the shm file.
             new_snode->file = posix_open(
-                new_snode->filename.ptr(),
+                new_snode->filename.c_str(),
                 O_CREAT | O_NOFOLLOW | O_RDWR);
             if (new_snode->file < 0) {
                 return posix_error(errno);
@@ -527,7 +527,7 @@ static struct PosixFs final {
                 // using this shm file.
                 if (0 == posix_shm_lock(*snode, F_WRLCK, kShmDMS, 1)) {
                     // This should drop the lock we just took.
-                    unlink(snode->filename.ptr());
+                    unlink(snode->filename.c_str());
                 }
             }
             inode->snode.reset();
@@ -609,8 +609,8 @@ auto PosixEnv::new_file(const char *filename, OpenMode mode, File *&out) -> Stat
 
     // Allocate storage for the filename. Alloc::to_string() adds a '\0'.
     const Slice filename_slice(filename, std::strlen(filename));
-    auto filename_storage = UniqueString::from_slice(filename_slice);
-    if (filename_storage.is_empty()) {
+    String filename_storage;
+    if (build_string(filename_storage, filename_slice)) {
         return Status::no_memory();
     }
 

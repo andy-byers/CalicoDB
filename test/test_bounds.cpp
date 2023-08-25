@@ -47,7 +47,7 @@ protected:
 
 TEST_F(BoundaryValueTests, BoundaryPayload)
 {
-    ASSERT_OK(m_db->update([this](auto &tx) {
+    ASSERT_OK(m_db->run(WriteOptions(), [this](auto &tx) {
         TestCursor c;
         auto s = test_create_and_open_bucket(tx, BucketOptions(), "bucket", c);
         if (s.is_ok()) {
@@ -57,7 +57,7 @@ TEST_F(BoundaryValueTests, BoundaryPayload)
         return s;
     }));
 
-    ASSERT_OK(m_db->view([this](const auto &tx) {
+    ASSERT_OK(m_db->run(ReadOptions(), [this](const auto &tx) {
         TestCursor c;
         auto s = test_open_bucket(tx, "bucket", b);
         if (s.is_ok()) {
@@ -71,7 +71,7 @@ TEST_F(BoundaryValueTests, BoundaryPayload)
 
 TEST_F(BoundaryValueTests, OverflowPayload)
 {
-    ASSERT_OK(m_db->update([this](auto &tx) {
+    ASSERT_OK(m_db->run(WriteOptions(), [this](auto &tx) {
         TestCursor c;
         auto s = test_create_and_open_bucket(tx, BucketOptions(), "bucket", c);
         if (s.is_ok()) {
@@ -112,7 +112,7 @@ TEST_F(StressTests, LotsOfBuckets)
     // There isn't really a limit on the number of buckets one can create. Just create a
     // bunch of them.
     static constexpr size_t kNumBuckets = 100'000;
-    ASSERT_OK(m_db->update([](auto &tx) {
+    ASSERT_OK(m_db->run(WriteOptions(), [](auto &tx) {
         Status s;
         for (size_t i = 0; s.is_ok() && i < kNumBuckets; ++i) {
             TestCursor c;
@@ -124,7 +124,7 @@ TEST_F(StressTests, LotsOfBuckets)
         }
         return s;
     }));
-    ASSERT_OK(m_db->view([](auto &tx) {
+    ASSERT_OK(m_db->run(ReadOptions(), [](const auto &tx) {
         Status s;
         for (size_t i = 0; s.is_ok() && i < kNumBuckets; ++i) {
             TestCursor c;
@@ -143,7 +143,7 @@ TEST_F(StressTests, LotsOfBuckets)
 
 TEST_F(StressTests, CursorLimit)
 {
-    ASSERT_OK(m_db->update([](auto &tx) {
+    ASSERT_OK(m_db->run(WriteOptions(), [](auto &tx) {
         Status s;
         std::vector<TestCursor> cursors(1'000);
         for (size_t i = 0; s.is_ok() && i < cursors.size(); ++i) {
@@ -175,7 +175,7 @@ TEST_F(StressTests, LargeVacuum)
     static constexpr size_t kNumRecords = 1'234;
     static constexpr size_t kTotalBuckets = 2'500;
     static constexpr size_t kDroppedBuckets = kTotalBuckets / 10;
-    ASSERT_OK(m_db->update([](auto &tx) {
+    ASSERT_OK(m_db->run(WriteOptions(), [](auto &tx) {
         Status s;
         for (size_t i = 0; s.is_ok() && i < kTotalBuckets; ++i) {
             TestCursor c;
@@ -194,7 +194,7 @@ TEST_F(StressTests, LargeVacuum)
         }
         return s;
     }));
-    ASSERT_OK(m_db->view([](auto &tx) {
+    ASSERT_OK(m_db->run(ReadOptions(), [](const auto &tx) {
         Status s;
         for (size_t i = 0; s.is_ok() && i < kTotalBuckets; ++i) {
             TestCursor c;

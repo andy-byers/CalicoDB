@@ -752,7 +752,11 @@ public:
     static constexpr size_t kNumRounds = 500;
     std::string m_dirname;
 
-    ~EnvConcurrencyTests() override = default;
+    ~EnvConcurrencyTests() override
+    {
+        //        m_helper.cleanup_files();
+        //        EXPECT_EQ(Alloc::bytes_used(), 0);
+    }
 
     auto SetUp() -> void override
     {
@@ -784,8 +788,6 @@ public:
     template <class Test>
     auto run_test(const Test &test)
     {
-        //        signal(SIGCHLD, SIG_IGN);
-
         std::vector<int> pipes(m_num_processes);
         for (size_t n = 0; n < m_num_processes; ++n) {
             int pipefd[2];
@@ -956,43 +958,51 @@ protected:
     EnvWithFiles m_helper;
     Env *m_env = nullptr;
 };
+
 TEST_P(EnvConcurrencyTests, SingleWriter)
 {
     run_reader_writer_test(m_num_processes, [](auto r) {
         return r == kNumRounds / 2;
     });
 }
+
 TEST_P(EnvConcurrencyTests, MultipleWriters)
 {
     run_reader_writer_test(m_num_processes * kNumRounds / 10, [](auto r) {
         return r % 10 == 9;
     });
 }
+
 TEST_P(EnvConcurrencyTests, Contention)
 {
     run_reader_writer_test(m_num_processes * kNumRounds / 2, [](auto r) {
         return r & 1;
     });
 }
+
 TEST_P(EnvConcurrencyTests, ShmLifetime1)
 {
     run_shm_lifetime_test(false);
 }
+
 TEST_P(EnvConcurrencyTests, ShmLifetime2)
 {
     run_shm_lifetime_test(true);
 }
+
 TEST_P(EnvConcurrencyTests, SingleShmWriter1)
 {
     run_shm_reader_writer_test(1, 1);
     run_shm_reader_writer_test(1, 1);
 }
+
 TEST_P(EnvConcurrencyTests, SingleShmWriter2)
 {
     run_shm_reader_writer_test(2, 1);
     run_shm_reader_writer_test(3, 1);
     run_shm_reader_writer_test(4, 1);
 }
+
 TEST_P(EnvConcurrencyTests, MultipleShmWriters)
 {
     run_shm_reader_writer_test(1, 5);
@@ -1007,6 +1017,7 @@ TEST_P(EnvConcurrencyTests, MultipleShmWriters)
     run_shm_reader_writer_test(2, 15);
     run_shm_reader_writer_test(3, 15);
 }
+
 TEST_P(EnvConcurrencyTests, ShmAtomic)
 {
     run_shm_atomic_test(1);
@@ -1016,6 +1027,7 @@ TEST_P(EnvConcurrencyTests, ShmAtomic)
     run_shm_atomic_test(20);
     run_shm_atomic_test(30);
 }
+
 INSTANTIATE_TEST_SUITE_P(
     EnvConcurrencyTests,
     EnvConcurrencyTests,
@@ -1114,79 +1126,6 @@ TEST(TempEnv, TempEnv)
     Logger *logger;
     ASSERT_OK(env->new_logger("NOOP", logger));
     ASSERT_EQ(logger, nullptr);
-}
-
-// void sig_handler(int signum)
-//{
-//     printf("signal %d\n", signum);
-// }
-TEST(A, B)
-{
-    //    signal(SIGCHLD,SIG_IGN);
-
-    //    sigset_t unblock;
-    //
-    //    sigemptyset(&unblock);
-    //    sigaddset(&unblock, SIGCHLD);
-    //    sigprocmask(SIG_UNBLOCK, &unblock, nullptr);
-
-    if (const auto pid = fork()) {
-        sleep(1);
-        ASSERT_GT(pid, 0) << strerror(errno);
-        int s;
-        const auto wait_pid = wait(&s);
-        ASSERT_GE(wait_pid, 0);
-        //        do {
-        //            int s;
-        //            const auto wait_pid = wait(&s);
-        //            if (wait_pid >= 0) {
-        //                break;
-        //            } else if (errno != EINTR) {
-        //                ADD_FAILURE() << strerror(errno);
-        //            }
-        //        } while (errno == EINTR);
-    } else {
-        std::exit(0);
-    }
-    //    size_t m_num_processes = 1;
-    //    std::vector<int> pipes(m_num_processes);
-    //    for (size_t n = 0; n < m_num_processes; ++n) {
-    //        int pipefd[2];
-    //        ASSERT_EQ(pipe(pipefd), 0);
-    //        pipes[n] = pipefd[0];
-    //
-    //        if (const auto pid = fork()) {
-    //            ASSERT_GT(pid, 0) << strerror(errno);
-    //            close(pipefd[1]);
-    //        } else {
-    //            close(pipefd[0]);
-    //            dup2(pipefd[1], STDOUT_FILENO);
-    //            dup2(pipefd[1], STDERR_FILENO);
-    //
-    //            std::exit(testing::Test::HasFailure());
-    //        }
-    //    }
-    //    for (size_t n = 0; n < m_num_processes; ++n) {
-    //        int s;
-    //        const auto pid = wait(&s);
-    //        ASSERT_NE(pid, -1)
-    //            << "wait failed: " << strerror(errno);
-    //        if (WIFEXITED(s) && WEXITSTATUS(s) != 0) {
-    //            std::string msg;
-    //            for (char buf[256];;) {
-    //                if (const auto rc = read(pipes[n], buf, sizeof(buf))) {
-    //                    ASSERT_GT(rc, 0) << strerror(errno);
-    //                    msg.append(buf, static_cast<size_t>(rc));
-    //                } else {
-    //                    break;
-    //                }
-    //            }
-    //            ADD_FAILURE()
-    //                << "exited " << (WIFEXITED(s) ? "" : "ab")
-    //                << "normally with exit status " << WEXITSTATUS(s)
-    //                << '\n' << msg;
-    //        }
-    //    }
 }
 
 } // namespace calicodb::test

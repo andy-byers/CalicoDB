@@ -90,7 +90,7 @@ Schema::Schema(Pager &pager, const Status &status, Stat &stat, char *scratch)
       m_pager(&pager),
       m_scratch(scratch),
       m_stat(&stat),
-      m_map(pager, stat, scratch, Id::root(), UniqueString()),
+      m_map(pager, stat, scratch, Id::root(), String()),
       m_cursor(m_map),
       m_trees{"", &m_map, nullptr, nullptr},
       m_schema(Alloc::new_object<SchemaCursor>(m_cursor))
@@ -234,13 +234,9 @@ auto Schema::construct_or_reference_tree(const Slice &name, Id root_id) -> Tree 
         return already_open;
     }
 
-    UniqueString name_str;
-    if (!root_id.is_root()) {
-        // If `name` is empty, a single byte will be allocated to store the '\0'.
-        name_str = UniqueString::from_slice(name);
-        if (name_str.is_empty()) {
-            return nullptr;
-        }
+    String name_str;
+    if (!root_id.is_root() && build_string(name_str, name)) {
+        return nullptr;
     }
 
     auto *tree = Alloc::new_object<Tree>(*m_pager, *m_stat, m_scratch,
@@ -283,8 +279,8 @@ auto Schema::drop_bucket(const Slice &name) -> Status
     if (!decode_and_check_root_id(m_cursor.value(), root_id)) {
         return corrupted_root_id();
     }
-    auto *drop = construct_or_reference_tree(m_cursor.key(), root_id);
-    if (drop == nullptr) {
+    ObjectPtr<Tree> drop(construct_or_reference_tree(m_cursor.key(), root_id));
+    if (!drop) {
         return Status::no_memory();
     }
     IntrusiveList::remove(drop->list_entry);
@@ -325,8 +321,6 @@ auto Schema::drop_bucket(const Slice &name) -> Status
             s = Status::corruption();
         }
     }
-
-    Alloc::delete_object(drop);
     return s;
 }
 

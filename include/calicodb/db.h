@@ -6,15 +6,16 @@
 #define CALICODB_DB_H
 
 #include "options.h"
-#include "tx.h"
+#include "status.h"
 
 namespace calicodb
 {
 
-// Tag for starting a transaction that has writer capabilities
-// SEE: DB::new_tx()
-struct WriteTag {
-};
+// <calicodb/tx.h>
+class Tx;
+
+// <calicodb/string.h>
+class String;
 
 // On-disk collection of buckets
 class DB
@@ -41,12 +42,14 @@ public:
     void operator=(DB &) = delete;
 
     // Get a human-readable string describing a named database property
-    // If the property named `name` exists, returns true and stores the property value in
-    // `*value_out`. Otherwise, false is returned and `value_out->clear()` is called. The
-    // `value_out` parameter is optional: if passed a nullptr, this method performs an
-    // existence check. The `value_out` Slice is invalidated both when the database is
-    // closed and when this routine is called again.
-    virtual auto get_property(const Slice &name, Slice *value_out) const -> bool = 0;
+    // If the property named `name` exists, returns OK and stores the property value in
+    // `*value_out`. If the property does not exist, a status is returned for which
+    // Status::is_not_found() evaluates to true and `value_out->reset(nullptr)` is
+    // called. The `value_out` parameter is optional: if passed a nullptr, this method
+    // performs an existence check. If there wasn't enough memory available to create
+    // the property string, a status is returned for which Status::is_no_memory()
+    // evaluates to true.
+    virtual auto get_property(const Slice &name, String *value_out) const -> Status = 0;
 
     // Write modified pages from the write-ahead log (WAL) back to the database file
     // If `reset` is true, steps are taken to make sure that the next writer will reset the WAL
@@ -61,54 +64,25 @@ public:
     // Forwards the Status returned by the callable `fn`. Note that the callable accepts a const
     // Tx reference, meaning methods that modify the database state cannot be called on it.
     template <class Fn>
-    auto view(Fn &&fn) const -> Status;
+    auto run(const ReadOptions &options, Fn &&fn) const -> Status;
 
     // Run a read-write transaction
     // REQUIRES: Status Fn::operator()(Tx &) is implemented.
     // If the callable `fn` returns an OK status, the transaction is committed. Otherwise,
     // the transaction is rolled back.
     template <class Fn>
-    auto update(Fn &&fn) -> Status;
+    auto run(const WriteOptions &options, Fn &&fn) -> Status;
 
     // Start a transaction manually
     // Stores a pointer to the heap-allocated transaction object in `tx_out` and returns OK on
-    // success. Stores nullptr in `tx_out` and returns a non-OK status on failure. If the WriteTag
-    // overload is used, then the transaction is a read-write transaction, otherwise it is a
-    // readonly transaction. The caller is responsible for calling delete on the Tx pointer when
-    // it is no longer needed.
-    // NOTE: Consider using the DB::view()/DB::update() API instead.
-    virtual auto new_tx(Tx *&tx_out) const -> Status = 0;
-    virtual auto new_tx(WriteTag, Tx *&tx_out) -> Status = 0;
+    // success. Stores nullptr in `tx_out` and returns a non-OK status on failure. If the
+    // WriteOptions overload is used, then the transaction is a read-write transaction, otherwise
+    // it is a readonly transaction. The caller is responsible for calling delete on the Tx
+    // pointer when it is no longer needed.
+    // NOTE: Consider using the DB::run() API instead.
+    virtual auto new_tx(const ReadOptions &options, Tx *&tx_out) const -> Status = 0;
+    virtual auto new_tx(const WriteOptions &options, Tx *&tx_out) -> Status = 0;
 };
-
-template <class Fn>
-auto DB::view(Fn &&fn) const -> Status
-{
-    Tx *tx;
-    auto s = new_tx(tx);
-    if (s.is_ok()) {
-        const auto *const_tx = tx;
-        s = fn(*const_tx);
-        delete tx;
-    }
-    return s;
-}
-
-template <class Fn>
-auto DB::update(Fn &&fn) -> Status
-{
-    Tx *tx;
-    auto s = new_tx(WriteTag(), tx);
-    if (s.is_ok()) {
-        s = fn(*tx);
-        if (s.is_ok()) {
-            s = tx->commit();
-        }
-        // Implicit rollback of all uncommitted changes.
-        delete tx;
-    }
-    return s;
-}
 
 } // namespace calicodb
 

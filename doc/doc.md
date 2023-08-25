@@ -128,10 +128,11 @@ if (!s.is_ok()) {
 ```
 
 ### Readonly transactions
-Readonly transactions are typically run through the `DB::view()` API.
+Readonly transactions are typically run using `DB::run(ReadOptions(), fn)`, where `fn` is a callback that reads from the database.
 
 ```C++
-s = db->view([](const calicodb::Tx &tx) {
+const char *bucket_name = "all_kittens"; // Lambda captures are supported.
+s = db->run(calicodb::ReadOptions(), [bucket_name](const calicodb::Tx &tx) {
     // Open buckets (see #buckets) and read some data. The `tx` object is managed 
     // by the database. DB::view() will forward the status returned by this callable.
     return calicodb::Status::ok();
@@ -139,20 +140,20 @@ s = db->view([](const calicodb::Tx &tx) {
 ```
 
 ### Read-write transactions
-Read-write transactions can be run using `DB::update()`.
-`DB::update()` accepts a callable that runs a read-write transaction.
+Read-write transactions can be run using `DB::run(WriteOptions(), fn)`, where `fn` is a callable that modifies the database.
 If an error is encountered during a read-write transaction, the transaction status (queried with `Tx::status()`) may be set.
 If this happens, the transaction object, and any buckets created from it, will return immediately with this same error whenever a read/write method is called.
-The only possible course-of-action in this case is to `delete` the transaction handle and possibly try again.
+The only possible course-of-action in this case is to return from `fn` and let the database clean up.
 
 ```C++
-s = db->update([](calicodb::Tx &tx) {
+s = db->run(calicodb::WriteOptions(), [](calicodb::Tx &tx) {
     // Read and/or write some records. If this callable returns an OK status,
     // `tx::commit()` is called on `tx` and the resulting status returned.
     // Otherwise, the transaction is rolled back and the original non-OK 
-    // status is forwarded to the caller. Note that tx::commit() does not 
-    // invalidate the transaction handle. This allows one to perform multiple 
-    // batches of writes per DB::update().
+    // status is forwarded to the caller (rollback itself cannot fail). Note 
+    // that calling tx::commit() early does not invalidate the transaction 
+    // handle. This allows one to perform multiple batches of writes per 
+    // DB::run().
     return calicodb::Status::ok();
 });
 ```
@@ -165,7 +166,7 @@ The caller is responsible for `delete`ing the `Tx` handle when it is no longer n
 calicodb::Tx *reader;
 
 // Start a readonly transaction.
-s = db->new_tx(reader);
+s = db->new_tx(calicodb::ReadOptions(), reader);
 if (!s.is_ok()) {
 }
 
@@ -180,7 +181,7 @@ calicodb::Tx *writer;
 
 // Start a read-write transaction. The handle resulting from this call can be
 // used to modify the database contents.
-s = db->new_tx(calicodb::WriteTag(), writer);
+s = db->new_tx(calicodb::WriteOptions(), writer);
 if (!s.is_ok()) {
 }
 
@@ -319,18 +320,20 @@ delete c;
 ### Database properties
 
 ```C++
-// Database properties are made available as slices. Each time this routine is called, the
-// last slice that was returned is invalidated (this also happens when the database is 
-// closed).
-calicodb::Slice prop;
-if (db->get_property("calicodb.stats", &prop)) {
-    // The property always ends in a null-terminator, so it can be used as a C-style string.
-    std::puts(prop.data());
+calicodb::String prop;
+s = db->get_property("calicodb.stats", &prop);
+if (s.is_ok()) {
+    std::puts(prop.c_str());
+} else if (s.is_no_memory()) {
+    // Not enough memory to allocate the property string.
+} else if (s.is_not_found()) {
+    // Property does not exist.
 }
 
 // Passing nullptr for the property value causes get_property() to perform a simple existence check, 
 // without attempting to populate the property value string.
-if (db->get_property("calicodb.stats", nullptr)) {
+s = db->get_property("calicodb.stats", nullptr);
+if (s.is_ok()) {
     
 }
 ```
@@ -348,8 +351,8 @@ Automatic checkpoints are attempted when transactions are started.
 // handle from earlier must not be used after this next line.
 delete tx;
 
-// Now we can run a checkpoint. See DB::update()/DB::view() for an API that
-// takes away some of the pain associated with transaction lifetimes.
+// Now we can run a checkpoint. See DB::run() for an API that takes away some
+// of the pain associated with transaction lifetimes.
 
 // If the `reset` parameter to DB::checkpoint() is true, the DB will set things
 // up such that the next writer writes to the start of the WAL file again. This

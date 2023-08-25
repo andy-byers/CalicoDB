@@ -3,7 +3,6 @@
 // LICENSE.md. See AUTHORS.md for a list of contributor names.
 
 #include "calicodb/db.h"
-#include "calicodb/env.h"
 #include "cursor_impl.h"
 #include "fuzzer.h"
 #include "model.h"
@@ -65,7 +64,7 @@ public:
 
         reopen_db();
 
-        const auto s = m_db->update([&stream, &db = *m_db](auto &tx) {
+        const auto s = m_db->run(WriteOptions(), [&stream, &db = *m_db](auto &tx) {
             std::unique_ptr<Cursor> cursors[kMaxBuckets];
 
             while (!stream.is_empty()) {
@@ -148,9 +147,12 @@ public:
 
 extern "C" int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size)
 {
-    FuzzedInputProvider stream(data, size);
-    Fuzzer fuzzer;
-    fuzzer.consume_input(stream);
+    {
+        FuzzedInputProvider stream(data, size);
+        Fuzzer fuzzer;
+        fuzzer.consume_input(stream);
+    }
+    CHECK_EQ(Alloc::bytes_used(), 0);
     return 0;
 }
 

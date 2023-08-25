@@ -5,13 +5,13 @@
 #ifndef CALICODB_TX_IMPL_H
 #define CALICODB_TX_IMPL_H
 
+#include "calicodb/tx.h"
 #include "schema.h"
 
 namespace calicodb
 {
 
 class ErrorState;
-struct Bucket;
 struct BucketOptions;
 struct Stat;
 

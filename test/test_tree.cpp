@@ -74,6 +74,7 @@ public:
         Alloc::delete_object(m_pager);
         delete m_file;
         delete m_env;
+        EXPECT_EQ(Alloc::bytes_used(), 0);
     }
 
     [[nodiscard]] static auto make_normal_key(size_t value)
@@ -103,7 +104,7 @@ public:
     {
         EXPECT_OK(m_pager->start_reader());
         EXPECT_OK(m_pager->start_writer());
-        m_tree = new Tree(*m_pager, m_stat, m_scratch.data(), Id::root(), UniqueString());
+        m_tree = new Tree(*m_pager, m_stat, m_scratch.data(), Id::root(), String());
         m_c = new (std::nothrow) CursorImpl(*m_tree);
     }
 
@@ -1001,9 +1002,6 @@ public:
 
     auto TearDown() -> void override
     {
-        for (auto &[tid, tree] : multi_tree) {
-            delete tree.c;
-        }
         multi_tree.clear();
         m_schema->close();
         delete m_schema;
@@ -1021,7 +1019,7 @@ public:
             &c));
         EXPECT_EQ(multi_tree.find(tid), end(multi_tree));
         auto *impl = reinterpret_cast<CursorImpl *>(c);
-        multi_tree.emplace(tid, TreeWrapper{impl, &impl->TEST_tree()});
+        multi_tree.emplace(tid, TreeWrapper{std::unique_ptr<CursorImpl>(impl), &impl->TEST_tree()});
     }
 
     auto fill_tree(size_t tid, bool shuffle = false)
@@ -1082,7 +1080,7 @@ public:
     }
 
     struct TreeWrapper {
-        CursorImpl *c;
+        std::unique_ptr<CursorImpl> c;
         Tree *tree;
     };
 
@@ -1791,7 +1789,7 @@ public:
         m_root_c = m_c;
         create_tree(1);
         m_tree = multi_tree.at(1).tree;
-        m_c = multi_tree.at(1).c;
+        m_c = multi_tree.at(1).c.get();
     }
 
     auto TearDown() -> void override
@@ -1883,11 +1881,12 @@ TEST_F(VacuumTests, VacuumSchemaTree)
     // Add records to m_tree.
     init_tree(*this, kInitLongValues);
     auto &c = *m_schema->cursor();
-    std::vector<Cursor *> cursors;
+    std::vector<TestCursor> cursors;
     for (size_t i = 0; i < kSize; i += 2) {
-        cursors.emplace_back();
-        ASSERT_OK(m_schema->create_bucket(BucketOptions(), numeric_key(i), &cursors.back()));
+        Cursor *temp;
+        ASSERT_OK(m_schema->create_bucket(BucketOptions(), numeric_key(i), &temp));
         ASSERT_OK(m_schema->create_bucket(BucketOptions(), numeric_key(i + 1), nullptr));
+        cursors.emplace_back(temp);
     }
     c.seek_first();
     for (size_t i = 0; i < kSize; ++i) {

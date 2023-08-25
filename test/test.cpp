@@ -9,9 +9,25 @@
 namespace calicodb
 {
 
+auto append_escaped_string(std::string &out, const Slice &value) -> void
+{
+    for (size_t i = 0; i < value.size(); ++i) {
+        const auto chr = value[i];
+        if (chr >= ' ' && chr <= '~') {
+            out.push_back(chr);
+        } else {
+            char buffer[10];
+            std::snprintf(buffer, sizeof(buffer), "\\x%02x", static_cast<unsigned>(chr) & 0xFF);
+            out.append(buffer);
+        }
+    }
+}
+
 auto PrintTo(const Slice &s, std::ostream *os) -> void
 {
-    *os << escape_string(s);
+    std::string str;
+    append_escaped_string(str, s);
+    *os << str;
 }
 
 auto PrintTo(const Status &s, std::ostream *os) -> void
@@ -24,8 +40,9 @@ auto PrintTo(const Cursor &c, std::ostream *os) -> void
     *os << "Cursor{";
     if (c.is_valid()) {
         const auto total_k = c.key();
-        const auto short_k = escape_string(total_k)
-                                 .substr(0, std::min(total_k.size(), 5UL));
+        std::string short_k;
+        append_escaped_string(short_k, total_k);
+        short_k.resize(std::min(total_k.size(), 5UL));
         *os << '"' << short_k;
         if (total_k.size() > short_k.size()) {
             *os << R"(" + <)" << total_k.size() - short_k.size() << " bytes>";
@@ -34,8 +51,9 @@ auto PrintTo(const Cursor &c, std::ostream *os) -> void
         }
 
         const auto total_v = c.value();
-        const auto short_v = escape_string(total_v)
-                                 .substr(0, std::min(total_v.size(), 5UL));
+        std::string short_v;
+        append_escaped_string(short_v, total_v);
+        short_v.resize(std::min(total_v.size(), 5UL));
         *os << R"(",")" << short_v;
         if (total_v.size() > short_v.size()) {
             *os << R"(" + <)" << total_v.size() - short_v.size() << " bytes>";

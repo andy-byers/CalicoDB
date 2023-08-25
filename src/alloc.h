@@ -12,7 +12,8 @@ namespace calicodb
 
 // Allocation routines for internal objects
 // Every heap-allocated object that CalicoDB uses must ultimately come from a call to either
-// Alloc::alloc() or Alloc::realloc(), and eventually be passed back to Alloc::free().
+// Alloc::malloc() or Alloc::realloc(), and eventually be passed back to Alloc::free().
+// NOTE: Alloc::set_*() are not thread-safe.
 class Alloc
 {
 public:

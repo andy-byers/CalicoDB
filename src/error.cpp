@@ -4,6 +4,7 @@
 
 #include "error.h"
 #include "alloc.h"
+#include "logging.h"
 #include <cstdarg>
 
 namespace calicodb
@@ -17,31 +18,14 @@ auto ErrorState::format_error(ErrorCode code, ...) -> const char *
 {
     CALICODB_EXPECT_LE(code, 0);
     CALICODB_EXPECT_LT(code, kNumCodes);
-    const char *fmt = kErrorFmt[code];
-    auto &error = m_errors[code];
 
     std::va_list args;
     va_start(args, code);
-
-    std::va_list args_copy;
-    va_copy(args_copy, args);
-    const auto old_len = error.is_empty() ? 0 : error.len() + 1;
-    auto rc = std::vsnprintf(error.ptr(), old_len, fmt, args_copy);
-    va_end(args_copy);
-    // This code does not handle std::vsnprintf() failures.
-    CALICODB_EXPECT_GE(rc, 0);
-    const auto len = static_cast<size_t>(rc);
-
-    if (len > error.len()) {
-        // Make sure the buffer has enough space to fit the error message.
-        error.resize(len);
-        if (error.is_empty()) {
-            return "out of memory in ErrorState::format_error()";
-        }
-        std::vsnprintf(error.ptr(), error.len() + 1, fmt, args);
-    }
+    m_errors[code].reset();
+    const auto rc = append_fmt_string_va(m_errors[code], kErrorFmt[code], args);
     va_end(args);
-    return error.ptr();
+
+    return rc ? "" : m_errors[code].c_str();
 }
 
 } // namespace calicodb

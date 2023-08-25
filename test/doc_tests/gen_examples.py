@@ -23,6 +23,8 @@ def main():
 #include <cstdio>
 #include "calicodb/db.h"
 #include "calicodb/cursor.h"
+#include "calicodb/tx.h"
+#include "calicodb/string.h"
 int main() {{{cpp} return 0;}}
 '''
     with open(args.output, 'w') as f:

@@ -917,13 +917,12 @@ auto Tree::redistribute_cells(Node &left, Node &right, Node &parent, uint32_t pi
     CALICODB_EXPECT_TRUE(!is_split || p_src == &right);
 
     // Cells that need to be redistributed, in order.
-    UniquePtr<Cell> cell_buffer(static_cast<Cell *>(
-        Alloc::malloc((cell_count + 2) * sizeof(Cell))));
-    if (!cell_buffer) {
+    UniqueBuffer<Cell> cell_buffer;
+    if (cell_buffer.realloc(cell_count + 2)) {
         m_pager->release(unused);
         return Status::no_memory();
     }
-    auto *cells = cell_buffer.get() + 1;
+    auto *cells = cell_buffer.ptr() + 1;
     auto *cell_itr = cells;
     uint32_t right_accum = 0;
     Cell cell;
@@ -1140,8 +1139,8 @@ auto Tree::fix_root(CursorImpl &c) -> Status
     return s;
 }
 
-Tree::Tree(Pager &pager, Stat &stat, char *scratch, Id root_id, UniqueString name)
-    : list_entry{name.as_slice(), this, nullptr, nullptr},
+Tree::Tree(Pager &pager, Stat &stat, char *scratch, Id root_id, String name)
+    : list_entry{string_as_slice(name), this, nullptr, nullptr},
       m_stat(&stat),
       m_node_scratch(scratch + kPageSize),
       m_cell_scratch{
@@ -1693,6 +1692,31 @@ class TreePrinter
         CHECK_TRUE(data.levels.size() == data.spaces.size());
     }
 
+    static auto append_fmt_string(std::string &str, const char *fmt, ...) -> void
+    {
+        std::va_list args;
+        va_start(args, fmt);
+
+        std::va_list args_copy;
+        va_copy(args_copy, args);
+        auto len = std::vsnprintf(
+            nullptr, 0,
+            fmt, args_copy);
+        va_end(args_copy);
+
+        CALICODB_EXPECT_GE(len, 0);
+        const auto offset = str.size();
+        str.resize(offset + static_cast<size_t>(len) + 1);
+        len = std::vsnprintf(
+            str.data() + offset,
+            str.size() - offset,
+            fmt, args);
+        str.pop_back();
+        va_end(args);
+
+        CALICODB_EXPECT_TRUE(0 <= len && len <= int(str.size()));
+    }
+
 public:
     static auto print_structure(Tree &tree, std::string &repr_out) -> Status
     {
@@ -1725,6 +1749,27 @@ public:
             }
         }
         return s;
+    }
+
+    static auto append_escaped_string(std::string &out, const Slice &value) -> void
+    {
+        for (size_t i = 0; i < value.size(); ++i) {
+            const auto chr = value[i];
+            if (chr >= ' ' && chr <= '~') {
+                out.push_back(chr);
+            } else {
+                char buffer[10];
+                std::snprintf(buffer, sizeof(buffer), "\\x%02x", static_cast<unsigned>(chr) & 0xFF);
+                out.append(buffer);
+            }
+        }
+    }
+
+    static auto escape_string(const Slice &value) -> std::string
+    {
+        std::string out;
+        append_escaped_string(out, value);
+        return out;
     }
 
     static auto print_nodes(Tree &tree, std::string &repr_out) -> Status

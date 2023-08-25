@@ -30,31 +30,32 @@ auto DB::open(const Options &options, const char *filename, DB *&db) -> Status
     clip_to_range(sanitized.cache_size, kMinFrameCount * kPageSize, kMaxCacheSize);
 
     // Allocate storage for the database filename.
+    String db_name;
     auto filename_len = std::strlen(filename);
-    auto db_name = UniqueString::from_slice(
-        Slice(filename, filename_len));
-    if (db_name.len() != filename_len) {
+    if (build_string(db_name, Slice(filename, filename_len))) {
         return Status::no_memory();
     }
 
     // Determine and allocate storage for the WAL filename.
-    UniqueString wal_name;
+    int rc;
+    String wal_name;
     if (const auto wal_filename_len = std::strlen(sanitized.wal_filename)) {
-        wal_name = UniqueString::from_slice(
+        rc = build_string(
+            wal_name,
             Slice(sanitized.wal_filename, wal_filename_len));
     } else {
-        wal_name = UniqueString::from_slice(
-            Slice(filename, filename_len),
+        rc = build_string(
+            wal_name,
+            string_as_slice(db_name),
             kDefaultWalSuffix);
     }
-    if (wal_name.is_empty()) {
+    if (rc) {
         return Status::no_memory();
     }
 
     // Allocate scratch memory for working with database pages.
     UniqueBuffer<char> scratch;
-    scratch.resize(kTreeBufferLen);
-    if (scratch.is_empty()) {
+    if (scratch.realloc(kTreeBufferLen)) {
         return Status::no_memory();
     }
 

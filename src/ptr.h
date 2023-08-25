@@ -6,6 +6,8 @@
 #define CALICODB_PTR_H
 
 #include "alloc.h"
+#include "calicodb/db.h"
+#include "calicodb/string.h"
 #include "utils.h"
 #include <memory>
 #include <utility>
@@ -195,9 +197,16 @@ public:
         return m_ptr.ref();
     }
 
+    auto reset() -> void
+    {
+        m_ptr.reset(nullptr);
+        m_len = 0;
+    }
+
     auto reset(char *ptr, size_t len) -> void
     {
-        CALICODB_EXPECT_EQ(ptr == nullptr, len == 0);
+        CALICODB_EXPECT_NE(ptr, nullptr);
+        CALICODB_EXPECT_NE(len, 0);
         m_ptr.reset(ptr);
         m_len = len;
     }
@@ -208,99 +217,47 @@ public:
         return std::exchange(ref(), nullptr);
     }
 
-    auto resize(size_t len) -> void
+    [[nodiscard]] auto realloc(size_t len) -> int
     {
-        CALICODB_EXPECT_GT(len, 0); // Use reset(nullptr, 0) to free the buffer early.
-        auto *ptr = static_cast<char *>(Alloc::realloc(m_ptr.get(), len));
-        if (ptr) {
+        auto *ptr = static_cast<T *>(Alloc::realloc(m_ptr.get(), len * sizeof(T)));
+        if (ptr || len == 0) {
             m_ptr.release();
-        } else {
-            len = 0;
+            m_ptr.reset(ptr);
+            m_len = len;
+            return 0;
         }
-        m_ptr.reset(ptr);
-        m_len = len;
+        return -1;
     }
 };
 
-class UniqueString final
+// NOTE: Allocates at least 1 byte to hold the '\0', which should not be included in `len`.
+inline auto realloc_string(String &string, size_t len) -> int
 {
-    UniqueBuffer<char> m_buf;
-
-public:
-    explicit UniqueString() = default;
-
-    explicit UniqueString(char *ptr, size_t len)
-    {
-        reset(ptr, len);
+    if (auto *ptr = static_cast<char *>(Alloc::realloc(string.data(), len + 1))) {
+        ptr[len] = '\0';
+        StringHelper::release(string);
+        string.reset(ptr);
+        return 0;
     }
+    return -1;
+}
 
-    UniqueString(UniqueString &&rhs) noexcept = default;
-    auto operator=(UniqueString &&rhs) noexcept -> UniqueString & = default;
-
-    [[nodiscard]] auto is_empty() const -> bool
-    {
-        return m_buf.is_empty();
+inline auto build_string(String &string_out, const Slice &slice, const Slice &extra = "") -> int
+{
+    const auto total_len = slice.size() + extra.size();
+    if (realloc_string(string_out, total_len)) {
+        return -1;
     }
+    CALICODB_EXPECT_NE(string_out.data(), nullptr);
+    std::memcpy(string_out.data(), slice.data(), slice.size());
+    std::memcpy(string_out.data() + slice.size(), extra.data(), extra.size());
+    return 0;
+}
 
-    [[nodiscard]] auto len() const -> size_t
-    {
-        return m_buf.len() ? m_buf.len() - 1 : 0;
-    }
-
-    [[nodiscard]] auto ptr() -> char *
-    {
-        return m_buf.ptr();
-    }
-
-    [[nodiscard]] auto ptr() const -> const char *
-    {
-        return m_buf.ptr();
-    }
-
-    [[nodiscard]] auto ref() -> char *&
-    {
-        return m_buf.ref();
-    }
-
-    auto reset(char *ptr, size_t len) -> void
-    {
-        m_buf.reset(ptr, len + (ptr != nullptr));
-    }
-
-    auto release() -> char *
-    {
-        return m_buf.release();
-    }
-
-    auto resize(size_t len) -> void
-    {
-        const auto including_null = len + (len != 0);
-        if (auto *ptr = static_cast<char *>(Alloc::realloc(m_buf.ptr(), including_null))) {
-            m_buf.release(); // Don't free the old pointer.
-            m_buf.reset(ptr, including_null);
-        }
-    }
-
-    // NOTE: A null byte is added at the end of the buffer.
-    static auto from_slice(const Slice &slice, const Slice &extra = "") -> UniqueString
-    {
-        const auto total_len = slice.size() + extra.size();
-
-        UniqueString str;
-        str.resize(total_len);
-        if (!str.is_empty()) {
-            std::memcpy(str.ptr(), slice.data(), slice.size());
-            std::memcpy(str.ptr() + slice.size(), extra.data(), extra.size());
-            str.ptr()[total_len] = '\0';
-        }
-        return str;
-    }
-
-    [[nodiscard]] auto as_slice() const -> Slice
-    {
-        return is_empty() ? "" : Slice(m_buf.ptr(), m_buf.len() - 1);
-    }
-};
+inline auto string_as_slice(const String &string) -> Slice
+{
+    return string.c_str();
+}
 
 template <class Object>
 using ObjectPtr = UniquePtr<Object, ObjectDestructor>;

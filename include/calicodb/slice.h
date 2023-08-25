@@ -119,6 +119,10 @@ public:
         return r;
     }
 
+    // Convenience conversion to std::string
+    // Memory allocated for the std::string is not tracked by the allocation subsystem. Also, the
+    // constructor of std::string throws std::bad_alloc. If this happens, std::terminate() will be
+    // called, since CalicoDB is compiled without exceptions.
     [[nodiscard]] auto to_string() const -> std::string
     {
         return {m_data, m_size};

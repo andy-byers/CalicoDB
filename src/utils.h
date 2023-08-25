@@ -7,6 +7,7 @@
 
 #include "calicodb/options.h"
 #include "calicodb/status.h"
+#include "calicodb/string.h"
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
@@ -30,6 +31,7 @@
 #define CALICODB_EXPECT_LE(lhs, rhs) CALICODB_EXPECT_TRUE((lhs) <= (rhs))
 #define CALICODB_EXPECT_GT(lhs, rhs) CALICODB_EXPECT_TRUE((lhs) > (rhs))
 #define CALICODB_EXPECT_GE(lhs, rhs) CALICODB_EXPECT_TRUE((lhs) >= (rhs))
+#define CALICODB_DEBUG_TRAP assert(false && __FUNCTION__)
 
 #define CALICODB_TRY(expr)                                               \
     do {                                                                 \
@@ -160,6 +162,15 @@ auto operator<<(std::ostream &os, const Slice &slice) -> std::ostream &
 {
     return os << slice.to_string();
 }
+
+class StringHelper
+{
+public:
+    static auto release(String &string) -> char *
+    {
+        return std::exchange(string.m_ptr, nullptr);
+    }
+};
 
 } // namespace calicodb
 

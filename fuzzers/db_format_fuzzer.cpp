@@ -2,9 +2,11 @@
 // This source code is licensed under the MIT License, which can be found in
 // LICENSE.md. See AUTHORS.md for a list of contributor names.
 
+#include "alloc.h"
 #include "calicodb/cursor.h"
 #include "calicodb/db.h"
 #include "calicodb/env.h"
+#include "calicodb/tx.h"
 #include "fake_env.h"
 #include "fuzzer.h"
 #include <memory>
@@ -24,7 +26,7 @@ public:
         m_options.env = &env;
     }
 
-    auto fuzz(const Slice &data) -> void
+    auto consume_input(const Slice &data) -> void
     {
         // Write the fuzzer input to a file.
         File *file;
@@ -38,7 +40,7 @@ public:
         auto s = DB::open(m_options, kFilename, db);
 
         if (s.is_ok()) {
-            s = db->update([](auto &tx) {
+            s = db->run(WriteOptions(), [](auto &tx) {
                 Cursor *c1 = nullptr;
                 Cursor *c2 = nullptr;
                 auto s = tx.open_bucket("b1", c1);
@@ -110,9 +112,12 @@ public:
 
 extern "C" int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size)
 {
-    FakeEnv env;
-    Fuzzer fuzzer(env);
-    fuzzer.fuzz(Slice(reinterpret_cast<const char *>(data), size));
+    {
+        FakeEnv env;
+        Fuzzer fuzzer(env);
+        fuzzer.consume_input(Slice(reinterpret_cast<const char *>(data), size));
+    }
+    CHECK_EQ(Alloc::bytes_used(), 0);
     return 0;
 }
 

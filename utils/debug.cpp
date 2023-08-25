@@ -26,11 +26,11 @@ auto print_database_overview(std::ostream &os, Pager &pager) -> void
             os << SEP "|    PageID |  ParentID | PageType       | Info                            |\n" SEP;
         }
         Id parent_id;
-        std::string info, type;
+        String info, type;
         if (PointerMap::is_map(page_id)) {
             const auto first = page_id.value + 1;
-            append_fmt_string(info, "Range=[%u,%u]", first, first + kPageSize / 5 - 1);
-            type = "<PtrMap>";
+            (void)append_fmt_string(info, "Range=[%u,%u]", first, first + kPageSize / 5 - 1);
+            (void)build_string(type, "<PtrMap>");
         } else {
             Status s;
             PointerMap::Entry entry;
@@ -53,48 +53,47 @@ auto print_database_overview(std::ostream &os, Pager &pager) -> void
 
             switch (entry.type) {
                 case PointerMap::kTreeRoot:
-                    type = "TreeRoot";
+                    (void)build_string(type, "TreeRoot");
                     [[fallthrough]];
                 case PointerMap::kTreeNode: {
                     auto n = NodeHdr::get_cell_count(
                         page->data + page_id.is_root() * FileHdr::kSize);
                     if (NodeHdr::get_type(page->data) == NodeHdr::kExternal) {
-                        append_fmt_string(info, "Ex,N=%u", n);
+                        (void)append_fmt_string(info, "Ex,N=%u", n);
                     } else {
-                        info = "In,N=";
-                        append_number(info, n);
+                        (void)build_string(type, "In,N=", std::to_string(n));
                         ++n;
                     }
-                    if (type.empty()) {
-                        type = "TreeNode";
+                    if (type.is_empty()) {
+                        (void)build_string(type, "TreeNode");
                     }
                     break;
                 }
                 case PointerMap::kFreelistPage:
-                    type = "Freelist";
+                    (void)build_string(type, "Freelist");
                     break;
                 case PointerMap::kOverflowHead:
-                    append_fmt_string(info, "Next=%u", get_u32(page->data));
-                    type = "OvflHead";
+                    (void)append_fmt_string(info, "Next=%u", get_u32(page->data));
+                    (void)build_string(type, "OvflHead");
                     break;
                 case PointerMap::kOverflowLink:
-                    append_fmt_string(info, "Next=%u", get_u32(page->data));
-                    type = "OvflLink";
+                    (void)append_fmt_string(info, "Next=%u", get_u32(page->data));
+                    (void)build_string(type, "OvflLink");
                     break;
                 default:
-                    type = "<BadType>";
+                    (void)build_string(type, "<BadType>");
             }
             pager.release(page);
         }
-        std::string line;
-        append_fmt_string(
+        String line;
+        (void)append_fmt_string(
             line,
             "|%10u |%10u | %-15s| %-32s|\n",
             page_id.value,
             parent_id.value,
             type.c_str(),
             info.c_str());
-        os << line;
+        os << line.c_str();
     }
     os << SEP;
 #undef SEP

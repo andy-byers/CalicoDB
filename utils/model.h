@@ -72,13 +72,13 @@ public:
 
     auto check_consistency() const -> void;
 
-    auto get_property(const Slice &name, Slice *value_out) const -> bool override
+    auto get_property(const Slice &name, String *value_out) const -> Status override
     {
         return m_db->get_property(name, value_out);
     }
 
-    auto new_tx(WriteTag, Tx *&tx_out) -> Status override;
-    [[nodiscard]] auto new_tx(Tx *&tx_out) const -> Status override;
+    auto new_tx(const WriteOptions &, Tx *&tx_out) -> Status override;
+    auto new_tx(const ReadOptions &, Tx *&tx_out) const -> Status override;
 
     auto checkpoint(bool reset) -> Status override
     {
@@ -99,7 +99,7 @@ class ModelCursorBase : public Cursor
     Cursor *const m_c;
     const ModelTx *const m_tx;
 
-    mutable typename Map::const_iterator m_itr;
+    mutable typename Map::iterator m_itr;
     Map *m_map;
 
     mutable std::string m_saved_key;
@@ -128,6 +128,12 @@ class ModelCursorBase : public Cursor
             return {true, m_saved_key};
         }
         return {false, ""};
+    }
+
+    auto move_to(typename Map::iterator position) const -> void
+    {
+        m_saved = false;
+        m_itr = position;
     }
 
 public:
@@ -302,10 +308,11 @@ public:
 
     auto drop_bucket(const Slice &name) -> Status override
     {
+        m_schema.seek(name);
         auto s = m_tx->drop_bucket(name);
         if (s.is_ok()) {
-            const auto num_erased = m_temp.erase(name.to_string());
-            CHECK_EQ(num_erased, 1);
+            CHECK_TRUE(m_schema.m_itr != end(m_temp));
+            m_schema.move_to(m_temp.erase(m_schema.m_itr));
         }
         return s;
     }

@@ -31,9 +31,9 @@ public:
     static auto destroy(const Options &options, const char *filename) -> Status;
     auto open(const Options &sanitized) -> Status;
 
-    [[nodiscard]] auto get_property(const Slice &name, Slice *out) const -> bool override;
-    auto new_tx(Tx *&tx) const -> Status override;
-    auto new_tx(WriteTag, Tx *&tx) -> Status override;
+    auto get_property(const Slice &name, String *out) const -> Status override;
+    auto new_tx(const ReadOptions &, Tx *&tx) const -> Status override;
+    auto new_tx(const WriteOptions &, Tx *&tx) -> Status override;
     auto checkpoint(bool reset) -> Status override;
 
     [[nodiscard]] auto TEST_pager() const -> Pager &;
@@ -41,8 +41,8 @@ public:
 private:
     struct Parameters {
         Options sanitized;
-        UniqueString db_name;
-        UniqueString wal_name;
+        String db_name;
+        String wal_name;
         UniqueBuffer<char> scratch;
     };
     friend class Alloc;
@@ -56,7 +56,6 @@ private:
     mutable TxImpl *m_tx = nullptr;
     mutable Stat m_stat;
     mutable UniqueBuffer<char> m_scratch;
-    mutable UniqueString m_property;
     mutable ObjectPtr<Pager> m_pager;
 
     UserPtr<File> m_file;
@@ -65,8 +64,8 @@ private:
     BusyHandler *const m_busy;
 
     const size_t m_auto_ckpt;
-    const UniqueString m_db_filename;
-    const UniqueString m_wal_filename;
+    const String m_db_filename;
+    const String m_wal_filename;
     const bool m_owns_log;
     const bool m_owns_env;
 };

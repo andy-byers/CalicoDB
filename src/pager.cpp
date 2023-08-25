@@ -137,8 +137,8 @@ Pager::~Pager()
     }
     // Regardless of lock mode, this is where the database file lock is released. The
     // database file should not be accessed after this point.
-    m_file->file_unlock();
     Alloc::delete_object(m_wal);
+    m_file->file_unlock();
 
     if (!s.is_ok()) {
         log(m_log, "failed pager shutdown due to %s (%s)",

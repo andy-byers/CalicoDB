@@ -23,12 +23,11 @@ auto CursorImpl::fetch_user_payload() -> Status
 
     Slice slice;
     if (cell.key_size) {
-        if (cell.key_size > key_buffer_len) {
-            m_key_buf.resize(cell.key_size);
-            if (m_key_buf.is_empty()) {
-                return Status::no_memory();
-            }
+        if (cell.key_size > key_buffer_len &&
+            m_key_buf.realloc(cell.key_size)) {
+            return Status::no_memory();
         }
+        CALICODB_EXPECT_NE(m_key_buf.ptr(), nullptr);
         auto s = m_tree->read_key(cell, m_key_buf.ptr(), &slice);
         if (!s.is_ok()) {
             return s;
@@ -36,12 +35,11 @@ auto CursorImpl::fetch_user_payload() -> Status
         m_key_len = slice.size();
     }
     if (const auto value_size = cell.total_pl_size - cell.key_size) {
-        if (value_size > value_buffer_len) {
-            m_value_buf.resize(value_size);
-            if (m_value_buf.is_empty()) {
-                return Status::no_memory();
-            }
+        if (value_size > value_buffer_len &&
+            m_value_buf.realloc(value_size)) {
+            return Status::no_memory();
         }
+        CALICODB_EXPECT_NE(m_value_buf.ptr(), nullptr);
         auto s = m_tree->read_value(cell, m_value_buf.ptr(), &slice);
         if (!s.is_ok()) {
             return s;

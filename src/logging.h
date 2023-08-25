@@ -13,13 +13,11 @@
 namespace calicodb
 {
 
-auto append_fmt_string(UniqueString &out, const char *fmt, ...) -> void;
+class String;
+[[nodiscard]] auto append_number(String &out, uint64_t value) -> int;
+[[nodiscard]] auto append_fmt_string(String &out, const char *fmt, ...) -> int;
+[[nodiscard]] auto append_fmt_string_va(String &out, const char *fmt, std::va_list args) -> int;
 
-auto append_fmt_string(std::string &out, const char *fmt, ...) -> void;
-auto append_number(std::string &out, size_t value) -> void;
-auto append_escaped_string(std::string &out, const Slice &value) -> void;
-auto number_to_string(size_t value) -> std::string;
-auto escape_string(const Slice &value) -> std::string;
 auto consume_decimal_number(Slice &data, uint64_t *val) -> bool;
 
 } // namespace calicodb
