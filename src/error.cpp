@@ -21,8 +21,8 @@ auto ErrorState::format_error(ErrorCode code, ...) -> const char *
 
     std::va_list args;
     va_start(args, code);
-    m_errors[code].reset();
-    const auto rc = append_fmt_string_va(m_errors[code], kErrorFmt[code], args);
+    m_errors[code].clear();
+    const auto rc = append_format_string_va(m_errors[code], kErrorFmt[code], args);
     va_end(args);
 
     return rc ? "" : m_errors[code].c_str();

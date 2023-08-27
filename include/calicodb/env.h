@@ -11,7 +11,7 @@
 namespace calicodb
 {
 
-// <calicodb/env.h> (below)
+// calicodb/env.h (below)
 class File;
 class Logger;
 

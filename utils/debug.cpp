@@ -29,8 +29,8 @@ auto print_database_overview(std::ostream &os, Pager &pager) -> void
         String info, type;
         if (PointerMap::is_map(page_id)) {
             const auto first = page_id.value + 1;
-            (void)append_fmt_string(info, "Range=[%u,%u]", first, first + kPageSize / 5 - 1);
-            (void)build_string(type, "<PtrMap>");
+            (void)append_format_string(info, "Range=[%u,%u]", first, first + kPageSize / 5 - 1);
+            (void)append_strings(type, "<PtrMap>");
         } else {
             Status s;
             PointerMap::Entry entry;
@@ -53,40 +53,40 @@ auto print_database_overview(std::ostream &os, Pager &pager) -> void
 
             switch (entry.type) {
                 case PointerMap::kTreeRoot:
-                    (void)build_string(type, "TreeRoot");
+                    (void)append_strings(type, "TreeRoot");
                     [[fallthrough]];
                 case PointerMap::kTreeNode: {
                     auto n = NodeHdr::get_cell_count(
                         page->data + page_id.is_root() * FileHdr::kSize);
                     if (NodeHdr::get_type(page->data) == NodeHdr::kExternal) {
-                        (void)append_fmt_string(info, "Ex,N=%u", n);
+                        (void)append_format_string(info, "Ex,N=%u", n);
                     } else {
-                        (void)build_string(type, "In,N=", std::to_string(n));
+                        (void)append_strings(type, "In,N=", std::to_string(n));
                         ++n;
                     }
                     if (type.is_empty()) {
-                        (void)build_string(type, "TreeNode");
+                        (void)append_strings(type, "TreeNode");
                     }
                     break;
                 }
                 case PointerMap::kFreelistPage:
-                    (void)build_string(type, "Freelist");
+                    (void)append_strings(type, "Freelist");
                     break;
                 case PointerMap::kOverflowHead:
-                    (void)append_fmt_string(info, "Next=%u", get_u32(page->data));
-                    (void)build_string(type, "OvflHead");
+                    (void)append_format_string(info, "Next=%u", get_u32(page->data));
+                    (void)append_strings(type, "OvflHead");
                     break;
                 case PointerMap::kOverflowLink:
-                    (void)append_fmt_string(info, "Next=%u", get_u32(page->data));
-                    (void)build_string(type, "OvflLink");
+                    (void)append_format_string(info, "Next=%u", get_u32(page->data));
+                    (void)append_strings(type, "OvflLink");
                     break;
                 default:
-                    (void)build_string(type, "<BadType>");
+                    (void)append_strings(type, "<BadType>");
             }
             pager.release(page);
         }
         String line;
-        (void)append_fmt_string(
+        (void)append_format_string(
             line,
             "|%10u |%10u | %-15s| %-32s|\n",
             page_id.value,

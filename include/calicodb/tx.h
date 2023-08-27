@@ -10,7 +10,7 @@
 namespace calicodb
 {
 
-// <calicodb/cursor.h>
+// calicodb/cursor.h
 class Cursor;
 
 // Transaction on a CalicoDB database

@@ -11,10 +11,10 @@
 namespace calicodb
 {
 
-// <calicodb/tx.h>
+// calicodb/tx.h
 class Tx;
 
-// <calicodb/string.h>
+// calicodb/string.h
 class String;
 
 // On-disk collection of buckets

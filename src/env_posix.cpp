@@ -3,6 +3,7 @@
 // LICENSE.md. See AUTHORS.md for a list of contributor names.
 
 #include "env_posix.h"
+#include "logging.h"
 #include "ptr.h"
 #include <ctime>
 #include <fcntl.h>
@@ -464,9 +465,9 @@ static struct PosixFs final {
             }
 
             // Allocate storage for the shm filename.
-            if (build_string(
+            if (append_strings(
                     new_snode->filename,
-                    string_as_slice(file.filename),
+                    file.filename,
                     kDefaultShmSuffix)) {
                 return Status::no_memory();
             }
@@ -610,7 +611,7 @@ auto PosixEnv::new_file(const char *filename, OpenMode mode, File *&out) -> Stat
     // Allocate storage for the filename. Alloc::to_string() adds a '\0'.
     const Slice filename_slice(filename, std::strlen(filename));
     String filename_storage;
-    if (build_string(filename_storage, filename_slice)) {
+    if (append_strings(filename_storage, filename_slice)) {
         return Status::no_memory();
     }
 

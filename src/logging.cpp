@@ -3,7 +3,6 @@
 // LICENSE.md. See AUTHORS.md for a list of contributor names.
 
 #include "logging.h"
-#include "calicodb/db.h"
 #include "calicodb/env.h"
 #include "utils.h"
 #include <limits>
@@ -11,81 +10,146 @@
 namespace calicodb
 {
 
-auto append_fmt_string(String &str, const char *fmt, ...) -> int
+StringBuilder::StringBuilder(String str)
+    : m_len(0)
+{
+    if (auto *ptr = std::exchange(str.m_ptr, nullptr)) {
+        m_buf.reset(ptr, str.m_cap);
+        m_len = str.m_len;
+        str.clear();
+    }
+}
+
+auto StringBuilder::ensure_capacity(size_t len) -> int
+{
+    auto capacity = std::max<size_t>(m_buf.len(), 1);
+    while (len + 1 > capacity) {
+        capacity *= 2;
+    }
+    if (capacity > m_buf.len()) {
+        return m_buf.realloc(capacity);
+    }
+    return 0;
+}
+
+auto StringBuilder::build() && -> String
+{
+    const auto capacity = m_buf.len();
+    const auto length = std::exchange(m_len, 0);
+    auto *pointer = m_buf.release();
+    if (length) {
+        CALICODB_EXPECT_NE(pointer, nullptr);
+        CALICODB_EXPECT_LT(length, capacity);
+        pointer[length] = '\0';
+    }
+    return String(pointer, length, capacity);
+}
+
+auto StringBuilder::append(const Slice &s) -> int
+{
+    if (ensure_capacity(m_len + s.size())) {
+        return -1;
+    }
+    std::memcpy(m_buf.ptr() + m_len, s.data(), s.size());
+    m_len += s.size();
+    return 0;
+}
+
+auto StringBuilder::append_escaped(const Slice &s) -> int
+{
+    int rc = 0;
+    for (size_t i = 0; rc == 0 && i < s.size(); ++i) {
+        const auto chr = s[i];
+        if (chr >= ' ' && chr <= '~') {
+            rc = append(chr);
+        } else {
+            char buffer[10];
+            std::snprintf(buffer, sizeof(buffer), "\\x%02x", static_cast<unsigned>(chr) & 0xFF);
+            rc = append(buffer);
+        }
+    }
+    return rc;
+}
+
+auto StringBuilder::append_format(const char *fmt, ...) -> int
 {
     std::va_list args;
     va_start(args, fmt);
-    const auto rc = append_fmt_string_va(str, fmt, args);
+    const auto rc = append_format_va(fmt, args);
     va_end(args);
     return rc;
 }
 
-auto append_fmt_string_va(String &str, const char *fmt, std::va_list args) -> int
+auto StringBuilder::append_format_va(const char *fmt, std::va_list args) -> int
 {
-    std::va_list args_copy;
-    va_copy(args_copy, args);
-    auto rc = std::vsnprintf(nullptr, 0, fmt, args_copy);
-    va_end(args_copy);
-
-    if (rc < 0) {
-        CALICODB_EXPECT_TRUE(false && "std::vsnprintf(nullptr, 0, ...) failed");
+    // Make sure the pointer is not null.
+    if (ensure_capacity(1)) {
         return -1;
     }
-    const auto len = static_cast<size_t>(rc);
-    const auto end = std::strlen(str.c_str());
-    if (realloc_string(str, end + len)) {
-        return -1;
-    }
-    // realloc_string() adds a '\0'.
-    rc = std::vsnprintf(str.data() + end, len + 1, fmt, args);
+    for (int i = 0; i < 2; ++i) {
+        std::va_list args_copy;
+        va_copy(args_copy, args);
+        auto rc = std::vsnprintf(m_buf.ptr() + m_len,
+                                 m_buf.len() - m_len,
+                                 fmt, args_copy);
+        va_end(args_copy);
 
-    if (rc < 0) {
-        CALICODB_EXPECT_TRUE(false && "std::vsnprintf(ptr, len, ...) failed");
-        return -1;
+        if (rc < 0) {
+            // This should never happen.
+            CALICODB_DEBUG_TRAP;
+            return -1;
+        }
+        const auto len = m_len + static_cast<size_t>(rc);
+        if (len + 1 <= m_buf.len()) {
+            // Success: m_buf had enough room for the message + '\0'.
+            m_len = len;
+            break;
+        } else if (i) {
+            // Already tried reallocating once. std::vsnprintf() may have a bug.
+            CALICODB_DEBUG_TRAP;
+            return -1;
+        } else if (ensure_capacity(len)) {
+            // Out of memory.
+            return -1;
+        }
     }
     return 0;
 }
 
-auto append_fmt_string(std::string &str, const char *fmt, ...) -> void
+auto append_strings(String &str, const Slice &s, const Slice &t) -> int
+{
+    StringBuilder builder(std::move(str));
+    auto rc = builder.append(s);
+    if (rc == 0) {
+        rc = builder.append(t);
+    }
+    str = std::move(builder).build();
+    return rc;
+}
+
+auto append_escaped_string(String &target, const Slice &s) -> int
+{
+    StringBuilder builder(std::move(target));
+    const auto rc = builder.append_escaped(s);
+    target = std::move(builder).build();
+    return rc;
+}
+
+auto append_format_string(String &target, const char *fmt, ...) -> int
 {
     std::va_list args;
     va_start(args, fmt);
-
-    std::va_list args_copy;
-    va_copy(args_copy, args);
-    auto len = std::vsnprintf(
-        nullptr, 0,
-        fmt, args_copy);
-    va_end(args_copy);
-
-    CALICODB_EXPECT_GE(len, 0);
-    const auto offset = str.size();
-    str.resize(offset + static_cast<size_t>(len) + 1);
-    len = std::vsnprintf(
-        str.data() + offset,
-        str.size() - offset,
-        fmt, args);
-    str.pop_back();
+    const auto rc = append_format_string_va(target, fmt, args);
     va_end(args);
-
-    CALICODB_EXPECT_TRUE(0 <= len && len <= int(str.size()));
+    return rc;
 }
 
-auto append_number(String &out, uint64_t value) -> int
+auto append_format_string_va(String &target, const char *fmt, std::va_list args) -> int
 {
-    char buf[30];
-    auto rc = std::snprintf(buf, sizeof(buf), "%llu", static_cast<unsigned long long>(value));
-    if (rc < 0) {
-        CALICODB_DEBUG_TRAP;
-        rc = 0;
-    }
-    const auto end = std::strlen(out.c_str());
-    const auto len = static_cast<size_t>(rc);
-    if (realloc_string(out, end + len)) {
-        return -1;
-    }
-    std::memcpy(out.data() + end, buf, len);
-    return 0;
+    StringBuilder builder(std::move(target));
+    const auto rc = builder.append_format_va(fmt, args);
+    target = std::move(builder).build();
+    return rc;
 }
 
 // Modified from LevelDB.

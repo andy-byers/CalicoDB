@@ -5,56 +5,63 @@
 #ifndef CALICODB_STRING_H
 #define CALICODB_STRING_H
 
-#include <cassert>
-#include <cstring>
+#include "slice.h"
 #include <utility>
 
 namespace calicodb
 {
 
 // Wrapper for a heap-allocated C-style string
+// Instances of this class are filled-out by certain library routines.
 class String final
 {
 public:
-    explicit String(char *ptr = nullptr)
-        : m_ptr(ptr)
+    explicit String()
+        : m_ptr(nullptr),
+          m_len(0),
+          m_cap(0)
     {
     }
 
     ~String()
     {
-        reset();
+        clear();
     }
 
     String(const String &) = delete;
     auto operator=(const String &) -> String & = delete;
 
     String(String &&rhs) noexcept
-        : m_ptr(std::exchange(rhs.m_ptr, nullptr))
+        : m_ptr(std::exchange(rhs.m_ptr, nullptr)),
+          m_len(std::exchange(rhs.m_len, 0)),
+          m_cap(std::exchange(rhs.m_cap, 0))
     {
     }
 
     auto operator=(String &&rhs) noexcept -> String &
     {
         if (this != &rhs) {
-            reset(std::exchange(rhs.m_ptr, nullptr));
+            clear();
+            m_ptr = std::exchange(rhs.m_ptr, nullptr);
+            m_len = std::exchange(rhs.m_len, 0);
+            m_cap = std::exchange(rhs.m_cap, 0);
         }
         return *this;
     }
 
-    auto operator==(const String &rhs) const -> bool
+    operator Slice()
     {
-        return std::strcmp(c_str(), rhs.c_str()) == 0;
-    }
-
-    auto operator!=(const String &rhs) const -> bool
-    {
-        return !(*this == rhs);
+        return m_ptr ? Slice(m_ptr, m_len) : "";
     }
 
     [[nodiscard]] auto is_empty() const -> bool
     {
-        return std::strlen(c_str()) == 0;
+        return length() == 0;
+    }
+
+    [[nodiscard]] auto length() const -> size_t
+    {
+        return m_len;
     }
 
     [[nodiscard]] auto c_str() const -> const char *
@@ -62,17 +69,26 @@ public:
         return m_ptr ? m_ptr : "";
     }
 
-    auto data() -> char *
+    [[nodiscard]] auto data() -> char *
     {
         return m_ptr;
     }
 
-    auto reset(char *ptr = nullptr) -> void;
+    auto clear() -> void;
 
 private:
-    friend class StringHelper;
+    friend class StringBuilder;
+
+    explicit String(char *ptr, size_t len, size_t cap)
+        : m_ptr(ptr),
+          m_len(len),
+          m_cap(cap)
+    {
+    }
 
     char *m_ptr;
+    size_t m_len;
+    size_t m_cap;
 };
 
 } // namespace calicodb

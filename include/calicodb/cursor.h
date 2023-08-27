@@ -8,10 +8,10 @@
 namespace calicodb
 {
 
-// <calicodb/slice.h>
+// calicodb/slice.h
 class Slice;
 
-// <calicodb/status.h>
+// calicodb/status.h
 class Status;
 
 // Cursor for iterating over the records in a bucket

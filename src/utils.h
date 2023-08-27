@@ -163,15 +163,6 @@ auto operator<<(std::ostream &os, const Slice &slice) -> std::ostream &
     return os << slice.to_string();
 }
 
-class StringHelper
-{
-public:
-    static auto release(String &string) -> char *
-    {
-        return std::exchange(string.m_ptr, nullptr);
-    }
-};
-
 } // namespace calicodb
 
 #endif // CALICODB_UTILS_H

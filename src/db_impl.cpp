@@ -136,7 +136,7 @@ auto DBImpl::destroy(const Options &options, const char *filename) -> Status
             // This DB doesn't use a shm file, since it was opened in exclusive locking
             // mode. shm files left by other connections must be removed manually.
             String path_buffer;
-            if (build_string(
+            if (append_strings(
                     path_buffer,
                     Slice(filename, std::strlen(filename)),
                     kDefaultShmSuffix)) {
@@ -159,7 +159,7 @@ auto DBImpl::destroy(const Options &options, const char *filename) -> Status
 auto DBImpl::get_property(const Slice &name, String *out) const -> Status
 {
     if (out) {
-        out->reset();
+        out->clear();
     }
     static constexpr char kBasePrefix[] = "calicodb.";
     if (name.starts_with(kBasePrefix)) {
@@ -168,7 +168,7 @@ auto DBImpl::get_property(const Slice &name, String *out) const -> Status
         if (prop == "stats") {
             int rc = 0;
             if (out) {
-                rc = append_fmt_string(
+                rc = append_format_string(
                     *out,
                     "Name               Value\n"
                     "------------------------\n"

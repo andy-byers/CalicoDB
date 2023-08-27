@@ -230,35 +230,6 @@ public:
     }
 };
 
-// NOTE: Allocates at least 1 byte to hold the '\0', which should not be included in `len`.
-inline auto realloc_string(String &string, size_t len) -> int
-{
-    if (auto *ptr = static_cast<char *>(Alloc::realloc(string.data(), len + 1))) {
-        ptr[len] = '\0';
-        StringHelper::release(string);
-        string.reset(ptr);
-        return 0;
-    }
-    return -1;
-}
-
-inline auto build_string(String &string_out, const Slice &slice, const Slice &extra = "") -> int
-{
-    const auto total_len = slice.size() + extra.size();
-    if (realloc_string(string_out, total_len)) {
-        return -1;
-    }
-    CALICODB_EXPECT_NE(string_out.data(), nullptr);
-    std::memcpy(string_out.data(), slice.data(), slice.size());
-    std::memcpy(string_out.data() + slice.size(), extra.data(), extra.size());
-    return 0;
-}
-
-inline auto string_as_slice(const String &string) -> Slice
-{
-    return string.c_str();
-}
-
 template <class Object>
 using ObjectPtr = UniquePtr<Object, ObjectDestructor>;
 template <class Object>

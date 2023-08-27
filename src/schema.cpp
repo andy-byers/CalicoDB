@@ -235,7 +235,7 @@ auto Schema::construct_or_reference_tree(const Slice &name, Id root_id) -> Tree 
     }
 
     String name_str;
-    if (!root_id.is_root() && build_string(name_str, name)) {
+    if (!root_id.is_root() && append_strings(name_str, name)) {
         return nullptr;
     }
 

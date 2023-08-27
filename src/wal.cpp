@@ -1205,7 +1205,7 @@ auto WalImpl::recover_index() -> Status
             const auto version = get_u32(&header[4]);
             if (version != kWalVersion) {
                 //                std::string message;
-                //                append_fmt_string(message, "found WAL version %u but expected %u", version, kWalVersion);
+                //                append_format_string(message, "found WAL version %u but expected %u", version, kWalVersion);
                 return cleanup(Status::invalid_argument("message"));
             }
 

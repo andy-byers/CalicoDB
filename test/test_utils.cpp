@@ -531,43 +531,10 @@ TEST(Status, StatusCodes)
 //     }
 // }
 
-static auto number_to_string(uint64_t number) -> std::string
-{
-    String str;
-    EXPECT_EQ(append_number(str, number), 0);
-    return str.c_str();
-}
-
-TEST(Logging, NumberToString)
-{
-    ASSERT_EQ("0", number_to_string(0));
-    ASSERT_EQ("1", number_to_string(1));
-    ASSERT_EQ("9", number_to_string(9));
-
-    ASSERT_EQ("10", number_to_string(10));
-    ASSERT_EQ("11", number_to_string(11));
-    ASSERT_EQ("19", number_to_string(19));
-    ASSERT_EQ("99", number_to_string(99));
-
-    ASSERT_EQ("100", number_to_string(100));
-    ASSERT_EQ("109", number_to_string(109));
-    ASSERT_EQ("190", number_to_string(190));
-    ASSERT_EQ("123", number_to_string(123));
-    ASSERT_EQ("12345678", number_to_string(12345678));
-
-    static_assert(std::numeric_limits<uint64_t>::max() == 18446744073709551615U,
-                  "Test consistency check");
-    ASSERT_EQ("18446744073709551000", number_to_string(18446744073709551000U));
-    ASSERT_EQ("18446744073709551600", number_to_string(18446744073709551600U));
-    ASSERT_EQ("18446744073709551610", number_to_string(18446744073709551610U));
-    ASSERT_EQ("18446744073709551614", number_to_string(18446744073709551614U));
-    ASSERT_EQ("18446744073709551615", number_to_string(18446744073709551615U));
-}
-
 void ConsumeDecimalNumberRoundtripTest(uint64_t number,
                                        const std::string &padding = "")
 {
-    std::string decimal_number = number_to_string(number);
+    std::string decimal_number = std::to_string(number);
     std::string input_string = decimal_number + padding;
     Slice input(input_string);
     Slice output = input;
@@ -593,7 +560,7 @@ TEST(Logging, ConsumeDecimalNumberRoundtrip)
     ConsumeDecimalNumberRoundtripTest(109);
     ConsumeDecimalNumberRoundtripTest(190);
     ConsumeDecimalNumberRoundtripTest(123);
-    ASSERT_EQ("12345678", number_to_string(12345678));
+    ASSERT_EQ("12345678", std::to_string(12345678));
 
     for (uint64_t i = 0; i < 100; ++i) {
         uint64_t large_number = std::numeric_limits<uint64_t>::max() - i;
@@ -674,10 +641,10 @@ TEST(Logging, ConsumeDecimalNumberNoDigits)
 TEST(Logging, AppendFmtString)
 {
     String str;
-    ASSERT_EQ(0, append_fmt_string(str, "hello %d %s", 42, "goodbye"));
+    ASSERT_EQ(0, append_format_string(str, "hello %d %s", 42, "goodbye"));
     const std::string long_str(128, '*');
-    ASSERT_EQ(0, append_fmt_string(str, "%s", long_str.data()));
-    ASSERT_EQ(0, append_fmt_string(str, "empty"));
+    ASSERT_EQ(0, append_format_string(str, "%s", long_str.data()));
+    ASSERT_EQ(0, append_format_string(str, "empty"));
     ASSERT_EQ(str.c_str(), "hello 42 goodbye" + long_str + "empty");
 }
 
@@ -850,5 +817,127 @@ TEST(Slice, DeathTest)
     ASSERT_DEATH(Slice(nullptr, 123), "Assert");
 }
 #endif // not NDEBUG
+
+class StringBuilderTests : public testing::Test
+{
+public:
+    auto build_string() -> String
+    {
+        return std::move(m_builder).build();
+    }
+
+    StringBuilder m_builder;
+};
+
+TEST_F(StringBuilderTests, InitialStateIsEmpty)
+{
+    const auto str = build_string();
+    ASSERT_EQ(str.length(), 0);
+}
+
+TEST_F(StringBuilderTests, Append)
+{
+    const std::string msg_a;
+    const std::string msg_b("abc");
+    const char msg_c = 'd';
+
+    ASSERT_EQ(m_builder.append(msg_a), 0);
+    ASSERT_EQ(m_builder.append(msg_b), 0);
+    ASSERT_EQ(m_builder.append(msg_c), 0);
+
+    const auto str = build_string();
+    ASSERT_EQ(str.length(), (msg_a + msg_b + msg_c).size());
+    ASSERT_EQ(Slice(str.c_str()), msg_a + msg_b + msg_c);
+}
+
+TEST_F(StringBuilderTests, AppendFormat)
+{
+    ASSERT_EQ(0, m_builder.append_format("hello %d %s", 42, "goodbye"));
+    const std::string long_str(512, '*');
+    ASSERT_EQ(0, m_builder.append_format("%s", long_str.data()));
+    ASSERT_EQ(0, m_builder.append_format("empty"));
+    const auto str = build_string();
+    ASSERT_EQ(Slice(str.c_str()), "hello 42 goodbye" + long_str + "empty");
+}
+
+TEST_F(StringBuilderTests, AppendEscaped)
+{
+    ASSERT_EQ(0, m_builder.append_format("hello %d %s", 42, "goodbye"));
+    const std::string long_str(512, '*');
+    ASSERT_EQ(0, m_builder.append_format("%s", long_str.data()));
+    ASSERT_EQ(0, m_builder.append_format("empty"));
+    const auto str = build_string();
+    ASSERT_EQ(Slice(str.c_str()), "hello 42 goodbye" + long_str + "empty");
+}
+
+TEST_F(StringBuilderTests, SpecialMemberFunctions)
+{
+    const char *msg = "abc";
+    ASSERT_EQ(m_builder.append(msg), 0);
+    auto move_constructed = std::move(m_builder);
+    m_builder = std::move(move_constructed);
+    const auto str = build_string();
+    ASSERT_EQ(Slice(str.c_str()), msg);
+}
+
+static constexpr const char *kTestMessages[] = {
+    "aa%d",
+    "bb%dbb%f",
+    "cc%dcc%fcccc%p",
+    "dd%ddd%fdddd%pdddddddd%u",
+    "ee%dee%feeee%peeeeeeee%ueeeeeeeeeeeeeeee%x",
+    "ff%dff%fffff%pffffffff%uffffffffffffffff%xffffffffffffffffffffffffffffffff%s",
+};
+
+TEST_F(StringBuilderTests, AppendMultiple)
+{
+    std::string answer;
+    for (size_t i = 0; i < 512; ++i) {
+        const auto r = rand() % ARRAY_SIZE(kTestMessages);
+        answer.append(kTestMessages[r]);
+        ASSERT_EQ(m_builder.append(Slice(kTestMessages[r])), 0);
+    }
+    const auto str = build_string();
+    ASSERT_EQ(Slice(str.c_str()), answer);
+}
+
+TEST_F(StringBuilderTests, AppendFormatMultiple)
+{
+    char buffer[4'096];
+    std::string answer;
+    for (size_t i = 0; i < 512; ++i) {
+        const auto r = rand() % ARRAY_SIZE(kTestMessages);
+        const auto fmt = kTestMessages[r];
+        switch (r) {
+            case 0:
+                std::snprintf(buffer, sizeof(buffer), fmt, i);
+                ASSERT_EQ(m_builder.append_format(fmt, i), 0);
+                break;
+            case 1:
+                std::snprintf(buffer, sizeof(buffer), fmt, i, static_cast<double>(i));
+                ASSERT_EQ(m_builder.append_format(fmt, i, static_cast<double>(i)), 0);
+                break;
+            case 2:
+                std::snprintf(buffer, sizeof(buffer), fmt, i, static_cast<double>(i), reinterpret_cast<void *>(i));
+                ASSERT_EQ(m_builder.append_format(fmt, i, static_cast<double>(i), reinterpret_cast<void *>(i)), 0);
+                break;
+            case 3:
+                std::snprintf(buffer, sizeof(buffer), fmt, i, static_cast<double>(i), reinterpret_cast<void *>(i), i);
+                ASSERT_EQ(m_builder.append_format(fmt, i, static_cast<double>(i), reinterpret_cast<void *>(i), i), 0);
+                break;
+            case 4:
+                std::snprintf(buffer, sizeof(buffer), fmt, i, static_cast<double>(i), reinterpret_cast<void *>(i), i, i);
+                ASSERT_EQ(m_builder.append_format(fmt, i, static_cast<double>(i), reinterpret_cast<void *>(i), i, i), 0);
+                break;
+            default:
+                std::snprintf(buffer, sizeof(buffer), fmt, i, static_cast<double>(i), reinterpret_cast<void *>(i), i, i, "Hello, world!");
+                ASSERT_EQ(m_builder.append_format(fmt, i, static_cast<double>(i), reinterpret_cast<void *>(i), i, i, "Hello, world!"), 0);
+                break;
+        }
+        answer.append(buffer);
+    }
+    const auto str = build_string();
+    ASSERT_EQ(Slice(str.c_str()), answer);
+}
 
 } // namespace calicodb::test

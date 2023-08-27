@@ -6,6 +6,7 @@
 #include "alloc.h"
 #include "db_impl.h"
 #include "env_posix.h"
+#include "logging.h"
 #include "temp.h"
 #include "utils.h"
 
@@ -32,7 +33,7 @@ auto DB::open(const Options &options, const char *filename, DB *&db) -> Status
     // Allocate storage for the database filename.
     String db_name;
     auto filename_len = std::strlen(filename);
-    if (build_string(db_name, Slice(filename, filename_len))) {
+    if (append_strings(db_name, Slice(filename, filename_len))) {
         return Status::no_memory();
     }
 
@@ -40,13 +41,13 @@ auto DB::open(const Options &options, const char *filename, DB *&db) -> Status
     int rc;
     String wal_name;
     if (const auto wal_filename_len = std::strlen(sanitized.wal_filename)) {
-        rc = build_string(
+        rc = append_strings(
             wal_name,
             Slice(sanitized.wal_filename, wal_filename_len));
     } else {
-        rc = build_string(
+        rc = append_strings(
             wal_name,
-            string_as_slice(db_name),
+            db_name,
             kDefaultWalSuffix);
     }
     if (rc) {

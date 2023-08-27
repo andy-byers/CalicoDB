@@ -46,7 +46,7 @@ static constexpr uint32_t kCellPtrSize = sizeof(uint16_t);
     //            type_name = "page";
     //    }
     //    std::string message;
-    //    append_fmt_string(message, "corruption detected on %s with ID %u",
+    //    append_format_string(message, "corruption detected on %s with ID %u",
     //                      type_name, page_id.value);
     // TODO: Write an actual error message somewhere. The storage should live as long as the database at-least.
     return Status::corruption("message");
@@ -1140,7 +1140,7 @@ auto Tree::fix_root(CursorImpl &c) -> Status
 }
 
 Tree::Tree(Pager &pager, Stat &stat, char *scratch, Id root_id, String name)
-    : list_entry{string_as_slice(name), this, nullptr, nullptr},
+    : list_entry{name, this, nullptr, nullptr},
       m_stat(&stat),
       m_node_scratch(scratch + kPageSize),
       m_cell_scratch{
@@ -1692,7 +1692,7 @@ class TreePrinter
         CHECK_TRUE(data.levels.size() == data.spaces.size());
     }
 
-    static auto append_fmt_string(std::string &str, const char *fmt, ...) -> void
+    static auto append_format_string(std::string &str, const char *fmt, ...) -> void
     {
         std::va_list args;
         va_start(args, fmt);
@@ -1725,11 +1725,11 @@ public:
             std::string msg;
             if (info.idx == info.ncells) {
                 if (node.is_leaf()) {
-                    append_fmt_string(msg, "%u]", info.ncells);
+                    append_format_string(msg, "%u]", info.ncells);
                 }
             } else {
                 if (info.idx == 0) {
-                    append_fmt_string(msg, "%u:[", node.ref->page_id.value);
+                    append_format_string(msg, "%u:[", node.ref->page_id.value);
                     ensure_level_exists(data, info.level);
                 }
                 if (!node.is_leaf()) {
@@ -1777,8 +1777,8 @@ public:
         const auto print = [&tree, &repr_out](auto &node, const auto &info) {
             if (info.idx == info.ncells) {
                 std::string msg;
-                append_fmt_string(msg, "%sternalNode(%u)\n", node.is_leaf() ? "Ex" : "In",
-                                  node.ref->page_id.value);
+                append_format_string(msg, "%sternalNode(%u)\n", node.is_leaf() ? "Ex" : "In",
+                                     node.ref->page_id.value);
                 for (uint32_t i = 0; i < info.ncells; ++i) {
                     Cell cell;
                     if (node.read(i, cell)) {
@@ -1786,12 +1786,12 @@ public:
                     }
                     msg.append("  Cell(");
                     if (!node.is_leaf()) {
-                        append_fmt_string(msg, "%u,", read_child_id(cell).value);
+                        append_format_string(msg, "%u,", read_child_id(cell).value);
                     }
                     const auto key_len = std::min(32U, std::min(cell.key_size, cell.local_pl_size));
                     msg.append('"' + escape_string(Slice(cell.key, key_len)) + '"');
                     if (cell.key_size > key_len) {
-                        append_fmt_string(msg, " + <%zu bytes>", cell.key_size - key_len);
+                        append_format_string(msg, " + <%zu bytes>", cell.key_size - key_len);
                     }
                     msg.append(")\n");
                 }

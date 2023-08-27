@@ -8,10 +8,12 @@
 namespace calicodb
 {
 
-auto String::reset(char *ptr) -> void
+auto String::clear() -> void
 {
     Alloc::free(m_ptr);
-    m_ptr = ptr;
+    m_ptr = nullptr;
+    m_len = 0;
+    m_cap = 0;
 }
 
 } // namespace calicodb

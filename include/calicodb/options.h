@@ -10,10 +10,10 @@
 namespace calicodb
 {
 
-// <calicodb/env.h>
+// calicodb/env.h
 class Env;
 
-// <calicodb/options.h> (below)
+// calicodb/options.h (below)
 class BusyHandler;
 class Logger;
 
