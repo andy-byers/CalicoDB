@@ -37,7 +37,7 @@ auto StringBuilder::build() && -> String
     const auto capacity = m_buf.len();
     const auto length = std::exchange(m_len, 0);
     auto *pointer = m_buf.release();
-    if (length) {
+    if (capacity) {
         CALICODB_EXPECT_NE(pointer, nullptr);
         CALICODB_EXPECT_LT(length, capacity);
         pointer[length] = '\0';

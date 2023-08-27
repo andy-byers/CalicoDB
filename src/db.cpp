@@ -47,7 +47,7 @@ auto DB::open(const Options &options, const char *filename, DB *&db) -> Status
     } else {
         rc = append_strings(
             wal_name,
-            db_name,
+            Slice(db_name),
             kDefaultWalSuffix);
     }
     if (rc) {

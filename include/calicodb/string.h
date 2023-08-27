@@ -49,7 +49,7 @@ public:
         return *this;
     }
 
-    operator Slice()
+    explicit operator Slice()
     {
         return m_ptr ? Slice(m_ptr, m_len) : "";
     }
@@ -66,7 +66,7 @@ public:
 
     [[nodiscard]] auto c_str() const -> const char *
     {
-        return m_ptr ? m_ptr : "";
+        return m_len ? m_ptr : "";
     }
 
     [[nodiscard]] auto data() -> char *

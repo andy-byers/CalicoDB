@@ -577,7 +577,7 @@ protected:
 
     auto run_alloc_test(size_t x, size_t y) -> void
     {
-        for (size_t limit : {10, 100, 1'000}) {
+        for (size_t limit : {10U, 100U, 1'000U}) {
             for (size_t max_alloc = 1; max_alloc <= limit; max_alloc *= 2) {
                 run_alloc_test_instance({x, y, max_alloc, limit});
                 if (x != y) {

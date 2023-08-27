@@ -1140,7 +1140,7 @@ auto Tree::fix_root(CursorImpl &c) -> Status
 }
 
 Tree::Tree(Pager &pager, Stat &stat, char *scratch, Id root_id, String name)
-    : list_entry{name, this, nullptr, nullptr},
+    : list_entry{Slice(name), this, nullptr, nullptr},
       m_stat(&stat),
       m_node_scratch(scratch + kPageSize),
       m_cell_scratch{

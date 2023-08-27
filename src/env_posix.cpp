@@ -467,7 +467,7 @@ static struct PosixFs final {
             // Allocate storage for the shm filename.
             if (append_strings(
                     new_snode->filename,
-                    file.filename,
+                    Slice(file.filename),
                     kDefaultShmSuffix)) {
                 return Status::no_memory();
             }
