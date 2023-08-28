@@ -79,12 +79,11 @@ s = calicodb::Status::ok();
 // The code and subcode can be retrieved as follows:
 std::printf("code = %d, subcode = %d\n", int(s.code()), int(s.subcode()));
 
-// A human-readable string representing the status can be created with:
-std::printf("s = %s: %s\n", s.type_name(), s.message());
+// A human-readable C-style string representing the status can be accessed with:
+std::printf("s = %s\n", s.message());
 
-// Non-OK statuses must be created through one of the static methods. Note that a status can 
-// have either a message, or a subcode, but not both.
-s = calicodb::Status::io_error("uh oh");
+// Non-OK statuses must be created through one of the static methods.
+s = calicodb::Status::io_error();
 s = calicodb::Status::invalid_argument();
 s = calicodb::Status::busy(calicodb::Status::kRetry); // Equivalent to Status::retry()
 

@@ -651,8 +651,8 @@ public:
         if (s.is_ok()) {
             s = m_env->remove_file(m_wal_name);
             if (!s.is_ok()) {
-                log(m_log, R"(failed to unlink WAL at "%s": %s (%s))",
-                    m_wal_name, s.type_name(), s.message());
+                log(m_log, R"(failed to unlink WAL at "%s": %s)",
+                    m_wal_name, s.message());
             }
         }
         return s;

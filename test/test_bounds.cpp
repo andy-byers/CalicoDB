@@ -200,8 +200,7 @@ TEST_F(StressTests, LargeVacuum)
             TestCursor c;
             s = test_open_bucket(tx, numeric_key(i), c);
             if (i < kDroppedBuckets) {
-                EXPECT_TRUE(s.is_invalid_argument()) << s.type_name() << ": "
-                                                     << s.message();
+                EXPECT_TRUE(s.is_invalid_argument()) << s.message();
                 s = Status::ok();
             } else if (s.is_ok()) {
                 c->seek_first();

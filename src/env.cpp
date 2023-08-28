@@ -24,7 +24,7 @@ auto File::read_exact(size_t offset, size_t size, char *scratch) -> Status
     Slice slice;
     auto s = read(offset, size, scratch, &slice);
     if (s.is_ok() && slice.size() != size) {
-        return Status::io_error("incomplete read");
+        return Status::io_error();
     }
     return s;
 }

@@ -6,9 +6,11 @@
 #define CALICODB_LOGGING_H
 
 #include "calicodb/string.h"
+#include "encoding.h"
 #include "ptr.h"
 #include "utils.h"
 #include <cstdarg>
+#include <optional>
 
 namespace calicodb
 {
@@ -47,6 +49,7 @@ public:
         return *this;
     }
 
+    [[nodiscard]] auto trim() -> int;
     [[nodiscard]] auto build() && -> String;
     [[nodiscard]] auto append(const Slice &s) -> int;
     [[nodiscard]] auto append(char c) -> int
@@ -56,6 +59,34 @@ public:
     [[nodiscard]] auto append_format(const char *fmt, ...) -> int;
     [[nodiscard]] auto append_format_va(const char *fmt, std::va_list args) -> int;
     [[nodiscard]] auto append_escaped(const Slice &s) -> int;
+
+    [[nodiscard]] static auto release_string(String str) -> char *
+    {
+        str.m_len = 0;
+        str.m_cap = 0;
+        return std::exchange(str.m_ptr, nullptr);
+    }
+};
+
+class StatusBuilder final
+{
+public:
+    [[nodiscard]] static auto initialize(StringBuilder &builder, Status::Code code, Status::SubCode subc = Status::kNone) -> int
+    {
+        char header[4] = {code, subc, '\x00', '\x00'};
+        return builder.append(Slice(header, sizeof(header)));
+    }
+
+    [[nodiscard]] static auto finalize(StringBuilder builder) -> Status
+    {
+        return Status(StringBuilder::release_string(
+            std::move(builder).build()));
+    }
+
+    [[nodiscard]] static auto compressed(Status::Code code, Status::SubCode subc = Status::kNone) -> Status
+    {
+        return Status(code, subc);
+    }
 };
 
 [[nodiscard]] auto append_strings(String &target, const Slice &s, const Slice &t = "") -> int;

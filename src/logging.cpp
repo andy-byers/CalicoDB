@@ -32,6 +32,11 @@ auto StringBuilder::ensure_capacity(size_t len) -> int
     return 0;
 }
 
+auto StringBuilder::trim() -> int
+{
+    return m_buf.realloc(m_len + 1);
+}
+
 auto StringBuilder::build() && -> String
 {
     const auto capacity = m_buf.len();

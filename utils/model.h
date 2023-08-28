@@ -34,8 +34,8 @@
         if (auto assert_s = (expr); !assert_s.is_ok()) {               \
             std::fprintf(                                              \
                 stderr,                                                \
-                "expected `(" #expr ").is_ok()` but got \"%s: %s\"\n", \
-                assert_s.type_name(), assert_s.message());             \
+                "expected `(" #expr ").is_ok()` but got \"%s\"\n", \
+                assert_s.message());             \
             std::abort();                                              \
         }                                                              \
     } while (0)

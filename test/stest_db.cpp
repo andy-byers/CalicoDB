@@ -252,9 +252,9 @@ struct DatabaseState {
 
     auto check_status(uint32_t mask) const -> void
     {
-        ASSERT_EQ(mask, mask & (1 << s.code())) << s.type_name() << ": " << s.message();
+        ASSERT_EQ(mask, mask & (1 << s.code())) << s.message();
         if (tx) {
-            ASSERT_EQ(s, tx->status()) << tx->status().type_name() << ": " << tx->status().message();
+            ASSERT_EQ(s, tx->status()) << tx->status().message();
         }
     }
 

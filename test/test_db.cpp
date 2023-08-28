@@ -759,20 +759,14 @@ TEST_F(DBTests, DropBuckets)
 
 TEST_F(DBTests, RerootBuckets)
 {
-    ASSERT_OK(m_db->run(WriteOptions(), [&d = m_db](auto &tx) {
+    ASSERT_OK(m_db->run(WriteOptions(), [](auto &tx) {
         EXPECT_OK(tx.create_bucket(BucketOptions(), "a", nullptr));
         EXPECT_OK(tx.create_bucket(BucketOptions(), "b", nullptr));
         EXPECT_OK(tx.create_bucket(BucketOptions(), "c", nullptr));
         EXPECT_OK(tx.create_bucket(BucketOptions(), "d", nullptr));
         reinterpret_cast<TxImpl &>(tx).TEST_validate();
-        print_database_overview(std::cerr, reinterpret_cast<DBImpl *>(d)->TEST_pager());
-        std::cerr << "\n";
         EXPECT_OK(tx.drop_bucket("a"));
-        print_database_overview(std::cerr, reinterpret_cast<DBImpl *>(d)->TEST_pager());
-        std::cerr << "\n";
         EXPECT_OK(tx.drop_bucket("b"));
-        print_database_overview(std::cerr, reinterpret_cast<DBImpl *>(d)->TEST_pager());
-        std::cerr << "\n";
         EXPECT_OK(tx.drop_bucket("d"));
         return Status::ok();
     }));
@@ -1164,7 +1158,7 @@ TEST_F(TransactionTests, ExclusiveLockingMode)
 
             Status s;
             ASSERT_TRUE((s = DB::open(options, m_db_name.c_str(), db)).is_busy())
-                << s.type_name() << ": " << s.message();
+                << s.message();
             ++n;
         };
         ASSERT_OK(m_db->run(WriteOptions(), [](auto &tx) {

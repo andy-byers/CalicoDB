@@ -51,7 +51,7 @@ static auto write_out_randomly(RandomGenerator &random, File &writer, const Slic
     while (counter < size) {
         const auto chunk_size = std::min<size_t>(size - counter, random.Next(size / kChunks));
         const auto s = reader.read_exact(counter, chunk_size, out_data);
-        EXPECT_TRUE(s.is_ok()) << "Error: " << s.type_name() << ": " << s.message();
+        EXPECT_TRUE(s.is_ok()) << "Error: " << s.message();
         out_data += chunk_size;
         counter += chunk_size;
     }
@@ -632,7 +632,7 @@ static auto busy_wait_shm_lock(File &file, size_t r, size_t n, ShmLockFlag flags
         if (s.is_ok()) {
             return;
         } else if (!s.is_busy()) {
-            ADD_FAILURE() << s.type_name() << ": " << s.message();
+            ADD_FAILURE() << s.message();
         }
         std::this_thread::yield();
     }

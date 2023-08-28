@@ -417,13 +417,13 @@ protected:
 
         // Make sure all files created during the test are unlinked.
         auto s = m_env->remove_file(m_filename.c_str());
-        ASSERT_TRUE(s.is_ok() || s.is_not_found()) << s.type_name();
+        ASSERT_TRUE(s.is_ok() || s.is_not_found()) << s.message();
         auto filename = m_filename + kDefaultWalSuffix.to_string();
         s = m_env->remove_file(filename.c_str());
-        ASSERT_TRUE(s.is_ok() || s.is_not_found()) << s.type_name();
+        ASSERT_TRUE(s.is_ok() || s.is_not_found()) << s.message();
         filename = m_filename + kDefaultShmSuffix.to_string();
         s = m_env->remove_file(filename.c_str());
-        ASSERT_TRUE(s.is_ok() || s.is_not_found()) << s.type_name();
+        ASSERT_TRUE(s.is_ok() || s.is_not_found()) << s.message();
     }
 
     auto set_fault_injection_type(FaultType type)

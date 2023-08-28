@@ -1627,9 +1627,8 @@ auto Tree::vacuum() -> Status
 #define CHECK_OK(expr)                                            \
     do {                                                          \
         if (const auto check_s = (expr); !check_s.is_ok()) {      \
-            std::fprintf(stderr, "error(%s:%d): %s: %s\n",        \
-                         __FILE__, __LINE__,                      \
-                         check_s.type_name(), check_s.message()); \
+            std::fprintf(stderr, "error(%s:%d): %s\n",        \
+                         __FILE__, __LINE__, check_s.message()); \
             std::abort();                                         \
         }                                                         \
     } while (0)
