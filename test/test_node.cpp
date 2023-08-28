@@ -347,8 +347,8 @@ public:
     auto SetUp() -> void override
     {
         char *cell_ptrs[kNumBlocks * 2];
-        size_t cell_sizes[kNumBlocks * 2];
-        for (size_t i = 0; i < kNumBlocks * 2; ++i) {
+        uint32_t cell_sizes[kNumBlocks * 2];
+        for (uint32_t i = 0; i < kNumBlocks * 2; ++i) {
             auto cell = make_cell(i);
             ASSERT_GT(m_node.write(i, cell), 0);
             // Fill the cell with pointers into m_node.
@@ -356,7 +356,7 @@ public:
             cell_sizes[i] = cell.footprint;
             cell_ptrs[i] = cell.ptr;
         }
-        for (size_t i = 0; i < kNumBlocks; ++i) {
+        for (uint32_t i = 0; i < kNumBlocks; ++i) {
             // Erase every other cell so that the free blocks don't merge.
             ASSERT_EQ(m_node.erase(i, cell_sizes[i * 2]), 0);
             m_ptrs[i] = cell_ptrs[i * 2];
@@ -373,7 +373,7 @@ TEST_F(CorruptedNodeFreelistTests, StartOutOfBounds)
 
 TEST_F(CorruptedNodeFreelistTests, InvalidFreeBlockHeader)
 {
-    for (size_t i = 0; i < kNumBlocks; ++i) {
+    for (uint32_t i = 0; i < kNumBlocks; ++i) {
         put_u16(m_ptrs[i], kPageSize);
         assert_corrupted_node();
         put_u32(m_ptrs[i], m_reset[i]);
