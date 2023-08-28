@@ -10,9 +10,15 @@
 namespace calicodb
 {
 
-// Allocation routines for internal objects
+// Wrappers for system memory management routines
 // Every heap-allocated object that CalicoDB uses must ultimately come from a call to either
 // Alloc::malloc() or Alloc::realloc(), and eventually be passed back to Alloc::free().
+// Differences between these routines and std::malloc(), std::realloc(), and std::free() are
+// detailed below. The main difference is that a nonnull low-addressed pointer is returned
+// from Alloc::malloc(0) and Alloc::realloc(..., 0). This pointer must not be dereferenced,
+// or passed to library functions that expect a valid pointer (like std::memcpy()). It can,
+// however, be reallocated and/or freed. See https://yarchive.net/comp/linux/malloc_0.html
+// for more details.
 // NOTE: Alloc::set_*() are not thread-safe.
 class Alloc
 {
@@ -45,8 +51,7 @@ public:
 
     // Calls the registered memory allocation function, which defaults to std::malloc()
     // Guarantees that malloc(0), the result of which is implementation-defined for
-    // std::malloc(), returns nullptr with no side effects.
-    //
+    // std::malloc(), returns a pointer to a zero-sized allocation with no side effects.
     // Source: https://en.cppreference.com/w/c/memory/malloc
     [[nodiscard]] static auto malloc(size_t len) -> void *;
 
@@ -54,10 +59,10 @@ public:
     // Defines behavior for the following two cases, which are implementation-defined for
     // std::realloc():
     //
-    //      Pattern             | Return  | Side effects
-    //     ---------------------|---------|--------------
-    //      realloc(nullptr, 0) | nullptr | None
-    //      realloc(ptr, 0)     | nullptr | ptr is freed
+    //      Pattern             | Return                | Side effects
+    //     ---------------------|-----------------------|--------------
+    //      realloc(nullptr, 0) | Zero-sized allocation | None
+    //      realloc(ptr, 0)     | Zero-sized allocation | ptr is freed
     //
     // Source: https://en.cppreference.com/w/c/memory/realloc
     [[nodiscard]] static auto realloc(void *ptr, size_t len) -> void *;

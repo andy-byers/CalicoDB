@@ -180,24 +180,35 @@ TEST_F(AllocTests, ReallocSameSize)
 
 TEST_F(AllocTests, SpecialCases)
 {
-    // NOOP
-    ASSERT_EQ(Alloc::malloc(0), nullptr);
-    ASSERT_EQ(Alloc::bytes_used(), 0);
-
-    // NOOP
-    ASSERT_EQ(Alloc::realloc(nullptr, 0), nullptr);
-    ASSERT_EQ(Alloc::bytes_used(), 0);
-
     void *ptr;
+
+    // NOOP, returns a nonnull pointer to a zero-sized allocation.
+    ASSERT_NE(ptr = Alloc::malloc(0), nullptr);
+    ASSERT_EQ(Alloc::bytes_used(), 0);
+    auto *zero_sized = ptr;
+    Alloc::free(ptr); // Not necessary, but should work fine
+
+    // NOOP, same
+    ASSERT_EQ(Alloc::realloc(nullptr, 0), zero_sized);
+    ASSERT_EQ(Alloc::bytes_used(), 0);
 
     // Equivalent to Alloc::malloc(1).
     ASSERT_NE(ptr = Alloc::realloc(nullptr, 1), nullptr);
     ASSERT_NE(ptr, nullptr);
     ASSERT_NE(Alloc::bytes_used(), 0);
 
-    // Equivalent to Alloc::free(ptr).
-    ASSERT_EQ(Alloc::realloc(ptr, 0), nullptr);
+    // Equivalent to Alloc::free(ptr), but returns a pointer to a zero-sized
+    // allocation.
+    ASSERT_EQ(Alloc::realloc(ptr, 0), zero_sized);
     ASSERT_EQ(Alloc::bytes_used(), 0);
+
+    // Zero-sized allocations can be reallocated.
+    ptr = Alloc::malloc(0);
+    ASSERT_EQ(Alloc::realloc(ptr, 0), zero_sized);
+    ASSERT_NE(ptr = Alloc::realloc(ptr, 1), zero_sized);
+    ASSERT_GT(Alloc::bytes_used(), 0);
+    *static_cast<char *>(ptr) = '\x42';
+    Alloc::free(ptr);
 }
 
 TEST_F(AllocTests, HeapObject)

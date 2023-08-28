@@ -10,6 +10,8 @@
 namespace calicodb
 {
 
+static void *s_zero_size_ptr = reinterpret_cast<void *>(13);
+
 // Prefix each allocation with its size, stored as an 8-byte unsigned integer.
 using Header = uint64_t;
 
@@ -88,7 +90,9 @@ static auto reserve_memory(size_t size) -> int
 
 auto Alloc::malloc(size_t size) -> void *
 {
-    if (size == 0 || size > kMaxAllocation) {
+    if (size == 0) {
+        return s_zero_size_ptr;
+    } else if (size > kMaxAllocation) {
         return nullptr;
     }
     ALLOCATION_HOOK;
@@ -110,11 +114,11 @@ auto Alloc::malloc(size_t size) -> void *
 
 auto Alloc::realloc(void *old_ptr, size_t new_size) -> void *
 {
-    if (old_ptr == nullptr) {
+    if (!old_ptr || old_ptr == s_zero_size_ptr) {
         return malloc(new_size);
     } else if (new_size == 0) {
         free(old_ptr);
-        return nullptr;
+        return s_zero_size_ptr;
     } else if (new_size > kMaxAllocation) {
         return nullptr;
     }
@@ -152,7 +156,7 @@ auto Alloc::realloc(void *old_ptr, size_t new_size) -> void *
 
 auto Alloc::free(void *ptr) -> void
 {
-    if (ptr) {
+    if (ptr && ptr != s_zero_size_ptr) {
         CALICODB_EXPECT_GT(size_of_alloc(ptr), sizeof(Header));
         CALICODB_EXPECT_GE(s_alloc.bytes_used.load(), size_of_alloc(ptr));
         s_alloc.bytes_used.fetch_sub(size_of_alloc(ptr));
