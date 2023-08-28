@@ -1002,7 +1002,7 @@ TEST_F(StringBuilderTests, AppendMultiple)
 {
     std::string answer;
     for (size_t i = 0; i < 512; ++i) {
-        const auto r = rand() % ARRAY_SIZE(kTestMessages);
+        const auto r = static_cast<size_t>(rand()) % ARRAY_SIZE(kTestMessages);
         answer.append(kTestMessages[r]);
         ASSERT_EQ(m_builder.append(Slice(kTestMessages[r])), 0);
     }
@@ -1015,7 +1015,7 @@ TEST_F(StringBuilderTests, AppendFormatMultiple)
     char buffer[4'096];
     std::string answer;
     for (size_t i = 0; i < 512; ++i) {
-        const auto r = rand() % ARRAY_SIZE(kTestMessages);
+        const auto r = static_cast<size_t>(rand()) % ARRAY_SIZE(kTestMessages);
         const auto fmt = kTestMessages[r];
         switch (r) {
             case 0:
