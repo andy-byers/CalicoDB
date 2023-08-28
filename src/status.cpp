@@ -92,8 +92,8 @@ Status::Status(Code code, SubCode subc)
     CALICODB_EXPECT_LT(subc, kMaxSubCode);
 
     std::uintptr_t state = 1;
-    state |= code << 1;
-    state |= subc << 8;
+    state |= static_cast<std::uintptr_t>(code) << 1;
+    state |= static_cast<std::uintptr_t>(subc) << 8;
     m_state = reinterpret_cast<char *>(state);
 }
 
