@@ -69,6 +69,7 @@ public:
 
     ~TreeTestHarness()
     {
+        EXPECT_TRUE(m_status.is_ok());
         EXPECT_EQ(m_c, nullptr);
         delete m_tree;
         Alloc::delete_object(m_pager);

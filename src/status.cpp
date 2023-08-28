@@ -12,49 +12,76 @@
 namespace calicodb
 {
 
-static auto is_compressed(const char *state) -> bool
+// Return true if the given `state` is inline, false otherwise
+// Uses the least-significant bit of the pointer value to distinguish between the 2 states:
+// inline and heap-allocated. Inline states have the code and subcode heap in the
+// pointer value, while heap-allocated states store the code and subcode in the first few
+// bytes, followed by a refcount and message.
+static auto is_inline(const char *state) -> bool
 {
-    static constexpr std::uintptr_t kCompressedBit = 0x0001;
-    return reinterpret_cast<std::uintptr_t>(state) & kCompressedBit;
+    static constexpr std::uintptr_t kInlineBit = 0x0001;
+    return reinterpret_cast<std::uintptr_t>(state) & kInlineBit;
 }
 
-static auto is_referenced(const char *state) -> bool
+// Return true if the given `state` is allocated on the heap, false otherwise
+static auto is_heap(const char *state) -> bool
 {
-    return state && !is_compressed(state);
+    return state && !is_inline(state);
 }
 
-static auto compressed_code(const char *state) -> Status::Code
+static auto inline_code(const char *state) -> Status::Code
 {
     static constexpr std::uintptr_t kCodeMask = 0x00FE;
     return static_cast<Status::Code>(
         (reinterpret_cast<std::uintptr_t>(state) & kCodeMask) >> 1);
 }
 
-static auto embedded_code(const char *state) -> Status::Code
-{
-    return static_cast<Status::Code>(state[0]);
-}
-
-static auto compressed_subcode(const char *state) -> Status::SubCode
+static auto inline_subcode(const char *state) -> Status::SubCode
 {
     static constexpr std::uintptr_t kSubCodeMask = 0xFF00;
     return static_cast<Status::SubCode>(
         (reinterpret_cast<std::uintptr_t>(state) & kSubCodeMask) >> 8);
 }
 
-static auto embedded_subcode(const char *state) -> Status::SubCode
+using HeapRefCount = uint16_t;
+
+static auto heap_code(const char *state) -> Status::Code
 {
-    return static_cast<Status::SubCode>(state[1]);
+    return static_cast<Status::Code>(state[sizeof(HeapRefCount)]);
 }
 
-static auto embedded_refcount_ptr(char *state) -> uint16_t *
+static auto heap_subcode(const char *state) -> Status::SubCode
 {
-    return reinterpret_cast<uint16_t *>(state + 2);
+    return static_cast<Status::SubCode>(state[sizeof(HeapRefCount) + 1]);
 }
 
-static auto embedded_message(const char *state) -> const char *
+static auto heap_refcount_ptr(char *state) -> HeapRefCount *
 {
-    return state + 4;
+    return reinterpret_cast<HeapRefCount *>(state);
+}
+
+static auto heap_message(const char *state) -> const char *
+{
+    return state + sizeof(HeapRefCount) + 2;
+}
+
+static auto incref(char *state) -> void
+{
+    if (is_heap(state)) {
+        static constexpr uint16_t kMaxRefcount = std::numeric_limits<uint16_t>::max();
+        CALICODB_EXPECT_LT(*heap_refcount_ptr(state), kMaxRefcount);
+        ++*heap_refcount_ptr(state);
+    }
+}
+
+static auto decref(char *state) -> void
+{
+    if (is_heap(state)) {
+        CALICODB_EXPECT_GT(*heap_refcount_ptr(state), 0);
+        if (--*heap_refcount_ptr(state) == 0) {
+            Alloc::free(state);
+        }
+    }
 }
 
 Status::Status(Code code, SubCode subc)
@@ -70,31 +97,23 @@ Status::Status(Code code, SubCode subc)
     m_state = reinterpret_cast<char *>(state);
 }
 
+Status::~Status()
+{
+    decref(m_state);
+}
+
 Status::Status(const Status &rhs)
     : m_state(rhs.m_state)
 {
-    if (is_referenced(m_state)) {
-        ++*embedded_refcount_ptr(m_state);
-    }
-}
-
-Status::~Status()
-{
-    if (is_referenced(m_state)) {
-        CALICODB_EXPECT_GT(*embedded_refcount_ptr(m_state), 0);
-        if (--*embedded_refcount_ptr(m_state) == 0) {
-            Alloc::free(m_state);
-        }
-    }
+    incref(m_state);
 }
 
 auto Status::operator=(const Status &rhs) -> Status &
 {
     if (&rhs != this) {
+        decref(m_state);
+        incref(rhs.m_state);
         m_state = rhs.m_state;
-        if (is_referenced(m_state)) {
-            ++*embedded_refcount_ptr(m_state);
-        }
     }
     return *this;
 }
@@ -114,10 +133,10 @@ auto Status::code() const -> Code
 {
     if (is_ok()) {
         return kOK;
-    } else if (is_compressed(m_state)) {
-        return compressed_code(m_state);
+    } else if (is_inline(m_state)) {
+        return inline_code(m_state);
     } else {
-        return embedded_code(m_state);
+        return heap_code(m_state);
     }
 }
 
@@ -125,10 +144,10 @@ auto Status::subcode() const -> SubCode
 {
     if (is_ok()) {
         return kNone;
-    } else if (is_compressed(m_state)) {
-        return compressed_subcode(m_state);
+    } else if (is_inline(m_state)) {
+        return inline_subcode(m_state);
     } else {
-        return embedded_subcode(m_state);
+        return heap_subcode(m_state);
     }
 }
 
@@ -136,8 +155,8 @@ auto Status::message() const -> const char *
 {
     if (is_ok()) {
         return "OK";
-    } else if (!is_compressed(m_state)) {
-        return embedded_message(m_state);
+    } else if (!is_inline(m_state)) {
+        return heap_message(m_state);
     } else if (is_retry()) {
         return "busy: retry";
     } else if (is_no_memory()) {
@@ -171,16 +190,16 @@ auto Status::message() const -> const char *
 static auto make_error(Status::Code code, Status::SubCode subc, const char *msg) -> Status
 {
     // Compressed status to return if there isn't enough memory.
-    auto fallback = StatusBuilder::compressed(code, subc);
+    auto fallback = StatusBuilder::inlined(code, subc);
 
     StringBuilder builder;
-    if (StatusBuilder::initialize(builder, code, subc)) {
+    if (StatusBuilder::start(builder, code, subc)) {
         return fallback;
     }
     if (builder.append(msg)) {
         return fallback;
     }
-    return StatusBuilder::finalize(std::move(builder));
+    return StatusBuilder::finish(std::move(builder));
 }
 
 auto Status::invalid_argument(const char *msg) -> Status

@@ -426,29 +426,30 @@ TEST(Coding, Varint32Truncation)
     ASSERT_EQ(large_value, result);
 }
 
-// TEST(Status, StatusMessages)
-//{
-//     ASSERT_EQ("OK", Status::ok().to_string());
-//     ASSERT_EQ("I/O error", Status::io_error().to_string());
-//     ASSERT_EQ("I/O error: msg", Status::io_error("msg").to_string());
-//     ASSERT_EQ("corruption", Status::corruption().to_string());
-//     ASSERT_EQ("corruption: msg", Status::corruption("msg").to_string());
-//     ASSERT_EQ("invalid argument", Status::invalid_argument().to_string());
-//     ASSERT_EQ("invalid argument: msg", Status::invalid_argument("msg").to_string());
-//     ASSERT_EQ("not supported", Status::not_supported().to_string());
-//     ASSERT_EQ("not supported: msg", Status::not_supported("msg").to_string());
-//     ASSERT_EQ("busy", Status::busy().to_string());
-//     ASSERT_EQ("busy: msg", Status::busy("msg").to_string());
-//     ASSERT_EQ("busy: retry", Status::retry().to_string());
-//     ASSERT_EQ("aborted", Status::aborted().to_string());
-//     ASSERT_EQ("aborted: msg", Status::aborted("msg").to_string());
-//     ASSERT_EQ("aborted: no memory", Status::no_memory().to_string());
-//     // Choice of `Status::invalid_argument()` is arbitrary, any `Code-SubCode` combo
-//     // is technically legal, but may not be semantically valid (for example, it makes
-//     // no sense to retry when a read-only transaction attempts to write: repeating that
-//     // action will surely fail next time as well).
-//     ASSERT_EQ("invalid argument: retry", Status::invalid_argument(Status::kRetry).to_string());
-// }
+TEST(Status, StatusMessages)
+{
+    ASSERT_EQ(Slice("OK"), Status::ok().message());
+    ASSERT_EQ(Slice("I/O error"), Status::io_error().message());
+    ASSERT_EQ(Slice("corruption"), Status::corruption().message());
+    ASSERT_EQ(Slice("invalid argument"), Status::invalid_argument().message());
+    ASSERT_EQ(Slice("not supported"), Status::not_supported().message());
+    ASSERT_EQ(Slice("busy"), Status::busy().message());
+    ASSERT_EQ(Slice("aborted"), Status::aborted().message());
+
+    ASSERT_EQ(Slice("busy: retry"), Status::retry().message());
+    ASSERT_EQ(Slice("aborted: no memory"), Status::no_memory().message());
+
+    static constexpr auto kMsg = "message";
+    ASSERT_EQ(Slice(kMsg), Status::io_error(kMsg).message());
+    ASSERT_EQ(Slice(kMsg), Status::corruption(kMsg).message());
+    ASSERT_EQ(Slice(kMsg), Status::invalid_argument(kMsg).message());
+    ASSERT_EQ(Slice(kMsg), Status::not_supported(kMsg).message());
+    ASSERT_EQ(Slice(kMsg), Status::busy(kMsg).message());
+    ASSERT_EQ(Slice(kMsg), Status::aborted(kMsg).message());
+
+    ASSERT_EQ(Slice(kMsg), Status::retry(kMsg).message());
+    ASSERT_EQ(Slice(kMsg), Status::no_memory(kMsg).message());
+}
 
 TEST(Status, StatusCodes)
 {
@@ -477,59 +478,167 @@ TEST(Status, StatusCodes)
 #undef CHECK_SUBCODE
 }
 
-// TEST(Status, Copy)
-//{
-//     const auto s = Status::invalid_argument("status message");
-//     const auto t = s;
-//     ASSERT_TRUE(t.is_invalid_argument());
-//     ASSERT_EQ(t.to_string(), std::string("invalid argument: ") + "status message");
-//
-//     ASSERT_TRUE(s.is_invalid_argument());
-//     ASSERT_EQ(s.to_string(), std::string("invalid argument: ") + "status message");
-// }
-//
-// TEST(Status, Reassign)
-//{
-//     auto s = Status::ok();
-//     ASSERT_TRUE(s.is_ok());
-//
-//     s = Status::invalid_argument("status message");
-//     ASSERT_TRUE(s.is_invalid_argument());
-//     ASSERT_EQ(s.to_string(), "invalid argument: status message");
-//
-//     s = Status::not_supported("status message");
-//     ASSERT_TRUE(s.is_not_supported());
-//     ASSERT_EQ(s.to_string(), "not supported: status message");
-//
-//     s = Status::ok();
-//     ASSERT_TRUE(s.is_ok());
-// }
-//
-// TEST(Status, MoveConstructor)
-//{
-//     {
-//         Status ok = Status::ok();
-//         Status ok2 = std::move(ok);
-//
-//         ASSERT_TRUE(ok2.is_ok());
-//     }
-//
-//     {
-//         Status status = Status::not_found("custom kNotFound status message");
-//         Status status2 = std::move(status);
-//
-//         ASSERT_TRUE(status2.is_not_found());
-//         ASSERT_EQ("not found: custom kNotFound status message", status2.to_string());
-//     }
-//
-//     {
-//         Status self_moved = Status::io_error("custom kIOError status message");
-//
-//         // Needed to bypass compiler warning about explicit move-assignment.
-//         Status &self_moved_reference = self_moved;
-//         self_moved_reference = std::move(self_moved);
-//     }
-// }
+TEST(Status, Copy)
+{
+    const auto s = Status::invalid_argument("status message");
+    const auto t = s;
+    ASSERT_TRUE(t.is_invalid_argument());
+    ASSERT_EQ(t.message(), Slice("status message"));
+
+    ASSERT_TRUE(s.is_invalid_argument());
+    ASSERT_EQ(s.message(), Slice("status message"));
+
+    // Pointer comparison. Status cannot allocate memory in its copy constructor/assignment operator.
+    // A refcount is increased instead.
+    ASSERT_EQ(s.message(), t.message());
+}
+
+TEST(Status, CopyReleasesMemory)
+{
+    {
+        auto s = Status::invalid_argument("status message");
+        const auto s_bytes_used = Alloc::bytes_used();
+        ASSERT_GT(s_bytes_used, 0);
+
+        const auto t = Status::no_memory("status message 2");
+        const auto t_bytes_used = Alloc::bytes_used() - s_bytes_used;
+        ASSERT_GT(t_bytes_used, 0);
+
+        // s should release the memory it held and increase the refcount for the memory block
+        // held by t.
+        s = t;
+        ASSERT_TRUE(s.is_no_memory());
+        ASSERT_EQ(s.message(), Slice("status message 2"));
+        ASSERT_EQ(Alloc::bytes_used(), t_bytes_used);
+
+        const auto u = t;
+        ASSERT_TRUE(u.is_no_memory());
+        ASSERT_EQ(u.message(), Slice("status message 2"));
+        ASSERT_EQ(Alloc::bytes_used(), t_bytes_used);
+    }
+    ASSERT_EQ(Alloc::bytes_used(), 0);
+}
+
+TEST(Status, Reassign)
+{
+    auto s = Status::ok();
+    ASSERT_TRUE(s.is_ok());
+
+    s = Status::invalid_argument("status message");
+    ASSERT_TRUE(s.is_invalid_argument());
+    ASSERT_EQ(s.message(), Slice("status message"));
+
+    s = Status::not_supported("status message");
+    ASSERT_TRUE(s.is_not_supported());
+    ASSERT_EQ(s.message(), Slice("status message"));
+
+    s = Status::ok();
+    ASSERT_TRUE(s.is_ok());
+}
+
+TEST(Status, MoveConstructor)
+{
+    {
+        Status ok = Status::ok();
+        Status ok2 = std::move(ok);
+
+        ASSERT_TRUE(ok2.is_ok());
+    }
+
+    {
+        Status status = Status::not_found("custom kNotFound status message");
+        Status status2 = std::move(status);
+
+        ASSERT_TRUE(status2.is_not_found());
+        ASSERT_EQ(Slice("custom kNotFound status message"), status2.message());
+    }
+
+    {
+        Status self_moved = Status::io_error("custom kIOError status message");
+
+        // Needed to bypass compiler warning about explicit move-assignment.
+        Status &self_moved_reference = self_moved;
+        self_moved_reference = std::move(self_moved);
+    }
+}
+
+TEST(Status, CopyInline)
+{
+    const auto s = Status::no_memory();
+    const auto t = s;
+    ASSERT_TRUE(t.is_no_memory());
+    ASSERT_EQ(t.message(), Slice("aborted: no memory"));
+
+    ASSERT_TRUE(s.is_no_memory());
+    ASSERT_EQ(s.message(), Slice("aborted: no memory"));
+
+    auto u = Status::ok();
+    u = t;
+
+    ASSERT_TRUE(u.is_no_memory());
+    ASSERT_EQ(u.message(), Slice("aborted: no memory"));
+}
+
+TEST(Status, ReassignInline)
+{
+    auto s = Status::ok();
+    ASSERT_TRUE(s.is_ok());
+
+    s = Status::no_memory();
+    ASSERT_TRUE(s.is_no_memory());
+    ASSERT_EQ(s.message(), Slice("aborted: no memory"));
+
+    s = Status::aborted();
+    ASSERT_TRUE(s.is_aborted());
+    ASSERT_EQ(s.message(), Slice("aborted"));
+
+    s = Status::ok();
+    ASSERT_TRUE(s.is_ok());
+}
+
+TEST(Status, MoveConstructorInline)
+{
+    {
+        Status status = Status::no_memory();
+        Status status2 = std::move(status);
+
+        ASSERT_TRUE(status2.is_no_memory());
+        ASSERT_EQ(Slice("aborted: no memory"), status2.message());
+    }
+
+    {
+        Status self_moved = Status::io_error();
+
+        // Needed to bypass compiler warning about explicit move-assignment.
+        Status &self_moved_reference = self_moved;
+        self_moved_reference = std::move(self_moved);
+    }
+}
+
+#ifndef NDEBUG
+TEST(Status, InlineStatusHasNoRefcount)
+{
+    std::vector<Status> statuses;
+    auto s = Status::not_found();
+    for (size_t i = 1; i < std::numeric_limits<uint16_t>::max(); ++i) {
+        statuses.push_back(s);
+    }
+    // If there was a refcount attached to s, it would have overflowed just now, causing an
+    // assertion to trip. Must be tested with assertions enabled.
+    statuses.push_back(s);
+}
+
+TEST(Status, RefcountOverflow)
+{
+    std::vector<Status> statuses;
+    auto s = Status::not_found("not inline");
+    for (size_t i = 1; i < std::numeric_limits<uint16_t>::max(); ++i) {
+        statuses.push_back(s);
+    }
+
+    ASSERT_DEATH(statuses.push_back(s), "Assert");
+}
+#endif // NDEBUG
 
 void ConsumeDecimalNumberRoundtripTest(uint64_t number,
                                        const std::string &padding = "")

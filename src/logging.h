@@ -71,19 +71,21 @@ public:
 class StatusBuilder final
 {
 public:
-    [[nodiscard]] static auto initialize(StringBuilder &builder, Status::Code code, Status::SubCode subc = Status::kNone) -> int
+    [[nodiscard]] static auto start(StringBuilder &builder, Status::Code code, Status::SubCode subc = Status::kNone) -> int
     {
-        char header[4] = {code, subc, '\x00', '\x00'};
+        static constexpr uint16_t kInitialRefcount = 1;
+        char header[4] = {'\x00', '\x00', code, subc};
+        std::memcpy(header, &kInitialRefcount, sizeof(kInitialRefcount));
         return builder.append(Slice(header, sizeof(header)));
     }
 
-    [[nodiscard]] static auto finalize(StringBuilder builder) -> Status
+    [[nodiscard]] static auto finish(StringBuilder builder) -> Status
     {
         return Status(StringBuilder::release_string(
             std::move(builder).build()));
     }
 
-    [[nodiscard]] static auto compressed(Status::Code code, Status::SubCode subc = Status::kNone) -> Status
+    [[nodiscard]] static auto inlined(Status::Code code, Status::SubCode subc = Status::kNone) -> Status
     {
         return Status(code, subc);
     }

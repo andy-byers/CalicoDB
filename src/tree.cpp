@@ -1624,13 +1624,13 @@ auto Tree::vacuum() -> Status
 
 #if CALICODB_TEST
 
-#define CHECK_OK(expr)                                            \
-    do {                                                          \
-        if (const auto check_s = (expr); !check_s.is_ok()) {      \
-            std::fprintf(stderr, "error(%s:%d): %s\n",        \
+#define CHECK_OK(expr)                                           \
+    do {                                                         \
+        if (const auto check_s = (expr); !check_s.is_ok()) {     \
+            std::fprintf(stderr, "error(%s:%d): %s\n",           \
                          __FILE__, __LINE__, check_s.message()); \
-            std::abort();                                         \
-        }                                                         \
+            std::abort();                                        \
+        }                                                        \
     } while (0)
 
 #define CHECK_TRUE(expr)                                             \

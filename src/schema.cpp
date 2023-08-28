@@ -11,7 +11,11 @@ namespace calicodb
 {
 
 static constexpr size_t kMaxRootEntryLen = kVarintMaxLength;
-static const Status kNoBucket = Status::invalid_argument("bucket does not exist");
+
+static auto no_bucket() -> Status
+{
+    return Status::invalid_argument("bucket does not exist");
+}
 
 class SchemaCursor : public Cursor
 {
@@ -180,7 +184,7 @@ auto Schema::open_bucket(const Slice &name, Cursor *&c_out) -> Status
 
     Id root_id;
     if (!m_cursor.is_valid()) {
-        return s.is_ok() ? kNoBucket : s;
+        return s.is_ok() ? no_bucket() : s;
     } else if (!decode_and_check_root_id(m_cursor.value(), root_id)) {
         return corrupted_root_id();
     }
@@ -271,7 +275,7 @@ auto Schema::drop_bucket(const Slice &name) -> Status
     m_cursor.find(name);
     auto s = m_cursor.status();
     if (!m_cursor.is_valid()) {
-        return s.is_ok() ? kNoBucket : s;
+        return s.is_ok() ? no_bucket() : s;
     }
     CALICODB_EXPECT_TRUE(s.is_ok());
 

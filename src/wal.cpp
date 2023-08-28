@@ -120,8 +120,8 @@ static constexpr size_t kIndexHdrSize = sizeof(HashIndexHdr) * 2 + sizeof(CkptIn
 static_assert(std::is_pod_v<HashIndexHdr>);
 static_assert((kIndexHdrSize & 0b11) == 0);
 
-static constexpr uint32_t kNIndexHashes = 8192;
-static constexpr uint32_t kNIndexKeys = 4096;
+static constexpr uint32_t kNIndexHashes = 8'192;
+static constexpr uint32_t kNIndexKeys = 4'096;
 static constexpr uint32_t kNIndexKeys0 =
     kNIndexKeys - kIndexHdrSize / sizeof(uint32_t);
 

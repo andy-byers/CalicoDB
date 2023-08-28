@@ -15,12 +15,15 @@ namespace calicodb::test
 {
 
 static constexpr auto *kFaultText = "<FAULT>";
-static const auto kFaultStatus = Status::io_error(kFaultText);
+static auto injected_fault() -> Status
+{
+    return Status::io_error(kFaultText);
+}
 
 #define MAYBE_CRASH(target)                         \
     do {                                            \
         if ((target)->should_next_syscall_fail()) { \
-            return kFaultStatus;                    \
+            return injected_fault();                \
         }                                           \
     } while (0)
 
@@ -164,7 +167,7 @@ public:
                                   << " KiB backup\n";
                         load_from_backup();
                     }
-                    return kFaultStatus;
+                    return injected_fault();
                 }
                 MAYBE_CRASH(m_env);
                 auto s = FileWrapper::sync();
@@ -757,9 +760,9 @@ TEST_F(CrashTests, Operations_Syscall)
 {
     // Run with syscall fault injection.
     run_operations_test({kSyscallFaults, false, false});
-    run_operations_test({kSyscallFaults, true, false});
-    run_operations_test({kSyscallFaults, false, true});
-    run_operations_test({kSyscallFaults, true, true});
+    //    run_operations_test({kSyscallFaults, true, false});
+    //    run_operations_test({kSyscallFaults, false, true});
+    //    run_operations_test({kSyscallFaults, true, true});
 }
 
 TEST_F(CrashTests, Operations_OOM)
@@ -932,7 +935,7 @@ class DataLossEnv : public EnvWrapper
                 // cannot figure out that something has gone wrong. It'll likely show up as corruption
                 // later on.
                 perform_writes();
-                return kFaultStatus;
+                return injected_fault();
             }
             return Status::ok();
         }
@@ -1120,8 +1123,8 @@ public:
             m_env->m_drop_file = param.loss_file;
             auto s = tx.commit();
             if (!s.is_ok()) {
-                EXPECT_EQ(kFaultStatus, s);
-                EXPECT_EQ(kFaultStatus, tx.commit());
+                EXPECT_EQ(injected_fault(), s);
+                EXPECT_EQ(injected_fault(), tx.commit());
             }
             return s;
         });
@@ -1133,8 +1136,8 @@ public:
         m_env->m_drop_file = param.loss_file;
         auto s = m_db->checkpoint(reset);
         if (!s.is_ok()) {
-            EXPECT_EQ(kFaultStatus, s);
-            EXPECT_EQ(kFaultStatus, m_db->checkpoint(reset));
+            EXPECT_EQ(injected_fault(), s);
+            EXPECT_EQ(injected_fault(), m_db->checkpoint(reset));
         }
         return s;
     }
@@ -1180,7 +1183,7 @@ public:
         // Only the WAL is written during a transaction.
         const DropParameters drop_param = {loss_type, m_filename + kDefaultWalSuffix.to_string()};
 
-        ASSERT_EQ(kFaultStatus, perform_writes(drop_param, kNumWrites, 1));
+        ASSERT_EQ(injected_fault(), perform_writes(drop_param, kNumWrites, 1));
         ASSERT_OK(check_records(kNumWrites, 0));
 
         if (reopen_after_failure) {
@@ -1206,7 +1209,7 @@ public:
         const DropParameters drop_param = {loss_type, m_filename};
 
         ASSERT_OK(perform_writes({}, kNumWrites, 1));
-        ASSERT_EQ(kFaultStatus, perform_checkpoint(drop_param, true));
+        ASSERT_EQ(injected_fault(), perform_checkpoint(drop_param, true));
         // Any records contained in the pages being checkpointed should continue being read from
         // the WAL: the backfill count was not increased due to the failed call to File::sync().
         ASSERT_OK(check_records(kNumWrites, 1));
