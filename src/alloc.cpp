@@ -75,6 +75,8 @@ static auto size_of_alloc(void *ptr) -> size_t
         }                                                     \
     } while (0)
 
+// Reserve `size` bytes of memory for allocation
+// Ensures that the limit set by Alloc::set_limit() is respected.
 static auto reserve_memory(size_t size) -> int
 {
     auto before = s_alloc.bytes_used.load(std::memory_order_relaxed);
@@ -86,6 +88,13 @@ static auto reserve_memory(size_t size) -> int
         }
     } while (!s_alloc.bytes_used.compare_exchange_weak(before, after));
     return 0;
+}
+
+// Give back `size bytes of memory
+static auto cancel_memory(size_t size) -> void
+{
+    [[maybe_unused]] const auto size_before = s_alloc.bytes_used.fetch_sub(size);
+    CALICODB_EXPECT_GE(size_before, size);
 }
 
 auto Alloc::malloc(size_t size) -> void *
@@ -107,7 +116,7 @@ auto Alloc::malloc(size_t size) -> void *
         *ptr++ = size;
     } else {
         // Memory was reserved, but actual malloc() failed.
-        s_alloc.bytes_used.fetch_sub(alloc_size);
+        cancel_memory(alloc_size);
     }
     return ptr;
 }
@@ -146,8 +155,7 @@ auto Alloc::realloc(void *old_ptr, size_t new_size) -> void *
 
     if ((new_ptr == nullptr && grow) ||   // Reserved memory, but realloc() failed
         (new_ptr != nullptr && shrink)) { // Succeeded in shrinking the allocation
-        CALICODB_EXPECT_GE(s_alloc.bytes_used.load(), grow + shrink);
-        s_alloc.bytes_used.fetch_sub(grow + shrink);
+        cancel_memory(grow + shrink);
     }
     return new_ptr;
 }
@@ -158,9 +166,8 @@ auto Alloc::free(void *ptr) -> void
 {
     if (ptr && ptr != s_zero_size_ptr) {
         CALICODB_EXPECT_GT(size_of_alloc(ptr), sizeof(Header));
-        CALICODB_EXPECT_GE(s_alloc.bytes_used.load(), size_of_alloc(ptr));
-        s_alloc.bytes_used.fetch_sub(size_of_alloc(ptr));
         s_alloc.methods.free(static_cast<Header *>(ptr) - 1);
+        cancel_memory(size_of_alloc(ptr));
     }
 }
 

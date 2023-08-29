@@ -10,8 +10,10 @@
 #include "calicodb/tx.h"
 #include <algorithm>
 #include <climits>
+#include <condition_variable>
 #include <functional>
 #include <memory>
+#include <mutex>
 #include <random>
 
 namespace calicodb
@@ -156,6 +158,77 @@ inline auto test_create_and_open_bucket(Tx &tx, const BucketOptions &options, co
     c_out.reset(c);
     return s;
 }
+
+// Counting semaphore
+class Semaphore
+{
+    mutable std::mutex m_mu;
+    std::condition_variable m_cv;
+    size_t m_available;
+
+public:
+    explicit Semaphore(size_t n = 0)
+        : m_available(n)
+    {
+    }
+
+    Semaphore(Semaphore &) = delete;
+    void operator=(Semaphore &) = delete;
+
+    auto wait() -> void
+    {
+        std::unique_lock lock(m_mu);
+        m_cv.wait(lock, [this] {
+            return m_available > 0;
+        });
+        --m_available;
+    }
+
+    auto signal(size_t n = 1) -> void
+    {
+        m_mu.lock();
+        m_available += n;
+        m_mu.unlock();
+        m_cv.notify_all();
+    }
+};
+
+// Reusable thread barrier
+class Barrier
+{
+    Semaphore m_phase_1;
+    Semaphore m_phase_2;
+    mutable std::mutex m_mu;
+    const size_t m_max_count;
+    size_t m_count = 0;
+
+public:
+    explicit Barrier(size_t max_count)
+        : m_max_count(max_count)
+    {
+    }
+
+    Barrier(Barrier &) = delete;
+    void operator=(Barrier &) = delete;
+
+    // Wait for m_max_count threads to call this routine
+    auto wait() -> void
+    {
+        m_mu.lock();
+        if (++m_count == m_max_count) {
+            m_phase_1.signal(m_max_count);
+        }
+        m_mu.unlock();
+        m_phase_1.wait();
+
+        m_mu.lock();
+        if (--m_count == 0) {
+            m_phase_2.signal(m_max_count);
+        }
+        m_mu.unlock();
+        m_phase_2.wait();
+    }
+};
 
 } // namespace calicodb
 
