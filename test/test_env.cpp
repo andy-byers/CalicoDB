@@ -845,7 +845,7 @@ public:
             }
         }
         for (size_t i = 0; i < ARRAY_SIZE(expected); ++i) {
-            ASSERT_EQ(m_shared.resources[i], static_cast<int>(kNumRounds * expected[i]));
+            ASSERT_EQ(m_shared.resources[i], static_cast<int>(kNumRounds) * expected[i]);
         }
     }
 
