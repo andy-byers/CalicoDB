@@ -166,8 +166,8 @@ auto Alloc::free(void *ptr) -> void
 {
     if (ptr && ptr != s_zero_size_ptr) {
         CALICODB_EXPECT_GT(size_of_alloc(ptr), sizeof(Header));
-        s_alloc.methods.free(static_cast<Header *>(ptr) - 1);
         cancel_memory(size_of_alloc(ptr));
+        s_alloc.methods.free(static_cast<Header *>(ptr) - 1);
     }
 }
 
