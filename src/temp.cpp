@@ -16,7 +16,9 @@
 namespace calicodb
 {
 
-class TempEnv : public Env
+class TempEnv
+    : public Env,
+      public HeapObject
 {
 public:
     ~TempEnv() override = default;
@@ -29,7 +31,9 @@ public:
 
     auto new_file(const char *filename, OpenMode, File *&file_out) -> Status override
     {
-        class TempFile : public File
+        class TempFile
+            : public File,
+              public HeapObject
         {
             PagedFile *const m_file;
 
@@ -109,7 +113,7 @@ public:
             auto file_unlock() -> void override {}
         };
         CALICODB_EXPECT_TRUE(m_file.name.empty());
-        m_file.name = filename;
+        m_file.name = filename ? filename : "";
 
         file_out = new (std::nothrow) TempFile(m_file);
         return file_out ? Status::ok() : Status::no_memory();

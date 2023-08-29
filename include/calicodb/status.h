@@ -33,140 +33,132 @@ public:
     };
 
     // Construct an OK status
-    explicit Status() = default;
+    explicit Status()
+        : m_state(nullptr)
+    {
+    }
+
+    ~Status();
 
     // Create an OK status
     static auto ok() -> Status
     {
         return Status();
     }
+    
+    static auto invalid_argument(SubCode subc = kNone) -> Status
+    {
+        return Status(kInvalidArgument, subc);
+    }
 
-    // Each of the methods in this block constructs a non-OK status, optionally with an
-    // error message.
-    static auto invalid_argument(SubCode msg = kNone) -> Status
+    static auto not_supported(SubCode subc = kNone) -> Status
     {
-        return Status(kInvalidArgument, msg);
+        return Status(kNotSupported, subc);
     }
-    static auto invalid_argument(const char *msg) -> Status
+
+    static auto corruption(SubCode subc = kNone) -> Status
     {
-        return Status(kInvalidArgument, msg);
+        return Status(kCorruption, subc);
     }
-    static auto not_supported(SubCode msg = kNone) -> Status
+
+    static auto not_found(SubCode subc = kNone) -> Status
     {
-        return Status(kNotSupported, msg);
+        return Status(kNotFound, subc);
     }
-    static auto not_supported(const char *msg) -> Status
+
+    static auto io_error(SubCode subc = kNone) -> Status
     {
-        return Status(kNotSupported, msg);
+        return Status(kIOError, subc);
     }
-    static auto corruption(SubCode msg = kNone) -> Status
+
+    static auto busy(SubCode subc = kNone) -> Status
     {
-        return Status(kCorruption, msg);
+        return Status(kBusy, subc);
     }
-    static auto corruption(const char *msg) -> Status
+
+    static auto aborted(SubCode subc = kNone) -> Status
     {
-        return Status(kCorruption, msg);
-    }
-    static auto not_found(SubCode msg = kNone) -> Status
-    {
-        return Status(kNotFound, msg);
-    }
-    static auto not_found(const char *msg) -> Status
-    {
-        return Status(kNotFound, msg);
-    }
-    static auto io_error(SubCode msg = kNone) -> Status
-    {
-        return Status(kIOError, msg);
-    }
-    static auto io_error(const char *msg) -> Status
-    {
-        return Status(kIOError, msg);
-    }
-    static auto busy(SubCode msg = kNone) -> Status
-    {
-        return Status(kBusy, msg);
-    }
-    static auto busy(const char *msg) -> Status
-    {
-        return Status(kBusy, msg);
-    }
-    static auto aborted(SubCode msg = kNone) -> Status
-    {
-        return Status(kAborted, msg);
-    }
-    static auto aborted(const char *msg) -> Status
-    {
-        return Status(kAborted, msg);
+        return Status(kAborted, subc);
     }
 
     static auto retry() -> Status
     {
-        return Status(kBusy, kRetry);
+        return busy(kRetry);
     }
+
     static auto no_memory() -> Status
     {
-        return Status(kAborted, kNoMemory);
+        return aborted(kNoMemory);
     }
+
+    static auto invalid_argument(const char *msg) -> Status;
+    static auto not_supported(const char *msg) -> Status;
+    static auto corruption(const char *msg) -> Status;
+    static auto not_found(const char *msg) -> Status;
+    static auto io_error(const char *msg) -> Status;
+    static auto busy(const char *msg) -> Status;
+    static auto aborted(const char *msg) -> Status;
+    static auto retry(const char *msg) -> Status;
+    static auto no_memory(const char *msg) -> Status;
 
     // Return true if the status is OK, false otherwise
     [[nodiscard]] auto is_ok() const -> bool
     {
-        return m_code == kOK;
+        return m_state == nullptr;
     }
+
     [[nodiscard]] auto is_invalid_argument() const -> bool
     {
-        return m_code == kInvalidArgument;
+        return code() == kInvalidArgument;
     }
+
     [[nodiscard]] auto is_io_error() const -> bool
     {
-        return m_code == kIOError;
+        return code() == kIOError;
     }
+
     [[nodiscard]] auto is_not_supported() const -> bool
     {
-        return m_code == kNotSupported;
+        return code() == kNotSupported;
     }
+
     [[nodiscard]] auto is_corruption() const -> bool
     {
-        return m_code == kCorruption;
+        return code() == kCorruption;
     }
+
     [[nodiscard]] auto is_not_found() const -> bool
     {
-        return m_code == kNotFound;
+        return code() == kNotFound;
     }
+
     [[nodiscard]] auto is_busy() const -> bool
     {
-        return m_code == kBusy;
+        return code() == kBusy;
     }
+
     [[nodiscard]] auto is_aborted() const -> bool
     {
-        return m_code == kAborted;
+        return code() == kAborted;
     }
 
     [[nodiscard]] auto is_retry() const -> bool
     {
-        return m_code == kBusy && m_subc == kRetry;
+        return is_busy() && subcode() == kRetry;
     }
+
     [[nodiscard]] auto is_no_memory() const -> bool
     {
-        return m_code == kAborted && m_subc == kNoMemory;
+        return is_aborted() && subcode() == kNoMemory;
     }
 
-    [[nodiscard]] auto code() const -> Code
-    {
-        return m_code;
-    }
-    [[nodiscard]] auto subcode() const -> SubCode
-    {
-        return m_subc;
-    }
-
-    [[nodiscard]] auto type_name() const -> const char *;
+    [[nodiscard]] auto code() const -> Code;
+    [[nodiscard]] auto subcode() const -> SubCode;
     [[nodiscard]] auto message() const -> const char *;
 
     auto operator==(const Status &rhs) const -> bool
     {
-        return m_code == rhs.m_code;
+        return code() == rhs.code();
     }
     auto operator!=(const Status &rhs) const -> bool
     {
@@ -174,22 +166,22 @@ public:
     }
 
     // Status can be copied and moved.
-    Status(const Status &rhs) = default;
-    auto operator=(const Status &rhs) -> Status & = default;
+    Status(const Status &rhs);
+    auto operator=(const Status &rhs) -> Status &;
     Status(Status &&rhs) noexcept;
     auto operator=(Status &&rhs) noexcept -> Status &;
 
 private:
-    explicit Status(Code code, const char *msg);
-    explicit Status(Code code, SubCode subc = kNone)
-        : m_code(code),
-          m_subc(subc)
+    friend class StatusBuilder;
+
+    explicit Status(char *state)
+        : m_state(state)
     {
     }
 
-    const char *m_state = "";
-    Code m_code = kOK;
-    SubCode m_subc = kNone;
+    explicit Status(Code code, SubCode subc);
+
+    char *m_state;
 };
 
 } // namespace calicodb

@@ -5,12 +5,12 @@
 #ifndef CALICODB_TX_H
 #define CALICODB_TX_H
 
-#include "status.h"
+#include "db.h"
 
 namespace calicodb
 {
 
-struct BucketOptions;
+// calicodb/cursor.h
 class Cursor;
 
 // Transaction on a CalicoDB database
@@ -79,11 +79,10 @@ public:
     // new record is created. Returns an OK status on success, and a non-OK status on
     // failure.
     // Also adjusts the cursor `c` to point to the newly-created record. The following
-    // expressions evaluate to true on success:
-    //     `c->is_valid()`
-    //     `c->status().is_ok()`
-    //     `c->key()` == `key`
-    //     `c->value()` == `value`
+    // 3 expressions evaluate to true on success:
+    //     (1) c->is_valid()
+    //     (2) c->key() == key
+    //     (3) c->value() == value
     // It is safe to use both `c->key()` and `c->value()` as parameters to this
     // routine. On failure, the cursor is left in an unspecified state (possibly
     // invalidated, or placed on a nearby record).
@@ -101,6 +100,35 @@ public:
     // left in an unspecified state.
     virtual auto erase(Cursor &c) -> Status = 0;
 };
+
+template <class Fn>
+auto DB::run(const ReadOptions &options, Fn &&fn) const -> Status
+{
+    Tx *tx;
+    auto s = new_tx(options, tx);
+    if (s.is_ok()) {
+        const auto *const_tx = tx;
+        s = fn(*const_tx);
+        delete tx;
+    }
+    return s;
+}
+
+template <class Fn>
+auto DB::run(const WriteOptions &options, Fn &&fn) -> Status
+{
+    Tx *tx;
+    auto s = new_tx(options, tx);
+    if (s.is_ok()) {
+        s = fn(*tx);
+        if (s.is_ok()) {
+            s = tx->commit();
+        }
+        // Implicit rollback of all uncommitted changes.
+        delete tx;
+    }
+    return s;
+}
 
 } // namespace calicodb
 

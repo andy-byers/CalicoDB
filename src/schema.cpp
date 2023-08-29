@@ -11,7 +11,11 @@ namespace calicodb
 {
 
 static constexpr size_t kMaxRootEntryLen = kVarintMaxLength;
-static const Status kNoBucket = Status::invalid_argument("bucket does not exist");
+
+static auto no_bucket() -> Status
+{
+    return Status::invalid_argument("bucket does not exist");
+}
 
 class SchemaCursor : public Cursor
 {
@@ -90,7 +94,7 @@ Schema::Schema(Pager &pager, const Status &status, Stat &stat, char *scratch)
       m_pager(&pager),
       m_scratch(scratch),
       m_stat(&stat),
-      m_map(pager, stat, scratch, Id::root(), UniqueBuffer()),
+      m_map(pager, stat, scratch, Id::root(), String()),
       m_cursor(m_map),
       m_trees{"", &m_map, nullptr, nullptr},
       m_schema(Alloc::new_object<SchemaCursor>(m_cursor))
@@ -180,7 +184,7 @@ auto Schema::open_bucket(const Slice &name, Cursor *&c_out) -> Status
 
     Id root_id;
     if (!m_cursor.is_valid()) {
-        return s.is_ok() ? kNoBucket : s;
+        return s.is_ok() ? no_bucket() : s;
     } else if (!decode_and_check_root_id(m_cursor.value(), root_id)) {
         return corrupted_root_id();
     }
@@ -234,17 +238,13 @@ auto Schema::construct_or_reference_tree(const Slice &name, Id root_id) -> Tree 
         return already_open;
     }
 
-    UniqueBuffer name_buf;
-    if (!root_id.is_root()) {
-        // If `name` is empty, a single byte will be allocated to store the '\0'.
-        name_buf = UniqueBuffer::from_slice(name);
-        if (name_buf.is_empty()) {
-            return nullptr;
-        }
+    String name_str;
+    if (!root_id.is_root() && append_strings(name_str, name)) {
+        return nullptr;
     }
 
     auto *tree = Alloc::new_object<Tree>(*m_pager, *m_stat, m_scratch,
-                                         root_id, std::move(name_buf));
+                                         root_id, std::move(name_str));
     if (tree) {
         IntrusiveList::add_tail(tree->list_entry, m_trees);
     }
@@ -275,7 +275,7 @@ auto Schema::drop_bucket(const Slice &name) -> Status
     m_cursor.find(name);
     auto s = m_cursor.status();
     if (!m_cursor.is_valid()) {
-        return s.is_ok() ? kNoBucket : s;
+        return s.is_ok() ? no_bucket() : s;
     }
     CALICODB_EXPECT_TRUE(s.is_ok());
 
@@ -283,8 +283,8 @@ auto Schema::drop_bucket(const Slice &name) -> Status
     if (!decode_and_check_root_id(m_cursor.value(), root_id)) {
         return corrupted_root_id();
     }
-    auto *drop = construct_or_reference_tree(m_cursor.key(), root_id);
-    if (drop == nullptr) {
+    ObjectPtr<Tree> drop(construct_or_reference_tree(m_cursor.key(), root_id));
+    if (!drop) {
         return Status::no_memory();
     }
     IntrusiveList::remove(drop->list_entry);
@@ -325,8 +325,6 @@ auto Schema::drop_bucket(const Slice &name) -> Status
             s = Status::corruption();
         }
     }
-
-    Alloc::delete_object(drop);
     return s;
 }
 

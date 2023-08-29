@@ -10,13 +10,18 @@
 namespace calicodb
 {
 
-class BusyHandler;
+// calicodb/env.h
 class Env;
+
+// calicodb/options.h (below)
+class BusyHandler;
 class Logger;
 
 // Size of a database page in bytes.
 static constexpr size_t kPageSize = 4'096;
 
+// Options to control the behavior of a database connection (passed to DB::open()
+// and DB::destroy())
 struct Options final {
     // Size of the page cache in bytes.
     size_t cache_size = 1'024 * kPageSize; // 4 MB
@@ -66,6 +71,17 @@ struct Options final {
     } lock_mode = kLockNormal;
 };
 
+// Options to control the behavior of a readonly transaction (passed to DB::run() and
+// DB::new_tx())
+struct ReadOptions {
+};
+
+// Options to control the behavior of a read-write transaction (passed to DB::run() and
+// DB::new_tx())
+struct WriteOptions {
+};
+
+// Options for controlling the behavior of Tx::create_bucket()
 struct BucketOptions final {
     bool error_if_exists = false;
 };

@@ -31,18 +31,18 @@ auto ModelDB::check_consistency() const -> void
     reinterpret_cast<const DBImpl *>(m_db)->TEST_pager().assert_state();
 }
 
-auto ModelDB::new_tx(WriteTag, Tx *&tx_out) -> Status
+auto ModelDB::new_tx(const WriteOptions &options, Tx *&tx_out) -> Status
 {
-    auto s = m_db->new_tx(WriteTag(), tx_out);
+    auto s = m_db->new_tx(options, tx_out);
     if (s.is_ok()) {
         tx_out = new ModelTx(*m_store, *tx_out);
     }
     return s;
 }
 
-auto ModelDB::new_tx(Tx *&tx_out) const -> Status
+auto ModelDB::new_tx(const ReadOptions &options, Tx *&tx_out) const -> Status
 {
-    auto s = m_db->new_tx(tx_out);
+    auto s = m_db->new_tx(options, tx_out);
     if (s.is_ok()) {
         tx_out = new ModelTx(*m_store, *tx_out);
     }
@@ -90,10 +90,10 @@ auto ModelTx::create_bucket(const BucketOptions &options, const Slice &name, Cur
     auto s = m_tx->create_bucket(options, name, c_out);
     if (s.is_ok()) {
         // NOOP if `name` already exists.
-        auto [itr, _] = m_temp.insert({name.to_string(), {}});
+        m_schema.move_to(m_temp.insert(m_schema.m_itr, {name.to_string(), {}}));
         if (c_out) {
             CHECK_TRUE(*c_out != nullptr);
-            *c_out = open_model_cursor(**c_out, itr->second);
+            *c_out = open_model_cursor(**c_out, m_schema.m_itr->second);
         }
     } else if (c_out) {
         CHECK_EQ(*c_out, nullptr);
@@ -105,9 +105,9 @@ auto ModelTx::open_bucket(const Slice &name, Cursor *&c_out) const -> Status
 {
     auto s = m_tx->open_bucket(name, c_out);
     if (s.is_ok()) {
-        auto itr = m_temp.find(name.to_string());
-        CHECK_TRUE(itr != end(m_temp));
-        c_out = open_model_cursor(*c_out, itr->second);
+        m_schema.move_to(m_temp.find(name.to_string()));
+        CHECK_TRUE(m_schema.m_itr != end(m_temp));
+        c_out = open_model_cursor(*c_out, m_schema.m_itr->second);
     } else {
         CHECK_EQ(c_out, nullptr);
     }

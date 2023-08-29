@@ -6,6 +6,8 @@
 #define CALICODB_PTR_H
 
 #include "alloc.h"
+#include "calicodb/db.h"
+#include "calicodb/string.h"
 #include "utils.h"
 #include <memory>
 #include <utility>
@@ -133,9 +135,12 @@ public:
     }
 };
 
+template <class T>
 class UniqueBuffer final
 {
-    UniquePtr<char> m_ptr;
+    static_assert(std::is_trivially_copyable_v<T>);
+
+    UniquePtr<T> m_ptr;
     size_t m_len;
 
 public:
@@ -144,7 +149,7 @@ public:
     {
     }
 
-    explicit UniqueBuffer(char *ptr, size_t len)
+    explicit UniqueBuffer(T *ptr, size_t len)
         : m_ptr(ptr),
           m_len(len)
     {
@@ -177,65 +182,51 @@ public:
         return m_len;
     }
 
-    [[nodiscard]] auto ptr() -> char *
+    [[nodiscard]] auto ptr() -> T *
     {
         return m_ptr.get();
     }
 
-    [[nodiscard]] auto ptr() const -> const char *
+    [[nodiscard]] auto ptr() const -> const T *
     {
         return m_ptr.get();
     }
 
-    [[nodiscard]] auto ref() -> char *&
+    [[nodiscard]] auto ref() -> T *&
     {
         return m_ptr.ref();
     }
 
+    auto reset() -> void
+    {
+        m_ptr.reset(nullptr);
+        m_len = 0;
+    }
+
     auto reset(char *ptr, size_t len) -> void
     {
-        CALICODB_EXPECT_EQ(ptr == nullptr, len == 0);
+        CALICODB_EXPECT_NE(ptr, nullptr);
+        CALICODB_EXPECT_NE(len, 0);
         m_ptr.reset(ptr);
         m_len = len;
     }
 
-    auto release() -> char *
+    auto release() -> T *
     {
         m_len = 0;
         return std::exchange(ref(), nullptr);
     }
 
-    auto resize(size_t len) -> void
+    [[nodiscard]] auto realloc(size_t len) -> int
     {
-        CALICODB_EXPECT_GT(len, 0); // Use reset(nullptr, 0) to free the buffer early.
-        auto *ptr = static_cast<char *>(Alloc::realloc(m_ptr.get(), len));
-        if (ptr) {
+        auto *ptr = static_cast<T *>(Alloc::realloc(m_ptr.get(), len * sizeof(T)));
+        if (ptr || len == 0) {
             m_ptr.release();
-        } else {
-            len = 0;
+            m_ptr.reset(ptr);
+            m_len = len;
+            return 0;
         }
-        m_ptr.reset(ptr);
-        m_len = len;
-    }
-
-    // NOTE: A null byte is added at the end of the buffer.
-    static auto from_slice(const Slice &slice, const Slice &extra = "") -> UniqueBuffer
-    {
-        const auto len = slice.size() + extra.size();
-
-        UniqueBuffer buf;
-        buf.resize(len + 1);
-        if (!buf.is_empty()) {
-            std::memcpy(buf.ptr(), slice.data(), slice.size());
-            std::memcpy(buf.ptr() + slice.size(), extra.data(), extra.size());
-            buf.ptr()[len] = '\0';
-        }
-        return buf;
-    }
-
-    [[nodiscard]] auto as_slice() const -> Slice
-    {
-        return is_empty() ? "" : Slice(m_ptr.get(), m_len - 1);
+        return -1;
     }
 };
 

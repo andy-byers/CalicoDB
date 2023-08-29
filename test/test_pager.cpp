@@ -270,6 +270,8 @@ protected:
         delete m_file;
         delete m_wal_file;
         delete m_env;
+
+        EXPECT_EQ(Alloc::bytes_used(), 0);
     }
 
     auto SetUp() -> void override
@@ -316,7 +318,7 @@ protected:
             s = m_env->new_file("wal", Env::kReadWrite, m_wal_file);
         }
         if (!s.is_ok()) {
-            ADD_FAILURE() << s.type_name() << ": " << s.message();
+            ADD_FAILURE() << s.message();
             delete m_file;
             return false;
         }
@@ -324,7 +326,7 @@ protected:
     }
     auto close() -> void
     {
-        delete m_pager;
+        Alloc::delete_object(m_pager);
         m_pager = nullptr;
     }
 
@@ -717,7 +719,7 @@ public:
                 PageRef *page;
                 auto s = Freelist::remove(*m_pager, Freelist::kRemoveExact,
                                           m_ordering[i], page);
-                ASSERT_TRUE(s.is_corruption()) << s.type_name();
+                ASSERT_TRUE(s.is_corruption()) << s.message();
                 ASSERT_EQ(page, nullptr);
                 ASSERT_OK(m_pager->commit());
             });
@@ -784,8 +786,10 @@ protected:
 
     ~HashIndexTestBase()
     {
+        m_index->close();
         delete m_shm;
         delete m_index;
+        EXPECT_EQ(Alloc::bytes_used(), 0);
     }
 
     auto append(uint32_t key)

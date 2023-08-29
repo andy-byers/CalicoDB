@@ -12,6 +12,240 @@
 namespace calicodb::test
 {
 
+class AllocTests : public testing::Test
+{
+public:
+    static constexpr size_t kFakeAllocationSize = 1'024;
+    alignas(uint64_t) static char s_fake_allocation[kFakeAllocationSize];
+    static uint64_t *s_alloc_size_ptr;
+    static void *s_alloc_data_ptr;
+
+    explicit AllocTests() = default;
+    ~AllocTests() override = default;
+
+    auto SetUp() -> void override
+    {
+        ASSERT_EQ(Alloc::bytes_used(), 0);
+    }
+
+    auto TearDown() -> void override
+    {
+        ASSERT_EQ(Alloc::bytes_used(), 0);
+        ASSERT_EQ(Alloc::set_limit(0), 0);
+        ASSERT_EQ(Alloc::set_methods(Alloc::kDefaultMethods), 0);
+        Alloc::set_hook(nullptr, nullptr);
+    }
+};
+
+// The wrapper functions in alloc.cpp add a header of 8 bytes to each allocation, which is
+// used to store the number of bytes in the rest of the allocation.
+alignas(uint64_t) char AllocTests::s_fake_allocation[kFakeAllocationSize];
+uint64_t *AllocTests::s_alloc_size_ptr = reinterpret_cast<uint64_t *>(s_fake_allocation);
+void *AllocTests::s_alloc_data_ptr = s_alloc_size_ptr + 1;
+
+static constexpr Alloc::Methods kFakeMethods = {
+    [](auto) -> void * {
+        return AllocTests::s_fake_allocation;
+    },
+    [](auto *old_ptr, auto) -> void * {
+        EXPECT_EQ(old_ptr, AllocTests::s_fake_allocation);
+        return AllocTests::s_fake_allocation;
+    },
+    [](auto *ptr) {
+        EXPECT_EQ(ptr, AllocTests::s_fake_allocation);
+    },
+};
+
+static constexpr Alloc::Methods kFaultyMethods = {
+    [](auto) -> void * {
+        return nullptr;
+    },
+    [](auto *, auto) -> void * {
+        return nullptr;
+    },
+    [](auto *) {},
+};
+
+TEST_F(AllocTests, Methods)
+{
+    auto *ptr = Alloc::malloc(123);
+    ASSERT_NE(ptr, nullptr);
+    auto *new_ptr = Alloc::realloc(ptr, 321);
+    ASSERT_NE(new_ptr, nullptr);
+
+    // Prevent malloc/realloc-free mismatch.
+    ASSERT_EQ(Alloc::set_methods(kFakeMethods), -1);
+    Alloc::free(new_ptr);
+
+    ASSERT_EQ(Alloc::set_methods(kFakeMethods), 0);
+    ASSERT_EQ(ptr = Alloc::malloc(123), s_alloc_data_ptr);
+    ASSERT_EQ(123, *s_alloc_size_ptr);
+    ASSERT_EQ(Alloc::realloc(ptr, 321), ptr);
+    ASSERT_EQ(321, *s_alloc_size_ptr);
+    ASSERT_EQ(Alloc::realloc(ptr, 42), ptr);
+    ASSERT_EQ(42, *s_alloc_size_ptr);
+    Alloc::free(nullptr);
+    Alloc::free(ptr);
+
+    ASSERT_EQ(Alloc::set_methods(kFaultyMethods), 0);
+    ASSERT_EQ(Alloc::malloc(123), nullptr);
+    ASSERT_EQ(Alloc::realloc(nullptr, 123), nullptr);
+}
+
+TEST_F(AllocTests, Limit)
+{
+    Alloc::set_limit(100);
+    auto *a = Alloc::malloc(50 - sizeof(uint64_t));
+    ASSERT_NE(a, nullptr);
+
+    // 8-byte overhead causes this to exceed the limit.
+    auto *b = Alloc::malloc(50);
+    ASSERT_EQ(b, nullptr);
+
+    b = Alloc::malloc(50 - sizeof(uint64_t));
+    ASSERT_NE(b, nullptr);
+
+    // 0 bytes available, fail to get 1 byte.
+    auto *c = Alloc::realloc(a, 51 - sizeof(uint64_t));
+    ASSERT_EQ(c, nullptr);
+
+    c = Alloc::realloc(a, 20 - sizeof(uint64_t));
+    ASSERT_NE(c, nullptr);
+
+    ASSERT_EQ(Alloc::set_limit(1), -1);
+    ASSERT_EQ(Alloc::set_limit(0), 0);
+
+    // a was realloc'd.
+    Alloc::free(b);
+    Alloc::free(c);
+}
+
+TEST_F(AllocTests, AllocationHook)
+{
+    struct HookArg {
+        int rc = 0;
+    } hook_arg;
+
+    const auto hook = [](auto *arg) {
+        return static_cast<const HookArg *>(arg)->rc;
+    };
+
+    Alloc::set_hook(hook, &hook_arg);
+
+    void *ptr;
+    ASSERT_NE(ptr = Alloc::malloc(123), nullptr);
+    ASSERT_NE(ptr = Alloc::realloc(ptr, 321), nullptr);
+    Alloc::free(ptr);
+
+    hook_arg.rc = -1;
+    ASSERT_EQ(Alloc::malloc(123), nullptr);
+    ASSERT_EQ(Alloc::realloc(ptr, 321), nullptr);
+}
+
+TEST_F(AllocTests, LargeAllocations)
+{
+    // Don't actually allocate anything.
+    ASSERT_EQ(Alloc::set_methods(kFakeMethods), 0);
+
+    void *p;
+    ASSERT_EQ(nullptr, Alloc::malloc(kMaxAllocation + 1));
+    ASSERT_NE(nullptr, p = Alloc::malloc(kMaxAllocation));
+    ASSERT_EQ(nullptr, Alloc::realloc(p, kMaxAllocation + 1));
+    ASSERT_NE(nullptr, p = Alloc::realloc(p, kMaxAllocation));
+    Alloc::free(p);
+}
+
+TEST_F(AllocTests, ReallocSameSize)
+{
+    static constexpr size_t kSize = 42;
+
+    void *ptr;
+    ASSERT_NE(ptr = Alloc::malloc(kSize), nullptr);
+    ASSERT_NE(ptr = Alloc::realloc(ptr, kSize), nullptr);
+    Alloc::free(ptr);
+
+    static constexpr Alloc::Methods kFaultyRealloc = {
+        std::malloc,
+        [](auto *, auto) -> void * {
+            return nullptr;
+        },
+        std::free,
+    };
+    ASSERT_EQ(Alloc::set_methods(kFaultyRealloc), 0);
+    ASSERT_NE(ptr = Alloc::malloc(kSize), nullptr);
+    ASSERT_EQ(Alloc::realloc(ptr, kSize), nullptr);
+    ASSERT_GT(Alloc::bytes_used(), kSize);
+    Alloc::free(ptr);
+}
+
+TEST_F(AllocTests, SpecialCases)
+{
+    void *ptr;
+
+    // NOOP, returns a nonnull pointer to a zero-sized allocation.
+    ASSERT_NE(ptr = Alloc::malloc(0), nullptr);
+    ASSERT_EQ(Alloc::bytes_used(), 0);
+    auto *zero_sized = ptr;
+    Alloc::free(ptr); // Not necessary, but should work fine
+
+    // NOOP, same
+    ASSERT_EQ(Alloc::realloc(nullptr, 0), zero_sized);
+    ASSERT_EQ(Alloc::bytes_used(), 0);
+
+    // Equivalent to Alloc::malloc(1).
+    ASSERT_NE(ptr = Alloc::realloc(nullptr, 1), nullptr);
+    ASSERT_NE(ptr, nullptr);
+    ASSERT_NE(Alloc::bytes_used(), 0);
+
+    // Equivalent to Alloc::free(ptr), but returns a pointer to a zero-sized
+    // allocation.
+    ASSERT_EQ(Alloc::realloc(ptr, 0), zero_sized);
+    ASSERT_EQ(Alloc::bytes_used(), 0);
+
+    // Zero-sized allocations can be reallocated.
+    ptr = Alloc::malloc(0);
+    ASSERT_EQ(Alloc::realloc(ptr, 0), zero_sized);
+    ASSERT_NE(ptr = Alloc::realloc(ptr, 1), zero_sized);
+    ASSERT_GT(Alloc::bytes_used(), 0);
+    *static_cast<char *>(ptr) = '\x42';
+    Alloc::free(ptr);
+}
+
+TEST_F(AllocTests, HeapObject)
+{
+    struct CustomObject : public HeapObject {
+        int data[42];
+    };
+
+    auto *obj = new (std::nothrow) CustomObject;
+    ASSERT_GE(Alloc::bytes_used(), sizeof(CustomObject));
+    delete obj;
+    ASSERT_EQ(Alloc::bytes_used(), 0);
+}
+
+#ifndef NDEBUG
+TEST_F(AllocTests, DeathTest)
+{
+    void *ptr;
+    ptr = Alloc::malloc(1);
+
+    auto *size_ptr = reinterpret_cast<uint64_t *>(ptr) - 1;
+    // Give back more memory than was allocated in-total. If more than 1 byte were already allocated, this
+    // corruption would go undetected.
+    *size_ptr = 2;
+    ASSERT_DEATH(Alloc::free(ptr), "Assert");
+    ASSERT_DEATH((void)Alloc::realloc(ptr, 123), "Assert");
+    // Actual allocations must not be zero-length. Alloc::malloc() returns a nullptr if 0 bytes are
+    // requested.
+    *size_ptr = 0;
+    ASSERT_DEATH(Alloc::free(ptr), "Assert");
+    ASSERT_DEATH((void)Alloc::realloc(ptr, 123), "Assert");
+
+    *size_ptr = 1;
+    Alloc::free(ptr);
+}
+#endif // NDEBUG
+
 TEST(UniquePtr, PointerWidth)
 {
     static_assert(sizeof(UniquePtr<int, DefaultDestructor>) == sizeof(void *));
@@ -203,29 +437,30 @@ TEST(Coding, Varint32Truncation)
     ASSERT_EQ(large_value, result);
 }
 
-// TEST(Status, StatusMessages)
-//{
-//     ASSERT_EQ("OK", Status::ok().to_string());
-//     ASSERT_EQ("I/O error", Status::io_error().to_string());
-//     ASSERT_EQ("I/O error: msg", Status::io_error("msg").to_string());
-//     ASSERT_EQ("corruption", Status::corruption().to_string());
-//     ASSERT_EQ("corruption: msg", Status::corruption("msg").to_string());
-//     ASSERT_EQ("invalid argument", Status::invalid_argument().to_string());
-//     ASSERT_EQ("invalid argument: msg", Status::invalid_argument("msg").to_string());
-//     ASSERT_EQ("not supported", Status::not_supported().to_string());
-//     ASSERT_EQ("not supported: msg", Status::not_supported("msg").to_string());
-//     ASSERT_EQ("busy", Status::busy().to_string());
-//     ASSERT_EQ("busy: msg", Status::busy("msg").to_string());
-//     ASSERT_EQ("busy: retry", Status::retry().to_string());
-//     ASSERT_EQ("aborted", Status::aborted().to_string());
-//     ASSERT_EQ("aborted: msg", Status::aborted("msg").to_string());
-//     ASSERT_EQ("aborted: no memory", Status::no_memory().to_string());
-//     // Choice of `Status::invalid_argument()` is arbitrary, any `Code-SubCode` combo
-//     // is technically legal, but may not be semantically valid (for example, it makes
-//     // no sense to retry when a read-only transaction attempts to write: repeating that
-//     // action will surely fail next time as well).
-//     ASSERT_EQ("invalid argument: retry", Status::invalid_argument(Status::kRetry).to_string());
-// }
+TEST(Status, StatusMessages)
+{
+    ASSERT_EQ(Slice("OK"), Status::ok().message());
+    ASSERT_EQ(Slice("I/O error"), Status::io_error().message());
+    ASSERT_EQ(Slice("corruption"), Status::corruption().message());
+    ASSERT_EQ(Slice("invalid argument"), Status::invalid_argument().message());
+    ASSERT_EQ(Slice("not supported"), Status::not_supported().message());
+    ASSERT_EQ(Slice("busy"), Status::busy().message());
+    ASSERT_EQ(Slice("aborted"), Status::aborted().message());
+
+    ASSERT_EQ(Slice("busy: retry"), Status::retry().message());
+    ASSERT_EQ(Slice("aborted: no memory"), Status::no_memory().message());
+
+    static constexpr auto kMsg = "message";
+    ASSERT_EQ(Slice(kMsg), Status::io_error(kMsg).message());
+    ASSERT_EQ(Slice(kMsg), Status::corruption(kMsg).message());
+    ASSERT_EQ(Slice(kMsg), Status::invalid_argument(kMsg).message());
+    ASSERT_EQ(Slice(kMsg), Status::not_supported(kMsg).message());
+    ASSERT_EQ(Slice(kMsg), Status::busy(kMsg).message());
+    ASSERT_EQ(Slice(kMsg), Status::aborted(kMsg).message());
+
+    ASSERT_EQ(Slice(kMsg), Status::retry(kMsg).message());
+    ASSERT_EQ(Slice(kMsg), Status::no_memory(kMsg).message());
+}
 
 TEST(Status, StatusCodes)
 {
@@ -254,90 +489,172 @@ TEST(Status, StatusCodes)
 #undef CHECK_SUBCODE
 }
 
-// TEST(Status, Copy)
-//{
-//     const auto s = Status::invalid_argument("status message");
-//     const auto t = s;
-//     ASSERT_TRUE(t.is_invalid_argument());
-//     ASSERT_EQ(t.to_string(), std::string("invalid argument: ") + "status message");
-//
-//     ASSERT_TRUE(s.is_invalid_argument());
-//     ASSERT_EQ(s.to_string(), std::string("invalid argument: ") + "status message");
-// }
-//
-// TEST(Status, Reassign)
-//{
-//     auto s = Status::ok();
-//     ASSERT_TRUE(s.is_ok());
-//
-//     s = Status::invalid_argument("status message");
-//     ASSERT_TRUE(s.is_invalid_argument());
-//     ASSERT_EQ(s.to_string(), "invalid argument: status message");
-//
-//     s = Status::not_supported("status message");
-//     ASSERT_TRUE(s.is_not_supported());
-//     ASSERT_EQ(s.to_string(), "not supported: status message");
-//
-//     s = Status::ok();
-//     ASSERT_TRUE(s.is_ok());
-// }
-//
-// TEST(Status, MoveConstructor)
-//{
-//     {
-//         Status ok = Status::ok();
-//         Status ok2 = std::move(ok);
-//
-//         ASSERT_TRUE(ok2.is_ok());
-//     }
-//
-//     {
-//         Status status = Status::not_found("custom kNotFound status message");
-//         Status status2 = std::move(status);
-//
-//         ASSERT_TRUE(status2.is_not_found());
-//         ASSERT_EQ("not found: custom kNotFound status message", status2.to_string());
-//     }
-//
-//     {
-//         Status self_moved = Status::io_error("custom kIOError status message");
-//
-//         // Needed to bypass compiler warning about explicit move-assignment.
-//         Status &self_moved_reference = self_moved;
-//         self_moved_reference = std::move(self_moved);
-//     }
-// }
-
-TEST(Logging, NumberToString)
+TEST(Status, Copy)
 {
-    ASSERT_EQ("0", number_to_string(0));
-    ASSERT_EQ("1", number_to_string(1));
-    ASSERT_EQ("9", number_to_string(9));
+    const auto s = Status::invalid_argument("status message");
+    const auto t = s;
+    ASSERT_TRUE(t.is_invalid_argument());
+    ASSERT_EQ(t.message(), Slice("status message"));
 
-    ASSERT_EQ("10", number_to_string(10));
-    ASSERT_EQ("11", number_to_string(11));
-    ASSERT_EQ("19", number_to_string(19));
-    ASSERT_EQ("99", number_to_string(99));
+    ASSERT_TRUE(s.is_invalid_argument());
+    ASSERT_EQ(s.message(), Slice("status message"));
 
-    ASSERT_EQ("100", number_to_string(100));
-    ASSERT_EQ("109", number_to_string(109));
-    ASSERT_EQ("190", number_to_string(190));
-    ASSERT_EQ("123", number_to_string(123));
-    ASSERT_EQ("12345678", number_to_string(12345678));
-
-    static_assert(std::numeric_limits<uint64_t>::max() == 18446744073709551615U,
-                  "Test consistency check");
-    ASSERT_EQ("18446744073709551000", number_to_string(18446744073709551000U));
-    ASSERT_EQ("18446744073709551600", number_to_string(18446744073709551600U));
-    ASSERT_EQ("18446744073709551610", number_to_string(18446744073709551610U));
-    ASSERT_EQ("18446744073709551614", number_to_string(18446744073709551614U));
-    ASSERT_EQ("18446744073709551615", number_to_string(18446744073709551615U));
+    // Pointer comparison. Status cannot allocate memory in its copy constructor/assignment operator.
+    // A refcount is increased instead.
+    ASSERT_EQ(s.message(), t.message());
 }
+
+TEST(Status, CopyReleasesMemory)
+{
+    {
+        auto s = Status::invalid_argument("status message");
+        const auto s_bytes_used = Alloc::bytes_used();
+        ASSERT_GT(s_bytes_used, 0);
+
+        const auto t = Status::no_memory("status message 2");
+        const auto t_bytes_used = Alloc::bytes_used() - s_bytes_used;
+        ASSERT_GT(t_bytes_used, 0);
+
+        // s should release the memory it held and increase the refcount for the memory block
+        // held by t.
+        s = t;
+        ASSERT_TRUE(s.is_no_memory());
+        ASSERT_EQ(s.message(), Slice("status message 2"));
+        ASSERT_EQ(Alloc::bytes_used(), t_bytes_used);
+
+        const auto u = t;
+        ASSERT_TRUE(u.is_no_memory());
+        ASSERT_EQ(u.message(), Slice("status message 2"));
+        ASSERT_EQ(Alloc::bytes_used(), t_bytes_used);
+    }
+    ASSERT_EQ(Alloc::bytes_used(), 0);
+}
+
+TEST(Status, Reassign)
+{
+    auto s = Status::ok();
+    ASSERT_TRUE(s.is_ok());
+
+    s = Status::invalid_argument("status message");
+    ASSERT_TRUE(s.is_invalid_argument());
+    ASSERT_EQ(s.message(), Slice("status message"));
+
+    s = Status::not_supported("status message");
+    ASSERT_TRUE(s.is_not_supported());
+    ASSERT_EQ(s.message(), Slice("status message"));
+
+    s = Status::ok();
+    ASSERT_TRUE(s.is_ok());
+}
+
+TEST(Status, MoveConstructor)
+{
+    {
+        Status ok = Status::ok();
+        Status ok2 = std::move(ok);
+
+        ASSERT_TRUE(ok2.is_ok());
+    }
+
+    {
+        Status status = Status::not_found("custom kNotFound status message");
+        Status status2 = std::move(status);
+
+        ASSERT_TRUE(status2.is_not_found());
+        ASSERT_EQ(Slice("custom kNotFound status message"), status2.message());
+    }
+
+    {
+        Status self_moved = Status::io_error("custom kIOError status message");
+
+        // Needed to bypass compiler warning about explicit move-assignment.
+        Status &self_moved_reference = self_moved;
+        self_moved_reference = std::move(self_moved);
+    }
+}
+
+TEST(Status, CopyInline)
+{
+    const auto s = Status::no_memory();
+    const auto t = s;
+    ASSERT_TRUE(t.is_no_memory());
+    ASSERT_EQ(t.message(), Slice("aborted: no memory"));
+
+    ASSERT_TRUE(s.is_no_memory());
+    ASSERT_EQ(s.message(), Slice("aborted: no memory"));
+
+    auto u = Status::ok();
+    u = t;
+
+    ASSERT_TRUE(u.is_no_memory());
+    ASSERT_EQ(u.message(), Slice("aborted: no memory"));
+}
+
+TEST(Status, ReassignInline)
+{
+    auto s = Status::ok();
+    ASSERT_TRUE(s.is_ok());
+
+    s = Status::no_memory();
+    ASSERT_TRUE(s.is_no_memory());
+    ASSERT_EQ(s.message(), Slice("aborted: no memory"));
+
+    s = Status::aborted();
+    ASSERT_TRUE(s.is_aborted());
+    ASSERT_EQ(s.message(), Slice("aborted"));
+
+    s = Status::ok();
+    ASSERT_TRUE(s.is_ok());
+}
+
+TEST(Status, MoveConstructorInline)
+{
+    {
+        Status status = Status::no_memory();
+        Status status2 = std::move(status);
+
+        ASSERT_TRUE(status2.is_no_memory());
+        ASSERT_EQ(Slice("aborted: no memory"), status2.message());
+    }
+
+    {
+        Status self_moved = Status::io_error();
+
+        // Needed to bypass compiler warning about explicit move-assignment.
+        Status &self_moved_reference = self_moved;
+        self_moved_reference = std::move(self_moved);
+    }
+}
+
+#ifndef NDEBUG
+TEST(Status, InlineStatusHasNoRefcount)
+{
+    std::vector<Status> statuses;
+    auto s = Status::not_found();
+    for (size_t i = 1; i < std::numeric_limits<uint16_t>::max(); ++i) {
+        statuses.push_back(s);
+    }
+    // If there was a refcount attached to s, it would have overflowed just now, causing an
+    // assertion to trip. Must be tested with assertions enabled.
+    statuses.push_back(s);
+}
+
+TEST(Status, RefcountOverflow)
+{
+    std::vector<Status> statuses;
+    auto s = Status::not_found("not inline");
+    for (size_t i = 1; i < std::numeric_limits<uint16_t>::max(); ++i) {
+        statuses.push_back(s);
+    }
+
+    ASSERT_DEATH(statuses.push_back(s), "Assert");
+}
+#endif // NDEBUG
 
 void ConsumeDecimalNumberRoundtripTest(uint64_t number,
                                        const std::string &padding = "")
 {
-    std::string decimal_number = number_to_string(number);
+    std::string decimal_number = std::to_string(number);
     std::string input_string = decimal_number + padding;
     Slice input(input_string);
     Slice output = input;
@@ -363,7 +680,7 @@ TEST(Logging, ConsumeDecimalNumberRoundtrip)
     ConsumeDecimalNumberRoundtripTest(109);
     ConsumeDecimalNumberRoundtripTest(190);
     ConsumeDecimalNumberRoundtripTest(123);
-    ASSERT_EQ("12345678", number_to_string(12345678));
+    ASSERT_EQ("12345678", std::to_string(12345678));
 
     for (uint64_t i = 0; i < 100; ++i) {
         uint64_t large_number = std::numeric_limits<uint64_t>::max() - i;
@@ -443,12 +760,12 @@ TEST(Logging, ConsumeDecimalNumberNoDigits)
 
 TEST(Logging, AppendFmtString)
 {
-    std::string str;
-    append_fmt_string(str, "hello %d %s", 42, "goodbye");
+    String str;
+    ASSERT_EQ(0, append_format_string(str, "hello %d %s", 42, "goodbye"));
     const std::string long_str(128, '*');
-    append_fmt_string(str, "%s", long_str.data());
-    append_fmt_string(str, "empty");
-    ASSERT_EQ(str, "hello 42 goodbye" + long_str + "empty");
+    ASSERT_EQ(0, append_format_string(str, "%s", long_str.data()));
+    ASSERT_EQ(0, append_format_string(str, "empty"));
+    ASSERT_EQ(str.c_str(), "hello 42 goodbye" + long_str + "empty");
 }
 
 TEST(Slice, Construction)
@@ -620,5 +937,127 @@ TEST(Slice, DeathTest)
     ASSERT_DEATH(Slice(nullptr, 123), "Assert");
 }
 #endif // not NDEBUG
+
+class StringBuilderTests : public testing::Test
+{
+public:
+    auto build_string() -> String
+    {
+        return std::move(m_builder).build();
+    }
+
+    StringBuilder m_builder;
+};
+
+TEST_F(StringBuilderTests, InitialStateIsEmpty)
+{
+    const auto str = build_string();
+    ASSERT_EQ(str.length(), 0);
+}
+
+TEST_F(StringBuilderTests, Append)
+{
+    const std::string msg_a;
+    const std::string msg_b("abc");
+    const char msg_c = 'd';
+
+    ASSERT_EQ(m_builder.append(msg_a), 0);
+    ASSERT_EQ(m_builder.append(msg_b), 0);
+    ASSERT_EQ(m_builder.append(msg_c), 0);
+
+    const auto str = build_string();
+    ASSERT_EQ(str.length(), (msg_a + msg_b + msg_c).size());
+    ASSERT_EQ(Slice(str.c_str()), msg_a + msg_b + msg_c);
+}
+
+TEST_F(StringBuilderTests, AppendFormat)
+{
+    ASSERT_EQ(0, m_builder.append_format("hello %d %s", 42, "goodbye"));
+    const std::string long_str(512, '*');
+    ASSERT_EQ(0, m_builder.append_format("%s", long_str.data()));
+    ASSERT_EQ(0, m_builder.append_format("empty"));
+    const auto str = build_string();
+    ASSERT_EQ(Slice(str.c_str()), "hello 42 goodbye" + long_str + "empty");
+}
+
+TEST_F(StringBuilderTests, AppendEscaped)
+{
+    ASSERT_EQ(0, m_builder.append_format("hello %d %s", 42, "goodbye"));
+    const std::string long_str(512, '*');
+    ASSERT_EQ(0, m_builder.append_format("%s", long_str.data()));
+    ASSERT_EQ(0, m_builder.append_format("empty"));
+    const auto str = build_string();
+    ASSERT_EQ(Slice(str.c_str()), "hello 42 goodbye" + long_str + "empty");
+}
+
+TEST_F(StringBuilderTests, SpecialMemberFunctions)
+{
+    const char *msg = "abc";
+    ASSERT_EQ(m_builder.append(msg), 0);
+    auto move_constructed = std::move(m_builder);
+    m_builder = std::move(move_constructed);
+    const auto str = build_string();
+    ASSERT_EQ(Slice(str.c_str()), msg);
+}
+
+static constexpr const char *kTestMessages[] = {
+    "aa%d",
+    "bb%dbb%f",
+    "cc%dcc%fcccc%p",
+    "dd%ddd%fdddd%pdddddddd%u",
+    "ee%dee%feeee%peeeeeeee%ueeeeeeeeeeeeeeee%x",
+    "ff%dff%fffff%pffffffff%uffffffffffffffff%xffffffffffffffffffffffffffffffff%s",
+};
+
+TEST_F(StringBuilderTests, AppendMultiple)
+{
+    std::string answer;
+    for (size_t i = 0; i < 512; ++i) {
+        const auto r = static_cast<size_t>(rand()) % ARRAY_SIZE(kTestMessages);
+        answer.append(kTestMessages[r]);
+        ASSERT_EQ(m_builder.append(Slice(kTestMessages[r])), 0);
+    }
+    const auto str = build_string();
+    ASSERT_EQ(Slice(str.c_str()), answer);
+}
+
+TEST_F(StringBuilderTests, AppendFormatMultiple)
+{
+    char buffer[4'096];
+    std::string answer;
+    for (size_t i = 0; i < 512; ++i) {
+        const auto r = static_cast<size_t>(rand()) % ARRAY_SIZE(kTestMessages);
+        const auto fmt = kTestMessages[r];
+        switch (r) {
+            case 0:
+                std::snprintf(buffer, sizeof(buffer), fmt, i);
+                ASSERT_EQ(m_builder.append_format(fmt, i), 0);
+                break;
+            case 1:
+                std::snprintf(buffer, sizeof(buffer), fmt, i, static_cast<double>(i));
+                ASSERT_EQ(m_builder.append_format(fmt, i, static_cast<double>(i)), 0);
+                break;
+            case 2:
+                std::snprintf(buffer, sizeof(buffer), fmt, i, static_cast<double>(i), reinterpret_cast<void *>(i));
+                ASSERT_EQ(m_builder.append_format(fmt, i, static_cast<double>(i), reinterpret_cast<void *>(i)), 0);
+                break;
+            case 3:
+                std::snprintf(buffer, sizeof(buffer), fmt, i, static_cast<double>(i), reinterpret_cast<void *>(i), i);
+                ASSERT_EQ(m_builder.append_format(fmt, i, static_cast<double>(i), reinterpret_cast<void *>(i), i), 0);
+                break;
+            case 4:
+                std::snprintf(buffer, sizeof(buffer), fmt, i, static_cast<double>(i), reinterpret_cast<void *>(i), i, i);
+                ASSERT_EQ(m_builder.append_format(fmt, i, static_cast<double>(i), reinterpret_cast<void *>(i), i, i), 0);
+                break;
+            default:
+                std::snprintf(buffer, sizeof(buffer), fmt, i, static_cast<double>(i), reinterpret_cast<void *>(i), i, i, "Hello, world!");
+                ASSERT_EQ(m_builder.append_format(fmt, i, static_cast<double>(i), reinterpret_cast<void *>(i), i, i, "Hello, world!"), 0);
+                break;
+        }
+        answer.append(buffer);
+    }
+    const auto str = build_string();
+    ASSERT_EQ(Slice(str.c_str()), answer);
+}
 
 } // namespace calicodb::test

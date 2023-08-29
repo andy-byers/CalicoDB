@@ -252,9 +252,9 @@ struct DatabaseState {
 
     auto check_status(uint32_t mask) const -> void
     {
-        ASSERT_EQ(mask, mask & (1 << s.code())) << s.type_name() << ": " << s.message();
+        ASSERT_EQ(mask, mask & (1 << s.code())) << s.message();
         if (tx) {
-            ASSERT_EQ(s, tx->status()) << tx->status().type_name() << ": " << tx->status().message();
+            ASSERT_EQ(s, tx->status()) << tx->status().message();
         }
     }
 
@@ -288,7 +288,7 @@ struct DatabaseState {
         CALICODB_EXPECT_NE(db, nullptr);
         CALICODB_EXPECT_EQ(tx, nullptr);
         ASSERT_EQ(state, kNone);
-        s = db->new_tx(tx);
+        s = db->new_tx(ReadOptions(), tx);
         if (s.is_ok()) {
             state = kReadable;
         }
@@ -299,7 +299,7 @@ struct DatabaseState {
         CALICODB_EXPECT_NE(db, nullptr);
         CALICODB_EXPECT_EQ(tx, nullptr);
         ASSERT_EQ(state, kNone);
-        s = db->new_tx(WriteTag(), tx);
+        s = db->new_tx(WriteOptions(), tx);
         if (s.is_ok()) {
             state = kWritable;
         }
@@ -781,8 +781,8 @@ protected:
     explicit STestDB()
     {
         std::filesystem::remove_all(m_state.filename);
-        std::filesystem::remove_all(m_state.filename + kDefaultShmSuffix);
-        std::filesystem::remove_all(m_state.filename + kDefaultWalSuffix);
+        std::filesystem::remove_all(m_state.filename + kDefaultShmSuffix.to_string());
+        std::filesystem::remove_all(m_state.filename + kDefaultWalSuffix.to_string());
     }
 
     auto TearDown() -> void override

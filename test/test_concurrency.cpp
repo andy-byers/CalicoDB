@@ -8,81 +8,11 @@
 #include "test.h"
 #include <condition_variable>
 #include <filesystem>
+#include <iomanip>
 #include <thread>
 
 namespace calicodb::test
 {
-
-// Counting semaphore
-class Semaphore
-{
-    mutable std::mutex m_mu;
-    std::condition_variable m_cv;
-    size_t m_available;
-
-public:
-    explicit Semaphore(size_t n = 0)
-        : m_available(n)
-    {
-    }
-
-    Semaphore(Semaphore &) = delete;
-    void operator=(Semaphore &) = delete;
-
-    auto wait() -> void
-    {
-        std::unique_lock lock(m_mu);
-        m_cv.wait(lock, [this] {
-            return m_available > 0;
-        });
-        --m_available;
-    }
-
-    auto signal(size_t n = 1) -> void
-    {
-        m_mu.lock();
-        m_available += n;
-        m_mu.unlock();
-        m_cv.notify_all();
-    }
-};
-
-// Reusable thread barrier
-class Barrier
-{
-    Semaphore m_phase_1;
-    Semaphore m_phase_2;
-    mutable std::mutex m_mu;
-    const size_t m_max_count;
-    size_t m_count = 0;
-
-public:
-    explicit Barrier(size_t max_count)
-        : m_max_count(max_count)
-    {
-    }
-
-    Barrier(Barrier &) = delete;
-    void operator=(Barrier &) = delete;
-
-    // Wait for m_max_count threads to call this routine
-    auto wait() -> void
-    {
-        m_mu.lock();
-        if (++m_count == m_max_count) {
-            m_phase_1.signal(m_max_count);
-        }
-        m_mu.unlock();
-        m_phase_1.wait();
-
-        m_mu.lock();
-        if (--m_count == 0) {
-            m_phase_2.signal(m_max_count);
-        }
-        m_mu.unlock();
-        m_phase_2.wait();
-    }
-};
 
 class DelayEnv : public EnvWrapper
 {
@@ -177,6 +107,7 @@ TEST(ConcurrencyTestsTools, BarrierIsReusable)
 class ConcurrencyTests : public testing::Test
 {
 protected:
+    RandomGenerator m_random;
     std::string m_filename;
     DelayEnv *m_env;
 
@@ -185,13 +116,21 @@ protected:
           m_env(new DelayEnv(Env::default_env()))
     {
         std::filesystem::remove_all(m_filename);
-        std::filesystem::remove_all(m_filename + kDefaultWalSuffix);
-        std::filesystem::remove_all(m_filename + kDefaultShmSuffix);
+        std::filesystem::remove_all(m_filename + kDefaultWalSuffix.to_string());
+        std::filesystem::remove_all(m_filename + kDefaultShmSuffix.to_string());
     }
 
     ~ConcurrencyTests() override
     {
         delete m_env;
+    }
+
+    auto TearDown() -> void override
+    {
+        // All resources should have been cleaned up by now, even though the Env is not deleted.
+        ASSERT_EQ(Alloc::bytes_used(), 0) << "leaked " << std::setprecision(4)
+                                          << static_cast<double>(Alloc::bytes_used()) / (1'024.0 * 1'024)
+                                          << " MiB";
     }
 
     struct Connection;
@@ -271,8 +210,9 @@ protected:
         threads.reserve(connections.size());
         for (auto &co : connections) {
             threads.emplace_back([&co, b = &barrier, t = threads.size()] {
-                while (connection_main(co, b))
-                    ;
+                while (connection_main(co, b)) {
+                    // Run until the connection clears its own callback.
+                }
             });
         }
 
@@ -353,13 +293,13 @@ protected:
         for (size_t n = 0; s.is_ok() && n < co.op_args[0]; ++n) {
             barrier_wait(barrier);
 
-            s = co.db->view([&co, barrier](const auto &tx) {
+            s = co.db->run(ReadOptions(), [&co, barrier](const auto &tx) {
                 barrier_wait(barrier);
 
-                Cursor *c;
+                TestCursor c;
                 // Oddly enough, if we name this Status "s", some platforms complain about shadowing,
                 // even though s is not captured in this lambda.
-                auto t = tx.open_bucket("BUCKET", c);
+                auto t = test_open_bucket(tx, "BUCKET", c);
                 if (t.is_invalid_argument()) {
                     // Writer hasn't created the bucket yet.
                     return Status::ok();
@@ -381,7 +321,6 @@ protected:
                         EXPECT_EQ(c->value(), co.result.back()) << "non repeatable read";
                     }
                 }
-                delete c;
                 return t.is_not_found() ? Status::ok() : t;
             });
         }
@@ -405,11 +344,11 @@ protected:
         for (size_t n = 0; s.is_ok() && n < co.op_args[0]; ++n) {
             barrier_wait(barrier);
 
-            s = co.db->update([&co, barrier](auto &tx) {
+            s = co.db->run(WriteOptions(), [&co, barrier](auto &tx) {
                 barrier_wait(barrier);
 
-                Cursor *c;
-                auto t = tx.create_bucket(BucketOptions(), "BUCKET", &c);
+                TestCursor c;
+                auto t = test_create_and_open_bucket(tx, BucketOptions(), "BUCKET", c);
                 for (size_t i = 0; t.is_ok() && i < co.op_args[1]; ++i) {
                     uint64_t result = 1;
                     c->find(numeric_key(i));
@@ -466,23 +405,134 @@ protected:
         delete co.db;
         return s;
     }
+
+    struct AllocTestParameters {
+        size_t num_malloc;
+        size_t num_realloc;
+        size_t max_alloc;
+        size_t limit;
+    };
+    auto run_alloc_test_instance(const AllocTestParameters &param) -> void
+    {
+        static constexpr size_t kNumIterations = 2; //'000;
+        ASSERT_EQ(Alloc::bytes_used(), 0);
+        ASSERT_EQ(Alloc::set_limit(param.limit), 0);
+
+        const auto nt = param.num_malloc + param.num_realloc;
+        Barrier barrier(nt);
+
+        Connection tmp;
+        tmp.filename = m_filename.c_str();
+        tmp.env = m_env;
+
+        struct AllocState {
+            char *ptr;
+            unsigned state;
+        };
+        std::vector<Connection> connections;
+        std::vector<AllocState> malloc_states(param.num_malloc);
+        for (auto &state : malloc_states) {
+            const uint64_t min_alloc = param.limit == 1;
+            tmp.op_args[0] = m_random.Next(min_alloc, param.max_alloc);
+            tmp.op = [&state](auto &co, auto *b) {
+                barrier_wait(b);
+                if (state.ptr) {
+                    Alloc::free(state.ptr);
+                    state.ptr = nullptr;
+                } else {
+                    state.ptr = static_cast<char *>(Alloc::malloc(co.op_args[0]));
+                }
+                if (state.state++ > kNumIterations) {
+                    co.op = nullptr;
+                }
+                return Status::ok();
+            };
+            connections.emplace_back(tmp);
+        }
+        std::vector<AllocState> realloc_states(param.num_realloc);
+        for (auto &state : realloc_states) {
+            tmp.op_args[0] = m_random.Next(param.max_alloc);
+            tmp.op_args[1] = m_random.Next(1, param.max_alloc);
+            tmp.op = [&state](auto &co, auto *b) {
+                barrier_wait(b);
+                size_t new_size;
+                switch (state.state & 0b11) {
+                    case 0b00:
+                        new_size = 0;
+                        break;
+                    case 0b01:
+                        new_size = co.op_args[0];
+                        break;
+                    case 0b10:
+                        new_size = co.op_args[1];
+                        break;
+                    default:
+                        new_size = co.op_args[0] + co.op_args[1];
+                }
+                auto *new_ptr = Alloc::realloc(state.ptr, new_size);
+                if (new_ptr || new_size == 0) {
+                    state.ptr = static_cast<char *>(new_ptr);
+                }
+                if (state.state++ > kNumIterations) {
+                    co.op = nullptr;
+                }
+                return Status::ok();
+            };
+            connections.emplace_back(tmp);
+        }
+
+        std::vector<std::thread> threads;
+        threads.reserve(connections.size());
+        for (auto &co : connections) {
+            threads.emplace_back([&co, b = &barrier, t = threads.size(), limit = param.limit] {
+                while (connection_main(co, b)) {
+                    ASSERT_LE(Alloc::bytes_used(), limit);
+                }
+            });
+        }
+        for (auto &t : threads) {
+            t.join();
+        }
+
+        for (const auto &[ptr, _] : malloc_states) {
+            Alloc::free(ptr);
+        }
+        for (const auto &[ptr, _] : realloc_states) {
+            Alloc::free(ptr);
+        }
+
+        ASSERT_EQ(Alloc::bytes_used(), 0);
+    }
+
+    auto run_alloc_test(size_t x, size_t y) -> void
+    {
+        for (size_t limit : {10U, 100U, 1'000U}) {
+            for (size_t max_alloc = 1; max_alloc <= limit; max_alloc *= 2) {
+                run_alloc_test_instance({x, y, max_alloc, limit});
+                if (x != y) {
+                    run_alloc_test_instance({y, x, max_alloc, limit});
+                }
+            }
+        }
+    }
 };
 
-TEST_F(ConcurrencyTests, 0)
+TEST_F(ConcurrencyTests, Database0)
 {
+    // Sanity check, no concurrency.
     run_test({1, 0, 0});
     run_test({0, 1, 0});
     run_test({0, 0, 1});
 }
 
-TEST_F(ConcurrencyTests, 1)
+TEST_F(ConcurrencyTests, Database1)
 {
     run_test({10, 0, 0});
     run_test({0, 10, 0});
     run_test({0, 0, 10});
 }
 
-TEST_F(ConcurrencyTests, 2)
+TEST_F(ConcurrencyTests, Database2)
 {
     run_test({10, 0, 1});
     run_test({10, 1, 0});
@@ -495,11 +545,42 @@ TEST_F(ConcurrencyTests, 2)
     run_test({1, 1, 10});
 }
 
-TEST_F(ConcurrencyTests, 3)
+TEST_F(ConcurrencyTests, Database3)
 {
     run_test({100, 10, 10});
     run_test({10, 100, 10});
     run_test({10, 10, 100});
+}
+
+TEST_F(ConcurrencyTests, Database4)
+{
+    run_test({50, 50, 50});
+}
+
+TEST_F(ConcurrencyTests, Allocation0)
+{
+    // Sanity check, no concurrency.
+    run_alloc_test(0, 1);
+}
+
+TEST_F(ConcurrencyTests, Allocation1)
+{
+    run_alloc_test(0, 10);
+}
+
+TEST_F(ConcurrencyTests, Allocation2)
+{
+    run_alloc_test(1, 10);
+}
+
+TEST_F(ConcurrencyTests, Allocation3)
+{
+    run_alloc_test(10, 100);
+}
+
+TEST_F(ConcurrencyTests, Allocation4)
+{
+    run_alloc_test(50, 50);
 }
 
 } // namespace calicodb::test

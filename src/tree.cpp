@@ -46,7 +46,7 @@ static constexpr uint32_t kCellPtrSize = sizeof(uint16_t);
     //            type_name = "page";
     //    }
     //    std::string message;
-    //    append_fmt_string(message, "corruption detected on %s with ID %u",
+    //    append_format_string(message, "corruption detected on %s with ID %u",
     //                      type_name, page_id.value);
     // TODO: Write an actual error message somewhere. The storage should live as long as the database at-least.
     return Status::corruption("message");
@@ -917,13 +917,12 @@ auto Tree::redistribute_cells(Node &left, Node &right, Node &parent, uint32_t pi
     CALICODB_EXPECT_TRUE(!is_split || p_src == &right);
 
     // Cells that need to be redistributed, in order.
-    UniquePtr<Cell> cell_buffer(static_cast<Cell *>(
-        Alloc::malloc((cell_count + 2) * sizeof(Cell))));
-    if (!cell_buffer) {
+    UniqueBuffer<Cell> cell_buffer;
+    if (cell_buffer.realloc(cell_count + 2)) {
         m_pager->release(unused);
         return Status::no_memory();
     }
-    auto *cells = cell_buffer.get() + 1;
+    auto *cells = cell_buffer.ptr() + 1;
     auto *cell_itr = cells;
     uint32_t right_accum = 0;
     Cell cell;
@@ -1140,10 +1139,8 @@ auto Tree::fix_root(CursorImpl &c) -> Status
     return s;
 }
 
-Tree::Tree(Pager &pager, Stat &stat, char *scratch, Id root_id, UniqueBuffer name)
-    // "-1" because `name.len()` includes the '\0'.
-    : list_entry{name.is_empty() ? "" : Slice(name.ptr(), name.len() - 1),
-                 this, nullptr, nullptr},
+Tree::Tree(Pager &pager, Stat &stat, char *scratch, Id root_id, String name)
+    : list_entry{Slice(name), this, nullptr, nullptr},
       m_stat(&stat),
       m_node_scratch(scratch + kPageSize),
       m_cell_scratch{
@@ -1206,10 +1203,9 @@ auto Tree::allocate(AllocationType type, Id nearby, PageRef *&page_out) -> Statu
 
 auto Tree::put(CursorImpl &c, const Slice &key, const Slice &value) -> Status
 {
-    static constexpr auto kMaxLength = std::numeric_limits<uint32_t>::max();
-    if (key.size() > kMaxLength) {
+    if (key.size() > kMaxAllocation) {
         return Status::invalid_argument("key is too long");
-    } else if (value.size() > kMaxLength) {
+    } else if (value.size() > kMaxAllocation) {
         return Status::invalid_argument("value is too long");
     }
 
@@ -1396,11 +1392,12 @@ auto Tree::erase(CursorImpl &c) -> Status
     }
     manage_cursors(&c, kInitNormal);
 
-    std::string saved_key;
+    Slice saved_key;
     if (1 == NodeHdr::get_cell_count(c.m_node.hdr())) {
         // This node will underflow when the record is removed. Make sure the key is saved so that
-        // the correct position can be found after underflow resolution.
-        saved_key = c.m_key.to_string();
+        // the correct position can be found after underflow resolution. The backing buffer for
+        // saved_key will not be freed/realloc'd until after the cursor position is found again.
+        saved_key = c.key();
     }
     Status s;
     if (c.m_idx < NodeHdr::get_cell_count(c.m_node.hdr())) {
@@ -1627,14 +1624,13 @@ auto Tree::vacuum() -> Status
 
 #if CALICODB_TEST
 
-#define CHECK_OK(expr)                                            \
-    do {                                                          \
-        if (const auto check_s = (expr); !check_s.is_ok()) {      \
-            std::fprintf(stderr, "error(%s:%d): %s: %s\n",        \
-                         __FILE__, __LINE__,                      \
-                         check_s.type_name(), check_s.message()); \
-            std::abort();                                         \
-        }                                                         \
+#define CHECK_OK(expr)                                           \
+    do {                                                         \
+        if (const auto check_s = (expr); !check_s.is_ok()) {     \
+            std::fprintf(stderr, "error(%s:%d): %s\n",           \
+                         __FILE__, __LINE__, check_s.message()); \
+            std::abort();                                        \
+        }                                                        \
     } while (0)
 
 #define CHECK_TRUE(expr)                                             \
@@ -1695,6 +1691,31 @@ class TreePrinter
         CHECK_TRUE(data.levels.size() == data.spaces.size());
     }
 
+    static auto append_format_string(std::string &str, const char *fmt, ...) -> void
+    {
+        std::va_list args;
+        va_start(args, fmt);
+
+        std::va_list args_copy;
+        va_copy(args_copy, args);
+        auto len = std::vsnprintf(
+            nullptr, 0,
+            fmt, args_copy);
+        va_end(args_copy);
+
+        CALICODB_EXPECT_GE(len, 0);
+        const auto offset = str.size();
+        str.resize(offset + static_cast<size_t>(len) + 1);
+        len = std::vsnprintf(
+            str.data() + offset,
+            str.size() - offset,
+            fmt, args);
+        str.pop_back();
+        va_end(args);
+
+        CALICODB_EXPECT_TRUE(0 <= len && len <= int(str.size()));
+    }
+
 public:
     static auto print_structure(Tree &tree, std::string &repr_out) -> Status
     {
@@ -1703,11 +1724,11 @@ public:
             std::string msg;
             if (info.idx == info.ncells) {
                 if (node.is_leaf()) {
-                    append_fmt_string(msg, "%u]", info.ncells);
+                    append_format_string(msg, "%u]", info.ncells);
                 }
             } else {
                 if (info.idx == 0) {
-                    append_fmt_string(msg, "%u:[", node.ref->page_id.value);
+                    append_format_string(msg, "%u:[", node.ref->page_id.value);
                     ensure_level_exists(data, info.level);
                 }
                 if (!node.is_leaf()) {
@@ -1729,13 +1750,34 @@ public:
         return s;
     }
 
+    static auto append_escaped_string(std::string &out, const Slice &value) -> void
+    {
+        for (size_t i = 0; i < value.size(); ++i) {
+            const auto chr = value[i];
+            if (chr >= ' ' && chr <= '~') {
+                out.push_back(chr);
+            } else {
+                char buffer[10];
+                std::snprintf(buffer, sizeof(buffer), "\\x%02x", static_cast<unsigned>(chr) & 0xFF);
+                out.append(buffer);
+            }
+        }
+    }
+
+    static auto escape_string(const Slice &value) -> std::string
+    {
+        std::string out;
+        append_escaped_string(out, value);
+        return out;
+    }
+
     static auto print_nodes(Tree &tree, std::string &repr_out) -> Status
     {
         const auto print = [&tree, &repr_out](auto &node, const auto &info) {
             if (info.idx == info.ncells) {
                 std::string msg;
-                append_fmt_string(msg, "%sternalNode(%u)\n", node.is_leaf() ? "Ex" : "In",
-                                  node.ref->page_id.value);
+                append_format_string(msg, "%sternalNode(%u)\n", node.is_leaf() ? "Ex" : "In",
+                                     node.ref->page_id.value);
                 for (uint32_t i = 0; i < info.ncells; ++i) {
                     Cell cell;
                     if (node.read(i, cell)) {
@@ -1743,12 +1785,12 @@ public:
                     }
                     msg.append("  Cell(");
                     if (!node.is_leaf()) {
-                        append_fmt_string(msg, "%u,", read_child_id(cell).value);
+                        append_format_string(msg, "%u,", read_child_id(cell).value);
                     }
                     const auto key_len = std::min(32U, std::min(cell.key_size, cell.local_pl_size));
                     msg.append('"' + escape_string(Slice(cell.key, key_len)) + '"');
                     if (cell.key_size > key_len) {
-                        append_fmt_string(msg, " + <%zu bytes>", cell.key_size - key_len);
+                        append_format_string(msg, " + <%zu bytes>", cell.key_size - key_len);
                     }
                     msg.append(")\n");
                 }

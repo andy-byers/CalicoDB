@@ -26,11 +26,11 @@ auto print_database_overview(std::ostream &os, Pager &pager) -> void
             os << SEP "|    PageID |  ParentID | PageType       | Info                            |\n" SEP;
         }
         Id parent_id;
-        std::string info, type;
+        String info, type;
         if (PointerMap::is_map(page_id)) {
             const auto first = page_id.value + 1;
-            append_fmt_string(info, "Range=[%u,%u]", first, first + kPageSize / 5 - 1);
-            type = "<PtrMap>";
+            (void)append_format_string(info, "Range=[%u,%u]", first, first + kPageSize / 5 - 1);
+            (void)append_strings(type, "<PtrMap>");
         } else {
             Status s;
             PointerMap::Entry entry;
@@ -39,7 +39,7 @@ auto print_database_overview(std::ostream &os, Pager &pager) -> void
             } else {
                 s = PointerMap::read_entry(pager, page_id, entry);
                 if (!s.is_ok()) {
-                    os << "error: " << s.type_name() << ": " << s.message() << '\n';
+                    os << "error: " << s.message() << '\n';
                     return;
                 }
                 parent_id = entry.back_ptr;
@@ -47,54 +47,53 @@ auto print_database_overview(std::ostream &os, Pager &pager) -> void
             PageRef *page;
             s = pager.acquire(page_id, page);
             if (!s.is_ok()) {
-                os << "error: " << s.type_name() << ": " << s.message() << '\n';
+                os << "error: " << s.message() << '\n';
                 return;
             }
 
             switch (entry.type) {
                 case PointerMap::kTreeRoot:
-                    type = "TreeRoot";
+                    (void)append_strings(type, "TreeRoot");
                     [[fallthrough]];
                 case PointerMap::kTreeNode: {
                     auto n = NodeHdr::get_cell_count(
                         page->data + page_id.is_root() * FileHdr::kSize);
                     if (NodeHdr::get_type(page->data) == NodeHdr::kExternal) {
-                        append_fmt_string(info, "Ex,N=%u", n);
+                        (void)append_format_string(info, "Ex,N=%u", n);
                     } else {
-                        info = "In,N=";
-                        append_number(info, n);
+                        (void)append_strings(type, "In,N=", std::to_string(n));
                         ++n;
                     }
-                    if (type.empty()) {
-                        type = "TreeNode";
+                    if (type.is_empty()) {
+                        (void)append_strings(type, "TreeNode");
                     }
                     break;
                 }
                 case PointerMap::kFreelistPage:
-                    type = "Freelist";
+                    (void)append_strings(type, "Freelist");
                     break;
                 case PointerMap::kOverflowHead:
-                    append_fmt_string(info, "Next=%u", get_u32(page->data));
-                    type = "OvflHead";
+                    (void)append_format_string(info, "Next=%u", get_u32(page->data));
+                    (void)append_strings(type, "OvflHead");
                     break;
                 case PointerMap::kOverflowLink:
-                    append_fmt_string(info, "Next=%u", get_u32(page->data));
-                    type = "OvflLink";
+                    (void)append_format_string(info, "Next=%u", get_u32(page->data));
+                    (void)append_strings(type, "OvflLink");
                     break;
                 default:
-                    type = "<BadType>";
+                    (void)append_strings(type, "<BadType>");
             }
             pager.release(page);
         }
-        std::string line;
-        append_fmt_string(
+        String line;
+        (void)append_format_string(
             line,
             "|%10u |%10u | %-15s| %-32s|\n",
             page_id.value,
             parent_id.value,
             type.c_str(),
             info.c_str());
-        os << line;
+        os << line.c_str();
     }
     os << SEP;
 #undef SEP

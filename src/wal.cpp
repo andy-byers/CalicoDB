@@ -120,8 +120,8 @@ static constexpr size_t kIndexHdrSize = sizeof(HashIndexHdr) * 2 + sizeof(CkptIn
 static_assert(std::is_pod_v<HashIndexHdr>);
 static_assert((kIndexHdrSize & 0b11) == 0);
 
-static constexpr uint32_t kNIndexHashes = 8192;
-static constexpr uint32_t kNIndexKeys = 4096;
+static constexpr uint32_t kNIndexHashes = 8'192;
+static constexpr uint32_t kNIndexKeys = 4'096;
 static constexpr uint32_t kNIndexKeys0 =
     kNIndexKeys - kIndexHdrSize / sizeof(uint32_t);
 
@@ -356,6 +356,10 @@ auto HashIndex::close() -> void
     if (m_file) {
         m_file->shm_unmap(true);
         m_file = nullptr;
+    } else {
+        for (size_t i = 0; i < m_num_groups; ++i) {
+            Alloc::free(const_cast<char *>(m_groups[i]));
+        }
     }
     Alloc::free(m_groups);
     m_groups = nullptr;
@@ -483,15 +487,12 @@ auto HashIterator::init(uint32_t backfill) -> Status
 
     // Temporary buffer for mergesort. Freed before returning from this routine. Possibly a bit
     // larger than necessary due to platform alignment requirements (see alloc.h).
-    const auto temp_len =
-        (last_value < kNIndexKeys ? last_value : kNIndexKeys);
-    auto *temp = static_cast<Hash *>(Alloc::malloc(
-        temp_len * sizeof(Hash)));
-    if (temp == nullptr) {
+    UniqueBuffer<Hash> temp;
+    if (temp.realloc(last_value < kNIndexKeys ? last_value : kNIndexKeys)) {
         // m_state will be freed in the destructor.
         return Status::no_memory();
     }
-    std::memset(temp, 0, temp_len * sizeof(Hash));
+    std::memset(temp.ptr(), 0, temp.len() * sizeof(Hash));
 
     Status s;
     for (uint32_t i = index_group_number(backfill + 1); i < m_num_groups; ++i) {
@@ -517,7 +518,7 @@ auto HashIterator::init(uint32_t backfill) -> Status
         }
 
         auto *keys = const_cast<Key *>(group.keys);
-        mergesort(keys, index_buf, temp, group_size);
+        mergesort(keys, index_buf, temp.ptr(), group_size);
         m_state->groups[i] = {
             keys,
             index_buf,
@@ -526,7 +527,6 @@ auto HashIterator::init(uint32_t backfill) -> Status
             group.base + 1,
         };
     }
-    Alloc::free(temp);
     return s;
 }
 
@@ -651,11 +651,10 @@ public:
         if (s.is_ok()) {
             s = m_env->remove_file(m_wal_name);
             if (!s.is_ok()) {
-                log(m_log, R"(failed to unlink WAL at "%s": %s (%s))",
-                    m_wal_name, s.type_name(), s.message());
+                log(m_log, R"(failed to unlink WAL at "%s": %s)",
+                    m_wal_name, s.message());
             }
         }
-        m_index.close();
         return s;
     }
 
@@ -1206,7 +1205,7 @@ auto WalImpl::recover_index() -> Status
             const auto version = get_u32(&header[4]);
             if (version != kWalVersion) {
                 //                std::string message;
-                //                append_fmt_string(message, "found WAL version %u but expected %u", version, kWalVersion);
+                //                append_format_string(message, "found WAL version %u but expected %u", version, kWalVersion);
                 return cleanup(Status::invalid_argument("message"));
             }
 

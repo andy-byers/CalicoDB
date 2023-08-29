@@ -5,6 +5,7 @@
 #ifndef CALICODB_TREE_H
 #define CALICODB_TREE_H
 
+#include "calicodb/cursor.h"
 #include "freelist.h"
 #include "header.h"
 #include "node.h"
@@ -54,7 +55,7 @@ public:
     ~Tree();
     auto save_all_cursors() const -> void;
 
-    explicit Tree(Pager &pager, Stat &stat, char *scratch, Id root_id, UniqueBuffer name);
+    explicit Tree(Pager &pager, Stat &stat, char *scratch, Id root_id, String name);
     static auto get_tree(CursorImpl &c) -> Tree *;
 
     struct Reroot {
@@ -231,7 +232,7 @@ private:
     static constexpr auto kCellBufferLen = kPageSize / kNumCellBuffers;
     char *const m_cell_scratch[kNumCellBuffers];
 
-    UniqueBuffer m_name;
+    String m_name;
     Pager *const m_pager;
     Id m_root_id;
     const bool m_writable;

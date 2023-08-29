@@ -6,6 +6,7 @@
 #include "alloc.h"
 #include "db_impl.h"
 #include "env_posix.h"
+#include "logging.h"
 #include "temp.h"
 #include "utils.h"
 
@@ -29,35 +30,35 @@ auto DB::open(const Options &options, const char *filename, DB *&db) -> Status
     auto sanitized = options;
     clip_to_range(sanitized.cache_size, kMinFrameCount * kPageSize, kMaxCacheSize);
 
-    // Allocate storage for the database filename. Note that if the filename is empty, a single byte
-    // will be allocated to hold a '\0', so we won't attempt to allocate 0 bytes.
+    // Allocate storage for the database filename.
+    String db_name;
     auto filename_len = std::strlen(filename);
-    auto db_name = UniqueBuffer::from_slice(
-        Slice(filename, filename_len));
-    if (db_name.is_empty()) {
+    if (append_strings(db_name, Slice(filename, filename_len))) {
         return Status::no_memory();
     }
 
     // Determine and allocate storage for the WAL filename.
-    UniqueBuffer wal_name;
+    int rc;
+    String wal_name;
     if (const auto wal_filename_len = std::strlen(sanitized.wal_filename)) {
-        wal_name = UniqueBuffer::from_slice(
+        rc = append_strings(
+            wal_name,
             Slice(sanitized.wal_filename, wal_filename_len));
     } else {
-        wal_name = UniqueBuffer::from_slice(
-            Slice(filename, filename_len),
-            Slice(kDefaultWalSuffix, std::strlen(kDefaultWalSuffix)));
+        rc = append_strings(
+            wal_name,
+            Slice(db_name),
+            kDefaultWalSuffix);
     }
-    if (wal_name.is_empty()) {
+    if (rc) {
         return Status::no_memory();
     }
 
     // Allocate scratch memory for working with database pages.
-    auto *scratch_ptr = static_cast<char *>(Alloc::malloc(kTreeBufferLen));
-    if (scratch_ptr == nullptr) {
+    UniqueBuffer<char> scratch;
+    if (scratch.realloc(kTreeBufferLen)) {
         return Status::no_memory();
     }
-    UniqueBuffer scratch(scratch_ptr, kTreeBufferLen);
 
     auto s = Status::no_memory();
     if (sanitized.temp_database) {

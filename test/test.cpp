@@ -11,37 +11,26 @@ namespace calicodb
 
 auto PrintTo(const Slice &s, std::ostream *os) -> void
 {
-    *os << escape_string(s);
+    String str;
+    ASSERT_EQ(append_escaped_string(str, s), 0);
+    *os << str.c_str();
 }
 
 auto PrintTo(const Status &s, std::ostream *os) -> void
 {
-    *os << s.type_name() << ": " << s.message();
+    *os << s.message();
 }
 
 auto PrintTo(const Cursor &c, std::ostream *os) -> void
 {
     *os << "Cursor{";
     if (c.is_valid()) {
-        const auto total_k = c.key();
-        const auto short_k = escape_string(total_k)
-                                 .substr(0, std::min(total_k.size(), 5UL));
-        *os << '"' << short_k;
-        if (total_k.size() > short_k.size()) {
-            *os << R"(" + <)" << total_k.size() - short_k.size() << " bytes>";
-        } else {
-            *os << '"';
-        }
-
-        const auto total_v = c.value();
-        const auto short_v = escape_string(total_v)
-                                 .substr(0, std::min(total_v.size(), 5UL));
-        *os << R"(",")" << short_v;
-        if (total_v.size() > short_v.size()) {
-            *os << R"(" + <)" << total_v.size() - short_v.size() << " bytes>";
-        } else {
-            *os << '"';
-        }
+        String s;
+        ASSERT_EQ(append_strings(s, "\""), 0);
+        ASSERT_EQ(append_escaped_string(s, c.key()), 0);
+        ASSERT_EQ(append_strings(s, R"(",")"), 0);
+        ASSERT_EQ(append_escaped_string(s, c.value()), 0);
+        ASSERT_EQ(append_strings(s, "\""), 0);
     }
     *os << '}';
 }
@@ -54,8 +43,7 @@ auto check_status(const char *expr, const Status &s) -> testing::AssertionResult
     if (s.is_ok()) {
         return testing::AssertionSuccess();
     } else {
-        return testing::AssertionFailure() << expr << ": " << s.type_name()
-                                           << ": " << s.message();
+        return testing::AssertionFailure() << expr << ": " << s.message();
     }
 }
 
@@ -65,7 +53,7 @@ auto read_file_to_string(Env &env, const char *filename) -> std::string
     auto s = env.file_size(filename, file_size);
     if (!s.is_ok()) {
         if (!s.is_io_error()) {
-            ADD_FAILURE() << s.type_name() << ": " << s.message();
+            ADD_FAILURE() << s.message();
         }
         return "";
     }

@@ -7,6 +7,7 @@
 
 #include "calicodb/options.h"
 #include "calicodb/status.h"
+#include "calicodb/string.h"
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
@@ -30,6 +31,7 @@
 #define CALICODB_EXPECT_LE(lhs, rhs) CALICODB_EXPECT_TRUE((lhs) <= (rhs))
 #define CALICODB_EXPECT_GT(lhs, rhs) CALICODB_EXPECT_TRUE((lhs) > (rhs))
 #define CALICODB_EXPECT_GE(lhs, rhs) CALICODB_EXPECT_TRUE((lhs) >= (rhs))
+#define CALICODB_DEBUG_TRAP assert(false && __FUNCTION__)
 
 #define CALICODB_TRY(expr)                                               \
     do {                                                                 \
@@ -63,11 +65,15 @@ auto busy_wait(BusyHandler *handler, const Callback &callback) -> Status
     }
 }
 
+// Enforce a reasonable limit on the size of a single allocation. This is, consequently, the maximum
+// size of a record key or value.
+static constexpr auto kMaxAllocation = 0XFFFFFFEF;
+
 static constexpr size_t kMinFrameCount = 1;
 static constexpr size_t kMaxCacheSize = 1 << 30;
 static constexpr size_t kTreeBufferLen = 3 * kPageSize;
-static constexpr auto *kDefaultWalSuffix = "-wal"; // TODO: Make this a Slice
-static constexpr auto *kDefaultShmSuffix = "-shm"; // TODO: Make this a Slice
+static constexpr Slice kDefaultWalSuffix = "-wal";
+static constexpr Slice kDefaultShmSuffix = "-shm";
 
 // Additional file locking modes that cannot be requested directly
 enum { kLockUnlocked = 0 };

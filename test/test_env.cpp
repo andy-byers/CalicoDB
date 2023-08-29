@@ -10,6 +10,7 @@
 #include "fake_env.h"
 #include "temp.h"
 #include "test.h"
+#include <csignal>
 #include <filesystem>
 #include <gtest/gtest.h>
 #include <mutex>
@@ -50,7 +51,7 @@ static auto write_out_randomly(RandomGenerator &random, File &writer, const Slic
     while (counter < size) {
         const auto chunk_size = std::min<size_t>(size - counter, random.Next(size / kChunks));
         const auto s = reader.read_exact(counter, chunk_size, out_data);
-        EXPECT_TRUE(s.is_ok()) << "Error: " << s.type_name() << ": " << s.message();
+        EXPECT_TRUE(s.is_ok()) << "Error: " << s.message();
         out_data += chunk_size;
         counter += chunk_size;
     }
@@ -166,74 +167,6 @@ public:
 private:
     File *m_file;
 };
-
-static constexpr size_t kFileVersionOffset = 1024;
-static constexpr size_t kVersionLengthInuint32_t = 128;
-static constexpr auto kVersionLength = kVersionLengthInuint32_t * sizeof(uint32_t);
-
-// REQUIRES: kShared or greater file_lock is held on "file"
-static constexpr auto kBadVersion = static_cast<uint32_t>(-1);
-static auto read_file_version(File &file) -> uint32_t
-{
-    Slice version_slice;
-    std::string version_string(kVersionLength, '\0');
-    EXPECT_OK(file.read(
-        kFileVersionOffset,
-        kVersionLength,
-        version_string.data(),
-        &version_slice));
-    const auto version = version_slice.is_empty()
-                             ? 0
-                             : get_u32(version_slice.data());
-    for (size_t i = 1; i < kVersionLengthInuint32_t; ++i) {
-        EXPECT_EQ(version, get_u32(version_string.data() + sizeof(uint32_t) * i));
-    }
-    return version;
-}
-// REQUIRES: kShared file_lock is held on byte "index" of "shm"
-static auto read_shm_version(File &file, size_t index) -> uint32_t
-{
-    SharedBuffer sh(file);
-
-    // Read/write the version string in-between mapped regions.
-    const auto offset = (index + 1) * File::kShmRegionSize - kVersionLength / 2;
-    const auto version_string = sh.read(offset, kVersionLength);
-    const auto version = get_u32(version_string.data());
-    for (size_t i = 1; i < kVersionLengthInuint32_t; ++i) {
-        EXPECT_EQ(version, get_u32(version_string.data() + sizeof(uint32_t) * i));
-    }
-    return version;
-}
-// REQUIRES: kExclusive file_lock is held on "file"
-static auto write_file_version(File &file, uint32_t version) -> void
-{
-    std::string version_string(kVersionLength, '\0');
-    for (size_t i = 0; i < kVersionLengthInuint32_t; ++i) {
-        put_u32(version_string.data() + sizeof(uint32_t) * i, version);
-    }
-    EXPECT_OK(file.write(
-        kFileVersionOffset,
-        version_string));
-}
-// REQUIRES: kExclusive file_lock is held on byte "index" of "shm"
-static auto write_shm_version(File &file, uint32_t version, size_t index) -> void
-{
-    std::string version_string(kVersionLength, '\0');
-    for (size_t i = 0; i < kVersionLengthInuint32_t; ++i) {
-        put_u32(version_string.data() + sizeof(uint32_t) * i, version);
-    }
-    SharedBuffer sh(file);
-    const auto offset = (index + 1) * File::kShmRegionSize - kVersionLength / 2;
-    sh.write(offset, version_string);
-}
-static auto sum_shm_versions(File &file) -> uint32_t
-{
-    uint32_t total = 0;
-    for (size_t i = 0; i < File::kShmLockCount; ++i) {
-        total += read_shm_version(file, i);
-    }
-    return total;
-}
 
 class FileTests : public testing::TestWithParam<size_t>
 {
@@ -631,401 +564,11 @@ static auto busy_wait_shm_lock(File &file, size_t r, size_t n, ShmLockFlag flags
         if (s.is_ok()) {
             return;
         } else if (!s.is_busy()) {
-            ADD_FAILURE() << s.type_name() << ": " << s.message();
+            ADD_FAILURE() << s.message();
         }
         std::this_thread::yield();
     }
 }
-static auto file_reader_writer_test_routine(Env &, File &file, bool is_writer) -> void
-{
-    busy_wait_file_lock(file, is_writer);
-    if (is_writer) {
-        write_file_version(file, read_file_version(file) + 1);
-    } else {
-        read_file_version(file); // Could be anything...
-    }
-    file.file_unlock();
-}
-static auto shm_lifetime_test_routine(Env &env, const char *filename, bool unlink) -> void
-{
-    File *file;
-    ASSERT_OK(env.new_file(filename, Env::kCreate, file));
-
-    Status s;
-    volatile void *ptr;
-    while (!(s = file->shm_map(0, true, ptr)).is_ok()) {
-        // NOTE: This call may return either Status::busy() or Status::not_found() on failure.
-        // Status::not_found() means someone else unlinked the shm before we could get the DMS
-        // lock.
-    }
-    ASSERT_OK(s);
-    file->shm_unmap(unlink);
-
-    delete file;
-}
-static auto shm_reader_writer_test_routine(File &file, size_t r, size_t n, bool is_writer) -> void
-{
-    ASSERT_TRUE(is_writer || n == 1);
-    const auto lock_flag = is_writer ? kShmWriter : kShmReader;
-    busy_wait_shm_lock(file, r, n, kShmLock | lock_flag);
-
-    for (size_t i = r; i < r + n; ++i) {
-        const auto version = read_shm_version(file, i);
-        if (is_writer) {
-            write_shm_version(file, version + 1, i);
-        }
-    }
-    ASSERT_OK(file.shm_lock(r, n, kShmUnlock | lock_flag));
-}
-
-class SharedCount
-{
-    volatile uint32_t *m_ptr = nullptr;
-    File *m_file = nullptr;
-
-public:
-    explicit SharedCount(Env &env, const std::string &name)
-    {
-        volatile void *ptr;
-        EXPECT_OK(env.new_file(name.c_str(), Env::kCreate | Env::kReadWrite, m_file));
-        EXPECT_OK(m_file->shm_map(0, true, ptr));
-        EXPECT_TRUE(ptr);
-        m_ptr = reinterpret_cast<volatile uint32_t *>(ptr);
-    }
-
-    ~SharedCount()
-    {
-        m_file->shm_unmap(true);
-        delete m_file;
-    }
-
-    enum MemoryOrder : int {
-        kRelaxed = __ATOMIC_RELAXED,
-        kAcquire = __ATOMIC_ACQUIRE,
-        kRelease = __ATOMIC_RELEASE,
-        kAcqRel = __ATOMIC_ACQ_REL,
-        kSeqCst = __ATOMIC_SEQ_CST,
-    };
-    auto load(MemoryOrder order = kAcquire) const -> uint32_t
-    {
-        return __atomic_load_n(m_ptr, order);
-    }
-    auto store(uint32_t value, MemoryOrder order = kRelease) -> void
-    {
-        __atomic_store_n(m_ptr, value, order);
-    }
-    auto increase(uint32_t n, MemoryOrder order = kRelaxed) -> uint32_t
-    {
-        return __atomic_add_fetch(m_ptr, n, order);
-    }
-};
-
-// Env multithreading tests
-//
-// Each Env instance created in a given process communicates with the same global
-// "inode info manager". This is to overcome some shortcomings of POSIX advisory
-// locks. Examples include (a) closing a file descriptor to an inode with locks
-// held on it can cause all locks to be dropped, and (b) POSIX locks don't work
-// between threads in the same process.
-//
-// This test fixture uses multiple processes/threads to access a one or more Envs.
-// The process is forked m_num_processes times. The Env is not created until after the
-// fork(), so there are m_num_processes independent Envs, each managing its own inode list.
-// Locking between processes must take place through the actual POSIX advisory locks.
-// Locking between threads in the same process must be coordinated through the
-// global inode list.
-struct EnvConcurrencyTestsParam {
-    size_t num_processes = 0;
-    size_t num_threads = 0;
-};
-class EnvConcurrencyTests : public testing::TestWithParam<EnvConcurrencyTestsParam>
-{
-public:
-    const size_t m_num_processes = GetParam().num_processes;
-    const size_t m_num_threads = GetParam().num_threads;
-    static constexpr size_t kNumRounds = 500;
-    std::string m_dirname;
-
-    ~EnvConcurrencyTests() override = default;
-
-    auto SetUp() -> void override
-    {
-        m_dirname = testing::TempDir();
-        // Create the file and zero out the version.
-        auto &tempenv = Env::default_env();
-        File *tempfile;
-        const auto filename = m_dirname + "/0000000000";
-        (void)tempenv.remove_file(filename.c_str());
-        ASSERT_OK(tempenv.new_file(filename.c_str(), Env::kCreate, tempfile));
-        write_file_version(*tempfile, 0);
-        delete tempfile;
-    }
-
-    auto set_up(bool clear = false) -> void
-    {
-        if (m_env == nullptr) {
-            m_env = &Env::default_env();
-            m_helper.env = m_env;
-        }
-
-        ASSERT_GT(m_num_processes, 0) << "REQUIRES: m_num_processes > 0";
-        m_helper.open_unowned_file(
-            EnvWithFiles::kSameName,
-            Env::kCreate,
-            clear);
-    }
-
-    template <class Test>
-    auto run_test(const Test &test)
-    {
-        std::vector<int> pipes(m_num_processes);
-        for (size_t n = 0; n < m_num_processes; ++n) {
-            int pipefd[2];
-            ASSERT_EQ(pipe(pipefd), 0);
-            pipes[n] = pipefd[0];
-
-            const auto pid = fork();
-            ASSERT_NE(-1, pid) << strerror(errno);
-            if (pid) {
-                close(pipefd[1]);
-            } else {
-                close(pipefd[0]);
-                dup2(pipefd[1], STDOUT_FILENO);
-                dup2(pipefd[1], STDERR_FILENO);
-                test(n);
-                std::exit(testing::Test::HasFailure());
-            }
-        }
-        for (size_t n = 0; n < m_num_processes; ++n) {
-            int s;
-            const auto pid = wait(&s);
-            ASSERT_NE(pid, -1)
-                << "wait failed: " << strerror(errno);
-            if (WIFEXITED(s) && WEXITSTATUS(s) != 0) {
-                std::string msg;
-                for (char buf[256];;) {
-                    if (const auto rc = read(pipes[n], buf, sizeof(buf))) {
-                        ASSERT_GT(rc, 0) << strerror(errno);
-                        msg.append(buf, static_cast<size_t>(rc));
-                    } else {
-                        break;
-                    }
-                }
-                ADD_FAILURE()
-                    << "exited " << (WIFEXITED(s) ? "" : "ab")
-                    << "normally with exit status " << WEXITSTATUS(s)
-                    << '\n'
-                    << msg;
-            }
-        }
-    }
-
-    template <class IsWriter>
-    auto run_reader_writer_test(size_t writers_per_thread, const IsWriter &is_writer) -> void
-    {
-        set_up(true);
-        run_test([&is_writer, this](auto) {
-            for (size_t i = 0; i < m_num_threads; ++i) {
-                set_up();
-            }
-            std::vector<std::thread> threads;
-            while (threads.size() < m_num_threads) {
-                const auto t = threads.size();
-                threads.emplace_back([&is_writer, t, this] {
-                    for (size_t r = 0; r < kNumRounds; ++r) {
-                        file_reader_writer_test_routine(*m_env, *m_helper.files[t], is_writer(r));
-                    }
-                });
-            }
-            for (auto &thread : threads) {
-                thread.join();
-            }
-        });
-        set_up();
-        ASSERT_EQ(writers_per_thread * m_num_threads, read_file_version(*m_helper.files.front()));
-    }
-
-    auto run_shm_lifetime_test(bool unlink) -> void
-    {
-        for (size_t i = 0; i < m_num_threads; ++i) {
-            set_up(true);
-        }
-        run_test([this, unlink](auto) {
-            std::vector<std::thread> threads;
-            while (threads.size() < m_num_threads) {
-                threads.emplace_back([this, unlink] {
-                    for (size_t r = 0; r < kNumRounds; ++r) {
-                        const auto filename = m_dirname + make_filename(0);
-                        shm_lifetime_test_routine(
-                            *m_helper.env, filename.c_str(), unlink);
-                    }
-                });
-            }
-            for (auto &thread : threads) {
-                thread.join();
-            }
-        });
-    }
-
-    auto run_shm_reader_writer_test(size_t writer_n, size_t num_writers) -> void
-    {
-        std::vector<size_t> indices(kNumRounds);
-        std::iota(begin(indices), end(indices), 0);
-        std::default_random_engine rng(42);
-        std::shuffle(begin(indices), end(indices), rng);
-        indices.resize(num_writers);
-
-        std::vector<bool> flags(kNumRounds);
-        for (size_t i = 0; i < num_writers; ++i) {
-            flags[indices[i]] = true;
-        }
-
-        auto &env = Env::default_env();
-        File *file; // Keep this shm open to read from at the end...
-        const auto filename = m_dirname + "0000000000";
-        (void)env.remove_file(filename.c_str());
-        ASSERT_OK(env.new_file(filename.c_str(), Env::kCreate, file));
-        volatile void *ptr;
-        ASSERT_OK(file->shm_map(0, true, ptr));
-        run_test([&](auto) {
-            for (size_t i = 0; i < m_num_threads; ++i) {
-                set_up();
-                ASSERT_OK(m_helper.files[i]->shm_map(0, true, ptr));
-            }
-            std::vector<std::thread> threads;
-            while (threads.size() < m_num_threads) {
-                const auto t = threads.size();
-                threads.emplace_back([t, this, &flags, writer_n] {
-                    for (size_t r = 0; r < kNumRounds; ++r) {
-                        shm_reader_writer_test_routine(
-                            *m_helper.files[t],
-                            r % (File::kShmLockCount - flags[r] * (writer_n - 1)),
-                            flags[r] * (writer_n - 1) + 1, flags[r]);
-                    }
-                });
-            }
-            for (auto &thread : threads) {
-                thread.join();
-            }
-        });
-
-        ASSERT_EQ(num_writers * writer_n * m_num_threads * m_num_processes, sum_shm_versions(*file));
-        file->shm_unmap(true);
-        delete file;
-        // Get rid of the shm for the next round.
-        m_helper.cleanup_files();
-    }
-
-    auto run_shm_atomic_test(size_t num_writes) -> void
-    {
-        ASSERT_LE(num_writes, kNumRounds);
-        auto &env = Env::default_env();
-        SharedCount count(env, "shared_count");
-        count.store(0);
-
-        run_test([&](auto) {
-            auto &env = Env::default_env();
-            std::vector<std::thread> threads;
-            while (threads.size() < m_num_threads) {
-                threads.emplace_back([&env, num_writes] {
-                    for (size_t r = 0; r < kNumRounds; ++r) {
-                        SharedCount count(env, "shared_count");
-                        if (r < num_writes) {
-                            count.increase(1);
-                        }
-                    }
-                });
-            }
-            for (auto &thread : threads) {
-                thread.join();
-            }
-        });
-        ASSERT_EQ(count.load(), m_num_processes * m_num_threads * num_writes);
-    }
-
-protected:
-    EnvWithFiles m_helper;
-    Env *m_env = nullptr;
-};
-TEST_P(EnvConcurrencyTests, SingleWriter)
-{
-    run_reader_writer_test(m_num_processes, [](auto r) {
-        return r == kNumRounds / 2;
-    });
-}
-TEST_P(EnvConcurrencyTests, MultipleWriters)
-{
-    run_reader_writer_test(m_num_processes * kNumRounds / 10, [](auto r) {
-        return r % 10 == 9;
-    });
-}
-TEST_P(EnvConcurrencyTests, Contention)
-{
-    run_reader_writer_test(m_num_processes * kNumRounds / 2, [](auto r) {
-        return r & 1;
-    });
-}
-TEST_P(EnvConcurrencyTests, ShmLifetime1)
-{
-    run_shm_lifetime_test(false);
-}
-TEST_P(EnvConcurrencyTests, ShmLifetime2)
-{
-    run_shm_lifetime_test(true);
-}
-TEST_P(EnvConcurrencyTests, SingleShmWriter1)
-{
-    run_shm_reader_writer_test(1, 1);
-    run_shm_reader_writer_test(1, 1);
-}
-TEST_P(EnvConcurrencyTests, SingleShmWriter2)
-{
-    run_shm_reader_writer_test(2, 1);
-    run_shm_reader_writer_test(3, 1);
-    run_shm_reader_writer_test(4, 1);
-}
-TEST_P(EnvConcurrencyTests, MultipleShmWriters)
-{
-    run_shm_reader_writer_test(1, 5);
-    run_shm_reader_writer_test(2, 5);
-    run_shm_reader_writer_test(3, 5);
-
-    run_shm_reader_writer_test(1, 10);
-    run_shm_reader_writer_test(2, 10);
-    run_shm_reader_writer_test(3, 10);
-
-    run_shm_reader_writer_test(1, 15);
-    run_shm_reader_writer_test(2, 15);
-    run_shm_reader_writer_test(3, 15);
-}
-TEST_P(EnvConcurrencyTests, ShmAtomic)
-{
-    run_shm_atomic_test(1);
-    run_shm_atomic_test(2);
-    run_shm_atomic_test(3);
-    run_shm_atomic_test(10);
-    run_shm_atomic_test(20);
-    run_shm_atomic_test(30);
-}
-INSTANTIATE_TEST_SUITE_P(
-    EnvConcurrencyTests,
-    EnvConcurrencyTests,
-    ::testing::Values(
-        // Sanity check: single thread/process
-        EnvConcurrencyTestsParam{1, 1},
-
-        // Multiple threads
-        EnvConcurrencyTestsParam{1, 2},
-        EnvConcurrencyTestsParam{1, 4},
-
-        // Multiple processes
-        EnvConcurrencyTestsParam{2, 1},
-        EnvConcurrencyTestsParam{4, 1},
-
-        // Multiple threads in multiple processes
-        EnvConcurrencyTestsParam{2, 2},
-        EnvConcurrencyTestsParam{2, 4},
-        EnvConcurrencyTestsParam{4, 2}));
 
 TEST(EnvWrappers, WrapperEnvWorksAsExpected)
 {
@@ -1106,5 +649,309 @@ TEST(TempEnv, TempEnv)
     ASSERT_OK(env->new_logger("NOOP", logger));
     ASSERT_EQ(logger, nullptr);
 }
+
+class FileConcurrencyTests : public testing::TestWithParam<std::tuple<size_t, size_t>>
+{
+public:
+    struct State {
+        std::vector<int> output;
+        const char *filename;
+        int *resource;
+        File *file;
+    };
+
+    const std::tuple<size_t, size_t> m_options;
+    const std::string m_filename;
+    std::vector<std::thread> m_threads;
+    std::vector<State> m_states;
+    int m_resource;
+
+    explicit FileConcurrencyTests()
+        : m_options(GetParam()),
+          m_filename(testing::TempDir() + "calicodb_file_concurrency"),
+          m_resource(0)
+    {
+    }
+
+    ~FileConcurrencyTests() override
+    {
+        std::filesystem::remove_all(m_filename.c_str());
+    }
+
+    auto run_test() -> void
+    {
+        const size_t num_readers = std::get<0>(m_options);
+        const size_t num_writers = std::get<1>(m_options);
+        static constexpr size_t kNumRounds = 256;
+        const auto num_threads = num_readers + num_writers;
+        while (m_states.size() < num_threads) {
+            m_states.emplace_back();
+            m_states.back().filename = m_filename.c_str();
+            m_states.back().resource = &m_resource;
+            m_states.back().file = nullptr;
+        }
+
+        for (size_t n = 0; n < num_threads; ++n) {
+            auto *action = n < num_readers ? reader : writer;
+            m_threads.emplace_back([action, &s = m_states.at(n)] {
+                for (size_t i = 0; i < kNumRounds; ++i) {
+                    action(s);
+                }
+            });
+        }
+        for (auto &t : m_threads) {
+            t.join();
+        }
+
+        for (size_t n = 0; n < num_threads; ++n) {
+            const auto &s = m_states.at(n);
+            ASSERT_EQ(s.file, nullptr);
+            auto sorted = s.output;
+            std::sort(begin(sorted), end(sorted));
+            ASSERT_EQ(sorted, s.output);
+        }
+
+        ASSERT_EQ(m_resource, kNumRounds * num_writers);
+    }
+
+    static auto open_file(State &state) -> Status
+    {
+        return Env::default_env().new_file(
+            state.filename,
+            Env::kCreate | Env::kReadWrite,
+            state.file);
+    }
+
+    static auto close_file(State &state) -> void
+    {
+        delete std::exchange(state.file, nullptr);
+    }
+
+    static auto reader(State &state) -> void
+    {
+        ASSERT_OK(open_file(state));
+        busy_wait_file_lock(*state.file, false);
+        state.output.push_back(*state.resource);
+        close_file(state);
+    }
+
+    static auto writer(State &state) -> void
+    {
+        ASSERT_OK(open_file(state));
+        busy_wait_file_lock(*state.file, true);
+        state.output.push_back((*state.resource)++);
+        close_file(state);
+    }
+};
+
+TEST_P(FileConcurrencyTests, Run)
+{
+    run_test();
+}
+
+INSTANTIATE_TEST_SUITE_P(
+    FileConcurrencyTests,
+    FileConcurrencyTests,
+    ::testing::Combine(
+        testing::Values(1, 2, 5, 10),
+        testing::Values(0, 1, 2, 5, 10)));
+
+struct ShmLockPattern {
+    size_t lock_ofs;
+    size_t lock_len;
+    int write;
+};
+class ShmConcurrencyTests : public testing::TestWithParam<std::vector<ShmLockPattern>>
+{
+public:
+    struct SharedState {
+        int resources[File::kShmLockCount];
+        const std::string filename;
+    } m_shared;
+
+    struct State {
+        std::vector<int> outputs[File::kShmLockCount];
+        File *file = nullptr;
+        size_t lock_ofs = 0;
+        size_t lock_len = 0;
+    };
+
+    const std::vector<ShmLockPattern> m_options;
+    std::vector<std::thread> m_threads;
+    std::vector<State> m_states;
+    File *m_file;
+
+    explicit ShmConcurrencyTests()
+        : m_shared{{}, testing::TempDir() + "calicodb_file_concurrency"},
+          m_options(GetParam())
+    {
+    }
+
+    ~ShmConcurrencyTests() override
+    {
+        std::filesystem::remove_all(m_shared.filename.c_str());
+    }
+
+    auto SetUp() -> void override
+    {
+        ASSERT_OK(Env::default_env().new_file(
+            m_shared.filename.c_str(),
+            Env::kCreate | Env::kReadWrite,
+            m_file));
+        volatile void *ptr;
+        ASSERT_OK(m_file->shm_map(0, true, ptr));
+    }
+
+    auto TearDown() -> void override
+    {
+        m_file->shm_unmap(true);
+        delete std::exchange(m_file, nullptr);
+    }
+
+    auto run_test() -> void
+    {
+        static constexpr size_t kNumRounds = 256;
+        const auto num_threads = m_options.size();
+        int expected[File::kShmLockCount] = {};
+        for (auto [ofs, len, write] : m_options) {
+            for (size_t i = 0; i < len; ++i) {
+                expected[ofs + i] += write;
+            }
+        }
+
+        m_states.resize(num_threads);
+        for (size_t n = 0; n < num_threads; ++n) {
+            const auto [ofs, len, write] = m_options.at(n);
+            auto *action = write ? writer : reader;
+            auto &s = m_states.at(n);
+            s.lock_len = len;
+            s.lock_ofs = ofs;
+            m_threads.emplace_back([action, &s, &shared = m_shared] {
+                for (size_t i = 0; i < kNumRounds; ++i) {
+                    action(shared, s);
+                }
+            });
+        }
+        for (auto &t : m_threads) {
+            t.join();
+        }
+
+        for (const auto &s : m_states) {
+            for (size_t i = 0; i < s.lock_len; ++i) {
+                const auto &output = s.outputs[i + s.lock_ofs];
+                auto sorted = output;
+                std::sort(begin(sorted), end(sorted));
+                ASSERT_EQ(sorted, output);
+            }
+        }
+        for (size_t i = 0; i < ARRAY_SIZE(expected); ++i) {
+            ASSERT_EQ(m_shared.resources[i], static_cast<int>(kNumRounds) * expected[i]);
+        }
+    }
+
+    static auto open_file(State &state, const char *filename) -> Status
+    {
+        return Env::default_env().new_file(
+            filename,
+            Env::kCreate | Env::kReadWrite,
+            state.file);
+    }
+
+    static auto close_file(State &state) -> void
+    {
+        delete std::exchange(state.file, nullptr);
+    }
+
+    static auto reader(SharedState &shared, State &state) -> void
+    {
+        ASSERT_EQ(state.lock_len, 1);
+        ASSERT_OK(open_file(state, shared.filename.c_str()));
+
+        volatile void *ptr;
+        ASSERT_OK(state.file->shm_map(state.lock_ofs, false, ptr));
+        busy_wait_shm_lock(*state.file, state.lock_ofs, 1, kShmLock | kShmReader);
+        state.outputs[state.lock_ofs].push_back(shared.resources[state.lock_ofs]);
+        ASSERT_OK(state.file->shm_lock(state.lock_ofs, 1, kShmUnlock | kShmReader));
+        state.file->shm_unmap(false);
+        close_file(state);
+    }
+
+    static auto writer(SharedState &shared, State &state) -> void
+    {
+        ASSERT_OK(open_file(state, shared.filename.c_str()));
+
+        volatile void *ptr;
+        ASSERT_OK(state.file->shm_map(state.lock_ofs, true, ptr));
+        busy_wait_shm_lock(*state.file, state.lock_ofs, state.lock_len, kShmLock | kShmWriter);
+        for (size_t i = 0; i < state.lock_len; ++i) {
+            const auto r = i + state.lock_ofs;
+            state.outputs[r].push_back(shared.resources[r]++);
+        }
+        ASSERT_OK(state.file->shm_lock(state.lock_ofs, state.lock_len, kShmUnlock | kShmWriter));
+        state.file->shm_unmap(false);
+        close_file(state);
+    }
+};
+
+TEST_P(ShmConcurrencyTests, Run)
+{
+    run_test();
+}
+
+INSTANTIATE_TEST_SUITE_P(
+    SingleLock,
+    ShmConcurrencyTests,
+    ::testing::Values(                            // 01234567
+        std::vector<ShmLockPattern>{{0, 1, 1}},   // w.......
+        std::vector<ShmLockPattern>{{0, 1, 0},    // r.......
+                                    {0, 1, 1}},   // w.......
+        std::vector<ShmLockPattern>{{0, 1, 0},    // r.......
+                                    {0, 1, 0},    // r.......
+                                    {0, 1, 1}},   // w.......
+        std::vector<ShmLockPattern>{{0, 1, 0},    // r.......
+                                    {0, 1, 0},    // r.......
+                                    {0, 1, 0},    // r.......
+                                    {0, 1, 1},    // w.......
+                                    {0, 1, 1}})); // w.......
+
+INSTANTIATE_TEST_SUITE_P(
+    MultiLock,
+    ShmConcurrencyTests,
+    ::testing::Values(                            // 01234567
+        std::vector<ShmLockPattern>{{0, 2, 1}},   // ww......
+        std::vector<ShmLockPattern>{{0, 1, 0},    // r.......
+                                    {0, 2, 1}},   // ww......
+        std::vector<ShmLockPattern>{{0, 1, 0},    // r.......
+                                    {1, 1, 0},    // .r......
+                                    {0, 2, 1}},   // ww......
+        std::vector<ShmLockPattern>{{0, 1, 0},    // r.......
+                                    {1, 1, 0},    // .r......
+                                    {2, 1, 0},    // ..r.....
+                                    {0, 2, 1},    // ww......
+                                    {1, 3, 1}},   // .ww.....
+        std::vector<ShmLockPattern>{{0, 1, 0},    // r.......
+                                    {1, 1, 0},    // .r......
+                                    {2, 1, 0},    // ..r.....
+                                    {3, 1, 0},    // ...r....
+                                    {4, 1, 0},    // ....r...
+                                    {5, 1, 0},    // .....r..
+                                    {6, 1, 0},    // ......r.
+                                    {7, 1, 0},    // .......r
+                                    {0, 8, 1}},   // wwwwwwww
+        std::vector<ShmLockPattern>{{0, 1, 0},    // r.......
+                                    {1, 1, 0},    // .r......
+                                    {2, 1, 0},    // ..r.....
+                                    {3, 1, 0},    // ...r....
+                                    {0, 1, 0},    // r.......
+                                    {1, 1, 0},    // .r......
+                                    {2, 1, 0},    // ..r.....
+                                    {3, 1, 0},    // ...r....
+                                    {0, 8, 1}},   // wwwwwwww
+        std::vector<ShmLockPattern>{{5, 1, 0},    // .....r..
+                                    {7, 1, 0},    // .......r
+                                    {6, 2, 1},    // ......ww
+                                    {4, 2, 1},    // ....ww..
+                                    {2, 4, 1},    // ..wwww..
+                                    {0, 6, 1}})); // wwwwww..
 
 } // namespace calicodb::test

@@ -6,7 +6,6 @@
 #include "fuzzer.h"
 #include "logging.h"
 #include "model.h"
-#include "tree.h"
 
 namespace calicodb
 {
@@ -35,7 +34,7 @@ class Fuzzer
         delete m_c;
         delete m_tx;
         m_c = nullptr;
-        CHECK_OK(m_db->new_tx(WriteTag(), m_tx));
+        CHECK_OK(m_db->new_tx(WriteOptions(), m_tx));
         reopen_bucket();
     }
 
@@ -63,138 +62,139 @@ public:
         delete m_db;
     }
 
-    auto fuzz(FuzzedInputProvider &stream) -> bool;
-};
+    auto consume_input(FuzzedInputProvider &stream) -> bool
+    {
+        if (stream.is_empty()) {
+            return false;
+        }
 
-auto Fuzzer::fuzz(FuzzedInputProvider &stream) -> bool
-{
-    if (stream.is_empty()) {
-        return false;
-    }
-
-    const enum OperationType {
-        kBucketPut,
-        kBucketGet,
-        kBucketErase,
-        kCursorNext,
-        kCursorPrevious,
-        kCursorSeek,
-        kCursorPut,
-        kCursorErase,
-        kTxCommit,
-        kTxVacuum,
-        kReopenDB,
-        kReopenTx,
-        kReopenBucket,
-        kValidateDB,
-        kMaxValue = kValidateDB
-    } op_type = stream.extract_enum<OperationType>();
+        const enum OperationType {
+            kBucketPut,
+            kBucketGet,
+            kBucketErase,
+            kCursorNext,
+            kCursorPrevious,
+            kCursorSeek,
+            kCursorPut,
+            kCursorErase,
+            kTxCommit,
+            kTxVacuum,
+            kReopenDB,
+            kReopenTx,
+            kReopenBucket,
+            kValidateDB,
+            kMaxValue = kValidateDB
+        } op_type = stream.extract_enum<OperationType>();
 
 #ifdef FUZZER_TRACE
-    static constexpr const char *kOperationTypeNames[kMaxValue + 1] = {
-        "kBucketPut",
-        "kBucketGet",
-        "kBucketErase",
-        "kCursorNext",
-        "kCursorPrevious",
-        "kCursorSeek",
-        "kCursorPut",
-        "kCursorErase",
-        "kTxCommit",
-        "kTxVacuum",
-        "kReopenDB",
-        "kReopenTx",
-        "kReopenBucket",
-        "kValidateDB",
-    };
-    const auto sample_len = std::min(stream.length(), 8UL);
-    const auto missing_len = stream.length() - sample_len;
-    const auto sample = escape_string(stream.peek(sample_len));
-    std::cout << "TRACE: OpType: " << kOperationTypeNames[op_type] << R"( Input: ")"
-              << sample << R"(" + <)" << missing_len << " bytes>\n";
+        static constexpr const char *kOperationTypeNames[kMaxValue + 1] = {
+            "kBucketPut",
+            "kBucketGet",
+            "kBucketErase",
+            "kCursorNext",
+            "kCursorPrevious",
+            "kCursorSeek",
+            "kCursorPut",
+            "kCursorErase",
+            "kTxCommit",
+            "kTxVacuum",
+            "kReopenDB",
+            "kReopenTx",
+            "kReopenBucket",
+            "kValidateDB",
+        };
+        const auto sample_len = std::min(stream.length(), 8UL);
+        const auto missing_len = stream.length() - sample_len;
+        const auto sample = escape_string(stream.peek(sample_len));
+        std::cout << "TRACE: OpType: " << kOperationTypeNames[op_type] << R"( Input: ")"
+                  << sample << R"(" + <)" << missing_len << " bytes>\n";
 #endif // FUZZER_TRACE
 
-    std::string key, value;
-    Status s;
+        std::string key, value;
+        Status s;
 
-    auto &schema = m_tx->schema();
-    schema.seek_first();
-    CHECK_TRUE(schema.is_valid());
+        auto &schema = m_tx->schema();
+        schema.seek_first();
+        CHECK_TRUE(schema.is_valid());
 
-    switch (op_type) {
-        case kBucketGet:
-            m_c->find(stream.extract_random());
-            s = m_c->status();
-            break;
-        case kBucketPut:
-            key = stream.extract_random();
-            s = m_tx->put(*m_c, key, stream.extract_random_record_value());
-            break;
-        case kBucketErase:
-            s = m_tx->erase(*m_c, stream.extract_random());
-            break;
-        case kCursorErase:
-            s = m_tx->erase(*m_c);
-            break;
-        case kCursorSeek:
-            key = stream.extract_random();
-            m_c->seek(key);
-            break;
-        case kCursorNext:
-            if (m_c->is_valid()) {
-                m_c->next();
-            } else {
-                m_c->seek_first();
-            }
-            break;
-        case kCursorPrevious:
-            if (m_c->is_valid()) {
-                m_c->previous();
-            } else {
-                m_c->seek_last();
-            }
-            break;
-        case kTxVacuum:
-            s = m_tx->vacuum();
-            break;
-        case kTxCommit:
-            s = m_tx->commit();
-            break;
-        case kReopenTx:
-            reopen_tx();
-            break;
-        case kReopenBucket:
-            reopen_bucket();
-            break;
-        case kValidateDB:
-            reinterpret_cast<ModelDB *>(m_db)->check_consistency();
-            reinterpret_cast<ModelTx *>(m_tx)->check_consistency();
-            break;
-        default: // kReopenDB
-            reopen_db();
-    }
-    if (m_c->is_valid()) {
-        [[maybe_unused]] const auto _k = m_c->key();
-        [[maybe_unused]] const auto _v = m_c->value();
-        [[maybe_unused]] const auto _s = m_c->status();
-    }
+        switch (op_type) {
+            case kBucketGet:
+                m_c->find(stream.extract_random());
+                s = m_c->status();
+                break;
+            case kBucketPut:
+                key = stream.extract_random();
+                s = m_tx->put(*m_c, key, stream.extract_random_record_value());
+                break;
+            case kBucketErase:
+                s = m_tx->erase(*m_c, stream.extract_random());
+                break;
+            case kCursorErase:
+                s = m_tx->erase(*m_c);
+                break;
+            case kCursorSeek:
+                key = stream.extract_random();
+                m_c->seek(key);
+                break;
+            case kCursorNext:
+                if (m_c->is_valid()) {
+                    m_c->next();
+                } else {
+                    m_c->seek_first();
+                }
+                break;
+            case kCursorPrevious:
+                if (m_c->is_valid()) {
+                    m_c->previous();
+                } else {
+                    m_c->seek_last();
+                }
+                break;
+            case kTxVacuum:
+                s = m_tx->vacuum();
+                break;
+            case kTxCommit:
+                s = m_tx->commit();
+                break;
+            case kReopenTx:
+                reopen_tx();
+                break;
+            case kReopenBucket:
+                reopen_bucket();
+                break;
+            case kValidateDB:
+                reinterpret_cast<ModelDB *>(m_db)->check_consistency();
+                reinterpret_cast<ModelTx *>(m_tx)->check_consistency();
+                break;
+            default: // kReopenDB
+                reopen_db();
+        }
+        if (m_c->is_valid()) {
+            [[maybe_unused]] const auto _k = m_c->key();
+            [[maybe_unused]] const auto _v = m_c->value();
+            [[maybe_unused]] const auto _s = m_c->status();
+        }
 
-    if (s.is_not_found() || s.is_invalid_argument()) {
-        // Forgive non-fatal errors.
-        s = Status::ok();
+        if (s.is_not_found() || s.is_invalid_argument()) {
+            // Forgive non-fatal errors.
+            s = Status::ok();
+        }
+        CHECK_OK(s);
+        CHECK_OK(m_tx->status());
+        return true;
     }
-    CHECK_OK(s);
-    CHECK_OK(m_tx->status());
-    return true;
-}
+};
 
 extern "C" int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size)
 {
-    FakeEnv env;
-    Fuzzer fuzzer(env);
-    FuzzedInputProvider stream(data, size);
-    while (fuzzer.fuzz(stream)) {
+    {
+        FakeEnv env;
+        Fuzzer fuzzer(env);
+        FuzzedInputProvider stream(data, size);
+        while (fuzzer.consume_input(stream)) {
+        }
     }
+    CHECK_EQ(Alloc::bytes_used(), 0);
     return 0;
 }
 

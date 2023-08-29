@@ -49,22 +49,33 @@ public:
             Options::kLockNormal,
             false,
         };
-
-        EXPECT_OK(Pager::open(pager_param, m_pager));
-        EXPECT_OK(m_pager->start_reader());
-        EXPECT_OK(m_pager->start_writer());
-        m_pager->initialize_root();
-        EXPECT_OK(m_pager->commit());
-        m_pager->finish();
+        auto s = Pager::open(pager_param, m_pager);
+        if (s.is_ok()) {
+            s = m_pager->start_reader();
+            if (s.is_ok()) {
+                s = m_pager->start_writer();
+            }
+            if (s.is_ok()) {
+                m_pager->initialize_root();
+                s = m_pager->commit();
+            }
+            m_pager->finish();
+        }
+        if (!s.is_ok()) {
+            Alloc::delete_object(m_pager);
+            m_pager = nullptr;
+        }
     }
 
     ~TreeTestHarness()
     {
+        EXPECT_TRUE(m_status.is_ok());
         EXPECT_EQ(m_c, nullptr);
         delete m_tree;
-        delete m_pager;
+        Alloc::delete_object(m_pager);
         delete m_file;
         delete m_env;
+        EXPECT_EQ(Alloc::bytes_used(), 0);
     }
 
     [[nodiscard]] static auto make_normal_key(size_t value)
@@ -94,8 +105,8 @@ public:
     {
         EXPECT_OK(m_pager->start_reader());
         EXPECT_OK(m_pager->start_writer());
-        m_tree = new Tree(*m_pager, m_stat, m_scratch.data(), Id::root(), UniqueBuffer());
-        m_c = new CursorImpl(*m_tree);
+        m_tree = new Tree(*m_pager, m_stat, m_scratch.data(), Id::root(), String());
+        m_c = new (std::nothrow) CursorImpl(*m_tree);
     }
 
     auto close() const -> void
@@ -518,7 +529,8 @@ protected:
 
 TEST_F(EmptyTreeCursorTests, EmptyTreeBehavior)
 {
-    auto cursor = std::make_unique<CursorImpl>(*m_tree);
+    std::unique_ptr<CursorImpl> cursor(new (std::nothrow) CursorImpl(*m_tree));
+    ASSERT_TRUE(cursor);
     cursor->seek_first();
     ASSERT_FALSE(cursor->is_valid());
     cursor->seek_last();
@@ -549,9 +561,8 @@ protected:
     {
         switch (GetParam()) {
             case 0:
-                return std::make_unique<CursorImpl>(*m_tree);
             case 1:
-                return std::make_unique<CursorImpl>(*m_tree);
+                return std::unique_ptr<CursorImpl>(new (std::nothrow) CursorImpl(*m_tree));
 
                 // TODO                return std::unique_ptr<Cursor>(&m_schema->cursor());
         }
@@ -785,7 +796,7 @@ protected:
 
     auto add_cursor() -> Cursor *
     {
-        m_cursors.emplace_back(new CursorImpl(*m_tree));
+        m_cursors.emplace_back(new (std::nothrow) CursorImpl(*m_tree));
         return m_cursors.back();
     }
 
@@ -992,9 +1003,6 @@ public:
 
     auto TearDown() -> void override
     {
-        for (auto &[tid, tree] : multi_tree) {
-            delete tree.c;
-        }
         multi_tree.clear();
         m_schema->close();
         delete m_schema;
@@ -1012,7 +1020,7 @@ public:
             &c));
         EXPECT_EQ(multi_tree.find(tid), end(multi_tree));
         auto *impl = reinterpret_cast<CursorImpl *>(c);
-        multi_tree.emplace(tid, TreeWrapper{impl, &impl->TEST_tree()});
+        multi_tree.emplace(tid, TreeWrapper{std::unique_ptr<CursorImpl>(impl), &impl->TEST_tree()});
     }
 
     auto fill_tree(size_t tid, bool shuffle = false)
@@ -1073,7 +1081,7 @@ public:
     }
 
     struct TreeWrapper {
-        CursorImpl *c;
+        std::unique_ptr<CursorImpl> c;
         Tree *tree;
     };
 
@@ -1576,7 +1584,7 @@ TEST_F(CursorModificationTests, SeekAndPut)
 TEST_F(CursorModificationTests, PutWithoutCursor)
 {
     init_tree(*this, kInitNormal);
-    auto c = std::make_unique<CursorImpl>(*m_tree);
+    std::unique_ptr<CursorImpl> c(new (std::nothrow) CursorImpl(*m_tree));
     c->seek_first();
     ASSERT_TRUE(c->is_valid());
 
@@ -1741,8 +1749,8 @@ TEST_F(CursorModificationTests, UntrackedCursors)
 {
     init_tree(*this, kInitLongValues);
 
-    auto c1 = std::make_unique<CursorImpl>(*m_tree);
-    auto c2 = std::make_unique<CursorImpl>(*m_tree);
+    std::unique_ptr<CursorImpl> c1(new (std::nothrow) CursorImpl(*m_tree));
+    std::unique_ptr<CursorImpl> c2(new (std::nothrow) CursorImpl(*m_tree));
     c1->seek_first();
     c2->seek_last();
 
@@ -1782,7 +1790,7 @@ public:
         m_root_c = m_c;
         create_tree(1);
         m_tree = multi_tree.at(1).tree;
-        m_c = multi_tree.at(1).c;
+        m_c = multi_tree.at(1).c.get();
     }
 
     auto TearDown() -> void override
@@ -1874,11 +1882,12 @@ TEST_F(VacuumTests, VacuumSchemaTree)
     // Add records to m_tree.
     init_tree(*this, kInitLongValues);
     auto &c = *m_schema->cursor();
-    std::vector<Cursor *> cursors;
+    std::vector<TestCursor> cursors;
     for (size_t i = 0; i < kSize; i += 2) {
-        cursors.emplace_back();
-        ASSERT_OK(m_schema->create_bucket(BucketOptions(), numeric_key(i), &cursors.back()));
+        Cursor *temp;
+        ASSERT_OK(m_schema->create_bucket(BucketOptions(), numeric_key(i), &temp));
         ASSERT_OK(m_schema->create_bucket(BucketOptions(), numeric_key(i + 1), nullptr));
+        cursors.emplace_back(temp);
     }
     c.seek_first();
     for (size_t i = 0; i < kSize; ++i) {

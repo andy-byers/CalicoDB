@@ -13,7 +13,9 @@ namespace calicodb
 
 class Schema;
 
-class CursorImpl : public Cursor
+class CursorImpl
+    : public Cursor,
+      public HeapObject
 {
     friend class InorderTraversal;
     friend class Tree;
@@ -35,12 +37,12 @@ class CursorImpl : public Cursor
     uint32_t m_idx_path[kMaxDepth - 1];
     int m_level = 0;
 
-    // A heap-allocated buffer used to store the current record. m_key and m_value are
-    // slices into this buffer. The buffer length is not stored explicitly, but it is
-    // always greater than or equal to the sum of the lengths of m_key and m_value.
-    char *m_user_payload = nullptr;
-    Slice m_key;
-    Slice m_value;
+    // Heap-allocated buffers used to store the current record. m_key and m_value are
+    // slices into these buffers.
+    UniqueBuffer<char> m_key_buf;
+    UniqueBuffer<char> m_value_buf;
+    size_t m_key_len = 0;
+    size_t m_value_len = 0;
     bool m_saved = false;
 
     auto save_position() -> void
@@ -54,7 +56,7 @@ class CursorImpl : public Cursor
     auto ensure_position_loaded() -> void
     {
         if (m_saved) {
-            seek_to_leaf(m_key, kSeekNormal);
+            seek_to_leaf(key(), kSeekNormal);
         }
     }
 
@@ -82,6 +84,7 @@ class CursorImpl : public Cursor
 public:
     explicit CursorImpl(Tree &tree);
     ~CursorImpl() override;
+
     auto move_to_parent() -> void;
     auto assign_child(Node child) -> void;
     auto move_to_child(Id child_id) -> void;
@@ -142,13 +145,17 @@ public:
     auto key() const -> Slice override
     {
         CALICODB_EXPECT_TRUE(is_valid());
-        return m_key;
+        CALICODB_EXPECT_LE(m_key_len, m_key_buf.len());
+        return m_key_len ? Slice(m_key_buf.ptr(), m_key_len)
+                         : Slice();
     }
 
     auto value() const -> Slice override
     {
         CALICODB_EXPECT_TRUE(is_valid());
-        return m_value;
+        CALICODB_EXPECT_LE(m_value_len, m_value_buf.len());
+        return m_value_len ? Slice(m_value_buf.ptr(), m_value_len)
+                           : Slice();
     }
 
     [[nodiscard]] auto is_valid() const -> bool override

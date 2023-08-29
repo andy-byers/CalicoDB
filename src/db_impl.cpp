@@ -14,7 +14,9 @@ namespace calicodb
 
 auto DBImpl::open(const Options &sanitized) -> Status
 {
-    auto s = m_env->new_file(m_db_filename.ptr(), Env::kReadWrite, m_file.ref());
+    auto s = m_env->new_file(m_db_filename.c_str(),
+                             Env::kReadWrite,
+                             m_file.ref());
     if (s.is_ok()) {
         if (sanitized.error_if_exists) {
             return Status::invalid_argument("database already exists");
@@ -27,14 +29,14 @@ auto DBImpl::open(const Options &sanitized) -> Status
         // failed call to DB::destroy(), or it is an unrelated file that coincidentally has the
         // same name as this database's WAL file. Either way, we must get rid of it here,
         // otherwise we'll end up checkpointing it.
-        s = m_env->remove_file(m_wal_filename.ptr());
+        s = m_env->remove_file(m_wal_filename.c_str());
         if (s.is_ok()) {
-            log(m_log, R"(removed old WAL file "%s")", m_wal_filename.ptr());
+            log(m_log, R"(removed old WAL file "%s")", m_wal_filename.c_str());
         } else if (!s.is_not_found()) {
             return s;
         }
-        log(m_log, R"(creating missing database "%s")", m_db_filename.ptr());
-        s = m_env->new_file(m_db_filename.ptr(), Env::kCreate, m_file.ref());
+        log(m_log, R"(creating missing database "%s")", m_db_filename.c_str());
+        s = m_env->new_file(m_db_filename.c_str(), Env::kCreate, m_file.ref());
     }
     if (s.is_ok()) {
         s = busy_wait(m_busy, [this] {
@@ -49,8 +51,8 @@ auto DBImpl::open(const Options &sanitized) -> Status
         return s;
     }
     const Pager::Parameters pager_param = {
-        m_db_filename.ptr(),
-        m_wal_filename.ptr(),
+        m_db_filename.c_str(),
+        m_wal_filename.c_str(),
         m_file.get(),
         m_env,
         m_log,
@@ -68,7 +70,7 @@ auto DBImpl::open(const Options &sanitized) -> Status
     // work needed when DB::checkpoint() is actually called. If this is actually the first
     // connection, then fsync() must be called on each file before it is used, to make sure
     // there isn't any data left in the kernel page cache.
-    const auto needs_ckpt = m_env->file_exists(m_wal_filename.ptr());
+    const auto needs_ckpt = m_env->file_exists(m_wal_filename.c_str());
     s = Pager::open(pager_param, m_pager.ref());
     if (s.is_ok() && needs_ckpt) {
         s = m_pager->checkpoint(false);
@@ -108,6 +110,7 @@ DBImpl::~DBImpl()
 auto DBImpl::destroy(const Options &options, const char *filename) -> Status
 {
     auto copy = options;
+    copy.cache_size = 0;
     copy.error_if_exists = false;
     copy.create_if_missing = false;
     copy.lock_mode = Options::kLockExclusive;
@@ -118,7 +121,7 @@ auto DBImpl::destroy(const Options &options, const char *filename) -> Status
         // The file header is not checked until a transaction is started. Run a read
         // transaction, which will return with a non-OK status if `filename` is not a
         // valid database.
-        s = db->view([](auto &) {
+        s = db->run(ReadOptions(), [](auto &) {
             return Status::ok();
         });
         if (s.is_ok()) {
@@ -132,19 +135,20 @@ auto DBImpl::destroy(const Options &options, const char *filename) -> Status
 
             // This DB doesn't use a shm file, since it was opened in exclusive locking
             // mode. shm files left by other connections must be removed manually.
-            auto path_buffer = UniqueBuffer::from_slice(
-                Slice(filename, std::strlen(filename)),
-                Slice(kDefaultShmSuffix, std::strlen(kDefaultShmSuffix)));
-            if (!path_buffer.is_empty()) {
-                auto t = env->remove_file(path_buffer.ptr());
+            String path_buffer;
+            if (append_strings(
+                    path_buffer,
+                    Slice(filename, std::strlen(filename)),
+                    kDefaultShmSuffix)) {
+                s = Status::no_memory();
+            } else {
+                auto t = env->remove_file(path_buffer.c_str());
                 if (t.is_ok()) {
                     log(options.info_log, R"(removed leftover shm file "%s")",
-                        path_buffer.ptr());
+                        path_buffer.c_str());
                 } else if (s.is_ok() && !t.is_not_found()) {
                     s = t;
                 }
-            } else {
-                s = Status::no_memory();
             }
         }
         delete db;
@@ -152,7 +156,7 @@ auto DBImpl::destroy(const Options &options, const char *filename) -> Status
     return s;
 }
 
-auto DBImpl::get_property(const Slice &name, Slice *out) const -> bool
+auto DBImpl::get_property(const Slice &name, String *out) const -> Status
 {
     if (out) {
         out->clear();
@@ -162,10 +166,10 @@ auto DBImpl::get_property(const Slice &name, Slice *out) const -> bool
         const auto prop = name.range(std::strlen(kBasePrefix));
 
         if (prop == "stats") {
+            int rc = 0;
             if (out) {
-                m_property.reset(nullptr, 0);
-                append_fmt_string(
-                    m_property,
+                rc = append_format_string(
+                    *out,
                     "Name               Value\n"
                     "------------------------\n"
                     "DB read(MB)   %10.4f\n"
@@ -186,13 +190,11 @@ auto DBImpl::get_property(const Slice &name, Slice *out) const -> bool
                     static_cast<double>(m_stat.counters[Stat::kCacheHits]) /
                         static_cast<double>(m_stat.counters[Stat::kCacheHits] +
                                             m_stat.counters[Stat::kCacheMisses]));
-                // Exclude the '\0' that is included in m_property.len().
-                *out = Slice(m_property.ptr(), m_property.len() - 1);
             }
-            return true;
+            return rc ? Status::no_memory() : Status::ok();
         }
     }
-    return false;
+    return Status::not_found();
 }
 
 static auto already_running_error() -> Status
@@ -233,7 +235,7 @@ auto DBImpl::prepare_tx(bool write, TxType *&tx_out) const -> Status
     }
     if (s.is_ok()) {
         CALICODB_EXPECT_TRUE(m_status.is_ok());
-        m_tx = new (std::nothrow) TxImpl({
+        m_tx = new (std::nothrow) TxImpl(TxImpl::Parameters{
             &m_status,
             &m_errors,
             m_pager.get(),
@@ -261,12 +263,12 @@ auto DBImpl::prepare_tx(bool write, TxType *&tx_out) const -> Status
     return s;
 }
 
-auto DBImpl::new_tx(WriteTag, Tx *&tx_out) -> Status
+auto DBImpl::new_tx(const WriteOptions &, Tx *&tx_out) -> Status
 {
     return prepare_tx(true, tx_out);
 }
 
-auto DBImpl::new_tx(Tx *&tx_out) const -> Status
+auto DBImpl::new_tx(const ReadOptions &, Tx *&tx_out) const -> Status
 {
     return prepare_tx(false, tx_out);
 }

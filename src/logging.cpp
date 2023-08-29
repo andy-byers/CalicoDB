@@ -10,87 +10,151 @@
 namespace calicodb
 {
 
-auto append_fmt_string(UniqueBuffer &str, const char *fmt, ...) -> void
+StringBuilder::StringBuilder(String str)
+    : m_len(0)
 {
-    std::va_list args;
-    va_start(args, fmt);
-
-    std::va_list args_copy;
-    va_copy(args_copy, args);
-    auto len = std::vsnprintf(nullptr, 0, fmt, args_copy);
-    va_end(args_copy);
-
-    CALICODB_EXPECT_GE(len, 0);
-    auto offset = str.len();
-    if (!str.is_empty() && str.ptr()[str.len() - 1] == '\0') {
-        // Consume trailing '\0', since it is included in str.len().
-        --offset;
+    if (auto *ptr = std::exchange(str.m_ptr, nullptr)) {
+        m_buf.reset(ptr, str.m_cap);
+        m_len = str.m_len;
+        str.clear();
     }
-    str.resize(offset + static_cast<size_t>(len) + 1);
-    if (!str.is_empty()) {
-        std::vsnprintf(str.ptr() + offset, str.len() - offset, fmt, args);
+}
+
+auto StringBuilder::ensure_capacity(size_t len) -> int
+{
+    auto capacity = std::max<size_t>(m_buf.len(), 1);
+    while (len + 1 > capacity) {
+        capacity *= 2;
     }
-    va_end(args);
+    if (capacity > m_buf.len()) {
+        return m_buf.realloc(capacity);
+    }
+    return 0;
 }
 
-auto append_fmt_string(std::string &str, const char *fmt, ...) -> void
+auto StringBuilder::trim() -> int
 {
-    std::va_list args;
-    va_start(args, fmt);
-
-    std::va_list args_copy;
-    va_copy(args_copy, args);
-    auto len = std::vsnprintf(
-        nullptr, 0,
-        fmt, args_copy);
-    va_end(args_copy);
-
-    CALICODB_EXPECT_GE(len, 0);
-    const auto offset = str.size();
-    str.resize(offset + static_cast<size_t>(len) + 1);
-    len = std::vsnprintf(
-        str.data() + offset,
-        str.size() - offset,
-        fmt, args);
-    str.pop_back();
-    va_end(args);
-
-    CALICODB_EXPECT_TRUE(0 <= len && len <= int(str.size()));
+    return m_buf.realloc(m_len + 1);
 }
 
-auto append_number(std::string &out, size_t value) -> void
+auto StringBuilder::build() && -> String
 {
-    char buffer[30];
-    std::snprintf(buffer, sizeof(buffer), "%llu", static_cast<unsigned long long>(value));
-    out.append(buffer);
+    const auto capacity = m_buf.len();
+    const auto length = std::exchange(m_len, 0);
+    auto *pointer = m_buf.release();
+    if (capacity) {
+        CALICODB_EXPECT_NE(pointer, nullptr);
+        CALICODB_EXPECT_LT(length, capacity);
+        pointer[length] = '\0';
+    }
+    return String(pointer, length, capacity);
 }
 
-auto append_escaped_string(std::string &out, const Slice &value) -> void
+auto StringBuilder::append(const Slice &s) -> int
 {
-    for (size_t i = 0; i < value.size(); ++i) {
-        const auto chr = value[i];
+    if (ensure_capacity(m_len + s.size())) {
+        return -1;
+    }
+    std::memcpy(m_buf.ptr() + m_len, s.data(), s.size());
+    m_len += s.size();
+    return 0;
+}
+
+auto StringBuilder::append_escaped(const Slice &s) -> int
+{
+    int rc = 0;
+    for (size_t i = 0; rc == 0 && i < s.size(); ++i) {
+        const auto chr = s[i];
         if (chr >= ' ' && chr <= '~') {
-            out.push_back(chr);
+            rc = append(chr);
         } else {
             char buffer[10];
             std::snprintf(buffer, sizeof(buffer), "\\x%02x", static_cast<unsigned>(chr) & 0xFF);
-            out.append(buffer);
+            rc = append(buffer);
         }
     }
+    return rc;
 }
 
-auto number_to_string(size_t value) -> std::string
+auto StringBuilder::append_format(const char *fmt, ...) -> int
 {
-    std::string out;
-    append_number(out, value);
-    return out;
+    std::va_list args;
+    va_start(args, fmt);
+    const auto rc = append_format_va(fmt, args);
+    va_end(args);
+    return rc;
 }
 
-auto escape_string(const Slice &value) -> std::string
+auto StringBuilder::append_format_va(const char *fmt, std::va_list args) -> int
 {
-    std::string out;
-    append_escaped_string(out, value);
-    return out;
+    // Make sure the pointer is not null.
+    if (ensure_capacity(1)) {
+        return -1;
+    }
+    for (int i = 0; i < 2; ++i) {
+        std::va_list args_copy;
+        va_copy(args_copy, args);
+        auto rc = std::vsnprintf(m_buf.ptr() + m_len,
+                                 m_buf.len() - m_len,
+                                 fmt, args_copy);
+        va_end(args_copy);
+
+        if (rc < 0) {
+            // This should never happen.
+            CALICODB_DEBUG_TRAP;
+            return -1;
+        }
+        const auto len = m_len + static_cast<size_t>(rc);
+        if (len + 1 <= m_buf.len()) {
+            // Success: m_buf had enough room for the message + '\0'.
+            m_len = len;
+            break;
+        } else if (i) {
+            // Already tried reallocating once. std::vsnprintf() may have a bug.
+            CALICODB_DEBUG_TRAP;
+            return -1;
+        } else if (ensure_capacity(len)) {
+            // Out of memory.
+            return -1;
+        }
+    }
+    return 0;
+}
+
+auto append_strings(String &str, const Slice &s, const Slice &t) -> int
+{
+    StringBuilder builder(std::move(str));
+    auto rc = builder.append(s);
+    if (rc == 0) {
+        rc = builder.append(t);
+    }
+    str = std::move(builder).build();
+    return rc;
+}
+
+auto append_escaped_string(String &target, const Slice &s) -> int
+{
+    StringBuilder builder(std::move(target));
+    const auto rc = builder.append_escaped(s);
+    target = std::move(builder).build();
+    return rc;
+}
+
+auto append_format_string(String &target, const char *fmt, ...) -> int
+{
+    std::va_list args;
+    va_start(args, fmt);
+    const auto rc = append_format_string_va(target, fmt, args);
+    va_end(args);
+    return rc;
+}
+
+auto append_format_string_va(String &target, const char *fmt, std::va_list args) -> int
+{
+    StringBuilder builder(std::move(target));
+    const auto rc = builder.append_format_va(fmt, args);
+    target = std::move(builder).build();
+    return rc;
 }
 
 // Modified from LevelDB.

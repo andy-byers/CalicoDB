@@ -119,14 +119,15 @@ protected:
           m_env(new CallbackEnv(Env::default_env()))
     {
         std::filesystem::remove_all(m_db_name.c_str());
-        std::filesystem::remove_all(m_db_name + kDefaultWalSuffix);
-        std::filesystem::remove_all(m_db_name + kDefaultShmSuffix);
+        std::filesystem::remove_all(m_db_name + kDefaultWalSuffix.to_string());
+        std::filesystem::remove_all(m_db_name + kDefaultShmSuffix.to_string());
     }
 
     ~DBTests() override
     {
         delete m_db;
         delete m_env;
+        EXPECT_EQ(Alloc::bytes_used(), 0);
     }
 
     auto SetUp() -> void override
@@ -145,7 +146,7 @@ protected:
         auto key_str = numeric_key<kMaxKV>(kv);
         key_str = key_str.substr(kMaxKV - key_length);
         const auto val_length = kMaxKV - key_length;
-        auto val_str = number_to_string(kv);
+        auto val_str = std::to_string(kv);
         if (val_str.size() < val_length) {
             val_str.resize(kPageSize / 4 - val_str.size(), '0');
         }
@@ -333,8 +334,8 @@ protected:
         options.env = env ? env : m_env;
         if (clear) {
             std::filesystem::remove_all(m_db_name.c_str());
-            std::filesystem::remove_all(m_db_name + kDefaultWalSuffix);
-            std::filesystem::remove_all(m_db_name + kDefaultShmSuffix);
+            std::filesystem::remove_all(m_db_name + kDefaultWalSuffix.to_string());
+            std::filesystem::remove_all(m_db_name + kDefaultShmSuffix.to_string());
             std::filesystem::remove_all(m_alt_wal_name);
         }
         if (m_config & kExclusiveLockMode) {
@@ -395,12 +396,12 @@ protected:
 
 TEST_F(DBTests, GetProperty)
 {
-    Slice value;
-    ASSERT_TRUE(m_db->get_property("calicodb.stats", nullptr));
-    ASSERT_TRUE(m_db->get_property("calicodb.stats", &value));
+    String value;
+    ASSERT_OK(m_db->get_property("calicodb.stats", nullptr));
+    ASSERT_OK(m_db->get_property("calicodb.stats", &value));
     ASSERT_FALSE(value.is_empty());
-    ASSERT_FALSE(m_db->get_property("nonexistent", nullptr));
-    ASSERT_FALSE(m_db->get_property("nonexistent", &value));
+    ASSERT_NOK(m_db->get_property("nonexistent", nullptr));
+    ASSERT_NOK(m_db->get_property("nonexistent", &value));
     ASSERT_TRUE(value.is_empty());
 }
 
@@ -408,7 +409,7 @@ TEST_F(DBTests, ConvenienceFunctions)
 {
     const auto *const_db = m_db;
     (void)reinterpret_cast<DBImpl *>(m_db)->TEST_pager();
-    ASSERT_OK(m_db->update([](auto &tx) {
+    ASSERT_OK(m_db->run(WriteOptions(), [](auto &tx) {
         // Let the database root page get initialized.
         EXPECT_OK(tx.create_bucket(BucketOptions(), "bucket", nullptr));
         reinterpret_cast<TxImpl *>(&tx)->TEST_validate();
@@ -423,41 +424,41 @@ TEST_F(DBTests, NewTx)
     Tx *reader1, *reader2 = reinterpret_cast<Tx *>(42);
     Tx *writer1, *writer2 = reinterpret_cast<Tx *>(42);
 
-    ASSERT_OK(m_db->new_tx(WriteTag(), writer1));
+    ASSERT_OK(m_db->new_tx(WriteOptions(), writer1));
     ASSERT_NE(nullptr, writer2);
-    ASSERT_NOK(m_db->new_tx(WriteTag(), writer2));
+    ASSERT_NOK(m_db->new_tx(WriteOptions(), writer2));
     ASSERT_EQ(nullptr, writer2);
     delete writer1;
 
-    ASSERT_OK(m_db->new_tx(WriteTag(), writer2));
+    ASSERT_OK(m_db->new_tx(WriteOptions(), writer2));
     ASSERT_NE(nullptr, reader2);
-    ASSERT_NOK(m_db->new_tx(reader2));
+    ASSERT_NOK(m_db->new_tx(ReadOptions(), reader2));
     ASSERT_EQ(nullptr, reader2);
     delete writer2;
 
-    ASSERT_OK(m_db->new_tx(reader2));
+    ASSERT_OK(m_db->new_tx(ReadOptions(), reader2));
     ASSERT_NE(nullptr, writer2);
-    ASSERT_NOK(m_db->new_tx(WriteTag(), writer2));
+    ASSERT_NOK(m_db->new_tx(WriteOptions(), writer2));
     ASSERT_EQ(nullptr, writer2);
     delete reader2;
 
-    ASSERT_OK(m_db->new_tx(reader1));
+    ASSERT_OK(m_db->new_tx(ReadOptions(), reader1));
     ASSERT_NE(nullptr, reader2);
-    ASSERT_NOK(m_db->new_tx(reader2));
+    ASSERT_NOK(m_db->new_tx(ReadOptions(), reader2));
     ASSERT_EQ(nullptr, reader2);
     delete reader1;
 
-    ASSERT_OK(m_db->update([](auto &tx) {
+    ASSERT_OK(m_db->run(WriteOptions(), [](auto &tx) {
         return put_range(tx, BucketOptions(), "bucket", 0, 100);
     }));
-    ASSERT_OK(m_db->view([](const auto &tx) {
+    ASSERT_OK(m_db->run(ReadOptions(), [](const auto &tx) {
         return check_range(tx, "bucket", 0, 100, true);
     }));
 }
 
 TEST_F(DBTests, NewBucket)
 {
-    ASSERT_OK(m_db->update([](auto &tx) {
+    ASSERT_OK(m_db->run(WriteOptions(), [](auto &tx) {
         TestCursor c;
         BucketOptions tbopt;
         EXPECT_NOK(test_open_bucket(tx, "BUCKET", c));
@@ -468,7 +469,7 @@ TEST_F(DBTests, NewBucket)
 
 TEST_F(DBTests, BucketBehavior)
 {
-    ASSERT_OK(m_db->update([](auto &tx) {
+    ASSERT_OK(m_db->run(WriteOptions(), [](auto &tx) {
         TestCursor c;
         EXPECT_OK(test_create_and_open_bucket(tx, BucketOptions(), "BUCKET", c));
         EXPECT_OK(tx.put(*c, "key", "value"));
@@ -481,12 +482,12 @@ TEST_F(DBTests, BucketBehavior)
 
 TEST_F(DBTests, ReadonlyTxDisallowsWrites)
 {
-    ASSERT_OK(m_db->update([](auto &tx) {
+    ASSERT_OK(m_db->run(WriteOptions(), [](auto &tx) {
         return tx.create_bucket(BucketOptions(), "BUCKET", nullptr);
     }));
 
     Tx *tx;
-    ASSERT_OK(m_db->new_tx(tx));
+    ASSERT_OK(m_db->new_tx(ReadOptions(), tx));
 
     TestCursor c;
     ASSERT_NOK(test_create_and_open_bucket(*tx, BucketOptions(), "BUCKET", c));
@@ -504,10 +505,10 @@ TEST_F(DBTests, ReadonlyTxDisallowsWrites)
 TEST_F(DBTests, ReadonlyTx)
 {
     do {
-        ASSERT_OK(m_db->update([](auto &tx) {
+        ASSERT_OK(m_db->run(WriteOptions(), [](auto &tx) {
             return tx.create_bucket(BucketOptions(), "BUCKET", nullptr);
         }));
-        ASSERT_OK(m_db->view([](auto &tx) {
+        ASSERT_OK(m_db->run(ReadOptions(), [](const auto &tx) {
             TestCursor c;
             return test_open_bucket(tx, "BUCKET", c);
         }));
@@ -521,7 +522,7 @@ TEST_F(DBTests, UpdateThenView)
         BucketOptions tbopt;
         tbopt.error_if_exists = true;
         for (int i = 0; i < 3; ++i) {
-            ASSERT_OK(m_db->update([i, tbopt, round](auto &tx) {
+            ASSERT_OK(m_db->run(WriteOptions(), [i, tbopt, round](auto &tx) {
                 TestCursor c;
                 auto s = test_create_and_open_bucket(tx, tbopt, kBucketStr + i, c);
                 if (s.is_ok()) {
@@ -534,7 +535,7 @@ TEST_F(DBTests, UpdateThenView)
             }));
         }
         for (int i = 0; i < 3; ++i) {
-            ASSERT_OK(m_db->view([round, i](auto &tx) {
+            ASSERT_OK(m_db->run(ReadOptions(), [round, i](const auto &tx) {
                 TestCursor c;
                 auto s = test_open_bucket(tx, kBucketStr + i, c);
                 if (s.is_ok()) {
@@ -545,7 +546,7 @@ TEST_F(DBTests, UpdateThenView)
                 return s;
             }));
         }
-        ASSERT_OK(m_db->update([](auto &tx) {
+        ASSERT_OK(m_db->run(WriteOptions(), [](auto &tx) {
             return tx.vacuum();
         }));
         ASSERT_OK(m_db->checkpoint(false));
@@ -556,7 +557,7 @@ TEST_F(DBTests, UpdateThenView)
 TEST_F(DBTests, RollbackRootUpdate)
 {
     do {
-        ASSERT_EQ(0, std::strcmp(m_db->update([](auto &tx) {
+        ASSERT_EQ(0, std::strcmp(m_db->run(WriteOptions(), [](auto &tx) {
                                          TestCursor c;
                                          for (size_t i = 0; i < 10; ++i) {
                                              auto s = test_create_and_open_bucket(tx, BucketOptions(), numeric_key(i), c);
@@ -574,7 +575,7 @@ TEST_F(DBTests, RollbackRootUpdate)
                                      })
                                      .message(),
                                  "42"));
-        ASSERT_OK(m_db->view([](const auto &tx) {
+        ASSERT_OK(m_db->run(ReadOptions(), [](const auto &tx) {
             TestCursor c;
             Status s;
             for (size_t i = 0; i < 10 && s.is_ok(); ++i) {
@@ -597,7 +598,7 @@ TEST_F(DBTests, RollbackUpdate)
     size_t round = 0;
     do {
         for (int i = 0; i < 3; ++i) {
-            ASSERT_EQ(0, std::strcmp(m_db->update([i, round](auto &tx) {
+            ASSERT_EQ(0, std::strcmp(m_db->run(WriteOptions(), [i, round](auto &tx) {
                                              TestCursor c;
                                              auto s = test_create_and_open_bucket(tx, BucketOptions(), kBucketStr + i, c);
                                              if (s.is_ok()) {
@@ -623,7 +624,7 @@ TEST_F(DBTests, RollbackUpdate)
                                      "42"));
         }
         for (int i = 0; i < 3; ++i) {
-            ASSERT_OK(m_db->view([round, i](const auto &tx) {
+            ASSERT_OK(m_db->run(ReadOptions(), [round, i](const auto &tx) {
                 TestCursor c;
                 auto s = test_open_bucket(tx, kBucketStr + i, c);
                 if (s.is_ok()) {
@@ -643,7 +644,7 @@ TEST_F(DBTests, ScanWholeDatabase)
     static constexpr size_t kNumBuckets = 32;
     static constexpr size_t kRecordsPerBucket = 100;
 
-    ASSERT_OK(m_db->update([](auto &tx) {
+    ASSERT_OK(m_db->run(WriteOptions(), [](auto &tx) {
         TestCursor c;
         for (size_t i = 0; i < kNumBuckets; ++i) {
             EXPECT_OK(put_range(tx, BucketOptions(), numeric_key(i), 0, kRecordsPerBucket));
@@ -651,7 +652,7 @@ TEST_F(DBTests, ScanWholeDatabase)
         return Status::ok();
     }));
 
-    ASSERT_OK(m_db->view([](const auto &tx) {
+    ASSERT_OK(m_db->run(ReadOptions(), [](const auto &tx) {
         auto &schema = tx.schema();
         schema.seek_first();
         for (size_t i = 0; i < kNumBuckets; ++i) {
@@ -681,7 +682,7 @@ TEST_F(DBTests, ScanWholeDatabase)
 TEST_F(DBTests, VacuumEmptyDB)
 {
     do {
-        ASSERT_OK(m_db->update([](auto &tx) {
+        ASSERT_OK(m_db->run(WriteOptions(), [](auto &tx) {
             return tx.vacuum();
         }));
     } while (change_options(true));
@@ -697,7 +698,7 @@ TEST_F(DBTests, AutoCheckpoint)
         options.auto_checkpoint = i;
         ASSERT_OK(DB::open(options, m_db_name.c_str(), m_db));
         for (size_t j = 0; j < 10; ++j) {
-            ASSERT_OK(m_db->update([j](auto &tx) {
+            ASSERT_OK(m_db->run(WriteOptions(), [j](auto &tx) {
                 return put_range(tx, BucketOptions(), "b", j * 1'000, (j + 1) * 1'000);
             }));
         }
@@ -706,7 +707,7 @@ TEST_F(DBTests, AutoCheckpoint)
 
 TEST_F(DBTests, CheckpointResize)
 {
-    ASSERT_OK(m_db->update([](auto &tx) {
+    ASSERT_OK(m_db->run(WriteOptions(), [](auto &tx) {
         return tx.create_bucket(BucketOptions(), "BUCKET", nullptr);
     }));
     ASSERT_EQ(0, file_size(m_db_name.c_str()));
@@ -714,7 +715,7 @@ TEST_F(DBTests, CheckpointResize)
     ASSERT_OK(m_db->checkpoint(true));
     ASSERT_EQ(kPageSize * 3, file_size(m_db_name.c_str()));
 
-    ASSERT_OK(m_db->update([](auto &tx) {
+    ASSERT_OK(m_db->run(WriteOptions(), [](auto &tx) {
         auto s = tx.drop_bucket("BUCKET");
         if (s.is_ok()) {
             s = tx.vacuum();
@@ -731,17 +732,17 @@ TEST_F(DBTests, CheckpointResize)
 
 TEST_F(DBTests, DropBuckets)
 {
-    ASSERT_OK(m_db->update([](auto &tx) {
+    ASSERT_OK(m_db->run(WriteOptions(), [](auto &tx) {
         EXPECT_OK(tx.create_bucket(BucketOptions(), "a", nullptr));
         EXPECT_OK(tx.create_bucket(BucketOptions(), "b", nullptr));
         return Status::ok();
     }));
-    ASSERT_OK(m_db->update([](auto &tx) {
+    ASSERT_OK(m_db->run(WriteOptions(), [](auto &tx) {
         EXPECT_OK(tx.drop_bucket("b"));
         EXPECT_NOK(tx.drop_bucket("c"));
         return Status::ok();
     }));
-    ASSERT_OK(m_db->view([](auto &tx) {
+    ASSERT_OK(m_db->run(ReadOptions(), [](const auto &tx) {
         TestCursor a, nonexistent;
         auto &schema = tx.schema();
         schema.seek_first();
@@ -758,28 +759,22 @@ TEST_F(DBTests, DropBuckets)
 
 TEST_F(DBTests, RerootBuckets)
 {
-    ASSERT_OK(m_db->update([&d = m_db](auto &tx) {
+    ASSERT_OK(m_db->run(WriteOptions(), [](auto &tx) {
         EXPECT_OK(tx.create_bucket(BucketOptions(), "a", nullptr));
         EXPECT_OK(tx.create_bucket(BucketOptions(), "b", nullptr));
         EXPECT_OK(tx.create_bucket(BucketOptions(), "c", nullptr));
         EXPECT_OK(tx.create_bucket(BucketOptions(), "d", nullptr));
         reinterpret_cast<TxImpl &>(tx).TEST_validate();
-        print_database_overview(std::cerr, reinterpret_cast<DBImpl *>(d)->TEST_pager());
-        std::cerr << "\n";
         EXPECT_OK(tx.drop_bucket("a"));
-        print_database_overview(std::cerr, reinterpret_cast<DBImpl *>(d)->TEST_pager());
-        std::cerr << "\n";
         EXPECT_OK(tx.drop_bucket("b"));
-        print_database_overview(std::cerr, reinterpret_cast<DBImpl *>(d)->TEST_pager());
-        std::cerr << "\n";
         EXPECT_OK(tx.drop_bucket("d"));
         return Status::ok();
     }));
-    ASSERT_OK(m_db->update([](auto &tx) {
+    ASSERT_OK(m_db->run(WriteOptions(), [](auto &tx) {
         EXPECT_OK(tx.create_bucket(BucketOptions(), "e", nullptr));
         return tx.vacuum();
     }));
-    ASSERT_OK(m_db->view([](auto &tx) {
+    ASSERT_OK(m_db->run(ReadOptions(), [](const auto &tx) {
         TestCursor c, e;
         auto &schema = tx.schema();
         schema.seek_first();
@@ -806,22 +801,22 @@ TEST_F(DBTests, BucketExistence)
         TestCursor c;
         return test_open_bucket(tx, "bucket", c);
     };
-    ASSERT_NOK(m_db->view(try_open_bucket));
-    ASSERT_NOK(m_db->update(try_open_bucket));
+    ASSERT_NOK(m_db->run(ReadOptions(), try_open_bucket));
+    ASSERT_NOK(m_db->run(WriteOptions(), try_open_bucket));
 
     // Tx::create_bucket() must be used for bucket creation.
-    ASSERT_OK(m_db->update([](auto &tx) {
+    ASSERT_OK(m_db->run(WriteOptions(), [](auto &tx) {
         return tx.create_bucket(BucketOptions(), "bucket", nullptr);
     }));
 
-    ASSERT_NOK(m_db->update([](auto &tx) {
+    ASSERT_NOK(m_db->run(WriteOptions(), [](auto &tx) {
         BucketOptions b_opt;
         b_opt.error_if_exists = true;
         return tx.create_bucket(b_opt, "bucket", nullptr);
     }));
 
     // Now the bucket can be opened.
-    ASSERT_OK(m_db->view([](auto &tx) {
+    ASSERT_OK(m_db->run(ReadOptions(), [](const auto &tx) {
         TestCursor c;
         return test_open_bucket(tx, "bucket", c);
     }));
@@ -833,7 +828,7 @@ TEST_F(DBTests, SpaceAmplification)
     static constexpr size_t kNumRecords = kInputSize / 256;
 
     RandomGenerator random;
-    ASSERT_OK(m_db->update([&random](auto &tx) {
+    ASSERT_OK(m_db->run(WriteOptions(), [&random](auto &tx) {
         TestCursor c;
         auto s = test_create_and_open_bucket(tx, BucketOptions(), "b", c);
         for (size_t i = 0; s.is_ok() && i < kNumRecords; ++i) {
@@ -853,13 +848,13 @@ TEST_F(DBTests, SpaceAmplification)
 
 TEST_F(DBTests, VacuumDroppedBuckets)
 {
-    ASSERT_OK(m_db->update([](auto &tx) {
+    ASSERT_OK(m_db->run(WriteOptions(), [](auto &tx) {
         EXPECT_OK(put_range(tx, BucketOptions(), "a", 0, 1'000));
         EXPECT_OK(put_range(tx, BucketOptions(), "b", 0, 1'000));
         EXPECT_OK(put_range(tx, BucketOptions(), "c", 0, 1'000));
         return Status::ok();
     }));
-    ASSERT_OK(m_db->update([](auto &tx) {
+    ASSERT_OK(m_db->run(WriteOptions(), [](auto &tx) {
         TestCursor a, b, c;
         EXPECT_OK(test_open_bucket(tx, "a", a));
         EXPECT_OK(test_open_bucket(tx, "b", b));
@@ -892,7 +887,7 @@ TEST(OldWalTests, HandlesOldWalFile)
     dbopt.env = &env;
     dbopt.wal_filename = kOldWal;
     ASSERT_OK(DB::open(dbopt, "./testdb", db));
-    ASSERT_OK(db->update([](auto &tx) {
+    ASSERT_OK(db->run(WriteOptions(), [](auto &tx) {
         return tx.create_bucket(BucketOptions(), "BUCKET", nullptr);
     }));
 
@@ -904,15 +899,15 @@ TEST(OldWalTests, HandlesOldWalFile)
 TEST(DestructionTests, DestructionBehavior)
 {
     const auto db_name = testing::TempDir() + "calicodb_test_db";
-    const auto wal_name = db_name + kDefaultWalSuffix;
-    const auto shm_name = db_name + kDefaultShmSuffix;
+    const auto wal_name = db_name + kDefaultWalSuffix.to_string();
+    const auto shm_name = db_name + kDefaultShmSuffix.to_string();
     (void)Env::default_env().remove_file(db_name.c_str());
     (void)Env::default_env().remove_file(wal_name.c_str());
     (void)Env::default_env().remove_file(shm_name.c_str());
 
     DB *db;
     ASSERT_OK(DB::open(Options(), db_name.c_str(), db));
-    ASSERT_OK(db->update([](auto &tx) {
+    ASSERT_OK(db->run(WriteOptions(), [](auto &tx) {
         return tx.create_bucket(BucketOptions(), "BUCKET", nullptr);
     }));
     ASSERT_TRUE(Env::default_env().file_exists(db_name.c_str()));
@@ -1118,7 +1113,7 @@ TEST_F(TransactionTests, ReadsMostRecentSnapshot)
         options.env = m_env;
         auto s = DB::open(options, m_db_name.c_str(), db);
         ASSERT_OK(s);
-        s = db->view([key_limit](auto &tx) {
+        s = db->run(ReadOptions(), [key_limit](auto &tx) {
             return check_range(tx, "BUCKET", 0, key_limit, true);
         });
         delete db;
@@ -1127,7 +1122,7 @@ TEST_F(TransactionTests, ReadsMostRecentSnapshot)
         }
         ASSERT_OK(s);
     };
-    ASSERT_OK(m_db->update([&](auto &tx) {
+    ASSERT_OK(m_db->run(WriteOptions(), [&](auto &tx) {
         // WARNING: If too big of a transaction is performed, the system may run out of file
         //          descriptors. The closing of the database file must sometimes be deferred
         //          until after the transaction completes, since this connection will have a
@@ -1163,10 +1158,10 @@ TEST_F(TransactionTests, ExclusiveLockingMode)
 
             Status s;
             ASSERT_TRUE((s = DB::open(options, m_db_name.c_str(), db)).is_busy())
-                << s.type_name() << ": " << s.message();
+                << s.message();
             ++n;
         };
-        ASSERT_OK(m_db->update([](auto &tx) {
+        ASSERT_OK(m_db->run(WriteOptions(), [](auto &tx) {
             for (size_t i = 0; i < 50; ++i) {
                 EXPECT_OK(put_range(tx, BucketOptions(), "BUCKET", i * 10, (i + 1) * 10));
                 EXPECT_OK(tx.commit());
@@ -1183,7 +1178,7 @@ TEST_F(TransactionTests, IgnoresFutureVersions)
     auto has_open_db = false;
     uint64_t n = 0;
 
-    ASSERT_OK(m_db->update([](auto &tx) {
+    ASSERT_OK(m_db->run(WriteOptions(), [](auto &tx) {
         return put_range(tx, BucketOptions(), "BUCKET", 0, kN);
     }));
 
@@ -1198,7 +1193,7 @@ TEST_F(TransactionTests, IgnoresFutureVersions)
         options.env = m_env;
         has_open_db = true;
         ASSERT_OK(DB::open(options, m_db_name.c_str(), db));
-        ASSERT_OK(db->update([n](auto &tx) {
+        ASSERT_OK(db->run(WriteOptions(), [n](auto &tx) {
             return put_range(tx, BucketOptions(), "BUCKET", kN * n, kN * (n + 1));
         }));
         delete db;
@@ -1206,7 +1201,7 @@ TEST_F(TransactionTests, IgnoresFutureVersions)
         ++n;
     };
 
-    (void)m_db->view([&n](auto &tx) {
+    (void)m_db->run(ReadOptions(), [&n](const auto &tx) {
         for (size_t i = 0; i < kN; ++i) {
             EXPECT_OK(check_range(tx, "BUCKET", 0, kN, true));
             EXPECT_OK(check_range(tx, "BUCKET", kN, kN * (n + 1), false));
@@ -1227,7 +1222,7 @@ protected:
 
 TEST_F(CheckpointTests, CheckpointerBlocksOtherCheckpointers)
 {
-    ASSERT_OK(m_db->update([](auto &tx) {
+    ASSERT_OK(m_db->run(WriteOptions(), [](auto &tx) {
         return put_range(tx, BucketOptions(), "BUCKET", 0, 1'000);
     }));
     m_env->m_write_callback = [this] {
@@ -1250,11 +1245,11 @@ TEST_F(CheckpointTests, CheckpointerAllowsTransactions)
     static constexpr size_t kSavedCount = 100;
 
     // Set up a DB with some records in both the database file and the WAL.
-    ASSERT_OK(m_db->update([](auto &tx) {
+    ASSERT_OK(m_db->run(WriteOptions(), [](auto &tx) {
         return put_range(tx, BucketOptions(), "before", 0, kSavedCount);
     }));
     ASSERT_OK(m_db->checkpoint(true));
-    ASSERT_OK(m_db->update([](auto &tx) {
+    ASSERT_OK(m_db->run(WriteOptions(), [](auto &tx) {
         // These records will be checkpointed below. round is 1 to cause a new version of the first half of
         // the records to be written.
         return put_range(tx, BucketOptions(), "before", 0, kSavedCount / 2, 1);
@@ -1271,10 +1266,10 @@ TEST_F(CheckpointTests, CheckpointerAllowsTransactions)
         Options options;
         options.env = m_env;
         ASSERT_OK(DB::open(options, m_db_name.c_str(), db));
-        ASSERT_OK(db->update([n](auto &tx) {
+        ASSERT_OK(db->run(WriteOptions(), [n](auto &tx) {
             return put_range(tx, BucketOptions(), "after", n * 2, (n + 1) * 2);
         }));
-        (void)db->view([n](auto &tx) {
+        (void)db->run(ReadOptions(), [n](auto &tx) {
             EXPECT_OK(check_range(tx, "before", 0, kSavedCount / 2, true, 1));
             EXPECT_OK(check_range(tx, "before", kSavedCount / 2, kSavedCount, true, 0));
             EXPECT_OK(check_range(tx, "after", 0, (n + 1) * 2, true));
@@ -1301,7 +1296,7 @@ protected:
     {
         static constexpr auto *kName = "12345678_BUCKET_NAMES";
         static constexpr size_t kN = 10;
-        (void)m_db->update([&bitmaps](auto &tx) {
+        (void)m_db->run(WriteOptions(), [&bitmaps](auto &tx) {
             TestCursor cursors[8];
             for (size_t i = 0; i < 8; ++i) {
                 EXPECT_OK(test_create_and_open_bucket(tx, BucketOptions(), kName + i, cursors[i]));
@@ -1398,53 +1393,55 @@ TEST_F(DBVacuumTests, SanityCheck)
         0b11111111,
     });
 }
-//
-// TEST(TestModelDB, TestModelDB)
-//{
-//    DB *db;
-//    KVStore store;
-//    FakeEnv env;
-//    Options options;
-//    options.env = &env;
-//    const auto filename = testing::TempDir() + "calicodb_test_model_db";
-//    ASSERT_OK(ModelDB::open(options, filename.c_str(), store, db));
-//    ASSERT_OK(db->update([](auto &tx) {
-//        EXPECT_OK(tx.create_bucket(BucketOptions(), "a", nullptr));
-//        EXPECT_OK(tx.create_bucket(BucketOptions(), "b", nullptr));
-//        EXPECT_OK(tx.create_bucket(BucketOptions(), "c", nullptr));
-//        return Status::ok();
-//    }));
-//    ASSERT_TRUE(env.file_exists(filename.c_str()));
-//    ASSERT_OK(db->update([](auto &tx) {
-//        Cursor *c;
-//        auto &schema = tx.schema();
-//        schema.seek_first();
-////        EXPECT_TRUE(schema.is_valid());
-//        EXPECT_EQ(schema.key(), "a");
-//        EXPECT_OK(tx.open_bucket(schema.key(), c));
-//        EXPECT_OK(tx.drop_bucket(schema.key())); // Drop bucket before delete cursor.
-//        delete c;
-//
-//        // NOTE: The schema cursor is used to fulfill create/open/drop bucket requests. Each time
-//        //       a *_bucket() method is called on the Tx object, the schema cursor may be moved.
-//        schema.seek_first();
-////        EXPECT_TRUE(schema.is_valid());
-//        EXPECT_EQ(schema.key(), "b");
-//        EXPECT_OK(tx.open_bucket(schema.key(), c));
-//        delete c;
-//        EXPECT_OK(tx.drop_bucket(schema.key())); // Drop bucket after delete cursor.
-//
-//        schema.seek_first();
-////        EXPECT_TRUE(schema.is_valid());
-//        EXPECT_EQ(schema.key(), "c");
-//        EXPECT_OK(tx.open_bucket(schema.key(), c));
-//        delete c;
-//
-//        reinterpret_cast<ModelTx &>(tx).check_consistency();
-//        return Status::ok();
-//    }));
-//    reinterpret_cast<ModelDB *>(db)->check_consistency();
-//    delete db;
-//}
+
+static auto model_writer(Tx &tx) -> Status
+{
+    TestCursor c;
+    auto &schema = tx.schema();
+    schema.seek_first();
+    EXPECT_TRUE(schema.is_valid());
+    EXPECT_EQ(schema.key(), "a");
+    EXPECT_OK(test_open_bucket(tx, schema.key(), c));
+    EXPECT_OK(tx.drop_bucket(schema.key())); // Drop bucket before delete cursor.
+    c.reset();
+
+    // NOTE: The schema cursor is used to fulfill create/open/drop bucket requests. Each time
+    //       a *_bucket() method is called on the Tx object, the schema cursor may be moved.
+    schema.seek_first();
+    EXPECT_TRUE(schema.is_valid());
+    EXPECT_EQ(schema.key(), "b");
+    EXPECT_OK(test_open_bucket(tx, schema.key(), c));
+    c.reset();
+    EXPECT_OK(tx.drop_bucket(schema.key())); // Drop bucket after delete cursor.
+
+    schema.seek_first();
+    EXPECT_TRUE(schema.is_valid());
+    EXPECT_EQ(schema.key(), "c");
+    EXPECT_OK(test_open_bucket(tx, schema.key(), c));
+    c.reset();
+
+    reinterpret_cast<ModelTx &>(tx).check_consistency();
+    return Status::ok();
+}
+TEST(TestModelDB, TestModelDB)
+{
+    DB *db;
+    KVStore store;
+    FakeEnv env;
+    Options options;
+    options.env = &env;
+    const auto filename = testing::TempDir() + "calicodb_test_model_db";
+    ASSERT_OK(ModelDB::open(options, filename.c_str(), store, db));
+    ASSERT_OK(db->run(WriteOptions(), [](auto &tx) {
+        EXPECT_OK(tx.create_bucket(BucketOptions(), "a", nullptr));
+        EXPECT_OK(tx.create_bucket(BucketOptions(), "b", nullptr));
+        EXPECT_OK(tx.create_bucket(BucketOptions(), "c", nullptr));
+        return Status::ok();
+    }));
+    ASSERT_TRUE(env.file_exists(filename.c_str()));
+    ASSERT_OK(db->run(WriteOptions(), model_writer));
+    reinterpret_cast<ModelDB *>(db)->check_consistency();
+    delete db;
+}
 
 } // namespace calicodb::test
