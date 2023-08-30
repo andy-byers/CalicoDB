@@ -407,7 +407,6 @@ TEST_F(DBTests, GetProperty)
 
 TEST_F(DBTests, ConvenienceFunctions)
 {
-    const auto *const_db = m_db;
     (void)reinterpret_cast<DBImpl *>(m_db)->TEST_pager();
     ASSERT_OK(m_db->run(WriteOptions(), [](auto &tx) {
         // Let the database root page get initialized.
@@ -1071,7 +1070,6 @@ TEST_F(DBOpenTests, CustomLogger)
             std::va_list args_copy;
             va_copy(args_copy, args);
 
-            const auto offset = m_str.size();
             const auto len = std::vsnprintf(
                 fixed, sizeof(fixed), fmt, args);
             ASSERT_TRUE(0 <= len && len < 1'024);

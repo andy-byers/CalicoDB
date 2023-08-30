@@ -1012,7 +1012,6 @@ public:
 
     auto create_tree(size_t tid)
     {
-        Id root;
         Cursor *c;
         EXPECT_OK(m_schema->create_bucket(
             BucketOptions(),
@@ -1029,7 +1028,7 @@ public:
         size_t indices[kInitialRecordCount];
         std::iota(std::begin(indices), std::end(indices), 0);
         if (shuffle) {
-            std::default_random_engine rng(tid);
+            std::default_random_engine rng(static_cast<unsigned int>(tid));
             std::shuffle(std::begin(indices), std::end(indices), rng);
         }
         for (auto idx : indices) {

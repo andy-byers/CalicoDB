@@ -7,38 +7,42 @@
 namespace calicodb
 {
 
-static constexpr uint16_t kPageMask = kPageSize - 1;
-static constexpr uint32_t kSlotWidth = sizeof(uint16_t);
-static constexpr uint32_t kMinBlockSize = 2 * kSlotWidth;
+namespace
+{
+constexpr uint16_t kPageMask = kPageSize - 1;
+constexpr uint32_t kSlotWidth = sizeof(uint16_t);
+constexpr uint32_t kMinBlockSize = 2 * kSlotWidth;
+constexpr uint32_t kMaxCellCount = (kPageSize - NodeHdr::kSize) /
+                                   (kMinCellHeaderSize + kSlotWidth);
 
-[[nodiscard]] static auto node_header_offset(const Node &node)
+[[nodiscard]] auto node_header_offset(const Node &node)
 {
     return page_offset(node.ref->page_id);
 }
 
-[[nodiscard]] static auto cell_slots_offset(const Node &node) -> uint32_t
+[[nodiscard]] auto cell_slots_offset(const Node &node) -> uint32_t
 {
     return node_header_offset(node) + NodeHdr::kSize;
 }
 
-[[nodiscard]] static auto cell_area_offset(const Node &node) -> uint32_t
+[[nodiscard]] auto cell_area_offset(const Node &node) -> uint32_t
 {
     return cell_slots_offset(node) + NodeHdr::get_cell_count(node.hdr()) * kSlotWidth;
 }
 
-[[nodiscard]] static auto get_ivec_slot(const Node &node, uint32_t index) -> uint32_t
+[[nodiscard]] auto get_ivec_slot(const Node &node, uint32_t index) -> uint32_t
 {
     CALICODB_EXPECT_LT(index, NodeHdr::get_cell_count(node.hdr()));
     return kPageMask & get_u16(node.ref->data + cell_slots_offset(node) + index * kSlotWidth);
 }
 
-static auto put_ivec_slot(Node &node, uint32_t index, uint32_t slot)
+auto put_ivec_slot(Node &node, uint32_t index, uint32_t slot)
 {
     CALICODB_EXPECT_LT(index, NodeHdr::get_cell_count(node.hdr()));
     return put_u16(node.ref->data + cell_slots_offset(node) + index * kSlotWidth, static_cast<uint16_t>(slot));
 }
 
-static auto insert_ivec_slot(Node &node, uint32_t index, uint32_t slot)
+auto insert_ivec_slot(Node &node, uint32_t index, uint32_t slot)
 {
     CALICODB_EXPECT_GE(node.gap_size, kSlotWidth);
     const auto count = NodeHdr::get_cell_count(node.hdr());
@@ -54,7 +58,7 @@ static auto insert_ivec_slot(Node &node, uint32_t index, uint32_t slot)
     NodeHdr::put_cell_count(node.hdr(), count + 1);
 }
 
-static auto remove_ivec_slot(Node &node, uint32_t index)
+auto remove_ivec_slot(Node &node, uint32_t index)
 {
     const auto count = NodeHdr::get_cell_count(node.hdr());
     CALICODB_EXPECT_LT(index, count);
@@ -68,7 +72,7 @@ static auto remove_ivec_slot(Node &node, uint32_t index)
     NodeHdr::put_cell_count(node.hdr(), count - 1);
 }
 
-[[nodiscard]] static auto external_parse_cell(char *data, const char *limit, Cell *cell_out)
+[[nodiscard]] auto external_parse_cell(char *data, const char *limit, Cell *cell_out)
 {
     uint32_t key_size, value_size;
     const auto *ptr = data;
@@ -97,7 +101,7 @@ static auto remove_ivec_slot(Node &node, uint32_t index)
     }
     return -1;
 }
-[[nodiscard]] static auto internal_parse_cell(char *data, const char *limit, Cell *cell_out)
+[[nodiscard]] auto internal_parse_cell(char *data, const char *limit, Cell *cell_out)
 {
     uint32_t key_size;
     if (const auto *ptr = decode_varint(data + sizeof(uint32_t), limit, key_size)) {
@@ -119,6 +123,91 @@ static auto remove_ivec_slot(Node &node, uint32_t index)
     }
     return -1;
 }
+
+constexpr int (*kParsers[2])(char *, const char *, Cell *) = {
+    internal_parse_cell,
+    external_parse_cell,
+};
+
+[[nodiscard]] auto get_next_pointer(const Node &node, uint32_t offset) -> uint32_t
+{
+    return get_u16(node.ref->data + offset);
+}
+
+[[nodiscard]] auto get_block_size(const Node &node, uint32_t offset) -> uint32_t
+{
+    return get_u16(node.ref->data + offset + kSlotWidth);
+}
+
+auto set_next_pointer(Node &node, uint32_t offset, uint32_t value) -> void
+{
+    CALICODB_EXPECT_LT(value, kPageSize);
+    return put_u16(node.ref->data + offset, static_cast<uint16_t>(value));
+}
+
+auto set_block_size(Node &node, uint32_t offset, uint32_t value) -> void
+{
+    CALICODB_EXPECT_GE(value, kMinBlockSize);
+    CALICODB_EXPECT_LT(value, kPageSize);
+    return put_u16(node.ref->data + offset + kSlotWidth, static_cast<uint16_t>(value));
+}
+
+auto take_free_space(Node &node, uint32_t ptr0, uint32_t ptr1, uint32_t needed_size) -> uint32_t
+{
+    CALICODB_EXPECT_LE(ptr1 + kMinBlockSize, kPageSize);
+    CALICODB_EXPECT_LT(ptr0 + kMinBlockSize, ptr1);
+    CALICODB_EXPECT_LE(needed_size, node.usable_space);
+
+    const auto ptr2 = get_next_pointer(node, ptr1);
+    const auto block_len = get_block_size(node, ptr1);
+
+    CALICODB_EXPECT_GE(block_len, needed_size);
+    const auto leftover_len = block_len - needed_size;
+
+    if (leftover_len < kMinBlockSize) {
+        const auto frag_count = NodeHdr::get_frag_count(node.hdr());
+        NodeHdr::put_frag_count(node.hdr(), frag_count + leftover_len);
+        if (ptr0 == 0) {
+            NodeHdr::put_free_start(node.hdr(), ptr2);
+        } else {
+            set_next_pointer(node, ptr0, ptr2);
+        }
+    } else {
+        set_block_size(node, ptr1, leftover_len);
+    }
+    return ptr1 + leftover_len;
+}
+
+auto allocate_from_freelist(Node &node, uint32_t needed_size) -> uint32_t
+{
+    auto block_ofs = NodeHdr::get_free_start(node.hdr());
+    uint32_t prev_ofs = 0;
+
+    while (block_ofs) {
+        // Ensured by BlockAllocator::freelist_size(), which is called each time a node is
+        // created from a page.
+        CALICODB_EXPECT_LE(prev_ofs + kMinBlockSize, block_ofs);
+        const auto block_len = get_block_size(node, block_ofs);
+        if (needed_size <= block_len) {
+            return take_free_space(node, prev_ofs, block_ofs, needed_size);
+        }
+        prev_ofs = block_ofs;
+        block_ofs = get_next_pointer(node, block_ofs);
+    }
+    return 0;
+}
+
+auto allocate_from_gap(Node &node, uint32_t needed_size) -> uint32_t
+{
+    if (node.gap_size >= needed_size) {
+        node.gap_size -= needed_size;
+        const auto offset = NodeHdr::get_cell_start(node.hdr()) - needed_size;
+        NodeHdr::put_cell_start(node.hdr(), offset);
+        return offset;
+    }
+    return 0U;
+}
+} // namespace
 
 auto Node::alloc(uint32_t index, uint32_t size) -> int
 {
@@ -158,85 +247,6 @@ auto Node::alloc(uint32_t index, uint32_t size) -> int
     put_ivec_slot(*this, index, static_cast<uint32_t>(offset));
     usable_space -= size + kSlotWidth;
     return static_cast<int>(offset);
-}
-
-[[nodiscard]] static auto get_next_pointer(const Node &node, uint32_t offset) -> uint32_t
-{
-    return get_u16(node.ref->data + offset);
-}
-
-[[nodiscard]] static auto get_block_size(const Node &node, uint32_t offset) -> uint32_t
-{
-    return get_u16(node.ref->data + offset + kSlotWidth);
-}
-
-static auto set_next_pointer(Node &node, uint32_t offset, uint32_t value) -> void
-{
-    CALICODB_EXPECT_LT(value, kPageSize);
-    return put_u16(node.ref->data + offset, static_cast<uint16_t>(value));
-}
-
-static auto set_block_size(Node &node, uint32_t offset, uint32_t value) -> void
-{
-    CALICODB_EXPECT_GE(value, kMinBlockSize);
-    CALICODB_EXPECT_LT(value, kPageSize);
-    return put_u16(node.ref->data + offset + kSlotWidth, static_cast<uint16_t>(value));
-}
-
-static auto take_free_space(Node &node, uint32_t ptr0, uint32_t ptr1, uint32_t needed_size) -> uint32_t
-{
-    CALICODB_EXPECT_LE(ptr1 + kMinBlockSize, kPageSize);
-    CALICODB_EXPECT_LT(ptr0 + kMinBlockSize, ptr1);
-    CALICODB_EXPECT_LE(needed_size, node.usable_space);
-
-    const auto ptr2 = get_next_pointer(node, ptr1);
-    const auto block_len = get_block_size(node, ptr1);
-
-    CALICODB_EXPECT_GE(block_len, needed_size);
-    const auto leftover_len = block_len - needed_size;
-
-    if (leftover_len < kMinBlockSize) {
-        const auto frag_count = NodeHdr::get_frag_count(node.hdr());
-        NodeHdr::put_frag_count(node.hdr(), frag_count + leftover_len);
-        if (ptr0 == 0) {
-            NodeHdr::put_free_start(node.hdr(), ptr2);
-        } else {
-            set_next_pointer(node, ptr0, ptr2);
-        }
-    } else {
-        set_block_size(node, ptr1, leftover_len);
-    }
-    return ptr1 + leftover_len;
-}
-
-static auto allocate_from_freelist(Node &node, uint32_t needed_size) -> uint32_t
-{
-    auto block_ofs = NodeHdr::get_free_start(node.hdr());
-    uint32_t prev_ofs = 0;
-
-    while (block_ofs) {
-        // Ensured by BlockAllocator::freelist_size(), which is called each time a node is
-        // created from a page.
-        CALICODB_EXPECT_LE(prev_ofs + kMinBlockSize, block_ofs);
-        const auto block_len = get_block_size(node, block_ofs);
-        if (needed_size <= block_len) {
-            return take_free_space(node, prev_ofs, block_ofs, needed_size);
-        }
-        prev_ofs = block_ofs;
-        block_ofs = get_next_pointer(node, block_ofs);
-    }
-    return 0;
-}
-
-static auto allocate_from_gap(Node &node, uint32_t needed_size) -> uint32_t
-{
-    if (node.gap_size >= needed_size) {
-        node.gap_size -= needed_size;
-        const auto offset = NodeHdr::get_cell_start(node.hdr()) - needed_size;
-        NodeHdr::put_cell_start(node.hdr(), offset);
-        return offset;
-    }
-    return 0U;
 }
 
 auto BlockAllocator::allocate(Node &node, uint32_t needed_size) -> uint32_t
@@ -383,14 +393,6 @@ auto BlockAllocator::defragment(Node &node, int skip) -> int
     return 0;
 }
 
-static constexpr int (*kParsers[2])(char *, const char *, Cell *) = {
-    internal_parse_cell,
-    external_parse_cell,
-};
-
-static constexpr uint32_t kMaxCellCount = (kPageSize - NodeHdr::kSize) /
-                                          (kMinCellHeaderSize + kSlotWidth);
-
 auto Node::from_existing_page(PageRef &page, char *scratch, Node &node_out) -> int
 {
     const auto hdr_offset = page_offset(page.page_id);
@@ -424,7 +426,7 @@ auto Node::from_existing_page(PageRef &page, char *scratch, Node &node_out) -> i
     if (node.usable_space > kPageSize) {
         return -1;
     }
-    node_out = std::move(node);
+    node_out = move(node);
     return 0;
 }
 

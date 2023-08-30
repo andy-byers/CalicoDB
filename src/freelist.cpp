@@ -9,7 +9,10 @@
 namespace calicodb
 {
 
-static constexpr size_t kTrunkCapacity = (kPageSize - 2 * sizeof(uint32_t)) / sizeof(uint32_t);
+namespace
+{
+
+constexpr size_t kTrunkCapacity = (kPageSize - 2 * sizeof(uint32_t)) / sizeof(uint32_t);
 
 struct FreePage {
     static auto get_leaf_ptr(PageRef &ref, size_t index) -> char *
@@ -47,6 +50,14 @@ struct FreePage {
         put_u32(get_leaf_ptr(ref, index), value);
     }
 };
+
+template <class T>
+auto abs_distance(T t1, T t2) -> int64_t
+{
+    static_assert(std::is_signed_v<T> || sizeof(T) < sizeof(int64_t));
+    return std::abs(static_cast<int64_t>(t1) - static_cast<int64_t>(t2));
+}
+} // namespace
 
 auto Freelist::add(Pager &pager, PageRef *&page) -> Status
 {
@@ -109,13 +120,6 @@ cleanup:
     pager.release(trunk);
     pager.release(page, Pager::kDiscard);
     return s;
-}
-
-template <class T>
-static auto abs_distance(T t1, T t2) -> int64_t
-{
-    static_assert(std::is_signed_v<T> || sizeof(T) < sizeof(int64_t));
-    return std::abs(static_cast<int64_t>(t1) - static_cast<int64_t>(t2));
 }
 
 // Translated from SQLite. This is like allocateBtreePage(), except allocating from the end of

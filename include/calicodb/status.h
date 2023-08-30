@@ -45,7 +45,7 @@ public:
     {
         return Status();
     }
-    
+
     static auto invalid_argument(SubCode subc = kNone) -> Status
     {
         return Status(kInvalidArgument, subc);

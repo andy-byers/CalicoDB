@@ -5,14 +5,16 @@
 #include "schema.h"
 #include "encoding.h"
 #include "logging.h"
-#include "tree.h"
 
 namespace calicodb
 {
 
-static constexpr size_t kMaxRootEntryLen = kVarintMaxLength;
+namespace
+{
 
-static auto no_bucket() -> Status
+constexpr size_t kMaxRootEntryLen = kVarintMaxLength;
+
+auto no_bucket() -> Status
 {
     return Status::invalid_argument("bucket does not exist");
 }
@@ -88,6 +90,7 @@ public:
         m_c->previous();
     }
 };
+} // namespace
 
 Schema::Schema(Pager &pager, const Status &status, Stat &stat, char *scratch)
     : m_status(&status),
@@ -244,7 +247,7 @@ auto Schema::construct_or_reference_tree(const Slice &name, Id root_id) -> Tree 
     }
 
     auto *tree = Alloc::new_object<Tree>(*m_pager, *m_stat, m_scratch,
-                                         root_id, std::move(name_str));
+                                         root_id, move(name_str));
     if (tree) {
         IntrusiveList::add_tail(tree->list_entry, m_trees);
     }

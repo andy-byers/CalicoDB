@@ -6,7 +6,6 @@
 #include "test.h"
 
 #include "encoding.h"
-#include "error.h"
 #include "logging.h"
 
 namespace calicodb::test
@@ -68,56 +67,56 @@ static constexpr Alloc::Methods kFaultyMethods = {
 
 TEST_F(AllocTests, Methods)
 {
-    auto *ptr = Alloc::malloc(123);
+    auto *ptr = Alloc::allocate(123);
     ASSERT_NE(ptr, nullptr);
-    auto *new_ptr = Alloc::realloc(ptr, 321);
+    auto *new_ptr = Alloc::reallocate(ptr, 321);
     ASSERT_NE(new_ptr, nullptr);
 
     // Prevent malloc/realloc-free mismatch.
     ASSERT_EQ(Alloc::set_methods(kFakeMethods), -1);
-    Alloc::free(new_ptr);
+    Alloc::deallocate(new_ptr);
 
     ASSERT_EQ(Alloc::set_methods(kFakeMethods), 0);
-    ASSERT_EQ(ptr = Alloc::malloc(123), s_alloc_data_ptr);
+    ASSERT_EQ(ptr = Alloc::allocate(123), s_alloc_data_ptr);
     ASSERT_EQ(123, *s_alloc_size_ptr);
-    ASSERT_EQ(Alloc::realloc(ptr, 321), ptr);
+    ASSERT_EQ(Alloc::reallocate(ptr, 321), ptr);
     ASSERT_EQ(321, *s_alloc_size_ptr);
-    ASSERT_EQ(Alloc::realloc(ptr, 42), ptr);
+    ASSERT_EQ(Alloc::reallocate(ptr, 42), ptr);
     ASSERT_EQ(42, *s_alloc_size_ptr);
-    Alloc::free(nullptr);
-    Alloc::free(ptr);
+    Alloc::deallocate(nullptr);
+    Alloc::deallocate(ptr);
 
     ASSERT_EQ(Alloc::set_methods(kFaultyMethods), 0);
-    ASSERT_EQ(Alloc::malloc(123), nullptr);
-    ASSERT_EQ(Alloc::realloc(nullptr, 123), nullptr);
+    ASSERT_EQ(Alloc::allocate(123), nullptr);
+    ASSERT_EQ(Alloc::reallocate(nullptr, 123), nullptr);
 }
 
 TEST_F(AllocTests, Limit)
 {
     Alloc::set_limit(100);
-    auto *a = Alloc::malloc(50 - sizeof(uint64_t));
+    auto *a = Alloc::allocate(50 - sizeof(uint64_t));
     ASSERT_NE(a, nullptr);
 
     // 8-byte overhead causes this to exceed the limit.
-    auto *b = Alloc::malloc(50);
+    auto *b = Alloc::allocate(50);
     ASSERT_EQ(b, nullptr);
 
-    b = Alloc::malloc(50 - sizeof(uint64_t));
+    b = Alloc::allocate(50 - sizeof(uint64_t));
     ASSERT_NE(b, nullptr);
 
     // 0 bytes available, fail to get 1 byte.
-    auto *c = Alloc::realloc(a, 51 - sizeof(uint64_t));
+    auto *c = Alloc::reallocate(a, 51 - sizeof(uint64_t));
     ASSERT_EQ(c, nullptr);
 
-    c = Alloc::realloc(a, 20 - sizeof(uint64_t));
+    c = Alloc::reallocate(a, 20 - sizeof(uint64_t));
     ASSERT_NE(c, nullptr);
 
     ASSERT_EQ(Alloc::set_limit(1), -1);
     ASSERT_EQ(Alloc::set_limit(0), 0);
 
     // a was realloc'd.
-    Alloc::free(b);
-    Alloc::free(c);
+    Alloc::deallocate(b);
+    Alloc::deallocate(c);
 }
 
 TEST_F(AllocTests, AllocationHook)
@@ -133,13 +132,13 @@ TEST_F(AllocTests, AllocationHook)
     Alloc::set_hook(hook, &hook_arg);
 
     void *ptr;
-    ASSERT_NE(ptr = Alloc::malloc(123), nullptr);
-    ASSERT_NE(ptr = Alloc::realloc(ptr, 321), nullptr);
-    Alloc::free(ptr);
+    ASSERT_NE(ptr = Alloc::allocate(123), nullptr);
+    ASSERT_NE(ptr = Alloc::reallocate(ptr, 321), nullptr);
+    Alloc::deallocate(ptr);
 
     hook_arg.rc = -1;
-    ASSERT_EQ(Alloc::malloc(123), nullptr);
-    ASSERT_EQ(Alloc::realloc(ptr, 321), nullptr);
+    ASSERT_EQ(Alloc::allocate(123), nullptr);
+    ASSERT_EQ(Alloc::reallocate(ptr, 321), nullptr);
 }
 
 TEST_F(AllocTests, LargeAllocations)
@@ -148,11 +147,11 @@ TEST_F(AllocTests, LargeAllocations)
     ASSERT_EQ(Alloc::set_methods(kFakeMethods), 0);
 
     void *p;
-    ASSERT_EQ(nullptr, Alloc::malloc(kMaxAllocation + 1));
-    ASSERT_NE(nullptr, p = Alloc::malloc(kMaxAllocation));
-    ASSERT_EQ(nullptr, Alloc::realloc(p, kMaxAllocation + 1));
-    ASSERT_NE(nullptr, p = Alloc::realloc(p, kMaxAllocation));
-    Alloc::free(p);
+    ASSERT_EQ(nullptr, Alloc::allocate(kMaxAllocation + 1));
+    ASSERT_NE(nullptr, p = Alloc::allocate(kMaxAllocation));
+    ASSERT_EQ(nullptr, Alloc::reallocate(p, kMaxAllocation + 1));
+    ASSERT_NE(nullptr, p = Alloc::reallocate(p, kMaxAllocation));
+    Alloc::deallocate(p);
 }
 
 TEST_F(AllocTests, ReallocSameSize)
@@ -160,9 +159,9 @@ TEST_F(AllocTests, ReallocSameSize)
     static constexpr size_t kSize = 42;
 
     void *ptr;
-    ASSERT_NE(ptr = Alloc::malloc(kSize), nullptr);
-    ASSERT_NE(ptr = Alloc::realloc(ptr, kSize), nullptr);
-    Alloc::free(ptr);
+    ASSERT_NE(ptr = Alloc::allocate(kSize), nullptr);
+    ASSERT_NE(ptr = Alloc::reallocate(ptr, kSize), nullptr);
+    Alloc::deallocate(ptr);
 
     static constexpr Alloc::Methods kFaultyRealloc = {
         std::malloc,
@@ -172,10 +171,10 @@ TEST_F(AllocTests, ReallocSameSize)
         std::free,
     };
     ASSERT_EQ(Alloc::set_methods(kFaultyRealloc), 0);
-    ASSERT_NE(ptr = Alloc::malloc(kSize), nullptr);
-    ASSERT_EQ(Alloc::realloc(ptr, kSize), nullptr);
+    ASSERT_NE(ptr = Alloc::allocate(kSize), nullptr);
+    ASSERT_EQ(Alloc::reallocate(ptr, kSize), nullptr);
     ASSERT_GT(Alloc::bytes_used(), kSize);
-    Alloc::free(ptr);
+    Alloc::deallocate(ptr);
 }
 
 TEST_F(AllocTests, SpecialCases)
@@ -183,32 +182,32 @@ TEST_F(AllocTests, SpecialCases)
     void *ptr;
 
     // NOOP, returns a nonnull pointer to a zero-sized allocation.
-    ASSERT_NE(ptr = Alloc::malloc(0), nullptr);
+    ASSERT_NE(ptr = Alloc::allocate(0), nullptr);
     ASSERT_EQ(Alloc::bytes_used(), 0);
     auto *zero_sized = ptr;
-    Alloc::free(ptr); // Not necessary, but should work fine
+    Alloc::deallocate(ptr); // Not necessary, but should work fine
 
     // NOOP, same
-    ASSERT_EQ(Alloc::realloc(nullptr, 0), zero_sized);
+    ASSERT_EQ(Alloc::reallocate(nullptr, 0), zero_sized);
     ASSERT_EQ(Alloc::bytes_used(), 0);
 
     // Equivalent to Alloc::malloc(1).
-    ASSERT_NE(ptr = Alloc::realloc(nullptr, 1), nullptr);
+    ASSERT_NE(ptr = Alloc::reallocate(nullptr, 1), nullptr);
     ASSERT_NE(ptr, nullptr);
     ASSERT_NE(Alloc::bytes_used(), 0);
 
     // Equivalent to Alloc::free(ptr), but returns a pointer to a zero-sized
     // allocation.
-    ASSERT_EQ(Alloc::realloc(ptr, 0), zero_sized);
+    ASSERT_EQ(Alloc::reallocate(ptr, 0), zero_sized);
     ASSERT_EQ(Alloc::bytes_used(), 0);
 
     // Zero-sized allocations can be reallocated.
-    ptr = Alloc::malloc(0);
-    ASSERT_EQ(Alloc::realloc(ptr, 0), zero_sized);
-    ASSERT_NE(ptr = Alloc::realloc(ptr, 1), zero_sized);
+    ptr = Alloc::allocate(0);
+    ASSERT_EQ(Alloc::reallocate(ptr, 0), zero_sized);
+    ASSERT_NE(ptr = Alloc::reallocate(ptr, 1), zero_sized);
     ASSERT_GT(Alloc::bytes_used(), 0);
     *static_cast<char *>(ptr) = '\x42';
-    Alloc::free(ptr);
+    Alloc::deallocate(ptr);
 }
 
 TEST_F(AllocTests, HeapObject)
@@ -227,22 +226,22 @@ TEST_F(AllocTests, HeapObject)
 TEST_F(AllocTests, DeathTest)
 {
     void *ptr;
-    ptr = Alloc::malloc(1);
+    ptr = Alloc::allocate(1);
 
     auto *size_ptr = reinterpret_cast<uint64_t *>(ptr) - 1;
     // Give back more memory than was allocated in-total. If more than 1 byte were already allocated, this
     // corruption would go undetected.
     *size_ptr = 2;
-    ASSERT_DEATH(Alloc::free(ptr), "Assert");
-    ASSERT_DEATH((void)Alloc::realloc(ptr, 123), "Assert");
+    ASSERT_DEATH(Alloc::deallocate(ptr), "Assert");
+    ASSERT_DEATH((void)Alloc::reallocate(ptr, 123), "Assert");
     // Actual allocations must not be zero-length. Alloc::malloc() returns a nullptr if 0 bytes are
     // requested.
     *size_ptr = 0;
-    ASSERT_DEATH(Alloc::free(ptr), "Assert");
-    ASSERT_DEATH((void)Alloc::realloc(ptr, 123), "Assert");
+    ASSERT_DEATH(Alloc::deallocate(ptr), "Assert");
+    ASSERT_DEATH((void)Alloc::reallocate(ptr, 123), "Assert");
 
     *size_ptr = 1;
-    Alloc::free(ptr);
+    Alloc::deallocate(ptr);
 }
 #endif // NDEBUG
 
@@ -460,6 +459,40 @@ TEST(Status, StatusMessages)
 
     ASSERT_EQ(Slice(kMsg), Status::retry(kMsg).message());
     ASSERT_EQ(Slice(kMsg), Status::no_memory(kMsg).message());
+}
+
+TEST(Status, StatusBuilderMessages)
+{
+    static constexpr auto kFmt = "message %d %s...";
+    static constexpr auto kExpected = "message 42 hello...";
+    ASSERT_EQ(Slice(kExpected), StatusBuilder::io_error(kFmt, 42, "hello").message());
+    ASSERT_EQ(Slice(kExpected), StatusBuilder::corruption(kFmt, 42, "hello").message());
+    ASSERT_EQ(Slice(kExpected), StatusBuilder::invalid_argument(kFmt, 42, "hello").message());
+    ASSERT_EQ(Slice(kExpected), StatusBuilder::not_supported(kFmt, 42, "hello").message());
+    ASSERT_EQ(Slice(kExpected), StatusBuilder::busy(kFmt, 42, "hello").message());
+    ASSERT_EQ(Slice(kExpected), StatusBuilder::aborted(kFmt, 42, "hello").message());
+    ASSERT_EQ(Slice(kExpected), StatusBuilder::retry(kFmt, 42, "hello").message());
+    ASSERT_EQ(Slice(kExpected), StatusBuilder::no_memory(kFmt, 42, "hello").message());
+}
+
+TEST(Status, StatusBuilderFallback)
+{
+    // StatusBuilder should fail to allocate memory for the error message and return an inline Status with
+    // the requested Status::Code and Status::SubCode.
+    ASSERT_EQ(Alloc::set_limit(1), 0);
+
+    static constexpr auto kFmt = "message %d %s...";
+    ASSERT_EQ(Slice(Status::io_error().message()), StatusBuilder::io_error(kFmt, 42, "hello").message());
+    ASSERT_EQ(Slice(Status::corruption().message()), StatusBuilder::corruption(kFmt, 42, "hello").message());
+    ASSERT_EQ(Slice(Status::invalid_argument().message()), StatusBuilder::invalid_argument(kFmt, 42, "hello").message());
+    ASSERT_EQ(Slice(Status::not_supported().message()), StatusBuilder::not_supported(kFmt, 42, "hello").message());
+    ASSERT_EQ(Slice(Status::busy().message()), StatusBuilder::busy(kFmt, 42, "hello").message());
+    ASSERT_EQ(Slice(Status::aborted().message()), StatusBuilder::aborted(kFmt, 42, "hello").message());
+    ASSERT_EQ(Slice(Status::retry().message()), StatusBuilder::retry(kFmt, 42, "hello").message());
+    ASSERT_EQ(Slice(Status::no_memory().message()), StatusBuilder::no_memory(kFmt, 42, "hello").message());
+
+    // Reset memory limit back to the default.
+    ASSERT_EQ(Alloc::set_limit(0), 0);
 }
 
 TEST(Status, StatusCodes)
@@ -900,21 +933,6 @@ TEST(Slice, NonPrintableSlice)
     }
 }
 
-TEST(ErrorState, ReallocateError)
-{
-    ErrorState state;
-    static constexpr auto *kFixed1 = "Hello";
-    const auto *msg1 = state.format_error(ErrorState::kCorruptedPage, kFixed1, 1);
-    const auto len1 = std::strlen(msg1);
-    ASSERT_EQ(msg1[len1 - 1], '1');
-
-    static constexpr auto *kFixed2 = "Hello, world!";
-    const auto *msg2 = state.format_error(ErrorState::kCorruptedPage, "Hello, world!", 2);
-    const auto len2 = std::strlen(msg2);
-    ASSERT_EQ(len1 + std::strlen(kFixed2), len2 + std::strlen(kFixed1));
-    ASSERT_EQ(msg2[len2 - 1], '2');
-}
-
 #if not NDEBUG
 TEST(Expect, DeathTest)
 {
@@ -1027,7 +1045,7 @@ TEST_F(StringBuilderTests, AppendFormatMultiple)
     std::string answer;
     for (size_t i = 0; i < 512; ++i) {
         const auto r = static_cast<size_t>(rand()) % ARRAY_SIZE(kTestMessages);
-        const auto fmt = kTestMessages[r];
+        const auto *fmt = kTestMessages[r];
         switch (r) {
             case 0:
                 std::snprintf(buffer, sizeof(buffer), fmt, i);

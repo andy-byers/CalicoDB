@@ -130,7 +130,6 @@ public:
 
 private:
     friend class DBImpl;
-    friend class InorderTraversal;
     friend class Schema;
     friend class SchemaCursor;
     friend class CursorImpl;

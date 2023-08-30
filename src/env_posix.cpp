@@ -2,12 +2,14 @@
 // This source code is licensed under the MIT License, which can be found in
 // LICENSE.md. See AUTHORS.md for a list of contributor names.
 
-#include "env_posix.h"
+#include "alloc.h"
+#include "calicodb/env.h"
 #include "logging.h"
+#include "port.h"
 #include "ptr.h"
+#include "utils.h"
 #include <ctime>
 #include <fcntl.h>
-#include <mutex>
 #include <sys/mman.h>
 #include <sys/stat.h>
 #include <sys/time.h>
@@ -16,7 +18,9 @@
 namespace calicodb
 {
 
-class PosixEnv;
+namespace
+{
+
 class PosixFile;
 struct FileId;
 struct INode;
@@ -24,13 +28,37 @@ struct PosixFs;
 struct PosixShm;
 struct ShmNode;
 
-static constexpr int kFilePermissions = 0644; // -rw-r--r--
+class PosixEnv
+    : public Env,
+      public HeapObject
+{
+    uint16_t m_rng[3] = {};
+
+public:
+    explicit PosixEnv();
+    ~PosixEnv() override = default;
+
+    static auto operator delete(void *ptr, size_t) -> void;
+
+    auto new_logger(const char *filename, Logger *&out) -> Status override;
+    auto new_file(const char *filename, OpenMode mode, File *&out) -> Status override;
+    [[nodiscard]] auto file_exists(const char *filename) const -> bool override;
+    auto remove_file(const char *filename) -> Status override;
+    [[nodiscard]] auto file_size(const char *filename, size_t &out) const -> Status override;
+
+    auto srand(unsigned seed) -> void override;
+    [[nodiscard]] auto rand() -> unsigned override;
+
+    auto sleep(unsigned micros) -> void override;
+};
+
+constexpr int kFilePermissions = 0644; // -rw-r--r--
 
 // Constants for SQLite-style shared memory locking
 // There are "File::kShmLockCount" lock bytes available. See include/calicodb/env.h
 // for more details.
-static constexpr size_t kShmLock0 = 120;
-static constexpr size_t kShmDMS = kShmLock0 + File::kShmLockCount;
+constexpr size_t kShmLock0 = 120;
+constexpr size_t kShmDMS = kShmLock0 + File::kShmLockCount;
 
 struct FileId final {
     auto operator==(const FileId &rhs) const -> bool
@@ -50,7 +78,7 @@ struct FileId final {
 struct ShmNode final {
     INode *inode = nullptr;
 
-    mutable std::mutex mutex;
+    mutable port::Mutex mutex;
 
     String filename;
     int file = -1;
@@ -88,7 +116,7 @@ struct UnusedFile final {
 
 struct INode final {
     FileId key;
-    mutable std::mutex mutex;
+    mutable port::Mutex mutex;
     unsigned nlocks = 0;
     int lock = kLockUnlocked;
 
@@ -110,12 +138,12 @@ struct INode final {
     INode *prev = nullptr;
 };
 
-static auto posix_file_lock(int file, const struct flock &lock) -> int
+auto posix_file_lock(int file, const struct flock &lock) -> int
 {
     return fcntl(file, F_SETLK, &lock);
 }
 
-[[nodiscard]] static auto posix_shm_lock(ShmNode &snode, short type, size_t offset, size_t n) -> int
+[[nodiscard]] auto posix_shm_lock(ShmNode &snode, short type, size_t offset, size_t n) -> int
 {
     CALICODB_EXPECT_GE(snode.file, 0);
     CALICODB_EXPECT_TRUE(n == 1 || type != F_RDLCK);
@@ -129,7 +157,7 @@ static auto posix_file_lock(int file, const struct flock &lock) -> int
     return posix_file_lock(snode.file, lock);
 }
 
-[[nodiscard]] static auto posix_error(int error) -> Status
+[[nodiscard]] auto posix_error(int error) -> Status
 {
     CALICODB_EXPECT_NE(error, 0);
     switch (error) {
@@ -147,14 +175,14 @@ static auto posix_file_lock(int file, const struct flock &lock) -> int
     }
 }
 
-[[nodiscard]] static auto posix_busy() -> Status
+[[nodiscard]] auto posix_busy() -> Status
 {
     return Status::busy(std::strerror(EBUSY));
 }
 
-static constexpr size_t kOpenCloseTimeout = 100;
+constexpr size_t kOpenCloseTimeout = 100;
 
-[[nodiscard]] static auto posix_open(const char *filename, int mode) -> int
+[[nodiscard]] auto posix_open(const char *filename, int mode) -> int
 {
     for (size_t t = 0; t < kOpenCloseTimeout; ++t) {
         const auto fd = open(filename, mode | O_CLOEXEC, kFilePermissions);
@@ -166,7 +194,7 @@ static constexpr size_t kOpenCloseTimeout = 100;
     return -1;
 }
 
-static auto posix_close(int fd) -> int
+auto posix_close(int fd) -> int
 {
     for (size_t t = 0; t < kOpenCloseTimeout; ++t) {
         const auto rc = close(fd);
@@ -178,7 +206,7 @@ static auto posix_close(int fd) -> int
     return -1;
 }
 
-[[nodiscard]] static auto posix_read(int file, size_t size, char *scratch, Slice *out) -> int
+[[nodiscard]] auto posix_read(int file, size_t size, char *scratch, Slice *out) -> int
 {
     auto rest = size;
     while (rest > 0) {
@@ -199,7 +227,7 @@ static auto posix_close(int fd) -> int
     }
     return 0;
 }
-static auto posix_write(int file, Slice in) -> int
+auto posix_write(int file, Slice in) -> int
 {
     while (!in.is_empty()) {
         const auto n = write(file, in.data(), in.size());
@@ -212,14 +240,14 @@ static auto posix_write(int file, Slice in) -> int
     return 0;
 }
 
-[[nodiscard]] static auto seek_and_read(int file, size_t offset, size_t size, char *scratch, Slice *out) -> int
+[[nodiscard]] auto seek_and_read(int file, size_t offset, size_t size, char *scratch, Slice *out) -> int
 {
     if (const auto rc = lseek(file, static_cast<off_t>(offset), SEEK_SET); rc < 0) {
         return -1;
     }
     return posix_read(file, size, scratch, out);
 }
-[[nodiscard]] static auto seek_and_write(int file, size_t offset, Slice in) -> int
+[[nodiscard]] auto seek_and_write(int file, size_t offset, Slice in) -> int
 {
     if (const auto rc = lseek(file, static_cast<off_t>(offset), SEEK_SET); rc < 0) {
         return -1;
@@ -227,7 +255,7 @@ static auto posix_write(int file, Slice in) -> int
     return posix_write(file, in);
 }
 
-[[nodiscard]] static auto posix_truncate(int fd, size_t size) -> int
+[[nodiscard]] auto posix_truncate(int fd, size_t size) -> int
 {
     for (;;) {
         const auto rc = ftruncate(fd, static_cast<off_t>(size));
@@ -240,6 +268,7 @@ static auto posix_write(int file, Slice in) -> int
 
 struct PosixShm {
     auto lock(size_t r, size_t n, ShmLockFlag flags) -> Status;
+    auto lock_impl(size_t r, size_t n, ShmLockFlag flags) -> Status;
 
     ShmNode *snode = nullptr;
     PosixShm *next = nullptr;
@@ -253,8 +282,8 @@ class PosixFile
 {
 public:
     explicit PosixFile(String filename, UniquePtr<UnusedFile> prealloc)
-        : filename(std::move(filename)),
-          prealloc(std::move(prealloc))
+        : filename(move(filename)),
+          prealloc(move(prealloc))
     {
     }
 
@@ -276,6 +305,8 @@ public:
     auto shm_lock(size_t r, size_t n, ShmLockFlag flags) -> Status override;
     auto shm_unmap(bool unlink) -> void override;
     auto shm_barrier() -> void override;
+
+    auto file_lock_impl(FileLockMode mode) -> Status;
 
     String filename;
     UniquePtr<UnusedFile> prealloc;
@@ -338,7 +369,7 @@ public:
             if (offset + 1 >= L) {
                 if (i == 0) {
                     L = offset + 2; // +1 for '\n'
-                    var = static_cast<char *>(Alloc::malloc(L));
+                    var = static_cast<char *>(Alloc::allocate(L));
                     if (var == nullptr) {
                         // Write just this generic message if the system could not fulfill the allocation.
                         static constexpr const char kNoMemory[] = "could not log message: no memory for temp buffer\n";
@@ -356,12 +387,12 @@ public:
             append(Slice(p, offset));
             break;
         }
-        Alloc::free(var);
+        Alloc::deallocate(var);
     }
 };
 
 // Per-process singleton for managing filesystem state
-static struct PosixFs final {
+struct PosixFs final {
     explicit PosixFs()
     {
         const auto pgsz = sysconf(_SC_PAGESIZE);
@@ -383,7 +414,7 @@ static struct PosixFs final {
         for (auto *file = inode.unused; file;) {
             auto *next = file->next;
             close(file->file);
-            Alloc::free(file);
+            Alloc::deallocate(file);
             file = next;
         }
         inode.unused = nullptr;
@@ -454,14 +485,16 @@ static struct PosixFs final {
         if (!shm_storage) {
             return Status::no_memory();
         }
+        mutex.lock();
+        Status s;
         auto *inode = file.inode;
-        std::unique_lock main_guard(mutex);
         auto *snode = inode->snode.get();
         if (snode == nullptr) {
+            s = Status::no_memory();
             // Allocate storage for the shm node.
             ObjectPtr<ShmNode> new_snode(Alloc::new_object<ShmNode>());
             if (!new_snode) {
-                return Status::no_memory();
+                goto cleanup;
             }
 
             // Allocate storage for the shm filename.
@@ -469,7 +502,7 @@ static struct PosixFs final {
                     new_snode->filename,
                     Slice(file.filename),
                     kDefaultShmSuffix)) {
-                return Status::no_memory();
+                goto cleanup;
             }
 
             // Open the shm file.
@@ -477,27 +510,36 @@ static struct PosixFs final {
                 new_snode->filename.c_str(),
                 O_CREAT | O_NOFOLLOW | O_RDWR);
             if (new_snode->file < 0) {
-                return posix_error(errno);
+                s = posix_error(errno);
+                goto cleanup;
             }
             // WARNING: If another process unlinks the file after we opened it above, the
             //          attempt to take the DMS lock here will fail.
             if (new_snode->take_dms_lock()) {
-                return Status::busy();
+                s = Status::busy();
+                goto cleanup;
             }
 
             snode = new_snode.get();
-            inode->snode = std::move(new_snode);
+            inode->snode = move(new_snode);
             snode->inode = inode;
+            s = Status::ok();
         }
         CALICODB_EXPECT_GE(snode->file, 0);
         ++snode->refcount;
-        main_guard.unlock();
 
-        std::lock_guard node_guard(snode->mutex);
+    cleanup:
+        mutex.unlock();
+        if (!s.is_ok()) {
+            return s;
+        }
+
+        snode->mutex.lock();
         shm_out = shm_storage.release();
         shm_out->snode = snode;
         shm_out->next = snode->refs;
         snode->refs = shm_out;
+        snode->mutex.unlock();
         return Status::ok();
     }
 
@@ -505,17 +547,17 @@ static struct PosixFs final {
     {
         auto *snode = shm.snode;
         auto *inode = snode->inode;
-        {
-            std::lock_guard guard(snode->mutex);
-            auto **pp = &snode->refs;
-            for (; *pp != &shm; pp = &(*pp)->next) {
-            }
-            // Remove "shm" from the list.
-            *pp = shm.next;
+
+        snode->mutex.lock();
+        auto **pp = &snode->refs;
+        for (; *pp != &shm; pp = &(*pp)->next) {
         }
+        // Remove "shm" from the list.
+        *pp = shm.next;
+        snode->mutex.unlock();
 
         // Global mutex must be locked when creating or destroying shm nodes.
-        std::lock_guard guard(mutex);
+        mutex.lock();
         CALICODB_EXPECT_GT(snode->refcount, 0);
 
         if (--snode->refcount == 0) {
@@ -533,10 +575,11 @@ static struct PosixFs final {
             }
             inode->snode.reset();
         }
+        mutex.unlock();
     }
 
     // Linked list of inodes, protected by a mutex.
-    mutable std::mutex mutex;
+    mutable port::Mutex mutex;
     INode *inode_list = nullptr;
 
     // OS page size for mmap().
@@ -548,16 +591,7 @@ static struct PosixFs final {
     size_t mmap_scale = 0;
 } s_fs;
 
-auto setup_platform_env() -> int
-{
-    return 0;
-}
-
-auto teardown_platform_env() -> void
-{
-}
-
-static auto seed_prng_state(uint16_t *state, uint32_t seed) -> void
+auto seed_prng_state(uint16_t *state, uint32_t seed) -> void
 {
     state[0] = 0x330E;
     std::memcpy(&state[1], &seed, sizeof(seed));
@@ -572,7 +606,7 @@ PosixEnv::PosixEnv()
 
 auto PosixEnv::operator delete(void *ptr, size_t) -> void
 {
-    Alloc::free(ptr);
+    Alloc::deallocate(ptr);
 }
 
 auto PosixEnv::remove_file(const char *filename) -> Status
@@ -617,7 +651,7 @@ auto PosixEnv::new_file(const char *filename, OpenMode mode, File *&out) -> Stat
 
     // Allocate storage for an UnusedFile.
     UniquePtr<UnusedFile> prealloc(static_cast<UnusedFile *>(
-        Alloc::malloc(sizeof(UnusedFile))));
+        Alloc::allocate(sizeof(UnusedFile))));
     if (!prealloc) {
         return Status::no_memory();
     }
@@ -628,8 +662,8 @@ auto PosixEnv::new_file(const char *filename, OpenMode mode, File *&out) -> Stat
     // Allocate storage for the File instance. Files are exposed to the user, so just use regular
     // operator new(). The Alloc API is only used for internal structures.
     auto *file = new (std::nothrow) PosixFile(
-        std::move(filename_storage),
-        std::move(prealloc));
+        move(filename_storage),
+        move(prealloc));
     if (file == nullptr) {
         goto cleanup;
     }
@@ -799,19 +833,22 @@ auto PosixFile::shm_map(size_t r, bool extend, volatile void *&out) -> Status
     CALICODB_EXPECT_TRUE(shm);
     auto *snode = shm->snode;
     CALICODB_EXPECT_TRUE(snode);
-    std::lock_guard guard(snode->mutex);
-    if (snode->is_unlocked) {
-        if (snode->take_dms_lock()) {
-            return posix_error(EAGAIN);
-        }
-        snode->is_unlocked = false;
-    }
+
     // Determine the file size (in shared memory regions) needed to satisfy the
     // request for region "r".
     const auto mmap_scale = s_fs.mmap_scale;
     const auto request = (r + mmap_scale) / mmap_scale * mmap_scale;
 
     Status s;
+    snode->mutex.lock();
+    if (snode->is_unlocked) {
+        if (snode->take_dms_lock()) {
+            s = posix_error(EAGAIN);
+            goto cleanup;
+        }
+        snode->is_unlocked = false;
+    }
+
     if (snode->num_regions < request) {
         size_t file_size;
         if (struct stat st = {}; fstat(snode->file, &st)) {
@@ -837,7 +874,7 @@ auto PosixFile::shm_map(size_t r, bool extend, volatile void *&out) -> Status
         }
 
         // Make room for a pointer to the requested shm region.
-        if (auto **realloc_ptr = static_cast<char **>(Alloc::realloc(
+        if (auto **realloc_ptr = static_cast<char **>(Alloc::reallocate(
                 snode->regions.get(), request * sizeof(char *)))) {
             snode->regions.release();
             snode->regions.reset(realloc_ptr);
@@ -869,6 +906,7 @@ cleanup:
     if (r < snode->num_regions) {
         out = snode->regions.get()[r];
     }
+    snode->mutex.unlock();
     return s;
 }
 
@@ -899,10 +937,17 @@ auto PosixShm::lock(size_t r, size_t n, ShmLockFlag flags) -> Status
         flags == (kShmUnlock | kShmWriter));
     CALICODB_EXPECT_TRUE(n == 1 || (flags & kShmWriter));
 
+    snode->mutex.lock();
+    auto s = lock_impl(r, n, flags);
+    snode->mutex.unlock();
+    return s;
+}
+
+auto PosixShm::lock_impl(size_t r, size_t n, ShmLockFlag flags) -> Status
+{
     auto *state = snode->locks;
     const auto mask = static_cast<uint16_t>((1 << (r + n)) - (1 << r));
     CALICODB_EXPECT_TRUE(n > 1 || mask == (1 << r));
-    std::lock_guard guard(snode->mutex);
     CALICODB_EXPECT_TRUE(snode->check_locks());
 
     if (flags & kShmUnlock) {
@@ -1042,7 +1087,14 @@ auto PosixFile::file_lock(FileLockMode mode) -> Status
     // First lock taken on a file must be kShared.
     CALICODB_EXPECT_TRUE(local_lock != kLockUnlocked || mode == kFileShared);
 
-    std::lock_guard guard(inode->mutex);
+    inode->mutex.lock();
+    auto s = file_lock_impl(mode);
+    inode->mutex.unlock();
+    return s;
+}
+
+auto PosixFile::file_lock_impl(FileLockMode mode) -> Status
+{
     if (local_lock != inode->lock && (inode->lock == kFileExclusive || mode == kFileExclusive)) {
         // Some other thread in this process has an incompatible lock.
         return posix_busy();
@@ -1111,7 +1163,7 @@ auto PosixFile::file_unlock() -> void
     lock.l_start = 0;
     lock.l_len = 0;
 
-    std::lock_guard guard(inode->mutex);
+    inode->mutex.lock();
     CALICODB_EXPECT_TRUE(inode->lock == kFileShared || inode->nlocks == 1);
     CALICODB_EXPECT_GT(inode->nlocks, 0);
 
@@ -1121,7 +1173,10 @@ auto PosixFile::file_unlock() -> void
         inode->lock = kLockUnlocked;
     }
     local_lock = kLockUnlocked;
+    inode->mutex.unlock();
 }
+
+} // namespace
 
 auto Env::default_env() -> Env &
 {

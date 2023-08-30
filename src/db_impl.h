@@ -6,7 +6,6 @@
 #define CALICODB_DB_IMPL_H
 
 #include "calicodb/db.h"
-#include "error.h"
 #include "ptr.h"
 #include "stat.h"
 
@@ -51,7 +50,6 @@ private:
     template <class TxType>
     auto prepare_tx(bool write, TxType *&tx_out) const -> Status;
 
-    mutable ErrorState m_errors;
     mutable Status m_status;
     mutable TxImpl *m_tx = nullptr;
     mutable Stat m_stat;

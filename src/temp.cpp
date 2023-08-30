@@ -4,16 +4,20 @@
 
 #include "temp.h"
 #include "alloc.h"
+#include "logging.h"
 #include "page.h"
+#include "ptr.h"
 #include "stat.h"
 #include "wal.h"
 #include <chrono>
 #include <random>
 #include <thread>
 #include <unordered_map>
-#include <vector>
 
 namespace calicodb
+{
+
+namespace
 {
 
 class TempEnv
@@ -53,7 +57,7 @@ public:
                 CALICODB_EXPECT_EQ(offset, page_id.as_index() * kPageSize);
                 CALICODB_EXPECT_EQ(size, kPageSize);
 
-                const auto *page = m_file->fetch_page(page_id, false);
+                const auto *page = m_file->fetch_page(page_id);
                 if (page == nullptr) {
                     // page_id is out of bounds.
                     page = "";
@@ -75,7 +79,10 @@ public:
                 CALICODB_EXPECT_EQ(offset, page_id.as_index() * kPageSize);
                 CALICODB_EXPECT_EQ(data.size(), kPageSize);
 
-                auto *page = m_file->fetch_page(page_id, true);
+                if (m_file->ensure_large_enough(page_id.value)) {
+                    return Status::no_memory();
+                }
+                auto *page = m_file->fetch_page(page_id);
                 std::memcpy(page, data.data(), data.size());
                 return Status::ok();
             }
@@ -84,7 +91,9 @@ public:
             {
                 const auto page_count = size / kPageSize;
                 CALICODB_EXPECT_EQ(size, page_count * kPageSize);
-                m_file->resize(page_count);
+                if (m_file->resize(page_count)) {
+                    return Status::no_memory();
+                }
                 return Status::ok();
             }
 
@@ -112,8 +121,10 @@ public:
             auto shm_barrier() -> void override {}
             auto file_unlock() -> void override {}
         };
-        CALICODB_EXPECT_TRUE(m_file.name.empty());
-        m_file.name = filename ? filename : "";
+        CALICODB_EXPECT_TRUE(m_filename.is_empty());
+        if (append_strings(m_filename, filename)) {
+            return Status::no_memory();
+        }
 
         file_out = new (std::nothrow) TempFile(m_file);
         return file_out ? Status::ok() : Status::no_memory();
@@ -122,7 +133,7 @@ public:
     auto file_size(const char *filename, size_t &size_out) const -> Status override
     {
         if (file_exists(filename)) {
-            size_out = m_file.pages.size() * kPageSize;
+            size_out = m_file.pages.len() * kPageSize;
             return Status::ok();
         }
         return Status::invalid_argument();
@@ -131,7 +142,7 @@ public:
     auto remove_file(const char *filename) -> Status override
     {
         if (file_exists(filename)) {
-            m_file.name.clear();
+            m_filename.clear();
             return Status::ok();
         }
         return Status::invalid_argument();
@@ -139,7 +150,8 @@ public:
 
     [[nodiscard]] auto file_exists(const char *filename) const -> bool override
     {
-        return !m_file.name.empty() && m_file.name == filename;
+        return !m_filename.is_empty() &&
+               Slice(m_filename.c_str(), m_filename.length()) == Slice(filename);
     }
 
     auto srand(unsigned seed) -> void override
@@ -162,36 +174,68 @@ private:
     friend class TempWal;
 
     std::default_random_engine m_rng;
+    String m_filename;
 
-    struct PagedFile {
-        std::vector<std::string> pages;
-        std::string name;
+    struct PagedFile final {
+        UniqueBuffer<char *> pages;
 
-        [[nodiscard]] auto fetch_page(Id id, bool extend) -> char *
+        ~PagedFile()
         {
-            const auto idx = id.as_index();
-            if (idx >= pages.size()) {
-                if (!extend) {
-                    return nullptr;
-                }
-                resize(idx + 1);
-            }
-            CALICODB_EXPECT_LT(idx, pages.size());
-            CALICODB_EXPECT_EQ(pages[idx].size(), kPageSize);
-            return pages[idx].data();
+            [[maybe_unused]] const auto rc = resize(0);
+            CALICODB_EXPECT_EQ(rc, 0);
         }
 
-        auto resize(size_t page_count) -> void
+        [[nodiscard]] auto resize(size_t new_len) -> int
         {
-            pages.resize(page_count, std::string(kPageSize, '\0'));
+            // Free pages if shrinking the file.
+            const auto old_len = pages.len();
+            for (size_t i = new_len; i < old_len; ++i) {
+                Alloc::deallocate(pages.ptr()[i]);
+                // Clear pointers in case realloc() fails.
+                pages.ptr()[i] = nullptr;
+            }
+            // Resize the page pointer array.
+            if (pages.realloc(new_len)) {
+                // Alloc::reallocate() might fail when trimming an allocation, but not if the new size
+                // is 0. In that case, the underlying reallocation function is not called. Instead, the
+                // memory is freed using Alloc::deallocate(), and a pointer (non-null) is returned to a
+                // zero-length allocation (see alloc.h).
+                CALICODB_EXPECT_NE(new_len, 0);
+                return -1;
+            }
+            // Allocate pages if growing the file.
+            for (size_t i = old_len; i < new_len; ++i) {
+                auto *&page = pages.ptr()[i];
+                if (auto *ptr = Alloc::allocate(kPageSize)) {
+                    page = static_cast<char *>(ptr);
+                } else {
+                    // Clear the rest of the pointers so the destructor doesn't mess up.
+                    std::memset(page, 0, (new_len - i) * sizeof(char *));
+                    return -1;
+                }
+            }
+            return 0;
+        }
+
+        [[nodiscard]] auto ensure_large_enough(size_t len) -> int
+        {
+            const auto num_pages = pages.len();
+            if (len > num_pages && resize(len)) {
+                return -1;
+            }
+            CALICODB_EXPECT_LE(len, pages.len());
+            return 0;
+        }
+
+        [[nodiscard]] auto fetch_page(Id id) -> char *
+        {
+            if (id.value > pages.len()) {
+                return nullptr;
+            }
+            return pages.ptr()[id.as_index()];
         }
     } m_file;
 };
-
-auto new_temp_env() -> Env *
-{
-    return new (std::nothrow) TempEnv;
-}
 
 class TempWal : public Wal
 {
@@ -242,8 +286,10 @@ public:
             m_stat->counters[Stat::kWriteWal] += kPageSize;
         }
         if (db_size > 0) {
-            write_back_committed();
-            m_env->m_file.resize(db_size);
+            if (write_back_committed() ||
+                m_env->m_file.resize(db_size)) {
+                return Status::no_memory();
+            }
             m_pages.clear();
         }
         return Status::ok();
@@ -285,24 +331,34 @@ public:
 
     [[nodiscard]] auto db_size() const -> uint32_t override
     {
-        return static_cast<uint32_t>(m_env->m_file.pages.size());
+        return static_cast<uint32_t>(m_env->m_file.pages.len());
     }
 
 private:
-    auto write_back_committed() -> void
+    [[nodiscard]] auto write_back_committed() -> int
     {
         for (const auto &[id, src] : m_pages) {
-            auto *dst = m_env->m_file.fetch_page(id, true);
+            if (m_env->m_file.ensure_large_enough(id.value)) {
+                return -1;
+            }
+            auto *dst = m_env->m_file.fetch_page(id);
             std::memcpy(dst, src.data(), kPageSize);
             m_stat->counters[Stat::kReadWal] += kPageSize;
             m_stat->counters[Stat::kWriteDB] += kPageSize;
         }
+        return 0;
     }
 
     std::unordered_map<Id, std::string, Id::Hash> m_pages;
     TempEnv *const m_env;
     Stat *const m_stat;
 };
+} // namespace
+
+auto new_temp_env() -> Env *
+{
+    return new (std::nothrow) TempEnv;
+}
 
 auto new_temp_wal(const Wal::Parameters &param) -> Wal *
 {

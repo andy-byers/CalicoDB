@@ -8,12 +8,14 @@
 #include "calicodb/cursor.h"
 #include "calicodb/env.h"
 #include "calicodb/tx.h"
+#include "utils.h"
 #include <algorithm>
 #include <climits>
 #include <condition_variable>
 #include <functional>
 #include <memory>
 #include <mutex>
+#include <ostream>
 #include <random>
 
 namespace calicodb
@@ -137,6 +139,18 @@ public:
         return dist(m_rng);
     }
 };
+
+template <class T>
+auto operator<<(std::ostream &os, const Id &id) -> std::ostream &
+{
+    return os << "Id(" << id.value << ')';
+}
+
+template <class T>
+auto operator<<(std::ostream &os, const Slice &slice) -> std::ostream &
+{
+    return os << slice.to_string();
+}
 
 // Print information about each database page to `os`
 auto print_database_overview(std::ostream &os, Pager &pager) -> void;

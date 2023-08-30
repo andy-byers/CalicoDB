@@ -4,7 +4,6 @@
 
 #include "bufmgr.h"
 #include "calicodb/env.h"
-#include "calicodb/options.h"
 #include "encoding.h"
 #include "stat.h"
 
@@ -210,7 +209,9 @@ auto Dirtylist::add(PageRef &ref) -> void
     ref.set_flag(PageRef::kDirty);
 }
 
-static auto dirtylist_merge(DirtyHdr *lhs, DirtyHdr *rhs) -> DirtyHdr *
+namespace
+{
+auto dirtylist_merge(DirtyHdr *lhs, DirtyHdr *rhs) -> DirtyHdr *
 {
     DirtyHdr result = {};
     auto *tail = &result;
@@ -237,6 +238,7 @@ static auto dirtylist_merge(DirtyHdr *lhs, DirtyHdr *rhs) -> DirtyHdr *
     }
     return result.dirty;
 }
+} // namespace
 
 // NOTE: Sorting routine is from SQLite (src/pcache.c).
 auto Dirtylist::sort() -> DirtyHdr *

@@ -9,8 +9,6 @@
 #include "calicodb/db.h"
 #include "calicodb/string.h"
 #include "utils.h"
-#include <memory>
-#include <utility>
 
 namespace calicodb
 {
@@ -34,7 +32,7 @@ struct UserObjectDestructor {
 struct DefaultDestructor {
     auto operator()(void *ptr) const -> void
     {
-        Alloc::free(ptr);
+        Alloc::deallocate(ptr);
     }
 };
 
@@ -56,7 +54,7 @@ public:
 
     template <class Dx>
     explicit UniquePtr(Object *ptr, Dx &&destructor)
-        : Destructor(std::forward<Dx>(destructor)),
+        : Destructor(forward<Dx>(destructor)),
           m_ptr(ptr)
     {
     }
@@ -71,7 +69,7 @@ public:
 
     UniquePtr(UniquePtr &&rhs) noexcept
         : Destructor(rhs),
-          m_ptr(std::exchange(rhs.m_ptr, nullptr))
+          m_ptr(exchange(rhs.m_ptr, nullptr))
     {
     }
 
@@ -131,7 +129,7 @@ public:
 
     auto release() -> Object *
     {
-        return std::exchange(m_ptr, nullptr);
+        return exchange(m_ptr, nullptr);
     }
 };
 
@@ -157,16 +155,16 @@ public:
     }
 
     UniqueBuffer(UniqueBuffer &&rhs) noexcept
-        : m_ptr(std::move(rhs.m_ptr)),
-          m_len(std::exchange(rhs.m_len, 0))
+        : m_ptr(move(rhs.m_ptr)),
+          m_len(exchange(rhs.m_len, 0U))
     {
     }
 
     auto operator=(UniqueBuffer &&rhs) noexcept -> UniqueBuffer &
     {
         if (this != &rhs) {
-            m_ptr = std::move(rhs.m_ptr);
-            m_len = std::exchange(rhs.m_len, 0);
+            m_ptr = move(rhs.m_ptr);
+            m_len = exchange(rhs.m_len, 0U);
         }
         return *this;
     }
@@ -214,12 +212,12 @@ public:
     auto release() -> T *
     {
         m_len = 0;
-        return std::exchange(ref(), nullptr);
+        return exchange(ref(), nullptr);
     }
 
     [[nodiscard]] auto realloc(size_t len) -> int
     {
-        auto *ptr = static_cast<T *>(Alloc::realloc(m_ptr.get(), len * sizeof(T)));
+        auto *ptr = static_cast<T *>(Alloc::reallocate(m_ptr.get(), len * sizeof(T)));
         if (ptr || len == 0) {
             m_ptr.release();
             m_ptr.reset(ptr);

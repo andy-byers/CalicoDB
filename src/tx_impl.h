@@ -11,7 +11,6 @@
 namespace calicodb
 {
 
-class ErrorState;
 struct BucketOptions;
 struct Stat;
 
@@ -22,7 +21,6 @@ class TxImpl
 public:
     struct Parameters {
         const Status *status;
-        ErrorState *errors;
         Pager *pager;
         Stat *stat;
         char *scratch;
@@ -78,7 +76,6 @@ private:
     friend class DBImpl;
 
     mutable Schema m_schema;
-    ErrorState *const m_errors;
     const Status *const m_status;
     Pager *const m_pager;
     TxImpl **m_backref = nullptr;

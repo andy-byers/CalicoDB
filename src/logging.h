@@ -10,7 +10,6 @@
 #include "ptr.h"
 #include "utils.h"
 #include <cstdarg>
-#include <optional>
 
 namespace calicodb
 {
@@ -35,16 +34,16 @@ public:
     explicit StringBuilder(String str);
 
     StringBuilder(StringBuilder &&rhs) noexcept
-        : m_buf(std::move(rhs.m_buf)),
-          m_len(std::exchange(rhs.m_len, 0))
+        : m_buf(move(rhs.m_buf)),
+          m_len(exchange(rhs.m_len, 0U))
     {
     }
 
     auto operator=(StringBuilder &&rhs) noexcept -> StringBuilder &
     {
         if (this != &rhs) {
-            m_buf = std::move(rhs.m_buf);
-            m_len = std::exchange(rhs.m_len, 0);
+            m_buf = move(rhs.m_buf);
+            m_len = exchange(rhs.m_len, 0U);
         }
         return *this;
     }
@@ -64,14 +63,30 @@ public:
     {
         str.m_len = 0;
         str.m_cap = 0;
-        return std::exchange(str.m_ptr, nullptr);
+        return exchange(str.m_ptr, nullptr);
     }
 };
 
 class StatusBuilder final
 {
 public:
-    [[nodiscard]] static auto start(StringBuilder &builder, Status::Code code, Status::SubCode subc = Status::kNone) -> int
+    template <class... Args>
+    static auto build(Status::Code code, Status::SubCode subc, const char *fmt, Args &&...args) -> Status
+    {
+        Status fallback(code, subc);
+
+        StringBuilder builder;
+        if (start(builder, code, subc)) {
+            return fallback;
+        }
+        if (builder.append_format(fmt, forward<Args>(args)...)) {
+            return fallback;
+        }
+        return finish(move(builder));
+    }
+
+    template <class... Args>
+    static auto start(StringBuilder &builder, Status::Code code, Status::SubCode subc = Status::kNone) -> int
     {
         static constexpr uint16_t kInitialRefcount = 1;
         char header[4] = {'\x00', '\x00', code, subc};
@@ -79,15 +94,64 @@ public:
         return builder.append(Slice(header, sizeof(header)));
     }
 
-    [[nodiscard]] static auto finish(StringBuilder builder) -> Status
+    static auto finish(StringBuilder builder) -> Status
     {
         return Status(StringBuilder::release_string(
-            std::move(builder).build()));
+            move(builder).build()));
     }
 
-    [[nodiscard]] static auto inlined(Status::Code code, Status::SubCode subc = Status::kNone) -> Status
+    template <class... Args>
+    static auto invalid_argument(const char *fmt, Args &&...args) -> Status
     {
-        return Status(code, subc);
+        return build(Status::kInvalidArgument, Status::kNone, fmt, forward<Args>(args)...);
+    }
+
+    template <class... Args>
+    static auto not_supported(const char *fmt, Args &&...args) -> Status
+    {
+        return build(Status::kNotSupported, Status::kNone, fmt, forward<Args>(args)...);
+    }
+
+    template <class... Args>
+    static auto corruption(const char *fmt, Args &&...args) -> Status
+    {
+        return build(Status::kCorruption, Status::kNone, fmt, forward<Args>(args)...);
+    }
+
+    template <class... Args>
+    static auto not_found(const char *fmt, Args &&...args) -> Status
+    {
+        return build(Status::kNotFound, Status::kNone, fmt, forward<Args>(args)...);
+    }
+
+    template <class... Args>
+    static auto io_error(const char *fmt, Args &&...args) -> Status
+    {
+        return build(Status::kIOError, Status::kNone, fmt, forward<Args>(args)...);
+    }
+
+    template <class... Args>
+    static auto busy(const char *fmt, Args &&...args) -> Status
+    {
+        return build(Status::kBusy, Status::kNone, fmt, forward<Args>(args)...);
+    }
+
+    template <class... Args>
+    static auto aborted(const char *fmt, Args &&...args) -> Status
+    {
+        return build(Status::kAborted, Status::kNone, fmt, forward<Args>(args)...);
+    }
+
+    template <class... Args>
+    static auto retry(const char *fmt, Args &&...args) -> Status
+    {
+        return build(Status::kBusy, Status::kRetry, fmt, forward<Args>(args)...);
+    }
+
+    template <class... Args>
+    static auto no_memory(const char *fmt, Args &&...args) -> Status
+    {
+        return build(Status::kAborted, Status::kNoMemory, fmt, forward<Args>(args)...);
     }
 };
 

@@ -5,7 +5,6 @@
 #include "pager.h"
 #include "alloc.h"
 #include "calicodb/env.h"
-#include "freelist.h"
 #include "header.h"
 #include "logging.h"
 #include "node.h"
@@ -14,6 +13,28 @@
 
 namespace calicodb
 {
+
+namespace
+{
+
+constexpr auto kEntrySize =
+    sizeof(char) +    // Type (1 B)
+    sizeof(uint32_t); // Back pointer (4 B)
+
+auto entry_offset(Id map_id, Id page_id) -> size_t
+{
+    CALICODB_EXPECT_LT(map_id, page_id);
+    return (page_id.value - map_id.value - 1) * kEntrySize;
+}
+
+auto decode_entry(const char *data) -> PointerMap::Entry
+{
+    return {
+        Id(get_u32(data + 1)),
+        PointerMap::Type{*data},
+    };
+}
+} // namespace
 
 auto Pager::purge_page(PageRef &victim) -> void
 {
@@ -607,24 +628,6 @@ auto Pager::assert_state() const -> bool
             CALICODB_EXPECT_TRUE(false && "unrecognized Pager::Mode");
     }
     return true;
-}
-
-static constexpr auto kEntrySize =
-    sizeof(char) +    // Type (1 B)
-    sizeof(uint32_t); // Back pointer (4 B)
-
-static auto entry_offset(Id map_id, Id page_id) -> size_t
-{
-    CALICODB_EXPECT_LT(map_id, page_id);
-    return (page_id.value - map_id.value - 1) * kEntrySize;
-}
-
-static auto decode_entry(const char *data) -> PointerMap::Entry
-{
-    return {
-        Id(get_u32(data + 1)),
-        PointerMap::Type{*data},
-    };
 }
 
 auto PointerMap::lookup(Id page_id) -> Id
