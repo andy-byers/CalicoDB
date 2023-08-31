@@ -10,6 +10,7 @@
 #include "utils.h"
 #include <climits>
 #include <iostream>
+#include <limits>
 
 namespace calicodb
 {
