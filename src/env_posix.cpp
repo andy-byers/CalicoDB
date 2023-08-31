@@ -44,7 +44,7 @@ public:
     auto new_file(const char *filename, OpenMode mode, File *&out) -> Status override;
     [[nodiscard]] auto file_exists(const char *filename) const -> bool override;
     auto remove_file(const char *filename) -> Status override;
-     auto file_size(const char *filename, size_t &out) const -> Status override;
+    auto file_size(const char *filename, size_t &out) const -> Status override;
 
     auto srand(unsigned seed) -> void override;
     [[nodiscard]] auto rand() -> unsigned override;
@@ -479,7 +479,7 @@ struct PosixFs final {
         inode = nullptr;
     }
 
-     auto ref_snode(PosixFile &file, PosixShm *&shm_out) const -> Status
+    auto ref_snode(PosixFile &file, PosixShm *&shm_out) const -> Status
     {
         ObjectPtr<PosixShm> shm_storage(Alloc::new_object<PosixShm>());
         if (!shm_storage) {

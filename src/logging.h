@@ -69,89 +69,131 @@ public:
 
 class StatusBuilder final
 {
+    StringBuilder m_builder;
+    const Status m_fallback;
+    bool m_ok = true;
+
 public:
-    template <class... Args>
-    static auto build(Status::Code code, Status::SubCode subc, const char *fmt, Args &&...args) -> Status
-    {
-        Status fallback(code, subc);
-
-        StringBuilder builder;
-        if (start(builder, code, subc)) {
-            return fallback;
-        }
-        if (builder.append_format(fmt, forward<Args>(args)...)) {
-            return fallback;
-        }
-        return finish(move(builder));
-    }
-
-    template <class... Args>
-    static auto start(StringBuilder &builder, Status::Code code, Status::SubCode subc = Status::kNone) -> int
+    explicit StatusBuilder(Status::Code code, Status::SubCode subc = Status::kNone)
+        : m_fallback(code, subc)
     {
         static constexpr uint16_t kInitialRefcount = 1;
         char header[4] = {'\x00', '\x00', code, subc};
         std::memcpy(header, &kInitialRefcount, sizeof(kInitialRefcount));
-        return builder.append(Slice(header, sizeof(header)));
+        if (m_builder.append(Slice(header, sizeof(header)))) {
+            m_ok = false;
+        }
     }
 
-    static auto finish(StringBuilder builder) -> Status
+    [[nodiscard]] auto append(const Slice &s) -> StatusBuilder
     {
-        return Status(StringBuilder::release_string(
-            move(builder).build()));
+        if (m_ok && m_builder.append(s)) {
+            m_ok = false;
+        }
+        return std::move(*this);
+    }
+
+    [[nodiscard]] auto append(char c) -> StatusBuilder
+    {
+        return append(Slice(&c, 1));
+    }
+
+    template <class... Args>
+    [[nodiscard]] auto append_format(const char *fmt, Args &&...args) -> StatusBuilder
+    {
+        if (m_ok && m_builder.append_format(fmt, forward<Args>(args)...)) {
+            m_ok = false;
+        }
+        return std::move(*this);
+    }
+
+    [[nodiscard]] auto append_escaped(const Slice &s) -> StatusBuilder
+    {
+        if (m_ok && m_builder.append(s)) {
+            m_ok = false;
+        }
+        return std::move(*this);
+    }
+
+    auto build() && -> Status
+    {
+        if (m_ok) {
+            return Status(StringBuilder::release_string(
+                move(m_builder).build()));
+        }
+        return m_fallback;
     }
 
     template <class... Args>
     static auto invalid_argument(const char *fmt, Args &&...args) -> Status
     {
-        return build(Status::kInvalidArgument, Status::kNone, fmt, forward<Args>(args)...);
+        return StatusBuilder(Status::kInvalidArgument)
+            .append_format(fmt, forward<Args>(args)...)
+            .build();
     }
 
     template <class... Args>
     static auto not_supported(const char *fmt, Args &&...args) -> Status
     {
-        return build(Status::kNotSupported, Status::kNone, fmt, forward<Args>(args)...);
+        return StatusBuilder(Status::kNotSupported)
+            .append_format(fmt, forward<Args>(args)...)
+            .build();
     }
 
     template <class... Args>
     static auto corruption(const char *fmt, Args &&...args) -> Status
     {
-        return build(Status::kCorruption, Status::kNone, fmt, forward<Args>(args)...);
+        return StatusBuilder(Status::kCorruption)
+            .append_format(fmt, forward<Args>(args)...)
+            .build();
     }
 
     template <class... Args>
     static auto not_found(const char *fmt, Args &&...args) -> Status
     {
-        return build(Status::kNotFound, Status::kNone, fmt, forward<Args>(args)...);
+        return StatusBuilder(Status::kNotFound)
+            .append_format(fmt, forward<Args>(args)...)
+            .build();
     }
 
     template <class... Args>
     static auto io_error(const char *fmt, Args &&...args) -> Status
     {
-        return build(Status::kIOError, Status::kNone, fmt, forward<Args>(args)...);
+        return StatusBuilder(Status::kIOError)
+            .append_format(fmt, forward<Args>(args)...)
+            .build();
     }
 
     template <class... Args>
     static auto busy(const char *fmt, Args &&...args) -> Status
     {
-        return build(Status::kBusy, Status::kNone, fmt, forward<Args>(args)...);
+        return StatusBuilder(Status::kBusy)
+            .append_format(fmt, forward<Args>(args)...)
+            .build();
     }
 
     template <class... Args>
     static auto aborted(const char *fmt, Args &&...args) -> Status
     {
-        return build(Status::kAborted, Status::kNone, fmt, forward<Args>(args)...);
+        return StatusBuilder(Status::kAborted)
+            .append_format(fmt, forward<Args>(args)...)
+            .build();
     }
 
     template <class... Args>
     static auto retry(const char *fmt, Args &&...args) -> Status
     {
-        return build(Status::kBusy, Status::kRetry, fmt, forward<Args>(args)...);
+        return StatusBuilder(Status::kBusy, Status::kRetry)
+            .append_format(fmt, forward<Args>(args)...)
+            .build();
     }
 
     template <class... Args>
     static auto no_memory(const char *fmt, Args &&...args) -> Status
     {
-        return build(Status::kAborted, Status::kNoMemory, fmt, forward<Args>(args)...);
+        return StatusBuilder(Status::kAborted, Status::kNoMemory)
+            .append_format(fmt, forward<Args>(args)...)
+            .build();
     }
 };
 

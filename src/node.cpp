@@ -9,6 +9,7 @@ namespace calicodb
 
 namespace
 {
+
 constexpr uint16_t kPageMask = kPageSize - 1;
 constexpr uint32_t kSlotWidth = sizeof(uint16_t);
 constexpr uint32_t kMinBlockSize = 2 * kSlotWidth;
@@ -207,6 +208,7 @@ auto allocate_from_gap(Node &node, uint32_t needed_size) -> uint32_t
     }
     return 0U;
 }
+
 } // namespace
 
 auto Node::alloc(uint32_t index, uint32_t size) -> int

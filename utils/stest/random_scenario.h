@@ -11,7 +11,7 @@
 namespace stest
 {
 
-template<class State>
+template <class State>
 class RandomScenario : public InterleavedScenario<State>
 {
 public:

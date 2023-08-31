@@ -55,9 +55,9 @@ public:
     [[nodiscard]] virtual auto value() const -> Slice = 0;
 
     // Move the cursor to the first record with a key that is equal to the given `key`
-    // Invalidates the cursor if a read fails or the key does not exist. If no errors
-    // are encountered and the record does not exist, the cursor status is set to a
-    // status for which Status::is_not_found() evaluates to true.
+    // If the record is found, then c->is_valid() will return true on the cursor c,
+    // otherwise, it will return false. If an error is encountered, c->status() will
+    // return a non-OK status describing what happened.
     virtual auto find(const Slice &key) -> void = 0;
 
     // Move the cursor to the first record with a key that is greater than or equal

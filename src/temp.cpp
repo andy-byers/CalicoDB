@@ -9,10 +9,7 @@
 #include "ptr.h"
 #include "stat.h"
 #include "wal.h"
-#include <chrono>
 #include <random>
-#include <thread>
-#include <unordered_map>
 
 namespace calicodb
 {
@@ -166,8 +163,7 @@ public:
 
     auto sleep(unsigned micros) -> void override
     {
-        std::this_thread::sleep_for(
-            std::chrono::microseconds(micros));
+        Env::default_env().sleep(micros);
     }
 
 private:
@@ -207,6 +203,7 @@ private:
             for (size_t i = old_len; i < new_len; ++i) {
                 auto *&page = pages.ptr()[i];
                 if (auto *ptr = Alloc::allocate(kPageSize)) {
+                    std::memset(ptr, 0, kPageSize);
                     page = static_cast<char *>(ptr);
                 } else {
                     // Clear the rest of the pointers so the destructor doesn't mess up.
@@ -237,16 +234,33 @@ private:
     } m_file;
 };
 
+// In-memory WAL
+// This WAL implementation only needs to save the most-recent version of each page (we
+// can only rollback once, and there are no other connections).
 class TempWal : public Wal
 {
 public:
+    [[nodiscard]] static auto create(const Wal::Parameters &param) -> TempWal *
+    {
+        auto *wal = Alloc::new_object<TempWal>(
+            reinterpret_cast<TempEnv &>(*param.env), *param.stat);
+        if (wal->m_table.grow()) {
+            Alloc::deallocate(wal);
+            return nullptr;
+        }
+        return wal;
+    }
+
     explicit TempWal(TempEnv &env, Stat &stat)
         : m_env(&env),
           m_stat(&stat)
     {
     }
 
-    ~TempWal() override = default;
+    ~TempWal() override
+    {
+        m_table.clear();
+    }
 
     auto start_reader(bool &changed) -> Status override
     {
@@ -256,15 +270,9 @@ public:
 
     auto read(Id page_id, char *&page) -> Status override
     {
-        if (m_pages.empty()) {
-            // This is the usual case: pages are only stored here if they were written during
-            // the current read-write transaction. Otherwise, they will be located in the Env.
-            page = nullptr;
-            return Status::ok();
-        }
-        const auto itr = m_pages.find(page_id);
-        if (itr != end(m_pages)) {
-            std::memcpy(page, itr->second.data(), kPageSize);
+        const auto itr = m_table.find(page_id.value);
+        if (itr != m_table.end() && *itr) {
+            std::memcpy(page, (*itr)->page, kPageSize);
             m_stat->counters[Stat::kReadWal] += kPageSize;
         } else {
             page = nullptr;
@@ -281,16 +289,25 @@ public:
     {
         auto *dirty = &first_ref->dirty_hdr;
         for (auto *p = dirty; p; p = p->dirty) {
+            if (m_table.occupied * 2 >= m_table.data.len()) {
+                if (m_table.grow()) {
+                    return Status::no_memory();
+                }
+            }
             auto *ref = p->get_page_ref();
-            m_pages.insert_or_assign(ref->page_id, std::string(ref->data, kPageSize));
+            auto **itr = m_table.find(ref->page_id.value);
+            if (*itr == nullptr) {
+                *itr = PageEntry::create(ref->page_id.value);
+                if (*itr == nullptr) {
+                    return Status::no_memory();
+                }
+                ++m_table.occupied;
+            }
+            std::memcpy((*itr)->page, ref->data, kPageSize);
             m_stat->counters[Stat::kWriteWal] += kPageSize;
         }
-        if (db_size > 0) {
-            if (write_back_committed() ||
-                m_env->m_file.resize(db_size)) {
-                return Status::no_memory();
-            }
-            m_pages.clear();
+        if (db_size && commit(db_size)) {
+            return Status::no_memory();
         }
         return Status::ok();
     }
@@ -299,20 +316,21 @@ public:
     {
         // This routine will call undo() on frames in a different order than the normal WAL
         // class. This shouldn't make a difference to the pager (the only caller).
-        for (const auto &[id, _] : m_pages) {
-            undo(object, id);
-        }
-        m_pages.clear();
+        m_table.for_each([undo, object](auto &page) {
+            undo(object, Id(page->key));
+            return 0;
+        });
     }
 
     auto finish_writer() -> void override
     {
-        // Caller should have called commit(), if not rollback().
-        CALICODB_EXPECT_TRUE(m_pages.empty());
-        m_pages.clear(); // Just to make sure.
+        m_table.clear();
     }
 
-    auto finish_reader() -> void override {}
+    auto finish_reader() -> void override
+    {
+        CALICODB_EXPECT_EQ(m_table.occupied, 0);
+    }
 
     auto close() -> Status override
     {
@@ -335,24 +353,127 @@ public:
     }
 
 private:
-    [[nodiscard]] auto write_back_committed() -> int
+    [[nodiscard]] auto commit(size_t db_size) -> int
     {
-        for (const auto &[id, src] : m_pages) {
-            if (m_env->m_file.ensure_large_enough(id.value)) {
+        const auto rc = m_table.for_each([this](auto *page) {
+            if (m_env->m_file.ensure_large_enough(page->key)) {
                 return -1;
             }
-            auto *dst = m_env->m_file.fetch_page(id);
-            std::memcpy(dst, src.data(), kPageSize);
+            auto *dst = m_env->m_file.fetch_page(Id(page->key));
+            std::memcpy(dst, page->page, kPageSize);
             m_stat->counters[Stat::kReadWal] += kPageSize;
             m_stat->counters[Stat::kWriteDB] += kPageSize;
+            return 0;
+        });
+        if (rc || m_env->m_file.resize(db_size)) {
+            return -1;
         }
+        m_table.clear();
         return 0;
     }
 
-    std::unordered_map<Id, std::string, Id::Hash> m_pages;
+    struct PageEntry {
+        uint32_t key;
+        char page[kPageSize];
+
+        static auto create(uint32_t key) -> PageEntry *
+        {
+            auto *ptr = static_cast<PageEntry *>(
+                Alloc::allocate(sizeof(PageEntry)));
+            if (ptr) {
+                ptr->key = key;
+            }
+            return ptr;
+        }
+    };
+
+    // Simple hash table for pages written to the WAL
+    // Also, we never need to
+    // remove single pages, which simplifies the implementation. Uses linear probing.
+    struct PageTable {
+        UniqueBuffer<PageEntry *> data;
+        size_t occupied = 0;
+
+        [[nodiscard]] auto end() -> PageEntry **
+        {
+            return data.ptr() + data.len();
+        }
+
+        template <class Action>
+        auto for_each(Action &&action) -> int
+        {
+            for (size_t i = 0; i < data.len(); ++i) {
+                // Caller may need to free and clear the pointer, so provide a reference.
+                auto *&ptr = data.ptr()[i];
+                if (ptr && action(ptr)) {
+                    return -1;
+                }
+            }
+            return 0;
+        }
+
+        [[nodiscard]] auto find(uint32_t key) -> PageEntry **
+        {
+            // grow() must succeed at least once before this method is called.
+            CALICODB_EXPECT_LT(occupied, data.len());
+            CALICODB_EXPECT_FALSE(data.is_empty());
+
+            // Robert Jenkins' 32-bit integer hash function
+            // Source: https://gist.github.com/badboy/6267743.
+            const auto hash = [](uint32_t x) {
+                x = (x + 0x7ED55D16) + (x << 12);
+                x = (x ^ 0xC761C23C) ^ (x >> 19);
+                x = (x + 0x165667B1) + (x << 5);
+                x = (x + 0xD3A2646C) ^ (x << 9);
+                x = (x + 0xFD7046C5) + (x << 3);
+                x = (x ^ 0xB55A4F09) ^ (x >> 16);
+                return x;
+            };
+
+            size_t tries = 0;
+            for (auto h = hash(key);; ++h, ++tries) {
+                CALICODB_EXPECT_LT(tries, data.len());
+                auto *&ptr = data.ptr()[h & (data.len() - 1)];
+                if (ptr == nullptr || ptr->key == key) {
+                    return &ptr;
+                }
+            }
+        }
+
+        [[nodiscard]] auto grow() -> int
+        {
+            uint32_t capacity = 4;
+            while (capacity <= data.len()) {
+                capacity *= 2;
+            }
+            PageTable table;
+            if (table.data.realloc(capacity)) {
+                return -1;
+            }
+            std::memset(table.data.ptr(), 0, capacity * sizeof(PageEntry *));
+            for_each([&table](auto *page) {
+                *table.find(page->key) = page;
+                return 0;
+            });
+            data = std::move(table.data);
+            return 0;
+        }
+
+        auto clear() -> void
+        {
+            for_each([this](auto *&page) {
+                Alloc::deallocate(page);
+                page = nullptr;
+                --occupied;
+                return 0;
+            });
+        }
+    } m_table;
+
     TempEnv *const m_env;
     Stat *const m_stat;
 };
+
 } // namespace
 
 auto new_temp_env() -> Env *
@@ -362,7 +483,7 @@ auto new_temp_env() -> Env *
 
 auto new_temp_wal(const Wal::Parameters &param) -> Wal *
 {
-    return Alloc::new_object<TempWal>(reinterpret_cast<TempEnv &>(*param.env), *param.stat);
+    return TempWal::create(param);
 }
 
 } // namespace calicodb

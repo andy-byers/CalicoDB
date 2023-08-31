@@ -5,13 +5,13 @@
 #ifndef CALICODB_STEST_REPEATED_SCENARIO_H
 #define CALICODB_STEST_REPEATED_SCENARIO_H
 
-#include <cstring>
 #include "scenario.h"
+#include <cstring>
 
 namespace stest
 {
 
-template<class State>
+template <class State>
 class InterleavedScenario : public Scenario<State>
 {
 public:

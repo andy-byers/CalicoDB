@@ -12,8 +12,9 @@ namespace stest
 
 static FILE *s_debug_file = nullptr;
 
-template<class State>
-class Scenario {
+template <class State>
+class Scenario
+{
 public:
     const char *const name;
 
@@ -73,7 +74,7 @@ protected:
     virtual auto reset_scenario() -> void = 0;
 };
 
-template<class State>
+template <class State>
 class ScenarioArray final
 {
 public:
@@ -113,7 +114,7 @@ private:
     size_t m_sequence_index;
 };
 
-template<class State>
+template <class State>
 class IteratedScenario : public Scenario<State>
 {
 public:
@@ -176,8 +177,7 @@ private:
     Scenario<State> *m_current_scenario;
 };
 
-
-template<class State>
+template <class State>
 class ConditionalScenario : public Scenario<State>
 {
 public:

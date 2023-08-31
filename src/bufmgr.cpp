@@ -194,6 +194,7 @@ auto Dirtylist::is_empty() const -> bool
 
 auto Dirtylist::remove(PageRef &ref) -> DirtyHdr *
 {
+    CALICODB_EXPECT_TRUE(TEST_contains(ref));
     CALICODB_EXPECT_TRUE(ref.get_flag(PageRef::kDirty));
     // NOTE: ref.dirty_hdr.next_entry is still valid after this call (IntrusiveList::remove() does not
     //       reinitialize the entry it removes from the list).
@@ -204,6 +205,7 @@ auto Dirtylist::remove(PageRef &ref) -> DirtyHdr *
 
 auto Dirtylist::add(PageRef &ref) -> void
 {
+    CALICODB_EXPECT_FALSE(TEST_contains(ref));
     CALICODB_EXPECT_FALSE(ref.get_flag(PageRef::kDirty));
     IntrusiveList::add_head(ref.dirty_hdr, m_head);
     ref.set_flag(PageRef::kDirty);
@@ -211,6 +213,7 @@ auto Dirtylist::add(PageRef &ref) -> void
 
 namespace
 {
+
 auto dirtylist_merge(DirtyHdr *lhs, DirtyHdr *rhs) -> DirtyHdr *
 {
     DirtyHdr result = {};
@@ -238,6 +241,7 @@ auto dirtylist_merge(DirtyHdr *lhs, DirtyHdr *rhs) -> DirtyHdr *
     }
     return result.dirty;
 }
+
 } // namespace
 
 // NOTE: Sorting routine is from SQLite (src/pcache.c).

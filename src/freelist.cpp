@@ -19,19 +19,22 @@ struct FreePage {
     {
         return ref.data + (index + 2) * sizeof(uint32_t);
     }
+
     static auto get_leaf_ptr(const PageRef &ref, size_t index) -> const char *
     {
         return ref.data + (index + 2) * sizeof(uint32_t);
     }
 
-    static auto get_next_id(PageRef &ref) -> uint32_t
+    static auto get_next_id(PageRef &ref) -> Id
     {
-        return get_u32(ref.data);
+        return Id(get_u32(ref.data));
     }
+
     static auto get_leaf_count(const PageRef &ref) -> uint32_t
     {
         return get_u32(ref.data + sizeof(uint32_t));
     }
+
     static auto get_leaf_id(const PageRef &ref, size_t index) -> Id
     {
         return Id(get_u32(FreePage::get_leaf_ptr(ref, index)));
@@ -41,10 +44,12 @@ struct FreePage {
     {
         put_u32(ref.data, value.value);
     }
+
     static auto put_leaf_count(PageRef &ref, uint32_t value) -> void
     {
         put_u32(ref.data + sizeof(uint32_t), value);
     }
+
     static auto put_leaf_id(PageRef &ref, size_t index, uint32_t value) -> void
     {
         put_u32(get_leaf_ptr(ref, index), value);
@@ -57,6 +62,7 @@ auto abs_distance(T t1, T t2) -> int64_t
     static_assert(std::is_signed_v<T> || sizeof(T) < sizeof(int64_t));
     return std::abs(static_cast<int64_t>(t1) - static_cast<int64_t>(t2));
 }
+
 } // namespace
 
 auto Freelist::add(Pager &pager, PageRef *&page) -> Status
@@ -78,7 +84,7 @@ auto Freelist::add(Pager &pager, PageRef *&page) -> Status
     } else if (!free_head.is_null()) {
         s = pager.acquire(free_head, trunk);
         if (s.is_ok()) {
-            const auto n = get_u32(trunk->data + sizeof(uint32_t));
+            const auto n = FreePage::get_leaf_count(*trunk);
             if (n < kTrunkCapacity) {
                 // Trunk has enough room for a new leaf page.
                 pager.mark_dirty(*trunk);
@@ -163,9 +169,9 @@ auto Freelist::remove(Pager &pager, RemoveType type, Id nearby, PageRef *&page_o
     do {
         prev_trunk = trunk;
         if (prev_trunk) {
-            trunk_id.value = get_u32(&prev_trunk->data[0]);
+            trunk_id = FreePage::get_next_id(*prev_trunk);
         } else {
-            trunk_id.value = FileHdr::get_freelist_head(database_root->data).value;
+            trunk_id = FileHdr::get_freelist_head(database_root->data);
         }
         if (trunk_id.value > max_page || search_attempts++ > free_count) {
             s = Status::corruption();
@@ -178,7 +184,7 @@ auto Freelist::remove(Pager &pager, RemoveType type, Id nearby, PageRef *&page_o
         }
         assert(trunk != nullptr);
         assert(trunk->data != nullptr);
-        leaf_count = get_u32(trunk->data + sizeof(uint32_t));
+        leaf_count = FreePage::get_leaf_count(*trunk);
         if (leaf_count == 0 && !search_list) {
             CALICODB_EXPECT_EQ(prev_trunk, nullptr);
             pager.mark_dirty(*trunk);
@@ -285,11 +291,10 @@ auto Freelist::assert_state(Pager &pager) -> bool
     CALICODB_EXPECT_TRUE(free_head.is_null() || free_head.value > kFirstMapPage);
 
     Status s;
-    Id last_id;
     while (!free_head.is_null()) {
         s = pager.acquire(free_head, head);
         CALICODB_EXPECT_TRUE(s.is_ok());
-        const auto n = get_u32(head->data + sizeof(uint32_t));
+        const auto n = FreePage::get_leaf_count(*head);
         CALICODB_EXPECT_LE(n, kTrunkCapacity);
 
         PointerMap::Entry entry;
@@ -307,8 +312,7 @@ auto Freelist::assert_state(Pager &pager) -> bool
             CALICODB_EXPECT_EQ(entry.back_ptr, Id::null());
             CALICODB_EXPECT_EQ(entry.type, PointerMap::kFreelistPage);
         }
-        last_id = free_head;
-        free_head.value = get_u32(head->data);
+        free_head = FreePage::get_next_id(*head);
         pager.release(head);
     }
     return true;

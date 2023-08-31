@@ -15,9 +15,100 @@
 namespace calicodb
 {
 
+namespace
+{
+
 // Compiler intrinsics for atomic loads and stores
 #define ATOMIC_LOAD(p) __atomic_load_n(p, __ATOMIC_RELAXED)
 #define ATOMIC_STORE(p, v) __atomic_store_n(p, v, __ATOMIC_RELAXED)
+
+struct HashIndexHdr {
+    uint32_t version;
+    uint32_t unused0;
+    uint32_t change;
+    uint16_t is_init;
+    uint16_t unused1;
+    uint32_t max_frame;
+    uint32_t page_count;
+    uint32_t frame_cksum[2];
+    uint32_t salt[2];
+    uint32_t cksum[2];
+};
+
+class HashIndex final
+{
+public:
+    friend class HashIterator;
+
+    using Key = uint32_t;
+    using Value = uint32_t;
+
+    explicit HashIndex(HashIndexHdr &header, File *file);
+    [[nodiscard]] auto fetch(Value value) -> Key;
+    auto lookup(Key key, Value lower, Value &out) -> Status;
+    auto assign(Key key, Value value) -> Status;
+    [[nodiscard]] auto header() -> volatile HashIndexHdr *;
+    [[nodiscard]] auto groups() const -> volatile char **;
+    auto cleanup() -> void;
+    auto close() -> void;
+
+private:
+    friend class WalImpl;
+
+    auto map_group(size_t group_number, bool extend) -> Status;
+
+    // Storage for hash table groups.
+    volatile char **m_groups = nullptr;
+    size_t m_num_groups = 0;
+
+    // Address of the hash table header kept in memory. This version of the header corresponds
+    // to the current transaction. The one stored in the first table group corresponds to the
+    // most-recently-committed transaction.
+    HashIndexHdr *m_hdr;
+
+    File *m_file;
+};
+
+// Construct for iterating through the hash index.
+class HashIterator final
+{
+public:
+    using Key = HashIndex::Key;
+    using Value = HashIndex::Value;
+
+    struct Entry {
+        Key key = 0;
+        Value value = 0;
+    };
+
+    ~HashIterator();
+
+    // Create an iterator over the contents of the provided hash index.
+    explicit HashIterator(HashIndex &index);
+    auto init(uint32_t backfill = 0) -> Status;
+
+    // Return the next hash entry.
+    //
+    // This method should return a key that is greater than the last key returned by this
+    // method, along with the most-recently-set value.
+    [[nodiscard]] auto read(Entry &out) -> bool;
+
+private:
+    struct State {
+        struct Group {
+            Key *keys;
+            uint16_t *index;
+            uint32_t size;
+            uint32_t next;
+            uint32_t base;
+        } groups[1];
+    };
+
+    HashIndex *const m_source;
+    State *m_state = nullptr;
+    size_t m_num_groups = 0;
+    Key m_prior = 0;
+};
 
 using Key = HashIndex::Key;
 using Value = HashIndex::Value;
@@ -248,7 +339,10 @@ auto HashIndex::assign(Key key, Value value) -> Status
     const auto key_capacity = group_number ? kNIndexKeys : kNIndexKeys0;
 
     // REQUIRES: WAL writer lock is held.
-    CALICODB_TRY(map_group(group_number, true));
+    auto s = map_group(group_number, true);
+    if (!s.is_ok()) {
+        return s;
+    }
     HashGroup group(group_number, m_groups[group_number]);
 
     CALICODB_EXPECT_LT(group.base, value);
@@ -689,7 +783,10 @@ public:
         CALICODB_EXPECT_GE(m_reader_lock, 0);
         CALICODB_EXPECT_EQ(m_redo_cksum, 0);
 
-        CALICODB_TRY(lock_exclusive(kWriteLock, 1));
+        auto s = lock_exclusive(kWriteLock, 1);
+        if (!s.is_ok()) {
+            return s;
+        }
         m_writer_lock = true;
 
         // We have the writer lock, so no other connection will write the index header while
@@ -1053,21 +1150,6 @@ private:
     //                                            and no writer is connected that can keep the shm file up-to-date
 };
 
-auto Wal::open(const Parameters &param, Wal *&wal_out) -> Status
-{
-    UserPtr<File> wal_file;
-    auto s = param.env->new_file(param.filename, Env::kCreate, wal_file.ref());
-    if (s.is_ok()) {
-        wal_out = Alloc::new_object<WalImpl>(param, move(wal_file));
-        if (wal_out == nullptr) {
-            s = Status::no_memory();
-        }
-    }
-    return s;
-}
-
-Wal::~Wal() = default;
-
 WalImpl::WalImpl(const Parameters &param, UserPtr<File> wal_file)
     : m_index(m_hdr, param.lock_mode == Options::kLockNormal ? param.db_file : nullptr),
       m_wal_name(param.filename),
@@ -1099,10 +1181,13 @@ auto WalImpl::rewrite_checksums(uint32_t end) -> Status
     }
 
     char cksum_buffer[2 * sizeof(uint32_t)];
-    CALICODB_TRY(m_wal->read_exact(
+    auto s = m_wal->read_exact(
         cksum_offset,
         sizeof(cksum_buffer),
-        cksum_buffer));
+        cksum_buffer);
+    if (!s.is_ok()) {
+        return s;
+    }
     m_stat->counters[Stat::kReadWal] += kFrameSize;
 
     m_hdr.frame_cksum[0] = get_u32(&m_frame[0]);
@@ -1113,7 +1198,10 @@ auto WalImpl::rewrite_checksums(uint32_t end) -> Status
 
     for (; redo < end; ++redo) {
         const auto offset = frame_offset(redo);
-        CALICODB_TRY(m_wal->read_exact(offset, kFrameSize, m_frame));
+        s = m_wal->read_exact(offset, kFrameSize, m_frame);
+        if (!s.is_ok()) {
+            break;
+        }
         m_stat->counters[Stat::kReadWal] += kFrameSize;
 
         WalFrameHdr hdr;
@@ -1121,10 +1209,13 @@ auto WalImpl::rewrite_checksums(uint32_t end) -> Status
         hdr.db_size = get_u32(&m_frame[4]);
         encode_frame(hdr, &m_frame[WalFrameHdr::kSize], m_frame);
 
-        CALICODB_TRY(m_wal->write(offset, Slice(m_frame, WalFrameHdr::kSize)));
+        s = m_wal->write(offset, Slice(m_frame, WalFrameHdr::kSize));
+        if (!s.is_ok()) {
+            break;
+        }
         m_stat->counters[Stat::kWriteWal] += WalFrameHdr::kSize;
     }
-    return Status::ok();
+    return s;
 }
 
 auto WalImpl::recover_index() -> Status
@@ -1593,5 +1684,22 @@ auto WalImpl::transfer_contents(bool reset) -> Status
         start_frame, ATOMIC_LOAD(&info->backfill), m_hdr.max_frame);
     return s;
 }
+
+} // namespace
+
+auto Wal::open(const Parameters &param, Wal *&wal_out) -> Status
+{
+    UserPtr<File> wal_file;
+    auto s = param.env->new_file(param.filename, Env::kCreate, wal_file.ref());
+    if (s.is_ok()) {
+        wal_out = Alloc::new_object<WalImpl>(param, move(wal_file));
+        if (wal_out == nullptr) {
+            s = Status::no_memory();
+        }
+    }
+    return s;
+}
+
+Wal::~Wal() = default;
 
 } // namespace calicodb

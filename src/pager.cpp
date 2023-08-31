@@ -34,6 +34,7 @@ auto decode_entry(const char *data) -> PointerMap::Entry
         PointerMap::Type{*data},
     };
 }
+
 } // namespace
 
 auto Pager::purge_page(PageRef &victim) -> void
