@@ -122,7 +122,7 @@ private:
     auto open_wal() -> Status;
     auto refresh_state() -> Status;
     auto read_page(PageRef &out, size_t *size_out) -> Status;
-    [[nodiscard]] auto read_page_from_file(PageRef &ref, size_t *size_out) const -> Status;
+     auto read_page_from_file(PageRef &ref, size_t *size_out) const -> Status;
     auto ensure_available_buffer() -> Status;
     auto flush_dirty_pages() -> Status;
     auto purge_page(PageRef &victim) -> void;

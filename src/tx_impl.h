@@ -29,7 +29,7 @@ public:
     explicit TxImpl(const Parameters &param);
     ~TxImpl() override;
 
-    [[nodiscard]] auto status() const -> Status override
+     auto status() const -> Status override
     {
         return *m_status;
     }

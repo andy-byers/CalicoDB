@@ -41,7 +41,7 @@ public:
         return m_c->is_valid();
     }
 
-    [[nodiscard]] auto status() const -> Status override
+     auto status() const -> Status override
     {
         return m_c->status();
     }
