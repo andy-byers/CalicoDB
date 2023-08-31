@@ -11,10 +11,10 @@
 #include "schema.h"
 #include "stat.h"
 #include "utils.h"
-#include <functional>
 
 #ifdef CALICODB_TEST
 // Required for debug printing the tree structure.
+#include <functional>
 #include <string>
 #include <vector>
 #endif // CALICODB_TEST
@@ -22,92 +22,74 @@
 namespace calicodb
 {
 
-static constexpr uint32_t kCellPtrSize = sizeof(uint16_t);
-
-[[nodiscard]] static auto corrupted_page(Id page_id, PointerMap::Type page_type = PointerMap::kEmpty) -> Status
+namespace
 {
-    (void)page_id;
-    (void)page_type;
-    //    const char *type_name;
-    //    switch (page_type) {
-    //        case PointerMap::kTreeNode:
-    //        case PointerMap::kTreeRoot:
-    //            type_name = "tree node";
-    //            break;
-    //        case PointerMap::kOverflowHead:
-    //        case PointerMap::kOverflowLink:
-    //            type_name = "overflow page";
-    //            break;
-    //        case PointerMap::kFreelistTrunk:
-    //        case PointerMap::kFreelistLeaf:
-    //            type_name = "freelist page";
-    //            break;
-    //        default:
-    //            type_name = "page";
-    //    }
-    //    std::string message;
-    //    append_format_string(message, "corruption detected on %s with ID %u",
-    //                      type_name, page_id.value);
-    // TODO: Write an actual error message somewhere. The storage should live as long as the database at-least.
-    return Status::corruption("message");
-}
 
-auto Tree::corrupted_node(Id page_id) const -> Status
+constexpr uint32_t kCellPtrSize = sizeof(uint16_t);
+
+[[nodiscard]] auto corrupted_page(Id page_id, PointerMap::Type page_type = PointerMap::kEmpty) -> Status
 {
-    auto s = corrupted_page(page_id, PointerMap::kTreeNode);
-    if (m_pager->mode() >= Pager::kWrite) {
-        // Pager status should never be set unless a rollback is needed.
-        m_pager->set_status(s);
+    const char *type_name;
+    switch (page_type) {
+        case PointerMap::kTreeNode:
+        case PointerMap::kTreeRoot:
+            type_name = "tree node";
+            break;
+        case PointerMap::kOverflowHead:
+        case PointerMap::kOverflowLink:
+            type_name = "overflow page";
+            break;
+        case PointerMap::kFreelistPage:
+            type_name = "freelist page";
+            break;
+        default:
+            type_name = "page";
     }
-    return s;
+    return StatusBuilder::corruption("corruption detected on %s with ID %u",
+                                     type_name, page_id.value);
 }
 
-auto Tree::get_tree(CursorImpl &c) -> Tree *
-{
-    return c.m_tree;
-}
-
-[[nodiscard]] static auto cell_slots_offset(const Node &node) -> uint32_t
+[[nodiscard]] auto cell_slots_offset(const Node &node) -> uint32_t
 {
     return page_offset(node.ref->page_id) + NodeHdr::kSize;
 }
 
-[[nodiscard]] static auto cell_area_offset(const Node &node) -> uint32_t
+[[nodiscard]] auto cell_area_offset(const Node &node) -> uint32_t
 {
     return cell_slots_offset(node) + NodeHdr::get_cell_count(node.hdr()) * kCellPtrSize;
 }
 
-[[nodiscard]] static auto read_next_id(const PageRef &page) -> Id
+[[nodiscard]] auto read_next_id(const PageRef &page) -> Id
 {
     return Id(get_u32(page.data + page_offset(page.page_id)));
 }
 
-static auto write_next_id(PageRef &page, Id next_id) -> void
+auto write_next_id(PageRef &page, Id next_id) -> void
 {
     put_u32(page.data + page_offset(page.page_id), next_id.value);
 }
 
-[[nodiscard]] static auto read_child_id(const Cell &cell)
+[[nodiscard]] auto read_child_id(const Cell &cell)
 {
     return Id(get_u32(cell.ptr));
 }
 
-[[nodiscard]] static auto read_overflow_id(const Cell &cell)
+[[nodiscard]] auto read_overflow_id(const Cell &cell)
 {
     return Id(get_u32(cell.key + cell.local_pl_size));
 }
 
-static auto write_overflow_id(Cell &cell, Id overflow_id)
+auto write_overflow_id(Cell &cell, Id overflow_id)
 {
     put_u32(cell.key + cell.local_pl_size, overflow_id.value);
 }
 
-static auto write_child_id(Cell &cell, Id child_id)
+auto write_child_id(Cell &cell, Id child_id)
 {
     put_u32(cell.ptr, child_id.value);
 }
 
-[[nodiscard]] static auto merge_root(Node &root, Node &child)
+[[nodiscard]] auto merge_root(Node &root, Node &child)
 {
     CALICODB_EXPECT_EQ(NodeHdr::get_next_id(root.hdr()), child.ref->page_id);
     if (NodeHdr::get_free_start(child.hdr()) > 0) {
@@ -132,13 +114,13 @@ static auto write_child_id(Cell &cell, Id child_id)
     return 0;
 }
 
-[[nodiscard]] static auto is_underflowing(const Node &node)
+[[nodiscard]] auto is_underflowing(const Node &node)
 {
     return NodeHdr::get_cell_count(node.hdr()) == 0;
 }
 
-static constexpr uint32_t kLinkContentOffset = sizeof(uint32_t);
-static constexpr uint32_t kLinkContentSize = kPageSize - kLinkContentOffset;
+constexpr uint32_t kLinkContentOffset = sizeof(uint32_t);
+constexpr uint32_t kLinkContentSize = kPageSize - kLinkContentOffset;
 
 struct PayloadManager {
     static auto access(
@@ -211,9 +193,33 @@ struct PayloadManager {
     }
 };
 
-auto Tree::save_all_cursors() const -> void
+auto detach_cell(Cell &cell, char *backing) -> void
 {
-    manage_cursors(nullptr, kInitSaveCursors);
+    CALICODB_EXPECT_NE(backing, nullptr);
+    if (cell.ptr != backing) {
+        std::memcpy(backing, cell.ptr, cell.footprint);
+        const auto diff = cell.key - cell.ptr;
+        cell.ptr = backing;
+        cell.key = backing + diff;
+    }
+}
+
+// Determine what the last page number should be after a vacuum operation completes on a database with the
+// given number of pages `db_size` and number of freelist (trunk + leaf) pages `free_size`. This computation
+// was taken from SQLite (src/btree.c:finalDbSize()).
+auto vacuum_end_page(uint32_t db_size, uint32_t free_size) -> Id
+{
+    // Number of entries that can fit on a pointer map page.
+    static constexpr auto kEntriesPerMap = kPageSize / 5;
+    // Page ID of the most-recent pointer map page (the page that holds the back pointer for the last page
+    // in the database file).
+    const auto pm_page = PointerMap::lookup(Id(db_size));
+    // Number of pointer map pages between the current last page and the after-vacuum last page.
+    const auto pm_size = (free_size + pm_page.value + kEntriesPerMap - db_size) / kEntriesPerMap;
+
+    auto end_page = Id(db_size - free_size - pm_size);
+    end_page.value -= PointerMap::is_map(end_page);
+    return end_page;
 }
 
 class InorderTraversal
@@ -233,7 +239,7 @@ public:
         Node root;
         auto s = tree.acquire(tree.root(), root);
         if (s.is_ok()) {
-            s = traverse_impl(tree, std::move(root), cb, 0);
+            s = traverse_impl(tree, move(root), cb, 0);
         }
         return s;
     }
@@ -247,12 +253,12 @@ private:
             if (!node.is_leaf()) {
                 const auto save_id = node.ref->page_id;
                 const auto next_id = node.read_child_id(i);
-                tree.release(std::move(node));
+                tree.release(move(node));
 
                 Node next;
                 s = tree.acquire(next_id, next);
                 if (s.is_ok()) {
-                    s = traverse_impl(tree, std::move(next), cb, level + 1);
+                    s = traverse_impl(tree, move(next), cb, level + 1);
                 }
                 if (s.is_ok()) {
                     s = tree.acquire(save_id, node);
@@ -262,10 +268,37 @@ private:
                 s = cb(node, TraversalInfo{i, n, level});
             }
         }
-        tree.release(std::move(node));
+        tree.release(move(node));
         return s;
     }
 };
+
+[[nodiscard]] constexpr auto is_overflow_type(PointerMap::Type type) -> bool
+{
+    return type == PointerMap::kOverflowHead ||
+           type == PointerMap::kOverflowLink;
+}
+} // namespace
+
+auto Tree::corrupted_node(Id page_id) const -> Status
+{
+    auto s = corrupted_page(page_id, PointerMap::kTreeNode);
+    if (m_pager->mode() >= Pager::kWrite) {
+        // Pager status should never be set unless a rollback is needed.
+        m_pager->set_status(s);
+    }
+    return s;
+}
+
+auto Tree::get_tree(CursorImpl &c) -> Tree *
+{
+    return c.m_tree;
+}
+
+auto Tree::save_all_cursors() const -> void
+{
+    manage_cursors(nullptr, kInitSaveCursors);
+}
 
 auto Tree::create(Id *root_id_out) -> Status
 {
@@ -402,7 +435,7 @@ auto Tree::extract_key(const Cell &cell, KeyScratch &scratch, Slice &key_out, ui
         return Status::ok();
     }
     if (limit > scratch.len) {
-        auto *buf = Alloc::realloc(
+        auto *buf = Alloc::reallocate(
             scratch.buf, limit);
         if (buf) {
             scratch.buf = static_cast<char *>(buf);
@@ -560,17 +593,6 @@ auto Tree::make_pivot(const PivotOptions &opt, Cell &pivot_out) -> Status
         m_pager->release(prev, Pager::kNoCache);
     }
     return s;
-}
-
-static auto detach_cell(Cell &cell, char *backing) -> void
-{
-    CALICODB_EXPECT_NE(backing, nullptr);
-    if (cell.ptr != backing) {
-        std::memcpy(backing, cell.ptr, cell.footprint);
-        const auto diff = cell.key - cell.ptr;
-        cell.ptr = backing;
-        cell.key = backing + diff;
-    }
 }
 
 auto Tree::post_pivot(Node &parent, uint32_t idx, Cell &pivot, Id child_id) -> Status
@@ -750,7 +772,7 @@ auto Tree::split_root(CursorImpl &c) -> Status
 
         // Overflow cell is now in the child. m_ovfl.idx stays the same.
         m_ovfl.pid = child.ref->page_id;
-        c.assign_child(std::move(child));
+        c.assign_child(move(child));
         c.m_idx_path[1] = c.m_idx_path[0];
         c.m_idx_path[0] = 0;
     }
@@ -772,12 +794,12 @@ auto Tree::split_nonroot(CursorImpl &c) -> Status
         left = Node::from_new_page(*left.ref, m_node_scratch, node.is_leaf());
         const auto ncells = NodeHdr::get_cell_count(node.hdr());
         if (m_ovfl.idx >= ncells && c.on_last_node()) {
-            return split_nonroot_fast(c, parent, std::move(left));
+            return split_nonroot_fast(c, parent, move(left));
         }
         s = redistribute_cells(left, node, parent, pivot_idx);
     }
 
-    release(std::move(left));
+    release(move(left));
     c.move_to_parent();
     return s;
 }
@@ -845,7 +867,7 @@ auto Tree::split_nonroot_fast(CursorImpl &c, Node &parent, Node right) -> Status
     }
 
 cleanup:
-    release(std::move(right));
+    release(move(right));
     c.move_to_parent();
     return s;
 }
@@ -1045,9 +1067,9 @@ auto Tree::redistribute_cells(Node &left, Node &right, Node &parent, uint32_t pi
     }
     // Replace *p_src with tmp.
     tmp.ref->page_id = Id::null();
-    release(std::move(*p_src), Pager::kDiscard);
+    release(move(*p_src), Pager::kDiscard);
     m_pager->move_page(*tmp.ref, src_location);
-    *p_src = std::move(tmp);
+    *p_src = move(tmp);
 
     // Only the parent is allowed to overflow. The caller is expected to rebalance the parent in this case.
     CALICODB_EXPECT_TRUE(!m_ovfl.exists() || m_ovfl.pid == parent.ref->page_id);
@@ -1077,12 +1099,12 @@ auto Tree::fix_nonroot(CursorImpl &c, Node &parent, uint32_t idx) -> Status
         s = redistribute_cells(*p_left, *p_right, parent, idx);
         // NOTE: If this block isn't hit, then (a) sibling is not acquired, and (b) node will be
         //       released when the cursor is advanced.
-        release(std::move(*p_right));
+        release(move(*p_right));
         if (s.is_ok() && 0 == NodeHdr::get_cell_count(p_left->hdr())) {
             // redistribute_cells() performed a merge.
             s = Freelist::add(*m_pager, p_left->ref);
         } else {
-            release(std::move(*p_left));
+            release(move(*p_left));
         }
     }
 
@@ -1116,18 +1138,18 @@ auto Tree::fix_root(CursorImpl &c) -> Status
             c.m_idx = NodeHdr::get_cell_count(child.hdr()) / 2;
             if (child.read(c.m_idx, cell)) {
                 s = corrupted_node(node.ref->page_id);
-                release(std::move(child));
+                release(move(child));
             } else {
                 m_ovfl.cell = cell;
                 detach_cell(m_ovfl.cell, m_cell_scratch[0]);
                 child.erase(c.m_idx, cell.footprint);
-                c.assign_child(std::move(child));
+                c.assign_child(move(child));
                 s = split_nonroot(c);
             }
         } else {
             if (merge_root(node, child)) {
                 s = corrupted_node(node.ref->page_id);
-                release(std::move(child));
+                release(move(child));
             } else {
                 s = Freelist::add(*m_pager, child.ref);
             }
@@ -1149,7 +1171,7 @@ Tree::Tree(Pager &pager, Stat &stat, char *scratch, Id root_id, String name)
           scratch + kCellBufferLen * 2,
           scratch + kCellBufferLen * 3,
       },
-      m_name(std::move(name)),
+      m_name(move(name)),
       m_pager(&pager),
       m_root_id(root_id),
       m_writable(pager.mode() >= Pager::kWrite)
@@ -1165,7 +1187,7 @@ Tree::Tree(Pager &pager, Stat &stat, char *scratch, Id root_id, String name)
 Tree::~Tree()
 {
     for (const auto &scratch : m_key_scratch) {
-        Alloc::free(scratch.buf);
+        Alloc::deallocate(scratch.buf);
     }
 
     // Make sure all cursors are in the inactive list with their nodes released.
@@ -1420,12 +1442,6 @@ auto Tree::erase(CursorImpl &c) -> Status
     return s;
 }
 
-[[nodiscard]] static constexpr auto is_overflow_type(PointerMap::Type type) -> bool
-{
-    return type == PointerMap::kOverflowHead ||
-           type == PointerMap::kOverflowLink;
-}
-
 auto Tree::relocate_page(PageRef *&free, PointerMap::Entry entry, Id last_id) -> Status
 {
     CALICODB_EXPECT_NE(free->page_id, last_id);
@@ -1467,7 +1483,7 @@ auto Tree::relocate_page(PageRef *&free, PointerMap::Entry entry, Id last_id) ->
                 }
             }
             const auto page_id = parent.ref->page_id;
-            release(std::move(parent));
+            release(move(parent));
             if (s.is_ok() && !found) {
                 s = corrupted_node(page_id);
             }
@@ -1481,7 +1497,7 @@ auto Tree::relocate_page(PageRef *&free, PointerMap::Entry entry, Id last_id) ->
             if (!s.is_ok()) {
                 return s;
             } else if (parent.is_leaf()) {
-                release(std::move(parent));
+                release(move(parent));
                 return corrupted_node(entry.back_ptr);
             }
             bool found = false;
@@ -1495,7 +1511,7 @@ auto Tree::relocate_page(PageRef *&free, PointerMap::Entry entry, Id last_id) ->
             if (!found) {
                 s = corrupted_node(parent.ref->page_id);
             }
-            release(std::move(parent));
+            release(move(parent));
             [[fallthrough]];
         }
         case PointerMap::kTreeRoot: {
@@ -1509,7 +1525,7 @@ auto Tree::relocate_page(PageRef *&free, PointerMap::Entry entry, Id last_id) ->
                 return s;
             }
             s = fix_links(last, free->page_id);
-            release(std::move(last));
+            release(move(last));
             break;
         }
         default:
@@ -1545,24 +1561,6 @@ auto Tree::relocate_page(PageRef *&free, PointerMap::Entry entry, Id last_id) ->
         }
     }
     return s;
-}
-
-// Determine what the last page number should be after a vacuum operation completes on a database with the
-// given number of pages `db_size` and number of freelist (trunk + leaf) pages `free_size`. This computation
-// was taken from SQLite (src/btree.c:finalDbSize()).
-static auto vacuum_end_page(uint32_t db_size, uint32_t free_size) -> Id
-{
-    // Number of entries that can fit on a pointer map page.
-    static constexpr auto kEntriesPerMap = kPageSize / 5;
-    // Page ID of the most-recent pointer map page (the page that holds the back pointer for the last page
-    // in the database file).
-    const auto pm_page = PointerMap::lookup(Id(db_size));
-    // Number of pointer map pages between the current last page and the after-vacuum last page.
-    const auto pm_size = (free_size + pm_page.value + kEntriesPerMap - db_size) / kEntriesPerMap;
-
-    auto end_page = Id(db_size - free_size - pm_size);
-    end_page.value -= PointerMap::is_map(end_page);
-    return end_page;
 }
 
 auto Tree::vacuum() -> Status
@@ -1837,7 +1835,7 @@ public:
                 CHECK_OK(tree.find_parent_id(child.ref->page_id, parent_id));
                 CHECK_TRUE(parent_id == node.ref->page_id);
 
-                tree.release(std::move(child));
+                tree.release(move(child));
             };
             if (info.idx == info.ncells) {
                 return Status::ok();

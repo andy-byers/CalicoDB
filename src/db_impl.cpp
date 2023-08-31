@@ -12,6 +12,14 @@
 namespace calicodb
 {
 
+namespace
+{
+auto already_running_error() -> Status
+{
+    return Status::not_supported("another transaction is running");
+}
+} // namespace
+
 auto DBImpl::open(const Options &sanitized) -> Status
 {
     auto s = m_env->new_file(m_db_filename.c_str(),
@@ -82,13 +90,13 @@ auto DBImpl::open(const Options &sanitized) -> Status
 }
 
 DBImpl::DBImpl(Parameters param)
-    : m_scratch(std::move(param.scratch)),
+    : m_scratch(move(param.scratch)),
       m_env(param.sanitized.env),
       m_log(param.sanitized.info_log),
       m_busy(param.sanitized.busy),
       m_auto_ckpt(param.sanitized.auto_checkpoint),
-      m_db_filename(std::move(param.db_name)),
-      m_wal_filename(std::move(param.wal_name)),
+      m_db_filename(move(param.db_name)),
+      m_wal_filename(move(param.wal_name)),
       m_owns_log(param.sanitized.info_log == nullptr),
       m_owns_env(param.sanitized.temp_database)
 {
@@ -197,11 +205,6 @@ auto DBImpl::get_property(const Slice &name, String *out) const -> Status
     return Status::not_found();
 }
 
-static auto already_running_error() -> Status
-{
-    return Status::not_supported("another transaction is running");
-}
-
 auto DBImpl::checkpoint(bool reset) -> Status
 {
     if (m_tx) {
@@ -237,7 +240,6 @@ auto DBImpl::prepare_tx(bool write, TxType *&tx_out) const -> Status
         CALICODB_EXPECT_TRUE(m_status.is_ok());
         m_tx = new (std::nothrow) TxImpl(TxImpl::Parameters{
             &m_status,
-            &m_errors,
             m_pager.get(),
             &m_stat,
             m_scratch.ptr(),

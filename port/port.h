@@ -2,18 +2,11 @@
 // This source code is licensed under the MIT License, which can be found in
 // LICENSE.md. See AUTHORS.md for a list of contributor names.
 
-#include "calicodb/string.h"
-#include "alloc.h"
+#ifndef CALICODB_PORT_PORT_H
+#define CALICODB_PORT_PORT_H
 
-namespace calicodb
-{
+#if defined(CALICODB_PLATFORM_POSIX)
+#include "port_posix.h"
+#endif
 
-auto String::clear() -> void
-{
-    Alloc::deallocate(m_ptr);
-    m_ptr = nullptr;
-    m_len = 0;
-    m_cap = 0;
-}
-
-} // namespace calicodb
+#endif // CALICODB_PORT_PORT_H

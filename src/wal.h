@@ -7,7 +7,6 @@
 
 #include "calicodb/db.h"
 #include "utils.h"
-#include <functional>
 
 namespace calicodb
 {

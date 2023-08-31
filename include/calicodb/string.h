@@ -6,7 +6,6 @@
 #define CALICODB_STRING_H
 
 #include "slice.h"
-#include <utility>
 
 namespace calicodb
 {
@@ -32,19 +31,26 @@ public:
     auto operator=(const String &) -> String & = delete;
 
     String(String &&rhs) noexcept
-        : m_ptr(std::exchange(rhs.m_ptr, nullptr)),
-          m_len(std::exchange(rhs.m_len, 0)),
-          m_cap(std::exchange(rhs.m_cap, 0))
+        : m_ptr(rhs.m_ptr),
+          m_len(rhs.m_len),
+          m_cap(rhs.m_cap)
     {
+        rhs.m_ptr = nullptr;
+        rhs.m_len = 0;
+        rhs.m_cap = 0;
     }
 
     auto operator=(String &&rhs) noexcept -> String &
     {
         if (this != &rhs) {
             clear();
-            m_ptr = std::exchange(rhs.m_ptr, nullptr);
-            m_len = std::exchange(rhs.m_len, 0);
-            m_cap = std::exchange(rhs.m_cap, 0);
+            m_ptr = rhs.m_ptr;
+            m_len = rhs.m_len;
+            m_cap = rhs.m_cap;
+
+            rhs.m_ptr = nullptr;
+            rhs.m_len = 0;
+            rhs.m_cap = 0;
         }
         return *this;
     }

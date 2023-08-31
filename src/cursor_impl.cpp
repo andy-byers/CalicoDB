@@ -13,8 +13,8 @@ namespace calicodb
 auto CursorImpl::fetch_user_payload() -> Status
 {
     CALICODB_EXPECT_TRUE(has_key());
-    const auto key_buffer_len = std::exchange(m_key_len, 0);
-    const auto value_buffer_len = std::exchange(m_value_len, 0);
+    const auto key_buffer_len = exchange(m_key_len, 0U);
+    const auto value_buffer_len = exchange(m_value_len, 0U);
 
     Cell cell;
     if (m_node.read(m_idx, cell)) {
@@ -182,15 +182,15 @@ auto CursorImpl::move_to_parent() -> void
     release_nodes(kCurrentLevel);
     --m_level;
     m_idx = m_idx_path[m_level];
-    m_node = std::move(m_node_path[m_level]);
+    m_node = move(m_node_path[m_level]);
 }
 
 auto CursorImpl::assign_child(Node child) -> void
 {
     CALICODB_EXPECT_TRUE(has_node());
     m_idx_path[m_level] = m_idx;
-    m_node_path[m_level] = std::move(m_node);
-    m_node = std::move(child);
+    m_node_path[m_level] = move(m_node);
+    m_node = move(child);
     ++m_level;
 }
 
@@ -201,7 +201,7 @@ auto CursorImpl::move_to_child(Id child_id) -> void
         Node child;
         m_status = m_tree->acquire(child_id, child);
         if (m_status.is_ok()) {
-            assign_child(std::move(child));
+            assign_child(move(child));
         }
     } else {
         m_status = m_tree->corrupted_node(child_id);
@@ -261,12 +261,12 @@ auto CursorImpl::seek_to_leaf(const Slice &key, SeekType type) -> bool
 
 auto CursorImpl::release_nodes(ReleaseType type) -> void
 {
-    m_tree->release(std::move(m_node));
+    m_tree->release(move(m_node));
     if (type < kAllLevels) {
         return;
     }
     for (int i = 0; i < m_level; ++i) {
-        m_tree->release(std::move(m_node_path[i]));
+        m_tree->release(move(m_node_path[i]));
     }
 }
 

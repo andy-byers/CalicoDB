@@ -18,7 +18,7 @@ add_subdirectory(cmake_tests/add_subdirectory)
 
 function(build_test NAME)
     add_executable(${NAME} ${NAME}.cpp test.cpp test.h)
-    target_compile_options(${NAME} PRIVATE ${CALICODB_FLAGS})
+#    target_compile_options(${NAME} PRIVATE ${CALICODB_OPTIONS})
     target_link_libraries(${NAME} PRIVATE calicodb_utils gtest_main)
     target_include_directories(${NAME} PUBLIC "${CALICODB_SOURCE_DIR}")
     add_test(NAME ${NAME} COMMAND ${NAME})

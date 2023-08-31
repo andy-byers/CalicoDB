@@ -6,14 +6,11 @@
 #include "calicodb/env.h"
 #include "common.h"
 #include "encoding.h"
-#include "env_posix.h"
 #include "fake_env.h"
 #include "temp.h"
 #include "test.h"
-#include <csignal>
 #include <filesystem>
 #include <gtest/gtest.h>
-#include <mutex>
 #include <thread>
 
 namespace calicodb::test
@@ -581,7 +578,6 @@ TEST(EnvWrappers, WrapperEnvWorksAsExpected)
     ASSERT_OK(w_env.new_file("file", Env::kCreate, file));
     ASSERT_TRUE(w_env.new_logger("sink", sink).is_not_supported());
     ASSERT_TRUE(w_env.file_exists("file"));
-    volatile void *ptr;
     delete file;
     size_t size;
     ASSERT_OK(w_env.file_size("file", size));

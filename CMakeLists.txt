@@ -18,61 +18,122 @@ option(CALICODB_WithASan "Build with ASan" Off)
 option(CALICODB_WithUBSan "Build with UBSan" Off)
 option(CALICODB_WithTSan "Build with TSan" Off)
 
-# Add applicable warnings from @lefticus/cpp-best-practices.
-set(CALICODB_FLAGS "")
+# Ensure that neither exceptions, nor RTTI, are enabled.
 if(${CMAKE_CXX_COMPILER_ID} STREQUAL MSVC)
     message(FATAL_ERROR 'Visual Studio is not yet supported')
 else()
-    # Disable exceptions and RTTI.
     string(REGEX REPLACE "-fexceptions" "" CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS}")
     string(REGEX REPLACE "-frtti" "" CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS}")
-    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fno-exceptions -fno-rtti")
+endif()
 
-    list(APPEND CALICODB_FLAGS -Werror)
-    list(APPEND CALICODB_FLAGS -Wall)
-    list(APPEND CALICODB_FLAGS -Wextra)
-    list(APPEND CALICODB_FLAGS -Wnon-virtual-dtor)
-    list(APPEND CALICODB_FLAGS -Wpedantic)
-    list(APPEND CALICODB_FLAGS -Wold-style-cast)
-    list(APPEND CALICODB_FLAGS -Wcast-align)
-    list(APPEND CALICODB_FLAGS -Woverloaded-virtual)
-    list(APPEND CALICODB_FLAGS -Wdouble-promotion)
-    list(APPEND CALICODB_FLAGS -Wimplicit-fallthrough)
-    list(APPEND CALICODB_FLAGS -Wunused)
-
-    list(APPEND CALICODB_FLAGS -Wno-unused-variable)
+# Set compiler warnings/options for the library (from @lefticus/cpp-best-practices).
+set(CALICODB_OPTIONS "")
+if(${CMAKE_CXX_COMPILER_ID} STREQUAL MSVC)
+    message(FATAL_ERROR 'Visual Studio is not yet supported')
+else() # Clang OR GNU
+    set(CALICODB_OPTIONS
+            -fno-exceptions
+            -fno-rtti
+            -Wall
+            -Wextra
+            -Wshadow
+            -Wnon-virtual-dtor
+            -Wold-style-cast
+            -Wcast-align
+            -Wunused
+            -Woverloaded-virtual
+            -Wpedantic
+            -Wconversion
+            -Wsign-conversion
+            -Wnull-dereference
+            -Wdouble-promotion
+            -Wimplicit-fallthrough)
 
     if(${CMAKE_CXX_COMPILER_ID} STREQUAL GNU)
-        list(APPEND CALICODB_FLAGS -Wconversion)
-        list(APPEND CALICODB_FLAGS -Wsign-conversion)
-        list(APPEND CALICODB_FLAGS -Wduplicated-cond)
-        list(APPEND CALICODB_FLAGS -Wduplicated-branches)
-        list(APPEND CALICODB_FLAGS -Wlogical-op)
+        set(CALICODB_OPTIONS
+                ${CALICODB_OPTIONS}
+                -Wmisleading-indentation
+                -Wduplicated-cond
+                -Wduplicated-branches
+                -Wlogical-op
+                -Wuseless-cast)
     endif()
 endif()
 
-file(GLOB_RECURSE
-        CALICODB_SOURCES
-        "${PROJECT_SOURCE_DIR}/src/*.cpp"
-        "${PROJECT_SOURCE_DIR}/src/*.h")
-add_library(calicodb STATIC
-        "${PROJECT_SOURCE_DIR}/include/calicodb/cursor.h"
-        "${PROJECT_SOURCE_DIR}/include/calicodb/db.h"
-        "${PROJECT_SOURCE_DIR}/include/calicodb/env.h"
-        "${PROJECT_SOURCE_DIR}/include/calicodb/options.h"
-        "${PROJECT_SOURCE_DIR}/include/calicodb/slice.h"
-        "${PROJECT_SOURCE_DIR}/include/calicodb/status.h"
-        "${PROJECT_SOURCE_DIR}/include/calicodb/tx.h"
-        "${CALICODB_SOURCES}")
+add_library(calicodb STATIC)
+target_sources(calicodb
+        PRIVATE src/alloc.cpp
+                src/alloc.h
+                src/bufmgr.cpp
+                src/bufmgr.h
+                src/cursor.cpp
+                src/cursor_impl.cpp
+                src/cursor_impl.h
+                src/db.cpp
+                src/db_impl.cpp
+                src/db_impl.h
+                src/encoding.h
+                src/env.cpp
+                src/freelist.cpp
+                src/freelist.h
+                src/header.cpp
+                src/header.h
+                src/list.h
+                src/logging.cpp
+                src/logging.h
+                src/node.cpp
+                src/node.h
+                src/page.h
+                src/pager.cpp
+                src/pager.h
+                src/ptr.h
+                src/schema.cpp
+                src/schema.h
+                src/stat.h
+                src/status.cpp
+                src/string.cpp
+                src/temp.cpp
+                src/temp.h
+                src/tree.cpp
+                src/tree.h
+                src/tx.cpp
+                src/tx_impl.cpp
+                src/tx_impl.h
+                src/utils.h
+                src/wal.cpp
+                src/wal.h
+                port/port.h
+        $<$<VERSION_GREATER:CMAKE_VERSION,3.2>:PUBLIC>  # From LevelDB
+            include/calicodb/cursor.h
+            include/calicodb/db.h
+            include/calicodb/env.h
+            include/calicodb/options.h
+            include/calicodb/slice.h
+            include/calicodb/status.h
+            include/calicodb/tx.h)
 target_include_directories(calicodb
-        PUBLIC  $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/include>
-                $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>)
+        PUBLIC $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/include>
+               $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>
+        PRIVATE ${PROJECT_SOURCE_DIR}/port)
 target_compile_options(calicodb
-        PRIVATE "${CALICODB_FLAGS}")
+        PRIVATE ${CALICODB_OPTIONS})
 target_compile_definitions(calicodb
         PUBLIC CALICODB_VERSION_MAJOR=${PROJECT_VERSION_MAJOR}
                CALICODB_VERSION_MINOR=${PROJECT_VERSION_MINOR}
                CALICODB_VERSION_PATCH=${PROJECT_VERSION_PATCH})
+
+if(WIN32)
+    message(FATAL_ERROR 'Windows is not yet supported')
+    target_compile_definitions(calicodb
+            PRIVATE CALICODB_PLATFORM_WINDOWS=1)
+else()
+    target_sources(calicodb
+            PRIVATE src/env_posix.cpp
+                    port/port_posix.cpp
+                    port/port_posix.h)
+    target_compile_definitions(calicodb
+            PRIVATE CALICODB_PLATFORM_POSIX=1)
+endif()
 
 if(CALICODB_WithASan)
     target_compile_options(calicodb PUBLIC -fsanitize=address)

@@ -7,36 +7,37 @@
 #include "calicodb/slice.h"
 #include "logging.h"
 #include "utils.h"
-#include <limits>
 
 namespace calicodb
 {
 
+namespace
+{
 // Return true if the given `state` is inline, false otherwise
 // Uses the least-significant bit of the pointer value to distinguish between the 2 states:
 // inline and heap-allocated. Inline states have the code and subcode heap in the
 // pointer value, while heap-allocated states store the code and subcode in the first few
 // bytes, followed by a refcount and message.
-static auto is_inline(const char *state) -> bool
+auto is_inline(const char *state) -> bool
 {
     static constexpr std::uintptr_t kInlineBit = 0x0001;
     return reinterpret_cast<std::uintptr_t>(state) & kInlineBit;
 }
 
 // Return true if the given `state` is allocated on the heap, false otherwise
-static auto is_heap(const char *state) -> bool
+auto is_heap(const char *state) -> bool
 {
     return state && !is_inline(state);
 }
 
-static auto inline_code(const char *state) -> Status::Code
+auto inline_code(const char *state) -> Status::Code
 {
     static constexpr std::uintptr_t kCodeMask = 0x00FE;
     return static_cast<Status::Code>(
         (reinterpret_cast<std::uintptr_t>(state) & kCodeMask) >> 1);
 }
 
-static auto inline_subcode(const char *state) -> Status::SubCode
+auto inline_subcode(const char *state) -> Status::SubCode
 {
     static constexpr std::uintptr_t kSubCodeMask = 0xFF00;
     return static_cast<Status::SubCode>(
@@ -45,44 +46,44 @@ static auto inline_subcode(const char *state) -> Status::SubCode
 
 using HeapRefCount = uint16_t;
 
-static auto heap_code(const char *state) -> Status::Code
+auto heap_code(const char *state) -> Status::Code
 {
     return static_cast<Status::Code>(state[sizeof(HeapRefCount)]);
 }
 
-static auto heap_subcode(const char *state) -> Status::SubCode
+auto heap_subcode(const char *state) -> Status::SubCode
 {
     return static_cast<Status::SubCode>(state[sizeof(HeapRefCount) + 1]);
 }
 
-static auto heap_refcount_ptr(char *state) -> HeapRefCount *
+auto heap_refcount_ptr(char *state) -> HeapRefCount *
 {
     return reinterpret_cast<HeapRefCount *>(state);
 }
 
-static auto heap_message(const char *state) -> const char *
+auto heap_message(const char *state) -> const char *
 {
     return state + sizeof(HeapRefCount) + 2;
 }
 
-static auto incref(char *state) -> void
+auto incref(char *state) -> void
 {
     if (is_heap(state)) {
-        static constexpr uint16_t kMaxRefcount = std::numeric_limits<uint16_t>::max();
-        CALICODB_EXPECT_LT(*heap_refcount_ptr(state), kMaxRefcount);
+        CALICODB_EXPECT_LT(*heap_refcount_ptr(state), UINT16_MAX);
         ++*heap_refcount_ptr(state);
     }
 }
 
-static auto decref(char *state) -> void
+auto decref(char *state) -> void
 {
     if (is_heap(state)) {
         CALICODB_EXPECT_GT(*heap_refcount_ptr(state), 0);
         if (--*heap_refcount_ptr(state) == 0) {
-            Alloc::free(state);
+            Alloc::deallocate(state);
         }
     }
 }
+} // namespace
 
 Status::Status(Code code, SubCode subc)
     : m_state(nullptr)
@@ -119,7 +120,7 @@ auto Status::operator=(const Status &rhs) -> Status &
 }
 
 Status::Status(Status &&rhs) noexcept
-    : m_state(std::exchange(rhs.m_state, nullptr))
+    : m_state(exchange(rhs.m_state, nullptr))
 {
 }
 
@@ -153,9 +154,7 @@ auto Status::subcode() const -> SubCode
 
 auto Status::message() const -> const char *
 {
-    if (is_ok()) {
-        return "OK";
-    } else if (!is_inline(m_state)) {
+    if (is_heap(m_state)) {
         return heap_message(m_state);
     } else if (is_retry()) {
         return "busy: retry";
@@ -187,64 +186,49 @@ auto Status::message() const -> const char *
     }
 }
 
-static auto make_error(Status::Code code, Status::SubCode subc, const char *msg) -> Status
-{
-    // Compressed status to return if there isn't enough memory.
-    auto fallback = StatusBuilder::inlined(code, subc);
-
-    StringBuilder builder;
-    if (StatusBuilder::start(builder, code, subc)) {
-        return fallback;
-    }
-    if (builder.append(msg)) {
-        return fallback;
-    }
-    return StatusBuilder::finish(std::move(builder));
-}
-
 auto Status::invalid_argument(const char *msg) -> Status
 {
-    return make_error(kInvalidArgument, kNone, msg);
+    return StatusBuilder::invalid_argument("%s", msg);
 }
 
 auto Status::not_supported(const char *msg) -> Status
 {
-    return make_error(kNotSupported, kNone, msg);
+    return StatusBuilder::not_supported("%s", msg);
 }
 
 auto Status::corruption(const char *msg) -> Status
 {
-    return make_error(kCorruption, kNone, msg);
+    return StatusBuilder::corruption("%s", msg);
 }
 
 auto Status::not_found(const char *msg) -> Status
 {
-    return make_error(kNotFound, kNone, msg);
+    return StatusBuilder::not_found("%s", msg);
 }
 
 auto Status::io_error(const char *msg) -> Status
 {
-    return make_error(kIOError, kNone, msg);
+    return StatusBuilder::io_error("%s", msg);
 }
 
 auto Status::busy(const char *msg) -> Status
 {
-    return make_error(kBusy, kNone, msg);
+    return StatusBuilder::busy("%s", msg);
 }
 
 auto Status::aborted(const char *msg) -> Status
 {
-    return make_error(kAborted, kNone, msg);
+    return StatusBuilder::aborted("%s", msg);
 }
 
 auto Status::retry(const char *msg) -> Status
 {
-    return make_error(kBusy, kRetry, msg);
+    return StatusBuilder::retry("%s", msg);
 }
 
 auto Status::no_memory(const char *msg) -> Status
 {
-    return make_error(kAborted, kNoMemory, msg);
+    return StatusBuilder::no_memory("%s", msg);
 }
 
 } // namespace calicodb

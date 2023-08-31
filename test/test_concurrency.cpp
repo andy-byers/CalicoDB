@@ -437,10 +437,10 @@ protected:
             tmp.op = [&state](auto &co, auto *b) {
                 barrier_wait(b);
                 if (state.ptr) {
-                    Alloc::free(state.ptr);
+                    Alloc::deallocate(state.ptr);
                     state.ptr = nullptr;
                 } else {
-                    state.ptr = static_cast<char *>(Alloc::malloc(co.op_args[0]));
+                    state.ptr = static_cast<char *>(Alloc::allocate(co.op_args[0]));
                 }
                 if (state.state++ > kNumIterations) {
                     co.op = nullptr;
@@ -469,7 +469,7 @@ protected:
                     default:
                         new_size = co.op_args[0] + co.op_args[1];
                 }
-                auto *new_ptr = Alloc::realloc(state.ptr, new_size);
+                auto *new_ptr = Alloc::reallocate(state.ptr, new_size);
                 if (new_ptr || new_size == 0) {
                     state.ptr = static_cast<char *>(new_ptr);
                 }
@@ -495,10 +495,10 @@ protected:
         }
 
         for (const auto &[ptr, _] : malloc_states) {
-            Alloc::free(ptr);
+            Alloc::deallocate(ptr);
         }
         for (const auto &[ptr, _] : realloc_states) {
-            Alloc::free(ptr);
+            Alloc::deallocate(ptr);
         }
 
         ASSERT_EQ(Alloc::bytes_used(), 0);

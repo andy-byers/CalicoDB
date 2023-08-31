@@ -10,6 +10,7 @@
 #include "utils.h"
 #include <climits>
 #include <iostream>
+#include <limits>
 
 namespace calicodb
 {
@@ -25,15 +26,15 @@ namespace calicodb
 #define CHECK_FALSE(cond) \
     CHECK_TRUE(!(cond))
 
-#define CHECK_OK(expr)                                                 \
-    do {                                                               \
-        if (auto assert_s = (expr); !assert_s.is_ok()) {               \
-            std::fprintf(                                              \
-                stderr,                                                \
+#define CHECK_OK(expr)                                             \
+    do {                                                           \
+        if (auto assert_s = (expr); !assert_s.is_ok()) {           \
+            std::fprintf(                                          \
+                stderr,                                            \
                 "expected `(" #expr ").is_ok()` but got \"%s\"\n", \
-                assert_s.message());             \
-            std::abort();                                              \
-        }                                                              \
+                assert_s.message());                               \
+            std::abort();                                          \
+        }                                                          \
     } while (0)
 
 #define CHECK_EQ(lhs, rhs)                                                                             \

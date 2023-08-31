@@ -3,28 +3,67 @@
 // LICENSE.md. See AUTHORS.md for a list of contributor names.
 
 #include "alloc.h"
-#include "utils.h"
 #include <atomic>
-#include <limits>
 
 namespace calicodb
 {
 
-static void *s_zero_size_ptr = reinterpret_cast<void *>(13);
+namespace
+{
+void *s_zero_size_ptr = reinterpret_cast<void *>(13);
 
 // Prefix each allocation with its size, stored as an 8-byte unsigned integer.
 using Header = uint64_t;
 
-static constexpr auto kMaxLimit =
-    std::numeric_limits<size_t>::max() - kMaxAllocation;
+constexpr auto kMaxLimit = SIZE_MAX - kMaxAllocation;
 
-static struct Allocator {
+struct Allocator {
     Alloc::Methods methods = Alloc::kDefaultMethods;
     Alloc::Hook hook = nullptr;
     void *hook_arg = nullptr;
     uint64_t limit = kMaxLimit;
     std::atomic<uint64_t> bytes_used = 0;
 } s_alloc;
+
+auto size_of_alloc(size_t size) -> size_t
+{
+    return size + sizeof(Header);
+}
+
+auto size_of_alloc(void *ptr) -> size_t
+{
+    return size_of_alloc(static_cast<const Header *>(ptr)[-1]);
+}
+
+// Reserve `size` bytes of memory for allocation
+// Ensures that the limit set by Alloc::set_limit() is respected.
+auto reserve_memory(size_t size) -> int
+{
+    auto before = s_alloc.bytes_used.load(std::memory_order_relaxed);
+    uint64_t after;
+    do {
+        after = before + size;
+        if (after > s_alloc.limit) {
+            return -1;
+        }
+    } while (!s_alloc.bytes_used.compare_exchange_weak(before, after));
+    return 0;
+}
+
+// Give back `size bytes of memory
+auto cancel_memory(size_t size) -> void
+{
+    [[maybe_unused]] const auto size_before = s_alloc.bytes_used.fetch_sub(size);
+    CALICODB_EXPECT_GE(size_before, size);
+}
+} // namespace
+
+#define ALLOCATION_HOOK                                       \
+    do {                                                      \
+        if (s_alloc.hook && s_alloc.hook(s_alloc.hook_arg)) { \
+            return nullptr;                                   \
+        }                                                     \
+    } while (0)
 
 auto Alloc::bytes_used() -> size_t
 {
@@ -58,46 +97,7 @@ auto Alloc::set_methods(const Methods &methods) -> int
     return 0;
 }
 
-static auto size_of_alloc(size_t size) -> size_t
-{
-    return size + sizeof(Header);
-}
-
-static auto size_of_alloc(void *ptr) -> size_t
-{
-    return size_of_alloc(static_cast<const Header *>(ptr)[-1]);
-}
-
-#define ALLOCATION_HOOK                                       \
-    do {                                                      \
-        if (s_alloc.hook && s_alloc.hook(s_alloc.hook_arg)) { \
-            return nullptr;                                   \
-        }                                                     \
-    } while (0)
-
-// Reserve `size` bytes of memory for allocation
-// Ensures that the limit set by Alloc::set_limit() is respected.
-static auto reserve_memory(size_t size) -> int
-{
-    auto before = s_alloc.bytes_used.load(std::memory_order_relaxed);
-    uint64_t after;
-    do {
-        after = before + size;
-        if (after > s_alloc.limit) {
-            return -1;
-        }
-    } while (!s_alloc.bytes_used.compare_exchange_weak(before, after));
-    return 0;
-}
-
-// Give back `size bytes of memory
-static auto cancel_memory(size_t size) -> void
-{
-    [[maybe_unused]] const auto size_before = s_alloc.bytes_used.fetch_sub(size);
-    CALICODB_EXPECT_GE(size_before, size);
-}
-
-auto Alloc::malloc(size_t size) -> void *
+auto Alloc::allocate(size_t size) -> void *
 {
     if (size == 0) {
         return s_zero_size_ptr;
@@ -121,12 +121,12 @@ auto Alloc::malloc(size_t size) -> void *
     return ptr;
 }
 
-auto Alloc::realloc(void *old_ptr, size_t new_size) -> void *
+auto Alloc::reallocate(void *old_ptr, size_t new_size) -> void *
 {
     if (!old_ptr || old_ptr == s_zero_size_ptr) {
-        return malloc(new_size);
+        return allocate(new_size);
     } else if (new_size == 0) {
-        free(old_ptr);
+        deallocate(old_ptr);
         return s_zero_size_ptr;
     } else if (new_size > kMaxAllocation) {
         return nullptr;
@@ -160,9 +160,7 @@ auto Alloc::realloc(void *old_ptr, size_t new_size) -> void *
     return new_ptr;
 }
 
-#undef ALLOCATION_HOOK
-
-auto Alloc::free(void *ptr) -> void
+auto Alloc::deallocate(void *ptr) -> void
 {
     if (ptr && ptr != s_zero_size_ptr) {
         CALICODB_EXPECT_GT(size_of_alloc(ptr), sizeof(Header));

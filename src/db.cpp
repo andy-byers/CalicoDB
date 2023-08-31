@@ -3,9 +3,7 @@
 // LICENSE.md. See AUTHORS.md for a list of contributor names.
 
 #include "calicodb/db.h"
-#include "alloc.h"
 #include "db_impl.h"
-#include "env_posix.h"
 #include "logging.h"
 #include "temp.h"
 #include "utils.h"
@@ -13,8 +11,10 @@
 namespace calicodb
 {
 
+namespace
+{
 template <class T, class V>
-static constexpr auto clip_to_range(T &t, V min, V max) -> void
+constexpr auto clip_to_range(T &t, V min, V max) -> void
 {
     if (static_cast<V>(t) > max) {
         t = max;
@@ -23,6 +23,7 @@ static constexpr auto clip_to_range(T &t, V min, V max) -> void
         t = min;
     }
 }
+} // namespace
 
 auto DB::open(const Options &options, const char *filename, DB *&db) -> Status
 {
@@ -84,9 +85,9 @@ auto DB::open(const Options &options, const char *filename, DB *&db) -> Status
 
     impl = new (std::nothrow) DBImpl({
         sanitized,
-        std::move(db_name),
-        std::move(wal_name),
-        std::move(scratch),
+        move(db_name),
+        move(wal_name),
+        move(scratch),
     });
     if (impl) {
         s = impl->open(sanitized);

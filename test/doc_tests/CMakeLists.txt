@@ -7,6 +7,7 @@ set(EXAMPLES_SOURCE "${CMAKE_CURRENT_BINARY_DIR}/examples.cpp")
 set(README_FILE "${CMAKE_SOURCE_DIR}/doc/design.md")
 set(DESIGN_FILE "${CMAKE_SOURCE_DIR}/README.md")
 set(DOC_FILE "${CMAKE_SOURCE_DIR}/doc/doc.md")
+
 # Generate and build the example source file.
 add_custom_command(OUTPUT "${EXAMPLES_SOURCE}"
         COMMAND python3 "${WRITE_CPP_BLOCKS}" "${DOC_FILE}" "${EXAMPLES_SOURCE}"
@@ -14,6 +15,11 @@ add_custom_command(OUTPUT "${EXAMPLES_SOURCE}"
         COMMENT "Writing ${EXAMPLES_SOURCE}")
 add_executable(doc_examples "${EXAMPLES_SOURCE}")
 target_link_libraries(doc_examples calicodb)
+target_compile_options(doc_examples
+        PRIVATE ${CALICODB_OPTIONS}
+                -Wno-unused-parameter
+                -Wno-unused)
+
 # This test just runs the example executable and makes sure it doesn't crash.
 add_test(NAME doc_examples
         COMMAND doc_examples)

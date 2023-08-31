@@ -293,7 +293,7 @@ auto HashIndex::map_group(size_t group_number, bool extend) -> Status
     if (m_num_groups <= group_number) {
         static constexpr size_t kPtrWidth = sizeof(volatile char *);
         const auto needed_len = group_number + 1;
-        if (auto **groups = static_cast<volatile char **>(Alloc::realloc(
+        if (auto **groups = static_cast<volatile char **>(Alloc::reallocate(
                 m_groups, needed_len * kPtrWidth))) {
             std::memset(groups + m_num_groups, 0,
                         (needed_len - m_num_groups) * kPtrWidth);
@@ -310,7 +310,7 @@ auto HashIndex::map_group(size_t group_number, bool extend) -> Status
         if (m_file) {
             s = m_file->shm_map(group_number, extend, ptr);
         } else {
-            auto *buf = Alloc::malloc(File::kShmRegionSize);
+            auto *buf = Alloc::allocate(File::kShmRegionSize);
             if (buf == nullptr) {
                 s = Status::no_memory();
             } else if (group_number == 0) {
@@ -358,10 +358,10 @@ auto HashIndex::close() -> void
         m_file = nullptr;
     } else {
         for (size_t i = 0; i < m_num_groups; ++i) {
-            Alloc::free(const_cast<char *>(m_groups[i]));
+            Alloc::deallocate(const_cast<char *>(m_groups[i]));
         }
     }
-    Alloc::free(m_groups);
+    Alloc::deallocate(m_groups);
     m_groups = nullptr;
 }
 
@@ -456,7 +456,7 @@ HashIterator::HashIterator(HashIndex &source)
 
 HashIterator::~HashIterator()
 {
-    Alloc::free(m_state);
+    Alloc::deallocate(m_state);
 }
 
 auto HashIterator::init(uint32_t backfill) -> Status
@@ -473,13 +473,12 @@ auto HashIterator::init(uint32_t backfill) -> Status
     static_assert(alignof(State) == alignof(State::Group));
 
     // Allocate internal buffers.
-    static constexpr size_t kAlignmentMask = alignof(State) - 1;
     m_num_groups = index_group_number(last_value) + 1;
     const auto state_size =
         sizeof(State) +                             // Includes storage for 1 group ("groups[1]" member).
         (m_num_groups - 1) * sizeof(State::Group) + // Additional groups.
         last_value * sizeof(Hash);                  // Indices to sort.
-    m_state = static_cast<State *>(Alloc::malloc(state_size));
+    m_state = static_cast<State *>(Alloc::allocate(state_size));
     if (m_state == nullptr) {
         return Status::no_memory();
     }
@@ -1059,7 +1058,7 @@ auto Wal::open(const Parameters &param, Wal *&wal_out) -> Status
     UserPtr<File> wal_file;
     auto s = param.env->new_file(param.filename, Env::kCreate, wal_file.ref());
     if (s.is_ok()) {
-        wal_out = Alloc::new_object<WalImpl>(param, std::move(wal_file));
+        wal_out = Alloc::new_object<WalImpl>(param, move(wal_file));
         if (wal_out == nullptr) {
             s = Status::no_memory();
         }
@@ -1074,7 +1073,7 @@ WalImpl::WalImpl(const Parameters &param, UserPtr<File> wal_file)
       m_wal_name(param.filename),
       m_sync_mode(param.sync_mode),
       m_lock_mode(param.lock_mode),
-      m_wal(std::move(wal_file)),
+      m_wal(move(wal_file)),
       m_env(param.env),
       m_db(param.db_file),
       m_log(param.info_log),

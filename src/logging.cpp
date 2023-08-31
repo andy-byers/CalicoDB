@@ -5,7 +5,6 @@
 #include "logging.h"
 #include "calicodb/env.h"
 #include "utils.h"
-#include <limits>
 
 namespace calicodb
 {
@@ -13,7 +12,7 @@ namespace calicodb
 StringBuilder::StringBuilder(String str)
     : m_len(0)
 {
-    if (auto *ptr = std::exchange(str.m_ptr, nullptr)) {
+    if (auto *ptr = exchange(str.m_ptr, nullptr)) {
         m_buf.reset(ptr, str.m_cap);
         m_len = str.m_len;
         str.clear();
@@ -40,7 +39,7 @@ auto StringBuilder::trim() -> int
 auto StringBuilder::build() && -> String
 {
     const auto capacity = m_buf.len();
-    const auto length = std::exchange(m_len, 0);
+    const auto length = exchange(m_len, 0U);
     auto *pointer = m_buf.release();
     if (capacity) {
         CALICODB_EXPECT_NE(pointer, nullptr);
@@ -123,20 +122,20 @@ auto StringBuilder::append_format_va(const char *fmt, std::va_list args) -> int
 
 auto append_strings(String &str, const Slice &s, const Slice &t) -> int
 {
-    StringBuilder builder(std::move(str));
+    StringBuilder builder(move(str));
     auto rc = builder.append(s);
     if (rc == 0) {
         rc = builder.append(t);
     }
-    str = std::move(builder).build();
+    str = move(builder).build();
     return rc;
 }
 
 auto append_escaped_string(String &target, const Slice &s) -> int
 {
-    StringBuilder builder(std::move(target));
+    StringBuilder builder(move(target));
     const auto rc = builder.append_escaped(s);
-    target = std::move(builder).build();
+    target = move(builder).build();
     return rc;
 }
 
@@ -151,9 +150,9 @@ auto append_format_string(String &target, const char *fmt, ...) -> int
 
 auto append_format_string_va(String &target, const char *fmt, std::va_list args) -> int
 {
-    StringBuilder builder(std::move(target));
+    StringBuilder builder(move(target));
     const auto rc = builder.append_format_va(fmt, args);
-    target = std::move(builder).build();
+    target = move(builder).build();
     return rc;
 }
 
@@ -161,7 +160,7 @@ auto append_format_string_va(String &target, const char *fmt, std::va_list args)
 auto consume_decimal_number(Slice &in, uint64_t *val) -> bool
 {
     // Constants that will be optimized away.
-    static constexpr const uint64_t kMaxUint64 = std::numeric_limits<uint64_t>::max();
+    static constexpr const uint64_t kMaxUint64 = UINT64_MAX;
     static constexpr const char kLastDigitOfMaxUint64 = '0' + static_cast<char>(kMaxUint64 % 10);
 
     uint64_t value = 0;

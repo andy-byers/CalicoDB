@@ -95,7 +95,7 @@ private:
 
         ~PageTable()
         {
-            Alloc::free(m_table);
+            Alloc::deallocate(m_table);
         }
 
         [[nodiscard]] auto preallocate(size_t cache_size) -> int
@@ -107,7 +107,7 @@ private:
             }
             const auto table_size = capacity * sizeof(PageRef *);
             if (auto *table = static_cast<PageRef **>(
-                    Alloc::malloc(table_size))) {
+                    Alloc::allocate(table_size))) {
                 std::memset(table, 0, table_size);
                 m_capacity = capacity;
                 m_table = table;

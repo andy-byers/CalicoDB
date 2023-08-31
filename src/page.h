@@ -54,7 +54,7 @@ struct PageRef {
         // out-of-bounds reads and writes that might occur if the database is corrupted.
         static constexpr size_t kSpilloverLen = sizeof(void *);
 
-        auto *ref = static_cast<PageRef *>(Alloc::malloc(
+        auto *ref = static_cast<PageRef *>(Alloc::allocate(
             sizeof(PageRef) + kPageSize + kSpilloverLen));
         if (ref) {
             CALICODB_EXPECT_TRUE(is_aligned(ref, alignof(PageRef)));
@@ -78,7 +78,7 @@ struct PageRef {
 
     static auto free(PageRef *ref) -> void
     {
-        Alloc::free(ref);
+        Alloc::deallocate(ref);
     }
 
     [[nodiscard]] auto get_flag(Flag f) const -> bool

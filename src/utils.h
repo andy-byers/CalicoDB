@@ -11,8 +11,6 @@
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
-#include <limits>
-#include <ostream>
 
 #if NDEBUG
 #define CALICODB_EXPECT_(expr, file, line)
@@ -131,12 +129,6 @@ struct Id {
     uint32_t value = kNull;
 };
 
-template <class T>
-auto operator<<(std::ostream &os, Id id) -> std::ostream &
-{
-    return os << id.value;
-}
-
 inline auto operator<(Id lhs, Id rhs) -> bool
 {
     return lhs.value < rhs.value;
@@ -158,9 +150,31 @@ inline auto operator!=(Id lhs, Id rhs) -> bool
 }
 
 template <class T>
-auto operator<<(std::ostream &os, const Slice &slice) -> std::ostream &
+[[nodiscard]] constexpr auto move(T &&t) noexcept -> typename std::remove_reference_t<T> &&
 {
-    return os << slice.to_string();
+    return static_cast<typename std::remove_reference_t<T> &&>(t);
+}
+
+template <class T>
+[[nodiscard]] constexpr auto forward(typename std::remove_reference_t<T> &t) noexcept -> T &&
+{
+    return static_cast<T &&>(t);
+}
+
+template <class T>
+[[nodiscard]] constexpr auto forward(typename std::remove_reference_t<T> &&t) noexcept -> T &&
+{
+    static_assert(!std::is_lvalue_reference_v<T>,
+                  "forward must not be used to convert an rvalue to an lvalue");
+    return static_cast<T &&>(t);
+}
+
+template <class T, class U = T>
+constexpr inline auto exchange(T &obj, U &&new_val) -> T
+{
+    auto old_val = move(obj);
+    obj = forward<U>(new_val);
+    return old_val;
 }
 
 } // namespace calicodb

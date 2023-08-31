@@ -14,7 +14,9 @@ auto FileHdr::check_db_support(const char *root) -> Status
     if (0 != std::memcmp(root, kFmtString, sizeof(kFmtString))) {
         return Status::invalid_argument("file is not a CalicoDB database");
     } else if (root[kFmtVersionOffset] > kFmtVersion) {
-        return Status::invalid_argument("CalicoDB version is not supported");
+        return StatusBuilder::invalid_argument("CalicoDB file format version %d is not supported"
+                                               "(maximum supported version is %d)",
+                                               root[kFmtVersionOffset], kFmtVersion);
     }
     return Status::ok();
 }
