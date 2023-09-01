@@ -865,7 +865,6 @@ public:
     };
     auto write_batch(const WriteOptions &options) -> Status
     {
-        Dirtylist dirtylist;
         std::vector<UniquePtr<PageRef>> pages;
         const size_t min_r = !options.omit_some;
         size_t occupied = 0;
@@ -877,7 +876,6 @@ public:
                 page = PageRef::alloc();
                 EXPECT_NE(page, nullptr);
                 std::memset(page->data, 0, kPageSize);
-                dirtylist.add(*page);
                 ++occupied;
             }
             pages.emplace_back(page);
@@ -892,11 +890,13 @@ public:
             // Unoccupied pages have values of 0.
             m_temp.resize(pages.size());
         }
+        Dirtylist dirtylist;
         for (size_t i = 0; i < pages.size(); ++i) {
             if (pages[i]) {
                 pages[i]->page_id.value = ks.at(i);
                 m_temp.at(ks.at(i) - 1) = vs.at(i);
                 put_u32(pages[i]->data, vs.at(i));
+                dirtylist.add(*pages[i]);
             }
         }
 
