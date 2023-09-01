@@ -939,7 +939,7 @@ auto Tree::redistribute_cells(Node &left, Node &right, Node &parent, uint32_t pi
     CALICODB_EXPECT_TRUE(!is_split || p_src == &right);
 
     // Cells that need to be redistributed, in order.
-    UniqueBuffer<Cell> cell_buffer;
+    Buffer<Cell> cell_buffer;
     if (cell_buffer.realloc(cell_count + 2)) {
         m_pager->release(unused);
         return Status::no_memory();

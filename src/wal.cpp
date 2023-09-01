@@ -580,7 +580,7 @@ auto HashIterator::init(uint32_t backfill) -> Status
 
     // Temporary buffer for mergesort. Freed before returning from this routine. Possibly a bit
     // larger than necessary due to platform alignment requirements (see alloc.h).
-    UniqueBuffer<Hash> temp;
+    Buffer<Hash> temp;
     if (temp.realloc(last_value < kNIndexKeys ? last_value : kNIndexKeys)) {
         // m_state will be freed in the destructor.
         return Status::no_memory();
@@ -1232,54 +1232,30 @@ auto WalImpl::recover_index() -> Status
     // code isn't being called from the checkpoint routine. In that case, the checkpoint
     // lock is already held.
     const auto lock = kNotWriteLock + m_ckpt_lock;
-    CALICODB_TRY(lock_exclusive(lock, READ_LOCK(0) - lock));
+    auto s = lock_exclusive(lock, READ_LOCK(0) - lock);
+    if (!s.is_ok()) {
+        return s;
+    }
 
     uint32_t frame_cksum[2] = {};
 
-    const auto cleanup = [&frame_cksum, lock, this](auto s) {
-        if (s.is_ok()) {
-            m_hdr.frame_cksum[0] = frame_cksum[0];
-            m_hdr.frame_cksum[1] = frame_cksum[1];
-            write_index_header();
-            // NOTE: This code can run while readers are trying to connect (`start_reader()`).
-            //
-            volatile auto *info = get_ckpt_info();
-            // TODO: It seems that this store races with connections that are attempting to
-            //       start reading. Making it atomic for now. When readers read the backfill
-            //       count to see if they can get read lock 0, they are not under any lock...
-            // info->backfill = 0;
-            ATOMIC_STORE(&info->backfill, 0);
-            info->backfill_attempted = m_hdr.max_frame;
-            info->readmark[0] = 0;
-            for (size_t i = 1; i < kReaderCount; ++i) {
-                s = lock_exclusive(READ_LOCK(i), 1);
-                if (s.is_ok()) {
-                    if (i == 1 && m_hdr.max_frame) {
-                        info->readmark[i] = m_hdr.max_frame;
-                    } else {
-                        info->readmark[i] = kReadmarkNotUsed;
-                    }
-                    unlock_exclusive(READ_LOCK(i), 1);
-                } else if (!s.is_busy()) {
-                    break;
-                }
-            }
-            log(m_log, "recovered %u WAL frames", m_hdr.max_frame);
-        }
-        unlock_exclusive(lock, READ_LOCK(0) - lock);
-        return s;
-    };
-
     size_t file_size;
-    CALICODB_TRY(m_env->file_size(m_wal_name, file_size));
+    s = m_env->file_size(m_wal_name, file_size);
+    if (!s.is_ok()) {
+        return s;
+    }
     if (file_size > kWalHdrSize) {
         char header[kWalHdrSize];
-        CALICODB_TRY(m_wal->read_exact(0, sizeof(header), header));
+        s = m_wal->read_exact(0, sizeof(header), header);
+        if (!s.is_ok()) {
+            goto cleanup;
+        }
         m_stat->counters[Stat::kReadWal] += sizeof(header);
 
         const auto magic = get_u32(&header[0]);
         if (magic != kWalMagic) {
-            return cleanup(Status::corruption("WAL header is corrupted"));
+            s = Status::corruption("WAL header is corrupted");
+            goto cleanup;
         }
         m_ckpt_number = get_u32(&header[12]);
         std::memcpy(m_hdr.salt, &header[16], sizeof(m_hdr.salt));
@@ -1294,9 +1270,9 @@ auto WalImpl::recover_index() -> Status
             // if the version number is understood.
             const auto version = get_u32(&header[4]);
             if (version != kWalVersion) {
-                //                std::string message;
-                //                append_format_string(message, "found WAL version %u but expected %u", version, kWalVersion);
-                return cleanup(Status::invalid_argument("message"));
+                s = StatusBuilder::invalid_argument("found WAL version %u but expected %u",
+                                                    version, kWalVersion);
+                goto cleanup;
             }
 
             const auto last_frame = static_cast<uint32_t>((file_size - kWalHdrSize) / kFrameSize);
@@ -1305,14 +1281,20 @@ auto WalImpl::recover_index() -> Status
                 const auto first = 1 + (n_group == 0 ? 0 : kNIndexKeys0 + (n_group - 1) * kNIndexKeys);
                 for (auto n_frame = first; n_frame <= last; ++n_frame) {
                     const auto offset = frame_offset(n_frame);
-                    CALICODB_TRY(m_wal->read_exact(offset, kFrameSize, m_frame));
+                    s = m_wal->read_exact(offset, kFrameSize, m_frame);
+                    if (!s.is_ok()) {
+                        goto cleanup;
+                    }
                     m_stat->counters[Stat::kReadWal] += kFrameSize;
 
                     WalFrameHdr hdr;
                     if (!decode_frame(m_frame, hdr)) {
                         break;
                     }
-                    CALICODB_TRY(m_index.assign(hdr.pgno, n_frame));
+                    s = m_index.assign(hdr.pgno, n_frame);
+                    if (!s.is_ok()) {
+                        goto cleanup;
+                    }
                     if (hdr.db_size) {
                         // Found a commit frame.
                         m_hdr.max_frame = n_frame;
@@ -1324,7 +1306,39 @@ auto WalImpl::recover_index() -> Status
             }
         }
     }
-    return cleanup(Status::ok());
+
+cleanup:
+    if (s.is_ok()) {
+        m_hdr.frame_cksum[0] = frame_cksum[0];
+        m_hdr.frame_cksum[1] = frame_cksum[1];
+        write_index_header();
+        // NOTE: This code can run while readers are trying to connect (`start_reader()`).
+        //
+        volatile auto *info = get_ckpt_info();
+        // TODO: It seems that this store races with connections that are attempting to
+        //       start reading. Making it atomic for now. When readers read the backfill
+        //       count to see if they can get read lock 0, they are not under any lock...
+        // info->backfill = 0;
+        ATOMIC_STORE(&info->backfill, 0);
+        info->backfill_attempted = m_hdr.max_frame;
+        info->readmark[0] = 0;
+        for (size_t i = 1; i < kReaderCount; ++i) {
+            s = lock_exclusive(READ_LOCK(i), 1);
+            if (s.is_ok()) {
+                if (i == 1 && m_hdr.max_frame) {
+                    info->readmark[i] = m_hdr.max_frame;
+                } else {
+                    info->readmark[i] = kReadmarkNotUsed;
+                }
+                unlock_exclusive(READ_LOCK(i), 1);
+            } else if (!s.is_busy()) {
+                break;
+            }
+        }
+        log(m_log, "recovered %u WAL frames", m_hdr.max_frame);
+    }
+    unlock_exclusive(lock, READ_LOCK(0) - lock);
+    return s;
 }
 
 auto WalImpl::encode_frame(const WalFrameHdr &hdr, const char *page, char *out) -> void
@@ -1374,18 +1388,22 @@ auto WalImpl::read(Id page_id, char *&page) -> Status
     page = nullptr;
     if (m_reader_lock && m_hdr.max_frame) {
         uint32_t frame;
-        CALICODB_TRY(m_index.lookup(page_id.value, m_min_frame, frame));
-
-        if (frame) {
-            CALICODB_TRY(m_wal->read_exact(
-                frame_offset(frame) + WalFrameHdr::kSize,
-                kPageSize,
-                m_frame));
-            m_stat->counters[Stat::kReadWal] += kPageSize;
-
-            std::memcpy(ptr, m_frame, kPageSize);
-            page = ptr;
+        auto s = m_index.lookup(page_id.value, m_min_frame, frame);
+        if (!s.is_ok() || frame == 0) {
+            // Either there was a low-level I/O error, or the page is not in the WAL.
+            return s;
         }
+        s = m_wal->read_exact(
+            frame_offset(frame) + WalFrameHdr::kSize,
+            kPageSize,
+            m_frame);
+        if (!s.is_ok()) {
+            return s;
+        }
+        m_stat->counters[Stat::kReadWal] += kPageSize;
+
+        std::memcpy(ptr, m_frame, kPageSize);
+        page = ptr;
     }
     return Status::ok();
 }
@@ -1406,7 +1424,10 @@ auto WalImpl::write(PageRef *first_ref, size_t db_size) -> Status
     if (0 != std::memcmp(&m_hdr, ConstStablePtr(live), sizeof(m_hdr))) {
         first_frame = live->max_frame + 1;
     }
-    CALICODB_TRY(restart_log());
+    auto s = restart_log();
+    if (!s.is_ok()) {
+        return s;
+    }
 
     if (m_hdr.max_frame == 0) {
         // This is the first frame written to the WAL. Write the WAL header.
@@ -1431,13 +1452,19 @@ auto WalImpl::write(PageRef *first_ref, size_t db_size) -> Status
         m_hdr.frame_cksum[0] = cksum[0];
         m_hdr.frame_cksum[1] = cksum[1];
 
-        CALICODB_TRY(m_wal->write(0, Slice(header, sizeof(header))));
-        m_stat->counters[Stat::kWriteWal] += sizeof(header);
+        s = m_wal->write(0, Slice(header, sizeof(header)));
+        if (s.is_ok()) {
+            m_stat->counters[Stat::kWriteWal] += sizeof(header);
 
-        if (m_sync_mode != Options::kSyncOff) {
-            ++m_stat->counters[Stat::kSyncWal];
-            CALICODB_TRY(m_wal->sync());
+            if (m_sync_mode != Options::kSyncOff) {
+                ++m_stat->counters[Stat::kSyncWal];
+                s = m_wal->sync();
+            }
         }
+    }
+    if (!s.is_ok()) {
+        // I/O error while writing the WAL header.
+        return s;
     }
 
     // Write each dirty page to the WAL.
@@ -1454,17 +1481,24 @@ auto WalImpl::write(PageRef *first_ref, size_t db_size) -> Status
         if (first_frame && (p->dirty || !is_commit)) {
             // Check to see if the page has been written to the WAL already by the
             // current transaction. If so, overwrite it and indicate that checksums
-            // need to be recomputed from here on commit.
-            CALICODB_TRY(m_index.lookup(ref->page_id.value, first_frame, frame));
-            if (frame) {
+            // need to be recomputed from here on commit. If not, fall through and
+            // append a new frame containing the page.
+            s = m_index.lookup(ref->page_id.value, first_frame, frame);
+            if (s.is_ok() && frame) {
                 if (m_redo_cksum == 0 || frame < m_redo_cksum) {
                     m_redo_cksum = frame;
                 }
-                CALICODB_TRY(m_wal->write(
-                    frame_offset(frame) + WalFrameHdr::kSize,
-                    Slice(ref->data, kPageSize)));
-                m_stat->counters[Stat::kWriteWal] += kPageSize;
-                continue;
+                s = m_wal->write(frame_offset(frame) + WalFrameHdr::kSize,
+                                 Slice(ref->data, kPageSize));
+                if (s.is_ok()) {
+                    // Overwrite was successful, skip the code that appends a new frame.
+                    m_stat->counters[Stat::kWriteWal] += kPageSize;
+                    continue;
+                }
+            }
+            if (!s.is_ok()) {
+                // I/O error during lookup or overwrite.
+                return s;
             }
         }
         // Page has not been written during the current transaction. Create a new
@@ -1475,7 +1509,10 @@ auto WalImpl::write(PageRef *first_ref, size_t db_size) -> Status
         header.pgno = ref->page_id.value;
         header.db_size = p->dirty == nullptr ? static_cast<uint32_t>(db_size) : 0;
         encode_frame(header, ref->data, m_frame);
-        CALICODB_TRY(m_wal->write(offset, Slice(m_frame, kFrameSize)));
+        s = m_wal->write(offset, Slice(m_frame, kFrameSize));
+        if (!s.is_ok()) {
+            return s;
+        }
         m_stat->counters[Stat::kWriteWal] += kFrameSize;
         ref->set_flag(PageRef::kExtra);
 
@@ -1485,16 +1522,20 @@ auto WalImpl::write(PageRef *first_ref, size_t db_size) -> Status
     }
 
     if (is_commit && m_redo_cksum) {
-        CALICODB_TRY(rewrite_checksums(next_frame));
+        s = rewrite_checksums(next_frame);
+        if (!s.is_ok()) {
+            return s;
+        }
     }
 
-    Status s;
     next_frame = m_hdr.max_frame + 1;
     for (auto *p = dirty; s.is_ok() && p; p = p->dirty) {
         auto *ref = p->get_page_ref();
         if (ref->get_flag(PageRef::kExtra)) {
             s = m_index.assign(ref->page_id.value, next_frame++);
-            ref->clear_flag(PageRef::kExtra);
+            if (s.is_ok()) {
+                ref->clear_flag(PageRef::kExtra);
+            }
         }
     }
     if (s.is_ok()) {
@@ -1506,7 +1547,10 @@ auto WalImpl::write(PageRef *first_ref, size_t db_size) -> Status
             CALICODB_EXPECT_TRUE(dirty);
             if (m_sync_mode == Options::kSyncFull) {
                 ++m_stat->counters[Stat::kSyncWal];
-                CALICODB_TRY(m_wal->sync());
+                s = m_wal->sync();
+                if (!s.is_ok()) {
+                    return s;
+                }
             }
             m_hdr.page_count = static_cast<uint32_t>(db_size);
             ++m_hdr.change;

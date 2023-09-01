@@ -42,7 +42,7 @@ private:
         Options sanitized;
         String db_name;
         String wal_name;
-        UniqueBuffer<char> scratch;
+        Buffer<char> scratch;
     };
     friend class Alloc;
     explicit DBImpl(Parameters param);
@@ -53,7 +53,7 @@ private:
     mutable Status m_status;
     mutable TxImpl *m_tx = nullptr;
     mutable Stat m_stat;
-    mutable UniqueBuffer<char> m_scratch;
+    mutable Buffer<char> m_scratch;
     mutable ObjectPtr<Pager> m_pager;
 
     UserPtr<File> m_file;

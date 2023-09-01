@@ -188,47 +188,65 @@ auto Status::message() const -> const char *
 
 auto Status::invalid_argument(const char *msg) -> Status
 {
-    return StatusBuilder::invalid_argument("%s", msg);
+    return StatusBuilder(kInvalidArgument)
+        .append(msg)
+        .build();
 }
 
 auto Status::not_supported(const char *msg) -> Status
 {
-    return StatusBuilder::not_supported("%s", msg);
+    return StatusBuilder(kNotSupported)
+        .append(msg)
+        .build();
 }
 
 auto Status::corruption(const char *msg) -> Status
 {
-    return StatusBuilder::corruption("%s", msg);
+    return StatusBuilder(kCorruption)
+        .append(msg)
+        .build();
 }
 
 auto Status::not_found(const char *msg) -> Status
 {
-    return StatusBuilder::not_found("%s", msg);
+    return StatusBuilder(kNotFound)
+        .append(msg)
+        .build();
 }
 
 auto Status::io_error(const char *msg) -> Status
 {
-    return StatusBuilder::io_error("%s", msg);
+    return StatusBuilder(kIOError)
+        .append(msg)
+        .build();
 }
 
 auto Status::busy(const char *msg) -> Status
 {
-    return StatusBuilder::busy("%s", msg);
+    return StatusBuilder(kBusy)
+        .append(msg)
+        .build();
 }
 
 auto Status::aborted(const char *msg) -> Status
 {
-    return StatusBuilder::aborted("%s", msg);
+    return StatusBuilder(kAborted)
+        .append(msg)
+        .build();
 }
 
 auto Status::retry(const char *msg) -> Status
 {
-    return StatusBuilder::retry("%s", msg);
+    return StatusBuilder(kBusy, kRetry)
+        .append(msg)
+        .build();
 }
 
 auto Status::no_memory(const char *msg) -> Status
 {
-    return StatusBuilder::no_memory("%s", msg);
+    return StatusBuilder(kAborted, kNoMemory)
+        .append(msg)
+        .build();
 }
 
 } // namespace calicodb

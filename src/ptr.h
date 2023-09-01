@@ -134,7 +134,7 @@ public:
 };
 
 template <class T>
-class UniqueBuffer final
+class Buffer final
 {
     static_assert(std::is_trivially_copyable_v<T>);
 
@@ -142,25 +142,25 @@ class UniqueBuffer final
     size_t m_len;
 
 public:
-    explicit UniqueBuffer()
+    explicit Buffer()
         : m_len(0)
     {
     }
 
-    explicit UniqueBuffer(T *ptr, size_t len)
+    explicit Buffer(T *ptr, size_t len)
         : m_ptr(ptr),
           m_len(len)
     {
         CALICODB_EXPECT_EQ(ptr == nullptr, len == 0);
     }
 
-    UniqueBuffer(UniqueBuffer &&rhs) noexcept
+    Buffer(Buffer &&rhs) noexcept
         : m_ptr(move(rhs.m_ptr)),
           m_len(exchange(rhs.m_len, 0U))
     {
     }
 
-    auto operator=(UniqueBuffer &&rhs) noexcept -> UniqueBuffer &
+    auto operator=(Buffer &&rhs) noexcept -> Buffer &
     {
         if (this != &rhs) {
             m_ptr = move(rhs.m_ptr);

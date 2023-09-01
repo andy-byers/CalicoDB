@@ -173,7 +173,7 @@ private:
     String m_filename;
 
     struct PagedFile final {
-        UniqueBuffer<char *> pages;
+        Buffer<char *> pages;
 
         ~PagedFile()
         {
@@ -391,7 +391,7 @@ private:
     // Also, we never need to
     // remove single pages, which simplifies the implementation. Uses linear probing.
     struct PageTable {
-        UniqueBuffer<PageEntry *> data;
+        Buffer<PageEntry *> data;
         size_t occupied = 0;
 
         [[nodiscard]] auto end() -> PageEntry **

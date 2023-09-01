@@ -18,19 +18,16 @@ class StringBuilder final
 {
     // Buffer for accumulating string data. The length stored in the buffer type is the capacity,
     // and m_len is the number of bytes that have been written.
-    UniqueBuffer<char> m_buf;
-    size_t m_len;
+    Buffer<char> m_buf;
+    size_t m_len = 0;
+    bool m_ok = true;
 
     // Make sure the underlying buffer is large enough to hold `len` bytes of string data, plus
     // a '\0'
     [[nodiscard]] auto ensure_capacity(size_t len) -> int;
 
 public:
-    explicit StringBuilder()
-        : m_len(0)
-    {
-    }
-
+    explicit StringBuilder() = default;
     explicit StringBuilder(String str);
 
     StringBuilder(StringBuilder &&rhs) noexcept
@@ -48,30 +45,30 @@ public:
         return *this;
     }
 
-    [[nodiscard]] auto trim() -> int;
-    [[nodiscard]] auto build() && -> String;
-    [[nodiscard]] auto append(const Slice &s) -> int;
-    [[nodiscard]] auto append(char c) -> int
-    {
-        return append(Slice(&c, 1));
-    }
-    [[nodiscard]] auto append_format(const char *fmt, ...) -> int;
-    [[nodiscard]] auto append_format_va(const char *fmt, std::va_list args) -> int;
-    [[nodiscard]] auto append_escaped(const Slice &s) -> int;
-
     [[nodiscard]] static auto release_string(String str) -> char *
     {
         str.m_len = 0;
         str.m_cap = 0;
         return exchange(str.m_ptr, nullptr);
     }
+
+    auto trim() -> StringBuilder &;
+    auto append(const Slice &s) -> StringBuilder &;
+    auto append(char c) -> StringBuilder &
+    {
+        return append(Slice(&c, 1));
+    }
+    auto append_format(const char *fmt, ...) -> StringBuilder &;
+    auto append_format_va(const char *fmt, std::va_list args) -> StringBuilder &;
+    auto append_escaped(const Slice &s) -> StringBuilder &;
+
+    [[nodiscard]] auto build(String &string_out) -> int;
 };
 
 class StatusBuilder final
 {
     StringBuilder m_builder;
     const Status m_fallback;
-    bool m_ok = true;
 
 public:
     explicit StatusBuilder(Status::Code code, Status::SubCode subc = Status::kNone)
@@ -80,48 +77,41 @@ public:
         static constexpr uint16_t kInitialRefcount = 1;
         char header[4] = {'\x00', '\x00', code, subc};
         std::memcpy(header, &kInitialRefcount, sizeof(kInitialRefcount));
-        if (m_builder.append(Slice(header, sizeof(header)))) {
-            m_ok = false;
-        }
+        m_builder.append(Slice(header, sizeof(header)));
     }
 
-    [[nodiscard]] auto append(const Slice &s) -> StatusBuilder
+    [[nodiscard]] auto append(const Slice &s) -> StatusBuilder &
     {
-        if (m_ok && m_builder.append(s)) {
-            m_ok = false;
-        }
-        return std::move(*this);
+        m_builder.append(s);
+        return *this;
     }
 
-    [[nodiscard]] auto append(char c) -> StatusBuilder
+    [[nodiscard]] auto append(char c) -> StatusBuilder &
     {
         return append(Slice(&c, 1));
     }
 
     template <class... Args>
-    [[nodiscard]] auto append_format(const char *fmt, Args &&...args) -> StatusBuilder
+    [[nodiscard]] auto append_format(const char *fmt, Args &&...args) -> StatusBuilder &
     {
-        if (m_ok && m_builder.append_format(fmt, forward<Args>(args)...)) {
-            m_ok = false;
-        }
-        return std::move(*this);
+        m_builder.append_format(fmt, forward<Args>(args)...);
+        return *this;
     }
 
-    [[nodiscard]] auto append_escaped(const Slice &s) -> StatusBuilder
+    [[nodiscard]] auto append_escaped(const Slice &s) -> StatusBuilder &
     {
-        if (m_ok && m_builder.append(s)) {
-            m_ok = false;
-        }
-        return std::move(*this);
+        m_builder.append(s);
+        return *this;
     }
 
-    auto build() && -> Status
+    auto build() -> Status
     {
-        if (m_ok) {
-            return Status(StringBuilder::release_string(
-                move(m_builder).build()));
+        String string;
+        if (m_builder.trim().build(string)) {
+            return m_fallback;
         }
-        return m_fallback;
+        return Status(StringBuilder::release_string(
+            std::move(string)));
     }
 
     template <class... Args>

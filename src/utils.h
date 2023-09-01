@@ -31,13 +31,6 @@
 #define CALICODB_EXPECT_GE(lhs, rhs) CALICODB_EXPECT_TRUE((lhs) >= (rhs))
 #define CALICODB_DEBUG_TRAP assert(false && __FUNCTION__)
 
-#define CALICODB_TRY(expr)                                               \
-    do {                                                                 \
-        if (auto __calicodb_try_s = (expr); !__calicodb_try_s.is_ok()) { \
-            return __calicodb_try_s;                                     \
-        }                                                                \
-    } while (0)
-
 #define ARRAY_SIZE(x) (sizeof(x) / sizeof((x)[0]))
 
 namespace calicodb
@@ -80,13 +73,6 @@ struct Id {
     static constexpr uint32_t kNull = 0;
     static constexpr uint32_t kRoot = 1;
 
-    struct Hash {
-        auto operator()(const Id &id) const -> uint64_t
-        {
-            return id.value;
-        }
-    };
-
     Id() = default;
 
     template <class T>
@@ -122,7 +108,7 @@ struct Id {
 
     [[nodiscard]] constexpr auto as_index() const -> size_t
     {
-        CALICODB_EXPECT_NE(value, null().value);
+        CALICODB_EXPECT_NE(value, kNull);
         return value - 1;
     }
 

@@ -20,8 +20,8 @@ public:
 
     ~Mutex();
 
-    Mutex(const Mutex &) = delete;
-    auto operator=(const Mutex &) -> Mutex & = delete;
+    Mutex(Mutex &) = delete;
+    auto operator=(Mutex &) -> void = delete;
 
     auto lock() -> void;
     auto unlock() -> void;
