@@ -6,8 +6,8 @@
 #include "alloc.h"
 #include "logging.h"
 #include "page.h"
-#include "ptr.h"
 #include "stat.h"
+#include "unique_ptr.h"
 #include "wal.h"
 #include <random>
 

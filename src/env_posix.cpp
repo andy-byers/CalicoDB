@@ -6,7 +6,7 @@
 #include "calicodb/env.h"
 #include "logging.h"
 #include "port.h"
-#include "ptr.h"
+#include "unique_ptr.h"
 #include "utils.h"
 #include <ctime>
 #include <fcntl.h>

@@ -64,6 +64,7 @@ add_library(calicodb STATIC)
 target_sources(calicodb
         PRIVATE src/alloc.cpp
                 src/alloc.h
+                src/buffer.h
                 src/bufmgr.cpp
                 src/bufmgr.h
                 src/cursor.cpp
@@ -86,7 +87,6 @@ target_sources(calicodb
                 src/page.h
                 src/pager.cpp
                 src/pager.h
-                src/ptr.h
                 src/schema.cpp
                 src/schema.h
                 src/stat.h
@@ -99,6 +99,7 @@ target_sources(calicodb
                 src/tx.cpp
                 src/tx_impl.cpp
                 src/tx_impl.h
+                src/unique_ptr.h
                 src/utils.h
                 src/wal.cpp
                 src/wal.h

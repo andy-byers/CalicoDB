@@ -10,7 +10,7 @@
 #include "header.h"
 #include "node.h"
 #include "pager.h"
-#include "ptr.h"
+#include "unique_ptr.h"
 
 namespace calicodb
 {

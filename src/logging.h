@@ -5,9 +5,10 @@
 #ifndef CALICODB_LOGGING_H
 #define CALICODB_LOGGING_H
 
+#include "buffer.h"
 #include "calicodb/string.h"
 #include "encoding.h"
-#include "ptr.h"
+#include "unique_ptr.h"
 #include "utils.h"
 #include <cstdarg>
 

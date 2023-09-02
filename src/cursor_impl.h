@@ -5,6 +5,7 @@
 #ifndef CALICODB_CURSOR_IMPL_H
 #define CALICODB_CURSOR_IMPL_H
 
+#include "buffer.h"
 #include "calicodb/cursor.h"
 #include "tree.h"
 

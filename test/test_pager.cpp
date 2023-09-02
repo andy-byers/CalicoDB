@@ -8,9 +8,9 @@
 #include "freelist.h"
 #include "logging.h"
 #include "pager.h"
-#include "ptr.h"
 #include "temp.h"
 #include "test.h"
+#include "unique_ptr.h"
 #include "wal.h"
 #include <filesystem>
 

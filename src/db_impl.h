@@ -5,9 +5,10 @@
 #ifndef CALICODB_DB_IMPL_H
 #define CALICODB_DB_IMPL_H
 
+#include "buffer.h"
 #include "calicodb/db.h"
-#include "ptr.h"
 #include "stat.h"
+#include "unique_ptr.h"
 
 namespace calicodb
 {

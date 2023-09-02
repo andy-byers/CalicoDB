@@ -65,9 +65,16 @@ static constexpr size_t kMaxCacheSize = 1 << 30;
 static constexpr size_t kTreeBufferLen = 3 * kPageSize;
 static constexpr Slice kDefaultWalSuffix = "-wal";
 static constexpr Slice kDefaultShmSuffix = "-shm";
+static constexpr std::uintptr_t kZeroSizePtr = 13;
 
 // Additional file locking modes that cannot be requested directly
 enum { kLockUnlocked = 0 };
+
+template <class T>
+auto zero_size_ptr() -> T *
+{
+    return reinterpret_cast<T *>(kZeroSizePtr);
+}
 
 struct Id {
     static constexpr uint32_t kNull = 0;

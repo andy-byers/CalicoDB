@@ -10,7 +10,6 @@ namespace calicodb
 
 namespace
 {
-void *s_zero_size_ptr = reinterpret_cast<void *>(13);
 
 // Prefix each allocation with its size, stored as an 8-byte unsigned integer.
 using Header = uint64_t;
@@ -100,7 +99,7 @@ auto Alloc::set_methods(const Methods &methods) -> int
 auto Alloc::allocate(size_t size) -> void *
 {
     if (size == 0) {
-        return s_zero_size_ptr;
+        return zero_size_ptr<void>();
     } else if (size > kMaxAllocation) {
         return nullptr;
     }
@@ -123,11 +122,11 @@ auto Alloc::allocate(size_t size) -> void *
 
 auto Alloc::reallocate(void *old_ptr, size_t new_size) -> void *
 {
-    if (!old_ptr || old_ptr == s_zero_size_ptr) {
+    if (!old_ptr || old_ptr == zero_size_ptr<void>()) {
         return allocate(new_size);
     } else if (new_size == 0) {
         deallocate(old_ptr);
-        return s_zero_size_ptr;
+        return zero_size_ptr<void>();
     } else if (new_size > kMaxAllocation) {
         return nullptr;
     }
@@ -162,7 +161,7 @@ auto Alloc::reallocate(void *old_ptr, size_t new_size) -> void *
 
 auto Alloc::deallocate(void *ptr) -> void
 {
-    if (ptr && ptr != s_zero_size_ptr) {
+    if (ptr && ptr != zero_size_ptr<void>()) {
         CALICODB_EXPECT_GT(size_of_alloc(ptr), sizeof(Header));
         cancel_memory(size_of_alloc(ptr));
         s_alloc.methods.free(static_cast<Header *>(ptr) - 1);

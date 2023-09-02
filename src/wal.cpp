@@ -9,8 +9,8 @@
 #include "encoding.h"
 #include "logging.h"
 #include "page.h"
-#include "ptr.h"
 #include "stat.h"
+#include "unique_ptr.h"
 
 namespace calicodb
 {
