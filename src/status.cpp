@@ -13,6 +13,19 @@ namespace calicodb
 
 namespace
 {
+
+auto make_inline_state(Status::Code code, Status::SubCode subc) -> char *
+{
+    CALICODB_EXPECT_GT(code, Status::kOK);
+    CALICODB_EXPECT_LT(code, Status::kMaxCode);
+    CALICODB_EXPECT_LT(subc, Status::kMaxSubCode);
+
+    uintptr_t state = 1;
+    state |= static_cast<uintptr_t>(code) << 1;
+    state |= static_cast<uintptr_t>(subc) << 8;
+    return reinterpret_cast<char *>(state);
+}
+
 // Return true if the given `state` is inline, false otherwise
 // Uses the least-significant bit of the pointer value to distinguish between the 2 states:
 // inline and heap-allocated. Inline states have the code and subcode heap in the
@@ -20,8 +33,8 @@ namespace
 // bytes, followed by a refcount and message.
 auto is_inline(const char *state) -> bool
 {
-    static constexpr std::uintptr_t kInlineBit = 0x0001;
-    return reinterpret_cast<std::uintptr_t>(state) & kInlineBit;
+    static constexpr uintptr_t kInlineBit = 0x0001;
+    return reinterpret_cast<uintptr_t>(state) & kInlineBit;
 }
 
 // Return true if the given `state` is allocated on the heap, false otherwise
@@ -32,16 +45,16 @@ auto is_heap(const char *state) -> bool
 
 auto inline_code(const char *state) -> Status::Code
 {
-    static constexpr std::uintptr_t kCodeMask = 0x00FE;
+    static constexpr uintptr_t kCodeMask = 0x00FE;
     return static_cast<Status::Code>(
-        (reinterpret_cast<std::uintptr_t>(state) & kCodeMask) >> 1);
+        (reinterpret_cast<uintptr_t>(state) & kCodeMask) >> 1);
 }
 
 auto inline_subcode(const char *state) -> Status::SubCode
 {
-    static constexpr std::uintptr_t kSubCodeMask = 0xFF00;
+    static constexpr uintptr_t kSubCodeMask = 0xFF00;
     return static_cast<Status::SubCode>(
-        (reinterpret_cast<std::uintptr_t>(state) & kSubCodeMask) >> 8);
+        (reinterpret_cast<uintptr_t>(state) & kSubCodeMask) >> 8);
 }
 
 using HeapRefCount = uint16_t;
@@ -66,12 +79,15 @@ auto heap_message(const char *state) -> const char *
     return state + sizeof(HeapRefCount) + 2;
 }
 
-auto incref(char *state) -> void
+auto incref(char *state) -> int
 {
     if (is_heap(state)) {
-        CALICODB_EXPECT_LT(*heap_refcount_ptr(state), UINT16_MAX);
+        if (*heap_refcount_ptr(state) == UINT16_MAX) {
+            return -1;
+        }
         ++*heap_refcount_ptr(state);
     }
+    return 0;
 }
 
 auto decref(char *state) -> void
@@ -83,19 +99,12 @@ auto decref(char *state) -> void
         }
     }
 }
+
 } // namespace
 
 Status::Status(Code code, SubCode subc)
-    : m_state(nullptr)
+    : m_state(make_inline_state(code, subc))
 {
-    CALICODB_EXPECT_GT(code, kOK);
-    CALICODB_EXPECT_LT(code, kMaxCode);
-    CALICODB_EXPECT_LT(subc, kMaxSubCode);
-
-    std::uintptr_t state = 1;
-    state |= static_cast<std::uintptr_t>(code) << 1;
-    state |= static_cast<std::uintptr_t>(subc) << 8;
-    m_state = reinterpret_cast<char *>(state);
 }
 
 Status::~Status()
@@ -106,15 +115,18 @@ Status::~Status()
 Status::Status(const Status &rhs)
     : m_state(rhs.m_state)
 {
-    incref(m_state);
+    if (incref(m_state)) {
+        m_state = make_inline_state(rhs.code(), rhs.subcode());
+    }
 }
 
 auto Status::operator=(const Status &rhs) -> Status &
 {
     if (&rhs != this) {
         decref(m_state);
-        incref(rhs.m_state);
-        m_state = rhs.m_state;
+        m_state = incref(rhs.m_state)
+                      ? make_inline_state(rhs.code(), rhs.subcode())
+                      : rhs.m_state;
     }
     return *this;
 }

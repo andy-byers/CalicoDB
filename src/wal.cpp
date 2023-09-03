@@ -130,8 +130,8 @@ using ConstStablePtr = const char *;
 template <class Src, class Dst>
 static auto read_hdr(const volatile Src *src, Dst *dst) -> void
 {
-    CALICODB_EXPECT_EQ(reinterpret_cast<std::uintptr_t>(src) & (alignof(uint64_t) - 1), 0);
-    CALICODB_EXPECT_EQ(reinterpret_cast<std::uintptr_t>(dst) & (alignof(uint64_t) - 1), 0);
+    CALICODB_EXPECT_EQ(reinterpret_cast<uintptr_t>(src) & (alignof(uint64_t) - 1), 0);
+    CALICODB_EXPECT_EQ(reinterpret_cast<uintptr_t>(dst) & (alignof(uint64_t) - 1), 0);
     const volatile auto *src64 = reinterpret_cast<const volatile uint64_t *>(src);
     auto *dst64 = reinterpret_cast<uint64_t *>(dst);
     for (size_t i = 0; i < sizeof(HashIndexHdr) / sizeof *src64; ++i) {
@@ -141,8 +141,8 @@ static auto read_hdr(const volatile Src *src, Dst *dst) -> void
 template <class Src, class Dst>
 static auto write_hdr(const Src *src, volatile Dst *dst) -> void
 {
-    CALICODB_EXPECT_EQ(reinterpret_cast<std::uintptr_t>(src) & (alignof(uint64_t) - 1), 0);
-    CALICODB_EXPECT_EQ(reinterpret_cast<std::uintptr_t>(dst) & (alignof(uint64_t) - 1), 0);
+    CALICODB_EXPECT_EQ(reinterpret_cast<uintptr_t>(src) & (alignof(uint64_t) - 1), 0);
+    CALICODB_EXPECT_EQ(reinterpret_cast<uintptr_t>(dst) & (alignof(uint64_t) - 1), 0);
     const auto *src64 = reinterpret_cast<const uint64_t *>(src);
     volatile auto *dst64 = reinterpret_cast<volatile uint64_t *>(dst);
     for (size_t i = 0; i < sizeof(HashIndexHdr) / sizeof *src64; ++i) {
@@ -438,7 +438,7 @@ auto HashIndex::cleanup() -> void
             }
         }
         // Clear the keys that correspond to cleared hash slots.
-        const auto rest_size = static_cast<std::uintptr_t>(
+        const auto rest_size = static_cast<uintptr_t>(
             ConstStablePtr(group.hash) -
             ConstStablePtr(group.keys + max_hash));
         std::memset(StablePtr(group.keys + max_hash), 0, rest_size);
@@ -688,7 +688,7 @@ struct WalFrameHdr {
 static auto compute_checksum(const Slice &in, const uint32_t *initial, uint32_t *out)
 {
     CALICODB_EXPECT_NE(out, nullptr);
-    CALICODB_EXPECT_EQ(std::uintptr_t(in.data()) & 3, 0);
+    CALICODB_EXPECT_EQ(uintptr_t(in.data()) & 3, 0);
     CALICODB_EXPECT_LE(in.size(), 65'536);
     CALICODB_EXPECT_EQ(in.size() & 7, 0);
     CALICODB_EXPECT_GT(in.size(), 0);

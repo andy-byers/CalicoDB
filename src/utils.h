@@ -39,7 +39,7 @@ namespace calicodb
 [[nodiscard]] inline auto is_aligned(void *ptr, size_t alignment) -> bool
 {
     CALICODB_EXPECT_NE(alignment, 0);
-    return reinterpret_cast<std::uintptr_t>(ptr) % alignment == 0;
+    return reinterpret_cast<uintptr_t>(ptr) % alignment == 0;
 }
 
 template <class Callback>
@@ -65,7 +65,7 @@ static constexpr size_t kMaxCacheSize = 1 << 30;
 static constexpr size_t kTreeBufferLen = 3 * kPageSize;
 static constexpr Slice kDefaultWalSuffix = "-wal";
 static constexpr Slice kDefaultShmSuffix = "-shm";
-static constexpr std::uintptr_t kZeroSizePtr = 13;
+static constexpr uintptr_t kZeroSizePtr = 13;
 
 // Additional file locking modes that cannot be requested directly
 enum { kLockUnlocked = 0 };

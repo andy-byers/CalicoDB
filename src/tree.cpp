@@ -1313,7 +1313,7 @@ auto Tree::emplace(Node &node, const Slice &key, const Slice &value, uint32_t in
     auto *ptr = header;
     ptr = encode_varint(ptr, static_cast<uint32_t>(value.size()));
     ptr = encode_varint(ptr, static_cast<uint32_t>(key.size()));
-    const auto hdr_size = static_cast<std::uintptr_t>(ptr - header);
+    const auto hdr_size = static_cast<uintptr_t>(ptr - header);
     const auto pad_size = hdr_size > kMinCellHeaderSize ? 0 : kMinCellHeaderSize - hdr_size;
     const auto cell_size = local_pl_size + hdr_size + pad_size + sizeof(uint32_t) * has_remote;
     // External cell headers are padded out to 4 bytes.

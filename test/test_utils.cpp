@@ -659,6 +659,18 @@ TEST(Status, MoveConstructorInline)
     }
 }
 
+TEST(Status, RefcountOverflow)
+{
+    std::vector<Status> statuses;
+    auto s = Status::not_found("not inline");
+    for (size_t i = 1; i < std::numeric_limits<uint16_t>::max(); ++i) {
+        statuses.push_back(s);
+    }
+    ASSERT_EQ(statuses.back().message(), s.message());
+    statuses.push_back(s);
+    ASSERT_NE(statuses.back().message(), s.message());
+}
+
 #ifndef NDEBUG
 TEST(Status, InlineStatusHasNoRefcount)
 {
@@ -670,17 +682,6 @@ TEST(Status, InlineStatusHasNoRefcount)
     // If there was a refcount attached to s, it would have overflowed just now, causing an
     // assertion to trip. Must be tested with assertions enabled.
     statuses.push_back(s);
-}
-
-TEST(Status, RefcountOverflow)
-{
-    std::vector<Status> statuses;
-    auto s = Status::not_found("not inline");
-    for (size_t i = 1; i < std::numeric_limits<uint16_t>::max(); ++i) {
-        statuses.push_back(s);
-    }
-
-    ASSERT_DEATH(statuses.push_back(s), "Assert");
 }
 #endif // NDEBUG
 
