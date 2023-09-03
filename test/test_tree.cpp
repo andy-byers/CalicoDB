@@ -6,6 +6,7 @@
 #include "cursor_impl.h"
 #include "encoding.h"
 #include "freelist.h"
+#include "logging.h"
 #include "schema.h"
 #include "temp.h"
 #include "test.h"
@@ -30,8 +31,8 @@ public:
     mutable CursorImpl *m_c = nullptr;
 
     TreeTestHarness()
-        : m_env(new_temp_env()),
-          m_scratch(kTreeBufferLen, '\0')
+        : m_env(new_temp_env(TEST_PAGE_SIZE)),
+          m_scratch(kScratchBufferPages * TEST_PAGE_SIZE, '\0')
     {
         EXPECT_OK(m_env->new_file("db", Env::kCreate, m_file));
 
@@ -44,6 +45,7 @@ public:
             &m_status,
             &m_stat,
             nullptr,
+            TEST_PAGE_SIZE,
             kMinFrameCount * 5,
             Options::kSyncNormal,
             Options::kLockNormal,
@@ -78,6 +80,22 @@ public:
         EXPECT_EQ(Alloc::bytes_used(), 0);
     }
 
+    auto allocate(bool is_external, Id nearby, Node &node_out) -> Status
+    {
+        PageRef *ref;
+        auto s = m_tree->allocate(Tree::kAllocateAny, nearby, ref);
+        if (s.is_ok()) {
+            if (ref->refs == 1) {
+                CALICODB_EXPECT_FALSE(PointerMap::is_map(ref->page_id, TEST_PAGE_SIZE));
+                node_out = Node::from_new_page(*ref, TEST_PAGE_SIZE, m_scratch.data(), is_external);
+            } else {
+                m_pager->release(ref);
+                s = StatusBuilder::corruption("page %u is corrupted", ref->page_id.value);
+            }
+        }
+        return s;
+    }
+
     [[nodiscard]] static auto make_normal_key(size_t value)
     {
         return numeric_key<6>(value);
@@ -86,13 +104,13 @@ public:
     [[nodiscard]] static auto make_long_key(size_t value)
     {
         const auto suffix = make_normal_key(value);
-        const std::string key(kPageSize * 2 - suffix.size(), '0');
+        const std::string key(TEST_PAGE_SIZE * 2 - suffix.size(), '0');
         return key + suffix;
     }
 
     [[nodiscard]] static auto make_value(char c, bool overflow = false)
     {
-        auto size = kPageSize;
+        auto size = TEST_PAGE_SIZE;
         if (overflow) {
             size /= 3;
         } else {
@@ -166,9 +184,9 @@ TEST_F(TreeTests, KeysAreUnique)
     ASSERT_EQ(m_c->value(), make_value('2'));
 }
 
-static constexpr auto kMaxLocalSize =
+static const auto kMaxLocalSize =
     kMaxCellHeaderSize +
-    compute_local_pl_size(kPageSize, 0) +
+    compute_local_pl_size(TEST_PAGE_SIZE, 0, TEST_PAGE_SIZE) +
     sizeof(uint16_t); // Indirection vector entry
 
 TEST_F(TreeTests, RootFitsAtLeast3Cells)
@@ -183,7 +201,7 @@ TEST_F(TreeTests, RootFitsAtLeast3Cells)
 TEST_F(TreeTests, NonRootFitsAtLeast4Cells)
 {
     Node nonroot;
-    ASSERT_OK(m_tree->allocate_(true, Id(), nonroot));
+    ASSERT_OK(allocate(true, Id(), nonroot));
     ASSERT_GE(nonroot.usable_space, 4 * kMaxLocalSize);
     ASSERT_LT(nonroot.usable_space, 5 * kMaxLocalSize);
     m_tree->release(std::move(nonroot));
@@ -223,8 +241,8 @@ TEST_F(TreeTests, HandlesLargePayloads)
 TEST_F(TreeTests, LongVsShortKeys)
 {
     for (int i = 0; i < 2; ++i) {
-        const auto actual_key_len = i == 0 ? 1 : kPageSize * 2 - 1;
-        const auto search_key_len = kPageSize * 2 - actual_key_len;
+        const auto actual_key_len = i == 0 ? 1 : TEST_PAGE_SIZE * 2 - 1;
+        const auto search_key_len = TEST_PAGE_SIZE * 2 - actual_key_len;
         ASSERT_OK(m_tree->put(*m_c, std::string(actual_key_len, 'a'), make_value('1', true)));
         ASSERT_OK(m_tree->put(*m_c, std::string(actual_key_len, 'b'), make_value('2', true)));
         ASSERT_OK(m_tree->put(*m_c, std::string(actual_key_len, 'c'), make_value('3', true)));
@@ -251,16 +269,16 @@ TEST_F(TreeTests, LongVsShortKeys)
 TEST_F(TreeTests, GetNonexistentKeys)
 {
     // Missing 0
-    ASSERT_OK(m_tree->put(*m_c, make_long_key(1), make_value('0', true)));
+    ASSERT_OK(m_tree->put(*m_c, make_long_key(1), make_value('1', true)));
     // Missing 2
-    ASSERT_OK(m_tree->put(*m_c, make_long_key(3), make_value('0', true)));
-    ASSERT_OK(m_tree->put(*m_c, make_long_key(4), make_value('0', true)));
-    ASSERT_OK(m_tree->put(*m_c, make_long_key(5), make_value('0', true)));
+    ASSERT_OK(m_tree->put(*m_c, make_long_key(3), make_value('3', true)));
+    ASSERT_OK(m_tree->put(*m_c, make_long_key(4), make_value('4', true)));
+    ASSERT_OK(m_tree->put(*m_c, make_long_key(5), make_value('5', true)));
 
     // Missing 6
-    ASSERT_OK(m_tree->put(*m_c, make_long_key(7), make_value('0', true)));
-    ASSERT_OK(m_tree->put(*m_c, make_long_key(8), make_value('0', true)));
-    ASSERT_OK(m_tree->put(*m_c, make_long_key(9), make_value('0', true)));
+    ASSERT_OK(m_tree->put(*m_c, make_long_key(7), make_value('7', true)));
+    ASSERT_OK(m_tree->put(*m_c, make_long_key(8), make_value('8', true)));
+    ASSERT_OK(m_tree->put(*m_c, make_long_key(9), make_value('9', true)));
     // Missing 10
 
     m_tree->TEST_validate();
@@ -276,14 +294,19 @@ TEST_F(TreeTests, GetNonexistentKeys)
 
     m_c->find(make_long_key(1));
     ASSERT_TRUE(m_c->is_valid());
+    ASSERT_EQ(m_c->value(), make_value('1', true));
     m_c->find(make_long_key(3));
     ASSERT_TRUE(m_c->is_valid());
+    ASSERT_EQ(m_c->value(), make_value('3', true));
     m_c->find(make_long_key(5));
     ASSERT_TRUE(m_c->is_valid());
+    ASSERT_EQ(m_c->value(), make_value('5', true));
     m_c->find(make_long_key(7));
     ASSERT_TRUE(m_c->is_valid());
+    ASSERT_EQ(m_c->value(), make_value('7', true));
     m_c->find(make_long_key(9));
     ASSERT_TRUE(m_c->is_valid());
+    ASSERT_EQ(m_c->value(), make_value('9', true));
 }
 
 TEST_F(TreeTests, ResolvesOverflowsOnLeftmostPosition)
@@ -401,7 +424,7 @@ TEST_F(TreeTests, SplitWithShortAndLongKeys)
         ASSERT_OK(m_tree->put(*m_c, {key, 2}, "v"));
     }
     for (unsigned i = 0; i < kInitialRecordCount; ++i) {
-        const auto key = random.Generate(kPageSize);
+        const auto key = random.Generate(TEST_PAGE_SIZE);
         ASSERT_OK(m_tree->put(*m_c, key, "v"));
     }
     validate();
@@ -437,7 +460,7 @@ public:
 
     auto random_chunk(bool overflow, bool nonzero = true)
     {
-        return random.Generate(random.Next(nonzero, kPageSize * overflow + 12));
+        return random.Generate(random.Next(nonzero, TEST_PAGE_SIZE * overflow + 12));
     }
 
     auto random_write() -> std::pair<std::string, std::string>
@@ -876,17 +899,17 @@ class PointerMapTests : public TreeTests
 public:
     [[nodiscard]] auto map_size() -> size_t
     {
-        return kPageSize / (sizeof(char) + sizeof(uint32_t));
+        return TEST_PAGE_SIZE / (sizeof(char) + sizeof(uint32_t));
     }
 };
 
 TEST_F(PointerMapTests, FirstPointerMapIsPage2)
 {
-    ASSERT_EQ(PointerMap::lookup(Id(1)), Id(0));
-    ASSERT_EQ(PointerMap::lookup(Id(2)), Id(2));
-    ASSERT_EQ(PointerMap::lookup(Id(3)), Id(2));
-    ASSERT_EQ(PointerMap::lookup(Id(4)), Id(2));
-    ASSERT_EQ(PointerMap::lookup(Id(5)), Id(2));
+    ASSERT_EQ(PointerMap::lookup(Id(1), TEST_PAGE_SIZE), Id(0));
+    ASSERT_EQ(PointerMap::lookup(Id(2), TEST_PAGE_SIZE), Id(2));
+    ASSERT_EQ(PointerMap::lookup(Id(3), TEST_PAGE_SIZE), Id(2));
+    ASSERT_EQ(PointerMap::lookup(Id(4), TEST_PAGE_SIZE), Id(2));
+    ASSERT_EQ(PointerMap::lookup(Id(5), TEST_PAGE_SIZE), Id(2));
 }
 
 TEST_F(PointerMapTests, ReadsAndWritesEntries)
@@ -942,13 +965,13 @@ TEST_F(PointerMapTests, PointerMapCanFitAllPointers)
 TEST_F(PointerMapTests, MapPagesAreRecognized)
 {
     Id id(2);
-    ASSERT_EQ(PointerMap::lookup(id), id);
+    ASSERT_EQ(PointerMap::lookup(id, TEST_PAGE_SIZE), id);
 
     // Back pointers for the next "map.map_size()" pages are stored on page 2. The next pointermap page is
     // the page following the last page whose back pointer is on page 2. This pattern continues forever.
     for (size_t i = 0; i < 1'000'000; ++i) {
         id.value += static_cast<uint32_t>(map_size() + 1);
-        ASSERT_EQ(PointerMap::lookup(id), id);
+        ASSERT_EQ(PointerMap::lookup(id, TEST_PAGE_SIZE), id);
     }
 }
 
@@ -964,28 +987,35 @@ TEST_F(PointerMapTests, FindsCorrectMapPages)
             map_id.value += static_cast<uint32_t>(map_size() + 1);
             counter = 0;
         } else {
-            ASSERT_EQ(PointerMap::lookup(page_id), map_id);
+            ASSERT_EQ(PointerMap::lookup(page_id, TEST_PAGE_SIZE), map_id);
         }
     }
 }
 
 TEST_F(PointerMapTests, LookupBeforeFirstMap)
 {
-    ASSERT_TRUE(PointerMap::lookup(Id(0)).is_null());
-    ASSERT_TRUE(PointerMap::lookup(Id(1)).is_null());
+    ASSERT_TRUE(PointerMap::lookup(Id(0), TEST_PAGE_SIZE).is_null());
+    ASSERT_TRUE(PointerMap::lookup(Id(1), TEST_PAGE_SIZE).is_null());
 }
 
 class MultiTreeTests : public TreeTests
 {
 public:
     static constexpr size_t kN = 32;
+    struct TreeWrapper {
+        std::unique_ptr<CursorImpl> c;
+        Tree *tree;
+    };
+
+    Schema *m_schema = nullptr;
+    std::unordered_map<size_t, TreeWrapper> multi_tree;
+    std::vector<std::string> payload_values;
 
     explicit MultiTreeTests()
-        : payload_values(kInitialRecordCount),
-          m_scratch(kTreeBufferLen, '\0')
+        : payload_values(kInitialRecordCount)
     {
         for (auto &value : payload_values) {
-            value = random.Generate(kPageSize / 2).to_string();
+            value = random.Generate(TEST_PAGE_SIZE / 2).to_string();
         }
     }
 
@@ -1072,22 +1102,12 @@ public:
         }
         ASSERT_EQ(roots.size(), num_roots);
         for (auto root : roots) {
-            ASSERT_FALSE(PointerMap::is_map(root));
+            ASSERT_FALSE(PointerMap::is_map(root, TEST_PAGE_SIZE));
             // These tests shouldn't use more than a single pointer map page.
-            ASSERT_EQ(PointerMap::lookup(root), Id(2));
+            ASSERT_EQ(PointerMap::lookup(root, TEST_PAGE_SIZE), Id(2));
             ASSERT_LE(root.value, 2 + num_roots);
         }
     }
-
-    struct TreeWrapper {
-        std::unique_ptr<CursorImpl> c;
-        Tree *tree;
-    };
-
-    Schema *m_schema = nullptr;
-    std::unordered_map<size_t, TreeWrapper> multi_tree;
-    std::vector<std::string> payload_values;
-    std::string m_scratch;
 };
 
 TEST_F(MultiTreeTests, CreateA)
@@ -1369,7 +1389,7 @@ class RebalanceTests
       public testing::TestWithParam<uint32_t>
 {
 public:
-    static constexpr size_t kValueSizes[] = {10, 100, 500, kPageSize};
+    static constexpr size_t kValueSizes[] = {10, 100, 500, TEST_PAGE_SIZE};
     ~RebalanceTests() override = default;
 
     auto SetUp() -> void override

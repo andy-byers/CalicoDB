@@ -133,7 +133,7 @@ public:
     // actually change the tree structure: all that matters for record payloads is their length.
     [[nodiscard]] auto extract_random_record_value() -> std::string
     {
-        const auto len = extract_integral_in_range<size_t>(0, kPageSize * 3);
+        const auto len = extract_integral_in_range<size_t>(0, kMinPageSize * 3);
         return std::string(len, '\0');
     }
 

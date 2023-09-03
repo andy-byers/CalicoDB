@@ -45,7 +45,7 @@ struct PageRef {
         return page_id.value;
     }
 
-    static auto alloc() -> PageRef *
+    static auto alloc(size_t page_size) -> PageRef *
     {
         static_assert(std::is_trivially_copyable_v<DirtyHdr>);
         static_assert(std::is_trivially_copyable_v<PageRef>);
@@ -55,7 +55,7 @@ struct PageRef {
         static constexpr size_t kSpilloverLen = sizeof(void *);
 
         auto *ref = static_cast<PageRef *>(Alloc::allocate(
-            sizeof(PageRef) + kPageSize + kSpilloverLen));
+            sizeof(PageRef) + page_size + kSpilloverLen));
         if (ref) {
             CALICODB_EXPECT_TRUE(is_aligned(ref, alignof(PageRef)));
             IntrusiveList::initialize(*ref);
@@ -72,6 +72,7 @@ struct PageRef {
                 0,
                 PageRef::kNormal,
             };
+            std::memset(ref->data, 0, page_size);
         }
         return ref;
     }

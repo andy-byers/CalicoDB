@@ -103,7 +103,8 @@ if (s.is_ok()) {
 // Set some initialization options. See include/calicodb/options.h for descriptions
 // and default values.
 const calicodb::Options options = {
-    1'024 * calicodb::kPageSize,  // cache_size
+    4'096, // page_size
+    1'024 * 4'096,  // cache_size
     1'000, // auto_checkpoint
     "wal-filename", // wal_filename
     nullptr, // info_log

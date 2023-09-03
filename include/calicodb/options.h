@@ -7,6 +7,10 @@
 
 #include <cstddef>
 
+#ifndef CALICODB_DEFAULT_PAGE_SIZE
+#define CALICODB_DEFAULT_PAGE_SIZE 4'096
+#endif // CALICODB_DEFAULT_PAGE_SIZE
+
 namespace calicodb
 {
 
@@ -17,14 +21,13 @@ class Env;
 class BusyHandler;
 class Logger;
 
-// Size of a database page in bytes.
-static constexpr size_t kPageSize = 4'096;
-
 // Options to control the behavior of a database connection (passed to DB::open()
 // and DB::destroy())
 struct Options final {
+    size_t page_size = CALICODB_DEFAULT_PAGE_SIZE;
+
     // Size of the page cache in bytes.
-    size_t cache_size = 1'024 * kPageSize; // 4 MB
+    size_t cache_size = 1'024 * page_size;
 
     // Run a checkpoint when the WAL has reached this number of frames. If
     // set to 0, only the necessary checkpoints are run automatically. These

@@ -27,7 +27,7 @@ public:
     Bufmgr mgr;
 
     explicit BufmgrTests()
-        : mgr(m_stat)
+        : mgr(32, m_stat)
     {
     }
 
@@ -35,14 +35,14 @@ public:
 
     auto SetUp() -> void override
     {
-        ASSERT_EQ(mgr.preallocate(32), 0);
+        ASSERT_EQ(mgr.reallocate(TEST_PAGE_SIZE), 0);
     }
 
     auto insert_and_reference(uint32_t key, uint32_t value) -> PageRef *
     {
         auto *ref = mgr.next_victim();
         if (ref == nullptr) {
-            ref = mgr.allocate();
+            ref = mgr.allocate(TEST_PAGE_SIZE);
             EXPECT_NE(ref, nullptr);
         } else {
             if (ref->get_flag(PageRef::kDirty)) {
@@ -287,42 +287,48 @@ protected:
         close();
         (void)m_env->remove_file("db");
         (void)m_env->remove_file("wal");
-        delete m_file;
-        m_file = nullptr;
+        delete exchange(m_file, nullptr);
+        delete exchange(m_wal_file, nullptr);
 
+        File *file = nullptr;
+        File *wal_file = nullptr;
         auto s = m_env->new_file(
             "db",
             Env::kCreate | Env::kReadWrite,
-            m_file);
-        if (s.is_ok()) {
-            const Pager::Parameters param = {
-                "db",
-                "wal",
-                m_file,
-                m_env,
-                nullptr,
-                &m_status,
-                &m_stat,
-                nullptr,
-                kMinFrameCount,
-                Options::kSyncNormal,
-                lock_mode,
-                true,
-            };
-            s = Pager::open(param, m_pager);
+            file);
+        if (!s.is_ok()) {
+            ADD_FAILURE() << s.message();
+            return false;
         }
+        const Pager::Parameters param = {
+            "db",
+            "wal",
+            file,
+            m_env,
+            nullptr,
+            &m_status,
+            &m_stat,
+            nullptr,
+            TEST_PAGE_SIZE,
+            kMinFrameCount,
+            Options::kSyncNormal,
+            lock_mode,
+            true,
+        };
+        s = Pager::open(param, m_pager);
         if (s.is_ok()) {
             s = m_pager->start_reader();
             m_pager->finish();
         }
         if (s.is_ok()) {
-            delete m_wal_file;
-            m_wal_file = nullptr;
-            s = m_env->new_file("wal", Env::kReadWrite, m_wal_file);
+            s = m_env->new_file("wal", Env::kReadWrite, wal_file);
         }
-        if (!s.is_ok()) {
+        if (s.is_ok()) {
+            m_file = file;
+            m_wal_file = wal_file;
+        } else {
             ADD_FAILURE() << s.message();
-            delete m_file;
+            delete file;
             return false;
         }
         return true;
@@ -340,7 +346,7 @@ protected:
         if (m_page_ids.empty() || m_page_ids.back() < page_out->page_id) {
             m_page_ids.emplace_back(page_out->page_id);
         }
-        std::memset(page_out->data, 0, kPageSize);
+        std::memset(page_out->data, 0, TEST_PAGE_SIZE);
         return page_out->page_id;
     }
     auto allocate_page() -> Id
@@ -353,8 +359,8 @@ protected:
     auto alter_page(PageRef &page) -> void
     {
         m_pager->mark_dirty(page);
-        const auto value = get_u32(page.data + kPageSize - 4);
-        put_u32(page.data + kPageSize - 4, value + 1);
+        const auto value = get_u32(page.data + TEST_PAGE_SIZE - 4);
+        put_u32(page.data + TEST_PAGE_SIZE - 4, value + 1);
     }
     auto alter_page(size_t index) -> void
     {
@@ -365,7 +371,7 @@ protected:
     }
     auto read_page(const PageRef &page) -> uint32_t
     {
-        return get_u32(page.data + kPageSize - 4);
+        return get_u32(page.data + TEST_PAGE_SIZE - 4);
     }
     auto read_page(size_t index) -> uint32_t
     {
@@ -403,7 +409,7 @@ TEST_F(PagerTests, LastPageIsNotPointerMap)
 {
     // If this particular page ends up being a pointer map, we would need to alter the
     // guard at the beginning of Pager::allocate() to prevent the page ID from wrapping.
-    ASSERT_FALSE(PointerMap::is_map(Id::from_index(std::numeric_limits<uint32_t>::max() - 1)));
+    ASSERT_FALSE(PointerMap::is_map(Id::from_index(std::numeric_limits<uint32_t>::max() - 1), TEST_PAGE_SIZE));
 }
 
 TEST_F(PagerTests, AllocatePage)
@@ -455,6 +461,25 @@ TEST_F(PagerTests, NOOP)
 
 TEST_F(PagerTests, Commit)
 {
+    reopen(Options::kLockNormal);
+    pager_update([this] {
+        for (size_t i = 0; i < kManyPages; ++i) {
+            PageRef *page;
+            allocate_page(page);
+            alter_page(*page);
+            m_pager->release(page);
+        }
+        ASSERT_OK(m_pager->commit());
+    });
+    pager_view([this] {
+        for (size_t i = 0; i < kManyPages; ++i) {
+            ASSERT_EQ(read_page(i), 1);
+        }
+    });
+}
+
+TEST_F(PagerTests, Commit2)
+{
     for (int iteration = 0; iteration < 6; ++iteration) {
         reopen(iteration < 3 ? Options::kLockNormal : Options::kLockExclusive);
         pager_update([this] {
@@ -469,15 +494,13 @@ TEST_F(PagerTests, Commit)
                     // kNoCache should be ignored since the page is dirty.
                     Pager::kNoCache);
             }
-            // Alter every other page.
+            // Alter every other page, drop the rest.
             for (size_t i = 0; i < kManyPages; ++i) {
                 PageRef *page;
                 ASSERT_OK(m_pager->acquire(m_page_ids[i], page));
                 alter_page(*page);
-                m_pager->release(
-                    page,
-                    // Drop every other update.
-                    i & 1 ? Pager::kNoCache : Pager::kDiscard);
+                // Discard even-numbered updates.
+                m_pager->release(page, i & 1 ? Pager::kKeep : Pager::kDiscard);
             }
             ASSERT_OK(m_pager->commit());
         });
@@ -493,14 +516,38 @@ TEST_F(PagerTests, Commit)
         }
         pager_view([this] {
             for (size_t i = 0; i < kManyPages; ++i) {
-                const auto value = read_page(i);
-                ASSERT_EQ(1 + (i & 1), value);
+                ASSERT_EQ(read_page(i), 1 + (i & 1));
             }
         });
     }
 }
 
 TEST_F(PagerTests, Rollback)
+{
+    reopen(Options::kLockNormal);
+    size_t page_count = 0;
+    pager_update([this, &page_count] {
+        for (size_t i = 0; i < kManyPages; ++i) {
+            PageRef *page;
+            allocate_page(page);
+            alter_page(*page);
+            m_pager->release(page);
+
+            if (i == kManyPages / 2) {
+                ASSERT_OK(m_pager->commit());
+                page_count = m_pager->page_count();
+            }
+        }
+    });
+    pager_view([this, page_count] {
+        ASSERT_EQ(m_pager->page_count(), page_count);
+        for (size_t i = 0; i < kManyPages; ++i) {
+            ASSERT_EQ(i <= kManyPages / 2, read_page(i));
+        }
+    });
+}
+
+TEST_F(PagerTests, Rollback2)
 {
     for (int iteration = 0; iteration < 6; ++iteration) {
         reopen(iteration < 3 ? Options::kLockNormal : Options::kLockExclusive);
@@ -549,7 +596,7 @@ TEST_F(PagerTests, Truncation)
 
     size_t file_size;
     ASSERT_OK(m_env->file_size("db", file_size));
-    ASSERT_EQ(file_size, kPageSize * m_page_ids.at(kManyPages / 2).value);
+    ASSERT_EQ(file_size, TEST_PAGE_SIZE * m_page_ids.at(kManyPages / 2).value);
 
     pager_view([this] {
         for (size_t i = 0; i < kManyPages; ++i) {
@@ -644,7 +691,7 @@ public:
         std::shuffle(begin(m_ordering), end(m_ordering), m_rng);
     }
 
-    static constexpr size_t kFreelistLen = kPageSize * 5;
+    static constexpr size_t kFreelistLen = TEST_PAGE_SIZE * 5;
     auto populate_freelist(bool shuffle) -> void
     {
         pager_update([this, shuffle] {
@@ -783,7 +830,7 @@ using MakeWal = WalComponents (*)(Wal::Parameters);
 
 auto make_temporary_wal(Wal::Parameters param) -> WalComponents
 {
-    param.env = new_temp_env();
+    param.env = new_temp_env(kMaxPageSize);
     EXPECT_NE(param.env, nullptr);
     EXPECT_OK(param.env->new_file("db", Env::kCreate | Env::kReadWrite,
                                   param.db_file));
@@ -802,6 +849,7 @@ auto make_persistent_wal(Wal::Parameters param) -> WalComponents
 class WalTests : public testing::TestWithParam<MakeWal>
 {
 public:
+    static constexpr uint32_t TEST_PAGE_SIZE = 1'024;
     const std::string m_filename;
     File *m_db_file = nullptr;
     Env *m_env = nullptr;
@@ -811,6 +859,7 @@ public:
     std::default_random_engine m_rng;
     std::vector<uint32_t> m_temp;
     std::vector<uint32_t> m_perm;
+    char m_scratch[TEST_PAGE_SIZE];
 
     explicit WalTests()
         : m_filename(testing::TempDir() + "calicodb_wal_tests")
@@ -845,12 +894,13 @@ public:
 
     auto rollback() -> void
     {
-        m_wal->rollback([](auto *object, auto page_id) {
-            auto &self = *static_cast<WalTests *>(object);
-            const auto i = page_id.as_index();
-            self.m_temp.at(i) = self.m_perm.at(i);
-        },
-                        this);
+        m_wal->rollback(
+            [](auto *object, auto page_id) {
+                auto &self = *static_cast<WalTests *>(object);
+                const auto i = page_id.as_index();
+                self.m_temp.at(i) = self.m_perm.at(i);
+            },
+            this);
 
         ASSERT_EQ(m_temp, m_perm);
         m_temp = m_perm;
@@ -873,9 +923,9 @@ public:
             PageRef *page = nullptr;
             if (std::uniform_int_distribution<size_t>(min_r, 8)(m_rng) ||
                 (occupied == 0 && i + 1 == options.db_size)) {
-                page = PageRef::alloc();
+                page = PageRef::alloc(TEST_PAGE_SIZE);
                 EXPECT_NE(page, nullptr);
-                std::memset(page->data, 0, kPageSize);
+                std::memset(page->data, 0, TEST_PAGE_SIZE);
                 ++occupied;
             }
             pages.emplace_back(page);
@@ -911,6 +961,7 @@ public:
         EXPECT_NE(dirty, nullptr);
         auto s = m_wal->write(
             dirty->get_page_ref(),
+            TEST_PAGE_SIZE,
             options.truncate ? options.truncate
                              : m_temp.size() * options.commit);
         if (s.is_ok()) {
@@ -926,10 +977,10 @@ public:
 
     auto read_batch(size_t n) -> Status
     {
-        char buffer[kPageSize] = {};
+        char buffer[TEST_PAGE_SIZE] = {};
         for (size_t i = 0; i < n; ++i) {
             char *page = buffer;
-            auto s = m_wal->read(Id::from_index(i), page);
+            auto s = m_wal->read(Id::from_index(i), TEST_PAGE_SIZE, page);
             if (!s.is_ok()) {
                 return s;
             } else if (page) {
@@ -938,12 +989,12 @@ public:
             } else if (i < m_temp.size()) {
                 // Not found, but should exist: read from the database file.
                 Slice result;
-                s = m_db_file->read(i * kPageSize, kPageSize, buffer, &result);
+                s = m_db_file->read(i * TEST_PAGE_SIZE, TEST_PAGE_SIZE, buffer, &result);
                 if (!s.is_ok()) {
                     return s;
-                } else if (result.size() != kPageSize) {
+                } else if (result.size() != TEST_PAGE_SIZE) {
                     ADD_FAILURE() << "incomplete read: read " << result.size() << '/'
-                                  << kPageSize << " bytes";
+                                  << TEST_PAGE_SIZE << " bytes";
                     return Status::io_error();
                 }
                 EXPECT_EQ(m_temp.at(i), get_u32(buffer));
@@ -954,10 +1005,10 @@ public:
 
     auto expect_missing(Id id) const -> void
     {
-        char buffer[kPageSize];
+        char buffer[TEST_PAGE_SIZE];
 
         char *page = buffer;
-        ASSERT_OK(m_wal->read(id, page));
+        ASSERT_OK(m_wal->read(id, TEST_PAGE_SIZE, page));
         ASSERT_EQ(page, nullptr);
     }
 
@@ -1011,7 +1062,7 @@ public:
                 }
                 return s;
             }));
-            ASSERT_OK(m_wal->checkpoint(i % options.ckpt_reset_interval == 0));
+            ASSERT_OK(m_wal->checkpoint(i % options.ckpt_reset_interval == 0, m_scratch, TEST_PAGE_SIZE));
             ASSERT_OK(with_reader([this] {
                 return read_batch(kMaxPages);
             }));
@@ -1036,8 +1087,8 @@ TEST_P(WalTests, EmptyCheckpoint)
 
     // Checkpoint cannot be run until the WAL index is created the first time a
     // transaction is started.
-    ASSERT_OK(m_wal->checkpoint(false));
-    ASSERT_OK(m_wal->checkpoint(true));
+    ASSERT_OK(m_wal->checkpoint(false, m_scratch, TEST_PAGE_SIZE));
+    ASSERT_OK(m_wal->checkpoint(true, m_scratch, TEST_PAGE_SIZE));
 }
 
 TEST_P(WalTests, Commit)
@@ -1063,7 +1114,7 @@ TEST_P(WalTests, Truncate)
         opt.truncate = 8;
         return write_batch(opt);
     }));
-    ASSERT_OK(m_wal->checkpoint(true));
+    ASSERT_OK(m_wal->checkpoint(true, m_scratch, TEST_PAGE_SIZE));
     ASSERT_OK(with_reader([this] {
         expect_missing(Id(9));
         expect_missing(Id(10));
@@ -1083,7 +1134,7 @@ TEST_P(WalTests, ReadsAndWrites)
             opt.omit_some = i % 2;
             return write_batch(opt);
         }));
-        ASSERT_OK(m_wal->checkpoint(i < 5));
+        ASSERT_OK(m_wal->checkpoint(i < 5, m_scratch, TEST_PAGE_SIZE));
         ASSERT_OK(with_reader([this] {
             return read_batch(kNumPages);
         }));

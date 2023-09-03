@@ -41,11 +41,11 @@ public:
 
     // Open or create a WAL file called `param.filename`
     static auto open(const Parameters &param, Wal *&out) -> Status;
-    virtual auto close() -> Status = 0;
+    virtual auto close(char *scratch, uint32_t page_size) -> Status = 0;
 
     // Write as much of the WAL back to the DB as possible
     // REQUIRES: WAL is in Unlocked mode
-    virtual auto checkpoint(bool reset) -> Status = 0;
+    virtual auto checkpoint(bool reset, char *scratch, uint32_t page_size) -> Status = 0;
 
     // REQUIRES: WAL is in Unlocked mode
     virtual auto start_reader(bool &changed) -> Status = 0;
@@ -55,7 +55,7 @@ public:
     // into `page_out` and returns an OK status. Otherwise, sets `page_out` to nullptr and
     // returns a non-OK status.
     // REQUIRES: WAL is in Reader mode
-    virtual auto read(Id page_id, char *&page_out) -> Status = 0;
+    virtual auto read(Id page_id, uint32_t page_size, char *&page_out) -> Status = 0;
 
     // State transition from "reader locked" to "writer locked"
     // REQUIRES: WAL is in Reader mode
@@ -63,7 +63,7 @@ public:
 
     // Write new versions of the given pages to the WAL
     // REQUIRES: WAL is in Writer mode
-    virtual auto write(PageRef *dirty, size_t db_size) -> Status = 0;
+    virtual auto write(PageRef *dirty, uint32_t page_size, size_t db_size) -> Status = 0;
 
     // REQUIRES: WAL is in Writer mode
     using Undo = void (*)(void *, Id);

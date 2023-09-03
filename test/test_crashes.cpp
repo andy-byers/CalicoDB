@@ -169,7 +169,6 @@ public:
                     }
                     return injected_fault();
                 }
-                MAYBE_CRASH(m_env);
                 auto s = FileWrapper::sync();
                 if (s.is_ok() && m_env->m_drop_unsynced) {
                     save_to_backup();
@@ -245,7 +244,7 @@ protected:
     }
     [[nodiscard]] static auto make_value(size_t n) -> std::string
     {
-        return std::string(std::min(n * 6, kPageSize * 3), '*');
+        return std::string(minval<size_t>(n * 6, TEST_PAGE_SIZE * 3), '*');
     }
 
     // Check if a status is an injected fault
@@ -760,9 +759,9 @@ TEST_F(CrashTests, Operations_Syscall)
 {
     // Run with syscall fault injection.
     run_operations_test({kSyscallFaults, false, false});
-    //    run_operations_test({kSyscallFaults, true, false});
-    //    run_operations_test({kSyscallFaults, false, true});
-    //    run_operations_test({kSyscallFaults, true, true});
+    run_operations_test({kSyscallFaults, true, false});
+    run_operations_test({kSyscallFaults, false, true});
+    run_operations_test({kSyscallFaults, true, true});
 }
 
 TEST_F(CrashTests, Operations_OOM)
@@ -906,7 +905,7 @@ class DataLossEnv : public EnvWrapper
             }
             size_t len = 0;
             if (offset < m_env->m_buffer.size()) {
-                len = std::min(length, m_env->m_buffer.size() - offset);
+                len = minval(length, m_env->m_buffer.size() - offset);
                 std::memcpy(scratch, m_env->m_buffer.data() + offset, len);
             }
             if (slice_out) {

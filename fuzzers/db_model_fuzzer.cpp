@@ -52,6 +52,7 @@ public:
         env.srand(42);
         m_options.env = &env;
         m_options.cache_size = 0;
+        m_options.page_size = kMinPageSize;
         reopen_db();
     }
 

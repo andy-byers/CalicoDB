@@ -4,6 +4,7 @@
 
 #include "calicodb/db.h"
 #include "db_impl.h"
+#include "header.h"
 #include "logging.h"
 #include "temp.h"
 #include "utils.h"
@@ -29,7 +30,13 @@ auto DB::open(const Options &options, const char *filename, DB *&db) -> Status
 {
     DBImpl *impl = nullptr;
     auto sanitized = options;
-    clip_to_range(sanitized.cache_size, kMinFrameCount * kPageSize, kMaxCacheSize);
+    clip_to_range(sanitized.page_size, kMinPageSize, kMaxPageSize);
+    clip_to_range(sanitized.cache_size, kMinFrameCount * sanitized.page_size, kMaxCacheSize);
+
+    auto s = FileHdr::check_page_size(sanitized.page_size);
+    if (!s.is_ok()) {
+        return s;
+    }
 
     // Allocate storage for the database filename.
     String db_name;
@@ -57,11 +64,11 @@ auto DB::open(const Options &options, const char *filename, DB *&db) -> Status
 
     // Allocate scratch memory for working with database pages.
     Buffer<char> scratch;
-    if (scratch.realloc(kTreeBufferLen)) {
+    if (scratch.realloc(sanitized.page_size * kScratchBufferPages)) {
         return Status::no_memory();
     }
 
-    auto s = Status::no_memory();
+    s = Status::no_memory();
     if (sanitized.temp_database) {
         if (sanitized.env != nullptr) {
             log(sanitized.info_log,
@@ -69,7 +76,7 @@ auto DB::open(const Options &options, const char *filename, DB *&db) -> Status
                 "(custom Env must not be used with temp database)",
                 sanitized.env);
         }
-        sanitized.env = new_temp_env();
+        sanitized.env = new_temp_env(sanitized.page_size * 4);
         if (sanitized.env == nullptr) {
             goto cleanup;
         }

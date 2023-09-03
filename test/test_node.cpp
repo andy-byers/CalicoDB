@@ -4,6 +4,7 @@
 
 #include "calicodb/env.h"
 #include "node.h"
+#include "test.h"
 #include <gtest/gtest.h>
 #include <limits>
 
@@ -15,13 +16,13 @@ class NodeTests : public testing::Test
 public:
     Env *env;
     explicit NodeTests()
-        : m_backing(kPageSize, '\0'),
-          m_scratch(kPageSize, '\0'),
-          m_ref(PageRef::alloc())
+        : m_backing(TEST_PAGE_SIZE, '\0'),
+          m_scratch(TEST_PAGE_SIZE, '\0'),
+          m_ref(PageRef::alloc(TEST_PAGE_SIZE))
     {
         env = &Env::default_env();
         m_ref->page_id = Id(3);
-        m_node = Node::from_new_page(*m_ref, m_scratch.data(), true);
+        m_node = Node::from_new_page(*m_ref, TEST_PAGE_SIZE, m_scratch.data(), true);
     }
 
     ~NodeTests() override
@@ -88,8 +89,8 @@ public:
                 return false;
         }
 
-        std::memset(m_ref->data, 0, kPageSize);
-        m_node = Node::from_new_page(*m_ref, m_scratch.data(), is_leaf);
+        std::memset(m_ref->data, 0, TEST_PAGE_SIZE);
+        m_node = Node::from_new_page(*m_ref, TEST_PAGE_SIZE, m_scratch.data(), is_leaf);
         return true;
     }
 };
@@ -110,10 +111,10 @@ public:
         NodeHdr::put_cell_start(
             m_node.hdr(),
             page_offset(m_node.ref->page_id) + NodeHdr::kSize);
-        ASSERT_LT(n, kPageSize - FileHdr::kSize - NodeHdr::kSize)
+        ASSERT_LT(n, TEST_PAGE_SIZE - FileHdr::kSize - NodeHdr::kSize)
             << "reserve_for_test(" << n << ") leaves no room for possible headers";
         m_size = n;
-        m_base = kPageSize - n;
+        m_base = TEST_PAGE_SIZE - n;
     }
 
     uint32_t m_size = 0;
@@ -127,31 +128,31 @@ TEST_F(BlockAllocatorTests, MergesAdjacentBlocks)
     // ..........#####...............#####.....
     ASSERT_EQ(0, BlockAllocator::release(m_node, m_base + 10, 5));
     ASSERT_EQ(0, BlockAllocator::release(m_node, m_base + 30, 5));
-    ASSERT_EQ(BlockAllocator::freelist_size(m_node), 10);
+    ASSERT_EQ(BlockAllocator::freelist_size(m_node, TEST_PAGE_SIZE), 10);
 
     // .....##########...............#####.....
     ASSERT_EQ(0, BlockAllocator::release(m_node, m_base + 5, 5));
-    ASSERT_EQ(BlockAllocator::freelist_size(m_node), 15);
+    ASSERT_EQ(BlockAllocator::freelist_size(m_node, TEST_PAGE_SIZE), 15);
 
     // .....##########...............##########
     ASSERT_EQ(0, BlockAllocator::release(m_node, m_base + 35, 5));
-    ASSERT_EQ(BlockAllocator::freelist_size(m_node), 20);
+    ASSERT_EQ(BlockAllocator::freelist_size(m_node, TEST_PAGE_SIZE), 20);
 
     // .....###############..........##########
     ASSERT_EQ(0, BlockAllocator::release(m_node, m_base + 15, 5));
-    ASSERT_EQ(BlockAllocator::freelist_size(m_node), 25);
+    ASSERT_EQ(BlockAllocator::freelist_size(m_node, TEST_PAGE_SIZE), 25);
 
     // .....###############.....###############
     ASSERT_EQ(0, BlockAllocator::release(m_node, m_base + 25, 5));
-    ASSERT_EQ(BlockAllocator::freelist_size(m_node), 30);
+    ASSERT_EQ(BlockAllocator::freelist_size(m_node, TEST_PAGE_SIZE), 30);
 
     // .....###################################
     ASSERT_EQ(0, BlockAllocator::release(m_node, m_base + 20, 5));
-    ASSERT_EQ(BlockAllocator::freelist_size(m_node), 35);
+    ASSERT_EQ(BlockAllocator::freelist_size(m_node, TEST_PAGE_SIZE), 35);
 
     // ########################################
     ASSERT_EQ(0, BlockAllocator::release(m_node, m_base, 5));
-    ASSERT_EQ(BlockAllocator::freelist_size(m_node), m_size);
+    ASSERT_EQ(BlockAllocator::freelist_size(m_node, TEST_PAGE_SIZE), m_size);
 }
 
 TEST_F(BlockAllocatorTests, ConsumesAdjacentFragments)
@@ -165,22 +166,22 @@ TEST_F(BlockAllocatorTests, ConsumesAdjacentFragments)
 
     // .....##########**...........**#####*....
     ASSERT_EQ(0, BlockAllocator::release(m_node, m_base + 5, 4));
-    ASSERT_EQ(BlockAllocator::freelist_size(m_node), 15);
+    ASSERT_EQ(BlockAllocator::freelist_size(m_node, TEST_PAGE_SIZE), 15);
     ASSERT_EQ(NodeHdr::get_frag_count(m_node.hdr()), 5);
 
     // .....#################......**#####*....
     ASSERT_EQ(0, BlockAllocator::release(m_node, m_base + 17, 5));
-    ASSERT_EQ(BlockAllocator::freelist_size(m_node), 22);
+    ASSERT_EQ(BlockAllocator::freelist_size(m_node, TEST_PAGE_SIZE), 22);
     ASSERT_EQ(NodeHdr::get_frag_count(m_node.hdr()), 3);
 
     // .....##############################*....
     ASSERT_EQ(0, BlockAllocator::release(m_node, m_base + 22, 6));
-    ASSERT_EQ(BlockAllocator::freelist_size(m_node), 30);
+    ASSERT_EQ(BlockAllocator::freelist_size(m_node, TEST_PAGE_SIZE), 30);
     ASSERT_EQ(NodeHdr::get_frag_count(m_node.hdr()), 1);
 
     // .....##############################*....
     ASSERT_EQ(0, BlockAllocator::release(m_node, m_base + 36, 4));
-    ASSERT_EQ(BlockAllocator::freelist_size(m_node), 35);
+    ASSERT_EQ(BlockAllocator::freelist_size(m_node, TEST_PAGE_SIZE), 35);
     ASSERT_EQ(NodeHdr::get_frag_count(m_node.hdr()), 0);
 }
 
@@ -195,13 +196,13 @@ TEST_F(BlockAllocatorTests, ExternalNodesConsume3ByteFragments)
 
     // ###########
     ASSERT_EQ(0, BlockAllocator::release(m_node, m_base + 0, 4));
-    ASSERT_EQ(BlockAllocator::freelist_size(m_node), m_size - NodeHdr::get_frag_count(m_node.hdr()));
+    ASSERT_EQ(BlockAllocator::freelist_size(m_node, TEST_PAGE_SIZE), m_size - NodeHdr::get_frag_count(m_node.hdr()));
     ASSERT_EQ(NodeHdr::get_frag_count(m_node.hdr()), 0);
 }
 
 TEST_F(BlockAllocatorTests, InternalNodesConsume3ByteFragments)
 {
-    m_node = Node::from_new_page(*m_ref, m_scratch.data(), false);
+    m_node = Node::from_new_page(*m_ref, TEST_PAGE_SIZE, m_scratch.data(), false);
 
     reserve_for_test(11);
     NodeHdr::put_frag_count(m_node.hdr(), 3);
@@ -211,7 +212,7 @@ TEST_F(BlockAllocatorTests, InternalNodesConsume3ByteFragments)
 
     // ###########
     ASSERT_EQ(0, BlockAllocator::release(m_node, m_base + 0, 4));
-    ASSERT_EQ(BlockAllocator::freelist_size(m_node), m_size);
+    ASSERT_EQ(BlockAllocator::freelist_size(m_node, TEST_PAGE_SIZE), m_size);
     ASSERT_EQ(NodeHdr::get_frag_count(m_node.hdr()), 0);
 }
 
@@ -299,12 +300,12 @@ public:
     auto assert_corrupted_node() -> void
     {
         Node corrupted;
-        ASSERT_NE(Node::from_existing_page(*m_node.ref, m_scratch.data(), corrupted), 0);
+        ASSERT_NE(Node::from_existing_page(*m_node.ref, TEST_PAGE_SIZE, m_scratch.data(), corrupted), 0);
     }
     auto assert_valid_node() -> void
     {
         Node valid;
-        ASSERT_EQ(Node::from_existing_page(*m_node.ref, m_scratch.data(), valid), 0);
+        ASSERT_EQ(Node::from_existing_page(*m_node.ref, TEST_PAGE_SIZE, m_scratch.data(), valid), 0);
     }
 };
 
@@ -333,7 +334,7 @@ TEST_F(CorruptedNodeTests, InvalidCellCount)
 
 TEST_F(CorruptedNodeTests, InvalidCellStart)
 {
-    NodeHdr::put_cell_start(m_node.hdr(), kPageSize + 1);
+    NodeHdr::put_cell_start(m_node.hdr(), TEST_PAGE_SIZE + 1);
     assert_corrupted_node();
 }
 
@@ -367,18 +368,18 @@ public:
 
 TEST_F(CorruptedNodeFreelistTests, StartOutOfBounds)
 {
-    NodeHdr::put_free_start(m_node.hdr(), kPageSize);
+    NodeHdr::put_free_start(m_node.hdr(), TEST_PAGE_SIZE);
     assert_corrupted_node();
 }
 
 TEST_F(CorruptedNodeFreelistTests, InvalidFreeBlockHeader)
 {
     for (uint32_t i = 0; i < kNumBlocks; ++i) {
-        put_u16(m_ptrs[i], kPageSize);
+        put_u16(m_ptrs[i], TEST_PAGE_SIZE);
         assert_corrupted_node();
         put_u32(m_ptrs[i], m_reset[i]);
 
-        put_u16(m_ptrs[i] + 2, kPageSize);
+        put_u16(m_ptrs[i] + 2, TEST_PAGE_SIZE);
         assert_corrupted_node();
         put_u32(m_ptrs[i], m_reset[i]);
 

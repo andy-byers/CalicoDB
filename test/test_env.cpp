@@ -28,7 +28,7 @@ static auto write_out_randomly(RandomGenerator &random, File &writer, const Slic
     size_t counter = 0;
 
     while (!in.is_empty()) {
-        const auto chunk_size = std::min<size_t>(in.size(), random.Next(message.size() / kChunks));
+        const auto chunk_size = minval<size_t>(in.size(), random.Next(message.size() / kChunks));
         auto chunk = in.range(0, chunk_size);
 
         ASSERT_TRUE(writer.write(counter, chunk).is_ok());
@@ -46,7 +46,7 @@ static auto write_out_randomly(RandomGenerator &random, File &writer, const Slic
     size_t counter = 0;
 
     while (counter < size) {
-        const auto chunk_size = std::min<size_t>(size - counter, random.Next(size / kChunks));
+        const auto chunk_size = minval<size_t>(size - counter, random.Next(size / kChunks));
         const auto s = reader.read_exact(counter, chunk_size, out_data);
         EXPECT_TRUE(s.is_ok()) << "Error: " << s.message();
         out_data += chunk_size;
@@ -134,7 +134,7 @@ public:
             if (ptr == out.data()) {
                 copy_offset = offset % File::kShmRegionSize;
             }
-            auto copy_size = std::min(size, File::kShmRegionSize - copy_offset);
+            auto copy_size = minval(size, File::kShmRegionSize - copy_offset);
             std::memcpy(ptr, const_cast<const char *>(begin) + copy_offset, copy_size);
             ptr += copy_size;
             size -= copy_size;
@@ -155,7 +155,7 @@ public:
             if (r == r1) {
                 copy_offset = offset % File::kShmRegionSize;
             }
-            auto copy_size = std::min(copy.size(), File::kShmRegionSize - copy_offset);
+            auto copy_size = minval(copy.size(), File::kShmRegionSize - copy_offset);
             std::memcpy(const_cast<char *>(begin) + copy_offset, copy.data(), copy_size);
             copy.advance(copy_size);
         }
@@ -555,7 +555,7 @@ static auto busy_wait_file_lock(File &file, bool is_writer) -> void
 }
 static auto busy_wait_shm_lock(File &file, size_t r, size_t n, ShmLockFlag flags) -> void
 {
-    CALICODB_EXPECT_LE(r + n, File::kShmLockCount);
+    ASSERT_LE(r + n, File::kShmLockCount);
     for (;;) {
         const auto s = file.shm_lock(r, n, flags);
         if (s.is_ok()) {
@@ -588,63 +588,144 @@ TEST(EnvWrappers, WrapperEnvWorksAsExpected)
     ASSERT_OK(w_env.remove_file("file"));
 }
 
-TEST(TempEnv, TempEnv)
+class TempEnvTests : public testing::TestWithParam<size_t>
 {
-    auto env = std::unique_ptr<Env>(new_temp_env());
-    auto in_page = std::string(kPageSize - 1, '*') + "0";
-    std::string out_page(kPageSize, '\0');
+public:
+    const size_t m_sector_size;
+    std::unique_ptr<Env> m_env;
+    std::unique_ptr<File> m_file;
+    std::string m_result;
+    std::string m_buffer;
+    RandomGenerator m_random;
 
-    File *file;
-    ASSERT_OK(env->new_file("temp", Env::OpenMode(), file));
+    explicit TempEnvTests()
+        : m_sector_size(GetParam()),
+          m_env(new_temp_env(m_sector_size)),
+          m_result(m_sector_size * 3, '\0'),
+          m_buffer(m_result),
+          m_random(m_result.size())
+    {
+    }
 
+    ~TempEnvTests() override = default;
+
+    auto SetUp() -> void override
+    {
+        File *file;
+        ASSERT_OK(m_env->new_file("temp", Env::OpenMode(), file));
+        m_file.reset(file);
+    }
+
+    auto random_size(size_t offset) -> size_t
+    {
+        return m_random.Next(1, minval(m_result.size() - offset, m_sector_size));
+    }
+
+    auto random_data(size_t offset)
+    {
+        return m_random.Generate(random_size(offset));
+    }
+
+    auto write_file(size_t offset, const Slice &data) -> void
+    {
+        ASSERT_OK(m_file->write(offset, data));
+        ASSERT_LE(offset + data.size(), m_result.size());
+        std::memcpy(m_result.data() + offset, data.data(), data.size());
+    }
+
+    auto check_file(size_t offset, size_t size) -> void
+    {
+        std::fill(begin(m_buffer), end(m_buffer), '\0');
+        ASSERT_LT(offset, m_buffer.size());
+        ASSERT_LE(offset + size, m_buffer.size());
+        ASSERT_OK(m_file->read_exact(offset, size, m_buffer.data()));
+        ASSERT_EQ(Slice(m_buffer).range(0, size),
+                  Slice(m_result).range(offset, size));
+    }
+};
+
+TEST_P(TempEnvTests, Operations)
+{
     // NOOPs.
-    EXPECT_OK(file->file_lock(FileLockMode()));
-    file->file_unlock();
+    EXPECT_OK(m_file->file_lock(FileLockMode()));
+    m_file->file_unlock();
 
     // Not supported.
-    EXPECT_NOK(file->shm_lock(0, 1, ShmLockFlag()));
+    EXPECT_NOK(m_file->shm_lock(0, 1, ShmLockFlag()));
     volatile void *ptr;
-    EXPECT_NOK(file->shm_map(0, false, ptr));
-    file->shm_unmap(true);
-
-    EXPECT_OK(file->write(0, in_page));
-    in_page.back() = '1';
-    EXPECT_OK(file->write(kPageSize, in_page));
-    in_page.back() = '2';
-    EXPECT_OK(file->write(kPageSize * 2, in_page));
-
-    Slice read;
-    EXPECT_OK(file->read(kPageSize * 2, kPageSize, out_page.data(), &read));
-    EXPECT_EQ(read, in_page);
-    in_page.back() = '1';
-    EXPECT_OK(file->read(kPageSize, kPageSize, out_page.data(), &read));
-    EXPECT_EQ(read, in_page);
-    in_page.back() = '0';
-    EXPECT_OK(file->read(0, kPageSize, out_page.data(), &read));
-    EXPECT_EQ(read, in_page);
-
-    EXPECT_OK(file->resize(0));
-    EXPECT_OK(file->read(0, kPageSize, out_page.data(), &read));
-    EXPECT_TRUE(read.is_empty());
+    EXPECT_NOK(m_file->shm_map(0, false, ptr));
+    m_file->shm_unmap(true);
 
     // File should still be accessible through the pointer returned by new_file().
-    EXPECT_TRUE(env->file_exists("temp"));
-    EXPECT_OK(env->remove_file("temp"));
-    EXPECT_FALSE(env->file_exists("temp"));
-    EXPECT_OK(file->write(0, in_page));
-    EXPECT_OK(file->read(0, kPageSize, out_page.data(), &read));
-    EXPECT_EQ(read, in_page);
+    EXPECT_TRUE(m_env->file_exists("temp"));
+    EXPECT_OK(m_env->remove_file("temp"));
+    EXPECT_FALSE(m_env->file_exists("temp"));
 
-    delete file;
+    m_file.reset();
 
-    env->srand(42);
-    env->rand();
-    env->sleep(1);
+    m_env->srand(42);
+    m_env->rand();
+    m_env->sleep(1);
 
     Logger *logger;
-    ASSERT_OK(env->new_logger("NOOP", logger));
+    ASSERT_OK(m_env->new_logger("NOOP", logger));
     ASSERT_EQ(logger, nullptr);
 }
+
+TEST_P(TempEnvTests, SequentialIO)
+{
+    size_t offset = 0;
+    while (offset < m_result.size()) {
+        const auto chunk = random_data(offset);
+        write_file(offset, chunk);
+        offset += chunk.size();
+    }
+    offset = 0;
+    while (offset < m_result.size()) {
+        const auto chunk_size = random_size(offset);
+        check_file(offset, chunk_size);
+        offset += chunk_size;
+    }
+    check_file(0, m_result.size());
+}
+
+TEST_P(TempEnvTests, RandomIO)
+{
+    size_t file_size = 0;
+    RandomGenerator random;
+    for (size_t i = 0; i < 100; ++i) {
+        const auto chunk = random.Generate(random.Next(m_sector_size / 2));
+        const auto offset = random.Next(m_result.size() - chunk.size());
+        file_size = maxval<size_t>(file_size, offset + chunk.size());
+        write_file(offset, chunk);
+        check_file(offset, chunk.size());
+    }
+    check_file(0, file_size);
+}
+
+TEST_P(TempEnvTests, LargeIO)
+{
+    RandomGenerator random(m_buffer.size());
+    const auto data = random.Generate(m_buffer.size());
+    std::memcpy(m_buffer.data(), data.data(), data.size());
+
+    write_file(100, data.range(0, data.size() - 200));
+    check_file(0, m_result.size() - 200);
+    check_file(100, m_result.size() - 200);
+
+    write_file(0, data);
+    check_file(0, m_result.size());
+}
+
+INSTANTIATE_TEST_SUITE_P(
+    TempEnvTests,
+    TempEnvTests,
+    testing::Values(kMinPageSize / 2,
+                    kMinPageSize,
+                    kMinPageSize * 2,
+                    kMaxPageSize / 2,
+                    kMaxPageSize,
+                    kMaxPageSize * 2));
 
 class FileConcurrencyTests : public testing::TestWithParam<std::tuple<size_t, size_t>>
 {

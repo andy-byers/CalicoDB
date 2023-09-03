@@ -10,12 +10,14 @@
 namespace calicodb
 {
 
-Bufmgr::Bufmgr(Stat &stat)
+Bufmgr::Bufmgr(size_t min_buffers, Stat &stat)
     : m_root(nullptr),
-      m_min_buffers(0),
+      m_min_buffers(min_buffers),
       m_num_buffers(0),
       m_stat(&stat)
 {
+    CALICODB_EXPECT_GE(min_buffers, kMinFrameCount);
+
     // We don't call alloc_page() for the dummy list heads, so the circular
     // connections must be initialized manually.
     IntrusiveList::initialize(m_in_use);
@@ -24,35 +26,42 @@ Bufmgr::Bufmgr(Stat &stat)
 
 Bufmgr::~Bufmgr()
 {
-    PageRef::free(m_root);
-
     // The pager should have released any referenced pages before the buffer manager
     // is destroyed.
-    CALICODB_EXPECT_TRUE(IntrusiveList::is_empty(m_in_use));
-
-    for (auto *p = m_lru.next_entry; p != &m_lru;) {
-        auto *ptr = p;
-        p = p->next_entry;
-        PageRef::free(ptr);
-    }
+    free_buffers();
 }
 
-auto Bufmgr::preallocate(size_t min_buffers) -> int
+auto Bufmgr::free_buffers() -> void
 {
+    CALICODB_EXPECT_TRUE(IntrusiveList::is_empty(m_in_use));
+    while (!IntrusiveList::is_empty(m_lru)) {
+        auto *ptr = m_lru.next_entry;
+        IntrusiveList::remove(*ptr);
+        PageRef::free(ptr);
+        --m_num_buffers;
+    }
+    PageRef::free(m_root);
+    m_root = nullptr;
+
     CALICODB_EXPECT_EQ(m_num_buffers, 0);
-    for (; m_num_buffers < min_buffers; ++m_num_buffers) {
-        if (auto *ref = PageRef::alloc()) {
+}
+
+auto Bufmgr::reallocate(size_t page_size) -> int
+{
+    CALICODB_EXPECT_EQ(m_refsum, 0);
+    free_buffers();
+    for (; m_num_buffers < m_min_buffers; ++m_num_buffers) {
+        if (auto *ref = PageRef::alloc(page_size)) {
             IntrusiveList::add_tail(*ref, m_lru);
         } else {
             return -1;
         }
     }
-    m_root = PageRef::alloc();
-    if (!m_root || m_table.preallocate(min_buffers)) {
+    m_root = PageRef::alloc(page_size);
+    if (!m_root || m_table.preallocate(m_min_buffers)) {
         return -1;
     }
     m_root->page_id = Id::root();
-    m_min_buffers = min_buffers;
     return 0;
 }
 
@@ -82,9 +91,9 @@ auto Bufmgr::next_victim() -> PageRef *
     return IntrusiveList::is_empty(m_lru) ? nullptr : m_lru.prev_entry;
 }
 
-auto Bufmgr::allocate() -> PageRef *
+auto Bufmgr::allocate(size_t page_size) -> PageRef *
 {
-    auto *ref = PageRef::alloc();
+    auto *ref = PageRef::alloc(page_size);
     if (ref) {
         IntrusiveList::add_tail(*ref, m_lru);
         ++m_num_buffers;

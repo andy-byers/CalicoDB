@@ -12,9 +12,12 @@ namespace calicodb
 namespace
 {
 
-constexpr size_t kTrunkCapacity = (kPageSize - 2 * sizeof(uint32_t)) / sizeof(uint32_t);
-
 struct FreePage {
+    static auto capacity(uint32_t page_size) -> size_t
+    {
+        return (page_size - 2 * sizeof(uint32_t)) / sizeof(uint32_t);
+    }
+
     static auto get_leaf_ptr(PageRef &ref, size_t index) -> char *
     {
         return ref.data + (index + 2) * sizeof(uint32_t);
@@ -73,6 +76,7 @@ auto Freelist::add(Pager &pager, PageRef *&page) -> Status
         pager.release(page);
         return Status::corruption();
     }
+    const auto trunk_capacity = FreePage::capacity(pager.page_size());
     auto &root = pager.get_root();
     PageRef *trunk = nullptr;
     Status s;
@@ -85,7 +89,7 @@ auto Freelist::add(Pager &pager, PageRef *&page) -> Status
         s = pager.acquire(free_head, trunk);
         if (s.is_ok()) {
             const auto n = FreePage::get_leaf_count(*trunk);
-            if (n < kTrunkCapacity) {
+            if (n < trunk_capacity) {
                 // Trunk has enough room for a new leaf page.
                 pager.mark_dirty(*trunk);
                 FreePage::put_leaf_count(*trunk, n + 1);
@@ -93,7 +97,7 @@ auto Freelist::add(Pager &pager, PageRef *&page) -> Status
                 s = PointerMap::write_entry(
                     pager, page->page_id, {Id::null(), PointerMap::kFreelistPage});
                 goto cleanup;
-            } else if (n > kTrunkCapacity) {
+            } else if (n > trunk_capacity) {
                 s = Status::corruption();
                 goto cleanup;
             }
@@ -139,6 +143,7 @@ auto Freelist::remove(Pager &pager, RemoveType type, Id nearby, PageRef *&page_o
     auto database_root = &pager.get_root();
     const auto max_page = pager.page_count();
     const auto free_count = FileHdr::get_freelist_length(database_root->data);
+    const auto trunk_capacity = FreePage::capacity(pager.page_size());
     if (free_count >= max_page) {
         return Status::corruption();
     } else if (free_count == 0) {
@@ -192,7 +197,7 @@ auto Freelist::remove(Pager &pager, RemoveType type, Id nearby, PageRef *&page_o
                         trunk->data, sizeof(uint32_t));
             page_out = trunk;
             trunk = nullptr;
-        } else if (leaf_count > kTrunkCapacity) {
+        } else if (leaf_count > trunk_capacity) {
             s = Status::corruption();
             goto cleanup;
         } else if (search_list && nearby == trunk_id) {
@@ -283,8 +288,9 @@ cleanup:
 
 auto Freelist::assert_state(Pager &pager) -> bool
 {
-    PageRef *head = nullptr;
+    [[maybe_unused]] const auto trunk_capacity = FreePage::capacity(pager.page_size());
     auto &root = pager.get_root();
+    PageRef *head = nullptr;
 
     auto free_head = FileHdr::get_freelist_head(root.data);
     CALICODB_EXPECT_LE(free_head.value, pager.page_count());
@@ -295,7 +301,7 @@ auto Freelist::assert_state(Pager &pager) -> bool
         s = pager.acquire(free_head, head);
         CALICODB_EXPECT_TRUE(s.is_ok());
         const auto n = FreePage::get_leaf_count(*head);
-        CALICODB_EXPECT_LE(n, kTrunkCapacity);
+        CALICODB_EXPECT_LE(n, trunk_capacity);
 
         PointerMap::Entry entry;
         s = PointerMap::read_entry(pager, free_head, entry);
