@@ -14,9 +14,13 @@ namespace
 
 constexpr size_t kMaxRootEntryLen = kVarintMaxLength;
 
-auto no_bucket() -> Status
+auto no_bucket(const Slice &name) -> Status
 {
-    return Status::invalid_argument("bucket does not exist");
+    return StatusBuilder(Status::kInvalidArgument)
+        .append("bucket \"")
+        .append_escaped(name)
+        .append("\" does not exist")
+        .build();
 }
 
 class SchemaCursor : public Cursor
@@ -41,7 +45,7 @@ public:
         return m_c->is_valid();
     }
 
-     auto status() const -> Status override
+    auto status() const -> Status override
     {
         return m_c->status();
     }
@@ -90,6 +94,7 @@ public:
         m_c->previous();
     }
 };
+
 } // namespace
 
 Schema::Schema(Pager &pager, const Status &status, Stat &stat, char *scratch)
@@ -187,7 +192,7 @@ auto Schema::open_bucket(const Slice &name, Cursor *&c_out) -> Status
 
     Id root_id;
     if (!m_cursor.is_valid()) {
-        return s.is_ok() ? no_bucket() : s;
+        return s.is_ok() ? no_bucket(name) : s;
     } else if (!decode_and_check_root_id(m_cursor.value(), root_id)) {
         return corrupted_root_id();
     }
@@ -278,7 +283,7 @@ auto Schema::drop_bucket(const Slice &name) -> Status
     m_cursor.find(name);
     auto s = m_cursor.status();
     if (!m_cursor.is_valid()) {
-        return s.is_ok() ? no_bucket() : s;
+        return s.is_ok() ? no_bucket(name) : s;
     }
     CALICODB_EXPECT_TRUE(s.is_ok());
 

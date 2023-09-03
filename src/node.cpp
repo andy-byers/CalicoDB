@@ -9,6 +9,7 @@ namespace calicodb
 
 namespace
 {
+
 constexpr uint16_t kPageMask = kPageSize - 1;
 constexpr uint32_t kSlotWidth = sizeof(uint16_t);
 constexpr uint32_t kMinBlockSize = 2 * kSlotWidth;
@@ -82,7 +83,7 @@ auto remove_ivec_slot(Node &node, uint32_t index)
     if (!(ptr = decode_varint(ptr, limit, key_size))) {
         return -1;
     }
-    const auto hdr_size = static_cast<std::uintptr_t>(ptr - data);
+    const auto hdr_size = static_cast<uintptr_t>(ptr - data);
     const auto pad_size = hdr_size > kMinCellHeaderSize ? 0 : kMinCellHeaderSize - hdr_size;
     const auto local_pl_size = compute_local_pl_size(key_size, value_size);
     const auto has_remote = local_pl_size < key_size + value_size;
@@ -105,7 +106,7 @@ auto remove_ivec_slot(Node &node, uint32_t index)
 {
     uint32_t key_size;
     if (const auto *ptr = decode_varint(data + sizeof(uint32_t), limit, key_size)) {
-        const auto hdr_size = static_cast<std::uintptr_t>(ptr - data);
+        const auto hdr_size = static_cast<uintptr_t>(ptr - data);
         const auto local_pl_size = compute_local_pl_size(key_size, 0);
         const auto has_remote = local_pl_size < key_size;
         const auto footprint = hdr_size + local_pl_size + has_remote * sizeof(uint32_t);
@@ -207,6 +208,7 @@ auto allocate_from_gap(Node &node, uint32_t needed_size) -> uint32_t
     }
     return 0U;
 }
+
 } // namespace
 
 auto Node::alloc(uint32_t index, uint32_t size) -> int

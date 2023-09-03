@@ -6,10 +6,13 @@
 #include "encoding.h"
 #include "fake_env.h"
 #include "freelist.h"
+#include "logging.h"
 #include "pager.h"
 #include "temp.h"
 #include "test.h"
+#include "unique_ptr.h"
 #include "wal.h"
+#include <filesystem>
 
 namespace calicodb::test
 {
@@ -775,277 +778,370 @@ TEST_F(FreelistTests, FreelistCorruption)
     });
 }
 
-class HashIndexTestBase
+using WalComponents = std::tuple<Env *, Wal *, File *>;
+using MakeWal = WalComponents (*)(Wal::Parameters);
+
+auto make_temporary_wal(Wal::Parameters param) -> WalComponents
 {
-protected:
-    explicit HashIndexTestBase()
-    {
-        EXPECT_OK(m_env.new_file("shm", Env::kCreate, m_shm));
-        m_index = new HashIndex(m_header, m_shm);
-    }
-
-    ~HashIndexTestBase()
-    {
-        m_index->close();
-        delete m_shm;
-        delete m_index;
-        EXPECT_EQ(Alloc::bytes_used(), 0);
-    }
-
-    auto append(uint32_t key)
-    {
-        ASSERT_OK(m_index->assign(key, ++m_header.max_frame));
-    }
-
-    FakeEnv m_env;
-    File *m_shm = nullptr;
-    HashIndexHdr m_header = {};
-    HashIndex *m_index = nullptr;
-};
-
-class HashIndexTests
-    : public HashIndexTestBase,
-      public testing::Test
-{
-protected:
-    ~HashIndexTests() override = default;
-};
-
-TEST_F(HashIndexTests, FirstSegmentFrameBounds)
-{
-    append(1);
-    append(2);
-    append(3);
-    append(4);
-
-    const uint32_t min_frame(2);
-    m_header.max_frame = 3;
-
-    uint32_t value;
-    ASSERT_OK(m_index->lookup(1, min_frame, value));
-    ASSERT_FALSE(value);
-    ASSERT_OK(m_index->lookup(2, min_frame, value));
-    ASSERT_EQ(value, 2);
-    ASSERT_OK(m_index->lookup(3, min_frame, value));
-    ASSERT_EQ(value, 3);
-    ASSERT_OK(m_index->lookup(4, min_frame, value));
-    ASSERT_FALSE(value);
+    param.env = new_temp_env();
+    EXPECT_NE(param.env, nullptr);
+    EXPECT_OK(param.env->new_file("db", Env::kCreate | Env::kReadWrite,
+                                  param.db_file));
+    return {param.env, new_temp_wal(param), param.db_file};
 }
 
-TEST_F(HashIndexTests, SecondSegmentFrameBounds)
+auto make_persistent_wal(Wal::Parameters param) -> WalComponents
 {
-    for (uint32_t i = 1; i <= 6'000; ++i) {
-        append(i);
-    }
-
-    const uint32_t min_frame = 5'000;
-    m_header.max_frame = 5'500;
-
-    uint32_t value;
-    ASSERT_OK(m_index->lookup(1, min_frame, value));
-    ASSERT_FALSE(value);
-    ASSERT_OK(m_index->lookup(4'999, min_frame, value));
-    EXPECT_FALSE(value);
-    ASSERT_OK(m_index->lookup(5'000, min_frame, value));
-    ASSERT_EQ(value, 5'000);
-    ASSERT_OK(m_index->lookup(5'500, min_frame, value));
-    ASSERT_EQ(value, 5'500);
-    ASSERT_OK(m_index->lookup(5'501, min_frame, value));
-    ASSERT_FALSE(value);
-    ASSERT_OK(m_index->lookup(10'000, min_frame, value));
-    ASSERT_FALSE(value);
+    Wal *wal;
+    EXPECT_OK(param.env->new_file("db", Env::kCreate | Env::kReadWrite,
+                                  param.db_file));
+    EXPECT_OK(Wal::open(param, wal));
+    return {param.env, wal, param.db_file};
 }
 
-TEST_F(HashIndexTests, Cleanup)
+class WalTests : public testing::TestWithParam<MakeWal>
 {
-    uint32_t value;
-    append(1);
-    append(2);
-    append(3);
-    append(4);
+public:
+    const std::string m_filename;
+    File *m_db_file = nullptr;
+    Env *m_env = nullptr;
+    Wal *m_wal = nullptr;
+    Stat m_stat;
 
-    // Performing cleanup when there are no valid frames is a NOOP. The next person to write the
-    // WAL index will do so at frame 1, which automatically causes the WAL index to clear itself.
-    m_header.max_frame = 0;
-    m_index->cleanup();
-    m_header.max_frame = 4;
+    std::default_random_engine m_rng;
+    std::vector<uint32_t> m_temp;
+    std::vector<uint32_t> m_perm;
 
-    ASSERT_OK(m_index->lookup(1, 1, value));
-    ASSERT_EQ(value, 1);
-    ASSERT_OK(m_index->lookup(2, 1, value));
-    ASSERT_EQ(value, 2);
-    ASSERT_OK(m_index->lookup(3, 1, value));
-    ASSERT_EQ(value, 3);
-    ASSERT_OK(m_index->lookup(4, 1, value));
-    ASSERT_EQ(value, 4);
-
-    m_header.max_frame = 2;
-    m_index->cleanup();
-    m_header.max_frame = 4;
-
-    ASSERT_OK(m_index->lookup(1, 1, value));
-    ASSERT_EQ(value, 1);
-    ASSERT_OK(m_index->lookup(2, 1, value));
-    ASSERT_EQ(value, 2);
-    ASSERT_OK(m_index->lookup(3, 1, value));
-    ASSERT_FALSE(value);
-    ASSERT_OK(m_index->lookup(4, 1, value));
-    ASSERT_FALSE(value);
-}
-
-TEST_F(HashIndexTests, ReadsAndWrites)
-{
-    std::vector<uint32_t> keys;
-    // Write 2 full index buckets + a few extra entries.
-    for (uint32_t i = 0; i < 4'096 * 2; ++i) {
-        keys.emplace_back(i);
-    }
-    std::default_random_engine rng(42);
-    std::shuffle(begin(keys), end(keys), rng);
-
-    for (const auto &id : keys) {
-        append(id);
+    explicit WalTests()
+        : m_filename(testing::TempDir() + "calicodb_wal_tests")
+    {
+        std::filesystem::remove_all(m_filename);
     }
 
-    const uint32_t lower = 1'234;
-    m_header.max_frame = 5'000;
+    ~WalTests() override
+    {
+        Alloc::delete_object(m_wal);
+        delete m_db_file;
+        if (m_env != &Env::default_env()) {
+            delete m_env;
+        }
+        std::filesystem::remove_all(m_filename);
+    }
 
-    uint32_t value = 1;
-    for (const auto &key : keys) {
-        ASSERT_EQ(m_index->fetch(value), key);
-        uint32_t current;
-        ASSERT_OK(m_index->lookup(key, lower, current));
-        if (m_header.max_frame < value || value < lower) {
-            ASSERT_FALSE(current);
+    auto SetUp() -> void override
+    {
+        const Wal::Parameters param = {
+            m_filename.c_str(),
+            &Env::default_env(),
+            nullptr,
+            nullptr,
+            &m_stat,
+            nullptr,
+            Options::kSyncNormal,
+            Options::kLockNormal,
+        };
+        std::tie(m_env, m_wal, m_db_file) = GetParam()(param);
+    }
+
+    auto rollback() -> void
+    {
+        m_wal->rollback([](auto *object, auto page_id) {
+            auto &self = *static_cast<WalTests *>(object);
+            const auto i = page_id.as_index();
+            self.m_temp.at(i) = self.m_perm.at(i);
+        },
+                        this);
+
+        ASSERT_EQ(m_temp, m_perm);
+        m_temp = m_perm;
+    }
+
+    struct WriteOptions {
+        size_t db_size = 0;
+        size_t truncate = 0;
+        bool commit = false;
+        bool sort_pages = false;
+        bool omit_some = false;
+    };
+    auto write_batch(const WriteOptions &options) -> Status
+    {
+        std::vector<UniquePtr<PageRef>> pages;
+        const size_t min_r = !options.omit_some;
+        size_t occupied = 0;
+        pages.reserve(options.db_size);
+        for (size_t i = 0; i < options.db_size; ++i) {
+            PageRef *page = nullptr;
+            if (std::uniform_int_distribution<size_t>(min_r, 8)(m_rng) ||
+                (occupied == 0 && i + 1 == options.db_size)) {
+                page = PageRef::alloc();
+                EXPECT_NE(page, nullptr);
+                std::memset(page->data, 0, kPageSize);
+                ++occupied;
+            }
+            pages.emplace_back(page);
+        }
+
+        std::vector<uint32_t> ks(pages.size());
+        std::iota(begin(ks), end(ks), 1);
+        auto vs = ks;
+        std::shuffle(begin(ks), end(ks), m_rng);
+        std::shuffle(begin(vs), end(vs), m_rng);
+        if (m_temp.size() < pages.size()) {
+            // Unoccupied pages have values of 0.
+            m_temp.resize(pages.size());
+        }
+        Dirtylist dirtylist;
+        for (size_t i = 0; i < pages.size(); ++i) {
+            if (pages[i]) {
+                pages[i]->page_id.value = ks.at(i);
+                m_temp.at(ks.at(i) - 1) = vs.at(i);
+                put_u32(pages[i]->data, vs.at(i));
+                dirtylist.add(*pages[i]);
+            }
+        }
+
+        auto *dirty = dirtylist.begin();
+        if (options.sort_pages) {
+            dirty = dirtylist.sort();
         } else {
-            ASSERT_EQ(current, value);
+            for (auto *p = dirty; p != dirtylist.end(); p = p->next_entry) {
+                p->dirty = p->next_entry == dirtylist.end() ? nullptr : p->next_entry;
+            }
         }
-        ++value;
+        EXPECT_NE(dirty, nullptr);
+        auto s = m_wal->write(
+            dirty->get_page_ref(),
+            options.truncate ? options.truncate
+                             : m_temp.size() * options.commit);
+        if (s.is_ok()) {
+            if (options.truncate) {
+                m_temp.resize(options.truncate);
+            }
+            if (options.commit) {
+                m_perm = m_temp;
+            }
+        }
+        return s;
     }
-}
 
-TEST_F(HashIndexTests, SimulateUsage)
-{
-    static constexpr size_t kNumTestFrames = 10'000;
-
-    RandomGenerator random;
-    std::map<uint32_t, uint32_t> simulated;
-
-    for (size_t iteration = 0; iteration < 2; ++iteration) {
-        uint32_t lower = 1;
-        for (size_t frame = 1; frame <= kNumTestFrames; ++frame) {
-            if (const auto r = random.Next(10); r == 0) {
-                // Run a commit. The calls that validate the page-frame mapping below
-                // will ignore frames below "lower". This is not exactly how the WAL works,
-                // we actually use 3 index headers, 2 in the index, and 1 in memory. The
-                // in-index header's max_frame is used as the position of the last commit.
-                lower = m_header.max_frame + 1;
-                simulated.clear();
-            } else {
-                // Perform a write, but only if the page does not already exist in a frame
-                // in the range "lower" to "m_header.max_frame", inclusive.
-                uint32_t value;
-                const uint32_t key = static_cast<uint32_t>(random.Next(1, kNumTestFrames));
-                ASSERT_OK(m_index->lookup(key, lower, value));
-                if (value < lower) {
-                    append(key);
-                    simulated.insert_or_assign(key, m_header.max_frame);
+    auto read_batch(size_t n) -> Status
+    {
+        char buffer[kPageSize] = {};
+        for (size_t i = 0; i < n; ++i) {
+            char *page = buffer;
+            auto s = m_wal->read(Id::from_index(i), page);
+            if (!s.is_ok()) {
+                return s;
+            } else if (page) {
+                // Found in the WAL.
+                EXPECT_EQ(m_temp.at(i), get_u32(page));
+            } else if (i < m_temp.size()) {
+                // Not found, but should exist: read from the database file.
+                Slice result;
+                s = m_db_file->read(i * kPageSize, kPageSize, buffer, &result);
+                if (!s.is_ok()) {
+                    return s;
+                } else if (result.size() != kPageSize) {
+                    ADD_FAILURE() << "incomplete read: read " << result.size() << '/'
+                                  << kPageSize << " bytes";
+                    return Status::io_error();
                 }
+                EXPECT_EQ(m_temp.at(i), get_u32(buffer));
             }
         }
-        uint32_t result;
-        for (const auto &[key, value] : simulated) {
-            ASSERT_OK(m_index->lookup(key, lower, result));
-            ASSERT_EQ(result, value);
+        return Status::ok();
+    }
+
+    auto expect_missing(Id id) const -> void
+    {
+        char buffer[kPageSize];
+
+        char *page = buffer;
+        ASSERT_OK(m_wal->read(id, page));
+        ASSERT_EQ(page, nullptr);
+    }
+
+    template <class Callback>
+    auto with_reader(const Callback &cb) -> Status
+    {
+        bool _;
+        auto s = m_wal->start_reader(_);
+        if (s.is_ok()) {
+            s = cb();
+            m_wal->finish_reader();
         }
-        // Reset the WAL index.
-        m_header.max_frame = 0;
-        simulated.clear();
+        return s;
+    }
+
+    template <class Callback>
+    auto with_writer(const Callback &cb) -> Status
+    {
+        return with_reader([this, &cb] {
+            auto s = m_wal->start_writer();
+            if (s.is_ok()) {
+                s = cb();
+                m_wal->finish_writer();
+            }
+            return s;
+        });
+    }
+
+    struct RunOptions : WriteOptions {
+        size_t commit_interval = 1;
+        size_t rollback_interval = 1;
+        size_t ckpt_reset_interval = 1;
+    };
+    auto run_operations(const RunOptions &options)
+    {
+        static constexpr size_t kMinPages = 10;
+        static constexpr size_t kMaxPages = kMinPages * 100;
+        RandomGenerator random;
+        for (size_t i = 1; i < 1'234; ++i) {
+            ASSERT_OK(with_writer([this, i, &random, &options] {
+                auto opt = options;
+                opt.db_size = random.Next(kMinPages, kMaxPages);
+                opt.commit = i % opt.commit_interval == 0;
+                const auto r = random.Next(1, kMaxPages);
+                if (opt.commit && r < opt.db_size) {
+                    opt.truncate = r;
+                }
+                auto s = write_batch(opt);
+                if (s.is_ok() && !opt.commit && i % opt.rollback_interval == 0) {
+                    rollback();
+                }
+                return s;
+            }));
+            ASSERT_OK(m_wal->checkpoint(i % options.ckpt_reset_interval == 0));
+            ASSERT_OK(with_reader([this] {
+                return read_batch(kMaxPages);
+            }));
+        }
+    }
+};
+
+TEST_P(WalTests, OpenAndClose)
+{
+    // Do nothing.
+}
+
+TEST_P(WalTests, EmptyTransaction)
+{
+    ASSERT_OK(with_reader([] { return Status::ok(); }));
+    ASSERT_OK(with_writer([] { return Status::ok(); }));
+}
+
+TEST_P(WalTests, EmptyCheckpoint)
+{
+    ASSERT_OK(with_reader([] { return Status::ok(); }));
+
+    // Checkpoint cannot be run until the WAL index is created the first time a
+    // transaction is started.
+    ASSERT_OK(m_wal->checkpoint(false));
+    ASSERT_OK(m_wal->checkpoint(true));
+}
+
+TEST_P(WalTests, Commit)
+{
+    ASSERT_OK(with_writer([this] {
+        WriteOptions opt;
+        opt.commit = true;
+        opt.db_size = 9;
+        return write_batch(opt);
+    }));
+    ASSERT_OK(with_reader([this] {
+        expect_missing(Id(10));
+        return read_batch(10);
+    }));
+}
+
+TEST_P(WalTests, Truncate)
+{
+    ASSERT_OK(with_writer([this] {
+        WriteOptions opt;
+        opt.commit = true;
+        opt.db_size = 10;
+        opt.truncate = 8;
+        return write_batch(opt);
+    }));
+    ASSERT_OK(m_wal->checkpoint(true));
+    ASSERT_OK(with_reader([this] {
+        expect_missing(Id(9));
+        expect_missing(Id(10));
+        return read_batch(10);
+    }));
+}
+
+TEST_P(WalTests, ReadsAndWrites)
+{
+    static constexpr size_t kNumPages = 1'000;
+    for (size_t i = 0; i < 10; ++i) {
+        ASSERT_OK(with_writer([this, i] {
+            WriteOptions opt;
+            opt.commit = true;
+            opt.db_size = kNumPages / 10 * (i + 1);
+            opt.sort_pages = i % 1;
+            opt.omit_some = i % 2;
+            return write_batch(opt);
+        }));
+        ASSERT_OK(m_wal->checkpoint(i < 5));
+        ASSERT_OK(with_reader([this] {
+            return read_batch(kNumPages);
+        }));
     }
 }
 
-class HashIteratorTests
-    : public HashIndexTestBase,
-      public testing::Test
+TEST_P(WalTests, Rollback)
 {
-protected:
-    ~HashIteratorTests() override = default;
-};
-
-#ifndef NDEBUG
-TEST_F(HashIteratorTests, EmptyIndexDeathTest)
-{
-    HashIterator itr(*m_index);
-    ASSERT_DEATH((void)itr.init(), "");
+    for (size_t i = 0; i < 10; ++i) {
+        for (size_t j = 0; j < 2; ++j) {
+            // Commit when j == 0, rollback when j == 1.
+            ASSERT_OK(with_writer([this, i, j] {
+                WriteOptions opt;
+                opt.commit = j == 0;
+                opt.db_size = (i + 1) * 10;
+                opt.sort_pages = i % 1;
+                opt.omit_some = j % 1;
+                auto s = write_batch(opt);
+                if (s.is_ok() && j) {
+                    rollback();
+                }
+                return s;
+            }));
+        }
+        ASSERT_OK(with_reader([this] {
+            return read_batch(100);
+        }));
+    }
 }
-#endif // NDEBUG
 
-class HashIteratorParamTests
-    : public HashIndexTestBase,
-      public testing::TestWithParam<std::tuple<size_t, size_t>>
+TEST_P(WalTests, SanityCheck)
 {
-protected:
-    HashIteratorParamTests()
-        : m_num_pages(std::get<1>(GetParam())),
-          m_num_copies(std::get<0>(GetParam()))
-    {
-    }
+    run_operations(RunOptions());
+}
 
-    ~HashIteratorParamTests() override = default;
-
-    auto test_reordering_and_deduplication()
-    {
-        m_header.max_frame = 0;
-        m_index->cleanup();
-
-        for (size_t d = 0; d < m_num_copies; ++d) {
-            for (size_t i = 0; i < m_num_pages; ++i) {
-                append(static_cast<uint32_t>(m_num_pages - i));
-            }
-        }
-        HashIterator itr(*m_index);
-        ASSERT_OK(itr.init());
-        HashIterator::Entry entry;
-
-        for (size_t i = 0;; ++i) {
-            if (itr.read(entry)) {
-                // Keys (page IDs) are always read in order. Values (frame IDs) should be
-                // the most-recent values set for the associated key.
-                ASSERT_EQ(entry.key, i + 1);
-                ASSERT_EQ(entry.value, m_num_pages * m_num_copies - i);
-            } else {
-                ASSERT_EQ(i, m_num_pages);
-                break;
-            }
-        }
-    }
-
-    size_t m_num_pages = 0;
-    size_t m_num_copies = 0;
-};
-
-TEST_P(HashIteratorParamTests, ReorderingAndDeduplication)
+TEST_P(WalTests, Operations_1)
 {
-    test_reordering_and_deduplication();
+    RunOptions options;
+    options.commit_interval = 4;
+    run_operations(RunOptions());
+}
+
+TEST_P(WalTests, Operations_2)
+{
+    RunOptions options;
+    options.commit_interval = 4;
+    options.rollback_interval = 2;
+    run_operations(RunOptions());
 }
 
 INSTANTIATE_TEST_SUITE_P(
-    HashIteratorParamTests,
-    HashIteratorParamTests,
-    ::testing::Values(
-        std::make_tuple(1, 1),
-        std::make_tuple(1, 2),
-        std::make_tuple(1, 3),
-        std::make_tuple(1, 10),
-        std::make_tuple(1, 100),
-        std::make_tuple(1, 10'000),
-        std::make_tuple(1, 100'000),
-        std::make_tuple(5, 1),
-        std::make_tuple(5, 2),
-        std::make_tuple(5, 3),
-        std::make_tuple(5, 10),
-        std::make_tuple(5, 100),
-        std::make_tuple(5, 10'000),
-        std::make_tuple(5, 100'000)));
+    TemporaryWalTests,
+    WalTests,
+    testing::Values(make_temporary_wal));
+
+INSTANTIATE_TEST_SUITE_P(
+    PersistentWalTests,
+    WalTests,
+    testing::Values(make_persistent_wal));
 
 } // namespace calicodb::test

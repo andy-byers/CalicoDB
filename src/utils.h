@@ -31,13 +31,6 @@
 #define CALICODB_EXPECT_GE(lhs, rhs) CALICODB_EXPECT_TRUE((lhs) >= (rhs))
 #define CALICODB_DEBUG_TRAP assert(false && __FUNCTION__)
 
-#define CALICODB_TRY(expr)                                               \
-    do {                                                                 \
-        if (auto __calicodb_try_s = (expr); !__calicodb_try_s.is_ok()) { \
-            return __calicodb_try_s;                                     \
-        }                                                                \
-    } while (0)
-
 #define ARRAY_SIZE(x) (sizeof(x) / sizeof((x)[0]))
 
 namespace calicodb
@@ -46,7 +39,7 @@ namespace calicodb
 [[nodiscard]] inline auto is_aligned(void *ptr, size_t alignment) -> bool
 {
     CALICODB_EXPECT_NE(alignment, 0);
-    return reinterpret_cast<std::uintptr_t>(ptr) % alignment == 0;
+    return reinterpret_cast<uintptr_t>(ptr) % alignment == 0;
 }
 
 template <class Callback>
@@ -72,20 +65,20 @@ static constexpr size_t kMaxCacheSize = 1 << 30;
 static constexpr size_t kTreeBufferLen = 3 * kPageSize;
 static constexpr Slice kDefaultWalSuffix = "-wal";
 static constexpr Slice kDefaultShmSuffix = "-shm";
+static constexpr uintptr_t kZeroSizePtr = 13;
 
 // Additional file locking modes that cannot be requested directly
 enum { kLockUnlocked = 0 };
 
+template <class T>
+auto zero_size_ptr() -> T *
+{
+    return reinterpret_cast<T *>(kZeroSizePtr);
+}
+
 struct Id {
     static constexpr uint32_t kNull = 0;
     static constexpr uint32_t kRoot = 1;
-
-    struct Hash {
-        auto operator()(const Id &id) const -> uint64_t
-        {
-            return id.value;
-        }
-    };
 
     Id() = default;
 
@@ -122,7 +115,7 @@ struct Id {
 
     [[nodiscard]] constexpr auto as_index() const -> size_t
     {
-        CALICODB_EXPECT_NE(value, null().value);
+        CALICODB_EXPECT_NE(value, kNull);
         return value - 1;
     }
 

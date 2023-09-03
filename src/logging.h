@@ -5,9 +5,10 @@
 #ifndef CALICODB_LOGGING_H
 #define CALICODB_LOGGING_H
 
+#include "buffer.h"
 #include "calicodb/string.h"
 #include "encoding.h"
-#include "ptr.h"
+#include "unique_ptr.h"
 #include "utils.h"
 #include <cstdarg>
 
@@ -18,19 +19,16 @@ class StringBuilder final
 {
     // Buffer for accumulating string data. The length stored in the buffer type is the capacity,
     // and m_len is the number of bytes that have been written.
-    UniqueBuffer<char> m_buf;
-    size_t m_len;
+    Buffer<char> m_buf;
+    size_t m_len = 0;
+    bool m_ok = true;
 
     // Make sure the underlying buffer is large enough to hold `len` bytes of string data, plus
     // a '\0'
     [[nodiscard]] auto ensure_capacity(size_t len) -> int;
 
 public:
-    explicit StringBuilder()
-        : m_len(0)
-    {
-    }
-
+    explicit StringBuilder() = default;
     explicit StringBuilder(String str);
 
     StringBuilder(StringBuilder &&rhs) noexcept
@@ -48,110 +46,145 @@ public:
         return *this;
     }
 
-    [[nodiscard]] auto trim() -> int;
-    [[nodiscard]] auto build() && -> String;
-    [[nodiscard]] auto append(const Slice &s) -> int;
-    [[nodiscard]] auto append(char c) -> int
-    {
-        return append(Slice(&c, 1));
-    }
-    [[nodiscard]] auto append_format(const char *fmt, ...) -> int;
-    [[nodiscard]] auto append_format_va(const char *fmt, std::va_list args) -> int;
-    [[nodiscard]] auto append_escaped(const Slice &s) -> int;
-
     [[nodiscard]] static auto release_string(String str) -> char *
     {
         str.m_len = 0;
         str.m_cap = 0;
         return exchange(str.m_ptr, nullptr);
     }
+
+    auto trim() -> StringBuilder &;
+    auto append(const Slice &s) -> StringBuilder &;
+    auto append(char c) -> StringBuilder &
+    {
+        return append(Slice(&c, 1));
+    }
+    auto append_format(const char *fmt, ...) -> StringBuilder &;
+    auto append_format_va(const char *fmt, std::va_list args) -> StringBuilder &;
+    auto append_escaped(const Slice &s) -> StringBuilder &;
+
+    [[nodiscard]] auto build(String &string_out) -> int;
 };
 
 class StatusBuilder final
 {
+    StringBuilder m_builder;
+    const Status m_fallback;
+
 public:
-    template <class... Args>
-    static auto build(Status::Code code, Status::SubCode subc, const char *fmt, Args &&...args) -> Status
-    {
-        Status fallback(code, subc);
-
-        StringBuilder builder;
-        if (start(builder, code, subc)) {
-            return fallback;
-        }
-        if (builder.append_format(fmt, forward<Args>(args)...)) {
-            return fallback;
-        }
-        return finish(move(builder));
-    }
-
-    template <class... Args>
-    static auto start(StringBuilder &builder, Status::Code code, Status::SubCode subc = Status::kNone) -> int
+    explicit StatusBuilder(Status::Code code, Status::SubCode subc = Status::kNone)
+        : m_fallback(code, subc)
     {
         static constexpr uint16_t kInitialRefcount = 1;
         char header[4] = {'\x00', '\x00', code, subc};
         std::memcpy(header, &kInitialRefcount, sizeof(kInitialRefcount));
-        return builder.append(Slice(header, sizeof(header)));
+        m_builder.append(Slice(header, sizeof(header)));
     }
 
-    static auto finish(StringBuilder builder) -> Status
+    [[nodiscard]] auto append(const Slice &s) -> StatusBuilder &
     {
+        m_builder.append(s);
+        return *this;
+    }
+
+    [[nodiscard]] auto append(char c) -> StatusBuilder &
+    {
+        return append(Slice(&c, 1));
+    }
+
+    template <class... Args>
+    [[nodiscard]] auto append_format(const char *fmt, Args &&...args) -> StatusBuilder &
+    {
+        m_builder.append_format(fmt, forward<Args>(args)...);
+        return *this;
+    }
+
+    [[nodiscard]] auto append_escaped(const Slice &s) -> StatusBuilder &
+    {
+        m_builder.append(s);
+        return *this;
+    }
+
+    auto build() -> Status
+    {
+        String string;
+        if (m_builder.trim().build(string)) {
+            return m_fallback;
+        }
         return Status(StringBuilder::release_string(
-            move(builder).build()));
+            std::move(string)));
     }
 
     template <class... Args>
     static auto invalid_argument(const char *fmt, Args &&...args) -> Status
     {
-        return build(Status::kInvalidArgument, Status::kNone, fmt, forward<Args>(args)...);
+        return StatusBuilder(Status::kInvalidArgument)
+            .append_format(fmt, forward<Args>(args)...)
+            .build();
     }
 
     template <class... Args>
     static auto not_supported(const char *fmt, Args &&...args) -> Status
     {
-        return build(Status::kNotSupported, Status::kNone, fmt, forward<Args>(args)...);
+        return StatusBuilder(Status::kNotSupported)
+            .append_format(fmt, forward<Args>(args)...)
+            .build();
     }
 
     template <class... Args>
     static auto corruption(const char *fmt, Args &&...args) -> Status
     {
-        return build(Status::kCorruption, Status::kNone, fmt, forward<Args>(args)...);
+        return StatusBuilder(Status::kCorruption)
+            .append_format(fmt, forward<Args>(args)...)
+            .build();
     }
 
     template <class... Args>
     static auto not_found(const char *fmt, Args &&...args) -> Status
     {
-        return build(Status::kNotFound, Status::kNone, fmt, forward<Args>(args)...);
+        return StatusBuilder(Status::kNotFound)
+            .append_format(fmt, forward<Args>(args)...)
+            .build();
     }
 
     template <class... Args>
     static auto io_error(const char *fmt, Args &&...args) -> Status
     {
-        return build(Status::kIOError, Status::kNone, fmt, forward<Args>(args)...);
+        return StatusBuilder(Status::kIOError)
+            .append_format(fmt, forward<Args>(args)...)
+            .build();
     }
 
     template <class... Args>
     static auto busy(const char *fmt, Args &&...args) -> Status
     {
-        return build(Status::kBusy, Status::kNone, fmt, forward<Args>(args)...);
+        return StatusBuilder(Status::kBusy)
+            .append_format(fmt, forward<Args>(args)...)
+            .build();
     }
 
     template <class... Args>
     static auto aborted(const char *fmt, Args &&...args) -> Status
     {
-        return build(Status::kAborted, Status::kNone, fmt, forward<Args>(args)...);
+        return StatusBuilder(Status::kAborted)
+            .append_format(fmt, forward<Args>(args)...)
+            .build();
     }
 
     template <class... Args>
     static auto retry(const char *fmt, Args &&...args) -> Status
     {
-        return build(Status::kBusy, Status::kRetry, fmt, forward<Args>(args)...);
+        return StatusBuilder(Status::kBusy, Status::kRetry)
+            .append_format(fmt, forward<Args>(args)...)
+            .build();
     }
 
     template <class... Args>
     static auto no_memory(const char *fmt, Args &&...args) -> Status
     {
-        return build(Status::kAborted, Status::kNoMemory, fmt, forward<Args>(args)...);
+        return StatusBuilder(Status::kAborted, Status::kNoMemory)
+            .append_format(fmt, forward<Args>(args)...)
+            .build();
     }
 };
 

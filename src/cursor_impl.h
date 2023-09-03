@@ -5,6 +5,7 @@
 #ifndef CALICODB_CURSOR_IMPL_H
 #define CALICODB_CURSOR_IMPL_H
 
+#include "buffer.h"
 #include "calicodb/cursor.h"
 #include "tree.h"
 
@@ -39,8 +40,8 @@ class CursorImpl
 
     // Heap-allocated buffers used to store the current record. m_key and m_value are
     // slices into these buffers.
-    UniqueBuffer<char> m_key_buf;
-    UniqueBuffer<char> m_value_buf;
+    Buffer<char> m_key_buf;
+    Buffer<char> m_value_buf;
     size_t m_key_len = 0;
     size_t m_value_len = 0;
     bool m_saved = false;

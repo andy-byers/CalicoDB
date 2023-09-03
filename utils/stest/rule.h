@@ -11,8 +11,9 @@
 namespace stest
 {
 
-template<class State>
-class Rule {
+template <class State>
+class Rule
+{
 public:
     const char *const name;
 

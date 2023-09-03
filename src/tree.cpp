@@ -939,7 +939,7 @@ auto Tree::redistribute_cells(Node &left, Node &right, Node &parent, uint32_t pi
     CALICODB_EXPECT_TRUE(!is_split || p_src == &right);
 
     // Cells that need to be redistributed, in order.
-    UniqueBuffer<Cell> cell_buffer;
+    Buffer<Cell> cell_buffer;
     if (cell_buffer.realloc(cell_count + 2)) {
         m_pager->release(unused);
         return Status::no_memory();
@@ -1313,7 +1313,7 @@ auto Tree::emplace(Node &node, const Slice &key, const Slice &value, uint32_t in
     auto *ptr = header;
     ptr = encode_varint(ptr, static_cast<uint32_t>(value.size()));
     ptr = encode_varint(ptr, static_cast<uint32_t>(key.size()));
-    const auto hdr_size = static_cast<std::uintptr_t>(ptr - header);
+    const auto hdr_size = static_cast<uintptr_t>(ptr - header);
     const auto pad_size = hdr_size > kMinCellHeaderSize ? 0 : kMinCellHeaderSize - hdr_size;
     const auto cell_size = local_pl_size + hdr_size + pad_size + sizeof(uint32_t) * has_remote;
     // External cell headers are padded out to 4 bytes.

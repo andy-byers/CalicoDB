@@ -29,35 +29,12 @@ public:
 
     String(const String &) = delete;
     auto operator=(const String &) -> String & = delete;
-
-    String(String &&rhs) noexcept
-        : m_ptr(rhs.m_ptr),
-          m_len(rhs.m_len),
-          m_cap(rhs.m_cap)
-    {
-        rhs.m_ptr = nullptr;
-        rhs.m_len = 0;
-        rhs.m_cap = 0;
-    }
-
-    auto operator=(String &&rhs) noexcept -> String &
-    {
-        if (this != &rhs) {
-            clear();
-            m_ptr = rhs.m_ptr;
-            m_len = rhs.m_len;
-            m_cap = rhs.m_cap;
-
-            rhs.m_ptr = nullptr;
-            rhs.m_len = 0;
-            rhs.m_cap = 0;
-        }
-        return *this;
-    }
+    String(String &&rhs) noexcept;
+    auto operator=(String &&rhs) noexcept -> String &;
 
     explicit operator Slice()
     {
-        return m_ptr ? Slice(m_ptr, m_len) : "";
+        return m_len ? Slice(m_ptr, m_len) : "";
     }
 
     [[nodiscard]] auto is_empty() const -> bool

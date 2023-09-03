@@ -56,7 +56,7 @@ auto DB::open(const Options &options, const char *filename, DB *&db) -> Status
     }
 
     // Allocate scratch memory for working with database pages.
-    UniqueBuffer<char> scratch;
+    Buffer<char> scratch;
     if (scratch.realloc(kTreeBufferLen)) {
         return Status::no_memory();
     }

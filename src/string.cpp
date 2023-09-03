@@ -8,6 +8,24 @@
 namespace calicodb
 {
 
+String::String(String &&rhs) noexcept
+    : m_ptr(exchange(rhs.m_ptr, nullptr)),
+      m_len(exchange(rhs.m_len, 0U)),
+      m_cap(exchange(rhs.m_cap, 0U))
+{
+}
+
+auto String::operator=(String &&rhs) noexcept -> String &
+{
+    if (this != &rhs) {
+        clear();
+        m_ptr = exchange(rhs.m_ptr, nullptr);
+        m_len = exchange(rhs.m_len, 0U);
+        m_cap = exchange(rhs.m_cap, 0U);
+    }
+    return *this;
+}
+
 auto String::clear() -> void
 {
     Alloc::deallocate(m_ptr);

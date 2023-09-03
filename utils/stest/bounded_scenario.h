@@ -10,7 +10,7 @@
 namespace stest
 {
 
-template<class State>
+template <class State>
 class BoundedScenario : public ConditionalScenario<State>
 {
 public:

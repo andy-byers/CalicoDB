@@ -659,6 +659,18 @@ TEST(Status, MoveConstructorInline)
     }
 }
 
+TEST(Status, RefcountOverflow)
+{
+    std::vector<Status> statuses;
+    auto s = Status::not_found("not inline");
+    for (size_t i = 1; i < std::numeric_limits<uint16_t>::max(); ++i) {
+        statuses.push_back(s);
+    }
+    ASSERT_EQ(statuses.back().message(), s.message());
+    statuses.push_back(s);
+    ASSERT_NE(statuses.back().message(), s.message());
+}
+
 #ifndef NDEBUG
 TEST(Status, InlineStatusHasNoRefcount)
 {
@@ -670,17 +682,6 @@ TEST(Status, InlineStatusHasNoRefcount)
     // If there was a refcount attached to s, it would have overflowed just now, causing an
     // assertion to trip. Must be tested with assertions enabled.
     statuses.push_back(s);
-}
-
-TEST(Status, RefcountOverflow)
-{
-    std::vector<Status> statuses;
-    auto s = Status::not_found("not inline");
-    for (size_t i = 1; i < std::numeric_limits<uint16_t>::max(); ++i) {
-        statuses.push_back(s);
-    }
-
-    ASSERT_DEATH(statuses.push_back(s), "Assert");
 }
 #endif // NDEBUG
 
@@ -961,7 +962,9 @@ class StringBuilderTests : public testing::Test
 public:
     auto build_string() -> String
     {
-        return std::move(m_builder).build();
+        String str;
+        EXPECT_EQ(m_builder.build(str), 0);
+        return str;
     }
 
     StringBuilder m_builder;
@@ -979,9 +982,10 @@ TEST_F(StringBuilderTests, Append)
     const std::string msg_b("abc");
     const char msg_c = 'd';
 
-    ASSERT_EQ(m_builder.append(msg_a), 0);
-    ASSERT_EQ(m_builder.append(msg_b), 0);
-    ASSERT_EQ(m_builder.append(msg_c), 0);
+    m_builder
+        .append(msg_a)
+        .append(msg_b)
+        .append(msg_c);
 
     const auto str = build_string();
     ASSERT_EQ(str.length(), (msg_a + msg_b + msg_c).size());
@@ -990,32 +994,22 @@ TEST_F(StringBuilderTests, Append)
 
 TEST_F(StringBuilderTests, AppendFormat)
 {
-    ASSERT_EQ(0, m_builder.append_format("hello %d %s", 42, "goodbye"));
     const std::string long_str(512, '*');
-    ASSERT_EQ(0, m_builder.append_format("%s", long_str.data()));
-    ASSERT_EQ(0, m_builder.append_format("empty"));
+    m_builder.append_format("hello %d %s", 42, "goodbye")
+        .append_format("%s", long_str.data())
+        .append_format("empty");
     const auto str = build_string();
     ASSERT_EQ(Slice(str.c_str()), "hello 42 goodbye" + long_str + "empty");
 }
 
 TEST_F(StringBuilderTests, AppendEscaped)
 {
-    ASSERT_EQ(0, m_builder.append_format("hello %d %s", 42, "goodbye"));
     const std::string long_str(512, '*');
-    ASSERT_EQ(0, m_builder.append_format("%s", long_str.data()));
-    ASSERT_EQ(0, m_builder.append_format("empty"));
+    m_builder.append_format("hello %d %s", 42, "goodbye")
+        .append_format("%s", long_str.data())
+        .append_format("empty");
     const auto str = build_string();
     ASSERT_EQ(Slice(str.c_str()), "hello 42 goodbye" + long_str + "empty");
-}
-
-TEST_F(StringBuilderTests, SpecialMemberFunctions)
-{
-    const char *msg = "abc";
-    ASSERT_EQ(m_builder.append(msg), 0);
-    auto move_constructed = std::move(m_builder);
-    m_builder = std::move(move_constructed);
-    const auto str = build_string();
-    ASSERT_EQ(Slice(str.c_str()), msg);
 }
 
 static constexpr const char *kTestMessages[] = {
@@ -1033,7 +1027,7 @@ TEST_F(StringBuilderTests, AppendMultiple)
     for (size_t i = 0; i < 512; ++i) {
         const auto r = static_cast<size_t>(rand()) % ARRAY_SIZE(kTestMessages);
         answer.append(kTestMessages[r]);
-        ASSERT_EQ(m_builder.append(Slice(kTestMessages[r])), 0);
+        m_builder.append(Slice(kTestMessages[r]));
     }
     const auto str = build_string();
     ASSERT_EQ(Slice(str.c_str()), answer);
@@ -1049,27 +1043,27 @@ TEST_F(StringBuilderTests, AppendFormatMultiple)
         switch (r) {
             case 0:
                 std::snprintf(buffer, sizeof(buffer), fmt, i);
-                ASSERT_EQ(m_builder.append_format(fmt, i), 0);
+                m_builder.append_format(fmt, i);
                 break;
             case 1:
                 std::snprintf(buffer, sizeof(buffer), fmt, i, static_cast<double>(i));
-                ASSERT_EQ(m_builder.append_format(fmt, i, static_cast<double>(i)), 0);
+                m_builder.append_format(fmt, i, static_cast<double>(i));
                 break;
             case 2:
                 std::snprintf(buffer, sizeof(buffer), fmt, i, static_cast<double>(i), reinterpret_cast<void *>(i));
-                ASSERT_EQ(m_builder.append_format(fmt, i, static_cast<double>(i), reinterpret_cast<void *>(i)), 0);
+                m_builder.append_format(fmt, i, static_cast<double>(i), reinterpret_cast<void *>(i));
                 break;
             case 3:
                 std::snprintf(buffer, sizeof(buffer), fmt, i, static_cast<double>(i), reinterpret_cast<void *>(i), i);
-                ASSERT_EQ(m_builder.append_format(fmt, i, static_cast<double>(i), reinterpret_cast<void *>(i), i), 0);
+                m_builder.append_format(fmt, i, static_cast<double>(i), reinterpret_cast<void *>(i), i);
                 break;
             case 4:
                 std::snprintf(buffer, sizeof(buffer), fmt, i, static_cast<double>(i), reinterpret_cast<void *>(i), i, i);
-                ASSERT_EQ(m_builder.append_format(fmt, i, static_cast<double>(i), reinterpret_cast<void *>(i), i, i), 0);
+                m_builder.append_format(fmt, i, static_cast<double>(i), reinterpret_cast<void *>(i), i, i);
                 break;
             default:
                 std::snprintf(buffer, sizeof(buffer), fmt, i, static_cast<double>(i), reinterpret_cast<void *>(i), i, i, "Hello, world!");
-                ASSERT_EQ(m_builder.append_format(fmt, i, static_cast<double>(i), reinterpret_cast<void *>(i), i, i, "Hello, world!"), 0);
+                m_builder.append_format(fmt, i, static_cast<double>(i), reinterpret_cast<void *>(i), i, i, "Hello, world!");
                 break;
         }
         answer.append(buffer);

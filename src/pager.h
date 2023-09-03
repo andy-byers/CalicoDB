@@ -109,12 +109,6 @@ public:
 
     auto set_status(const Status &error) const -> void;
 
-    // Access to the WAL for testing.
-    [[nodiscard]] auto TEST_wal() -> Wal *
-    {
-        return m_wal;
-    }
-
 private:
     friend class Alloc;
     explicit Pager(const Parameters &param);
@@ -122,7 +116,7 @@ private:
     auto open_wal() -> Status;
     auto refresh_state() -> Status;
     auto read_page(PageRef &out, size_t *size_out) -> Status;
-     auto read_page_from_file(PageRef &ref, size_t *size_out) const -> Status;
+    auto read_page_from_file(PageRef &ref, size_t *size_out) const -> Status;
     auto ensure_available_buffer() -> Status;
     auto flush_dirty_pages() -> Status;
     auto purge_page(PageRef &victim) -> void;

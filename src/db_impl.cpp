@@ -14,10 +14,12 @@ namespace calicodb
 
 namespace
 {
+
 auto already_running_error() -> Status
 {
     return Status::not_supported("another transaction is running");
 }
+
 } // namespace
 
 auto DBImpl::open(const Options &sanitized) -> Status
@@ -27,11 +29,13 @@ auto DBImpl::open(const Options &sanitized) -> Status
                              m_file.ref());
     if (s.is_ok()) {
         if (sanitized.error_if_exists) {
-            return Status::invalid_argument("database already exists");
+            return StatusBuilder::invalid_argument(R"(database "%s" already exists)",
+                                                   m_db_filename.c_str());
         }
     } else if (s.is_not_found()) {
         if (!sanitized.create_if_missing) {
-            return Status::invalid_argument("database does not exist");
+            return StatusBuilder::invalid_argument(R"(database "%s" does not exist)",
+                                                   m_db_filename.c_str());
         }
         // If there exists a file named m_wal_filename, then it must either be leftover from a
         // failed call to DB::destroy(), or it is an unrelated file that coincidentally has the

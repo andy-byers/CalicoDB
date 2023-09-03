@@ -10,7 +10,7 @@
 namespace stest
 {
 
-template<class State>
+template <class State>
 class SequenceScenario : public IteratedScenario<State>
 {
 public:
