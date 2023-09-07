@@ -849,7 +849,6 @@ auto make_persistent_wal(Wal::Parameters param) -> WalComponents
 class WalTests : public testing::TestWithParam<MakeWal>
 {
 public:
-    static constexpr uint32_t TEST_PAGE_SIZE = 1'024;
     const std::string m_filename;
     File *m_db_file = nullptr;
     Env *m_env = nullptr;
