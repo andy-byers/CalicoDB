@@ -9,7 +9,6 @@
 #include "stat.h"
 #include "unique_ptr.h"
 #include "wal.h"
-#include <random>
 
 namespace calicodb
 {
@@ -169,12 +168,15 @@ public:
 
     auto srand(unsigned seed) -> void override
     {
-        m_rng.seed(seed);
+        ::srand(seed);
     }
 
     auto rand() -> unsigned override
     {
-        return std::uniform_int_distribution<unsigned>()(m_rng);
+        // This method is not called by the library. Normally, rand() is called by WalImpl to
+        // generate a salt, but this class is only ever used with TempWal. If random numbers
+        // are ever needed for in-memory databases, we should use a better PRNG.
+        return static_cast<unsigned>(::rand());
     }
 
     auto sleep(unsigned micros) -> void override
@@ -185,7 +187,6 @@ public:
 private:
     friend class TempWal;
 
-    std::default_random_engine m_rng;
     String m_filename;
 
     struct SectorFile final {
