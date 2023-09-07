@@ -75,7 +75,7 @@ auto remove_ivec_slot(Node &node, uint32_t index)
     NodeHdr::put_cell_count(node.hdr(), count - 1);
 }
 
-[[nodiscard]] auto external_parse_cell(char *data, const char *limit, uint32_t page_size, Cell *cell_out)
+[[nodiscard]] auto external_parse_cell(char *data, const char *limit, uint32_t total_space, Cell *cell_out)
 {
     uint32_t key_size, value_size;
     const auto *ptr = data;
@@ -87,7 +87,7 @@ auto remove_ivec_slot(Node &node, uint32_t index)
     }
     const auto hdr_size = static_cast<uintptr_t>(ptr - data);
     const auto pad_size = hdr_size > kMinCellHeaderSize ? 0 : kMinCellHeaderSize - hdr_size;
-    const auto local_pl_size = compute_local_pl_size(key_size, value_size, page_size);
+    const auto local_pl_size = compute_local_pl_size(key_size, value_size, total_space);
     const auto has_remote = local_pl_size < key_size + value_size;
     const auto footprint = hdr_size + pad_size + local_pl_size + has_remote * sizeof(uint32_t);
 
@@ -104,12 +104,13 @@ auto remove_ivec_slot(Node &node, uint32_t index)
     }
     return -1;
 }
-[[nodiscard]] auto internal_parse_cell(char *data, const char *limit, uint32_t page_size, Cell *cell_out)
+
+[[nodiscard]] auto internal_parse_cell(char *data, const char *limit, uint32_t total_space, Cell *cell_out)
 {
     uint32_t key_size;
     if (const auto *ptr = decode_varint(data + sizeof(uint32_t), limit, key_size)) {
         const auto hdr_size = static_cast<uintptr_t>(ptr - data);
-        const auto local_pl_size = compute_local_pl_size(key_size, 0, page_size);
+        const auto local_pl_size = compute_local_pl_size(key_size, 0, total_space);
         const auto has_remote = local_pl_size < key_size;
         const auto footprint = hdr_size + local_pl_size + has_remote * sizeof(uint32_t);
         if (data + footprint <= limit) {
@@ -338,18 +339,18 @@ auto BlockAllocator::release(Node &node, uint32_t block_ofs, uint32_t block_len)
     return 0;
 }
 
-auto BlockAllocator::freelist_size(const Node &node, uint32_t page_size) -> int
+auto BlockAllocator::freelist_size(const Node &node, uint32_t total_space) -> int
 {
     uint32_t total_len = 0;
     auto prev_end = NodeHdr::get_cell_start(node.hdr()) - kMinBlockSize;
     for (auto block_ofs = NodeHdr::get_free_start(node.hdr()); block_ofs;) {
-        if (block_ofs + kMinBlockSize > page_size || // Free block header is out of bounds
-            prev_end + kMinBlockSize > block_ofs) {  // Out-of-order blocks or missed fragment
+        if (block_ofs + kMinBlockSize > total_space || // Free block header is out of bounds
+            prev_end + kMinBlockSize > block_ofs) {    // Out-of-order blocks or missed fragment
             return -1;
         }
         const auto block_len = get_block_size(node, block_ofs);
         const auto next_ofs = get_next_pointer(node, block_ofs);
-        if (block_ofs + block_len > page_size) { // Free block body is out of bounds
+        if (block_ofs + block_len > total_space) { // Free block body is out of bounds
             return -1;
         }
         prev_end = block_ofs + block_len;

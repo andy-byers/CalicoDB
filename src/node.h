@@ -22,7 +22,7 @@ struct BlockAllocator {
     // (3) Any 2 adjacent free blocks are separated by at least 4 bytes (otherwise,
     //     there is a fragment between the two blocks that should have been consumed
     //     by release()).
-    [[nodiscard]] static auto freelist_size(const Node &node, uint32_t page_size) -> int;
+    [[nodiscard]] static auto freelist_size(const Node &node, uint32_t total_space) -> int;
 
     // Release unused memory back to the node
     // Returns 0 on success and -1 on failure. The freelist (and gap) was already
@@ -60,9 +60,9 @@ struct LocalBounds {
 // Determine how many bytes of payload can be stored locally (not on an overflow chain)
 // Uses SQLite's computation for min and max local payload sizes. If "max local" is exceeded, then 1 or more
 // overflow chain pages will be required to store this payload.
-[[nodiscard]] inline auto compute_local_pl_size(size_t key_size, size_t value_size, uint32_t page_size) -> uint32_t
+[[nodiscard]] inline auto compute_local_pl_size(size_t key_size, size_t value_size, uint32_t total_space) -> uint32_t
 {
-    const auto max_local = static_cast<uint32_t>((page_size - NodeHdr::kSize) * 64 / 256 -
+    const auto max_local = static_cast<uint32_t>((total_space - NodeHdr::kSize) * 64 / 256 -
                                                  kMaxCellHeaderSize - sizeof(uint16_t));
     if (key_size + value_size <= max_local) {
         // The whole payload can be stored locally.
@@ -71,7 +71,7 @@ struct LocalBounds {
         // The first part of the key will occupy the entire local payload.
         return max_local;
     }
-    const auto min_local = static_cast<uint32_t>((page_size - NodeHdr::kSize) * 32 / 256 -
+    const auto min_local = static_cast<uint32_t>((total_space - NodeHdr::kSize) * 32 / 256 -
                                                  kMaxCellHeaderSize - sizeof(uint16_t));
     // Try to prevent the key from being split.
     return maxval(min_local, static_cast<uint32_t>(key_size));

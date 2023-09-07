@@ -12,7 +12,6 @@
 #include <fcntl.h>
 #include <sys/mman.h>
 #include <sys/stat.h>
-#include <sys/statvfs.h>
 #include <sys/time.h>
 #include <unistd.h>
 
@@ -170,7 +169,7 @@ auto posix_file_lock(int file, const struct flock &lock) -> int
         case ETIMEDOUT:
             return Status::busy(std::strerror(error));
         case ENOENT:
-            return Status::not_found(std::strerror(errno));
+            return Status::not_found(std::strerror(error));
         default:
             return Status::io_error(std::strerror(error));
     }
