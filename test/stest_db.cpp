@@ -20,7 +20,7 @@ using namespace stest;
 
 struct DatabaseState {
     static constexpr uint32_t kMaxKeyLen = 1'024;
-    static constexpr uint32_t kMaxValueLen = kPageSize;
+    static constexpr uint32_t kMaxValueLen = TEST_PAGE_SIZE;
     RandomGenerator rng;
 
     [[nodiscard]] auto random_chunk(size_t max_length) const -> Slice

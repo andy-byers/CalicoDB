@@ -22,14 +22,14 @@ class Bufmgr final
 public:
     friend class Pager;
 
-    explicit Bufmgr(Stat &stat);
+    explicit Bufmgr(size_t cache_size, Stat &stat);
     ~Bufmgr();
 
-    // Allocate `min_buffers` page buffers for non-root pages, the root page buffer,
-    // and enough hash table slots to accommodate all non-root pages without incurring
-    // too many collisions. This method must only be called once, right after the
-    // constructor.
-    [[nodiscard]] auto preallocate(size_t min_buffers) -> int;
+    // Allocate m_min_buffers page buffers for non-root pages, each of size `page_size`,
+    // the root page buffer, and enough hash table slots to accommodate all non-root
+    // pages without incurring too many collisions. There must not be any referenced
+    // or dirty pages when this method is called.
+    [[nodiscard]] auto reallocate(size_t page_size) -> int;
 
     // Get a reference to the root page, which is always in-memory, but is not
     // addressable in the cache
@@ -48,7 +48,7 @@ public:
     [[nodiscard]] auto lookup(Id page_id) -> PageRef *;
 
     [[nodiscard]] auto next_victim() -> PageRef *;
-    [[nodiscard]] auto allocate() -> PageRef *;
+    [[nodiscard]] auto allocate(size_t page_size) -> PageRef *;
     auto register_page(PageRef &ref) -> void;
     auto shrink_to_fit() -> void;
 
@@ -79,6 +79,8 @@ public:
     Bufmgr(Bufmgr &) = delete;
 
 private:
+    auto free_buffers() -> void;
+
     // Hash table modified from LevelDB. Maps each cached page ID to a page reference:
     // a structure that contains the page contents from disk, as well as some other
     // metadata. Each page reference in m_map can also be found in either m_lru or
@@ -98,11 +100,13 @@ private:
             Alloc::deallocate(m_table);
         }
 
-        [[nodiscard]] auto preallocate(size_t cache_size) -> int
+        [[nodiscard]] auto preallocate(size_t min_buffers) -> int
         {
-            CALICODB_EXPECT_EQ(m_capacity, 0);
+            if (m_capacity) {
+                return 0;
+            }
             uint32_t capacity = 4;
-            while (capacity < cache_size) {
+            while (capacity < min_buffers) {
                 capacity *= 2;
             }
             const auto table_size = capacity * sizeof(PageRef *);

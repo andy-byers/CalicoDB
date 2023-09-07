@@ -31,6 +31,7 @@ public:
     {
         m_options.temp_database = true;
         m_options.cache_size = 0;
+        m_options.page_size = kMinPageSize;
         reopen_db();
     }
 
@@ -41,7 +42,7 @@ public:
 
     static auto check_bucket(Cursor &c) -> void
     {
-        reinterpret_cast<const CursorImpl &>(c).TEST_tree().TEST_validate();
+        reinterpret_cast<const ModelCursor &>(c).validate();
     }
 
     auto consume_input(FuzzedInputProvider &stream) -> void

@@ -22,7 +22,7 @@ struct BlockAllocator {
     // (3) Any 2 adjacent free blocks are separated by at least 4 bytes (otherwise,
     //     there is a fragment between the two blocks that should have been consumed
     //     by release()).
-    [[nodiscard]] static auto freelist_size(const Node &node) -> int;
+    [[nodiscard]] static auto freelist_size(const Node &node, uint32_t total_space) -> int;
 
     // Release unused memory back to the node
     // Returns 0 on success and -1 on failure. The freelist (and gap) was already
@@ -44,32 +44,37 @@ struct BlockAllocator {
 
 // NOTE: Cell headers are padded out to kMinCellHeaderSize, which corresponds to the size
 //       of a free block header.
-static constexpr uint32_t kMinCellHeaderSize =
+static constexpr size_t kMinCellHeaderSize =
     sizeof(uint16_t) +
     sizeof(uint16_t);
-static constexpr uint32_t kMaxCellHeaderSize =
+static constexpr size_t kMaxCellHeaderSize =
     kVarintMaxLength + // Value size  (5 B)
     kVarintMaxLength + // Key size    (5 B)
     sizeof(uint32_t);  // Overflow ID (4 B)
 
+struct LocalBounds {
+    uint32_t min;
+    uint32_t max;
+};
+
 // Determine how many bytes of payload can be stored locally (not on an overflow chain)
-[[nodiscard]] static constexpr auto compute_local_pl_size(size_t key_size, size_t value_size) -> uint32_t
+// Uses SQLite's computation for min and max local payload sizes. If "max local" is exceeded, then 1 or more
+// overflow chain pages will be required to store this payload.
+[[nodiscard]] inline auto compute_local_pl_size(size_t key_size, size_t value_size, uint32_t total_space) -> uint32_t
 {
-    // SQLite's computation for min and max local payload sizes. If kMaxLocal is exceeded, then 1 or more
-    // overflow chain pages will be required to store this payload.
-    constexpr const uint32_t kMinLocal =
-        (kPageSize - NodeHdr::kSize) * 32 / 256 - kMaxCellHeaderSize - sizeof(uint16_t);
-    constexpr const uint32_t kMaxLocal =
-        (kPageSize - NodeHdr::kSize) * 64 / 256 - kMaxCellHeaderSize - sizeof(uint16_t);
-    if (key_size + value_size <= kMaxLocal) {
+    const auto max_local = static_cast<uint32_t>((total_space - NodeHdr::kSize) * 64 / 256 -
+                                                 kMaxCellHeaderSize - sizeof(uint16_t));
+    if (key_size + value_size <= max_local) {
         // The whole payload can be stored locally.
         return static_cast<uint32_t>(key_size + value_size);
-    } else if (key_size > kMaxLocal) {
+    } else if (key_size > max_local) {
         // The first part of the key will occupy the entire local payload.
-        return kMaxLocal;
+        return max_local;
     }
+    const auto min_local = static_cast<uint32_t>((total_space - NodeHdr::kSize) * 32 / 256 -
+                                                 kMaxCellHeaderSize - sizeof(uint16_t));
     // Try to prevent the key from being split.
-    return std::max(kMinLocal, static_cast<uint32_t>(key_size));
+    return maxval(min_local, static_cast<uint32_t>(key_size));
 }
 
 // Internal cell format:
@@ -114,16 +119,18 @@ struct Cell {
 
 // Simple construct representing a tree node
 struct Node final {
+    using ParseCell = int (*)(char *, const char *, uint32_t, Cell *);
     static constexpr uint32_t kMaxFragCount = 0x80;
 
     PageRef *ref;
-    int (*parser)(char *, const char *, Cell *);
+    ParseCell parser;
     char *scratch;
+    uint32_t total_space;
     uint32_t usable_space;
     uint32_t gap_size;
 
-    [[nodiscard]] static auto from_existing_page(PageRef &page, char *scratch, Node &node_out) -> int;
-    [[nodiscard]] static auto from_new_page(PageRef &page, char *scratch, bool is_leaf) -> Node;
+    [[nodiscard]] static auto from_existing_page(PageRef &page, uint32_t total_space, char *scratch, Node &node_out) -> int;
+    [[nodiscard]] static auto from_new_page(PageRef &page, uint32_t total_space, char *scratch, bool is_leaf) -> Node;
 
     explicit Node()
         : ref(nullptr)
@@ -139,6 +146,7 @@ struct Node final {
         : ref(rhs.ref),
           parser(rhs.parser),
           scratch(rhs.scratch),
+          total_space(rhs.total_space),
           usable_space(rhs.usable_space),
           gap_size(rhs.gap_size)
     {
@@ -151,6 +159,7 @@ struct Node final {
             ref = rhs.ref;
             parser = rhs.parser;
             scratch = rhs.scratch;
+            total_space = rhs.total_space;
             usable_space = rhs.usable_space;
             gap_size = rhs.gap_size;
 

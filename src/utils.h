@@ -60,9 +60,11 @@ auto busy_wait(BusyHandler *handler, const Callback &callback) -> Status
 // size of a record key or value.
 static constexpr auto kMaxAllocation = 0XFFFFFFEF;
 
+static constexpr uint32_t kMinPageSize = 512;
+static constexpr uint32_t kMaxPageSize = 32'768;
 static constexpr size_t kMinFrameCount = 1;
 static constexpr size_t kMaxCacheSize = 1 << 30;
-static constexpr size_t kTreeBufferLen = 3 * kPageSize;
+static constexpr size_t kScratchBufferPages = 3;
 static constexpr Slice kDefaultWalSuffix = "-wal";
 static constexpr Slice kDefaultShmSuffix = "-shm";
 static constexpr uintptr_t kZeroSizePtr = 13;
@@ -163,11 +165,23 @@ template <class T>
 }
 
 template <class T, class U = T>
-constexpr inline auto exchange(T &obj, U &&new_val) -> T
+constexpr auto exchange(T &obj, U &&new_val) -> T
 {
     auto old_val = move(obj);
     obj = forward<U>(new_val);
     return old_val;
+}
+
+template <class T>
+constexpr auto minval(T t1, T t2) -> T
+{
+    return t1 < t2 ? t1 : t2;
+}
+
+template <class T>
+constexpr auto maxval(T t1, T t2) -> T
+{
+    return t1 > t2 ? t1 : t2;
 }
 
 } // namespace calicodb

@@ -18,8 +18,8 @@ namespace calicodb::test
 
 TEST(FileFormatTests, ReportsUnrecognizedFormatString)
 {
-    char page[kPageSize];
-    FileHdr::make_supported_db(page);
+    char page[TEST_PAGE_SIZE];
+    FileHdr::make_supported_db(page, TEST_PAGE_SIZE);
 
     ++page[0];
     ASSERT_NOK(FileHdr::check_db_support(page));
@@ -27,8 +27,8 @@ TEST(FileFormatTests, ReportsUnrecognizedFormatString)
 
 TEST(FileFormatTests, ReportsUnrecognizedFormatVersion)
 {
-    char page[kPageSize];
-    FileHdr::make_supported_db(page);
+    char page[TEST_PAGE_SIZE];
+    FileHdr::make_supported_db(page, TEST_PAGE_SIZE);
 
     ++page[FileHdr::kFmtVersionOffset];
     ASSERT_NOK(FileHdr::check_db_support(page));
@@ -108,6 +108,7 @@ class DBTests : public testing::Test
 {
 protected:
     static constexpr size_t kMaxRounds = 1'000;
+    static constexpr size_t kPageSize = TEST_PAGE_SIZE;
     const std::string m_test_dir;
     const std::string m_db_name;
     const std::string m_alt_wal_name;
@@ -141,14 +142,14 @@ protected:
         EXPECT_LE(0, round);
         // 3 pages is long enough to generate both types of overflow pages (kOverflowHead
         // and kOverflowLink).
-        static constexpr size_t kMaxKV = kPageSize * 3;
+        static constexpr size_t kMaxKV = TEST_PAGE_SIZE * 3;
         const auto key_length = (round + 1) * kMaxKV / kMaxRounds;
         auto key_str = numeric_key<kMaxKV>(kv);
         key_str = key_str.substr(kMaxKV - key_length);
         const auto val_length = kMaxKV - key_length;
         auto val_str = std::to_string(kv);
         if (val_str.size() < val_length) {
-            val_str.resize(kPageSize / 4 - val_str.size(), '0');
+            val_str.resize(TEST_PAGE_SIZE / 4 - val_str.size(), '0');
         }
         return {key_str, val_str};
     }
@@ -332,6 +333,7 @@ protected:
         Options options;
         options.busy = &m_busy;
         options.env = env ? env : m_env;
+        options.page_size = TEST_PAGE_SIZE;
         if (clear) {
             std::filesystem::remove_all(m_db_name.c_str());
             std::filesystem::remove_all(m_db_name + kDefaultWalSuffix.to_string());
@@ -689,16 +691,16 @@ TEST_F(DBTests, VacuumEmptyDB)
 
 TEST_F(DBTests, AutoCheckpoint)
 {
+    static constexpr size_t kN = 1'000;
     Options options;
     for (size_t i = 1; i < 100; i += i) {
-        delete m_db;
-        m_db = nullptr;
+        delete exchange(m_db, nullptr);
 
         options.auto_checkpoint = i;
         ASSERT_OK(DB::open(options, m_db_name.c_str(), m_db));
-        for (size_t j = 0; j < 10; ++j) {
-            ASSERT_OK(m_db->run(WriteOptions(), [j](auto &tx) {
-                return put_range(tx, BucketOptions(), "b", j * 1'000, (j + 1) * 1'000);
+        for (size_t j = 0; j < 100; ++j) {
+            ASSERT_OK(m_db->run(WriteOptions(), [i, j](auto &tx) {
+                return put_range(tx, BucketOptions(), "b", j * kN, (j + 1) * kN, i);
             }));
         }
     }
@@ -712,7 +714,7 @@ TEST_F(DBTests, CheckpointResize)
     ASSERT_EQ(0, file_size(m_db_name.c_str()));
 
     ASSERT_OK(m_db->checkpoint(true));
-    ASSERT_EQ(kPageSize * 3, file_size(m_db_name.c_str()));
+    ASSERT_EQ(TEST_PAGE_SIZE * 3, file_size(m_db_name.c_str()));
 
     ASSERT_OK(m_db->run(WriteOptions(), [](auto &tx) {
         auto s = tx.drop_bucket("BUCKET");
@@ -721,12 +723,12 @@ TEST_F(DBTests, CheckpointResize)
         }
         return s;
     }));
-    ASSERT_EQ(kPageSize * 3, file_size(m_db_name.c_str()));
+    ASSERT_EQ(TEST_PAGE_SIZE * 3, file_size(m_db_name.c_str()));
 
     // Tx::vacuum() never gets rid of the root database page, even if the whole database
     // is empty.
     ASSERT_OK(m_db->checkpoint(true));
-    ASSERT_EQ(kPageSize, file_size(m_db_name.c_str()));
+    ASSERT_EQ(TEST_PAGE_SIZE, file_size(m_db_name.c_str()));
 }
 
 TEST_F(DBTests, DropBuckets)
@@ -891,7 +893,7 @@ TEST(OldWalTests, HandlesOldWalFile)
     }));
 
     ASSERT_OK(env.file_size(kOldWal, file_size));
-    ASSERT_GT(file_size, kPageSize * 3);
+    ASSERT_GT(file_size, dbopt.page_size * 3);
     delete db;
 }
 
@@ -1093,6 +1095,84 @@ TEST_F(DBOpenTests, CustomLogger)
     ASSERT_FALSE(logger.m_str.empty());
 }
 
+class DBPageSizeTests : public DBOpenTests
+{
+public:
+    Options m_options;
+
+    explicit DBPageSizeTests()
+    {
+        m_options.wal_filename = m_alt_wal_name.c_str();
+    }
+
+    ~DBPageSizeTests() override = default;
+
+    [[nodiscard]] auto db_page_size() const -> size_t
+    {
+        return reinterpret_cast<DBImpl *>(m_db)->TEST_pager().page_size();
+    }
+
+    auto add_pages(bool commit) -> Status
+    {
+        return m_db->run(WriteOptions(), [commit](auto &tx) {
+            EXPECT_OK(tx.create_bucket(BucketOptions(), "a", nullptr));
+            EXPECT_OK(tx.create_bucket(BucketOptions(), "b", nullptr));
+            EXPECT_OK(tx.create_bucket(BucketOptions(), "c", nullptr));
+            return commit ? Status::ok() : Status::invalid_argument();
+        });
+    }
+
+    template <class Fn>
+    auto for_each_page_size(const Fn &fn) const -> void
+    {
+        for (auto ps1 = kMinPageSize; ps1 <= kMaxPageSize; ps1 *= 2) {
+            for (auto ps2 = kMinPageSize; ps2 <= kMaxPageSize; ps2 *= 2) {
+                // Call fn(kMinPageSize, kMinPageSize) as a sanity check.
+                if (ps1 == kMinPageSize || ps1 != ps2) {
+                    fn(ps1, ps2);
+                    (void)m_env->remove_file(m_options.wal_filename);
+                    (void)m_env->remove_file(m_db_name.c_str());
+                }
+            }
+        }
+    }
+};
+
+TEST_F(DBPageSizeTests, EmptyDB)
+{
+    for_each_page_size([this](auto ps1, auto ps2) {
+        m_options.page_size = ps1;
+        ASSERT_OK(DB::open(m_options, m_db_name.c_str(), m_db));
+        ASSERT_NOK(add_pages(false));
+        ASSERT_EQ(db_page_size(), ps1);
+        delete exchange(m_db, nullptr);
+
+        m_options.page_size = ps2;
+        ASSERT_OK(DB::open(m_options, m_db_name.c_str(), m_db));
+        ASSERT_OK(add_pages(true));
+        ASSERT_EQ(db_page_size(), ps2);
+        delete exchange(m_db, nullptr);
+    });
+}
+
+TEST_F(DBPageSizeTests, NonEmptyDB)
+{
+    for_each_page_size([this](auto ps1, auto ps2) {
+        m_options.page_size = ps1;
+        ASSERT_OK(DB::open(m_options, m_db_name.c_str(), m_db));
+        ASSERT_OK(add_pages(true));
+        ASSERT_EQ(db_page_size(), ps1);
+        delete exchange(m_db, nullptr);
+
+        m_options.page_size = ps2;
+        ASSERT_OK(DB::open(m_options, m_db_name.c_str(), m_db));
+        ASSERT_OK(add_pages(true));
+        // Page size should be what the first connection set.
+        ASSERT_EQ(db_page_size(), ps1);
+        delete exchange(m_db, nullptr);
+    });
+}
+
 class TransactionTests : public DBTests
 {
 protected:
@@ -1108,6 +1188,7 @@ TEST_F(TransactionTests, ReadsMostRecentSnapshot)
     m_env->m_write_callback = [&] {
         DB *db;
         Options options;
+        options.page_size = TEST_PAGE_SIZE;
         options.env = m_env;
         auto s = DB::open(options, m_db_name.c_str(), db);
         ASSERT_OK(s);
@@ -1150,6 +1231,7 @@ TEST_F(TransactionTests, ExclusiveLockingMode)
             }
             DB *db;
             Options options;
+            options.page_size = TEST_PAGE_SIZE;
             options.lock_mode = i == 0 ? Options::kLockNormal
                                        : Options::kLockExclusive;
             options.env = m_env;
@@ -1189,6 +1271,7 @@ TEST_F(TransactionTests, IgnoresFutureVersions)
         DB *db;
         Options options;
         options.env = m_env;
+        options.page_size = TEST_PAGE_SIZE;
         has_open_db = true;
         ASSERT_OK(DB::open(options, m_db_name.c_str(), db));
         ASSERT_OK(db->run(WriteOptions(), [n](auto &tx) {
@@ -1230,6 +1313,7 @@ TEST_F(CheckpointTests, CheckpointerBlocksOtherCheckpointers)
         DB *db;
         Options options;
         options.env = m_env;
+        options.page_size = TEST_PAGE_SIZE;
         ASSERT_OK(DB::open(options, m_db_name.c_str(), db));
         ASSERT_TRUE(db->checkpoint(false).is_busy());
         ASSERT_TRUE(db->checkpoint(true).is_busy());
@@ -1263,6 +1347,7 @@ TEST_F(CheckpointTests, CheckpointerAllowsTransactions)
         DB *db;
         Options options;
         options.env = m_env;
+        options.page_size = TEST_PAGE_SIZE;
         ASSERT_OK(DB::open(options, m_db_name.c_str(), db));
         ASSERT_OK(db->run(WriteOptions(), [n](auto &tx) {
             return put_range(tx, BucketOptions(), "after", n * 2, (n + 1) * 2);

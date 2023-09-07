@@ -9,7 +9,6 @@
 #include "stat.h"
 #include "unique_ptr.h"
 #include "wal.h"
-#include <random>
 
 namespace calicodb
 {
@@ -22,6 +21,11 @@ class TempEnv
       public HeapObject
 {
 public:
+    explicit TempEnv(size_t sector_size)
+        : m_file(sector_size)
+    {
+    }
+
     ~TempEnv() override = default;
 
     auto new_logger(const char *, Logger *&logger_out) -> Status override
@@ -32,14 +36,26 @@ public:
 
     auto new_file(const char *filename, OpenMode, File *&file_out) -> Status override
     {
+        if (m_filename.is_empty()) {
+            if (append_strings(m_filename, filename)) {
+                return Status::no_memory();
+            }
+        } else if (Slice(m_filename) != Slice(filename)) {
+            return Status::not_supported();
+        }
+        return new_temp_file(file_out);
+    }
+
+    auto new_temp_file(File *&file_out) -> Status
+    {
         class TempFile
             : public File,
               public HeapObject
         {
-            PagedFile *const m_file;
+            SectorFile *const m_file;
 
         public:
-            explicit TempFile(PagedFile &file)
+            explicit TempFile(SectorFile &file)
                 : m_file(&file)
             {
             }
@@ -48,20 +64,23 @@ public:
 
             auto read(size_t offset, size_t size, char *scratch, Slice *data_out) -> Status override
             {
-                const auto page_id = Id::from_index(offset / kPageSize);
-
-                // This class is incapable of reading anything other than a full page of data.
-                CALICODB_EXPECT_EQ(offset, page_id.as_index() * kPageSize);
-                CALICODB_EXPECT_EQ(size, kPageSize);
-
-                const auto *page = m_file->fetch_page(page_id);
-                if (page == nullptr) {
-                    // page_id is out of bounds.
-                    page = "";
+                if (offset >= m_file->actual_size) {
                     size = 0;
+                } else if (offset + size > m_file->actual_size) {
+                    size = m_file->actual_size - offset;
                 }
-
-                std::memcpy(scratch, page, size);
+                const auto max_chunk = m_file->sector_size;
+                auto *sectors = m_file->sectors.ptr();
+                auto *out = scratch;
+                auto idx = offset / max_chunk;
+                offset %= max_chunk;
+                for (auto leftover = size; leftover; ++idx) {
+                    const auto chunk = minval(max_chunk - offset, leftover);
+                    std::memcpy(out, sectors[idx] + offset, chunk);
+                    leftover -= chunk;
+                    out += chunk;
+                    offset = 0;
+                }
                 if (data_out) {
                     *data_out = Slice(scratch, size);
                 }
@@ -70,28 +89,28 @@ public:
 
             auto write(size_t offset, const Slice &data) -> Status override
             {
-                const auto page_id = Id::from_index(offset / kPageSize);
-
-                // This class is incapable of reading anything other than a full page of data.
-                CALICODB_EXPECT_EQ(offset, page_id.as_index() * kPageSize);
-                CALICODB_EXPECT_EQ(data.size(), kPageSize);
-
-                if (m_file->ensure_large_enough(page_id.value)) {
+                if (m_file->actual_size < offset + data.size() &&
+                    m_file->resize(offset + data.size())) {
                     return Status::no_memory();
                 }
-                auto *page = m_file->fetch_page(page_id);
-                std::memcpy(page, data.data(), data.size());
+                const auto max_chunk = m_file->sector_size;
+                auto *sectors = m_file->sectors.ptr();
+                auto idx = offset / max_chunk;
+                offset %= max_chunk;
+                for (auto in = data; !in.is_empty(); ++idx) {
+                    const auto chunk = minval(max_chunk - offset, in.size());
+                    std::memcpy(sectors[idx] + offset, in.data(), chunk);
+                    in.advance(chunk);
+                    offset = 0;
+                }
                 return Status::ok();
             }
 
             auto resize(size_t size) -> Status override
             {
-                const auto page_count = size / kPageSize;
-                CALICODB_EXPECT_EQ(size, page_count * kPageSize);
-                if (m_file->resize(page_count)) {
-                    return Status::no_memory();
-                }
-                return Status::ok();
+                return m_file->resize(size)
+                           ? Status::no_memory()
+                           : Status::ok();
             }
 
             auto sync() -> Status override
@@ -118,10 +137,6 @@ public:
             auto shm_barrier() -> void override {}
             auto file_unlock() -> void override {}
         };
-        CALICODB_EXPECT_TRUE(m_filename.is_empty());
-        if (append_strings(m_filename, filename)) {
-            return Status::no_memory();
-        }
 
         file_out = new (std::nothrow) TempFile(m_file);
         return file_out ? Status::ok() : Status::no_memory();
@@ -130,7 +145,7 @@ public:
     auto file_size(const char *filename, size_t &size_out) const -> Status override
     {
         if (file_exists(filename)) {
-            size_out = m_file.pages.len() * kPageSize;
+            size_out = m_file.actual_size;
             return Status::ok();
         }
         return Status::invalid_argument();
@@ -153,12 +168,15 @@ public:
 
     auto srand(unsigned seed) -> void override
     {
-        m_rng.seed(seed);
+        ::srand(seed);
     }
 
     auto rand() -> unsigned override
     {
-        return std::uniform_int_distribution<unsigned>()(m_rng);
+        // This method is not called by the library. Normally, rand() is called by WalImpl to
+        // generate a salt, but this class is only ever used with TempWal. If random numbers
+        // are ever needed for in-memory databases, we should use a better PRNG.
+        return static_cast<unsigned>(::rand());
     }
 
     auto sleep(unsigned micros) -> void override
@@ -169,29 +187,37 @@ public:
 private:
     friend class TempWal;
 
-    std::default_random_engine m_rng;
     String m_filename;
 
-    struct PagedFile final {
-        Buffer<char *> pages;
+    struct SectorFile final {
+        Buffer<char *> sectors;
+        const size_t sector_size;
+        size_t actual_size;
 
-        ~PagedFile()
+        explicit SectorFile(size_t sector_size)
+            : sector_size(sector_size),
+              actual_size(0)
+        {
+        }
+
+        ~SectorFile()
         {
             [[maybe_unused]] const auto rc = resize(0);
             CALICODB_EXPECT_EQ(rc, 0);
         }
 
-        [[nodiscard]] auto resize(size_t new_len) -> int
+        [[nodiscard]] auto resize(size_t size) -> int
         {
+            const auto new_len = (size + sector_size - 1) / sector_size;
             // Free pages if shrinking the file.
-            const auto old_len = pages.len();
+            const auto old_len = sectors.len();
             for (size_t i = new_len; i < old_len; ++i) {
-                Alloc::deallocate(pages.ptr()[i]);
+                Alloc::deallocate(sectors[i]);
                 // Clear pointers in case realloc() fails.
-                pages.ptr()[i] = nullptr;
+                sectors[i] = nullptr;
             }
             // Resize the page pointer array.
-            if (pages.realloc(new_len)) {
+            if (sectors.realloc(new_len)) {
                 // Alloc::reallocate() might fail when trimming an allocation, but not if the new size
                 // is 0. In that case, the underlying reallocation function is not called. Instead, the
                 // memory is freed using Alloc::deallocate(), and a pointer (non-null) is returned to a
@@ -201,9 +227,9 @@ private:
             }
             // Allocate pages if growing the file.
             for (size_t i = old_len; i < new_len; ++i) {
-                auto *&page = pages.ptr()[i];
-                if (auto *ptr = Alloc::allocate(kPageSize)) {
-                    std::memset(ptr, 0, kPageSize);
+                auto *&page = sectors[i];
+                if (auto *ptr = Alloc::allocate(sector_size)) {
+                    std::memset(ptr, 0, sector_size);
                     page = static_cast<char *>(ptr);
                 } else {
                     // Clear the rest of the pointers so the destructor doesn't mess up.
@@ -211,25 +237,17 @@ private:
                     return -1;
                 }
             }
+            actual_size = size;
             return 0;
         }
 
-        [[nodiscard]] auto ensure_large_enough(size_t len) -> int
+        [[nodiscard]] auto ensure_large_enough(size_t size) -> int
         {
-            const auto num_pages = pages.len();
-            if (len > num_pages && resize(len)) {
+            if (size > sectors.len() * sector_size && resize(size)) {
                 return -1;
             }
-            CALICODB_EXPECT_LE(len, pages.len());
+            CALICODB_EXPECT_LE(size, sectors.len() * sector_size);
             return 0;
-        }
-
-        [[nodiscard]] auto fetch_page(Id id) -> char *
-        {
-            if (id.value > pages.len()) {
-                return nullptr;
-            }
-            return pages.ptr()[id.as_index()];
         }
     } m_file;
 };
@@ -268,12 +286,13 @@ public:
         return Status::ok();
     }
 
-    auto read(Id page_id, char *&page) -> Status override
+    auto read(Id page_id, uint32_t page_size, char *&page) -> Status override
     {
         const auto itr = m_table.find(page_id.value);
         if (itr != m_table.end() && *itr) {
-            std::memcpy(page, (*itr)->page, kPageSize);
-            m_stat->counters[Stat::kReadWal] += kPageSize;
+            const auto copy_size = minval(page_size, m_page_size);
+            std::memcpy(page, (*itr)->page(), copy_size);
+            m_stat->counters[Stat::kReadWal] += copy_size;
         } else {
             page = nullptr;
         }
@@ -285,8 +304,12 @@ public:
         return Status::ok();
     }
 
-    auto write(PageRef *first_ref, size_t db_size) -> Status override
+    auto write(PageRef *first_ref, uint32_t page_size, size_t db_size) -> Status override
     {
+        if (m_table.occupied == 0) {
+            m_page_size = page_size;
+        }
+        CALICODB_EXPECT_EQ(m_page_size, page_size);
         auto *dirty = &first_ref->dirty_hdr;
         for (auto *p = dirty; p; p = p->dirty) {
             if (m_table.occupied * 2 >= m_table.data.len()) {
@@ -297,14 +320,14 @@ public:
             auto *ref = p->get_page_ref();
             auto **itr = m_table.find(ref->page_id.value);
             if (*itr == nullptr) {
-                *itr = PageEntry::create(ref->page_id.value);
+                *itr = PageEntry::create(ref->page_id.value, m_page_size);
                 if (*itr == nullptr) {
                     return Status::no_memory();
                 }
                 ++m_table.occupied;
             }
-            std::memcpy((*itr)->page, ref->data, kPageSize);
-            m_stat->counters[Stat::kWriteWal] += kPageSize;
+            std::memcpy((*itr)->page(), ref->data, page_size);
+            m_stat->counters[Stat::kWriteWal] += page_size;
         }
         if (db_size && commit(db_size)) {
             return Status::no_memory();
@@ -332,12 +355,12 @@ public:
         CALICODB_EXPECT_EQ(m_table.occupied, 0);
     }
 
-    auto close() -> Status override
+    auto close(char *, uint32_t) -> Status override
     {
         return Status::ok();
     }
 
-    auto checkpoint(bool) -> Status override
+    auto checkpoint(bool, char *, uint32_t) -> Status override
     {
         return Status::ok();
     }
@@ -349,23 +372,32 @@ public:
 
     [[nodiscard]] auto db_size() const -> uint32_t override
     {
-        return static_cast<uint32_t>(m_env->m_file.pages.len());
+        return static_cast<uint32_t>(m_env->m_file.sectors.len());
     }
 
 private:
     [[nodiscard]] auto commit(size_t db_size) -> int
     {
-        const auto rc = m_table.for_each([this](auto *page) {
-            if (m_env->m_file.ensure_large_enough(page->key)) {
-                return -1;
+        if (m_env->m_file.ensure_large_enough(db_size * m_page_size)) {
+            return -1;
+        }
+        UniquePtr<File> file;
+        auto s = m_env->new_temp_file(file.ref());
+        if (!s.is_ok()) {
+            return -1;
+        }
+        const auto rc = m_table.for_each([this, &file, db_size](auto *page) {
+            if (page->key <= db_size) {
+                auto s = file->write((page->key - 1) * m_page_size, Slice(page->page(), m_page_size));
+                if (!s.is_ok()) {
+                    return -1;
+                }
+                m_stat->counters[Stat::kReadWal] += m_page_size;
+                m_stat->counters[Stat::kWriteDB] += m_page_size;
             }
-            auto *dst = m_env->m_file.fetch_page(Id(page->key));
-            std::memcpy(dst, page->page, kPageSize);
-            m_stat->counters[Stat::kReadWal] += kPageSize;
-            m_stat->counters[Stat::kWriteDB] += kPageSize;
             return 0;
         });
-        if (rc || m_env->m_file.resize(db_size)) {
+        if (rc || m_env->m_file.resize(db_size * m_page_size)) {
             return -1;
         }
         m_table.clear();
@@ -374,12 +406,16 @@ private:
 
     struct PageEntry {
         uint32_t key;
-        char page[kPageSize];
 
-        static auto create(uint32_t key) -> PageEntry *
+        [[nodiscard]] auto page() -> char *
+        {
+            return reinterpret_cast<char *>(this + 1);
+        }
+
+        static auto create(uint32_t key, size_t page_size) -> PageEntry *
         {
             auto *ptr = static_cast<PageEntry *>(
-                Alloc::allocate(sizeof(PageEntry)));
+                Alloc::allocate(sizeof(PageEntry) + page_size));
             if (ptr) {
                 ptr->key = key;
             }
@@ -404,7 +440,7 @@ private:
         {
             for (size_t i = 0; i < data.len(); ++i) {
                 // Caller may need to free and clear the pointer, so provide a reference.
-                auto *&ptr = data.ptr()[i];
+                auto *&ptr = data[i];
                 if (ptr && action(ptr)) {
                     return -1;
                 }
@@ -433,7 +469,7 @@ private:
             size_t tries = 0;
             for (auto h = hash(key);; ++h, ++tries) {
                 CALICODB_EXPECT_LT(tries, data.len());
-                auto *&ptr = data.ptr()[h & (data.len() - 1)];
+                auto *&ptr = data[h & (data.len() - 1)];
                 if (ptr == nullptr || ptr->key == key) {
                     return &ptr;
                 }
@@ -455,7 +491,7 @@ private:
                 *table.find(page->key) = page;
                 return 0;
             });
-            data = std::move(table.data);
+            data = move(table.data);
             return 0;
         }
 
@@ -472,13 +508,14 @@ private:
 
     TempEnv *const m_env;
     Stat *const m_stat;
+    uint32_t m_page_size;
 };
 
 } // namespace
 
-auto new_temp_env() -> Env *
+auto new_temp_env(size_t sector_size) -> Env *
 {
-    return new (std::nothrow) TempEnv;
+    return new (std::nothrow) TempEnv(sector_size);
 }
 
 auto new_temp_wal(const Wal::Parameters &param) -> Wal *

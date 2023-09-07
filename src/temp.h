@@ -11,7 +11,7 @@
 namespace calicodb
 {
 
-[[nodiscard]] auto new_temp_env() -> Env *;
+[[nodiscard]] auto new_temp_env(size_t sector_size) -> Env *;
 [[nodiscard]] auto new_temp_wal(const Wal::Parameters &param) -> Wal *;
 
 } // namespace calicodb

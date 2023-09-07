@@ -21,7 +21,7 @@ class CursorImpl;
 
 [[nodiscard]] inline auto truncate_suffix(const Slice &lhs, const Slice &rhs, Slice &prefix_out) -> int
 {
-    const auto end = std::min(
+    const auto end = minval(
         lhs.size(), rhs.size());
 
     size_t n = 0;
@@ -77,28 +77,12 @@ public:
     };
     auto allocate(AllocationType type, Id nearby, PageRef *&page_out) -> Status;
 
-    auto allocate_(bool is_external, Id nearby, Node &node_out) -> Status
-    {
-        PageRef *ref;
-        auto s = allocate(kAllocateAny, nearby, ref);
-        if (s.is_ok()) {
-            if (ref->refs == 1) {
-                CALICODB_EXPECT_FALSE(PointerMap::is_map(ref->page_id));
-                node_out = Node::from_new_page(*ref, m_node_scratch, is_external);
-            } else {
-                m_pager->release(ref);
-                s = corrupted_node(ref->page_id);
-            }
-        }
-        return s;
-    }
-
     auto acquire(Id page_id, Node &node_out, bool write = false) const -> Status
     {
         PageRef *ref;
         auto s = m_pager->acquire(page_id, ref);
         if (s.is_ok()) {
-            if (Node::from_existing_page(*ref, m_node_scratch, node_out)) {
+            if (Node::from_existing_page(*ref, m_page_size, m_node_scratch, node_out)) {
                 m_pager->release(ref);
                 return corrupted_node(page_id);
             }
@@ -228,12 +212,12 @@ private:
     // Scratch memory for cells that aren't embedded in nodes. Use m_cell_scratch[n] to get a pointer to
     // the start of cell scratch buffer n, where n < kNumCellBuffers.
     static constexpr size_t kNumCellBuffers = 4;
-    static constexpr auto kCellBufferLen = kPageSize / kNumCellBuffers;
     char *const m_cell_scratch[kNumCellBuffers];
 
     String m_name;
     Pager *const m_pager;
     Id m_root_id;
+    const uint32_t m_page_size;
     const bool m_writable;
 };
 

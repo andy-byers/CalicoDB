@@ -14,10 +14,10 @@ namespace calicodb
 // Every heap-allocated object that CalicoDB uses must ultimately come from a call to either
 // Alloc::allocate() or Alloc::reallocate(), and eventually be passed back to
 // Alloc::deallocate(). Differences between these routines and std::malloc(), std::realloc(),
-// and std::free() are detailed below. The main difference is that a nonnull low-address
-// pointer is returned from Alloc::allocate(0) and Alloc::reallocate(..., 0). This pointer
-// must not be dereferenced, or passed to library functions that expect a valid pointer
-// (like std::memcpy()). It can, however, be reallocated and/or freed. See
+// and std::free() are detailed here and below. The main difference is that a nonnull low-
+// address pointer is returned from Alloc::allocate(0) and Alloc::reallocate(..., 0). This
+// pointer must not be dereferenced, or passed to library functions that expect a valid
+// pointer (like std::memcpy()). It can, however, be reallocated and/or freed. See
 // https://yarchive.net/comp/linux/malloc_0.html for more details.
 // NOTE: Alloc::set_*() are not thread-safe.
 class Alloc

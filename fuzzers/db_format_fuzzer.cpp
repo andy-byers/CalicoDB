@@ -24,6 +24,7 @@ public:
     {
         env.srand(42);
         m_options.env = &env;
+        m_options.page_size = kMinPageSize;
     }
 
     auto consume_input(const Slice &data) -> void

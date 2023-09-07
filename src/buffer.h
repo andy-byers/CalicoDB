@@ -47,6 +47,18 @@ public:
         return *this;
     }
 
+    auto operator[](size_t idx) -> T &
+    {
+        CALICODB_EXPECT_LT(idx, m_len);
+        return m_ptr.get()[idx];
+    }
+
+    auto operator[](size_t idx) const -> const T &
+    {
+        CALICODB_EXPECT_LT(idx, m_len);
+        return m_ptr.get()[idx];
+    }
+
     [[nodiscard]] auto is_empty() const -> bool
     {
         return m_len == 0;

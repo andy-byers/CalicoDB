@@ -12,6 +12,7 @@
 
 #include "calicodb/cursor.h"
 #include "calicodb/db.h"
+#include "cursor_impl.h"
 #include "common.h"
 #include "logging.h"
 #include <iostream>
@@ -250,6 +251,11 @@ public:
         }
         m_c->previous();
     }
+
+    auto validate() const -> void
+    {
+        reinterpret_cast<const CursorImpl *>(m_c)->TEST_tree().TEST_validate();
+    }
 };
 
 template class ModelCursorBase<KVMap>;
@@ -345,6 +351,8 @@ ModelCursorBase<Map>::~ModelCursorBase()
         delete m_c;
     }
 }
+
+using ModelCursor = ModelCursorBase<KVMap>;
 
 } // namespace calicodb
 

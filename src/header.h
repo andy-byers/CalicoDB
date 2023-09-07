@@ -29,21 +29,24 @@ namespace calicodb
 //     22      4     Freelist head
 //     26      4     Freelist length
 //     30      4     Largest root
-//     34      1     File format version
-//     35      29    Reserved
+//     34      2     Page size
+//     36      1     File format version
+//     37      27    Reserved
 struct FileHdr {
     static constexpr char kFmtString[18] = "CalicoDB format 1";
     static constexpr char kFmtVersion = 1;
 
     [[nodiscard]] static auto check_db_support(const char *root) -> Status;
-    static auto make_supported_db(char *root) -> void;
+    [[nodiscard]] static auto check_page_size(size_t page_size) -> Status;
+    static auto make_supported_db(char *root, size_t page_size) -> void;
 
     enum {
         kPageCountOffset = sizeof(kFmtString),
         kFreelistHeadOffset = kPageCountOffset + sizeof(uint32_t),
         kFreelistLengthOffset = kFreelistHeadOffset + sizeof(uint32_t),
         kLargestRootOffset = kFreelistLengthOffset + sizeof(uint32_t),
-        kFmtVersionOffset = kLargestRootOffset + sizeof(uint32_t),
+        kPageSizeOffset = kLargestRootOffset + sizeof(uint32_t),
+        kFmtVersionOffset = kPageSizeOffset + sizeof(uint16_t),
         kReservedOffset = kFmtVersionOffset + sizeof(char),
         kSize = 64
     };
@@ -83,6 +86,16 @@ struct FileHdr {
     static auto put_largest_root(char *root, Id value) -> void
     {
         put_u32(root + kLargestRootOffset, value.value);
+    }
+
+    [[nodiscard]] static auto get_page_size(const char *root) -> uint32_t
+    {
+        return get_u16(root + kPageSizeOffset);
+    }
+    static auto put_page_size(char *root, uint32_t value) -> void
+    {
+        CALICODB_EXPECT_TRUE(check_page_size(value).is_ok());
+        put_u16(root + kPageSizeOffset, static_cast<uint16_t>(value));
     }
 };
 

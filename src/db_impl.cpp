@@ -71,7 +71,8 @@ auto DBImpl::open(const Options &sanitized) -> Status
         &m_status,
         &m_stat,
         m_busy,
-        (sanitized.cache_size + kPageSize - 1) / kPageSize,
+        static_cast<uint32_t>(sanitized.page_size),
+        sanitized.cache_size,
         sanitized.sync_mode,
         sanitized.lock_mode,
         !sanitized.temp_database,
@@ -108,7 +109,10 @@ DBImpl::DBImpl(Parameters param)
 
 DBImpl::~DBImpl()
 {
-    m_pager.reset();
+    if (m_pager) {
+        m_pager->close();
+        m_pager.reset();
+    }
     m_file.reset();
 
     if (m_owns_log) {

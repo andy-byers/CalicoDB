@@ -5,6 +5,7 @@
 #ifndef CALICODB_PAGER_H
 #define CALICODB_PAGER_H
 
+#include "buffer.h"
 #include "bufmgr.h"
 #include "stat.h"
 #include "wal.h"
@@ -34,13 +35,19 @@ public:
         Status *status;
         Stat *stat;
         BusyHandler *busy;
-        size_t frame_count;
+        uint32_t page_size;
+        size_t cache_size;
         Options::SyncMode sync_mode;
         Options::LockMode lock_mode;
         bool persistent;
     };
 
     ~Pager();
+
+    [[nodiscard]] auto page_size() const -> uint32_t
+    {
+        return m_page_size;
+    }
 
     [[nodiscard]] auto page_count() const -> uint32_t
     {
@@ -54,6 +61,7 @@ public:
     }
 
     static auto open(const Parameters &param, Pager *&out) -> Status;
+    auto close() -> void;
 
     auto start_reader() -> Status;
     auto start_writer() -> Status;
@@ -114,7 +122,9 @@ private:
     explicit Pager(const Parameters &param);
 
     auto open_wal() -> Status;
+    auto close_wal() -> Status;
     auto refresh_state() -> Status;
+    auto set_page_size(uint32_t value) -> Status;
     auto read_page(PageRef &out, size_t *size_out) -> Status;
     auto read_page_from_file(PageRef &ref, size_t *size_out) const -> Status;
     auto ensure_available_buffer() -> Status;
@@ -127,6 +137,7 @@ private:
 
     Bufmgr m_bufmgr;
     Dirtylist m_dirtylist;
+    Buffer<char> m_scratch;
 
     Status *const m_status;
     Logger *const m_log;
@@ -143,6 +154,7 @@ private:
 
     Wal *m_wal = nullptr;
 
+    uint32_t m_page_size = 0;
     uint32_t m_page_count = 0;
     uint32_t m_saved_page_count = 0;
     bool m_refresh = true;
@@ -168,14 +180,14 @@ struct PointerMap {
     };
 
     // Return true if page "page_id" is a pointer map page, false otherwise.
-    [[nodiscard]] static auto is_map(Id page_id) -> bool
+    [[nodiscard]] static auto is_map(Id page_id, size_t page_size) -> bool
     {
-        return lookup(page_id) == page_id;
+        return lookup(page_id, page_size) == page_id;
     }
 
     // Return the page ID of the pointer map page that holds the back pointer for page "page_id",
     // Id::null() otherwise.
-    [[nodiscard]] static auto lookup(Id page_id) -> Id;
+    [[nodiscard]] static auto lookup(Id page_id, size_t page_size) -> Id;
 
     // Read an entry from the pointer map.
     static auto read_entry(Pager &pager, Id page_id, Entry &entry) -> Status;

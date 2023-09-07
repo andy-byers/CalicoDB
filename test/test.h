@@ -11,6 +11,10 @@
 #include "stest/rule.h"
 #include <gtest/gtest.h>
 
+#ifndef TEST_PAGE_SIZE
+#define TEST_PAGE_SIZE 1'024
+#endif // TEST_PAGE_SIZE
+
 namespace calicodb
 {
 
