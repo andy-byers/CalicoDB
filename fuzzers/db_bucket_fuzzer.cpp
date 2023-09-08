@@ -67,12 +67,15 @@ public:
 
         const auto s = m_db->run(WriteOptions(), [&stream, &db = *m_db](auto &tx) {
             std::unique_ptr<Cursor> cursors[kMaxBuckets];
+            std::string str;
+            std::string str2;
 
             while (!stream.is_empty()) {
                 const auto idx = stream.extract_integral_in_range<uint16_t>(0, kMaxBuckets - 1);
                 if (cursors[idx] == nullptr) {
                     Cursor *cursor;
-                    CHECK_OK(tx.create_bucket(BucketOptions(), std::to_string(idx), &cursor));
+                    str = std::to_string(idx);
+                    CHECK_OK(tx.create_bucket(BucketOptions(), to_slice(str), &cursor));
                     cursors[idx].reset(cursor);
                 }
                 Status s;
@@ -93,16 +96,20 @@ public:
                         }
                         break;
                     case kOpSeek:
-                        c->seek(stream.extract_random());
+                        str = stream.extract_random();
+                        c->seek(to_slice(str));
                         break;
                     case kOpModify:
                         if (c->is_valid()) {
-                            s = tx.put(*c, c->key(), stream.extract_random_record_value());
+                            str = stream.extract_random();
+                            s = tx.put(*c, c->key(), to_slice(str));
                             break;
                         }
                         [[fallthrough]];
                     case kOpPut:
-                        s = tx.put(*c, stream.extract_random(), stream.extract_random_record_value());
+                        str = stream.extract_random();
+                        str2 = stream.extract_random();
+                        s = tx.put(*c, to_slice(str), to_slice(str2));
                         break;
                     case kOpErase:
                         s = tx.erase(*c);
@@ -115,7 +122,8 @@ public:
                         break;
                     case kOpDrop:
                         cursors[idx].reset();
-                        s = tx.drop_bucket(std::to_string(idx));
+                        str = std::to_string(idx);
+                        s = tx.drop_bucket(to_slice(str));
                         c = nullptr;
                         break;
                     case kOpCheck:

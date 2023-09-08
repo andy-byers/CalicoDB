@@ -140,6 +140,16 @@ public:
     }
 };
 
+inline auto to_string(const Slice &s) -> std::string
+{
+    return {s.data(), s.size()};
+}
+
+inline auto to_slice(const std::string &s) -> Slice
+{
+    return {s.data(), s.size()};
+}
+
 template <class T>
 auto operator<<(std::ostream &os, const Id &id) -> std::ostream &
 {
@@ -149,7 +159,7 @@ auto operator<<(std::ostream &os, const Id &id) -> std::ostream &
 template <class T>
 auto operator<<(std::ostream &os, const Slice &slice) -> std::ostream &
 {
-    return os << slice.to_string();
+    return os << to_string(slice);
 }
 
 // Print information about each database page to `os`

@@ -185,7 +185,7 @@ public:
         write_out_randomly(m_random, *original, message);
         for (size_t i = 0; i < kCount; ++i) {
             auto *file = m_helper.open_unowned_file(EnvWithFiles::kSameName, Env::kReadOnly);
-            ASSERT_EQ(message, read_back_randomly(m_random, *file, message.size()));
+            ASSERT_EQ(to_string(message), read_back_randomly(m_random, *file, message.size()));
         }
     }
 
@@ -639,8 +639,8 @@ public:
         ASSERT_LT(offset, m_buffer.size());
         ASSERT_LE(offset + size, m_buffer.size());
         ASSERT_OK(m_file->read_exact(offset, size, m_buffer.data()));
-        ASSERT_EQ(Slice(m_buffer).range(0, size),
-                  Slice(m_result).range(offset, size));
+        ASSERT_EQ(to_slice(m_buffer).range(0, size),
+                  to_slice(m_result).range(offset, size));
     }
 };
 

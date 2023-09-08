@@ -13,9 +13,7 @@
 #include "utils.h"
 
 #ifdef CALICODB_TEST
-// Required for debug printing the tree structure.
-#include <functional>
-#include <string>
+// Used for debug printing the tree structure.
 #include <vector>
 #endif // CALICODB_TEST
 
@@ -278,6 +276,7 @@ private:
     return type == PointerMap::kOverflowHead ||
            type == PointerMap::kOverflowLink;
 }
+
 } // namespace
 
 auto Tree::corrupted_node(Id page_id) const -> Status
@@ -561,7 +560,7 @@ auto Tree::make_pivot(const PivotOptions &opt, Cell &pivot_out) -> Status
         while (s.is_ok() && !prefix.is_empty()) {
             PageRef *dst;
             // Allocate a new overflow page.
-            s = m_pager->allocate(dst);
+            s = allocate(kAllocateAny, dst_bptr, dst);
             if (!s.is_ok()) {
                 break;
             }
@@ -1213,6 +1212,10 @@ auto Tree::allocate(AllocationType type, Id nearby, PageRef *&page_out) -> Statu
     if (s.is_ok() && page_out == nullptr) {
         // Freelist is empty. Allocate a page from the end of the database file.
         s = m_pager->allocate(page_out);
+        if (s.is_ok() && PointerMap::is_map(page_out->page_id, m_page_size)) {
+            m_pager->release(page_out);
+            s = m_pager->allocate(page_out);
+        }
     }
     if (s.is_ok()) {
         if (page_out->refs == 1) {
@@ -1367,7 +1370,7 @@ auto Tree::emplace(Node &node, const Slice &key, const Slice &value, uint32_t in
         CALICODB_EXPECT_FALSE(src.is_empty());
         if (len == 0) {
             PageRef *ovfl;
-            s = m_pager->allocate(ovfl);
+            s = allocate(kAllocateAny, node.ref->page_id, ovfl);
             if (s.is_ok()) {
                 put_u32(next_ptr, ovfl->page_id.value);
                 len = m_page_size - kLinkContentOffset;
@@ -1654,11 +1657,11 @@ auto Tree::vacuum() -> Status
 class TreePrinter
 {
     struct StructuralData {
-        std::vector<std::string> levels;
+        std::vector<String> levels;
         std::vector<uint32_t> spaces;
     };
 
-    static auto add_to_level(StructuralData &data, const std::string &message, uint32_t target) -> void
+    static auto add_to_level(StructuralData &data, const String &message, uint32_t target) -> void
     {
         // If target is equal to levels.size(), add spaces to all levels.
         CHECK_TRUE(target <= data.levels.size());
@@ -1670,11 +1673,13 @@ class TreePrinter
             CHECK_TRUE(L_itr != end(data.levels));
             if (i++ == target) {
                 // Don't leave trailing spaces. Only add them if there will be more text.
-                L_itr->resize(L_itr->size() + *s_itr, ' ');
-                L_itr->append(message);
+                for (size_t j = 0; j < *s_itr; ++j) {
+                    CHECK_EQ(append_strings(*L_itr, " "), 0);
+                }
+                CHECK_EQ(append_strings(*L_itr, message.c_str()), 0);
                 *s_itr = 0;
             } else {
-                *s_itr += uint32_t(message.size());
+                *s_itr += uint32_t(message.length());
             }
             ++L_itr;
             ++s_itr;
@@ -1691,93 +1696,51 @@ class TreePrinter
         CHECK_TRUE(data.levels.size() == data.spaces.size());
     }
 
-    static auto append_format_string(std::string &str, const char *fmt, ...) -> void
-    {
-        std::va_list args;
-        va_start(args, fmt);
-
-        std::va_list args_copy;
-        va_copy(args_copy, args);
-        auto len = std::vsnprintf(
-            nullptr, 0,
-            fmt, args_copy);
-        va_end(args_copy);
-
-        CALICODB_EXPECT_GE(len, 0);
-        const auto offset = str.size();
-        str.resize(offset + static_cast<size_t>(len) + 1);
-        len = std::vsnprintf(
-            str.data() + offset,
-            str.size() - offset,
-            fmt, args);
-        str.pop_back();
-        va_end(args);
-
-        CALICODB_EXPECT_TRUE(0 <= len && len <= int(str.size()));
-    }
-
 public:
-    static auto print_structure(Tree &tree, std::string &repr_out) -> Status
+    static auto print_structure(Tree &tree, String &repr_out) -> Status
     {
         StructuralData data;
         const auto print = [&data](auto &node, const auto &info) {
-            std::string msg;
+            StringBuilder msg;
             if (info.idx == info.ncells) {
                 if (node.is_leaf()) {
-                    append_format_string(msg, "%u]", info.ncells);
+                    msg.append_format("%u]", info.ncells);
                 }
             } else {
                 if (info.idx == 0) {
-                    append_format_string(msg, "%u:[", node.ref->page_id.value);
+                    msg.append_format("%u:[", node.ref->page_id.value);
                     ensure_level_exists(data, info.level);
                 }
                 if (!node.is_leaf()) {
-                    msg += '*';
+                    msg.append('*');
                     if (info.idx + 1 == info.ncells) {
-                        msg += ']';
+                        msg.append(']');
                     }
                 }
             }
-            add_to_level(data, msg, info.level);
+            String msg_out;
+            CHECK_EQ(msg.build(msg_out), 0);
+            add_to_level(data, msg_out, info.level);
             return Status::ok();
         };
+        StringBuilder builder;
         auto s = InorderTraversal::traverse(tree, print);
         if (s.is_ok()) {
             for (const auto &level : data.levels) {
-                repr_out.append(level + '\n');
+                builder.append_format("%s\n", level.c_str());
             }
         }
+        CHECK_EQ(builder.build(repr_out), 0);
         return s;
     }
 
-    static auto append_escaped_string(std::string &out, const Slice &value) -> void
-    {
-        for (size_t i = 0; i < value.size(); ++i) {
-            const auto chr = value[i];
-            if (chr >= ' ' && chr <= '~') {
-                out.push_back(chr);
-            } else {
-                char buffer[10];
-                std::snprintf(buffer, sizeof(buffer), "\\x%02x", static_cast<unsigned>(chr) & 0xFF);
-                out.append(buffer);
-            }
-        }
-    }
-
-    static auto escape_string(const Slice &value) -> std::string
-    {
-        std::string out;
-        append_escaped_string(out, value);
-        return out;
-    }
-
-    static auto print_nodes(Tree &tree, std::string &repr_out) -> Status
+    static auto print_nodes(Tree &tree, String &repr_out) -> Status
     {
         const auto print = [&tree, &repr_out](auto &node, const auto &info) {
             if (info.idx == info.ncells) {
-                std::string msg;
-                append_format_string(msg, "%sternalNode(%u)\n", node.is_leaf() ? "Ex" : "In",
-                                     node.ref->page_id.value);
+                StringBuilder msg;
+                msg.append_format("%sternalNode(%u)\n", node.is_leaf() ? "Ex" : "In",
+                                  node.ref->page_id.value);
                 for (uint32_t i = 0; i < info.ncells; ++i) {
                     Cell cell;
                     if (node.read(i, cell)) {
@@ -1785,16 +1748,20 @@ public:
                     }
                     msg.append("  Cell(");
                     if (!node.is_leaf()) {
-                        append_format_string(msg, "%u,", read_child_id(cell).value);
+                        msg.append_format("%u,", read_child_id(cell).value);
                     }
                     const auto key_len = minval(32U, minval(cell.key_size, cell.local_pl_size));
-                    msg.append('"' + escape_string(Slice(cell.key, key_len)) + '"');
+                    msg.append('"');
+                    msg.append_escaped(Slice(cell.key, key_len));
+                    msg.append('"');
                     if (cell.key_size > key_len) {
-                        append_format_string(msg, " + <%zu bytes>", cell.key_size - key_len);
+                        msg.append_format(" + <%zu bytes>", cell.key_size - key_len);
                     }
                     msg.append(")\n");
                 }
-                repr_out.append(msg);
+                String msg_out;
+                CHECK_EQ(msg.build(msg_out), 0);
+                CHECK_EQ(append_strings(repr_out, msg_out.c_str()), 0);
             }
             return Status::ok();
         };
@@ -1804,8 +1771,7 @@ public:
 
 class TreeValidator
 {
-    using PageCallback = std::function<void(PageRef *&)>;
-
+    template <class PageCallback>
     static auto traverse_chain(Pager &pager, PageRef *page, const PageCallback &cb) -> void
     {
         for (;;) {
@@ -1893,12 +1859,12 @@ auto Tree::TEST_validate() -> void
     TreeValidator::validate(*this);
 }
 
-auto Tree::print_structure(std::string &repr_out) -> Status
+auto Tree::print_structure(String &repr_out) -> Status
 {
     return TreePrinter::print_structure(*this, repr_out);
 }
 
-auto Tree::print_nodes(std::string &repr_out) -> Status
+auto Tree::print_nodes(String &repr_out) -> Status
 {
     return TreePrinter::print_nodes(*this, repr_out);
 }

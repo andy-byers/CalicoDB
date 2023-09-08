@@ -116,8 +116,8 @@ protected:
           m_env(new DelayEnv(Env::default_env()))
     {
         std::filesystem::remove_all(m_filename);
-        std::filesystem::remove_all(m_filename + kDefaultWalSuffix.to_string());
-        std::filesystem::remove_all(m_filename + kDefaultShmSuffix.to_string());
+        std::filesystem::remove_all(m_filename + to_string(kDefaultWalSuffix));
+        std::filesystem::remove_all(m_filename + to_string(kDefaultShmSuffix));
     }
 
     ~ConcurrencyTests() override
@@ -224,8 +224,8 @@ protected:
             // Check the results (only readers output anything).
             for (size_t i = 0; i + 1 < co.result.size(); ++i) {
                 uint64_t n;
-                Slice slice(co.result[i]);
-                ASSERT_LE(slice, co.result[i + 1]);
+                auto slice = to_slice(co.result[i]);
+                ASSERT_LE(slice, to_slice(co.result[i + 1]));
                 ASSERT_TRUE(consume_decimal_number(slice, &n));
                 ASSERT_TRUE(slice.is_empty());
             }
@@ -310,7 +310,8 @@ protected:
                 for (size_t i = 0; i < co.op_args[1] * 2; ++i) {
                     // If the bucket exists, then it must contain co.op_arg records (the first writer to run
                     // makes sure of this).
-                    c->find(numeric_key(i % co.op_args[1]));
+                    const auto name = numeric_key(i % co.op_args[1]);
+                    c->find(to_slice(name));
                     if (!c->is_valid()) {
                         t = c->status();
                         break;
@@ -318,7 +319,7 @@ protected:
                         const auto value = c->value();
                         co.result.emplace_back(value.data(), value.size());
                     } else {
-                        EXPECT_EQ(c->value(), co.result.back()) << "non repeatable read";
+                        EXPECT_EQ(c->value(), to_slice(co.result.back())) << "non repeatable read";
                     }
                 }
                 return t.is_not_found() ? Status::ok() : t;
@@ -351,7 +352,8 @@ protected:
                 auto t = test_create_and_open_bucket(tx, BucketOptions(), "BUCKET", c);
                 for (size_t i = 0; t.is_ok() && i < co.op_args[1]; ++i) {
                     uint64_t result = 1;
-                    c->find(numeric_key(i));
+                    const auto key = numeric_key(i);
+                    c->find(to_slice(key));
                     if (c->is_valid()) {
                         Slice slice(c->value());
                         EXPECT_TRUE(consume_decimal_number(slice, &result));
@@ -362,7 +364,8 @@ protected:
                         break;
                     }
                     if (t.is_ok()) {
-                        t = tx.put(*c, numeric_key(i), numeric_key(result));
+                        const auto value = numeric_key(result);
+                        t = tx.put(*c, to_slice(key), to_slice(value));
                     }
                 }
                 EXPECT_OK(t);

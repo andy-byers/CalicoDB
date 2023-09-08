@@ -259,12 +259,12 @@ auto Schema::construct_or_reference_tree(const Slice &name, Id root_id) -> Tree 
     return tree;
 }
 
-auto Schema::unpack_and_use(Cursor &c) -> std::pair<Tree &, CursorImpl &>
+auto Schema::unpack_and_use(Cursor &c) -> UnpackedCursor
 {
     auto *c_impl = static_cast<CursorImpl *>(c.handle());
     auto *tree = Tree::get_tree(*c_impl);
     use_tree(tree);
-    return {*tree, *c_impl};
+    return {tree, c_impl};
 }
 
 auto Schema::use_tree(Tree *tree) -> void

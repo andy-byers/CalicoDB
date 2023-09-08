@@ -26,14 +26,16 @@ else()
     string(REGEX REPLACE "-frtti" "" CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS}")
 endif()
 
-# Set compiler warnings/options for the library (from @lefticus/cpp-best-practices).
 set(CALICODB_OPTIONS "")
+set(CALICODB_WARNINGS "")
+# Set compiler warnings for the library (from @lefticus/cpp-best-practices).
 if(${CMAKE_CXX_COMPILER_ID} STREQUAL MSVC)
     message(FATAL_ERROR 'Visual Studio is not yet supported')
 else() # Clang OR GNU
     set(CALICODB_OPTIONS
             -fno-exceptions
-            -fno-rtti
+            -fno-rtti)
+    set(CALICODB_WARNINGS
             -Wall
             -Wextra
             -Wshadow
@@ -50,8 +52,8 @@ else() # Clang OR GNU
             -Wimplicit-fallthrough)
 
     if(${CMAKE_CXX_COMPILER_ID} STREQUAL GNU)
-        set(CALICODB_OPTIONS
-                ${CALICODB_OPTIONS}
+        set(CALICODB_WARNINGS
+                ${CALICODB_WARNINGS}
                 -Wmisleading-indentation
                 -Wduplicated-cond
                 -Wduplicated-branches
@@ -87,6 +89,8 @@ target_sources(calicodb
                 src/page.h
                 src/pager.cpp
                 src/pager.h
+                src/pointer_map.cpp
+                src/pointer_map.h
                 src/schema.cpp
                 src/schema.h
                 src/stat.h
@@ -117,7 +121,8 @@ target_include_directories(calicodb
                $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>
         PRIVATE ${PROJECT_SOURCE_DIR}/port)
 target_compile_options(calicodb
-        PRIVATE ${CALICODB_OPTIONS})
+        PRIVATE ${CALICODB_OPTIONS}
+                ${CALICODB_WARNINGS})
 target_compile_definitions(calicodb
         PUBLIC CALICODB_VERSION_MAJOR=${PROJECT_VERSION_MAJOR}
                CALICODB_VERSION_MINOR=${PROJECT_VERSION_MINOR}

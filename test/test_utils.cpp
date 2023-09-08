@@ -690,7 +690,7 @@ void ConsumeDecimalNumberRoundtripTest(uint64_t number,
 {
     std::string decimal_number = std::to_string(number);
     std::string input_string = decimal_number + padding;
-    Slice input(input_string);
+    auto input = to_slice(input_string);
     Slice output = input;
     uint64_t result;
     ASSERT_TRUE(consume_decimal_number(output, &result));
@@ -743,7 +743,7 @@ TEST(Logging, ConsumeDecimalNumberRoundtripWithPadding)
 
 void ConsumeDecimalNumberOverflowTest(const std::string &input_string)
 {
-    Slice input(input_string);
+    auto input = to_slice(input_string);
     Slice output = input;
     uint64_t result;
     ASSERT_EQ(false, consume_decimal_number(output, &result));
@@ -772,7 +772,7 @@ TEST(Logging, ConsumeDecimalNumberOverflow)
 
 void ConsumeDecimalNumberNoDigitsTest(const std::string &input_string)
 {
-    Slice input(input_string);
+    auto input = to_slice(input_string);
     Slice output = input;
     uint64_t result;
     ASSERT_EQ(false, consume_decimal_number(output, &result));
@@ -804,9 +804,6 @@ TEST(Logging, AppendFmtString)
 
 TEST(Slice, Construction)
 {
-    std::string s("123");
-    ASSERT_EQ(s, Slice(s));
-
     const auto *p = "123";
     ASSERT_EQ(p, Slice(p));
     ASSERT_EQ(p, Slice(p, 3));
@@ -899,10 +896,8 @@ static constexpr auto constexpr_slice_test(Slice s, Slice answer) -> int
 
 TEST(Slice, ConstantExpressions)
 {
-    static constexpr std::string_view sv("42");
     static constexpr Slice s1("42");
-    static constexpr Slice s2(sv);
-    ASSERT_EQ(0, constexpr_slice_test(s1, sv));
+    static constexpr Slice s2("42", 2);
     ASSERT_EQ(0, constexpr_slice_test(s1, s2));
 }
 
@@ -910,16 +905,16 @@ TEST(Slice, NonPrintableSlice)
 {
     {
         const std::string s("\x00\x01", 2);
-        ASSERT_EQ(2, Slice(s).size());
+        ASSERT_EQ(2, to_slice(s).size());
     }
     {
         const std::string s("\x00", 1);
-        ASSERT_EQ(0, Slice(s).compare(s));
+        ASSERT_EQ(0, to_slice(s).compare(to_slice(s)));
     }
     {
         std::string s("\x00\x00", 2);
         std::string t("\x00\x01", 2);
-        ASSERT_LT(Slice(s).compare(t), 0);
+        ASSERT_LT(to_slice(s).compare(to_slice(t)), 0);
     }
     {
         std::string u("\x0F", 1);
@@ -930,7 +925,7 @@ TEST(Slice, NonPrintableSlice)
         ASSERT_LT(v[0], u[0]);
 
         // Unsigned comparison should come out the other way.
-        ASSERT_LT(Slice(u).compare(v), 0);
+        ASSERT_LT(to_slice(u).compare(to_slice(v)), 0);
     }
 }
 
@@ -983,13 +978,13 @@ TEST_F(StringBuilderTests, Append)
     const char msg_c = 'd';
 
     m_builder
-        .append(msg_a)
-        .append(msg_b)
+        .append(to_slice(msg_a))
+        .append(to_slice(msg_b))
         .append(msg_c);
 
     const auto str = build_string();
     ASSERT_EQ(str.length(), (msg_a + msg_b + msg_c).size());
-    ASSERT_EQ(Slice(str.c_str()), msg_a + msg_b + msg_c);
+    ASSERT_EQ(Slice(str.c_str(), str.length()), to_slice(msg_a + msg_b + msg_c));
 }
 
 TEST_F(StringBuilderTests, AppendFormat)
@@ -998,8 +993,9 @@ TEST_F(StringBuilderTests, AppendFormat)
     m_builder.append_format("hello %d %s", 42, "goodbye")
         .append_format("%s", long_str.data())
         .append_format("empty");
-    const auto str = build_string();
-    ASSERT_EQ(Slice(str.c_str()), "hello 42 goodbye" + long_str + "empty");
+    const auto lhs = build_string();
+    const auto rhs = "hello 42 goodbye" + long_str + "empty";
+    ASSERT_EQ(Slice(lhs.c_str()), to_slice(rhs));
 }
 
 TEST_F(StringBuilderTests, AppendEscaped)
@@ -1008,8 +1004,9 @@ TEST_F(StringBuilderTests, AppendEscaped)
     m_builder.append_format("hello %d %s", 42, "goodbye")
         .append_format("%s", long_str.data())
         .append_format("empty");
-    const auto str = build_string();
-    ASSERT_EQ(Slice(str.c_str()), "hello 42 goodbye" + long_str + "empty");
+    const auto lhs = build_string();
+    const auto rhs = "hello 42 goodbye" + long_str + "empty";
+    ASSERT_EQ(Slice(lhs.c_str()), to_slice(rhs));
 }
 
 static constexpr const char *kTestMessages[] = {
@@ -1030,7 +1027,7 @@ TEST_F(StringBuilderTests, AppendMultiple)
         m_builder.append(Slice(kTestMessages[r]));
     }
     const auto str = build_string();
-    ASSERT_EQ(Slice(str.c_str()), answer);
+    ASSERT_EQ(Slice(str.c_str()), to_slice(answer));
 }
 
 TEST_F(StringBuilderTests, AppendFormatMultiple)
@@ -1069,7 +1066,7 @@ TEST_F(StringBuilderTests, AppendFormatMultiple)
         answer.append(buffer);
     }
     const auto str = build_string();
-    ASSERT_EQ(Slice(str.c_str()), answer);
+    ASSERT_EQ(Slice(str.c_str()), to_slice(answer));
 }
 
 } // namespace calicodb::test

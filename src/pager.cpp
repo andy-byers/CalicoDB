@@ -14,29 +14,6 @@
 namespace calicodb
 {
 
-namespace
-{
-
-constexpr auto kEntrySize =
-    sizeof(char) +    // Type (1 B)
-    sizeof(uint32_t); // Back pointer (4 B)
-
-auto entry_offset(Id map_id, Id page_id) -> size_t
-{
-    CALICODB_EXPECT_LT(map_id, page_id);
-    return (page_id.value - map_id.value - 1) * kEntrySize;
-}
-
-auto decode_entry(const char *data) -> PointerMap::Entry
-{
-    return {
-        Id(get_u32(data + 1)),
-        PointerMap::Type{*data},
-    };
-}
-
-} // namespace
-
 auto Pager::set_page_size(uint32_t value) -> Status
 {
     CALICODB_EXPECT_LT(m_mode, kError);
@@ -148,7 +125,8 @@ auto Pager::close_wal() -> Status
             s = Status::ok();
         }
     }
-    Alloc::delete_object(exchange(m_wal, nullptr));
+    Alloc::delete_object(m_wal);
+    m_wal = nullptr;
     return s;
 }
 
@@ -157,8 +135,7 @@ auto Pager::open(const Parameters &param, Pager *&pager_out) -> Status
     Status s;
     pager_out = Alloc::new_object<Pager>(param);
     if (pager_out) {
-        auto page_size = param.page_size;
-        s = pager_out->set_page_size(page_size);
+        s = pager_out->set_page_size(param.page_size);
     } else {
         s = Status::no_memory();
     }
@@ -186,6 +163,8 @@ Pager::Pager(const Parameters &param)
     CALICODB_EXPECT_NE(m_file, nullptr);
     CALICODB_EXPECT_NE(m_status, nullptr);
     CALICODB_EXPECT_NE(m_stat, nullptr);
+    CALICODB_EXPECT_NE(m_db_name, nullptr);
+    CALICODB_EXPECT_NE(m_wal_name, nullptr);
 }
 
 Pager::~Pager()
@@ -459,11 +438,10 @@ auto Pager::allocate(PageRef *&page_out) -> Status
 
     static constexpr uint32_t kMaxPageCount = 0xFF'FF'FF'FF;
     if (m_page_count == kMaxPageCount) {
-        return Status::not_supported("reached the maximum allowed DB size");
+        return Status::not_supported("reached the maximum allowed database size");
     }
 
-    auto page_id = Id::from_index(m_page_count);
-    page_id.value += PointerMap::is_map(page_id, m_page_size);
+    const auto page_id = Id::from_index(m_page_count);
     auto s = get_unused_page(page_out);
     if (s.is_ok()) {
         page_out->page_id = page_id;
@@ -663,62 +641,6 @@ auto Pager::assert_state() const -> bool
             CALICODB_EXPECT_TRUE(false && "unrecognized Pager::Mode");
     }
     return true;
-}
-
-auto PointerMap::lookup(Id page_id, size_t page_size) -> Id
-{
-    // Root page (1) has no parents, and page 2 is the first pointer map page. If `page_id` is a pointer map
-    // page, `page_id` will be returned.
-    if (page_id.value < kFirstMapPage) {
-        return Id::null();
-    }
-    const auto len = page_size / kEntrySize + 1;
-    const auto idx = (page_id.value - kFirstMapPage) / len;
-    return Id(idx * len + kFirstMapPage);
-}
-
-auto PointerMap::read_entry(Pager &pager, Id page_id, Entry &entry_out) -> Status
-{
-    const auto mid = lookup(page_id, pager.page_size());
-    const auto offset = entry_offset(mid, page_id);
-    if (offset + kEntrySize > pager.page_size()) {
-        return Status::corruption();
-    }
-
-    PageRef *map;
-    auto s = pager.acquire(mid, map);
-    if (s.is_ok()) {
-        entry_out = decode_entry(map->data + offset);
-        pager.release(map);
-        if (entry_out.type <= kEmpty || entry_out.type >= kTypeCount) {
-            s = Status::corruption();
-        }
-    }
-    return s;
-}
-
-auto PointerMap::write_entry(Pager &pager, Id page_id, Entry entry) -> Status
-{
-    const auto mid = lookup(page_id, pager.page_size());
-
-    PageRef *map;
-    auto s = pager.acquire(mid, map);
-    if (s.is_ok()) {
-        const auto offset = entry_offset(mid, page_id);
-        if (offset + kEntrySize > pager.page_size()) {
-            return Status::corruption();
-        }
-        const auto [back_ptr, type] = decode_entry(
-            map->data + offset);
-        if (entry.back_ptr != back_ptr || entry.type != type) {
-            pager.mark_dirty(*map);
-            auto *data = map->data + offset;
-            *data++ = entry.type;
-            put_u32(data, entry.back_ptr.value);
-        }
-        pager.release(map);
-    }
-    return s;
 }
 
 } // namespace calicodb

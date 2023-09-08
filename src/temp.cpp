@@ -41,6 +41,7 @@ public:
                 return Status::no_memory();
             }
         } else if (Slice(m_filename) != Slice(filename)) {
+            // Only supports a single file: the database file. The WAL is simulated by TempWal.
             return Status::not_supported();
         }
         return new_temp_file(file_out);

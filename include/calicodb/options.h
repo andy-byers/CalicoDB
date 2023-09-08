@@ -8,7 +8,7 @@
 #include <cstddef>
 
 #ifndef CALICODB_DEFAULT_PAGE_SIZE
-#define CALICODB_DEFAULT_PAGE_SIZE 4'096
+#define CALICODB_DEFAULT_PAGE_SIZE 4'096U
 #endif // CALICODB_DEFAULT_PAGE_SIZE
 
 namespace calicodb

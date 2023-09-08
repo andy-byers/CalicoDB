@@ -10,6 +10,7 @@
 #include "header.h"
 #include "node.h"
 #include "pager.h"
+#include "pointer_map.h"
 #include "unique_ptr.h"
 
 namespace calicodb
@@ -108,8 +109,8 @@ public:
         return m_root_id;
     }
 
-    auto print_structure(std::string &repr_out) -> Status;
-    auto print_nodes(std::string &repr_out) -> Status;
+    auto print_structure(String &repr_out) -> Status;
+    auto print_nodes(String &repr_out) -> Status;
     auto TEST_validate() -> void;
 
 private:

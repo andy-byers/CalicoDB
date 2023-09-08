@@ -6,6 +6,7 @@
 #define CALICODB_ALLOC_H
 
 #include "utils.h"
+#include <new>
 
 namespace calicodb
 {

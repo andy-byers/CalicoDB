@@ -5,6 +5,7 @@
 #include "freelist.h"
 #include "header.h"
 #include "pager.h"
+#include "pointer_map.h"
 
 namespace calicodb
 {

@@ -70,7 +70,7 @@ auto TxImpl::put(Cursor &c, const Slice &key, const Slice &value) -> Status
 {
     return run_write_operation([&schema = m_schema, &c, &key, &value] {
         const auto [tree, c_impl] = schema.unpack_and_use(c);
-        return tree.put(c_impl, key, value);
+        return tree->put(*c_impl, key, value);
     });
 }
 
@@ -78,7 +78,7 @@ auto TxImpl::erase(Cursor &c, const Slice &key) -> Status
 {
     return run_write_operation([&schema = m_schema, &c, &key] {
         const auto [tree, c_impl] = schema.unpack_and_use(c);
-        return tree.erase(c_impl, key);
+        return tree->erase(*c_impl, key);
     });
 }
 
@@ -86,7 +86,7 @@ auto TxImpl::erase(Cursor &c) -> Status
 {
     return run_write_operation([&schema = m_schema, &c] {
         const auto [tree, c_impl] = schema.unpack_and_use(c);
-        return tree.erase(c_impl);
+        return tree->erase(*c_impl);
     });
 }
 

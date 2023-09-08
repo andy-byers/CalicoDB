@@ -5,6 +5,7 @@
 #ifndef CALICODB_BUFMGR_H
 #define CALICODB_BUFMGR_H
 
+#include "buffer.h"
 #include "page.h"
 #include "utils.h"
 
@@ -67,7 +68,7 @@ public:
     auto unref(PageRef &ref) -> void;
 
     // Return the number of live page references
-    [[nodiscard]] auto refsum() const -> unsigned
+    [[nodiscard]] auto refsum() const -> size_t
     {
         return m_refsum;
     }
@@ -100,7 +101,7 @@ private:
             Alloc::deallocate(m_table);
         }
 
-        [[nodiscard]] auto preallocate(size_t min_buffers) -> int
+        [[nodiscard]] auto reallocate(size_t min_buffers) -> int
         {
             if (m_capacity) {
                 return 0;
@@ -112,9 +113,9 @@ private:
             const auto table_size = capacity * sizeof(PageRef *);
             if (auto *table = static_cast<PageRef **>(
                     Alloc::allocate(table_size))) {
-                std::memset(table, 0, table_size);
                 m_capacity = capacity;
                 m_table = table;
+                clear();
                 return 0;
             }
             return -1;
@@ -176,19 +177,27 @@ private:
     // Unordered.
     PageRef m_in_use;
 
-    // LRU-ordered list containing page references. Elements are considered
-    // valid if ref->get_flag(PageRef::kCached) evaluates to true.
+    // LRU-ordered list containing unreferenced pages. Elements are considered
+    // to be in the cache if ref->get_flag(PageRef::kCached) evaluates to true.
     PageRef m_lru;
+
+    // Storage for m_min_buffers database pages and associated metadata.
+    Buffer<PageRef> m_metadata;
+    Buffer<char> m_backing;
+
+    // Linked list of extra page buffers.
+    PageRef *m_extra = nullptr;
 
     // Root page is stored separately. It is accessed very often, so it makes
     // sense to keep it in a dedicated location rather than having to find it
     // in the hash map each time.
-    PageRef *m_root;
+    PageRef *m_root = nullptr;
 
-    size_t m_min_buffers;
-    size_t m_num_buffers;
     Stat *const m_stat;
-    unsigned m_refsum = 0;
+
+    const size_t m_min_buffers;
+    size_t m_num_buffers = 0;
+    size_t m_refsum = 0;
 };
 
 class Dirtylist

@@ -111,7 +111,8 @@ public:
                   << sample << R"(" + <)" << missing_len << " bytes>\n";
 #endif // FUZZER_TRACE
 
-        std::string key, value;
+        std::string str;
+        std::string str2;
         Status s;
 
         auto &schema = m_tx->schema();
@@ -120,22 +121,25 @@ public:
 
         switch (op_type) {
             case kBucketGet:
-                m_c->find(stream.extract_random());
+                str = stream.extract_random();
+                m_c->find(to_slice(str));
                 s = m_c->status();
                 break;
             case kBucketPut:
-                key = stream.extract_random();
-                s = m_tx->put(*m_c, key, stream.extract_random_record_value());
+                str = stream.extract_random();
+                str2 = stream.extract_random();
+                s = m_tx->put(*m_c, to_slice(str), to_slice(str2));
                 break;
             case kBucketErase:
-                s = m_tx->erase(*m_c, stream.extract_random());
+                str = stream.extract_random();
+                s = m_tx->erase(*m_c, to_slice(str));
                 break;
             case kCursorErase:
                 s = m_tx->erase(*m_c);
                 break;
             case kCursorSeek:
-                key = stream.extract_random();
-                m_c->seek(key);
+                str = stream.extract_random();
+                m_c->seek(to_slice(str));
                 break;
             case kCursorNext:
                 if (m_c->is_valid()) {

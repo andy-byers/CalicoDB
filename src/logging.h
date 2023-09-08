@@ -112,7 +112,7 @@ public:
             return m_fallback;
         }
         return Status(StringBuilder::release_string(
-            std::move(string)));
+            move(string)));
     }
 
     template <class... Args>

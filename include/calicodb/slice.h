@@ -7,7 +7,6 @@
 
 #include <cassert>
 #include <cstring>
-#include <string>
 
 namespace calicodb
 {
@@ -28,17 +27,7 @@ public:
         : m_data(data)
     {
         assert(m_data != nullptr);
-        m_size = std::char_traits<char>::length(m_data);
-    }
-
-    constexpr Slice(const std::string_view &rhs)
-        : Slice(rhs.data(), rhs.size())
-    {
-    }
-
-    Slice(const std::string &rhs)
-        : Slice(rhs.data(), rhs.size())
-    {
+        m_size = __builtin_strlen(m_data);
     }
 
     [[nodiscard]] constexpr auto is_empty() const -> bool
@@ -117,15 +106,6 @@ public:
             }
         }
         return r;
-    }
-
-    // Convenience conversion to std::string
-    // Memory allocated for the std::string is not tracked by the allocation subsystem. Also, the
-    // constructor of std::string throws std::bad_alloc. If this happens, std::terminate() will be
-    // called, since CalicoDB is compiled without exceptions.
-    [[nodiscard]] auto to_string() const -> std::string
-    {
-        return {m_data, m_size};
     }
 
 private:

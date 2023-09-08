@@ -14,6 +14,10 @@ namespace calicodb
 
 struct PageRef;
 
+// Allocate this many bytes of extra space at the end of each page buffer to catch
+// out-of-bounds reads and writes that might occur if the database is corrupted.
+static constexpr size_t kSpilloverLen = sizeof(void *);
+
 struct DirtyHdr {
     DirtyHdr *dirty;
     DirtyHdr *prev_entry;
@@ -23,9 +27,12 @@ struct DirtyHdr {
     [[nodiscard]] inline auto get_page_ref() const -> const PageRef *;
 };
 
+static_assert(std::is_trivially_copyable_v<DirtyHdr>);
+
 struct PageRef {
     char *data;
     PageRef *next_hash;
+    PageRef *next_extra;
     PageRef *prev_entry;
     PageRef *next_entry;
     DirtyHdr dirty_hdr;
@@ -37,7 +44,7 @@ struct PageRef {
         kNormal = 0,
         kCached = 1,
         kDirty = 2,
-        kExtra = 4,
+        kAppend = 4,
     } flag;
 
     [[nodiscard]] auto key() const -> uint32_t
@@ -47,34 +54,32 @@ struct PageRef {
 
     static auto alloc(size_t page_size) -> PageRef *
     {
-        static_assert(std::is_trivially_copyable_v<DirtyHdr>);
-        static_assert(std::is_trivially_copyable_v<PageRef>);
-
-        // Allocate this many bytes of extra space at the end of the page buffer to catch
-        // out-of-bounds reads and writes that might occur if the database is corrupted.
-        static constexpr size_t kSpilloverLen = sizeof(void *);
-
         auto *ref = static_cast<PageRef *>(Alloc::allocate(
             sizeof(PageRef) + page_size + kSpilloverLen));
         if (ref) {
             CALICODB_EXPECT_TRUE(is_aligned(ref, alignof(PageRef)));
-            IntrusiveList::initialize(*ref);
-            IntrusiveList::initialize(ref->dirty_hdr);
-            *ref = {
-                // Page buffer is located right after the PageRef struct.
-                reinterpret_cast<char *>(ref + 1),
-                nullptr,
-                // Next 3 members already set by IntrusiveList::initialize(). Forward the values.
-                ref->prev_entry,
-                ref->next_entry,
-                ref->dirty_hdr,
-                Id::null(),
-                0,
-                PageRef::kNormal,
-            };
-            std::memset(ref->data, 0, page_size);
+            init(*ref, reinterpret_cast<char *>(ref + 1), page_size);
         }
         return ref;
+    }
+
+    static auto init(PageRef &ref, char *page, size_t page_size) -> void
+    {
+        IntrusiveList::initialize(ref);
+        IntrusiveList::initialize(ref.dirty_hdr);
+        ref = {
+            page,
+            nullptr,
+            nullptr,
+            // Next 3 members already set by IntrusiveList::initialize(). Forward the values.
+            ref.prev_entry,
+            ref.next_entry,
+            ref.dirty_hdr,
+            Id::null(),
+            0,
+            PageRef::kNormal,
+        };
+        std::memset(ref.data, 0, page_size);
     }
 
     static auto free(PageRef *ref) -> void
@@ -95,6 +100,8 @@ struct PageRef {
         flag = static_cast<Flag>(flag & ~f);
     }
 };
+
+static_assert(std::is_trivially_copyable_v<PageRef>);
 
 auto DirtyHdr::get_page_ref() -> PageRef *
 {

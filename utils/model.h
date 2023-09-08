@@ -12,8 +12,8 @@
 
 #include "calicodb/cursor.h"
 #include "calicodb/db.h"
-#include "cursor_impl.h"
 #include "common.h"
+#include "cursor_impl.h"
 #include "logging.h"
 #include <iostream>
 #include <list>
@@ -110,8 +110,8 @@ class ModelCursorBase : public Cursor
     auto save_position() const -> void
     {
         if (!m_saved && m_c->is_valid()) {
-            m_saved_key = m_c->key().to_string();
-            m_saved_val = m_c->value().to_string();
+            m_saved_key = to_string(m_c->key());
+            m_saved_val = to_string(m_c->value());
             // The element at m_itr may have been erased. This will cause m_itr to be
             // invalidated, but we won't be able to tell, since it probably won't equal
             // end(*m_map). This makes sure the iterator can still be used as a hint in
@@ -181,13 +181,13 @@ public:
             const auto key = m_saved
                                  ? m_saved_key
                                  : m_itr->first;
-            CHECK_EQ(key, m_c->key().to_string());
+            CHECK_EQ(key, to_string(m_c->key()));
 
             std::string value;
             if constexpr (!kIsSchema) {
                 value = m_saved ? m_saved_val : m_itr->second;
             }
-            CHECK_EQ(value, m_c->value().to_string());
+            CHECK_EQ(value, to_string(m_c->value()));
         }
     }
 
@@ -204,14 +204,14 @@ public:
     auto find(const Slice &key) -> void override
     {
         m_saved = false;
-        m_itr = m_map->find(key.to_string());
+        m_itr = m_map->find(to_string(key));
         m_c->find(key);
     }
 
     auto seek(const Slice &key) -> void override
     {
         m_saved = false;
-        m_itr = m_map->lower_bound(key.to_string());
+        m_itr = m_map->lower_bound(to_string(key));
         m_c->seek(key);
     }
 

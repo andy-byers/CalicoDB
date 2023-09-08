@@ -160,42 +160,6 @@ private:
     bool m_refresh = true;
 };
 
-// The first pointer map page is always on page 2, right after the root page.
-static constexpr size_t kFirstMapPage = 2;
-
-struct PointerMap {
-    enum Type : char {
-        kEmpty,
-        kTreeNode,
-        kTreeRoot,
-        kOverflowHead,
-        kOverflowLink,
-        kFreelistPage,
-        kTypeCount
-    };
-
-    struct Entry {
-        Id back_ptr;
-        Type type = kEmpty;
-    };
-
-    // Return true if page "page_id" is a pointer map page, false otherwise.
-    [[nodiscard]] static auto is_map(Id page_id, size_t page_size) -> bool
-    {
-        return lookup(page_id, page_size) == page_id;
-    }
-
-    // Return the page ID of the pointer map page that holds the back pointer for page "page_id",
-    // Id::null() otherwise.
-    [[nodiscard]] static auto lookup(Id page_id, size_t page_size) -> Id;
-
-    // Read an entry from the pointer map.
-    static auto read_entry(Pager &pager, Id page_id, Entry &entry) -> Status;
-
-    // Write an entry to the pointer map.
-    static auto write_entry(Pager &pager, Id page_id, Entry entry) -> Status;
-};
-
 } // namespace calicodb
 
 #endif // CALICODB_PAGER_H

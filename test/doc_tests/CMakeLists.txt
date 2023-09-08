@@ -17,6 +17,7 @@ add_executable(doc_examples "${EXAMPLES_SOURCE}")
 target_link_libraries(doc_examples calicodb)
 target_compile_options(doc_examples
         PRIVATE ${CALICODB_OPTIONS}
+                ${CALICODB_WARNINGS}
                 -Wno-unused-parameter
                 -Wno-unused)
 
