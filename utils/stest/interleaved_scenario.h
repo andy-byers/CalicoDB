@@ -22,7 +22,10 @@ public:
     {
     }
 
-    ~InterleavedScenario() override = default;
+    ~InterleavedScenario() override
+    {
+        delete[] m_seen;
+    }
 
 protected:
     auto reset_scenario() -> void override
