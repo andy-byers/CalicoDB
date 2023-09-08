@@ -11,6 +11,7 @@
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
+#include <type_traits>
 
 #if NDEBUG
 #define CALICODB_EXPECT_(expr, file, line)
@@ -65,6 +66,8 @@ static constexpr uint32_t kMaxPageSize = 32'768;
 static constexpr size_t kMinFrameCount = 1;
 static constexpr size_t kMaxCacheSize = 1 << 30;
 static constexpr size_t kScratchBufferPages = 3;
+// The first pointer map page is always on page 2, right after the root page.
+static constexpr size_t kFirstMapPage = 2;
 static constexpr Slice kDefaultWalSuffix = "-wal";
 static constexpr Slice kDefaultShmSuffix = "-shm";
 static constexpr uintptr_t kZeroSizePtr = 13;

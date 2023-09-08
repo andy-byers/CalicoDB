@@ -8,6 +8,7 @@
 #include "port.h"
 #include "unique_ptr.h"
 #include "utils.h"
+#include <cerrno>
 #include <ctime>
 #include <fcntl.h>
 #include <sys/mman.h>
@@ -1012,7 +1013,9 @@ auto PosixShm::lock_impl(size_t r, size_t n, ShmLockFlag flags) -> Status
             return posix_error(errno);
         }
         CALICODB_EXPECT_FALSE(reader_mask & mask);
-        std::fill(state + r, state + r + n, -1);
+        for (size_t i = 0; i < n; ++i) {
+            state[r + i] = -1;
+        }
         writer_mask |= mask;
     }
     CALICODB_EXPECT_TRUE(snode->check_locks());

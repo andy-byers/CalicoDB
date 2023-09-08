@@ -58,15 +58,15 @@ auto ModelTx::check_consistency() const -> void
 {
     for (const auto &[name, map] : m_temp) {
         Cursor *c;
-        CHECK_OK(m_tx->open_bucket(name, c));
+        CHECK_OK(m_tx->open_bucket(name.c_str(), c));
         auto copy = map;
         c->seek_first();
         while (c->is_valid()) {
-            const auto key = c->key().to_string();
+            const auto key = to_string(c->key());
             const auto itr = map.find(key);
             CHECK_TRUE(itr != end(map));
             CHECK_EQ(itr->first, key);
-            CHECK_EQ(itr->second, c->value().to_string());
+            CHECK_EQ(itr->second, to_string(c->value()));
             copy.erase(key);
             c->next();
         }
@@ -90,7 +90,7 @@ auto ModelTx::create_bucket(const BucketOptions &options, const Slice &name, Cur
     auto s = m_tx->create_bucket(options, name, c_out);
     if (s.is_ok()) {
         // NOOP if `name` already exists.
-        m_schema.move_to(m_temp.insert(m_schema.m_itr, {name.to_string(), {}}));
+        m_schema.move_to(m_temp.insert(m_schema.m_itr, {to_string(name), {}}));
         if (c_out) {
             CHECK_TRUE(*c_out != nullptr);
             *c_out = open_model_cursor(**c_out, m_schema.m_itr->second);
@@ -105,7 +105,7 @@ auto ModelTx::open_bucket(const Slice &name, Cursor *&c_out) const -> Status
 {
     auto s = m_tx->open_bucket(name, c_out);
     if (s.is_ok()) {
-        m_schema.move_to(m_temp.find(name.to_string()));
+        m_schema.move_to(m_temp.find(to_string(name)));
         CHECK_TRUE(m_schema.m_itr != end(m_temp));
         c_out = open_model_cursor(*c_out, m_schema.m_itr->second);
     } else {
@@ -124,8 +124,8 @@ auto ModelTx::open_model_cursor(Cursor &c, KVMap &map) const -> Cursor *
 
 auto ModelTx::put(Cursor &c, const Slice &key, const Slice &value) -> Status
 {
-    const auto key_copy = key.to_string();
-    const auto value_copy = value.to_string();
+    const auto key_copy = to_string(key);
+    const auto value_copy = to_string(value);
     auto &m = use_cursor<KVMap>(c);
     auto s = m_tx->put(c, key, value);
     if (s.is_ok()) {
@@ -138,7 +138,7 @@ auto ModelTx::put(Cursor &c, const Slice &key, const Slice &value) -> Status
 
 auto ModelTx::erase(Cursor &c, const Slice &key) -> Status
 {
-    const auto key_copy = key.to_string();
+    const auto key_copy = to_string(key);
     auto &m = use_cursor<KVMap>(c);
     auto s = m_tx->erase(c, key);
     if (s.is_ok()) {

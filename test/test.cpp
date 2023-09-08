@@ -80,7 +80,7 @@ auto write_string_to_file(Env &env, const char *filename, const std::string &buf
     } else {
         write_pos = static_cast<size_t>(offset);
     }
-    ASSERT_OK(file->write(write_pos, buffer));
+    ASSERT_OK(file->write(write_pos, buffer.c_str()));
     ASSERT_OK(file->sync());
     delete file;
 }

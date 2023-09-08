@@ -13,6 +13,7 @@ target_include_directories(calicodb_utils
         PUBLIC "${PROJECT_SOURCE_DIR}/src"
                "${PROJECT_SOURCE_DIR}/utils")
 target_compile_options(calicodb_utils
-        PUBLIC "${CALICODB_OPTIONS}")
+        PUBLIC ${CALICODB_OPTIONS}
+               ${CALICODB_WARNINGS})
 
 add_subdirectory(stest)

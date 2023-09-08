@@ -6,6 +6,7 @@
 #define CALICODB_UTILS_FAKE_ENV_H
 
 #include "calicodb/env.h"
+#include <string>
 #include <unordered_map>
 #include <vector>
 

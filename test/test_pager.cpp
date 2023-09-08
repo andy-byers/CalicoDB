@@ -405,21 +405,14 @@ protected:
     }
 };
 
-TEST_F(PagerTests, LastPageIsNotPointerMap)
-{
-    // If this particular page ends up being a pointer map, we would need to alter the
-    // guard at the beginning of Pager::allocate() to prevent the page ID from wrapping.
-    ASSERT_FALSE(PointerMap::is_map(Id::from_index(std::numeric_limits<uint32_t>::max() - 1), TEST_PAGE_SIZE));
-}
-
 TEST_F(PagerTests, AllocatePage)
 {
     pager_update([this] {
-        // Pager layer skips pointer map pages, and the root already exists.
+        // Root already exists.
+        ASSERT_EQ(Id(2), allocate_page());
         ASSERT_EQ(Id(3), allocate_page());
         ASSERT_EQ(Id(4), allocate_page());
-        ASSERT_EQ(Id(5), allocate_page());
-        ASSERT_EQ(5, m_pager->page_count());
+        ASSERT_EQ(4, m_pager->page_count());
     });
 }
 
@@ -429,16 +422,16 @@ TEST_F(PagerTests, AcquirePage)
         allocate_page();
         allocate_page();
         allocate_page();
-        ASSERT_EQ(5, m_pager->page_count());
+        ASSERT_EQ(4, m_pager->page_count());
 
         PageRef *page;
-        for (uint32_t n = 1; n < 5; ++n) {
+        for (uint32_t n = 1; n < 4; ++n) {
             ASSERT_OK(m_pager->acquire(Id(n), page));
             m_pager->release(page);
-            ASSERT_EQ(5, m_pager->page_count());
+            ASSERT_EQ(4, m_pager->page_count());
         }
-        // Attempt to skip page 5.
-        ASSERT_TRUE(m_pager->acquire(Id(6), page).is_corruption());
+        // Attempt to skip page 4.
+        ASSERT_TRUE(m_pager->acquire(Id(5), page).is_corruption());
     });
 }
 
@@ -669,161 +662,6 @@ TEST_F(PagerTests, DeathTest)
     });
 }
 #endif // NDEBUG
-
-class FreelistTests : public PagerTests
-{
-public:
-    decltype(m_page_ids) m_ordering;
-    std::default_random_engine m_rng;
-
-    explicit FreelistTests()
-        : m_rng(42)
-    {
-    }
-
-    auto SetUp() -> void override
-    {
-        PagerTests::SetUp();
-    }
-
-    auto shuffle_order() -> void
-    {
-        std::shuffle(begin(m_ordering), end(m_ordering), m_rng);
-    }
-
-    static constexpr size_t kFreelistLen = TEST_PAGE_SIZE * 5;
-    auto populate_freelist(bool shuffle) -> void
-    {
-        pager_update([this, shuffle] {
-            PageRef *page;
-            for (size_t i = 0; i < kFreelistLen; ++i) {
-                allocate_page(page);
-                m_pager->release(page);
-            }
-            m_ordering = m_page_ids;
-            if (shuffle) {
-                shuffle_order();
-            }
-            for (auto id : m_ordering) {
-                ASSERT_OK(m_pager->acquire(id, page));
-                ASSERT_OK(Freelist::add(*m_pager, page));
-            }
-            ASSERT_OK(m_pager->commit());
-        });
-    }
-
-    auto test_pop_any()
-    {
-        pager_update([this] {
-            PageRef *page;
-            std::vector<Id> freelist_page_ids(m_page_ids.size());
-            for (size_t i = 0; i < m_page_ids.size(); ++i) {
-                ASSERT_OK(Freelist::remove(*m_pager, Freelist::kRemoveAny,
-                                           Id::null(), page));
-                ASSERT_NE(page, nullptr);
-                freelist_page_ids[i] = page->page_id;
-                m_pager->release(page);
-            }
-            std::sort(begin(freelist_page_ids), end(freelist_page_ids));
-            ASSERT_EQ(freelist_page_ids, m_page_ids);
-            ASSERT_OK(m_pager->commit());
-        });
-    }
-
-    auto test_pop_exact_found()
-    {
-        pager_update([this] {
-            std::vector<Id> freelist_page_ids;
-            shuffle_order();
-            PageRef *page;
-            for (auto exact : m_ordering) {
-                freelist_page_ids.emplace_back(exact);
-                ASSERT_OK(Freelist::remove(*m_pager, Freelist::kRemoveExact,
-                                           freelist_page_ids.back(), page))
-                    << "failed to pop page " << exact.value;
-                ASSERT_FALSE(freelist_page_ids.back().is_null());
-                ASSERT_EQ(freelist_page_ids.back(), exact);
-                m_pager->release(page);
-            }
-            std::sort(begin(freelist_page_ids), end(freelist_page_ids));
-            ASSERT_EQ(freelist_page_ids, m_page_ids);
-            ASSERT_OK(m_pager->commit());
-        });
-    }
-
-    auto test_pop_exact_not_found()
-    {
-        pager_update([this] {
-            PageRef *page;
-            for (size_t i = 0; i < m_ordering.size(); i += 2) {
-                ASSERT_OK(Freelist::remove(*m_pager, Freelist::kRemoveExact,
-                                           m_ordering[i], page))
-                    << "failed to pop page " << m_ordering[i].value;
-                m_pager->release(page);
-            }
-            ASSERT_OK(m_pager->commit());
-        });
-
-        for (size_t i = 0; i < m_ordering.size(); i += 2) {
-            pager_update([this, i] {
-                PageRef *page;
-                auto s = Freelist::remove(*m_pager, Freelist::kRemoveExact,
-                                          m_ordering[i], page);
-                ASSERT_TRUE(s.is_corruption()) << s.message();
-                ASSERT_EQ(page, nullptr);
-                ASSERT_OK(m_pager->commit());
-            });
-        }
-    }
-};
-
-TEST_F(FreelistTests, PopAnySequential)
-{
-    populate_freelist(false);
-    test_pop_any();
-}
-
-TEST_F(FreelistTests, PopAnyRandom)
-{
-    populate_freelist(true);
-    test_pop_any();
-}
-
-TEST_F(FreelistTests, PopExactSequentialFound)
-{
-    populate_freelist(false);
-    test_pop_exact_found();
-}
-
-TEST_F(FreelistTests, PopExactRandomFound)
-{
-    populate_freelist(true);
-    test_pop_exact_found();
-}
-
-TEST_F(FreelistTests, PopExactSequentialNotFound)
-{
-    populate_freelist(false);
-    test_pop_exact_not_found();
-}
-
-TEST_F(FreelistTests, PopExactRandomNotFound)
-{
-    populate_freelist(true);
-    test_pop_exact_not_found();
-}
-
-TEST_F(FreelistTests, FreelistCorruption)
-{
-    pager_update([this] {
-        PageRef *page;
-        allocate_page(page);
-        page->page_id.value = m_pager->page_count() + 1;
-        ASSERT_NOK(Freelist::add(*m_pager, page));
-        auto *root = &m_pager->get_root();
-        ASSERT_NOK(Freelist::add(*m_pager, root));
-    });
-}
 
 using WalComponents = std::tuple<Env *, Wal *, File *>;
 using MakeWal = WalComponents (*)(Wal::Parameters);

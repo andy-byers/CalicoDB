@@ -75,8 +75,8 @@ TEST_F(BoundaryValueTests, OverflowPayload)
         TestCursor c;
         auto s = test_create_and_open_bucket(tx, BucketOptions(), "bucket", c);
         if (s.is_ok()) {
-            EXPECT_TRUE((s = tx.put(*c, m_overflow_slice, "v")).is_invalid_argument()) << s.to_string();
-            EXPECT_TRUE((s = tx.put(*c, "k", m_overflow_slice)).is_invalid_argument()) << s.to_string();
+            EXPECT_TRUE((s = tx.put(*c, m_overflow_slice, "v")).is_invalid_argument()) << to_string(s);
+            EXPECT_TRUE((s = tx.put(*c, "k", m_overflow_slice)).is_invalid_argument()) << to_string(s);
         }
         return Status::ok();
     }));
@@ -92,8 +92,8 @@ protected:
         : m_filename(testing::TempDir() + "calicodb_stress_tests")
     {
         std::filesystem::remove_all(m_filename);
-        std::filesystem::remove_all(m_filename + kDefaultWalSuffix.to_string());
-        std::filesystem::remove_all(m_filename + kDefaultShmSuffix.to_string());
+        std::filesystem::remove_all(m_filename + to_string(kDefaultWalSuffix));
+        std::filesystem::remove_all(m_filename + to_string(kDefaultShmSuffix));
     }
 
     ~StressTests() override
@@ -117,9 +117,9 @@ TEST_F(StressTests, LotsOfBuckets)
         for (size_t i = 0; s.is_ok() && i < kNumBuckets; ++i) {
             TestCursor c;
             const auto name = numeric_key(i);
-            s = test_create_and_open_bucket(tx, BucketOptions(), name, c);
+            s = test_create_and_open_bucket(tx, BucketOptions(), to_slice(name), c);
             if (s.is_ok()) {
-                s = tx.put(*c, name, name);
+                s = tx.put(*c, to_slice(name), to_slice(name));
             }
         }
         return s;
@@ -129,12 +129,12 @@ TEST_F(StressTests, LotsOfBuckets)
         for (size_t i = 0; s.is_ok() && i < kNumBuckets; ++i) {
             TestCursor c;
             const auto name = numeric_key(i);
-            s = test_open_bucket(tx, name, c);
+            s = test_open_bucket(tx, to_slice(name), c);
             if (s.is_ok()) {
                 c->seek_first();
                 EXPECT_TRUE(c->is_valid());
-                EXPECT_EQ(name, c->key());
-                EXPECT_EQ(name, c->value());
+                EXPECT_EQ(to_slice(name), c->key());
+                EXPECT_EQ(to_slice(name), c->value());
             }
         }
         return s;
@@ -149,9 +149,8 @@ TEST_F(StressTests, CursorLimit)
         for (size_t i = 0; s.is_ok() && i < cursors.size(); ++i) {
             s = test_create_and_open_bucket(tx, BucketOptions(), "bucket", cursors[i]);
             if (s.is_ok()) {
-                s = tx.put(*cursors[i],
-                           numeric_key(i),
-                           numeric_key(i));
+                const auto name = numeric_key(i);
+                s = tx.put(*cursors[i], to_slice(name), to_slice(name));
             } else {
                 break;
             }
@@ -163,8 +162,8 @@ TEST_F(StressTests, CursorLimit)
                 cursors[i]->next();
             }
             EXPECT_TRUE(cursors[i]->is_valid());
-            EXPECT_EQ(cursors[i]->key(), numeric_key(i));
-            EXPECT_EQ(cursors[i]->value(), numeric_key(i));
+            EXPECT_EQ(to_string(cursors[i]->key()), numeric_key(i));
+            EXPECT_EQ(to_string(cursors[i]->value()), numeric_key(i));
         }
         return s;
     }));
@@ -180,13 +179,15 @@ TEST_F(StressTests, LargeVacuum)
         for (size_t i = 0; s.is_ok() && i < kTotalBuckets; ++i) {
             TestCursor c;
             const auto name = numeric_key(i);
-            s = test_create_and_open_bucket(tx, BucketOptions(), name, c);
+            s = test_create_and_open_bucket(tx, BucketOptions(), to_slice(name), c);
             for (size_t j = 0; s.is_ok() && j < kNumRecords; ++j) {
-                s = tx.put(*c, numeric_key(j), numeric_key(j));
+                const auto name2 = numeric_key(j);
+                s = tx.put(*c, to_slice(name2), to_slice(name2));
             }
         }
         for (size_t i = 0; s.is_ok() && i < kDroppedBuckets; ++i) {
-            s = tx.drop_bucket(numeric_key(i));
+            const auto name2 = numeric_key(i);
+            s = tx.drop_bucket(to_slice(name2));
         }
         if (s.is_ok()) {
             // Run a vacuum while there are many buckets open.
@@ -198,16 +199,18 @@ TEST_F(StressTests, LargeVacuum)
         Status s;
         for (size_t i = 0; s.is_ok() && i < kTotalBuckets; ++i) {
             TestCursor c;
-            s = test_open_bucket(tx, numeric_key(i), c);
+            const auto name = numeric_key(i);
+            s = test_open_bucket(tx, to_slice(name), c);
             if (i < kDroppedBuckets) {
                 EXPECT_TRUE(s.is_invalid_argument()) << s.message();
                 s = Status::ok();
             } else if (s.is_ok()) {
                 c->seek_first();
                 for (size_t j = 0; j < kNumRecords; ++j) {
+                    const auto name2 = numeric_key(j);
                     EXPECT_TRUE(c->is_valid());
-                    EXPECT_EQ(numeric_key(j), c->key());
-                    EXPECT_EQ(numeric_key(j), c->value());
+                    EXPECT_EQ(to_slice(name2), c->key());
+                    EXPECT_EQ(to_slice(name2), c->value());
                     c->next();
                 }
             }

@@ -35,7 +35,11 @@ public:
     auto open_bucket(const Slice &name, Cursor *&c_out) -> Status;
     auto drop_bucket(const Slice &name) -> Status;
 
-    auto unpack_and_use(Cursor &c) -> std::pair<Tree &, CursorImpl &>;
+    struct UnpackedCursor {
+        Tree *tree;
+        CursorImpl *c;
+    };
+    auto unpack_and_use(Cursor &c) -> UnpackedCursor;
     auto use_tree(Tree *tree) -> void;
 
     auto vacuum() -> Status;

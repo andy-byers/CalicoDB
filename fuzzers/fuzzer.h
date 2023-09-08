@@ -7,10 +7,12 @@
 #ifndef CALICODB_FUZZERS_FUZZER_H
 #define CALICODB_FUZZERS_FUZZER_H
 
+#include "common.h"
 #include "utils.h"
 #include <climits>
 #include <iostream>
 #include <limits>
+#include <vector>
 
 namespace calicodb
 {
@@ -126,15 +128,6 @@ public:
             result = result % (range + 1);
         }
         return static_cast<T>(min + result);
-    }
-
-    // This routine returns a std::string with length based on the next fuzzed integer. We seem to get
-    // better coverage this way. This may be due to the fact that changing record payload bytes doesn't
-    // actually change the tree structure: all that matters for record payloads is their length.
-    [[nodiscard]] auto extract_random_record_value() -> std::string
-    {
-        const auto len = extract_integral_in_range<size_t>(0, kMinPageSize * 3);
-        return std::string(len, '\0');
     }
 
     [[nodiscard]] auto extract_fixed(size_t len) -> Slice

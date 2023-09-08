@@ -40,19 +40,14 @@ cmake -DCMAKE_BUILD_TYPE=Release -DCALICODB_Test=Off .. && cmake --build .
 ### Slices
 
 ```C++
-std::string str("abc");
+static constexpr auto *kCString = "abc";
 
-// We can create slices from C-style strings, standard library strings, or directly from a pointer and a length.
-calicodb::Slice s1(str.c_str());
-calicodb::Slice s2(str);
-calicodb::Slice s3(str.data(), str.size());
-
-// A slice can be converted back to a std::string using Slice::to_string().
-std::printf("s1 = %s\n", s1.to_string().c_str());
+// Slices can be created from C-style strings, or from a pointer and a size.
+calicodb::Slice s1(kCString);
+calicodb::Slice s2(kCString, 3);
 
 // Slices have methods for modifying the size and pointer position. These methods do not change the underlying data, 
-// they just change what range of bytes the slice is currently viewing. Slice::advance() increments the underlying 
-// pointer...
+// they just change what range of bytes the slice is currently viewing. advance() increments the underlying pointer...
 s1.advance(1);
 
 // ...and truncate() decreases the size.

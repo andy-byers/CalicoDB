@@ -1547,7 +1547,7 @@ auto WalImpl::write(PageRef *first_ref, uint32_t page_size, size_t db_size) -> S
         s = write_frame(header, ref->data, offset);
 
         m_stat->counters[Stat::kWriteWal] += frame_size;
-        ref->set_flag(PageRef::kExtra);
+        ref->set_flag(PageRef::kAppend);
         offset += frame_size;
         ++next_frame;
     }
@@ -1558,7 +1558,7 @@ auto WalImpl::write(PageRef *first_ref, uint32_t page_size, size_t db_size) -> S
             return s;
         }
     }
-    if (m_sync_mode == Options::kSyncFull) {
+    if (is_commit && m_sync_mode == Options::kSyncFull) {
         ++m_stat->counters[Stat::kSyncWal];
         s = m_wal->sync();
     }
@@ -1566,10 +1566,10 @@ auto WalImpl::write(PageRef *first_ref, uint32_t page_size, size_t db_size) -> S
     next_frame = m_hdr.max_frame + 1;
     for (auto *p = dirty; s.is_ok() && p; p = p->dirty) {
         auto *ref = p->get_page_ref();
-        if (ref->get_flag(PageRef::kExtra)) {
+        if (ref->get_flag(PageRef::kAppend)) {
             s = m_index.assign(ref->page_id.value, next_frame++);
             if (s.is_ok()) {
-                ref->clear_flag(PageRef::kExtra);
+                ref->clear_flag(PageRef::kAppend);
             }
         }
     }

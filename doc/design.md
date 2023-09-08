@@ -1,5 +1,5 @@
 # CalicoDB Design
-CalicoDB is designed to be very simple to use.
+CalicoDB aims to be simple and portable.
 The API is based off that of LevelDB, but the backend uses a B<sup>+</sup>-tree rather than a log-structured merge (LSM) tree.
 The concurrency model is based off SQLite in WAL mode.
 
@@ -24,9 +24,7 @@ See [`fake_env.h`](../utils/fake_env.h) for an example that stores the database 
 
 ### Pager
 The pager layer uses an `Env` to provide access to the database file in fixed-size chunks, called pages.
-Pages are the basic unit of I/O for a CalicoDB database, and are fixed at 4096 bytes.
-When a database is opened, the pager will allocate a large buffer to hold database pages read from disk.
-The buffer slot assignment is coordinated using a simple LRU cache.
+Pages are the basic unit of I/O for a CalicoDB database, and are fixed at database creation time.
 
 It is the pager's job to maintain consistency between database pages on disk and in memory, and to coordinate with the WAL.
 In this design, the pager is never allowed to write directly to the database file.
@@ -171,7 +169,7 @@ Each pointer map entry consists of the following fields:
 
 The pointer map is spread out over 0 or more specific database pages called pointer map pages.
 The first pointer map page is always on page 2, that is, the page right after the root page.
-Each pointer map page holds `kPageSize / 5` entries: one for each of the `kPageSize / 5` pages directly following it.
+Each pointer map page holds `page_size / 5` entries: one for each of the `page_size / 5` pages directly following it.
 Every other pointer map page is located on the page following the last page referenced by the previous pointer map page.
 
 Each cell that is moved between internal tree nodes must have its child's parent pointer updated.
@@ -233,10 +231,10 @@ Otherwise, any routine that fails can be retried any number of times.
 ## Database file format
 The database file consists of 0 or more fixed-size pages.
 A freshly-created database is just an empty database file.
-When the first bucket is created, the first 3 database pages are initialized in-memory.
+When the first tree is created, the first 3 database pages are initialized in-memory.
 The first page in the file, called the root page, contains the file header and serves as the [schema tree's][#schema] root node.
 The second page is always a [pointer map](#pointer-map) page.
-The third page is the root node of the tree representing the newly-created bucket.
+The third page is the root node of the newly-created tree.
 As the database grows, additional pages are allocated by extending the database file.
 
 ## Performance

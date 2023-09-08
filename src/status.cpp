@@ -138,7 +138,8 @@ Status::Status(Status &&rhs) noexcept
 
 auto Status::operator=(Status &&rhs) noexcept -> Status &
 {
-    std::swap(m_state, rhs.m_state);
+    auto *state = exchange(m_state, rhs.m_state);
+    rhs.m_state = state;
     return *this;
 }
 

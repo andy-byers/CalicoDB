@@ -55,6 +55,7 @@ auto cancel_memory(size_t size) -> void
     [[maybe_unused]] const auto size_before = s_alloc.bytes_used.fetch_sub(size);
     CALICODB_EXPECT_GE(size_before, size);
 }
+
 } // namespace
 
 #define ALLOCATION_HOOK                                       \

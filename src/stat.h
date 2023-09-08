@@ -5,7 +5,7 @@
 #ifndef CALICODB_STAT_H
 #define CALICODB_STAT_H
 
-#include "utils.h"
+#include <cstdint>
 
 namespace calicodb
 {

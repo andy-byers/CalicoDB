@@ -8,6 +8,7 @@
 #include "common.h"
 #include "logging.h"
 #include "pager.h"
+#include "pointer_map.h"
 #include <iostream>
 
 namespace calicodb
@@ -81,7 +82,7 @@ auto print_database_overview(std::ostream &os, Pager &pager) -> void
                     if (NodeHdr::get_type(page->data) == NodeHdr::kExternal) {
                         (void)append_format_string(info, "Ex,N=%u", n);
                     } else {
-                        (void)append_strings(type, "In,N=", std::to_string(n));
+                        (void)append_strings(type, "In,N=", std::to_string(n).c_str());
                         ++n;
                     }
                     if (type.is_empty()) {

@@ -128,7 +128,7 @@ public:
                 m_env->m_syscall_state.enabled = false;
 
                 ASSERT_OK(resize(m_backup.size()));
-                ASSERT_OK(write(0, m_backup));
+                ASSERT_OK(write(0, to_slice(m_backup)));
 
                 m_env->m_syscall_state.enabled = crash_state;
             }
@@ -217,8 +217,8 @@ protected:
           m_env(new CrashEnv(Env::default_env()))
     {
         auto db_name = m_filename;
-        auto shm_name = m_filename + kDefaultWalSuffix.to_string();
-        auto wal_name = m_filename + kDefaultShmSuffix.to_string();
+        auto shm_name = m_filename + to_string(kDefaultWalSuffix);
+        auto wal_name = m_filename + to_string(kDefaultShmSuffix);
         (void)m_env->remove_file(db_name.c_str());
         (void)m_env->remove_file(shm_name.c_str());
         (void)m_env->remove_file(wal_name.c_str());
@@ -240,7 +240,7 @@ protected:
             // Let the keys get increasingly long so that the overflow chain code gets tested.
             s_keys[n].resize(s_keys[n].size() + n * 32, '0');
         }
-        return s_keys[n];
+        return to_slice(s_keys[n]);
     }
     [[nodiscard]] static auto make_value(size_t n) -> std::string
     {
@@ -266,18 +266,19 @@ protected:
         const auto name1 = std::to_string(iteration);
         const auto name2 = std::to_string((iteration + 1) % kNumIterations);
 
-        s = test_open_bucket(tx, name1, c1);
+        s = test_open_bucket(tx, to_slice(name1), c1);
         if (s.is_invalid_argument()) {
             BucketOptions options;
             options.error_if_exists = true;
-            s = test_create_and_open_bucket(tx, options, name1, c1);
+            s = test_create_and_open_bucket(tx, options, to_slice(name1), c1);
             if (s.is_ok()) {
                 std::vector<uint32_t> keys(kNumRecords);
                 std::iota(begin(keys), end(keys), 0);
                 std::default_random_engine rng(42);
                 std::shuffle(begin(keys), end(keys), rng);
                 for (auto k : keys) {
-                    s = tx.put(*c1, make_key(k), make_value(k));
+                    const auto v = make_value(k);
+                    s = tx.put(*c1, make_key(k), to_slice(v));
                     if (!s.is_ok()) {
                         break;
                     }
@@ -290,7 +291,7 @@ protected:
             }
             return s;
         }
-        s = test_create_and_open_bucket(tx, BucketOptions(), name2, c2);
+        s = test_create_and_open_bucket(tx, BucketOptions(), to_slice(name2), c2);
         if (!s.is_ok()) {
             if (!s.is_no_memory()) {
                 EXPECT_EQ(s, tx.status());
@@ -302,7 +303,7 @@ protected:
         for (size_t i = 0; i < kNumRecords; ++i) {
             if (c1->is_valid()) {
                 EXPECT_EQ(c1->key(), make_key(i));
-                EXPECT_EQ(c1->value(), make_value(i));
+                EXPECT_EQ(to_string(c1->value()), make_value(i));
                 s = tx.put(*c2, c1->key(), c1->value());
                 if (!s.is_ok()) {
                     break;
@@ -317,7 +318,7 @@ protected:
         c2.reset();
 
         if (s.is_ok()) {
-            s = tx.drop_bucket(name1);
+            s = tx.drop_bucket(to_slice(name1));
         }
         if (s.is_ok()) {
             s = tx.vacuum();
@@ -336,14 +337,14 @@ protected:
         auto &schema = tx.schema();
         schema.seek_first();
         if (schema.is_valid()) {
-            b_name = schema.key().to_string();
+            b_name = to_string(schema.key());
             EXPECT_EQ(b_name, std::to_string((iteration + 1) % kNumIterations));
         } else {
             return schema.status();
         }
 
         TestCursor c;
-        auto s = test_open_bucket(tx, b_name, c);
+        auto s = test_open_bucket(tx, to_slice(b_name), c);
         if (!s.is_ok()) {
             return s;
         }
@@ -351,7 +352,7 @@ protected:
             const auto key = make_key(i);
             c->find(key);
             if (c->is_valid()) {
-                EXPECT_EQ(c->value(), make_value(i));
+                EXPECT_EQ(to_string(c->value()), make_value(i));
             } else {
                 return c->status();
             }
@@ -366,7 +367,7 @@ protected:
             }
             c->next();
         }
-        EXPECT_FALSE(c->is_valid()) << "key = \"" << c->key().to_string() << '\"';
+        EXPECT_FALSE(c->is_valid()) << "key = \"" << to_string(c->key()) << '\"';
         return s;
     }
 
@@ -420,10 +421,10 @@ protected:
         // Make sure all files created during the test are unlinked.
         auto s = m_env->remove_file(m_filename.c_str());
         ASSERT_TRUE(s.is_ok() || s.is_not_found()) << s.message();
-        auto filename = m_filename + kDefaultWalSuffix.to_string();
+        auto filename = m_filename + to_string(kDefaultWalSuffix);
         s = m_env->remove_file(filename.c_str());
         ASSERT_TRUE(s.is_ok() || s.is_not_found()) << s.message();
-        filename = m_filename + kDefaultShmSuffix.to_string();
+        filename = m_filename + to_string(kDefaultShmSuffix);
         s = m_env->remove_file(filename.c_str());
         ASSERT_TRUE(s.is_ok() || s.is_not_found()) << s.message();
     }
@@ -620,7 +621,8 @@ protected:
                 }
                 keep_open->seek_first();
                 for (size_t j = 0; s.is_ok() && j < kNumRecords; ++j) {
-                    s = tx.put(*c, make_key(j), make_value(j));
+                    const auto v = make_value(j);
+                    s = tx.put(*c, make_key(j), to_slice(v));
                 }
                 if (!c->status().is_ok()) {
                     const auto before_status = c->status();
@@ -642,7 +644,7 @@ protected:
                     c->seek_first();
                     for (size_t j = 0; c->is_valid() && j < kNumRecords; ++j) {
                         EXPECT_EQ(c->key(), make_key(j));
-                        EXPECT_EQ(c->value(), make_value(j));
+                        EXPECT_EQ(to_string(c->value()), make_value(j));
                         c->next();
                     }
                     s = c->status();
@@ -653,7 +655,7 @@ protected:
                     c->seek_last();
                     for (size_t j = 0; c->is_valid() && j < kNumRecords; ++j) {
                         EXPECT_EQ(c->key(), make_key(kNumRecords - j - 1));
-                        EXPECT_EQ(c->value(), make_value(kNumRecords - j - 1));
+                        EXPECT_EQ(to_string(c->value()), make_value(kNumRecords - j - 1));
                         c->previous();
                     }
                     if (s.is_ok()) {
@@ -666,7 +668,7 @@ protected:
                             break;
                         }
                         EXPECT_EQ(c->key(), make_key(j));
-                        EXPECT_EQ(c->value(), make_value(j));
+                        EXPECT_EQ(to_string(c->value()), make_value(j));
                     }
                     if (s.is_ok()) {
                         s = c->status();
@@ -711,11 +713,11 @@ protected:
                     for (size_t j = 0; s.is_ok() && j < kNumRecords; ++j) {
                         const auto key = make_key(j);
                         const auto value = make_value(j);
-                        s = tx.put(*c, key, value);
+                        s = tx.put(*c, key, to_slice(value));
                         if (s.is_ok()) {
                             EXPECT_TRUE(c->is_valid());
                             EXPECT_EQ(c->key(), key);
-                            EXPECT_EQ(c->value(), value);
+                            EXPECT_EQ(to_string(c->value()), value);
                         }
                     }
                     if (s.is_ok()) {
@@ -723,12 +725,12 @@ protected:
                         s = c->status();
                     }
                     while (s.is_ok() && c->is_valid()) {
-                        auto v = c->value().to_string();
+                        auto v = to_string(c->value());
                         v.append(v);
-                        s = tx.put(*c, c->key(), v);
+                        s = tx.put(*c, c->key(), to_slice(v));
                         if (s.is_ok()) {
                             EXPECT_TRUE(c->is_valid());
-                            EXPECT_EQ(c->value(), v);
+                            EXPECT_EQ(to_string(c->value()), v);
                             c->previous();
                         }
                     }
@@ -859,7 +861,7 @@ class DataLossEnv : public EnvWrapper
         auto perform_writes() -> void
         {
             std::uniform_int_distribution dist;
-            const Slice buffer(m_env->m_buffer);
+            const auto buffer = to_slice(m_env->m_buffer);
             const auto &wr = m_env->m_writes;
             const auto loss_type = m_env->m_loss_type;
             auto itr = cbegin(wr);
@@ -1091,8 +1093,8 @@ public:
         m_db = nullptr;
         if (clear) {
             std::filesystem::remove_all(m_filename);
-            std::filesystem::remove_all(m_filename + kDefaultWalSuffix.to_string());
-            std::filesystem::remove_all(m_filename + kDefaultShmSuffix.to_string());
+            std::filesystem::remove_all(m_filename + to_string(kDefaultWalSuffix));
+            std::filesystem::remove_all(m_filename + to_string(kDefaultShmSuffix));
         }
         delete m_env;
         m_env = new DataLossEnv(Env::default_env());
@@ -1116,7 +1118,9 @@ public:
             TestCursor c;
             EXPECT_OK(test_create_and_open_bucket(tx, BucketOptions(), "bucket", c));
             for (size_t i = 0; i < num_writes; ++i) {
-                EXPECT_OK(tx.put(*c, numeric_key(i), numeric_key(i + version * num_writes)));
+                const auto key = numeric_key(i);
+                const auto value = numeric_key(i + version * num_writes);
+                EXPECT_OK(tx.put(*c, to_slice(key), to_slice(value)));
             }
             m_env->m_loss_type = param.loss_type;
             m_env->m_drop_file = param.loss_file;
@@ -1147,9 +1151,10 @@ public:
             TestCursor c;
             auto s = test_open_bucket(tx, "bucket", c);
             for (size_t i = 0; i < num_writes && s.is_ok(); ++i) {
-                c->find(numeric_key(i));
+                const auto key = numeric_key(i);
+                c->find(to_slice(key));
                 if (c->is_valid()) {
-                    EXPECT_EQ(c->value(), numeric_key(i + version * num_writes));
+                    EXPECT_EQ(to_string(c->value()), numeric_key(i + version * num_writes));
                 }
             }
             return s;
@@ -1180,7 +1185,7 @@ public:
         ASSERT_OK(perform_writes({}, kNumWrites, 0));
 
         // Only the WAL is written during a transaction.
-        const DropParameters drop_param = {loss_type, m_filename + kDefaultWalSuffix.to_string()};
+        const DropParameters drop_param = {loss_type, m_filename + to_string(kDefaultWalSuffix)};
 
         ASSERT_EQ(injected_fault(), perform_writes(drop_param, kNumWrites, 1));
         ASSERT_OK(check_records(kNumWrites, 0));

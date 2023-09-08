@@ -11,17 +11,11 @@ namespace calicodb
 {
 
 Bufmgr::Bufmgr(size_t min_buffers, Stat &stat)
-    : m_root(nullptr),
-      m_min_buffers(min_buffers),
-      m_num_buffers(0),
-      m_stat(&stat)
+    : m_stat(&stat),
+      m_min_buffers(min_buffers)
 {
     CALICODB_EXPECT_GE(min_buffers, kMinFrameCount);
-
-    // We don't call alloc_page() for the dummy list heads, so the circular
-    // connections must be initialized manually.
-    IntrusiveList::initialize(m_in_use);
-    IntrusiveList::initialize(m_lru);
+    free_buffers();
 }
 
 Bufmgr::~Bufmgr()
@@ -33,35 +27,39 @@ Bufmgr::~Bufmgr()
 
 auto Bufmgr::free_buffers() -> void
 {
-    CALICODB_EXPECT_TRUE(IntrusiveList::is_empty(m_in_use));
-    while (!IntrusiveList::is_empty(m_lru)) {
-        auto *ptr = m_lru.next_entry;
-        IntrusiveList::remove(*ptr);
-        PageRef::free(ptr);
-        --m_num_buffers;
-    }
-    PageRef::free(m_root);
+    shrink_to_fit();
+    m_backing.reset();
+    m_metadata.reset();
+    IntrusiveList::initialize(m_in_use);
+    IntrusiveList::initialize(m_lru);
+    m_num_buffers = 0;
     m_root = nullptr;
-
-    CALICODB_EXPECT_EQ(m_num_buffers, 0);
 }
 
 auto Bufmgr::reallocate(size_t page_size) -> int
 {
-    CALICODB_EXPECT_EQ(m_refsum, 0);
     free_buffers();
-    for (; m_num_buffers < m_min_buffers; ++m_num_buffers) {
-        if (auto *ref = PageRef::alloc(page_size)) {
-            IntrusiveList::add_tail(*ref, m_lru);
-        } else {
-            return -1;
-        }
-    }
-    m_root = PageRef::alloc(page_size);
-    if (!m_root || m_table.preallocate(m_min_buffers)) {
+
+    const auto buffer_size = page_size + kSpilloverLen;
+    const auto num_buffers = m_min_buffers + 1;
+    if (m_backing.realloc(buffer_size * num_buffers)) {
         return -1;
     }
+    if (m_metadata.realloc(num_buffers)) {
+        return -1;
+    }
+    if (m_table.reallocate(m_min_buffers)) {
+        return -1;
+    }
+    for (size_t i = 0; i < num_buffers; ++i) {
+        PageRef::init(m_metadata[i], m_backing.ptr() + buffer_size * i, page_size);
+        IntrusiveList::add_tail(m_metadata[i], m_lru);
+    }
+    m_num_buffers = m_min_buffers;
+    // Reserve the first page buffer for page 1.
+    m_root = m_metadata.ptr();
     m_root->page_id = Id::root();
+    IntrusiveList::remove(*m_root);
     return 0;
 }
 
@@ -95,6 +93,10 @@ auto Bufmgr::allocate(size_t page_size) -> PageRef *
 {
     auto *ref = PageRef::alloc(page_size);
     if (ref) {
+        if (m_extra) {
+            ref->next_extra = m_extra;
+        }
+        m_extra = ref;
         IntrusiveList::add_tail(*ref, m_lru);
         ++m_num_buffers;
     }
@@ -126,7 +128,8 @@ auto Bufmgr::purge() -> void
     CALICODB_EXPECT_TRUE(IntrusiveList::is_empty(m_in_use));
     CALICODB_EXPECT_EQ(m_refsum, 0);
     for (auto *ref = m_lru.next_entry;
-         ref != &m_lru; ref = ref->next_entry) {
+         ref != &m_lru;
+         ref = ref->next_entry) {
         ref->flag = PageRef::kNormal;
     }
     m_table.clear();
@@ -158,13 +161,17 @@ auto Bufmgr::unref(PageRef &ref) -> void
 auto Bufmgr::shrink_to_fit() -> void
 {
     CALICODB_EXPECT_EQ(m_refsum, 0);
-    while (m_num_buffers > m_min_buffers) {
-        auto *lru = m_lru.prev_entry;
-        m_table.remove(lru->key());
-        IntrusiveList::remove(*lru);
-        PageRef::free(lru);
+    for (auto *ref = m_extra; ref;) {
+        if (ref->get_flag(PageRef::kCached)) {
+            m_table.remove(ref->key());
+        }
         --m_num_buffers;
+        IntrusiveList::remove(*ref);
+        auto *next = ref->next_extra;
+        PageRef::free(ref);
+        ref = next;
     }
+    m_extra = nullptr;
 }
 
 auto Bufmgr::assert_state() const -> bool
