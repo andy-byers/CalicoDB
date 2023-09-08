@@ -64,8 +64,8 @@ endif()
 
 add_library(calicodb STATIC)
 target_sources(calicodb
-        PRIVATE src/alloc.cpp
-                src/alloc.h
+        PRIVATE src/allocator.cpp
+                src/allocator.h
                 src/buffer.h
                 src/bufmgr.cpp
                 src/bufmgr.h
@@ -84,6 +84,8 @@ target_sources(calicodb
                 src/list.h
                 src/logging.cpp
                 src/logging.h
+                src/mem.cpp
+                src/mem.h
                 src/node.cpp
                 src/node.h
                 src/page.h

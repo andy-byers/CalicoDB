@@ -2,6 +2,7 @@
 // This source code is licensed under the MIT License, which can be found in
 // LICENSE.md. See AUTHORS.md for a list of contributor names.
 
+#include "allocator.h"
 #include "calicodb/cursor.h"
 #include "calicodb/db.h"
 #include "calicodb/env.h"
@@ -51,13 +52,13 @@ public:
 
     auto enable_oom_faults() -> void
     {
-        Alloc::set_hook(should_next_allocation_fail, this);
+        DebugAllocator::set_hook(should_next_allocation_fail, this);
         m_oom_state.enabled = true;
     }
 
     auto disable_oom_faults() -> void
     {
-        Alloc::set_hook(nullptr, nullptr);
+        DebugAllocator::set_hook(nullptr, nullptr);
         m_oom_state.enabled = false;
     }
 
@@ -227,7 +228,7 @@ protected:
     ~CrashTests() override
     {
         delete m_env;
-        EXPECT_EQ(Alloc::bytes_used(), 0);
+        EXPECT_EQ(DebugAllocator::bytes_used(), 0);
     }
 
     static constexpr size_t kNumRecords = 64;

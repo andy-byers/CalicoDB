@@ -52,7 +52,7 @@ auto Bufmgr::reallocate(size_t page_size) -> int
         return -1;
     }
     for (size_t i = 0; i < num_buffers; ++i) {
-        PageRef::init(m_metadata[i], m_backing.ptr() + buffer_size * i, page_size);
+        PageRef::init(m_metadata[i], m_backing.ptr() + buffer_size * i);
         IntrusiveList::add_tail(m_metadata[i], m_lru);
     }
     m_num_buffers = m_min_buffers;

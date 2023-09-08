@@ -3,7 +3,7 @@
 // LICENSE.md. See AUTHORS.md for a list of contributor names.
 
 #include "calicodb/string.h"
-#include "alloc.h"
+#include "mem.h"
 
 namespace calicodb
 {
@@ -28,7 +28,7 @@ auto String::operator=(String &&rhs) noexcept -> String &
 
 auto String::clear() -> void
 {
-    Alloc::deallocate(m_ptr);
+    Mem::deallocate(m_ptr);
     m_ptr = nullptr;
     m_len = 0;
     m_cap = 0;

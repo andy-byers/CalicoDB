@@ -3,6 +3,7 @@
 // LICENSE.md. See AUTHORS.md for a list of contributor names.
 
 #include "test.h"
+#include "allocator.h"
 #include "calicodb/cursor.h"
 #include "logging.h"
 
@@ -88,3 +89,10 @@ auto write_string_to_file(Env &env, const char *filename, const std::string &buf
 } // namespace test
 
 } // namespace calicodb
+
+auto main(int argc, char **argv) -> int
+{
+    ::testing::InitGoogleTest(&argc, argv);
+    calicodb::Mem::set_methods(calicodb::DebugAllocator::methods());
+    return RUN_ALL_TESTS();
+}

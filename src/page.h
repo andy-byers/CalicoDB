@@ -5,9 +5,9 @@
 #ifndef CALICODB_PAGE_H
 #define CALICODB_PAGE_H
 
-#include "alloc.h"
 #include "header.h"
 #include "list.h"
+#include "mem.h"
 
 namespace calicodb
 {
@@ -54,16 +54,16 @@ struct PageRef {
 
     static auto alloc(size_t page_size) -> PageRef *
     {
-        auto *ref = static_cast<PageRef *>(Alloc::allocate(
+        auto *ref = static_cast<PageRef *>(Mem::allocate(
             sizeof(PageRef) + page_size + kSpilloverLen));
         if (ref) {
             CALICODB_EXPECT_TRUE(is_aligned(ref, alignof(PageRef)));
-            init(*ref, reinterpret_cast<char *>(ref + 1), page_size);
+            init(*ref, reinterpret_cast<char *>(ref + 1));
         }
         return ref;
     }
 
-    static auto init(PageRef &ref, char *page, size_t page_size) -> void
+    static auto init(PageRef &ref, char *page) -> void
     {
         IntrusiveList::initialize(ref);
         IntrusiveList::initialize(ref.dirty_hdr);
@@ -79,12 +79,11 @@ struct PageRef {
             0,
             PageRef::kNormal,
         };
-        std::memset(ref.data, 0, page_size);
     }
 
     static auto free(PageRef *ref) -> void
     {
-        Alloc::deallocate(ref);
+        Mem::deallocate(ref);
     }
 
     [[nodiscard]] auto get_flag(Flag f) const -> bool

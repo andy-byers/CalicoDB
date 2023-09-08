@@ -2,11 +2,11 @@
 // This source code is licensed under the MIT License, which can be found in
 // LICENSE.md. See AUTHORS.md for a list of contributor names.
 
-#include "alloc.h"
 #include "calicodb/env.h"
 #include "common.h"
 #include "encoding.h"
 #include "fake_env.h"
+#include "mem.h"
 #include "temp.h"
 #include "test.h"
 #include <filesystem>

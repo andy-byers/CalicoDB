@@ -2,8 +2,8 @@
 // This source code is licensed under the MIT License, which can be found in
 // LICENSE.md. See AUTHORS.md for a list of contributor names.
 
-#ifndef CALICODB_ALLOC_H
-#define CALICODB_ALLOC_H
+#ifndef CALICODB_MEM_H
+#define CALICODB_MEM_H
 
 #include "utils.h"
 #include <new>
@@ -13,18 +13,16 @@ namespace calicodb
 
 // Wrappers for system memory management routines
 // Every heap-allocated object that CalicoDB uses must ultimately come from a call to either
-// Alloc::allocate() or Alloc::reallocate(), and eventually be passed back to
-// Alloc::deallocate(). Differences between these routines and std::malloc(), std::realloc(),
+// Mem::allocate() or Mem::reallocate(), and eventually be passed back to
+// Mem::deallocate(). Differences between these routines and std::malloc(), std::realloc(),
 // and std::free() are detailed here and below. The main difference is that a nonnull low-
-// address pointer is returned from Alloc::allocate(0) and Alloc::reallocate(..., 0). This
+// address pointer is returned from Mem::allocate(0) and Mem::reallocate(..., 0). This
 // pointer must not be dereferenced, or passed to library functions that expect a valid
 // pointer (like std::memcpy()). It can, however, be reallocated and/or freed. See
 // https://yarchive.net/comp/linux/malloc_0.html for more details.
-// NOTE: Alloc::set_*() are not thread-safe.
-class Alloc
+class Mem
 {
 public:
-    using Hook = int (*)(void *);
     using Malloc = void *(*)(size_t);
     using Realloc = void *(*)(void *, size_t);
     using Free = void (*)(void *);
@@ -35,21 +33,7 @@ public:
         Free free;
     };
 
-    static constexpr Methods kDefaultMethods = {
-        std::malloc,
-        std::realloc,
-        std::free,
-    };
-
-    static auto set_methods(const Methods &methods) -> int;
-    static auto set_limit(size_t limit) -> int;
-    static auto bytes_used() -> size_t;
-
-    // Set a callback that is called in allocate() and reallocate() with the provided
-    // `arg`. If the result is nonzero, a nullptr is returned immediately, before the
-    // actual allocation routine is called. Used for injecting random errors during
-    // testing.
-    static auto set_hook(Hook hook, void *arg) -> void;
+    static auto set_methods(const Methods &methods) -> Methods;
 
     // Calls the registered memory allocation function, which defaults to std::malloc()
     // Guarantees that allocate(0), the result of which is implementation-defined for
@@ -109,15 +93,15 @@ struct HeapObject {
 
     static auto operator new(size_t size, const std::nothrow_t &) noexcept -> void *
     {
-        return Alloc::allocate(size);
+        return Mem::allocate(size);
     }
 
     static auto operator delete(void *ptr) -> void
     {
-        Alloc::deallocate(ptr);
+        Mem::deallocate(ptr);
     }
 };
 
 } // namespace calicodb
 
-#endif // CALICODB_ALLOC_H
+#endif // CALICODB_MEM_H

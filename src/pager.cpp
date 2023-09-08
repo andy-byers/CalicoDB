@@ -3,10 +3,10 @@
 // LICENSE.md. See AUTHORS.md for a list of contributor names.
 
 #include "pager.h"
-#include "alloc.h"
 #include "calicodb/env.h"
 #include "header.h"
 #include "logging.h"
+#include "mem.h"
 #include "node.h"
 #include "stat.h"
 #include "temp.h"
@@ -125,7 +125,7 @@ auto Pager::close_wal() -> Status
             s = Status::ok();
         }
     }
-    Alloc::delete_object(m_wal);
+    Mem::delete_object(m_wal);
     m_wal = nullptr;
     return s;
 }
@@ -133,14 +133,14 @@ auto Pager::close_wal() -> Status
 auto Pager::open(const Parameters &param, Pager *&pager_out) -> Status
 {
     Status s;
-    pager_out = Alloc::new_object<Pager>(param);
+    pager_out = Mem::new_object<Pager>(param);
     if (pager_out) {
         s = pager_out->set_page_size(param.page_size);
     } else {
         s = Status::no_memory();
     }
     if (!s.is_ok()) {
-        Alloc::delete_object(pager_out);
+        Mem::delete_object(pager_out);
         pager_out = nullptr;
     }
     return s;
@@ -171,7 +171,7 @@ Pager::~Pager()
 {
     CALICODB_EXPECT_EQ(m_mode, kOpen);
     CALICODB_EXPECT_TRUE(m_status->is_ok());
-    Alloc::delete_object(m_wal);
+    Mem::delete_object(m_wal);
 }
 
 auto Pager::close() -> void

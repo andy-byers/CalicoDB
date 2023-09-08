@@ -45,7 +45,7 @@ private:
         String wal_name;
         Buffer<char> scratch;
     };
-    friend class Alloc;
+    friend class Mem;
     explicit DBImpl(Parameters param);
 
     template <class TxType>

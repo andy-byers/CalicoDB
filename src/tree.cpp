@@ -3,10 +3,10 @@
 // LICENSE.md. See AUTHORS.md for a list of contributor names.
 
 #include "tree.h"
-#include "alloc.h"
 #include "cursor_impl.h"
 #include "encoding.h"
 #include "logging.h"
+#include "mem.h"
 #include "pager.h"
 #include "schema.h"
 #include "stat.h"
@@ -131,7 +131,7 @@ struct PayloadManager {
     {
         const auto ovfl_content_max = static_cast<uint32_t>(pager.page_size() - kLinkContentOffset);
         CALICODB_EXPECT_TRUE(in_buf || out_buf);
-        if (offset <= cell.local_pl_size) {
+        if (offset <= cell.local_pl_size) { // TODO: change to "<", no change in outcome but is less confusing
             const auto n = minval(length, cell.local_pl_size - offset);
             if (in_buf) {
                 std::memcpy(cell.key + offset, in_buf, n);
@@ -160,6 +160,8 @@ struct PayloadManager {
                 s = pager.acquire(pgno, ovfl);
                 if (!s.is_ok()) {
                     break;
+                } else if (in_buf) {
+                    pager.mark_dirty(*ovfl);
                 }
                 uint32_t len;
                 if (offset >= ovfl_content_max) {
@@ -185,7 +187,7 @@ struct PayloadManager {
             }
         }
         if (s.is_ok() && length) {
-            return Status::corruption("missing data from overflow record");
+            return StatusBuilder::corruption("missing %u bytes from overflow record", length);
         }
         return s;
     }
@@ -434,7 +436,7 @@ auto Tree::extract_key(const Cell &cell, KeyScratch &scratch, Slice &key_out, ui
         return Status::ok();
     }
     if (limit > scratch.len) {
-        auto *buf = Alloc::reallocate(
+        auto *buf = Mem::reallocate(
             scratch.buf, limit);
         if (buf) {
             scratch.buf = static_cast<char *>(buf);
@@ -1188,7 +1190,7 @@ Tree::Tree(Pager &pager, Stat &stat, char *scratch, Id root_id, String name)
 Tree::~Tree()
 {
     for (const auto &scratch : m_key_scratch) {
-        Alloc::deallocate(scratch.buf);
+        Mem::deallocate(scratch.buf);
     }
 
     // Make sure all cursors are in the inactive list with their nodes released.
