@@ -2,6 +2,7 @@
 // This source code is licensed under the MIT License, which can be found in
 // LICENSE.md. See AUTHORS.md for a list of contributor names.
 
+#include "allocator.h"
 #include "common.h"
 #include "encoding.h"
 #include "fake_env.h"
@@ -274,7 +275,7 @@ protected:
         delete m_wal_file;
         delete m_env;
 
-        EXPECT_EQ(Alloc::bytes_used(), 0);
+        EXPECT_EQ(DebugAllocator::bytes_used(), 0);
     }
 
     auto SetUp() -> void override
@@ -335,7 +336,7 @@ protected:
     }
     auto close() -> void
     {
-        Alloc::delete_object(m_pager);
+        Mem::delete_object(m_pager);
         m_pager = nullptr;
     }
 
@@ -706,7 +707,7 @@ public:
 
     ~WalTests() override
     {
-        Alloc::delete_object(m_wal);
+        Mem::delete_object(m_wal);
         delete m_db_file;
         if (m_env != &Env::default_env()) {
             delete m_env;

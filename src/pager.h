@@ -118,7 +118,7 @@ public:
     auto set_status(const Status &error) const -> void;
 
 private:
-    friend class Alloc;
+    friend class Mem;
     explicit Pager(const Parameters &param);
 
     auto open_wal() -> Status;

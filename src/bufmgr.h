@@ -98,7 +98,7 @@ private:
 
         ~PageTable()
         {
-            Alloc::deallocate(m_table);
+            Mem::deallocate(m_table);
         }
 
         [[nodiscard]] auto reallocate(size_t min_buffers) -> int
@@ -112,7 +112,7 @@ private:
             }
             const auto table_size = capacity * sizeof(PageRef *);
             if (auto *table = static_cast<PageRef **>(
-                    Alloc::allocate(table_size))) {
+                    Mem::allocate(table_size))) {
                 m_capacity = capacity;
                 m_table = table;
                 clear();

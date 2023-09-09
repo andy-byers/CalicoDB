@@ -5,6 +5,7 @@
 #include "common.h"
 #include "test.h"
 
+#include "allocator.h"
 #include "encoding.h"
 #include "logging.h"
 
@@ -24,25 +25,24 @@ public:
 
     auto SetUp() -> void override
     {
-        ASSERT_EQ(Alloc::bytes_used(), 0);
+        ASSERT_EQ(DebugAllocator::bytes_used(), 0);
     }
 
     auto TearDown() -> void override
     {
-        ASSERT_EQ(Alloc::bytes_used(), 0);
-        ASSERT_EQ(Alloc::set_limit(0), 0);
-        ASSERT_EQ(Alloc::set_methods(Alloc::kDefaultMethods), 0);
-        Alloc::set_hook(nullptr, nullptr);
+        ASSERT_EQ(DebugAllocator::bytes_used(), 0);
+        DebugAllocator::set_limit(0);
+        DebugAllocator::set_hook(nullptr, nullptr);
+        Mem::set_methods(DebugAllocator::methods());
     }
 };
 
 // The wrapper functions in alloc.cpp add a header of 8 bytes to each allocation, which is
 // used to store the number of bytes in the rest of the allocation.
 alignas(uint64_t) char AllocTests::s_fake_allocation[kFakeAllocationSize];
-uint64_t *AllocTests::s_alloc_size_ptr = reinterpret_cast<uint64_t *>(s_fake_allocation);
-void *AllocTests::s_alloc_data_ptr = s_alloc_size_ptr + 1;
+void *AllocTests::s_alloc_data_ptr = s_fake_allocation;
 
-static constexpr Alloc::Methods kFakeMethods = {
+static constexpr Mem::Methods kFakeMethods = {
     [](auto) -> void * {
         return AllocTests::s_fake_allocation;
     },
@@ -55,7 +55,7 @@ static constexpr Alloc::Methods kFakeMethods = {
     },
 };
 
-static constexpr Alloc::Methods kFaultyMethods = {
+static constexpr Mem::Methods kFaultyMethods = {
     [](auto) -> void * {
         return nullptr;
     },
@@ -67,56 +67,51 @@ static constexpr Alloc::Methods kFaultyMethods = {
 
 TEST_F(AllocTests, Methods)
 {
-    auto *ptr = Alloc::allocate(123);
+    auto *ptr = Mem::allocate(123);
     ASSERT_NE(ptr, nullptr);
-    auto *new_ptr = Alloc::reallocate(ptr, 321);
+    auto *new_ptr = Mem::reallocate(ptr, 321);
     ASSERT_NE(new_ptr, nullptr);
 
-    // Prevent malloc/realloc-free mismatch.
-    ASSERT_EQ(Alloc::set_methods(kFakeMethods), -1);
-    Alloc::deallocate(new_ptr);
+    Mem::deallocate(new_ptr);
 
-    ASSERT_EQ(Alloc::set_methods(kFakeMethods), 0);
-    ASSERT_EQ(ptr = Alloc::allocate(123), s_alloc_data_ptr);
-    ASSERT_EQ(123, *s_alloc_size_ptr);
-    ASSERT_EQ(Alloc::reallocate(ptr, 321), ptr);
-    ASSERT_EQ(321, *s_alloc_size_ptr);
-    ASSERT_EQ(Alloc::reallocate(ptr, 42), ptr);
-    ASSERT_EQ(42, *s_alloc_size_ptr);
-    Alloc::deallocate(nullptr);
-    Alloc::deallocate(ptr);
+    Mem::set_methods(kFakeMethods);
+    ASSERT_EQ(ptr = Mem::allocate(123), s_alloc_data_ptr);
+    ASSERT_EQ(Mem::reallocate(ptr, 321), ptr);
+    ASSERT_EQ(Mem::reallocate(ptr, 42), ptr);
+    Mem::deallocate(nullptr);
+    Mem::deallocate(ptr);
 
-    ASSERT_EQ(Alloc::set_methods(kFaultyMethods), 0);
-    ASSERT_EQ(Alloc::allocate(123), nullptr);
-    ASSERT_EQ(Alloc::reallocate(nullptr, 123), nullptr);
+    Mem::set_methods(kFaultyMethods);
+    ASSERT_EQ(Mem::allocate(123), nullptr);
+    ASSERT_EQ(Mem::reallocate(nullptr, 123), nullptr);
 }
 
 TEST_F(AllocTests, Limit)
 {
-    Alloc::set_limit(100);
-    auto *a = Alloc::allocate(50 - sizeof(uint64_t));
+    DebugAllocator::set_limit(100);
+    auto *a = Mem::allocate(50 - sizeof(uint64_t));
     ASSERT_NE(a, nullptr);
 
     // 8-byte overhead causes this to exceed the limit.
-    auto *b = Alloc::allocate(50);
+    auto *b = Mem::allocate(50);
     ASSERT_EQ(b, nullptr);
 
-    b = Alloc::allocate(50 - sizeof(uint64_t));
+    b = Mem::allocate(50 - sizeof(uint64_t));
     ASSERT_NE(b, nullptr);
 
     // 0 bytes available, fail to get 1 byte.
-    auto *c = Alloc::reallocate(a, 51 - sizeof(uint64_t));
+    auto *c = Mem::reallocate(a, 51 - sizeof(uint64_t));
     ASSERT_EQ(c, nullptr);
 
-    c = Alloc::reallocate(a, 20 - sizeof(uint64_t));
+    c = Mem::reallocate(a, 20 - sizeof(uint64_t));
     ASSERT_NE(c, nullptr);
 
-    ASSERT_EQ(Alloc::set_limit(1), -1);
-    ASSERT_EQ(Alloc::set_limit(0), 0);
+    ASSERT_EQ(DebugAllocator::set_limit(1), 0);
+    ASSERT_NE(DebugAllocator::set_limit(0), 0);
 
     // a was realloc'd.
-    Alloc::deallocate(b);
-    Alloc::deallocate(c);
+    Mem::deallocate(b);
+    Mem::deallocate(c);
 }
 
 TEST_F(AllocTests, AllocationHook)
@@ -129,29 +124,30 @@ TEST_F(AllocTests, AllocationHook)
         return static_cast<const HookArg *>(arg)->rc;
     };
 
-    Alloc::set_hook(hook, &hook_arg);
+    DebugAllocator::set_hook(hook, &hook_arg);
 
     void *ptr;
-    ASSERT_NE(ptr = Alloc::allocate(123), nullptr);
-    ASSERT_NE(ptr = Alloc::reallocate(ptr, 321), nullptr);
-    Alloc::deallocate(ptr);
+    ASSERT_NE(ptr = Mem::allocate(123), nullptr);
+    ASSERT_NE(ptr = Mem::reallocate(ptr, 321), nullptr);
+    Mem::deallocate(ptr);
 
+    ptr = nullptr;
     hook_arg.rc = -1;
-    ASSERT_EQ(Alloc::allocate(123), nullptr);
-    ASSERT_EQ(Alloc::reallocate(ptr, 321), nullptr);
+    ASSERT_EQ(Mem::allocate(123), nullptr);
+    ASSERT_EQ(Mem::reallocate(ptr, 321), nullptr);
 }
 
 TEST_F(AllocTests, LargeAllocations)
 {
     // Don't actually allocate anything.
-    ASSERT_EQ(Alloc::set_methods(kFakeMethods), 0);
+    Mem::set_methods(kFakeMethods);
 
     void *p;
-    ASSERT_EQ(nullptr, Alloc::allocate(kMaxAllocation + 1));
-    ASSERT_NE(nullptr, p = Alloc::allocate(kMaxAllocation));
-    ASSERT_EQ(nullptr, Alloc::reallocate(p, kMaxAllocation + 1));
-    ASSERT_NE(nullptr, p = Alloc::reallocate(p, kMaxAllocation));
-    Alloc::deallocate(p);
+    ASSERT_EQ(nullptr, Mem::allocate(kMaxAllocation + 1));
+    ASSERT_NE(nullptr, p = Mem::allocate(kMaxAllocation));
+    ASSERT_EQ(nullptr, Mem::reallocate(p, kMaxAllocation + 1));
+    ASSERT_NE(nullptr, p = Mem::reallocate(p, kMaxAllocation));
+    Mem::deallocate(p);
 }
 
 TEST_F(AllocTests, ReallocSameSize)
@@ -159,55 +155,32 @@ TEST_F(AllocTests, ReallocSameSize)
     static constexpr size_t kSize = 42;
 
     void *ptr;
-    ASSERT_NE(ptr = Alloc::allocate(kSize), nullptr);
-    ASSERT_NE(ptr = Alloc::reallocate(ptr, kSize), nullptr);
-    Alloc::deallocate(ptr);
-
-    static constexpr Alloc::Methods kFaultyRealloc = {
-        std::malloc,
-        [](auto *, auto) -> void * {
-            return nullptr;
-        },
-        std::free,
-    };
-    ASSERT_EQ(Alloc::set_methods(kFaultyRealloc), 0);
-    ASSERT_NE(ptr = Alloc::allocate(kSize), nullptr);
-    ASSERT_EQ(Alloc::reallocate(ptr, kSize), nullptr);
-    ASSERT_GT(Alloc::bytes_used(), kSize);
-    Alloc::deallocate(ptr);
+    ASSERT_NE(ptr = Mem::allocate(kSize), nullptr);
+    ASSERT_NE(ptr = Mem::reallocate(ptr, kSize), nullptr);
+    Mem::deallocate(ptr);
 }
 
 TEST_F(AllocTests, SpecialCases)
 {
     void *ptr;
 
-    // NOOP, returns a nonnull pointer to a zero-sized allocation.
-    ASSERT_NE(ptr = Alloc::allocate(0), nullptr);
-    ASSERT_EQ(Alloc::bytes_used(), 0);
-    auto *zero_sized = ptr;
-    Alloc::deallocate(ptr); // Not necessary, but should work fine
+    // NOOP, returns nullptr.
+    ASSERT_EQ(Mem::allocate(0), nullptr);
+    ASSERT_EQ(DebugAllocator::bytes_used(), 0);
+    Mem::deallocate(nullptr);
 
     // NOOP, same
-    ASSERT_EQ(Alloc::reallocate(nullptr, 0), zero_sized);
-    ASSERT_EQ(Alloc::bytes_used(), 0);
+    ASSERT_EQ(Mem::reallocate(nullptr, 0), nullptr);
+    ASSERT_EQ(DebugAllocator::bytes_used(), 0);
 
-    // Equivalent to Alloc::malloc(1).
-    ASSERT_NE(ptr = Alloc::reallocate(nullptr, 1), nullptr);
+    // Equivalent to Mem::malloc(1).
+    ASSERT_NE(ptr = Mem::reallocate(nullptr, 1), nullptr);
     ASSERT_NE(ptr, nullptr);
-    ASSERT_NE(Alloc::bytes_used(), 0);
+    ASSERT_EQ(DebugAllocator::bytes_used(), DebugAllocator::size_of(ptr));
 
-    // Equivalent to Alloc::free(ptr), but returns a pointer to a zero-sized
-    // allocation.
-    ASSERT_EQ(Alloc::reallocate(ptr, 0), zero_sized);
-    ASSERT_EQ(Alloc::bytes_used(), 0);
-
-    // Zero-sized allocations can be reallocated.
-    ptr = Alloc::allocate(0);
-    ASSERT_EQ(Alloc::reallocate(ptr, 0), zero_sized);
-    ASSERT_NE(ptr = Alloc::reallocate(ptr, 1), zero_sized);
-    ASSERT_GT(Alloc::bytes_used(), 0);
-    *static_cast<char *>(ptr) = '\x42';
-    Alloc::deallocate(ptr);
+    // Equivalent to Mem::free(ptr), but returns nullptr.
+    ASSERT_EQ(Mem::reallocate(ptr, 0), nullptr);
+    ASSERT_EQ(DebugAllocator::bytes_used(), 0);
 }
 
 TEST_F(AllocTests, HeapObject)
@@ -217,31 +190,32 @@ TEST_F(AllocTests, HeapObject)
     };
 
     auto *obj = new (std::nothrow) CustomObject;
-    ASSERT_GE(Alloc::bytes_used(), sizeof(CustomObject));
+    ASSERT_GE(DebugAllocator::bytes_used(), DebugAllocator::size_of(obj));
     delete obj;
-    ASSERT_EQ(Alloc::bytes_used(), 0);
+    ASSERT_EQ(DebugAllocator::bytes_used(), 0);
 }
 
 #ifndef NDEBUG
 TEST_F(AllocTests, DeathTest)
 {
     void *ptr;
-    ptr = Alloc::allocate(1);
+    ptr = Mem::allocate(1);
 
     auto *size_ptr = reinterpret_cast<uint64_t *>(ptr) - 1;
+    const auto saved_value = *size_ptr;
     // Give back more memory than was allocated in-total. If more than 1 byte were already allocated, this
     // corruption would go undetected.
-    *size_ptr = 2;
-    ASSERT_DEATH(Alloc::deallocate(ptr), "Assert");
-    ASSERT_DEATH((void)Alloc::reallocate(ptr, 123), "Assert");
-    // Actual allocations must not be zero-length. Alloc::malloc() returns a nullptr if 0 bytes are
+    *size_ptr = saved_value + 1;
+    ASSERT_DEATH(Mem::deallocate(ptr), "Assert");
+    ASSERT_DEATH((void)Mem::reallocate(ptr, 123), "Assert");
+    // Actual allocations must not be zero-length. Mem::malloc() returns a nullptr if 0 bytes are
     // requested.
-    *size_ptr = 0;
-    ASSERT_DEATH(Alloc::deallocate(ptr), "Assert");
-    ASSERT_DEATH((void)Alloc::reallocate(ptr, 123), "Assert");
+    *size_ptr = saved_value - 1;
+    ASSERT_DEATH(Mem::deallocate(ptr), "Assert");
+    ASSERT_DEATH((void)Mem::reallocate(ptr, 123), "Assert");
 
-    *size_ptr = 1;
-    Alloc::deallocate(ptr);
+    *size_ptr = saved_value;
+    Mem::deallocate(ptr);
 }
 #endif // NDEBUG
 
@@ -479,7 +453,7 @@ TEST(Status, StatusBuilderFallback)
 {
     // StatusBuilder should fail to allocate memory for the error message and return an inline Status with
     // the requested Status::Code and Status::SubCode.
-    ASSERT_EQ(Alloc::set_limit(1), 0);
+    DebugAllocator::set_limit(1);
 
     static constexpr auto kFmt = "message %d %s...";
     ASSERT_EQ(Slice(Status::io_error().message()), StatusBuilder::io_error(kFmt, 42, "hello").message());
@@ -492,7 +466,7 @@ TEST(Status, StatusBuilderFallback)
     ASSERT_EQ(Slice(Status::no_memory().message()), StatusBuilder::no_memory(kFmt, 42, "hello").message());
 
     // Reset memory limit back to the default.
-    ASSERT_EQ(Alloc::set_limit(0), 0);
+    DebugAllocator::set_limit(0);
 }
 
 TEST(Status, StatusCodes)
@@ -541,11 +515,11 @@ TEST(Status, CopyReleasesMemory)
 {
     {
         auto s = Status::invalid_argument("status message");
-        const auto s_bytes_used = Alloc::bytes_used();
+        const auto s_bytes_used = DebugAllocator::bytes_used();
         ASSERT_GT(s_bytes_used, 0);
 
         const auto t = Status::no_memory("status message 2");
-        const auto t_bytes_used = Alloc::bytes_used() - s_bytes_used;
+        const auto t_bytes_used = DebugAllocator::bytes_used() - s_bytes_used;
         ASSERT_GT(t_bytes_used, 0);
 
         // s should release the memory it held and increase the refcount for the memory block
@@ -553,14 +527,14 @@ TEST(Status, CopyReleasesMemory)
         s = t;
         ASSERT_TRUE(s.is_no_memory());
         ASSERT_EQ(s.message(), Slice("status message 2"));
-        ASSERT_EQ(Alloc::bytes_used(), t_bytes_used);
+        ASSERT_EQ(DebugAllocator::bytes_used(), t_bytes_used);
 
         const auto u = t;
         ASSERT_TRUE(u.is_no_memory());
         ASSERT_EQ(u.message(), Slice("status message 2"));
-        ASSERT_EQ(Alloc::bytes_used(), t_bytes_used);
+        ASSERT_EQ(DebugAllocator::bytes_used(), t_bytes_used);
     }
-    ASSERT_EQ(Alloc::bytes_used(), 0);
+    ASSERT_EQ(DebugAllocator::bytes_used(), 0);
 }
 
 TEST(Status, Reassign)

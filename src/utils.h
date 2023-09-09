@@ -70,16 +70,9 @@ static constexpr size_t kScratchBufferPages = 3;
 static constexpr size_t kFirstMapPage = 2;
 static constexpr Slice kDefaultWalSuffix = "-wal";
 static constexpr Slice kDefaultShmSuffix = "-shm";
-static constexpr uintptr_t kZeroSizePtr = 13;
 
 // Additional file locking modes that cannot be requested directly
 enum { kLockUnlocked = 0 };
-
-template <class T>
-auto zero_size_ptr() -> T *
-{
-    return reinterpret_cast<T *>(kZeroSizePtr);
-}
 
 struct Id {
     static constexpr uint32_t kNull = 0;

@@ -3,8 +3,8 @@
 // LICENSE.md. See AUTHORS.md for a list of contributor names.
 
 #include "temp.h"
-#include "alloc.h"
 #include "logging.h"
+#include "mem.h"
 #include "page.h"
 #include "stat.h"
 #include "unique_ptr.h"
@@ -213,7 +213,7 @@ private:
             // Free pages if shrinking the file.
             const auto old_len = sectors.len();
             for (size_t i = new_len; i < old_len; ++i) {
-                Alloc::deallocate(sectors[i]);
+                Mem::deallocate(sectors[i]);
                 // Clear pointers in case realloc() fails.
                 sectors[i] = nullptr;
             }
@@ -221,15 +221,14 @@ private:
             if (sectors.realloc(new_len)) {
                 // Alloc::reallocate() might fail when trimming an allocation, but not if the new size
                 // is 0. In that case, the underlying reallocation function is not called. Instead, the
-                // memory is freed using Alloc::deallocate(), and a pointer (non-null) is returned to a
-                // zero-length allocation (see alloc.h).
+                // memory is freed using Alloc::deallocate().
                 CALICODB_EXPECT_NE(new_len, 0);
                 return -1;
             }
             // Allocate pages if growing the file.
             for (size_t i = old_len; i < new_len; ++i) {
                 auto *&page = sectors[i];
-                if (auto *ptr = Alloc::allocate(sector_size)) {
+                if (auto *ptr = Mem::allocate(sector_size)) {
                     std::memset(ptr, 0, sector_size);
                     page = static_cast<char *>(ptr);
                 } else {
@@ -261,10 +260,10 @@ class TempWal : public Wal
 public:
     [[nodiscard]] static auto create(const Wal::Parameters &param) -> TempWal *
     {
-        auto *wal = Alloc::new_object<TempWal>(
+        auto *wal = Mem::new_object<TempWal>(
             reinterpret_cast<TempEnv &>(*param.env), *param.stat);
         if (wal->m_table.grow()) {
-            Alloc::deallocate(wal);
+            Mem::deallocate(wal);
             return nullptr;
         }
         return wal;
@@ -416,7 +415,7 @@ private:
         static auto create(uint32_t key, size_t page_size) -> PageEntry *
         {
             auto *ptr = static_cast<PageEntry *>(
-                Alloc::allocate(sizeof(PageEntry) + page_size));
+                Mem::allocate(sizeof(PageEntry) + page_size));
             if (ptr) {
                 ptr->key = key;
             }
@@ -499,7 +498,7 @@ private:
         auto clear() -> void
         {
             for_each([this](auto *&page) {
-                Alloc::deallocate(page);
+                Mem::deallocate(page);
                 page = nullptr;
                 --occupied;
                 return 0;

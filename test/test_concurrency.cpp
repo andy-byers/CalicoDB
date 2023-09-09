@@ -2,6 +2,7 @@
 // This source code is licensed under the MIT License, which can be found in
 // LICENSE.md. See AUTHORS.md for a list of contributor names.
 
+#include "allocator.h"
 #include "calicodb/db.h"
 #include "common.h"
 #include "logging.h"
@@ -123,14 +124,15 @@ protected:
     ~ConcurrencyTests() override
     {
         delete m_env;
+        DebugAllocator::set_limit(0);
     }
 
     auto TearDown() -> void override
     {
         // All resources should have been cleaned up by now, even though the Env is not deleted.
-        ASSERT_EQ(Alloc::bytes_used(), 0) << "leaked " << std::setprecision(4)
-                                          << static_cast<double>(Alloc::bytes_used()) / (1'024.0 * 1'024)
-                                          << " MiB";
+        ASSERT_EQ(DebugAllocator::bytes_used(), 0) << "leaked " << std::setprecision(4)
+                                                   << static_cast<double>(DebugAllocator::bytes_used()) / (1'024.0 * 1'024)
+                                                   << " MiB";
     }
 
     struct Connection;
@@ -417,9 +419,9 @@ protected:
     };
     auto run_alloc_test_instance(const AllocTestParameters &param) -> void
     {
-        static constexpr size_t kNumIterations = 2; //'000;
-        ASSERT_EQ(Alloc::bytes_used(), 0);
-        ASSERT_EQ(Alloc::set_limit(param.limit), 0);
+        static constexpr size_t kNumIterations = 500;
+        ASSERT_EQ(DebugAllocator::bytes_used(), 0);
+        ASSERT_NE(DebugAllocator::set_limit(param.limit), 0);
 
         const auto nt = param.num_malloc + param.num_realloc;
         Barrier barrier(nt);
@@ -440,10 +442,10 @@ protected:
             tmp.op = [&state](auto &co, auto *b) {
                 barrier_wait(b);
                 if (state.ptr) {
-                    Alloc::deallocate(state.ptr);
+                    Mem::deallocate(state.ptr);
                     state.ptr = nullptr;
                 } else {
-                    state.ptr = static_cast<char *>(Alloc::allocate(co.op_args[0]));
+                    state.ptr = static_cast<char *>(Mem::allocate(co.op_args[0]));
                 }
                 if (state.state++ > kNumIterations) {
                     co.op = nullptr;
@@ -472,7 +474,7 @@ protected:
                     default:
                         new_size = co.op_args[0] + co.op_args[1];
                 }
-                auto *new_ptr = Alloc::reallocate(state.ptr, new_size);
+                auto *new_ptr = Mem::reallocate(state.ptr, new_size);
                 if (new_ptr || new_size == 0) {
                     state.ptr = static_cast<char *>(new_ptr);
                 }
@@ -489,7 +491,7 @@ protected:
         for (auto &co : connections) {
             threads.emplace_back([&co, b = &barrier, t = threads.size(), limit = param.limit] {
                 while (connection_main(co, b)) {
-                    ASSERT_LE(Alloc::bytes_used(), limit);
+                    ASSERT_LE(DebugAllocator::bytes_used(), limit);
                 }
             });
         }
@@ -498,13 +500,13 @@ protected:
         }
 
         for (const auto &[ptr, _] : malloc_states) {
-            Alloc::deallocate(ptr);
+            Mem::deallocate(ptr);
         }
         for (const auto &[ptr, _] : realloc_states) {
-            Alloc::deallocate(ptr);
+            Mem::deallocate(ptr);
         }
 
-        ASSERT_EQ(Alloc::bytes_used(), 0);
+        ASSERT_EQ(DebugAllocator::bytes_used(), 0);
     }
 
     auto run_alloc_test(size_t x, size_t y) -> void

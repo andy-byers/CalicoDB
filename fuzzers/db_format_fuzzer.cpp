@@ -2,13 +2,14 @@
 // This source code is licensed under the MIT License, which can be found in
 // LICENSE.md. See AUTHORS.md for a list of contributor names.
 
-#include "alloc.h"
+#include "allocator.h"
 #include "calicodb/cursor.h"
 #include "calicodb/db.h"
 #include "calicodb/env.h"
 #include "calicodb/tx.h"
 #include "fake_env.h"
 #include "fuzzer.h"
+#include "mem.h"
 #include <memory>
 
 namespace calicodb
@@ -113,12 +114,13 @@ public:
 
 extern "C" int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size)
 {
+    Mem::set_methods(DebugAllocator::methods());
     {
         FakeEnv env;
         Fuzzer fuzzer(env);
         fuzzer.consume_input(Slice(reinterpret_cast<const char *>(data), size));
     }
-    CHECK_EQ(Alloc::bytes_used(), 0);
+    CHECK_EQ(DebugAllocator::bytes_used(), 0);
     return 0;
 }
 

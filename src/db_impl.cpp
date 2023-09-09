@@ -3,9 +3,9 @@
 // LICENSE.md. See AUTHORS.md for a list of contributor names.
 
 #include "db_impl.h"
-#include "alloc.h"
 #include "calicodb/env.h"
 #include "logging.h"
+#include "mem.h"
 #include "pager.h"
 #include "tx_impl.h"
 

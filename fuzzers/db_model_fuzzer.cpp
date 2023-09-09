@@ -2,6 +2,7 @@
 // This source code is licensed under the MIT License, which can be found in
 // LICENSE.md. See AUTHORS.md for a list of contributor names.
 
+#include "allocator.h"
 #include "fake_env.h"
 #include "fuzzer.h"
 #include "logging.h"
@@ -104,11 +105,12 @@ public:
             "kReopenBucket",
             "kValidateDB",
         };
+        String repr;
         const auto sample_len = std::min(stream.length(), 8UL);
         const auto missing_len = stream.length() - sample_len;
-        const auto sample = escape_string(stream.peek(sample_len));
+        CHECK_EQ(append_escaped_string(repr, stream.peek(sample_len)), 0);
         std::cout << "TRACE: OpType: " << kOperationTypeNames[op_type] << R"( Input: ")"
-                  << sample << R"(" + <)" << missing_len << " bytes>\n";
+                  << repr.c_str() << R"(" + <)" << missing_len << " bytes>\n";
 #endif // FUZZER_TRACE
 
         std::string str;
@@ -192,6 +194,7 @@ public:
 
 extern "C" int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size)
 {
+    Mem::set_methods(DebugAllocator::methods());
     {
         FakeEnv env;
         Fuzzer fuzzer(env);
@@ -199,7 +202,7 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size)
         while (fuzzer.consume_input(stream)) {
         }
     }
-    CHECK_EQ(Alloc::bytes_used(), 0);
+    CHECK_EQ(DebugAllocator::bytes_used(), 0);
     return 0;
 }
 

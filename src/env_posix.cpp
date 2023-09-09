@@ -2,9 +2,9 @@
 // This source code is licensed under the MIT License, which can be found in
 // LICENSE.md. See AUTHORS.md for a list of contributor names.
 
-#include "alloc.h"
 #include "calicodb/env.h"
 #include "logging.h"
+#include "mem.h"
 #include "port.h"
 #include "unique_ptr.h"
 #include "utils.h"
@@ -370,7 +370,7 @@ public:
             if (offset + 1 >= L) {
                 if (i == 0) {
                     L = offset + 2; // +1 for '\n'
-                    var = static_cast<char *>(Alloc::allocate(L));
+                    var = static_cast<char *>(Mem::allocate(L));
                     if (var == nullptr) {
                         // Write just this generic message if the system could not fulfill the allocation.
                         static constexpr const char kNoMemory[] = "could not log message: no memory for temp buffer\n";
@@ -388,7 +388,7 @@ public:
             append(Slice(p, offset));
             break;
         }
-        Alloc::deallocate(var);
+        Mem::deallocate(var);
     }
 };
 
@@ -415,7 +415,7 @@ struct PosixFs final {
         for (auto *file = inode.unused; file;) {
             auto *next = file->next;
             close(file->file);
-            Alloc::deallocate(file);
+            Mem::deallocate(file);
             file = next;
         }
         inode.unused = nullptr;
@@ -437,7 +437,7 @@ struct PosixFs final {
             ino = ino->next;
         }
         if (ino == nullptr) {
-            ino = Alloc::new_object<INode>();
+            ino = Mem::new_object<INode>();
             if (ino == nullptr) {
                 return Status::no_memory();
             }
@@ -475,14 +475,14 @@ struct PosixFs final {
                 CALICODB_EXPECT_EQ(inode->next->prev, inode);
                 inode->next->prev = inode->prev;
             }
-            Alloc::delete_object(inode);
+            Mem::delete_object(inode);
         }
         inode = nullptr;
     }
 
     auto ref_snode(PosixFile &file, PosixShm *&shm_out) const -> Status
     {
-        ObjectPtr<PosixShm> shm_storage(Alloc::new_object<PosixShm>());
+        ObjectPtr<PosixShm> shm_storage(Mem::new_object<PosixShm>());
         if (!shm_storage) {
             return Status::no_memory();
         }
@@ -493,7 +493,7 @@ struct PosixFs final {
         if (snode == nullptr) {
             s = Status::no_memory();
             // Allocate storage for the shm node.
-            ObjectPtr<ShmNode> new_snode(Alloc::new_object<ShmNode>());
+            ObjectPtr<ShmNode> new_snode(Mem::new_object<ShmNode>());
             if (!new_snode) {
                 goto cleanup;
             }
@@ -607,7 +607,7 @@ PosixEnv::PosixEnv()
 
 auto PosixEnv::operator delete(void *ptr, size_t) -> void
 {
-    Alloc::deallocate(ptr);
+    Mem::deallocate(ptr);
 }
 
 auto PosixEnv::remove_file(const char *filename) -> Status
@@ -652,7 +652,7 @@ auto PosixEnv::new_file(const char *filename, OpenMode mode, File *&out) -> Stat
 
     // Allocate storage for an UnusedFile.
     UniquePtr<UnusedFile> prealloc(static_cast<UnusedFile *>(
-        Alloc::allocate(sizeof(UnusedFile))));
+        Mem::allocate(sizeof(UnusedFile))));
     if (!prealloc) {
         return Status::no_memory();
     }
@@ -875,7 +875,7 @@ auto PosixFile::shm_map(size_t r, bool extend, volatile void *&out) -> Status
         }
 
         // Make room for a pointer to the requested shm region.
-        if (auto **realloc_ptr = static_cast<char **>(Alloc::reallocate(
+        if (auto **realloc_ptr = static_cast<char **>(Mem::reallocate(
                 snode->regions.get(), request * sizeof(char *)))) {
             snode->regions.release();
             snode->regions.reset(realloc_ptr);

@@ -106,17 +106,15 @@ public:
 
     [[nodiscard]] auto realloc(size_t len) -> int
     {
-        if (auto *ptr = static_cast<T *>(Alloc::reallocate(
-                m_ptr.get(), len * sizeof(T)))) {
-            // NOTE: We may end up with a pointer equal to zero_size_ptr<T>() (which is not nullptr),
-            //       if `len` is 0. This is fine, so long as callers make sure is_empty() is false
-            //       before dereferencing m_ptr.
-            m_ptr.release();
-            m_ptr.reset(ptr);
-            m_len = len;
-            return 0;
+        auto *ptr = static_cast<T *>(Mem::reallocate(
+            m_ptr.get(), len * sizeof(T)));
+        if (!ptr && len) {
+            return -1;
         }
-        return -1;
+        m_ptr.release();
+        m_ptr.reset(ptr);
+        m_len = len;
+        return 0;
     }
 };
 

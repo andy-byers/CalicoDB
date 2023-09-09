@@ -2,6 +2,7 @@
 // This source code is licensed under the MIT License, which can be found in
 // LICENSE.md. See AUTHORS.md for a list of contributor names.
 
+#include "allocator.h"
 #include "common.h"
 #include "cursor_impl.h"
 #include "encoding.h"
@@ -86,7 +87,7 @@ public:
             m_pager->finish();
         }
         if (!s.is_ok()) {
-            Alloc::delete_object(m_pager);
+            Mem::delete_object(m_pager);
             m_pager = nullptr;
         }
     }
@@ -96,10 +97,10 @@ public:
         EXPECT_TRUE(m_status.is_ok());
         EXPECT_EQ(m_c, nullptr);
         delete m_tree;
-        Alloc::delete_object(m_pager);
+        Mem::delete_object(m_pager);
         delete m_file;
         delete m_env;
-        EXPECT_EQ(Alloc::bytes_used(), 0);
+        EXPECT_EQ(DebugAllocator::bytes_used(), 0);
     }
 
     auto tree_put(CursorImpl &c, const std::string &k, const std::string &v) -> Status
@@ -1807,6 +1808,27 @@ TEST_F(CursorModificationTests, OverwriteRandom)
         m_c->next();
     }
     ASSERT_FALSE(m_c->is_valid());
+    ASSERT_OK(m_c->status());
+}
+
+TEST_F(CursorModificationTests, OverwriteExactSize)
+{
+    static constexpr size_t kNumIterations = 5;
+    for (size_t iteration = 0; iteration < kNumIterations; ++iteration) {
+        std::string target(64U << iteration, static_cast<char>('0' + iteration));
+        for (size_t i = 0; i < kInitialRecordCount; ++i) {
+            put_u64(target.data(), i);
+            ASSERT_OK(tree_put(*m_c, numeric_key(i), target));
+        }
+        for (size_t i = 0; i < kInitialRecordCount; ++i) {
+            put_u64(target.data(), i);
+            cursor_seek(numeric_key(i));
+            ASSERT_TRUE(m_c->is_valid());
+            ASSERT_EQ(to_string(m_c->key()), numeric_key(i));
+            ASSERT_EQ(to_string(m_c->value()), target);
+            m_c->next();
+        }
+    }
     ASSERT_OK(m_c->status());
 }
 

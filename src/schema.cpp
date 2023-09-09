@@ -105,7 +105,7 @@ Schema::Schema(Pager &pager, const Status &status, Stat &stat, char *scratch)
       m_map(pager, stat, scratch, Id::root(), String()),
       m_cursor(m_map),
       m_trees{"", &m_map, nullptr, nullptr},
-      m_schema(Alloc::new_object<SchemaCursor>(m_cursor))
+      m_schema(Mem::new_object<SchemaCursor>(m_cursor))
 {
     IntrusiveList::initialize(m_trees);
 }
@@ -113,13 +113,13 @@ Schema::Schema(Pager &pager, const Status &status, Stat &stat, char *scratch)
 auto Schema::close() -> void
 {
     map_trees(false, [](auto &t) {
-        Alloc::delete_object(t.tree);
+        Mem::delete_object(t.tree);
         return true;
     });
     IntrusiveList::initialize(m_trees);
 
     m_cursor.reset();
-    Alloc::delete_object(m_schema);
+    Mem::delete_object(m_schema);
     m_map.save_all_cursors();
 }
 
@@ -233,7 +233,7 @@ auto Schema::find_open_tree(const Slice &name) -> Tree *
         } else if (IntrusiveList::is_empty(t.tree->m_active_list) &&
                    IntrusiveList::is_empty(t.tree->m_inactive_list)) {
             IntrusiveList::remove(t);
-            Alloc::delete_object(t.tree);
+            Mem::delete_object(t.tree);
         }
         return true;
     });
@@ -251,8 +251,8 @@ auto Schema::construct_or_reference_tree(const Slice &name, Id root_id) -> Tree 
         return nullptr;
     }
 
-    auto *tree = Alloc::new_object<Tree>(*m_pager, *m_stat, m_scratch,
-                                         root_id, move(name_str));
+    auto *tree = Mem::new_object<Tree>(*m_pager, *m_stat, m_scratch,
+                                       root_id, move(name_str));
     if (tree) {
         IntrusiveList::add_tail(tree->list_entry, m_trees);
     }

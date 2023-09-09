@@ -2,6 +2,7 @@
 // This source code is licensed under the MIT License, which can be found in
 // LICENSE.md. See AUTHORS.md for a list of contributor names.
 
+#include "allocator.h"
 #include "common.h"
 #include "db_impl.h"
 #include "fake_env.h"
@@ -128,7 +129,7 @@ protected:
     {
         delete m_db;
         delete m_env;
-        EXPECT_EQ(Alloc::bytes_used(), 0);
+        EXPECT_EQ(DebugAllocator::bytes_used(), 0);
     }
 
     auto SetUp() -> void override
@@ -638,6 +639,28 @@ TEST_F(DBTests, RollbackUpdate)
         ASSERT_OK(m_db->checkpoint(false));
         ++round;
     } while (change_options(true));
+}
+
+TEST_F(DBTests, ModifyRecordSpecialCase)
+{
+    const std::string long_key(compute_local_pl_size(kPageSize, 0, kPageSize), '*');
+    ASSERT_OK(m_db->run(WriteOptions(), [&long_key](auto &tx) {
+        TestCursor c;
+        EXPECT_OK(test_create_and_open_bucket(tx, BucketOptions(), "b", c));
+        EXPECT_OK(tx.put(*c, to_slice(long_key), "old_value"));
+        EXPECT_OK(tx.commit());
+        EXPECT_OK(tx.put(*c, to_slice(long_key), "new_value"));
+        return Status::ok();
+    }));
+    ASSERT_OK(m_db->run(ReadOptions(), [&long_key](auto &tx) {
+        TestCursor c;
+        EXPECT_OK(test_open_bucket(tx, "b", c));
+
+        c->find(to_slice(long_key));
+        EXPECT_TRUE(c->is_valid());
+        EXPECT_EQ(c->value(), "new_value");
+        return Status::ok();
+    }));
 }
 
 TEST_F(DBTests, ScanWholeDatabase)

@@ -1,7 +1,7 @@
 # Modified from LevelDB's GitHub workflows storage.
-name: CI
+name: Bench
 
-on: [pull_request, push]
+on: [pull_request]
 
 permissions:
   contents: read

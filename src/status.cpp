@@ -3,9 +3,9 @@
 // LICENSE.md. See AUTHORS.md for a list of contributor names.
 
 #include "calicodb/status.h"
-#include "alloc.h"
 #include "calicodb/slice.h"
 #include "logging.h"
+#include "mem.h"
 #include "utils.h"
 
 namespace calicodb
@@ -95,7 +95,7 @@ auto decref(char *state) -> void
     if (is_heap(state)) {
         CALICODB_EXPECT_GT(*heap_refcount_ptr(state), 0);
         if (--*heap_refcount_ptr(state) == 0) {
-            Alloc::deallocate(state);
+            Mem::deallocate(state);
         }
     }
 }

@@ -5,9 +5,9 @@
 #ifndef CALICODB_UNIQUE_PTR_H
 #define CALICODB_UNIQUE_PTR_H
 
-#include "alloc.h"
 #include "calicodb/db.h"
 #include "calicodb/string.h"
+#include "mem.h"
 #include "utils.h"
 
 namespace calicodb
@@ -17,7 +17,7 @@ struct ObjectDestructor {
     template <class Object>
     auto operator()(Object *ptr) const -> void
     {
-        Alloc::delete_object(ptr);
+        Mem::delete_object(ptr);
     }
 };
 
@@ -32,7 +32,7 @@ struct UserObjectDestructor {
 struct DefaultDestructor {
     auto operator()(void *ptr) const -> void
     {
-        Alloc::deallocate(ptr);
+        Mem::deallocate(ptr);
     }
 };
 
