@@ -833,6 +833,83 @@ INSTANTIATE_TEST_SUITE_P(
         testing::Values(1, 2, 5, 10),
         testing::Values(0, 1, 2, 5, 10)));
 
+class FileDescriptorReuseTests : public testing::Test
+{
+public:
+    const std::string m_filename;
+    Env *const m_env;
+
+    explicit FileDescriptorReuseTests()
+        : m_filename(testing::TempDir() + "calicodb_fd_reuse_tests"),
+          m_env(&default_env())
+    {
+        std::filesystem::remove_all(m_filename);
+    }
+
+    ~FileDescriptorReuseTests() override
+    {
+        std::filesystem::remove_all(m_filename);
+    }
+
+    static auto open_file(Env &env, const char *filename, bool writer) -> File *
+    {
+        File *file;
+        auto s = env.new_file(filename, Env::kCreate | (writer ? Env::kReadOnly : Env::kReadWrite), file);
+        EXPECT_TRUE(s.is_ok() || s.is_io_error());
+        return file;
+    }
+
+    auto run_test(size_t readers, size_t writers) -> void
+    {
+        auto *keep_open = open_file(*m_env, m_filename.c_str(), true);
+        ASSERT_NE(keep_open, nullptr);
+        ASSERT_OK(keep_open->file_lock(kFileShared));
+
+        std::vector<std::thread> threads;
+        size_t counters[] = {readers, writers};
+        while (counters[0] + counters[1]) {
+            const auto is_writer = counters[0] < counters[1];
+            threads.emplace_back([this, is_writer] {
+                delete open_file(*m_env, m_filename.c_str(), is_writer);
+            });
+            --counters[is_writer];
+        }
+
+        for (auto &thread : threads) {
+            thread.join();
+        }
+
+        keep_open->file_unlock();
+        delete keep_open;
+    }
+};
+
+TEST_F(FileDescriptorReuseTests, ReusesFds0)
+{
+    run_test(0, 0);
+}
+
+TEST_F(FileDescriptorReuseTests, ReusesFds1)
+{
+    run_test(0, 10);
+    run_test(10, 0);
+    run_test(10, 10);
+}
+
+TEST_F(FileDescriptorReuseTests, ReusesFds2)
+{
+    run_test(10, 100);
+    run_test(100, 10);
+    run_test(100, 100);
+}
+
+TEST_F(FileDescriptorReuseTests, ReusesFds3)
+{
+    run_test(100, 1'000);
+    run_test(1'000, 100);
+    run_test(1'000, 1'000);
+}
+
 struct ShmLockPattern {
     size_t lock_ofs;
     size_t lock_len;
