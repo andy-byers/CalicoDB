@@ -5,9 +5,9 @@
 #include "calicodb/db.h"
 #include "db_impl.h"
 #include "header.h"
+#include "internal.h"
 #include "logging.h"
 #include "temp.h"
-#include "utils.h"
 
 namespace calicodb
 {
@@ -87,10 +87,11 @@ auto DB::open(const Options &options, const char *filename, DB *&db) -> Status
         sanitized.sync_mode = Options::kSyncOff;
     }
     if (sanitized.env == nullptr) {
-        sanitized.env = &Env::default_env();
+        sanitized.env = &default_env();
     }
 
     impl = new (std::nothrow) DBImpl({
+        options,
         sanitized,
         move(db_name),
         move(wal_name),

@@ -64,11 +64,11 @@ endif()
 
 add_library(calicodb STATIC)
 target_sources(calicodb
-        PRIVATE src/allocator.cpp
-                src/allocator.h
-                src/buffer.h
+        PRIVATE src/buffer.h
                 src/bufmgr.cpp
                 src/bufmgr.h
+                src/config.cpp
+                src/config_internal.h
                 src/cursor.cpp
                 src/cursor_impl.cpp
                 src/cursor_impl.h
@@ -106,17 +106,19 @@ target_sources(calicodb
                 src/tx_impl.cpp
                 src/tx_impl.h
                 src/unique_ptr.h
-                src/utils.h
+        src/internal.h
                 src/wal.cpp
                 src/wal.h
                 port/port.h
-        $<$<VERSION_GREATER:CMAKE_VERSION,3.2>:PUBLIC>  # From LevelDB
+        $<$<VERSION_GREATER:CMAKE_VERSION,3.2>:PUBLIC>
+            include/calicodb/config.h
             include/calicodb/cursor.h
             include/calicodb/db.h
             include/calicodb/env.h
             include/calicodb/options.h
             include/calicodb/slice.h
             include/calicodb/status.h
+            include/calicodb/string.h
             include/calicodb/tx.h)
 target_include_directories(calicodb
         PUBLIC $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/include>
@@ -149,7 +151,8 @@ if(CALICODB_WithASan)
 endif()
 
 if(CALICODB_WithUBSan)
-    target_compile_options(calicodb PUBLIC -fsanitize=undefined)
+    # RTTI required for -fsanitize=vptr.
+    target_compile_options(calicodb PUBLIC -fsanitize=undefined -frtti)
     target_link_options(calicodb PUBLIC -fsanitize=undefined)
 endif()
 

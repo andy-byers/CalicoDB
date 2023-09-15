@@ -5,12 +5,13 @@
 #include "tree.h"
 #include "cursor_impl.h"
 #include "encoding.h"
+#include "internal.h"
 #include "logging.h"
 #include "mem.h"
 #include "pager.h"
 #include "schema.h"
 #include "stat.h"
-#include "utils.h"
+#include "status_internal.h"
 
 #ifdef CALICODB_TEST
 // Used for debug printing the tree structure.
@@ -131,7 +132,7 @@ struct PayloadManager {
     {
         const auto ovfl_content_max = static_cast<uint32_t>(pager.page_size() - kLinkContentOffset);
         CALICODB_EXPECT_TRUE(in_buf || out_buf);
-        if (offset <= cell.local_pl_size) { // TODO: change to "<", no change in outcome but is less confusing
+        if (offset < cell.local_pl_size) {
             const auto n = minval(length, cell.local_pl_size - offset);
             if (in_buf) {
                 std::memcpy(cell.key + offset, in_buf, n);
@@ -340,8 +341,8 @@ auto Tree::create(Id *root_id_out) -> Status
         std::memset(hdr, 0, NodeHdr::kSize);
         NodeHdr::put_type(hdr, true);
         NodeHdr::put_cell_start(hdr, m_page_size);
-        s = PointerMap::write_entry(*m_pager, target,
-                                    {Id::null(), PointerMap::kTreeRoot});
+        PointerMap::write_entry(*m_pager, target,
+                                {Id::null(), PointerMap::kTreeRoot}, s);
     }
 
     if (s.is_ok()) {
@@ -460,15 +461,6 @@ auto Tree::read_key(const Cell &cell, char *scratch, Slice *key_out, uint32_t li
     return s;
 }
 
-auto Tree::read_value(Node &node, uint32_t index, char *scratch, Slice *value_out) const -> Status
-{
-    Cell cell;
-    if (node.read(index, cell)) {
-        return corrupted_node(node.ref->page_id);
-    }
-    return read_value(cell, scratch, value_out);
-}
-
 auto Tree::read_value(const Cell &cell, char *scratch, Slice *value_out) const -> Status
 {
     const auto value_size = cell.total_pl_size - cell.key_size;
@@ -500,9 +492,7 @@ auto Tree::find_parent_id(Id page_id, Id &out) const -> Status
 
 auto Tree::fix_parent_id(Id page_id, Id parent_id, PointerMap::Type type, Status &s) -> void
 {
-    if (s.is_ok()) {
-        s = PointerMap::write_entry(*m_pager, page_id, {parent_id, type});
-    }
+    PointerMap::write_entry(*m_pager, page_id, {parent_id, type}, s);
 }
 
 auto Tree::maybe_fix_overflow_chain(const Cell &cell, Id parent_id, Status &s) -> void
@@ -579,8 +569,8 @@ auto Tree::make_pivot(const PivotOptions &opt, Cell &pivot_out) -> Status
             } else {
                 write_overflow_id(pivot_out, dst->page_id);
             }
-            s = PointerMap::write_entry(
-                *m_pager, dst->page_id, {dst_bptr, dst_type});
+            PointerMap::write_entry(*m_pager, dst->page_id,
+                                    {dst_bptr, dst_type}, s);
 
             dst_type = PointerMap::kOverflowLink;
             dst_bptr = dst->page_id;
@@ -1381,8 +1371,8 @@ auto Tree::emplace(Node &node, const Slice &key, const Slice &value, uint32_t in
                 if (prev) {
                     m_pager->release(prev, Pager::kNoCache);
                 }
-                s = PointerMap::write_entry(
-                    *m_pager, ovfl->page_id, {prev_pgno, prev_type});
+                PointerMap::write_entry(*m_pager, ovfl->page_id,
+                                        {prev_pgno, prev_type}, s);
                 prev_type = PointerMap::kOverflowLink;
                 prev_pgno = ovfl->page_id;
                 prev = ovfl;
@@ -1539,12 +1529,9 @@ auto Tree::relocate_page(PageRef *&free, PointerMap::Entry entry, Id last_id) ->
             return corrupted_node(PointerMap::lookup(last_id, m_page_size));
     }
 
-    if (s.is_ok()) {
-        s = PointerMap::write_entry(*m_pager, last_id, {});
-    }
-    if (s.is_ok()) {
-        s = PointerMap::write_entry(*m_pager, free->page_id, entry);
-    }
+    PointerMap::write_entry(*m_pager, last_id, {}, s);
+    PointerMap::write_entry(*m_pager, free->page_id, entry, s);
+
     if (s.is_ok()) {
         PageRef *last;
         s = m_pager->acquire(last_id, last);
@@ -1555,7 +1542,7 @@ auto Tree::relocate_page(PageRef *&free, PointerMap::Entry entry, Id last_id) ->
                     s = PointerMap::read_entry(*m_pager, next_id, entry);
                     if (s.is_ok()) {
                         entry.back_ptr = free->page_id;
-                        s = PointerMap::write_entry(*m_pager, next_id, entry);
+                        PointerMap::write_entry(*m_pager, next_id, entry, s);
                     }
                 }
             }
@@ -1681,7 +1668,7 @@ class TreePrinter
                 CHECK_EQ(append_strings(*L_itr, message.c_str()), 0);
                 *s_itr = 0;
             } else {
-                *s_itr += uint32_t(message.length());
+                *s_itr += uint32_t(message.size());
             }
             ++L_itr;
             ++s_itr;

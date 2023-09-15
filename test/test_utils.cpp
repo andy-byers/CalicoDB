@@ -5,9 +5,11 @@
 #include "common.h"
 #include "test.h"
 
-#include "allocator.h"
+#include "calicodb/config.h"
+#include "config_internal.h"
 #include "encoding.h"
 #include "logging.h"
+#include "status_internal.h"
 
 namespace calicodb::test
 {
@@ -17,7 +19,6 @@ class AllocTests : public testing::Test
 public:
     static constexpr size_t kFakeAllocationSize = 1'024;
     alignas(uint64_t) static char s_fake_allocation[kFakeAllocationSize];
-    static uint64_t *s_alloc_size_ptr;
     static void *s_alloc_data_ptr;
 
     explicit AllocTests() = default;
@@ -33,7 +34,7 @@ public:
         ASSERT_EQ(DebugAllocator::bytes_used(), 0);
         DebugAllocator::set_limit(0);
         DebugAllocator::set_hook(nullptr, nullptr);
-        Mem::set_methods(DebugAllocator::methods());
+        ASSERT_OK(configure(kSetAllocator, DebugAllocator::config()));
     }
 };
 
@@ -42,7 +43,7 @@ public:
 alignas(uint64_t) char AllocTests::s_fake_allocation[kFakeAllocationSize];
 void *AllocTests::s_alloc_data_ptr = s_fake_allocation;
 
-static constexpr Mem::Methods kFakeMethods = {
+static constexpr AllocatorConfig kFakeConfig = {
     [](auto) -> void * {
         return AllocTests::s_fake_allocation;
     },
@@ -55,7 +56,7 @@ static constexpr Mem::Methods kFakeMethods = {
     },
 };
 
-static constexpr Mem::Methods kFaultyMethods = {
+static constexpr AllocatorConfig kFaultyConfig = {
     [](auto) -> void * {
         return nullptr;
     },
@@ -64,6 +65,24 @@ static constexpr Mem::Methods kFaultyMethods = {
     },
     [](auto *) {},
 };
+
+TEST_F(AllocTests, Configure)
+{
+    AllocatorConfig saved;
+    ASSERT_OK(configure(kGetAllocator, &saved));
+    auto *ptr = saved.malloc(42);
+    ASSERT_OK(configure(kSetAllocator, kFakeConfig));
+    Mem::deallocate(Mem::reallocate(Mem::allocate(123), 42));
+    ASSERT_OK(configure(kSetAllocator, saved));
+    Mem::deallocate(ptr);
+
+    ASSERT_OK(configure(kSetAllocator, AllocatorConfig{
+                                           CALICODB_DEFAULT_MALLOC,
+                                           CALICODB_DEFAULT_REALLOC,
+                                           CALICODB_DEFAULT_FREE,
+                                       }));
+    Mem::deallocate(Mem::reallocate(Mem::allocate(123), 42));
+}
 
 TEST_F(AllocTests, Methods)
 {
@@ -74,14 +93,14 @@ TEST_F(AllocTests, Methods)
 
     Mem::deallocate(new_ptr);
 
-    Mem::set_methods(kFakeMethods);
+    ASSERT_OK(configure(kSetAllocator, kFakeConfig));
     ASSERT_EQ(ptr = Mem::allocate(123), s_alloc_data_ptr);
     ASSERT_EQ(Mem::reallocate(ptr, 321), ptr);
     ASSERT_EQ(Mem::reallocate(ptr, 42), ptr);
     Mem::deallocate(nullptr);
     Mem::deallocate(ptr);
 
-    Mem::set_methods(kFaultyMethods);
+    ASSERT_OK(configure(kSetAllocator, kFaultyConfig));
     ASSERT_EQ(Mem::allocate(123), nullptr);
     ASSERT_EQ(Mem::reallocate(nullptr, 123), nullptr);
 }
@@ -140,7 +159,7 @@ TEST_F(AllocTests, AllocationHook)
 TEST_F(AllocTests, LargeAllocations)
 {
     // Don't actually allocate anything.
-    Mem::set_methods(kFakeMethods);
+    ASSERT_OK(configure(kSetAllocator, kFakeConfig));
 
     void *p;
     ASSERT_EQ(nullptr, Mem::allocate(kMaxAllocation + 1));
@@ -942,7 +961,7 @@ public:
 TEST_F(StringBuilderTests, InitialStateIsEmpty)
 {
     const auto str = build_string();
-    ASSERT_EQ(str.length(), 0);
+    ASSERT_EQ(str.size(), 0);
 }
 
 TEST_F(StringBuilderTests, Append)
@@ -957,8 +976,8 @@ TEST_F(StringBuilderTests, Append)
         .append(msg_c);
 
     const auto str = build_string();
-    ASSERT_EQ(str.length(), (msg_a + msg_b + msg_c).size());
-    ASSERT_EQ(Slice(str.c_str(), str.length()), to_slice(msg_a + msg_b + msg_c));
+    ASSERT_EQ(str.size(), (msg_a + msg_b + msg_c).size());
+    ASSERT_EQ(Slice(str.c_str(), str.size()), to_slice(msg_a + msg_b + msg_c));
 }
 
 TEST_F(StringBuilderTests, AppendFormat)

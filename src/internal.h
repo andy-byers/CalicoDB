@@ -2,16 +2,16 @@
 // This source code is licensed under the MIT License, which can be found in
 // LICENSE.md. See AUTHORS.md for a list of contributor names.
 
-#ifndef CALICODB_UTILS_H
-#define CALICODB_UTILS_H
+#ifndef CALICODB_INTERNAL_H
+#define CALICODB_INTERNAL_H
 
 #include "calicodb/options.h"
 #include "calicodb/status.h"
 #include "calicodb/string.h"
+#include "utility.h"
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
-#include <type_traits>
 
 #if NDEBUG
 #define CALICODB_EXPECT_(expr, file, line)
@@ -37,7 +37,7 @@
 namespace calicodb
 {
 
-[[nodiscard]] inline auto is_aligned(void *ptr, size_t alignment) -> bool
+[[nodiscard]] inline auto is_aligned(const void *ptr, size_t alignment) -> bool
 {
     CALICODB_EXPECT_NE(alignment, 0);
     return reinterpret_cast<uintptr_t>(ptr) % alignment == 0;
@@ -59,7 +59,7 @@ auto busy_wait(BusyHandler *handler, const Callback &callback) -> Status
 
 // Enforce a reasonable limit on the size of a single allocation. This is, consequently, the maximum
 // size of a record key or value.
-static constexpr auto kMaxAllocation = 0XFFFFFFEF;
+static constexpr uint32_t kMaxAllocation = 2'000'000'000;
 
 static constexpr uint32_t kMinPageSize = 512;
 static constexpr uint32_t kMaxPageSize = 32'768;
@@ -141,34 +141,6 @@ inline auto operator!=(Id lhs, Id rhs) -> bool
 }
 
 template <class T>
-[[nodiscard]] constexpr auto move(T &&t) noexcept -> typename std::remove_reference_t<T> &&
-{
-    return static_cast<typename std::remove_reference_t<T> &&>(t);
-}
-
-template <class T>
-[[nodiscard]] constexpr auto forward(typename std::remove_reference_t<T> &t) noexcept -> T &&
-{
-    return static_cast<T &&>(t);
-}
-
-template <class T>
-[[nodiscard]] constexpr auto forward(typename std::remove_reference_t<T> &&t) noexcept -> T &&
-{
-    static_assert(!std::is_lvalue_reference_v<T>,
-                  "forward must not be used to convert an rvalue to an lvalue");
-    return static_cast<T &&>(t);
-}
-
-template <class T, class U = T>
-constexpr auto exchange(T &obj, U &&new_val) -> T
-{
-    auto old_val = move(obj);
-    obj = forward<U>(new_val);
-    return old_val;
-}
-
-template <class T>
 constexpr auto minval(T t1, T t2) -> T
 {
     return t1 < t2 ? t1 : t2;
@@ -182,4 +154,4 @@ constexpr auto maxval(T t1, T t2) -> T
 
 } // namespace calicodb
 
-#endif // CALICODB_UTILS_H
+#endif // CALICODB_INTERNAL_H

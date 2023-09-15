@@ -10,6 +10,7 @@
 #include "mem.h"
 #include "page.h"
 #include "stat.h"
+#include "status_internal.h"
 #include "unique_ptr.h"
 
 namespace calicodb
@@ -130,8 +131,8 @@ using ConstStablePtr = const char *;
 template <class Src, class Dst>
 auto read_hdr(const volatile Src *src, Dst *dst) -> void
 {
-    CALICODB_EXPECT_EQ(reinterpret_cast<uintptr_t>(src) & (alignof(uint64_t) - 1), 0);
-    CALICODB_EXPECT_EQ(reinterpret_cast<uintptr_t>(dst) & (alignof(uint64_t) - 1), 0);
+    CALICODB_EXPECT_TRUE(is_aligned(const_cast<const Src *>(src), alignof(uint64_t)));
+    CALICODB_EXPECT_TRUE(is_aligned(const_cast<const Dst *>(dst), alignof(uint64_t)));
     const volatile auto *src64 = reinterpret_cast<const volatile uint64_t *>(src);
     auto *dst64 = reinterpret_cast<uint64_t *>(dst);
     for (size_t i = 0; i < sizeof(HashIndexHdr) / sizeof *src64; ++i) {
@@ -141,8 +142,8 @@ auto read_hdr(const volatile Src *src, Dst *dst) -> void
 template <class Src, class Dst>
 auto write_hdr(const Src *src, volatile Dst *dst) -> void
 {
-    CALICODB_EXPECT_EQ(reinterpret_cast<uintptr_t>(src) & (alignof(uint64_t) - 1), 0);
-    CALICODB_EXPECT_EQ(reinterpret_cast<uintptr_t>(dst) & (alignof(uint64_t) - 1), 0);
+    CALICODB_EXPECT_TRUE(is_aligned(const_cast<const Src *>(src), alignof(uint64_t)));
+    CALICODB_EXPECT_TRUE(is_aligned(const_cast<const Dst *>(dst), alignof(uint64_t)));
     const auto *src64 = reinterpret_cast<const uint64_t *>(src);
     volatile auto *dst64 = reinterpret_cast<volatile uint64_t *>(dst);
     for (size_t i = 0; i < sizeof(HashIndexHdr) / sizeof *src64; ++i) {
@@ -152,6 +153,7 @@ auto write_hdr(const Src *src, volatile Dst *dst) -> void
 template <class Shared, class Local>
 auto compare_hdr(const volatile Shared *shared, const Local *local) -> int
 {
+    CALICODB_EXPECT_TRUE(is_aligned(const_cast<const Shared *>(shared), alignof(uint64_t)));
     const volatile auto *shared64 = reinterpret_cast<const volatile uint64_t *>(shared);
     const auto *local64 = reinterpret_cast<const uint64_t *>(local);
     for (size_t i = 0; i < sizeof(HashIndexHdr) / sizeof *shared64; ++i) {
@@ -1139,11 +1141,11 @@ private:
 
     UserPtr<File> m_wal;
 
-    Env *const m_env = nullptr;
-    File *const m_db = nullptr;
-    Logger *const m_log = nullptr;
-    Stat *const m_stat = nullptr;
-    BusyHandler *const m_busy = nullptr;
+    Env *const m_env;
+    File *const m_db;
+    Logger *const m_log;
+    Stat *const m_stat;
+    BusyHandler *const m_busy;
 
     uint32_t m_min_frame = 0;
 
@@ -1241,9 +1243,6 @@ auto WalImpl::recover_index() -> Status
     CALICODB_EXPECT_TRUE(m_writer_lock);
     m_hdr = {};
 
-    // TODO: This code is not being called from checkpoint anymore. It would be necessary if
-    //       we wanted to support a "truncate" checkpoint mode like SQLite. If not, this code
-    //       can be simplified to just taking the recovery lock.
     // Lock the recover "Rcvr" lock. Lock the checkpoint ("Ckpt") lock as well, if this
     // code isn't being called from the checkpoint routine. In that case, the checkpoint
     // lock is already held.
@@ -1337,12 +1336,7 @@ cleanup:
         m_hdr.frame_cksum[1] = frame_cksum[1];
         write_index_header();
         // NOTE: This code can run while readers are trying to connect (`start_reader()`).
-        //
         volatile auto *info = get_ckpt_info();
-        // TODO: It seems that this store races with connections that are attempting to
-        //       start reading. Making it atomic for now. When readers read the backfill
-        //       count to see if they can get read lock 0, they are not under any lock...
-        // info->backfill = 0;
         ATOMIC_STORE(&info->backfill, 0);
         info->backfill_attempted = m_hdr.max_frame;
         info->readmark[0] = 0;

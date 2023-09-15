@@ -7,6 +7,7 @@
 #include "logging.h"
 #include "mem.h"
 #include "pager.h"
+#include "status_internal.h"
 #include "tx_impl.h"
 
 namespace calicodb
@@ -102,8 +103,9 @@ DBImpl::DBImpl(Parameters param)
       m_auto_ckpt(param.sanitized.auto_checkpoint),
       m_db_filename(move(param.db_name)),
       m_wal_filename(move(param.wal_name)),
-      m_owns_log(param.sanitized.info_log == nullptr),
-      m_owns_env(param.sanitized.temp_database)
+      m_owns_log(param.original.info_log != param.sanitized.info_log),
+      m_owns_env(param.original.env != param.sanitized.env &&
+                 param.sanitized.env != &default_env())
 {
 }
 
@@ -143,7 +145,7 @@ auto DBImpl::destroy(const Options &options, const char *filename) -> Status
         if (s.is_ok()) {
             auto *env = options.env;
             if (env == nullptr) {
-                env = &Env::default_env();
+                env = &default_env();
             }
             // Remove the database file from disk. The WAL file should be cleaned up
             // automatically.

@@ -5,7 +5,7 @@
 #ifndef CALICODB_FREELIST_H
 #define CALICODB_FREELIST_H
 
-#include "utils.h"
+#include "internal.h"
 
 namespace calicodb
 {

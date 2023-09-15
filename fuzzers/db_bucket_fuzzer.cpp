@@ -2,7 +2,6 @@
 // This source code is licensed under the MIT License, which can be found in
 // LICENSE.md. See AUTHORS.md for a list of contributor names.
 
-#include "allocator.h"
 #include "calicodb/db.h"
 #include "cursor_impl.h"
 #include "fuzzer.h"
@@ -157,7 +156,7 @@ public:
 
 extern "C" int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size)
 {
-    Mem::set_methods(DebugAllocator::methods());
+    CHECK_OK(configure(kSetAllocator, DebugAllocator::config()));
     {
         FuzzedInputProvider stream(data, size);
         Fuzzer fuzzer;

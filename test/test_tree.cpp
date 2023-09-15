@@ -2,13 +2,13 @@
 // This source code is licensed under the MIT License, which can be found in
 // LICENSE.md. See AUTHORS.md for a list of contributor names.
 
-#include "allocator.h"
 #include "common.h"
 #include "cursor_impl.h"
 #include "encoding.h"
 #include "freelist.h"
 #include "logging.h"
 #include "schema.h"
+#include "status_internal.h"
 #include "temp.h"
 #include "test.h"
 #include "tree.h"
@@ -963,9 +963,13 @@ TEST_F(PointerMapTests, ReadsAndWritesEntries)
     ASSERT_OK(m_pager->allocate(page));
     m_pager->release(page);
 
-    ASSERT_OK(PointerMap::write_entry(*m_pager, Id(3), PointerMap::Entry{Id(33), PointerMap::kTreeNode}));
-    ASSERT_OK(PointerMap::write_entry(*m_pager, Id(4), PointerMap::Entry{Id(44), PointerMap::kFreelistPage}));
-    ASSERT_OK(PointerMap::write_entry(*m_pager, Id(5), PointerMap::Entry{Id(55), PointerMap::kOverflowLink}));
+    Status s;
+    PointerMap::write_entry(*m_pager, Id(3), PointerMap::Entry{Id(33), PointerMap::kTreeNode}, s);
+    ASSERT_OK(s);
+    PointerMap::write_entry(*m_pager, Id(4), PointerMap::Entry{Id(44), PointerMap::kFreelistPage}, s);
+    ASSERT_OK(s);
+    PointerMap::write_entry(*m_pager, Id(5), PointerMap::Entry{Id(55), PointerMap::kOverflowLink}, s);
+    ASSERT_OK(s);
 
     PointerMap::Entry entry_1, entry_2, entry_3;
     ASSERT_OK(PointerMap::read_entry(*m_pager, Id(3), entry_1));
@@ -993,7 +997,9 @@ TEST_F(PointerMapTests, PointerMapCanFitAllPointers)
         if (i != map_size()) {
             const Id id(i + 3);
             const PointerMap::Entry entry{Id(id.value + 1), PointerMap::kTreeNode};
-            ASSERT_OK(PointerMap::write_entry(*m_pager, id, entry));
+            Status s;
+            PointerMap::write_entry(*m_pager, id, entry, s);
+            ASSERT_OK(s);
         }
     }
     for (size_t i = 0; i < map_size() + 10; ++i) {

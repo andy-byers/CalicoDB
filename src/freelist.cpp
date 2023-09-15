@@ -95,8 +95,8 @@ auto Freelist::add(Pager &pager, PageRef *&page) -> Status
                 pager.mark_dirty(*trunk);
                 FreePage::put_leaf_count(*trunk, n + 1);
                 FreePage::put_leaf_id(*trunk, n, page->page_id.value);
-                s = PointerMap::write_entry(
-                    pager, page->page_id, {Id::null(), PointerMap::kFreelistPage});
+                PointerMap::write_entry(pager, page->page_id,
+                                        {Id::null(), PointerMap::kFreelistPage}, s);
                 goto cleanup;
             } else if (n > trunk_capacity) {
                 s = Status::corruption();
@@ -117,9 +117,8 @@ auto Freelist::add(Pager &pager, PageRef *&page) -> Status
         free_head = page->page_id;
         // Release the page before it gets discarded below.
         pager.release(page);
-        s = PointerMap::write_entry(
-            pager, free_head,
-            {Id::null(), PointerMap::kFreelistPage});
+        PointerMap::write_entry(pager, free_head,
+                                {Id::null(), PointerMap::kFreelistPage}, s);
     }
 
 cleanup:

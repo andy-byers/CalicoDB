@@ -4,7 +4,7 @@
 
 #include "schema.h"
 #include "encoding.h"
-#include "logging.h"
+#include "status_internal.h"
 
 namespace calicodb
 {

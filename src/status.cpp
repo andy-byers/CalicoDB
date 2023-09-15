@@ -4,9 +4,9 @@
 
 #include "calicodb/status.h"
 #include "calicodb/slice.h"
-#include "logging.h"
+#include "internal.h"
 #include "mem.h"
-#include "utils.h"
+#include "status_internal.h"
 
 namespace calicodb
 {
@@ -57,35 +57,23 @@ auto inline_subcode(const char *state) -> Status::SubCode
         (reinterpret_cast<uintptr_t>(state) & kSubCodeMask) >> 8);
 }
 
-using HeapRefCount = uint16_t;
-
-auto heap_code(const char *state) -> Status::Code
+auto heap_hdr(char *state) -> HeapStatusHdr *
 {
-    return static_cast<Status::Code>(state[sizeof(HeapRefCount)]);
-}
-
-auto heap_subcode(const char *state) -> Status::SubCode
-{
-    return static_cast<Status::SubCode>(state[sizeof(HeapRefCount) + 1]);
-}
-
-auto heap_refcount_ptr(char *state) -> HeapRefCount *
-{
-    return reinterpret_cast<HeapRefCount *>(state);
+    return reinterpret_cast<HeapStatusHdr *>(state);
 }
 
 auto heap_message(const char *state) -> const char *
 {
-    return state + sizeof(HeapRefCount) + 2;
+    return state + sizeof(HeapStatusHdr);
 }
 
 auto incref(char *state) -> int
 {
     if (is_heap(state)) {
-        if (*heap_refcount_ptr(state) == UINT16_MAX) {
+        if (heap_hdr(state)->refs == UINT16_MAX) {
             return -1;
         }
-        ++*heap_refcount_ptr(state);
+        ++heap_hdr(state)->refs;
     }
     return 0;
 }
@@ -93,8 +81,8 @@ auto incref(char *state) -> int
 auto decref(char *state) -> void
 {
     if (is_heap(state)) {
-        CALICODB_EXPECT_GT(*heap_refcount_ptr(state), 0);
-        if (--*heap_refcount_ptr(state) == 0) {
+        CALICODB_EXPECT_GT(heap_hdr(state)->refs, 0);
+        if (--heap_hdr(state)->refs == 0) {
             Mem::deallocate(state);
         }
     }
@@ -150,7 +138,7 @@ auto Status::code() const -> Code
     } else if (is_inline(m_state)) {
         return inline_code(m_state);
     } else {
-        return heap_code(m_state);
+        return heap_hdr(m_state)->code;
     }
 }
 
@@ -161,7 +149,7 @@ auto Status::subcode() const -> SubCode
     } else if (is_inline(m_state)) {
         return inline_subcode(m_state);
     } else {
-        return heap_subcode(m_state);
+        return heap_hdr(m_state)->subc;
     }
 }
 

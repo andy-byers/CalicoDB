@@ -4,6 +4,7 @@
 + [API](#api)
     + [Slices](#slices)
     + [Statuses](#statuses)
+    + [Global options](#Global options)
     + [Opening a database](#opening-a-database)
     + [Readonly transactions](#readonly-transactions)
     + [Read-write transactions](#read-write-transactions)
@@ -40,6 +41,8 @@ cmake -DCMAKE_BUILD_TYPE=Release -DCALICODB_Test=Off .. && cmake --build .
 ### Slices
 
 ```C++
+#include "calicodb/slice.h"
+
 static constexpr auto *kCString = "abc";
 
 // Slices can be created from C-style strings, or from a pointer and a size.
@@ -59,11 +62,36 @@ assert(s2 < "bc");
 assert(s2.starts_with("ab"));
 ```
 
+### Global options
+Per-process options are queried and set using `calicodb::configure()`.
+This API is not thread safe, and options should be set before any other library functions are called or objects created.
+For example, `calicodb::configure()` can be used to set the general-purpose allocator used to get heap memory for the library.
+Changing the allocator while the library is using heap memory can cause a malloc/free mismatch, which is undefined behavior.
+
+```C++
+#include "calicodb/config.h"
+#include "calicodb/status.h"
+
+// Query the general-purpose allocator that is currently in-use.
+calicodb::AllocatorConfig config;
+const calicodb::Status rc = calicodb::configure(calicodb::kGetAllocator, &config);
+if (rc.is_ok()) {
+    // config contains the default allocation routines.
+    assert(config.malloc == CALICODB_DEFAULT_MALLOC);
+    assert(config.realloc == CALICODB_DEFAULT_REALLOC);
+    assert(config.free == CALICODB_DEFAULT_FREE);
+}
+```
+
 ### Statuses
 All CalicoDB routines that have the possibility of failure will return (or otherwise expose) a status object.
 Status objects have a code, a subcode, and possibly a message.
+If a `Status` has a message, then it is stored on the heap, along with the code and subcode.
+Otherwise, or if the heap allocation fails, the code and subcode are packed into the state pointer.
 
 ```C++
+#include "calicodb/status.h"
+
 // The default constructor creates an OK status. An OK status is a status for which 
 // Status::is_ok() returns true (not an error status).
 calicodb::Status s;
@@ -95,6 +123,8 @@ if (s.is_ok()) {
 ### Opening a database
 
 ```C++
+#include "calicodb/db.h"
+
 // Set some initialization options. See include/calicodb/options.h for descriptions
 // and default values.
 const calicodb::Options options = {
@@ -112,9 +142,9 @@ const calicodb::Options options = {
     calicodb::Options::kLockNormal, // lock_mode
 };
 
-// Create or open a database at "/tmp/cats".
+// Create or open a database at the given path.
 calicodb::DB *db;
-s = calicodb::DB::open(options, "/tmp/cats", db);
+s = calicodb::DB::open(options, "/tmp/calicodb_cats_example", db);
 
 // Handle failure. s.message() provides a string representation of the status.
 if (!s.is_ok()) {
@@ -126,6 +156,9 @@ if (!s.is_ok()) {
 Readonly transactions are typically run using `DB::run(ReadOptions(), fn)`, where `fn` is a callback that reads from the database.
 
 ```C++
+#include "calicodb/db.h"
+#include "calicodb/tx.h"
+
 const char *bucket_name = "all_kittens"; // Lambda captures are supported.
 s = db->run(calicodb::ReadOptions(), [bucket_name](const calicodb::Tx &tx) {
     // Open buckets (see #buckets) and read some data. The `tx` object is managed 
@@ -141,6 +174,9 @@ If this happens, the transaction object, and any buckets created from it, will r
 The only possible course-of-action in this case is to return from `fn` and let the database clean up.
 
 ```C++
+#include "calicodb/db.h"
+#include "calicodb/tx.h"
+
 s = db->run(calicodb::WriteOptions(), [](calicodb::Tx &tx) {
     // Read and/or write some records. If this callable returns an OK status,
     // `tx::commit()` is called on `tx` and the resulting status returned.
@@ -158,6 +194,9 @@ Transactions can also be run manually.
 The caller is responsible for `delete`ing the `Tx` handle when it is no longer needed.
 
 ```C++
+#include "calicodb/db.h"
+#include "calicodb/tx.h"
+
 calicodb::Tx *reader;
 
 // Start a readonly transaction.
@@ -199,6 +238,10 @@ Each open bucket is represented by a `calicodb::Cursor` over its contents.
 Multiple cursors can be opened on each bucket.
 
 ```C++
+#include "calicodb/cursor.h"
+#include "calicodb/db.h"
+#include "calicodb/tx.h"
+
 calicodb::Cursor *c;
 
 // Set some initialization options. Enforces that the bucket "cats" must
@@ -241,6 +284,10 @@ Cursors are used to perform full-bucket scans and range queries.
 They can also be used to help modify the database during [read-write transactions](#read-write-transactions).
 
 ```C++
+#include "calicodb/cursor.h"
+#include "calicodb/db.h"
+#include "calicodb/tx.h"
+
 // Scan the entire bucket forwards.
 c->seek_first();
 while (c->is_valid()) {
@@ -315,6 +362,9 @@ delete c;
 ### Database properties
 
 ```C++
+#include "calicodb/db.h"
+#include "calicodb/string.h"
+
 calicodb::String prop;
 s = db->get_property("calicodb.stats", &prop);
 if (s.is_ok()) {
@@ -341,6 +391,8 @@ Note that automatic checkpoints can be run using the `auto_checkpoint` option (s
 Automatic checkpoints are attempted when transactions are started.
 
 ```C++
+#include "calicodb/db.h"
+
 // This transaction was started earlier, in #manual-transactions. It must be
 // finished before the database can be checkpointed. Note that the bucket 
 // handle from earlier must not be used after this next line.
@@ -375,7 +427,9 @@ delete db;
 ### Destroying a database
 
 ```C++
-s = calicodb::DB::destroy(options, "/tmp/cats");
+#include "calicodb/db.h"
+
+s = calicodb::DB::destroy(options, "/tmp/calicodb_cats_example");
 if (s.is_ok()) {
     // Database has been destroyed.
 }

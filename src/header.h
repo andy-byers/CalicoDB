@@ -6,7 +6,7 @@
 #define CALICODB_HEADER_H
 
 #include "encoding.h"
-#include "utils.h"
+#include "internal.h"
 
 namespace calicodb
 {
@@ -56,6 +56,7 @@ struct FileHdr {
     {
         return get_u32(root + kPageCountOffset);
     }
+
     static auto put_page_count(char *root, uint32_t value) -> void
     {
         put_u32(root + kPageCountOffset, value);
@@ -65,6 +66,7 @@ struct FileHdr {
     {
         return Id(get_u32(root + kFreelistHeadOffset));
     }
+
     static auto put_freelist_head(char *root, Id value) -> void
     {
         put_u32(root + kFreelistHeadOffset, value.value);
@@ -74,6 +76,7 @@ struct FileHdr {
     {
         return get_u32(root + kFreelistLengthOffset);
     }
+
     static auto put_freelist_length(char *root, uint32_t value) -> void
     {
         put_u32(root + kFreelistLengthOffset, value);
@@ -83,6 +86,7 @@ struct FileHdr {
     {
         return Id(get_u32(root + kLargestRootOffset));
     }
+
     static auto put_largest_root(char *root, Id value) -> void
     {
         put_u32(root + kLargestRootOffset, value.value);
@@ -92,6 +96,7 @@ struct FileHdr {
     {
         return get_u16(root + kPageSizeOffset);
     }
+
     static auto put_page_size(char *root, uint32_t value) -> void
     {
         CALICODB_EXPECT_TRUE(check_page_size(value).is_ok());
@@ -110,7 +115,7 @@ struct FileHdr {
 //     8       4     Next ID
 // TODO: Only internal nodes need a "Next ID".
 struct NodeHdr {
-    enum Type : int {
+    enum Type : char {
         kInvalid = 0,
         kInternal = 1,
         kExternal = 2,

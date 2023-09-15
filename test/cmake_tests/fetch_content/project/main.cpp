@@ -6,6 +6,6 @@
 
 auto main(int, const char *[]) -> int
 {
-    (void)calicodb::Env::default_env();
+    (void)calicodb::default_env();
     return 0;
 }

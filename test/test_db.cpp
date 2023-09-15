@@ -2,7 +2,6 @@
 // This source code is licensed under the MIT License, which can be found in
 // LICENSE.md. See AUTHORS.md for a list of contributor names.
 
-#include "allocator.h"
 #include "common.h"
 #include "db_impl.h"
 #include "fake_env.h"
@@ -118,7 +117,7 @@ protected:
         : m_test_dir(testing::TempDir()),
           m_db_name(m_test_dir + "calicodb_test_db"),
           m_alt_wal_name(m_db_name + "_alternate_wal"),
-          m_env(new CallbackEnv(Env::default_env()))
+          m_env(new CallbackEnv(default_env()))
     {
         std::filesystem::remove_all(m_db_name.c_str());
         std::filesystem::remove_all(m_db_name + to_string(kDefaultWalSuffix));
@@ -925,44 +924,44 @@ TEST(DestructionTests, DestructionBehavior)
     const auto db_name = testing::TempDir() + "calicodb_test_db";
     const auto wal_name = db_name + to_string(kDefaultWalSuffix);
     const auto shm_name = db_name + to_string(kDefaultShmSuffix);
-    (void)Env::default_env().remove_file(db_name.c_str());
-    (void)Env::default_env().remove_file(wal_name.c_str());
-    (void)Env::default_env().remove_file(shm_name.c_str());
+    (void)default_env().remove_file(db_name.c_str());
+    (void)default_env().remove_file(wal_name.c_str());
+    (void)default_env().remove_file(shm_name.c_str());
 
     DB *db;
     ASSERT_OK(DB::open(Options(), db_name.c_str(), db));
     ASSERT_OK(db->run(WriteOptions(), [](auto &tx) {
         return tx.create_bucket(BucketOptions(), "BUCKET", nullptr);
     }));
-    ASSERT_TRUE(Env::default_env().file_exists(db_name.c_str()));
-    ASSERT_TRUE(Env::default_env().file_exists(wal_name.c_str()));
-    ASSERT_TRUE(Env::default_env().file_exists(shm_name.c_str()));
+    ASSERT_TRUE(default_env().file_exists(db_name.c_str()));
+    ASSERT_TRUE(default_env().file_exists(wal_name.c_str()));
+    ASSERT_TRUE(default_env().file_exists(shm_name.c_str()));
 
     delete db;
-    ASSERT_TRUE(Env::default_env().file_exists(db_name.c_str()));
-    ASSERT_FALSE(Env::default_env().file_exists(wal_name.c_str()));
-    ASSERT_FALSE(Env::default_env().file_exists(shm_name.c_str()));
+    ASSERT_TRUE(default_env().file_exists(db_name.c_str()));
+    ASSERT_FALSE(default_env().file_exists(wal_name.c_str()));
+    ASSERT_FALSE(default_env().file_exists(shm_name.c_str()));
 
     ASSERT_OK(DB::destroy(Options(), db_name.c_str()));
-    ASSERT_FALSE(Env::default_env().file_exists(db_name.c_str()));
-    ASSERT_FALSE(Env::default_env().file_exists(wal_name.c_str()));
-    ASSERT_FALSE(Env::default_env().file_exists(shm_name.c_str()));
+    ASSERT_FALSE(default_env().file_exists(db_name.c_str()));
+    ASSERT_FALSE(default_env().file_exists(wal_name.c_str()));
+    ASSERT_FALSE(default_env().file_exists(shm_name.c_str()));
 }
 
 TEST(DestructionTests, OnlyDeletesCalicoDatabases)
 {
-    (void)Env::default_env().remove_file("./testdb");
+    (void)default_env().remove_file("./testdb");
 
     // "./testdb" does not exist.
     ASSERT_NOK(DB::destroy(Options(), "./testdb"));
-    ASSERT_FALSE(Env::default_env().file_exists("./testdb"));
+    ASSERT_FALSE(default_env().file_exists("./testdb"));
 
     // File is too small to read the first page.
     File *file;
-    ASSERT_OK(Env::default_env().new_file("./testdb", Env::kCreate, file));
+    ASSERT_OK(default_env().new_file("./testdb", Env::kCreate, file));
     ASSERT_OK(file->write(0, "CalicoDB format"));
     ASSERT_NOK(DB::destroy(Options(), "./testdb"));
-    ASSERT_TRUE(Env::default_env().file_exists("./testdb"));
+    ASSERT_TRUE(default_env().file_exists("./testdb"));
 
     // Identifier is incorrect.
     ASSERT_OK(file->write(0, "CalicoDB format 0"));
@@ -1108,7 +1107,7 @@ TEST_F(DBOpenTests, CustomLogger)
     // DB will warn (through the log) about the fact that options.env is not nullptr.
     // It will clear that field and use it to hold a custom Env that helps implement
     // in-memory databases.
-    options.env = &Env::default_env();
+    options.env = &default_env();
     options.temp_database = true;
     // In-memory databases can have an empty filename.
     ASSERT_OK(DB::open(options, "", m_db));
@@ -1206,7 +1205,7 @@ protected:
 
 TEST_F(TransactionTests, ReadsMostRecentSnapshot)
 {
-    uint64_t key_limit = 0;
+    size_t key_limit = 0;
     auto should_records_exist = false;
     m_env->m_write_callback = [&] {
         DB *db;
@@ -1230,7 +1229,7 @@ TEST_F(TransactionTests, ReadsMostRecentSnapshot)
         //          until after the transaction completes, since this connection will have a
         //          write lock until DB::update() returns.
         for (size_t i = 0; i < 10; ++i) {
-            static constexpr uint64_t kScale = 5;
+            static constexpr size_t kScale = 5;
             EXPECT_OK(put_range(tx, BucketOptions(), "BUCKET", i * kScale, (i + 1) * kScale));
             EXPECT_OK(tx.commit());
             should_records_exist = true;
@@ -1277,9 +1276,9 @@ TEST_F(TransactionTests, ExclusiveLockingMode)
 
 TEST_F(TransactionTests, IgnoresFutureVersions)
 {
-    static constexpr uint64_t kN = 5;
+    static constexpr size_t kN = 5;
     auto has_open_db = false;
-    uint64_t n = 0;
+    size_t n = 0;
 
     ASSERT_OK(m_db->run(WriteOptions(), [](auto &tx) {
         return put_range(tx, BucketOptions(), "BUCKET", 0, kN);
@@ -1360,7 +1359,7 @@ TEST_F(CheckpointTests, CheckpointerAllowsTransactions)
         return put_range(tx, BucketOptions(), "before", 0, kSavedCount / 2, 1);
     }));
 
-    uint64_t n = 0;
+    size_t n = 0;
     m_env->m_write_callback = [this, &n] {
         if (n >= 256) {
             // NOTE: The outer DB still has the file locked, so the Env won't close the database file when

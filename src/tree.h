@@ -121,8 +121,6 @@ private:
     friend class TreePrinter;
     friend class TreeValidator;
 
-    auto relocate_page(Node &node, PointerMap::Type type, Id id) -> int;
-
     auto corrupted_node(Id page_id) const -> Status;
 
     auto redistribute_cells(Node &left, Node &right, Node &parent, uint32_t pivot_idx) -> Status;
@@ -143,7 +141,6 @@ private:
     auto extract_key(const Cell &cell, KeyScratch &scratch, Slice &key_out, uint32_t limit = 0) const -> Status;
     auto read_key(const Cell &cell, char *scratch, Slice *key_out, uint32_t limit = 0) const -> Status;
     auto read_value(const Cell &cell, char *scratch, Slice *value_out) const -> Status;
-    auto read_value(Node &node, uint32_t index, char *scratch, Slice *value_out) const -> Status;
     auto overwrite_value(const Cell &cell, const Slice &value) -> Status;
     auto emplace(Node &node, const Slice &key, const Slice &value, uint32_t index, bool &overflow) -> Status;
     auto free_overflow(Id head_id) -> Status;

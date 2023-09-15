@@ -5,7 +5,7 @@
 #ifndef CALICODB_POINTER_MAP_H
 #define CALICODB_POINTER_MAP_H
 
-#include "utils.h"
+#include "internal.h"
 
 namespace calicodb
 {
@@ -42,7 +42,7 @@ struct PointerMap {
     static auto read_entry(Pager &pager, Id page_id, Entry &entry_out) -> Status;
 
     // Write an entry to the pointer map.
-    static auto write_entry(Pager &pager, Id page_id, Entry entry) -> Status;
+    static auto write_entry(Pager &pager, Id page_id, Entry entry, Status &s) -> void;
 };
 
 } // namespace calicodb

@@ -40,6 +40,7 @@ public:
 
 private:
     struct Parameters {
+        Options original;
         Options sanitized;
         String db_name;
         String wal_name;

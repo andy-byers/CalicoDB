@@ -8,7 +8,7 @@
 #define CALICODB_FUZZERS_FUZZER_H
 
 #include "common.h"
-#include "utils.h"
+#include "internal.h"
 #include <climits>
 #include <iostream>
 #include <limits>

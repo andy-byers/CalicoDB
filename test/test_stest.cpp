@@ -4,11 +4,11 @@
 
 #include "test.h"
 #include "bounded_scenario.h"
+#include "internal.h"
 #include "random_scenario.h"
 #include "rule_sequence_scenario.h"
 #include "scenario.h"
 #include "sequence_scenario.h"
-#include "utils.h"
 #include <gtest/gtest.h>
 
 namespace calicodb::test

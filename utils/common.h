@@ -5,10 +5,11 @@
 #ifndef CALICODB_UTILS_COMMON_H
 #define CALICODB_UTILS_COMMON_H
 
+#include "calicodb/config.h"
 #include "calicodb/cursor.h"
 #include "calicodb/env.h"
 #include "calicodb/tx.h"
-#include "utils.h"
+#include "internal.h"
 #include <algorithm>
 #include <climits>
 #include <condition_variable>
@@ -30,6 +31,29 @@ static auto numeric_key(size_t key, char padding = '0') -> std::string
     assert(Length >= key_string.size());
     return std::string(Length - key_string.size(), padding) + key_string;
 }
+
+// NOTE: Member functions are not thread-safe.
+class DebugAllocator
+{
+public:
+    static auto config() -> AllocatorConfig;
+
+    static auto set_limit(size_t limit) -> size_t;
+
+    // Allocation hook for testing
+    using Hook = int (*)(void *);
+
+    // Set a callback that is called in malloc() and realloc() with the provided `arg`.
+    // If the result is nonzero, a nullptr is returned immediately, before the actual
+    // allocation routine is called. Used for injecting random errors during testing.
+    static auto set_hook(Hook hook, void *arg) -> void;
+
+    // Get the total number of bytes allocated through malloc() and realloc() that have
+    // not yet been passed to free()
+    static auto bytes_used() -> size_t;
+
+    static auto size_of(void *ptr) -> size_t;
+};
 
 class FileWrapper : public File
 {
@@ -126,16 +150,16 @@ public:
     }
 
     // Not in LevelDB.
-    auto Next(uint64_t t_max) const -> uint64_t
+    auto Next(size_t t_max) const -> size_t
     {
-        std::uniform_int_distribution<uint64_t> dist(0, t_max);
+        std::uniform_int_distribution<size_t> dist(0, t_max);
         return dist(m_rng);
     }
 
     // Not in LevelDB.
-    auto Next(uint64_t t_min, uint64_t t_max) const -> uint64_t
+    auto Next(size_t t_min, size_t t_max) const -> size_t
     {
-        std::uniform_int_distribution<uint64_t> dist(t_min, t_max);
+        std::uniform_int_distribution<size_t> dist(t_min, t_max);
         return dist(m_rng);
     }
 };

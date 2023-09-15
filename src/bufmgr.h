@@ -6,15 +6,15 @@
 #define CALICODB_BUFMGR_H
 
 #include "buffer.h"
+#include "internal.h"
 #include "page.h"
-#include "utils.h"
 
 namespace calicodb
 {
 
-class Pager;
 class File;
 class Env;
+class Pager;
 struct Stat;
 
 // Manages database pages that have been read from stable storage
@@ -23,7 +23,7 @@ class Bufmgr final
 public:
     friend class Pager;
 
-    explicit Bufmgr(size_t cache_size, Stat &stat);
+    explicit Bufmgr(size_t min_buffers, Stat &stat);
     ~Bufmgr();
 
     // Allocate m_min_buffers page buffers for non-root pages, each of size `page_size`,
@@ -89,9 +89,11 @@ private:
     class PageTable
     {
     public:
+        friend class Bufmgr;
+
         PageTable()
             : m_capacity(0),
-              m_size(0),
+              m_length(0),
               m_table(nullptr)
         {
         }
@@ -99,26 +101,6 @@ private:
         ~PageTable()
         {
             Mem::deallocate(m_table);
-        }
-
-        [[nodiscard]] auto reallocate(size_t min_buffers) -> int
-        {
-            if (m_capacity) {
-                return 0;
-            }
-            uint32_t capacity = 4;
-            while (capacity < min_buffers) {
-                capacity *= 2;
-            }
-            const auto table_size = capacity * sizeof(PageRef *);
-            if (auto *table = static_cast<PageRef **>(
-                    Mem::allocate(table_size))) {
-                m_capacity = capacity;
-                m_table = table;
-                clear();
-                return 0;
-            }
-            return -1;
         }
 
         auto clear() -> void
@@ -131,33 +113,17 @@ private:
             return *find_pointer(key);
         }
 
-        // NOTE: PageRef with key `ref->key()` must not exist.
-        auto insert(PageRef *ref) -> void
-        {
-            auto **ptr = find_pointer(ref->key());
-            CALICODB_EXPECT_NE(ptr, nullptr);
-            CALICODB_EXPECT_EQ(*ptr, nullptr);
-            ref->next_hash = nullptr;
-            *ptr = ref;
-            ++m_size;
-        }
+        [[nodiscard]] auto allocate(size_t min_buffers) -> int;
 
-        auto remove(uint32_t key) -> PageRef *
-        {
-            auto **ptr = find_pointer(key);
-            auto *result = *ptr;
-            if (result != nullptr) {
-                *ptr = result->next_hash;
-                --m_size;
-            }
-            return result;
-        }
+        // NOTE: PageRef with key `ref->key()` must not exist.
+        auto insert(PageRef *ref) -> void;
+        auto remove(uint32_t key) -> PageRef *;
 
     private:
         // The table consists of an array of buckets where each bucket is
         // a linked list of cache entries that hash into the bucket.
         uint32_t m_capacity;
-        uint32_t m_size;
+        uint32_t m_length;
         PageRef **m_table;
 
         // Return a pointer to slot that points to a cache entry that

@@ -3,8 +3,7 @@
 // LICENSE.md. See AUTHORS.md for a list of contributor names.
 
 #include "header.h"
-#include "calicodb/options.h"
-#include "logging.h"
+#include "status_internal.h"
 
 namespace calicodb
 {
@@ -14,7 +13,7 @@ auto FileHdr::check_page_size(size_t page_size) -> Status
     if (page_size && (page_size & (page_size - 1))) {
         // Note that a page size of 0 in the header actually represents 1 << 16, which won't quite
         // fit in 2 bytes.
-        return StatusBuilder::corruption("page size (%u) is not a power of 2");
+        return Status::corruption("page size (%u) is not a power of 2");
     } else if (page_size < kMinPageSize) {
         return StatusBuilder::corruption("page size (%u) is too small (minimum page size is %u)",
                                          page_size, kMinPageSize);

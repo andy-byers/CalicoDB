@@ -64,16 +64,20 @@ auto PointerMap::read_entry(Pager &pager, Id page_id, Entry &entry_out) -> Statu
     return s;
 }
 
-auto PointerMap::write_entry(Pager &pager, Id page_id, Entry entry) -> Status
+auto PointerMap::write_entry(Pager &pager, Id page_id, Entry entry, Status &s) -> void
 {
+    if (!s.is_ok()) {
+        return;
+    }
     const auto mid = lookup(page_id, pager.page_size());
 
     PageRef *map;
-    auto s = pager.acquire(mid, map);
+    s = pager.acquire(mid, map);
     if (s.is_ok()) {
         const auto offset = entry_offset(mid, page_id);
         if (offset + kEntrySize > pager.page_size()) {
-            return Status::corruption();
+            s = Status::corruption();
+            return;
         }
         const auto [back_ptr, type] = decode_entry(
             map->data + offset);
@@ -85,7 +89,6 @@ auto PointerMap::write_entry(Pager &pager, Id page_id, Entry entry) -> Status
         }
         pager.release(map);
     }
-    return s;
 }
 
 } // namespace calicodb

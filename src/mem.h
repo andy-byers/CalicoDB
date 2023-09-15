@@ -5,7 +5,7 @@
 #ifndef CALICODB_MEM_H
 #define CALICODB_MEM_H
 
-#include "utils.h"
+#include "internal.h"
 #include <new>
 
 namespace calicodb
@@ -23,18 +23,6 @@ namespace calicodb
 class Mem
 {
 public:
-    using Malloc = void *(*)(size_t);
-    using Realloc = void *(*)(void *, size_t);
-    using Free = void (*)(void *);
-
-    struct Methods {
-        Malloc malloc;
-        Realloc realloc;
-        Free free;
-    };
-
-    static auto set_methods(const Methods &methods) -> Methods;
-
     // Calls the registered memory allocation function, which defaults to std::malloc()
     // Guarantees that allocate(0), the result of which is implementation-defined for
     // std::malloc(), returns a pointer to a zero-sized allocation with no side effects.

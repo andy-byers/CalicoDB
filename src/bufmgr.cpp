@@ -48,7 +48,9 @@ auto Bufmgr::reallocate(size_t page_size) -> int
     if (m_metadata.realloc(num_buffers)) {
         return -1;
     }
-    if (m_table.reallocate(m_min_buffers)) {
+    // The hash table is only allocated once. The total number of bytes allotted to the
+    // page cache has not changed, just the page size.
+    if (m_table.m_capacity == 0 && m_table.allocate(m_min_buffers)) {
         return -1;
     }
     for (size_t i = 0; i < num_buffers; ++i) {
@@ -201,6 +203,45 @@ auto Bufmgr::assert_state() const -> bool
         CALICODB_EXPECT_EQ(p->refs, 0);
     }
     return refsum == m_refsum;
+}
+
+auto Bufmgr::PageTable::allocate(size_t min_buffers) -> int
+{
+    CALICODB_EXPECT_EQ(m_capacity, 0);
+    uint32_t capacity = 4;
+    while (capacity < min_buffers) {
+        capacity *= 2;
+    }
+    const auto table_size = capacity * sizeof(PageRef *);
+    if (auto *table = static_cast<PageRef **>(
+            Mem::allocate(table_size))) {
+        m_capacity = capacity;
+        m_table = table;
+        clear();
+        return 0;
+    }
+    return -1;
+}
+
+auto Bufmgr::PageTable::insert(PageRef *ref) -> void
+{
+    auto **ptr = find_pointer(ref->key());
+    CALICODB_EXPECT_NE(ptr, nullptr);
+    CALICODB_EXPECT_EQ(*ptr, nullptr);
+    ref->next_hash = nullptr;
+    *ptr = ref;
+    ++m_length;
+}
+
+auto Bufmgr::PageTable::remove(uint32_t key) -> PageRef *
+{
+    auto **ptr = find_pointer(key);
+    auto *result = *ptr;
+    if (result != nullptr) {
+        *ptr = result->next_hash;
+        --m_length;
+    }
+    return result;
 }
 
 auto Dirtylist::is_empty() const -> bool

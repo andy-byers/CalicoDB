@@ -20,7 +20,7 @@ public:
           m_scratch(TEST_PAGE_SIZE, '\0'),
           m_ref(PageRef::alloc(TEST_PAGE_SIZE))
     {
-        env = &Env::default_env();
+        env = &default_env();
         m_ref->page_id = Id(3);
         m_node = Node::from_new_page(*m_ref, TEST_PAGE_SIZE, m_scratch.data(), true);
     }
