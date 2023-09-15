@@ -63,7 +63,7 @@ struct EnvWithFiles final {
     ~EnvWithFiles()
     {
         cleanup_files();
-        if (env != &Env::default_env()) {
+        if (env != &default_env()) {
             delete env;
         }
     }
@@ -172,7 +172,7 @@ public:
 
     explicit FileTests()
     {
-        m_env = &Env::default_env();
+        m_env = &default_env();
         m_helper.env = m_env;
     }
 
@@ -246,7 +246,7 @@ protected:
         delete m_logger;
         m_logger = nullptr;
         std::filesystem::remove_all(m_log_filename);
-        ASSERT_OK(Env::default_env().new_logger(m_log_filename.c_str(), m_logger));
+        ASSERT_OK(default_env().new_logger(m_log_filename.c_str(), m_logger));
     }
 
     const std::string m_log_filename;
@@ -256,15 +256,15 @@ protected:
 TEST_F(LoggerTests, LogNullptrIsNOOP)
 {
     log(nullptr, "nothing %d", 42);
-    ASSERT_TRUE(read_file_to_string(Env::default_env(), m_log_filename.c_str()).empty());
+    ASSERT_TRUE(read_file_to_string(default_env(), m_log_filename.c_str()).empty());
 }
 
 TEST_F(LoggerTests, LogsFormattedText)
 {
     log(m_logger, "%u foo", 123);
-    const auto msg1 = read_file_to_string(Env::default_env(), m_log_filename.c_str());
+    const auto msg1 = read_file_to_string(default_env(), m_log_filename.c_str());
     log(m_logger, "bar %d", 42);
-    const auto msg2 = read_file_to_string(Env::default_env(), m_log_filename.c_str());
+    const auto msg2 = read_file_to_string(default_env(), m_log_filename.c_str());
 
     // Make sure both text and header info were written.
     ASSERT_EQ(kHdrLen, msg1.find("123 foo\n"));
@@ -282,7 +282,7 @@ TEST_F(LoggerTests, HandlesMessages)
         msg.resize(n, '$');
         log(m_logger, "%s", msg.c_str());
 
-        const auto res = read_file_to_string(Env::default_env(), m_log_filename.c_str());
+        const auto res = read_file_to_string(default_env(), m_log_filename.c_str());
         ASSERT_EQ(msg + '\n', res.substr(kHdrLen)); // Account for the datetime header and trailing newline.
     }
 }
@@ -296,7 +296,7 @@ TEST_F(LoggerTests, HandlesLongMessages)
         msg.resize(n, '$');
         log(m_logger, "%s", msg.c_str());
 
-        const auto res = read_file_to_string(Env::default_env(), m_log_filename.c_str());
+        const auto res = read_file_to_string(default_env(), m_log_filename.c_str());
         ASSERT_EQ(msg + '\n', res.substr(kHdrLen)); // Account for the datetime header and trailing newline.
     }
 }
@@ -310,7 +310,7 @@ public:
     explicit EnvLockStateTests()
         : m_filename(testing::TempDir() + "filename")
     {
-        m_env = &Env::default_env();
+        m_env = &default_env();
         m_helper.env = m_env;
     }
 
@@ -436,7 +436,7 @@ class EnvShmTests : public testing::Test
 public:
     explicit EnvShmTests()
     {
-        m_helper.env = &Env::default_env();
+        m_helper.env = &default_env();
     }
 
     ~EnvShmTests() override = default;
@@ -793,7 +793,7 @@ public:
 
     static auto open_file(State &state) -> Status
     {
-        return Env::default_env().new_file(
+        return default_env().new_file(
             state.filename,
             Env::kCreate | Env::kReadWrite,
             state.file);
@@ -871,7 +871,7 @@ public:
 
     auto SetUp() -> void override
     {
-        ASSERT_OK(Env::default_env().new_file(
+        ASSERT_OK(default_env().new_file(
             m_shared.filename.c_str(),
             Env::kCreate | Env::kReadWrite,
             m_file));
@@ -928,7 +928,7 @@ public:
 
     static auto open_file(State &state, const char *filename) -> Status
     {
-        return Env::default_env().new_file(
+        return default_env().new_file(
             filename,
             Env::kCreate | Env::kReadWrite,
             state.file);

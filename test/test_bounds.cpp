@@ -2,35 +2,33 @@
 // This source code is licensed under the MIT License, which can be found in
 // LICENSE.md. See AUTHORS.md for a list of contributor names.
 
-#include "calicodb/cursor.h"
 #include "calicodb/db.h"
 #include "common.h"
+#include "db_impl.h"
+#include "encoding.h"
+#include "internal.h"
 #include "test.h"
-#include "utils.h"
 #include <filesystem>
 #include <gtest/gtest.h>
 
 namespace calicodb::test
 {
-#if 0  // TODO: These tests use quite a bit of memory and may not be a good idea to run in CI right now.
+
 class BoundaryValueTests : public testing::Test
 {
 protected:
-    static constexpr size_t kLargeValueLength =
-        std::numeric_limits<uint32_t>::max();
+    static constexpr size_t kMaxLen = kMaxAllocation;
     const std::string m_filename;
-    const char *m_backing;
-    const Slice m_largest_slice;
-    const Slice m_overflow_slice;
+    char *const m_backing;
     DB *m_db = nullptr;
 
     explicit BoundaryValueTests()
         : m_filename(testing::TempDir() + "db"),
-          m_backing(new char[kLargeValueLength + 1]()),
-          m_largest_slice(m_backing, kLargeValueLength),
-          m_overflow_slice(m_backing, kLargeValueLength + 1)
+          m_backing(new char[kMaxLen + 1]())
     {
-        (void)DB::destroy(Options(), m_filename);
+        std::filesystem::remove_all(m_filename);
+        std::filesystem::remove_all(m_filename + kDefaultWalSuffix.data());
+        std::filesystem::remove_all(m_filename + kDefaultShmSuffix.data());
     }
 
     ~BoundaryValueTests() override
@@ -41,47 +39,126 @@ protected:
 
     auto SetUp() -> void override
     {
-        ASSERT_OK(DB::open(Options(), m_filename, m_db));
+        Options options;
+        options.auto_checkpoint = 0;
+        options.page_size = kMaxPageSize;
+        ASSERT_OK(DB::open(options, m_filename.c_str(), m_db));
+    }
+
+    auto payload(uint32_t size) -> Slice
+    {
+        EXPECT_LE(size, kMaxLen + 1);
+        if (size >= sizeof(uint32_t)) {
+            put_u32(m_backing, size);
+            put_u32(m_backing + size - sizeof(uint32_t), size);
+        }
+        return {m_backing, size};
+    }
+
+    auto test_boundary_payload(bool test_key, bool test_value) -> void
+    {
+        const uint32_t key_size = test_key * kMaxLen;
+        const uint32_t value_size = test_value * kMaxLen;
+
+        ASSERT_OK(m_db->run(WriteOptions(), [=](auto &tx) {
+            TestCursor c;
+            auto s = test_create_and_open_bucket(tx, BucketOptions(), "bucket", c);
+            if (s.is_ok()) {
+                s = tx.put(*c, payload(key_size), payload(value_size));
+            }
+            return s;
+        }));
+
+        ASSERT_OK(m_db->checkpoint(false));
+
+        ASSERT_OK(m_db->run(ReadOptions(), [=](const auto &tx) {
+            TestCursor c;
+            auto s = test_open_bucket(tx, "bucket", c);
+            if (s.is_ok()) {
+                c->find(payload(key_size));
+                EXPECT_TRUE(c->is_valid()) << c->status().message();
+                EXPECT_EQ(c->value(), payload(value_size));
+            }
+            return s;
+        }));
+    }
+
+    auto test_overflow_payload(bool test_key, bool test_value) -> void
+    {
+        const uint32_t key_size = test_key * (kMaxLen + 1);
+        const uint32_t value_size = test_value * (kMaxLen + 1);
+
+        ASSERT_OK(m_db->run(WriteOptions(), [=](auto &tx) {
+            TestCursor c;
+            auto s = test_create_and_open_bucket(tx, BucketOptions(), "bucket", c);
+            if (s.is_ok()) {
+                EXPECT_TRUE((s = tx.put(*c, payload(key_size), payload(value_size))).is_invalid_argument()) << s.message();
+            }
+            return Status::ok();
+        }));
     }
 };
 
-TEST_F(BoundaryValueTests, BoundaryPayload)
+TEST_F(BoundaryValueTests, BoundaryBucketName)
 {
-    ASSERT_OK(m_db->run(WriteOptions(), [this](auto &tx) {
+    ASSERT_OK(m_db->run(WriteOptions(), [=](auto &tx) {
         TestCursor c;
-        auto s = test_create_and_open_bucket(tx, BucketOptions(), "bucket", c);
-        if (s.is_ok()) {
-            // Put a maximally-sized record.
-            s = tx.put(*c, m_largest_slice, m_largest_slice);
-        }
-        return s;
+        return test_create_and_open_bucket(tx, BucketOptions(), payload(kMaxLen), c);
     }));
 
-    ASSERT_OK(m_db->run(ReadOptions(), [this](const auto &tx) {
+    ASSERT_OK(m_db->checkpoint(false));
+
+    ASSERT_OK(m_db->run(ReadOptions(), [=](const auto &tx) {
         TestCursor c;
-        auto s = test_open_bucket(tx, "bucket", b);
-        if (s.is_ok()) {
-            std::string value;
-            s = tx.get(*c, m_largest_slice, &value);
-            EXPECT_EQ(value, m_largest_slice);
-        }
-        return s;
+        return test_open_bucket(tx, payload(kMaxLen), c);
     }));
 }
 
-TEST_F(BoundaryValueTests, OverflowPayload)
+TEST_F(BoundaryValueTests, OverflowBucketName)
 {
-    ASSERT_OK(m_db->run(WriteOptions(), [this](auto &tx) {
+    ASSERT_NOK(m_db->run(WriteOptions(), [=](auto &tx) {
         TestCursor c;
-        auto s = test_create_and_open_bucket(tx, BucketOptions(), "bucket", c);
-        if (s.is_ok()) {
-            EXPECT_TRUE((s = tx.put(*c, m_overflow_slice, "v")).is_invalid_argument()) << to_string(s);
-            EXPECT_TRUE((s = tx.put(*c, "k", m_overflow_slice)).is_invalid_argument()) << to_string(s);
-        }
-        return Status::ok();
+        return test_create_and_open_bucket(tx, BucketOptions(), payload(kMaxLen + 1), c);
+    }));
+
+    ASSERT_OK(m_db->checkpoint(false));
+
+    ASSERT_NOK(m_db->run(ReadOptions(), [=](const auto &tx) {
+        TestCursor c;
+        return test_open_bucket(tx, payload(kMaxLen + 1), c);
     }));
 }
-#endif // 0
+
+TEST_F(BoundaryValueTests, BoundaryKey)
+{
+    test_boundary_payload(true, false);
+}
+
+TEST_F(BoundaryValueTests, BoundaryValue)
+{
+    test_boundary_payload(false, true);
+}
+
+TEST_F(BoundaryValueTests, BoundaryRecord)
+{
+    test_boundary_payload(true, true);
+}
+
+TEST_F(BoundaryValueTests, OverflowKey)
+{
+    test_overflow_payload(true, false);
+}
+
+TEST_F(BoundaryValueTests, OverflowValue)
+{
+    test_overflow_payload(false, true);
+}
+
+TEST_F(BoundaryValueTests, OverflowRecord)
+{
+    test_overflow_payload(true, true);
+}
+
 class StressTests : public testing::Test
 {
 protected:

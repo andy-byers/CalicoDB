@@ -12,17 +12,18 @@ namespace calicodb
 {
 
 // calicodb/env.h (below)
+class Env;
 class File;
 class Logger;
+
+// Return a reference to a singleton implementing the Env interface for this platform
+[[nodiscard]] auto default_env() -> Env &;
 
 // CalicoDB storage environment
 // Handles platform-specific filesystem manipulations and file locking.
 class Env
 {
 public:
-    // Return a reference to a singleton implementing the Env interface for this platform
-    [[nodiscard]] static auto default_env() -> Env &;
-
     explicit Env();
     virtual ~Env();
 

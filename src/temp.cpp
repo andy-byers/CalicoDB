@@ -164,7 +164,7 @@ public:
     [[nodiscard]] auto file_exists(const char *filename) const -> bool override
     {
         return !m_filename.is_empty() &&
-               Slice(m_filename.c_str(), m_filename.length()) == Slice(filename);
+               Slice(m_filename.c_str(), m_filename.size()) == Slice(filename);
     }
 
     auto srand(unsigned seed) -> void override
@@ -182,7 +182,7 @@ public:
 
     auto sleep(unsigned micros) -> void override
     {
-        Env::default_env().sleep(micros);
+        default_env().sleep(micros);
     }
 
 private:
@@ -261,7 +261,8 @@ public:
     [[nodiscard]] static auto create(const Wal::Parameters &param) -> TempWal *
     {
         auto *wal = Mem::new_object<TempWal>(
-            reinterpret_cast<TempEnv &>(*param.env), *param.stat);
+            reinterpret_cast<TempEnv &>(*param.env),
+            *param.stat);
         if (wal->m_table.grow()) {
             Mem::deallocate(wal);
             return nullptr;
@@ -381,7 +382,7 @@ private:
         if (m_env->m_file.ensure_large_enough(db_size * m_page_size)) {
             return -1;
         }
-        UniquePtr<File> file;
+        UserPtr<File> file;
         auto s = m_env->new_temp_file(file.ref());
         if (!s.is_ok()) {
             return -1;

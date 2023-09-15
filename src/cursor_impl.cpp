@@ -3,9 +3,9 @@
 // LICENSE.md. See AUTHORS.md for a list of contributor names.
 
 #include "cursor_impl.h"
+#include "internal.h"
 #include "pager.h"
 #include "schema.h"
-#include "utils.h"
 
 namespace calicodb
 {
@@ -222,7 +222,7 @@ auto CursorImpl::on_last_node() const -> bool
 
 auto CursorImpl::seek_to_leaf(const Slice &key, SeekType type) -> bool
 {
-    if (m_status.is_corruption()) {
+    if (m_status.is_corruption() || key.size() > kMaxAllocation) {
         // Don't recover from corruption. The user needs to restart the whole transaction.
         return false;
     }

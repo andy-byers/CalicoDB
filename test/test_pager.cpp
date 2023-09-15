@@ -2,11 +2,9 @@
 // This source code is licensed under the MIT License, which can be found in
 // LICENSE.md. See AUTHORS.md for a list of contributor names.
 
-#include "allocator.h"
 #include "common.h"
 #include "encoding.h"
 #include "fake_env.h"
-#include "freelist.h"
 #include "logging.h"
 #include "pager.h"
 #include "temp.h"
@@ -709,7 +707,7 @@ public:
     {
         Mem::delete_object(m_wal);
         delete m_db_file;
-        if (m_env != &Env::default_env()) {
+        if (m_env != &default_env()) {
             delete m_env;
         }
         std::filesystem::remove_all(m_filename);
@@ -719,7 +717,7 @@ public:
     {
         const Wal::Parameters param = {
             m_filename.c_str(),
-            &Env::default_env(),
+            &default_env(),
             nullptr,
             nullptr,
             &m_stat,

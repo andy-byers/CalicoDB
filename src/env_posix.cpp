@@ -3,11 +3,11 @@
 // LICENSE.md. See AUTHORS.md for a list of contributor names.
 
 #include "calicodb/env.h"
+#include "internal.h"
 #include "logging.h"
 #include "mem.h"
 #include "port.h"
 #include "unique_ptr.h"
-#include "utils.h"
 #include <cerrno>
 #include <ctime>
 #include <fcntl.h>
@@ -38,8 +38,6 @@ class PosixEnv
 public:
     explicit PosixEnv();
     ~PosixEnv() override = default;
-
-    static auto operator delete(void *ptr, size_t) -> void;
 
     auto new_logger(const char *filename, Logger *&out) -> Status override;
     auto new_file(const char *filename, OpenMode mode, File *&out) -> Status override;
@@ -603,11 +601,6 @@ auto seed_prng_state(uint16_t *state, uint32_t seed) -> void
 PosixEnv::PosixEnv()
 {
     seed_prng_state(m_rng, static_cast<uint32_t>(time(nullptr)));
-}
-
-auto PosixEnv::operator delete(void *ptr, size_t) -> void
-{
-    Mem::deallocate(ptr);
 }
 
 auto PosixEnv::remove_file(const char *filename) -> Status
@@ -1181,7 +1174,7 @@ auto PosixFile::file_unlock() -> void
 
 } // namespace
 
-auto Env::default_env() -> Env &
+auto default_env() -> Env &
 {
     static PosixEnv s_env;
     return s_env;

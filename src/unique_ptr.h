@@ -7,8 +7,8 @@
 
 #include "calicodb/db.h"
 #include "calicodb/string.h"
+#include "internal.h"
 #include "mem.h"
-#include "utils.h"
 
 namespace calicodb
 {

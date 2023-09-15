@@ -3,9 +3,8 @@
 // LICENSE.md. See AUTHORS.md for a list of contributor names.
 
 #include "mem.h"
-#include "allocator.h"
+#include "config_internal.h"
 #include "port.h"
-#include <atomic>
 
 namespace calicodb
 {
@@ -15,18 +14,9 @@ namespace
 
 struct AllocatorState {
     port::Mutex mutex;
-    Mem::Methods methods = DefaultAllocator::methods();
 } s_state;
 
 } // namespace
-
-auto Mem::set_methods(const Methods &methods) -> Methods
-{
-    s_state.mutex.lock();
-    const auto m = exchange(s_state.methods, methods);
-    s_state.mutex.unlock();
-    return m;
-}
 
 auto Mem::allocate(size_t size) -> void *
 {
@@ -34,7 +24,7 @@ auto Mem::allocate(size_t size) -> void *
         return nullptr;
     }
     s_state.mutex.lock();
-    auto *ptr = s_state.methods.malloc(size);
+    auto *ptr = g_config.allocator.malloc(size);
     s_state.mutex.unlock();
     return ptr;
 }
@@ -51,7 +41,7 @@ auto Mem::reallocate(void *old_ptr, size_t new_size) -> void *
     }
 
     s_state.mutex.lock();
-    auto *new_ptr = s_state.methods.realloc(old_ptr, new_size);
+    auto *new_ptr = g_config.allocator.realloc(old_ptr, new_size);
     s_state.mutex.unlock();
     return new_ptr;
 }
@@ -60,7 +50,7 @@ auto Mem::deallocate(void *ptr) -> void
 {
     if (ptr) {
         s_state.mutex.lock();
-        s_state.methods.free(ptr);
+        g_config.allocator.free(ptr);
         s_state.mutex.unlock();
     }
 }

@@ -4,16 +4,16 @@
 
 #include "logging.h"
 #include "calicodb/env.h"
-#include "utils.h"
+#include "internal.h"
 
 namespace calicodb
 {
 
 StringBuilder::StringBuilder(String str)
 {
-    if (auto *ptr = exchange(str.m_ptr, nullptr)) {
-        m_buf.reset(ptr, str.m_cap);
-        m_len = str.m_len;
+    if (auto *ptr = exchange(str.m_data, nullptr)) {
+        m_buf.reset(ptr, str.m_size);
+        m_len = str.m_size;
         str.clear();
     }
 }
@@ -23,46 +23,43 @@ auto StringBuilder::ensure_capacity(size_t len) -> int
     if (!m_ok) {
         return -1;
     }
+    // NOTE: This routine only fails if len_with_null is greater than kMaxAllocation
+    //       ("capacity > kMaxAllocation" might end up being true below, but that is OK).
+    const auto len_with_null = len + 1;
+    if (len_with_null <= m_buf.len()) {
+        return 0;
+    }
+    if (len_with_null > kMaxAllocation) {
+        return -1;
+    }
     auto capacity = m_buf.is_empty()
                         ? len + 1
                         : m_buf.len();
-    while (len + 1 > capacity) {
+    while (len_with_null > capacity) {
         capacity *= 2;
     }
-    if (capacity <= m_buf.len()) {
-        return 0;
-    }
-    if (m_buf.realloc(capacity)) {
+    if (m_buf.realloc(minval<size_t>(capacity, kMaxAllocation))) {
         m_ok = false;
         return -1;
     }
     return 0;
 }
 
-auto StringBuilder::trim() -> StringBuilder &
-{
-    if (m_ok && m_len + 1 < m_buf.len()) {
-        if (m_buf.realloc(m_len + 1)) {
-            m_ok = false;
-        }
-    }
-    return *this;
-}
-
 auto StringBuilder::build(String &string_out) -> int
 {
+    // Trim the allocation.
+    if (m_ok && m_len + 1 < m_buf.len()) {
+        m_ok = m_buf.realloc(m_len + 1) == 0;
+    }
     if (!m_ok) {
         return -1;
     }
-    const auto capacity = m_buf.len();
-    const auto length = exchange(m_len, 0U);
-    auto *pointer = m_buf.release();
-    if (capacity) {
-        CALICODB_EXPECT_NE(pointer, nullptr);
-        CALICODB_EXPECT_LT(length, capacity);
-        pointer[length] = '\0';
+    if (!m_buf.is_empty()) {
+        CALICODB_EXPECT_EQ(m_buf.len(), m_len + 1);
+        m_buf[m_len] = '\0';
     }
-    string_out = String(pointer, length, capacity);
+    string_out = String(m_buf.release(), m_len);
+    m_len = 0;
     return 0;
 }
 
@@ -146,7 +143,6 @@ auto append_strings(String &str, const Slice &s, const Slice &t) -> int
     return StringBuilder(move(str))
         .append(s)
         .append(t)
-        .trim()
         .build(str);
 }
 
@@ -154,7 +150,6 @@ auto append_escaped_string(String &target, const Slice &s) -> int
 {
     return StringBuilder(move(target))
         .append_escaped(s)
-        .trim()
         .build(target);
 }
 
@@ -171,7 +166,6 @@ auto append_format_string_va(String &target, const char *fmt, std::va_list args)
 {
     return StringBuilder(move(target))
         .append_format_va(fmt, args)
-        .trim()
         .build(target);
 }
 

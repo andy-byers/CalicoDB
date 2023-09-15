@@ -16,9 +16,8 @@ class String final
 {
 public:
     explicit String()
-        : m_ptr(nullptr),
-          m_len(0),
-          m_cap(0)
+        : m_data(nullptr),
+          m_size(0)
     {
     }
 
@@ -34,27 +33,27 @@ public:
 
     explicit operator Slice()
     {
-        return m_len ? Slice(m_ptr, m_len) : "";
+        return m_size ? Slice(m_data, m_size) : "";
     }
 
     [[nodiscard]] auto is_empty() const -> bool
     {
-        return length() == 0;
+        return size() == 0;
     }
 
-    [[nodiscard]] auto length() const -> size_t
+    [[nodiscard]] auto size() const -> size_t
     {
-        return m_len;
+        return m_size;
     }
 
     [[nodiscard]] auto c_str() const -> const char *
     {
-        return m_len ? m_ptr : "";
+        return m_size ? m_data : "";
     }
 
     [[nodiscard]] auto data() -> char *
     {
-        return m_ptr;
+        return m_data;
     }
 
     auto clear() -> void;
@@ -62,16 +61,14 @@ public:
 private:
     friend class StringBuilder;
 
-    explicit String(char *ptr, size_t len, size_t cap)
-        : m_ptr(ptr),
-          m_len(len),
-          m_cap(cap)
+    explicit String(char *data, size_t size)
+        : m_data(data),
+          m_size(size)
     {
     }
 
-    char *m_ptr;
-    size_t m_len;
-    size_t m_cap;
+    char *m_data;
+    size_t m_size;
 };
 
 } // namespace calicodb

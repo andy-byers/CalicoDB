@@ -4,14 +4,14 @@
 
 #include "calicodb/string.h"
 #include "mem.h"
+#include "utility.h"
 
 namespace calicodb
 {
 
 String::String(String &&rhs) noexcept
-    : m_ptr(exchange(rhs.m_ptr, nullptr)),
-      m_len(exchange(rhs.m_len, 0U)),
-      m_cap(exchange(rhs.m_cap, 0U))
+    : m_data(exchange(rhs.m_data, nullptr)),
+      m_size(exchange(rhs.m_size, 0U))
 {
 }
 
@@ -19,19 +19,17 @@ auto String::operator=(String &&rhs) noexcept -> String &
 {
     if (this != &rhs) {
         clear();
-        m_ptr = exchange(rhs.m_ptr, nullptr);
-        m_len = exchange(rhs.m_len, 0U);
-        m_cap = exchange(rhs.m_cap, 0U);
+        m_data = exchange(rhs.m_data, nullptr);
+        m_size = exchange(rhs.m_size, 0U);
     }
     return *this;
 }
 
 auto String::clear() -> void
 {
-    Mem::deallocate(m_ptr);
-    m_ptr = nullptr;
-    m_len = 0;
-    m_cap = 0;
+    Mem::deallocate(m_data);
+    m_data = nullptr;
+    m_size = 0;
 }
 
 } // namespace calicodb

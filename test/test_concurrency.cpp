@@ -2,12 +2,10 @@
 // This source code is licensed under the MIT License, which can be found in
 // LICENSE.md. See AUTHORS.md for a list of contributor names.
 
-#include "allocator.h"
 #include "calicodb/db.h"
 #include "common.h"
 #include "logging.h"
 #include "test.h"
-#include <condition_variable>
 #include <filesystem>
 #include <iomanip>
 #include <thread>
@@ -110,25 +108,23 @@ class ConcurrencyTests : public testing::Test
 protected:
     RandomGenerator m_random;
     std::string m_filename;
-    DelayEnv *m_env;
+    UserPtr<DelayEnv> m_env;
 
     explicit ConcurrencyTests()
         : m_filename(testing::TempDir() + "concurrency"),
-          m_env(new DelayEnv(Env::default_env()))
+          m_env(new DelayEnv(default_env()))
     {
         std::filesystem::remove_all(m_filename);
         std::filesystem::remove_all(m_filename + to_string(kDefaultWalSuffix));
         std::filesystem::remove_all(m_filename + to_string(kDefaultShmSuffix));
     }
 
-    ~ConcurrencyTests() override
-    {
-        delete m_env;
-        DebugAllocator::set_limit(0);
-    }
+    ~ConcurrencyTests() override = default;
 
     auto TearDown() -> void override
     {
+        m_env.reset();
+        DebugAllocator::set_limit(0);
         // All resources should have been cleaned up by now, even though the Env is not deleted.
         ASSERT_EQ(DebugAllocator::bytes_used(), 0) << "leaked " << std::setprecision(4)
                                                    << static_cast<double>(DebugAllocator::bytes_used()) / (1'024.0 * 1'024)
@@ -180,7 +176,7 @@ protected:
 
         Connection tmp;
         tmp.filename = m_filename.c_str();
-        tmp.env = m_env;
+        tmp.env = m_env.get();
         tmp.op_args[0] = param.num_iterations;
         tmp.op_args[1] = param.num_records;
 
@@ -410,116 +406,6 @@ protected:
         delete co.db;
         return s;
     }
-
-    struct AllocTestParameters {
-        size_t num_malloc;
-        size_t num_realloc;
-        size_t max_alloc;
-        size_t limit;
-    };
-    auto run_alloc_test_instance(const AllocTestParameters &param) -> void
-    {
-        static constexpr size_t kNumIterations = 500;
-        ASSERT_EQ(DebugAllocator::bytes_used(), 0);
-        ASSERT_NE(DebugAllocator::set_limit(param.limit), 0);
-
-        const auto nt = param.num_malloc + param.num_realloc;
-        Barrier barrier(nt);
-
-        Connection tmp;
-        tmp.filename = m_filename.c_str();
-        tmp.env = m_env;
-
-        struct AllocState {
-            char *ptr;
-            unsigned state;
-        };
-        std::vector<Connection> connections;
-        std::vector<AllocState> malloc_states(param.num_malloc);
-        for (auto &state : malloc_states) {
-            const uint64_t min_alloc = param.limit == 1;
-            tmp.op_args[0] = m_random.Next(min_alloc, param.max_alloc);
-            tmp.op = [&state](auto &co, auto *b) {
-                barrier_wait(b);
-                if (state.ptr) {
-                    Mem::deallocate(state.ptr);
-                    state.ptr = nullptr;
-                } else {
-                    state.ptr = static_cast<char *>(Mem::allocate(co.op_args[0]));
-                }
-                if (state.state++ > kNumIterations) {
-                    co.op = nullptr;
-                }
-                return Status::ok();
-            };
-            connections.emplace_back(tmp);
-        }
-        std::vector<AllocState> realloc_states(param.num_realloc);
-        for (auto &state : realloc_states) {
-            tmp.op_args[0] = m_random.Next(param.max_alloc);
-            tmp.op_args[1] = m_random.Next(1, param.max_alloc);
-            tmp.op = [&state](auto &co, auto *b) {
-                barrier_wait(b);
-                size_t new_size;
-                switch (state.state & 0b11) {
-                    case 0b00:
-                        new_size = 0;
-                        break;
-                    case 0b01:
-                        new_size = co.op_args[0];
-                        break;
-                    case 0b10:
-                        new_size = co.op_args[1];
-                        break;
-                    default:
-                        new_size = co.op_args[0] + co.op_args[1];
-                }
-                auto *new_ptr = Mem::reallocate(state.ptr, new_size);
-                if (new_ptr || new_size == 0) {
-                    state.ptr = static_cast<char *>(new_ptr);
-                }
-                if (state.state++ > kNumIterations) {
-                    co.op = nullptr;
-                }
-                return Status::ok();
-            };
-            connections.emplace_back(tmp);
-        }
-
-        std::vector<std::thread> threads;
-        threads.reserve(connections.size());
-        for (auto &co : connections) {
-            threads.emplace_back([&co, b = &barrier, t = threads.size(), limit = param.limit] {
-                while (connection_main(co, b)) {
-                    ASSERT_LE(DebugAllocator::bytes_used(), limit);
-                }
-            });
-        }
-        for (auto &t : threads) {
-            t.join();
-        }
-
-        for (const auto &[ptr, _] : malloc_states) {
-            Mem::deallocate(ptr);
-        }
-        for (const auto &[ptr, _] : realloc_states) {
-            Mem::deallocate(ptr);
-        }
-
-        ASSERT_EQ(DebugAllocator::bytes_used(), 0);
-    }
-
-    auto run_alloc_test(size_t x, size_t y) -> void
-    {
-        for (size_t limit : {10U, 100U, 1'000U}) {
-            for (size_t max_alloc = 1; max_alloc <= limit; max_alloc *= 2) {
-                run_alloc_test_instance({x, y, max_alloc, limit});
-                if (x != y) {
-                    run_alloc_test_instance({y, x, max_alloc, limit});
-                }
-            }
-        }
-    }
 };
 
 TEST_F(ConcurrencyTests, Database0)
@@ -560,32 +446,6 @@ TEST_F(ConcurrencyTests, Database3)
 TEST_F(ConcurrencyTests, Database4)
 {
     run_test({50, 50, 50});
-}
-
-TEST_F(ConcurrencyTests, Allocation0)
-{
-    // Sanity check, no concurrency.
-    run_alloc_test(0, 1);
-}
-
-TEST_F(ConcurrencyTests, Allocation1)
-{
-    run_alloc_test(0, 10);
-}
-
-TEST_F(ConcurrencyTests, Allocation2)
-{
-    run_alloc_test(1, 10);
-}
-
-TEST_F(ConcurrencyTests, Allocation3)
-{
-    run_alloc_test(10, 100);
-}
-
-TEST_F(ConcurrencyTests, Allocation4)
-{
-    run_alloc_test(50, 50);
 }
 
 } // namespace calicodb::test

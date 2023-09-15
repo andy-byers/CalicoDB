@@ -4,9 +4,9 @@
 
 #include "model.h"
 #include "db_impl.h"
+#include "internal.h"
 #include "pager.h"
 #include "tree.h"
-#include "utils.h"
 
 namespace calicodb
 {

@@ -5,7 +5,7 @@
 #ifndef CALICODB_ENCODING_H
 #define CALICODB_ENCODING_H
 
-#include "utils.h"
+#include "internal.h"
 
 namespace calicodb
 {

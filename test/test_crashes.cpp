@@ -2,7 +2,6 @@
 // This source code is licensed under the MIT License, which can be found in
 // LICENSE.md. See AUTHORS.md for a list of contributor names.
 
-#include "allocator.h"
 #include "calicodb/cursor.h"
 #include "calicodb/db.h"
 #include "calicodb/env.h"
@@ -215,7 +214,7 @@ protected:
 
     explicit CrashTests()
         : m_filename(testing::TempDir() + "calicodb_crashes"),
-          m_env(new CrashEnv(Env::default_env()))
+          m_env(new CrashEnv(default_env()))
     {
         auto db_name = m_filename;
         auto shm_name = m_filename + to_string(kDefaultWalSuffix);
@@ -324,7 +323,7 @@ protected:
         if (s.is_ok()) {
             s = tx.vacuum();
         }
-        if (!s.is_no_memory()) { // TODO
+        if (!s.is_no_memory()) {
             EXPECT_EQ(s, tx.status());
         }
         return s;
@@ -985,7 +984,7 @@ public:
 TEST(DataLossEnvTests, NormalOperations)
 {
     const auto filename = testing::TempDir() + "calicodb_data_loss_env_tests";
-    DataLossEnv env(Env::default_env());
+    DataLossEnv env(default_env());
     (void)env.remove_file(filename.c_str());
 
     File *file;
@@ -1012,7 +1011,7 @@ TEST(DataLossEnvTests, NormalOperations)
 TEST(DataLossEnvTests, DroppedWrites)
 {
     const auto filename = testing::TempDir() + "calicodb_data_loss_env_tests";
-    DataLossEnv env(Env::default_env());
+    DataLossEnv env(default_env());
     (void)env.remove_file(filename.c_str());
 
     env.m_drop_file = filename;
@@ -1098,7 +1097,7 @@ public:
             std::filesystem::remove_all(m_filename + to_string(kDefaultShmSuffix));
         }
         delete m_env;
-        m_env = new DataLossEnv(Env::default_env());
+        m_env = new DataLossEnv(default_env());
 
         Options options;
         options.env = m_env;
