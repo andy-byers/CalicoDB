@@ -848,6 +848,8 @@ INSTANTIATE_TEST_SUITE_P(
 class MultiCursorTests : public TreeTests
 {
 protected:
+    std::vector<CursorImpl *> m_cursors;
+
     auto SetUp() -> void override
     {
         TreeTests::SetUp();
@@ -873,8 +875,6 @@ protected:
         delete m_cursors.at(idx);
         m_cursors.erase(begin(m_cursors) + static_cast<std::ptrdiff_t>(idx));
     }
-
-    std::vector<Cursor *> m_cursors;
 };
 
 TEST_F(MultiCursorTests, CursorIsUnaffectedByModifications)
@@ -937,6 +937,55 @@ TEST_F(MultiCursorTests, LotsOfCursors)
     // Both put() and erase() cause live cursors to be saved.
     ASSERT_OK(tree_put(*m_c, "key", "value"));
     ASSERT_OK(tree_erase(*m_c, "key"));
+}
+
+TEST_F(MultiCursorTests, ModifyNodeWithCursors)
+{
+    m_c->seek_first();
+    while (m_c->is_valid()) {
+        ASSERT_OK(m_tree->erase(*m_c));
+    }
+
+    add_cursor();
+    add_cursor();
+    add_cursor();
+    add_cursor();
+
+    auto &c1 = *m_cursors.at(0);
+    auto &c2 = *m_cursors.at(1);
+    auto &c3 = *m_cursors.at(2);
+    auto &c4 = *m_cursors.at(3);
+
+    ASSERT_OK(tree_put(c4, "a", make_value('1', true)));
+    ASSERT_OK(tree_put(c4, "b", make_value('2', true)));
+    ASSERT_OK(tree_put(c4, "c", make_value('3', true)));
+
+    c1.find("a");
+    ASSERT_TRUE(c1.is_valid());
+    c2.find("a");
+    ASSERT_TRUE(c2.is_valid());
+    c3.find("b");
+    ASSERT_TRUE(c3.is_valid());
+
+    const auto key_a = make_value('a', true);
+    const auto key_b = make_value('b', true);
+    const auto key_c = make_value('c', true);
+    ASSERT_OK(tree_put(c4, key_a, make_value('4', true)));
+    ASSERT_OK(tree_put(c4, key_b, make_value('5', true)));
+    ASSERT_OK(tree_put(c4, key_c, make_value('6', true)));
+
+    c4.find(key_a.c_str());
+    ASSERT_TRUE(c4.is_valid());
+    c4.previous();
+    ASSERT_TRUE(c4.is_valid());
+    ASSERT_EQ(c4.key(), c1.key());
+    ASSERT_EQ(c4.key(), c2.key());
+
+    c4.find(key_b.c_str());
+    ASSERT_TRUE(c4.is_valid());
+    c4.previous();
+    ASSERT_TRUE(c4.is_valid());
+    ASSERT_EQ(c4.key(), c3.key());
 }
 
 class PointerMapTests : public TreeTests

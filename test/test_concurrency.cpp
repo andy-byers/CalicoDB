@@ -159,7 +159,7 @@ protected:
         size_t num_writers = 0;
         size_t num_checkpointers = 0;
 
-        // These parameters should not be set manually. run_test() will iterate over various
+        // These parameters should not be set manually. run_consistency_test() will iterate over various
         // combinations of them.
         size_t num_iterations = 0;
         size_t num_records = 0;
@@ -167,7 +167,7 @@ protected:
         bool delay_barrier = false;
         bool delay_sync = false;
     };
-    auto run_test_instance(const ConsistencyTestParameters &param) -> void
+    auto run_consistency_test_instance(const ConsistencyTestParameters &param) -> void
     {
         (void)DB::destroy(Options(), m_filename.c_str());
 
@@ -229,12 +229,12 @@ protected:
             }
         }
     }
-    auto run_test(const ConsistencyTestParameters &param) -> void
+    auto run_consistency_test(const ConsistencyTestParameters &param) -> void
     {
         for (size_t i = 1; i <= 4; ++i) {
             for (size_t j = 1; j <= 4; ++j) {
                 for (size_t k = 1; k <= 4; ++k) {
-                    run_test_instance({
+                    run_consistency_test_instance({
                         param.num_readers,
                         param.num_writers,
                         param.num_checkpointers,
@@ -411,41 +411,41 @@ protected:
 TEST_F(ConcurrencyTests, Database0)
 {
     // Sanity check, no concurrency.
-    run_test({1, 0, 0});
-    run_test({0, 1, 0});
-    run_test({0, 0, 1});
+    run_consistency_test({1, 0, 0});
+    run_consistency_test({0, 1, 0});
+    run_consistency_test({0, 0, 1});
 }
 
 TEST_F(ConcurrencyTests, Database1)
 {
-    run_test({10, 0, 0});
-    run_test({0, 10, 0});
-    run_test({0, 0, 10});
+    run_consistency_test({10, 0, 0});
+    run_consistency_test({0, 10, 0});
+    run_consistency_test({0, 0, 10});
 }
 
 TEST_F(ConcurrencyTests, Database2)
 {
-    run_test({10, 0, 1});
-    run_test({10, 1, 0});
-    run_test({10, 1, 1});
-    run_test({0, 10, 1});
-    run_test({1, 10, 0});
-    run_test({1, 10, 1});
-    run_test({0, 1, 10});
-    run_test({1, 0, 10});
-    run_test({1, 1, 10});
+    run_consistency_test({10, 0, 1});
+    run_consistency_test({10, 1, 0});
+    run_consistency_test({10, 1, 1});
+    run_consistency_test({0, 10, 1});
+    run_consistency_test({1, 10, 0});
+    run_consistency_test({1, 10, 1});
+    run_consistency_test({0, 1, 10});
+    run_consistency_test({1, 0, 10});
+    run_consistency_test({1, 1, 10});
 }
 
 TEST_F(ConcurrencyTests, Database3)
 {
-    run_test({100, 10, 10});
-    run_test({10, 100, 10});
-    run_test({10, 10, 100});
+    run_consistency_test({100, 10, 10});
+    run_consistency_test({10, 100, 10});
+    run_consistency_test({10, 10, 100});
 }
 
 TEST_F(ConcurrencyTests, Database4)
 {
-    run_test({50, 50, 50});
+    run_consistency_test({50, 50, 50});
 }
 
 } // namespace calicodb::test

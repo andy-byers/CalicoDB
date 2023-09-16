@@ -108,9 +108,10 @@ struct ShmNode final {
     [[nodiscard]] auto check_locks() const -> bool;
 };
 
-struct UnusedFile final {
+struct UnusedFd final {
     int file;
-    UnusedFile *next;
+    int mode;
+    UnusedFd *next;
 };
 
 struct INode final {
@@ -120,7 +121,7 @@ struct INode final {
     int lock = kLockUnlocked;
 
     // List of file descriptors that are waiting to be closed.
-    UnusedFile *unused = nullptr;
+    UnusedFd *unused = nullptr;
 
     // Number of PosixFile instances referencing this inode.
     int refcount = 0;
@@ -275,14 +276,17 @@ struct PosixShm {
     uint16_t writer_mask = 0;
 };
 
+#define READ_WRITE_MODE(mode) (static_cast<int>(mode) & (Env::kReadOnly | Env::kReadWrite))
+
 class PosixFile
     : public File,
       public HeapObject
 {
 public:
-    explicit PosixFile(String filename, UniquePtr<UnusedFile> prealloc)
+    explicit PosixFile(String filename, int mode, UniquePtr<UnusedFd> prealloc)
         : filename(move(filename)),
-          prealloc(move(prealloc))
+          prealloc(move(prealloc)),
+          rw_mode(mode)
     {
     }
 
@@ -308,9 +312,10 @@ public:
     auto file_lock_impl(FileLockMode mode) -> Status;
 
     String filename;
-    UniquePtr<UnusedFile> prealloc;
+    UniquePtr<UnusedFd> prealloc;
     ObjectPtr<PosixShm> shm;
     INode *inode = nullptr;
+    int rw_mode = 0;
     int file = -1;
 
     // Lock mode for this particular file descriptor.
@@ -417,6 +422,38 @@ struct PosixFs final {
             file = next;
         }
         inode.unused = nullptr;
+    }
+
+    [[nodiscard]] auto find_unused_fd(const char *path, int flags) -> UnusedFd *
+    {
+        UnusedFd *unused = nullptr;
+        struct stat st;
+        mutex.lock();
+
+        if (inode_list && 0 == stat(path, &st)) {
+            auto *inode = inode_list;
+            while (inode && (inode->key.device != st.st_dev ||
+                             inode->key.inode != st.st_ino)) {
+                inode = inode->next;
+            }
+            if (inode) {
+                inode->mutex.lock();
+                flags &= Env::kReadOnly | Env::kReadWrite;
+                UnusedFd **ptr;
+                // Seek ptr to the first file descriptor with matching read/write mode.
+                for (ptr = &inode->unused;
+                     *ptr && (*ptr)->mode != flags;
+                     ptr = &(*ptr)->next) {
+                }
+                unused = *ptr;
+                if (unused) {
+                    *ptr = unused->next;
+                }
+                inode->mutex.unlock();
+            }
+        }
+        mutex.unlock();
+        return unused;
     }
 
     [[nodiscard]] auto ref_inode(int fd, INode *&ino_out) -> Status
@@ -628,13 +665,12 @@ auto PosixEnv::file_size(const char *filename, size_t &out) const -> Status
 
 auto PosixEnv::new_file(const char *filename, OpenMode mode, File *&out) -> Status
 {
-    const auto is_create = mode & kCreate;
-    const auto is_readonly = mode & kReadOnly;
+    UnusedFd *reuse;
     out = nullptr;
 
     const auto flags =
-        (is_create ? O_CREAT : 0) |
-        (is_readonly ? O_RDONLY : O_RDWR);
+        ((mode & kCreate) ? O_CREAT : 0) |
+        ((mode & kReadOnly) ? O_RDONLY : O_RDWR);
 
     // Allocate storage for the filename. Alloc::to_string() adds a '\0'.
     const Slice filename_slice(filename, std::strlen(filename));
@@ -643,38 +679,47 @@ auto PosixEnv::new_file(const char *filename, OpenMode mode, File *&out) -> Stat
         return Status::no_memory();
     }
 
-    // Allocate storage for an UnusedFile.
-    UniquePtr<UnusedFile> prealloc(static_cast<UnusedFile *>(
-        Mem::allocate(sizeof(UnusedFile))));
+    // Allocate storage for an UnusedFd.
+    UniquePtr<UnusedFd> prealloc(static_cast<UnusedFd *>(
+        Mem::allocate(sizeof(UnusedFd))));
     if (!prealloc) {
         return Status::no_memory();
     }
 
     auto s = Status::no_memory();
-    INode *ino = nullptr;
+    INode *inode = nullptr;
 
     // Allocate storage for the File instance. Files are exposed to the user, so just use regular
     // operator new(). The Alloc API is only used for internal structures.
     auto *file = new (std::nothrow) PosixFile(
         move(filename_storage),
+        READ_WRITE_MODE(mode),
         move(prealloc));
     if (file == nullptr) {
         goto cleanup;
     }
 
-    // Open the file. Let the OS choose what file descriptor to use.
-    file->file = posix_open(filename, flags);
-    if (file->file < 0) {
-        s = posix_error(errno);
-        goto cleanup;
+    reuse = s_fs.find_unused_fd(filename, mode);
+    if (reuse) {
+        // Reuse a file descriptor opened by another connection.
+        file->file = reuse->file;
+        Mem::deallocate(reuse);
+    } else {
+        // Open the file. Let the OS choose what file descriptor to use.
+        file->file = posix_open(filename, flags);
+        if (file->file < 0) {
+            s = posix_error(errno);
+            goto cleanup;
+        }
     }
+    CALICODB_EXPECT_GE(file->file, 0);
 
     // Search the global inode info list. This requires locking the global mutex.
     s_fs.mutex.lock();
-    s = s_fs.ref_inode(file->file, ino);
+    s = s_fs.ref_inode(file->file, inode);
     s_fs.mutex.unlock();
     if (s.is_ok()) {
-        file->inode = ino;
+        file->inode = inode;
         out = file;
     }
 
@@ -746,10 +791,11 @@ auto PosixFile::close() -> Status
 
     if (inode->nlocks) {
         // Some other thread in this process has a lock on this file from a different
-        // file descriptor. Closing this file descriptor will cause other threads to
-        // lose their locks. Defer close() until the other locks have been released.
-        // This uses the UnusedFile created when the file was opened.
+        // file descriptor. Callinc close() on this file descriptor will cause other
+        // threads to lose their locks. Defer close() until the other locks have been
+        // released. This uses the UnusedFd created when the file was opened.
         prealloc->file = fd;
+        prealloc->mode = rw_mode;
         prealloc->next = inode->unused;
         inode->unused = prealloc.release();
         fd = -1;
