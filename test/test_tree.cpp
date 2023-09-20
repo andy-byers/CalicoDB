@@ -21,14 +21,23 @@ static constexpr size_t kInitialRecordCount = 1'000;
 
 static auto tree_put(Tree &tree, CursorImpl &c, const std::string &k, const std::string &v) -> Status
 {
-    return tree.put(c,
-                    to_slice(k),
-                    Slice(v.c_str(), v.size()));
+    auto s = tree.put(c, to_slice(k),
+                      Slice(v.c_str(), v.size()));
+    if (s.is_ok()) {
+        EXPECT_TRUE(c.is_valid());
+        EXPECT_EQ(c.key(), to_slice(k));
+        EXPECT_EQ(c.value(), to_slice(v));
+    }
+    return s;
 }
 
 static auto tree_erase(Tree &tree, CursorImpl &c, const std::string &k) -> Status
 {
-    return tree.erase(c, to_slice(k));
+    auto s = tree.erase(c, to_slice(k));
+    if (s.is_ok() && c.is_valid()) {
+        EXPECT_GT(c.key(), to_slice(k));
+    }
+    return s;
 }
 
 static auto cursor_find(Cursor &c, const std::string &k) -> void
@@ -426,8 +435,6 @@ TEST_F(TreeTests, PrintRecords)
 TEST_F(TreeTests, ResolvesUnderflowsOnRightmostPosition)
 {
     init_tree(*this);
-    validate();
-
     for (size_t i = 0; i < kInitialRecordCount; ++i) {
         ASSERT_OK(tree_erase(*m_c, make_long_key(kInitialRecordCount - i - 1)));
     }
@@ -464,7 +471,7 @@ TEST_F(TreeTests, ResolvesOverflowsFromOverwrite)
 TEST_F(TreeTests, SplitWithShortAndLongKeys)
 {
     for (unsigned i = 0; i < kInitialRecordCount; ++i) {
-        char key[3]{};
+        char key[3] = {};
         put_u16(key, static_cast<uint16_t>(kInitialRecordCount - i - 1));
         ASSERT_OK(tree_put(*m_c, {key, 2}, "v"));
     }
@@ -1163,8 +1170,16 @@ public:
             std::shuffle(std::begin(indices), std::end(indices), rng);
         }
         for (auto idx : indices) {
+            const auto key = make_long_key(idx);
             const auto value = payload_values[(idx + tid) % payload_values.size()];
-            ASSERT_OK(::calicodb::test::tree_put(*tree, *c, make_long_key(idx), value));
+            ASSERT_OK(::calicodb::test::tree_put(*tree, *c, key, value));
+            // Cursor is left on the newly-inserted record, even if there was a split.
+            ASSERT_TRUE(c->is_valid());
+            ASSERT_EQ(c->key(), to_slice(key));
+            ASSERT_EQ(c->value(), to_slice(value));
+            while (c->is_valid()) {
+                c->next();
+            }
         }
         tree->TEST_validate();
     }

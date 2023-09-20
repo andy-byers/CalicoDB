@@ -31,8 +31,7 @@ class CursorImpl
     uint32_t m_idx = 0;
 
     // *_path members are used to track the path taken from the tree's root to the current
-    // position. At any given time, the elements with indices less than the current level
-    // are valid.
+    // position.
     static constexpr size_t kMaxDepth = 17 + 1;
     Node m_node_path[kMaxDepth - 1];
     uint32_t m_idx_path[kMaxDepth - 1];
@@ -86,7 +85,43 @@ public:
     explicit CursorImpl(Tree &tree);
     ~CursorImpl() override;
 
-    auto move_to_parent() -> void;
+    auto handle_split_root(Node child) -> void
+    {
+        static constexpr auto kNumSlots = ARRAY_SIZE(m_node_path);
+        CALICODB_EXPECT_EQ(m_node.ref->page_id, m_tree->root());
+        CALICODB_EXPECT_EQ(m_node_path[0].ref, nullptr);             // m_node goes here
+        CALICODB_EXPECT_EQ(m_node_path[kNumSlots - 1].ref, nullptr); // Overwrite this slot
+        CALICODB_EXPECT_EQ(m_level, 0);
+        // Shift the node and index paths to make room for the new level. Nodes are not trivially
+        // copiable.
+        for (size_t i = 1; i < kNumSlots; ++i) {
+            m_node_path[kNumSlots - i] = move(m_node_path[kNumSlots - i - 1]);
+        }
+        std::memmove(m_idx_path + 1, m_idx_path,
+                     (kNumSlots - 1) * sizeof *m_idx_path);
+        assign_child(move(child));
+        // Root is empty until split_nonroot() is called
+        m_idx_path[0] = 0;
+    }
+
+    auto handle_merge_root() -> void
+    {
+        // m_node is the root node. It always belongs at m_node_path[0]. The node in
+        // m_node_path[1] was destroyed.
+        CALICODB_EXPECT_EQ(m_node.ref->page_id, m_tree->root());
+        CALICODB_EXPECT_EQ(m_node_path[0].ref, nullptr); // m_node goes here
+        CALICODB_EXPECT_EQ(m_node_path[1].ref, nullptr); // Overwrite this slot
+        CALICODB_EXPECT_EQ(m_level, 0);
+        static constexpr auto kNumSlots = ARRAY_SIZE(m_node_path);
+        for (size_t i = 0; i < kNumSlots - 1; ++i) {
+            m_node_path[i] = move(m_node_path[i + 1]);
+        }
+        std::memmove(m_idx_path, m_idx_path + 1,
+                     (kNumSlots - 1) * sizeof *m_idx_path);
+        m_idx = m_idx_path[0];
+    }
+
+    auto move_to_parent(bool preserve_path) -> void;
     auto assign_child(Node child) -> void;
     auto move_to_child(Id child_id) -> void;
     auto fetch_user_payload() -> Status;
@@ -115,6 +150,21 @@ public:
         release_nodes(kAllLevels);
         m_status = s;
         m_level = 0;
+    }
+
+    auto finish_write(const Status &s) -> void
+    {
+        if (!s.is_ok()) {
+            reset(s);
+            return;
+        }
+        m_idx_path[m_level] = m_idx;
+        m_node_path[m_level] = move(m_node);
+        while (!m_node_path[m_level].is_leaf()) {
+            ++m_level;
+        }
+        m_node = move(m_node_path[m_level]);
+        m_idx = m_idx_path[m_level];
     }
 
     enum SeekType {
@@ -173,6 +223,8 @@ public:
     {
         return *m_tree;
     }
+
+    auto assert_state() -> bool;
 };
 
 } // namespace calicodb

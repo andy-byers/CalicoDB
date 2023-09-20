@@ -109,6 +109,12 @@ auto write_child_id(Cell &cell, Id child_id)
     area = root.ref->data + cell_slots_offset(root);
     std::memcpy(area, child.ref->data + cell_slots_offset(child), area_size);
     std::memcpy(root.hdr(), child.hdr(), NodeHdr::kSize);
+
+    // Transfer/recompute metadata.
+    const auto size_difference = root.ref->page_id.is_root() ? FileHdr::kSize : 0U;
+    root.usable_space = child.usable_space - size_difference;
+    root.gap_size = child.gap_size - size_difference;
+    root.scratch = child.scratch;
     root.parser = child.parser;
     return 0;
 }
@@ -534,9 +540,10 @@ auto Tree::make_pivot(const PivotOptions &opt, Cell &pivot_out) -> Status
         return Status::corruption();
     }
     pivot_out.ptr = opt.scratch;
-    pivot_out.total_pl_size = static_cast<uint32_t>(prefix.size());
+    pivot_out.key_size = static_cast<uint32_t>(prefix.size());
+    pivot_out.total_pl_size = pivot_out.key_size;
     auto *ptr = pivot_out.ptr + sizeof(uint32_t); // Skip the left child ID.
-    pivot_out.key = encode_varint(ptr, pivot_out.total_pl_size);
+    pivot_out.key = encode_varint(ptr, pivot_out.key_size);
     pivot_out.local_pl_size = compute_local_pl_size(prefix.size(), 0, m_page_size);
     pivot_out.footprint = pivot_out.local_pl_size + uint32_t(pivot_out.key - opt.scratch);
     std::memcpy(pivot_out.key, prefix.data(), pivot_out.local_pl_size);
@@ -715,7 +722,6 @@ auto Tree::resolve_overflow(CursorImpl &c) -> Status
         }
         ++m_stat->counters[Stat::kSMOCount];
     }
-    c.reset(s);
     return s;
 }
 
@@ -763,9 +769,7 @@ auto Tree::split_root(CursorImpl &c) -> Status
 
         // Overflow cell is now in the child. m_ovfl.idx stays the same.
         m_ovfl.pid = child.ref->page_id;
-        c.assign_child(move(child));
-        c.m_idx_path[1] = c.m_idx_path[0];
-        c.m_idx_path[0] = 0;
+        c.handle_split_root(move(child));
     }
     return s;
 }
@@ -789,9 +793,19 @@ auto Tree::split_nonroot(CursorImpl &c) -> Status
         }
         s = redistribute_cells(left, node, parent, pivot_idx);
     }
+    if (s.is_ok()) {
+        // Correct the cursor position. It may not be correct after the split.
+        const auto left_size = NodeHdr::get_cell_count(left.hdr());
+        if (c.m_idx < left_size) {
+            auto temp = exchange(node, move(left));
+            left = move(temp);
+        } else {
+            c.m_idx -= left_size;
+        }
+    }
 
     release(move(left));
-    c.move_to_parent();
+    c.move_to_parent(true);
     return s;
 }
 
@@ -847,7 +861,7 @@ auto Tree::split_nonroot_fast(CursorImpl &c, Node &parent, Node right) -> Status
         CALICODB_EXPECT_GT(c.m_level, 0);
         const auto pivot_idx = c.m_idx_path[c.m_level - 1];
 
-        // Post the pivot into the parent node. This call will fix the left's parent pointer.
+        // Post the pivot into the parent node. This call will fix left's parent pointer.
         s = post_pivot(parent, pivot_idx, pivot, left.ref->page_id);
         if (s.is_ok()) {
             CALICODB_EXPECT_EQ(NodeHdr::get_next_id(parent.hdr()), left.ref->page_id);
@@ -858,15 +872,17 @@ auto Tree::split_nonroot_fast(CursorImpl &c, Node &parent, Node right) -> Status
     }
 
 cleanup:
-    release(move(right));
-    c.move_to_parent();
+    release(move(c.m_node));
+    c.m_node = move(right);
+    c.m_idx = 0;
+    c.move_to_parent(true);
     return s;
 }
 
 auto Tree::resolve_underflow(CursorImpl &c) -> Status
 {
     Status s;
-    while (c.has_node() && s.is_ok() && is_underflowing(c.m_node)) {
+    while (s.is_ok() && is_underflowing(c.m_node)) {
         if (c.page_id() == root()) {
             s = fix_root(c);
             break;
@@ -877,7 +893,6 @@ auto Tree::resolve_underflow(CursorImpl &c) -> Status
         s = fix_nonroot(c, parent, pivot_idx);
         ++m_stat->counters[Stat::kSMOCount];
     }
-    c.reset(s);
     return s;
 }
 
@@ -885,8 +900,7 @@ auto Tree::resolve_underflow(CursorImpl &c) -> Status
 // One of the two siblings must be empty. This code handles rebalancing after both put() and
 // erase() operations. When called from put(), there will be an overflow cell in m_ovfl.cell
 // which needs to be put in either `left` or `right`, depending on its index and which cell is
-// chosen as the new pivot. When called from erase(), the `left` node may be left totally empty,
-// in which case, it should be freed.
+// chosen as the new pivot.
 auto Tree::redistribute_cells(Node &left, Node &right, Node &parent, uint32_t pivot_idx) -> Status
 {
     upgrade(parent);
@@ -1069,9 +1083,9 @@ auto Tree::redistribute_cells(Node &left, Node &right, Node &parent, uint32_t pi
 
 auto Tree::fix_nonroot(CursorImpl &c, Node &parent, uint32_t idx) -> Status
 {
-    auto &node = c.m_node;
-    CALICODB_EXPECT_NE(node.ref->page_id, root());
-    CALICODB_EXPECT_TRUE(is_underflowing(node));
+    auto current = move(c.m_node);
+    CALICODB_EXPECT_NE(current.ref->page_id, root());
+    CALICODB_EXPECT_TRUE(is_underflowing(current));
     CALICODB_EXPECT_FALSE(m_ovfl.exists());
 
     Status s;
@@ -1080,26 +1094,40 @@ auto Tree::fix_nonroot(CursorImpl &c, Node &parent, uint32_t idx) -> Status
         --idx; // Correct the pivot `idx` to point to p_left.
         s = acquire(parent.read_child_id(idx), sibling, true);
         p_left = &sibling;
-        p_right = &node;
+        p_right = &current;
     } else {
         s = acquire(parent.read_child_id(idx + 1), sibling, true);
-        p_left = &node;
+        p_left = &current;
         p_right = &sibling;
     }
     if (s.is_ok()) {
+        // NOTE: p_right is filled up first. If there are not enough cells in the sibling node,
+        //       then p_left will be empty after this call.
         s = redistribute_cells(*p_left, *p_right, parent, idx);
-        // NOTE: If this block isn't hit, then (a) sibling is not acquired, and (b) node will be
-        //       released when the cursor is advanced.
-        release(move(*p_right));
-        if (s.is_ok() && 0 == NodeHdr::get_cell_count(p_left->hdr())) {
-            // redistribute_cells() performed a merge.
-            s = Freelist::add(*m_pager, p_left->ref);
-        } else {
-            release(move(*p_left));
+        if (s.is_ok()) {
+            // Fix the cursor history path based on what happened in redistribute_cells().
+            if (NodeHdr::get_cell_count(p_left->hdr()) == 0) {
+                // There was a merge.
+                c.m_node = move(*p_right);
+                s = Freelist::add(*m_pager, p_left->ref);
+                // The parent lost a cell, so correct the path if needed.
+                const auto parent_size = NodeHdr::get_cell_count(parent.hdr());
+                auto &parent_index = c.m_idx_path[c.m_level - 1];
+                parent_index -= parent_index > parent_size;
+            } else {
+                // There was a rotation.
+                c.m_node = move(current);
+                release(move(sibling));
+            }
+            if (p_left == &current) {
+                c.m_idx = 0;
+            } else {
+                c.m_idx = NodeHdr::get_cell_count(c.m_node.hdr());
+            }
         }
     }
 
-    c.move_to_parent();
+    c.move_to_parent(true);
     if (s.is_ok() && m_ovfl.exists()) {
         // The `parent` may have overflowed when the pivot was posted (if redistribute_cells()
         // performed a rotation).
@@ -1110,44 +1138,43 @@ auto Tree::fix_nonroot(CursorImpl &c, Node &parent, uint32_t idx) -> Status
 
 auto Tree::fix_root(CursorImpl &c) -> Status
 {
-    auto &node = c.m_node;
-    CALICODB_EXPECT_EQ(node.ref->page_id, root());
-    if (node.is_leaf()) {
+    auto &parent = c.m_node;
+    CALICODB_EXPECT_EQ(parent.ref->page_id, root());
+    if (parent.is_leaf()) {
         // The whole tree is empty.
         return Status::ok();
     }
 
-    Node child;
-    auto s = acquire(NodeHdr::get_next_id(node.hdr()), child, true);
-    if (s.is_ok()) {
-        // We don't have enough room to transfer the child contents into the root, due to the space occupied by
-        // the file header. In this case, we'll just split the child and insert the median cell into the root.
-        // Note that the child needs an overflow cell for the split routine to work. We'll just fake it by
-        // extracting an arbitrary cell and making it the overflow cell.
-        if (node.ref->page_id.is_root() && child.usable_space < FileHdr::kSize) {
-            Cell cell;
-            c.m_idx = NodeHdr::get_cell_count(child.hdr()) / 2;
-            if (child.read(c.m_idx, cell)) {
-                s = corrupted_node(node.ref->page_id);
-                release(move(child));
-            } else {
-                m_ovfl.cell = cell;
-                detach_cell(m_ovfl.cell, m_cell_scratch[0]);
-                child.erase(c.m_idx, cell.footprint);
-                c.assign_child(move(child));
-                s = split_nonroot(c);
-            }
+    Status s;
+    auto child = move(c.m_node_path[1]);
+    // We don't have enough room to transfer the child contents into the root, due to the space occupied by
+    // the file header. In this case, we'll just split the child and insert the median cell into the root.
+    // Note that the child needs an overflow cell for the split routine to work. We'll just fake it by
+    // extracting an arbitrary cell and making it the overflow cell.
+    if (parent.ref->page_id.is_root() && child.usable_space < FileHdr::kSize) {
+        Cell cell; // TODO: Need specific tests for this! Probably broken with these changes.
+        c.m_idx = NodeHdr::get_cell_count(child.hdr()) / 2;
+        if (child.read(c.m_idx, cell)) {
+            s = corrupted_node(parent.ref->page_id);
+            release(move(child));
         } else {
-            if (merge_root(node, child, m_page_size)) {
-                s = corrupted_node(node.ref->page_id);
-                release(move(child));
-            } else {
-                s = Freelist::add(*m_pager, child.ref);
-            }
-            if (s.is_ok()) {
-                s = fix_links(node);
-            }
+            m_ovfl.cell = cell;
+            detach_cell(m_ovfl.cell, m_cell_scratch[0]);
+            child.erase(c.m_idx, cell.footprint);
+            c.assign_child(move(child));
+            s = split_nonroot(c);
         }
+    } else {
+        if (merge_root(parent, child, m_page_size)) {
+            s = corrupted_node(parent.ref->page_id);
+            release(move(child));
+        } else {
+            s = Freelist::add(*m_pager, child.ref);
+        }
+        if (s.is_ok()) {
+            s = fix_links(parent);
+        }
+        c.handle_merge_root();
     }
     return s;
 }
@@ -1233,6 +1260,7 @@ auto Tree::put(CursorImpl &c, const Slice &key, const Slice &value) -> Status
         key, CursorImpl::kSeekWriter);
     auto s = c.m_status;
     if (s.is_ok()) {
+        CALICODB_EXPECT_TRUE(c.assert_state());
         upgrade(c.m_node);
         if (key_exists) {
             Cell cell;
@@ -1266,23 +1294,17 @@ auto Tree::put(CursorImpl &c, const Slice &key, const Slice &value) -> Status
                 m_ovfl = {ovfl, c.page_id(), c.m_idx};
                 s = resolve_overflow(c);
             }
+            c.finish_write(s);
         }
     }
 
 cleanup:
     if (s.is_ok()) {
-        if (c.has_key()) {
-            // Cursor is already on the correct record.
-            s = c.fetch_user_payload();
-        } else {
-            // There must have been a SMO. The rebalancing routine clears the cursor,
-            // since it is left on an internal node. Seek back to where the record
-            // was inserted.
-            c.seek(key);
-            s = c.status();
-        }
+        // Cursor is left on the correct record.
+        s = c.fetch_user_payload();
     }
     if (c.m_status.is_ok()) {
+        CALICODB_EXPECT_TRUE(c.assert_state());
         c.m_status = s;
     }
     return s;
@@ -1411,29 +1433,24 @@ auto Tree::erase(CursorImpl &c) -> Status
     }
     manage_cursors(&c, kInitNormal);
 
-    Slice saved_key;
-    if (1 == NodeHdr::get_cell_count(c.m_node.hdr())) {
-        // This node will underflow when the record is removed. Make sure the key is saved so that
-        // the correct position can be found after underflow resolution. The backing buffer for
-        // saved_key will not be freed/realloc'd until after the cursor position is found again.
-        saved_key = c.key();
-    }
     Status s;
     if (c.m_idx < NodeHdr::get_cell_count(c.m_node.hdr())) {
+        CALICODB_EXPECT_TRUE(c.assert_state());
         upgrade(c.m_node);
         s = remove_cell(c.m_node, c.m_idx);
-        if (s.is_ok() && is_underflowing(c.m_node)) {
+        if (s.is_ok()) {
             s = resolve_underflow(c);
         }
+        c.finish_write(s);
     }
     if (s.is_ok()) {
         if (c.has_node()) {
             c.ensure_correct_leaf(true);
-        } else {
-            c.seek(saved_key);
         }
         s = c.m_status;
-    } else if (c.m_status.is_ok()) {
+    }
+    if (c.m_status.is_ok()) {
+        CALICODB_EXPECT_TRUE(c.assert_state());
         c.m_status = s;
     }
     return s;

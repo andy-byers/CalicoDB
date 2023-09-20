@@ -75,7 +75,7 @@ auto CursorImpl::move_to_right_sibling() -> void
             reset();
             return;
         }
-        move_to_parent();
+        move_to_parent(false);
     }
     while (!m_node.is_leaf()) {
         move_to_child(m_node.read_child_id(m_idx));
@@ -101,7 +101,7 @@ auto CursorImpl::move_to_left_sibling() -> void
             reset();
             return;
         }
-        move_to_parent();
+        move_to_parent(false);
     }
     while (!m_node.is_leaf()) {
         move_to_child(m_node.read_child_id(m_idx));
@@ -176,9 +176,13 @@ CursorImpl::~CursorImpl()
     }
 }
 
-auto CursorImpl::move_to_parent() -> void
+auto CursorImpl::move_to_parent(bool preserve_path) -> void
 {
     CALICODB_EXPECT_GT(m_level, 0);
+    if (preserve_path) {
+        m_node_path[m_level] = move(m_node);
+        m_idx_path[m_level] = m_idx;
+    }
     release_nodes(kCurrentLevel);
     --m_level;
     m_idx = m_idx_path[m_level];
@@ -265,8 +269,8 @@ auto CursorImpl::release_nodes(ReleaseType type) -> void
     if (type < kAllLevels) {
         return;
     }
-    for (int i = 0; i < m_level; ++i) {
-        m_tree->release(move(m_node_path[i]));
+    for (auto &node : m_node_path) {
+        m_tree->release(move(node));
     }
 }
 
@@ -333,6 +337,29 @@ auto CursorImpl::find(const Slice &key) -> void
     if (!seek_to_leaf(key, kSeekReader)) {
         release_nodes(kAllLevels);
     }
+}
+
+auto CursorImpl::assert_state() -> bool
+{
+    if (is_valid()) {
+        CALICODB_EXPECT_TRUE(m_node.is_leaf());
+        for (size_t i = 0; i < ARRAY_SIZE(m_node_path); ++i) {
+            if (m_node_path[i].ref == nullptr) {
+                continue;
+            }
+            CALICODB_EXPECT_LE(m_idx_path[i], NodeHdr::get_cell_count(m_node_path[i].hdr()));
+
+            [[maybe_unused]] Node node;
+            CALICODB_EXPECT_EQ(0, Node::from_existing_page(
+                                      *m_node_path[i].ref,
+                                      m_tree->m_page_size,
+                                      m_tree->m_node_scratch,
+                                      node));
+            CALICODB_EXPECT_EQ(node.gap_size, m_node_path[i].gap_size);
+            CALICODB_EXPECT_EQ(node.usable_space, m_node_path[i].usable_space);
+        }
+    }
+    return true;
 }
 
 } // namespace calicodb
