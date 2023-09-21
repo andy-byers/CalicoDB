@@ -535,7 +535,6 @@ auto Pager::release(PageRef *&page, ReleaseAction action) -> void
                 const auto is_dirty = page->get_flag(PageRef::kDirty);
                 const auto should_discard = action == kDiscard || !is_dirty;
                 if (should_discard) {
-                    CALICODB_EXPECT_TRUE(page->get_flag(PageRef::kCached));
                     if (is_dirty) {
                         CALICODB_EXPECT_GE(m_mode, kDirty);
                         m_dirtylist.remove(*page);

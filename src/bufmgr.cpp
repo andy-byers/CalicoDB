@@ -80,6 +80,7 @@ auto Bufmgr::lookup(Id page_id) -> PageRef *
     }
     ++m_stat->counters[Stat::kCacheHits];
     if (ref->refs == 0) {
+        // Make ref the most-recently-used element.
         IntrusiveList::remove(*ref);
         IntrusiveList::add_head(*ref, m_lru);
     }
@@ -108,7 +109,7 @@ auto Bufmgr::allocate(size_t page_size) -> PageRef *
 auto Bufmgr::register_page(PageRef &page) -> void
 {
     if (Id::root() < page.page_id) {
-        CALICODB_EXPECT_TRUE(query(page.page_id) == nullptr);
+        CALICODB_EXPECT_EQ(query(page.page_id), nullptr);
         CALICODB_EXPECT_FALSE(page.get_flag(PageRef::kCached));
         m_table.insert(&page);
         page.set_flag(PageRef::kCached);
@@ -117,9 +118,11 @@ auto Bufmgr::register_page(PageRef &page) -> void
 
 auto Bufmgr::erase(PageRef &ref) -> void
 {
-    if (ref.get_flag(PageRef::kCached)) {
-        ref.clear_flag(PageRef::kCached);
-        m_table.remove(ref.key());
+    if (Id::root() < ref.page_id) {
+        if (ref.get_flag(PageRef::kCached)) {
+            ref.clear_flag(PageRef::kCached);
+            m_table.remove(ref.key());
+        }
         IntrusiveList::remove(ref);
         IntrusiveList::add_tail(ref, m_lru);
     }
@@ -181,12 +184,13 @@ auto Bufmgr::assert_state() const -> bool
     // Make sure the refcounts add up to the "refsum".
     uint32_t refsum = 0;
     for (auto p = m_in_use.next_entry; p != &m_in_use; p = p->next_entry) {
-        const auto *ref = m_table.lookup(p->key());
+        [[maybe_unused]] const auto *ref = m_table.lookup(p->key());
         CALICODB_EXPECT_NE(ref, nullptr);
+        // If this check fails, then look at usage of get_unused_page(). May have been replacing
+        // a page with new content, i.e. what happens in Tree::redistribute_cells().
         CALICODB_EXPECT_EQ(p, ref);
         CALICODB_EXPECT_GT(p->refs, 0);
         refsum += p->refs;
-        (void)ref;
     }
     for (auto p = m_lru.next_entry; p != &m_lru; p = p->next_entry) {
         if (p->get_flag(PageRef::kDirty)) {

@@ -254,7 +254,7 @@ public:
 
     auto validate() const -> void
     {
-        reinterpret_cast<const CursorImpl *>(m_c)->TEST_tree().TEST_validate();
+        reinterpret_cast<const CursorImpl *>(m_c)->TEST_check_state();
     }
 };
 

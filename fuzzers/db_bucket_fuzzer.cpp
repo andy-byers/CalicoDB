@@ -78,6 +78,7 @@ public:
                     CHECK_OK(tx.create_bucket(BucketOptions(), to_slice(str), &cursor));
                     cursors[idx].reset(cursor);
                 }
+
                 Status s;
                 auto *c = cursors[idx].get();
                 switch (stream.extract_enum<OperationType>()) {
