@@ -5,6 +5,7 @@
 #ifndef CALICODB_ENV_H
 #define CALICODB_ENV_H
 
+#include "slice.h"
 #include "status.h"
 #include <cstdarg>
 

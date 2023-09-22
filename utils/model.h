@@ -73,7 +73,7 @@ public:
 
     auto check_consistency() const -> void;
 
-    auto get_property(const Slice &name, String *value_out) const -> Status override
+    auto get_property(const Slice &name, CALICODB_STRING *value_out) const -> Status override
     {
         return m_db->get_property(name, value_out);
     }

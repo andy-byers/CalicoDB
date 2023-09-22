@@ -5,8 +5,6 @@
 #ifndef CALICODB_STATUS_H
 #define CALICODB_STATUS_H
 
-#include "slice.h"
-
 namespace calicodb
 {
 

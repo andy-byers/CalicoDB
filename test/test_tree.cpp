@@ -47,12 +47,12 @@ static auto tree_erase(Tree &tree, CursorImpl &c, const std::string &k) -> Statu
 
 static auto cursor_find(Cursor &c, const std::string &k) -> void
 {
-    c.find(to_slice(k));
+    c.find(k);
 }
 
 static auto cursor_seek(Cursor &c, const std::string &k) -> void
 {
-    c.seek(to_slice(k));
+    c.seek(k);
 }
 
 class TreeTestHarness
@@ -131,12 +131,12 @@ public:
 
     auto cursor_find(const std::string &k) -> void
     {
-        m_c->find(to_slice(k));
+        m_c->find(k);
     }
 
     auto cursor_seek(const std::string &k) -> void
     {
-        m_c->seek(to_slice(k));
+        m_c->seek(k);
     }
 
     auto allocate(bool is_external, Id nearby, Node &node_out) -> Status

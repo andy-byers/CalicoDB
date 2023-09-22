@@ -174,20 +174,18 @@ auto DBImpl::destroy(const Options &options, const char *filename) -> Status
     return s;
 }
 
-auto DBImpl::get_property(const Slice &name, String *out) const -> Status
+auto DBImpl::get_property(const Slice &name, CALICODB_STRING *value_out) const -> Status
 {
-    if (out) {
-        out->clear();
-    }
     static constexpr char kBasePrefix[] = "calicodb.";
     if (name.starts_with(kBasePrefix)) {
         const auto prop = name.range(std::strlen(kBasePrefix));
+        String temp;
 
         if (prop == "stats") {
             int rc = 0;
-            if (out) {
+            if (value_out) {
                 rc = append_format_string(
-                    *out,
+                    temp,
                     "Name               Value\n"
                     "------------------------\n"
                     "DB read(MB)   %10.4f\n"
@@ -208,6 +206,7 @@ auto DBImpl::get_property(const Slice &name, String *out) const -> Status
                     static_cast<double>(m_stat.counters[Stat::kCacheHits]) /
                         static_cast<double>(m_stat.counters[Stat::kCacheHits] +
                                             m_stat.counters[Stat::kCacheMisses]));
+                value_out->append(temp.data(), temp.size());
             }
             return rc ? Status::no_memory() : Status::ok();
         }

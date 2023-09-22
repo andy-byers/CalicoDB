@@ -5,14 +5,11 @@
 #ifndef CALICODB_CURSOR_H
 #define CALICODB_CURSOR_H
 
+#include "slice.h"
+#include "status.h"
+
 namespace calicodb
 {
-
-// calicodb/slice.h
-class Slice;
-
-// calicodb/status.h
-class Status;
 
 // Cursor for iterating over the records in a bucket
 // Cursors must be obtained by calling Tx::open_bucket() or Tx::create_bucket(). It

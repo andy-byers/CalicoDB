@@ -31,7 +31,7 @@ public:
     static auto destroy(const Options &options, const char *filename) -> Status;
     auto open(const Options &sanitized) -> Status;
 
-    auto get_property(const Slice &name, String *out) const -> Status override;
+    auto get_property(const Slice &name, CALICODB_STRING *value_out) const -> Status override;
     auto new_tx(const ReadOptions &, Tx *&tx) const -> Status override;
     auto new_tx(const WriteOptions &, Tx *&tx) -> Status override;
     auto checkpoint(bool reset) -> Status override;
