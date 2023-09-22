@@ -363,7 +363,6 @@ delete c;
 
 ```C++
 #include "calicodb/db.h"
-#include "calicodb/string.h"
 
 CALICODB_STRING prop; // CALICODB_STRING defaults to std::string
 s = db->get_property("calicodb.stats", &prop);
