@@ -37,9 +37,9 @@ public:
 
     struct UnpackedCursor {
         Tree *tree;
-        CursorImpl *c;
+        TreeCursor *c;
     };
-    auto unpack_and_use(Cursor &c) -> UnpackedCursor;
+    auto unpack_cursor(Cursor &c) -> UnpackedCursor;
     auto use_tree(Tree *tree) -> void;
 
     auto vacuum() -> Status;
@@ -79,16 +79,14 @@ private:
     char *const m_scratch;
     Stat *const m_stat;
 
-    // The schema tree and a cursor over its contents. When m_cursor.is_valid(),
-    // m_cursor.value() returns a non-human-readable string containing information
-    // about the bucket that m_cursor is positioned on.
     Tree m_map;
-    CursorImpl m_cursor;
+    CursorImpl m_internal;
+    CursorImpl m_exposed;
 
     // List containing a tree for each open bucket (including the schema tree).
     mutable Tree::ListEntry m_trees = {};
 
-    // Wrapper over m_cursor, returns a human-readable string for Cursor::value().
+    // Wrapper over m_exposed, returns a human-readable string for Cursor::value().
     Cursor *const m_schema;
 };
 

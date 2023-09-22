@@ -10,329 +10,92 @@
 namespace calicodb
 {
 
-auto CursorImpl::fetch_user_payload() -> Status
-{
-    CALICODB_EXPECT_TRUE(has_key());
-    const auto key_buffer_len = exchange(m_key_len, 0U);
-    const auto value_buffer_len = exchange(m_value_len, 0U);
-
-    Cell cell;
-    if (m_node.read(m_idx, cell)) {
-        return m_tree->corrupted_node(page_id());
-    }
-
-    Slice slice;
-    if (cell.key_size) {
-        if (cell.key_size > key_buffer_len &&
-            m_key_buf.realloc(cell.key_size)) {
-            return Status::no_memory();
-        }
-        CALICODB_EXPECT_NE(m_key_buf.ptr(), nullptr);
-        auto s = m_tree->read_key(cell, m_key_buf.ptr(), &slice);
-        if (!s.is_ok()) {
-            return s;
-        }
-        m_key_len = slice.size();
-    }
-    if (const auto value_size = cell.total_pl_size - cell.key_size) {
-        if (value_size > value_buffer_len &&
-            m_value_buf.realloc(value_size)) {
-            return Status::no_memory();
-        }
-        CALICODB_EXPECT_NE(m_value_buf.ptr(), nullptr);
-        auto s = m_tree->read_value(cell, m_value_buf.ptr(), &slice);
-        if (!s.is_ok()) {
-            return s;
-        }
-        m_value_len = slice.size();
-    }
-    return Status::ok();
-}
-
-auto CursorImpl::ensure_correct_leaf(bool read_payload) -> void
-{
-    if (has_node()) {
-        CALICODB_EXPECT_TRUE(m_node.is_leaf());
-        if (m_idx == NodeHdr::get_cell_count(m_node.hdr())) {
-            move_to_right_sibling();
-        }
-    }
-    if (read_payload && has_key()) {
-        m_status = fetch_user_payload();
-    }
-}
-
-auto CursorImpl::move_to_right_sibling() -> void
-{
-    CALICODB_EXPECT_TRUE(has_node());
-    CALICODB_EXPECT_TRUE(m_node.is_leaf());
-    const auto leaf_level = m_level;
-    for (uint32_t adjust = 0;; adjust = 1) {
-        const auto ncells = NodeHdr::get_cell_count(m_node.hdr());
-        if (++m_idx < ncells + adjust) {
-            break;
-        } else if (m_level == 0) {
-            reset();
-            return;
-        }
-        move_to_parent();
-    }
-    while (!m_node.is_leaf()) {
-        move_to_child(m_node.read_child_id(m_idx));
-        if (!m_status.is_ok()) {
-            return;
-        }
-        m_idx = 0;
-    }
-    if (m_level != leaf_level) {
-        m_status = Status::corruption();
-    }
-}
-
-auto CursorImpl::move_to_left_sibling() -> void
-{
-    CALICODB_EXPECT_TRUE(has_node());
-    CALICODB_EXPECT_TRUE(m_node.is_leaf());
-    for (;;) {
-        if (m_idx > 0) {
-            --m_idx;
-            break;
-        } else if (m_level == 0) {
-            reset();
-            return;
-        }
-        move_to_parent();
-    }
-    while (!m_node.is_leaf()) {
-        move_to_child(m_node.read_child_id(m_idx));
-        if (!m_status.is_ok()) {
-            return;
-        }
-        m_idx = NodeHdr::get_cell_count(m_node.hdr()) - m_node.is_leaf();
-    }
-}
-
-auto CursorImpl::seek_to_last_leaf() -> void
-{
-    reset();
-    m_status = m_tree->acquire(m_tree->root(), m_node);
-    while (m_status.is_ok()) {
-        m_idx = NodeHdr::get_cell_count(m_node.hdr());
-        if (m_node.is_leaf()) {
-            m_idx -= m_idx > 0;
-            break;
-        }
-        move_to_child(NodeHdr::get_next_id(m_node.hdr()));
-    }
-}
-
-auto CursorImpl::search_node(const Slice &key) -> bool
-{
-    CALICODB_EXPECT_TRUE(m_status.is_ok());
-    CALICODB_EXPECT_NE(m_node.ref, nullptr);
-
-    auto exact = false;
-    auto upper = NodeHdr::get_cell_count(m_node.hdr());
-    uint32_t lower = 0;
-
-    while (lower < upper) {
-        Slice rhs;
-        const auto mid = (lower + upper) / 2;
-        // This call to Tree::extract_key() may return a partial key, if the whole key wasn't
-        // needed for the comparison. We read at most 1 byte more than is present in `key` so
-        // that we still have the necessary length information to break ties. This lets us avoid
-        // reading overflow chains if it isn't really necessary.
-        m_status = m_tree->extract_key(m_node, mid, m_tree->m_key_scratch[0], rhs,
-                                       static_cast<uint32_t>(key.size() + 1));
-        if (!m_status.is_ok()) {
-            break;
-        }
-        const auto cmp = key.compare(rhs);
-        if (cmp <= 0) {
-            exact = cmp == 0;
-            upper = mid;
-        } else {
-            lower = mid + 1;
-        }
-    }
-
-    m_idx = lower + exact * !m_node.is_leaf();
-    return exact;
-}
-
 CursorImpl::CursorImpl(Tree &tree)
-    : m_list_entry{this, nullptr, nullptr},
-      m_tree(&tree),
-      m_status(tree.m_pager->status())
+    : m_c(tree)
 {
-    IntrusiveList::add_head(m_list_entry, tree.m_inactive_list);
 }
 
-CursorImpl::~CursorImpl()
+CursorImpl::~CursorImpl() = default;
+
+auto CursorImpl::is_valid() const -> bool
 {
-    if (!IntrusiveList::is_empty(m_list_entry)) {
-        IntrusiveList::remove(m_list_entry);
-        reset();
-    }
+    return m_c.is_valid();
 }
 
-auto CursorImpl::move_to_parent() -> void
+auto CursorImpl::handle() -> void *
 {
-    CALICODB_EXPECT_GT(m_level, 0);
-    release_nodes(kCurrentLevel);
-    --m_level;
-    m_idx = m_idx_path[m_level];
-    m_node = move(m_node_path[m_level]);
+    return &m_c;
 }
 
-auto CursorImpl::assign_child(Node child) -> void
+auto CursorImpl::key() const -> Slice
 {
-    CALICODB_EXPECT_TRUE(has_node());
-    m_idx_path[m_level] = m_idx;
-    m_node_path[m_level] = move(m_node);
-    m_node = move(child);
-    ++m_level;
+    return m_c.key();
 }
 
-auto CursorImpl::move_to_child(Id child_id) -> void
+auto CursorImpl::value() const -> Slice
 {
-    CALICODB_EXPECT_TRUE(has_node());
-    if (m_level < static_cast<int>(kMaxDepth - 1)) {
-        Node child;
-        m_status = m_tree->acquire(child_id, child);
-        if (m_status.is_ok()) {
-            assign_child(move(child));
-        }
-    } else {
-        m_status = m_tree->corrupted_node(child_id);
-    }
+    return m_c.value();
 }
 
-auto CursorImpl::on_last_node() const -> bool
+auto CursorImpl::status() const -> Status
 {
-    CALICODB_EXPECT_TRUE(has_node());
-    for (int i = 0; i < m_level; ++i) {
-        const auto &node = m_node_path[i];
-        if (m_idx_path[i] < NodeHdr::get_cell_count(node.hdr())) {
-            return false;
-        }
-    }
-    return true;
-}
-
-auto CursorImpl::seek_to_leaf(const Slice &key, SeekType type) -> bool
-{
-    if (m_status.is_corruption() || key.size() > kMaxAllocation) {
-        // Don't recover from corruption. The user needs to restart the whole transaction.
-        return false;
-    }
-    auto on_correct_node = false;
-    if (has_key() && on_last_node()) {
-        CALICODB_EXPECT_TRUE(m_node.is_leaf());
-
-        // This block handles cases where the cursor is already positioned on the target node. This
-        // means that (a) this tree is the most-recently-accessed tree in the database, and (b) the
-        // last operation didn't cause an overflow or underflow.
-        Slice boundary;
-        m_status = m_tree->extract_key(m_node, 0, m_tree->m_key_scratch[0], boundary);
-        if (!m_status.is_ok()) {
-            return false;
-        }
-        on_correct_node = boundary <= key;
-    }
-    if (!on_correct_node) {
-        reset();
-        m_status = m_tree->acquire(m_tree->root(), m_node);
-    }
-    while (m_status.is_ok()) {
-        const auto found_exact_key = search_node(key);
-        if (m_status.is_ok()) {
-            if (m_node.is_leaf()) {
-                if (type >= kSeekNormal) {
-                    ensure_correct_leaf(type != kSeekNormal);
-                }
-                return found_exact_key;
-            }
-            move_to_child(m_node.read_child_id(m_idx));
-        }
-    }
-    return false;
-}
-
-auto CursorImpl::release_nodes(ReleaseType type) -> void
-{
-    m_tree->release(move(m_node));
-    if (type < kAllLevels) {
-        return;
-    }
-    for (int i = 0; i < m_level; ++i) {
-        m_tree->release(move(m_node_path[i]));
-    }
+    return m_c.status();
 }
 
 auto CursorImpl::seek_first() -> void
 {
-    prepare(Tree::kInitNormal);
-    seek_to_first_leaf();
-    if (has_key()) {
-        m_status = fetch_user_payload();
-    }
+    seek("");
 }
 
 auto CursorImpl::seek_last() -> void
 {
-    prepare(Tree::kInitNormal);
-    seek_to_last_leaf();
-    if (has_key()) {
-        m_status = fetch_user_payload();
+    m_c.activate(false);
+    m_c.seek_to_last_leaf();
+    m_c.fetch_record_if_valid();
+}
+
+auto CursorImpl::seek(const Slice &key) -> void
+{
+    m_c.activate(false);
+    m_c.seek_to_leaf(key, true);
+}
+
+auto CursorImpl::find(const Slice &key) -> void
+{
+    m_c.activate(false);
+    if (!m_c.seek_to_leaf(key, true)) {
+        m_c.reset(m_c.status());
     }
 }
 
 auto CursorImpl::next() -> void
 {
-    CALICODB_EXPECT_TRUE(is_valid());
-    // NOTE: Loading the cursor position involves seeking back to the saved key. If the saved key
-    //       was erased, then this will place the cursor on the first record with a key that
-    //       compares greater than it.
-    prepare(Tree::kInitNormal);
-
-    if (!has_key()) {
-        return;
+    CALICODB_EXPECT_TRUE(m_c.is_valid());
+    m_c.activate(true);
+    if (m_c.is_valid()) {
+        m_c.move_right();
     }
-    move_to_right_sibling();
-    if (has_key()) {
-        m_status = fetch_user_payload();
-    }
+    m_c.fetch_record_if_valid();
 }
 
 auto CursorImpl::previous() -> void
 {
-    CALICODB_EXPECT_TRUE(is_valid());
-    prepare(Tree::kInitNormal);
-
-    if (!has_key()) {
-        return;
+    CALICODB_EXPECT_TRUE(m_c.is_valid());
+    m_c.activate(true);
+    if (m_c.is_valid()) {
+        m_c.move_left();
     }
-    move_to_left_sibling();
-    if (has_key()) {
-        m_status = fetch_user_payload();
-    }
+    m_c.fetch_record_if_valid();
 }
 
-auto CursorImpl::seek(const Slice &key) -> void
+auto CursorImpl::TEST_tree_cursor() -> TreeCursor &
 {
-    // The cursor position is not reset prior to the call to seek_to_leaf(). seek_to_leaf() may
-    // try to avoid performing a full root-to-leaf traversal.
-    prepare(Tree::kInitNormal);
-    seek_to_leaf(key, kSeekReader);
+    return m_c;
 }
 
-auto CursorImpl::find(const Slice &key) -> void
+auto CursorImpl::TEST_check_state() const -> void
 {
-    prepare(Tree::kInitNormal);
-    if (!seek_to_leaf(key, kSeekReader)) {
-        release_nodes(kAllLevels);
-    }
+    CALICODB_EXPECT_TRUE(m_c.assert_state());
 }
 
 } // namespace calicodb
