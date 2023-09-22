@@ -365,12 +365,10 @@ delete c;
 #include "calicodb/db.h"
 #include "calicodb/string.h"
 
-calicodb::String prop;
+CALICODB_STRING prop; // CALICODB_STRING defaults to std::string
 s = db->get_property("calicodb.stats", &prop);
 if (s.is_ok()) {
-    std::puts(prop.c_str());
-} else if (s.is_no_memory()) {
-    // Not enough memory to allocate the property string.
+    // prop contains database statistics.
 } else if (s.is_not_found()) {
     // Property does not exist.
 }

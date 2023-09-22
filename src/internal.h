@@ -7,7 +7,7 @@
 
 #include "calicodb/options.h"
 #include "calicodb/status.h"
-#include "calicodb/string.h"
+#include "internal_string.h"
 #include "utility.h"
 #include <cstdint>
 #include <cstdio>

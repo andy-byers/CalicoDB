@@ -15,6 +15,7 @@ add_subdirectory(doc_tests)
 # CMake tests. Adapted from @nlohmann/json.
 add_subdirectory(cmake_tests/fetch_content)
 add_subdirectory(cmake_tests/add_subdirectory)
+add_subdirectory(cmake_tests/custom_string)
 
 function(build_test NAME)
     add_executable(${NAME} ${NAME}.cpp test.cpp test.h)

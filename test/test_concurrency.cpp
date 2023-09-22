@@ -115,8 +115,8 @@ protected:
           m_env(new DelayEnv(default_env()))
     {
         std::filesystem::remove_all(m_filename);
-        std::filesystem::remove_all(m_filename + to_string(kDefaultWalSuffix));
-        std::filesystem::remove_all(m_filename + to_string(kDefaultShmSuffix));
+        std::filesystem::remove_all(m_filename + kDefaultWalSuffix.to_string());
+        std::filesystem::remove_all(m_filename + kDefaultShmSuffix.to_string());
     }
 
     ~ConcurrencyTests() override = default;
@@ -309,7 +309,7 @@ protected:
                     // If the bucket exists, then it must contain co.op_arg records (the first writer to run
                     // makes sure of this).
                     const auto name = numeric_key(i % co.op_args[1]);
-                    c->find(to_slice(name));
+                    c->find(name);
                     if (!c->is_valid()) {
                         t = c->status();
                         break;
@@ -351,7 +351,7 @@ protected:
                 for (size_t i = 0; t.is_ok() && i < co.op_args[1]; ++i) {
                     uint64_t result = 1;
                     const auto key = numeric_key(i);
-                    c->find(to_slice(key));
+                    c->find(key);
                     if (c->is_valid()) {
                         Slice slice(c->value());
                         EXPECT_TRUE(consume_decimal_number(slice, &result));
@@ -363,7 +363,7 @@ protected:
                     }
                     if (t.is_ok()) {
                         const auto value = numeric_key(result);
-                        t = tx.put(*c, to_slice(key), to_slice(value));
+                        t = tx.put(*c, key, value);
                     }
                 }
                 EXPECT_OK(t);

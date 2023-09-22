@@ -120,8 +120,8 @@ protected:
           m_env(new CallbackEnv(default_env()))
     {
         std::filesystem::remove_all(m_db_name.c_str());
-        std::filesystem::remove_all(m_db_name + to_string(kDefaultWalSuffix));
-        std::filesystem::remove_all(m_db_name + to_string(kDefaultShmSuffix));
+        std::filesystem::remove_all(m_db_name + kDefaultWalSuffix.to_string());
+        std::filesystem::remove_all(m_db_name + kDefaultShmSuffix.to_string());
     }
 
     ~DBTests() override
@@ -157,12 +157,12 @@ protected:
     [[nodiscard]] static auto put(Tx &tx, Cursor &c, size_t kv, size_t round = 0) -> Status
     {
         const auto [k, v] = make_kv(kv, round);
-        return tx.put(c, to_slice(k), to_slice(v));
+        return tx.put(c, k, v);
     }
     [[nodiscard]] static auto put(Tx &tx, const BucketOptions &options, const std::string &bname, size_t kv, size_t round = 0) -> Status
     {
         TestCursor c;
-        auto s = test_create_and_open_bucket(tx, options, to_slice(bname), c);
+        auto s = test_create_and_open_bucket(tx, options, bname, c);
         if (s.is_ok()) {
             s = put(tx, *c, kv, round);
         }
@@ -180,7 +180,7 @@ protected:
     [[nodiscard]] static auto put_range(Tx &tx, const BucketOptions &options, const std::string &bname, size_t kv1, size_t kv2, size_t round = 0) -> Status
     {
         TestCursor c;
-        auto s = test_create_and_open_bucket(tx, options, to_slice(bname), c);
+        auto s = test_create_and_open_bucket(tx, options, bname, c);
         if (s.is_ok()) {
             s = put_range(tx, *c, kv1, kv2, round);
         }
@@ -190,12 +190,12 @@ protected:
     [[nodiscard]] static auto erase(Tx &tx, Cursor &c, size_t kv, size_t round = 0) -> Status
     {
         const auto [k, _] = make_kv(kv, round);
-        return tx.erase(c, to_slice(k));
+        return tx.erase(c, k);
     }
     [[nodiscard]] static auto erase(Tx &tx, const BucketOptions &options, const std::string &bname, size_t kv, size_t round = 0) -> Status
     {
         TestCursor c;
-        auto s = test_create_and_open_bucket(tx, options, to_slice(bname), c);
+        auto s = test_create_and_open_bucket(tx, options, bname, c);
         if (s.is_ok()) {
             s = erase(tx, *c, kv, round);
         }
@@ -213,7 +213,7 @@ protected:
     [[nodiscard]] static auto erase_range(Tx &tx, const BucketOptions &options, const std::string &bname, size_t kv1, size_t kv2, size_t round = 0) -> Status
     {
         TestCursor c;
-        auto s = test_create_and_open_bucket(tx, options, to_slice(bname), c);
+        auto s = test_create_and_open_bucket(tx, options, bname, c);
         if (s.is_ok()) {
             s = erase_range(tx, *c, kv1, kv2, round);
         }
@@ -224,11 +224,11 @@ protected:
     {
         std::string result;
         const auto [k, v] = make_kv(kv, round);
-        c.find(to_slice(k));
+        c.find(k);
         if (c.is_valid()) {
             EXPECT_TRUE(exists);
             uint64_t n;
-            Slice slice(to_slice(result));
+            Slice slice(result);
             EXPECT_TRUE(consume_decimal_number(slice, &n));
             EXPECT_EQ(kv, n);
         } else if (c.status().is_not_found()) {
@@ -241,7 +241,7 @@ protected:
     [[nodiscard]] static auto check(Tx &tx, const BucketOptions &options, const std::string &bname, size_t kv, bool exists, size_t round = 0) -> Status
     {
         TestCursor c;
-        auto s = test_create_and_open_bucket(tx, options, to_slice(bname), c);
+        auto s = test_create_and_open_bucket(tx, options, bname, c);
         if (s.is_ok()) {
             s = check(tx, *c, kv, exists, round);
         }
@@ -264,7 +264,7 @@ protected:
             for (size_t kv = kv1; kv < kv2; ++kv) {
                 const auto [k, v] = make_kv(kv, round);
                 if (kv == kv1) {
-                    c.seek(to_slice(k));
+                    c.seek(k);
                 }
                 if (c.is_valid()) {
                     EXPECT_EQ(k, to_string(c.key()));
@@ -280,7 +280,7 @@ protected:
                 for (size_t i = 0; i < kv2 - kv1; ++i) {
                     const auto [k, v] = make_kv(kv2 - i - 1, round);
                     if (i == 0) {
-                        c.seek(to_slice(k));
+                        c.seek(k);
                     }
                     if (c.is_valid()) {
                         EXPECT_EQ(k, to_string(c.key()));
@@ -295,7 +295,7 @@ protected:
         } else {
             for (size_t kv = kv1; kv < kv2; ++kv) {
                 const auto [k, v] = make_kv(kv, round);
-                c.seek(to_slice(k));
+                c.seek(k);
                 if (c.is_valid()) {
                     EXPECT_NE(k, to_string(c.key()));
                 } else if (!c.status().is_ok()) {
@@ -310,7 +310,7 @@ protected:
     [[nodiscard]] static auto check_range(const Tx &tx, const std::string &bname, size_t kv1, size_t kv2, bool exists, size_t round = 0) -> Status
     {
         TestCursor c;
-        auto s = test_open_bucket(tx, to_slice(bname), c);
+        auto s = test_open_bucket(tx, bname, c);
         if (s.is_ok()) {
             s = check_range(tx, *c, kv1, kv2, exists, round);
         }
@@ -336,8 +336,8 @@ protected:
         options.page_size = TEST_PAGE_SIZE;
         if (clear) {
             std::filesystem::remove_all(m_db_name);
-            std::filesystem::remove_all(m_db_name + to_string(kDefaultWalSuffix));
-            std::filesystem::remove_all(m_db_name + to_string(kDefaultShmSuffix));
+            std::filesystem::remove_all(m_db_name + kDefaultWalSuffix.to_string());
+            std::filesystem::remove_all(m_db_name + kDefaultShmSuffix.to_string());
             std::filesystem::remove_all(m_alt_wal_name);
         }
         if (m_config & kExclusiveLockMode) {
@@ -398,13 +398,14 @@ protected:
 
 TEST_F(DBTests, GetProperty)
 {
-    String value;
+    std::string value;
     ASSERT_OK(m_db->get_property("calicodb.stats", nullptr));
     ASSERT_OK(m_db->get_property("calicodb.stats", &value));
-    ASSERT_FALSE(value.is_empty());
+    ASSERT_FALSE(value.empty());
+    value.clear();
     ASSERT_NOK(m_db->get_property("nonexistent", nullptr));
     ASSERT_NOK(m_db->get_property("nonexistent", &value));
-    ASSERT_TRUE(value.is_empty());
+    ASSERT_TRUE(value.empty());
 }
 
 TEST_F(DBTests, ConvenienceFunctions)
@@ -646,16 +647,16 @@ TEST_F(DBTests, ModifyRecordSpecialCase)
     ASSERT_OK(m_db->run(WriteOptions(), [&long_key](auto &tx) {
         TestCursor c;
         EXPECT_OK(test_create_and_open_bucket(tx, BucketOptions(), "b", c));
-        EXPECT_OK(tx.put(*c, to_slice(long_key), "old_value"));
+        EXPECT_OK(tx.put(*c, long_key, "old_value"));
         EXPECT_OK(tx.commit());
-        EXPECT_OK(tx.put(*c, to_slice(long_key), "new_value"));
+        EXPECT_OK(tx.put(*c, long_key, "new_value"));
         return Status::ok();
     }));
     ASSERT_OK(m_db->run(ReadOptions(), [&long_key](auto &tx) {
         TestCursor c;
         EXPECT_OK(test_open_bucket(tx, "b", c));
 
-        c->find(to_slice(long_key));
+        c->find(long_key);
         EXPECT_TRUE(c->is_valid());
         EXPECT_EQ(c->value(), "new_value");
         return Status::ok();
@@ -687,8 +688,8 @@ TEST_F(DBTests, ScanWholeDatabase)
             for (size_t j = 0; j < kRecordsPerBucket; ++j) {
                 const auto [k, v] = make_kv(j);
                 EXPECT_TRUE(c->is_valid());
-                EXPECT_EQ(c->key(), to_slice(k));
-                EXPECT_EQ(c->value(), to_slice(v));
+                EXPECT_EQ(c->key(), k);
+                EXPECT_EQ(c->value(), v);
                 c->next();
             }
             EXPECT_FALSE(c->is_valid());
@@ -922,8 +923,8 @@ TEST(OldWalTests, HandlesOldWalFile)
 TEST(DestructionTests, DestructionBehavior)
 {
     const auto db_name = testing::TempDir() + "calicodb_test_db";
-    const auto wal_name = db_name + to_string(kDefaultWalSuffix);
-    const auto shm_name = db_name + to_string(kDefaultShmSuffix);
+    const auto wal_name = db_name + kDefaultWalSuffix.to_string();
+    const auto shm_name = db_name + kDefaultShmSuffix.to_string();
     (void)default_env().remove_file(db_name.c_str());
     (void)default_env().remove_file(wal_name.c_str());
     (void)default_env().remove_file(shm_name.c_str());
@@ -1085,7 +1086,7 @@ TEST_F(DBOpenTests, CustomLogger)
 
         auto append(const Slice &msg) -> void override
         {
-            m_str.append(to_string(msg));
+            m_str.append(msg.to_string());
         }
 
         auto logv(const char *fmt, std::va_list args) -> void override

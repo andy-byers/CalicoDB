@@ -6,9 +6,9 @@
 #define CALICODB_LOGGING_H
 
 #include "buffer.h"
-#include "calicodb/string.h"
 #include "encoding.h"
 #include "internal.h"
+#include "internal_string.h"
 #include "unique_ptr.h"
 #include <cstdarg>
 

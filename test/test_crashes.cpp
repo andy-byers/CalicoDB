@@ -128,7 +128,7 @@ public:
                 m_env->m_syscall_state.enabled = false;
 
                 ASSERT_OK(resize(m_backup.size()));
-                ASSERT_OK(write(0, to_slice(m_backup)));
+                ASSERT_OK(write(0, m_backup));
 
                 m_env->m_syscall_state.enabled = crash_state;
             }
@@ -217,8 +217,8 @@ protected:
           m_env(new CrashEnv(default_env()))
     {
         auto db_name = m_filename;
-        auto shm_name = m_filename + to_string(kDefaultWalSuffix);
-        auto wal_name = m_filename + to_string(kDefaultShmSuffix);
+        auto shm_name = m_filename + kDefaultWalSuffix.to_string();
+        auto wal_name = m_filename + kDefaultShmSuffix.to_string();
         (void)m_env->remove_file(db_name.c_str());
         (void)m_env->remove_file(shm_name.c_str());
         (void)m_env->remove_file(wal_name.c_str());
@@ -266,11 +266,11 @@ protected:
         const auto name1 = std::to_string(iteration);
         const auto name2 = std::to_string((iteration + 1) % kNumIterations);
 
-        s = test_open_bucket(tx, to_slice(name1), c1);
+        s = test_open_bucket(tx, name1, c1);
         if (s.is_invalid_argument()) {
             BucketOptions options;
             options.error_if_exists = true;
-            s = test_create_and_open_bucket(tx, options, to_slice(name1), c1);
+            s = test_create_and_open_bucket(tx, options, name1, c1);
             if (s.is_ok()) {
                 std::vector<uint32_t> keys(kNumRecords);
                 std::iota(begin(keys), end(keys), 0);
@@ -278,7 +278,7 @@ protected:
                 std::shuffle(begin(keys), end(keys), rng);
                 for (auto k : keys) {
                     const auto v = make_value(k);
-                    s = tx.put(*c1, make_key(k), to_slice(v));
+                    s = tx.put(*c1, make_key(k), v);
                     if (!s.is_ok()) {
                         break;
                     }
@@ -291,7 +291,7 @@ protected:
             }
             return s;
         }
-        s = test_create_and_open_bucket(tx, BucketOptions(), to_slice(name2), c2);
+        s = test_create_and_open_bucket(tx, BucketOptions(), name2, c2);
         if (!s.is_ok()) {
             if (!s.is_no_memory()) {
                 EXPECT_EQ(s, tx.status());
@@ -318,7 +318,7 @@ protected:
         c2.reset();
 
         if (s.is_ok()) {
-            s = tx.drop_bucket(to_slice(name1));
+            s = tx.drop_bucket(name1);
         }
         if (s.is_ok()) {
             s = tx.vacuum();
@@ -344,7 +344,7 @@ protected:
         }
 
         TestCursor c;
-        auto s = test_open_bucket(tx, to_slice(b_name), c);
+        auto s = test_open_bucket(tx, b_name, c);
         if (!s.is_ok()) {
             return s;
         }
@@ -421,10 +421,10 @@ protected:
         // Make sure all files created during the test are unlinked.
         auto s = m_env->remove_file(m_filename.c_str());
         ASSERT_TRUE(s.is_ok() || s.is_not_found()) << s.message();
-        auto filename = m_filename + to_string(kDefaultWalSuffix);
+        auto filename = m_filename + kDefaultWalSuffix.to_string();
         s = m_env->remove_file(filename.c_str());
         ASSERT_TRUE(s.is_ok() || s.is_not_found()) << s.message();
-        filename = m_filename + to_string(kDefaultShmSuffix);
+        filename = m_filename + kDefaultShmSuffix.to_string();
         s = m_env->remove_file(filename.c_str());
         ASSERT_TRUE(s.is_ok() || s.is_not_found()) << s.message();
     }
@@ -622,7 +622,7 @@ protected:
                 keep_open->seek_first();
                 for (size_t j = 0; s.is_ok() && j < kNumRecords; ++j) {
                     const auto v = make_value(j);
-                    s = tx.put(*c, make_key(j), to_slice(v));
+                    s = tx.put(*c, make_key(j), v);
                 }
                 if (!c->status().is_ok()) {
                     const auto before_status = c->status();
@@ -713,7 +713,7 @@ protected:
                     for (size_t j = 0; s.is_ok() && j < kNumRecords; ++j) {
                         const auto key = make_key(j);
                         const auto value = make_value(j);
-                        s = tx.put(*c, key, to_slice(value));
+                        s = tx.put(*c, key, value);
                         if (s.is_ok()) {
                             EXPECT_TRUE(c->is_valid());
                             EXPECT_EQ(c->key(), key);
@@ -727,7 +727,7 @@ protected:
                     while (s.is_ok() && c->is_valid()) {
                         auto v = to_string(c->value());
                         v.append(v);
-                        s = tx.put(*c, c->key(), to_slice(v));
+                        s = tx.put(*c, c->key(), v);
                         if (s.is_ok()) {
                             EXPECT_TRUE(c->is_valid());
                             EXPECT_EQ(to_string(c->value()), v);
@@ -861,7 +861,7 @@ class DataLossEnv : public EnvWrapper
         auto perform_writes() -> void
         {
             std::uniform_int_distribution dist;
-            const auto buffer = to_slice(m_env->m_buffer);
+            const auto buffer = m_env->m_buffer;
             const auto &wr = m_env->m_writes;
             const auto loss_type = m_env->m_loss_type;
             auto itr = cbegin(wr);
@@ -874,7 +874,7 @@ class DataLossEnv : public EnvWrapper
                     m_env->m_dropped_bytes += len;
                     continue;
                 }
-                ASSERT_OK(FileWrapper::write(ofs, buffer.range(ofs, len)));
+                ASSERT_OK(FileWrapper::write(ofs, Slice(buffer).range(ofs, len)));
             }
             // Refresh the buffer.
             EXPECT_OK(FileWrapper::read(0, m_env->m_buffer.size(), m_env->m_buffer.data(), nullptr));
@@ -1093,8 +1093,8 @@ public:
         m_db = nullptr;
         if (clear) {
             std::filesystem::remove_all(m_filename);
-            std::filesystem::remove_all(m_filename + to_string(kDefaultWalSuffix));
-            std::filesystem::remove_all(m_filename + to_string(kDefaultShmSuffix));
+            std::filesystem::remove_all(m_filename + kDefaultWalSuffix.to_string());
+            std::filesystem::remove_all(m_filename + kDefaultShmSuffix.to_string());
         }
         delete m_env;
         m_env = new DataLossEnv(default_env());
@@ -1120,7 +1120,7 @@ public:
             for (size_t i = 0; i < num_writes; ++i) {
                 const auto key = numeric_key(i);
                 const auto value = numeric_key(i + version * num_writes);
-                EXPECT_OK(tx.put(*c, to_slice(key), to_slice(value)));
+                EXPECT_OK(tx.put(*c, key, value));
             }
             m_env->m_loss_type = param.loss_type;
             m_env->m_drop_file = param.loss_file;
@@ -1152,7 +1152,7 @@ public:
             auto s = test_open_bucket(tx, "bucket", c);
             for (size_t i = 0; i < num_writes && s.is_ok(); ++i) {
                 const auto key = numeric_key(i);
-                c->find(to_slice(key));
+                c->find(key);
                 if (c->is_valid()) {
                     EXPECT_EQ(to_string(c->value()), numeric_key(i + version * num_writes));
                 }
@@ -1185,7 +1185,7 @@ public:
         ASSERT_OK(perform_writes({}, kNumWrites, 0));
 
         // Only the WAL is written during a transaction.
-        const DropParameters drop_param = {loss_type, m_filename + to_string(kDefaultWalSuffix)};
+        const DropParameters drop_param = {loss_type, m_filename + kDefaultWalSuffix.to_string()};
 
         ASSERT_EQ(injected_fault(), perform_writes(drop_param, kNumWrites, 1));
         ASSERT_OK(check_records(kNumWrites, 0));
