@@ -22,23 +22,23 @@ static constexpr size_t kInitialRecordCount = 1'000;
 static auto tree_put(Tree &tree, CursorImpl &c, const std::string &k, const std::string &v) -> Status
 {
     return tree.put(c,
-                    to_slice(k),
+                    k,
                     Slice(v.c_str(), v.size()));
 }
 
 static auto tree_erase(Tree &tree, CursorImpl &c, const std::string &k) -> Status
 {
-    return tree.erase(c, to_slice(k));
+    return tree.erase(c, k);
 }
 
 static auto cursor_find(Cursor &c, const std::string &k) -> void
 {
-    c.find(to_slice(k));
+    c.find(k);
 }
 
 static auto cursor_seek(Cursor &c, const std::string &k) -> void
 {
-    c.seek(to_slice(k));
+    c.seek(k);
 }
 
 class TreeTestHarness
@@ -106,23 +106,23 @@ public:
     auto tree_put(CursorImpl &c, const std::string &k, const std::string &v) -> Status
     {
         return m_tree->put(c,
-                           to_slice(k),
+                           k,
                            Slice(v.c_str(), v.size()));
     }
 
     auto tree_erase(CursorImpl &c, const std::string &k) -> Status
     {
-        return m_tree->erase(c, to_slice(k));
+        return m_tree->erase(c, k);
     }
 
     auto cursor_find(const std::string &k) -> void
     {
-        m_c->find(to_slice(k));
+        m_c->find(k);
     }
 
     auto cursor_seek(const std::string &k) -> void
     {
-        m_c->seek(to_slice(k));
+        m_c->seek(k);
     }
 
     auto allocate(bool is_external, Id nearby, Node &node_out) -> Status
@@ -513,7 +513,7 @@ public:
         const auto key = random_chunk(overflow_keys);
         const auto val = random_chunk(overflow_values, false);
         EXPECT_OK(m_tree->put(*m_c, key, val));
-        return {to_string(key), to_string(val)};
+        return {key.to_string(), val.to_string()};
     }
 
     const bool overflow_keys = GetParam() & 0b10;

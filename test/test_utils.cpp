@@ -683,7 +683,7 @@ void ConsumeDecimalNumberRoundtripTest(uint64_t number,
 {
     std::string decimal_number = std::to_string(number);
     std::string input_string = decimal_number + padding;
-    auto input = to_slice(input_string);
+    auto input = input_string;
     Slice output = input;
     uint64_t result;
     ASSERT_TRUE(consume_decimal_number(output, &result));
@@ -736,7 +736,7 @@ TEST(Logging, ConsumeDecimalNumberRoundtripWithPadding)
 
 void ConsumeDecimalNumberOverflowTest(const std::string &input_string)
 {
-    auto input = to_slice(input_string);
+    auto input = input_string;
     Slice output = input;
     uint64_t result;
     ASSERT_EQ(false, consume_decimal_number(output, &result));
@@ -765,7 +765,7 @@ TEST(Logging, ConsumeDecimalNumberOverflow)
 
 void ConsumeDecimalNumberNoDigitsTest(const std::string &input_string)
 {
-    auto input = to_slice(input_string);
+    auto input = input_string;
     Slice output = input;
     uint64_t result;
     ASSERT_EQ(false, consume_decimal_number(output, &result));
@@ -898,16 +898,16 @@ TEST(Slice, NonPrintableSlice)
 {
     {
         const std::string s("\x00\x01", 2);
-        ASSERT_EQ(2, to_slice(s).size());
+        ASSERT_EQ(2, s.size());
     }
     {
         const std::string s("\x00", 1);
-        ASSERT_EQ(0, to_slice(s).compare(to_slice(s)));
+        ASSERT_EQ(0, s.compare(s));
     }
     {
         std::string s("\x00\x00", 2);
         std::string t("\x00\x01", 2);
-        ASSERT_LT(to_slice(s).compare(to_slice(t)), 0);
+        ASSERT_LT(s.compare(t), 0);
     }
     {
         std::string u("\x0F", 1);
@@ -918,7 +918,7 @@ TEST(Slice, NonPrintableSlice)
         ASSERT_LT(v[0], u[0]);
 
         // Unsigned comparison should come out the other way.
-        ASSERT_LT(to_slice(u).compare(to_slice(v)), 0);
+        ASSERT_LT(u.compare(v), 0);
     }
 }
 
@@ -971,8 +971,8 @@ TEST_F(StringBuilderTests, Append)
     const char msg_c = 'd';
 
     m_builder
-        .append(to_slice(msg_a))
-        .append(to_slice(msg_b))
+        .append(msg_a)
+        .append(msg_b)
         .append(msg_c);
 
     const auto str = build_string();
@@ -988,7 +988,7 @@ TEST_F(StringBuilderTests, AppendFormat)
         .append_format("empty");
     const auto lhs = build_string();
     const auto rhs = "hello 42 goodbye" + long_str + "empty";
-    ASSERT_EQ(Slice(lhs.c_str()), to_slice(rhs));
+    ASSERT_EQ(Slice(lhs.c_str()), rhs);
 }
 
 TEST_F(StringBuilderTests, AppendEscaped)
@@ -999,7 +999,7 @@ TEST_F(StringBuilderTests, AppendEscaped)
         .append_format("empty");
     const auto lhs = build_string();
     const auto rhs = "hello 42 goodbye" + long_str + "empty";
-    ASSERT_EQ(Slice(lhs.c_str()), to_slice(rhs));
+    ASSERT_EQ(Slice(lhs.c_str()), rhs);
 }
 
 static constexpr const char *kTestMessages[] = {
@@ -1020,7 +1020,7 @@ TEST_F(StringBuilderTests, AppendMultiple)
         m_builder.append(Slice(kTestMessages[r]));
     }
     const auto str = build_string();
-    ASSERT_EQ(Slice(str.c_str()), to_slice(answer));
+    ASSERT_EQ(Slice(str.c_str()), answer);
 }
 
 TEST_F(StringBuilderTests, AppendFormatMultiple)
@@ -1059,7 +1059,7 @@ TEST_F(StringBuilderTests, AppendFormatMultiple)
         answer.append(buffer);
     }
     const auto str = build_string();
-    ASSERT_EQ(Slice(str.c_str()), to_slice(answer));
+    ASSERT_EQ(Slice(str.c_str()), answer);
 }
 
 } // namespace calicodb::test

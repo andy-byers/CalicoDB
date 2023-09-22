@@ -6,8 +6,8 @@
 #define CALICODB_UNIQUE_PTR_H
 
 #include "calicodb/db.h"
-#include "calicodb/string.h"
 #include "internal.h"
+#include "internal_string.h"
 #include "mem.h"
 
 namespace calicodb

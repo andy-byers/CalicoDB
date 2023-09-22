@@ -81,6 +81,7 @@ target_sources(calicodb
                 src/freelist.h
                 src/header.cpp
                 src/header.h
+                src/internal.h
                 src/list.h
                 src/logging.cpp
                 src/logging.h
@@ -97,7 +98,9 @@ target_sources(calicodb
                 src/schema.h
                 src/stat.h
                 src/status.cpp
-                src/string.cpp
+                src/status_internal.h
+        src/internal_string.cpp
+        src/internal_string.h
                 src/temp.cpp
                 src/temp.h
                 src/tree.cpp
@@ -106,7 +109,7 @@ target_sources(calicodb
                 src/tx_impl.cpp
                 src/tx_impl.h
                 src/unique_ptr.h
-        src/internal.h
+                src/utility.h
                 src/wal.cpp
                 src/wal.h
                 port/port.h
@@ -118,7 +121,6 @@ target_sources(calicodb
             include/calicodb/options.h
             include/calicodb/slice.h
             include/calicodb/status.h
-            include/calicodb/string.h
             include/calicodb/tx.h)
 target_include_directories(calicodb
         PUBLIC $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/include>

@@ -6,6 +6,7 @@
 #define CALICODB_DB_H
 
 #include "options.h"
+#include "slice.h"
 #include "status.h"
 
 namespace calicodb
@@ -49,7 +50,11 @@ public:
     // performs an existence check. If there wasn't enough memory available to create
     // the property string, a status is returned for which Status::is_no_memory()
     // evaluates to true.
-    virtual auto get_property(const Slice &name, String *value_out) const -> Status = 0;
+    // Note that this routine does not check for allocation failure resulting from the
+    // call to CALICODB_STRING::append() (assuming it returns an error code rather than
+    // throwing). It will, however, always append() 1 or more bytes to the string, so if
+    // *value_out is empty, then the allocation has failed.
+    virtual auto get_property(const Slice &name, CALICODB_STRING *value_out) const -> Status = 0;
 
     // Write modified pages from the write-ahead log (WAL) back to the database file
     // If `reset` is true, steps are taken to make sure that the next writer will reset the WAL

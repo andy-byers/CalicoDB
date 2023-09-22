@@ -81,9 +81,9 @@ public:
     Scenario<State> **const scenarios;
     const size_t size;
 
-    explicit ScenarioArray(Scenario<State> **scenarios, size_t size)
-        : scenarios(scenarios),
-          size(size),
+    explicit ScenarioArray(Scenario<State> **scenarios_, size_t size_)
+        : scenarios(scenarios_),
+          size(size_),
           m_sequence_index(0)
     {
         assert(scenarios && size);
@@ -118,8 +118,8 @@ template <class State>
 class IteratedScenario : public Scenario<State>
 {
 public:
-    explicit IteratedScenario(const char *name)
-        : Scenario<State>(name)
+    explicit IteratedScenario(const char *name_)
+        : Scenario<State>(name_)
     {
     }
 
@@ -181,8 +181,8 @@ template <class State>
 class ConditionalScenario : public Scenario<State>
 {
 public:
-    explicit ConditionalScenario(const char *name, Scenario<State> &scenario)
-        : Scenario<State>(name),
+    explicit ConditionalScenario(const char *name_, Scenario<State> &scenario)
+        : Scenario<State>(name_),
           m_scenario(&scenario)
     {
     }

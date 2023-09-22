@@ -8,6 +8,22 @@
 #include <cassert>
 #include <cstring>
 
+// String class CALICODB_STRING must provide the following interface:
+//     CALICODB_STRING(const char *, size_t)
+//     size_t size() const
+//     const char* data() const
+//     void append(const char *, size_t)
+//
+// Note that CALICODB_STRING::append() is allowed to return an error code on allocation
+// failure. The library will not check or otherwise refer to this return code, however,
+// since the default (std::string) throws on allocation failure and has a void return
+// for append(). The library only exposes these strings in one place: DB::get_property().
+// Slices and C-style strings are used for everything else.
+#ifndef CALICODB_STRING
+#include <string>
+#define CALICODB_STRING std::string
+#endif // CALICODB_STRING
+
 namespace calicodb
 {
 
@@ -28,6 +44,12 @@ public:
     {
         assert(m_data != nullptr);
         m_size = __builtin_strlen(m_data);
+    }
+
+    Slice(const CALICODB_STRING &str)
+        : m_data(str.data()),
+          m_size(str.size())
+    {
     }
 
     [[nodiscard]] constexpr auto is_empty() const -> bool
@@ -106,6 +128,11 @@ public:
             }
         }
         return r;
+    }
+
+    [[nodiscard]] auto to_string() const -> CALICODB_STRING
+    {
+        return {m_data, m_size};
     }
 
 private:

@@ -2,10 +2,10 @@
 // This source code is licensed under the MIT License, which can be found in
 // LICENSE.md. See AUTHORS.md for a list of contributor names.
 
-#ifndef CALICODB_STRING_H
-#define CALICODB_STRING_H
+#ifndef CALICODB_INTERNAL_STRING_H
+#define CALICODB_INTERNAL_STRING_H
 
-#include "slice.h"
+#include "calicodb/slice.h"
 
 namespace calicodb
 {
@@ -73,4 +73,4 @@ private:
 
 } // namespace calicodb
 
-#endif // CALICODB_STRING_H
+#endif // CALICODB_INTERNAL_STRING_H

@@ -2,7 +2,7 @@
 // This source code is licensed under the MIT License, which can be found in
 // LICENSE.md. See AUTHORS.md for a list of contributor names.
 
-#include "calicodb/string.h"
+#include "internal_string.h"
 #include "mem.h"
 #include "utility.h"
 

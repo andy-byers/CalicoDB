@@ -146,7 +146,7 @@ public:
             std::shuffle(begin(m_data), end(m_data), m_rng);
         }
         m_pos += len;
-        return {m_data.data() + m_pos - len, static_cast<size_t>(len)};
+        return {m_data.data() + m_pos - len, len};
     }
 
     // Not in LevelDB.
