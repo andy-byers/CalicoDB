@@ -3,8 +3,11 @@ set(CMAKE_TRY_COMPILE_TARGET_TYPE "STATIC_LIBRARY")
 
 project(calicodb
         LANGUAGES CXX
-        VERSION 0.1.1)
+        VERSION 0.2.0)
+
 set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD_REQUIRED On)
+set(CMAKE_CXX_EXTENSIONS Off)
 
 set(MAIN_PROJECT Off)
 if (CMAKE_CURRENT_SOURCE_DIR STREQUAL CMAKE_SOURCE_DIR)
@@ -99,8 +102,8 @@ target_sources(calicodb
                 src/stat.h
                 src/status.cpp
                 src/status_internal.h
-        src/internal_string.cpp
-        src/internal_string.h
+                src/internal_string.cpp
+                src/internal_string.h
                 src/temp.cpp
                 src/temp.h
                 src/tree.cpp

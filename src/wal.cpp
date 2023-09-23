@@ -65,7 +65,7 @@ private:
     // Address of the hash table header kept in memory. This version of the header corresponds
     // to the current transaction. The one stored in the first table group corresponds to the
     // most-recently-committed transaction.
-    HashIndexHdr *m_hdr;
+    HashIndexHdr *const m_hdr;
 
     File *m_file;
 };

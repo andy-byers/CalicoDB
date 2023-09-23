@@ -59,7 +59,6 @@ class TreeTestHarness
 {
 public:
     Env *m_env;
-    std::string m_scratch;
     Status m_status;
     Stat m_stat;
     Pager *m_pager = nullptr;
@@ -68,8 +67,7 @@ public:
     mutable CursorImpl *m_c;
 
     TreeTestHarness()
-        : m_env(new_temp_env(TEST_PAGE_SIZE)),
-          m_scratch(kScratchBufferPages * TEST_PAGE_SIZE, '\0')
+        : m_env(new_temp_env(TEST_PAGE_SIZE))
     {
         EXPECT_OK(m_env->new_file("db", Env::kCreate, m_file));
 
@@ -146,7 +144,7 @@ public:
         if (s.is_ok()) {
             if (ref->refs == 1) {
                 CALICODB_EXPECT_FALSE(PointerMap::is_map(ref->page_id, TEST_PAGE_SIZE));
-                node_out = Node::from_new_page(*ref, TEST_PAGE_SIZE, m_scratch.data(), is_external);
+                node_out = Node::from_new_page(*ref, TEST_PAGE_SIZE, m_pager->scratch(), is_external);
             } else {
                 m_pager->release(ref);
                 s = StatusBuilder::corruption("page %u is corrupted", ref->page_id.value);
@@ -182,7 +180,7 @@ public:
     {
         EXPECT_OK(m_pager->start_reader());
         EXPECT_OK(m_pager->start_writer());
-        m_tree = new Tree(*m_pager, m_stat, m_scratch.data(), Id::root(), String());
+        m_tree = new Tree(*m_pager, m_stat, m_pager->scratch(), Id::root(), String());
         m_c = new (std::nothrow) CursorImpl(*m_tree);
     }
 
@@ -545,27 +543,9 @@ TEST_P(TreeSanityChecks, Erase)
             const auto [k, v] = random_write();
             records[k] = v;
         }
-        int ii = 0;
         for (const auto &[key, value] : records) {
-            if (iteration == 2 && ii++ == 9354) {
-                String str;
-                ASSERT_OK(m_tree->print_structure(str));
-                std::cerr << str.c_str();
-            }
             ASSERT_OK(tree_erase(*m_c, key));
-
-            if (iteration == 2 && ii == 9355) {
-                String str;
-                ASSERT_OK(m_tree->print_structure(str));
-                std::cerr << str.c_str();
-            }
-
-            if (iteration == 2 && ii > 9350)
-                CALICODB_EXPECT_TRUE(static_cast<TreeCursor *>(m_c->handle())->assert_state());
         }
-        //                        1:[*                       *                        *                                 *                                      *                       *]
-        //        4547:[*]                    1370:[*]                4103:[*]                 7870:[*        *]                682:[*       *        *]                959:[*]                 655:[*        *       *]
-        // 5963:[1]        5848:[1]    6196:[1]        138:[1] 3104:[1]        3202:[1] 1977:[1]       8682:[1]  4094:[1] 516:[1]      298:[1] 8649:[1]  894:[1] 8131:[1]       7749:[1]  579:[1]      3584:[1] 455:[1]  99:[1]
         records.clear();
         validate();
     }
@@ -634,7 +614,7 @@ protected:
     auto SetUp() -> void override
     {
         open();
-        m_schema = new Schema(*m_pager, m_status, m_stat, m_scratch.data());
+        m_schema = new Schema(*m_pager, m_status, m_stat);
         init_tree(*this, kInitLongKeys);
     }
 
@@ -1140,8 +1120,7 @@ public:
         m_schema = new Schema(
             *m_pager,
             m_status,
-            m_stat,
-            m_scratch.data());
+            m_stat);
     }
 
     auto TearDown() -> void override

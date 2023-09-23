@@ -286,19 +286,51 @@ private:
            type == PointerMap::kOverflowLink;
 }
 
-auto as_slice(const Buffer<char> &buf) -> Slice
+} // namespace
+
+auto TreeCursor::read_user_key() -> Status
 {
-    return buf.is_empty() ? "" : Slice(buf.ptr(), buf.len());
+    CALICODB_EXPECT_TRUE(on_record());
+    CALICODB_EXPECT_TRUE(m_key.is_empty());
+    if (m_tree->m_writable || m_cell.key_size > m_cell.local_pl_size) {
+        if (m_key_buf.len() < m_cell.key_size &&
+            m_key_buf.realloc(m_cell.key_size)) {
+            return Status::no_memory();
+        }
+        if (m_cell.key_size) {
+            return m_tree->read_key(m_cell, m_key_buf.ptr(), &m_key);
+        }
+    } else {
+        m_key = Slice(m_cell.key, m_cell.key_size);
+    }
+    return Status::ok();
 }
 
-} // namespace
+auto TreeCursor::read_user_value() -> Status
+{
+    CALICODB_EXPECT_TRUE(on_record());
+    CALICODB_EXPECT_TRUE(m_value.is_empty());
+    const auto value_size = m_cell.total_pl_size - m_cell.key_size;
+    if (m_tree->m_writable || m_cell.total_pl_size > m_cell.local_pl_size) {
+        if (m_value_buf.len() < value_size &&
+            m_value_buf.realloc(value_size)) {
+            return Status::no_memory();
+        }
+        if (value_size) {
+            return m_tree->read_value(m_cell, m_value_buf.ptr(), &m_value);
+        }
+    } else {
+        m_value = Slice(m_cell.key + m_cell.key_size, value_size);
+    }
+    return Status::ok();
+}
 
 auto TreeCursor::fetch_user_payload() -> Status
 {
     CALICODB_EXPECT_TRUE(on_record());
     CALICODB_EXPECT_NE(m_state, kInvalidState);
-    auto key_buf = exchange(m_key_buf, Buffer<char>());
-    auto value_buf = exchange(m_value_buf, Buffer<char>());
+    m_key.clear();
+    m_value.clear();
 
     // NOTE: Reading the cell here is redundant when coming through seek_to_leaf() right now,
     //       since search_node() always ends on the cell that it just read. If the binary
@@ -307,30 +339,11 @@ auto TreeCursor::fetch_user_payload() -> Status
     if (m_node.read(m_idx, m_cell)) {
         return m_tree->corrupted_node(page_id());
     }
-    if (m_cell.key_size > 0) {
-        if (key_buf.realloc(m_cell.key_size)) {
-            return Status::no_memory();
-        }
-        // NOTE: key_buf.ptr() is equal to nullptr if the key size was 0. Tree::read_*()
-        //       should handle this case.
-        auto s = m_tree->read_key(m_cell, key_buf.ptr(), nullptr);
-        if (!s.is_ok()) {
-            return s;
-        }
-        m_key_buf = move(key_buf);
+    auto s = read_user_key();
+    if (s.is_ok()) {
+        s = read_user_value();
     }
-    const auto value_size = m_cell.total_pl_size - m_cell.key_size;
-    if (value_size > 0) {
-        if (value_buf.realloc(value_size)) {
-            return Status::no_memory();
-        }
-        auto s = m_tree->read_value(m_cell, value_buf.ptr(), nullptr);
-        if (!s.is_ok()) {
-            return s;
-        }
-        m_value_buf = move(value_buf);
-    }
-    return Status::ok();
+    return s;
 }
 
 auto TreeCursor::fetch_record_if_valid() -> void
@@ -343,7 +356,7 @@ auto TreeCursor::fetch_record_if_valid() -> void
 auto TreeCursor::ensure_position_loaded() -> void
 {
     if (m_state == kSavedState) {
-        seek_to_leaf(as_slice(m_key_buf), true);
+        seek_to_leaf(m_key, true);
     }
 }
 
@@ -648,13 +661,13 @@ auto TreeCursor::release_nodes(ReleaseType type) -> void
 auto TreeCursor::key() const -> Slice
 {
     CALICODB_EXPECT_TRUE(is_valid());
-    return as_slice(m_key_buf);
+    return m_key;
 }
 
 auto TreeCursor::value() const -> Slice
 {
     CALICODB_EXPECT_TRUE(is_valid());
-    return as_slice(m_value_buf);
+    return m_value;
 }
 
 auto TreeCursor::assert_state() const -> bool
@@ -852,8 +865,8 @@ auto Tree::read_key(const Cell &cell, char *scratch, Slice *key_out, uint32_t li
         limit = cell.key_size;
     }
     auto s = PayloadManager::access(*m_pager, cell, 0, limit, nullptr, scratch);
-    if (s.is_ok() && key_out) {
-        *key_out = Slice(scratch, limit);
+    if (key_out) {
+        *key_out = s.is_ok() ? Slice(scratch, limit) : "";
     }
     return s;
 }
@@ -862,8 +875,8 @@ auto Tree::read_value(const Cell &cell, char *scratch, Slice *value_out) const -
 {
     const auto value_size = cell.total_pl_size - cell.key_size;
     auto s = PayloadManager::access(*m_pager, cell, cell.key_size, value_size, nullptr, scratch);
-    if (s.is_ok() && value_out) {
-        *value_out = Slice(scratch, value_size);
+    if (value_out) {
+        *value_out = s.is_ok() ? Slice(scratch, value_size) : "";
     }
     return s;
 }

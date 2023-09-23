@@ -46,14 +46,16 @@ auto PointerMap::lookup(Id page_id, size_t page_size) -> Id
 
 auto PointerMap::read_entry(Pager &pager, Id page_id, Entry &entry_out) -> Status
 {
-    const auto mid = lookup(page_id, pager.page_size());
-    const auto offset = entry_offset(mid, page_id);
+    const auto map_id = lookup(page_id, pager.page_size());
+    if (map_id.is_null() || page_id <= map_id) {
+        return Status::corruption();
+    }
+    const auto offset = entry_offset(map_id, page_id);
     if (offset + kEntrySize > pager.page_size()) {
         return Status::corruption();
     }
-
     PageRef *map;
-    auto s = pager.acquire(mid, map);
+    auto s = pager.acquire(map_id, map);
     if (s.is_ok()) {
         entry_out = decode_entry(map->data + offset);
         pager.release(map);
@@ -69,12 +71,15 @@ auto PointerMap::write_entry(Pager &pager, Id page_id, Entry entry, Status &s) -
     if (!s.is_ok()) {
         return;
     }
-    const auto mid = lookup(page_id, pager.page_size());
-
+    const auto map_id = lookup(page_id, pager.page_size());
+    if (map_id.is_null() || page_id <= map_id) {
+        s = Status::corruption();
+        return;
+    }
     PageRef *map;
-    s = pager.acquire(mid, map);
+    s = pager.acquire(map_id, map);
     if (s.is_ok()) {
-        const auto offset = entry_offset(mid, page_id);
+        const auto offset = entry_offset(map_id, page_id);
         if (offset + kEntrySize > pager.page_size()) {
             s = Status::corruption();
             return;

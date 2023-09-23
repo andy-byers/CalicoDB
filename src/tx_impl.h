@@ -23,7 +23,6 @@ public:
         const Status *status;
         Pager *pager;
         Stat *stat;
-        char *scratch;
         bool writable;
     };
     explicit TxImpl(const Parameters &param);

@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 
-echo "run_examples.sh!"
+echo "run_examples.sh..."
 
 for EXAMPLE in $1; do
-  MESSAGE="running $EXAMPLE\t"
+  MESSAGE="running $EXAMPLE...\t"
 
   "$EXAMPLE"
 

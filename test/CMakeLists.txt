@@ -15,6 +15,9 @@ add_subdirectory(doc_tests)
 # CMake tests. Adapted from @nlohmann/json.
 add_subdirectory(cmake_tests/fetch_content)
 add_subdirectory(cmake_tests/add_subdirectory)
+
+# Build the library without <string> header. <string> seems to cause transitive inclusion of a
+# ton of other non-standalone standard library headers.
 add_subdirectory(cmake_tests/custom_string)
 
 function(build_test NAME)

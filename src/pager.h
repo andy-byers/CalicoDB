@@ -115,6 +115,11 @@ public:
         return *m_status;
     }
 
+    auto scratch() -> char *
+    {
+        return m_scratch.ptr();
+    }
+
     auto set_status(const Status &error) const -> void;
 
 private:

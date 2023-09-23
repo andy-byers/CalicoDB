@@ -97,12 +97,12 @@ public:
 
 } // namespace
 
-Schema::Schema(Pager &pager, const Status &status, Stat &stat, char *scratch)
+Schema::Schema(Pager &pager, const Status &status, Stat &stat)
     : m_status(&status),
       m_pager(&pager),
-      m_scratch(scratch),
+      m_scratch(pager.scratch()),
       m_stat(&stat),
-      m_map(pager, stat, scratch, Id::root(), String()),
+      m_map(pager, stat, pager.scratch(), Id::root(), String()),
       m_internal(m_map),
       m_exposed(m_map),
       m_trees{"", &m_map, nullptr, nullptr},

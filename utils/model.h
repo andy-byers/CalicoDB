@@ -125,7 +125,7 @@ class ModelCursorBase : public Cursor
     {
         if (m_saved) {
             m_saved = false;
-            m_itr = m_map->find(m_saved_key);
+            m_itr = m_map->lower_bound(m_saved_key);
             return {true, m_saved_key};
         }
         return {false, ""};
