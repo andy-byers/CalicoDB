@@ -14,7 +14,7 @@ namespace calicodb
 {
 
 class Pager;
-struct Stat;
+struct Stats;
 
 // Representation of the database schema
 // NOTE: The routines *_bucket(), where * is "create" or "open", do not set their
@@ -23,7 +23,7 @@ struct Stat;
 class Schema final
 {
 public:
-    explicit Schema(Pager &pager, const Status &status, Stat &stat);
+    explicit Schema(Pager &pager, const Status &status, Stats &stat);
 
     [[nodiscard]] auto cursor() -> Cursor *
     {
@@ -77,7 +77,7 @@ private:
     const Status *const m_status;
     Pager *const m_pager;
     char *const m_scratch;
-    Stat *const m_stat;
+    Stats *const m_stat;
 
     Tree m_map;
     CursorImpl m_internal;

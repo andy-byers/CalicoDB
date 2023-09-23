@@ -7,7 +7,6 @@
 
 #include "buffer.h"
 #include "calicodb/db.h"
-#include "stat.h"
 #include "unique_ptr.h"
 
 namespace calicodb
@@ -31,7 +30,7 @@ public:
     static auto destroy(const Options &options, const char *filename) -> Status;
     auto open(const Options &sanitized) -> Status;
 
-    auto get_property(const Slice &name, CALICODB_STRING *value_out) const -> Status override;
+    auto get_property(const Slice &name, void *value_out) const -> Status override;
     auto new_tx(const ReadOptions &, Tx *&tx) const -> Status override;
     auto new_tx(const WriteOptions &, Tx *&tx) -> Status override;
     auto checkpoint(bool reset) -> Status override;
@@ -53,8 +52,8 @@ private:
 
     mutable Status m_status;
     mutable TxImpl *m_tx = nullptr;
-    mutable Stat m_stat;
     mutable ObjectPtr<Pager> m_pager;
+    mutable Stats m_stats;
 
     UserPtr<File> m_file;
     Env *const m_env;

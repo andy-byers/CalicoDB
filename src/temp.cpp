@@ -3,12 +3,13 @@
 // LICENSE.md. See AUTHORS.md for a list of contributor names.
 
 #include "temp.h"
+#include "calicodb/env.h"
+#include "calicodb/wal.h"
 #include "logging.h"
 #include "mem.h"
 #include "page.h"
-#include "stat.h"
 #include "unique_ptr.h"
-#include "wal.h"
+#include "wal_internal.h"
 
 namespace calicodb
 {
@@ -258,11 +259,11 @@ private:
 class TempWal : public Wal
 {
 public:
-    [[nodiscard]] static auto create(const Wal::Parameters &param) -> TempWal *
+    [[nodiscard]] static auto create(const WalOptionsExtra &options) -> TempWal *
     {
         auto *wal = Mem::new_object<TempWal>(
-            reinterpret_cast<TempEnv &>(*param.env),
-            *param.stat);
+            reinterpret_cast<TempEnv &>(*options.env),
+            *options.stat);
         if (wal->m_table.grow()) {
             Mem::deallocate(wal);
             return nullptr;
@@ -270,7 +271,7 @@ public:
         return wal;
     }
 
-    explicit TempWal(TempEnv &env, Stat &stat)
+    explicit TempWal(TempEnv &env, Stats &stat)
         : m_env(&env),
           m_stat(&stat)
     {
@@ -281,54 +282,53 @@ public:
         m_table.clear();
     }
 
-    auto start_reader(bool &changed) -> Status override
+    auto start_read(bool &changed) -> Status override
     {
         changed = false;
         return Status::ok();
     }
 
-    auto read(Id page_id, uint32_t page_size, char *&page) -> Status override
+    auto read(uint32_t page_id, uint32_t page_size, char *&page) -> Status override
     {
-        const auto itr = m_table.find(page_id.value);
+        const auto itr = m_table.find(page_id);
         if (itr != m_table.end() && *itr) {
             const auto copy_size = minval(page_size, m_page_size);
             std::memcpy(page, (*itr)->page(), copy_size);
-            m_stat->counters[Stat::kReadWal] += copy_size;
+            m_stat->read_wal += copy_size;
         } else {
             page = nullptr;
         }
         return Status::ok();
     }
 
-    auto start_writer() -> Status override
+    auto start_write() -> Status override
     {
         return Status::ok();
     }
 
-    auto write(PageRef *first_ref, uint32_t page_size, size_t db_size) -> Status override
+    auto write(Pages &writer, uint32_t page_size, size_t db_size) -> Status override
     {
         if (m_table.occupied == 0) {
             m_page_size = page_size;
         }
         CALICODB_EXPECT_EQ(m_page_size, page_size);
-        auto *dirty = &first_ref->dirty_hdr;
-        for (auto *p = dirty; p; p = p->dirty) {
+        for (; writer.value(); writer.next()) {
             if (m_table.occupied * 2 >= m_table.data.len()) {
                 if (m_table.grow()) {
                     return Status::no_memory();
                 }
             }
-            auto *ref = p->get_page_ref();
-            auto **itr = m_table.find(ref->page_id.value);
+            auto *ref = writer.value();
+            auto **itr = m_table.find(ref->page_id);
             if (*itr == nullptr) {
-                *itr = PageEntry::create(ref->page_id.value, m_page_size);
+                *itr = PageEntry::create(ref->page_id, m_page_size);
                 if (*itr == nullptr) {
                     return Status::no_memory();
                 }
                 ++m_table.occupied;
             }
             std::memcpy((*itr)->page(), ref->data, page_size);
-            m_stat->counters[Stat::kWriteWal] += page_size;
+            m_stat->write_wal += page_size;
         }
         if (db_size && commit(db_size)) {
             return Status::no_memory();
@@ -336,24 +336,29 @@ public:
         return Status::ok();
     }
 
-    auto rollback(const Undo &undo, void *object) -> void override
+    auto rollback(const Rollback &hook, void *object) -> void override
     {
         // This routine will call undo() on frames in a different order than the normal WAL
         // class. This shouldn't make a difference to the pager (the only caller).
-        m_table.for_each([undo, object](auto &page) {
-            undo(object, Id(page->key));
+        m_table.for_each([hook, object](auto &page) {
+            hook(object, page->key);
             return 0;
         });
     }
 
-    auto finish_writer() -> void override
+    auto finish_write() -> void override
     {
         m_table.clear();
     }
 
-    auto finish_reader() -> void override
+    auto finish_read() -> void override
     {
         CALICODB_EXPECT_EQ(m_table.occupied, 0);
+    }
+
+    auto open(const WalOptions &) -> Status override
+    {
+        return Status::ok();
     }
 
     auto close(char *, uint32_t) -> Status override
@@ -366,12 +371,12 @@ public:
         return Status::ok();
     }
 
-    [[nodiscard]] auto last_frame_count() const -> size_t override
+    [[nodiscard]] auto wal_size() const -> size_t override
     {
         return 0;
     }
 
-    [[nodiscard]] auto db_size() const -> uint32_t override
+    [[nodiscard]] auto db_size() const -> size_t override
     {
         return static_cast<uint32_t>(m_env->m_file.sectors.len());
     }
@@ -393,8 +398,8 @@ private:
                 if (!s.is_ok()) {
                     return -1;
                 }
-                m_stat->counters[Stat::kReadWal] += m_page_size;
-                m_stat->counters[Stat::kWriteDB] += m_page_size;
+                m_stat->read_wal += m_page_size;
+                m_stat->write_db += m_page_size;
             }
             return 0;
         });
@@ -508,7 +513,7 @@ private:
     } m_table;
 
     TempEnv *const m_env;
-    Stat *const m_stat;
+    Stats *const m_stat;
     uint32_t m_page_size;
 };
 
@@ -519,9 +524,9 @@ auto new_temp_env(size_t sector_size) -> Env *
     return new (std::nothrow) TempEnv(sector_size);
 }
 
-auto new_temp_wal(const Wal::Parameters &param) -> Wal *
+auto new_temp_wal(const WalOptionsExtra &options) -> Wal *
 {
-    return TempWal::create(param);
+    return TempWal::create(options);
 }
 
 } // namespace calicodb

@@ -3,6 +3,7 @@
 // LICENSE.md. See AUTHORS.md for a list of contributor names.
 
 #include "calicodb/db.h"
+#include "calicodb/env.h"
 #include "db_impl.h"
 #include "header.h"
 #include "internal.h"
@@ -60,11 +61,19 @@ auto DB::open(const Options &options, const char *filename, DB *&db) -> Status
 
     s = Status::no_memory();
     if (sanitized.temp_database) {
-        if (sanitized.env != nullptr) {
+        if (sanitized.env) {
             log(sanitized.info_log,
                 "warning: ignoring options.env object @ %p "
                 "(custom Env must not be used with temp database)",
                 sanitized.env);
+        }
+        if (sanitized.wal) {
+            log(sanitized.info_log,
+                "warning: ignoring options.wal object @ %p "
+                "(custom Wal must not be used with temp database)",
+                sanitized.wal);
+            // Opened by the pager at the start of the first transaction.
+            sanitized.wal = nullptr;
         }
         sanitized.env = new_temp_env(sanitized.page_size * 4);
         if (sanitized.env == nullptr) {

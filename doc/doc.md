@@ -134,6 +134,7 @@ const calicodb::Options options = {
     "wal-filename", // wal_filename
     nullptr, // info_log
     nullptr, // env
+    nullptr, // wal
     nullptr, // busy
     true, // create_if_missing
     false, // error_if_exists
@@ -364,16 +365,16 @@ delete c;
 ```C++
 #include "calicodb/db.h"
 
-CALICODB_STRING prop; // CALICODB_STRING defaults to std::string
-s = db->get_property("calicodb.stats", &prop);
+calicodb::Stats stats;
+s = db->get_property("calicodb.stats", &stats);
 if (s.is_ok()) {
-    // prop contains database statistics.
+    // stats contains database statistics.
 } else if (s.is_not_found()) {
     // Property does not exist.
 }
 
 // Passing nullptr for the property value causes get_property() to perform a simple existence check, 
-// without attempting to populate the property value string.
+// without attempting to populate the property value.
 s = db->get_property("calicodb.stats", nullptr);
 if (s.is_ok()) {
     

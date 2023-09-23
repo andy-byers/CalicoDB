@@ -10,7 +10,7 @@ Given that a process accessing a CalicoDB database shuts down properly, the reco
 
 While running, however, 2 additional files are maintained:
 + `-wal`: The `-wal` file is named like the database file, but with a suffix of `-wal`.
-Updates to database pages are written here, rather than the database file.
+Pages to database pages are written here, rather than the database file.
 See [WAL file](#wal-file) for details.
 + `-shm`: The `-shm` file is named like the `-wal` file, but with a suffix of `-shm` in place of `-wal`.
 Greatly speeds up the process of locating specific database pages in the WAL.

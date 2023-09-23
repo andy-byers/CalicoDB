@@ -39,8 +39,8 @@ struct AllocatorConfig {
 };
 
 // NOTE: An enumerator cannot be used for ConfigTarget (the "named parameter preceding the first
-//       variable parameter", see https://en.cppreference.com/w/cpp/utility/variadic/va_start) due
-//       to default argument promotion rules.
+//       variable parameter" in configure()) due to default argument promotion rules. See
+//       https://en.cppreference.com/w/cpp/utility/variadic/va_start.
 struct ConfigTarget {
     constexpr operator int() const
     {

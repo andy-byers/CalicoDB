@@ -97,7 +97,7 @@ public:
 
 } // namespace
 
-Schema::Schema(Pager &pager, const Status &status, Stat &stat)
+Schema::Schema(Pager &pager, const Status &status, Stats &stat)
     : m_status(&status),
       m_pager(&pager),
       m_scratch(pager.scratch()),

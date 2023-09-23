@@ -21,20 +21,16 @@ option(CALICODB_WithASan "Build with ASan" Off)
 option(CALICODB_WithUBSan "Build with UBSan" Off)
 option(CALICODB_WithTSan "Build with TSan" Off)
 
-# Ensure that neither exceptions, nor RTTI, are enabled.
-if(${CMAKE_CXX_COMPILER_ID} STREQUAL MSVC)
-    message(FATAL_ERROR 'Visual Studio is not yet supported')
-else()
-    string(REGEX REPLACE "-fexceptions" "" CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS}")
-    string(REGEX REPLACE "-frtti" "" CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS}")
-endif()
-
 set(CALICODB_OPTIONS "")
 set(CALICODB_WARNINGS "")
-# Set compiler warnings for the library (from @lefticus/cpp-best-practices).
+# Set compiler warnings for the library (from @lefticus/cpp-best-practices), and make sure
+# that neither exceptions, nor RTTI, are enabled.
 if(${CMAKE_CXX_COMPILER_ID} STREQUAL MSVC)
     message(FATAL_ERROR 'Visual Studio is not yet supported')
 else() # Clang OR GNU
+    string(REGEX REPLACE "-fexceptions" "" CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS}")
+    string(REGEX REPLACE "-frtti" "" CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS}")
+
     set(CALICODB_OPTIONS
             -fno-exceptions
             -fno-rtti)
@@ -80,11 +76,14 @@ target_sources(calicodb
                 src/db_impl.h
                 src/encoding.h
                 src/env.cpp
+                src/env_posix.cpp
                 src/freelist.cpp
                 src/freelist.h
                 src/header.cpp
                 src/header.h
                 src/internal.h
+                src/internal_string.cpp
+                src/internal_string.h
                 src/list.h
                 src/logging.cpp
                 src/logging.h
@@ -99,11 +98,8 @@ target_sources(calicodb
                 src/pointer_map.h
                 src/schema.cpp
                 src/schema.h
-                src/stat.h
                 src/status.cpp
                 src/status_internal.h
-                src/internal_string.cpp
-                src/internal_string.h
                 src/temp.cpp
                 src/temp.h
                 src/tree.cpp
@@ -114,7 +110,7 @@ target_sources(calicodb
                 src/unique_ptr.h
                 src/utility.h
                 src/wal.cpp
-                src/wal.h
+                src/wal_internal.h
                 port/port.h
         $<$<VERSION_GREATER:CMAKE_VERSION,3.2>:PUBLIC>
             include/calicodb/config.h
@@ -123,8 +119,10 @@ target_sources(calicodb
             include/calicodb/env.h
             include/calicodb/options.h
             include/calicodb/slice.h
+            include/calicodb/stats.h
             include/calicodb/status.h
-            include/calicodb/tx.h)
+            include/calicodb/tx.h
+            include/calicodb/wal.h)
 target_include_directories(calicodb
         PUBLIC $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/include>
                $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>

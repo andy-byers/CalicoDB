@@ -7,13 +7,12 @@
 
 #include "buffer.h"
 #include "bufmgr.h"
-#include "stat.h"
-#include "wal.h"
 
 namespace calicodb
 {
 
 class Env;
+class Wal;
 
 class Pager final
 {
@@ -31,9 +30,10 @@ public:
         const char *wal_name;
         File *db_file;
         Env *env;
+        Wal *wal;
         Logger *log;
         Status *status;
-        Stat *stat;
+        Stats *stat;
         BusyHandler *busy;
         uint32_t page_size;
         size_t cache_size;
@@ -136,7 +136,7 @@ private:
     auto flush_dirty_pages() -> Status;
     auto purge_page(PageRef &victim) -> void;
 
-    static auto undo_callback(void *arg, Id id) -> void;
+    static auto undo_callback(void *arg, uint32_t id) -> void;
 
     mutable Mode m_mode = kOpen;
 
@@ -147,8 +147,9 @@ private:
     Status *const m_status;
     Logger *const m_log;
     Env *const m_env;
+    Wal *const m_user_wal;
     File *const m_file;
-    Stat *const m_stat;
+    Stats *const m_stats;
     BusyHandler *const m_busy;
 
     const Options::LockMode m_lock_mode;

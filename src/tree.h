@@ -54,7 +54,7 @@ public:
 
     ~Tree();
 
-    explicit Tree(Pager &pager, Stat &stat, char *scratch, Id root_id, String name);
+    explicit Tree(Pager &pager, Stats &stat, char *scratch, Id root_id, String name);
     static auto get_tree(TreeCursor &c) -> Tree *;
 
     auto activate_cursor(TreeCursor &target, bool requires_position) const -> void;
@@ -173,7 +173,7 @@ private:
     mutable CursorEntry m_inactive_list;
 
     // Various tree operation counts are tracked in this variable.
-    Stat *const m_stat;
+    Stats *const m_stat;
 
     // When the node pointed at by m_c overflows, store the cell that couldn't fit on the page here. The
     // location that the overflow cell should be placed is copied into the pid and idx fields from m_c.

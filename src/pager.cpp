@@ -4,12 +4,13 @@
 
 #include "pager.h"
 #include "calicodb/env.h"
+#include "calicodb/wal.h"
 #include "header.h"
 #include "logging.h"
 #include "mem.h"
 #include "node.h"
-#include "stat.h"
 #include "temp.h"
+#include "wal_internal.h"
 
 namespace calicodb
 {
@@ -48,7 +49,7 @@ auto Pager::read_page(PageRef &page_out, size_t *size_out) -> Status
 {
     // Try to read the page from the WAL.
     auto *page = page_out.data;
-    auto s = m_wal->read(page_out.page_id, m_page_size, page);
+    auto s = m_wal->read(page_out.page_id.value, m_page_size, page);
     if (s.is_ok()) {
         if (page == nullptr) {
             // No error, but the page could not be located in the WAL. Read the page
@@ -74,7 +75,7 @@ auto Pager::read_page_from_file(PageRef &ref, size_t *size_out) const -> Status
     const auto offset = ref.page_id.as_index() * m_page_size;
     auto s = m_file->read(offset, m_page_size, ref.data, &slice);
     if (s.is_ok()) {
-        m_stat->counters[Stat::kReadDB] += slice.size();
+        m_stats->read_db += slice.size();
         std::memset(ref.data + slice.size(), 0, m_page_size - slice.size());
         if (size_out) {
             *size_out = slice.size();
@@ -86,24 +87,29 @@ auto Pager::read_page_from_file(PageRef &ref, size_t *size_out) const -> Status
 auto Pager::open_wal() -> Status
 {
     CALICODB_EXPECT_EQ(m_wal, nullptr);
-    const Wal::Parameters wal_param = {
+    const WalOptions options = {
         m_wal_name,
         m_env,
         m_file,
+        m_stats,
+    };
+    // Extra parameters for WAL class constructor.
+    const WalOptionsExtra extra = {
+        options,
         m_log,
-        m_stat,
         m_busy,
         m_sync_mode,
         m_lock_mode,
     };
-    if (m_persistent) {
-        return Wal::open(wal_param, m_wal);
+    if (m_user_wal) {
+        m_wal = m_user_wal;
+    } else if (m_persistent) {
+        m_wal = new_default_wal(extra);
+    } else {
+        m_wal = new_temp_wal(extra);
     }
-    m_wal = new_temp_wal(wal_param);
-    if (m_wal == nullptr) {
-        return Status::no_memory();
-    }
-    return Status::ok();
+    return m_wal ? m_wal->open(options)
+                 : Status::no_memory();
 }
 
 auto Pager::close_wal() -> Status
@@ -125,7 +131,9 @@ auto Pager::close_wal() -> Status
             s = Status::ok();
         }
     }
-    Mem::delete_object(m_wal);
+    if (m_wal != m_user_wal) {
+        Mem::delete_object(m_wal);
+    }
     m_wal = nullptr;
     return s;
 }
@@ -151,8 +159,9 @@ Pager::Pager(const Parameters &param)
       m_status(param.status),
       m_log(param.log),
       m_env(param.env),
+      m_user_wal(param.wal),
       m_file(param.db_file),
-      m_stat(param.stat),
+      m_stats(param.stat),
       m_busy(param.busy),
       m_lock_mode(param.lock_mode),
       m_sync_mode(param.sync_mode),
@@ -162,7 +171,7 @@ Pager::Pager(const Parameters &param)
 {
     CALICODB_EXPECT_NE(m_file, nullptr);
     CALICODB_EXPECT_NE(m_status, nullptr);
-    CALICODB_EXPECT_NE(m_stat, nullptr);
+    CALICODB_EXPECT_NE(m_stats, nullptr);
     CALICODB_EXPECT_NE(m_db_name, nullptr);
     CALICODB_EXPECT_NE(m_wal_name, nullptr);
 }
@@ -196,7 +205,7 @@ auto Pager::start_reader() -> Status
         return *m_status;
     }
     if (m_wal) {
-        m_wal->finish_reader();
+        m_wal->finish_read();
     } else {
         auto s = open_wal();
         if (!s.is_ok()) {
@@ -205,7 +214,7 @@ auto Pager::start_reader() -> Status
     }
     bool changed;
     auto s = busy_wait(m_busy, [this, &changed] {
-        return m_wal->start_reader(changed);
+        return m_wal->start_read(changed);
     });
     if (s.is_ok()) {
         if (changed) {
@@ -232,7 +241,7 @@ auto Pager::start_writer() -> Status
 
     Status s;
     if (m_mode == kRead) {
-        s = m_wal->start_writer();
+        s = m_wal->start_write();
         if (s.is_ok()) {
             m_mode = kWrite;
         }
@@ -288,9 +297,10 @@ auto Pager::move_page(PageRef &page, Id destination) -> void
     }
 }
 
-auto Pager::undo_callback(void *arg, Id id) -> void
+auto Pager::undo_callback(void *arg, uint32_t key) -> void
 {
     PageRef *ref;
+    const Id id(key);
     auto *pager = static_cast<Pager *>(arg);
     if (!id.is_root() && (ref = pager->m_bufmgr.query(id))) {
         pager->purge_page(*ref);
@@ -306,13 +316,13 @@ auto Pager::finish() -> void
             // Get rid of obsolete cached pages that aren't dirty anymore.
             m_wal->rollback(undo_callback, this);
         }
-        m_wal->finish_writer();
+        m_wal->finish_write();
         // Get rid of dirty pages, or all cached pages if there was a fault.
         purge_pages(m_mode == kError);
         m_page_count = m_saved_page_count;
     }
     if (m_mode >= kRead) {
-        m_wal->finish_reader();
+        m_wal->finish_read();
         m_bufmgr.shrink_to_fit();
     }
     *m_status = Status::ok();
@@ -353,7 +363,7 @@ auto Pager::checkpoint(bool reset) -> Status
 auto Pager::auto_checkpoint(size_t frame_limit) -> Status
 {
     CALICODB_EXPECT_GT(frame_limit, 0);
-    if (m_wal && frame_limit < m_wal->last_frame_count()) {
+    if (m_wal && frame_limit < m_wal->wal_size()) {
         return checkpoint(false);
     }
     return Status::ok();
@@ -381,7 +391,8 @@ auto Pager::flush_dirty_pages() -> Status
     dirty = m_dirtylist.sort();
     CALICODB_EXPECT_NE(dirty, nullptr);
 
-    return m_wal->write(dirty->get_page_ref(), m_page_size, m_page_count);
+    WalPagesImpl pages(*dirty->get_page_ref());
+    return m_wal->write(pages, m_page_size, m_page_count);
 }
 
 auto Pager::set_page_count(uint32_t page_count) -> void
@@ -410,8 +421,9 @@ auto Pager::ensure_available_buffer() -> Status
         // The transient list is not valid unless Dirtylist::sort() was called.
         victim->dirty_hdr.dirty = nullptr;
 
+        WalPagesImpl pages(*victim);
         // DB page count is 0 here because this write is not part of a commit.
-        s = m_wal->write(victim, m_page_size, 0);
+        s = m_wal->write(pages, m_page_size, 0);
         if (s.is_ok()) {
             m_dirtylist.remove(*victim);
         } else {
