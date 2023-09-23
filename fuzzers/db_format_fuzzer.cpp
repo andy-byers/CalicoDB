@@ -1,11 +1,17 @@
 // Copyright (c) 2022, The CalicoDB Authors. All rights reserved.
 // This source code is licensed under the MIT License, which can be found in
 // LICENSE.md. See AUTHORS.md for a list of contributor names.
+//
+// db_format_fuzzer: Fuzz the database file format using libFuzzer
+//
+// This fuzzer takes a CalicoDB database file as input. The database is opened,
+// and some queries and modifications are performed. The fuzzer expects 2 buckets
+// to be present: "b1" and "b2". Seed inputs should contain at least these 2
+// buckets.
 
 #include "calicodb/cursor.h"
 #include "calicodb/db.h"
 #include "calicodb/env.h"
-#include "calicodb/tx.h"
 #include "fake_env.h"
 #include "fuzzer.h"
 #include "mem.h"
@@ -42,14 +48,14 @@ public:
 
         if (s.is_ok()) {
             s = db->run(WriteOptions(), [](auto &tx) {
-                Cursor *c1 = nullptr;
-                Cursor *c2 = nullptr;
-                auto s = tx.open_bucket("b1", c1);
+                TestCursor c1;
+                TestCursor c2;
+                auto s = test_open_bucket(tx, "b1", c1);
                 if (s.is_ok()) {
-                    s = tx.open_bucket("b2", c2);
+                    s = test_open_bucket(tx, "b2", c2);
                 }
                 if (s.is_ok()) {
-                    // Copy all records from c1 to c2.
+                    // Copy all records from b1 to b2.
                     c1->seek_last();
                     while (c1->is_valid() && s.is_ok()) {
                         s = tx.put(*c2, c1->key(), c1->value());
@@ -61,7 +67,7 @@ public:
                         s = c1->status();
                     }
                     if (s.is_ok()) {
-                        // Copy reverse mapping from c2 to c1.
+                        // Copy reverse mapping from b2 to b1.
                         c2->seek_first();
                         while (c2->is_valid() && s.is_ok()) {
                             s = tx.put(*c1, c2->value(), c2->key());
@@ -84,11 +90,11 @@ public:
                             s = c2->status();
                         }
                     }
-                    delete c1;
-                    delete c2;
+                    c1.reset();
+                    c2.reset();
 
                     if (s.is_ok()) {
-                        s = tx.drop_bucket("c2");
+                        s = tx.drop_bucket("b2");
                     }
                     if (s.is_ok()) {
                         s = tx.vacuum();
@@ -107,6 +113,7 @@ public:
         CHECK_TRUE(
             s.is_ok() ||               // Database is valid (or corruption was not detected)
             s.is_invalid_argument() || // Not a CalicoDB database
+            s.is_no_memory() ||        // Key or value larger than kMaxAllocation
             s.is_corruption());        // Corruption was detected
     }
 };

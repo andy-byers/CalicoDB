@@ -23,7 +23,7 @@ struct Stat;
 class Schema final
 {
 public:
-    explicit Schema(Pager &pager, const Status &status, Stat &stat, char *scratch);
+    explicit Schema(Pager &pager, const Status &status, Stat &stat);
 
     [[nodiscard]] auto cursor() -> Cursor *
     {

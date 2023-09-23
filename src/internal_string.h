@@ -11,7 +11,6 @@ namespace calicodb
 {
 
 // Wrapper for a heap-allocated C-style string
-// Instances of this class are filled-out by certain library routines.
 class String final
 {
 public:

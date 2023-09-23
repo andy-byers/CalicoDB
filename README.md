@@ -10,7 +10,7 @@ It is intended for read-heavy embedded applications.
 + [Features](#features)
 + [Caveats](#caveats)
 + [Documentation](#documentation)
-+ [Dependencies](#dependencies)
++ [Requirements](#requirements)
 + [Performance](#performance)
 + [TODO](#todo)
 + [Contributions](#contributions)
@@ -40,8 +40,13 @@ The author is not a professional database developer, so any type of feedback is 
 ## Documentation
 Check out the [docs](doc/doc.md).
 
-## Dependencies
-The library itself has no dependencies.
+## Requirements
+The library requires the following to compile:
++ CMake version 3.14 or later
++ C++ compiler with support for C++17
+  + GCC (>= 7.0)
+  + Clang (>= 5.0)
+
 The tests depend on `@google/googletest`, which is downloaded during the build.
 
 ## Performance

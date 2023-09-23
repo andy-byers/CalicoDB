@@ -14,6 +14,7 @@ namespace calicodb
 
 namespace
 {
+
 template <class T, class V>
 constexpr auto clip_to_range(T &t, V min, V max) -> void
 {
@@ -24,6 +25,7 @@ constexpr auto clip_to_range(T &t, V min, V max) -> void
         t = min;
     }
 }
+
 } // namespace
 
 auto DB::open(const Options &options, const char *filename, DB *&db) -> Status
@@ -40,31 +42,19 @@ auto DB::open(const Options &options, const char *filename, DB *&db) -> Status
 
     // Allocate storage for the database filename.
     String db_name;
-    auto filename_len = std::strlen(filename);
-    if (append_strings(db_name, Slice(filename, filename_len))) {
+    if (append_strings(db_name, Slice(filename))) {
         return Status::no_memory();
     }
 
     // Determine and allocate storage for the WAL filename.
     int rc;
     String wal_name;
-    if (const auto wal_filename_len = std::strlen(sanitized.wal_filename)) {
-        rc = append_strings(
-            wal_name,
-            Slice(sanitized.wal_filename, wal_filename_len));
+    if (sanitized.wal_filename[0] == '\0') {
+        rc = append_strings(wal_name, Slice(db_name), kDefaultWalSuffix);
     } else {
-        rc = append_strings(
-            wal_name,
-            Slice(db_name),
-            kDefaultWalSuffix);
+        rc = append_strings(wal_name, Slice(sanitized.wal_filename));
     }
     if (rc) {
-        return Status::no_memory();
-    }
-
-    // Allocate scratch memory for working with database pages.
-    Buffer<char> scratch;
-    if (scratch.realloc(sanitized.page_size * kScratchBufferPages)) {
         return Status::no_memory();
     }
 
@@ -95,7 +85,6 @@ auto DB::open(const Options &options, const char *filename, DB *&db) -> Status
         sanitized,
         move(db_name),
         move(wal_name),
-        move(scratch),
     });
     if (impl) {
         s = impl->open(sanitized);

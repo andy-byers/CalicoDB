@@ -96,8 +96,7 @@ auto DBImpl::open(const Options &sanitized) -> Status
 }
 
 DBImpl::DBImpl(Parameters param)
-    : m_scratch(move(param.scratch)),
-      m_env(param.sanitized.env),
+    : m_env(param.sanitized.env),
       m_log(param.sanitized.info_log),
       m_busy(param.sanitized.busy),
       m_auto_ckpt(param.sanitized.auto_checkpoint),
@@ -251,7 +250,6 @@ auto DBImpl::prepare_tx(bool write, TxType *&tx_out) const -> Status
             &m_status,
             m_pager.get(),
             &m_stat,
-            m_scratch.ptr(),
             write,
         });
         if (m_tx && m_tx->m_schema.cursor()) {

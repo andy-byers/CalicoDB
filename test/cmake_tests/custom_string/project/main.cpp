@@ -2,15 +2,11 @@
 // This source code is licensed under the MIT License, which can be found in
 // LICENSE.md. See AUTHORS.md for a list of contributor names.
 
-#include <cstdlib>
+#include <cstdio>
 
 class CustomString
 {
 public:
-    CustomString(const char *)
-    {
-    }
-
     CustomString(const char *, size_t)
     {
     }
@@ -35,7 +31,7 @@ public:
 
 auto main(int, const char *[]) -> int
 {
-    CALICODB_STRING string("42");
+    CALICODB_STRING string("42", 2);
     (void)calicodb::Slice(string);
     return 0;
 }

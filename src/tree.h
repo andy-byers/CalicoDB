@@ -240,6 +240,8 @@ class TreeCursor
 
     Buffer<char> m_key_buf;
     Buffer<char> m_value_buf;
+    Slice m_key;
+    Slice m_value;
 
     enum State {
         kInvalidState,
@@ -274,6 +276,9 @@ class TreeCursor
     auto start_write() -> void;
     auto start_write(const Slice &key) -> bool;
     auto finish_write(Status &s) -> void;
+
+    auto read_user_key() -> Status;
+    auto read_user_value() -> Status;
 
 public:
     explicit TreeCursor(Tree &tree);
