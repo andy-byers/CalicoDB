@@ -9,7 +9,6 @@
 #include "logging.h"
 #include "mem.h"
 #include "page.h"
-#include "stat.h"
 #include "status_internal.h"
 #include "unique_ptr.h"
 #include "wal_internal.h"

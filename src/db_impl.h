@@ -7,7 +7,6 @@
 
 #include "buffer.h"
 #include "calicodb/db.h"
-#include "stat.h"
 #include "unique_ptr.h"
 
 namespace calicodb

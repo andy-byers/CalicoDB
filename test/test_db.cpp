@@ -888,50 +888,6 @@ TEST_F(DBTests, VacuumDroppedBuckets)
     }));
 }
 
-TEST(a, b)
-{
-    DB *db;
-    RandomGenerator random;
-    for (size_t i = 0; i < 100; ++i) {
-        std::string fn = "/tmp/calicodb_fuzzer_db_z" + std::to_string(i);
-        ASSERT_OK(DB::open(Options(), fn.c_str(), db));
-        ASSERT_OK(db->run(WriteOptions(), [i](auto &tx) {
-            Cursor *c;
-            EXPECT_OK(tx.create_bucket(BucketOptions(), "b0", &c));
-            for (size_t j = 0; j <= i * 25; ++j) {
-                EXPECT_OK(tx.put(*c, numeric_key<312>(j), numeric_key<14>(j)));
-            }
-            delete c;
-            return tx.drop_bucket("b0");
-        }));
-        ASSERT_OK(db->run(WriteOptions(), [i](auto &tx) {
-            Cursor *c;
-            EXPECT_OK(tx.create_bucket(BucketOptions(), "b1", &c));
-            for (size_t j = 0; j <= i * 150; ++j) {
-                EXPECT_OK(tx.put(*c, numeric_key<123>(j), numeric_key<1234>(j)));
-            }
-            for (size_t j = 0; j <= i * 150; j += 3) {
-                EXPECT_OK(tx.erase(*c, numeric_key<123>(j)));
-            }
-            delete c;
-            return Status::ok();
-        }));
-        ASSERT_OK(db->run(WriteOptions(), [i](auto &tx) {
-            Cursor *c;
-            EXPECT_OK(tx.create_bucket(BucketOptions(), "b2", &c));
-            for (size_t j = 0; j <= i * 10; ++j) {
-                EXPECT_OK(tx.put(*c, numeric_key<12>(j), numeric_key<31>(j)));
-            }
-            for (size_t j = 0; j <= i * 10; j += 2) {
-                EXPECT_OK(tx.erase(*c, numeric_key<12>(j)));
-            }
-            delete c;
-            return Status::ok();
-        }));
-        delete db;
-    }
-}
-
 TEST(OldWalTests, HandlesOldWalFile)
 {
     static constexpr auto kOldWal = "./testwal";

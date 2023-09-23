@@ -5,7 +5,6 @@
 #include "bufmgr.h"
 #include "calicodb/env.h"
 #include "encoding.h"
-#include "stat.h"
 
 namespace calicodb
 {

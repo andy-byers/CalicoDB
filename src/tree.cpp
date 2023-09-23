@@ -10,7 +10,6 @@
 #include "mem.h"
 #include "pager.h"
 #include "schema.h"
-#include "stat.h"
 #include "status_internal.h"
 
 #ifdef CALICODB_TEST

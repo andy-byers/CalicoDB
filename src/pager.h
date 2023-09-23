@@ -7,7 +7,6 @@
 
 #include "buffer.h"
 #include "bufmgr.h"
-#include "stat.h"
 
 namespace calicodb
 {

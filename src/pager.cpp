@@ -9,7 +9,6 @@
 #include "logging.h"
 #include "mem.h"
 #include "node.h"
-#include "stat.h"
 #include "temp.h"
 #include "wal_internal.h"
 

@@ -21,20 +21,16 @@ option(CALICODB_WithASan "Build with ASan" Off)
 option(CALICODB_WithUBSan "Build with UBSan" Off)
 option(CALICODB_WithTSan "Build with TSan" Off)
 
-# Ensure that neither exceptions, nor RTTI, are enabled.
-if(${CMAKE_CXX_COMPILER_ID} STREQUAL MSVC)
-    message(FATAL_ERROR 'Visual Studio is not yet supported')
-else()
-    string(REGEX REPLACE "-fexceptions" "" CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS}")
-    string(REGEX REPLACE "-frtti" "" CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS}")
-endif()
-
 set(CALICODB_OPTIONS "")
 set(CALICODB_WARNINGS "")
-# Set compiler warnings for the library (from @lefticus/cpp-best-practices).
+# Set compiler warnings for the library (from @lefticus/cpp-best-practices), and make sure
+# that neither exceptions, nor RTTI, are enabled.
 if(${CMAKE_CXX_COMPILER_ID} STREQUAL MSVC)
     message(FATAL_ERROR 'Visual Studio is not yet supported')
 else() # Clang OR GNU
+    string(REGEX REPLACE "-fexceptions" "" CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS}")
+    string(REGEX REPLACE "-frtti" "" CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS}")
+
     set(CALICODB_OPTIONS
             -fno-exceptions
             -fno-rtti)
@@ -102,7 +98,6 @@ target_sources(calicodb
                 src/pointer_map.h
                 src/schema.cpp
                 src/schema.h
-                src/stat.h
                 src/status.cpp
                 src/status_internal.h
                 src/temp.cpp
@@ -124,6 +119,7 @@ target_sources(calicodb
             include/calicodb/env.h
             include/calicodb/options.h
             include/calicodb/slice.h
+            include/calicodb/stats.h
             include/calicodb/status.h
             include/calicodb/tx.h
             include/calicodb/wal.h)
