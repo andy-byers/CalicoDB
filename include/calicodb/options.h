@@ -6,6 +6,7 @@
 #define CALICODB_OPTIONS_H
 
 #include <cstddef>
+#include <cstdint>
 
 #ifndef CALICODB_DEFAULT_PAGE_SIZE
 #define CALICODB_DEFAULT_PAGE_SIZE 4'096U
@@ -16,6 +17,13 @@ namespace calicodb
 
 // calicodb/env.h
 class Env;
+class File;
+
+// calicodb/stat.h
+struct Stats;
+
+// calicodb/wal.h
+class Wal;
 
 // calicodb/options.h (below)
 class BusyHandler;
@@ -45,6 +53,9 @@ struct Options final {
     // Custom storage environment. See env.h for details.
     Env *env = nullptr;
 
+    // Custom write-ahead log. See wal.h for details.
+    Wal *wal = nullptr;
+
     // Action to take while waiting on a file lock.
     BusyHandler *busy = nullptr;
 
@@ -57,6 +68,8 @@ struct Options final {
     // If true, create the database in RAM only and never write anything to disk. The
     // database will persist for the duration of the process that created it, and a
     // lock_mode of kLockExclusive is implied.
+    // If this option is used, the implementation will ignore both the "env" and "wal"
+    // fields.
     bool temp_database = false;
 
     // Determines how often the operating system is asked to flush data to secondary
@@ -72,6 +85,13 @@ struct Options final {
         kLockNormal,    // Allow concurrent access
         kLockExclusive, // Exclude other connections
     } lock_mode = kLockNormal;
+};
+
+struct WalOptions {
+    const char *filename;
+    Env *env;
+    File *db;
+    Stats *stat;
 };
 
 // Options to control the behavior of a readonly transaction (passed to DB::run() and

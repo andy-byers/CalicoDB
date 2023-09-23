@@ -60,7 +60,7 @@ class TreeTestHarness
 public:
     Env *m_env;
     Status m_status;
-    Stat m_stat;
+    Stats m_stat;
     Pager *m_pager = nullptr;
     File *m_file = nullptr;
     Tree *m_tree = nullptr;
@@ -76,6 +76,7 @@ public:
             "wal",
             m_file,
             m_env,
+            nullptr,
             nullptr,
             &m_status,
             &m_stat,

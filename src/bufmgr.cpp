@@ -10,7 +10,7 @@
 namespace calicodb
 {
 
-Bufmgr::Bufmgr(size_t min_buffers, Stat &stat)
+Bufmgr::Bufmgr(size_t min_buffers, Stats &stat)
     : m_stat(&stat),
       m_min_buffers(min_buffers)
 {
@@ -75,10 +75,10 @@ auto Bufmgr::lookup(Id page_id) -> PageRef *
     CALICODB_EXPECT_FALSE(page_id.is_root());
     auto *ref = m_table.lookup(page_id.value);
     if (ref == nullptr) {
-        ++m_stat->counters[Stat::kCacheMisses];
+        ++m_stat->cache_misses;
         return nullptr;
     }
-    ++m_stat->counters[Stat::kCacheHits];
+    ++m_stat->cache_hits;
     if (ref->refs == 0) {
         // Make ref the most-recently-used element.
         IntrusiveList::remove(*ref);

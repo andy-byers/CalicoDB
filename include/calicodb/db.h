@@ -7,6 +7,7 @@
 
 #include "options.h"
 #include "slice.h"
+#include "stats.h"
 #include "status.h"
 
 namespace calicodb
@@ -42,19 +43,15 @@ public:
     DB(DB &) = delete;
     void operator=(DB &) = delete;
 
-    // Get a human-readable string describing a named database property
-    // If the property named `name` exists, returns OK and stores the property value in
-    // `*value_out`. If the property does not exist, a status is returned for which
-    // Status::is_not_found() evaluates to true and `value_out->reset(nullptr)` is
-    // called. The `value_out` parameter is optional: if passed a nullptr, this method
-    // performs an existence check. If there wasn't enough memory available to create
-    // the property string, a status is returned for which Status::is_no_memory()
-    // evaluates to true.
-    // Note that this routine does not check for allocation failure resulting from the
-    // call to CALICODB_STRING::append() (assuming it returns an error code rather than
-    // throwing). It will, however, always append() 1 or more bytes to the string, so if
-    // *value_out is empty, then the allocation has failed.
-    virtual auto get_property(const Slice &name, CALICODB_STRING *value_out) const -> Status = 0;
+    // Get information about the database instance
+    // Returns an OK status and writes property information to `value_out` if a property with the
+    // given `name` is found. If the given property does not exist, returns a status with code
+    // Status::kNotFound. `value_out` is optional: if passed nullptr, this routine  just checks if
+    // the property exists. The following combinations of parameters are supported:
+    //  `name`         | `value_out` type    | Description
+    // ----------------|---------------------|----------------------------------------
+    //  calicodb.stats | Stats *             | Statistics collected by the running DB
+    virtual auto get_property(const Slice &name, void *value_out) const -> Status = 0;
 
     // Write modified pages from the write-ahead log (WAL) back to the database file
     // If `reset` is true, steps are taken to make sure that the next writer will reset the WAL

@@ -15,7 +15,7 @@ namespace calicodb
 class File;
 class Env;
 class Pager;
-struct Stat;
+struct Stats;
 
 // Manages database pages that have been read from stable storage
 class Bufmgr final
@@ -23,7 +23,7 @@ class Bufmgr final
 public:
     friend class Pager;
 
-    explicit Bufmgr(size_t min_buffers, Stat &stat);
+    explicit Bufmgr(size_t min_buffers, Stats &stat);
     ~Bufmgr();
 
     // Allocate m_min_buffers page buffers for non-root pages, each of size `page_size`,
@@ -159,7 +159,7 @@ private:
     // in the hash map each time.
     PageRef *m_root = nullptr;
 
-    Stat *const m_stat;
+    Stats *const m_stat;
 
     const size_t m_min_buffers;
     size_t m_num_buffers = 0;

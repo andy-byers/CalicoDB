@@ -2,7 +2,7 @@
 // This source code is licensed under the MIT License, which can be found in
 // LICENSE.md. See AUTHORS.md for a list of contributor names.
 
-#include "wal.h"
+#include "calicodb/wal.h"
 #include "calicodb/db.h"
 #include "calicodb/env.h"
 #include "encoding.h"
@@ -12,6 +12,7 @@
 #include "stat.h"
 #include "status_internal.h"
 #include "unique_ptr.h"
+#include "wal_internal.h"
 
 namespace calicodb
 {
@@ -717,21 +718,23 @@ auto compute_checksum(const Slice &in, const uint32_t *initial, uint32_t *out)
 class WalImpl : public Wal
 {
 public:
-    explicit WalImpl(const Parameters &param, UserPtr<File> wal_file);
+    explicit WalImpl(const WalOptionsExtra &options);
     ~WalImpl() override;
 
-    auto read(Id page_id, uint32_t page_size, char *&page) -> Status override;
-    auto write(PageRef *first_ref, uint32_t page_size, size_t db_size) -> Status override;
+    auto open(const WalOptions &options) -> Status override;
+
+    auto read(uint32_t page_id, uint32_t page_size, char *&page) -> Status override;
+    auto write(Pages &writer, uint32_t page_size, size_t db_size) -> Status override;
     auto checkpoint(bool reset, char *scratch, uint32_t scratch_size) -> Status override;
 
-    auto rollback(const Undo &undo, void *object) -> void override
+    auto rollback(const Rollback &hook, void *object) -> void override
     {
         CALICODB_EXPECT_TRUE(m_writer_lock);
         const auto max_frame = m_hdr.max_frame;
         // Cast away volatile qualifier.
         m_hdr = *const_cast<const HashIndexHdr *>(m_index.header());
         for (auto frame = m_hdr.max_frame + 1; frame <= max_frame; ++frame) {
-            undo(object, Id(m_index.fetch(frame)));
+            hook(object, m_index.fetch(frame));
         }
         if (max_frame != m_hdr.max_frame) {
             m_index.cleanup();
@@ -753,7 +756,7 @@ public:
         return s;
     }
 
-    auto start_reader(bool &changed) -> Status override
+    auto start_read(bool &changed) -> Status override
     {
         CALICODB_EXPECT_FALSE(m_ckpt_lock);
 
@@ -769,16 +772,16 @@ public:
         return s;
     }
 
-    auto finish_reader() -> void override
+    auto finish_read() -> void override
     {
-        finish_writer();
+        finish_write();
         if (m_reader_lock >= 0) {
             unlock_shared(READ_LOCK(m_reader_lock));
             m_reader_lock = -1;
         }
     }
 
-    auto start_writer() -> Status override
+    auto start_write() -> Status override
     {
         if (m_writer_lock) {
             return Status::ok();
@@ -805,7 +808,7 @@ public:
         return Status::ok();
     }
 
-    auto finish_writer() -> void override
+    auto finish_write() -> void override
     {
         if (m_writer_lock) {
             unlock_exclusive(kWriteLock, 1);
@@ -814,14 +817,14 @@ public:
         }
     }
 
-    [[nodiscard]] auto last_frame_count() const -> size_t override
+    [[nodiscard]] auto wal_size() const -> size_t override
     {
         // NOTE: This value is used to determine if an automatic checkpoint should be run. It doesn't need to
         //       be totally up-to-date. It must, however, be less than or equal to the actual maximum frame.
         return m_hdr.max_frame;
     }
 
-    [[nodiscard]] auto db_size() const -> uint32_t override
+    [[nodiscard]] auto db_size() const -> size_t override
     {
         CALICODB_EXPECT_GE(m_reader_lock, 0);
         return m_hdr.page_count;
@@ -1144,7 +1147,7 @@ private:
     Env *const m_env;
     File *const m_db;
     Logger *const m_log;
-    Stat *const m_stat;
+    Stats *const m_stat;
     BusyHandler *const m_busy;
 
     uint32_t m_min_frame = 0;
@@ -1161,17 +1164,27 @@ private:
     bool m_lock_error = false;
 };
 
-WalImpl::WalImpl(const Parameters &param, UserPtr<File> wal_file)
-    : m_index(m_hdr, param.lock_mode == Options::kLockNormal ? param.db_file : nullptr),
-      m_wal_name(param.filename),
-      m_sync_mode(param.sync_mode),
-      m_lock_mode(param.lock_mode),
-      m_wal(move(wal_file)),
-      m_env(param.env),
-      m_db(param.db_file),
-      m_log(param.info_log),
-      m_stat(param.stat),
-      m_busy(param.busy)
+auto WalImpl::open(const WalOptions &) -> Status
+{
+    CALICODB_EXPECT_FALSE(m_wal);
+    UserPtr<File> file;
+    auto s = m_env->new_file(m_wal_name, Env::kCreate, file.ref());
+    if (s.is_ok()) {
+        m_wal = move(file);
+    }
+    return s;
+}
+
+WalImpl::WalImpl(const WalOptionsExtra &options)
+    : m_index(m_hdr, options.lock_mode == Options::kLockNormal ? options.db : nullptr),
+      m_wal_name(options.filename),
+      m_sync_mode(options.sync_mode),
+      m_lock_mode(options.lock_mode),
+      m_env(options.env),
+      m_db(options.db),
+      m_log(options.info_log),
+      m_stat(options.stat),
+      m_busy(options.busy)
 {
 }
 
@@ -1205,7 +1218,7 @@ auto WalImpl::rewrite_checksums(uint32_t end) -> Status
     if (!s.is_ok()) {
         return s;
     }
-    m_stat->counters[Stat::kReadWal] += frame_size;
+    m_stat->read_wal += frame_size;
 
     m_hdr.frame_cksum[0] = get_u32(frame.ptr());
     m_hdr.frame_cksum[1] = get_u32(frame.ptr() + sizeof(uint32_t));
@@ -1219,7 +1232,7 @@ auto WalImpl::rewrite_checksums(uint32_t end) -> Status
         if (!s.is_ok()) {
             break;
         }
-        m_stat->counters[Stat::kReadWal] += frame_size;
+        m_stat->read_wal += frame_size;
 
         WalFrameHdr hdr;
         hdr.pgno = get_u32(frame.ptr());
@@ -1231,7 +1244,7 @@ auto WalImpl::rewrite_checksums(uint32_t end) -> Status
         if (!s.is_ok()) {
             break;
         }
-        m_stat->counters[Stat::kWriteWal] += sizeof(buffer);
+        m_stat->write_wal += sizeof(buffer);
     }
     return s;
 }
@@ -1265,7 +1278,7 @@ auto WalImpl::recover_index() -> Status
         if (!s.is_ok()) {
             goto cleanup;
         }
-        m_stat->counters[Stat::kReadWal] += sizeof(header);
+        m_stat->read_wal += sizeof(header);
 
         const auto magic = get_u32(&header[0]);
         if (magic != kWalMagic) {
@@ -1307,7 +1320,7 @@ auto WalImpl::recover_index() -> Status
                     if (!s.is_ok()) {
                         goto cleanup;
                     }
-                    m_stat->counters[Stat::kReadWal] += frame_size;
+                    m_stat->read_wal += frame_size;
 
                     WalFrameHdr hdr;
                     if (decode_frame(frame.ptr(), hdr)) {
@@ -1409,13 +1422,13 @@ auto WalImpl::decode_frame(const char *frame, WalFrameHdr &out) -> int
     return 0;
 }
 
-auto WalImpl::read(Id page_id, uint32_t page_size, char *&page) -> Status
+auto WalImpl::read(uint32_t page_id, uint32_t page_size, char *&page) -> Status
 {
     CALICODB_EXPECT_GE(m_reader_lock, 0);
     auto *ptr = exchange(page, nullptr);
     if (m_reader_lock && m_hdr.max_frame) {
         uint32_t frame;
-        auto s = m_index.lookup(page_id.value, m_min_frame, frame);
+        auto s = m_index.lookup(page_id, m_min_frame, frame);
         if (!s.is_ok() || frame == 0) {
             // Either there was a low-level I/O error, or the page is not in the WAL.
             return s;
@@ -1425,7 +1438,7 @@ auto WalImpl::read(Id page_id, uint32_t page_size, char *&page) -> Status
             minval(page_size, m_page_size),
             ptr);
         if (s.is_ok()) {
-            m_stat->counters[Stat::kReadWal] += m_page_size;
+            m_stat->read_wal += m_page_size;
             page = ptr;
         }
         return s;
@@ -1433,15 +1446,14 @@ auto WalImpl::read(Id page_id, uint32_t page_size, char *&page) -> Status
     return Status::ok();
 }
 
-auto WalImpl::write(PageRef *first_ref, uint32_t page_size, size_t db_size) -> Status
+auto WalImpl::write(Pages &writer, uint32_t page_size, size_t db_size) -> Status
 {
     CALICODB_EXPECT_TRUE(m_writer_lock);
-    CALICODB_EXPECT_NE(first_ref, nullptr);
+    CALICODB_EXPECT_NE(writer.value(), nullptr);
 
     const auto frame_size = WalFrameHdr::kSize + page_size;
     const auto is_commit = db_size > 0;
     volatile auto *live = m_index.header();
-    auto *dirty = &first_ref->dirty_hdr;
     uint32_t first_frame = 0;
 
     // Check if the WAL's copy of the index header differs from what is on the first index page.
@@ -1481,10 +1493,10 @@ auto WalImpl::write(PageRef *first_ref, uint32_t page_size, size_t db_size) -> S
 
         s = m_wal->write(0, Slice(header, sizeof(header)));
         if (s.is_ok()) {
-            m_stat->counters[Stat::kWriteWal] += sizeof(header);
+            m_stat->write_wal += sizeof(header);
 
             if (m_sync_mode != Options::kSyncOff) {
-                ++m_stat->counters[Stat::kSyncWal];
+                ++m_stat->sync_wal;
                 s = m_wal->sync();
             }
         }
@@ -1498,29 +1510,32 @@ auto WalImpl::write(PageRef *first_ref, uint32_t page_size, size_t db_size) -> S
     // Write each dirty page to the WAL.
     auto next_frame = m_hdr.max_frame + 1;
     auto offset = frame_offset(next_frame, m_page_size);
-    for (auto *p = dirty; p; p = p->dirty) {
-        auto *ref = p->get_page_ref();
+    while (writer.value()) {
+        auto ref = *writer.value();
         uint32_t frame;
+        // After this call, writer.value() will contain the next page reference that
+        // needs to be written, or nullptr if ref is the last page.
+        writer.next();
 
         // Condition ensures that if this set of pages completes a transaction, then
         // the last frame will always be appended, even if another copy of the page
         // exists in the WAL for this transaction. This frame needs to have its
         // "db_size" field set to mark that it is a commit frame.
-        if (first_frame && (p->dirty || !is_commit)) {
+        if (first_frame && (writer.value() || !is_commit)) {
             // Check to see if the page has been written to the WAL already by the
             // current transaction. If so, overwrite it and indicate that checksums
             // need to be recomputed from here on commit. If not, fall through and
             // append a new frame containing the page.
-            s = m_index.lookup(ref->page_id.value, first_frame, frame);
+            s = m_index.lookup(ref.page_id, first_frame, frame);
             if (s.is_ok() && frame) {
                 if (m_redo_cksum == 0 || frame < m_redo_cksum) {
                     m_redo_cksum = frame;
                 }
                 s = m_wal->write(frame_offset(frame, m_page_size) + WalFrameHdr::kSize,
-                                 Slice(ref->data, m_page_size));
+                                 Slice(ref.data, m_page_size));
                 if (s.is_ok()) {
                     // Overwrite was successful, skip the code that appends a new frame.
-                    m_stat->counters[Stat::kWriteWal] += m_page_size;
+                    m_stat->write_wal += m_page_size;
                     continue;
                 }
             }
@@ -1534,14 +1549,14 @@ auto WalImpl::write(PageRef *first_ref, uint32_t page_size, size_t db_size) -> S
         // It will be cleared below when the page ID-to-frame number mapping is
         // created for the new frame.
         WalFrameHdr header;
-        header.pgno = ref->page_id.value;
-        header.db_size = p->dirty == nullptr ? static_cast<uint32_t>(db_size) : 0;
+        header.pgno = ref.page_id;
+        header.db_size = writer.value() ? 0 : static_cast<uint32_t>(db_size);
 
         CALICODB_EXPECT_EQ(offset, frame_offset(next_frame, m_page_size));
-        s = write_frame(header, ref->data, offset);
+        s = write_frame(header, ref.data, offset);
 
-        m_stat->counters[Stat::kWriteWal] += frame_size;
-        ref->set_flag(PageRef::kAppend);
+        m_stat->write_wal += frame_size;
+        *ref.flag |= PageRef::kAppend;
         offset += frame_size;
         ++next_frame;
     }
@@ -1553,17 +1568,17 @@ auto WalImpl::write(PageRef *first_ref, uint32_t page_size, size_t db_size) -> S
         }
     }
     if (is_commit && m_sync_mode == Options::kSyncFull) {
-        ++m_stat->counters[Stat::kSyncWal];
+        ++m_stat->sync_wal;
         s = m_wal->sync();
     }
 
     next_frame = m_hdr.max_frame + 1;
-    for (auto *p = dirty; s.is_ok() && p; p = p->dirty) {
-        auto *ref = p->get_page_ref();
-        if (ref->get_flag(PageRef::kAppend)) {
-            s = m_index.assign(ref->page_id.value, next_frame++);
+    for (writer.reset(); s.is_ok() && writer.value(); writer.next()) {
+        auto ref = *writer.value();
+        if (*ref.flag & PageRef::kAppend) {
+            s = m_index.assign(ref.page_id, next_frame++);
             if (s.is_ok()) {
-                ref->clear_flag(PageRef::kAppend);
+                *ref.flag &= ~PageRef::kAppend;
             }
         }
     }
@@ -1571,10 +1586,6 @@ auto WalImpl::write(PageRef *first_ref, uint32_t page_size, size_t db_size) -> S
         m_hdr.page_size = static_cast<uint16_t>(m_page_size);
         m_hdr.max_frame = next_frame - 1;
         if (is_commit) {
-            // If this is a commit, then at least 1 frame (the commit frame) must be written. The
-            // pager has logic to make sure of this (the root page is forcibly written if no pages
-            // are dirty).
-            CALICODB_EXPECT_TRUE(dirty);
             m_hdr.page_count = static_cast<uint32_t>(db_size);
             ++m_hdr.change;
             write_index_header();
@@ -1615,7 +1626,7 @@ auto WalImpl::checkpoint(bool reset, char *scratch, uint32_t scratch_size) -> St
     if (changed) {
         m_hdr = {};
     }
-    finish_writer();
+    finish_write();
     if (m_ckpt_lock) {
         unlock_exclusive(kCheckpointLock, 1);
         m_ckpt_lock = false;
@@ -1690,7 +1701,7 @@ auto WalImpl::transfer_contents(bool reset, char *scratch) -> Status
             start_frame = info->backfill;
             info->backfill_attempted = max_safe_frame;
             if (sync_on_ckpt) {
-                ++m_stat->counters[Stat::kSyncWal];
+                ++m_stat->sync_wal;
                 s = m_wal->sync();
             }
 
@@ -1704,11 +1715,11 @@ auto WalImpl::transfer_contents(bool reset, char *scratch) -> Status
                     entry.key > max_pgno) {
                     continue;
                 }
-                m_stat->counters[Stat::kReadWal] += m_page_size;
+                m_stat->read_wal += m_page_size;
                 s = m_wal->read_exact(frame_offset(entry.value, m_page_size) + WalFrameHdr::kSize,
                                       m_page_size, scratch);
                 if (s.is_ok()) {
-                    m_stat->counters[Stat::kWriteDB] += m_page_size;
+                    m_stat->write_db += m_page_size;
                     s = m_db->write((entry.key - 1) * m_page_size,
                                     Slice(scratch, m_page_size));
                 }
@@ -1717,7 +1728,7 @@ auto WalImpl::transfer_contents(bool reset, char *scratch) -> Status
                 if (max_safe_frame == m_hdr.max_frame) {
                     s = m_db->resize(m_hdr.page_count * m_page_size);
                     if (s.is_ok() && sync_on_ckpt) {
-                        ++m_stat->counters[Stat::kSyncDB];
+                        ++m_stat->sync_db;
                         s = m_db->sync();
                     }
                 }
@@ -1755,19 +1766,52 @@ auto WalImpl::transfer_contents(bool reset, char *scratch) -> Status
 
 } // namespace
 
-auto Wal::open(const Parameters &param, Wal *&wal_out) -> Status
+auto new_default_wal(const WalOptionsExtra &options) -> Wal *
 {
-    UserPtr<File> wal_file;
-    auto s = param.env->new_file(param.filename, Env::kCreate, wal_file.ref());
-    if (s.is_ok()) {
-        wal_out = Mem::new_object<WalImpl>(param, move(wal_file));
-        if (wal_out == nullptr) {
-            s = Status::no_memory();
-        }
-    }
-    return s;
+    return Mem::new_object<WalImpl>(options);
 }
 
+Wal::Pages::Pages() = default;
+
+Wal::Pages::~Pages() = default;
+
+Wal::Wal() = default;
+
 Wal::~Wal() = default;
+
+WalPagesImpl::WalPagesImpl(PageRef &first)
+    : m_first(&first),
+      m_itr(m_first)
+{
+}
+
+WalPagesImpl::~WalPagesImpl() = default;
+
+auto WalPagesImpl::value() const -> Data *
+{
+    if (m_itr) {
+        m_data = {
+            m_itr->data,
+            reinterpret_cast<uint16_t *>(&m_itr->flag),
+            m_itr->page_id.value,
+        };
+        return &m_data;
+    }
+    return nullptr;
+}
+
+auto WalPagesImpl::next() -> void
+{
+    if (m_itr) {
+        // Move to the next dirty page in the transient dirty list.
+        auto *next = m_itr->dirty_hdr.dirty;
+        m_itr = next ? next->get_page_ref() : nullptr;
+    }
+}
+
+auto WalPagesImpl::reset() -> void
+{
+    m_itr = m_first;
+}
 
 } // namespace calicodb

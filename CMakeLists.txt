@@ -80,11 +80,14 @@ target_sources(calicodb
                 src/db_impl.h
                 src/encoding.h
                 src/env.cpp
+                src/env_posix.cpp
                 src/freelist.cpp
                 src/freelist.h
                 src/header.cpp
                 src/header.h
                 src/internal.h
+                src/internal_string.cpp
+                src/internal_string.h
                 src/list.h
                 src/logging.cpp
                 src/logging.h
@@ -102,8 +105,6 @@ target_sources(calicodb
                 src/stat.h
                 src/status.cpp
                 src/status_internal.h
-                src/internal_string.cpp
-                src/internal_string.h
                 src/temp.cpp
                 src/temp.h
                 src/tree.cpp
@@ -114,7 +115,7 @@ target_sources(calicodb
                 src/unique_ptr.h
                 src/utility.h
                 src/wal.cpp
-                src/wal.h
+                src/wal_internal.h
                 port/port.h
         $<$<VERSION_GREATER:CMAKE_VERSION,3.2>:PUBLIC>
             include/calicodb/config.h
@@ -124,7 +125,8 @@ target_sources(calicodb
             include/calicodb/options.h
             include/calicodb/slice.h
             include/calicodb/status.h
-            include/calicodb/tx.h)
+            include/calicodb/tx.h
+            include/calicodb/wal.h)
 target_include_directories(calicodb
         PUBLIC $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/include>
                $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>

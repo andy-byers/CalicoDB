@@ -40,6 +40,8 @@ struct PageRef {
     Id page_id;
     uint16_t refs;
 
+    // NOTE: Flag must have underlying type uint16_t. This field is accessed using a
+    //       pointer to uint16_t.
     enum Flag : uint16_t {
         kNormal = 0,
         kCached = 1,

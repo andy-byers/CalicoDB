@@ -1115,7 +1115,7 @@ auto Tree::resolve_overflow(TreeCursor &c) -> Status
         } else {
             s = split_nonroot(c);
         }
-        ++m_stat->counters[Stat::kSMOCount];
+        ++m_stat->tree_smo;
     }
     return s;
 }
@@ -1288,7 +1288,7 @@ auto Tree::resolve_underflow(TreeCursor &c) -> Status
         auto &parent = c.m_node_path[c.m_level - 1];
         const auto pivot_idx = c.m_idx_path[c.m_level - 1];
         s = fix_nonroot(c, parent, pivot_idx);
-        ++m_stat->counters[Stat::kSMOCount];
+        ++m_stat->tree_smo;
     }
     return s;
 }
@@ -1583,7 +1583,7 @@ auto Tree::fix_root(TreeCursor &c) -> Status
     return s;
 }
 
-Tree::Tree(Pager &pager, Stat &stat, char *scratch, Id root_id, String name)
+Tree::Tree(Pager &pager, Stats &stat, char *scratch, Id root_id, String name)
     : list_entry{Slice(name), this, nullptr, nullptr},
       m_stat(&stat),
       m_node_scratch(scratch + pager.page_size()),

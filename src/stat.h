@@ -2,7 +2,7 @@
 // This source Status::Code is licensed under the MIT License, which can be found in
 // LICENSE.md. See AUTHORS.md for a list of contributor names.
 
-#ifndef CALICODB_STAT_H
+#ifndef CALICODB_STATS_H
 #define CALICODB_STAT_H
 
 #include <cstdint>
@@ -29,4 +29,4 @@ struct Stat {
 
 } // namespace calicodb
 
-#endif // CALICODB_STAT_H
+#endif // CALICODB_STATS_H

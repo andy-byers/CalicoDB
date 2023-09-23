@@ -12,7 +12,7 @@ namespace calicodb
 {
 
 struct BucketOptions;
-struct Stat;
+struct Stats;
 
 class TxImpl
     : public Tx,
@@ -22,7 +22,7 @@ public:
     struct Parameters {
         const Status *status;
         Pager *pager;
-        Stat *stat;
+        Stats *stat;
         bool writable;
     };
     explicit TxImpl(const Parameters &param);

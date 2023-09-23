@@ -68,9 +68,10 @@ auto DBImpl::open(const Options &sanitized) -> Status
         m_wal_filename.c_str(),
         m_file.get(),
         m_env,
+        sanitized.wal,
         m_log,
         &m_status,
-        &m_stat,
+        &m_stats,
         m_busy,
         static_cast<uint32_t>(sanitized.page_size),
         sanitized.cache_size,
@@ -106,6 +107,7 @@ DBImpl::DBImpl(Parameters param)
       m_owns_env(param.original.env != param.sanitized.env &&
                  param.sanitized.env != &default_env())
 {
+    CALICODB_EXPECT_NE(m_env, nullptr);
 }
 
 DBImpl::~DBImpl()
@@ -173,41 +175,16 @@ auto DBImpl::destroy(const Options &options, const char *filename) -> Status
     return s;
 }
 
-auto DBImpl::get_property(const Slice &name, CALICODB_STRING *value_out) const -> Status
+auto DBImpl::get_property(const Slice &name, void *value_out) const -> Status
 {
     static constexpr char kBasePrefix[] = "calicodb.";
     if (name.starts_with(kBasePrefix)) {
         const auto prop = name.range(std::strlen(kBasePrefix));
-        String temp;
-
         if (prop == "stats") {
-            int rc = 0;
             if (value_out) {
-                rc = append_format_string(
-                    temp,
-                    "Name               Value\n"
-                    "------------------------\n"
-                    "DB read(MB)   %10.4f\n"
-                    "DB write(MB)  %10.4f\n"
-                    "DB sync       %10llu\n"
-                    "WAL read(MB)  %10.4f\n"
-                    "WAL write(MB) %10.4f\n"
-                    "WAL sync      %10llu\n"
-                    "SMO count     %10llu\n"
-                    "Cache hit %%   %10.4f\n",
-                    static_cast<double>(m_stat.counters[Stat::kReadDB]) / 1'048'576.0,
-                    static_cast<double>(m_stat.counters[Stat::kWriteDB]) / 1'048'576.0,
-                    m_stat.counters[Stat::kSyncDB],
-                    static_cast<double>(m_stat.counters[Stat::kReadWal]) / 1'048'576.0,
-                    static_cast<double>(m_stat.counters[Stat::kWriteWal]) / 1'048'576.0,
-                    m_stat.counters[Stat::kSyncWal],
-                    m_stat.counters[Stat::kSMOCount],
-                    static_cast<double>(m_stat.counters[Stat::kCacheHits]) /
-                        static_cast<double>(m_stat.counters[Stat::kCacheHits] +
-                                            m_stat.counters[Stat::kCacheMisses]));
-                value_out->append(temp.data(), temp.size());
+                *static_cast<Stats *>(value_out) = m_stats;
             }
-            return rc ? Status::no_memory() : Status::ok();
+            return Status::ok();
         }
     }
     return Status::not_found();
@@ -249,7 +226,7 @@ auto DBImpl::prepare_tx(bool write, TxType *&tx_out) const -> Status
         m_tx = new (std::nothrow) TxImpl(TxImpl::Parameters{
             &m_status,
             m_pager.get(),
-            &m_stat,
+            &m_stats,
             write,
         });
         if (m_tx && m_tx->m_schema.cursor()) {

@@ -10,7 +10,7 @@
 #include "temp.h"
 #include "test.h"
 #include "unique_ptr.h"
-#include "wal.h"
+#include "wal_internal.h"
 #include <filesystem>
 
 namespace calicodb::test
@@ -22,7 +22,7 @@ class BufmgrTests : public testing::Test
 public:
     static constexpr uint32_t kCacheSize = 1'000;
     Dirtylist m_dirtylist;
-    Stat m_stat;
+    Stats m_stat;
     Bufmgr mgr;
 
     explicit BufmgrTests()
@@ -259,7 +259,7 @@ protected:
     Pager *m_pager = nullptr;
     File *m_file = nullptr;
     Status m_status;
-    Stat m_stat;
+    Stats m_stat;
 
     explicit PagerTests()
         : m_env(new FakeEnv())
@@ -304,6 +304,7 @@ protected:
             "wal",
             file,
             m_env,
+            nullptr,
             nullptr,
             &m_status,
             &m_stat,
@@ -663,24 +664,27 @@ TEST_F(PagerTests, DeathTest)
 #endif // NDEBUG
 
 using WalComponents = std::tuple<Env *, Wal *, File *>;
-using MakeWal = WalComponents (*)(Wal::Parameters);
+using MakeWal = WalComponents (*)(WalOptionsExtra);
 
-auto make_temporary_wal(Wal::Parameters param) -> WalComponents
+static Stats s_stat;
+
+auto make_temporary_wal(WalOptionsExtra options) -> WalComponents
 {
-    param.env = new_temp_env(kMaxPageSize);
-    EXPECT_NE(param.env, nullptr);
-    EXPECT_OK(param.env->new_file("db", Env::kCreate | Env::kReadWrite,
-                                  param.db_file));
-    return {param.env, new_temp_wal(param), param.db_file};
+    options.env = new_temp_env(kMaxPageSize);
+    EXPECT_NE(options.env, nullptr);
+    EXPECT_OK(options.env->new_file("db", Env::kCreate | Env::kReadWrite,
+                                    options.db));
+    return {options.env, new_temp_wal(options), options.db};
 }
 
-auto make_persistent_wal(Wal::Parameters param) -> WalComponents
+auto make_persistent_wal(WalOptionsExtra options) -> WalComponents
 {
-    Wal *wal;
-    EXPECT_OK(param.env->new_file("db", Env::kCreate | Env::kReadWrite,
-                                  param.db_file));
-    EXPECT_OK(Wal::open(param, wal));
-    return {param.env, wal, param.db_file};
+    EXPECT_OK(options.env->new_file("db", Env::kCreate | Env::kReadWrite,
+                                    options.db));
+    auto *wal = new_default_wal(options);
+    EXPECT_NE(wal, nullptr);
+    EXPECT_OK(wal->open(reinterpret_cast<const WalOptions &>(options)));
+    return {options.env, wal, options.db};
 }
 
 class WalTests : public testing::TestWithParam<MakeWal>
@@ -690,7 +694,7 @@ public:
     File *m_db_file = nullptr;
     Env *m_env = nullptr;
     Wal *m_wal = nullptr;
-    Stat m_stat;
+    Stats m_stat;
 
     std::default_random_engine m_rng;
     std::vector<uint32_t> m_temp;
@@ -715,12 +719,12 @@ public:
 
     auto SetUp() -> void override
     {
-        const Wal::Parameters param = {
-            m_filename.c_str(),
-            &default_env(),
+        const WalOptionsExtra param = {
+            {m_filename.c_str(),
+             &default_env(),
+             nullptr,
+             &s_stat},
             nullptr,
-            nullptr,
-            &m_stat,
             nullptr,
             Options::kSyncNormal,
             Options::kLockNormal,
@@ -733,7 +737,7 @@ public:
         m_wal->rollback(
             [](auto *object, auto page_id) {
                 auto &self = *static_cast<WalTests *>(object);
-                const auto i = page_id.as_index();
+                const auto i = page_id - 1;
                 self.m_temp.at(i) = self.m_perm.at(i);
             },
             this);
@@ -794,9 +798,10 @@ public:
                 p->dirty = p->next_entry == dirtylist.end() ? nullptr : p->next_entry;
             }
         }
+        WalPagesImpl pg(*dirty->get_page_ref());
         EXPECT_NE(dirty, nullptr);
         auto s = m_wal->write(
-            dirty->get_page_ref(),
+            pg,
             TEST_PAGE_SIZE,
             options.truncate ? options.truncate
                              : m_temp.size() * options.commit);
@@ -816,7 +821,7 @@ public:
         char buffer[TEST_PAGE_SIZE] = {};
         for (size_t i = 0; i < n; ++i) {
             char *page = buffer;
-            auto s = m_wal->read(Id::from_index(i), TEST_PAGE_SIZE, page);
+            auto s = m_wal->read(static_cast<uint32_t>(i + 1), TEST_PAGE_SIZE, page);
             if (!s.is_ok()) {
                 return s;
             } else if (page) {
@@ -844,7 +849,7 @@ public:
         char buffer[TEST_PAGE_SIZE];
 
         char *page = buffer;
-        ASSERT_OK(m_wal->read(id, TEST_PAGE_SIZE, page));
+        ASSERT_OK(m_wal->read(id.value, TEST_PAGE_SIZE, page));
         ASSERT_EQ(page, nullptr);
     }
 
@@ -852,10 +857,10 @@ public:
     auto with_reader(const Callback &cb) -> Status
     {
         bool _;
-        auto s = m_wal->start_reader(_);
+        auto s = m_wal->start_read(_);
         if (s.is_ok()) {
             s = cb();
-            m_wal->finish_reader();
+            m_wal->finish_read();
         }
         return s;
     }
@@ -864,10 +869,10 @@ public:
     auto with_writer(const Callback &cb) -> Status
     {
         return with_reader([this, &cb] {
-            auto s = m_wal->start_writer();
+            auto s = m_wal->start_write();
             if (s.is_ok()) {
                 s = cb();
-                m_wal->finish_writer();
+                m_wal->finish_write();
             }
             return s;
         });
