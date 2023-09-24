@@ -717,10 +717,10 @@ auto compute_checksum(const Slice &in, const uint32_t *initial, uint32_t *out)
 class WalImpl : public Wal
 {
 public:
-    explicit WalImpl(const WalOptionsExtra &options);
+    explicit WalImpl(const WalOptionsExtra &options, const char *filename);
     ~WalImpl() override;
 
-    auto open(const WalOptions &options) -> Status override;
+    auto open(const WalOptions &options, const char *filename) -> Status override;
 
     auto read(uint32_t page_id, uint32_t page_size, char *&page) -> Status override;
     auto write(Pages &writer, uint32_t page_size, size_t db_size) -> Status override;
@@ -1163,7 +1163,7 @@ private:
     bool m_lock_error = false;
 };
 
-auto WalImpl::open(const WalOptions &) -> Status
+auto WalImpl::open(const WalOptions &, const char *) -> Status
 {
     CALICODB_EXPECT_FALSE(m_wal);
     UserPtr<File> file;
@@ -1174,9 +1174,9 @@ auto WalImpl::open(const WalOptions &) -> Status
     return s;
 }
 
-WalImpl::WalImpl(const WalOptionsExtra &options)
+WalImpl::WalImpl(const WalOptionsExtra &options, const char *filename)
     : m_index(m_hdr, options.lock_mode == Options::kLockNormal ? options.db : nullptr),
-      m_wal_name(options.filename),
+      m_wal_name(filename),
       m_sync_mode(options.sync_mode),
       m_lock_mode(options.lock_mode),
       m_env(options.env),
@@ -1765,9 +1765,9 @@ auto WalImpl::transfer_contents(bool reset, char *scratch) -> Status
 
 } // namespace
 
-auto new_default_wal(const WalOptionsExtra &options) -> Wal *
+auto new_default_wal(const WalOptionsExtra &options, const char *filename) -> Wal *
 {
-    return Mem::new_object<WalImpl>(options);
+    return Mem::new_object<WalImpl>(options, filename);
 }
 
 Wal::Pages::Pages() = default;

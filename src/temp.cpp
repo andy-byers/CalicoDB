@@ -356,7 +356,7 @@ public:
         CALICODB_EXPECT_EQ(m_table.occupied, 0);
     }
 
-    auto open(const WalOptions &) -> Status override
+    auto open(const WalOptions &, const char *) -> Status override
     {
         return Status::ok();
     }

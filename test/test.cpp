@@ -7,6 +7,7 @@
 #include "calicodb/cursor.h"
 #include "common.h"
 #include "logging.h"
+#include <fstream>
 
 namespace calicodb
 {
@@ -87,14 +88,70 @@ auto write_string_to_file(Env &env, const char *filename, const std::string &buf
     delete file;
 }
 
+// From john's answer to https://stackoverflow.com/questions/11826554
+class NullBuffer : public std::streambuf
+{
+public:
+    auto overflow(int c) -> int
+    {
+        return c;
+    }
+} g_null_buffer;
+
+std::ostream g_null_stream(&g_null_buffer);
+std::ofstream g_file_stream;
+
+// Write extra messages to this stream during testing.
+std::ostream *g_logger = &g_null_stream;
+
 } // namespace test
 
 } // namespace calicodb
 
+// Indicate where the driver code encountered a problem. Additional information is written
+// to *g_logger.
+#define REPORT_DRIVER_ERROR std::cerr << "driver error (" __FILE__ << ':' << __LINE__ << ")\n"
+
 auto main(int argc, char **argv) -> int
 {
+    using namespace calicodb;
+    using namespace calicodb::test;
     ::testing::InitGoogleTest(&argc, argv);
-    (void)calicodb::configure(calicodb::kSetAllocator,
-                              calicodb::DebugAllocator::config());
-    return RUN_ALL_TESTS();
+
+#define STR(name) #name
+#define XSTR(name) STR(name)
+    static constexpr Slice kLogFile(XSTR(CALICODB_TEST_LOG_FILE));
+    if (kLogFile.starts_with("STDOUT")) {
+        g_logger = &std::cout;
+    } else if (kLogFile.starts_with("STDERR")) {
+        g_logger = &std::cerr;
+    } else {
+        g_file_stream.open(kLogFile.to_string(), std::ios::app);
+        if (g_file_stream.is_open()) {
+            g_logger = &g_file_stream;
+        }
+    }
+
+    TEST_LOG << "Running \"" << argv[0] << "\"...\n";
+
+    int rc = 0;
+    auto s = configure(kSetAllocator, DebugAllocator::config());
+    if (!s.is_ok()) {
+        TEST_LOG << "failed to set debug allocator: " << s.message() << '\n';
+        REPORT_DRIVER_ERROR;
+        rc = -1;
+    }
+    if (rc == 0) {
+        rc = RUN_ALL_TESTS(); // Run the registered tests.
+    }
+    if (rc == 0 && DebugAllocator::bytes_used() > 0) {
+        // Only report leaks if the test passed. There will likely be a leak if an
+        // ASSERT_*() fired.
+        TEST_LOG << "error: test leaked " << DebugAllocator::bytes_used() << " byte(s)\n";
+        REPORT_DRIVER_ERROR;
+        rc = -1;
+    }
+
+    TEST_LOG << '[' << (rc ? "FAIL" : "PASS") << "]\n";
+    return rc;
 }

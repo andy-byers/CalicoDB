@@ -116,24 +116,24 @@ public:
         EXPECT_EQ(DebugAllocator::bytes_used(), 0);
     }
 
-    auto tree_put(CursorImpl &c, const std::string &k, const std::string &v) -> Status
+    auto tree_put(CursorImpl &c, const std::string &k, const std::string &v) const -> Status
     {
         return m_tree->put(cursor_internal(c),
                            to_slice(k),
                            Slice(v.c_str(), v.size()));
     }
 
-    auto tree_erase(CursorImpl &c, const std::string &k) -> Status
+    auto tree_erase(CursorImpl &c, const std::string &k) const -> Status
     {
         return m_tree->erase(cursor_internal(c), to_slice(k));
     }
 
-    auto cursor_find(const std::string &k) -> void
+    auto cursor_find(const std::string &k) const -> void
     {
         m_c->find(k);
     }
 
-    auto cursor_seek(const std::string &k) -> void
+    auto cursor_seek(const std::string &k) const -> void
     {
         m_c->seek(k);
     }

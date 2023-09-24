@@ -162,9 +162,9 @@ public:
             {
                 if (m_env->should_next_syscall_fail()) {
                     if (m_env->m_drop_unsynced) {
-                        std::cout << "Loading "
-                                  << static_cast<double>(m_backup.size()) / 1'024.0
-                                  << " KiB backup\n";
+                        TEST_LOG << "Loading "
+                                 << static_cast<double>(m_backup.size()) / 1'024.0
+                                 << " KiB backup\n";
                         load_from_backup();
                     }
                     return injected_fault();
@@ -227,7 +227,6 @@ protected:
     ~CrashTests() override
     {
         delete m_env;
-        EXPECT_EQ(DebugAllocator::bytes_used(), 0);
     }
 
     static constexpr size_t kNumRecords = 64;
@@ -484,9 +483,9 @@ protected:
         } else {
             fault_type_str = "kNoFaults";
         }
-        std::cout << "CrashTests::Operations({\n  .fault_type = " << fault_type_str
-                  << ",\n  .auto_checkpoint = " << std::boolalpha << param.auto_checkpoint
-                  << ",\n})\n\n";
+        TEST_LOG << "CrashTests::Operations({\n  .fault_type = " << fault_type_str
+                 << ",\n  .auto_checkpoint = " << std::boolalpha << param.auto_checkpoint
+                 << ",\n})\n\n";
 
         Options options;
         options.env = m_env;
@@ -544,13 +543,13 @@ protected:
             });
         }
 
-        std::cout << " Location       | Hits per iteration\n";
-        std::cout << "----------------|--------------------\n";
-        std::cout << " kOpenDB        | " << std::setw(18) << static_cast<double>(src_counters[kSrcOpen]) / kNumIterations << '\n';
-        std::cout << " kUpdateDB      | " << std::setw(18) << static_cast<double>(src_counters[kSrcUpdate]) / kNumIterations << '\n';
-        std::cout << " kViewDB        | " << std::setw(18) << static_cast<double>(src_counters[kSrcView]) / kNumIterations << '\n';
-        std::cout << " kSrcCheckpoint | " << std::setw(18) << static_cast<double>(src_counters[kSrcCheckpoint]) / kNumIterations << '\n';
-        std::cout << '\n';
+        TEST_LOG << " Location       | Hits per iteration\n";
+        TEST_LOG << "----------------|--------------------\n";
+        TEST_LOG << " kOpenDB        | " << std::setw(18) << static_cast<double>(src_counters[kSrcOpen]) / kNumIterations << '\n';
+        TEST_LOG << " kUpdateDB      | " << std::setw(18) << static_cast<double>(src_counters[kSrcUpdate]) / kNumIterations << '\n';
+        TEST_LOG << " kViewDB        | " << std::setw(18) << static_cast<double>(src_counters[kSrcView]) / kNumIterations << '\n';
+        TEST_LOG << " kSrcCheckpoint | " << std::setw(18) << static_cast<double>(src_counters[kSrcCheckpoint]) / kNumIterations << '\n';
+        TEST_LOG << '\n';
     }
 
     struct OpenCloseParameters {
@@ -559,6 +558,8 @@ protected:
     };
     auto run_open_close_test(const OpenCloseParameters &param) -> void
     {
+        TEST_LOG << "CrashTests.OpenClose_*\n";
+
         Options options;
         options.env = m_env;
 
@@ -590,7 +591,7 @@ protected:
             delete db;
         }
 
-        std::cout << "Tries per iteration: " << static_cast<double>(tries) / static_cast<double>(param.num_iterations) << '\n';
+        TEST_LOG << "Tries per iteration: " << static_cast<double>(tries) / static_cast<double>(param.num_iterations) << '\n';
     }
 
     struct CursorReadParameters {
@@ -598,6 +599,8 @@ protected:
     };
     auto run_cursor_read_test(const CursorReadParameters &param) -> void
     {
+        TEST_LOG << "CrashTests.CursorRead_*\n";
+
         Options options;
         options.env = m_env;
         options.sync_mode = Options::kSyncFull;
@@ -609,12 +612,12 @@ protected:
             ASSERT_OK(ModelDB::open(options, m_filename.c_str(), m_store, db));
             ASSERT_OK(db->run(WriteOptions(), [](auto &tx) {
                 TestCursor c, keep_open;
-                auto s = test_create_and_open_bucket(tx, BucketOptions(), "BUCKET", c);
+                auto s = test_create_and_open_bucket(tx, BucketOptions(), "b", c);
                 if (!s.is_ok()) {
                     return s;
                 }
                 if (s.is_ok()) {
-                    s = test_open_bucket(tx, "BUCKET", keep_open);
+                    s = test_open_bucket(tx, "b", keep_open);
                 }
                 if (!s.is_ok()) {
                     return s;
@@ -637,7 +640,7 @@ protected:
             run_until_completion([&db] {
                 return db->run(ReadOptions(), [](const auto &tx) {
                     TestCursor c;
-                    auto s = test_open_bucket(tx, "BUCKET", c);
+                    auto s = test_open_bucket(tx, "b", c);
                     if (!s.is_ok()) {
                         return s;
                     }
@@ -683,6 +686,8 @@ protected:
 
     auto run_cursor_modify_test(const OperationsParameters &param) -> void
     {
+        TEST_LOG << "CrashTests.CursorModify_*\n";
+
         Options options;
         options.env = m_env;
         options.sync_mode = param.test_sync_mode
@@ -709,7 +714,7 @@ protected:
             run_until_completion([&db] {
                 return db->run(WriteOptions(), [](auto &tx) {
                     TestCursor c;
-                    auto s = test_create_and_open_bucket(tx, BucketOptions(), "BUCKET", c);
+                    auto s = test_create_and_open_bucket(tx, BucketOptions(), "b", c);
                     for (size_t j = 0; s.is_ok() && j < kNumRecords; ++j) {
                         const auto key = make_key(j);
                         const auto value = make_value(j);
@@ -1237,9 +1242,9 @@ public:
             for (int i = 0; i < 2; ++i) {
                 const auto reopen_after_failure = i == 1;
                 (this->*cb)(loss_type, reopen_after_failure);
-                std::cout << loss_type_to_string(loss_type)
-                          << (reopen_after_failure ? " (reopen)" : "")
-                          << ": dropped " << m_env->m_dropped_bytes << " bytes\n";
+                TEST_LOG << loss_type_to_string(loss_type)
+                         << (reopen_after_failure ? " (reopen)" : "")
+                         << ": dropped " << m_env->m_dropped_bytes << " bytes\n";
                 m_env->m_dropped_bytes = 0;
             }
         }

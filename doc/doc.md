@@ -377,7 +377,7 @@ if (s.is_ok()) {
 // without attempting to populate the property value.
 s = db->get_property("calicodb.stats", nullptr);
 if (s.is_ok()) {
-    
+    // Property "calicodb.stats" exists.
 }
 ```
 
@@ -392,8 +392,7 @@ Automatic checkpoints are attempted when transactions are started.
 #include "calicodb/db.h"
 
 // This transaction was started earlier, in #manual-transactions. It must be
-// finished before the database can be checkpointed. Note that the bucket 
-// handle from earlier must not be used after this next line.
+// finished before the database can be checkpointed.
 delete tx;
 
 // Now we can run a checkpoint. See DB::run() for an API that takes away some

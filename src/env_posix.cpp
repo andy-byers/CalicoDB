@@ -1100,7 +1100,6 @@ auto ShmNode::take_dms_lock() -> int
 
 auto ShmNode::check_locks() const -> bool
 {
-    int result = 0;
 #ifdef CALICODB_TEST
     // REQUIRES: "snode->mutex" is locked
     int check[File::kShmLockCount] = {};
@@ -1116,9 +1115,11 @@ auto ShmNode::check_locks() const -> bool
             }
         }
     }
-    result = std::memcmp(locks, check, sizeof(check));
+    for (size_t i = 0; i < ARRAY_SIZE(check); ++i) {
+        CALICODB_EXPECT_EQ(check[i], locks[i]);
+    }
 #endif // CALICODB_TEST
-    return result == 0;
+    return true;
 }
 
 auto PosixFile::file_lock(FileLockMode mode) -> Status

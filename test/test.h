@@ -26,6 +26,13 @@ auto PrintTo(const Cursor &c, std::ostream *os) -> void;
 namespace test
 {
 
+// Get a reference to a stream used for writing messages during testing. Defaults
+// to a stream that doesn't write anything. Tests that wish to write log messages
+// to a file on disk should write a message identifying themselves so that their
+// output has more context (gtest output is not written to TEST_LOG).
+#define TEST_LOG (*calicodb::test::g_logger)
+extern std::ostream *g_logger;
+
 #define ASSERT_OK(s) ASSERT_PRED_FORMAT1(calicodb::test::check_status, s)
 #define ASSERT_NOK(s) ASSERT_FALSE((s).is_ok())
 #define EXPECT_OK(s) EXPECT_PRED_FORMAT1(calicodb::test::check_status, s)

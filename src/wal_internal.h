@@ -17,7 +17,7 @@ struct WalOptionsExtra : public WalOptions {
     Options::LockMode lock_mode;
 };
 
-[[nodiscard]] auto new_default_wal(const WalOptionsExtra &options) -> Wal *;
+[[nodiscard]] auto new_default_wal(const WalOptionsExtra &options, const char *filename) -> Wal *;
 
 class WalPagesImpl : public Wal::Pages
 {

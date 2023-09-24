@@ -87,8 +87,8 @@ struct Options final {
     } lock_mode = kLockNormal;
 };
 
+// Options to control the behavior of a WAL connection (passed to Wal::open())
 struct WalOptions {
-    const char *filename;
     Env *env;
     File *db;
     Stats *stat;
