@@ -52,19 +52,15 @@ auto check_status(const char *expr, const Status &s) -> testing::AssertionResult
 
 auto read_file_to_string(Env &env, const char *filename) -> std::string
 {
-    size_t file_size;
-    auto s = env.file_size(filename, file_size);
-    if (!s.is_ok()) {
-        if (!s.is_io_error()) {
-            ADD_FAILURE() << s.message();
-        }
-        return "";
-    }
-    std::string buffer(file_size, '\0');
-
     File *file;
-    s = env.new_file(filename, Env::kReadOnly, file);
+    uint64_t file_size;
+    std::string buffer;
+    auto s = env.new_file(filename, Env::kReadOnly, file);
     if (s.is_ok()) {
+        s = file->get_size(file_size);
+    }
+    if (s.is_ok()) {
+        buffer.resize(file_size, '\0');
         s = file->read_exact(0, file_size, buffer.data());
     }
     delete file;
@@ -77,11 +73,11 @@ auto write_string_to_file(Env &env, const char *filename, const std::string &buf
     File *file;
     ASSERT_OK(env.new_file(filename, Env::kCreate, file));
 
-    size_t write_pos;
+    uint64_t write_pos;
     if (offset < 0) {
-        ASSERT_OK(env.file_size(filename, write_pos));
+        ASSERT_OK(file->get_size(write_pos));
     } else {
-        write_pos = static_cast<size_t>(offset);
+        write_pos = static_cast<uint64_t>(offset);
     }
     ASSERT_OK(file->write(write_pos, buffer.c_str()));
     ASSERT_OK(file->sync());

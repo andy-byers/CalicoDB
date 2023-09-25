@@ -114,8 +114,8 @@ public:
                 const auto crash_state = m_env->m_syscall_state.enabled;
                 m_env->m_syscall_state.enabled = false;
 
-                size_t file_size;
-                ASSERT_OK(m_env->file_size(m_filename.c_str(), file_size));
+                uint64_t file_size;
+                ASSERT_OK(get_size(file_size));
                 m_backup.resize(file_size);
                 ASSERT_OK(read_exact(0, file_size, m_backup.data()));
 
@@ -146,13 +146,13 @@ public:
                 delete m_target;
             }
 
-            auto read(size_t offset, size_t size, char *scratch, Slice *out) -> Status override
+            auto read(uint64_t offset, size_t size, char *scratch, Slice *out) -> Status override
             {
                 MAYBE_CRASH(m_env);
                 return FileWrapper::read(offset, size, scratch, out);
             }
 
-            auto write(size_t offset, const Slice &in) -> Status override
+            auto write(uint64_t offset, const Slice &in) -> Status override
             {
                 MAYBE_CRASH(m_env);
                 return FileWrapper::write(offset, in);
@@ -857,7 +857,7 @@ class DataLossEnv : public EnvWrapper
             delete m_target;
         }
 
-        auto initialize_buffer(size_t file_size) -> void
+        auto initialize_buffer(uint64_t file_size) -> void
         {
             m_env->m_buffer.resize(file_size);
             EXPECT_OK(FileWrapper::read(0, file_size, m_env->m_buffer.data(), nullptr));
@@ -885,7 +885,7 @@ class DataLossEnv : public EnvWrapper
             EXPECT_OK(FileWrapper::read(0, m_env->m_buffer.size(), m_env->m_buffer.data(), nullptr));
         }
 
-        auto write(size_t offset, const Slice &data) -> Status override
+        auto write(uint64_t offset, const Slice &data) -> Status override
         {
             EXPECT_FALSE(data.is_empty());
             if (m_filename != m_env->m_drop_file) {
@@ -905,14 +905,14 @@ class DataLossEnv : public EnvWrapper
             return Status::ok();
         }
 
-        auto read(size_t offset, size_t length, char *scratch, Slice *slice_out) -> Status override
+        auto read(uint64_t offset, size_t length, char *scratch, Slice *slice_out) -> Status override
         {
             if (m_filename != m_env->m_drop_file) {
                 return FileWrapper::read(offset, length, scratch, slice_out);
             }
-            size_t len = 0;
+            uint64_t len = 0;
             if (offset < m_env->m_buffer.size()) {
-                len = minval(length, m_env->m_buffer.size() - offset);
+                len = minval<uint64_t>(length, m_env->m_buffer.size() - offset);
                 std::memcpy(scratch, m_env->m_buffer.data() + offset, len);
             }
             if (slice_out) {
@@ -921,7 +921,7 @@ class DataLossEnv : public EnvWrapper
             return Status::ok();
         }
 
-        auto resize(size_t size) -> Status override
+        auto resize(uint64_t size) -> Status override
         {
             m_env->m_buffer.resize(size);
             m_env->m_writes.erase(m_env->m_writes.lower_bound(size),
@@ -977,8 +977,8 @@ public:
             auto *file = new DataLossFile(*this, filename, *file_out);
             file_out = file;
             if (filename == m_drop_file) {
-                size_t file_size;
-                EXPECT_OK(EnvWrapper::file_size(filename, file_size));
+                uint64_t file_size;
+                EXPECT_OK(file->get_size(file_size));
                 file->initialize_buffer(file_size);
             }
         }

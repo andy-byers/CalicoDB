@@ -20,7 +20,7 @@ Logger::Logger() = default;
 
 Logger::~Logger() = default;
 
-auto File::read_exact(size_t offset, size_t size, char *scratch) -> Status
+auto File::read_exact(uint64_t offset, size_t size, char *scratch) -> Status
 {
     Slice slice;
     auto s = read(offset, size, scratch, &slice);
@@ -61,11 +61,6 @@ auto EnvWrapper::new_logger(const char *filename, Logger *&out) -> Status
 auto EnvWrapper::file_exists(const char *filename) const -> bool
 {
     return m_target->file_exists(filename);
-}
-
-auto EnvWrapper::file_size(const char *filename, size_t &out) const -> Status
-{
-    return m_target->file_size(filename, out);
 }
 
 auto EnvWrapper::remove_file(const char *filename) -> Status
