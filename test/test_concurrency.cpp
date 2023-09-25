@@ -408,6 +408,119 @@ protected:
         delete co.db;
         return s;
     }
+
+    struct CheckpointerTestParameters {
+        size_t num_readers = 0;
+        size_t num_writers = 0;
+        bool auto_checkpoint = false;
+
+        // Set by run_checkpointer_test().
+        size_t num_iterations = 0;
+        size_t num_records = 0;
+        bool delay_sync = false;
+    };
+
+    auto run_checkpointer_test_instance(const CheckpointerTestParameters &param) -> void
+    {
+        (void)DB::destroy(Options(), m_filename.c_str());
+
+        Connection tmp;
+        tmp.filename = m_filename.c_str();
+        tmp.env = m_env.get();
+        tmp.op_args[0] = param.num_iterations;
+        tmp.op_args[1] = param.num_records;
+        // Writers never need to call File::sync(). This is taken care of by the checkpointer
+        // thread.
+        tmp.options.sync_mode = Options::kSyncOff;
+        tmp.options.auto_checkpoint = param.auto_checkpoint * 1'000;
+
+        std::vector<Connection> connections;
+        tmp.op = test_reader;
+        for (size_t i = 0; i < param.num_readers; ++i) {
+            connections.emplace_back(tmp);
+        }
+        tmp.op = test_writer;
+        for (size_t i = 0; i < param.num_writers; ++i) {
+            connections.emplace_back(tmp);
+        }
+        tmp.op = [](auto &co, auto *) {
+            auto s = reopen_connection(co);
+            if (!s.is_ok()) {
+                std::cerr<<"1: "<<s.message()<<'\n';
+//                s = Status::ok(); // Wait for the writer to create the DB.
+            }
+            if (s.is_ok()) {
+                do {
+                    s = co.db->checkpoint(true);
+                    co.env->sleep(25);
+                } while (s.is_busy());
+
+                if (!s.is_ok()) {
+                    std::cerr<<"2: "<<s.message()<<'\n';
+                }
+
+                if (co.op_args[0]-- <= 1) {
+                    co.op = nullptr;
+                }
+                delete co.db;
+            }
+            return s;
+        };
+        // Checkpointers should call File::sync() once on the WAL file before any pages are read,
+        // and once on the database file after all pages have been written.
+        tmp.options.sync_mode = Options::kSyncNormal;
+        connections.emplace_back(tmp);
+
+        m_env->m_delay_sync.store(param.delay_sync, std::memory_order_release);
+
+        std::vector<std::thread> threads;
+        threads.reserve(connections.size());
+        for (auto &co : connections) {
+            threads.emplace_back([&co, t = threads.size()] {
+                while (connection_main(co, nullptr)) {
+                    // Run until the connection clears its own callback.
+                }
+            });
+        }
+
+        for (auto &t : threads) {
+            t.join();
+        }
+
+        for (const auto &co : connections) {
+            // Check the results (only readers output anything).
+            for (size_t i = 0; i + 1 < co.result.size(); ++i) {
+                uint64_t n;
+                auto slice = to_slice(co.result[i]);
+                ASSERT_LE(slice, to_slice(co.result[i + 1]));
+                ASSERT_TRUE(consume_decimal_number(slice, &n));
+                ASSERT_TRUE(slice.is_empty());
+                m_sanity_check = maxval(m_sanity_check, n);
+            }
+        }
+    }
+
+    auto run_checkpointer_test(const CheckpointerTestParameters &param) -> void
+    {
+//        for (size_t num_iterations = 1; i <= num_iterations; ++num_iterations) {
+//            for (size_t num_records = 1; num_records <= 4; ++num_records) {
+//                for (size_t delay_sync = 0; delay_sync <= 1; ++delay_sync) {
+
+                    size_t i = 1;
+                    size_t j = 10;
+                    size_t k = 0;
+                    run_checkpointer_test_instance({
+                        param.num_readers,
+                        param.num_writers,
+                        param.auto_checkpoint,
+                        i,
+                        j,
+                        k == 0,
+                    });
+//                }
+//            }
+//        }
+    }
 };
 
 TEST_F(ConcurrencyTests, Database0)
@@ -444,6 +557,42 @@ TEST_F(ConcurrencyTests, Database3)
 TEST_F(ConcurrencyTests, Database4)
 {
     run_consistency_test({50, 50, 50});
+}
+
+TEST_F(ConcurrencyTests, Checkpointer0)
+{
+    // Sanity check, no concurrency.
+    run_checkpointer_test({0, 0});
+}
+
+TEST_F(ConcurrencyTests, Checkpointer1)
+{
+    run_checkpointer_test({1, 0});
+    run_checkpointer_test({1, 1});
+}
+
+TEST_F(ConcurrencyTests, Checkpointer2)
+{
+    run_checkpointer_test({2, 0});
+    run_checkpointer_test({2, 1});
+    run_checkpointer_test({1, 2});
+    run_checkpointer_test({2, 2});
+}
+
+TEST_F(ConcurrencyTests, Checkpointer3)
+{
+//    run_checkpointer_test({10, 0});
+//    run_checkpointer_test({10, 2});
+//    run_checkpointer_test({2, 10});
+    run_checkpointer_test({10, 10});
+}
+
+TEST_F(ConcurrencyTests, Checkpointer4)
+{
+    run_checkpointer_test({50, 0});
+    run_checkpointer_test({50, 10});
+    run_checkpointer_test({10, 50});
+    run_checkpointer_test({50, 50});
 }
 
 } // namespace calicodb::test

@@ -1107,7 +1107,7 @@ auto ShmNode::check_locks() const -> bool
     for (auto *p = refs; p; p = p->next) {
         for (size_t i = 0; i < File::kShmLockCount; ++i) {
             if (p->writer_mask & (1 << i)) {
-                CALICODB_EXPECT_FALSE(check[i]);
+                CALICODB_EXPECT_EQ(check[i], 0);
                 check[i] = -1;
             } else if (p->reader_mask & (1 << i)) {
                 CALICODB_EXPECT_GE(check[i], 0);

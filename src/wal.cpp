@@ -714,6 +714,14 @@ auto compute_checksum(const Slice &in, const uint32_t *initial, uint32_t *out)
     out[1] = s2;
 }
 
+//  Operation        | Write | Checkpoint | Recovery | ReadN |
+// ------------------|-------|------------|----------|-------|
+//  Read frames      |       |            |          | 1     |
+//  Write frames     | X     |            |
+//  Checkpoint       |       | X          |
+//  Checkpoint reset | X     | X          |
+//  Restart log      | X     |
+//  Recover index    | X     |
 class WalImpl : public Wal
 {
 public:
@@ -951,23 +959,31 @@ private:
         write_hdr(&m_hdr, &hdr[0]);
     }
 
+    // Restart the WAL index header such that the next writer writes to the start
+    // of the log file
+    // Readers are attached to readmark 0 and reading exclusively from the database
+    // file. This connection holds kWriteLock and the whole WAL has been checkpointed.
     auto restart_header(uint32_t salt_1) -> void
     {
+        CALICODB_EXPECT_TRUE(m_writer_lock);
+        volatile auto *info = get_ckpt_info();
+
         ++m_ckpt_number;
         m_hdr.max_frame = 0;
         auto *salt = StablePtr(m_hdr.salt);
         put_u32(salt, get_u32(salt) + 1);
         std::memcpy(salt + sizeof(uint32_t), &salt_1, sizeof(salt_1));
         write_index_header();
-
-        volatile auto *info = get_ckpt_info();
-        CALICODB_EXPECT_EQ(info->readmark[0], 0);
+        // Write to backfill count must be atomic: readers perform an ATOMIC_LOAD()
+        // on this variable to determine if they need to read exclusively from the
+        // database file.
         ATOMIC_STORE(&info->backfill, 0);
-        ATOMIC_STORE(&info->backfill_attempted, 0);
-        ATOMIC_STORE(&info->readmark[1], 0);
+        info->backfill_attempted = 0;
+        info->readmark[1] = 0;
         for (size_t i = 2; i < kReaderCount; ++i) {
-            ATOMIC_STORE(&info->readmark[i], kReadmarkNotUsed);
+            info->readmark[i] = kReadmarkNotUsed;
         }
+        CALICODB_EXPECT_EQ(info->readmark[0], 0);
     }
 
     auto restart_log() -> Status
@@ -1036,7 +1052,7 @@ private:
         CALICODB_EXPECT_NE(m_index.groups()[0], nullptr);
 
         volatile auto *info = get_ckpt_info();
-        if (!use_wal && ATOMIC_LOAD(&info->backfill) == m_hdr.max_frame) {
+        if (!use_wal && ATOMIC_LOAD(&info->backfill) == m_hdr.max_frame && m_hdr.max_frame == 0) {
             // The whole WAL has been written back to the database file, or the WAL is just empty.
             // Take info->readmark[0], which always has a value of 0 (the reader will see the WAL
             // as empty, causing it to read from the database file instead).
@@ -1058,13 +1074,13 @@ private:
 
         size_t max_readmark = 0;
         size_t max_index = 0;
-        uint32_t max_frame = m_hdr.max_frame;
+        auto max_frame = m_hdr.max_frame;
 
         // Attempt to find a readmark that this reader can use to read the most-recently-committed WAL
         // frames.
         for (size_t i = 1; i < kReaderCount; i++) {
-            const auto mark = ATOMIC_LOAD(&info->readmark[i]);
-            if (max_readmark <= mark && mark <= max_frame) {
+            const auto mark = ATOMIC_LOAD(&info->readmark[i]);  // TODO: Races with write on/around 1359...
+            if (max_readmark <= mark && mark <= max_frame) {    // TODO: Probably should be on readmark 0
                 CALICODB_EXPECT_NE(mark, kReadmarkNotUsed);
                 max_readmark = mark;
                 max_index = i;
@@ -1189,6 +1205,9 @@ WalImpl::WalImpl(const WalOptionsExtra &options, const char *filename)
 
 WalImpl::~WalImpl()
 {
+    CALICODB_EXPECT_FALSE(m_writer_lock);
+    CALICODB_EXPECT_FALSE(m_ckpt_lock);
+    CALICODB_EXPECT_EQ(m_reader_lock, -1);
     m_index.close();
 }
 
@@ -1253,7 +1272,6 @@ auto WalImpl::recover_index() -> Status
     CALICODB_EXPECT_EQ(kNotWriteLock, kWriteLock + 1);
     CALICODB_EXPECT_EQ(kCheckpointLock, kNotWriteLock);
     CALICODB_EXPECT_TRUE(m_writer_lock);
-    m_hdr = {};
 
     // Lock the recover "Rcvr" lock. Lock the checkpoint ("Ckpt") lock as well, if this
     // code isn't being called from the checkpoint routine. In that case, the checkpoint
@@ -1265,6 +1283,7 @@ auto WalImpl::recover_index() -> Status
     }
 
     uint32_t frame_cksum[2] = {};
+    m_hdr = {};
 
     size_t file_size;
     s = m_env->file_size(m_wal_name, file_size);
@@ -1347,18 +1366,18 @@ cleanup:
         m_hdr.frame_cksum[0] = frame_cksum[0];
         m_hdr.frame_cksum[1] = frame_cksum[1];
         write_index_header();
-        // NOTE: This code can run while readers are trying to connect (`start_reader()`).
+        // TODO: This code can run while readers are trying to connect (`start_reader()`). It shouldn't though, those readers should get readmark 0 and not read the other readmarks probably... What about backfill count?
         volatile auto *info = get_ckpt_info();
-        ATOMIC_STORE(&info->backfill, 0);
+        ATOMIC_STORE(&info->backfill, 0); // TODO: SQLite has a raw write here...
         info->backfill_attempted = m_hdr.max_frame;
         info->readmark[0] = 0;
         for (size_t i = 1; i < kReaderCount; ++i) {
             s = lock_exclusive(READ_LOCK(i), 1);
             if (s.is_ok()) {
                 if (i == 1 && m_hdr.max_frame) {
-                    info->readmark[i] = m_hdr.max_frame;
+                    info->readmark[i] = m_hdr.max_frame; // TODO: Races with ATOMIC_LOAD() on/around 1066...
                 } else {
-                    info->readmark[i] = kReadmarkNotUsed;
+                    info->readmark[i] = kReadmarkNotUsed; // TODO: Races with ATOMIC_LOAD() on/around 1074...
                 }
                 unlock_exclusive(READ_LOCK(i), 1);
             } else if (!s.is_busy()) {
@@ -1680,7 +1699,7 @@ auto WalImpl::transfer_contents(bool reset, char *scratch) -> Status
             }
         }
 
-        if (ATOMIC_LOAD(&info->backfill) < max_safe_frame) {
+        if (info->backfill < max_safe_frame) {
             HashIterator itr(m_index);
             s = itr.init(info->backfill);
             if (s.is_ok()) {
