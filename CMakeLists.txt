@@ -37,7 +37,6 @@ else() # Clang OR GNU
     set(CALICODB_WARNINGS
             -Wall
             -Wextra
-            -Wshadow
             -Wnon-virtual-dtor
             -Wold-style-cast
             -Wcast-align

@@ -133,7 +133,7 @@ inline auto decode_varint(const char *p, const char *limit, uint32_t &value_out)
         } else {
             result |= (byte << shift);
             value_out = result;
-            return reinterpret_cast<const char *>(p);
+            return p;
         }
     }
     return nullptr;
