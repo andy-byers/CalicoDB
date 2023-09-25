@@ -55,8 +55,7 @@ else() # Clang OR GNU
                 -Wmisleading-indentation
                 -Wduplicated-cond
                 -Wduplicated-branches
-                -Wlogical-op
-                -Wuseless-cast)
+                -Wlogical-op)
     endif()
 endif()
 
