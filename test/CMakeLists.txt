@@ -9,6 +9,16 @@ FetchContent_Declare(googletest
 FetchContent_MakeAvailable(googletest)
 include(GoogleTest)
 
+# Specifies where to write extra log messages during testing. The following options
+# are supported:
+#  Option | Description
+# --------|---------------------------------------------------------
+#  ""     | Discard log messages (the default)
+#  STDOUT | Write to the standard output stream (file descriptor 1)
+#  STDERR | Write to standard error stream (file descriptor 2)
+#  path   | Append to a specific file
+set(CALICODB_TEST_LOG_FILE "" CACHE INTERNAL "Destination for test log messages")
+
 # Documentation consistency checks.
 add_subdirectory(doc_tests)
 
@@ -22,8 +32,12 @@ add_subdirectory(cmake_tests/custom_string)
 
 function(build_test NAME)
     add_executable(${NAME} ${NAME}.cpp test.cpp test.h)
-    target_link_libraries(${NAME} PRIVATE calicodb_utils gtest)
-    target_include_directories(${NAME} PUBLIC "${CALICODB_SOURCE_DIR}")
+    target_compile_definitions(${NAME}
+            PRIVATE CALICODB_TEST_LOG_FILE=${CALICODB_TEST_LOG_FILE})
+    target_link_libraries(${NAME}
+            PRIVATE calicodb_utils gtest)
+    target_include_directories(${NAME}
+            PRIVATE "${CALICODB_SOURCE_DIR}")
     add_test(NAME ${NAME} COMMAND ${NAME})
 endfunction()
 

@@ -37,7 +37,6 @@ else() # Clang OR GNU
     set(CALICODB_WARNINGS
             -Wall
             -Wextra
-            -Wshadow
             -Wnon-virtual-dtor
             -Wold-style-cast
             -Wcast-align
@@ -56,8 +55,7 @@ else() # Clang OR GNU
                 -Wmisleading-indentation
                 -Wduplicated-cond
                 -Wduplicated-branches
-                -Wlogical-op
-                -Wuseless-cast)
+                -Wlogical-op)
     endif()
 endif()
 

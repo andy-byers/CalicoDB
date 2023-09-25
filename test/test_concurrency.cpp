@@ -109,6 +109,7 @@ protected:
     RandomGenerator m_random;
     std::string m_filename;
     UserPtr<DelayEnv> m_env;
+    uint64_t m_sanity_check = 0;
 
     explicit ConcurrencyTests()
         : m_filename(testing::TempDir() + "concurrency"),
@@ -129,6 +130,7 @@ protected:
         ASSERT_EQ(DebugAllocator::bytes_used(), 0) << "leaked " << std::setprecision(4)
                                                    << static_cast<double>(DebugAllocator::bytes_used()) / (1'024.0 * 1'024)
                                                    << " MiB";
+        TEST_LOG << "Sanity check: " << m_sanity_check << '\n';
     }
 
     struct Connection;
@@ -140,6 +142,7 @@ protected:
         const char *filename = nullptr;
         BusyHandler *busy = nullptr;
         Env *env = nullptr;
+        Options options;
 
         DB *db = nullptr;
         std::vector<std::string> result;
@@ -226,6 +229,7 @@ protected:
                 ASSERT_LE(slice, to_slice(co.result[i + 1]));
                 ASSERT_TRUE(consume_decimal_number(slice, &n));
                 ASSERT_TRUE(slice.is_empty());
+                m_sanity_check = maxval(m_sanity_check, n);
             }
         }
     }
@@ -249,7 +253,7 @@ protected:
         }
     }
 
-    [[nodiscard]] static auto reopen_connection(Connection &co, const Options *options) -> Status
+    [[nodiscard]] static auto reopen_connection(Connection &co) -> Status
     {
         static class AlwaysWait : public BusyHandler
         {
@@ -261,7 +265,7 @@ protected:
             }
         } s_busy_handler;
 
-        auto opt = options ? *options : Options();
+        auto opt = co.options;
         opt.env = co.env;
         opt.busy = &s_busy_handler;
         return DB::open(opt, co.filename, co.db);
@@ -275,7 +279,7 @@ protected:
     }
 
     // Reader task invariants:
-    // 1. If the bucket named "BUCKET" exists, it contains co.op_arg records
+    // 1. If the bucket named "b" exists, it contains co.op_arg records
     // 2. Record keys are monotonically increasing integers starting from 0, serialized
     //    using numeric_key()
     // 3. Each record value is another such serialized integer, however, each value is
@@ -285,9 +289,8 @@ protected:
     {
         barrier_wait(barrier);
 
-        Options options;
-        options.create_if_missing = false;
-        auto s = reopen_connection(co, &options);
+        co.options.create_if_missing = false;
+        auto s = reopen_connection(co);
         for (size_t n = 0; s.is_ok() && n < co.op_args[0]; ++n) {
             barrier_wait(barrier);
 
@@ -297,7 +300,7 @@ protected:
                 TestCursor c;
                 // Oddly enough, if we name this Status "s", some platforms complain about shadowing,
                 // even though s is not captured in this lambda.
-                auto t = test_open_bucket(tx, "BUCKET", c);
+                auto t = test_open_bucket(tx, "b", c);
                 if (t.is_invalid_argument()) {
                     // Writer hasn't created the bucket yet.
                     return Status::ok();
@@ -308,8 +311,8 @@ protected:
                 for (size_t i = 0; i < co.op_args[1] * 2; ++i) {
                     // If the bucket exists, then it must contain co.op_arg records (the first writer to run
                     // makes sure of this).
-                    const auto name = numeric_key(i % co.op_args[1]);
-                    c->find(name);
+                    const auto key = numeric_key(i % co.op_args[1]);
+                    c->find(key);
                     if (!c->is_valid()) {
                         t = c->status();
                         break;
@@ -333,13 +336,13 @@ protected:
     }
 
     // Writer tasks set up invariants on the DB for the reader to check. Each writer
-    // either creates or increases co.op_arg[1] records in a bucket named "BUCKET". The
+    // either creates or increases co.op_arg[1] records in a bucket named "b". The
     // first writer to run creates the bucket.
     [[nodiscard]] static auto test_writer(Connection &co, Barrier *barrier) -> Status
     {
         barrier_wait(barrier);
 
-        auto s = reopen_connection(co, nullptr);
+        auto s = reopen_connection(co);
         for (size_t n = 0; s.is_ok() && n < co.op_args[0]; ++n) {
             barrier_wait(barrier);
 
@@ -347,7 +350,7 @@ protected:
                 barrier_wait(barrier);
 
                 TestCursor c;
-                auto t = test_create_and_open_bucket(tx, BucketOptions(), "BUCKET", c);
+                auto t = test_create_and_open_bucket(tx, BucketOptions(), "b", c);
                 for (size_t i = 0; t.is_ok() && i < co.op_args[1]; ++i) {
                     uint64_t result = 1;
                     const auto key = numeric_key(i);
@@ -356,7 +359,7 @@ protected:
                         Slice slice(c->value());
                         EXPECT_TRUE(consume_decimal_number(slice, &result));
                         ++result;
-                    } else if (c->status().is_not_found()) {
+                    } else if (c->status().is_ok()) {
                         t = Status::ok();
                     } else {
                         break;
@@ -388,9 +391,8 @@ protected:
     {
         barrier_wait(barrier);
 
-        Options options;
-        options.create_if_missing = false;
-        auto s = reopen_connection(co, &options);
+        co.options.create_if_missing = false;
+        auto s = reopen_connection(co);
         for (size_t n = 0; s.is_ok() && n < co.op_args[0]; ++n) {
             barrier_wait(barrier);
             barrier_wait(barrier);
@@ -418,22 +420,18 @@ TEST_F(ConcurrencyTests, Database0)
 
 TEST_F(ConcurrencyTests, Database1)
 {
-    run_consistency_test({10, 0, 0});
-    run_consistency_test({0, 10, 0});
-    run_consistency_test({0, 0, 10});
+    run_consistency_test({2, 1, 0});
+    run_consistency_test({2, 0, 1});
+    run_consistency_test({2, 1, 1});
+    run_consistency_test({10, 2, 0});
+    run_consistency_test({10, 0, 2});
+    run_consistency_test({10, 2, 2});
 }
 
 TEST_F(ConcurrencyTests, Database2)
 {
-    run_consistency_test({10, 0, 1});
-    run_consistency_test({10, 1, 0});
-    run_consistency_test({10, 1, 1});
-    run_consistency_test({0, 10, 1});
-    run_consistency_test({1, 10, 0});
-    run_consistency_test({1, 10, 1});
-    run_consistency_test({0, 1, 10});
-    run_consistency_test({1, 0, 10});
-    run_consistency_test({1, 1, 10});
+    run_consistency_test({2, 2, 2});
+    run_consistency_test({10, 10, 10});
 }
 
 TEST_F(ConcurrencyTests, Database3)

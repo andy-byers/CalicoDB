@@ -1,9 +1,7 @@
 # CalicoDB
-CalicoDB is a tiny key-value database library written in C++17.
+CalicoDB is a tiny key-value database library written in C++17 and inspired by SQLite3.
 It exposes a small API that allows transactional storage and retrieval of byte sequences from multiple key spaces.
-CalicoDB runs in a single thread and uses a B<sup>+</sup>-tree backend.
-It is intended for read-heavy embedded applications.
-Heavily inspired by SQLite3.
+CalicoDB aims to be portable, flexable, and simple.
 
 ![CI status badge](https://github.com/andy-byers/CalicoDB/actions/workflows/test.yml/badge.svg)
 
@@ -22,7 +20,7 @@ It is not ready for production, and the author is not a professional database de
 Feedback is appreciated!
 
 ## Features
-+ Records are stored in buckets, each with an independent range of keys
++ Records are stored in buckets, each with an independent sorted range of keys
 + All buckets are stored in the same file, similar to the SQLite database file format
 + Supports multiple readers and a single writer simultaneously (readers have snapshot isolation)
 + Per-bucket bidirectional iteration using cursors

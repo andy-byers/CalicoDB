@@ -88,12 +88,12 @@ auto Pager::open_wal() -> Status
 {
     CALICODB_EXPECT_EQ(m_wal, nullptr);
     const WalOptions options = {
-        m_wal_name,
         m_env,
         m_file,
         m_stats,
     };
-    // Extra parameters for WAL class constructor.
+    // Extra parameters for WAL class constructors. Members are const in WalImpl and
+    // TempWal (the default and in-memory WAL implementations, respectively).
     const WalOptionsExtra extra = {
         options,
         m_log,
@@ -104,11 +104,11 @@ auto Pager::open_wal() -> Status
     if (m_user_wal) {
         m_wal = m_user_wal;
     } else if (m_persistent) {
-        m_wal = new_default_wal(extra);
+        m_wal = new_default_wal(extra, m_wal_name);
     } else {
         m_wal = new_temp_wal(extra);
     }
-    return m_wal ? m_wal->open(options)
+    return m_wal ? m_wal->open(options, m_wal_name)
                  : Status::no_memory();
 }
 

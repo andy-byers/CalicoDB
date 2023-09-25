@@ -33,7 +33,7 @@ public:
     virtual ~Wal();
 
     // REQUIRES: WAL is in "Closed" mode
-    virtual auto open(const WalOptions &options) -> Status = 0;
+    virtual auto open(const WalOptions &options, const char *filename) -> Status = 0;
 
     // REQUIRES: WAL is in "Open" mode
     virtual auto close(char *scratch, uint32_t page_size) -> Status = 0;

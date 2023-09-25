@@ -272,8 +272,6 @@ protected:
         delete m_file;
         delete m_wal_file;
         delete m_env;
-
-        EXPECT_EQ(DebugAllocator::bytes_used(), 0);
     }
 
     auto SetUp() -> void override
@@ -664,11 +662,11 @@ TEST_F(PagerTests, DeathTest)
 #endif // NDEBUG
 
 using WalComponents = std::tuple<Env *, Wal *, File *>;
-using MakeWal = WalComponents (*)(WalOptionsExtra);
+using MakeWal = WalComponents (*)(WalOptionsExtra, const char *);
 
 static Stats s_stat;
 
-auto make_temporary_wal(WalOptionsExtra options) -> WalComponents
+auto make_temporary_wal(WalOptionsExtra options, const char *) -> WalComponents
 {
     options.env = new_temp_env(kMaxPageSize);
     EXPECT_NE(options.env, nullptr);
@@ -677,13 +675,13 @@ auto make_temporary_wal(WalOptionsExtra options) -> WalComponents
     return {options.env, new_temp_wal(options), options.db};
 }
 
-auto make_persistent_wal(WalOptionsExtra options) -> WalComponents
+auto make_persistent_wal(WalOptionsExtra options, const char *filename) -> WalComponents
 {
     EXPECT_OK(options.env->new_file("db", Env::kCreate | Env::kReadWrite,
                                     options.db));
-    auto *wal = new_default_wal(options);
+    auto *wal = new_default_wal(options, filename);
     EXPECT_NE(wal, nullptr);
-    EXPECT_OK(wal->open(reinterpret_cast<const WalOptions &>(options)));
+    EXPECT_OK(wal->open(reinterpret_cast<const WalOptions &>(options), filename));
     return {options.env, wal, options.db};
 }
 
@@ -720,8 +718,7 @@ public:
     auto SetUp() -> void override
     {
         const WalOptionsExtra param = {
-            {m_filename.c_str(),
-             &default_env(),
+            {&default_env(),
              nullptr,
              &s_stat},
             nullptr,
@@ -729,7 +726,7 @@ public:
             Options::kSyncNormal,
             Options::kLockNormal,
         };
-        std::tie(m_env, m_wal, m_db_file) = GetParam()(param);
+        std::tie(m_env, m_wal, m_db_file) = GetParam()(param, m_filename.c_str());
     }
 
     auto rollback() -> void

@@ -870,28 +870,33 @@ TEST(Slice, Clear)
     ASSERT_EQ(0, slice.size());
 }
 
-static constexpr auto constexpr_slice_test(Slice s, Slice answer) -> int
+static constexpr auto constexpr_slice_test(Slice s, const char *result)
 {
+    Slice answer(result);
     for (size_t i = 0; i < s.size(); ++i) {
         if (s[i] != answer[i]) {
-            return -1;
+            return Slice();
         }
     }
-
     (void)s.starts_with(answer);
     (void)s.data();
-    (void)s.range(0, 0);
+    (void)s.size();
+    (void)s.range(0);
+    (void)s.range(0, 1);
     (void)s.is_empty();
-    s.advance(0);
-    s.truncate(s.size());
-    return 0;
+    s.advance(1);
+    s = Slice(answer.data(), answer.size());
+    s.truncate(0);
+    s = Slice(result); // answer.data() is a C-style string
+    s.clear();
+    s = answer;
+    return s;
 }
 
 TEST(Slice, ConstantExpressions)
 {
-    static constexpr Slice s1("42");
-    static constexpr Slice s2("42", 2);
-    ASSERT_EQ(0, constexpr_slice_test(s1, s2));
+    static constexpr Slice s("42");
+    ASSERT_EQ("42", constexpr_slice_test(s, "42"));
 }
 
 TEST(Slice, NonPrintableSlice)

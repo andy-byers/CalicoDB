@@ -16,9 +16,6 @@ namespace calicodb
 // calicodb/tx.h
 class Tx;
 
-// calicodb/string.h
-class String;
-
 // On-disk collection of buckets
 class DB
 {
