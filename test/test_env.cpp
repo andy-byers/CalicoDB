@@ -579,9 +579,6 @@ TEST(EnvWrappers, WrapperEnvWorksAsExpected)
     ASSERT_TRUE(w_env.new_logger("sink", sink).is_not_supported());
     ASSERT_TRUE(w_env.file_exists("file"));
     delete file;
-    size_t size;
-    ASSERT_OK(w_env.file_size("file", size));
-    ASSERT_EQ(size, 0);
     w_env.srand(123);
     (void)w_env.rand();
     w_env.sleep(0);
@@ -691,7 +688,7 @@ TEST_P(TempEnvTests, SequentialIO)
 
 TEST_P(TempEnvTests, RandomIO)
 {
-    size_t file_size = 0;
+    uint64_t file_size = 0;
     RandomGenerator random;
     for (size_t i = 0; i < 100; ++i) {
         const auto chunk = random.Generate(random.Next(m_sector_size / 2));

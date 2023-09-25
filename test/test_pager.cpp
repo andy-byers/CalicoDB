@@ -444,9 +444,9 @@ TEST_F(PagerTests, NOOP)
         m_pager->set_status(Status::ok());
     });
 
-    size_t file_size;
+    uint64_t file_size;
     // Database size is 0 before the first checkpoint.
-    ASSERT_OK(m_env->file_size("db", file_size));
+    ASSERT_OK(m_file->get_size(file_size));
     ASSERT_EQ(file_size, 0);
 }
 
@@ -585,8 +585,8 @@ TEST_F(PagerTests, Truncation)
 
     ASSERT_OK(m_pager->checkpoint(true));
 
-    size_t file_size;
-    ASSERT_OK(m_env->file_size("db", file_size));
+    uint64_t file_size;
+    ASSERT_OK(m_file->get_size(file_size));
     ASSERT_EQ(file_size, TEST_PAGE_SIZE * m_page_ids.at(kManyPages / 2).value);
 
     pager_view([this] {

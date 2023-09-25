@@ -38,7 +38,6 @@ public:
     };
     virtual auto new_file(const char *filename, OpenMode mode, File *&out) -> Status = 0;
     virtual auto new_logger(const char *filename, Logger *&out) -> Status = 0;
-    virtual auto file_size(const char *filename, size_t &out) const -> Status = 0;
     virtual auto remove_file(const char *filename) -> Status = 0;
     [[nodiscard]] virtual auto file_exists(const char *filename) const -> bool = 0;
 
@@ -78,18 +77,21 @@ public:
     // Reads into `scratch`, which must point to at least `size` bytes of available
     // memory. On success, sets "*out" to point to the data that was read, which may
     // be less than what was requested, but only if `out` is not nullptr.
-    virtual auto read(size_t offset, size_t size, char *scratch, Slice *out) -> Status = 0;
+    virtual auto read(uint64_t offset, size_t size, char *scratch, Slice *out) -> Status = 0;
 
     // Read exactly `size` bytes from the file at the given offset.
     //
     // Return a "not found" status if there is not enough data remaining in the file.
-    virtual auto read_exact(size_t offset, size_t size, char *scratch) -> Status;
+    virtual auto read_exact(uint64_t offset, size_t size, char *scratch) -> Status;
 
     // Write `in` to the file at the given offset.
-    virtual auto write(size_t offset, const Slice &in) -> Status = 0;
+    virtual auto write(uint64_t offset, const Slice &in) -> Status = 0;
 
-    // Set the file `size`
-    virtual auto resize(size_t size) -> Status = 0;
+    // Determine the file size in bytes
+    virtual auto get_size(uint64_t &size_out) const -> Status = 0;
+
+    // Set the file `size` in bytes
+    virtual auto resize(uint64_t size) -> Status = 0;
 
     // Synchronize with the underlying filesystem.
     virtual auto sync() -> Status = 0;
@@ -137,7 +139,6 @@ public:
 
     auto new_logger(const char *filename, Logger *&out) -> Status override;
     auto new_file(const char *filename, OpenMode mode, File *&out) -> Status override;
-    auto file_size(const char *filename, size_t &out) const -> Status override;
     auto remove_file(const char *filename) -> Status override;
     [[nodiscard]] auto file_exists(const char *filename) const -> bool override;
 

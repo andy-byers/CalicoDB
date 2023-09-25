@@ -1266,8 +1266,8 @@ auto WalImpl::recover_index() -> Status
 
     uint32_t frame_cksum[2] = {};
 
-    size_t file_size;
-    s = m_env->file_size(m_wal_name, file_size);
+    uint64_t file_size;
+    s = m_wal->get_size(file_size);
     if (!s.is_ok()) {
         return s;
     }

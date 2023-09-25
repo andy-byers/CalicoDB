@@ -83,13 +83,13 @@ public:
                 delete m_target;
             }
 
-            auto read(size_t offset, size_t size, char *scratch, Slice *out) -> Status override
+            auto read(uint64_t offset, size_t size, char *scratch, Slice *out) -> Status override
             {
                 m_env->call_read_callback();
                 return FileWrapper::read(offset, size, scratch, out);
             }
 
-            auto write(size_t offset, const Slice &in) -> Status override
+            auto write(uint64_t offset, const Slice &in) -> Status override
             {
                 m_env->call_write_callback();
                 return FileWrapper::write(offset, in);
@@ -374,8 +374,13 @@ protected:
 
     [[nodiscard]] auto file_size(const char *filename) const -> size_t
     {
-        size_t file_size;
-        EXPECT_OK(m_env->file_size(filename, file_size));
+        File *file;
+        uint64_t file_size = 0;
+        auto s = m_env->new_file(filename, Env::kReadOnly, file);
+        if (s.is_ok()) {
+            EXPECT_OK(file->get_size(file_size));
+            delete file;
+        }
         return file_size;
     }
 
@@ -861,8 +866,12 @@ TEST_F(DBTests, SpaceAmplification)
     }));
 
     close_db();
-    size_t file_size;
-    ASSERT_OK(m_env->file_size(m_db_name.c_str(), file_size));
+    File *file;
+    uint64_t file_size;
+    ASSERT_OK(m_env->new_file(m_db_name.c_str(), Env::kReadOnly, file));
+    ASSERT_OK(file->get_size(file_size));
+    delete file;
+
     const auto space_amp = static_cast<double>(file_size) / static_cast<double>(kInputSize);
     TEST_LOG << "SpaceAmplification: " << space_amp << '\n';
 }
@@ -898,10 +907,9 @@ TEST(OldWalTests, HandlesOldWalFile)
     ASSERT_OK(env.new_file(kOldWal, Env::kCreate, oldwal));
     ASSERT_OK(oldwal->write(42, ":3"));
 
-    size_t file_size;
-    ASSERT_OK(env.file_size(kOldWal, file_size));
+    uint64_t file_size;
+    ASSERT_OK(oldwal->get_size(file_size));
     ASSERT_NE(0, file_size);
-    delete oldwal;
 
     DB *db;
     Options dbopt;
@@ -912,8 +920,9 @@ TEST(OldWalTests, HandlesOldWalFile)
         return tx.create_bucket(BucketOptions(), "b", nullptr);
     }));
 
-    ASSERT_OK(env.file_size(kOldWal, file_size));
+    ASSERT_OK(oldwal->get_size(file_size));
     ASSERT_GT(file_size, dbopt.page_size * 3);
+    delete oldwal;
     delete db;
 }
 

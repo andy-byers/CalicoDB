@@ -24,7 +24,6 @@ public:
     auto new_logger(const char *filename, Logger *&out) -> Status override;
     auto new_file(const char *filename, OpenMode mode, File *&out) -> Status override;
     [[nodiscard]] auto file_exists(const char *filename) const -> bool override;
-    [[nodiscard]] auto file_size(const char *filename, size_t &out) const -> Status override;
     auto remove_file(const char *filename) -> Status override;
 
     auto srand(unsigned seed) -> void override;
@@ -58,9 +57,10 @@ public:
     }
 
     ~FakeFile() override = default;
-    auto read(size_t offset, size_t size, char *scratch, Slice *out) -> Status override;
-    auto write(size_t offset, const Slice &in) -> Status override;
-    auto resize(size_t size) -> Status override;
+    auto read(uint64_t offset, size_t size, char *scratch, Slice *out) -> Status override;
+    auto write(uint64_t offset, const Slice &in) -> Status override;
+    auto get_size(uint64_t &size_out) const -> Status override;
+    auto resize(uint64_t size) -> Status override;
     auto sync() -> Status override;
     auto file_lock(FileLockMode) -> Status override { return Status::ok(); }
     auto shm_map(size_t r, bool extend, volatile void *&out) -> Status override;

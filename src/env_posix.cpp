@@ -43,7 +43,6 @@ public:
     auto new_file(const char *filename, OpenMode mode, File *&out) -> Status override;
     [[nodiscard]] auto file_exists(const char *filename) const -> bool override;
     auto remove_file(const char *filename) -> Status override;
-    auto file_size(const char *filename, size_t &out) const -> Status override;
 
     auto srand(unsigned seed) -> void override;
     [[nodiscard]] auto rand() -> unsigned override;
@@ -297,9 +296,10 @@ public:
 
     auto close() -> Status;
 
-    auto read(size_t offset, size_t size, char *scratch, Slice *out) -> Status override;
-    auto write(size_t offset, const Slice &in) -> Status override;
-    auto resize(size_t size) -> Status override;
+    auto read(uint64_t offset, size_t size, char *scratch, Slice *out) -> Status override;
+    auto write(uint64_t offset, const Slice &in) -> Status override;
+    auto get_size(uint64_t &size_out) const -> Status override;
+    auto resize(uint64_t size) -> Status override;
     auto sync() -> Status override;
     auto file_lock(FileLockMode mode) -> Status override;
     auto file_unlock() -> void override;
@@ -653,16 +653,6 @@ auto PosixEnv::file_exists(const char *filename) const -> bool
     return access(filename, F_OK) == 0;
 }
 
-auto PosixEnv::file_size(const char *filename, size_t &out) const -> Status
-{
-    struct stat st = {};
-    if (stat(filename, &st)) {
-        return posix_error(errno);
-    }
-    out = static_cast<size_t>(st.st_size);
-    return Status::ok();
-}
-
 auto PosixEnv::new_file(const char *filename, OpenMode mode, File *&out) -> Status
 {
     UnusedFd *reuse;
@@ -766,6 +756,16 @@ auto PosixEnv::sleep(unsigned micros) -> void
     }
 }
 
+auto PosixFile::get_size(uint64_t &size_out) const -> Status
+{
+    struct stat st;
+    if (fstat(file, &st)) {
+        return posix_error(errno);
+    }
+    size_out = static_cast<uint64_t>(st.st_size);
+    return Status::ok();
+}
+
 auto PosixFile::close() -> Status
 {
     auto fd = file;
@@ -810,7 +810,7 @@ auto PosixFile::close() -> Status
     return Status::ok();
 }
 
-auto PosixFile::read(size_t offset, size_t size, char *scratch, Slice *out) -> Status
+auto PosixFile::read(uint64_t offset, size_t size, char *scratch, Slice *out) -> Status
 {
     if (seek_and_read(file, offset, size, scratch, out)) {
         return posix_error(errno);
@@ -818,7 +818,7 @@ auto PosixFile::read(size_t offset, size_t size, char *scratch, Slice *out) -> S
     return Status::ok();
 }
 
-auto PosixFile::write(size_t offset, const Slice &in) -> Status
+auto PosixFile::write(uint64_t offset, const Slice &in) -> Status
 {
     if (seek_and_write(file, offset, in)) {
         return posix_error(errno);
@@ -826,7 +826,7 @@ auto PosixFile::write(size_t offset, const Slice &in) -> Status
     return Status::ok();
 }
 
-auto PosixFile::resize(size_t size) -> Status
+auto PosixFile::resize(uint64_t size) -> Status
 {
     if (posix_truncate(file, size)) {
         return posix_error(errno);
@@ -890,7 +890,7 @@ auto PosixFile::shm_map(size_t r, bool extend, volatile void *&out) -> Status
     }
 
     if (snode->num_regions < request) {
-        size_t file_size;
+        uint64_t file_size;
         if (struct stat st = {}; fstat(snode->file, &st)) {
             s = posix_error(errno);
             goto cleanup;

@@ -64,7 +64,7 @@ public:
 
             ~TempFile() override = default;
 
-            auto read(size_t offset, size_t size, char *scratch, Slice *data_out) -> Status override
+            auto read(uint64_t offset, size_t size, char *scratch, Slice *data_out) -> Status override
             {
                 if (offset >= m_file->actual_size) {
                     size = 0;
@@ -77,7 +77,7 @@ public:
                 auto idx = offset / max_chunk;
                 offset %= max_chunk;
                 for (auto leftover = size; leftover; ++idx) {
-                    const auto chunk = minval(max_chunk - offset, leftover);
+                    const auto chunk = minval<uint64_t>(max_chunk - offset, leftover);
                     std::memcpy(out, sectors[idx] + offset, chunk);
                     leftover -= chunk;
                     out += chunk;
@@ -89,7 +89,7 @@ public:
                 return Status::ok();
             }
 
-            auto write(size_t offset, const Slice &data) -> Status override
+            auto write(uint64_t offset, const Slice &data) -> Status override
             {
                 if (m_file->actual_size < offset + data.size() &&
                     m_file->resize(offset + data.size())) {
@@ -100,7 +100,7 @@ public:
                 auto idx = offset / max_chunk;
                 offset %= max_chunk;
                 for (auto in = data; !in.is_empty(); ++idx) {
-                    const auto chunk = minval(max_chunk - offset, in.size());
+                    const auto chunk = minval<uint64_t>(max_chunk - offset, in.size());
                     std::memcpy(sectors[idx] + offset, in.data(), chunk);
                     in.advance(chunk);
                     offset = 0;
@@ -108,7 +108,13 @@ public:
                 return Status::ok();
             }
 
-            auto resize(size_t size) -> Status override
+            auto get_size(uint64_t &size_out) const -> Status override
+            {
+                size_out = m_file->actual_size;
+                return Status::ok();
+            }
+
+            auto resize(uint64_t size) -> Status override
             {
                 return m_file->resize(size)
                            ? Status::no_memory()
@@ -142,15 +148,6 @@ public:
 
         file_out = new (std::nothrow) TempFile(m_file);
         return file_out ? Status::ok() : Status::no_memory();
-    }
-
-    auto file_size(const char *filename, size_t &size_out) const -> Status override
-    {
-        if (file_exists(filename)) {
-            size_out = m_file.actual_size;
-            return Status::ok();
-        }
-        return Status::invalid_argument();
     }
 
     auto remove_file(const char *filename) -> Status override
@@ -193,8 +190,8 @@ private:
 
     struct SectorFile final {
         Buffer<char *> sectors;
-        const size_t sector_size;
-        size_t actual_size;
+        const uint64_t sector_size;
+        uint64_t actual_size;
 
         explicit SectorFile(size_t sector_size)
             : sector_size(sector_size),
