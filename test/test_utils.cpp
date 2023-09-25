@@ -875,10 +875,10 @@ static constexpr auto constexpr_slice_test(Slice s, const char *result)
     Slice answer(result);
     for (size_t i = 0; i < s.size(); ++i) {
         if (s[i] != answer[i]) {
-            return "";
+            return Slice();
         }
     }
-    (void)s.starts_with(answer));
+    (void)s.starts_with(answer);
     (void)s.data();
     (void)s.size();
     (void)s.range(0);
