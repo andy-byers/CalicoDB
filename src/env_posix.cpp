@@ -50,6 +50,7 @@ public:
     auto sleep(unsigned micros) -> void override;
 };
 
+constexpr size_t kPathMax = 512;       // Maximum path length from SQLite.
 constexpr int kFilePermissions = 0644; // -rw-r--r--
 
 // Constants for SQLite-style shared memory locking
@@ -633,6 +634,40 @@ auto seed_prng_state(uint16_t *state, uint32_t seed) -> void
     std::memcpy(&state[1], &seed, sizeof(seed));
 }
 
+auto open_parent_dir(const char *filename, int &fd_out) -> int
+{
+    char dirname[kPathMax + 1];
+    fd_out = -1;
+
+    std::snprintf(dirname, sizeof(dirname), "%s", filename);
+    auto i = std::strlen(dirname);
+    while (i > 0 && dirname[i] != '/') {
+        --i;
+    }
+    if (i > 0) {
+        dirname[i] = '\0';
+    } else {
+        if (dirname[0] != '/') {
+            dirname[0] = '.';
+        }
+        dirname[1] = '\0';
+    }
+    fd_out = posix_open(dirname, O_RDONLY);
+    return fd_out < 0 ? -1 : 0;
+}
+
+auto sync_parent_dir(const char *filename) -> void
+{
+    int dir;
+    if (open_parent_dir(filename, dir)) {
+        return;
+    }
+    if (fsync(dir)) {
+        // TODO: Use a default logger, log errors like this one.
+    }
+    posix_close(dir);
+}
+
 // Env constructor is not allowed to allocate memory: the allocation subsystem may not be set
 // up yet, since this runs during static initialization while creating the default Env instance.
 PosixEnv::PosixEnv()
@@ -645,6 +680,7 @@ auto PosixEnv::remove_file(const char *filename) -> Status
     if (unlink(filename)) {
         return posix_error(errno);
     }
+    sync_parent_dir(filename);
     return Status::ok();
 }
 

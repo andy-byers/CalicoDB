@@ -6,6 +6,7 @@
 #define CALICODB_WAL_INTERNAL_H
 
 #include "calicodb/wal.h"
+#include "page.h"
 
 namespace calicodb
 {

@@ -212,7 +212,7 @@ auto Pager::start_reader() -> Status
             return s;
         }
     }
-    bool changed;
+    bool changed = false;
     auto s = busy_wait(m_busy, [this, &changed] {
         return m_wal->start_read(changed);
     });
@@ -311,7 +311,7 @@ auto Pager::finish() -> void
 {
     CALICODB_EXPECT_TRUE(assert_state());
 
-    if (m_mode >= kDirty) {
+    if (m_mode >= kWrite) {
         if (m_mode == kDirty) {
             // Get rid of obsolete cached pages that aren't dirty anymore.
             m_wal->rollback(undo_callback, this);
@@ -322,8 +322,10 @@ auto Pager::finish() -> void
         m_page_count = m_saved_page_count;
     }
     if (m_mode >= kRead) {
-        m_wal->finish_read();
         m_bufmgr.shrink_to_fit();
+    }
+    if (m_wal) {
+        m_wal->finish_read();
     }
     *m_status = Status::ok();
     m_mode = kOpen;

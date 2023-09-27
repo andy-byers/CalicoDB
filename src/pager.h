@@ -122,10 +122,16 @@ public:
 
     auto set_status(const Status &error) const -> void;
 
+    auto TEST_wal() const -> const Wal *
+    {
+        return m_wal;
+    }
+
 private:
     friend class Mem;
     explicit Pager(const Parameters &param);
 
+    auto create_wal_object() -> Wal *;
     auto open_wal() -> Status;
     auto close_wal() -> Status;
     auto refresh_state() -> Status;

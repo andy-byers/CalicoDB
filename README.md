@@ -44,7 +44,9 @@ The library requires the following to compile:
   + GCC (>= 7.0)
   + Clang (>= 5.0)
 
-The tests depend on `@google/googletest`, which is downloaded during the build.
+The tests depend on:
++ `@google/googletest` (downloaded with CMake FetchContent)
++ Python 3
 
 ## Performance
 Performance benchmarks are run in a [fork of LevelDB](https://github.com/andy-byers/leveldb/tree/db_bench_calicodb).
