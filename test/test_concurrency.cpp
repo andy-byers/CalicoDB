@@ -177,32 +177,32 @@ protected:
         const auto nt = param.num_readers + param.num_writers + param.num_checkpointers;
         Barrier barrier(nt);
 
-        Connection tmp;
-        tmp.filename = m_filename.c_str();
-        tmp.env = m_env.get();
-        tmp.op_args[0] = param.num_iterations;
-        tmp.op_args[1] = param.num_records;
+        Connection proto;
+        proto.filename = m_filename.c_str();
+        proto.env = m_env.get();
+        proto.op_args[0] = param.num_iterations;
+        proto.op_args[1] = param.num_records;
 
         std::vector<Connection> connections;
-        tmp.op = test_reader;
+        proto.op = test_reader;
         for (size_t i = 0; i < param.num_readers; ++i) {
-            connections.emplace_back(tmp);
+            connections.emplace_back(proto);
         }
-        tmp.op = test_writer;
+        proto.op = test_writer;
         for (size_t i = 0; i < param.num_writers; ++i) {
-            connections.emplace_back(tmp);
+            connections.emplace_back(proto);
         }
         // Write some records to the WAL.
-        ASSERT_OK(test_writer(tmp, nullptr));
+        ASSERT_OK(test_writer(proto, nullptr));
 
-        tmp.op = test_checkpointer;
-        tmp.op_args[1] = param.checkpoint_reset;
+        proto.op = test_checkpointer;
+        proto.op_args[1] = param.checkpoint_reset;
         for (size_t i = 0; i < param.num_checkpointers; ++i) {
-            connections.emplace_back(tmp);
+            connections.emplace_back(proto);
         }
         // Write the WAL back to the database. If `param.checkpoint_reset` is true, then the WAL will be
         // reset such that writers start at the beginning again.
-        ASSERT_OK(test_checkpointer(tmp, nullptr));
+        ASSERT_OK(test_checkpointer(proto, nullptr));
 
         m_env->m_delay_sync.store(param.delay_barrier, std::memory_order_release);
         m_env->m_delay_sync.store(param.delay_sync, std::memory_order_release);
@@ -233,6 +233,12 @@ protected:
             }
         }
     }
+
+    // Run multiple concurrent readers, writers, and checkpointers. Each time a writer runs,
+    // it increments the numeric representation of each record value (changing 0000012 to
+    // 0000013, for example). Each write connection should see monotonically increasing
+    // values, since writers are serialized. Read connections might see the same value multiple
+    // times in-a-row, but the values should never decrease.
     auto run_consistency_test(const ConsistencyTestParameters &param) -> void
     {
         for (size_t i = 1; i <= 4; ++i) {
@@ -318,6 +324,9 @@ protected:
                         break;
                     } else if (i == 0) {
                         const auto value = c->value();
+                        if (!co.result.empty()) {
+                            EXPECT_GE(value, co.result.back());
+                        }
                         co.result.emplace_back(value.data(), value.size());
                     } else {
                         EXPECT_EQ(c->value(), to_slice(co.result.back())) << "non repeatable read";
@@ -352,19 +361,24 @@ protected:
                 TestCursor c;
                 auto t = test_create_and_open_bucket(tx, BucketOptions(), "b", c);
                 for (size_t i = 0; t.is_ok() && i < co.op_args[1]; ++i) {
-                    uint64_t result = 1;
+                    uint64_t result = 0;
                     const auto key = numeric_key(i);
                     c->find(key);
                     if (c->is_valid()) {
                         Slice slice(c->value());
                         EXPECT_TRUE(consume_decimal_number(slice, &result));
-                        ++result;
-                    } else if (c->status().is_ok()) {
-                        t = Status::ok();
-                    } else {
+                        if (i == 0) {
+                            if (!co.result.empty()) {
+                                // Writers must never encounter duplicates. Could indicate bad serialization.
+                                EXPECT_LT(co.result.back(), c->value());
+                            }
+                            co.result.emplace_back(c->value().to_string());
+                        }
+                    } else if (!c->status().is_ok()) {
                         break;
                     }
                     if (t.is_ok()) {
+                        ++result;
                         const auto value = numeric_key(result);
                         t = tx.put(*c, key, value);
                     }
@@ -408,9 +422,116 @@ protected:
         delete co.db;
         return s;
     }
+
+    struct CheckpointerTestParameters {
+        size_t num_readers = 0;
+        size_t num_writers = 0;
+        bool auto_checkpoint = false;
+
+        // Set by run_checkpointer_test().
+        size_t num_iterations = 0;
+        size_t num_records = 0;
+        bool delay_sync = false;
+    };
+
+    auto run_checkpointer_test_instance(const CheckpointerTestParameters &param) -> void
+    {
+        std::filesystem::remove_all(m_filename);
+        std::filesystem::remove_all(m_filename + kDefaultShmSuffix.to_string());
+        std::filesystem::remove_all(m_filename + kDefaultWalSuffix.to_string());
+        TEST_LOG << "ConcurrencyTests.Checkpointer*\n";
+
+        Connection proto;
+        proto.filename = m_filename.c_str();
+        proto.env = m_env.get();
+        proto.op_args[0] = param.num_iterations;
+        proto.op_args[1] = param.num_records;
+        // Writers never need to call File::sync(). This is taken care of by the checkpointer
+        // thread.
+        proto.options.sync_mode = Options::kSyncOff;
+        proto.options.auto_checkpoint = param.auto_checkpoint * 1'000;
+
+        std::vector<Connection> connections;
+        proto.op = test_writer;
+        for (size_t i = 0; i < param.num_writers; ++i) {
+            connections.emplace_back(proto);
+        }
+        proto.op = test_reader;
+        for (size_t i = 0; i < param.num_readers; ++i) {
+            connections.emplace_back(proto);
+        }
+        proto.op = [](auto &co, auto *) {
+            // Checkpointers should call File::sync() once on the WAL file before any pages are read,
+            // and once on the database file after all pages have been written.
+            co.options.sync_mode = Options::kSyncNormal;
+            auto s = reopen_connection(co);
+            if (s.is_ok()) {
+                do {
+                    s = co.db->checkpoint(true);
+                    co.env->sleep(25);
+                } while (s.is_busy());
+
+                if (co.op_args[0]-- <= 1) {
+                    co.op = nullptr;
+                }
+                delete co.db;
+            }
+            return s;
+        };
+        connections.emplace_back(proto);
+
+        m_env->m_delay_sync.store(param.delay_sync, std::memory_order_release);
+
+        std::vector<std::thread> threads;
+        threads.reserve(connections.size());
+        for (auto &co : connections) {
+            threads.emplace_back([&co, t = threads.size()] {
+                while (connection_main(co, nullptr)) {
+                    // Run until the connection clears its own callback.
+                }
+            });
+        }
+
+        for (auto &t : threads) {
+            t.join();
+        }
+
+        for (const auto &co : connections) {
+            // Check the results.
+            for (size_t i = 0; i + 1 < co.result.size(); ++i) {
+                uint64_t n;
+                auto slice = to_slice(co.result[i]);
+                ASSERT_LE(slice, to_slice(co.result[i + 1]));
+                ASSERT_TRUE(consume_decimal_number(slice, &n));
+                ASSERT_TRUE(slice.is_empty());
+                m_sanity_check = maxval(m_sanity_check, n);
+            }
+        }
+    }
+
+    // Similar to run_consistency_test(), except sometimes we disable sync and auto
+    // checkpoint behavior in the readers and writers. Instead, we have a single
+    // background thread run the checkpoints. Also, there are no barriers.
+    auto run_checkpointer_test(const CheckpointerTestParameters &param) -> void
+    {
+        for (size_t num_iterations = 1; num_iterations <= 4; ++num_iterations) {
+            for (size_t num_records = 1; num_records <= 4; ++num_records) {
+                for (size_t delay_sync = 0; delay_sync <= 1; ++delay_sync) {
+                    run_checkpointer_test_instance({
+                        param.num_readers,
+                        param.num_writers,
+                        param.auto_checkpoint,
+                        num_iterations,
+                        num_records,
+                        delay_sync != 0,
+                    });
+                }
+            }
+        }
+    }
 };
 
-TEST_F(ConcurrencyTests, Database0)
+TEST_F(ConcurrencyTests, Consistency0)
 {
     // Sanity check, no concurrency.
     run_consistency_test({1, 0, 0});
@@ -418,7 +539,7 @@ TEST_F(ConcurrencyTests, Database0)
     run_consistency_test({0, 0, 1});
 }
 
-TEST_F(ConcurrencyTests, Database1)
+TEST_F(ConcurrencyTests, Consistency1)
 {
     run_consistency_test({2, 1, 0});
     run_consistency_test({2, 0, 1});
@@ -428,22 +549,94 @@ TEST_F(ConcurrencyTests, Database1)
     run_consistency_test({10, 2, 2});
 }
 
-TEST_F(ConcurrencyTests, Database2)
+TEST_F(ConcurrencyTests, Consistency2)
 {
     run_consistency_test({2, 2, 2});
     run_consistency_test({10, 10, 10});
 }
 
-TEST_F(ConcurrencyTests, Database3)
+TEST_F(ConcurrencyTests, Consistency3)
 {
     run_consistency_test({100, 10, 10});
     run_consistency_test({10, 100, 10});
     run_consistency_test({10, 10, 100});
 }
 
-TEST_F(ConcurrencyTests, Database4)
+TEST_F(ConcurrencyTests, Consistency4)
 {
     run_consistency_test({50, 50, 50});
+}
+
+TEST_F(ConcurrencyTests, Checkpointer0)
+{
+    // Sanity check, no concurrency.
+    run_checkpointer_test({0, 0});
+}
+
+TEST_F(ConcurrencyTests, Checkpointer1)
+{
+    run_checkpointer_test({1, 0});
+    run_checkpointer_test({1, 1});
+}
+
+TEST_F(ConcurrencyTests, Checkpointer2)
+{
+    run_checkpointer_test({2, 0});
+    run_checkpointer_test({2, 1});
+    run_checkpointer_test({1, 2});
+    run_checkpointer_test({2, 2});
+}
+
+TEST_F(ConcurrencyTests, Checkpointer3)
+{
+    run_checkpointer_test({10, 0});
+    run_checkpointer_test({10, 2});
+    run_checkpointer_test({2, 10});
+    run_checkpointer_test({10, 10});
+}
+
+TEST_F(ConcurrencyTests, Checkpointer4)
+{
+    run_checkpointer_test({50, 0});
+    run_checkpointer_test({10, 50});
+    run_checkpointer_test({10, 50});
+    run_checkpointer_test({50, 50});
+}
+
+TEST_F(ConcurrencyTests, AutoCheckpointer0)
+{
+    // Sanity check, no concurrency.
+    run_checkpointer_test({0, 0, true});
+}
+
+TEST_F(ConcurrencyTests, AutoCheckpointer1)
+{
+    run_checkpointer_test({1, 0, true});
+    run_checkpointer_test({1, 1, true});
+}
+
+TEST_F(ConcurrencyTests, AutoCheckpointer2)
+{
+    run_checkpointer_test({2, 0, true});
+    run_checkpointer_test({2, 1, true});
+    run_checkpointer_test({1, 2, true});
+    run_checkpointer_test({2, 2, true});
+}
+
+TEST_F(ConcurrencyTests, AutoCheckpointer3)
+{
+    run_checkpointer_test({10, 0, true});
+    run_checkpointer_test({10, 2, true});
+    run_checkpointer_test({2, 10, true});
+    run_checkpointer_test({10, 10, true});
+}
+
+TEST_F(ConcurrencyTests, AutoCheckpointer4)
+{
+    run_checkpointer_test({50, 0, true});
+    run_checkpointer_test({10, 50, true});
+    run_checkpointer_test({10, 50, true});
+    run_checkpointer_test({50, 50, true});
 }
 
 } // namespace calicodb::test

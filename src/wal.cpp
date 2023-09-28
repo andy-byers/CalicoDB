@@ -714,6 +714,14 @@ auto compute_checksum(const Slice &in, const uint32_t *initial, uint32_t *out)
     out[1] = s2;
 }
 
+//  Operation        | Write | Checkpoint | Recovery | ReadN |
+// ------------------|-------|------------|----------|-------|
+//  Read frames      |       |            |          | 1     |
+//  Write frames     | X     |            |
+//  Checkpoint       |       | X          |
+//  Checkpoint reset | X     | X          |
+//  Restart log      | X     |
+//  Recover index    | X     |
 class WalImpl : public Wal
 {
 public:
@@ -870,9 +878,8 @@ private:
 
     [[nodiscard]] auto try_index_header(bool &changed) -> bool
     {
-        HashIndexHdr h1 = {};
-        HashIndexHdr h2 = {};
-        changed = false;
+        HashIndexHdr h1;
+        HashIndexHdr h2;
 
         const volatile auto *hdr = m_index.header();
         read_hdr(&hdr[0], &h1);
@@ -951,23 +958,31 @@ private:
         write_hdr(&m_hdr, &hdr[0]);
     }
 
+    // Restart the WAL index header such that the next writer writes to the start
+    // of the log file
+    // Readers are attached to readmark 0 and reading exclusively from the database
+    // file. This connection holds kWriteLock and the whole WAL has been checkpointed.
     auto restart_header(uint32_t salt_1) -> void
     {
+        CALICODB_EXPECT_TRUE(m_writer_lock);
+        volatile auto *info = get_ckpt_info();
+
         ++m_ckpt_number;
         m_hdr.max_frame = 0;
         auto *salt = StablePtr(m_hdr.salt);
         put_u32(salt, get_u32(salt) + 1);
         std::memcpy(salt + sizeof(uint32_t), &salt_1, sizeof(salt_1));
         write_index_header();
-
-        volatile auto *info = get_ckpt_info();
-        CALICODB_EXPECT_EQ(info->readmark[0], 0);
+        // Write to backfill count must be atomic: readers perform an ATOMIC_LOAD()
+        // on this variable to determine if they need to read exclusively from the
+        // database file.
         ATOMIC_STORE(&info->backfill, 0);
-        ATOMIC_STORE(&info->backfill_attempted, 0);
-        ATOMIC_STORE(&info->readmark[1], 0);
+        info->backfill_attempted = 0;
+        info->readmark[1] = 0;
         for (size_t i = 2; i < kReaderCount; ++i) {
-            ATOMIC_STORE(&info->readmark[i], kReadmarkNotUsed);
+            info->readmark[i] = kReadmarkNotUsed;
         }
+        CALICODB_EXPECT_EQ(info->readmark[0], 0);
     }
 
     auto restart_log() -> Status
@@ -1017,6 +1032,8 @@ private:
 
         Status s;
         if (!use_wal) {
+            // Attempt to read the index header. This will fail if another connection is
+            // writing the header concurrently.
             s = read_index_header(changed);
             if (s.is_busy()) {
                 if (m_index.m_groups[0] == nullptr) {
@@ -1058,12 +1075,12 @@ private:
 
         size_t max_readmark = 0;
         size_t max_index = 0;
-        uint32_t max_frame = m_hdr.max_frame;
+        auto max_frame = m_hdr.max_frame;
 
         // Attempt to find a readmark that this reader can use to read the most-recently-committed WAL
         // frames.
         for (size_t i = 1; i < kReaderCount; i++) {
-            const auto mark = ATOMIC_LOAD(&info->readmark[i]);
+            const auto mark = ATOMIC_LOAD(info->readmark + i);
             if (max_readmark <= mark && mark <= max_frame) {
                 CALICODB_EXPECT_NE(mark, kReadmarkNotUsed);
                 max_readmark = mark;
@@ -1075,7 +1092,7 @@ private:
             for (size_t i = 1; i < kReaderCount; ++i) {
                 s = lock_exclusive(READ_LOCK(i), 1);
                 if (s.is_ok()) {
-                    ATOMIC_STORE(&info->readmark[i], max_frame);
+                    ATOMIC_STORE(info->readmark + i, max_frame);
                     max_readmark = max_frame;
                     max_index = i;
                     unlock_exclusive(READ_LOCK(i), 1);
@@ -1189,6 +1206,9 @@ WalImpl::WalImpl(const WalOptionsExtra &options, const char *filename)
 
 WalImpl::~WalImpl()
 {
+    CALICODB_EXPECT_FALSE(m_writer_lock);
+    CALICODB_EXPECT_FALSE(m_ckpt_lock);
+    CALICODB_EXPECT_EQ(m_reader_lock, -1);
     m_index.close();
 }
 
@@ -1253,7 +1273,6 @@ auto WalImpl::recover_index() -> Status
     CALICODB_EXPECT_EQ(kNotWriteLock, kWriteLock + 1);
     CALICODB_EXPECT_EQ(kCheckpointLock, kNotWriteLock);
     CALICODB_EXPECT_TRUE(m_writer_lock);
-    m_hdr = {};
 
     // Lock the recover "Rcvr" lock. Lock the checkpoint ("Ckpt") lock as well, if this
     // code isn't being called from the checkpoint routine. In that case, the checkpoint
@@ -1265,12 +1284,14 @@ auto WalImpl::recover_index() -> Status
     }
 
     uint32_t frame_cksum[2] = {};
+    m_hdr = {};
 
-    size_t file_size;
-    s = m_env->file_size(m_wal_name, file_size);
+    uint64_t file_size;
+    s = m_wal->get_size(file_size);
     if (!s.is_ok()) {
         return s;
     }
+
     if (file_size > kWalHdrSize) {
         char header[kWalHdrSize];
         s = m_wal->read_exact(0, sizeof(header), header);
@@ -1322,8 +1343,12 @@ auto WalImpl::recover_index() -> Status
                     m_stat->read_wal += frame_size;
 
                     WalFrameHdr hdr;
+                    // Stop at the first invalid frame. This is not an error, it just indicates that there
+                    // are no more valid frames in this WAL. The WAL implementation may start to overwrite
+                    // frames from the start of the file, once the file has reached some threshold size.
+                    // Obsolete frames will fail decoding.
                     if (decode_frame(frame.ptr(), hdr)) {
-                        break;
+                        goto cleanup;
                     }
                     s = m_index.assign(hdr.pgno, n_frame);
                     if (!s.is_ok()) {
@@ -1333,6 +1358,8 @@ auto WalImpl::recover_index() -> Status
                         // Found a commit frame.
                         m_hdr.max_frame = n_frame;
                         m_hdr.page_count = hdr.db_size;
+                        // Page size was read from the WAL header above.
+                        m_hdr.page_size = static_cast<uint16_t>(m_page_size);
                         frame_cksum[0] = m_hdr.cksum[0];
                         frame_cksum[1] = m_hdr.cksum[1];
                     }
@@ -1343,12 +1370,15 @@ auto WalImpl::recover_index() -> Status
 
 cleanup:
     if (s.is_ok()) {
+        volatile auto *info = get_ckpt_info();
+
         m_hdr.page_size = static_cast<uint16_t>(m_page_size);
         m_hdr.frame_cksum[0] = frame_cksum[0];
         m_hdr.frame_cksum[1] = frame_cksum[1];
         write_index_header();
-        // NOTE: This code can run while readers are trying to connect (`start_reader()`).
-        volatile auto *info = get_ckpt_info();
+        // TODO: This code might run while a reader is trying to connect (see try_reader()).
+        //       Usually causes races on the backfill count, since this value is read by
+        //       every connection as it is connecting.
         ATOMIC_STORE(&info->backfill, 0);
         info->backfill_attempted = m_hdr.max_frame;
         info->readmark[0] = 0;
@@ -1662,7 +1692,7 @@ auto WalImpl::transfer_contents(bool reset, char *scratch) -> Status
         // checkpointer and ends at either the last WAL frame this connection knows about,
         // or the most-recent frame still needed by a reader, whichever is smaller.
         for (size_t i = 1; i < kReaderCount; ++i) {
-            const auto y = ATOMIC_LOAD(&info->readmark[i]);
+            const auto y = ATOMIC_LOAD(info->readmark + i);
             if (y < max_safe_frame) {
                 CALICODB_EXPECT_LE(y, m_hdr.max_frame);
                 s = busy_wait(m_busy, [this, i] {
@@ -1670,7 +1700,7 @@ auto WalImpl::transfer_contents(bool reset, char *scratch) -> Status
                 });
                 if (s.is_ok()) {
                     const uint32_t mark = i == 1 ? max_safe_frame : kReadmarkNotUsed;
-                    ATOMIC_STORE(&info->readmark[i], mark);
+                    ATOMIC_STORE(info->readmark + i, mark);
                     unlock_exclusive(READ_LOCK(i), 1);
                 } else if (s.is_busy()) {
                     max_safe_frame = y;
@@ -1680,7 +1710,7 @@ auto WalImpl::transfer_contents(bool reset, char *scratch) -> Status
             }
         }
 
-        if (ATOMIC_LOAD(&info->backfill) < max_safe_frame) {
+        if (info->backfill < max_safe_frame) {
             HashIterator itr(m_index);
             s = itr.init(info->backfill);
             if (s.is_ok()) {

@@ -47,17 +47,23 @@ auto FakeEnv::write_file_at(FileState &mem, size_t offset, const Slice &in) -> S
     return Status::ok();
 }
 
-auto FakeFile::read(size_t offset, size_t size, char *scratch, Slice *out) -> Status
+auto FakeFile::read(uint64_t offset, size_t size, char *scratch, Slice *out) -> Status
 {
     return m_env->read_file_at(*m_state, offset, size, scratch, out);
 }
 
-auto FakeFile::write(size_t offset, const Slice &in) -> Status
+auto FakeFile::write(uint64_t offset, const Slice &in) -> Status
 {
     return m_env->write_file_at(*m_state, offset, in);
 }
 
-auto FakeFile::resize(size_t size) -> Status
+auto FakeFile::get_size(uint64_t &size_out) const -> Status
+{
+    size_out = m_state->buffer.size();
+    return Status::ok();
+}
+
+auto FakeFile::resize(uint64_t size) -> Status
 {
     m_state->buffer.resize(size);
     return Status::ok();
@@ -120,16 +126,6 @@ auto FakeEnv::remove_file(const char *filename) -> Status
     // through open file descriptors, so if anyone has this file open, they should still be able to
     // access it.
     itr->second.created = false;
-    return Status::ok();
-}
-
-auto FakeEnv::file_size(const char *filename, size_t &out) const -> Status
-{
-    auto itr = m_state.find(filename);
-    if (itr == cend(m_state) || !itr->second.created) {
-        return Status::not_found("file does not exist");
-    }
-    out = itr->second.buffer.size();
     return Status::ok();
 }
 

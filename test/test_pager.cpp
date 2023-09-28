@@ -444,9 +444,9 @@ TEST_F(PagerTests, NOOP)
         m_pager->set_status(Status::ok());
     });
 
-    size_t file_size;
+    uint64_t file_size;
     // Database size is 0 before the first checkpoint.
-    ASSERT_OK(m_env->file_size("db", file_size));
+    ASSERT_OK(m_file->get_size(file_size));
     ASSERT_EQ(file_size, 0);
 }
 
@@ -585,8 +585,8 @@ TEST_F(PagerTests, Truncation)
 
     ASSERT_OK(m_pager->checkpoint(true));
 
-    size_t file_size;
-    ASSERT_OK(m_env->file_size("db", file_size));
+    uint64_t file_size;
+    ASSERT_OK(m_file->get_size(file_size));
     ASSERT_EQ(file_size, TEST_PAGE_SIZE * m_page_ids.at(kManyPages / 2).value);
 
     pager_view([this] {
@@ -735,10 +735,13 @@ public:
             [](auto *object, auto page_id) {
                 auto &self = *static_cast<WalTests *>(object);
                 const auto i = page_id - 1;
-                self.m_temp.at(i) = self.m_perm.at(i);
+                if (i < self.m_perm.size()) {
+                    self.m_temp.at(i) = self.m_perm[i];
+                }
             },
             this);
 
+        m_temp.resize(m_perm.size());
         ASSERT_EQ(m_temp, m_perm);
         m_temp = m_perm;
     }
@@ -807,7 +810,9 @@ public:
                 m_temp.resize(options.truncate);
             }
             if (options.commit) {
-                m_perm = m_temp;
+                m_perm = m_temp; // Commit
+            } else {
+                m_temp = m_perm; // Rollback
             }
         }
         return s;
@@ -826,14 +831,9 @@ public:
                 EXPECT_EQ(m_temp.at(i), get_u32(page));
             } else if (i < m_temp.size()) {
                 // Not found, but should exist: read from the database file.
-                Slice result;
-                s = m_db_file->read(i * TEST_PAGE_SIZE, TEST_PAGE_SIZE, buffer, &result);
+                s = m_db_file->read_exact(i * TEST_PAGE_SIZE, TEST_PAGE_SIZE, buffer);
                 if (!s.is_ok()) {
                     return s;
-                } else if (result.size() != TEST_PAGE_SIZE) {
-                    ADD_FAILURE() << "incomplete read: read " << result.size() << '/'
-                                  << TEST_PAGE_SIZE << " bytes";
-                    return Status::io_error();
                 }
                 EXPECT_EQ(m_temp.at(i), get_u32(buffer));
             }
@@ -1012,7 +1012,7 @@ TEST_P(WalTests, Operations_1)
 {
     RunOptions options;
     options.commit_interval = 4;
-    run_operations(RunOptions());
+    run_operations(options);
 }
 
 TEST_P(WalTests, Operations_2)
@@ -1020,7 +1020,7 @@ TEST_P(WalTests, Operations_2)
     RunOptions options;
     options.commit_interval = 4;
     options.rollback_interval = 2;
-    run_operations(RunOptions());
+    run_operations(options);
 }
 
 INSTANTIATE_TEST_SUITE_P(

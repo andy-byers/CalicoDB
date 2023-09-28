@@ -3,6 +3,13 @@ CalicoDB aims to be simple and portable.
 The API is based off that of LevelDB, but the backend uses a B<sup>+</sup>-tree rather than a log-structured merge (LSM) tree.
 The concurrency model is based off SQLite in WAL mode.
 
+## Portability
+The core library can be configured to use only freestanding C++ standard library headers (also requires `<cstring>` for `std::memcpy` etc.), in addition to the platform-specific headers required by the default `Env` implementation.
+CalicoDB can be ported to new platforms by implementing the virtual `Env` interface in [`env.h`](../include/calicodb/env.h).
+
+The default WAL uses shared memory for synchronization.
+If a certain platform does not support shared-memory, it may be possible to implement a custom `Wal` (see [`wal.h`](../include/calicodb/wal.h)) that uses a different synchronization mechanism.
+
 ## Architecture
 CalicoDB uses a B<sup>+</sup>-tree backed by a write-ahead log (WAL).
 The record store consists of 0 or more B<sup>+</sup>-trees and is located in a file with the same name as the database.

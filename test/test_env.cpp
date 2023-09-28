@@ -199,10 +199,8 @@ protected:
 TEST_P(FileTests, OpenAndClose)
 {
     for (size_t i = 0; i < 2; ++i) {
-        auto *file = m_helper.open_unowned_file(
-            EnvWithFiles::kSameName,
-            Env::kCreate);
         for (size_t j = 0; j < 2; ++j) {
+            File *file;
             ASSERT_OK(m_helper.env->new_file("shmfile", Env::kCreate, file));
             ASSERT_NE(file, nullptr);
             delete file;
@@ -213,6 +211,29 @@ TEST_P(FileTests, OpenAndClose)
 TEST_P(FileTests, SameINode)
 {
     test_same_inode();
+}
+
+TEST_P(FileTests, UseUnlinkedFile)
+{
+    const auto filename = testing::TempDir() + "calicodb_unlinked_file";
+    const auto shmname = testing::TempDir() + "calicodb_unlinked_file" + kDefaultShmSuffix.to_string();
+    (void)m_helper.env->remove_file(filename.c_str());
+    (void)m_helper.env->remove_file(shmname.c_str());
+
+    File *file;
+    ASSERT_OK(m_helper.env->new_file(filename.c_str(), Env::kCreate, file));
+    ASSERT_NE(file, nullptr);
+    ASSERT_OK(m_helper.env->remove_file(filename.c_str()));
+    volatile void *ptr;
+    ASSERT_OK(file->shm_map(0, true, ptr));
+    ASSERT_OK(file->file_lock(kFileShared));
+    ASSERT_OK(file->file_lock(kFileExclusive));
+    ASSERT_OK(file->shm_lock(0, File::kShmLockCount, kShmLock | kShmWriter));
+    ASSERT_OK(file->shm_lock(0, File::kShmLockCount, kShmUnlock | kShmWriter));
+    ASSERT_OK(file->shm_lock(0, 1, kShmLock | kShmReader));
+    ASSERT_OK(file->shm_lock(0, 1, kShmUnlock | kShmReader));
+    file->shm_unmap(true);
+    delete file;
 }
 
 INSTANTIATE_TEST_SUITE_P(
@@ -579,9 +600,6 @@ TEST(EnvWrappers, WrapperEnvWorksAsExpected)
     ASSERT_TRUE(w_env.new_logger("sink", sink).is_not_supported());
     ASSERT_TRUE(w_env.file_exists("file"));
     delete file;
-    size_t size;
-    ASSERT_OK(w_env.file_size("file", size));
-    ASSERT_EQ(size, 0);
     w_env.srand(123);
     (void)w_env.rand();
     w_env.sleep(0);
@@ -691,7 +709,7 @@ TEST_P(TempEnvTests, SequentialIO)
 
 TEST_P(TempEnvTests, RandomIO)
 {
-    size_t file_size = 0;
+    uint64_t file_size = 0;
     RandomGenerator random;
     for (size_t i = 0; i < 100; ++i) {
         const auto chunk = random.Generate(random.Next(m_sector_size / 2));

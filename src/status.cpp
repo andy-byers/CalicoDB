@@ -34,13 +34,13 @@ auto make_inline_state(Status::Code code, Status::SubCode subc) -> char *
 auto is_inline(const char *state) -> bool
 {
     static constexpr uintptr_t kInlineBit = 0x0001;
-    return reinterpret_cast<uintptr_t>(state) & kInlineBit;
+    return !state || reinterpret_cast<uintptr_t>(state) & kInlineBit;
 }
 
 // Return true if the given `state` is allocated on the heap, false otherwise
 auto is_heap(const char *state) -> bool
 {
-    return state && !is_inline(state);
+    return !is_inline(state);
 }
 
 auto inline_code(const char *state) -> Status::Code
@@ -133,9 +133,7 @@ auto Status::operator=(Status &&rhs) noexcept -> Status &
 
 auto Status::code() const -> Code
 {
-    if (is_ok()) {
-        return kOK;
-    } else if (is_inline(m_state)) {
+    if (is_inline(m_state)) {
         return inline_code(m_state);
     } else {
         return heap_hdr(m_state)->code;
@@ -144,9 +142,7 @@ auto Status::code() const -> Code
 
 auto Status::subcode() const -> SubCode
 {
-    if (is_ok()) {
-        return kNone;
-    } else if (is_inline(m_state)) {
+    if (is_inline(m_state)) {
         return inline_subcode(m_state);
     } else {
         return heap_hdr(m_state)->subc;

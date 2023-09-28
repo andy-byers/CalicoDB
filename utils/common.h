@@ -65,17 +65,22 @@ public:
 
     ~FileWrapper() override = default;
 
-    auto read(size_t offset, size_t size, char *scratch, Slice *out) -> Status override
+    auto read(uint64_t offset, size_t size, char *scratch, Slice *out) -> Status override
     {
         return m_target->read(offset, size, scratch, out);
     }
 
-    auto write(size_t offset, const Slice &in) -> Status override
+    auto write(uint64_t offset, const Slice &in) -> Status override
     {
         return m_target->write(offset, in);
     }
 
-    auto resize(size_t size) -> Status override
+    auto get_size(uint64_t &size_out) const -> Status override
+    {
+        return m_target->get_size(size_out);
+    }
+
+    auto resize(uint64_t size) -> Status override
     {
         return m_target->resize(size);
     }

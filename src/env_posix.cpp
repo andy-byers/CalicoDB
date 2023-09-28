@@ -43,7 +43,6 @@ public:
     auto new_file(const char *filename, OpenMode mode, File *&out) -> Status override;
     [[nodiscard]] auto file_exists(const char *filename) const -> bool override;
     auto remove_file(const char *filename) -> Status override;
-    auto file_size(const char *filename, size_t &out) const -> Status override;
 
     auto srand(unsigned seed) -> void override;
     [[nodiscard]] auto rand() -> unsigned override;
@@ -51,6 +50,7 @@ public:
     auto sleep(unsigned micros) -> void override;
 };
 
+constexpr size_t kPathMax = 512;       // Maximum path length from SQLite.
 constexpr int kFilePermissions = 0644; // -rw-r--r--
 
 // Constants for SQLite-style shared memory locking
@@ -297,9 +297,10 @@ public:
 
     auto close() -> Status;
 
-    auto read(size_t offset, size_t size, char *scratch, Slice *out) -> Status override;
-    auto write(size_t offset, const Slice &in) -> Status override;
-    auto resize(size_t size) -> Status override;
+    auto read(uint64_t offset, size_t size, char *scratch, Slice *out) -> Status override;
+    auto write(uint64_t offset, const Slice &in) -> Status override;
+    auto get_size(uint64_t &size_out) const -> Status override;
+    auto resize(uint64_t size) -> Status override;
     auto sync() -> Status override;
     auto file_lock(FileLockMode mode) -> Status override;
     auto file_unlock() -> void override;
@@ -633,6 +634,40 @@ auto seed_prng_state(uint16_t *state, uint32_t seed) -> void
     std::memcpy(&state[1], &seed, sizeof(seed));
 }
 
+auto open_parent_dir(const char *filename, int &fd_out) -> int
+{
+    char dirname[kPathMax + 1];
+    fd_out = -1;
+
+    std::snprintf(dirname, sizeof(dirname), "%s", filename);
+    auto i = std::strlen(dirname);
+    while (i > 0 && dirname[i] != '/') {
+        --i;
+    }
+    if (i > 0) {
+        dirname[i] = '\0';
+    } else {
+        if (dirname[0] != '/') {
+            dirname[0] = '.';
+        }
+        dirname[1] = '\0';
+    }
+    fd_out = posix_open(dirname, O_RDONLY);
+    return fd_out < 0 ? -1 : 0;
+}
+
+auto sync_parent_dir(const char *filename) -> void
+{
+    int dir;
+    if (open_parent_dir(filename, dir)) {
+        return;
+    }
+    if (fsync(dir)) {
+        // TODO: Use a default logger, log errors like this one.
+    }
+    posix_close(dir);
+}
+
 // Env constructor is not allowed to allocate memory: the allocation subsystem may not be set
 // up yet, since this runs during static initialization while creating the default Env instance.
 PosixEnv::PosixEnv()
@@ -645,22 +680,13 @@ auto PosixEnv::remove_file(const char *filename) -> Status
     if (unlink(filename)) {
         return posix_error(errno);
     }
+    sync_parent_dir(filename);
     return Status::ok();
 }
 
 auto PosixEnv::file_exists(const char *filename) const -> bool
 {
     return access(filename, F_OK) == 0;
-}
-
-auto PosixEnv::file_size(const char *filename, size_t &out) const -> Status
-{
-    struct stat st = {};
-    if (stat(filename, &st)) {
-        return posix_error(errno);
-    }
-    out = static_cast<size_t>(st.st_size);
-    return Status::ok();
 }
 
 auto PosixEnv::new_file(const char *filename, OpenMode mode, File *&out) -> Status
@@ -766,6 +792,16 @@ auto PosixEnv::sleep(unsigned micros) -> void
     }
 }
 
+auto PosixFile::get_size(uint64_t &size_out) const -> Status
+{
+    struct stat st;
+    if (fstat(file, &st)) {
+        return posix_error(errno);
+    }
+    size_out = static_cast<uint64_t>(st.st_size);
+    return Status::ok();
+}
+
 auto PosixFile::close() -> Status
 {
     auto fd = file;
@@ -810,7 +846,7 @@ auto PosixFile::close() -> Status
     return Status::ok();
 }
 
-auto PosixFile::read(size_t offset, size_t size, char *scratch, Slice *out) -> Status
+auto PosixFile::read(uint64_t offset, size_t size, char *scratch, Slice *out) -> Status
 {
     if (seek_and_read(file, offset, size, scratch, out)) {
         return posix_error(errno);
@@ -818,7 +854,7 @@ auto PosixFile::read(size_t offset, size_t size, char *scratch, Slice *out) -> S
     return Status::ok();
 }
 
-auto PosixFile::write(size_t offset, const Slice &in) -> Status
+auto PosixFile::write(uint64_t offset, const Slice &in) -> Status
 {
     if (seek_and_write(file, offset, in)) {
         return posix_error(errno);
@@ -826,7 +862,7 @@ auto PosixFile::write(size_t offset, const Slice &in) -> Status
     return Status::ok();
 }
 
-auto PosixFile::resize(size_t size) -> Status
+auto PosixFile::resize(uint64_t size) -> Status
 {
     if (posix_truncate(file, size)) {
         return posix_error(errno);
@@ -890,7 +926,7 @@ auto PosixFile::shm_map(size_t r, bool extend, volatile void *&out) -> Status
     }
 
     if (snode->num_regions < request) {
-        size_t file_size;
+        uint64_t file_size;
         if (struct stat st = {}; fstat(snode->file, &st)) {
             s = posix_error(errno);
             goto cleanup;
@@ -1107,7 +1143,7 @@ auto ShmNode::check_locks() const -> bool
     for (auto *p = refs; p; p = p->next) {
         for (size_t i = 0; i < File::kShmLockCount; ++i) {
             if (p->writer_mask & (1 << i)) {
-                CALICODB_EXPECT_FALSE(check[i]);
+                CALICODB_EXPECT_EQ(check[i], 0);
                 check[i] = -1;
             } else if (p->reader_mask & (1 << i)) {
                 CALICODB_EXPECT_GE(check[i], 0);
