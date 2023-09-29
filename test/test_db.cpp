@@ -119,9 +119,7 @@ protected:
           m_alt_wal_name(m_db_name + "_alternate_wal"),
           m_env(new CallbackEnv(default_env()))
     {
-        std::filesystem::remove_all(m_db_name.c_str());
-        std::filesystem::remove_all(m_db_name + kDefaultWalSuffix.to_string());
-        std::filesystem::remove_all(m_db_name + kDefaultShmSuffix.to_string());
+        remove_calicodb_files(m_db_name);
     }
 
     ~DBTests() override
@@ -335,9 +333,7 @@ protected:
         options.env = env ? env : m_env;
         options.page_size = TEST_PAGE_SIZE;
         if (clear) {
-            std::filesystem::remove_all(m_db_name);
-            std::filesystem::remove_all(m_db_name + kDefaultWalSuffix.to_string());
-            std::filesystem::remove_all(m_db_name + kDefaultShmSuffix.to_string());
+            remove_calicodb_files(m_db_name);
             std::filesystem::remove_all(m_alt_wal_name);
         }
         if (m_config & kExclusiveLockMode) {
@@ -552,7 +548,7 @@ TEST_F(DBTests, UpdateThenView)
         ASSERT_OK(m_db->run(WriteOptions(), [](auto &tx) {
             return tx.vacuum();
         }));
-        ASSERT_OK(m_db->checkpoint(false));
+        ASSERT_OK(m_db->checkpoint(kCheckpointPassive, nullptr));
         ++round;
     } while (change_options(true));
 }
@@ -637,7 +633,7 @@ TEST_F(DBTests, RollbackUpdate)
                 return s;
             }));
         }
-        ASSERT_OK(m_db->checkpoint(false));
+        ASSERT_OK(m_db->checkpoint(kCheckpointPassive, nullptr));
         ++round;
     } while (change_options(true));
 }
@@ -737,7 +733,7 @@ TEST_F(DBTests, CheckpointResize)
     }));
     ASSERT_EQ(0, file_size(m_db_name.c_str()));
 
-    ASSERT_OK(m_db->checkpoint(true));
+    ASSERT_OK(m_db->checkpoint(kCheckpointRestart, nullptr));
     ASSERT_EQ(TEST_PAGE_SIZE * 3, file_size(m_db_name.c_str()));
 
     ASSERT_OK(m_db->run(WriteOptions(), [](auto &tx) {
@@ -751,7 +747,7 @@ TEST_F(DBTests, CheckpointResize)
 
     // Tx::vacuum() never gets rid of the root database page, even if the whole database
     // is empty.
-    ASSERT_OK(m_db->checkpoint(true));
+    ASSERT_OK(m_db->checkpoint(kCheckpointRestart, nullptr));
     ASSERT_EQ(TEST_PAGE_SIZE, file_size(m_db_name.c_str()));
 }
 
@@ -1328,27 +1324,45 @@ protected:
     explicit CheckpointTests() = default;
 
     ~CheckpointTests() override = default;
+
+    auto SetUp() -> void override
+    {
+        ASSERT_OK(open_db(m_db));
+    }
+
+    auto open_db(DB *&db_out, BusyHandler *busy = nullptr) -> Status
+    {
+        Options options;
+        options.env = m_env;
+        options.busy = busy;
+        options.auto_checkpoint = 0;
+        options.page_size = TEST_PAGE_SIZE;
+        return DB::open(options, m_db_name.c_str(), db_out);
+    }
 };
 
 TEST_F(CheckpointTests, CheckpointerBlocksOtherCheckpointers)
 {
-    ASSERT_OK(m_db->run(WriteOptions(), [](auto &tx) {
-        return put_range(tx, BucketOptions(), "b", 0, 1'000);
-    }));
-    m_env->m_write_callback = [this] {
-        // Each time File::write() is called, use a different connection to attempt a
-        // checkpoint. It should get blocked every time, since a checkpoint is already
-        // running.
-        DB *db;
-        Options options;
-        options.env = m_env;
-        options.page_size = TEST_PAGE_SIZE;
-        ASSERT_OK(DB::open(options, m_db_name.c_str(), db));
-        ASSERT_TRUE(db->checkpoint(false).is_busy());
-        ASSERT_TRUE(db->checkpoint(true).is_busy());
-        delete db;
-    };
-    ASSERT_OK(m_db->checkpoint(true));
+    size_t n = 0;
+    for (auto mode : {kCheckpointPassive, kCheckpointFull, kCheckpointRestart}) {
+        ASSERT_OK(m_db->run(WriteOptions(), [&n](auto &tx) {
+            ++n;
+            return put_range(tx, BucketOptions(), "b", (n - 1) * 1'000, n * 1'000);
+        }));
+        m_env->m_write_callback = [this] {
+            // Each time File::write() is called, use a different connection to attempt a
+            // checkpoint. It should get blocked every time, since a checkpoint is already
+            // running.
+            DB *db;
+            ASSERT_OK(open_db(db));
+            ASSERT_TRUE(db->checkpoint(kCheckpointPassive, nullptr).is_busy());
+            ASSERT_TRUE(db->checkpoint(kCheckpointFull, nullptr).is_busy());
+            ASSERT_TRUE(db->checkpoint(kCheckpointRestart, nullptr).is_busy());
+            delete db;
+        };
+        ASSERT_OK(m_db->checkpoint(mode, nullptr));
+        m_env->m_write_callback = [] {};
+    }
 }
 
 TEST_F(CheckpointTests, CheckpointerAllowsTransactions)
@@ -1359,7 +1373,7 @@ TEST_F(CheckpointTests, CheckpointerAllowsTransactions)
     ASSERT_OK(m_db->run(WriteOptions(), [](auto &tx) {
         return put_range(tx, BucketOptions(), "before", 0, kSavedCount);
     }));
-    ASSERT_OK(m_db->checkpoint(true));
+    ASSERT_OK(m_db->checkpoint(kCheckpointRestart, nullptr));
     ASSERT_OK(m_db->run(WriteOptions(), [](auto &tx) {
         // These records will be checkpointed below. round is 1 to cause a new version of the first half of
         // the records to be written.
@@ -1368,16 +1382,11 @@ TEST_F(CheckpointTests, CheckpointerAllowsTransactions)
 
     size_t n = 0;
     m_env->m_write_callback = [this, &n] {
-        if (n >= 256) {
-            // NOTE: The outer DB still has the file locked, so the Env won't close the database file when
-            //       this DB is deleted.
-            return;
-        }
+        // NOTE: The outer DB still has the file locked, so the Env won't close the database file when
+        //       this DB is deleted. The Env implementation must reuse file descriptors, otherwise it
+        //       will likely run out during this test.
         DB *db;
-        Options options;
-        options.env = m_env;
-        options.page_size = TEST_PAGE_SIZE;
-        ASSERT_OK(DB::open(options, m_db_name.c_str(), db));
+        ASSERT_OK(open_db(db));
         ASSERT_OK(db->run(WriteOptions(), [n](auto &tx) {
             return put_range(tx, BucketOptions(), "after", n * 2, (n + 1) * 2);
         }));
@@ -1391,10 +1400,41 @@ TEST_F(CheckpointTests, CheckpointerAllowsTransactions)
         delete db;
     };
 
-    ASSERT_OK(m_db->checkpoint(false));
+    ASSERT_OK(m_db->checkpoint(kCheckpointPassive, nullptr));
     // Don't call the callback during close. DB::open() will return a Status::busy() due to the
     // exclusive lock held.
     m_env->m_write_callback = {};
+}
+
+TEST_F(CheckpointTests, CheckpointerFallsBackToLowerMode)
+{
+    size_t n = 0;
+    for (auto mode : {kCheckpointFull, kCheckpointRestart}) {
+        m_env->m_write_callback = [this, mode] {
+            DB *db;
+            class Handler : public BusyHandler
+            {
+            public:
+                bool called = false;
+                ~Handler() override = default;
+                auto exec(unsigned) -> bool override
+                {
+                    EXPECT_FALSE(called);
+                    called = true;
+                    return false;
+                }
+            } handler;
+            ASSERT_OK(open_db(db, &handler));
+            ASSERT_TRUE(db->checkpoint(mode, nullptr).is_busy());
+            ASSERT_TRUE(handler.called);
+            delete db;
+        };
+        ASSERT_OK(m_db->run(WriteOptions(), [&n](auto &tx) {
+            ++n;
+            return put_range(tx, BucketOptions(), "b", (n - 1) * 1'000, n * 1'000);
+        }));
+    }
+    m_env->m_write_callback = [] {};
 }
 
 class DBVacuumTests : public DBTests

@@ -51,12 +51,12 @@ public:
     virtual auto get_property(const Slice &name, void *value_out) const -> Status = 0;
 
     // Write modified pages from the write-ahead log (WAL) back to the database file
-    // If `reset` is true, steps are taken to make sure that the next writer will reset the WAL
-    // (start writing from the beginning of the file again). This includes blocking until all
-    // other connections are finished using the WAL. Additional checkpoints are run (a) when
-    // the database is closed, and (b) when a database is opened that has a WAL on disk. Note
-    // that in the case of (b), `reset` is false.
-    virtual auto checkpoint(bool reset) -> Status = 0;
+    // If `mode == kCheckpointReset`, steps are taken to make sure that the next writer will
+    // reset the WAL (start writing from the beginning of the file again). This includes
+    // blocking until all other connections are finished using the WAL. Additional checkpoints
+    // are run (a) when the database is closed, and (b) when a database is opened that has a
+    // WAL on disk. Note that in the case of (b), `mode == kCheckpointPassive`.
+    virtual auto checkpoint(CheckpointMode mode, CheckpointInfo *info_out) -> Status = 0;
 
     // Run a read-only transaction
     // REQUIRES: Status Fn::operator()(const Tx &) is implemented.

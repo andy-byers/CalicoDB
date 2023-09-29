@@ -81,9 +81,9 @@ public:
     auto new_tx(const WriteOptions &, Tx *&tx_out) -> Status override;
     auto new_tx(const ReadOptions &, Tx *&tx_out) const -> Status override;
 
-    auto checkpoint(bool reset) -> Status override
+    auto checkpoint(CheckpointMode mode, CheckpointInfo *info_out) -> Status override
     {
-        return m_db->checkpoint(reset);
+        return m_db->checkpoint(mode, info_out);
     }
 };
 

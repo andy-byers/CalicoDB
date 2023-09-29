@@ -118,6 +118,27 @@ public:
     virtual auto exec(unsigned attempts) -> bool = 0;
 };
 
+// Controls the behavior of the WAL checkpoint routine. Used by DB::checkpoint(),
+// which calls Wal::checkpoint().
+// kCheckpointPassive causes the WAL to write back as many pages as possible without
+// interfering with other connections. Other checkpointers are blocked, but readers
+// and a single writer are allowed to run concurrently. kCheckpointFull causes exclusion
+// of both writers and checkpointers. This makes sure that no pages are written after
+// the checkpoint starts. kCheckpointRestart is like kCheckpointFull, except that after
+// finishing, the checkpointer will block until all other connections are done with the
+// WAL. This ensures that future writes will start overwriting prior contents at the
+// start of the log, rather than continuing to grow the file.
+enum CheckpointMode {
+    kCheckpointPassive,
+    kCheckpointFull,
+    kCheckpointRestart,
+};
+
+struct CheckpointInfo {
+    size_t backfill;
+    size_t wal_size;
+};
+
 } // namespace calicodb
 
 #endif // CALICODB_OPTIONS_H

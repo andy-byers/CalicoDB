@@ -33,7 +33,7 @@ public:
     auto get_property(const Slice &name, void *value_out) const -> Status override;
     auto new_tx(const ReadOptions &, Tx *&tx) const -> Status override;
     auto new_tx(const WriteOptions &, Tx *&tx) -> Status override;
-    auto checkpoint(bool reset) -> Status override;
+    auto checkpoint(CheckpointMode mode, CheckpointInfo *info_out) -> Status override;
 
     [[nodiscard]] auto TEST_pager() const -> Pager &;
 

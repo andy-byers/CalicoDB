@@ -3,7 +3,7 @@ cmake_minimum_required(VERSION 3.14)
 project(project CXX)
 set(CMAKE_CXX_STANDARD 17)
 
-set(CALICODB_BuildTests OFF CACHE INTERNAL "")
+set(CALICODB_BuildTests Off CACHE INTERNAL "")
 add_subdirectory(${CALICODB_SOURCE}
         ${CMAKE_CURRENT_BINARY_DIR}/calicodb)
 

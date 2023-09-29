@@ -175,11 +175,6 @@ auto posix_file_lock(int file, const struct flock &lock) -> int
     }
 }
 
-[[nodiscard]] auto posix_busy() -> Status
-{
-    return Status::busy(std::strerror(EBUSY));
-}
-
 constexpr size_t kOpenCloseTimeout = 100;
 
 [[nodiscard]] auto posix_open(const char *filename, int mode) -> int
@@ -283,9 +278,10 @@ class PosixFile
       public HeapObject
 {
 public:
-    explicit PosixFile(String filename, int mode, UniquePtr<UnusedFd> prealloc)
+    explicit PosixFile(Env &env, String filename, int mode, UniquePtr<UnusedFd> prealloc)
         : filename(move(filename)),
           prealloc(move(prealloc)),
+          env(&env),
           rw_mode(mode)
     {
     }
@@ -316,6 +312,7 @@ public:
     UniquePtr<UnusedFd> prealloc;
     ObjectPtr<PosixShm> shm;
     INode *inode = nullptr;
+    Env *const env;
     int rw_mode = 0;
     int file = -1;
 
@@ -718,6 +715,7 @@ auto PosixEnv::new_file(const char *filename, OpenMode mode, File *&out) -> Stat
     // Allocate storage for the File instance. Files are exposed to the user, so just use regular
     // operator new(). The Alloc API is only used for internal structures.
     auto *file = new (std::nothrow) PosixFile(
+        *this,
         move(filename_storage),
         READ_WRITE_MODE(mode),
         move(prealloc));
@@ -996,7 +994,9 @@ auto PosixFile::shm_lock(size_t r, size_t n, ShmLockFlag flags) -> Status
 
 auto PosixFile::shm_barrier() -> void
 {
-    __sync_synchronize();
+    CALICODB_DEBUG_DELAY(*env);
+
+    __atomic_thread_fence(__ATOMIC_SEQ_CST);
 
     s_fs.mutex.lock();
     s_fs.mutex.unlock();
@@ -1061,7 +1061,7 @@ auto PosixShm::lock_impl(size_t r, size_t n, ShmLockFlag flags) -> Status
         CALICODB_EXPECT_EQ(1, n);
         if ((reader_mask & mask) == 0) {
             if (state[r] < 0) {
-                return posix_busy();
+                return Status::busy();
             } else if (state[r] == 0) {
                 if (posix_shm_lock(*snode, F_RDLCK, r + kShmLock0, n)) {
                     return posix_error(errno);
@@ -1079,7 +1079,7 @@ auto PosixShm::lock_impl(size_t r, size_t n, ShmLockFlag flags) -> Status
         for (size_t i = r; i < r + n; ++i) {
             if ((writer_mask & (1 << i)) == 0 && state[i]) {
                 // Some other thread in this process has a lock.
-                return posix_busy();
+                return Status::busy();
             }
         }
 
@@ -1176,7 +1176,7 @@ auto PosixFile::file_lock_impl(FileLockMode mode) -> Status
 {
     if (local_lock != inode->lock && (inode->lock == kFileExclusive || mode == kFileExclusive)) {
         // Some other thread in this process has an incompatible lock.
-        return posix_busy();
+        return Status::busy();
     }
 
     if (mode == kFileShared && inode->lock == kFileShared) {
@@ -1211,7 +1211,7 @@ auto PosixFile::file_lock_impl(FileLockMode mode) -> Status
         // Another thread in this process still holds a shared lock, preventing
         // this kExclusive from being taken. Note that this thread should already
         // have a shared lock (guarded for by an assert).
-        s = posix_busy();
+        s = Status::busy();
     } else {
         // The caller is requesting an exclusive lock, and no other thread in
         // this process already holds a lock.

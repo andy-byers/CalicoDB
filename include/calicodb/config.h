@@ -51,11 +51,8 @@ struct ConfigTarget {
 };
 
 // Specifies a target for configure(). configure() expects different variadic parameters depending on
-// the configuration target. Generally, if the ConfigTarget identifier looks like "kGetT", then the
-// variadic parameter will be a pointer to a POD struct of type "TConfig". Similarly, if the ConfigTarget
-// looks like "kSetT", then configure() will expect a "TConfig" by value. For example, kGetAllocator
-// causes configure() to expect a non-const pointer to AllocatorConfig.
-static constexpr ConfigTarget kGetAllocator = {1}; // AllocatorConfig *
+// the configuration target.
+static constexpr ConfigTarget kGetAllocator = {1}; // AllocatorConfig * (nonnull)
 static constexpr ConfigTarget kSetAllocator = {2}; // AllocatorConfig
 
 // Configure per-process options

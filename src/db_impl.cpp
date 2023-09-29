@@ -78,7 +78,7 @@ auto DBImpl::open(const Options &sanitized) -> Status
     const auto needs_ckpt = m_env->file_exists(m_wal_filename.c_str());
     s = Pager::open(pager_param, m_pager.ref());
     if (s.is_ok() && needs_ckpt) {
-        s = m_pager->checkpoint(false);
+        s = m_pager->checkpoint(kCheckpointPassive, nullptr);
         if (s.is_busy()) {
             s = Status::ok();
         }
@@ -180,13 +180,13 @@ auto DBImpl::get_property(const Slice &name, void *value_out) const -> Status
     return Status::not_found();
 }
 
-auto DBImpl::checkpoint(bool reset) -> Status
+auto DBImpl::checkpoint(CheckpointMode mode, CheckpointInfo *info_out) -> Status
 {
     if (m_tx) {
         return already_running_error();
     }
-    log(m_log, "running%s checkpoint", reset ? " reset" : "");
-    return m_pager->checkpoint(reset);
+    log(m_log, "running%s checkpoint", mode == kCheckpointRestart ? " restart" : "");
+    return m_pager->checkpoint(mode, info_out);
 }
 
 template <class TxType>

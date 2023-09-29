@@ -96,7 +96,7 @@ static constexpr size_t kVarintMaxLength = 5;
 
 inline auto encode_varint(char *dst, uint32_t v) -> char *
 {
-    uint8_t *ptr = reinterpret_cast<uint8_t *>(dst);
+    auto *ptr = reinterpret_cast<uint8_t *>(dst);
     static constexpr int B = 128;
     if (v < (1 << 7)) {
         *ptr++ = static_cast<uint8_t>(v);

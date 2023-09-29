@@ -72,7 +72,7 @@ auto Pager::read_page(PageRef &page_out, size_t *size_out) -> Status
 auto Pager::read_page_from_file(PageRef &ref, size_t *size_out) const -> Status
 {
     Slice slice;
-    const auto offset = ref.page_id.as_index() * m_page_size;
+    const auto offset = ref.page_id.as_index() * static_cast<uint64_t>(m_page_size);
     auto s = m_file->read(offset, m_page_size, ref.data, &slice);
     if (s.is_ok()) {
         m_stats->read_db += slice.size();
@@ -97,7 +97,6 @@ auto Pager::open_wal() -> Status
     const WalOptionsExtra extra = {
         options,
         m_log,
-        m_busy,
         m_sync_mode,
         m_lock_mode,
     };
@@ -347,7 +346,7 @@ auto Pager::purge_pages(bool purge_all) -> void
     }
 }
 
-auto Pager::checkpoint(bool reset) -> Status
+auto Pager::checkpoint(CheckpointMode mode, CheckpointInfo *info_out) -> Status
 {
     CALICODB_EXPECT_EQ(m_mode, kOpen);
     CALICODB_EXPECT_TRUE(assert_state());
@@ -359,14 +358,16 @@ auto Pager::checkpoint(bool reset) -> Status
         }
         finish();
     }
-    return m_wal->checkpoint(reset, m_scratch.ptr(), m_page_size);
+    return m_wal->checkpoint(mode, m_scratch.ptr(), m_page_size,
+                             mode == kCheckpointPassive ? nullptr : m_busy,
+                             info_out);
 }
 
 auto Pager::auto_checkpoint(size_t frame_limit) -> Status
 {
     CALICODB_EXPECT_GT(frame_limit, 0);
-    if (m_wal && frame_limit < m_wal->wal_size()) {
-        return checkpoint(false);
+    if (m_wal && frame_limit < m_wal->callback()) {
+        return checkpoint(kCheckpointFull, nullptr);
     }
     return Status::ok();
 }

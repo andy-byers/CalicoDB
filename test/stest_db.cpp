@@ -10,7 +10,6 @@
 #include "stest/sequence_scenario.h"
 #include "test.h"
 #include "tx_impl.h"
-#include <filesystem>
 #include <gtest/gtest.h>
 
 namespace calicodb::test
@@ -780,9 +779,7 @@ protected:
 
     explicit STestDB()
     {
-        std::filesystem::remove_all(m_state.filename);
-        std::filesystem::remove_all(m_state.filename + kDefaultShmSuffix.to_string());
-        std::filesystem::remove_all(m_state.filename + kDefaultWalSuffix.to_string());
+        remove_calicodb_files(m_state.filename);
     }
 
     auto TearDown() -> void override

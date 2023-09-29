@@ -14,6 +14,20 @@
 namespace calicodb::test
 {
 
+TEST(ConfigTests, ConfigAllocator)
+{
+    AllocatorConfig config;
+    ASSERT_OK(configure(kGetAllocator, &config));
+    ASSERT_OK(configure(kSetAllocator, DebugAllocator::config()));
+    ASSERT_OK(configure(kSetAllocator, config));
+}
+
+TEST(ConfigTests, ConfigUnrecognized)
+{
+    ASSERT_NOK(configure(ConfigTarget{123}, nullptr));
+    ASSERT_NOK(configure(ConfigTarget{321}, 42));
+}
+
 class AllocTests : public testing::Test
 {
 public:

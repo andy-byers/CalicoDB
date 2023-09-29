@@ -16,6 +16,9 @@ namespace
 
 auto make_inline_state(Status::Code code, Status::SubCode subc) -> char *
 {
+    static_assert((Status::kMaxCode & 0x007F) == Status::kMaxCode);
+    static_assert((Status::kMaxSubCode & 0xFFFF) == Status::kMaxSubCode);
+
     CALICODB_EXPECT_GT(code, Status::kOK);
     CALICODB_EXPECT_LT(code, Status::kMaxCode);
     CALICODB_EXPECT_LT(subc, Status::kMaxSubCode);

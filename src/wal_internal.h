@@ -13,7 +13,6 @@ namespace calicodb
 
 struct WalOptionsExtra : public WalOptions {
     Logger *info_log;
-    BusyHandler *busy;
     Options::SyncMode sync_mode;
     Options::LockMode lock_mode;
 };
