@@ -7,6 +7,7 @@
 #include "calicodb/cursor.h"
 #include "common.h"
 #include "logging.h"
+#include <filesystem>
 #include <fstream>
 
 namespace calicodb
@@ -82,6 +83,13 @@ auto write_string_to_file(Env &env, const char *filename, const std::string &buf
     ASSERT_OK(file->write(write_pos, buffer.c_str()));
     ASSERT_OK(file->sync());
     delete file;
+}
+
+auto remove_calicodb_files(const std::string &db_name) -> void
+{
+    std::filesystem::remove_all(db_name);
+    std::filesystem::remove_all(db_name + kDefaultWalSuffix.to_string());
+    std::filesystem::remove_all(db_name + kDefaultShmSuffix.to_string());
 }
 
 // From john's answer to https://stackoverflow.com/questions/11826554

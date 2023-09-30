@@ -13,6 +13,17 @@
 namespace calicodb::test
 {
 
+class WaitForever : public BusyHandler
+{
+public:
+    explicit WaitForever() = default;
+    ~WaitForever() override = default;
+    auto exec(unsigned) -> bool override
+    {
+        return true;
+    }
+} g_busy_handler;
+
 class DelayEnv : public EnvWrapper
 {
 public:
@@ -115,9 +126,7 @@ protected:
         : m_filename(testing::TempDir() + "concurrency"),
           m_env(new DelayEnv(default_env()))
     {
-        std::filesystem::remove_all(m_filename);
-        std::filesystem::remove_all(m_filename + kDefaultWalSuffix.to_string());
-        std::filesystem::remove_all(m_filename + kDefaultShmSuffix.to_string());
+        remove_calicodb_files(m_filename);
     }
 
     ~ConcurrencyTests() override = default;
@@ -222,7 +231,7 @@ protected:
         }
 
         for (const auto &co : connections) {
-            // Check the results (only readers output anything).
+            // Check the results.
             for (size_t i = 0; i + 1 < co.result.size(); ++i) {
                 uint64_t n;
                 auto slice = to_slice(co.result[i]);
@@ -261,19 +270,9 @@ protected:
 
     [[nodiscard]] static auto reopen_connection(Connection &co) -> Status
     {
-        static class AlwaysWait : public BusyHandler
-        {
-        public:
-            ~AlwaysWait() override = default;
-            [[nodiscard]] auto exec(unsigned) -> bool override
-            {
-                return true;
-            }
-        } s_busy_handler;
-
         auto opt = co.options;
         opt.env = co.env;
-        opt.busy = &s_busy_handler;
+        opt.busy = &g_busy_handler;
         return DB::open(opt, co.filename, co.db);
     }
 
@@ -410,7 +409,9 @@ protected:
         for (size_t n = 0; s.is_ok() && n < co.op_args[0]; ++n) {
             barrier_wait(barrier);
             barrier_wait(barrier);
-            s = co.db->checkpoint(co.op_args[1]);
+            s = co.db->checkpoint(co.op_args[1] ? kCheckpointRestart
+                                                : kCheckpointPassive,
+                                  nullptr);
 
             if (s.is_busy()) {
                 s = Status::ok();
@@ -431,7 +432,9 @@ protected:
         // Set by run_checkpointer_test().
         size_t num_iterations = 0;
         size_t num_records = 0;
+        CheckpointMode checkpoint_mode = kCheckpointPassive;
         bool delay_sync = false;
+        bool busy_wait = false;
     };
 
     auto run_checkpointer_test_instance(const CheckpointerTestParameters &param) -> void
@@ -460,14 +463,14 @@ protected:
         for (size_t i = 0; i < param.num_readers; ++i) {
             connections.emplace_back(proto);
         }
-        proto.op = [](auto &co, auto *) {
+        proto.op = [param](auto &co, auto *) {
             // Checkpointers should call File::sync() once on the WAL file before any pages are read,
             // and once on the database file after all pages have been written.
             co.options.sync_mode = Options::kSyncNormal;
             auto s = reopen_connection(co);
             if (s.is_ok()) {
                 do {
-                    s = co.db->checkpoint(true);
+                    s = co.db->checkpoint(param.checkpoint_mode, nullptr);
                     co.env->sleep(25);
                 } while (s.is_busy());
 
@@ -516,15 +519,23 @@ protected:
     {
         for (size_t num_iterations = 1; num_iterations <= 4; ++num_iterations) {
             for (size_t num_records = 1; num_records <= 4; ++num_records) {
-                for (size_t delay_sync = 0; delay_sync <= 1; ++delay_sync) {
-                    run_checkpointer_test_instance({
-                        param.num_readers,
-                        param.num_writers,
-                        param.auto_checkpoint,
-                        num_iterations,
-                        num_records,
-                        delay_sync != 0,
-                    });
+                for (CheckpointMode checkpoint_mode = kCheckpointPassive;
+                     checkpoint_mode <= kCheckpointRestart;
+                     checkpoint_mode = static_cast<CheckpointMode>(static_cast<int>(checkpoint_mode) + 1)) {
+                    for (size_t delay_sync = 0; delay_sync <= 1; ++delay_sync) {
+                        for (size_t busy_wait = 0; busy_wait <= 1; ++busy_wait) {
+                            run_checkpointer_test_instance({
+                                param.num_readers,
+                                param.num_writers,
+                                param.auto_checkpoint,
+                                num_iterations,
+                                num_records,
+                                checkpoint_mode,
+                                delay_sync != 0,
+                                busy_wait != 0,
+                            });
+                        }
+                    }
                 }
             }
         }

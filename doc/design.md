@@ -1,7 +1,18 @@
 # CalicoDB Design
 CalicoDB aims to be simple and portable.
-The API is based off that of LevelDB, but the backend uses a B<sup>+</sup>-tree rather than a log-structured merge (LSM) tree.
-The concurrency model is based off SQLite in WAL mode.
+The API is mostly modeled after LevelDB, but the backend uses a B<sup>+</sup>-tree rather than a log-structured merge (LSM) tree.
+The concurrency model and the database and WAL file formats are based off SQLite.
+
+## Coding conventions
+CalicoDB is designed to run in memory-constrained environments.
+This means we have to handle allocation failures, since the OS may not be configured to overcommit memory.
+Furthermore, the library may be used on 32-bit architectures, where it is not difficult to exhaust the entire address space.
+This, coupled with the fact that the library is compiled without exceptions, greatly limits what parts of the C++ standard library are available for us to use.
+In particular, we can't use anything that allocates heap memory, since it will throw `std::bad_alloc` on allocation failure.
+Instead, we make use of the C dynamic memory allocation routines `malloc`, `realloc`, and `free`.
+See [`mem.h`](../src/mem.h) for details on how non-trivial C++ objects are managed.
+
+The coding style is specified by the rules and comments in [`.clang-format`](../.clang-format).
 
 ## Portability
 The core library can be configured to use only freestanding C++ standard library headers (also requires `<cstring>` for `std::memcpy` etc.), in addition to the platform-specific headers required by the default `Env` implementation.

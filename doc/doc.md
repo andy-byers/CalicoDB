@@ -398,10 +398,13 @@ delete tx;
 // Now we can run a checkpoint. See DB::run() for an API that takes away some
 // of the pain associated with transaction lifetimes.
 
-// If the `reset` parameter to DB::checkpoint() is true, the DB will set things
-// up such that the next writer writes to the start of the WAL file again. This
-// involves blocking until other connections are finished with the WAL.
-s = db->checkpoint(true);
+calicodb::CheckpointInfo info = {};
+
+// If the `mode` parameter to DB::checkpoint() is equal to kCheckpointRestart, 
+// the DB will set things up such that the next writer writes to the start of 
+// the WAL file again. This involves blocking until other connections are 
+// finished with the WAL.
+s = db->checkpoint(calicodb::kCheckpointRestart, &info);
 if (s.is_ok()) {
     // The whole WAL was written back to the database file.
 } else if (s.is_busy()) {
@@ -439,7 +442,7 @@ if (s.is_ok()) {
     + Much of this project was inspired by SQLite3, both the architecture design documents and the source code
     + Especially see the B-tree design document, as well as `btree.h`, `btree.c`, and `btreeInt.h`
 3. [LevelDB](https://github.com/google/leveldb)
-    + Much of the API is inspired by LevelDB
+    + `Env`, `Cursor`, `Slice`, and `Status` APIs are inspired by LevelDB
     + Some parts of the CMake build process are taken from their `CMakeLists.txt`
 4. [BoltDB](https://github.com/boltdb/bolt)
     + Inspiration for the transaction API

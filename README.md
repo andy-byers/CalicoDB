@@ -1,7 +1,7 @@
 # CalicoDB
 CalicoDB is a tiny key-value database library written in C++17 and inspired by SQLite3.
 It exposes a small API that allows transactional storage and retrieval of byte sequences from multiple key spaces.
-CalicoDB aims to be portable, flexable, and simple.
+CalicoDB aims to be portable, flexible, and simple.
 
 ![CI status badge](https://github.com/andy-byers/CalicoDB/actions/workflows/test.yml/badge.svg)
 
@@ -29,6 +29,7 @@ Feedback is appreciated!
 + Virtual WAL interface
 
 ## Caveats
++ Keys, values, and bucket names are limited to roughly 2 GB in length
 + Each connection is single-threaded, and blocking I/O is used
 + Concurrent usage requires each connection to have its own `DB`
 + Only practical for datasets that can reasonably be stored in a single file 
@@ -55,6 +56,7 @@ Recent results can be found [here](https://github.com/andy-byers/leveldb/blob/db
 ## TODO
 1. Get everything code reviewed!
 2. Support Windows (write an `Env` implementation)
+3. Support duplicate keys (`allow_duplicates` option or similar added to `BucketOptions`?)
 
 ## Documentation
 Check out CalicoDB's [usage and design documents](doc).

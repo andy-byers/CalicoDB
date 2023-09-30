@@ -411,6 +411,7 @@ TEST_F(PagerTests, AllocatePage)
         ASSERT_EQ(Id(3), allocate_page());
         ASSERT_EQ(Id(4), allocate_page());
         ASSERT_EQ(4, m_pager->page_count());
+        ASSERT_TRUE(m_pager->assert_state());
     });
 }
 
@@ -437,8 +438,9 @@ TEST_F(PagerTests, NOOP)
 {
     pager_update([] {});
     pager_view([] {});
-    ASSERT_OK(m_pager->checkpoint(true));
-    ASSERT_OK(m_pager->checkpoint(false));
+    ASSERT_OK(m_pager->checkpoint(kCheckpointRestart, nullptr));
+    ASSERT_OK(m_pager->checkpoint(kCheckpointFull, nullptr));
+    ASSERT_OK(m_pager->checkpoint(kCheckpointPassive, nullptr));
     pager_update([this] {
         m_pager->set_page_count(0);
         m_pager->set_status(Status::ok());
@@ -494,13 +496,17 @@ TEST_F(PagerTests, Commit2)
                 m_pager->release(page, i & 1 ? Pager::kKeep : Pager::kDiscard);
             }
             ASSERT_OK(m_pager->commit());
+            ASSERT_TRUE(m_pager->assert_state());
         });
         if (iteration % 3 > 0) {
             // Make sure we actually have all the data we need in the WAL. The root page is
             // not in the WAL, but it is blank anyway.
             ASSERT_OK(m_file->resize(0));
             // Transfer the lost pages back.
-            ASSERT_OK(m_pager->checkpoint(iteration % 3 == 1));
+            ASSERT_OK(m_pager->checkpoint(iteration % 3 == 1
+                                              ? kCheckpointRestart
+                                              : kCheckpointPassive,
+                                          nullptr));
             // Everything should be back in the database file. The next reader shouldn't read
             // any pages from the WAL.
             ASSERT_OK(m_wal_file->resize(0));
@@ -558,7 +564,10 @@ TEST_F(PagerTests, Rollback2)
         });
         if (iteration % 3 > 0) {
             ASSERT_OK(m_file->resize(0));
-            ASSERT_OK(m_pager->checkpoint(iteration % 3 == 1));
+            ASSERT_OK(m_pager->checkpoint(iteration % 3 == 1
+                                              ? kCheckpointRestart
+                                              : kCheckpointPassive,
+                                          nullptr));
             ASSERT_OK(m_wal_file->resize(0));
         }
         pager_view([this, page_count] {
@@ -583,7 +592,7 @@ TEST_F(PagerTests, Truncation)
         ASSERT_OK(m_pager->commit());
     });
 
-    ASSERT_OK(m_pager->checkpoint(true));
+    ASSERT_OK(m_pager->checkpoint(kCheckpointRestart, nullptr));
 
     uint64_t file_size;
     ASSERT_OK(m_file->get_size(file_size));
@@ -648,7 +657,7 @@ TEST_F(PagerTests, DeathTest)
 
     ASSERT_DEATH((void)m_pager->start_writer(), "");
     ASSERT_OK(m_pager->start_reader());
-    ASSERT_DEATH((void)m_pager->checkpoint(true), "");
+    ASSERT_DEATH((void)m_pager->checkpoint(kCheckpointRestart, nullptr), "");
 
     pager_update([this] {
         PageRef *a, *b;
@@ -721,7 +730,6 @@ public:
             {&default_env(),
              nullptr,
              &s_stat},
-            nullptr,
             nullptr,
             Options::kSyncNormal,
             Options::kLockNormal,
@@ -900,7 +908,8 @@ public:
                 }
                 return s;
             }));
-            ASSERT_OK(m_wal->checkpoint(i % options.ckpt_reset_interval == 0, m_scratch, TEST_PAGE_SIZE));
+            ASSERT_OK(m_wal->checkpoint(i % options.ckpt_reset_interval == 0 ? kCheckpointRestart : kCheckpointPassive,
+                                        m_scratch, TEST_PAGE_SIZE, nullptr, nullptr));
             ASSERT_OK(with_reader([this] {
                 return read_batch(kMaxPages);
             }));
@@ -925,8 +934,8 @@ TEST_P(WalTests, EmptyCheckpoint)
 
     // Checkpoint cannot be run until the WAL index is created the first time a
     // transaction is started.
-    ASSERT_OK(m_wal->checkpoint(false, m_scratch, TEST_PAGE_SIZE));
-    ASSERT_OK(m_wal->checkpoint(true, m_scratch, TEST_PAGE_SIZE));
+    ASSERT_OK(m_wal->checkpoint(kCheckpointPassive, m_scratch, TEST_PAGE_SIZE, nullptr, nullptr));
+    ASSERT_OK(m_wal->checkpoint(kCheckpointRestart, m_scratch, TEST_PAGE_SIZE, nullptr, nullptr));
 }
 
 TEST_P(WalTests, Commit)
@@ -952,7 +961,7 @@ TEST_P(WalTests, Truncate)
         opt.truncate = 8;
         return write_batch(opt);
     }));
-    ASSERT_OK(m_wal->checkpoint(true, m_scratch, TEST_PAGE_SIZE));
+    ASSERT_OK(m_wal->checkpoint(kCheckpointRestart, m_scratch, TEST_PAGE_SIZE, nullptr, nullptr));
     ASSERT_OK(with_reader([this] {
         expect_missing(Id(9));
         expect_missing(Id(10));
@@ -972,7 +981,7 @@ TEST_P(WalTests, ReadsAndWrites)
             opt.omit_some = i % 2;
             return write_batch(opt);
         }));
-        ASSERT_OK(m_wal->checkpoint(i < 5, m_scratch, TEST_PAGE_SIZE));
+        ASSERT_OK(m_wal->checkpoint(i < 5 ? kCheckpointRestart : kCheckpointPassive, m_scratch, TEST_PAGE_SIZE, nullptr, nullptr));
         ASSERT_OK(with_reader([this] {
             return read_batch(kNumPages);
         }));

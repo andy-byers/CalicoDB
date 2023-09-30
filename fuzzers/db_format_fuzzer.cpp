@@ -104,7 +104,7 @@ public:
             });
 
             if (s.is_ok()) {
-                s = db->checkpoint(true);
+                s = db->checkpoint(kCheckpointRestart, nullptr);
             }
 
             delete db;

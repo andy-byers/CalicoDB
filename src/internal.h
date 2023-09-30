@@ -5,22 +5,19 @@
 #ifndef CALICODB_INTERNAL_H
 #define CALICODB_INTERNAL_H
 
+#include "calicodb/env.h"
 #include "calicodb/options.h"
-#include "calicodb/status.h"
-#include "internal_string.h"
 #include "utility.h"
+#include <cassert>
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
 
-#if NDEBUG
-#define CALICODB_EXPECT_(expr, file, line)
+#ifdef NDEBUG
+#define CALICODB_DEBUG_DELAY(env)
 #else
-#define CALICODB_EXPECT_(expr, file, line) calicodb::expect_impl(expr, #expr, file, line)
-#ifdef CALICODB_TEST
-#define CALICODB_EXPENSIVE_CHECKS
-#endif // CALICODB_TEST
-#endif // !NDEBUG
+#define CALICODB_DEBUG_DELAY(env) debug_delay_impl(env)
+#endif
 
 #define CALICODB_EXPECT_TRUE(expr) assert(expr)
 #define CALICODB_EXPECT_FALSE(expr) CALICODB_EXPECT_TRUE(!(expr))
@@ -37,10 +34,20 @@
 namespace calicodb
 {
 
+// Possibly cause the caller to sleep for a random length of time
+// Used to provoke timing problems in code that uses atomics.
+inline auto debug_delay_impl(Env &env) -> void
+{
+    if (env.rand() % 250 == 0) {
+        env.sleep(env.rand() % 100);
+    }
+}
+
 [[nodiscard]] inline auto is_aligned(const void *ptr, size_t alignment) -> bool
 {
-    CALICODB_EXPECT_NE(alignment, 0);
-    return reinterpret_cast<uintptr_t>(ptr) % alignment == 0;
+    CALICODB_EXPECT_GT(alignment, 1);
+    CALICODB_EXPECT_EQ(alignment & (alignment - 1), 0);
+    return 0 == (reinterpret_cast<uintptr_t>(ptr) & (alignment - 1));
 }
 
 template <class Callback>
@@ -57,17 +64,25 @@ auto busy_wait(BusyHandler *handler, const Callback &callback) -> Status
     }
 }
 
-// Enforce a reasonable limit on the size of a single allocation. This is, consequently, the maximum
-// size of a record key or value.
+// Limit on the size of a single allocation
+// This is, consequently, the maximum size of a record key or value.
 static constexpr uint32_t kMaxAllocation = 2'000'000'000;
 
+// Bounds on the size of a database page
 static constexpr uint32_t kMinPageSize = 512;
 static constexpr uint32_t kMaxPageSize = 32'768;
+
+// Bounds on the size of the page cache
 static constexpr size_t kMinFrameCount = 1;
 static constexpr size_t kMaxCacheSize = 1 << 30;
-static constexpr size_t kScratchBufferPages = 3;
-// The first pointer map page is always on page 2, right after the root page.
+
+// Number of scratch pages needed to perform tree operations
+static constexpr size_t kScratchBufferPages = 2;
+
+// Page number of the first pointer map page
 static constexpr size_t kFirstMapPage = 2;
+
+// Default filename suffixes for the WAL and shm files
 static constexpr Slice kDefaultWalSuffix = "-wal";
 static constexpr Slice kDefaultShmSuffix = "-shm";
 

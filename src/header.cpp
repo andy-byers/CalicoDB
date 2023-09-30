@@ -10,16 +10,14 @@ namespace calicodb
 
 auto FileHdr::check_page_size(size_t page_size) -> Status
 {
-    if (page_size && (page_size & (page_size - 1))) {
-        // Note that a page size of 0 in the header actually represents 1 << 16, which won't quite
-        // fit in 2 bytes.
-        return Status::corruption("page size (%u) is not a power of 2");
-    } else if (page_size < kMinPageSize) {
+    if (page_size < kMinPageSize) {
         return StatusBuilder::corruption("page size (%u) is too small (minimum page size is %u)",
                                          page_size, kMinPageSize);
     } else if (page_size > kMaxPageSize) {
         return StatusBuilder::corruption("page size (%u) is too large (maximum page size is %u)",
                                          page_size, kMaxPageSize);
+    } else if (page_size & (page_size - 1)) {
+        return Status::corruption("page size (%u) is not a power of 2");
     }
     return Status::ok();
 }

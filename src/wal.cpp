@@ -128,6 +128,9 @@ using ConstStablePtr = const char *;
 // by mmap()/VirtualAlloc(), or it is a pointer returned by malloc(). Either way,
 // it should be suitably aligned. HashIndexHdr has a size that is a multiple of 8,
 // so the second copy of the header should be properly aligned as well.
+// NOTE: These routines are not really necessary. They exist to make TSan happy.
+//       It would also be possible to selectively disable TSan (on the WalImpl
+//       methods try_index_header and write_index_header).
 template <class Src, class Dst>
 auto read_hdr(const volatile Src *src, Dst *dst) -> void
 {
@@ -166,12 +169,12 @@ auto compare_hdr(const volatile Shared *shared, const Local *local) -> int
 // Must be true for the above routines to work properly.
 static_assert(0 == sizeof(HashIndexHdr) % sizeof(uint64_t));
 
-constexpr size_t kReadmarkNotUsed = 0xFF'FF'FF'FF;
-constexpr size_t kWriteLock = 0;
-constexpr size_t kNotWriteLock = 1;
-constexpr size_t kCheckpointLock = 1;
-constexpr size_t kRecoveryLock = 2;
-constexpr size_t kReaderCount = File::kShmLockCount - 3;
+constexpr uint32_t kReadmarkNotUsed = 0xFF'FF'FF'FF;
+constexpr uint32_t kWriteLock = 0;
+constexpr uint32_t kNotWriteLock = 1;
+constexpr uint32_t kCheckpointLock = 1;
+constexpr uint32_t kRecoveryLock = 2;
+constexpr uint32_t kReaderCount = File::kShmLockCount - 3;
 #define READ_LOCK(i) static_cast<size_t>((i) + 3)
 
 struct CkptInfo {
@@ -195,13 +198,11 @@ struct CkptInfo {
     //    +-------+-------+-------+-------+
     uint8_t locks[File::kShmLockCount];
 
-    // Maximum frame number that a checkpointer attempted to write back to the
-    // database file. This value is set before the backfill field, so that
-    // checkpointer failures can be detected.
-    uint32_t backfill_attempted;
-
-    // Reserved for future expansion.
-    uint32_t reserved;
+    // Reserved for future expansion. reserved1 corresponds to the "backfill
+    // attempted" field in SQLite's checkpoint info structure, which seems to only
+    // be required for implementing SQLITE_ENABLE_SNAPSHOT functionality.
+    uint32_t reserved1;
+    uint32_t reserved2;
 };
 static_assert(std::is_pod_v<CkptInfo>);
 
@@ -732,7 +733,11 @@ public:
 
     auto read(uint32_t page_id, uint32_t page_size, char *&page) -> Status override;
     auto write(Pages &writer, uint32_t page_size, size_t db_size) -> Status override;
-    auto checkpoint(bool reset, char *scratch, uint32_t scratch_size) -> Status override;
+    auto checkpoint(CheckpointMode mode,
+                    char *scratch,
+                    uint32_t scratch_size,
+                    BusyHandler *busy,
+                    CheckpointInfo *info_out) -> Status override;
 
     auto rollback(const Rollback &hook, void *object) -> void override
     {
@@ -752,7 +757,7 @@ public:
     {
         // This will not block. This connection has an exclusive lock on the database file,
         // so no other connections are active right now.
-        auto s = checkpoint(true, scratch, page_size);
+        auto s = checkpoint(kCheckpointPassive, scratch, page_size, nullptr, nullptr);
         if (s.is_ok()) {
             s = m_env->remove_file(m_wal_name);
             if (!s.is_ok()) {
@@ -810,7 +815,7 @@ public:
             // local "max frame" value is no longer correct).
             unlock_exclusive(kWriteLock, 1);
             m_writer_lock = false;
-            return Status::busy("stale snapshot");
+            return Status::busy();
         }
         return Status::ok();
     }
@@ -824,17 +829,17 @@ public:
         }
     }
 
-    [[nodiscard]] auto wal_size() const -> size_t override
+    [[nodiscard]] auto callback() -> uint32_t override
     {
-        // NOTE: This value is used to determine if an automatic checkpoint should be run. It doesn't need to
-        //       be totally up-to-date. It must, however, be less than or equal to the actual maximum frame.
-        return m_hdr.max_frame;
+        return exchange(m_callback_arg, 0U);
     }
 
     [[nodiscard]] auto db_size() const -> size_t override
     {
-        CALICODB_EXPECT_GE(m_reader_lock, 0);
-        return m_hdr.page_count;
+        if (m_reader_lock >= 0) {
+            return m_hdr.page_count;
+        }
+        return 0;
     }
 
 private:
@@ -962,7 +967,7 @@ private:
     // of the log file
     // Readers are attached to readmark 0 and reading exclusively from the database
     // file. This connection holds kWriteLock and the whole WAL has been checkpointed.
-    auto restart_header(uint32_t salt_1) -> void
+    auto restart_header(uint32_t salt1) -> void
     {
         CALICODB_EXPECT_TRUE(m_writer_lock);
         volatile auto *info = get_ckpt_info();
@@ -971,16 +976,16 @@ private:
         m_hdr.max_frame = 0;
         auto *salt = StablePtr(m_hdr.salt);
         put_u32(salt, get_u32(salt) + 1);
-        std::memcpy(salt + sizeof(uint32_t), &salt_1, sizeof(salt_1));
+        std::memcpy(salt + sizeof(uint32_t), &salt1, sizeof(salt1));
         write_index_header();
-        // Write to backfill count must be atomic: readers perform an ATOMIC_LOAD()
-        // on this variable to determine if they need to read exclusively from the
-        // database file.
+
+        // These writes need to be atomic, otherwise TSan complains (see the end of
+        // recover_index() for an explanation of a similar situation).
+        CALICODB_DEBUG_DELAY(*m_env);
         ATOMIC_STORE(&info->backfill, 0);
-        info->backfill_attempted = 0;
-        info->readmark[1] = 0;
+        ATOMIC_STORE(info->readmark + 1, 0);
         for (size_t i = 2; i < kReaderCount; ++i) {
-            info->readmark[i] = kReadmarkNotUsed;
+            ATOMIC_STORE(info->readmark + i, kReadmarkNotUsed);
         }
         CALICODB_EXPECT_EQ(info->readmark[0], 0);
     }
@@ -995,10 +1000,10 @@ private:
             const volatile auto *info = get_ckpt_info();
             CALICODB_EXPECT_EQ(info->backfill, m_hdr.max_frame);
             if (info->backfill) {
-                const auto salt_1 = m_env->rand();
+                const auto salt1 = m_env->rand();
                 s = lock_exclusive(READ_LOCK(1), kReaderCount - 1);
                 if (s.is_ok()) {
-                    restart_header(salt_1);
+                    restart_header(salt1);
                     unlock_exclusive(READ_LOCK(1), kReaderCount - 1);
                 } else if (!s.is_busy()) {
                     return s;
@@ -1134,14 +1139,14 @@ private:
         return s;
     }
 
-    [[nodiscard]] static auto frame_offset(uint32_t frame, uint32_t page_size) -> size_t
+    [[nodiscard]] static auto frame_offset(uint32_t frame, uint32_t page_size) -> uint64_t
     {
         CALICODB_EXPECT_GT(frame, 0);
         CALICODB_EXPECT_GT(page_size, 0);
-        return kWalHdrSize + (frame - 1) * (WalFrameHdr::kSize + page_size);
+        return kWalHdrSize + (frame - 1) * static_cast<uint64_t>(WalFrameHdr::kSize + page_size);
     }
 
-    auto transfer_contents(bool reset, char *scratch) -> Status;
+    auto transfer_contents(CheckpointMode mode, char *scratch, BusyHandler *busy) -> Status;
     auto rewrite_checksums(uint32_t end) -> Status;
     auto recover_index() -> Status;
     [[nodiscard]] auto decode_frame(const char *frame, WalFrameHdr &out) -> int;
@@ -1164,7 +1169,6 @@ private:
     File *const m_db;
     Logger *const m_log;
     Stats *const m_stat;
-    BusyHandler *const m_busy;
 
     uint32_t m_min_frame = 0;
 
@@ -1173,6 +1177,8 @@ private:
     // the index header for performance reasons. This way we don't have to read the WAL
     // file header each time a transaction is started.
     uint32_t m_page_size = 0;
+
+    uint32_t m_callback_arg = 0;
 
     int m_reader_lock = -1;
     bool m_writer_lock = false;
@@ -1199,8 +1205,7 @@ WalImpl::WalImpl(const WalOptionsExtra &options, const char *filename)
       m_env(options.env),
       m_db(options.db),
       m_log(options.info_log),
-      m_stat(options.stat),
-      m_busy(options.busy)
+      m_stat(options.stat)
 {
 }
 
@@ -1375,21 +1380,21 @@ cleanup:
         m_hdr.page_size = static_cast<uint16_t>(m_page_size);
         m_hdr.frame_cksum[0] = frame_cksum[0];
         m_hdr.frame_cksum[1] = frame_cksum[1];
+        // Make the recovered frames visible to other connections.
         write_index_header();
-        // TODO: This code might run while a reader is trying to connect (see try_reader()).
-        //       Usually causes races on the backfill count, since this value is read by
-        //       every connection as it is connecting.
+
+        // NOTE: This code might run while a reader is trying to connect (see try_reader()).
+        //       Added calls to ATOMIC_*() to make TSan happy.
+        CALICODB_DEBUG_DELAY(*m_env);
         ATOMIC_STORE(&info->backfill, 0);
-        info->backfill_attempted = m_hdr.max_frame;
-        info->readmark[0] = 0;
+        ATOMIC_STORE(&info->readmark[0], 0);
         for (size_t i = 1; i < kReaderCount; ++i) {
             s = lock_exclusive(READ_LOCK(i), 1);
             if (s.is_ok()) {
-                if (i == 1 && m_hdr.max_frame) {
-                    info->readmark[i] = m_hdr.max_frame;
-                } else {
-                    info->readmark[i] = kReadmarkNotUsed;
-                }
+                const auto readmark = i == 1 && m_hdr.max_frame
+                                          ? m_hdr.max_frame
+                                          : kReadmarkNotUsed;
+                ATOMIC_STORE(&info->readmark[i], readmark);
                 unlock_exclusive(READ_LOCK(i), 1);
             } else if (!s.is_busy()) {
                 break;
@@ -1541,7 +1546,6 @@ auto WalImpl::write(Pages &writer, uint32_t page_size, size_t db_size) -> Status
     auto offset = frame_offset(next_frame, m_page_size);
     while (writer.value()) {
         auto ref = *writer.value();
-        uint32_t frame;
         // After this call, writer.value() will contain the next page reference that
         // needs to be written, or nullptr if ref is the last page.
         writer.next();
@@ -1551,6 +1555,7 @@ auto WalImpl::write(Pages &writer, uint32_t page_size, size_t db_size) -> Status
         // exists in the WAL for this transaction. This frame needs to have its
         // "db_size" field set to mark that it is a commit frame.
         if (first_frame && (writer.value() || !is_commit)) {
+            uint32_t frame;
             // Check to see if the page has been written to the WAL already by the
             // current transaction. If so, overwrite it and indicate that checksums
             // need to be recomputed from here on commit. If not, fall through and
@@ -1601,11 +1606,12 @@ auto WalImpl::write(Pages &writer, uint32_t page_size, size_t db_size) -> Status
         s = m_wal->sync();
     }
 
-    next_frame = m_hdr.max_frame + 1;
+    next_frame = m_hdr.max_frame;
     for (writer.reset(); s.is_ok() && writer.value(); writer.next()) {
         auto ref = *writer.value();
         if (*ref.flag & PageRef::kAppend) {
-            s = m_index.assign(ref.page_id, next_frame++);
+            ++next_frame;
+            s = m_index.assign(ref.page_id, next_frame);
             if (s.is_ok()) {
                 *ref.flag &= ~PageRef::kAppend;
             }
@@ -1613,31 +1619,43 @@ auto WalImpl::write(Pages &writer, uint32_t page_size, size_t db_size) -> Status
     }
     if (s.is_ok()) {
         m_hdr.page_size = static_cast<uint16_t>(m_page_size);
-        m_hdr.max_frame = next_frame - 1;
+        m_hdr.max_frame = next_frame;
         if (is_commit) {
             m_hdr.page_count = static_cast<uint32_t>(db_size);
             ++m_hdr.change;
             write_index_header();
+            m_callback_arg = next_frame;
         }
     }
     return s;
 }
 
-auto WalImpl::checkpoint(bool reset, char *scratch, uint32_t scratch_size) -> Status
+auto WalImpl::checkpoint(CheckpointMode mode,
+                         char *scratch,
+                         uint32_t scratch_size,
+                         BusyHandler *busy,
+                         CheckpointInfo *info_out) -> Status
 {
     CALICODB_EXPECT_FALSE(m_ckpt_lock);
     CALICODB_EXPECT_FALSE(m_writer_lock);
+    const auto mode0 = mode;
 
     // Exclude other connections from running a checkpoint. If the `reset` flag is set,
     // also exclude writers.
     auto s = lock_exclusive(kCheckpointLock, 1);
     if (s.is_ok()) {
         m_ckpt_lock = true;
-        if (reset) {
-            s = busy_wait(m_busy, [this] {
+        if (mode != kCheckpointPassive) {
+            s = busy_wait(busy, [this] {
                 return lock_exclusive(kWriteLock, 1);
             });
-            m_writer_lock = s.is_ok();
+            if (s.is_ok()) {
+                m_writer_lock = true;
+            } else if (s.is_busy()) {
+                mode = kCheckpointPassive;
+                busy = nullptr;
+                s = Status::ok();
+            }
         }
     }
 
@@ -1649,8 +1667,12 @@ auto WalImpl::checkpoint(bool reset, char *scratch, uint32_t scratch_size) -> St
         if (m_hdr.max_frame && m_page_size != scratch_size) {
             s = Status::corruption();
         } else {
-            s = transfer_contents(reset, scratch);
+            s = transfer_contents(mode, scratch, busy);
         }
+    }
+    if (info_out && (s.is_ok() || s.is_busy())) {
+        info_out->backfill = get_ckpt_info()->backfill;
+        info_out->wal_size = m_hdr.max_frame;
     }
     if (changed) {
         m_hdr = {};
@@ -1660,21 +1682,22 @@ auto WalImpl::checkpoint(bool reset, char *scratch, uint32_t scratch_size) -> St
         unlock_exclusive(kCheckpointLock, 1);
         m_ckpt_lock = false;
     }
-    return s;
+    return s.is_ok() && mode != mode0 ? Status::busy() : s;
 }
 
 // Write as much of the WAL back to the database file as possible
 // This method is run under an exclusive checkpoint lock, and possibly an exclusive writer
 // lock. Writes to the "backfill count" variable stored in the checkpoint header must be
 // atomic here, but reads need not be. This is the only connection allowed to change the
-// backfill count right now. Note that the backfill count is also set during both WAL reset
+// backfill count right now. Note that the backfill count is also set during both WAL restart
 // and index recovery, however, connections performing either of these actions are excluded
-// by shm locks (other checkpointers by the checkpoint lock, and connections seeking to
-// restart the log by the writer lock).
-auto WalImpl::transfer_contents(bool reset, char *scratch) -> Status
+// by shm locks. Checkpointers are serialized using the checkpoint lock, and connections
+// seeking to restart the log are excluded by the writer lock (but only if this checkpoint
+// is not a kCheckpointPassive), or reader lock 0.
+auto WalImpl::transfer_contents(CheckpointMode mode, char *scratch, BusyHandler *busy) -> Status
 {
     CALICODB_EXPECT_TRUE(m_ckpt_lock);
-    CALICODB_EXPECT_TRUE(!reset || m_writer_lock);
+    CALICODB_EXPECT_TRUE(mode == kCheckpointPassive || m_writer_lock);
     const auto sync_on_ckpt = m_sync_mode != Options::kSyncOff;
 
     Status s;
@@ -1695,7 +1718,7 @@ auto WalImpl::transfer_contents(bool reset, char *scratch) -> Status
             const auto y = ATOMIC_LOAD(info->readmark + i);
             if (y < max_safe_frame) {
                 CALICODB_EXPECT_LE(y, m_hdr.max_frame);
-                s = busy_wait(m_busy, [this, i] {
+                s = busy_wait(busy, [this, i] {
                     return lock_exclusive(READ_LOCK(i), 1);
                 });
                 if (s.is_ok()) {
@@ -1714,7 +1737,7 @@ auto WalImpl::transfer_contents(bool reset, char *scratch) -> Status
             HashIterator itr(m_index);
             s = itr.init(info->backfill);
             if (s.is_ok()) {
-                s = busy_wait(m_busy, [this] {
+                s = busy_wait(busy, [this] {
                     // Lock reader lock 0. This prevents other connections from ignoring the WAL and
                     // reading all pages from the database file. New readers should find a readmark,
                     // so they know which pages to get from the WAL, since this connection is about
@@ -1728,7 +1751,6 @@ auto WalImpl::transfer_contents(bool reset, char *scratch) -> Status
             }
 
             start_frame = info->backfill;
-            info->backfill_attempted = max_safe_frame;
             if (sync_on_ckpt) {
                 ++m_stat->sync_wal;
                 s = m_wal->sync();
@@ -1749,13 +1771,13 @@ auto WalImpl::transfer_contents(bool reset, char *scratch) -> Status
                                       m_page_size, scratch);
                 if (s.is_ok()) {
                     m_stat->write_db += m_page_size;
-                    s = m_db->write((entry.key - 1) * m_page_size,
+                    s = m_db->write(static_cast<uint64_t>(entry.key - 1) * m_page_size,
                                     Slice(scratch, m_page_size));
                 }
             }
             if (s.is_ok()) {
                 if (max_safe_frame == m_hdr.max_frame) {
-                    s = m_db->resize(m_hdr.page_count * m_page_size);
+                    s = m_db->resize(m_hdr.page_count * static_cast<uint64_t>(m_page_size));
                     if (s.is_ok() && sync_on_ckpt) {
                         ++m_stat->sync_db;
                         s = m_db->sync();
@@ -1768,22 +1790,22 @@ auto WalImpl::transfer_contents(bool reset, char *scratch) -> Status
             unlock_exclusive(READ_LOCK(0), 1);
         }
     }
-    if (s.is_ok() && reset) {
+    if (s.is_ok() && mode != kCheckpointPassive) {
         CALICODB_EXPECT_TRUE(m_writer_lock);
         if (info->backfill < m_hdr.max_frame) {
             // Some other connection got in the way.
-            s = Status::retry();
-        } else {
-            const auto salt_1 = m_env->rand();
+            s = Status::busy();
+        } else if (mode >= kCheckpointRestart) {
+            const auto salt1 = m_env->rand();
             // Wait on other connections that are still reading from the WAL. This is
             // what SQLite does for `SQLITE_CHECKPOINT_RESTART`. New connections will
             // take readmark 0 and read directly from the database file, and the next
             // writer will reset the log.
-            s = busy_wait(m_busy, [this] {
+            s = busy_wait(busy, [this] {
                 return lock_exclusive(READ_LOCK(1), kReaderCount - 1);
             });
             if (s.is_ok()) {
-                restart_header(salt_1);
+                restart_header(salt1);
                 unlock_exclusive(READ_LOCK(1), kReaderCount - 1);
             }
         }

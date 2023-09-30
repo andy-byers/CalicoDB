@@ -22,6 +22,35 @@ struct HeapStatusHdr {
 
 static_assert(sizeof(HeapStatusHdr) == sizeof(uint32_t));
 
+// Helper for creating Status objects
+// On the surface, a Status can be in 1 of 2 states: success or failure. A successful status returns
+// true when Status::is_ok() is called, and a failure status returns false. Failure statuses can be in
+// 1 of 2 hidden states: inline or heap. Inline failure statuses keep all necessary fields packed in
+// the state pointer value. They cannot contain an error message. Heap failure statuses store their
+// fields and an error message on the heap. A successful status never requires a heap allocation.
+//
+// Heap failure status layout:
+//      Offset | Size | Field
+//     --------|------|----------
+//      0      | 2    | Refcount
+//      2      | 1    | Code
+//      3      | 1    | SubCode
+//      4      | N    | Message
+//
+// Inline failure status layout:
+//     0    4    8    12
+//     ABBB BBBB CCCC CCCC
+//
+//     Where A = Discriminator
+//           B = Code
+//           C = SubCode
+//
+// Note the fields that are unique to each failure state: Refcount and Discriminator. The Refcount
+// is used to avoid allocating additional heap status states. Instead, we just increment the refcount
+// each time a heap status is copied. The Discriminator is always located in the least-significant
+// bit of the state pointer and serves to distinguish between heap and inline statuses. This bit will
+// never be set if the pointer is set to the address of some object allocated by the allocation
+// subsystem.
 class StatusBuilder final
 {
     StringBuilder m_builder;

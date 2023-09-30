@@ -133,8 +133,9 @@ cleanup:
 }
 
 // Translated from SQLite. This is like allocateBtreePage(), except allocating from the end of
-// the file is performed in Pager::allocate() and only 2 behaviors are supported: kPopExact and
-// kPopAny.
+// the file is performed in Pager::allocate() and only 2 behaviors are supported: kRemoveExact
+// and kRemoveAny. kRemoveExact causes the exact page `nearby` to be removed from the freelist.
+// kRemoveAny removes the page closest to `nearby`.
 auto Freelist::remove(Pager &pager, RemoveType type, Id nearby, PageRef *&page_out) -> Status
 {
     page_out = nullptr;

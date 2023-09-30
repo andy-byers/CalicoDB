@@ -68,7 +68,7 @@ public:
     auto commit() -> Status;
     auto finish() -> void;
 
-    auto checkpoint(bool reset) -> Status;
+    auto checkpoint(CheckpointMode mode, CheckpointInfo *info_out) -> Status;
     auto auto_checkpoint(size_t frame_limit) -> Status;
 
     auto allocate(PageRef *&page_out) -> Status;
@@ -131,7 +131,6 @@ private:
     friend class Mem;
     explicit Pager(const Parameters &param);
 
-    auto create_wal_object() -> Wal *;
     auto open_wal() -> Status;
     auto close_wal() -> Status;
     auto refresh_state() -> Status;

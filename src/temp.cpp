@@ -363,12 +363,12 @@ public:
         return Status::ok();
     }
 
-    auto checkpoint(bool, char *, uint32_t) -> Status override
+    auto checkpoint(CheckpointMode, char *, uint32_t, BusyHandler *, CheckpointInfo *) -> Status override
     {
         return Status::ok();
     }
 
-    [[nodiscard]] auto wal_size() const -> size_t override
+    [[nodiscard]] auto callback() -> uint32_t override
     {
         return 0;
     }
@@ -427,8 +427,8 @@ private:
     };
 
     // Simple hash table for pages written to the WAL
-    // Also, we never need to
-    // remove single pages, which simplifies the implementation. Uses linear probing.
+    // We never need to remove single pages, which simplifies the implementation. Uses
+    // linear probing.
     struct PageTable {
         Buffer<PageEntry *> data;
         size_t occupied = 0;
@@ -442,9 +442,7 @@ private:
         auto for_each(Action &&action) -> int
         {
             for (size_t i = 0; i < data.len(); ++i) {
-                // Caller may need to free and clear the pointer, so provide a reference.
-                auto *&ptr = data[i];
-                if (ptr && action(ptr)) {
+                if (data[i] && action(data[i])) {
                     return -1;
                 }
             }

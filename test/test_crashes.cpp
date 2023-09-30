@@ -9,7 +9,6 @@
 #include "logging.h"
 #include "model.h"
 #include "test.h"
-#include <filesystem>
 
 namespace calicodb::test
 {
@@ -532,7 +531,7 @@ protected:
                 validate(*db);
 
                 ++src_counters[kSrcCheckpoint];
-                s = db->checkpoint(true);
+                s = db->checkpoint(kCheckpointRestart, nullptr);
                 if (!s.is_ok()) {
                     EXPECT_TRUE(is_injected_fault(s));
                     return s;
@@ -1097,9 +1096,7 @@ public:
         delete m_db;
         m_db = nullptr;
         if (clear) {
-            std::filesystem::remove_all(m_filename);
-            std::filesystem::remove_all(m_filename + kDefaultWalSuffix.to_string());
-            std::filesystem::remove_all(m_filename + kDefaultShmSuffix.to_string());
+            remove_calicodb_files(m_filename);
         }
         delete m_env;
         m_env = new DataLossEnv(default_env());
@@ -1142,10 +1139,10 @@ public:
     {
         m_env->m_loss_type = param.loss_type;
         m_env->m_drop_file = param.loss_file;
-        auto s = m_db->checkpoint(reset);
+        auto s = m_db->checkpoint(reset ? kCheckpointRestart : kCheckpointPassive, nullptr);
         if (!s.is_ok()) {
             EXPECT_EQ(injected_fault(), s);
-            EXPECT_EQ(injected_fault(), m_db->checkpoint(reset));
+            EXPECT_EQ(injected_fault(), m_db->checkpoint(reset ? kCheckpointRestart : kCheckpointPassive, nullptr));
         }
         return s;
     }

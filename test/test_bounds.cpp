@@ -4,7 +4,6 @@
 
 #include "calicodb/db.h"
 #include "common.h"
-#include "db_impl.h"
 #include "encoding.h"
 #include "internal.h"
 #include "test.h"
@@ -26,9 +25,7 @@ protected:
         : m_filename(testing::TempDir() + "db"),
           m_backing(new char[kMaxLen + 1]())
     {
-        std::filesystem::remove_all(m_filename);
-        std::filesystem::remove_all(m_filename + kDefaultWalSuffix.data());
-        std::filesystem::remove_all(m_filename + kDefaultShmSuffix.data());
+        remove_calicodb_files(m_filename);
     }
 
     ~BoundaryValueTests() override
@@ -69,7 +66,7 @@ protected:
             return s;
         }));
 
-        ASSERT_OK(m_db->checkpoint(false));
+        ASSERT_OK(m_db->checkpoint(kCheckpointPassive, nullptr));
 
         ASSERT_OK(m_db->run(ReadOptions(), [=](const auto &tx) {
             TestCursor c;
@@ -106,7 +103,7 @@ TEST_F(BoundaryValueTests, BoundaryBucketName)
         return test_create_and_open_bucket(tx, BucketOptions(), payload(kMaxLen), c);
     }));
 
-    ASSERT_OK(m_db->checkpoint(false));
+    ASSERT_OK(m_db->checkpoint(kCheckpointPassive, nullptr));
 
     ASSERT_OK(m_db->run(ReadOptions(), [=](const auto &tx) {
         TestCursor c;
@@ -121,7 +118,7 @@ TEST_F(BoundaryValueTests, OverflowBucketName)
         return test_create_and_open_bucket(tx, BucketOptions(), payload(kMaxLen + 1), c);
     }));
 
-    ASSERT_OK(m_db->checkpoint(false));
+    ASSERT_OK(m_db->checkpoint(kCheckpointPassive, nullptr));
 
     ASSERT_NOK(m_db->run(ReadOptions(), [=](const auto &tx) {
         TestCursor c;
@@ -168,19 +165,50 @@ protected:
     explicit StressTests()
         : m_filename(testing::TempDir() + "calicodb_stress_tests")
     {
-        std::filesystem::remove_all(m_filename);
-        std::filesystem::remove_all(m_filename + kDefaultWalSuffix.to_string());
-        std::filesystem::remove_all(m_filename + kDefaultShmSuffix.to_string());
+        remove_calicodb_files(m_filename);
     }
 
     ~StressTests() override
     {
         delete m_db;
+
+        // The files left by this test can be very large. Make sure to clean up.
+        remove_calicodb_files(m_filename);
     }
 
-    auto SetUp() -> void override
+    auto run_32_bit_overflow_test(bool auto_checkpoint) -> void
     {
-        ASSERT_OK(DB::open(Options(), m_filename.c_str(), m_db));
+        // Keep the number of iterations low and the payload size high. Otherwise, the WAL grows
+        // to be way too large, since we retain many versions of each page. Still, these settings
+        // create a ~10 GB WAL.
+        static constexpr size_t kNumIterations = 5;
+        static constexpr size_t kPayloadSize = 1'000'000'000;
+        auto buffer = std::make_unique<char[]>(kPayloadSize);
+
+        // Make a database file that is larger than 4 GiB. Offsets to some locations within the
+        // file, as well as the file size itself, should overflow a 32-bit unsigned integer.
+        static_assert(kNumIterations * kPayloadSize > std::numeric_limits<uint32_t>::max());
+
+        Options options;
+        options.page_size = kMaxPageSize;
+        options.auto_checkpoint = auto_checkpoint ? options.auto_checkpoint : 0;
+        ASSERT_OK(DB::open(options, m_filename.c_str(), m_db));
+
+        for (size_t i = 0; i < kNumIterations; ++i) {
+            ASSERT_OK(m_db->run(WriteOptions(), [&buffer, i](auto &tx) {
+                TestCursor c;
+                auto s = test_create_and_open_bucket(tx, BucketOptions(), "b", c);
+                if (s.is_ok()) {
+                    put_u64(buffer.get(), i);
+                    s = tx.put(*c,
+                               Slice(buffer.get(), kPayloadSize),
+                               Slice(buffer.get(), kPayloadSize));
+                }
+                return s;
+            }));
+        }
+        ASSERT_OK(m_db->checkpoint(kCheckpointRestart, nullptr));
+        ASSERT_GT(std::filesystem::file_size(m_filename), kPayloadSize * kNumIterations);
     }
 };
 
@@ -189,6 +217,7 @@ TEST_F(StressTests, LotsOfBuckets)
     // There isn't really a limit on the number of buckets one can create. Just create a
     // bunch of them.
     static constexpr size_t kNumBuckets = 100'000;
+    ASSERT_OK(DB::open(Options(), m_filename.c_str(), m_db));
     ASSERT_OK(m_db->run(WriteOptions(), [](auto &tx) {
         Status s;
         for (size_t i = 0; s.is_ok() && i < kNumBuckets; ++i) {
@@ -220,6 +249,7 @@ TEST_F(StressTests, LotsOfBuckets)
 
 TEST_F(StressTests, CursorLimit)
 {
+    ASSERT_OK(DB::open(Options(), m_filename.c_str(), m_db));
     ASSERT_OK(m_db->run(WriteOptions(), [](auto &tx) {
         Status s;
         std::vector<TestCursor> cursors(1'000);
@@ -251,6 +281,7 @@ TEST_F(StressTests, LargeVacuum)
     static constexpr size_t kNumRecords = 1'234;
     static constexpr size_t kTotalBuckets = 2'500;
     static constexpr size_t kDroppedBuckets = kTotalBuckets / 10;
+    ASSERT_OK(DB::open(Options(), m_filename.c_str(), m_db));
     ASSERT_OK(m_db->run(WriteOptions(), [](auto &tx) {
         Status s;
         for (size_t i = 0; s.is_ok() && i < kTotalBuckets; ++i) {
@@ -294,6 +325,18 @@ TEST_F(StressTests, LargeVacuum)
         }
         return s;
     }));
+}
+
+TEST_F(StressTests, Overflow32Bits1)
+{
+    // Checkpoint the data incrementally.
+    run_32_bit_overflow_test(true);
+}
+
+TEST_F(StressTests, Overflow32Bits2)
+{
+    // Checkpoint all the data at once.
+    run_32_bit_overflow_test(false);
 }
 
 } // namespace calicodb::test
