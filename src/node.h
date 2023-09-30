@@ -119,7 +119,7 @@ struct Cell {
 
 // Simple construct representing a tree node
 struct Node final {
-    using ParseCell = int (*)(char *, const char *, uint32_t, Cell *);
+    using ParseCell = int (*)(char *, const char *, uint32_t, Cell &);
     static constexpr uint32_t kMaxFragCount = 0x80;
 
     PageRef *ref;

@@ -72,7 +72,7 @@ auto DB::open(const Options &options, const char *filename, DB *&db) -> Status
                 "warning: ignoring options.wal object @ %p "
                 "(custom Wal must not be used with temp database)",
                 sanitized.wal);
-            // Opened by the pager at the start of the first transaction.
+            // Created in DBImpl::open().
             sanitized.wal = nullptr;
         }
         sanitized.env = new_temp_env(sanitized.page_size * 4);

@@ -101,7 +101,7 @@ public:
     auto release() -> T *
     {
         m_len = 0;
-        return exchange(ref(), nullptr);
+        return m_ptr.release();
     }
 
     [[nodiscard]] auto realloc(size_t len) -> int

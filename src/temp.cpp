@@ -7,7 +7,6 @@
 #include "calicodb/wal.h"
 #include "logging.h"
 #include "mem.h"
-#include "page.h"
 #include "unique_ptr.h"
 #include "wal_internal.h"
 
@@ -373,9 +372,10 @@ public:
         return 0;
     }
 
-    [[nodiscard]] auto db_size() const -> size_t override
+    [[nodiscard]] auto db_size() const -> uint32_t override
     {
-        return static_cast<uint32_t>(m_env->m_file.sectors.len());
+        return static_cast<uint32_t>(
+            (m_env->m_file.actual_size + m_page_size - 1) / m_page_size);
     }
 
 private:

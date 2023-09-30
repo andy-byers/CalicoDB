@@ -43,11 +43,11 @@ public:
     // back on a valid record.
     virtual auto status() const -> Status = 0;
 
-    // Get the current record key
+    // Return the current key
     // REQUIRES: is_valid()
     [[nodiscard]] virtual auto key() const -> Slice = 0;
 
-    // Get the current record value
+    // Return the current value
     // REQUIRES: is_valid()
     [[nodiscard]] virtual auto value() const -> Slice = 0;
 

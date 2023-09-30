@@ -75,7 +75,7 @@ auto remove_ivec_slot(Node &node, uint32_t index)
     NodeHdr::put_cell_count(node.hdr(), count - 1);
 }
 
-[[nodiscard]] auto external_parse_cell(char *data, const char *limit, uint32_t total_space, Cell *cell_out)
+[[nodiscard]] auto external_parse_cell(char *data, const char *limit, uint32_t total_space, Cell &cell_out)
 {
     uint32_t key_size, value_size;
     const auto *ptr = data;
@@ -92,20 +92,18 @@ auto remove_ivec_slot(Node &node, uint32_t index)
     const auto footprint = hdr_size + pad_size + local_pl_size + has_remote * sizeof(uint32_t);
 
     if (data + footprint <= limit) {
-        if (cell_out) {
-            cell_out->ptr = data;
-            cell_out->key = data + hdr_size + pad_size;
-            cell_out->key_size = key_size;
-            cell_out->total_pl_size = key_size + value_size;
-            cell_out->local_pl_size = local_pl_size;
-            cell_out->footprint = static_cast<uint32_t>(footprint);
-        }
+        cell_out.ptr = data;
+        cell_out.key = data + hdr_size + pad_size;
+        cell_out.key_size = key_size;
+        cell_out.total_pl_size = key_size + value_size;
+        cell_out.local_pl_size = local_pl_size;
+        cell_out.footprint = static_cast<uint32_t>(footprint);
         return 0;
     }
     return -1;
 }
 
-[[nodiscard]] auto internal_parse_cell(char *data, const char *limit, uint32_t total_space, Cell *cell_out)
+[[nodiscard]] auto internal_parse_cell(char *data, const char *limit, uint32_t total_space, Cell &cell_out)
 {
     uint32_t key_size;
     if (const auto *ptr = decode_varint(data + sizeof(uint32_t), limit, key_size)) {
@@ -114,14 +112,12 @@ auto remove_ivec_slot(Node &node, uint32_t index)
         const auto has_remote = local_pl_size < key_size;
         const auto footprint = hdr_size + local_pl_size + has_remote * sizeof(uint32_t);
         if (data + footprint <= limit) {
-            if (cell_out) {
-                cell_out->ptr = data;
-                cell_out->key = data + hdr_size;
-                cell_out->key_size = key_size;
-                cell_out->total_pl_size = key_size;
-                cell_out->local_pl_size = local_pl_size;
-                cell_out->footprint = static_cast<uint32_t>(footprint);
-            }
+            cell_out.ptr = data;
+            cell_out.key = data + hdr_size;
+            cell_out.key_size = key_size;
+            cell_out.total_pl_size = key_size;
+            cell_out.local_pl_size = local_pl_size;
+            cell_out.footprint = static_cast<uint32_t>(footprint);
             return 0;
         }
     }
@@ -487,7 +483,7 @@ auto Node::read(uint32_t index, Cell &cell_out) const -> int
         ref->data + offset,
         ref->data + total_space,
         total_space,
-        &cell_out);
+        cell_out);
 }
 
 auto Node::write(uint32_t index, const Cell &cell) -> int

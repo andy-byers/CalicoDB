@@ -61,6 +61,7 @@ auto Bufmgr::reallocate(size_t page_size) -> int
     m_root = m_metadata.ptr();
     m_root->page_id = Id::root();
     IntrusiveList::remove(*m_root);
+    std::memset(m_root->data, 0, page_size);
     return 0;
 }
 

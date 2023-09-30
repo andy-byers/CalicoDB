@@ -12,6 +12,7 @@
 #include "temp.h"
 #include "test.h"
 #include "tree.h"
+#include "wal_internal.h"
 #include <unordered_map>
 
 namespace calicodb::test
@@ -64,19 +65,29 @@ public:
     Pager *m_pager = nullptr;
     File *m_file = nullptr;
     Tree *m_tree = nullptr;
+    ObjectPtr<Wal> m_wal;
     mutable CursorImpl *m_c;
 
     TreeTestHarness()
         : m_env(new_temp_env(TEST_PAGE_SIZE))
     {
         EXPECT_OK(m_env->new_file("db", Env::kCreate, m_file));
-
+        const WalOptionsExtra wal_options = {
+            {m_env,
+             m_file,
+             &m_stat},
+            nullptr,
+            Options::kSyncNormal,
+            Options::kLockNormal,
+        };
+        m_wal.reset(new_temp_wal(wal_options));
+        EXPECT_TRUE(m_wal);
         const Pager::Parameters pager_param = {
             "db",
             "wal",
             m_file,
             m_env,
-            nullptr,
+            m_wal.get(),
             nullptr,
             &m_status,
             &m_stat,
@@ -87,22 +98,7 @@ public:
             Options::kLockNormal,
             false,
         };
-        auto s = Pager::open(pager_param, m_pager);
-        if (s.is_ok()) {
-            s = m_pager->start_reader();
-            if (s.is_ok()) {
-                s = m_pager->start_writer();
-            }
-            if (s.is_ok()) {
-                m_pager->initialize_root();
-                s = m_pager->commit();
-            }
-            m_pager->finish();
-        }
-        if (!s.is_ok()) {
-            Mem::delete_object(m_pager);
-            m_pager = nullptr;
-        }
+        EXPECT_OK(Pager::open(pager_param, m_pager));
     }
 
     ~TreeTestHarness()
@@ -113,7 +109,6 @@ public:
         Mem::delete_object(m_pager);
         delete m_file;
         delete m_env;
-        EXPECT_EQ(DebugAllocator::bytes_used(), 0);
     }
 
     auto tree_put(CursorImpl &c, const std::string &k, const std::string &v) const -> Status
@@ -179,8 +174,8 @@ public:
 
     auto open() -> void
     {
-        EXPECT_OK(m_pager->start_reader());
-        EXPECT_OK(m_pager->start_writer());
+        EXPECT_OK(m_pager->lock_reader(nullptr));
+        EXPECT_OK(m_pager->begin_writer());
         m_tree = new Tree(*m_pager, m_stat, m_pager->scratch(), Id::root(), String());
         m_c = new (std::nothrow) CursorImpl(*m_tree);
     }

@@ -118,6 +118,11 @@ public:
 
     [[nodiscard]] auto ref() -> Object *&
     {
+        // WARNING: This convenience function is meant to be called like static_constructor(ptr.ref()),
+        //          where static_constructor(Object *&object_out) allocates an object of type Object on
+        //          the heap and passes its address to the caller through object_out. Memory is sure to
+        //          be leaked if m_ptr points to a valid allocation.
+        CALICODB_EXPECT_EQ(m_ptr, nullptr);
         return m_ptr;
     }
 

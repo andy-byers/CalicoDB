@@ -51,6 +51,7 @@ build_test(test_pager)
 build_test(test_stest)
 build_test(test_tree)
 build_test(test_utils)
+build_test(test_wal)
 
 # Scenario tests using /utils/stest.
 build_test(stest_db)

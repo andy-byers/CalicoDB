@@ -60,13 +60,13 @@ private:
         Status s;
         if (!m_writable) {
             s = Status::not_supported("transaction is readonly");
-        } else if (m_status->is_ok()) {
+        } else if (!m_status->is_ok()) {
+            s = *m_status;
+        } else {
             s = operation();
             if (!s.is_ok()) {
                 m_pager->set_status(s);
             }
-        } else {
-            s = *m_status;
         }
         return s;
     }

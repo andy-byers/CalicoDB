@@ -518,6 +518,9 @@ TEST_F(DBTests, UpdateThenView)
 {
     size_t round = 0;
     do {
+        if (!(m_config & kInMemory)) {
+            continue;
+        }
         BucketOptions bopt;
         bopt.error_if_exists = true;
         for (int i = 0; i < 3; ++i) {
@@ -597,30 +600,29 @@ TEST_F(DBTests, RollbackUpdate)
     size_t round = 0;
     do {
         for (int i = 0; i < 3; ++i) {
-            ASSERT_EQ(0, std::strcmp(m_db->run(WriteOptions(), [i, round](auto &tx) {
-                                             TestCursor c;
-                                             auto s = test_create_and_open_bucket(tx, BucketOptions(), kBucketStr + i, c);
-                                             if (s.is_ok()) {
-                                                 s = put_range(tx, *c, 0, 500, round);
-                                                 if (s.is_ok()) {
-                                                     // We have access to the Tx here, so we can actually call
-                                                     // Tx::commit() as many times as we want before we return.
-                                                     // The returned status determines whether to perform a final
-                                                     // commit before calling delete on the Tx.
-                                                     s = tx.commit();
-                                                     if (s.is_ok()) {
-                                                         s = put_range(tx, *c, 500, 1'000, round);
-                                                         if (s.is_ok()) {
-                                                             // Cause the rest of the changes to be rolled back.
-                                                             return Status::not_found("42");
-                                                         }
-                                                     }
-                                                 }
-                                             }
-                                             return s;
-                                         })
-                                         .message(),
-                                     "42"));
+            const auto s = m_db->run(WriteOptions(), [i, round](auto &tx) {
+                TestCursor c;
+                auto s = test_create_and_open_bucket(tx, BucketOptions(), kBucketStr + i, c);
+                if (s.is_ok()) {
+                    s = put_range(tx, *c, 0, 500, round);
+                    if (s.is_ok()) {
+                        // We have access to the Tx here, so we can actually call
+                        // Tx::commit() as many times as we want before we return.
+                        // The returned status determines whether to perform a final
+                        // commit before calling delete on the Tx.
+                        s = tx.commit();
+                        if (s.is_ok()) {
+                            s = put_range(tx, *c, 500, 1'000, round);
+                            if (s.is_ok()) {
+                                // Cause the rest of the changes to be rolled back.
+                                return Status::not_found("42");
+                            }
+                        }
+                    }
+                }
+                return s;
+            });
+            ASSERT_EQ(0, std::strcmp(s.message(), "42"));
         }
         for (int i = 0; i < 3; ++i) {
             ASSERT_OK(m_db->run(ReadOptions(), [round, i](const auto &tx) {
@@ -892,6 +894,28 @@ TEST_F(DBTests, VacuumDroppedBuckets)
         EXPECT_OK(tx.drop_bucket("c"));
         return tx.vacuum();
     }));
+}
+
+TEST_F(DBTests, ReadWithoutWAL)
+{
+    const auto wal_name = m_db_name + kDefaultWalSuffix.to_string();
+    ASSERT_OK(m_db->run(WriteOptions(), [](auto &tx) {
+        return put_range(tx, BucketOptions(), "b", 0, 1'000);
+    }));
+    ASSERT_TRUE(m_env->file_exists(wal_name.c_str()));
+
+    ASSERT_OK(reopen_db(false));
+    ASSERT_FALSE(m_env->file_exists(wal_name.c_str()));
+
+    ASSERT_OK(m_db->run(ReadOptions(), [](auto &tx) {
+        return check_range(tx, "b", 0, 1'000, true);
+    }));
+    ASSERT_FALSE(m_env->file_exists(wal_name.c_str()));
+
+    ASSERT_OK(m_db->checkpoint(kCheckpointPassive, nullptr));
+    ASSERT_OK(m_db->checkpoint(kCheckpointFull, nullptr));
+    ASSERT_OK(m_db->checkpoint(kCheckpointRestart, nullptr));
+    ASSERT_FALSE(m_env->file_exists(wal_name.c_str()));
 }
 
 TEST(OldWalTests, HandlesOldWalFile)

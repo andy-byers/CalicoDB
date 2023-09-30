@@ -142,10 +142,8 @@ auto Schema::open_cursor(const Slice &name, Id root_id, Cursor *&c_out) -> Statu
 
 auto Schema::create_bucket(const BucketOptions &options, const Slice &name, Cursor **c_out) -> Status
 {
-    if (m_pager->page_count() == 0) {
-        // Initialize the database file header, as well as the schema tree's root page.
-        m_pager->initialize_root();
-    }
+    CALICODB_EXPECT_GT(m_pager->page_count(), 0);
+
     Id root_id;
     auto [_, c] = unpack_cursor(m_internal);
     m_internal.find(name);
@@ -159,13 +157,13 @@ auto Schema::create_bucket(const BucketOptions &options, const Slice &name, Curs
         }
     } else if (s.is_ok()) {
         use_tree(&m_map);
-        s = m_map.create(&root_id);
+        s = m_map.create(root_id);
         if (s.is_ok()) {
             char buf[kMaxRootEntryLen];
             const auto len = encode_root_id(root_id, buf);
-            // On success, this call will leave m_cursor is on the schema record of the bucket that we
-            // need to open a cursor on below. It may invalidate `name`, so m_cursor.key() is used
-            // instead. The 2 should be equivalent.
+            // On success, this call will leave c on the schema record of the bucket that we need to
+            // open a cursor on below. It may invalidate `name`, so m_cursor.key() is used instead.
+            // The 2 should be equivalent.
             s = m_map.put(*c, name, Slice(buf, len));
         }
     }
@@ -181,9 +179,6 @@ auto Schema::open_bucket(const Slice &name, Cursor *&c_out) -> Status
     if (m_pager->page_count() == 0) {
         return Status::invalid_argument();
     }
-    // NOTE: Cannot use `name` again: this routine may have been called like
-    //       open_bucket(schema.key(), c), where "schema" is the result of
-    //       Tx::schema(), which is actually m_cursor.
     m_internal.find(name);
     auto s = m_internal.status();
 
