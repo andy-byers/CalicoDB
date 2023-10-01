@@ -80,7 +80,7 @@ public:
             Options::kSyncNormal,
             Options::kLockNormal,
         };
-        m_wal.reset(new_temp_wal(wal_options));
+        m_wal.reset(new_temp_wal(wal_options, TEST_PAGE_SIZE));
         EXPECT_TRUE(m_wal);
         const Pager::Parameters pager_param = {
             "db",

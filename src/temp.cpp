@@ -255,11 +255,12 @@ private:
 class TempWal : public Wal
 {
 public:
-    [[nodiscard]] static auto create(const WalOptionsExtra &options) -> TempWal *
+    [[nodiscard]] static auto create(const WalOptionsExtra &options, uint32_t page_size) -> TempWal *
     {
         auto *wal = Mem::new_object<TempWal>(
             reinterpret_cast<TempEnv &>(*options.env),
-            *options.stat);
+            *options.stat,
+            page_size);
         if (wal->m_table.grow()) {
             Mem::deallocate(wal);
             return nullptr;
@@ -267,9 +268,10 @@ public:
         return wal;
     }
 
-    explicit TempWal(TempEnv &env, Stats &stat)
+    explicit TempWal(TempEnv &env, Stats &stat, uint32_t page_size)
         : m_env(&env),
-          m_stat(&stat)
+          m_stat(&stat),
+          m_page_size(page_size)
     {
     }
 
@@ -286,6 +288,7 @@ public:
 
     auto read(uint32_t page_id, uint32_t page_size, char *&page) -> Status override
     {
+        CALICODB_EXPECT_EQ(m_page_size, page_size);
         const auto itr = m_table.find(page_id);
         if (itr != m_table.end() && *itr) {
             const auto copy_size = minval(page_size, m_page_size);
@@ -304,9 +307,6 @@ public:
 
     auto write(Pages &writer, uint32_t page_size, size_t db_size) -> Status override
     {
-        if (m_table.occupied == 0) {
-            m_page_size = page_size;
-        }
         CALICODB_EXPECT_EQ(m_page_size, page_size);
         for (; writer.value(); writer.next()) {
             if (m_table.occupied * 2 >= m_table.data.len()) {
@@ -509,7 +509,7 @@ private:
 
     TempEnv *const m_env;
     Stats *const m_stat;
-    uint32_t m_page_size;
+    const uint32_t m_page_size;
 };
 
 } // namespace
@@ -519,9 +519,9 @@ auto new_temp_env(size_t sector_size) -> Env *
     return new (std::nothrow) TempEnv(sector_size);
 }
 
-auto new_temp_wal(const WalOptionsExtra &options) -> Wal *
+auto new_temp_wal(const WalOptionsExtra &options, uint32_t page_size) -> Wal *
 {
-    return TempWal::create(options);
+    return TempWal::create(options, page_size);
 }
 
 } // namespace calicodb

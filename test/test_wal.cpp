@@ -26,7 +26,7 @@ auto make_temporary_wal(WalOptionsExtra options, const char *) -> WalComponents
     EXPECT_NE(options.env, nullptr);
     EXPECT_OK(options.env->new_file("db", Env::kCreate | Env::kReadWrite,
                                     options.db));
-    return {options.env, new_temp_wal(options), options.db};
+    return {options.env, new_temp_wal(options, TEST_PAGE_SIZE), options.db};
 }
 
 auto make_persistent_wal(WalOptionsExtra options, const char *filename) -> WalComponents

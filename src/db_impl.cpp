@@ -66,7 +66,7 @@ auto DBImpl::open(const Options &sanitized) -> Status
             sanitized.sync_mode,
             sanitized.lock_mode,
         };
-        m_temp_wal.reset(new_temp_wal(wal_options));
+        m_temp_wal.reset(new_temp_wal(wal_options, static_cast<uint32_t>(sanitized.page_size)));
         if (!m_temp_wal) {
             return Status::no_memory();
         }
