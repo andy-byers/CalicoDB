@@ -23,6 +23,12 @@ namespace
 #define ATOMIC_LOAD(p) __atomic_load_n(p, __ATOMIC_RELAXED)
 #define ATOMIC_STORE(p, v) __atomic_store_n(p, v, __ATOMIC_RELAXED)
 
+#if defined(__clang__) && !defined(NO_TSAN)
+#define NO_TSAN __attribute__((no_sanitize_thread))
+#else
+#define NO_TSAN
+#endif
+
 struct HashIndexHdr {
     uint32_t version;
     uint32_t unused;
@@ -123,51 +129,23 @@ using ConstStablePtr = const char *;
 // parameter must be a pointer to the start of one of the copies of the index header
 // in shared memory. The other parameter must be a pointer to a local copy of the
 // header.
-// Note that these routines are able to copy in chunks of uint64_t, because the
-// memory region starting at the first index header is either the address returned
-// by mmap()/VirtualAlloc(), or it is a pointer returned by malloc(). Either way,
-// it should be suitably aligned. HashIndexHdr has a size that is a multiple of 8,
-// so the second copy of the header should be properly aligned as well.
-// NOTE: These routines are not really necessary. They exist to make TSan happy.
-//       It would also be possible to selectively disable TSan (on the WalImpl
-//       methods try_index_header and write_index_header).
 template <class Src, class Dst>
 auto read_hdr(const volatile Src *src, Dst *dst) -> void
 {
-    CALICODB_EXPECT_TRUE(is_aligned(const_cast<const Src *>(src), alignof(uint64_t)));
-    CALICODB_EXPECT_TRUE(is_aligned(const_cast<const Dst *>(dst), alignof(uint64_t)));
-    const volatile auto *src64 = reinterpret_cast<const volatile uint64_t *>(src);
-    auto *dst64 = reinterpret_cast<uint64_t *>(dst);
-    for (size_t i = 0; i < sizeof(HashIndexHdr) / sizeof *src64; ++i) {
-        dst64[i] = ATOMIC_LOAD(&src64[i]);
-    }
+    std::memcpy(dst, ConstStablePtr(src), sizeof(HashIndexHdr));
 }
+
 template <class Src, class Dst>
 auto write_hdr(const Src *src, volatile Dst *dst) -> void
 {
-    CALICODB_EXPECT_TRUE(is_aligned(const_cast<const Src *>(src), alignof(uint64_t)));
-    CALICODB_EXPECT_TRUE(is_aligned(const_cast<const Dst *>(dst), alignof(uint64_t)));
-    const auto *src64 = reinterpret_cast<const uint64_t *>(src);
-    volatile auto *dst64 = reinterpret_cast<volatile uint64_t *>(dst);
-    for (size_t i = 0; i < sizeof(HashIndexHdr) / sizeof *src64; ++i) {
-        ATOMIC_STORE(&dst64[i], src64[i]);
-    }
+    std::memcpy(StablePtr(dst), src, sizeof(HashIndexHdr));
 }
+
 template <class Shared, class Local>
 auto compare_hdr(const volatile Shared *shared, const Local *local) -> int
 {
-    CALICODB_EXPECT_TRUE(is_aligned(const_cast<const Shared *>(shared), alignof(uint64_t)));
-    const volatile auto *shared64 = reinterpret_cast<const volatile uint64_t *>(shared);
-    const auto *local64 = reinterpret_cast<const uint64_t *>(local);
-    for (size_t i = 0; i < sizeof(HashIndexHdr) / sizeof *shared64; ++i) {
-        if (ATOMIC_LOAD(&shared64[i]) != local64[i]) {
-            return 1;
-        }
-    }
-    return 0;
+    return std::memcmp(ConstStablePtr(shared), local, sizeof(HashIndexHdr));
 }
-// Must be true for the above routines to work properly.
-static_assert(0 == sizeof(HashIndexHdr) % sizeof(uint64_t));
 
 constexpr uint32_t kReadmarkNotUsed = 0xFF'FF'FF'FF;
 constexpr uint32_t kWriteLock = 0;
@@ -834,7 +812,7 @@ public:
         return exchange(m_callback_arg, 0U);
     }
 
-    [[nodiscard]] auto db_size() const -> size_t override
+    [[nodiscard]] auto db_size() const -> uint32_t override
     {
         if (m_reader_lock >= 0) {
             return m_hdr.page_count;
@@ -913,7 +891,7 @@ private:
         return true;
     }
 
-    auto read_index_header(bool &changed) -> Status
+    NO_TSAN auto read_index_header(bool &changed) -> Status
     {
         auto s = m_index.map_group(0, m_writer_lock);
         if (!s.is_ok()) {
@@ -949,7 +927,7 @@ private:
         return s;
     }
 
-    auto write_index_header() -> void
+    NO_TSAN auto write_index_header() -> void
     {
         m_hdr.is_init = true;
         m_hdr.version = kWalVersion;

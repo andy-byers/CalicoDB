@@ -63,8 +63,8 @@ public:
     static auto open(const Parameters &param, Pager *&out) -> Status;
     auto close() -> void;
 
-    auto start_reader() -> Status;
-    auto start_writer() -> Status;
+    auto lock_reader(bool *changed_out) -> Status;
+    auto begin_writer() -> Status;
     auto commit() -> Status;
     auto finish() -> void;
 
@@ -79,7 +79,6 @@ public:
     auto set_page_count(uint32_t page_count) -> void;
     auto assert_state() const -> bool;
     auto purge_pages(bool purge_all) -> void;
-    auto initialize_root() -> void;
 
     // Action to take when a page is released
     // Actions other than kKeep exist as optimizations. Using kKeep for every
@@ -131,6 +130,10 @@ private:
     friend class Mem;
     explicit Pager(const Parameters &param);
 
+    auto initialize_root() -> void;
+    auto lock_reader_impl(bool refresh) -> Status;
+    auto get_page_count(uint32_t &value_out) -> Status;
+    auto open_wal_if_present() -> Status;
     auto open_wal() -> Status;
     auto close_wal() -> Status;
     auto refresh_state() -> Status;

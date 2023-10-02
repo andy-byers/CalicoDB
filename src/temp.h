@@ -5,18 +5,13 @@
 #ifndef CALICODB_TEMP_H
 #define CALICODB_TEMP_H
 
-#include <cstdlib>
+#include "wal_internal.h"
 
 namespace calicodb
 {
 
-class Env;
-class Wal;
-struct Stats;
-struct WalOptionsExtra;
-
 [[nodiscard]] auto new_temp_env(size_t sector_size) -> Env *;
-[[nodiscard]] auto new_temp_wal(const WalOptionsExtra &options) -> Wal *;
+[[nodiscard]] auto new_temp_wal(const WalOptionsExtra &options, uint32_t page_size) -> Wal *;
 
 } // namespace calicodb
 

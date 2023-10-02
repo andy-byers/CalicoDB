@@ -711,7 +711,7 @@ auto Tree::get_tree(TreeCursor &c) -> Tree *
     return c.m_tree;
 }
 
-auto Tree::create(Id *root_id_out) -> Status
+auto Tree::create(Id &root_id_out) -> Status
 {
     // Determine the next root page. This is the lowest-numbered page that is
     // not already a root, and not a pointer map page.
@@ -757,7 +757,7 @@ auto Tree::create(Id *root_id_out) -> Status
     if (s.is_ok()) {
         m_pager->mark_dirty(database_root);
         FileHdr::put_largest_root(database_root.data, target);
-        *root_id_out = target;
+        root_id_out = target;
     }
     m_pager->release(page);
     return s;
@@ -1639,13 +1639,9 @@ auto Tree::allocate(AllocationType type, Id nearby, PageRef *&page_out) -> Statu
             s = m_pager->allocate(page_out);
         }
     }
-    if (s.is_ok()) {
-        if (page_out->refs == 1) {
-            m_pager->mark_dirty(*page_out);
-        } else {
-            m_pager->release(page_out);
-            s = Status::corruption();
-        }
+    if (s.is_ok() && page_out->refs != 1) {
+        m_pager->release(page_out);
+        s = Status::corruption();
     }
     return s;
 }
@@ -1683,7 +1679,7 @@ auto Tree::put(TreeCursor &c, const Slice &key, const Slice &value) -> Status
             // There wasn't enough room for the cell in `node`, so it was built in
             // m_cell_scratch[0] instead.
             Cell ovfl;
-            if (c.m_node.parser(m_cell_scratch[0], m_cell_scratch[1], m_page_size, &ovfl)) {
+            if (c.m_node.parser(m_cell_scratch[0], m_cell_scratch[1], m_page_size, ovfl)) {
                 s = corrupted_node(c.page_id());
             } else {
                 CALICODB_EXPECT_FALSE(m_ovfl.exists());

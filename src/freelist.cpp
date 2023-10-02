@@ -6,12 +6,18 @@
 #include "header.h"
 #include "pager.h"
 #include "pointer_map.h"
+#include "status_internal.h"
 
 namespace calicodb
 {
 
 namespace
 {
+
+auto corrupted_freelist() -> Status
+{
+    return Status::corruption("freelist is corrupted");
+}
 
 struct FreePage {
     static auto capacity(uint32_t page_size) -> size_t
@@ -74,8 +80,9 @@ auto Freelist::add(Pager &pager, PageRef *&page) -> Status
     CALICODB_EXPECT_NE(nullptr, page);
     if (page->page_id.value <= kFirstMapPage ||
         page->page_id.value > pager.page_count()) {
+        const auto pgno = page->page_id.value;
         pager.release(page);
-        return Status::corruption();
+        return StatusBuilder::corruption("page %u is out of bounds", pgno);
     }
     const auto trunk_capacity = FreePage::capacity(pager.page_size());
     auto &root = pager.get_root();
@@ -85,7 +92,7 @@ auto Freelist::add(Pager &pager, PageRef *&page) -> Status
     // Page ID of the first freelist trunk page.
     auto free_head = FileHdr::get_freelist_head(root.data);
     if (free_head.value > pager.page_count()) {
-        s = Status::corruption();
+        s = corrupted_freelist();
     } else if (!free_head.is_null()) {
         s = pager.acquire(free_head, trunk);
         if (s.is_ok()) {
@@ -99,7 +106,7 @@ auto Freelist::add(Pager &pager, PageRef *&page) -> Status
                                         {Id::null(), PointerMap::kFreelistPage}, s);
                 goto cleanup;
             } else if (n > trunk_capacity) {
-                s = Status::corruption();
+                s = corrupted_freelist();
                 goto cleanup;
             }
         }
@@ -146,7 +153,7 @@ auto Freelist::remove(Pager &pager, RemoveType type, Id nearby, PageRef *&page_o
     const auto free_count = FileHdr::get_freelist_length(database_root->data);
     const auto trunk_capacity = FreePage::capacity(pager.page_size());
     if (free_count >= max_page) {
-        return Status::corruption();
+        return corrupted_freelist();
     } else if (free_count == 0) {
         return Status::ok();
     }
@@ -180,7 +187,7 @@ auto Freelist::remove(Pager &pager, RemoveType type, Id nearby, PageRef *&page_o
             trunk_id = FileHdr::get_freelist_head(database_root->data);
         }
         if (trunk_id.value > max_page || search_attempts++ > free_count) {
-            s = Status::corruption();
+            s = corrupted_freelist();
         } else {
             s = pager.acquire(trunk_id, trunk);
         }
@@ -199,7 +206,7 @@ auto Freelist::remove(Pager &pager, RemoveType type, Id nearby, PageRef *&page_o
             page_out = trunk;
             trunk = nullptr;
         } else if (leaf_count > trunk_capacity) {
-            s = Status::corruption();
+            s = corrupted_freelist();
             goto cleanup;
         } else if (search_list && nearby == trunk_id) {
             page_out = trunk;
@@ -217,7 +224,7 @@ auto Freelist::remove(Pager &pager, RemoveType type, Id nearby, PageRef *&page_o
                 PageRef *new_trunk;
                 const auto new_id = FreePage::get_leaf_id(*trunk, 0);
                 if (new_id.value > max_page) {
-                    s = Status::corruption();
+                    s = corrupted_freelist();
                     goto cleanup;
                 }
                 s = pager.acquire(new_id, new_trunk);
@@ -258,8 +265,8 @@ auto Freelist::remove(Pager &pager, RemoveType type, Id nearby, PageRef *&page_o
             }
 
             page_id = FreePage::get_leaf_id(*trunk, closest);
-            if (page_id.value > max_page || page_id.value < 2) {
-                s = Status::corruption();
+            if (page_id.value < kFirstMapPage || page_id.value > max_page) {
+                s = corrupted_freelist();
                 goto cleanup;
             }
             if (!search_list || page_id == nearby) {

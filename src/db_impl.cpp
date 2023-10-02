@@ -8,7 +8,9 @@
 #include "mem.h"
 #include "pager.h"
 #include "status_internal.h"
+#include "temp.h"
 #include "tx_impl.h"
+#include "wal_internal.h"
 
 namespace calicodb
 {
@@ -53,12 +55,28 @@ auto DBImpl::open(const Options &sanitized) -> Status
     if (!s.is_ok()) {
         return s;
     }
+    m_temp_wal.reset(sanitized.wal);
+    if (sanitized.temp_database) {
+        CALICODB_EXPECT_FALSE(m_temp_wal);
+        const WalOptionsExtra wal_options = {
+            {m_env,
+             m_file.get(),
+             &m_stats},
+            m_log,
+            sanitized.sync_mode,
+            sanitized.lock_mode,
+        };
+        m_temp_wal.reset(new_temp_wal(wal_options, static_cast<uint32_t>(sanitized.page_size)));
+        if (!m_temp_wal) {
+            return Status::no_memory();
+        }
+    }
     const Pager::Parameters pager_param = {
         m_db_filename.c_str(),
         m_wal_filename.c_str(),
         m_file.get(),
         m_env,
-        sanitized.wal,
+        m_temp_wal.get(),
         m_log,
         &m_status,
         &m_stats,
@@ -207,9 +225,9 @@ auto DBImpl::prepare_tx(bool write, TxType *&tx_out) const -> Status
     if (!s.is_ok()) {
         return s;
     }
-    s = m_pager->start_reader();
+    s = m_pager->lock_reader(nullptr);
     if (s.is_ok() && write) {
-        s = m_pager->start_writer();
+        s = m_pager->begin_writer();
     }
     if (s.is_ok()) {
         CALICODB_EXPECT_TRUE(m_status.is_ok());

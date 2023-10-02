@@ -9,6 +9,7 @@
 #include "logging.h"
 #include "mem.h"
 #include "node.h"
+#include "status_internal.h"
 #include "temp.h"
 #include "wal_internal.h"
 
@@ -47,9 +48,17 @@ auto Pager::purge_page(PageRef &victim) -> void
 
 auto Pager::read_page(PageRef &page_out, size_t *size_out) -> Status
 {
+    Status s;
     // Try to read the page from the WAL.
     auto *page = page_out.data;
-    auto s = m_wal->read(page_out.page_id.value, m_page_size, page);
+    if (m_wal) {
+        s = m_wal->read(page_out.page_id.value, m_page_size, page);
+    } else {
+        // Indicate that this page must be read from the database file. If the WAL is
+        // not open at this point, then it must not have existed at the time this
+        // transaction was started.
+        page = nullptr;
+    }
     if (s.is_ok()) {
         if (page == nullptr) {
             // No error, but the page could not be located in the WAL. Read the page
@@ -102,13 +111,32 @@ auto Pager::open_wal() -> Status
     };
     if (m_user_wal) {
         m_wal = m_user_wal;
-    } else if (m_persistent) {
-        m_wal = new_default_wal(extra, m_wal_name);
     } else {
-        m_wal = new_temp_wal(extra);
+        m_wal = new_default_wal(extra, m_wal_name);
+        if (m_wal == nullptr) {
+            return Status::no_memory();
+        }
     }
-    return m_wal ? m_wal->open(options, m_wal_name)
-                 : Status::no_memory();
+    CALICODB_EXPECT_NE(m_wal, nullptr);
+    auto s = m_wal->open(options, m_wal_name);
+    if (!s.is_ok()) {
+        // The WAL must never be left in "Closed" mode. If the WAL is not "Open", m_wal
+        // must be equal to nullptr.
+        if (!m_user_wal) {
+            Mem::delete_object(m_wal);
+        }
+        m_wal = nullptr;
+    }
+    return s;
+}
+
+auto Pager::open_wal_if_present() -> Status
+{
+    Status s;
+    if (m_persistent && m_env->file_exists(m_wal_name)) {
+        s = open_wal();
+    }
+    return s;
 }
 
 auto Pager::close_wal() -> Status
@@ -116,6 +144,7 @@ auto Pager::close_wal() -> Status
     CALICODB_EXPECT_EQ(m_mode, kOpen);
     Status s;
     if (!m_wal && m_env->file_exists(m_wal_name)) {
+        CALICODB_EXPECT_TRUE(m_persistent);
         s = open_wal();
     }
     if (s.is_ok() && m_wal) {
@@ -166,7 +195,8 @@ Pager::Pager(const Parameters &param)
       m_sync_mode(param.sync_mode),
       m_persistent(param.persistent),
       m_db_name(param.db_name),
-      m_wal_name(param.wal_name)
+      m_wal_name(param.wal_name),
+      m_wal(param.wal)
 {
     CALICODB_EXPECT_NE(m_file, nullptr);
     CALICODB_EXPECT_NE(m_status, nullptr);
@@ -179,7 +209,9 @@ Pager::~Pager()
 {
     CALICODB_EXPECT_EQ(m_mode, kOpen);
     CALICODB_EXPECT_TRUE(m_status->is_ok());
-    Mem::delete_object(m_wal);
+    if (m_wal != m_user_wal) {
+        Mem::delete_object(m_wal);
+    }
 }
 
 auto Pager::close() -> void
@@ -195,44 +227,52 @@ auto Pager::close() -> void
     }
 }
 
-auto Pager::start_reader() -> Status
+auto Pager::lock_reader_impl(bool refresh) -> Status
 {
-    CALICODB_EXPECT_NE(kError, m_mode);
-    CALICODB_EXPECT_TRUE(assert_state());
-
-    if (m_mode != kOpen) {
-        return *m_status;
+    Status s;
+    if (refresh) {
+        purge_pages(true);
     }
-    if (m_wal) {
-        m_wal->finish_read();
-    } else {
-        auto s = open_wal();
-        if (!s.is_ok()) {
-            return s;
-        }
+    if (m_refresh) {
+        s = refresh_state();
     }
-    bool changed = false;
-    auto s = busy_wait(m_busy, [this, &changed] {
-        return m_wal->start_read(changed);
-    });
     if (s.is_ok()) {
-        if (changed) {
-            purge_pages(true);
-        }
-        if (m_refresh) {
-            s = refresh_state();
-        }
-        if (s.is_ok()) {
-            m_mode = kRead;
-        }
-    }
-    if (!s.is_ok()) {
+        m_mode = kRead;
+    } else {
         finish();
     }
     return s;
 }
 
-auto Pager::start_writer() -> Status
+auto Pager::lock_reader(bool *changed_out) -> Status
+{
+    CALICODB_EXPECT_LE(m_mode, kRead);
+    CALICODB_EXPECT_TRUE(assert_state());
+
+    Status s;
+    if (m_wal) {
+        m_wal->finish_read();
+    } else {
+        s = open_wal_if_present();
+    }
+    bool changed = false;
+    if (m_wal && s.is_ok()) {
+        // Start a read transaction on the WAL. If Wal::start_read() indicates that the WAL
+        // is busy, use m_busy to wait and try again.
+        s = busy_wait(m_busy, [this, &changed] {
+            return m_wal->start_read(changed);
+        });
+    }
+    if (s.is_ok()) {
+        s = lock_reader_impl(changed);
+    }
+    if (changed_out) {
+        *changed_out = changed;
+    }
+    return s;
+}
+
+auto Pager::begin_writer() -> Status
 {
     CALICODB_EXPECT_NE(m_mode, kOpen);
     CALICODB_EXPECT_NE(m_mode, kError);
@@ -240,9 +280,30 @@ auto Pager::start_writer() -> Status
 
     Status s;
     if (m_mode == kRead) {
-        s = m_wal->start_write();
+        if (m_wal == nullptr) {
+            s = open_wal();
+            if (s.is_ok()) {
+                // start_reader() must have been called at some point to get the pager
+                // into kRead mode. The WAL must not have existed at that point. It does
+                // now, so call start_reader() again to start a read transaction on it.
+                s = lock_reader(nullptr);
+            }
+        }
+        if (s.is_ok()) {
+            s = m_wal->start_write();
+        }
+        if (!s.is_ok()) {
+            return s;
+        }
+        uint32_t page_count;
+        s = get_page_count(page_count);
         if (s.is_ok()) {
             m_mode = kWrite;
+            m_page_count = page_count;
+            m_saved_page_count = page_count;
+            if (page_count == 0) {
+                initialize_root();
+            }
         }
     }
     return s;
@@ -332,10 +393,11 @@ auto Pager::finish() -> void
 
 auto Pager::purge_pages(bool purge_all) -> void
 {
-    m_refresh = true;
-
     for (auto *dirty = m_dirtylist.begin(); dirty != m_dirtylist.end();) {
         auto *save = dirty->get_page_ref();
+        if (save->page_id.is_root()) {
+            m_refresh = true;
+        }
         dirty = dirty->next_entry;
         purge_page(*save);
     }
@@ -343,6 +405,7 @@ auto Pager::purge_pages(bool purge_all) -> void
 
     if (purge_all) {
         m_bufmgr.purge();
+        m_refresh = true;
     }
 }
 
@@ -352,15 +415,18 @@ auto Pager::checkpoint(CheckpointMode mode, CheckpointInfo *info_out) -> Status
     CALICODB_EXPECT_TRUE(assert_state());
     if (m_wal == nullptr) {
         // Ensure that the WAL and WAL index have been created.
-        auto s = start_reader();
+        auto s = lock_reader(nullptr);
         if (!s.is_ok()) {
             return s;
         }
         finish();
     }
-    return m_wal->checkpoint(mode, m_scratch.ptr(), m_page_size,
-                             mode == kCheckpointPassive ? nullptr : m_busy,
-                             info_out);
+    if (m_wal) {
+        return m_wal->checkpoint(mode, m_scratch.ptr(), m_page_size,
+                                 mode == kCheckpointPassive ? nullptr : m_busy,
+                                 info_out);
+    }
+    return Status::ok();
 }
 
 auto Pager::auto_checkpoint(size_t frame_limit) -> Status
@@ -400,6 +466,7 @@ auto Pager::flush_dirty_pages() -> Status
 
 auto Pager::set_page_count(uint32_t page_count) -> void
 {
+    CALICODB_EXPECT_GT(page_count, 0);
     CALICODB_EXPECT_GE(m_mode, kWrite);
     for (auto i = page_count; i < m_page_count; ++i) {
         if (auto *out_of_range = m_bufmgr.query(Id::from_index(i))) {
@@ -459,9 +526,17 @@ auto Pager::allocate(PageRef *&page_out) -> Status
     const auto page_id = Id::from_index(m_page_count);
     auto s = get_unused_page(page_out);
     if (s.is_ok()) {
+        CALICODB_EXPECT_FALSE(page_out->page_id.is_root());
+        if (page_out->page_id.is_null()) {
+            // If this PageRef has never held a valid database page, then its contents will be
+            // uninitialized. Make sure not to let uninitialized data into the file: it makes
+            // it impossible to reproduce results.
+            std::memset(page_out->data, 0, m_page_size);
+        }
         page_out->page_id = page_id;
         m_bufmgr.register_page(*page_out);
         m_page_count = page_id.value;
+
         // Callers of this routine will always modify `page_out`. Mark it dirty here for
         // convenience. Note that it might already be dirty, if it is a freelist trunk
         // page that has been modified recently.
@@ -477,7 +552,8 @@ auto Pager::acquire(Id page_id, PageRef *&page_out) -> Status
 
     if (page_id.is_null() || page_id.value > m_page_count) {
         page_out = nullptr;
-        return Status::corruption();
+        return StatusBuilder::corruption("page %u is out of bounds (page count is %u)",
+                                         page_id.value, m_page_count);
     } else if (page_id.is_root()) {
         // The root is in memory for the duration of the transaction, and we don't bother with
         // its reference count.
@@ -520,6 +596,7 @@ auto Pager::get_unused_page(PageRef *&page_out) -> Status
 auto Pager::get_root() -> PageRef &
 {
     CALICODB_EXPECT_GE(m_mode, kRead);
+    CALICODB_EXPECT_GT(m_page_count, 0);
     return *m_bufmgr.root();
 }
 
@@ -566,12 +643,34 @@ auto Pager::initialize_root() -> void
 {
     CALICODB_EXPECT_EQ(m_mode, kWrite);
     CALICODB_EXPECT_EQ(m_page_count, 0);
+
     m_page_count = 1;
+    auto &root = get_root();
 
-    mark_dirty(get_root());
-    FileHdr::make_supported_db(get_root().data, m_page_size);
+    // Initialize the root page of the database in the special buffer allocated by the
+    // buffer manager. Page count is written in commit().
+    mark_dirty(root);
+    FileHdr::make_supported_db(root.data, m_page_size);
 
-    log(m_log, "initialized database root page");
+    log(m_log, "initialized database");
+}
+
+auto Pager::get_page_count(uint32_t &value_out) -> Status
+{
+    // Try to determine the page count from the WAL. Value is known if the WAL is open
+    // and has at least 1 transaction committed.
+    value_out = m_wal ? m_wal->db_size() : 0;
+    if (value_out == 0) {
+        uint64_t file_size;
+        // Use the actual file size, rounded up to the nearest page.
+        auto s = m_file->get_size(file_size);
+        if (s.is_ok()) {
+            value_out = static_cast<uint32_t>(
+                (file_size + m_page_size - 1) / m_page_size);
+        }
+        return s;
+    }
+    return Status::ok();
 }
 
 auto Pager::refresh_state() -> Status
@@ -594,7 +693,9 @@ auto Pager::refresh_state() -> Status
         // understood by this version of the library.
         s = FileHdr::check_db_support(hdr);
         if (s.is_ok()) {
-            m_page_count = FileHdr::get_page_count(hdr);
+            s = get_page_count(m_page_count);
+        }
+        if (s.is_ok()) {
             // Set the database page size based on the value read from the file header.
             const auto new_page_size = FileHdr::get_page_size(hdr);
             if (m_page_size != new_page_size) {
@@ -605,7 +706,8 @@ auto Pager::refresh_state() -> Status
             }
         }
     } else if (read_size > 0) {
-        s = Status::corruption();
+        s = StatusBuilder::corruption("incomplete root page (read %u bytes)",
+                                      read_size);
     }
     m_refresh = !s.is_ok();
     return s;

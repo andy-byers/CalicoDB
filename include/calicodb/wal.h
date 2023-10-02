@@ -26,8 +26,11 @@ namespace calicodb
 //   start_read   | Open     | Reader
 //   start_write  | Reader   | Writer
 //   finish_write | Writer   | Reader
-//   finish_read  | > Open   | Open
+//   finish_read  | Open     | Open
+//   finish_read  | Reader   | Open
+//   finish_read  | Writer   | Open
 //   close        | Open     | Closed
+//
 // If a method returns with Status::ok(), then the WAL is expected to be in the "After"
 // state shown above. Otherwise, it is kept in the "Before" state. If a method has no
 // return, then it is expected to make the state transition without fail.
@@ -53,7 +56,7 @@ public:
 
     // Return the number of pages in the database file
     // Returns 0 if the value is not yet known, i.e. the WAL is not running a transaction.
-    [[nodiscard]] virtual auto db_size() const -> size_t = 0;
+    [[nodiscard]] virtual auto db_size() const -> uint32_t = 0;
 
     // REQUIRES: WAL is in "Open" mode
     virtual auto start_read(bool &changed) -> Status = 0;

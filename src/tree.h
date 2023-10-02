@@ -65,7 +65,7 @@ public:
         Id after;
     };
     // Must be called on the schema tree.
-    auto create(Id *out) -> Status;
+    auto create(Id &root_id_out) -> Status;
     auto destroy(Tree &tree, Reroot &rr) -> Status;
 
     auto put(TreeCursor &c, const Slice &key, const Slice &value) -> Status;

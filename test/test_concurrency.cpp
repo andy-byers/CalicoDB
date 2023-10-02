@@ -13,17 +13,6 @@
 namespace calicodb::test
 {
 
-class WaitForever : public BusyHandler
-{
-public:
-    explicit WaitForever() = default;
-    ~WaitForever() override = default;
-    auto exec(unsigned) -> bool override
-    {
-        return true;
-    }
-} g_busy_handler;
-
 class DelayEnv : public EnvWrapper
 {
 public:
@@ -122,6 +111,19 @@ protected:
     UserPtr<DelayEnv> m_env;
     uint64_t m_sanity_check = 0;
 
+    static class WaitForever : public BusyHandler
+    {
+    public:
+        std::atomic<uint64_t> counter = 0;
+        explicit WaitForever() = default;
+        ~WaitForever() override = default;
+        auto exec(unsigned) -> bool override
+        {
+            counter.fetch_add(1, std::memory_order_relaxed);
+            return true;
+        }
+    } s_busy_handler;
+
     explicit ConcurrencyTests()
         : m_filename(testing::TempDir() + "concurrency"),
           m_env(new DelayEnv(default_env()))
@@ -181,7 +183,9 @@ protected:
     };
     auto run_consistency_test_instance(const ConsistencyTestParameters &param) -> void
     {
-        (void)DB::destroy(Options(), m_filename.c_str());
+        TEST_LOG << "ConcurrencyTests.Consistency*\n";
+        remove_calicodb_files(m_filename);
+        s_busy_handler.counter = 0;
 
         const auto nt = param.num_readers + param.num_writers + param.num_checkpointers;
         Barrier barrier(nt);
@@ -250,6 +254,7 @@ protected:
     // times in-a-row, but the values should never decrease.
     auto run_consistency_test(const ConsistencyTestParameters &param) -> void
     {
+        uint64_t highest_wait_count = 0;
         for (size_t i = 1; i <= 4; ++i) {
             for (size_t j = 1; j <= 4; ++j) {
                 for (size_t k = 1; k <= 4; ++k) {
@@ -263,16 +268,18 @@ protected:
                         (j & 1) == 0,
                         (k & 1) == 0,
                     });
+                    highest_wait_count = maxval(highest_wait_count, s_busy_handler.counter.load(std::memory_order_relaxed));
                 }
             }
         }
+        TEST_LOG << "Highest wait count = " << highest_wait_count << '\n';
     }
 
     [[nodiscard]] static auto reopen_connection(Connection &co) -> Status
     {
         auto opt = co.options;
         opt.env = co.env;
-        opt.busy = &g_busy_handler;
+        opt.busy = &s_busy_handler;
         return DB::open(opt, co.filename, co.db);
     }
 
@@ -439,10 +446,9 @@ protected:
 
     auto run_checkpointer_test_instance(const CheckpointerTestParameters &param) -> void
     {
-        std::filesystem::remove_all(m_filename);
-        std::filesystem::remove_all(m_filename + kDefaultShmSuffix.to_string());
-        std::filesystem::remove_all(m_filename + kDefaultWalSuffix.to_string());
         TEST_LOG << "ConcurrencyTests.Checkpointer*\n";
+        remove_calicodb_files(m_filename);
+        s_busy_handler.counter = 0;
 
         Connection proto;
         proto.filename = m_filename.c_str();
@@ -517,6 +523,7 @@ protected:
     // background thread run the checkpoints. Also, there are no barriers.
     auto run_checkpointer_test(const CheckpointerTestParameters &param) -> void
     {
+        uint64_t highest_wait_count = 0;
         for (size_t num_iterations = 1; num_iterations <= 4; ++num_iterations) {
             for (size_t num_records = 1; num_records <= 4; ++num_records) {
                 for (CheckpointMode checkpoint_mode = kCheckpointPassive;
@@ -534,13 +541,17 @@ protected:
                                 delay_sync != 0,
                                 busy_wait != 0,
                             });
+                            highest_wait_count = maxval(highest_wait_count, s_busy_handler.counter.load(std::memory_order_relaxed));
                         }
                     }
                 }
             }
         }
+        TEST_LOG << "Highest wait count = " << highest_wait_count << '\n';
     }
 };
+
+ConcurrencyTests::WaitForever ConcurrencyTests::s_busy_handler;
 
 TEST_F(ConcurrencyTests, Consistency0)
 {

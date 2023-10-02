@@ -56,6 +56,7 @@ private:
     mutable Stats m_stats;
 
     UserPtr<File> m_file;
+    ObjectPtr<Wal> m_temp_wal;
     Env *const m_env;
     Logger *const m_log;
     BusyHandler *const m_busy;
