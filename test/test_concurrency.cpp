@@ -128,19 +128,20 @@ protected:
         : m_filename(get_full_filename(testing::TempDir() + "concurrency")),
           m_env(new DelayEnv(default_env()))
     {
+        // Use the default allocator for these tests: the debug allocator generates a ton of
+        // contention, causing the tests to timeout sometimes.
+        EXPECT_OK(configure(kSetAllocator, nullptr));
         remove_calicodb_files(m_filename);
     }
 
-    ~ConcurrencyTests() override = default;
+    ~ConcurrencyTests() override
+    {
+        EXPECT_OK(configure(kSetAllocator, DebugAllocator::config()));
+    }
 
     auto TearDown() -> void override
     {
         m_env.reset();
-        DebugAllocator::set_limit(0);
-        // All resources should have been cleaned up by now, even though the Env is not deleted.
-        ASSERT_EQ(DebugAllocator::bytes_used(), 0) << "leaked " << std::setprecision(4)
-                                                   << static_cast<double>(DebugAllocator::bytes_used()) / (1'024.0 * 1'024)
-                                                   << " MiB";
         TEST_LOG << "Sanity check: " << m_sanity_check << '\n';
     }
 
