@@ -998,7 +998,7 @@ auto Tree::make_pivot(const PivotOptions &opt, Cell &pivot_out) -> Status
 
 auto Tree::post_pivot(Node &parent, uint32_t idx, Cell &pivot, Id child_id) -> Status
 {
-    const auto rc = parent.write(idx, pivot);
+    const auto rc = parent.insert(idx, pivot);
     if (rc > 0) {
         put_u32(parent.ref->data + rc, child_id.value);
     } else if (rc == 0) {
@@ -1017,7 +1017,7 @@ auto Tree::post_pivot(Node &parent, uint32_t idx, Cell &pivot, Id child_id) -> S
 
 auto Tree::insert_cell(Node &node, uint32_t idx, const Cell &cell) -> Status
 {
-    const auto rc = node.write(idx, cell);
+    const auto rc = node.insert(idx, cell);
     if (rc < 0) {
         return corrupted_node(node.ref->page_id);
     } else if (rc == 0) {
@@ -1414,9 +1414,10 @@ auto Tree::redistribute_cells(Node &left, Node &right, Node &parent, uint32_t pi
     CALICODB_EXPECT_GE(ncells, is_split ? 4 : 1);
 
     sep = -1;
-    for (uint32_t left_accum = 0; right_accum > p_left->usable_space / 2 &&
-                                  right_accum > left_accum &&
-                                  2 + sep++ < ncells;) {
+    for (uint32_t left_accum = 0;
+         right_accum > p_left->usable_space / 2 &&
+         right_accum > left_accum &&
+         2 + sep++ < ncells;) {
         left_accum += cells[sep].footprint;
         right_accum -= cells[sep].footprint;
     }
@@ -1550,12 +1551,9 @@ auto Tree::fix_root(TreeCursor &c) -> Status
 
     Status s;
     auto child = move(c.m_node_path[1]);
-    // We don't have enough room to transfer the child contents into the root, due to the space occupied by
-    // the file header. In this case, we'll just split the child and insert the median cell into the root.
-    // Note that the child needs an overflow cell for the split routine to work. We'll just fake it by
-    // extracting an arbitrary cell and making it the overflow cell.
+
     if (parent.ref->page_id.is_root() && child.usable_space < FileHdr::kSize) {
-        Cell cell; // TODO: Need specific tests for this! Probably broken with these changes.
+        Cell cell; // TODO: May not be possible for a valid tree.
         c.m_idx = NodeHdr::get_cell_count(child.hdr()) / 2;
         if (child.read(c.m_idx, cell)) {
             s = corrupted_node(parent.ref->page_id);
@@ -2002,34 +2000,122 @@ auto Tree::vacuum() -> Status
     return s;
 }
 
+class TreeValidator
+{
+    template <class PageCallback>
+    static auto traverse_chain(Pager &pager, PageRef *page, const PageCallback &cb) -> Status
+    {
+        Status s;
+        do {
+            s = cb(page);
+            if (!s.is_ok()) {
+                break;
+            }
+            const auto next_id = read_next_id(*page);
+            pager.release(page);
+            if (next_id.is_null()) {
+                break;
+            }
+            s = pager.acquire(next_id, page);
+        } while (s.is_ok());
+        return s;
+    }
+
+public:
+    static auto validate(Tree &tree) -> Status
+    {
+        auto s = InorderTraversal::traverse(tree, [&tree](auto &node, const auto &info) {
+            auto check_parent_child = [&tree](auto &node, auto index) {
+                Node child;
+                auto s = tree.acquire(node.read_child_id(index), child, false);
+                if (s.is_ok()) {
+                    Id parent_id;
+                    s = tree.find_parent_id(child.ref->page_id, parent_id);
+                    if (s.is_ok() && parent_id != node.ref->page_id) {
+                        s = StatusBuilder::corruption("expected parent page %u but found %u",
+                                                      parent_id.value, node.ref->page_id.value);
+                    }
+                    tree.release(move(child));
+                }
+                return s;
+            };
+            if (info.idx == info.ncells) {
+                return Status::ok();
+            }
+
+            Status s;
+            if (!node.is_leaf()) {
+                s = check_parent_child(node, info.idx);
+                // Rightmost child.
+                if (s.is_ok() && info.idx + 1 == info.ncells) {
+                    s = check_parent_child(node, info.idx + 1);
+                }
+            }
+            return s;
+        });
+        if (!s.is_ok()) {
+            return s;
+        }
+
+        s = InorderTraversal::traverse(tree, [&tree](auto &node, const auto &info) {
+            if (info.idx == info.ncells) {
+                return node.check_integrity();
+            }
+            Cell cell;
+            if (node.read(info.idx, cell)) {
+                return StatusBuilder::corruption("corrupted detected in cell %u from tree node %u",
+                                                 info.idx, node.ref->page_id.value);
+            }
+
+            auto accumulated = cell.local_pl_size;
+            auto requested = cell.key_size;
+            if (node.is_leaf()) {
+                uint32_t value_size = 0;
+                if (!decode_varint(cell.ptr, node.ref->data + tree.m_page_size, value_size)) {
+                    return Status::corruption("corrupted varint");
+                }
+                requested += value_size;
+            }
+
+            if (cell.local_pl_size != cell.total_pl_size) {
+                const auto overflow_id = read_overflow_id(cell);
+                PageRef *head;
+                auto s = tree.m_pager->acquire(overflow_id, head);
+                if (!s.is_ok()) {
+                    return s;
+                }
+                s = traverse_chain(*tree.m_pager, head, [&](auto *) {
+                    if (requested <= accumulated) {
+                        return StatusBuilder::corruption("overflow chain is too long (expected %u but accumulated %u)",
+                                                         requested, accumulated);
+                    }
+                    accumulated += minval(tree.m_page_size - kLinkContentOffset,
+                                          requested - accumulated);
+                    return Status::ok();
+                });
+                if (!s.is_ok()) {
+                    return s;
+                }
+                if (requested != accumulated) {
+                    return StatusBuilder::corruption("overflow chain is too long (expected %u but accumulated %u)",
+                                                     requested, accumulated);
+                }
+            }
+            return Status::ok();
+        });
+        if (!s.is_ok()) {
+            return s;
+        }
+        return Status::ok();
+    }
+};
+
+auto Tree::check_integrity() -> Status
+{
+    return TreeValidator::validate(*this);
+}
+
 #if CALICODB_TEST
-
-#define CHECK_OK(expr)                                           \
-    do {                                                         \
-        if (const auto check_s = (expr); !check_s.is_ok()) {     \
-            std::fprintf(stderr, "error(%s:%d): %s\n",           \
-                         __FILE__, __LINE__, check_s.message()); \
-            std::abort();                                        \
-        }                                                        \
-    } while (0)
-
-#define CHECK_TRUE(expr)                                             \
-    do {                                                             \
-        if (!(expr)) {                                               \
-            std::fprintf(stderr, "error(%s:%d): \"%s\" was false\n", \
-                         __FILE__, __LINE__, #expr);                 \
-            std::abort();                                            \
-        }                                                            \
-    } while (0)
-
-#define CHECK_EQ(lhs, rhs)                                                   \
-    do {                                                                     \
-        if ((lhs) != (rhs)) {                                                \
-            std::fprintf(stderr, "error(%s:%d): \"" #lhs " != " #rhs "\"\n", \
-                         __FILE__, __LINE__);                                \
-            std::abort();                                                    \
-        }                                                                    \
-    } while (0)
 
 class TreePrinter
 {
@@ -2041,19 +2127,21 @@ class TreePrinter
     static auto add_to_level(StructuralData &data, const String &message, uint32_t target) -> void
     {
         // If target is equal to levels.size(), add spaces to all levels.
-        CHECK_TRUE(target <= data.levels.size());
+        CALICODB_EXPECT_TRUE(target <= data.levels.size());
         uint32_t i = 0;
 
+        [[maybe_unused]] int rc;
         auto s_itr = begin(data.spaces);
         auto L_itr = begin(data.levels);
         while (s_itr != end(data.spaces)) {
-            CHECK_TRUE(L_itr != end(data.levels));
+            CALICODB_EXPECT_NE(L_itr, end(data.levels));
             if (i++ == target) {
                 // Don't leave trailing spaces. Only add them if there will be more text.
                 for (size_t j = 0; j < *s_itr; ++j) {
-                    CHECK_EQ(append_strings(*L_itr, " "), 0);
+                    rc = append_strings(*L_itr, " ");
+                    CALICODB_EXPECT_EQ(rc, 0);
                 }
-                CHECK_EQ(append_strings(*L_itr, message.c_str()), 0);
+                rc = append_strings(*L_itr, message.c_str());
                 *s_itr = 0;
             } else {
                 *s_itr += uint32_t(message.size());
@@ -2069,8 +2157,8 @@ class TreePrinter
             data.levels.emplace_back();
             data.spaces.emplace_back();
         }
-        CHECK_TRUE(data.levels.size() > level);
-        CHECK_TRUE(data.levels.size() == data.spaces.size());
+        CALICODB_EXPECT_TRUE(data.levels.size() > level);
+        CALICODB_EXPECT_TRUE(data.levels.size() == data.spaces.size());
     }
 
 public:
@@ -2096,7 +2184,9 @@ public:
                 }
             }
             String msg_out;
-            CHECK_EQ(msg.build(msg_out), 0);
+            if (msg.build(msg_out)) {
+                return Status::no_memory();
+            }
             add_to_level(data, msg_out, info.level);
             return Status::ok();
         };
@@ -2107,7 +2197,9 @@ public:
                 builder.append_format("%s\n", level.c_str());
             }
         }
-        CHECK_EQ(builder.build(repr_out), 0);
+        if (s.is_ok() && builder.build(repr_out)) {
+            return Status::no_memory();
+        }
         return s;
     }
 
@@ -2137,8 +2229,10 @@ public:
                     msg.append(")\n");
                 }
                 String msg_out;
-                CHECK_EQ(msg.build(msg_out), 0);
-                CHECK_EQ(append_strings(repr_out, msg_out.c_str()), 0);
+                if (msg.build(msg_out) ||
+                    append_strings(repr_out, msg_out.c_str())) {
+                    return Status::no_memory();
+                }
             }
             return Status::ok();
         };
@@ -2146,94 +2240,14 @@ public:
     }
 };
 
-class TreeValidator
-{
-    template <class PageCallback>
-    static auto traverse_chain(Pager &pager, PageRef *page, const PageCallback &cb) -> void
-    {
-        for (;;) {
-            cb(page);
-
-            const auto next_id = read_next_id(*page);
-            pager.release(page);
-            if (next_id.is_null()) {
-                break;
-            }
-            CHECK_OK(pager.acquire(next_id, page));
-        }
-    }
-
-    [[nodiscard]] static auto get_readable_content(const PageRef &page, uint32_t page_size, uint32_t size_limit) -> Slice
-    {
-        return Slice(page.data, page_size).range(kLinkContentOffset, minval(size_limit, page_size - kLinkContentOffset));
-    }
-
-public:
-    static auto validate(Tree &tree) -> void
-    {
-        CHECK_OK(InorderTraversal::traverse(tree, [&tree](auto &node, const auto &info) {
-            auto check_parent_child = [&tree](auto &node, auto index) -> void {
-                Node child;
-                CHECK_OK(tree.acquire(node.read_child_id(index), child, false));
-
-                Id parent_id;
-                CHECK_OK(tree.find_parent_id(child.ref->page_id, parent_id));
-                CHECK_TRUE(parent_id == node.ref->page_id);
-
-                tree.release(move(child));
-            };
-            if (info.idx == info.ncells) {
-                return Status::ok();
-            }
-
-            if (!node.is_leaf()) {
-                check_parent_child(node, info.idx);
-                // Rightmost child.
-                if (info.idx + 1 == info.ncells) {
-                    check_parent_child(node, info.idx + 1);
-                }
-            }
-            return Status::ok();
-        }));
-
-        CHECK_OK(InorderTraversal::traverse(tree, [&tree](auto &node, const auto &info) {
-            if (info.idx == info.ncells) {
-                CHECK_TRUE(node.assert_state());
-                return Status::ok();
-            }
-            Cell cell;
-            CHECK_EQ(0, node.read(info.idx, cell));
-
-            auto accumulated = cell.local_pl_size;
-            auto requested = cell.key_size;
-            if (node.is_leaf()) {
-                uint32_t value_size = 0;
-                CHECK_TRUE(decode_varint(cell.ptr, node.ref->data + tree.m_page_size, value_size));
-                requested += value_size;
-            }
-
-            if (cell.local_pl_size != cell.total_pl_size) {
-                const auto overflow_id = read_overflow_id(cell);
-                PageRef *head;
-                CHECK_OK(tree.m_pager->acquire(overflow_id, head));
-                traverse_chain(*tree.m_pager, head, [&](auto *page) {
-                    CHECK_TRUE(requested > accumulated);
-                    accumulated += static_cast<uint32_t>(get_readable_content(
-                                                             *page,
-                                                             tree.m_page_size,
-                                                             requested - accumulated)
-                                                             .size());
-                });
-                CHECK_EQ(requested, accumulated);
-            }
-            return Status::ok();
-        }));
-    }
-};
-
 auto Tree::TEST_validate() -> void
 {
-    TreeValidator::validate(*this);
+    const auto s = check_integrity();
+    if (!s.is_ok()) {
+        log(m_pager->logger(), "validation failed for tree rooted at %u: %s",
+            m_root_id.value, s.message());
+        std::abort();
+    }
 }
 
 auto Tree::print_structure(String &repr_out) -> Status
@@ -2246,14 +2260,20 @@ auto Tree::print_nodes(String &repr_out) -> Status
     return TreePrinter::print_nodes(*this, repr_out);
 }
 
-#undef CHECK_TRUE
-#undef CHECK_EQ
-#undef CHECK_OK
-
 #else
 
 auto Tree::TEST_validate() -> void
 {
+}
+
+auto Tree::print_structure(String &) -> Status
+{
+    return Status::ok();
+}
+
+auto Tree::print_nodes(String &) -> Status
+{
+    return Status::ok();
 }
 
 #endif // CALICODB_TEST

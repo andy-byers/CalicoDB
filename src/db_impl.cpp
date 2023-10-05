@@ -183,6 +183,30 @@ auto DBImpl::destroy(const Options &options, const char *filename) -> Status
     return s;
 }
 
+auto DBImpl::check_integrity() -> Status
+{
+    Tx *tx;
+    auto s = prepare_tx(false, tx);
+    if (s.is_ok()) {
+        auto &schema = tx->schema();
+        schema.seek_first();
+        while (s.is_ok() && schema.is_valid()) {
+            Cursor *c;
+            s = tx->open_bucket(schema.key(), c);
+            if (s.is_ok()) {
+                s = reinterpret_cast<CursorImpl *>(c)->check_integrity();
+            }
+            schema.next();
+            delete c;
+        }
+        if (s.is_ok()) {
+            s = schema.status();
+        }
+        delete tx;
+    }
+    return s;
+}
+
 auto DBImpl::get_property(const Slice &name, void *value_out) const -> Status
 {
     static constexpr char kBasePrefix[] = "calicodb.";

@@ -59,6 +59,7 @@ auto DB::open(const Options &options, const char *filename, DB *&db) -> Status
         return Status::no_memory();
     }
 
+    UserPtr<Env> temp_env;
     s = Status::no_memory();
     if (sanitized.temp_database) {
         if (sanitized.env) {
@@ -75,10 +76,12 @@ auto DB::open(const Options &options, const char *filename, DB *&db) -> Status
             // Created in DBImpl::open().
             sanitized.wal = nullptr;
         }
-        sanitized.env = new_temp_env(sanitized.page_size * 4);
-        if (sanitized.env == nullptr) {
+        // Keep the in-memory Env object in temp_env until the DBImpl can take ownership.
+        temp_env.reset(new_temp_env(sanitized.page_size * 4));
+        if (!temp_env) {
             goto cleanup;
         }
+        sanitized.env = temp_env.get();
         // Only the following combination of lock_mode and sync_mode is supported for an
         // in-memory database. The database can only be accessed though this DB object,
         // and there is no file on disk to synchronize with.
@@ -96,7 +99,13 @@ auto DB::open(const Options &options, const char *filename, DB *&db) -> Status
         move(wal_name),
     });
     if (impl) {
+        // DBImpl object now owns all memory allocated in this function.
+        temp_env.release();
         s = impl->open(sanitized);
+
+        if (s.is_ok() && sanitized.integrity_check != Options::kCheckOff) {
+            s = impl->check_integrity();
+        }
     }
 
 cleanup:

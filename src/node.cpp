@@ -3,6 +3,7 @@
 // LICENSE.md. See AUTHORS.md for a list of contributor names.
 
 #include "node.h"
+#include "status_internal.h"
 
 namespace calicodb
 {
@@ -394,10 +395,12 @@ auto BlockAllocator::defragment(Node &node, int skip) -> int
     return 0;
 }
 
+#define MAX_CELL_COUNT(total_space) (((total_space)-NodeHdr::kSize) / \
+                                     (kMinCellHeaderSize + kSlotWidth))
+
 auto Node::from_existing_page(PageRef &page, uint32_t total_space, char *scratch, Node &node_out) -> int
 {
-    const auto max_cell_count = (total_space - NodeHdr::kSize) /
-                                (kMinCellHeaderSize + kSlotWidth);
+    const auto max_cell_count = MAX_CELL_COUNT(total_space);
     const auto hdr_offset = page_offset(page.page_id);
     const auto *hdr = page.data + hdr_offset;
     const auto type = NodeHdr::get_type(hdr);
@@ -486,7 +489,7 @@ auto Node::read(uint32_t index, Cell &cell_out) const -> int
         cell_out);
 }
 
-auto Node::write(uint32_t index, const Cell &cell) -> int
+auto Node::insert(uint32_t index, const Cell &cell) -> int
 {
     const auto offset = alloc(index, cell.footprint);
     if (offset > 0) {
@@ -517,14 +520,22 @@ auto Node::defrag() -> int
     return 0;
 }
 
-auto Node::check_state() const -> int
+auto Node::check_integrity() const -> Status
 {
-    const auto account = [this](auto from, auto size) {
+#define CORRUPTED_NODE(fmt, ...)                                 \
+    StatusBuilder::corruption("tree node %u is corrupted: " fmt, \
+                              ref->page_id.value, __VA_ARGS__)
+
+    const auto account = [this](auto from, auto size, const auto *name, auto &s) {
         if (from > total_space || from + size > total_space) {
+            s = CORRUPTED_NODE("\"%s\" region at [%u,%u) is out of bounds",
+                               name, from, from + size);
             return -1;
         }
         for (auto *ptr = scratch + from; ptr != scratch + from + size; ++ptr) {
             if (*ptr) {
+                s = CORRUPTED_NODE("\"%s\" region at [%u,%u) overlaps occupied byte at %zu",
+                                   name, from, from + size, static_cast<uintptr_t>(ptr - scratch - from));
                 return -1;
             } else {
                 *ptr = 1;
@@ -534,55 +545,58 @@ auto Node::check_state() const -> int
     };
     std::memset(scratch, 0, total_space);
 
-    // Header(s) and cell pointers.
-    if (account(0U, cell_area_offset(*this))) {
-        return -1;
+    Status s;
+    if (account(0U, cell_area_offset(*this), "header/indirection vector", s)) {
+        return s;
     }
     // Make sure the header fields are not obviously wrong.
-    if (Node::kMaxFragCount < NodeHdr::get_frag_count(hdr()) ||
-        total_space / 2 < NodeHdr::get_cell_count(hdr()) ||
-        total_space < NodeHdr::get_free_start(hdr())) {
-        return -1;
+    if (kMaxFragCount < NodeHdr::get_frag_count(hdr())) {
+        return CORRUPTED_NODE("fragment count of %u exceeds maximum of %u",
+                              NodeHdr::get_frag_count(hdr()), Node::kMaxFragCount);
+    }
+    if (MAX_CELL_COUNT(total_space) < NodeHdr::get_cell_count(hdr())) {
+        return CORRUPTED_NODE("cell count of %u exceeds maximum of %u",
+                              NodeHdr::get_cell_count(hdr()), MAX_CELL_COUNT(total_space));
+    }
+    if (total_space < NodeHdr::get_free_start(hdr())) {
+        return CORRUPTED_NODE("first free block at %u is out of bounds",
+                              NodeHdr::get_free_start(hdr()));
     }
 
-    // Gap space.
-    if (account(cell_area_offset(*this), gap_size)) {
-        return -1;
+    if (account(cell_area_offset(*this), gap_size, "gap", s)) {
+        return s;
     }
 
-    // Free list blocks.
     auto i = NodeHdr::get_free_start(hdr());
     const char *data = ref->data;
     while (i) {
-        if (account(i, get_u16(data + i + kSlotWidth))) {
-            return -1;
+        if (account(i, get_u16(data + i + kSlotWidth), "free block", s)) {
+            return s;
         }
         i = get_u16(data + i);
-    }
-
-    if (kMaxFragCount < NodeHdr::get_frag_count(hdr())) {
-        return -1;
     }
 
     // Cell bodies. Also makes sure the cells are in order where possible.
     for (i = 0; i < NodeHdr::get_cell_count(hdr()); ++i) {
         Cell left_cell;
-        if (auto ivec_slot = get_ivec_slot(*this, i);
-            read(i, left_cell) ||
-            account(ivec_slot, left_cell.footprint)) {
-            return -1;
+        auto ivec_slot = get_ivec_slot(*this, i);
+        if (read(i, left_cell)) {
+            return CORRUPTED_NODE("corruption detected in cell %u", i);
+        }
+        if (account(ivec_slot, left_cell.footprint, "cell", s)) {
+            return s;
         }
 
         if (i + 1 < NodeHdr::get_cell_count(hdr())) {
             Cell right_cell;
             if (read(i + 1, right_cell)) {
-                return -1;
+                return CORRUPTED_NODE("corruption detected in cell %u", i + 1);
             }
             const Slice left_local(left_cell.key, minval(left_cell.key_size, left_cell.local_pl_size));
             const Slice right_local(right_cell.key, minval(right_cell.key_size, right_cell.local_pl_size));
             const auto right_has_ovfl = right_cell.key_size > right_cell.local_pl_size;
             if (right_local < left_local || (left_local == right_local && !right_has_ovfl)) {
-                return -1;
+                return CORRUPTED_NODE("local keys for cells %u and %u are out of order", i, i + 1);
             }
         }
     }
@@ -592,13 +606,17 @@ auto Node::check_state() const -> int
     for (i = 0; i < total_space; ++i) {
         total_bytes += scratch[i] == '\x01';
     }
-    return -(total_bytes != total_space);
+    if (total_bytes != total_space) {
+        return CORRUPTED_NODE("unaccounted for bytes: found %u but expected %u",
+                              total_bytes, total_space);
+    }
+    return Status::ok();
 }
 
-auto Node::assert_state() const -> bool
+auto Node::assert_integrity() const -> bool
 {
-    CALICODB_EXPECT_EQ(0, check_state());
-    return true;
+    const auto s = check_integrity();
+    return s.is_ok();
 }
 
 } // namespace calicodb

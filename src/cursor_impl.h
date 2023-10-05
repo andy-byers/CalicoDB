@@ -36,6 +36,11 @@ public:
     auto next() -> void override;
     auto previous() -> void override;
 
+    auto check_integrity() const -> Status
+    {
+        return m_c.m_tree->check_integrity();
+    }
+
     auto TEST_tree_cursor() -> TreeCursor &;
     auto TEST_check_state() const -> void;
 };

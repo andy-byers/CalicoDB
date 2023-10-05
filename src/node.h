@@ -183,12 +183,12 @@ struct Node final {
 
     [[nodiscard]] auto defrag() -> int;
     [[nodiscard]] auto alloc(uint32_t index, uint32_t size) -> int;
-    [[nodiscard]] auto write(uint32_t index, const Cell &cell) -> int;
+    [[nodiscard]] auto insert(uint32_t index, const Cell &cell) -> int;
     [[nodiscard]] auto read(uint32_t index, Cell &cell_out) const -> int;
     auto erase(uint32_t index, uint32_t cell_size) -> int;
 
-    [[nodiscard]] auto check_state() const -> int;
-    [[nodiscard]] auto assert_state() const -> bool;
+    [[nodiscard]] auto check_integrity() const -> Status;
+    [[nodiscard]] auto assert_integrity() const -> bool;
 };
 
 } // namespace calicodb
