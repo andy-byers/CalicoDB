@@ -38,6 +38,10 @@ function(build_test NAME)
             PRIVATE calicodb_utils gtest)
     target_include_directories(${NAME}
             PRIVATE "${CALICODB_SOURCE_DIR}")
+    if(CALICODB_CI)
+        target_compile_definitions(${NAME}
+                PRIVATE CALICODB_CI=1)
+    endif()
     add_test(NAME ${NAME} COMMAND ${NAME})
 endfunction()
 

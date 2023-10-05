@@ -34,11 +34,9 @@ class TreeCursor;
             return -1;
         }
     }
-    if (n >= rhs.size()) {
-        return -1;
-    }
-    // `lhs` < result <= `rhs`
-    prefix_out = rhs.range(0, n + 1);
+    n = minval(n + 1, rhs.size());
+    // `lhs` <= result <= `rhs`
+    prefix_out = rhs.range(0, n);
     return 0;
 }
 
@@ -54,7 +52,7 @@ public:
 
     ~Tree();
 
-    explicit Tree(Pager &pager, Stats &stat, char *scratch, Id root_id, String name);
+    explicit Tree(Pager &pager, Stats &stat, char *scratch, Id root_id, String name, bool unique);
     static auto get_tree(TreeCursor &c) -> Tree *;
 
     auto activate_cursor(TreeCursor &target, bool requires_position) const -> void;
@@ -120,7 +118,6 @@ private:
     friend class DBImpl;
     friend class Schema;
     friend class SchemaCursor;
-    friend class TreeCursor;
     friend class TreeCursor;
     friend class TreePrinter;
     friend class TreeValidator;
@@ -214,6 +211,7 @@ private:
     Id m_root_id;
     const uint32_t m_page_size;
     const bool m_writable;
+    const bool m_unique;
 };
 
 class TreeCursor
@@ -273,14 +271,17 @@ class TreeCursor
     auto ensure_correct_leaf() -> void;
 
     auto seek_to_root() -> void;
-    auto search_node(const Slice &key) -> bool;
+    auto search_branch(const Slice &key) -> void;
+    auto search_leaf(const Slice &key) -> bool;
 
     auto start_write() -> void;
-    auto start_write(const Slice &key) -> bool;
+    auto start_write(const Slice &key, bool is_erase) -> bool;
     auto finish_write(Status &s) -> void;
 
     auto read_user_key() -> Status;
     auto read_user_value() -> Status;
+
+    auto perform_comparison(uint32_t index, const Slice &lhs, int &cmp_out) -> int;
 
 public:
     explicit TreeCursor(Tree &tree);

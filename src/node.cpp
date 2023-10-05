@@ -477,6 +477,9 @@ auto Node::write_child_id(uint32_t idx, Id child_id) -> void
 
 auto Node::read(uint32_t index, Cell &cell_out) const -> int
 {
+    if (index >= NodeHdr::get_cell_count(hdr())) {
+        return -1;
+    }
     const auto offset = get_ivec_slot(*this, index);
     if (offset < NodeHdr::get_cell_start(hdr())) {
         // NOTE: parser() checks the upper boundary.
@@ -594,8 +597,7 @@ auto Node::check_integrity() const -> Status
             }
             const Slice left_local(left_cell.key, minval(left_cell.key_size, left_cell.local_pl_size));
             const Slice right_local(right_cell.key, minval(right_cell.key_size, right_cell.local_pl_size));
-            const auto right_has_ovfl = right_cell.key_size > right_cell.local_pl_size;
-            if (right_local < left_local || (left_local == right_local && !right_has_ovfl)) {
+            if (right_local < left_local) {
                 return CORRUPTED_NODE("local keys for cells %u and %u are out of order", i, i + 1);
             }
         }
