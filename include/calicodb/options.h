@@ -85,6 +85,11 @@ struct Options final {
         kLockNormal,    // Allow concurrent access
         kLockExclusive, // Exclude other connections
     } lock_mode = kLockNormal;
+
+    enum IntegrityCheck {
+        kCheckOff,  // No integrity checking
+        kCheckFull, // Check all buckets before DB::open() returns
+    } integrity_check = kCheckOff;
 };
 
 // Options to control the behavior of a WAL connection (passed to Wal::open())

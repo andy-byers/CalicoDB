@@ -31,6 +31,19 @@ public:
         env.srand(42);
         m_options.env = &env;
         m_options.page_size = kMinPageSize;
+        CHECK_OK(default_env().new_logger("/tmp/format_log", m_options.info_log));
+        m_options.integrity_check =
+#ifdef INTEGRITY_CHECK
+            Options::kCheckFull
+#else
+            Options::kCheckOff
+#endif
+            ;
+    }
+
+    ~Fuzzer()
+    {
+        delete m_options.info_log;
     }
 
     auto consume_input(const Slice &data) -> void
@@ -76,7 +89,7 @@ public:
                         if (s.is_ok()) {
                             s = c2->status();
                         }
-                        // Erase some records from c2.
+                        // Erase some records from b2.
                         c2->seek_first();
                         while (c2->is_valid() && s.is_ok()) {
                             if (c2->key() < c2->value()) {
@@ -108,6 +121,12 @@ public:
             }
 
             delete db;
+
+            if (s.is_corruption()) {
+#ifdef INTEGRITY_CHECK
+                CHECK_OK(s);
+#endif
+            }
         }
 
         CHECK_TRUE(

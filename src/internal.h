@@ -39,7 +39,7 @@ namespace calicodb
 inline auto debug_delay_impl(Env &env) -> void
 {
     if (env.rand() % 250 == 0) {
-        env.sleep(env.rand() % 100);
+        env.sleep(env.rand() % 1'000);
     }
 }
 
