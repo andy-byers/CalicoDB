@@ -53,7 +53,7 @@ public:
     char m_scratch[TEST_PAGE_SIZE];
 
     explicit WalTests()
-        : m_filename(testing::TempDir() + "calicodb_wal_tests")
+        : m_filename(get_full_filename(testing::TempDir() + "calicodb_wal_tests"))
     {
         std::filesystem::remove_all(m_filename);
     }

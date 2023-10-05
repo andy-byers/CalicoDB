@@ -16,10 +16,95 @@
 namespace calicodb::test
 {
 
+class FullFilenameTests : public testing::Test
+{
+public:
+    Env *const m_env;
+    std::string m_buffer;
+    std::string m_exemplar;
+
+    explicit FullFilenameTests()
+        : m_env(&default_env()),
+          // Path buffer requires Env::max_filename() bytes, plus a null terminator.
+          m_buffer(m_env->max_filename() + 1, '\0')
+    {
+    }
+
+    auto assert_success(const std::string &elements, const std::string &exemplar)
+    {
+        ASSERT_OK(m_env->full_filename(elements.c_str(), m_buffer.data(), m_buffer.size()));
+        ASSERT_EQ(0, std::strcmp(m_buffer.c_str(), exemplar.c_str()))
+            << m_buffer.c_str() << " != " << exemplar;
+    }
+
+    auto assert_failure(const std::string &elements)
+    {
+        ASSERT_NOK(m_env->full_filename(elements.c_str(), m_buffer.data(), m_buffer.size()));
+    }
+};
+
+TEST_F(FullFilenameTests, ResolvesIdentities)
+{
+    assert_success("/test", "/test");
+    assert_success("/test/1", "/test/1");
+    assert_success("/test/1.ext", "/test/1.ext");
+    assert_success("/test.ext/1", "/test.ext/1");
+}
+
+TEST_F(FullFilenameTests, ResolvesRedundantSeparators)
+{
+    assert_success("/test/1/", "/test/1");
+    assert_success("//test/1//", "/test/1");
+    assert_success("/test//1", "/test/1");
+    assert_success("//test/1", "/test/1");
+}
+
+TEST_F(FullFilenameTests, ResolvesRelativePaths)
+{
+    assert_success("/./test/1", "/test/1");
+    assert_success("/test/./1", "/test/1");
+    assert_success("/test/1/.", "/test/1");
+    assert_success("/test/1/..", "/test");
+    assert_success("/test/../1", "/1");
+    assert_success("/../test/1", "/test/1");
+}
+
+TEST_F(FullFilenameTests, NotAFilename)
+{
+    assert_failure("/");
+    assert_failure("//");
+    assert_failure("/.");
+    assert_failure("/..");
+    assert_failure("/./.");
+    assert_failure("/./..");
+    assert_failure("/.././");
+}
+
+// lstat() might complain if the path is too long in env_posix.cpp. Call full_filename() on
+// successively shorter paths until it succeeds.
+TEST_F(FullFilenameTests, MaxLengthFilename)
+{
+    Status s;
+    auto size = m_env->max_filename();
+    do {
+        --size;
+        const auto max_filename = '/' + std::string(size, 'a');
+        s = m_env->full_filename(max_filename.c_str(), m_buffer.data(), m_buffer.size());
+    } while (!s.is_ok());
+    TEST_LOG << "Max path length: " << size << '\n';
+}
+
+TEST_F(FullFilenameTests, FilenameTooLong)
+{
+    const auto too_long = '/' + std::string(m_env->max_filename(), 'a');
+    assert_failure(too_long);
+}
+
 static auto make_filename(size_t n)
 {
     return numeric_key<10>(n);
 }
+
 static auto write_out_randomly(RandomGenerator &random, File &writer, const Slice &message) -> void
 {
     constexpr size_t kChunks = 20;
@@ -37,6 +122,7 @@ static auto write_out_randomly(RandomGenerator &random, File &writer, const Slic
     }
     ASSERT_TRUE(in.is_empty());
 }
+
 [[nodiscard]] static auto read_back_randomly(RandomGenerator &random, File &reader, size_t size) -> std::string
 {
     static constexpr size_t kChunks = 20;
@@ -54,6 +140,7 @@ static auto write_out_randomly(RandomGenerator &random, File &writer, const Slic
     }
     return backing;
 }
+
 struct EnvWithFiles final {
     explicit EnvWithFiles()
         : m_dirname(testing::TempDir())
@@ -215,8 +302,8 @@ TEST_P(FileTests, SameINode)
 
 TEST_P(FileTests, UseUnlinkedFile)
 {
-    const auto filename = testing::TempDir() + "calicodb_unlinked_file";
-    const auto shmname = testing::TempDir() + "calicodb_unlinked_file" + kDefaultShmSuffix.to_string();
+    const auto filename = get_full_filename(testing::TempDir() + "calicodb_unlinked_file");
+    const auto shmname = get_full_filename(testing::TempDir() + "calicodb_unlinked_file") + kDefaultShmSuffix.to_string();
     (void)m_helper.env->remove_file(filename.c_str());
     (void)m_helper.env->remove_file(shmname.c_str());
 
@@ -248,7 +335,7 @@ protected:
         "0000/00/00-00:00:00.000000 ");
 
     explicit LoggerTests()
-        : m_log_filename(testing::TempDir() + "logger")
+        : m_log_filename(get_full_filename(testing::TempDir() + "logger"))
     {
     }
 
@@ -329,7 +416,7 @@ public:
     std::string m_filename;
 
     explicit EnvLockStateTests()
-        : m_filename(testing::TempDir() + "filename")
+        : m_filename(get_full_filename(testing::TempDir() + "filename"))
     {
         m_env = &default_env();
         m_helper.env = m_env;
@@ -763,7 +850,7 @@ public:
 
     explicit FileConcurrencyTests()
         : m_options(GetParam()),
-          m_filename(testing::TempDir() + "calicodb_file_concurrency"),
+          m_filename(get_full_filename(testing::TempDir() + "calicodb_file_concurrency")),
           m_resource(0)
     {
     }
@@ -858,7 +945,7 @@ public:
     Env *const m_env;
 
     explicit FileDescriptorReuseTests()
-        : m_filename(testing::TempDir() + "calicodb_fd_reuse_tests"),
+        : m_filename(get_full_filename(testing::TempDir() + "calicodb_fd_reuse_tests")),
           m_env(&default_env())
     {
         std::filesystem::remove_all(m_filename);
@@ -954,7 +1041,7 @@ public:
     File *m_file;
 
     explicit ShmConcurrencyTests()
-        : m_shared{{}, testing::TempDir() + "calicodb_file_concurrency"},
+        : m_shared{{}, get_full_filename(testing::TempDir() + "calicodb_file_concurrency")},
           m_options(GetParam())
     {
     }

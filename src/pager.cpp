@@ -359,10 +359,12 @@ auto Pager::move_page(PageRef &page, Id destination) -> void
 
 auto Pager::undo_callback(void *arg, uint32_t key) -> void
 {
-    PageRef *ref;
     const Id id(key);
+    if (id.is_root()) {
+        return;
+    }
     auto *pager = static_cast<Pager *>(arg);
-    if (!id.is_root() && (ref = pager->m_bufmgr.query(id))) {
+    if (auto *ref = pager->m_bufmgr.query(id)) {
         pager->purge_page(*ref);
     }
 }

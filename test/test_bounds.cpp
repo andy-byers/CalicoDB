@@ -22,7 +22,7 @@ protected:
     DB *m_db = nullptr;
 
     explicit BoundaryValueTests()
-        : m_filename(testing::TempDir() + "db"),
+        : m_filename(get_full_filename(testing::TempDir() + "db")),
           m_backing(new char[kMaxLen + 1]())
     {
         remove_calicodb_files(m_filename);
@@ -163,7 +163,7 @@ protected:
     DB *m_db = nullptr;
 
     explicit StressTests()
-        : m_filename(testing::TempDir() + "calicodb_stress_tests")
+        : m_filename(get_full_filename(testing::TempDir() + "calicodb_stress_tests"))
     {
         remove_calicodb_files(m_filename);
     }

@@ -106,12 +106,37 @@ public:
 
 class DBTests : public testing::Test
 {
-protected:
+public:
     static constexpr size_t kMaxRounds = 1'000;
     static constexpr size_t kPageSize = TEST_PAGE_SIZE;
     const std::string m_test_dir;
     const std::string m_db_name;
     const std::string m_alt_wal_name;
+
+    static constexpr size_t kMaxBuckets = 13;
+    static constexpr const char kBucketStr[kMaxBuckets + 2] = "BUCKET_NAMING_";
+    enum Config {
+        kDefault = 0,
+        kExclusiveLockMode = 1,
+        kOffSyncMode = 2,
+        kFullSyncMode = 4,
+        kUseAltWAL = 8,
+        kSmallCache = 16,
+        kInMemory = 32,
+        kMaxConfig,
+    } m_config = kDefault;
+    CallbackEnv *m_env = nullptr;
+    DB *m_db = nullptr;
+
+    class BusyHandlerStub : public BusyHandler
+    {
+    public:
+        ~BusyHandlerStub() override = default;
+        auto exec(unsigned) -> bool override
+        {
+            return true;
+        }
+    } m_busy;
 
     explicit DBTests()
         : m_test_dir(testing::TempDir()),
@@ -315,16 +340,6 @@ protected:
         return s;
     }
 
-    enum Config {
-        kDefault = 0,
-        kExclusiveLockMode = 1,
-        kOffSyncMode = 2,
-        kFullSyncMode = 4,
-        kUseAltWAL = 8,
-        kSmallCache = 16,
-        kInMemory = 32,
-        kMaxConfig,
-    };
     auto reopen_db(bool clear, Env *env = nullptr) -> Status
     {
         close_db();
@@ -379,22 +394,6 @@ protected:
         }
         return file_size;
     }
-
-    static constexpr size_t kMaxBuckets = 13;
-    static constexpr const char kBucketStr[kMaxBuckets + 2] = "BUCKET_NAMING_";
-    Config m_config = kDefault;
-    CallbackEnv *m_env = nullptr;
-    DB *m_db = nullptr;
-
-    class BusyHandlerStub : public BusyHandler
-    {
-    public:
-        ~BusyHandlerStub() override = default;
-        auto exec(unsigned) -> bool override
-        {
-            return true;
-        }
-    } m_busy;
 };
 
 TEST_F(DBTests, GetProperty)
@@ -918,37 +917,74 @@ TEST_F(DBTests, ReadWithoutWAL)
     ASSERT_FALSE(m_env->file_exists(wal_name.c_str()));
 }
 
+static auto create_and_hash_db(DBTests &test) -> uint64_t
+{
+    EXPECT_OK(test.reopen_db(true));
+    EXPECT_OK(test.m_db->run(WriteOptions(), [](auto &tx) {
+        EXPECT_OK(DBTests::put_range(tx, BucketOptions(), "a", 0, 1'000));
+        EXPECT_OK(DBTests::put_range(tx, BucketOptions(), "b", 0, 1'000));
+        EXPECT_OK(DBTests::put_range(tx, BucketOptions(), "c", 0, 1'000));
+        EXPECT_OK(DBTests::put_range(tx, BucketOptions(), "d", 0, 1'000));
+
+        EXPECT_OK(tx.drop_bucket("a"));
+        EXPECT_OK(tx.vacuum());
+
+        EXPECT_OK(DBTests::erase_range(tx, BucketOptions(), "b", 0, 500));
+        EXPECT_OK(DBTests::erase_range(tx, BucketOptions(), "c", 250, 750));
+        EXPECT_OK(DBTests::erase_range(tx, BucketOptions(), "d", 500, 1'000));
+        return Status::ok();
+    }));
+    EXPECT_OK(test.m_db->checkpoint(kCheckpointRestart, nullptr));
+    return std::hash<std::string>{}(
+        read_file_to_string(*test.m_env, test.m_db_name.c_str()));
+}
+
+TEST_F(DBTests, FileFormatIsReproducible)
+{
+    const auto hash1 = create_and_hash_db(*this);
+    const auto hash2 = create_and_hash_db(*this);
+    ASSERT_EQ(hash1, hash2);
+
+    static constexpr char kJunk = '\xCC'; // 11001100
+    ASSERT_NE(kJunk, DebugAllocator::set_junk_byte(kJunk));
+    const auto hash3 = create_and_hash_db(*this);
+    ASSERT_EQ(hash2, hash3);
+}
+
 TEST(OldWalTests, HandlesOldWalFile)
 {
-    static constexpr auto kOldWal = "./testwal";
+    const std::string old_wal_name = get_full_filename(testing::TempDir() + "calicodb_testwal");
+    const std::string db_name = get_full_filename(testing::TempDir() + "calicodb_testdb");
+    std::filesystem::remove_all(db_name);
+    std::filesystem::remove_all(old_wal_name);
 
     File *oldwal;
-    FakeEnv env;
-    ASSERT_OK(env.new_file(kOldWal, Env::kCreate, oldwal));
+    auto &env = default_env();
+    ASSERT_OK(env.new_file(old_wal_name.c_str(), Env::kCreate, oldwal));
     //    ASSERT_OK(oldwal->write(42, ":3"));
     // TODO: The above line causes this test to fail now. Need to delete old WAL files somewhere.
     //       SQLite does it in pagerOpenWalIfPresent(), if the database is 0 bytes in size, rather
     //       than opening the WAL. Need to figure this out!
 
     DB *db;
-    Options dbopt;
-    dbopt.env = &env;
-    dbopt.wal_filename = kOldWal;
-    ASSERT_OK(DB::open(dbopt, "./testdb", db));
+    Options options;
+    options.env = &env;
+    options.wal_filename = old_wal_name.c_str();
+    ASSERT_OK(DB::open(options, db_name.c_str(), db));
     ASSERT_OK(db->run(WriteOptions(), [](auto &tx) {
         return tx.create_bucket(BucketOptions(), "b", nullptr);
     }));
 
     uint64_t file_size;
     ASSERT_OK(oldwal->get_size(file_size));
-    ASSERT_GT(file_size, dbopt.page_size * 3);
+    ASSERT_GT(file_size, options.page_size * 3);
     delete oldwal;
     delete db;
 }
 
 TEST(DestructionTests, DestructionBehavior)
 {
-    const auto db_name = testing::TempDir() + "calicodb_test_db";
+    const auto db_name = get_full_filename(testing::TempDir() + "calicodb_test_db");
     const auto wal_name = db_name + kDefaultWalSuffix.to_string();
     const auto shm_name = db_name + kDefaultShmSuffix.to_string();
     (void)default_env().remove_file(db_name.c_str());
@@ -999,31 +1035,29 @@ TEST(DestructionTests, OnlyDeletesCalicoDatabases)
 TEST(DestructionTests, OnlyDeletesCalicoWals)
 {
     Options options;
-    options.env = new FakeEnv;
-    options.wal_filename = "./wal";
+    options.env = &default_env();
+    options.wal_filename = "/tmp/calicodb_destruction_wal";
 
     DB *db;
-    ASSERT_OK(DB::open(options, "./test", db));
+    ASSERT_OK(DB::open(options, "/tmp/calicodb_destruction_test", db));
     delete db;
 
     // These files are not part of the DB.
     File *file;
-    ASSERT_OK(options.env->new_file("./wal_", Env::kCreate, file));
+    ASSERT_OK(options.env->new_file("/tmp/calicodb_destruction_wal_", Env::kCreate, file));
     delete file;
-    ASSERT_OK(options.env->new_file("./test.db", Env::kCreate, file));
+    ASSERT_OK(options.env->new_file("/tmp/calicodb_destruction_test.db", Env::kCreate, file));
     delete file;
 
-    ASSERT_OK(DB::destroy(options, "./test"));
-    ASSERT_TRUE(options.env->file_exists("./wal_"));
-    ASSERT_TRUE(options.env->file_exists("./test.db"));
-
-    delete options.env;
+    ASSERT_OK(DB::destroy(options, "/tmp/calicodb_destruction_test"));
+    ASSERT_TRUE(options.env->file_exists("/tmp/calicodb_destruction_wal_"));
+    ASSERT_TRUE(options.env->file_exists("/tmp/calicodb_destruction_test.db"));
 }
 
 TEST(DestructionTests, DeletesWalAndShm)
 {
     Options options;
-    options.env = new FakeEnv;
+    options.env = &default_env();
 
     DB *db;
     ASSERT_OK(DB::open(options, "./test", db));
@@ -1050,8 +1084,6 @@ TEST(DestructionTests, DeletesWalAndShm)
     ASSERT_FALSE(options.env->file_exists("./test"));
     ASSERT_FALSE(options.env->file_exists("./test-wal"));
     ASSERT_FALSE(options.env->file_exists("./test-shm"));
-
-    delete options.env;
 }
 
 class DBOpenTests : public DBTests
@@ -1603,10 +1635,8 @@ TEST(TestModelDB, TestModelDB)
 {
     DB *db;
     KVStore store;
-    FakeEnv env;
     Options options;
-    options.env = &env;
-    const auto filename = testing::TempDir() + "calicodb_test_model_db";
+    const auto filename = get_full_filename(testing::TempDir() + "calicodb_test_model_db");
     ASSERT_OK(ModelDB::open(options, filename.c_str(), store, db));
     ASSERT_OK(db->run(WriteOptions(), [](auto &tx) {
         EXPECT_OK(tx.create_bucket(BucketOptions(), "a", nullptr));
@@ -1614,7 +1644,7 @@ TEST(TestModelDB, TestModelDB)
         EXPECT_OK(tx.create_bucket(BucketOptions(), "c", nullptr));
         return Status::ok();
     }));
-    ASSERT_TRUE(env.file_exists(filename.c_str()));
+    ASSERT_TRUE(default_env().file_exists(filename.c_str()));
     ASSERT_OK(db->run(WriteOptions(), model_writer));
     reinterpret_cast<ModelDB *>(db)->check_consistency();
     delete db;

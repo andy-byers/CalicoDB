@@ -212,7 +212,7 @@ protected:
     KVStore m_store;
 
     explicit CrashTests()
-        : m_filename(testing::TempDir() + "calicodb_crashes"),
+        : m_filename(get_full_filename(testing::TempDir() + "calicodb_crashes")),
           m_env(new CrashEnv(default_env()))
     {
         auto db_name = m_filename;
@@ -987,7 +987,7 @@ public:
 
 TEST(DataLossEnvTests, NormalOperations)
 {
-    const auto filename = testing::TempDir() + "calicodb_data_loss_env_tests";
+    const auto filename = get_full_filename(testing::TempDir() + "calicodb_data_loss_env_tests");
     DataLossEnv env(default_env());
     (void)env.remove_file(filename.c_str());
 
@@ -1014,7 +1014,7 @@ TEST(DataLossEnvTests, NormalOperations)
 
 TEST(DataLossEnvTests, DroppedWrites)
 {
-    const auto filename = testing::TempDir() + "calicodb_data_loss_env_tests";
+    const auto filename = get_full_filename(testing::TempDir() + "calicodb_data_loss_env_tests");
     DataLossEnv env(default_env());
     (void)env.remove_file(filename.c_str());
 
@@ -1081,7 +1081,7 @@ public:
     DB *m_db = nullptr;
 
     explicit DataLossTests()
-        : m_filename(testing::TempDir() + "calicodb_dropped_writes")
+        : m_filename(get_full_filename(testing::TempDir() + "calicodb_dropped_writes"))
     {
     }
 

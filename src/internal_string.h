@@ -55,6 +55,7 @@ public:
         return m_data;
     }
 
+    [[nodiscard]] auto resize(size_t size, char c = '\0') -> int;
     auto clear() -> void;
 
 private:

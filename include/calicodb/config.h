@@ -38,28 +38,18 @@ struct AllocatorConfig {
     Free free;
 };
 
-// NOTE: An enumerator cannot be used for ConfigTarget (the "named parameter preceding the first
-//       variable parameter" in configure()) due to default argument promotion rules. See
-//       https://en.cppreference.com/w/cpp/utility/variadic/va_start.
-struct ConfigTarget {
-    constexpr operator int() const
-    {
-        return value;
-    }
-
-    int value;
-};
-
 // Specifies a target for configure(). configure() expects different variadic parameters depending on
 // the configuration target.
-static constexpr ConfigTarget kGetAllocator = {1}; // AllocatorConfig * (nonnull)
-static constexpr ConfigTarget kSetAllocator = {2}; // AllocatorConfig
+enum ConfigTarget {
+    kGetAllocator, // AllocatorConfig * (valid address)
+    kSetAllocator, // AllocatorConfig *
+};
 
 // Configure per-process options
 // This function is not safe to call from multiple threads simultaneously.
 // If `target` is recognized and the configuration option set successfully, an OK status is returned.
 // Otherwise, a non-OK status is returned with no side effects.
-auto configure(ConfigTarget target, ...) -> Status;
+auto configure(ConfigTarget target, void *value) -> Status;
 
 } // namespace calicodb
 

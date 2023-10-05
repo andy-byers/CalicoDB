@@ -125,7 +125,7 @@ protected:
     } s_busy_handler;
 
     explicit ConcurrencyTests()
-        : m_filename(testing::TempDir() + "concurrency"),
+        : m_filename(get_full_filename(testing::TempDir() + "concurrency")),
           m_env(new DelayEnv(default_env()))
     {
         remove_calicodb_files(m_filename);

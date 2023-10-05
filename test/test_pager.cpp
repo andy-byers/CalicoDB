@@ -305,7 +305,7 @@ struct PagerContext {
     }
 };
 
-const std::string PagerContext::db_name = testing::TempDir() + "calicodb_pager_tests";
+const std::string PagerContext::db_name = get_full_filename(testing::TempDir() + "calicodb_pager_tests");
 const std::string PagerContext::wal_name = PagerContext::db_name + kDefaultWalSuffix.to_string();
 
 class PagerTests : public testing::Test
@@ -320,8 +320,8 @@ protected:
     PagerContext m_ctx;
 
     explicit PagerTests()
-        : m_db_name(testing::TempDir() + "calicodb_pager_tests"),
-          m_wal_name(testing::TempDir() + "calicodb_pager_tests" + kDefaultWalSuffix.to_string()),
+        : m_db_name(get_full_filename(testing::TempDir() + "calicodb_pager_tests")),
+          m_wal_name(get_full_filename(testing::TempDir() + "calicodb_pager_tests") + kDefaultWalSuffix.to_string()),
           m_env(new FakeEnv())
     {
     }
