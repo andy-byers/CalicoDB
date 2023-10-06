@@ -35,6 +35,7 @@ auto Pager::set_page_size(uint32_t value) -> Status
         return Status::no_memory();
     }
     m_page_size = value;
+    log(m_log, "database page size is set to %u", value);
     return Status::ok();
 }
 

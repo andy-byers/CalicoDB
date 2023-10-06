@@ -35,7 +35,7 @@ public:
     PageRef *const m_ref;
     Node m_node;
 
-    // Use 2 bytes for the keys.
+    // Use 2 bytes for the keys. No values.
     char m_external_cell[6] = {'\x00', '\x02', '\x00', '\x00'};
     char m_internal_cell[7] = {'\x00', '\x00', '\x00', '\x00', '\x02'};
     [[nodiscard]] auto make_cell(uint32_t k) -> Cell
@@ -54,6 +54,38 @@ public:
             cell.key = m_external_cell + 4;
             cell.footprint = sizeof(m_external_cell);
         }
+        cell.key[0] = static_cast<char>(k >> 8);
+        cell.key[1] = static_cast<char>(k);
+        return cell;
+    }
+
+    char m_max_external_cell[TEST_PAGE_SIZE] = {};
+    char m_max_internal_cell[TEST_PAGE_SIZE] = {};
+    [[nodiscard]] auto make_max_cell(uint32_t k) -> Cell
+    {
+        static constexpr auto kMaxSize = kMaxAllocation;
+        const auto max_local = compute_local_pl_size(kMaxSize, kMaxSize, TEST_PAGE_SIZE);
+        auto *e_ptr = encode_varint(m_max_external_cell, kMaxSize); // Value size
+        e_ptr = encode_varint(e_ptr, kMaxSize);                     // Key size
+        auto *i_ptr = m_max_internal_cell + sizeof(uint32_t);
+        i_ptr = encode_varint(i_ptr, kMaxSize); // Key size
+
+        EXPECT_LE(k, std::numeric_limits<uint16_t>::max());
+        Cell cell = {
+            m_max_internal_cell,
+            i_ptr,
+            kMaxSize,
+            kMaxSize,
+            max_local,
+            4 + static_cast<uint32_t>(kVarintMaxLength) + max_local + 4,
+        };
+        if (m_node.is_leaf()) {
+            cell.ptr = m_max_external_cell;
+            cell.key = e_ptr;
+            cell.total_pl_size = 2 * kMaxSize;
+            cell.footprint = 2 * static_cast<uint32_t>(kVarintMaxLength) + max_local + 4;
+        }
+        // Big-endian so order is preserved.
         cell.key[0] = static_cast<char>(k >> 8);
         cell.key[1] = static_cast<char>(k);
         return cell;
@@ -223,14 +255,14 @@ TEST_F(NodeTests, CellLifecycle)
         auto target_space = m_node.usable_space;
         for (uint32_t i = 0;; ++i) {
             const auto cell_in = make_cell(i);
-            const auto rc = m_node.write(i, cell_in);
+            const auto rc = m_node.insert(i, cell_in);
             if (rc == 0) {
                 break;
             }
             ASSERT_GT(rc, 0);
             target_space -= cell_in.footprint + 2;
             ASSERT_EQ(m_node.usable_space, target_space);
-            ASSERT_TRUE(m_node.assert_state());
+            ASSERT_TRUE(m_node.assert_integrity());
         }
 
         for (uint32_t j = 0; j < NodeHdr::get_cell_count(m_node.hdr()); ++j) {
@@ -250,7 +282,7 @@ TEST_F(NodeTests, CellLifecycle)
             target_space += cell_out.footprint + 2;
             ASSERT_EQ(m_node.usable_space, target_space);
         }
-        ASSERT_TRUE(m_node.assert_state());
+        ASSERT_TRUE(m_node.assert_integrity());
         ASSERT_EQ(0, m_node.defrag());
         ASSERT_EQ(m_node.usable_space, target_space);
 
@@ -264,7 +296,7 @@ TEST_F(NodeTests, OverwriteOnEraseBehavior)
     for (auto t : {kExternalNode, kInternalNode}) {
         ASSERT_TRUE(change_node_type(t));
         const auto cell_in = make_cell(0);
-        ASSERT_LT(0, m_node.write(0, cell_in));
+        ASSERT_LT(0, m_node.insert(0, cell_in));
 
         Cell cell_out;
         ASSERT_EQ(0, m_node.read(0, cell_out));
@@ -280,6 +312,31 @@ TEST_F(NodeTests, OverwriteOnEraseBehavior)
                 m_node.erase(0, cell_out.footprint);
             }
         }
+    }
+}
+
+TEST_F(NodeTests, NonRootFits4Cells)
+{
+    for (auto t : {kExternalNode, kInternalNode}) {
+        ASSERT_TRUE(change_node_type(t));
+        ASSERT_LT(0, m_node.insert(0, make_max_cell(0)));
+        ASSERT_LT(0, m_node.insert(1, make_max_cell(1)));
+        ASSERT_LT(0, m_node.insert(2, make_max_cell(2)));
+        ASSERT_LT(0, m_node.insert(3, make_max_cell(3)));
+        ASSERT_EQ(0, m_node.insert(4, make_max_cell(4))); // Overflow
+        ASSERT_TRUE(m_node.assert_integrity());
+    }
+}
+
+TEST_F(NodeTests, RootFits3Cells)
+{
+    for (auto t : {kExternalRoot, kInternalRoot}) {
+        ASSERT_TRUE(change_node_type(t));
+        ASSERT_LT(0, m_node.insert(0, make_max_cell(0)));
+        ASSERT_LT(0, m_node.insert(1, make_max_cell(1)));
+        ASSERT_LT(0, m_node.insert(2, make_max_cell(2)));
+        ASSERT_EQ(0, m_node.insert(3, make_max_cell(3))); // Overflow
+        ASSERT_OK(m_node.check_integrity());
     }
 }
 
@@ -351,7 +408,7 @@ public:
         uint32_t cell_sizes[kNumBlocks * 2];
         for (uint32_t i = 0; i < kNumBlocks * 2; ++i) {
             auto cell = make_cell(i);
-            ASSERT_GT(m_node.write(i, cell), 0);
+            ASSERT_GT(m_node.insert(i, cell), 0);
             // Fill the cell with pointers into m_node.
             ASSERT_EQ(m_node.read(i, cell), 0);
             cell_sizes[i] = cell.footprint;

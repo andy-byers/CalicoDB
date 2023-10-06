@@ -110,6 +110,8 @@ public:
         return m_root_id;
     }
 
+    auto check_integrity() -> Status;
+
     auto print_structure(String &repr_out) -> Status;
     auto print_nodes(String &repr_out) -> Status;
     auto TEST_validate() -> void;
