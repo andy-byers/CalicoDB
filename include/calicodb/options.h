@@ -8,6 +8,10 @@
 #include <cstddef>
 #include <cstdint>
 
+#ifndef CALICODB_MAX_ALLOCATION
+#define CALICODB_MAX_ALLOCATION 2'000'000'000U
+#endif // CALICODB_MAX_ALLOCATION
+
 #ifndef CALICODB_DEFAULT_PAGE_SIZE
 #define CALICODB_DEFAULT_PAGE_SIZE 4'096U
 #endif // CALICODB_DEFAULT_PAGE_SIZE
@@ -112,6 +116,11 @@ struct WriteOptions {
 // Options for controlling the behavior of Tx::create_bucket()
 struct BucketOptions final {
     bool error_if_exists = false;
+
+    // If true, the library will ensure that all records in this bucket have unique keys.
+    // Otherwise, no uniqueness constraints are enforced. This means that multiple records
+    // within the same bucket may have the same key and value.
+    bool unique = true;
 };
 
 class BusyHandler

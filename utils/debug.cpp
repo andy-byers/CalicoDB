@@ -124,7 +124,7 @@ auto print_database_overview(std::ostream &os, Pager &pager) -> void
 namespace
 {
 
-constexpr auto kMaxLimit = SIZE_MAX - kMaxAllocation;
+constexpr uint64_t kMaxLimit = SIZE_MAX - kMaxAllocation;
 using DebugHeader = uint64_t;
 
 struct {
@@ -159,7 +159,6 @@ auto debug_malloc(size_t size) -> void *
     if (s_debug.bytes_used + alloc_size > s_debug.limit) {
         return nullptr;
     }
-
     ALLOCATION_HOOK;
 
     auto *ptr = static_cast<DebugHeader *>(

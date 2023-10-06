@@ -44,16 +44,20 @@ public:
 
     auto vacuum() -> Status;
 
-    [[nodiscard]] static auto decode_root_id(const Slice &data, Id &out) -> bool;
-    [[nodiscard]] static auto encode_root_id(Id id, char *root_id_out) -> size_t;
+    struct RootInfo {
+        Id root_id;
+        bool unique;
+    };
+    [[nodiscard]] static auto decode_root_info(const Slice &data, RootInfo &info_out) -> bool;
+    [[nodiscard]] static auto encode_root_info(const RootInfo &info, char *root_id_out) -> size_t;
 
     auto TEST_validate() const -> void;
 
 private:
-    [[nodiscard]] auto decode_and_check_root_id(const Slice &data, Id &out) -> bool;
-    auto open_cursor(const Slice &name, Id root_id, Cursor *&c_out) -> Status;
+    [[nodiscard]] auto decode_and_check_root_info(const Slice &data, RootInfo &info_out) -> bool;
+    auto open_cursor(const Slice &name, const RootInfo &info, Cursor *&c_out) -> Status;
     auto corrupted_root_id() -> Status;
-    auto construct_or_reference_tree(const Slice &name, Id root_id) -> Tree *;
+    auto construct_or_reference_tree(const Slice &name, const RootInfo &info) -> Tree *;
     auto find_open_tree(const Slice &name) -> Tree *;
 
     template <class Action>

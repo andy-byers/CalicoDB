@@ -1176,6 +1176,53 @@ TEST_F(DBOpenTests, CustomLogger)
     ASSERT_FALSE(logger.m_str.empty());
 }
 
+TEST_F(DBOpenTests, RemembersBucketOptions)
+{
+    for (size_t i = 0; i < 2; ++i) {
+        ASSERT_OK(DB::open(Options(), m_db_name.c_str(), m_db));
+        ASSERT_OK(m_db->run(WriteOptions(), [](auto &tx) {
+            BucketOptions options;
+            options.unique = false;
+            return tx.create_bucket(options, "b", nullptr);
+        }));
+        ASSERT_OK(m_db->run(WriteOptions(), [i](auto &tx) {
+            TestCursor c;
+            auto s = test_open_bucket(tx, "b", c);
+            if (s.is_ok()) {
+                s = tx.put(*c, numeric_key(i), numeric_key(1));
+            }
+            if (s.is_ok()) {
+                s = tx.put(*c, numeric_key(i), numeric_key(0));
+            }
+            return s;
+        }));
+        delete m_db;
+    }
+    ASSERT_OK(DB::open(Options(), m_db_name.c_str(), m_db));
+    ASSERT_OK(m_db->run(ReadOptions(), [](auto &tx) {
+        TestCursor c;
+        auto s = test_open_bucket(tx, "b", c);
+        if (s.is_ok()) {
+            c->find(numeric_key(0));
+            EXPECT_TRUE(c->is_valid());
+            EXPECT_EQ(c->value(), numeric_key(0));
+            c->next();
+            EXPECT_TRUE(c->is_valid());
+            EXPECT_EQ(c->value(), numeric_key(1));
+
+            c->find(numeric_key(1));
+            EXPECT_TRUE(c->is_valid());
+            EXPECT_EQ(c->value(), numeric_key(0));
+            c->next();
+            EXPECT_TRUE(c->is_valid());
+            EXPECT_EQ(c->value(), numeric_key(1));
+        }
+        return s;
+    }));
+    delete m_db;
+    m_db = nullptr;
+}
+
 class DBPageSizeTests : public DBOpenTests
 {
 public:
