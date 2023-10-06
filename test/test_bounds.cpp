@@ -13,6 +13,8 @@
 namespace calicodb::test
 {
 
+// These tests use a lot of memory, occasionally crashing GitHub C/I runners.
+#ifndef CALICODB_CI
 class BoundaryValueTests : public testing::Test
 {
 protected:
@@ -155,6 +157,7 @@ TEST_F(BoundaryValueTests, OverflowRecord)
 {
     test_overflow_payload(true, true);
 }
+#endif // CALICODB_CI
 
 class StressTests : public testing::Test
 {
