@@ -194,7 +194,6 @@ TEST_F(BoundaryValueTests, OverflowRecord)
 {
     test_overflow_payload(true, true);
 }
-#endif // CALICODB_CI
 
 TEST_F(BoundaryValueTests, Overflow32Bits1)
 {
