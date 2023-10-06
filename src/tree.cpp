@@ -447,45 +447,94 @@ auto TreeCursor::seek_to_last_leaf() -> void
     }
 }
 
-auto TreeCursor::search_node(const Slice &key) -> bool
+auto TreeCursor::perform_comparison(uint32_t index, const Slice &lhs, int &cmp_out) -> int
 {
+    if (m_node.read(index, m_cell)) {
+        m_status = Status::corruption();
+        return false;
+    }
+    Slice rhs;
+    // This call to Tree::extract_key() may return a partial key, if the whole key wasn't
+    // needed for the comparison. We read at most 1 byte more than is present in `key` so
+    // that we still have the necessary length information to break ties. This lets us avoid
+    // reading overflow chains if it isn't really necessary.
+    m_status = m_tree->extract_key(m_cell, m_tree->m_key_scratch[0], rhs,
+                                   static_cast<uint32_t>(lhs.size() + 1));
+    if (m_status.is_ok()) {
+        cmp_out = lhs.compare(rhs);
+        return 0;
+    }
+    return -1;
+}
+
+auto TreeCursor::search_branch(const Slice &key) -> void
+{
+    CALICODB_EXPECT_FALSE(m_node.is_leaf());
     CALICODB_EXPECT_TRUE(m_status.is_ok());
     CALICODB_EXPECT_NE(m_node.ref, nullptr);
 
-    auto exact = false;
     auto upper = NodeHdr::get_cell_count(m_node.hdr());
     uint32_t lower = 0;
 
     while (lower < upper) {
-        const auto mid = (lower + upper) / 2;
-        if (m_node.read(mid, m_cell)) {
-            m_status = Status::corruption();
-            return false;
+        int cmp;
+        const auto index = (lower + upper) / 2;
+        if (perform_comparison(index, key, cmp)) {
+            return;
         }
-        Slice rhs;
-        // This call to Tree::extract_key() may return a partial key, if the whole key wasn't
-        // needed for the comparison. We read at most 1 byte more than is present in `key` so
-        // that we still have the necessary length information to break ties. This lets us avoid
-        // reading overflow chains if it isn't really necessary.
-        m_status = m_tree->extract_key(m_cell, m_tree->m_key_scratch[0], rhs,
-                                       static_cast<uint32_t>(key.size() + 1));
-        if (!m_status.is_ok()) {
-            break;
-        }
-        const auto cmp = key.compare(rhs);
-        if (cmp < 0) {
-            upper = mid;
-        } else if (cmp > 0) {
-            lower = mid + 1;
+        if (cmp > 0) {
+            lower = index + 1;
         } else {
-            lower = mid;
-            exact = true;
-            break;
+            upper = index;
+            if (cmp == 0 && m_tree->m_unique) {
+                // In a unique tree, the invariant L < p <= R holds, where L is every key in the left
+                // child of the pivot p at m_idx, and R is every key in the right child. In a non-unique
+                // tree, the invariant is changed to L <= p <= R, meaning we must look through L if the
+                // search key is equal to p. Note that this is not strictly necessary.
+                m_idx = index + 1;
+                return;
+            }
         }
     }
+    m_idx = lower;
+}
 
-    m_idx = lower + exact * !m_node.is_leaf();
-    return exact;
+auto TreeCursor::search_leaf(const Slice &key) -> bool
+{
+    CALICODB_EXPECT_TRUE(m_node.is_leaf());
+    CALICODB_EXPECT_TRUE(m_status.is_ok());
+    CALICODB_EXPECT_NE(m_node.ref, nullptr);
+
+    auto exact = false;
+    auto found = false;
+    const auto count = NodeHdr::get_cell_count(m_node.hdr());
+    auto upper = count;
+    uint32_t lower = 0;
+
+    while (lower < upper) {
+        int cmp;
+        const auto index = (lower + upper) / 2;
+        if (perform_comparison(index, key, cmp)) {
+            return false;
+        }
+        if (cmp > 0) {
+            lower = index + 1;
+            exact = false;
+        } else {
+            upper = index;
+            exact = cmp == 0;
+        }
+        if (exact) {
+            found = true;
+        }
+    }
+    m_idx = lower;
+    // If cmp > 0 on the last iteration, but it was 0 on some other iteration, then
+    // m_cell will not contain the correct cell.
+    if (found != exact && m_node.read(m_idx, m_cell)) {
+        m_status = Status::corruption();
+    }
+    return found;
 }
 
 TreeCursor::TreeCursor(Tree &tree)
@@ -560,7 +609,7 @@ auto TreeCursor::reset(const Status &s) -> void
     m_level = 0;
 }
 
-auto TreeCursor::start_write(const Slice &key) -> bool
+auto TreeCursor::start_write(const Slice &key, bool is_erase) -> bool
 {
     // Save other cursors open on m_tree. This does not invalidate slices obtained from those
     // cursors.
@@ -570,7 +619,7 @@ auto TreeCursor::start_write(const Slice &key) -> bool
     // Seek to where the given key is, if it exists, or should go, if it does not. Don't read
     // the record where the cursor ends up: the payload slices being written might have come
     // from those buffers.
-    const auto result = seek_to_leaf(key, false);
+    const auto result = seek_to_leaf(key, is_erase);
     if (on_node()) {
         m_tree->upgrade(m_node);
     }
@@ -593,7 +642,7 @@ auto TreeCursor::finish_write(Status &s) -> void
     if (!s.is_ok()) {
         reset(s);
     }
-    if (!m_status.is_ok()) {
+    if (!on_node()) {
         s = m_status;
         return;
     }
@@ -631,16 +680,24 @@ auto TreeCursor::seek_to_leaf(const Slice &key, bool read_payload) -> bool
     }
     while (m_status.is_ok()) {
         CALICODB_EXPECT_EQ(m_state, kValidState);
-        const auto found_exact_key = search_node(key);
-        if (m_status.is_ok()) {
-            if (m_node.is_leaf()) {
-                if (read_payload) {
-                    ensure_correct_leaf();
-                    fetch_record_if_valid();
-                }
-                return found_exact_key;
+        if (!m_node.is_leaf()) {
+            search_branch(key);
+            if (!m_status.is_ok()) {
+                return false;
             }
             move_to_child(m_node.read_child_id(m_idx));
+            continue;
+        }
+        auto found_exact_key = search_leaf(key);
+        if (m_status.is_ok()) {
+            if (read_payload) {
+                ensure_correct_leaf();
+                fetch_record_if_valid();
+                if (on_record() && !found_exact_key) {
+                    found_exact_key = key == this->key();
+                }
+            }
+            return found_exact_key;
         }
     }
     return false;
@@ -1580,7 +1637,7 @@ auto Tree::fix_root(TreeCursor &c) -> Status
     return s;
 }
 
-Tree::Tree(Pager &pager, Stats &stat, char *scratch, Id root_id, String name)
+Tree::Tree(Pager &pager, Stats &stat, char *scratch, Id root_id, String name, bool unique)
     : list_entry{Slice(name), this, nullptr, nullptr},
       m_stat(&stat),
       m_node_scratch(scratch + pager.page_size()),
@@ -1594,7 +1651,8 @@ Tree::Tree(Pager &pager, Stats &stat, char *scratch, Id root_id, String name)
       m_pager(&pager),
       m_root_id(root_id),
       m_page_size(pager.page_size()),
-      m_writable(pager.mode() >= Pager::kWrite)
+      m_writable(pager.mode() >= Pager::kWrite),
+      m_unique(unique)
 {
     IntrusiveList::initialize(list_entry);
     IntrusiveList::initialize(m_active_list);
@@ -1652,11 +1710,11 @@ auto Tree::put(TreeCursor &c, const Slice &key, const Slice &value) -> Status
         return Status::invalid_argument("value is too long");
     }
 
-    const auto key_exists = c.start_write(key);
+    const auto key_exists = c.start_write(key, false);
     auto s = c.m_status;
     if (s.is_ok()) {
         CALICODB_EXPECT_TRUE(c.assert_state());
-        if (key_exists) {
+        if (key_exists && m_unique) {
             const auto value_size = c.m_cell.total_pl_size - c.m_cell.key_size;
             if (value_size == value.size()) {
                 s = overwrite_value(c.m_cell, value);
@@ -1795,7 +1853,7 @@ auto Tree::erase(TreeCursor &c, const Slice &key) -> Status
     // This call may invalidate `key`, if `key` was returned by `c->key()`. In
     // this case, seek_to_leaf() with kSeekReader should cause `c->key()` to
     // return the same key bytes that `key` formerly held.
-    const auto key_exists = c.start_write(key);
+    const auto key_exists = c.start_write(key, true);
     auto s = c.m_status;
     if (key_exists && s.is_ok()) {
         s = erase(c);

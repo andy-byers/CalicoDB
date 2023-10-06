@@ -149,8 +149,7 @@ auto main(int argc, char **argv) -> int
         rc = RUN_ALL_TESTS(); // Run the registered tests.
     }
     if (rc == 0 && DebugAllocator::bytes_used() > 0) {
-        // Only report leaks if the test passed. There will likely be a leak if an
-        // ASSERT_*() fired.
+        // Only report leaks if the test passed. There may be a leak if an ASSERT_*() fired.
         TEST_LOG << "error: test leaked " << DebugAllocator::bytes_used() << " byte(s)\n";
         REPORT_DRIVER_ERROR;
         rc = -1;

@@ -20,6 +20,7 @@ option(CALICODB_Install "Install the CMake targets during the install step" ${MA
 option(CALICODB_WithASan "Build with ASan" Off)
 option(CALICODB_WithUBSan "Build with UBSan" Off)
 option(CALICODB_WithTSan "Build with TSan" Off)
+option(CALICODB_CI "Must be set if this is a CI build" Off)
 
 set(CALICODB_OPTIONS "")
 set(CALICODB_WARNINGS "")

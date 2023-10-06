@@ -36,7 +36,7 @@ jobs:
       - name: Setup
         run: >-
           cmake -S "${{ github.workspace }}" -B "${{ env.BUILD_DIR }}"
-          -DCMAKE_BUILD_TYPE=${{ env.BUILD_TYPE }}
+          -DCMAKE_BUILD_TYPE=${{ env.BUILD_TYPE }} -DCALICODB_CI=On
           -DCALICODB_BuildFuzzers=On -DCALICODB_FuzzerStandalone=On
 
       - name: Build
