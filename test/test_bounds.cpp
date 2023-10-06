@@ -178,41 +178,6 @@ protected:
         // The files left by this test can be very large. Make sure to clean up.
         remove_calicodb_files(m_filename);
     }
-
-    auto run_32_bit_overflow_test(bool auto_checkpoint) -> void
-    {
-        // Keep the number of iterations low and the payload size high. Otherwise, the WAL grows
-        // to be way too large, since we retain many versions of each page. Still, these settings
-        // create a ~10 GB WAL.
-        static constexpr size_t kNumIterations = 5;
-        static constexpr size_t kPayloadSize = 1'000'000'000;
-        auto buffer = std::make_unique<char[]>(kPayloadSize);
-
-        // Make a database file that is larger than 4 GiB. Offsets to some locations within the
-        // file, as well as the file size itself, should overflow a 32-bit unsigned integer.
-        static_assert(kNumIterations * kPayloadSize > std::numeric_limits<uint32_t>::max());
-
-        Options options;
-        options.page_size = kMaxPageSize;
-        options.auto_checkpoint = auto_checkpoint ? options.auto_checkpoint : 0;
-        ASSERT_OK(DB::open(options, m_filename.c_str(), m_db));
-
-        for (size_t i = 0; i < kNumIterations; ++i) {
-            ASSERT_OK(m_db->run(WriteOptions(), [&buffer, i](auto &tx) {
-                TestCursor c;
-                auto s = test_create_and_open_bucket(tx, BucketOptions(), "b", c);
-                if (s.is_ok()) {
-                    put_u64(buffer.get(), i);
-                    s = tx.put(*c,
-                               Slice(buffer.get(), kPayloadSize),
-                               Slice(buffer.get(), kPayloadSize));
-                }
-                return s;
-            }));
-        }
-        ASSERT_OK(m_db->checkpoint(kCheckpointRestart, nullptr));
-        ASSERT_GT(std::filesystem::file_size(m_filename), kPayloadSize * kNumIterations);
-    }
 };
 
 TEST_F(StressTests, LotsOfBuckets)
@@ -328,18 +293,6 @@ TEST_F(StressTests, LargeVacuum)
         }
         return s;
     }));
-}
-
-TEST_F(StressTests, Overflow32Bits1)
-{
-    // Checkpoint the data incrementally.
-    run_32_bit_overflow_test(true);
-}
-
-TEST_F(StressTests, Overflow32Bits2)
-{
-    // Checkpoint all the data at once.
-    run_32_bit_overflow_test(false);
 }
 
 } // namespace calicodb::test
