@@ -24,8 +24,17 @@ namespace calicodb
 
 class Pager;
 
+inline auto get_full_filename(const std::string &filename) -> std::string
+{
+    std::string result(default_env().max_filename() + 1, '\0');
+    const auto s = default_env().full_filename(filename.c_str(), result.data(), result.size() - 1);
+    assert(s.is_ok());
+    result.resize(std::strlen(result.c_str()));
+    return result;
+}
+
 template <size_t Length = 16>
-static auto numeric_key(size_t key, char padding = '0') -> std::string
+auto numeric_key(size_t key, char padding = '0') -> std::string
 {
     const auto key_string = std::to_string(key);
     assert(Length >= key_string.size());
@@ -36,9 +45,10 @@ static auto numeric_key(size_t key, char padding = '0') -> std::string
 class DebugAllocator
 {
 public:
-    static auto config() -> AllocatorConfig;
+    static auto config() -> AllocatorConfig *;
 
     static auto set_limit(size_t limit) -> size_t;
+    static auto set_junk_byte(char c) -> char;
 
     // Allocation hook for testing
     using Hook = int (*)(void *);

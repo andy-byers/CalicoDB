@@ -130,9 +130,18 @@ using DebugHeader = uint64_t;
 struct {
     DebugAllocator::Hook hook = nullptr;
     void *hook_arg = nullptr;
-    uint64_t limit = kMaxLimit;
-    uint64_t bytes_used = 0;
+    size_t limit = kMaxLimit;
+    size_t bytes_used = 0;
+    char junk_byte = '\xAA'; // 10101010
 } s_debug;
+
+auto set_junk_memory(void *data, size_t size) -> void
+{
+    auto *ptr = static_cast<volatile char *>(data);
+    for (auto *end = ptr + size; ptr != end;) {
+        *ptr++ = s_debug.junk_byte;
+    }
+}
 
 } // namespace
 
@@ -157,6 +166,8 @@ auto debug_malloc(size_t size) -> void *
     if (ptr) {
         s_debug.bytes_used += alloc_size;
         *ptr++ = alloc_size;
+        // Fill initialized memory with predictable values.
+        set_junk_memory(ptr, size);
     }
     return ptr;
 }
@@ -171,7 +182,7 @@ auto debug_free(void *ptr) -> void
     // Fill the memory region with junk data. SQLite uses random bytes, which is probably more ideal,
     // but this should be good enough for now. This is intended to cause use-after-free bugs to be more
     // likely to result in crashes, rather than data corruption.
-    std::memset(ptr, 0xFF, alloc_size - sizeof(DebugHeader));
+    set_junk_memory(ptr, alloc_size - sizeof(DebugHeader));
     CALICODB_DEFAULT_FREE(static_cast<DebugHeader *>(ptr) - 1);
     s_debug.bytes_used -= alloc_size;
 }
@@ -213,13 +224,19 @@ auto debug_realloc(void *old_ptr, size_t new_size) -> void *
     return new_ptr;
 }
 
-auto DebugAllocator::config() -> AllocatorConfig
+auto DebugAllocator::set_junk_byte(char c) -> char
 {
-    return {
+    return exchange(s_debug.junk_byte, c);
+}
+
+auto DebugAllocator::config() -> AllocatorConfig *
+{
+    static AllocatorConfig s_config = {
         debug_malloc,
         debug_realloc,
         debug_free,
     };
+    return &s_config;
 }
 
 auto DebugAllocator::set_limit(size_t limit) -> size_t

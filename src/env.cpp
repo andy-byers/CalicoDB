@@ -53,6 +53,16 @@ auto EnvWrapper::new_file(const char *filename, OpenMode mode, File *&out) -> St
     return m_target->new_file(filename, mode, out);
 }
 
+auto EnvWrapper::max_filename() const -> size_t
+{
+    return m_target->max_filename();
+}
+
+auto EnvWrapper::full_filename(const char *filename, char *out, size_t out_size) -> Status
+{
+    return m_target->full_filename(filename, out, out_size);
+}
+
 auto EnvWrapper::new_logger(const char *filename, Logger *&out) -> Status
 {
     return m_target->new_logger(filename, out);

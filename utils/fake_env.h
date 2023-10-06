@@ -21,6 +21,17 @@ public:
     virtual auto put_file_contents(const char *filename, std::string contents) -> void;
 
     ~FakeEnv() override = default;
+
+    auto max_filename() const -> size_t override
+    {
+        return default_env().max_filename();
+    }
+
+    auto full_filename(const char *filename, char *out, size_t out_size) -> Status override
+    {
+        return default_env().full_filename(filename, out, out_size);
+    }
+
     auto new_logger(const char *filename, Logger *&out) -> Status override;
     auto new_file(const char *filename, OpenMode mode, File *&out) -> Status override;
     [[nodiscard]] auto file_exists(const char *filename) const -> bool override;

@@ -39,6 +39,8 @@ public:
     explicit PosixEnv();
     ~PosixEnv() override = default;
 
+    auto max_filename() const -> size_t override;
+    auto full_filename(const char *filename, char *out, size_t out_size) -> Status override;
     auto new_logger(const char *filename, Logger *&out) -> Status override;
     auto new_file(const char *filename, OpenMode mode, File *&out) -> Status override;
     [[nodiscard]] auto file_exists(const char *filename) const -> bool override;
@@ -52,6 +54,7 @@ public:
 
 constexpr size_t kPathMax = 512;       // Maximum path length from SQLite.
 constexpr int kFilePermissions = 0644; // -rw-r--r--
+constexpr size_t kMaxSymlinks = 100;
 
 // Constants for SQLite-style shared memory locking
 // There are "File::kShmLockCount" lock bytes available. See include/calicodb/env.h
@@ -259,6 +262,87 @@ auto posix_write(int file, Slice in) -> int
         }
         return rc;
     }
+}
+
+struct PathHelper {
+    Status s;
+    size_t symlinks;
+    char *output;
+    size_t size;
+    size_t used;
+};
+
+auto append_elements(PathHelper &path, const char *elements) -> void;
+
+auto append_one_element(PathHelper &path, const char *name, size_t size) -> void
+{
+    CALICODB_EXPECT_GT(size, 0);
+    CALICODB_EXPECT_NE(name, nullptr);
+    if (name[0] == '.') {
+        if (size == 1) {
+            return; // Current directory: NOOP
+        }
+        if (name[1] == '.' && size == 2) {
+            if (path.used > 1) {
+                // Parent directory: pop the last element
+                CALICODB_EXPECT_EQ(path.output[0], '/');
+                while (path.output[--path.used] != '/') {
+                }
+            }
+            return;
+        }
+    }
+    if (path.used + size + 2 >= path.size) {
+        path.s = Status::invalid_argument("path is too long");
+        return;
+    }
+    path.output[path.used++] = '/';
+    std::memcpy(path.output + path.used, name, size);
+    path.used += size;
+
+    if (!path.s.is_ok()) {
+        return;
+    }
+    struct stat st;
+    path.output[path.used] = '\0';
+    const auto *input = path.output;
+    if (lstat(input, &st)) {
+        if (errno != ENOENT) {
+            path.s = posix_error(errno);
+        }
+    } else if (S_ISLNK(st.st_mode)) {
+        char link[kPathMax + 2];
+        if (path.symlinks++ > kMaxSymlinks) {
+            path.s = Status::invalid_argument();
+        }
+        const auto got = readlink(input, link, kPathMax);
+        if (got <= 0 || got >= static_cast<ssize_t>(kPathMax)) {
+            path.s = Status::io_error("readlink");
+            return;
+        }
+        link[got] = '\0';
+        if (link[0] == '/') {
+            path.used = 0;
+        } else {
+            path.used -= size + 1;
+        }
+        append_elements(path, link);
+    }
+}
+
+auto append_elements(PathHelper &path, const char *elements) -> void
+{
+    size_t i = 0;
+    size_t j = 0;
+    do {
+        while (elements[i] && elements[i] != '/') {
+            ++i;
+        }
+        if (i > j) {
+            append_one_element(path, elements + j, i - j);
+        }
+        j = i + 1;
+    } while (elements[i++]);
 }
 
 struct PosixShm {
@@ -670,6 +754,29 @@ auto sync_parent_dir(const char *filename) -> void
 PosixEnv::PosixEnv()
 {
     seed_prng_state(m_rng, static_cast<uint32_t>(time(nullptr)));
+}
+
+auto PosixEnv::max_filename() const -> size_t
+{
+    return kPathMax;
+}
+
+auto PosixEnv::full_filename(const char *filename, char *out, size_t out_size) -> Status
+{
+    PathHelper path = {Status::ok(), 0, out, out_size, 0};
+    if (filename[0] != '/') {
+        char pwd[kPathMax + 2];
+        if (getcwd(pwd, kPathMax) == nullptr) {
+            return posix_error(errno);
+        }
+        append_elements(path, pwd);
+    }
+    append_elements(path, filename);
+    out[path.used] = '\0';
+    if (path.used < 2) {
+        return Status::invalid_argument();
+    }
+    return path.s;
 }
 
 auto PosixEnv::remove_file(const char *filename) -> Status

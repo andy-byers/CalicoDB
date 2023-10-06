@@ -27,6 +27,23 @@ constexpr auto clip_to_range(T &t, V min, V max) -> void
     }
 }
 
+auto get_full_filename(Env &env, const char *filename, String &result_out) -> Status
+{
+    if (!filename || !filename[0]) {
+        return Status::ok(); // In-memory database
+    }
+    const auto n = env.max_filename() + 1;
+    if (result_out.resize(n, '\0')) {
+        return Status::no_memory();
+    }
+    auto *ptr = result_out.data();
+    auto s = env.full_filename(filename, ptr, n);
+    if (s.is_ok() && result_out.resize(std::strlen(ptr))) {
+        s = Status::no_memory();
+    }
+    return s;
+}
+
 } // namespace
 
 auto DB::open(const Options &options, const char *filename, DB *&db) -> Status
@@ -40,25 +57,8 @@ auto DB::open(const Options &options, const char *filename, DB *&db) -> Status
     if (!s.is_ok()) {
         return s;
     }
-
-    // Allocate storage for the database filename.
     String db_name;
-    if (append_strings(db_name, Slice(filename))) {
-        return Status::no_memory();
-    }
-
-    // Determine and allocate storage for the WAL filename.
-    int rc;
     String wal_name;
-    if (sanitized.wal_filename[0] == '\0') {
-        rc = append_strings(wal_name, Slice(db_name), kDefaultWalSuffix);
-    } else {
-        rc = append_strings(wal_name, Slice(sanitized.wal_filename));
-    }
-    if (rc) {
-        return Status::no_memory();
-    }
-
     UserPtr<Env> temp_env;
     s = Status::no_memory();
     if (sanitized.temp_database) {
@@ -92,6 +92,21 @@ auto DB::open(const Options &options, const char *filename, DB *&db) -> Status
         sanitized.env = &default_env();
     }
 
+    // Determine absolute paths for the database and WAL.
+    s = get_full_filename(*sanitized.env, filename, db_name);
+    if (s.is_ok()) {
+        if (!sanitized.wal_filename || !sanitized.wal_filename[0]) {
+            if (append_strings(wal_name, Slice(db_name), kDefaultWalSuffix)) {
+                s = Status::no_memory();
+            }
+        } else {
+            s = get_full_filename(*sanitized.env, sanitized.wal_filename, wal_name);
+        }
+    }
+    if (!s.is_ok()) {
+        return s;
+    }
+
     impl = new (std::nothrow) DBImpl({
         options,
         sanitized,
@@ -102,14 +117,12 @@ auto DB::open(const Options &options, const char *filename, DB *&db) -> Status
         // DBImpl object now owns all memory allocated in this function.
         temp_env.release();
         s = impl->open(sanitized);
-
-        if (s.is_ok() && sanitized.integrity_check != Options::kCheckOff) {
-            s = impl->check_integrity();
-        }
+    } else {
+        s = Status::no_memory();
     }
 
 cleanup:
-    if (!s.is_ok() && impl) {
+    if (!s.is_ok()) {
         delete impl;
         impl = nullptr;
     }

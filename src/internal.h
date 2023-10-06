@@ -34,7 +34,7 @@
 namespace calicodb
 {
 
-// Possibly cause the caller to sleep for a random length of time
+// Possibly cause the calling thread to sleep for a random length of time
 // Used to provoke timing problems in code that uses atomics.
 inline auto debug_delay_impl(Env &env) -> void
 {

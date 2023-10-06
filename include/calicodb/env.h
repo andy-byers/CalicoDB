@@ -38,8 +38,11 @@ public:
     };
     virtual auto new_file(const char *filename, OpenMode mode, File *&out) -> Status = 0;
     virtual auto new_logger(const char *filename, Logger *&out) -> Status = 0;
-    virtual auto remove_file(const char *filename) -> Status = 0;
+
     [[nodiscard]] virtual auto file_exists(const char *filename) const -> bool = 0;
+    [[nodiscard]] virtual auto max_filename() const -> size_t = 0;
+    virtual auto full_filename(const char *filename, char *out, size_t out_size) -> Status = 0;
+    virtual auto remove_file(const char *filename) -> Status = 0;
 
     virtual auto srand(unsigned seed) -> void = 0;
     virtual auto rand() -> unsigned = 0;
@@ -139,8 +142,11 @@ public:
 
     auto new_logger(const char *filename, Logger *&out) -> Status override;
     auto new_file(const char *filename, OpenMode mode, File *&out) -> Status override;
-    auto remove_file(const char *filename) -> Status override;
+
     [[nodiscard]] auto file_exists(const char *filename) const -> bool override;
+    [[nodiscard]] auto max_filename() const -> size_t override;
+    auto full_filename(const char *filename, char *out, size_t out_size) -> Status override;
+    auto remove_file(const char *filename) -> Status override;
 
     auto srand(unsigned seed) -> void override;
     auto rand() -> unsigned override;

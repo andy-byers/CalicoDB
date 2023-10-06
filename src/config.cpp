@@ -9,27 +9,32 @@
 namespace calicodb
 {
 
-// Per-process configuration options.
-Config g_config = {
-    {
-        CALICODB_DEFAULT_MALLOC,
-        CALICODB_DEFAULT_REALLOC,
-        CALICODB_DEFAULT_FREE,
-    },
+namespace
+{
+
+constexpr AllocatorConfig kDefaultAllocatorConfig = {
+    CALICODB_DEFAULT_MALLOC,
+    CALICODB_DEFAULT_REALLOC,
+    CALICODB_DEFAULT_FREE,
 };
 
-auto configure(ConfigTarget target, ...) -> Status
-{
-    std::va_list args;
-    va_start(args, target);
+} // namespace
 
+// Per-process configuration options.
+Config g_config = {
+    kDefaultAllocatorConfig,
+};
+
+auto configure(ConfigTarget target, void *value) -> Status
+{
     Status s;
     switch (target) {
         case kGetAllocator:
-            *va_arg(args, AllocatorConfig *) = g_config.allocator;
+            *static_cast<AllocatorConfig *>(value) = g_config.allocator;
             break;
         case kSetAllocator:
-            g_config.allocator = va_arg(args, AllocatorConfig);
+            g_config.allocator = value ? *static_cast<const AllocatorConfig *>(value)
+                                       : kDefaultAllocatorConfig;
             CALICODB_EXPECT_NE(g_config.allocator.malloc, nullptr);
             CALICODB_EXPECT_NE(g_config.allocator.realloc, nullptr);
             CALICODB_EXPECT_NE(g_config.allocator.free, nullptr);
@@ -37,7 +42,6 @@ auto configure(ConfigTarget target, ...) -> Status
         default:
             s = Status::invalid_argument();
     }
-    va_end(args);
     return s;
 }
 
