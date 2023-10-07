@@ -60,7 +60,7 @@ public:
         auto s = DB::open(m_options, kFilename, db);
 
         if (s.is_ok()) {
-            s = db->run(WriteOptions(), [](auto &tx) {
+            s = db->update([](auto &tx) {
                 TestCursor c1;
                 TestCursor c2;
                 auto s = test_open_bucket(tx, "b1", c1);

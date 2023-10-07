@@ -287,7 +287,7 @@ struct DatabaseState {
         CALICODB_EXPECT_NE(db, nullptr);
         CALICODB_EXPECT_EQ(tx, nullptr);
         ASSERT_EQ(state, kNone);
-        s = db->new_tx(ReadOptions(), tx);
+        s = db->new_reader(tx);
         if (s.is_ok()) {
             state = kReadable;
         }
@@ -298,7 +298,7 @@ struct DatabaseState {
         CALICODB_EXPECT_NE(db, nullptr);
         CALICODB_EXPECT_EQ(tx, nullptr);
         ASSERT_EQ(state, kNone);
-        s = db->new_tx(WriteOptions(), tx);
+        s = db->new_writer(tx);
         if (s.is_ok()) {
             state = kWritable;
         }

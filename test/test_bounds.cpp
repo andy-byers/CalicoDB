@@ -58,7 +58,7 @@ protected:
         const uint32_t value_size = test_value * kMaxLen;
 
         ASSERT_OK(DB::open(m_options, m_filename.c_str(), m_db));
-        ASSERT_OK(m_db->run(WriteOptions(), [=](auto &tx) {
+        ASSERT_OK(m_db->update([=](auto &tx) {
             TestCursor c;
             auto s = test_create_and_open_bucket(tx, BucketOptions(), "bucket", c);
             if (s.is_ok()) {
@@ -69,7 +69,7 @@ protected:
 
         ASSERT_OK(m_db->checkpoint(kCheckpointPassive, nullptr));
 
-        ASSERT_OK(m_db->run(ReadOptions(), [=](const auto &tx) {
+        ASSERT_OK(m_db->view([=](const auto &tx) {
             TestCursor c;
             auto s = test_open_bucket(tx, "bucket", c);
             if (s.is_ok()) {
@@ -87,7 +87,7 @@ protected:
         const uint32_t value_size = test_value * (kMaxLen + 1);
 
         ASSERT_OK(DB::open(m_options, m_filename.c_str(), m_db));
-        ASSERT_OK(m_db->run(WriteOptions(), [=](auto &tx) {
+        ASSERT_OK(m_db->update([=](auto &tx) {
             TestCursor c;
             auto s = test_create_and_open_bucket(tx, BucketOptions(), "bucket", c);
             if (s.is_ok()) {
@@ -116,7 +116,7 @@ protected:
         ASSERT_OK(DB::open(options, m_filename.c_str(), m_db));
 
         for (size_t i = 0; i < kNumIterations; ++i) {
-            ASSERT_OK(m_db->run(WriteOptions(), [&buffer, i](auto &tx) {
+            ASSERT_OK(m_db->update([&buffer, i](auto &tx) {
                 TestCursor c;
                 auto s = test_create_and_open_bucket(tx, BucketOptions(), "b", c);
                 if (s.is_ok()) {
@@ -136,14 +136,14 @@ protected:
 TEST_F(BoundaryValueTests, BoundaryBucketName)
 {
     ASSERT_OK(DB::open(m_options, m_filename.c_str(), m_db));
-    ASSERT_OK(m_db->run(WriteOptions(), [=](auto &tx) {
+    ASSERT_OK(m_db->update([=](auto &tx) {
         TestCursor c;
         return test_create_and_open_bucket(tx, BucketOptions(), payload(kMaxLen), c);
     }));
 
     ASSERT_OK(m_db->checkpoint(kCheckpointPassive, nullptr));
 
-    ASSERT_OK(m_db->run(ReadOptions(), [=](const auto &tx) {
+    ASSERT_OK(m_db->view([=](const auto &tx) {
         TestCursor c;
         return test_open_bucket(tx, payload(kMaxLen), c);
     }));
@@ -152,14 +152,14 @@ TEST_F(BoundaryValueTests, BoundaryBucketName)
 TEST_F(BoundaryValueTests, OverflowBucketName)
 {
     ASSERT_OK(DB::open(m_options, m_filename.c_str(), m_db));
-    ASSERT_NOK(m_db->run(WriteOptions(), [=](auto &tx) {
+    ASSERT_NOK(m_db->update([=](auto &tx) {
         TestCursor c;
         return test_create_and_open_bucket(tx, BucketOptions(), payload(kMaxLen + 1), c);
     }));
 
     ASSERT_OK(m_db->checkpoint(kCheckpointPassive, nullptr));
 
-    ASSERT_NOK(m_db->run(ReadOptions(), [=](const auto &tx) {
+    ASSERT_NOK(m_db->view([=](const auto &tx) {
         TestCursor c;
         return test_open_bucket(tx, payload(kMaxLen + 1), c);
     }));
@@ -235,7 +235,7 @@ TEST_F(StressTests, LotsOfBuckets)
     // bunch of them.
     static constexpr size_t kNumBuckets = 100'000;
     ASSERT_OK(DB::open(Options(), m_filename.c_str(), m_db));
-    ASSERT_OK(m_db->run(WriteOptions(), [](auto &tx) {
+    ASSERT_OK(m_db->update([](auto &tx) {
         Status s;
         for (size_t i = 0; s.is_ok() && i < kNumBuckets; ++i) {
             TestCursor c;
@@ -247,7 +247,7 @@ TEST_F(StressTests, LotsOfBuckets)
         }
         return s;
     }));
-    ASSERT_OK(m_db->run(ReadOptions(), [](const auto &tx) {
+    ASSERT_OK(m_db->view([](const auto &tx) {
         Status s;
         for (size_t i = 0; s.is_ok() && i < kNumBuckets; ++i) {
             TestCursor c;
@@ -267,7 +267,7 @@ TEST_F(StressTests, LotsOfBuckets)
 TEST_F(StressTests, CursorLimit)
 {
     ASSERT_OK(DB::open(Options(), m_filename.c_str(), m_db));
-    ASSERT_OK(m_db->run(WriteOptions(), [](auto &tx) {
+    ASSERT_OK(m_db->update([](auto &tx) {
         Status s;
         std::vector<TestCursor> cursors(1'000);
         for (size_t i = 0; s.is_ok() && i < cursors.size(); ++i) {
@@ -299,7 +299,7 @@ TEST_F(StressTests, LargeVacuum)
     static constexpr size_t kTotalBuckets = 2'500;
     static constexpr size_t kDroppedBuckets = kTotalBuckets / 10;
     ASSERT_OK(DB::open(Options(), m_filename.c_str(), m_db));
-    ASSERT_OK(m_db->run(WriteOptions(), [](auto &tx) {
+    ASSERT_OK(m_db->update([](auto &tx) {
         Status s;
         for (size_t i = 0; s.is_ok() && i < kTotalBuckets; ++i) {
             TestCursor c;
@@ -320,7 +320,7 @@ TEST_F(StressTests, LargeVacuum)
         }
         return s;
     }));
-    ASSERT_OK(m_db->run(ReadOptions(), [](const auto &tx) {
+    ASSERT_OK(m_db->view([](const auto &tx) {
         Status s;
         for (size_t i = 0; s.is_ok() && i < kTotalBuckets; ++i) {
             TestCursor c;

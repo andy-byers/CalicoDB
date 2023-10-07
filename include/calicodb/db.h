@@ -63,14 +63,14 @@ public:
     // Forwards the Status returned by the callable `fn`. Note that the callable accepts a const
     // Tx reference, meaning methods that modify the database state cannot be called on it.
     template <class Fn>
-    auto run(const ReadOptions &options, Fn &&fn) const -> Status;
+    auto view(Fn &&fn) const -> Status;
 
     // Run a read-write transaction
     // REQUIRES: Status Fn::operator()(Tx &) is implemented.
     // If the callable `fn` returns an OK status, the transaction is committed. Otherwise,
     // the transaction is rolled back.
     template <class Fn>
-    auto run(const WriteOptions &options, Fn &&fn) -> Status;
+    auto update(Fn &&fn) -> Status;
 
     // Start a transaction manually
     // Stores a pointer to the heap-allocated transaction object in `tx_out` and returns OK on
@@ -79,8 +79,8 @@ public:
     // it is a readonly transaction. The caller is responsible for calling delete on the Tx
     // pointer when it is no longer needed.
     // NOTE: Consider using the DB::run() API instead.
-    virtual auto new_tx(const ReadOptions &options, Tx *&tx_out) const -> Status = 0;
-    virtual auto new_tx(const WriteOptions &options, Tx *&tx_out) -> Status = 0;
+    virtual auto new_reader(Tx *&tx_out) const -> Status = 0;
+    virtual auto new_writer(Tx *&tx_out) -> Status = 0;
 };
 
 } // namespace calicodb

@@ -65,7 +65,7 @@ public:
 
         reopen_db();
 
-        const auto s = m_db->run(WriteOptions(), [&stream, &db = *m_db](auto &tx) {
+        const auto s = m_db->update([&stream, &db = *m_db](auto &tx) {
             std::unique_ptr<Cursor> cursors[kMaxBuckets];
             std::string str;
             std::string str2;

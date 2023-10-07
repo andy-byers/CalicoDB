@@ -103,16 +103,6 @@ struct WalOptions {
     Stats *stat;
 };
 
-// Options to control the behavior of a readonly transaction (passed to DB::run() and
-// DB::new_tx())
-struct ReadOptions {
-};
-
-// Options to control the behavior of a read-write transaction (passed to DB::run() and
-// DB::new_tx())
-struct WriteOptions {
-};
-
 // Options for controlling the behavior of Tx::create_bucket()
 struct BucketOptions final {
     bool error_if_exists = false;

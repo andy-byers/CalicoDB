@@ -34,7 +34,7 @@ class Fuzzer
         delete m_c;
         delete m_tx;
         m_c = nullptr;
-        CHECK_OK(m_db->new_tx(WriteOptions(), m_tx));
+        CHECK_OK(m_db->new_writer(m_tx));
         reopen_bucket();
     }
 

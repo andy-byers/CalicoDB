@@ -773,7 +773,7 @@ TEST_P(TempEnvTests, Operations)
     m_env->sleep(1);
 
     Logger *logger;
-    ASSERT_OK(m_env->new_logger("NOOP", logger));
+    ASSERT_TRUE(m_env->new_logger("NOOP", logger).is_not_supported());
     ASSERT_EQ(logger, nullptr);
 }
 

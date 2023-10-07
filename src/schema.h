@@ -48,15 +48,12 @@ public:
         Id root_id;
         bool unique;
     };
-    [[nodiscard]] static auto decode_root_info(const Slice &data, RootInfo &info_out) -> bool;
-    [[nodiscard]] static auto encode_root_info(const RootInfo &info, char *root_id_out) -> size_t;
 
     auto TEST_validate() const -> void;
 
 private:
-    [[nodiscard]] auto decode_and_check_root_info(const Slice &data, RootInfo &info_out) -> bool;
+    auto decode_and_check_root_info(const Slice &data, RootInfo &info_out) -> Status;
     auto open_cursor(const Slice &name, const RootInfo &info, Cursor *&c_out) -> Status;
-    auto corrupted_root_id() -> Status;
     auto construct_or_reference_tree(const Slice &name, const RootInfo &info) -> Tree *;
     auto find_open_tree(const Slice &name) -> Tree *;
 

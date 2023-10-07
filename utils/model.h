@@ -78,8 +78,8 @@ public:
         return m_db->get_property(name, value_out);
     }
 
-    auto new_tx(const WriteOptions &, Tx *&tx_out) -> Status override;
-    auto new_tx(const ReadOptions &, Tx *&tx_out) const -> Status override;
+    auto new_writer(Tx *&tx_out) -> Status override;
+    auto new_reader(Tx *&tx_out) const -> Status override;
 
     auto checkpoint(CheckpointMode mode, CheckpointInfo *info_out) -> Status override
     {
@@ -178,16 +178,14 @@ public:
     auto check_record() const -> void
     {
         if (m_c->is_valid()) {
-            const auto key = m_saved
-                                 ? m_saved_key
-                                 : m_itr->first;
+            const auto key = m_saved ? m_saved_key
+                                     : m_itr->first;
             CHECK_EQ(key, to_string(m_c->key()));
 
-            std::string value;
             if constexpr (!kIsSchema) {
-                value = m_saved ? m_saved_val : m_itr->second;
+                const auto value = m_saved ? m_saved_val : m_itr->second;
+                CHECK_EQ(value, to_string(m_c->value()));
             }
-            CHECK_EQ(value, to_string(m_c->value()));
         }
     }
 

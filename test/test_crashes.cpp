@@ -392,7 +392,7 @@ protected:
                                        CrashEnv::CrashState());
 
         reinterpret_cast<ModelDB &>(db).check_consistency();
-        ASSERT_OK(db.run(ReadOptions(), [](const auto &tx) {
+        ASSERT_OK(db.view([](const auto &tx) {
             reinterpret_cast<const ModelTx &>(tx).check_consistency();
             return tx.status();
         }));
@@ -511,7 +511,7 @@ protected:
                 validate(*db);
 
                 ++src_counters[kSrcUpdate];
-                s = db->run(WriteOptions(), [i](auto &tx) {
+                s = db->update([i](auto &tx) {
                     return writer_task(tx, i);
                 });
                 if (!s.is_ok()) {
@@ -521,7 +521,7 @@ protected:
                 validate(*db);
 
                 ++src_counters[kSrcView];
-                s = db->run(ReadOptions(), [i](const auto &tx) {
+                s = db->view([i](const auto &tx) {
                     return reader_task(tx, i);
                 });
                 if (!s.is_ok()) {
@@ -609,7 +609,7 @@ protected:
 
             DB *db;
             ASSERT_OK(ModelDB::open(options, m_filename.c_str(), m_store, db));
-            ASSERT_OK(db->run(WriteOptions(), [](auto &tx) {
+            ASSERT_OK(db->update([](auto &tx) {
                 TestCursor c, keep_open;
                 auto s = test_create_and_open_bucket(tx, BucketOptions(), "b", c);
                 if (!s.is_ok()) {
@@ -637,7 +637,7 @@ protected:
 
             set_fault_injection_type(param.fault_type);
             run_until_completion([&db] {
-                return db->run(ReadOptions(), [](const auto &tx) {
+                return db->view([](const auto &tx) {
                     TestCursor c;
                     auto s = test_open_bucket(tx, "b", c);
                     if (!s.is_ok()) {
@@ -711,7 +711,7 @@ protected:
             validate(*db);
 
             run_until_completion([&db] {
-                return db->run(WriteOptions(), [](auto &tx) {
+                return db->update([](auto &tx) {
                     TestCursor c;
                     auto s = test_create_and_open_bucket(tx, BucketOptions(), "b", c);
                     for (size_t j = 0; s.is_ok() && j < kNumRecords; ++j) {
@@ -1116,7 +1116,7 @@ public:
     {
         // Don't drop any records until the commit.
         m_env->m_drop_file = "";
-        return m_db->run(WriteOptions(), [num_writes, version, &param, this](auto &tx) {
+        return m_db->update([num_writes, version, &param, this](auto &tx) {
             TestCursor c;
             EXPECT_OK(test_create_and_open_bucket(tx, BucketOptions(), "bucket", c));
             for (size_t i = 0; i < num_writes; ++i) {
@@ -1149,7 +1149,7 @@ public:
 
     auto check_records(size_t num_writes, size_t version)
     {
-        return m_db->run(ReadOptions(), [=](const auto &tx) {
+        return m_db->view([=](const auto &tx) {
             TestCursor c;
             auto s = test_open_bucket(tx, "bucket", c);
             for (size_t i = 0; i < num_writes && s.is_ok(); ++i) {
