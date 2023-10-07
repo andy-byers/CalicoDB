@@ -154,14 +154,14 @@ if (!s.is_ok()) {
 ```
 
 ### Readonly transactions
-Readonly transactions are typically run using `DB::run(ReadOptions(), fn)`, where `fn` is a callback that reads from the database.
+Readonly transactions are typically run using `DB::view(fn)`, where `fn` is a callback that reads from the database.
 
 ```C++
 #include "calicodb/db.h"
 #include "calicodb/tx.h"
 
 const char *bucket_name = "all_kittens"; // Lambda captures are supported.
-s = db->run(calicodb::ReadOptions(), [bucket_name](const calicodb::Tx &tx) {
+s = db->view([bucket_name](const calicodb::Tx &tx) {
     // Open buckets (see #buckets) and read some data. The `tx` object is managed 
     // by the database. DB::view() will forward the status returned by this callable.
     return calicodb::Status::ok();
@@ -169,7 +169,7 @@ s = db->run(calicodb::ReadOptions(), [bucket_name](const calicodb::Tx &tx) {
 ```
 
 ### Read-write transactions
-Read-write transactions can be run using `DB::run(WriteOptions(), fn)`, where `fn` is a callable that modifies the database.
+Read-write transactions can be run using `DB::update(fn)`, where `fn` is a callable that modifies the database.
 If an error is encountered during a read-write transaction, the transaction status (queried with `Tx::status()`) may be set.
 If this happens, the transaction object, and any buckets created from it, will return immediately with this same error whenever a read/write method is called.
 The only possible course-of-action in this case is to return from `fn` and let the database clean up.
@@ -178,12 +178,12 @@ The only possible course-of-action in this case is to return from `fn` and let t
 #include "calicodb/db.h"
 #include "calicodb/tx.h"
 
-s = db->run(calicodb::WriteOptions(), [](calicodb::Tx &tx) {
+s = db->update([](calicodb::Tx &tx) {
     // Read and/or write some records. If this callable returns an OK status,
-    // `tx::commit()` is called on `tx` and the resulting status returned.
+    // Tx::commit() is called on `tx` and the resulting status returned.
     // Otherwise, the transaction is rolled back and the original non-OK 
     // status is forwarded to the caller (rollback itself cannot fail). Note 
-    // that calling tx::commit() early does not invalidate the transaction 
+    // that calling Tx::commit() early does not invalidate the transaction 
     // handle. This allows one to perform multiple batches of writes per 
     // DB::run().
     return calicodb::Status::ok();
@@ -201,7 +201,7 @@ The caller is responsible for `delete`ing the `Tx` handle when it is no longer n
 calicodb::Tx *reader;
 
 // Start a readonly transaction.
-s = db->new_tx(calicodb::ReadOptions(), reader);
+s = db->new_reader(reader);
 if (!s.is_ok()) {
 }
 
@@ -216,7 +216,7 @@ calicodb::Tx *writer;
 
 // Start a read-write transaction. The handle resulting from this call can be
 // used to modify the database contents.
-s = db->new_tx(calicodb::WriteOptions(), writer);
+s = db->new_writer(writer);
 if (!s.is_ok()) {
 }
 

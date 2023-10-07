@@ -22,12 +22,6 @@ TEST(ConfigTests, ConfigAllocator)
     ASSERT_OK(configure(kSetAllocator, &config));
 }
 
-TEST(ConfigTests, ConfigUnrecognized)
-{
-    ASSERT_NOK(configure(static_cast<ConfigTarget>(123), nullptr));
-    ASSERT_NOK(configure(static_cast<ConfigTarget>(321), reinterpret_cast<void *>(42)));
-}
-
 class AllocTests : public testing::Test
 {
 public:

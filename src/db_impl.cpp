@@ -148,7 +148,7 @@ auto DBImpl::destroy(const Options &options, const char *filename) -> Status
         // The file header is not checked until a transaction is started. Run a read
         // transaction, which will return with a non-OK status if `filename` is not a
         // valid database.
-        s = db->run(ReadOptions(), [](auto &) {
+        s = db->view([](auto &) {
             return Status::ok();
         });
         if (s.is_ok()) {
@@ -281,14 +281,14 @@ auto DBImpl::prepare_tx(bool write, TxType *&tx_out) const -> Status
     return s;
 }
 
-auto DBImpl::new_tx(const WriteOptions &, Tx *&tx_out) -> Status
-{
-    return prepare_tx(true, tx_out);
-}
-
-auto DBImpl::new_tx(const ReadOptions &, Tx *&tx_out) const -> Status
+auto DBImpl::new_reader(Tx *&tx_out) const -> Status
 {
     return prepare_tx(false, tx_out);
+}
+
+auto DBImpl::new_writer(Tx *&tx_out) -> Status
+{
+    return prepare_tx(true, tx_out);
 }
 
 auto DBImpl::TEST_pager() const -> Pager &

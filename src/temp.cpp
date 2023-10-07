@@ -28,7 +28,7 @@ public:
 
     ~TempEnv() override = default;
 
-    auto max_filename() const -> size_t override
+    [[nodiscard]] auto max_filename() const -> size_t override
     {
         return default_env().max_filename();
     }
@@ -41,7 +41,7 @@ public:
     auto new_logger(const char *, Logger *&logger_out) -> Status override
     {
         logger_out = nullptr;
-        return Status::ok();
+        return Status::not_supported();
     }
 
     auto new_file(const char *filename, OpenMode, File *&file_out) -> Status override
@@ -50,7 +50,7 @@ public:
             if (append_strings(m_filename, filename)) {
                 return Status::no_memory();
             }
-        } else if (Slice(m_filename) != Slice(filename)) {
+        } else if (Slice(m_filename) != filename) {
             // Only supports a single file: the database file. The WAL is simulated by TempWal.
             return Status::not_supported();
         }
@@ -182,9 +182,8 @@ public:
     auto rand() -> unsigned override
     {
         // This method is not called by the library. Normally, rand() is called by WalImpl to
-        // generate a salt, but this class is only ever used with TempWal. If random numbers
-        // are ever needed for in-memory databases, we should use a better PRNG.
-        return static_cast<unsigned>(::rand());
+        // generate a salt, but this class is only ever used with TempWal.
+        return 0;
     }
 
     auto sleep(unsigned micros) -> void override

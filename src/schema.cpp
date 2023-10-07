@@ -12,9 +12,8 @@ namespace calicodb
 namespace
 {
 
-constexpr size_t kMinRootEntryLen = 2;
-constexpr size_t kMaxRootEntryLen = 1 + kVarintMaxLength;
-constexpr char kUniqueFlag = '\xFF';
+constexpr size_t kMaxRootEntrySize = 17; // "4294967295,unique"
+constexpr Slice kUniqueLabel = ",unique";
 
 auto no_bucket(const Slice &name) -> Status
 {
@@ -23,6 +22,39 @@ auto no_bucket(const Slice &name) -> Status
         .append_escaped(name)
         .append("\" does not exist")
         .build();
+}
+
+auto decode_root_info(const Slice &data, Schema::RootInfo &info_out) -> Status
+{
+    uint64_t number;
+    auto copy = data;
+    if (!consume_decimal_number(copy, &number)) {
+        return Status::corruption("root ID is invalid");
+    }
+    if (number > UINT32_MAX) {
+        return StatusBuilder::corruption("root ID %llu is out of bounds (maximum is %u)",
+                                         number, UINT32_MAX);
+    }
+    if (!copy.is_empty() && copy != kUniqueLabel) {
+        return Status::corruption("unique tag is invalid");
+    }
+    info_out.root_id.value = static_cast<uint32_t>(number);
+    info_out.unique = !copy.is_empty();
+    return Status::ok();
+}
+
+auto encode_root_info(const Schema::RootInfo &info, char *root_id_out) -> size_t
+{
+    static constexpr auto kMaxRootIdSize = kMaxRootEntrySize - kUniqueLabel.size();
+    const auto n = std::snprintf(root_id_out, kMaxRootIdSize, "%u", info.root_id.value);
+    CALICODB_EXPECT_LE(static_cast<size_t>(n), kMaxRootIdSize);
+    auto *ptr = root_id_out + n;
+
+    if (info.unique) {
+        std::memcpy(ptr, kUniqueLabel.data(), kUniqueLabel.size());
+        ptr += kUniqueLabel.size();
+    }
+    return static_cast<size_t>(ptr - root_id_out);
 }
 
 class SchemaCursor : public Cursor
@@ -59,11 +91,7 @@ public:
 
     [[nodiscard]] auto value() const -> Slice override
     {
-        // TODO: Parse the options string into a human-readable format, save it internally and return a slice to it.
-        //       We should skip the varint root ID or convert it into a decimal string.
-        CALICODB_EXPECT_TRUE(is_valid());
-        // return m_c->value();
-        return "";
+        return m_c->value();
     }
 
     auto find(const Slice &key) -> void override
@@ -125,15 +153,6 @@ auto Schema::close() -> void
     m_map.deactivate_cursors(nullptr);
 }
 
-auto Schema::corrupted_root_id() -> Status
-{
-    auto s = Status::corruption("bucket root page ID is corrupted");
-    if (m_pager->mode() > Pager::kRead) {
-        m_pager->set_status(s);
-    }
-    return s;
-}
-
 auto Schema::open_cursor(const Slice &name, const RootInfo &info, Cursor *&c_out) -> Status
 {
     if (auto *tree = construct_or_reference_tree(name, info)) {
@@ -152,16 +171,16 @@ auto Schema::create_bucket(const BucketOptions &options, const Slice &name, Curs
     auto s = m_internal.status();
     if (m_internal.is_valid()) {
         CALICODB_EXPECT_TRUE(s.is_ok());
-        if (!decode_and_check_root_info(m_internal.value(), info)) {
-            s = corrupted_root_id();
-        } else if (options.error_if_exists) {
+        if (options.error_if_exists) {
             s = Status::invalid_argument("bucket already exists");
+        } else {
+            s = decode_and_check_root_info(m_internal.value(), info);
         }
     } else if (s.is_ok()) {
         use_tree(&m_map);
         s = m_map.create(info.root_id);
         if (s.is_ok()) {
-            char buf[kMaxRootEntryLen];
+            char buf[kMaxRootEntrySize];
             info.unique = options.unique;
             const auto len = encode_root_info(info, buf);
             // On success, this call will leave c on the schema record of the bucket that we need to
@@ -188,40 +207,26 @@ auto Schema::open_bucket(const Slice &name, Cursor *&c_out) -> Status
     RootInfo info;
     if (!m_internal.is_valid()) {
         return s.is_ok() ? no_bucket(name) : s;
-    } else if (!decode_and_check_root_info(m_internal.value(), info)) {
-        return corrupted_root_id();
     }
-    return open_cursor(m_internal.key(), info, c_out);
+    CALICODB_EXPECT_TRUE(s.is_ok()); // Cursor invariant
+    s = decode_and_check_root_info(m_internal.value(), info);
+    if (s.is_ok()) {
+        s = open_cursor(m_internal.key(), info, c_out);
+    }
+    return s;
 }
 
-auto Schema::decode_root_info(const Slice &data, RootInfo &info_out) -> bool
+auto Schema::decode_and_check_root_info(const Slice &data, RootInfo &info_out) -> Status
 {
-    if (data.size() < kMinRootEntryLen) {
-        return false;
+    auto s = decode_root_info(data, info_out);
+    if (s.is_ok() && info_out.root_id.value > m_pager->page_count()) {
+        s = StatusBuilder::corruption("root ID %u is out of bounds (page count is %u)",
+                                      info_out.root_id.value, m_pager->page_count());
     }
-    info_out.unique = data[0] == kUniqueFlag;
-    if (!info_out.unique && data[0]) {
-        return false; // Invalid "unique flag"
+    if (!s.is_ok()) {
+        m_pager->set_status(s);
     }
-    uint32_t num;
-    if (decode_varint(data.data() + 1, data.data() + data.size(), num)) {
-        info_out.root_id.value = num;
-        return true;
-    }
-    return false;
-}
-
-auto Schema::decode_and_check_root_info(const Slice &data, RootInfo &info_out) -> bool
-{
-    return decode_root_info(data, info_out) &&
-           info_out.root_id.value <= m_pager->page_count();
-}
-
-auto Schema::encode_root_info(const RootInfo &info, char *root_id_out) -> size_t
-{
-    root_id_out[0] = info.unique ? kUniqueFlag : '\0';
-    const auto *end = encode_varint(root_id_out + 1, info.root_id.value);
-    return static_cast<size_t>(end - root_id_out);
+    return s;
 }
 
 auto Schema::find_open_tree(const Slice &name) -> Tree *
@@ -289,8 +294,9 @@ auto Schema::drop_bucket(const Slice &name) -> Status
     use_tree(&m_map);
 
     RootInfo info;
-    if (!decode_and_check_root_info(m_internal.value(), info)) {
-        return corrupted_root_id();
+    s = decode_and_check_root_info(m_internal.value(), info);
+    if (!s.is_ok()) {
+        return s;
     }
     ObjectPtr<Tree> drop(construct_or_reference_tree(m_internal.key(), info));
     if (!drop) {
@@ -318,12 +324,14 @@ auto Schema::drop_bucket(const Slice &name) -> Status
         m_internal.seek_first();
         s = m_internal.status();
         while (m_internal.is_valid()) {
-            if (!decode_and_check_root_info(m_internal.value(), info)) {
-                return corrupted_root_id();
+            CALICODB_EXPECT_TRUE(s.is_ok());
+            s = decode_and_check_root_info(m_internal.value(), info);
+            if (!s.is_ok()) {
+                return s;
             }
             if (info.root_id == rr.before) {
                 info.root_id = rr.after;
-                char buf[kMaxRootEntryLen];
+                char buf[kMaxRootEntrySize];
                 const auto len = encode_root_info(info, buf);
                 s = m_map.put(*c, m_internal.key(), Slice(buf, len));
                 found = true;

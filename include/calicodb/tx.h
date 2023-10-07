@@ -102,29 +102,29 @@ public:
 };
 
 template <class Fn>
-auto DB::run(const ReadOptions &options, Fn &&fn) const -> Status
+auto DB::view(Fn &&fn) const -> Status
 {
     Tx *tx;
-    auto s = new_tx(options, tx);
+    auto s = new_reader(tx);
     if (s.is_ok()) {
-        const auto *const_tx = tx;
-        s = fn(*const_tx);
+        const auto *immutable = tx;
+        s = fn(*immutable);
         delete tx;
     }
     return s;
 }
 
 template <class Fn>
-auto DB::run(const WriteOptions &options, Fn &&fn) -> Status
+auto DB::update(Fn &&fn) -> Status
 {
     Tx *tx;
-    auto s = new_tx(options, tx);
+    auto s = new_writer(tx);
     if (s.is_ok()) {
         s = fn(*tx);
         if (s.is_ok()) {
             s = tx->commit();
         }
-        // Implicit rollback of all uncommitted changes.
+        // Rollback all uncommitted changes.
         delete tx;
     }
     return s;

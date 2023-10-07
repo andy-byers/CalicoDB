@@ -31,18 +31,18 @@ auto ModelDB::check_consistency() const -> void
     reinterpret_cast<const DBImpl *>(m_db)->TEST_pager().assert_state();
 }
 
-auto ModelDB::new_tx(const WriteOptions &options, Tx *&tx_out) -> Status
+auto ModelDB::new_writer(Tx *&tx_out) -> Status
 {
-    auto s = m_db->new_tx(options, tx_out);
+    auto s = m_db->new_writer(tx_out);
     if (s.is_ok()) {
         tx_out = new ModelTx(*m_store, *tx_out);
     }
     return s;
 }
 
-auto ModelDB::new_tx(const ReadOptions &options, Tx *&tx_out) const -> Status
+auto ModelDB::new_reader(Tx *&tx_out) const -> Status
 {
-    auto s = m_db->new_tx(options, tx_out);
+    auto s = m_db->new_reader(tx_out);
     if (s.is_ok()) {
         tx_out = new ModelTx(*m_store, *tx_out);
     }

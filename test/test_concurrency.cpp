@@ -307,7 +307,7 @@ protected:
         for (size_t n = 0; s.is_ok() && n < co.op_args[0]; ++n) {
             barrier_wait(barrier);
 
-            s = co.db->run(ReadOptions(), [&co, barrier](const auto &tx) {
+            s = co.db->view([&co, barrier](const auto &tx) {
                 barrier_wait(barrier);
 
                 TestCursor c;
@@ -362,7 +362,7 @@ protected:
         for (size_t n = 0; s.is_ok() && n < co.op_args[0]; ++n) {
             barrier_wait(barrier);
 
-            s = co.db->run(WriteOptions(), [&co, barrier](auto &tx) {
+            s = co.db->update([&co, barrier](auto &tx) {
                 barrier_wait(barrier);
 
                 TestCursor c;
