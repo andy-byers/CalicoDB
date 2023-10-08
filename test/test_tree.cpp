@@ -87,7 +87,7 @@ public:
         if (s.is_ok()) {
             if (ref->refs == 1) {
                 CALICODB_EXPECT_FALSE(PointerMap::is_map(ref->page_id, TEST_PAGE_SIZE));
-                node_out = Node::from_new_page(*ref, TEST_PAGE_SIZE, m_pager->scratch(), is_external);
+                node_out = Node::from_new_page(m_tree->node_options, *ref, is_external);
             } else {
                 m_pager->release(ref);
                 s = StatusBuilder::corruption("page %u is corrupted", ref->page_id.value);

@@ -36,7 +36,6 @@ public:
     };
     mutable CrashState m_oom_state = {};
     mutable CrashState m_syscall_state = {};
-    bool m_drop_unsynced = false;
 
     explicit CrashEnv(Env &env)
         : EnvWrapper(env)
@@ -160,19 +159,9 @@ public:
             auto sync() -> Status override
             {
                 if (m_env->should_next_syscall_fail()) {
-                    if (m_env->m_drop_unsynced) {
-                        TEST_LOG << "Loading "
-                                 << static_cast<double>(m_backup.size()) / 1'024.0
-                                 << " KiB backup\n";
-                        load_from_backup();
-                    }
                     return injected_fault();
                 }
-                auto s = FileWrapper::sync();
-                if (s.is_ok() && m_env->m_drop_unsynced) {
-                    save_to_backup();
-                }
-                return s;
+                return FileWrapper::sync();
             }
 
             auto file_lock(FileLockMode mode) -> Status override
@@ -492,10 +481,6 @@ protected:
         options.sync_mode = param.test_sync_mode
                                 ? Options::kSyncFull
                                 : Options::kSyncNormal;
-        // m_drop_unsynced has no effect unless m_syscall_state.enabled is true. If both are true, then failures on fsync()
-        // cause all data written since the last fsync() to be dropped. This only applies to the file that encountered
-        // the fault.
-        m_env->m_drop_unsynced = param.test_sync_mode;
 
         for (size_t i = 0; i < kNumIterations; ++i) {
             set_fault_injection_type(param.fault_type);
@@ -692,10 +677,6 @@ protected:
         options.sync_mode = param.test_sync_mode
                                 ? Options::kSyncFull
                                 : Options::kSyncNormal;
-        // m_drop_unsynced has no effect unless m_syscall_state.enabled is true. If both are true, then failures on fsync()
-        // cause all data written since the last fsync() to be dropped. This only applies to the file that encountered
-        // the fault.
-        m_env->m_drop_unsynced = param.test_sync_mode;
 
         for (size_t i = 0; i < kNumIterations; ++i) {
             set_fault_injection_type(param.fault_type);
