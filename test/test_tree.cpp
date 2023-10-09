@@ -74,7 +74,6 @@ public:
     {
         EXPECT_TRUE(m_status.is_ok());
         EXPECT_EQ(m_c, nullptr);
-        delete m_tree;
         Mem::delete_object(m_pager);
         delete m_file;
         delete m_env;
@@ -133,6 +132,7 @@ public:
         m_c = nullptr;
         m_tree->deactivate_cursors(nullptr);
         m_pager->finish();
+        delete m_tree;
     }
 
     auto validate() const -> void
@@ -671,33 +671,22 @@ TEST_F(NonUniqueTreeTests, WriteAndErase2)
 
 TEST_F(NonUniqueTreeTests, WriteAndErase3)
 {
-    struct Record {
-        std::string key;
-        std::string value;
-    };
     static constexpr auto kMaxIndex = kInitialRecordCount / 10;
     unsigned counters[kMaxIndex] = {};
-    std::vector<Record> records;
+    std::vector<std::pair<std::string, std::string>> records;
     RandomGenerator random;
 
     for (size_t i = 0; i < kInitialRecordCount; ++i) {
         const auto index = random.Next(kMaxIndex - 1);
         const auto count = counters[index]++;
-        Record record = {numeric_key(index), make_long_key(count)};
-        ASSERT_OK(m_tree->put(tree_cursor_cast(*m_c), record.key, record.value));
+        auto record = std::make_pair(numeric_key(index), make_long_key(count));
+        ASSERT_OK(m_tree->put(tree_cursor_cast(*m_c), record.first, record.second));
         records.push_back(std::move(record));
     }
 
     std::sort(begin(records), end(records), [](const auto &lhs, const auto &rhs) {
-        if (lhs.key < rhs.key) {
-            return true;
-        } else if (lhs.key > rhs.key) {
-            return false;
-        } else if (lhs.value > rhs.value) {
-            return true;
-        } else {
-            return false;
-        }
+        const auto cmp = Slice(lhs.first).compare(rhs.first);
+        return cmp ? cmp < 0 : lhs.second > rhs.second;
     });
 
     m_c->seek_first();
@@ -1922,6 +1911,23 @@ TEST_F(CursorModificationTests, EraseAllRecordsFromRight)
         ASSERT_OK(m_tree->erase(tree_cursor_cast(*m_c)));
         ASSERT_FALSE(m_c->is_valid());
     }
+    validate();
+}
+
+TEST_F(CursorModificationTests, EraseSecondToLast)
+{
+    init_tree(*this, kInitLongKeys | kInitLongValues);
+    m_c->seek_last();
+    for (size_t i = 0; i < kInitialRecordCount; ++i) {
+        m_c->previous();
+        if (!m_c->is_valid()) {
+            ASSERT_EQ(i, kInitialRecordCount - 1);
+            m_c->seek_first();
+        }
+        ASSERT_OK(m_tree->erase(tree_cursor_cast(*m_c)));
+        ASSERT_EQ(m_c->is_valid(), i < kInitialRecordCount - 1);
+    }
+    ASSERT_FALSE(m_c->is_valid());
     validate();
 }
 

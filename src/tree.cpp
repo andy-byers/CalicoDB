@@ -1021,7 +1021,7 @@ auto Tree::make_pivot(const PivotOptions &opt, Cell &pivot_out) -> Status
         while (s.is_ok() && !prefix.is_empty()) {
             PageRef *dst;
             // Allocate a new overflow page.
-            s = allocate(kAllocateAny, dst_bptr, dst);
+            s = allocate(kAllocateAny, opt.parent->ref->page_id, dst);
             if (!s.is_ok()) {
                 break;
             }
@@ -1233,7 +1233,7 @@ auto Tree::split_nonroot(TreeCursor &c) -> Status
 
     Node left;
     auto &parent = c.m_node_path[c.m_level - 1];
-    auto s = allocate(kAllocateAny, c.page_id(), left.ref);
+    auto s = allocate(kAllocateAny, parent.ref->page_id, left.ref);
     const auto pivot_idx = c.m_idx_path[c.m_level - 1];
 
     if (s.is_ok()) {
@@ -1319,12 +1319,17 @@ auto Tree::split_nonroot_fast(TreeCursor &c, Node &parent, Node right) -> Status
     }
 
 cleanup:
-    const auto before = NodeHdr::get_cell_count(left.hdr()) + // # cells moved to left
-                        !left.is_leaf();                      // 1 pivot cell posted to parent
-    ++c.m_idx_path[c.m_level - 1];
-    c.m_idx -= before;
-    release(move(left));
-    c.m_node = move(right);
+    const auto before =
+        NodeHdr::get_cell_count(left.hdr()) + // # cells moved to left
+        !left.is_leaf();                      // 1 pivot cell posted to parent
+    if (c.m_idx >= before) {
+        ++c.m_idx_path[c.m_level - 1];
+        c.m_idx -= before;
+        release(move(left));
+        c.m_node = move(right);
+    } else {
+        release(move(right));
+    }
     c.move_to_parent(true);
     return s;
 }
@@ -1606,41 +1611,44 @@ auto Tree::fix_nonroot(TreeCursor &c, Node &parent, uint32_t idx) -> Status
 
 auto Tree::fix_root(TreeCursor &c) -> Status
 {
-    auto &parent = c.m_node;
-    CALICODB_EXPECT_EQ(parent.ref->page_id, root());
+    CALICODB_EXPECT_EQ(c.page_id(), root());
+    CALICODB_EXPECT_EQ(c.m_level, 0);
     CALICODB_EXPECT_EQ(c.m_idx, 0);
-    if (parent.is_leaf()) {
+    if (c.m_node.is_leaf()) {
         // The whole tree is empty.
         return Status::ok();
     }
 
     Status s;
     auto child = move(c.m_node_path[1]);
-
-    if (parent.ref->page_id.is_root() && child.usable_space < FileHdr::kSize) {
+    if (c.page_id().is_root() && child.usable_space < FileHdr::kSize) {
+        // There is not enough room for the child contents to be moved to the root node. Split the
+        // child instead.
         Cell cell;
-        const auto split_loc = NodeHdr::get_cell_count(child.hdr()) - 1;
+        const auto path_loc = c.m_idx_path[1];
+        const auto cell_count = NodeHdr::get_cell_count(child.hdr());
+        const auto split_loc = minval(path_loc, cell_count - 1);
         if (child.read(split_loc, cell)) {
-            s = corrupted_node(parent.ref->page_id);
+            s = corrupted_node(c.page_id());
             release(move(child));
         } else {
+            // Note that it is possible for path_loc != split_loc.
             detach_cell(cell, m_cell_scratch[0]);
             child.erase(split_loc, cell.footprint);
             c.assign_child(move(child));
-            m_ovfl.cell = cell;
-            m_ovfl.pid = c.page_id();
-            m_ovfl.idx = split_loc;
+            c.m_idx = path_loc;
+            m_ovfl = {cell, c.page_id(), split_loc};
             s = split_nonroot(c);
         }
     } else {
-        if (merge_root(parent, child, page_size)) {
-            s = corrupted_node(parent.ref->page_id);
+        if (merge_root(c.m_node, child, page_size)) {
+            s = corrupted_node(c.page_id());
             release(move(child));
         } else {
             s = Freelist::add(*m_pager, child.ref);
         }
         if (s.is_ok()) {
-            s = fix_links(parent);
+            s = fix_links(c.m_node);
         }
         c.handle_merge_root();
     }
