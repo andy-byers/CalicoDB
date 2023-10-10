@@ -77,7 +77,7 @@ static constexpr size_t kMinFrameCount = 1;
 static constexpr size_t kMaxCacheSize = 1 << 30;
 
 // Number of scratch pages needed to perform tree operations
-static constexpr size_t kScratchBufferPages = 2;
+static constexpr size_t kScratchBufferPages = 3;
 
 // Page number of the first pointer map page
 static constexpr size_t kFirstMapPage = 2;

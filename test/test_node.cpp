@@ -18,11 +18,12 @@ public:
     explicit NodeTests()
         : m_backing(TEST_PAGE_SIZE, '\0'),
           m_scratch(TEST_PAGE_SIZE, '\0'),
+          m_options(TEST_PAGE_SIZE, m_scratch.data()),
           m_ref(PageRef::alloc(TEST_PAGE_SIZE))
     {
         env = &default_env();
         m_ref->page_id = Id(3);
-        m_node = Node::from_new_page(*m_ref, TEST_PAGE_SIZE, m_scratch.data(), true);
+        m_node = Node::from_new_page(m_options, *m_ref, true);
     }
 
     ~NodeTests() override
@@ -32,6 +33,7 @@ public:
 
     std::string m_backing;
     std::string m_scratch;
+    const Node::Options m_options;
     PageRef *const m_ref;
     Node m_node;
 
@@ -64,7 +66,6 @@ public:
     [[nodiscard]] auto make_max_cell(uint32_t k) -> Cell
     {
         static constexpr auto kMaxSize = kMaxAllocation;
-        const auto max_local = compute_local_pl_size(kMaxSize, kMaxSize, TEST_PAGE_SIZE);
         auto *e_ptr = encode_varint(m_max_external_cell, kMaxSize); // Value size
         e_ptr = encode_varint(e_ptr, kMaxSize);                     // Key size
         auto *i_ptr = m_max_internal_cell + sizeof(uint32_t);
@@ -76,14 +77,14 @@ public:
             i_ptr,
             kMaxSize,
             kMaxSize,
-            max_local,
-            4 + static_cast<uint32_t>(kVarintMaxLength) + max_local + 4,
+            m_node.max_local,
+            4 + static_cast<uint32_t>(kVarintMaxLength) + m_node.max_local + 4,
         };
         if (m_node.is_leaf()) {
             cell.ptr = m_max_external_cell;
             cell.key = e_ptr;
-            cell.total_pl_size = 2 * kMaxSize;
-            cell.footprint = 2 * static_cast<uint32_t>(kVarintMaxLength) + max_local + 4;
+            cell.total_size = 2 * kMaxSize;
+            cell.footprint = 2 * static_cast<uint32_t>(kVarintMaxLength) + m_node.max_local + 4;
         }
         // Big-endian so order is preserved.
         cell.key[0] = static_cast<char>(k >> 8);
@@ -122,7 +123,7 @@ public:
         }
 
         std::memset(m_ref->data, 0, TEST_PAGE_SIZE);
-        m_node = Node::from_new_page(*m_ref, TEST_PAGE_SIZE, m_scratch.data(), is_leaf);
+        m_node = Node::from_new_page(m_options, *m_ref, is_leaf);
         return true;
     }
 };
@@ -234,7 +235,7 @@ TEST_F(BlockAllocatorTests, ExternalNodesConsume3ByteFragments)
 
 TEST_F(BlockAllocatorTests, InternalNodesConsume3ByteFragments)
 {
-    m_node = Node::from_new_page(*m_ref, TEST_PAGE_SIZE, m_scratch.data(), false);
+    m_node = Node::from_new_page(m_options, *m_ref, false);
 
     reserve_for_test(11);
     NodeHdr::put_frag_count(m_node.hdr(), 3);
@@ -269,8 +270,8 @@ TEST_F(NodeTests, CellLifecycle)
             const auto cell_in = make_cell(j);
             Cell cell_out = {};
             ASSERT_EQ(0, m_node.read(j, cell_out));
-            ASSERT_EQ(cell_in.local_pl_size, cell_out.local_pl_size);
-            ASSERT_EQ(cell_in.total_pl_size, cell_out.total_pl_size);
+            ASSERT_EQ(cell_in.local_size, cell_out.local_size);
+            ASSERT_EQ(cell_in.total_size, cell_out.total_size);
             ASSERT_EQ(Slice(cell_in.key, cell_in.key_size),
                       Slice(cell_out.key, cell_out.key_size));
         }
@@ -315,29 +316,42 @@ TEST_F(NodeTests, OverwriteOnEraseBehavior)
     }
 }
 
-TEST_F(NodeTests, NonRootFits4Cells)
+TEST_F(NodeTests, ExternalNonRootFits2Cells)
 {
-    for (auto t : {kExternalNode, kInternalNode}) {
-        ASSERT_TRUE(change_node_type(t));
-        ASSERT_LT(0, m_node.insert(0, make_max_cell(0)));
-        ASSERT_LT(0, m_node.insert(1, make_max_cell(1)));
-        ASSERT_LT(0, m_node.insert(2, make_max_cell(2)));
-        ASSERT_LT(0, m_node.insert(3, make_max_cell(3)));
-        ASSERT_EQ(0, m_node.insert(4, make_max_cell(4))); // Overflow
-        ASSERT_TRUE(m_node.assert_integrity());
-    }
+    ASSERT_TRUE(change_node_type(kExternalNode));
+    ASSERT_LT(0, m_node.insert(0, make_max_cell(0)));
+    ASSERT_LT(0, m_node.insert(1, make_max_cell(1)));
+    ASSERT_EQ(0, m_node.insert(2, make_max_cell(2))); // Overflow
+    ASSERT_TRUE(m_node.assert_integrity());
 }
 
-TEST_F(NodeTests, RootFits3Cells)
+TEST_F(NodeTests, InternalNonRootFits4Cells)
 {
-    for (auto t : {kExternalRoot, kInternalRoot}) {
-        ASSERT_TRUE(change_node_type(t));
-        ASSERT_LT(0, m_node.insert(0, make_max_cell(0)));
-        ASSERT_LT(0, m_node.insert(1, make_max_cell(1)));
-        ASSERT_LT(0, m_node.insert(2, make_max_cell(2)));
-        ASSERT_EQ(0, m_node.insert(3, make_max_cell(3))); // Overflow
-        ASSERT_OK(m_node.check_integrity());
-    }
+    ASSERT_TRUE(change_node_type(kInternalNode));
+    ASSERT_LT(0, m_node.insert(0, make_max_cell(0)));
+    ASSERT_LT(0, m_node.insert(1, make_max_cell(1)));
+    ASSERT_LT(0, m_node.insert(2, make_max_cell(2)));
+    ASSERT_LT(0, m_node.insert(3, make_max_cell(3)));
+    ASSERT_EQ(0, m_node.insert(4, make_max_cell(4))); // Overflow
+    ASSERT_TRUE(m_node.assert_integrity());
+}
+
+TEST_F(NodeTests, ExternalRootFits1Cell)
+{
+    ASSERT_TRUE(change_node_type(kExternalRoot));
+    ASSERT_LT(0, m_node.insert(0, make_max_cell(0)));
+    ASSERT_EQ(0, m_node.insert(1, make_max_cell(1))); // Overflow
+    ASSERT_TRUE(m_node.assert_integrity());
+}
+
+TEST_F(NodeTests, InternalRootFits3Cells)
+{
+    ASSERT_TRUE(change_node_type(kInternalRoot));
+    ASSERT_LT(0, m_node.insert(0, make_max_cell(0)));
+    ASSERT_LT(0, m_node.insert(1, make_max_cell(1)));
+    ASSERT_LT(0, m_node.insert(2, make_max_cell(2)));
+    ASSERT_EQ(0, m_node.insert(3, make_max_cell(3))); // Overflow
+    ASSERT_TRUE(m_node.assert_integrity());
 }
 
 TEST(NodeHeaderTests, ReportsInvalidNodeType)
@@ -357,12 +371,12 @@ public:
     auto assert_corrupted_node() -> void
     {
         Node corrupted;
-        ASSERT_NE(Node::from_existing_page(*m_node.ref, TEST_PAGE_SIZE, m_scratch.data(), corrupted), 0);
+        ASSERT_NE(Node::from_existing_page(m_options, *m_node.ref, corrupted), 0);
     }
     auto assert_valid_node() -> void
     {
         Node valid;
-        ASSERT_EQ(Node::from_existing_page(*m_node.ref, TEST_PAGE_SIZE, m_scratch.data(), valid), 0);
+        ASSERT_EQ(Node::from_existing_page(m_options, *m_node.ref, valid), 0);
     }
 };
 

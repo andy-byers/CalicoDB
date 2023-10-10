@@ -76,7 +76,7 @@ auto remove_ivec_slot(Node &node, uint32_t index)
     NodeHdr::put_cell_count(node.hdr(), count - 1);
 }
 
-[[nodiscard]] auto external_parse_cell(char *data, const char *limit, uint32_t total_space, Cell &cell_out)
+[[nodiscard]] auto external_parse_cell(char *data, const char *limit, uint32_t min_local, uint32_t max_local, Cell &cell_out)
 {
     uint32_t key_size, value_size;
     const auto *ptr = data;
@@ -88,36 +88,36 @@ auto remove_ivec_slot(Node &node, uint32_t index)
     }
     const auto hdr_size = static_cast<uintptr_t>(ptr - data);
     const auto pad_size = hdr_size > kMinCellHeaderSize ? 0 : kMinCellHeaderSize - hdr_size;
-    const auto local_pl_size = compute_local_pl_size(key_size, value_size, total_space);
-    const auto has_remote = local_pl_size < key_size + value_size;
-    const auto footprint = hdr_size + pad_size + local_pl_size + has_remote * sizeof(uint32_t);
+    const auto local_size = compute_local_size(key_size, value_size, min_local, max_local);
+    const auto has_remote = local_size < key_size + value_size;
+    const auto footprint = hdr_size + pad_size + local_size + has_remote * sizeof(uint32_t);
 
     if (data + footprint <= limit) {
         cell_out.ptr = data;
         cell_out.key = data + hdr_size + pad_size;
         cell_out.key_size = key_size;
-        cell_out.total_pl_size = key_size + value_size;
-        cell_out.local_pl_size = local_pl_size;
+        cell_out.total_size = key_size + value_size;
+        cell_out.local_size = local_size;
         cell_out.footprint = static_cast<uint32_t>(footprint);
         return 0;
     }
     return -1;
 }
 
-[[nodiscard]] auto internal_parse_cell(char *data, const char *limit, uint32_t total_space, Cell &cell_out)
+[[nodiscard]] auto internal_parse_cell(char *data, const char *limit, uint32_t min_local, uint32_t max_local, Cell &cell_out)
 {
     uint32_t key_size;
     if (const auto *ptr = decode_varint(data + sizeof(uint32_t), limit, key_size)) {
         const auto hdr_size = static_cast<uintptr_t>(ptr - data);
-        const auto local_pl_size = compute_local_pl_size(key_size, 0, total_space);
-        const auto has_remote = local_pl_size < key_size;
-        const auto footprint = hdr_size + local_pl_size + has_remote * sizeof(uint32_t);
+        const auto local_size = compute_local_size(key_size, 0, min_local, max_local);
+        const auto has_remote = local_size < key_size;
+        const auto footprint = hdr_size + local_size + has_remote * sizeof(uint32_t);
         if (data + footprint <= limit) {
             cell_out.ptr = data;
             cell_out.key = data + hdr_size;
             cell_out.key_size = key_size;
-            cell_out.total_pl_size = key_size;
-            cell_out.local_pl_size = local_pl_size;
+            cell_out.total_size = key_size;
+            cell_out.local_size = local_size;
             cell_out.footprint = static_cast<uint32_t>(footprint);
             return 0;
         }
@@ -207,6 +207,29 @@ auto allocate_from_gap(Node &node, uint32_t needed_size) -> uint32_t
         return offset;
     }
     return 0U;
+}
+
+[[nodiscard]] constexpr auto min_local_payload_size(uint32_t total_space) -> uint32_t
+{
+    return static_cast<uint32_t>((total_space - NodeHdr::kSize) * 32 / 256 -
+                                 kMaxCellHeaderSize - kSlotWidth);
+}
+
+[[nodiscard]] constexpr auto max_local_payload_size(uint32_t total_space) -> uint32_t
+{
+    return static_cast<uint32_t>((total_space - NodeHdr::kSize) * 64 / 256 -
+                                 kMaxCellHeaderSize - kSlotWidth);
+}
+
+[[nodiscard]] constexpr auto min_leaf_payload_size(uint32_t total_space) -> uint32_t
+{
+    return min_local_payload_size(total_space);
+}
+
+[[nodiscard]] constexpr auto max_leaf_payload_size(uint32_t total_space) -> uint32_t
+{
+    return static_cast<uint32_t>((total_space - NodeHdr::kSize) * 128 / 256 -
+                                 kMaxCellHeaderSize - kSlotWidth);
 }
 
 } // namespace
@@ -395,12 +418,22 @@ auto BlockAllocator::defragment(Node &node, int skip) -> int
     return 0;
 }
 
+Node::Options::Options(uint32_t page_size, char *scratch)
+    : scratch(scratch),
+      total_space(page_size),
+      min_local(min_local_payload_size(total_space)),
+      max_local(max_local_payload_size(total_space)),
+      min_leaf(min_leaf_payload_size(total_space)),
+      max_leaf(max_leaf_payload_size(total_space))
+{
+}
+
 #define MAX_CELL_COUNT(total_space) (((total_space)-NodeHdr::kSize) / \
                                      (kMinCellHeaderSize + kSlotWidth))
 
-auto Node::from_existing_page(PageRef &page, uint32_t total_space, char *scratch, Node &node_out) -> int
+auto Node::from_existing_page(const Options &options, PageRef &page, Node &node_out) -> int
 {
-    const auto max_cell_count = MAX_CELL_COUNT(total_space);
+    const auto max_cell_count = MAX_CELL_COUNT(options.total_space);
     const auto hdr_offset = page_offset(page.page_id);
     const auto *hdr = page.data + hdr_offset;
     const auto type = NodeHdr::get_type(hdr);
@@ -413,45 +446,49 @@ auto Node::from_existing_page(PageRef &page, uint32_t total_space, char *scratch
     }
     const auto gap_upper = NodeHdr::get_cell_start(hdr);
     const auto gap_lower = hdr_offset + NodeHdr::kSize + ncells * kSlotWidth;
-    if (gap_upper < gap_lower || gap_upper > total_space) {
+    if (gap_upper < gap_lower || gap_upper > options.total_space) {
         return -1;
     }
     Node node;
     node.ref = &page;
 
-    const auto total_freelist_bytes = BlockAllocator::freelist_size(node, total_space);
+    const auto total_freelist_bytes = BlockAllocator::freelist_size(node, options.total_space);
     if (total_freelist_bytes < 0) {
         return -1;
     }
-    node.scratch = scratch;
-    node.total_space = total_space;
+    node.scratch = options.scratch;
+    node.total_space = options.total_space;
     node.parser = kParsers[type - NodeHdr::kInternal];
     node.gap_size = gap_upper - gap_lower;
+    node.min_local = type == NodeHdr::kExternal ? options.min_leaf : options.min_local;
+    node.max_local = type == NodeHdr::kExternal ? options.max_leaf : options.max_local;
     node.usable_space = node.gap_size +
                         static_cast<uint32_t>(total_freelist_bytes) +
                         NodeHdr::get_frag_count(hdr);
-    if (node.usable_space > total_space) {
+    if (node.usable_space > options.total_space) {
         return -1;
     }
     node_out = move(node);
     return 0;
 }
 
-auto Node::from_new_page(PageRef &page, uint32_t total_space, char *scratch, bool is_leaf) -> Node
+auto Node::from_new_page(const Options &options, PageRef &page, bool is_leaf) -> Node
 {
     Node node;
     node.ref = &page;
-    node.scratch = scratch;
-    node.total_space = total_space;
+    node.scratch = options.scratch;
+    node.total_space = options.total_space;
     node.parser = kParsers[is_leaf];
+    node.min_local = is_leaf ? options.min_leaf : options.min_local;
+    node.max_local = is_leaf ? options.max_leaf : options.max_local;
 
     const auto usable_space = static_cast<uint32_t>(
-        total_space - cell_slots_offset(node));
+        options.total_space - cell_slots_offset(node));
     node.gap_size = usable_space;
     node.usable_space = usable_space;
 
     std::memset(node.hdr(), 0, NodeHdr::kSize);
-    NodeHdr::put_cell_start(node.hdr(), total_space);
+    NodeHdr::put_cell_start(node.hdr(), options.total_space);
     NodeHdr::put_type(node.hdr(), is_leaf);
     return node;
 }
@@ -488,7 +525,8 @@ auto Node::read(uint32_t index, Cell &cell_out) const -> int
     return parser(
         ref->data + offset,
         ref->data + total_space,
-        total_space,
+        min_local,
+        max_local,
         cell_out);
 }
 
@@ -595,8 +633,8 @@ auto Node::check_integrity() const -> Status
             if (read(i + 1, right_cell)) {
                 return CORRUPTED_NODE("corruption detected in cell %u", i + 1);
             }
-            const Slice left_local(left_cell.key, minval(left_cell.key_size, left_cell.local_pl_size));
-            const Slice right_local(right_cell.key, minval(right_cell.key_size, right_cell.local_pl_size));
+            const Slice left_local(left_cell.key, minval(left_cell.key_size, left_cell.local_size));
+            const Slice right_local(right_cell.key, minval(right_cell.key_size, right_cell.local_size));
             if (right_local < left_local) {
                 return CORRUPTED_NODE("local keys for cells %u and %u are out of order", i, i + 1);
             }

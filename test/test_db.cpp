@@ -110,7 +110,7 @@ public:
     static constexpr size_t kMaxRounds = 1'000;
     static constexpr size_t kPageSize = TEST_PAGE_SIZE;
     const std::string m_test_dir;
-    const std::string m_db_name;
+    std::string m_db_name;
     const std::string m_alt_wal_name;
 
     static constexpr size_t kMaxBuckets = 13;
@@ -641,7 +641,7 @@ TEST_F(DBTests, RollbackUpdate)
 
 TEST_F(DBTests, ModifyRecordSpecialCase)
 {
-    const std::string long_key(compute_local_pl_size(kPageSize, 0, kPageSize), '*');
+    const std::string long_key(kPageSize - NodeHdr::kSize - kMaxCellHeaderSize - 2, '*');
     ASSERT_OK(m_db->update([&long_key](auto &tx) {
         TestCursor c;
         EXPECT_OK(test_create_and_open_bucket(tx, BucketOptions(), "b", c));
@@ -917,38 +917,66 @@ TEST_F(DBTests, ReadWithoutWAL)
     ASSERT_FALSE(m_env->file_exists(wal_name.c_str()));
 }
 
-static auto create_and_hash_db(DBTests &test) -> uint64_t
+class DBFileFormatTests : public DBTests
 {
-    EXPECT_OK(test.reopen_db(true));
-    EXPECT_OK(test.m_db->update([](auto &tx) {
-        EXPECT_OK(DBTests::put_range(tx, BucketOptions(), "a", 0, 1'000));
-        EXPECT_OK(DBTests::put_range(tx, BucketOptions(), "b", 0, 1'000));
-        EXPECT_OK(DBTests::put_range(tx, BucketOptions(), "c", 0, 1'000));
-        EXPECT_OK(DBTests::put_range(tx, BucketOptions(), "d", 0, 1'000));
+protected:
+    explicit DBFileFormatTests() = default;
+    ~DBFileFormatTests() override = default;
 
-        EXPECT_OK(tx.drop_bucket("a"));
-        EXPECT_OK(tx.vacuum());
+    auto create_db_string()
+    {
+        static constexpr size_t kN = 1'000;
+        EXPECT_OK(reopen_db(true));
+        EXPECT_OK(m_db->update([](auto &tx) {
+            EXPECT_OK(DBTests::put_range(tx, BucketOptions(), "a", 0, kN));
+            EXPECT_OK(DBTests::put_range(tx, BucketOptions(), "b", 0, kN));
+            EXPECT_OK(DBTests::put_range(tx, BucketOptions(), "c", 0, kN));
+            EXPECT_OK(DBTests::put_range(tx, BucketOptions(), "d", 0, kN));
 
-        EXPECT_OK(DBTests::erase_range(tx, BucketOptions(), "b", 0, 500));
-        EXPECT_OK(DBTests::erase_range(tx, BucketOptions(), "c", 250, 750));
-        EXPECT_OK(DBTests::erase_range(tx, BucketOptions(), "d", 500, 1'000));
-        return Status::ok();
-    }));
-    EXPECT_OK(test.m_db->checkpoint(kCheckpointRestart, nullptr));
-    return std::hash<std::string>{}(
-        read_file_to_string(*test.m_env, test.m_db_name.c_str()));
+            EXPECT_OK(tx.drop_bucket("a"));
+            EXPECT_OK(tx.vacuum());
+
+            EXPECT_OK(DBTests::erase_range(tx, BucketOptions(), "b", 0, kN / 2));
+            EXPECT_OK(DBTests::erase_range(tx, BucketOptions(), "c", kN / 4, 3 * kN / 4));
+            EXPECT_OK(DBTests::erase_range(tx, BucketOptions(), "d", kN / 2, kN));
+            return Status::ok();
+        }));
+        EXPECT_OK(m_db->checkpoint(kCheckpointRestart, nullptr));
+        return read_file_to_string(*m_env, m_db_name.c_str());
+    }
+
+    auto assert_db_strings_equal(const std::string &lhs, const std::string &rhs)
+    {
+        std::hash<std::string> hash;
+        if (hash(lhs) == hash(rhs)) {
+            return;
+        }
+        ASSERT_EQ(lhs.size(), rhs.size());
+        ASSERT_EQ(lhs.size() % TEST_PAGE_SIZE, 0);
+        ASSERT_GE(lhs.size(), TEST_PAGE_SIZE * 3);
+        const auto npages = lhs.size() / TEST_PAGE_SIZE;
+        for (size_t i = 0; i < npages; ++i) {
+            const Slice lhs_page(lhs.data() + i * TEST_PAGE_SIZE, TEST_PAGE_SIZE);
+            const Slice rhs_page(rhs.data() + i * TEST_PAGE_SIZE, TEST_PAGE_SIZE);
+            ASSERT_EQ(lhs_page, rhs_page) << "mismatch on page " << i + 1;
+        }
+    }
+};
+
+TEST_F(DBFileFormatTests, IsReproducible1)
+{
+    const auto str1 = create_db_string();
+    const auto str2 = create_db_string();
+    assert_db_strings_equal(str1, str2);
 }
 
-TEST_F(DBTests, FileFormatIsReproducible)
+TEST_F(DBFileFormatTests, IsReproducible2)
 {
-    const auto hash1 = create_and_hash_db(*this);
-    const auto hash2 = create_and_hash_db(*this);
-    ASSERT_EQ(hash1, hash2);
-
+    const auto str1 = create_db_string();
     static constexpr char kJunk = '\xCC'; // 11001100
     ASSERT_NE(kJunk, DebugAllocator::set_junk_byte(kJunk));
-    const auto hash3 = create_and_hash_db(*this);
-    ASSERT_EQ(hash2, hash3);
+    const auto str2 = create_db_string();
+    assert_db_strings_equal(str1, str2);
 }
 
 TEST(OldWalTests, HandlesOldWalFile)

@@ -49,6 +49,8 @@ public:
         ListEntry *prev_entry;
         ListEntry *next_entry;
     } list_entry;
+    const uint32_t page_size;
+    const Node::Options node_options;
 
     ~Tree();
 
@@ -76,13 +78,12 @@ public:
         kAllocateExact = Freelist::kRemoveExact,
     };
     auto allocate(AllocationType type, Id nearby, PageRef *&page_out) -> Status;
-
     auto acquire(Id page_id, Node &node_out, bool write = false) const -> Status
     {
         PageRef *ref;
         auto s = m_pager->acquire(page_id, ref);
         if (s.is_ok()) {
-            if (Node::from_existing_page(*ref, m_page_size, m_node_scratch, node_out)) {
+            if (Node::from_existing_page(node_options, *ref, node_out)) {
                 m_pager->release(ref);
                 return corrupted_node(page_id);
             }
@@ -150,8 +151,8 @@ private:
 
     struct PivotOptions {
         const Cell *cells[2];
+        const Node *parent;
         char *scratch;
-        Id parent_id;
     };
     auto make_pivot(const PivotOptions &opt, Cell &pivot_out) -> Status;
     auto post_pivot(Node &node, uint32_t idx, Cell &cell, Id child_id) -> Status;
@@ -198,9 +199,6 @@ private:
     // Scratch buffers for holding overflowing keys. See extract_key().
     KeyScratch m_key_scratch[2] = {};
 
-    // Scratch memory for manipulating nodes.
-    char *const m_node_scratch;
-
     // Scratch memory for cells that aren't embedded in nodes. Use m_cell_scratch[n] to get a pointer to
     // the start of cell scratch buffer n, where n < kNumCellBuffers.
     static constexpr size_t kNumCellBuffers = 4;
@@ -209,7 +207,6 @@ private:
     String m_name;
     Pager *const m_pager;
     Id m_root_id;
-    const uint32_t m_page_size;
     const bool m_writable;
     const bool m_unique;
 };

@@ -28,13 +28,15 @@ auto Pager::set_page_size(uint32_t value) -> Status
     CALICODB_EXPECT_TRUE(m_persistent || m_page_size == 0);
 
     // Reallocate buffers and recompute values that depend on the page size.
-    if (m_scratch.realloc(value * kScratchBufferPages)) {
+    const auto scratch_size = value * kScratchBufferPages;
+    if (m_scratch.realloc(scratch_size)) {
         return Status::no_memory();
     }
     if (m_bufmgr.reallocate(value)) {
         return Status::no_memory();
     }
     m_page_size = value;
+    std::memset(m_scratch.ptr(), 0, scratch_size);
     log(m_log, "database page size is set to %u", value);
     return Status::ok();
 }
@@ -530,12 +532,6 @@ auto Pager::allocate(PageRef *&page_out) -> Status
     auto s = get_unused_page(page_out);
     if (s.is_ok()) {
         CALICODB_EXPECT_FALSE(page_out->page_id.is_root());
-        if (page_out->page_id.is_null()) {
-            // If this PageRef has never held a valid database page, then its contents will be
-            // uninitialized. Make sure not to let uninitialized data into the file: it makes
-            // it impossible to reproduce results.
-            std::memset(page_out->data, 0, m_page_size);
-        }
         page_out->page_id = page_id;
         m_bufmgr.register_page(*page_out);
         m_page_count = page_id.value;
@@ -590,6 +586,12 @@ auto Pager::get_unused_page(PageRef *&page_out) -> Status
         m_bufmgr.ref(*page_out);
         CALICODB_EXPECT_EQ(page_out->flag, PageRef::kNormal);
         CALICODB_EXPECT_EQ(page_out->refs, 1);
+        if (page_out->page_id.is_null()) {
+            // If this PageRef has never held a valid database page, then its contents will be
+            // uninitialized. Make sure not to let uninitialized data into the file: it makes
+            // it impossible to reproduce results.
+            std::memset(page_out->data, 0, m_page_size);
+        }
     } else {
         page_out = nullptr;
     }

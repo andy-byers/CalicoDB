@@ -60,10 +60,8 @@ struct LocalBounds {
 // Determine how many bytes of payload can be stored locally (not on an overflow chain)
 // Uses SQLite's computation for min and max local payload sizes. If "max local" is exceeded, then 1 or more
 // overflow chain pages will be required to store this payload.
-[[nodiscard]] inline auto compute_local_pl_size(size_t key_size, size_t value_size, uint32_t total_space) -> uint32_t
+[[nodiscard]] constexpr auto compute_local_size(size_t key_size, size_t value_size, uint32_t min_local, uint32_t max_local) -> uint32_t
 {
-    const auto max_local = static_cast<uint32_t>((total_space - NodeHdr::kSize) * 64 / 256 -
-                                                 kMaxCellHeaderSize - sizeof(uint16_t));
     if (key_size + value_size <= max_local) {
         // The whole payload can be stored locally.
         return static_cast<uint32_t>(key_size + value_size);
@@ -71,8 +69,6 @@ struct LocalBounds {
         // The first part of the key will occupy the entire local payload.
         return max_local;
     }
-    const auto min_local = static_cast<uint32_t>((total_space - NodeHdr::kSize) * 32 / 256 -
-                                                 kMaxCellHeaderSize - sizeof(uint16_t));
     // Try to prevent the key from being split.
     return maxval(min_local, static_cast<uint32_t>(key_size));
 }
@@ -108,10 +104,10 @@ struct Cell {
     uint32_t key_size;
 
     // Number of bytes contained in both the key and the value.
-    uint32_t total_pl_size;
+    uint32_t total_size;
 
     // Number of payload bytes stored locally (embedded in a node).
-    uint32_t local_pl_size;
+    uint32_t local_size;
 
     // Number of bytes occupied by this cell when embedded.
     uint32_t footprint;
@@ -119,18 +115,31 @@ struct Cell {
 
 // Simple construct representing a tree node
 struct Node final {
-    using ParseCell = int (*)(char *, const char *, uint32_t, Cell &);
+    using ParseCell = int (*)(char *, const char *, uint32_t, uint32_t, Cell &);
     static constexpr uint32_t kMaxFragCount = 0x80;
 
     PageRef *ref;
     ParseCell parser;
     char *scratch;
+    uint32_t min_local;
+    uint32_t max_local;
     uint32_t total_space;
     uint32_t usable_space;
     uint32_t gap_size;
 
-    [[nodiscard]] static auto from_existing_page(PageRef &page, uint32_t total_space, char *scratch, Node &node_out) -> int;
-    [[nodiscard]] static auto from_new_page(PageRef &page, uint32_t total_space, char *scratch, bool is_leaf) -> Node;
+    struct Options {
+        explicit Options(uint32_t page_size, char *scratch);
+
+        char *scratch;
+        uint32_t total_space;
+        uint32_t min_local;
+        uint32_t max_local;
+        uint32_t min_leaf;
+        uint32_t max_leaf;
+    };
+
+    [[nodiscard]] static auto from_existing_page(const Options &options, PageRef &page, Node &node_out) -> int;
+    [[nodiscard]] static auto from_new_page(const Options &options, PageRef &page, bool is_leaf) -> Node;
 
     explicit Node()
         : ref(nullptr)
@@ -146,6 +155,8 @@ struct Node final {
         : ref(rhs.ref),
           parser(rhs.parser),
           scratch(rhs.scratch),
+          min_local(rhs.min_local),
+          max_local(rhs.max_local),
           total_space(rhs.total_space),
           usable_space(rhs.usable_space),
           gap_size(rhs.gap_size)
@@ -159,6 +170,8 @@ struct Node final {
             ref = rhs.ref;
             parser = rhs.parser;
             scratch = rhs.scratch;
+            min_local = rhs.min_local;
+            max_local = rhs.max_local;
             total_space = rhs.total_space;
             usable_space = rhs.usable_space;
             gap_size = rhs.gap_size;
