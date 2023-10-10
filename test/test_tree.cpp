@@ -1931,6 +1931,48 @@ TEST_F(CursorModificationTests, EraseSecondToLast)
     validate();
 }
 
+TEST_F(CursorModificationTests, SizeDiscrepancy1)
+{
+    static constexpr size_t kN = 100;
+    for (size_t iteration = 0; iteration < 5; ++iteration) {
+        const auto offset = kN * iteration;
+        const auto first_key = numeric_key(offset) + make_long_key(0);
+        ASSERT_OK(m_tree->put(tree_cursor_cast(*m_c), first_key, "first_value"));
+        for (size_t i = 0; i < kN; ++i) {
+            ASSERT_OK(m_tree->put(tree_cursor_cast(*m_c), numeric_key(i + offset + 1), make_value('*')));
+            for (size_t j = 0; j <= i; ++j) {
+                ASSERT_TRUE(m_c->is_valid());
+                m_c->previous();
+            }
+            ASSERT_TRUE(m_c->is_valid());
+            ASSERT_EQ(m_c->key(), first_key);
+            ASSERT_EQ(m_c->value(), "first_value");
+        }
+        validate();
+    }
+}
+
+TEST_F(CursorModificationTests, SizeDiscrepancy2)
+{
+    static constexpr size_t kN = 100;
+    for (size_t iteration = 0; iteration < 5; ++iteration) {
+        const auto offset = (iteration + 1) * kN;
+        const auto last_key = numeric_key(offset - 1) + make_long_key(0);
+        ASSERT_OK(m_tree->put(tree_cursor_cast(*m_c), last_key, "last_value"));
+        for (size_t i = 0; i < kN; ++i) {
+            ASSERT_OK(m_tree->put(tree_cursor_cast(*m_c), numeric_key(offset - i - 1), make_value('*')));
+            for (size_t j = 0; j <= i; ++j) {
+                ASSERT_TRUE(m_c->is_valid());
+                m_c->next();
+            }
+            ASSERT_TRUE(m_c->is_valid());
+            ASSERT_EQ(m_c->key(), last_key);
+            ASSERT_EQ(m_c->value(), "last_value");
+        }
+        validate();
+    }
+}
+
 TEST_F(CursorModificationTests, SeekAndEraseForward)
 {
     init_tree(*this, kInitLongKeys | kInitLongValues);

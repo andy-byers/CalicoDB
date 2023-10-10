@@ -228,7 +228,7 @@ auto allocate_from_gap(Node &node, uint32_t needed_size) -> uint32_t
 
 [[nodiscard]] constexpr auto max_leaf_payload_size(uint32_t total_space) -> uint32_t
 {
-    return static_cast<uint32_t>((total_space - FileHdr::kSize - NodeHdr::kSize) * 128 / 256 -
+    return static_cast<uint32_t>((total_space - NodeHdr::kSize) * 128 / 256 -
                                  kMaxCellHeaderSize - kSlotWidth);
 }
 

@@ -336,12 +336,11 @@ TEST_F(NodeTests, InternalNonRootFits4Cells)
     ASSERT_TRUE(m_node.assert_integrity());
 }
 
-TEST_F(NodeTests, ExternalRootFits2Cells)
+TEST_F(NodeTests, ExternalRootFits1Cell)
 {
     ASSERT_TRUE(change_node_type(kExternalRoot));
     ASSERT_LT(0, m_node.insert(0, make_max_cell(0)));
-    ASSERT_LT(0, m_node.insert(1, make_max_cell(1)));
-    ASSERT_EQ(0, m_node.insert(2, make_max_cell(2))); // Overflow
+    ASSERT_EQ(0, m_node.insert(1, make_max_cell(1))); // Overflow
     ASSERT_TRUE(m_node.assert_integrity());
 }
 

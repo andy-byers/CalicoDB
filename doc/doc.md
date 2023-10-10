@@ -222,7 +222,8 @@ if (!s.is_ok()) {
 
 // Write some data...
 
-// Commit the transaction.
+// Commit the transaction. Note that file locks are not released until the Tx
+// object is deleted.
 s = writer->commit();
 if (!s.is_ok()) {
     // If commit() failed, then there was likely a low-level I/O error. There
@@ -268,9 +269,7 @@ delete c;
 // Since the bucket "cats" already exists, we can open it via the following:
 s = tx->open_bucket("cats", c);
 if (s.is_ok()) {
-    // b holds the handle for the open bucket "cats". The bucket will remain 
-    // open until either tx is delete'd, or "cats" is dropped with 
-    // Tx::drop_bucket(). 
+    // c holds a cursor on the open bucket "cats".
 }
 
 // Remove the bucket named "fish" from the database.

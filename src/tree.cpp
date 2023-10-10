@@ -1367,6 +1367,7 @@ auto Tree::redistribute_cells(Node &left, Node &right, Node &parent, uint32_t pi
     }
     auto tmp = Node::from_new_page(node_options, *unused, left.is_leaf());
     const auto merge_threshold = tmp.usable_space;
+    const auto is_leaf_level = tmp.is_leaf();
 
     Node *p_src, *p_left, *p_right;
     if (0 < NodeHdr::get_cell_count(left.hdr())) {
@@ -1383,7 +1384,7 @@ auto Tree::redistribute_cells(Node &left, Node &right, Node &parent, uint32_t pi
     const auto src_location = p_src->ref->page_id;
     tmp.ref->page_id = src_location;
 
-    if (!p_src->is_leaf()) {
+    if (!is_leaf_level) {
         // The new node is empty, so only the next pointer from p_src is relevant.
         NodeHdr::put_next_id(tmp.hdr(), NodeHdr::get_next_id(p_src->hdr()));
     }
@@ -1450,7 +1451,7 @@ auto Tree::redistribute_cells(Node &left, Node &right, Node &parent, uint32_t pi
             s = corrupted_node(parent.ref->page_id);
             goto cleanup;
         }
-        if (p_src->is_leaf()) {
+        if (is_leaf_level) {
             if (cell.local_size != cell.total_size) {
                 s = free_overflow(read_overflow_id(cell));
                 if (!s.is_ok()) {
@@ -1487,9 +1488,13 @@ auto Tree::redistribute_cells(Node &left, Node &right, Node &parent, uint32_t pi
             ++sep;
             left_accum += cells[sep].footprint + kCellPtrSize;
             right_accum -= cells[sep].footprint + kCellPtrSize;
-        } while (left_accum < right_accum &&
-                 left_accum < merge_threshold);
-        sep -= left_accum > merge_threshold;
+            if (left_accum > merge_threshold) {
+                // Left node will overflow if the children are leaves. If the children are branches,
+                // the cell that p_left has no room for will be posted to the parent instead.
+                sep -= is_leaf_level;
+                break;
+            }
+        } while (left_accum < right_accum);
     }
 
     idx = ncells - 1;
@@ -1503,9 +1508,9 @@ auto Tree::redistribute_cells(Node &left, Node &right, Node &parent, uint32_t pi
 
     // Post a pivot to the `parent` which links to p_left. If this connection existed before, we would have erased it
     // when parsing cells earlier.
-    if (idx > 0) {
+    if (idx + is_leaf_level > 0) {
         Cell pivot;
-        if (p_src->is_leaf()) {
+        if (is_leaf_level) {
             ++idx; // Backtrack to the last cell written to p_right.
             const PivotOptions opt = {
                 {&cells[idx - 1],
