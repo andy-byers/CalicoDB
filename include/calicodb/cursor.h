@@ -35,6 +35,12 @@ public:
     // behavior if the cursor is not valid.
     [[nodiscard]] virtual auto is_valid() const -> bool = 0;
 
+    // Return true if the cursor is positioned on a bucket record, false otherwise
+    // Cursors positioned on a bucket will have a non-human-readable value representing
+    // some implementation details. The referred-to sub bucket can be opened by calling
+    // Bucket::open_bucket(c.key(), ...), where c is the current cursor.
+    [[nodiscard]] virtual auto is_bucket() const -> bool = 0;
+
     // Return the status associated with this cursor
     // If is_valid() returns true, this method will always return an OK status.
     // Otherwise, the returned status will indicate the reason why the cursor is

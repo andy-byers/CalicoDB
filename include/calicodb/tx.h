@@ -10,6 +10,9 @@
 namespace calicodb
 {
 
+// calicodb/bucket.h
+class Bucket;
+
 // calicodb/cursor.h
 class Cursor;
 
@@ -48,13 +51,13 @@ public:
     // using Tx::drop_bucket(). Note that the bucket will not persist in the database unless
     // Tx::commit() is called after the bucket has been created but before the transaction
     // is finished.
-    virtual auto create_bucket(const BucketOptions &options, const Slice &name, Cursor **c_out) -> Status = 0;
+    virtual auto create_bucket(const BucketOptions &options, const Slice &name, Bucket **b_out) -> Status = 0;
 
     // Open an existing bucket
     // On success, stores a cursor over the bucket contents in `c_out` and returns an OK
     // status. If the bucket named `name` does not already exist, a status for which
     // Status::is_invalid_argument() evaluates to true is returned.
-    virtual auto open_bucket(const Slice &name, Cursor *&c_out) const -> Status = 0;
+    virtual auto open_bucket(const Slice &name, Bucket *&b_out) const -> Status = 0;
 
     // Remove a bucket from the database
     // If a bucket named `name` exists, this method will attempt to remove it. If `name`
@@ -73,32 +76,6 @@ public:
     // pending changes will be dropped. This method can be called more than once for a
     // given Tx: file locks are held until the Tx handle is delete'd.
     virtual auto commit() -> Status = 0;
-
-    // Create a mapping between `key` and `value` in the bucket referenced to by `c`
-    // If a record with key `key` already exists, sets its value to `value`. Otherwise, a
-    // new record is created. Returns an OK status on success, and a non-OK status on
-    // failure.
-    // Also adjusts the cursor `c` to point to the newly-created record. The following
-    // 3 expressions evaluate to true on success:
-    //     (1) c->is_valid()
-    //     (2) c->key() == key
-    //     (3) c->value() == value
-    // It is safe to use both `c->key()` and `c->value()` as parameters to this
-    // routine. On failure, the cursor is left in an unspecified state (possibly
-    // invalidated, or placed on a nearby record).
-    virtual auto put(Cursor &c, const Slice &key, const Slice &value) -> Status = 0;
-
-    // Ensure that no record with key `key` exists in the bucket referenced by `c`
-    // On success, leaves `c` on the record following the erased record and returns an
-    // OK status. Returns a non-OK status if an error was encountered. It is not an error
-    // if `key` does not exist.
-    virtual auto erase(Cursor &c, const Slice &key) -> Status = 0;
-
-    // Erase the record pointed to by `c`
-    // On success, the record is erased, `c` is placed on the following record, and an
-    // OK status is returned. Otherwise, a non-OK status is returned and the cursor is
-    // left in an unspecified state.
-    virtual auto erase(Cursor &c) -> Status = 0;
 };
 
 template <class Fn>
