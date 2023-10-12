@@ -57,7 +57,7 @@ auto print_database_overview(std::ostream &os, Pager &pager) -> void
         } else {
             PointerMap::Entry entry;
             if (page_id.is_root()) {
-                entry.type = PointerMap::kTreeRoot;
+                entry.type = kTreeRoot;
             } else {
                 s = PointerMap::read_entry(pager, page_id, entry);
                 if (!s.is_ok()) {
@@ -74,10 +74,10 @@ auto print_database_overview(std::ostream &os, Pager &pager) -> void
             }
 
             switch (entry.type) {
-                case PointerMap::kTreeRoot:
+                case kTreeRoot:
                     (void)append_strings(type, "TreeRoot");
                     [[fallthrough]];
-                case PointerMap::kTreeNode: {
+                case kTreeNode: {
                     auto n = NodeHdr::get_cell_count(
                         page->data + page_id.is_root() * FileHdr::kSize);
                     if (NodeHdr::get_type(page->data) == NodeHdr::kExternal) {
@@ -91,14 +91,14 @@ auto print_database_overview(std::ostream &os, Pager &pager) -> void
                     }
                     break;
                 }
-                case PointerMap::kFreelistPage:
+                case kFreelistPage:
                     (void)append_strings(type, "Freelist");
                     break;
-                case PointerMap::kOverflowHead:
+                case kOverflowHead:
                     (void)append_format_string(info, "Next=%u", get_u32(page->data));
                     (void)append_strings(type, "OvflHead");
                     break;
-                case PointerMap::kOverflowLink:
+                case kOverflowLink:
                     (void)append_format_string(info, "Next=%u", get_u32(page->data));
                     (void)append_strings(type, "OvflLink");
                     break;

@@ -310,16 +310,17 @@ protected:
             s = co.db->view([&co, barrier](const auto &tx) {
                 barrier_wait(barrier);
 
-                TestCursor c;
+                TestBucket b;
                 // Oddly enough, if we name this Status "s", some platforms complain about shadowing,
                 // even though s is not captured in this lambda.
-                auto t = test_open_bucket(tx, "b", c);
+                auto t = test_open_bucket(tx, "b", b);
                 if (t.is_invalid_argument()) {
                     // Writer hasn't created the bucket yet.
                     return Status::ok();
                 } else if (!t.is_ok()) {
                     return t;
                 }
+                auto c = test_new_cursor(*b);
                 // Iterate through the records twice. The same value should be read each time.
                 for (size_t i = 0; i < co.op_args[1] * 2; ++i) {
                     // If the bucket exists, then it must contain co.op_arg records (the first writer to run
@@ -365,8 +366,12 @@ protected:
             s = co.db->update([&co, barrier](auto &tx) {
                 barrier_wait(barrier);
 
-                TestCursor c;
-                auto t = test_create_and_open_bucket(tx, BucketOptions(), "b", c);
+                TestBucket b;
+                auto t = test_create_and_open_bucket(tx, "b", b);
+                if (!t.is_ok()) {
+                    return t;
+                }
+                auto c = test_new_cursor(*b);
                 for (size_t i = 0; t.is_ok() && i < co.op_args[1]; ++i) {
                     uint64_t result = 0;
                     const auto key = numeric_key(i);
@@ -387,7 +392,7 @@ protected:
                     if (t.is_ok()) {
                         ++result;
                         const auto value = numeric_key(result);
-                        t = tx.put(*c, key, value);
+                        t = b->put(key, value);
                     }
                 }
                 EXPECT_OK(t);

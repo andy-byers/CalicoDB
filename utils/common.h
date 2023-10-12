@@ -5,6 +5,7 @@
 #ifndef CALICODB_UTILS_COMMON_H
 #define CALICODB_UTILS_COMMON_H
 
+#include "calicodb/bucket.h"
 #include "calicodb/config.h"
 #include "calicodb/cursor.h"
 #include "calicodb/env.h"
@@ -204,21 +205,43 @@ auto operator<<(std::ostream &os, const Slice &slice) -> std::ostream &
 // Print information about each database page to `os`
 auto print_database_overview(std::ostream &os, Pager &pager) -> void;
 
+using TestBucket = std::unique_ptr<Bucket>;
 using TestCursor = std::unique_ptr<Cursor>;
 
-inline auto test_open_bucket(const Tx &tx, const Slice &name, TestCursor &c_out) -> Status
+inline auto test_new_cursor(const Bucket &b) -> TestCursor
 {
-    Cursor *c;
-    auto s = tx.open_bucket(name, c);
-    c_out.reset(c);
+    return TestCursor(b.new_cursor());
+}
+
+inline auto test_open_bucket(const Tx &tx, const Slice &name, TestBucket &b_out) -> Status
+{
+    Bucket *b;
+    auto s = tx.open_bucket(name, b);
+    b_out.reset(b);
     return s;
 }
 
-inline auto test_create_and_open_bucket(Tx &tx, const BucketOptions &options, const Slice &name, TestCursor &c_out) -> Status
+inline auto test_open_bucket(const Bucket &b, const Slice &key, TestBucket &b_out) -> Status
 {
-    Cursor *c;
-    auto s = tx.create_bucket(options, name, &c);
-    c_out.reset(c);
+    Bucket *b2;
+    auto s = b.open_bucket(key, b2);
+    b_out.reset(b2);
+    return s;
+}
+
+inline auto test_create_and_open_bucket(Tx &tx, const Slice &name, TestBucket &b_out) -> Status
+{
+    Bucket *b;
+    auto s = tx.create_bucket(name, &b);
+    b_out.reset(b);
+    return s;
+}
+
+inline auto test_create_and_open_bucket(Bucket &b, const Slice &key, TestBucket &b_out) -> Status
+{
+    Bucket *b2;
+    auto s = b.create_bucket(key, &b2);
+    b_out.reset(b2);
     return s;
 }
 

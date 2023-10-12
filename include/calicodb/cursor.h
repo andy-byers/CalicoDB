@@ -25,8 +25,8 @@ public:
     void operator=(Cursor &) = delete;
 
     // Return an opaque handle representing the cursor
-    // NOTE: Classes that extend Cursor must keep track of the Cursor * returned by
-    //       Tx::*_bucket() and return its address from this method.
+    // NOTE: Classes that extend Cursor must return the pointer returned by the handle()
+    //       method of the original cursor.
     [[nodiscard]] virtual auto handle() -> void * = 0;
 
     // Return true if the cursor is valid (positioned on a record), false otherwise

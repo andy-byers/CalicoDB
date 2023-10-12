@@ -63,6 +63,7 @@ endif()
 add_library(calicodb STATIC)
 target_sources(calicodb
         PRIVATE src/bucket.cpp
+                src/bucket_impl.cpp
                 src/bucket_impl.h
                 src/buffer.h
                 src/bufmgr.cpp

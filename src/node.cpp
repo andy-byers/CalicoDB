@@ -78,27 +78,29 @@ auto remove_ivec_slot(Node &node, uint32_t index)
 
 [[nodiscard]] auto external_parse_cell(char *data, const char *limit, uint32_t min_local, uint32_t max_local, Cell &cell_out)
 {
-    uint32_t key_size, value_size;
+    uint32_t value_size;
     const auto *ptr = data;
     if (!(ptr = decode_varint(ptr, limit, value_size))) {
         return -1;
     }
-    if (!(ptr = decode_varint(ptr, limit, key_size))) {
+    SizeWithFlag swf;
+    if (!(ptr = decode_size_with_flag(ptr, swf))) {
         return -1;
     }
     const auto hdr_size = static_cast<uintptr_t>(ptr - data);
     const auto pad_size = hdr_size > kMinCellHeaderSize ? 0 : kMinCellHeaderSize - hdr_size;
-    const auto local_size = compute_local_size(key_size, value_size, min_local, max_local);
-    const auto has_remote = local_size < key_size + value_size;
+    const auto local_size = compute_local_size(swf.size, value_size, min_local, max_local);
+    const auto has_remote = local_size < swf.size + value_size;
     const auto footprint = hdr_size + pad_size + local_size + has_remote * sizeof(uint32_t);
 
     if (data + footprint <= limit) {
         cell_out.ptr = data;
         cell_out.key = data + hdr_size + pad_size;
-        cell_out.key_size = key_size;
-        cell_out.total_size = key_size + value_size;
+        cell_out.key_size = swf.size;
+        cell_out.total_size = swf.size + value_size;
         cell_out.local_size = local_size;
         cell_out.footprint = static_cast<uint32_t>(footprint);
+        cell_out.is_bucket = swf.flag;
         return 0;
     }
     return -1;
@@ -119,6 +121,7 @@ auto remove_ivec_slot(Node &node, uint32_t index)
             cell_out.total_size = key_size;
             cell_out.local_size = local_size;
             cell_out.footprint = static_cast<uint32_t>(footprint);
+            cell_out.is_bucket = false;
             return 0;
         }
     }
@@ -233,6 +236,27 @@ auto allocate_from_gap(Node &node, uint32_t needed_size) -> uint32_t
 }
 
 } // namespace
+
+auto encode_size_with_flag(const SizeWithFlag &swf, char *output) -> char *
+{
+    // Sizes stored with an extra flag bit must not use the most-significant bit.
+    CALICODB_EXPECT_EQ(swf.size & 0x80000000U, 0);
+    const auto value = swf.size << 1 | swf.flag;
+    return encode_varint(output, value);
+}
+
+auto decode_size_with_flag(const char *input, SizeWithFlag &swf_out) -> const char *
+{
+    uint32_t value;
+    input = decode_varint(input, input + kVarintMaxLength, value);
+    if (input) {
+        swf_out.size = value >> 1;
+        swf_out.flag = value & 1;
+    }
+    return input;
+}
+
+static_assert(kMaxAllocation < 0x80000000U);
 
 auto Node::alloc(uint32_t index, uint32_t size) -> int
 {

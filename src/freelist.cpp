@@ -103,7 +103,7 @@ auto Freelist::add(Pager &pager, PageRef *&page) -> Status
                 FreePage::put_leaf_count(*trunk, n + 1);
                 FreePage::put_leaf_id(*trunk, n, page->page_id.value);
                 PointerMap::write_entry(pager, page->page_id,
-                                        {Id::null(), PointerMap::kFreelistPage}, s);
+                                        {Id::null(), kFreelistPage}, s);
                 goto cleanup;
             } else if (n > trunk_capacity) {
                 s = corrupted_freelist();
@@ -125,7 +125,7 @@ auto Freelist::add(Pager &pager, PageRef *&page) -> Status
         // Release the page before it gets discarded below.
         pager.release(page);
         PointerMap::write_entry(pager, free_head,
-                                {Id::null(), PointerMap::kFreelistPage}, s);
+                                {Id::null(), kFreelistPage}, s);
     }
 
 cleanup:
@@ -168,7 +168,7 @@ auto Freelist::remove(Pager &pager, RemoveType type, Id nearby, PageRef *&page_o
         if (!s.is_ok()) {
             return s;
         }
-        if (entry.type == PointerMap::kFreelistPage) {
+        if (entry.type == kFreelistPage) {
             search_list = true;
         }
     }
@@ -315,7 +315,7 @@ auto Freelist::assert_state(Pager &pager) -> bool
         s = PointerMap::read_entry(pager, free_head, entry);
         CALICODB_EXPECT_TRUE(s.is_ok());
         CALICODB_EXPECT_EQ(entry.back_ptr, Id::null());
-        CALICODB_EXPECT_EQ(entry.type, PointerMap::kFreelistPage);
+        CALICODB_EXPECT_EQ(entry.type, kFreelistPage);
 
         for (size_t i = 0; i < n; ++i) {
             const auto leaf_id = FreePage::get_leaf_id(*head, i);
@@ -324,7 +324,7 @@ auto Freelist::assert_state(Pager &pager) -> bool
             s = PointerMap::read_entry(pager, leaf_id, entry);
             CALICODB_EXPECT_TRUE(s.is_ok());
             CALICODB_EXPECT_EQ(entry.back_ptr, Id::null());
-            CALICODB_EXPECT_EQ(entry.type, PointerMap::kFreelistPage);
+            CALICODB_EXPECT_EQ(entry.type, kFreelistPage);
         }
         free_head = FreePage::get_next_id(*head);
         pager.release(head);

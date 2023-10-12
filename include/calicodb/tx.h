@@ -35,34 +35,16 @@ public:
     // corruption is detected in one of the files.
     virtual auto status() const -> Status = 0;
 
-    // Return a reference to a cursor that iterates over the database schema
-    // The database schema is a special bucket that stores the name and location of every
-    // other bucket in the database. Calling Cursor::key() on a valid schema cursor gives a
-    // bucket name. Calling Cursor::value() gives a bucket descriptor: a human-readable
-    // description of options that the bucket was created with. This cursor must not be
-    // used after the Tx that created it has been destroyed.
-    // SEE: cursor.h (for additional Cursor usage requirements)
-    [[nodiscard]] virtual auto schema() const -> Cursor & = 0;
+    // Return a cursor over the toplevel buckets
+    virtual auto toplevel() const -> Cursor & = 0;
 
-    // Create a new bucket
-    // Returns an OK status on success and a non-OK status on failure. If c_out is nonnull,
-    // opens a cursor over the bucket contents and stores it in `*c_out`. The bucket can be
-    // accessed via this cursor until the transaction is finished, or until `name` is dropped
-    // using Tx::drop_bucket(). Note that the bucket will not persist in the database unless
-    // Tx::commit() is called after the bucket has been created but before the transaction
-    // is finished.
-    virtual auto create_bucket(const BucketOptions &options, const Slice &name, Bucket **b_out) -> Status = 0;
+    // Create a toplevel bucket
+    virtual auto create_bucket(const Slice &name, Bucket **b_out) -> Status = 0;
 
-    // Open an existing bucket
-    // On success, stores a cursor over the bucket contents in `c_out` and returns an OK
-    // status. If the bucket named `name` does not already exist, a status for which
-    // Status::is_invalid_argument() evaluates to true is returned.
+    // Open a toplevel bucket
     virtual auto open_bucket(const Slice &name, Bucket *&b_out) const -> Status = 0;
 
-    // Remove a bucket from the database
-    // If a bucket named `name` exists, this method will attempt to remove it. If `name`
-    // does not exist, returns a status for which Status::is_invalid_argument() evaluates
-    // to true.
+    // Remove a toplevel bucket
     virtual auto drop_bucket(const Slice &name) -> Status = 0;
 
     // Defragment the database

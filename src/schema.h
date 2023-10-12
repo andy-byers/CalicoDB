@@ -16,55 +16,43 @@ namespace calicodb
 class Pager;
 struct Stats;
 
-// Representation of the database schema
-// NOTE: The routines *_bucket(), where * is "create" or "open", do not set their
-//       `c_out` parameter to nullptr on failure. It is the responsibility of the
-//       caller to do so.
 class Schema final
 {
 public:
-    explicit Schema(Pager &pager, const Status &status, Stats &stat);
+    explicit Schema(Pager &pager, Stats &stat);
 
-    [[nodiscard]] auto cursor() -> Cursor *
+    auto main_tree() -> Tree &
     {
-        return m_schema;
+        return m_main;
     }
 
-    auto close() -> void;
-    auto create_bucket(const BucketOptions &options, const Slice &name, Cursor **c_out) -> Status;
-    auto open_bucket(const Slice &name, Cursor *&c_out) -> Status;
-    auto drop_bucket(const Slice &name) -> Status;
+    auto pager() const -> Pager &
+    {
+        return *m_pager;
+    }
 
-    struct UnpackedCursor {
-        Tree *tree;
-        TreeCursor *c;
-    };
-    auto unpack_cursor(Cursor &c) -> UnpackedCursor;
+    auto create_tree(Id &root_id_out) -> Status;
+    auto drop_tree(Id root_id) -> Status;
+    auto open_tree(Id root_id) -> Tree *;
     auto use_tree(Tree *tree) -> void;
-
+    auto close_trees() -> void;
+    auto find_open_tree(Id root_id) -> Tree *;
     auto vacuum() -> Status;
 
-    struct RootInfo {
-        Id root_id;
-        bool unique;
-    };
+    // Locate the page containing the reference to the sub-bucket rooted at `root_id`
+    auto find_parent_id(Id root_id, Id &parent_id_out) -> Status;
 
     auto TEST_validate() const -> void;
 
 private:
-    auto decode_and_check_root_info(const Slice &data, RootInfo &info_out) -> Status;
-    auto open_cursor(const Slice &name, const RootInfo &info, Cursor *&c_out) -> Status;
-    auto construct_or_reference_tree(const Slice &name, const RootInfo &info) -> Tree *;
-    auto find_open_tree(const Slice &name) -> Tree *;
-
     template <class Action>
-    auto map_trees(bool include_schema, Action &&action) const -> void
+    auto map_trees(bool include_main, Action &&action) const -> void
     {
         auto *t = &m_trees;
         do {
-            // Don't access t after action() is called: it may get destroyed.
+            // Don't access t after action() is called: it might have been destroyed.
             auto *next_t = t->next_entry;
-            if (t->tree != &m_map || include_schema) {
+            if (t->tree != &m_main || include_main) {
                 if (!action(*t)) {
                     break;
                 }
@@ -73,22 +61,13 @@ private:
         } while (t != &m_trees);
     }
 
-    friend class Tree;
-
-    const Status *const m_status;
     Pager *const m_pager;
-    char *const m_scratch;
     Stats *const m_stat;
 
-    Tree m_map;
-    CursorImpl m_internal;
-    CursorImpl m_exposed;
+    Tree m_main;
 
-    // List containing a tree for each open bucket (including the schema tree).
+    // List containing a tree for each open bucket (including m_main).
     mutable Tree::ListEntry m_trees = {};
-
-    // Wrapper over m_exposed, returns a human-readable string for Cursor::value().
-    Cursor *const m_schema;
 };
 
 } // namespace calicodb

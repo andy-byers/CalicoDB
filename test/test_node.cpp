@@ -37,8 +37,9 @@ public:
     PageRef *const m_ref;
     Node m_node;
 
-    // Use 2 bytes for the keys. No values.
-    char m_external_cell[6] = {'\x00', '\x02', '\x00', '\x00'};
+    // Use 2 bytes for the keys. No values. External cells pack an extra bit into the key
+    // size field. As a result, the key size looks like it is double what it should be.
+    char m_external_cell[6] = {'\x00', '\x04', '\x00', '\x00'};
     char m_internal_cell[7] = {'\x00', '\x00', '\x00', '\x00', '\x02'};
     [[nodiscard]] auto make_cell(uint32_t k) -> Cell
     {

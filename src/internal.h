@@ -89,6 +89,34 @@ static constexpr Slice kDefaultShmSuffix = "-shm";
 // Additional file locking modes that cannot be requested directly
 enum { kLockUnlocked = 0 };
 
+enum PageType : uint8_t {
+    kInvalidPage,
+    kTreeRoot,
+    kTreeNode,
+    kOverflowHead,
+    kOverflowLink,
+    kFreelistPage,
+    kPageTypeCount
+};
+
+inline auto page_type_name(PageType type) -> const char *
+{
+    switch (type) {
+        case kTreeRoot:
+            return "tree root";
+        case kTreeNode:
+            return "tree node";
+        case kOverflowHead:
+            return "overflow head";
+        case kOverflowLink:
+            return "overflow link";
+        case kFreelistPage:
+            return "freelist page";
+        default:
+            return "unrecognized page";
+    }
+}
+
 struct Id {
     static constexpr uint32_t kNull = 0;
     static constexpr uint32_t kRoot = 1;

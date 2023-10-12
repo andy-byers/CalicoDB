@@ -24,8 +24,9 @@ public:
     explicit CursorImpl(Tree &tree);
     ~CursorImpl() override;
 
-    [[nodiscard]] auto is_valid() const -> bool override;
     [[nodiscard]] auto handle() -> void * override;
+    [[nodiscard]] auto is_valid() const -> bool override;
+    [[nodiscard]] auto is_bucket() const -> bool override;
     auto key() const -> Slice override;
     auto value() const -> Slice override;
     auto status() const -> Status override;

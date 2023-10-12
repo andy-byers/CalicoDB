@@ -249,15 +249,13 @@ protected:
         EXPECT_OK(tx.status());
 
         Status s;
-        TestCursor c1, c2;
+        TestBucket b1, b2;
         const auto name1 = std::to_string(iteration);
         const auto name2 = std::to_string((iteration + 1) % kNumIterations);
 
-        s = test_open_bucket(tx, name1, c1);
+        s = test_open_bucket(tx, name1, b1);
         if (s.is_invalid_argument()) {
-            BucketOptions options;
-            options.error_if_exists = true;
-            s = test_create_and_open_bucket(tx, options, name1, c1);
+            s = test_create_and_open_bucket(tx, name1, b1);
             if (s.is_ok()) {
                 std::vector<uint32_t> keys(kNumRecords);
                 std::iota(begin(keys), end(keys), 0);
@@ -265,7 +263,7 @@ protected:
                 std::shuffle(begin(keys), end(keys), rng);
                 for (auto k : keys) {
                     const auto v = make_value(k);
-                    s = tx.put(*c1, make_key(k), v);
+                    s = b1->put(make_key(k), v);
                     if (!s.is_ok()) {
                         break;
                     }
@@ -278,7 +276,7 @@ protected:
             }
             return s;
         }
-        s = test_create_and_open_bucket(tx, BucketOptions(), name2, c2);
+        s = test_create_and_open_bucket(tx, name2, b2);
         if (!s.is_ok()) {
             if (!s.is_no_memory()) {
                 EXPECT_EQ(s, tx.status());
@@ -286,12 +284,14 @@ protected:
             return s;
         }
 
+        auto c1 = test_new_cursor(*b1);
+        auto c2 = test_new_cursor(*b2);
         c1->seek_first();
         for (size_t i = 0; i < kNumRecords; ++i) {
             if (c1->is_valid()) {
                 EXPECT_EQ(c1->key(), make_key(i));
                 EXPECT_EQ(to_string(c1->value()), make_value(i));
-                s = tx.put(*c2, c1->key(), c1->value());
+                s = b2->put(c1->key(), c1->value());
                 if (!s.is_ok()) {
                     break;
                 }
@@ -330,11 +330,12 @@ protected:
             return schema.status();
         }
 
-        TestCursor c;
-        auto s = test_open_bucket(tx, b_name, c);
+        TestBucket b;
+        auto s = test_open_bucket(tx, b_name, b);
         if (!s.is_ok()) {
             return s;
         }
+        auto c = test_new_cursor(*b);
         for (size_t i = 0; i < kNumRecords; ++i) {
             const auto key = make_key(i);
             c->find(key);

@@ -44,7 +44,6 @@ class Tree final
 {
 public:
     struct ListEntry {
-        Slice name;
         Tree *const tree;
         ListEntry *prev_entry;
         ListEntry *next_entry;
@@ -54,7 +53,7 @@ public:
 
     ~Tree();
 
-    explicit Tree(Pager &pager, Stats &stat, char *scratch, Id root_id, String name, bool unique);
+    explicit Tree(Pager &pager, Stats &stat, char *scratch, Id root_id);
     static auto get_tree(TreeCursor &c) -> Tree *;
 
     auto activate_cursor(TreeCursor &target, bool requires_position) const -> void;
@@ -64,11 +63,12 @@ public:
         Id before;
         Id after;
     };
-    // Must be called on the schema tree.
-    auto create(Id &root_id_out) -> Status;
-    auto destroy(Tree &tree, Reroot &rr) -> Status;
 
-    auto put(TreeCursor &c, const Slice &key, const Slice &value) -> Status;
+    // Called on the "main" tree. Needs Tree::allocate() method. TODO
+    auto create(Id &root_id_out) -> Status;
+    auto destroy(Reroot &rr) -> Status;
+
+    auto put(TreeCursor &c, const Slice &key, const Slice &value, bool is_bucket) -> Status;
     auto erase(TreeCursor &c) -> Status;
     auto erase(TreeCursor &c, const Slice &key) -> Status;
     auto vacuum() -> Status;
@@ -118,7 +118,6 @@ public:
 private:
     friend class DBImpl;
     friend class Schema;
-    friend class SchemaCursor;
     friend class TreeCursor;
     friend class TreePrinter;
     friend class TreeValidator;
@@ -144,7 +143,7 @@ private:
     auto read_key(const Cell &cell, char *scratch, Slice *key_out, uint32_t limit = 0) const -> Status;
     auto read_value(const Cell &cell, char *scratch, Slice *value_out) const -> Status;
     auto overwrite_value(const Cell &cell, const Slice &value) -> Status;
-    auto emplace(Node &node, const Slice &key, const Slice &value, uint32_t index, bool &overflow) -> Status;
+    auto emplace(Node &node, const Slice &key, const Slice &value, bool flag, uint32_t index, bool &overflow) -> Status;
     auto free_overflow(Id head_id) -> Status;
 
     auto relocate_page(PageRef *&free, PointerMap::Entry entry, Id last_id) -> Status;
@@ -159,7 +158,7 @@ private:
     auto insert_cell(Node &node, uint32_t idx, const Cell &cell) -> Status;
     auto remove_cell(Node &node, uint32_t idx) -> Status;
     auto find_parent_id(Id page_id, Id &out) const -> Status;
-    auto fix_parent_id(Id page_id, Id parent_id, PointerMap::Type type, Status &s) -> void;
+    auto fix_parent_id(Id page_id, Id parent_id, PageType type, Status &s) -> void;
     auto maybe_fix_overflow_chain(const Cell &cell, Id parent_id, Status &s) -> void;
     auto fix_links(Node &node, Id parent_id = Id::null()) -> Status;
 
@@ -204,11 +203,9 @@ private:
     static constexpr size_t kNumCellBuffers = 4;
     char *const m_cell_scratch[kNumCellBuffers];
 
-    String m_name;
     Pager *const m_pager;
     Id m_root_id;
     const bool m_writable;
-    const bool m_unique;
 };
 
 class TreeCursor
@@ -268,8 +265,7 @@ class TreeCursor
     auto ensure_correct_leaf() -> void;
 
     auto seek_to_root() -> void;
-    auto search_branch(const Slice &key) -> void;
-    auto search_leaf(const Slice &key) -> bool;
+    auto search_node(const Slice &key) -> bool;
 
     auto start_write() -> void;
     auto start_write(const Slice &key, bool is_erase) -> bool;
@@ -278,11 +274,14 @@ class TreeCursor
     auto read_user_key() -> Status;
     auto read_user_value() -> Status;
 
-    auto perform_comparison(uint32_t index, const Slice &lhs, int &cmp_out) -> int;
-
 public:
     explicit TreeCursor(Tree &tree);
     ~TreeCursor();
+
+    auto tree() const -> Tree &
+    {
+        return *m_tree;
+    }
 
     auto reset(const Status &s = Status::ok()) -> void;
 
@@ -344,6 +343,13 @@ public:
     [[nodiscard]] auto on_record() const -> bool
     {
         return on_node() && m_idx < NodeHdr::get_cell_count(m_node.hdr());
+    }
+
+    // Called by CursorImpl. If the cursor is saved, then m_cell.is_bucket contains the bucket flag
+    // for the record that the cursor is saved on.
+    [[nodiscard]] auto is_bucket() const -> bool
+    {
+        return is_valid() && m_cell.is_bucket;
     }
 
     [[nodiscard]] auto page_id() const -> Id

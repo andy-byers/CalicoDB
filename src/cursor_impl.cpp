@@ -17,6 +17,11 @@ CursorImpl::CursorImpl(Tree &tree)
 
 CursorImpl::~CursorImpl() = default;
 
+auto CursorImpl::is_bucket() const -> bool
+{
+    return m_c.is_bucket();
+}
+
 auto CursorImpl::is_valid() const -> bool
 {
     return m_c.is_valid();

@@ -16,14 +16,17 @@ namespace calicodb
 class Pager;
 struct Stats;
 
-class BucketImpl : public Bucket
+class BucketImpl
+    : public Bucket,
+      public HeapObject
 {
 public:
-    explicit BucketImpl(Pager &pager, const Status &status, Stats &stat);
+    explicit BucketImpl(Schema &schema, Tree &tree);
+    ~BucketImpl() override;
 
-    auto create_bucket(const Slice &name, Bucket **b_out) -> Status override;
-    auto open_bucket(const Slice &name, Bucket *&b_out) const -> Status override;
-    auto drop_bucket(const Slice &name) -> Status override;
+    auto create_bucket(const Slice &key, Bucket **b_out) -> Status override;
+    auto open_bucket(const Slice &key, Bucket *&b_out) const -> Status override;
+    auto drop_bucket(const Slice &key) -> Status override;
     auto new_cursor() const -> Cursor * override;
     auto put(const Slice &key, const Slice &value) -> Status override;
     auto erase(const Slice &key) -> Status override;
@@ -33,22 +36,13 @@ public:
     auto TEST_validate() const -> void;
 
 private:
+    auto decode_and_check_root_id(const Slice &data, Id &root_id_out) const -> Status;
+
     friend class Tree;
 
-    const Status *const m_status;
-    Pager *const m_pager;
-    char *const m_scratch;
-    Stats *const m_stat;
-
-    Tree m_map;
-    CursorImpl m_internal;
-    CursorImpl m_exposed;
-
-    // List containing a tree for each open sub-bucket.
-    mutable Tree::ListEntry m_trees = {};
-
-    // Wrapper over m_exposed, returns a human-readable string for Cursor::value().
-    Cursor *const m_schema;
+    mutable CursorImpl m_cursor;
+    Schema *const m_schema;
+    Tree *const m_tree;
 };
 
 } // namespace calicodb

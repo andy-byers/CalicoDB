@@ -14,9 +14,6 @@ namespace calicodb
 // calicodb/cursor.h
 class Cursor;
 
-// Transaction on a CalicoDB database
-// The lifetime of a transaction is the same as that of the Tx object representing it (see
-// DB::new_tx()).
 class Bucket
 {
 public:
@@ -26,12 +23,23 @@ public:
     Bucket(Bucket &) = delete;
     void operator=(Bucket &) = delete;
 
-    virtual auto create_bucket(const Slice &name, Bucket **b_out) -> Status = 0;
-    virtual auto open_bucket(const Slice &name, Bucket *&b_out) const -> Status = 0;
-    virtual auto drop_bucket(const Slice &name) -> Status = 0;
-
+    // Return a cursor over the contents of this bucket
     virtual auto new_cursor() const -> Cursor * = 0;
+
+    // Create a nested bucket associated with the given `key`
+    virtual auto create_bucket(const Slice &key, Bucket **b_out) -> Status = 0;
+
+    // Open the nested bucket associated with the given `key`
+    virtual auto open_bucket(const Slice &key, Bucket *&b_out) const -> Status = 0;
+
+    // Drop the nested bucket associated with the given `key`
+    virtual auto drop_bucket(const Slice &key) -> Status = 0;
+
+    // Create a mapping between the given `key` and the given `value`
     virtual auto put(const Slice &key, const Slice &value) -> Status = 0;
+
+    // Erase the record identified by `key`
+    // This method cannot be used to remove a nested bucket. Use drop_bucket() instead.
     virtual auto erase(const Slice &key) -> Status = 0;
 
     virtual auto put(Cursor &c, const Slice &value) -> Status = 0;

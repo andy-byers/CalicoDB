@@ -32,6 +32,8 @@ class Logger;
 // Options to control the behavior of a database connection (passed to DB::open()
 // and DB::destroy())
 struct Options final {
+    // Size of a database page in bytes. Must be a power of 2 between 512 and
+    // 32768, inclusive.
     size_t page_size = CALICODB_DEFAULT_PAGE_SIZE;
 
     // Size of the page cache in bytes.
@@ -85,11 +87,6 @@ struct Options final {
         kLockNormal,    // Allow concurrent access
         kLockExclusive, // Exclude other connections
     } lock_mode = kLockNormal;
-
-    enum IntegrityCheck {
-        kCheckOff,  // No integrity checking
-        kCheckFull, // Check all buckets before DB::open() returns
-    } integrity_check = kCheckOff;
 };
 
 // Options to control the behavior of a WAL connection (passed to Wal::open())
@@ -97,16 +94,6 @@ struct WalOptions {
     Env *env;
     File *db;
     Stats *stat;
-};
-
-// Options for controlling the behavior of Tx::create_bucket()
-struct BucketOptions final {
-    bool error_if_exists = false;
-
-    // If true, the library will ensure that all records in this bucket have unique keys.
-    // Otherwise, no uniqueness constraints are enforced. This means that multiple records
-    // within the same bucket may have the same key and value.
-    bool unique = true;
 };
 
 class BusyHandler

@@ -73,6 +73,14 @@ struct LocalBounds {
     return maxval(min_local, static_cast<uint32_t>(key_size));
 }
 
+struct SizeWithFlag {
+    uint32_t size;
+    bool flag;
+};
+
+auto encode_size_with_flag(const SizeWithFlag &swf, char *output) -> char *;
+auto decode_size_with_flag(const char *input, SizeWithFlag &swf_out) -> const char *;
+
 // Internal cell format:
 //     Size   | Name
 //    --------|---------------
@@ -85,14 +93,18 @@ struct LocalBounds {
 //     Size   | Name
 //    --------|---------------
 //     varint | value_size
-//     varint | key_size
+//     varint | key_size/bucket_flag**
 //     n      | key
 //     m      | value
-//     4      | overflow_id*
+//     4      | overflow_id**
 //
 // * overflow_id field is only present when the cell payload is unable to
 //   fit entirely within the node page. In this case, it holds the page ID
 //   of the first overflow chain page that the payload has spilled onto.
+// ** The maximum key length is limited to half of the maximum value length
+//    such that the last bit of the key_size field in an external node is
+//    unused. This bit is used to distinguish between bucket records and
+//    normal records. TODO: Implement this, using a whole byte for now
 struct Cell {
     // Pointer to the start of the cell.
     char *ptr;
@@ -111,6 +123,10 @@ struct Cell {
 
     // Number of bytes occupied by this cell when embedded.
     uint32_t footprint;
+
+    // True if this cell refers to a nested sub-bucket, false otherwise.
+    // Always false for internal cells.
+    bool is_bucket;
 };
 
 // Simple construct representing a tree node

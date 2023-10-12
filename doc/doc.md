@@ -236,23 +236,14 @@ auto *tx = writer;
 
 ### Buckets
 In CalicoDB, buckets are persistent mappings from string keys to string values.
-Each open bucket is represented by a `calicodb::Cursor` over its contents.
-Multiple cursors can be opened on each bucket.
+Each open bucket is represented by a `calicodb::Bucket` handle.
 
 ```C++
 #include "calicodb/cursor.h"
 #include "calicodb/db.h"
 #include "calicodb/tx.h"
 
-calicodb::Cursor *c;
-
-// Set some initialization options. Enforces that the bucket "cats" must
-// not exist. Note that readonly transactions cannot create new buckets by
-// virtue of the fact that they must be used through pointers to const, 
-// and Tx::create_bucket() is not a const method. Tx::open_bucket() can be
-// used by a readonly transaction to open an existing bucket.
-calicodb::BucketOptions b_opt;
-b_opt.error_if_exists = true;
+calicodb::Bucket *b;
 
 // Create the bucket. Note that this bucket will not persist in the database 
 // unless Tx::commit() is called prior to the transaction ending.

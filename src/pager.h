@@ -179,6 +179,33 @@ private:
     bool m_refresh = true;
 };
 
+template <class Operation>
+auto pager_read(Pager &pager, const Operation &operation) -> Status
+{
+    CALICODB_EXPECT_EQ(pager.mode(), Pager::kRead);
+    if (pager.page_count() == 0) {
+        return Status::invalid_argument("database is empty");
+    }
+    return operation();
+}
+
+template <class Operation>
+auto pager_write(Pager &pager, const Operation &operation) -> Status
+{
+    Status s;
+    if (pager.mode() < Pager::kWrite) {
+        s = Status::not_supported("transaction is readonly");
+    } else if (!pager.status().is_ok()) {
+        s = pager.status();
+    } else {
+        s = operation();
+        if (!s.is_ok()) {
+            pager.set_status(s);
+        }
+    }
+    return s;
+}
+
 } // namespace calicodb
 
 #endif // CALICODB_PAGER_H
