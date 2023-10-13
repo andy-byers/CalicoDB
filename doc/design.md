@@ -51,8 +51,8 @@ Instead, modified pages are flushed to the WAL on commit or eviction from the ca
 ### Tree
 As mentioned earlier, CalicoDB uses B<sup>+</sup>-trees, hereafter called trees, to store records on disk.
 Every tree is rooted on some database page, called its root page.
-The tree that is rooted on the first database page is called the schema tree.
-The schema tree is used to maintain a name-to-root mapping for the other trees, if any exist.
+The tree that is rooted on the first database page is called the main tree.
+The main tree is used to maintain a name-to-root mapping for the other trees, if any exist.
 Additional trees will be rooted on pages after the second database page, which is always a pointer map page (see [Pointer Map](#pointer-map)).
 Trees are of variable order, so splits are performed when nodes (pages that are part of a tree) have run out of physical space.
 Merges/rotations are performed when a node has become totally empty.
@@ -200,25 +200,19 @@ This requires us to be able to swap any other database page with a freelist page
 Of course, each database page has 1 or more other pages that reference it, so each of these references must be updated to point to the new location.
 Using the pointer map, we can locate any page's "parent" page.
 Parent page types are given in the following table.
-Note that there is no distinction between internal and external nodes here: that information is stored in the page header.
+Note that there is no distinction between internal and external nodes here: that information is stored in the node header.
 `kTreeNode` and `kTreeRoot` can be either internal or external, and `kTree*` refers to any tree node.
 
 | Page type        | Parent page type                       |
 |:-----------------|:---------------------------------------|
 | `kTreeNode`      | `kTree*`                               |
-| `kTreeRoot`      | `kEmpty`<sup>1</sup>                   |
+| `kTreeRoot`      | `<none>`<sup>1</sup>                   |
 | `kOverflowHead`  | `kTree*`                               |
 | `kOverflowLink`  | `kOverflowHead`                        |
-| `kFreelistTrunk` | `kFreelistTrunk`, `kEmpty`<sup>1</sup> |
+| `kFreelistTrunk` | `kFreelistTrunk`, `<none>`<sup>1</sup> |
 | `kFreelistLeaf`  | `kFreelistTrunk`                       |
 
-<sup>1</sup> `kEmpty` means "no parent".
-
-### Schema
-The schema is used to keep track of all trees in the database.
-It is represented on disk by the tree rooted on the first database page.
-This tree, the schema tree, is created when the database itself is created, and can never be dropped.
-It stores the name and root page ID of every other tree, as well as other per-tree attributes.
+<sup>1</sup> `<none>` means "no parent".
 
 ### WAL
 The WAL is based off of SQLite's WAL design.

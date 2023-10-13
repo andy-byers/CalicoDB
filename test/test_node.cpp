@@ -15,6 +15,17 @@ class NodeTests : public testing::Test
 {
 public:
     Env *env;
+
+    static constexpr auto kCellScratchSize = TEST_PAGE_SIZE / 2;
+    char m_external_cell[kCellScratchSize] = {};
+    char m_internal_cell[kCellScratchSize] = {};
+    char m_bucket_cell[kCellScratchSize] = {};
+
+    static constexpr auto kMaxPayloadSize = kMaxAllocation;
+    char m_max_external_cell[kCellScratchSize] = {};
+    char m_max_internal_cell[kCellScratchSize] = {};
+    char m_max_bucket_cell[kCellScratchSize] = {};
+
     explicit NodeTests()
         : m_backing(TEST_PAGE_SIZE, '\0'),
           m_scratch(TEST_PAGE_SIZE, '\0'),
@@ -24,6 +35,14 @@ public:
         env = &default_env();
         m_ref->page_id = Id(3);
         m_node = Node::from_new_page(m_options, *m_ref, true);
+
+        encode_leaf_record_cell_hdr(m_external_cell, 2, 0);
+        encode_branch_record_cell_hdr(m_internal_cell, 2, Id(42));
+        prepare_bucket_cell_hdr(m_bucket_cell, 2);
+
+        encode_leaf_record_cell_hdr(m_max_external_cell, kMaxPayloadSize, 0);
+        encode_branch_record_cell_hdr(m_max_internal_cell, kMaxPayloadSize, Id(42));
+        prepare_bucket_cell_hdr(m_max_bucket_cell, kMaxPayloadSize);
     }
 
     ~NodeTests() override
@@ -37,60 +56,68 @@ public:
     PageRef *const m_ref;
     Node m_node;
 
-    // Use 2 bytes for the keys. No values. External cells pack an extra bit into the key
-    // size field. As a result, the key size looks like it is double what it should be.
-    char m_external_cell[6] = {'\x00', '\x04', '\x00', '\x00'};
-    char m_internal_cell[7] = {'\x00', '\x00', '\x00', '\x00', '\x02'};
     [[nodiscard]] auto make_cell(uint32_t k) -> Cell
     {
+        auto *ptr = m_node.is_leaf() ? m_external_cell
+                                     : m_internal_cell;
+        Cell cell;
+        EXPECT_EQ(0, m_node.parser(ptr, ptr + kCellScratchSize,
+                                   m_node.min_local, m_node.max_local, cell));
         EXPECT_LE(k, std::numeric_limits<uint16_t>::max());
-        Cell cell = {
-            m_internal_cell,
-            m_internal_cell + 5,
-            2,
-            2,
-            2,
-            sizeof(m_internal_cell),
-        };
-        if (m_node.is_leaf()) {
-            cell.ptr = m_external_cell;
-            cell.key = m_external_cell + 4;
-            cell.footprint = sizeof(m_external_cell);
-        }
         cell.key[0] = static_cast<char>(k >> 8);
         cell.key[1] = static_cast<char>(k);
         return cell;
     }
 
-    char m_max_external_cell[TEST_PAGE_SIZE] = {};
-    char m_max_internal_cell[TEST_PAGE_SIZE] = {};
-    [[nodiscard]] auto make_max_cell(uint32_t k) -> Cell
+    [[nodiscard]] auto make_bucket_cell(uint32_t k) -> Cell
     {
-        static constexpr auto kMaxSize = kMaxAllocation;
-        auto *e_ptr = encode_varint(m_max_external_cell, kMaxSize); // Value size
-        e_ptr = encode_varint(e_ptr, kMaxSize);                     // Key size
-        auto *i_ptr = m_max_internal_cell + sizeof(uint32_t);
-        i_ptr = encode_varint(i_ptr, kMaxSize); // Key size
-
+        Cell cell;
+        EXPECT_TRUE(m_node.is_leaf()) << "branch nodes cannot contain bucket cells";
+        EXPECT_EQ(0, m_node.parser(m_bucket_cell, m_bucket_cell + kCellScratchSize,
+                                   m_node.min_local, m_node.max_local, cell));
         EXPECT_LE(k, std::numeric_limits<uint16_t>::max());
-        Cell cell = {
-            m_max_internal_cell,
-            i_ptr,
-            kMaxSize,
-            kMaxSize,
-            m_node.max_local,
-            4 + static_cast<uint32_t>(kVarintMaxLength) + m_node.max_local + 4,
-        };
-        if (m_node.is_leaf()) {
-            cell.ptr = m_max_external_cell;
-            cell.key = e_ptr;
-            cell.total_size = 2 * kMaxSize;
-            cell.footprint = 2 * static_cast<uint32_t>(kVarintMaxLength) + m_node.max_local + 4;
-        }
-        // Big-endian so order is preserved.
         cell.key[0] = static_cast<char>(k >> 8);
         cell.key[1] = static_cast<char>(k);
         return cell;
+    }
+
+    [[nodiscard]] auto make_max_cell(uint32_t k) -> Cell
+    {
+        auto *ptr = m_node.is_leaf() ? m_max_external_cell
+                                     : m_max_internal_cell;
+        Cell cell;
+        EXPECT_EQ(0, m_node.parser(ptr, ptr + kCellScratchSize,
+                                   m_node.min_local, m_node.max_local, cell));
+        put_u32(cell.key + cell.local_size, 123); // Overflow ID
+        EXPECT_LE(k, std::numeric_limits<uint16_t>::max());
+        cell.key[0] = static_cast<char>(k >> 8);
+        cell.key[1] = static_cast<char>(k);
+        return cell;
+    }
+
+    [[nodiscard]] auto make_max_bucket_cell(uint32_t k) -> Cell
+    {
+        Cell cell;
+        EXPECT_TRUE(m_node.is_leaf()) << "branch nodes cannot contain bucket cells";
+        EXPECT_EQ(0, m_node.parser(m_max_bucket_cell, m_max_bucket_cell + kCellScratchSize,
+                                   m_node.min_local, m_node.max_local, cell));
+        put_u32(cell.key + cell.local_size, 123); // Overflow ID
+        EXPECT_LE(k, std::numeric_limits<uint16_t>::max());
+        cell.key[0] = static_cast<char>(k >> 8);
+        cell.key[1] = static_cast<char>(k);
+        return cell;
+    }
+
+    auto nth_cell_equals(uint32_t idx, const Cell &cell)
+    {
+        Cell other;
+        EXPECT_EQ(0, m_node.read(idx, other));
+        return other.key_size == cell.key_size &&
+               other.local_size == cell.local_size &&
+               other.total_size == cell.total_size &&
+               other.footprint == cell.footprint &&
+               other.is_bucket == cell.is_bucket;
+
     }
 
     using TestNodeType = uint32_t;
@@ -250,6 +277,89 @@ TEST_F(BlockAllocatorTests, InternalNodesConsume3ByteFragments)
     ASSERT_EQ(NodeHdr::get_frag_count(m_node.hdr()), 0);
 }
 
+TEST_F(NodeTests, ExternalNonRootFits2Cells)
+{
+    ASSERT_TRUE(change_node_type(kExternalNode));
+    ASSERT_LT(0, m_node.insert(0, make_max_cell(0)));
+    ASSERT_LT(0, m_node.insert(1, make_max_cell(1)));
+    ASSERT_EQ(0, m_node.insert(2, make_max_cell(2))); // Overflow
+    ASSERT_TRUE(m_node.assert_integrity());
+}
+
+TEST_F(NodeTests, InternalNonRootFits4Cells)
+{
+    ASSERT_TRUE(change_node_type(kInternalNode));
+    ASSERT_LT(0, m_node.insert(0, make_max_cell(0)));
+    ASSERT_LT(0, m_node.insert(1, make_max_cell(1)));
+    ASSERT_LT(0, m_node.insert(2, make_max_cell(2)));
+    ASSERT_LT(0, m_node.insert(3, make_max_cell(3)));
+    ASSERT_EQ(0, m_node.insert(4, make_max_cell(4))); // Overflow
+    ASSERT_TRUE(m_node.assert_integrity());
+}
+
+TEST_F(NodeTests, ExternalRootFits1Cell)
+{
+    ASSERT_TRUE(change_node_type(kExternalRoot));
+    ASSERT_LT(0, m_node.insert(0, make_max_cell(0)));
+    ASSERT_EQ(0, m_node.insert(1, make_max_cell(1))); // Overflow
+    ASSERT_TRUE(m_node.assert_integrity());
+}
+
+TEST_F(NodeTests, InternalRootFits3Cells)
+{
+    ASSERT_TRUE(change_node_type(kInternalRoot));
+    ASSERT_LT(0, m_node.insert(0, make_max_cell(0)));
+    ASSERT_LT(0, m_node.insert(1, make_max_cell(1)));
+    ASSERT_LT(0, m_node.insert(2, make_max_cell(2)));
+    ASSERT_EQ(0, m_node.insert(3, make_max_cell(3))); // Overflow
+    ASSERT_TRUE(m_node.assert_integrity());
+}
+
+TEST_F(NodeTests, ExternalNonRootIO)
+{
+    ASSERT_TRUE(change_node_type(kExternalNode));
+    ASSERT_LT(0, m_node.insert(0, make_cell(0)));
+    ASSERT_LT(0, m_node.insert(1, make_max_cell(1)));
+    ASSERT_TRUE(nth_cell_equals(0, make_cell(0)));
+    ASSERT_TRUE(nth_cell_equals(1, make_max_cell(1)));
+}
+
+TEST_F(NodeTests, InternalNonRootIO)
+{
+    ASSERT_TRUE(change_node_type(kInternalNode));
+    ASSERT_LT(0, m_node.insert(0, make_cell(0)));
+    ASSERT_LT(0, m_node.insert(1, make_max_cell(1)));
+    ASSERT_TRUE(nth_cell_equals(0, make_cell(0)));
+    ASSERT_TRUE(nth_cell_equals(1, make_max_cell(1)));
+}
+
+TEST_F(NodeTests, ExternalRootIO)
+{
+    ASSERT_TRUE(change_node_type(kExternalRoot));
+    ASSERT_LT(0, m_node.insert(0, make_cell(0)));
+    ASSERT_LT(0, m_node.insert(1, make_max_cell(1)));
+    ASSERT_TRUE(nth_cell_equals(0, make_cell(0)));
+    ASSERT_TRUE(nth_cell_equals(1, make_max_cell(1)));
+}
+
+TEST_F(NodeTests, InternalRootIO)
+{
+    ASSERT_TRUE(change_node_type(kInternalRoot));
+    ASSERT_LT(0, m_node.insert(0, make_cell(0)));
+    ASSERT_LT(0, m_node.insert(1, make_max_cell(1)));
+    ASSERT_TRUE(nth_cell_equals(0, make_cell(0)));
+    ASSERT_TRUE(nth_cell_equals(1, make_max_cell(1)));
+}
+
+TEST_F(NodeTests, ExternalRootBucketIO)
+{
+    ASSERT_TRUE(change_node_type(kExternalRoot));
+    ASSERT_LT(0, m_node.insert(0, make_bucket_cell(0)));
+    ASSERT_LT(0, m_node.insert(1, make_max_bucket_cell(1)));
+    ASSERT_TRUE(nth_cell_equals(0, make_bucket_cell(0)));
+    ASSERT_TRUE(nth_cell_equals(1, make_max_bucket_cell(1)));
+}
+
 TEST_F(NodeTests, CellLifecycle)
 {
     uint32_t type = 0;
@@ -267,7 +377,7 @@ TEST_F(NodeTests, CellLifecycle)
             ASSERT_TRUE(m_node.assert_integrity());
         }
 
-        for (uint32_t j = 0; j < NodeHdr::get_cell_count(m_node.hdr()); ++j) {
+        for (uint32_t j = 0; j < m_node.cell_count(); ++j) {
             const auto cell_in = make_cell(j);
             Cell cell_out = {};
             ASSERT_EQ(0, m_node.read(j, cell_out));
@@ -277,7 +387,7 @@ TEST_F(NodeTests, CellLifecycle)
                       Slice(cell_out.key, cell_out.key_size));
         }
 
-        while (0 < NodeHdr::get_cell_count(m_node.hdr())) {
+        while (0 < m_node.cell_count()) {
             Cell cell_out = {};
             ASSERT_EQ(0, m_node.read(0, cell_out));
             ASSERT_EQ(0, m_node.erase(0, cell_out.footprint));
@@ -315,44 +425,6 @@ TEST_F(NodeTests, OverwriteOnEraseBehavior)
             }
         }
     }
-}
-
-TEST_F(NodeTests, ExternalNonRootFits2Cells)
-{
-    ASSERT_TRUE(change_node_type(kExternalNode));
-    ASSERT_LT(0, m_node.insert(0, make_max_cell(0)));
-    ASSERT_LT(0, m_node.insert(1, make_max_cell(1)));
-    ASSERT_EQ(0, m_node.insert(2, make_max_cell(2))); // Overflow
-    ASSERT_TRUE(m_node.assert_integrity());
-}
-
-TEST_F(NodeTests, InternalNonRootFits4Cells)
-{
-    ASSERT_TRUE(change_node_type(kInternalNode));
-    ASSERT_LT(0, m_node.insert(0, make_max_cell(0)));
-    ASSERT_LT(0, m_node.insert(1, make_max_cell(1)));
-    ASSERT_LT(0, m_node.insert(2, make_max_cell(2)));
-    ASSERT_LT(0, m_node.insert(3, make_max_cell(3)));
-    ASSERT_EQ(0, m_node.insert(4, make_max_cell(4))); // Overflow
-    ASSERT_TRUE(m_node.assert_integrity());
-}
-
-TEST_F(NodeTests, ExternalRootFits1Cell)
-{
-    ASSERT_TRUE(change_node_type(kExternalRoot));
-    ASSERT_LT(0, m_node.insert(0, make_max_cell(0)));
-    ASSERT_EQ(0, m_node.insert(1, make_max_cell(1))); // Overflow
-    ASSERT_TRUE(m_node.assert_integrity());
-}
-
-TEST_F(NodeTests, InternalRootFits3Cells)
-{
-    ASSERT_TRUE(change_node_type(kInternalRoot));
-    ASSERT_LT(0, m_node.insert(0, make_max_cell(0)));
-    ASSERT_LT(0, m_node.insert(1, make_max_cell(1)));
-    ASSERT_LT(0, m_node.insert(2, make_max_cell(2)));
-    ASSERT_EQ(0, m_node.insert(3, make_max_cell(3))); // Overflow
-    ASSERT_TRUE(m_node.assert_integrity());
 }
 
 TEST(NodeHeaderTests, ReportsInvalidNodeType)

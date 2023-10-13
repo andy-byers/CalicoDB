@@ -26,7 +26,7 @@ constexpr uint32_t kMinBlockSize = 2 * kSlotWidth;
 
 [[nodiscard]] auto cell_area_offset(const Node &node) -> uint32_t
 {
-    return cell_slots_offset(node) + NodeHdr::get_cell_count(node.hdr()) * kSlotWidth;
+    return cell_slots_offset(node) + node.cell_count() * kSlotWidth;
 }
 
 [[nodiscard]] auto get_ivec_slot(const Node &node, uint32_t index) -> uint32_t
@@ -36,20 +36,20 @@ constexpr uint32_t kMinBlockSize = 2 * kSlotWidth;
     // fine, however, since we keep some spillover space to account for it (e.g. put_u64(ptr, val) can be
     // called, where ptr points to the last byte on the page, without running into undefined behavior).
     const auto mask = static_cast<uint16_t>(node.total_space - 1);
-    CALICODB_EXPECT_LT(index, NodeHdr::get_cell_count(node.hdr()));
+    CALICODB_EXPECT_LT(index, node.cell_count());
     return mask & get_u16(node.ref->data + cell_slots_offset(node) + index * kSlotWidth);
 }
 
 auto put_ivec_slot(Node &node, uint32_t index, uint32_t slot)
 {
-    CALICODB_EXPECT_LT(index, NodeHdr::get_cell_count(node.hdr()));
+    CALICODB_EXPECT_LT(index, node.cell_count());
     return put_u16(node.ref->data + cell_slots_offset(node) + index * kSlotWidth, static_cast<uint16_t>(slot));
 }
 
 auto insert_ivec_slot(Node &node, uint32_t index, uint32_t slot)
 {
     CALICODB_EXPECT_GE(node.gap_size, kSlotWidth);
-    const auto count = NodeHdr::get_cell_count(node.hdr());
+    const auto count = node.cell_count();
     CALICODB_EXPECT_LE(index, count);
     const auto offset = cell_slots_offset(node) + index * kSlotWidth;
     const auto size = (count - index) * kSlotWidth;
@@ -64,7 +64,7 @@ auto insert_ivec_slot(Node &node, uint32_t index, uint32_t slot)
 
 auto remove_ivec_slot(Node &node, uint32_t index)
 {
-    const auto count = NodeHdr::get_cell_count(node.hdr());
+    const auto count = node.cell_count();
     CALICODB_EXPECT_LT(index, count);
     const auto offset = cell_slots_offset(node) + index * kSlotWidth;
     const auto size = (count - index) * kSlotWidth;
@@ -78,27 +78,34 @@ auto remove_ivec_slot(Node &node, uint32_t index)
 
 [[nodiscard]] auto external_parse_cell(char *data, const char *limit, uint32_t min_local, uint32_t max_local, Cell &cell_out)
 {
-    uint32_t value_size;
-    const auto *ptr = data;
-    if (!(ptr = decode_varint(ptr, limit, value_size))) {
+    SizeWithFlag swf;
+    const auto *ptr = decode_size_with_flag(data, swf);
+    if (!ptr) {
         return -1;
     }
-    SizeWithFlag swf;
-    if (!(ptr = decode_size_with_flag(ptr, swf))) {
+    uint32_t key_size;
+    uint32_t value_size = 0;
+    if (swf.flag) {
+        key_size = swf.size;
+        ptr += sizeof(uint32_t);
+    } else if ((ptr = decode_varint(ptr, limit, key_size))) {
+        value_size = swf.size;
+    } else {
         return -1;
     }
     const auto hdr_size = static_cast<uintptr_t>(ptr - data);
     const auto pad_size = hdr_size > kMinCellHeaderSize ? 0 : kMinCellHeaderSize - hdr_size;
-    const auto local_size = compute_local_size(swf.size, value_size, min_local, max_local);
-    const auto has_remote = local_size < swf.size + value_size;
-    const auto footprint = hdr_size + pad_size + local_size + has_remote * sizeof(uint32_t);
+    // Note that the root_id in a bucket cell is considered part of the header.
+    const auto [k, v, o] = describe_leaf_payload(key_size, value_size, swf.flag,
+                                                 min_local, max_local);
+    const auto footprint = hdr_size + pad_size + k + v + o;
 
     if (data + footprint <= limit) {
         cell_out.ptr = data;
         cell_out.key = data + hdr_size + pad_size;
-        cell_out.key_size = swf.size;
-        cell_out.total_size = swf.size + value_size;
-        cell_out.local_size = local_size;
+        cell_out.key_size = key_size;
+        cell_out.total_size = key_size + value_size;
+        cell_out.local_size = k + v;
         cell_out.footprint = static_cast<uint32_t>(footprint);
         cell_out.is_bucket = swf.flag;
         return 0;
@@ -111,15 +118,14 @@ auto remove_ivec_slot(Node &node, uint32_t index)
     uint32_t key_size;
     if (const auto *ptr = decode_varint(data + sizeof(uint32_t), limit, key_size)) {
         const auto hdr_size = static_cast<uintptr_t>(ptr - data);
-        const auto local_size = compute_local_size(key_size, 0, min_local, max_local);
-        const auto has_remote = local_size < key_size;
-        const auto footprint = hdr_size + local_size + has_remote * sizeof(uint32_t);
+        const auto [k, _, o] = describe_branch_payload(key_size, min_local, max_local);
+        const auto footprint = hdr_size + k + o;
         if (data + footprint <= limit) {
             cell_out.ptr = data;
             cell_out.key = data + hdr_size;
             cell_out.key_size = key_size;
             cell_out.total_size = key_size;
-            cell_out.local_size = local_size;
+            cell_out.local_size = k;
             cell_out.footprint = static_cast<uint32_t>(footprint);
             cell_out.is_bucket = false;
             return 0;
@@ -257,6 +263,53 @@ auto decode_size_with_flag(const char *input, SizeWithFlag &swf_out) -> const ch
 }
 
 static_assert(kMaxAllocation < 0x80000000U);
+
+auto get_bucket_root_id(const Cell &cell) -> Id
+{
+    return Id(get_u32(cell.key - sizeof(uint32_t)));
+}
+
+auto put_bucket_root_id(Cell &cell, Id root_id) -> void
+{
+    put_u32(cell.key - sizeof(uint32_t), root_id.value);
+}
+
+auto put_bucket_root_id(char *key, const Slice &root_id) -> void
+{
+    // root_id is already encoded. Caller must have called put_u32(ptr, val) at some
+    // point, where ptr is equal to root_id.ptr(), and val is a 4-byte root ID.
+    CALICODB_EXPECT_EQ(root_id.size(), sizeof(uint32_t));
+    std::memcpy(key - sizeof(uint32_t), root_id.data(), sizeof(uint32_t));
+}
+
+auto encode_branch_record_cell_hdr(char *output, uint32_t key_size, Id child_id) -> char *
+{
+    put_u32(output, child_id.value);
+    return encode_varint(output + sizeof(uint32_t), key_size);
+}
+
+auto encode_leaf_record_cell_hdr(char *output, uint32_t key_size, uint32_t value_size) -> char *
+{
+    const auto *begin = output;
+    const SizeWithFlag swf = {value_size, false};
+    output = encode_size_with_flag(swf, output);
+    output = encode_varint(output, key_size);
+    const auto hdr_size = static_cast<uintptr_t>(output - begin);
+    const auto pad_size = hdr_size > kMinCellHeaderSize ? 0 : kMinCellHeaderSize - hdr_size;
+    // External cell headers are padded out to 4 bytes.
+    std::memset(output, 0, pad_size);
+    return output + pad_size;
+}
+
+auto prepare_bucket_cell_hdr(char *output, uint32_t key_size) -> char *
+{
+    const SizeWithFlag swf = {key_size, true};
+    output = encode_size_with_flag(swf, output);
+    output += sizeof(uint32_t); // Fill in the root_id later
+    // Cell headers are padded out to 4 bytes. The 4-byte root_id is considered part of the
+    // header, so no additional padding is required.
+    return output;
+}
 
 auto Node::alloc(uint32_t index, uint32_t size) -> int
 {
@@ -406,7 +459,7 @@ auto BlockAllocator::freelist_size(const Node &node, uint32_t total_space) -> in
 
 auto BlockAllocator::defragment(Node &node, int skip) -> int
 {
-    const auto n = NodeHdr::get_cell_count(node.hdr());
+    const auto n = node.cell_count();
     const auto cell_start = NodeHdr::get_cell_start(node.hdr());
     const auto to_skip = skip >= 0 ? static_cast<uint32_t>(skip) : n;
     auto *ptr = node.ref->data;

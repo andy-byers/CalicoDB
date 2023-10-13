@@ -7,19 +7,19 @@
 //// types of API misuse (for example, ModelBucket will write to a bucket in a read-
 //// only transaction without complaint).
 //
-// #ifndef CALICODB_UTILS_MODEL_H
-// #define CALICODB_UTILS_MODEL_H
+//#ifndef CALICODB_UTILS_MODEL_H
+//#define CALICODB_UTILS_MODEL_H
 //
-// #include "calicodb/cursor.h"
-// #include "calicodb/db.h"
-// #include "common.h"
-// #include "cursor_impl.h"
-// #include "logging.h"
-// #include <iostream>
-// #include <list>
-// #include <map>
+//#include "calicodb/cursor.h"
+//#include "calicodb/db.h"
+//#include "common.h"
+//#include "cursor_impl.h"
+//#include "logging.h"
+//#include <iostream>
+//#include <list>
+//#include <map>
 //
-// #define CHECK_TRUE(cond)                                 \
+//#define CHECK_TRUE(cond)                                 \
 //    do {                                                 \
 //        if (!(cond)) {                                   \
 //            std::cerr << "expected `" << #cond << "`\n"; \
@@ -27,10 +27,10 @@
 //        }                                                \
 //    } while (0)
 //
-// #define CHECK_FALSE(cond) \
+//#define CHECK_FALSE(cond) \
 //    CHECK_TRUE(!(cond))
 //
-// #define CHECK_OK(expr)                                             \
+//#define CHECK_OK(expr)                                             \
 //    do {                                                           \
 //        if (auto assert_s = (expr); !assert_s.is_ok()) {           \
 //            std::fprintf(                                          \
@@ -41,7 +41,7 @@
 //        }                                                          \
 //    } while (0)
 //
-// #define CHECK_EQ(lhs, rhs)                                                                             \
+//#define CHECK_EQ(lhs, rhs)                                                                             \
 //    do {                                                                                               \
 //        if ((lhs) != (rhs)) {                                                                          \
 //            std::cerr << "expected `" << #lhs "` (" << (lhs) << ") == `" #rhs "` (" << (rhs) << ")\n"; \
@@ -49,21 +49,24 @@
 //        }                                                                                              \
 //    } while (0)
 //
-// namespace calicodb
+//namespace calicodb
 //{
 //
-// using KVMap = std::map<std::string, std::string>;
-// using KVStore = std::map<std::string, KVMap>;
+//using ModelValue = std::variant<std::string, size_t>;
+//using ModelState = std::map<std::string, ModelValue>;
+//using ModelStore = std::vector<ModelState>;
 //
-// class ModelDB : public DB
+//class ModelDB
+//    : public DB,
+//      public HeapObject
 //{
-//    KVStore *const m_store;
+//    ModelStore *const m_store;
 //    DB *const m_db;
 //
-// public:
-//    static auto open(const Options &options, const char *filename, KVStore &store, DB *&db_out) -> Status;
+//public:
+//    static auto open(const Options &options, const char *filename, ModelStore &store, DB *&db_out) -> Status;
 //
-//    explicit ModelDB(KVStore &store, DB &db)
+//    explicit ModelDB(ModelStore &store, DB &db)
 //        : m_store(&store),
 //          m_db(&db)
 //    {
@@ -87,9 +90,11 @@
 //    }
 //};
 //
-// class ModelTx;
+//class ModelTx;
 //
-// class ModelCursor : public Cursor
+//class ModelCursor
+//    : public Cursor,
+//      public HeapObject
 //{
 //    friend class ModelTx;
 //
@@ -97,8 +102,8 @@
 //    Cursor *const m_c;
 //    const ModelTx *const m_tx;
 //
-//    mutable typename KVMap::iterator m_itr;
-//    KVMap *m_map;
+//    mutable typename ModelState::iterator m_itr;
+//    ModelState *m_map;
 //
 //    mutable std::string m_saved_key;
 //    mutable std::string m_saved_val;
@@ -128,14 +133,14 @@
 //        return {false, ""};
 //    }
 //
-//    auto move_to(typename KVMap::iterator position) const -> void
+//    auto move_to(typename ModelState::iterator position) const -> void
 //    {
 //        m_saved = false;
 //        m_itr = position;
 //    }
 //
-// public:
-//    explicit ModelCursor(Cursor &c, const ModelTx &tx, KVMap &map, std::list<Cursor *>::iterator backref)
+//public:
+//    explicit ModelCursor(Cursor &c, const ModelTx &tx, ModelState &map, std::list<Cursor *>::iterator backref)
 //        : m_backref(backref),
 //          m_c(&c),
 //          m_tx(&tx),
@@ -147,7 +152,7 @@
 //
 //    ~ModelCursor() override;
 //
-//    [[nodiscard]] auto map() -> KVMap &
+//    [[nodiscard]] auto map() -> ModelState &
 //    {
 //        return *m_map;
 //    }
@@ -251,12 +256,14 @@
 //    }
 //};
 //
-// class ModelBucket : public Tx
+//class ModelBucket
+//    : public Bucket,
+//      public HeapObject
 //{
 //    friend class ModelCursor;
 //
-//    mutable KVStore m_temp;
-//    KVStore *const m_base;
+//    mutable ModelState m_temp;
+//    ModelState *const m_base;
 //    Tx *const m_tx;
 //
 //    auto use_cursor(Cursor &c) const -> ModelCursor &
@@ -267,12 +274,12 @@
 //        return m;
 //    }
 //
-//    auto open_model_cursor(Cursor &c, KVMap &map) const -> Cursor *;
+//    auto open_model_cursor(Cursor &c, ModelState &map) const -> Cursor *;
 //    auto save_cursors(Cursor *exclude = nullptr) const -> void;
 //    mutable std::list<Cursor *> m_cursors;
 //
-// public:
-//    explicit ModelBucket(KVStore &store, Tx &tx)
+//public:
+//    explicit ModelBucket(ModelState &store, Tx &tx)
 //        : m_temp(store),
 //          m_base(&store),
 //          m_tx(&tx)
@@ -281,16 +288,8 @@
 //
 //    ~ModelBucket() override;
 //
-//    // WARNING: Invalidates all open cursors.
-//    auto check_consistency() const -> void;
-//
-//    [[nodiscard]] auto status() const -> Status override
-//    {
-//        return m_tx->status();
-//    }
-//
-//    auto create_bucket(const BucketOptions &options, const Slice &name, Cursor **c_out) -> Status override;
-//    [[nodiscard]] auto open_bucket(const Slice &name, Cursor *&c_out) const -> Status override;
+//    auto create_bucket(const Slice &name, Bucket **b_out) -> Status override;
+//    auto open_bucket(const Slice &name, Bucket *&b_out) const -> Status override;
 //
 //    auto drop_bucket(const Slice &name) -> Status override
 //    {
@@ -303,21 +302,24 @@
 //        return s;
 //    }
 //
-//    auto put(Cursor &c, const Slice &key, const Slice &value) -> Status override;
-//    auto erase(Cursor &c, const Slice &key) -> Status override;
+//    auto put(const Slice &key, const Slice &value) -> Status override;
+//    auto put(Cursor &c, const Slice &value) -> Status override;
+//    auto erase(const Slice &key) -> Status override;
 //    auto erase(Cursor &c) -> Status override;
 //};
 //
-// class ModelTx : public Tx
+//class ModelTx
+//    : public Tx,
+//      public HeapObject
 //{
 //    friend class ModelCursor;
 //
-//    mutable KVStore m_temp;
-//    KVStore *const m_base;
+//    mutable ModelStore m_temp;
+//    ModelStore *const m_base;
 //    Tx *const m_tx;
 //
-// public:
-//    explicit ModelTx(KVStore &store, Tx &tx)
+//public:
+//    explicit ModelTx(ModelStore &store, Tx &tx)
 //        : m_temp(store),
 //          m_base(&store),
 //          m_tx(&tx)
@@ -347,7 +349,7 @@
 //    }
 //};
 //
-// ModelCursor::~ModelCursor()
+//ModelCursor::~ModelCursor()
 //{
 //    m_tx->m_cursors.erase(m_backref);
 //    delete m_c;
@@ -355,4 +357,4 @@
 //
 //} // namespace calicodb
 //
-// #endif // CALICODB_UTILS_MODEL_H
+//#endif // CALICODB_UTILS_MODEL_H

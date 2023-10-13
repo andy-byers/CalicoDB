@@ -26,23 +26,17 @@ TxImpl::~TxImpl()
 
 auto TxImpl::create_bucket(const Slice &name, Bucket **b_out) -> Status
 {
-    return pager_write(m_schema.pager(), [this, name, b_out] {
-        return m_main.create_bucket(name, b_out);
-    });
+    return m_main.create_bucket(name, b_out);
 }
 
 auto TxImpl::open_bucket(const Slice &name, Bucket *&b_out) const -> Status
 {
-    return pager_read(m_schema.pager(), [this, name, &b_out] {
-        return m_main.open_bucket(name, b_out);
-    });
+    return m_main.open_bucket(name, b_out);
 }
 
 auto TxImpl::drop_bucket(const Slice &name) -> Status
 {
-    return pager_write(m_schema.pager(), [this, name] {
-        return m_main.drop_bucket(name);
-    });
+    return m_main.drop_bucket(name);
 }
 
 auto TxImpl::commit() -> Status

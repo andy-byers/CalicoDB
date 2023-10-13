@@ -22,11 +22,10 @@ auto no_bucket(const Slice &name) -> Status
         .build();
 }
 
-auto decode_root_id(const Slice &data, Id &out) -> int
+auto decode_root_id(const Slice &data, Id &root_id_out) -> int
 {
-    uint32_t value;
-    if (decode_varint(data.data(), data.data() + data.size(), value)) {
-        out.value = value;
+    if (data.size() == sizeof(uint32_t)) {
+        root_id_out.value = get_u32(data);
         return 0;
     }
     return -1;
@@ -34,8 +33,8 @@ auto decode_root_id(const Slice &data, Id &out) -> int
 
 auto encode_root_id(Id id, char *root_id_out) -> size_t
 {
-    const auto *end = encode_varint(root_id_out, id.value);
-    return static_cast<size_t>(end - root_id_out);
+    put_u32(root_id_out, id.value);
+    return sizeof(uint32_t);
 }
 
 } // namespace
@@ -61,6 +60,9 @@ auto BucketImpl::new_cursor() const -> Cursor *
 
 auto BucketImpl::create_bucket(const Slice &key, Bucket **b_out) -> Status
 {
+    if (b_out) {
+        *b_out = nullptr;
+    }
     return pager_write(m_schema->pager(), [this, key, b_out] {
         m_cursor.find(key);
         auto s = m_cursor.status();
@@ -79,47 +81,37 @@ auto BucketImpl::create_bucket(const Slice &key, Bucket **b_out) -> Status
         char buf[kVarintMaxLength];
         const size_t len = encode_root_id(root_id, buf);
         s = m_tree->put(*TREE_CURSOR(m_cursor), key, Slice(buf, len), true);
-        if (!s.is_ok()) {
-            return s;
+        if (s.is_ok() && b_out) {
+            s = Status::no_memory();
+            if (auto *tree = m_schema->open_tree(root_id)) {
+                *b_out = new (std::nothrow) BucketImpl(*m_schema, *tree);
+                s = *b_out ? Status::ok() : s;
+            }
         }
-
-        s = Status::no_memory();
-        auto *tree = m_schema->open_tree(root_id);
-        if (!tree) {
-            return s;
-        }
-
-        if (!b_out) {
-            return Status::ok();
-        }
-
-        *b_out = new (std::nothrow) BucketImpl(*m_schema, *tree);
-        return *b_out ? Status::ok() : s;
+        return s;
     });
 }
 
 auto BucketImpl::open_bucket(const Slice &key, Bucket *&b_out) const -> Status
 {
-    m_cursor.find(key);
-    auto s = m_cursor.status();
-    if (!m_cursor.is_valid()) {
-        return s.is_ok() ? no_bucket(key) : s;
-    }
+    b_out = nullptr;
+    return pager_read(m_schema->pager(), [this, key, &b_out] {
+        m_cursor.find(key);
+        auto s = m_cursor.status();
+        if (!m_cursor.is_valid()) {
+            return s.is_ok() ? no_bucket(key) : s;
+        }
 
-    Id root_id;
-    CALICODB_EXPECT_TRUE(s.is_ok()); // Cursor invariant
-    s = decode_and_check_root_id(m_cursor.value(), root_id);
-    if (!s.is_ok()) {
-        return s;
-    }
+        CALICODB_EXPECT_TRUE(s.is_ok()); // Cursor invariant
+        const auto root_id = TREE_CURSOR(m_cursor)->bucket_root_id();
 
-    s = Status::no_memory();
-    auto *tree = m_schema->open_tree(root_id);
-    if (!tree) {
+        s = Status::no_memory();
+        if (auto *tree = m_schema->open_tree(root_id)) {
+            b_out = new (std::nothrow) BucketImpl(*m_schema, *tree);
+            s = b_out ? Status::ok() : s;
+        }
         return s;
-    }
-    b_out = new (std::nothrow) BucketImpl(*m_schema, *tree);
-    return b_out ? Status::ok() : s;
+    });
 }
 
 auto BucketImpl::drop_bucket(const Slice &key) -> Status
@@ -131,12 +123,8 @@ auto BucketImpl::drop_bucket(const Slice &key) -> Status
             return s.is_ok() ? no_bucket(key) : s;
         }
 
-        Id root_id;
         CALICODB_EXPECT_TRUE(s.is_ok()); // Cursor invariant
-        s = decode_and_check_root_id(m_cursor.value(), root_id);
-        if (!s.is_ok()) {
-            return s;
-        }
+        const auto root_id = TREE_CURSOR(m_cursor)->bucket_root_id();
 
         s = m_tree->erase(*TREE_CURSOR(m_cursor));
         if (!s.is_ok()) {
@@ -157,7 +145,14 @@ auto BucketImpl::put(const Slice &key, const Slice &value) -> Status
 auto BucketImpl::erase(const Slice &key) -> Status
 {
     return pager_write(m_schema->pager(), [this, key] {
-        return m_tree->erase(*TREE_CURSOR(m_cursor), key);
+        m_cursor.find(key);
+        if (m_cursor.is_valid()) {
+            if (m_cursor.is_bucket()) {
+                return Status::invalid_argument("cannot erase bucket record");
+            }
+            return m_tree->erase(*TREE_CURSOR(m_cursor));
+        }
+        return m_cursor.status();
     });
 }
 
@@ -186,17 +181,11 @@ auto BucketImpl::decode_and_check_root_id(const Slice &data, Id &root_id_out) co
 {
     Status s;
     auto &pager = m_schema->pager();
-    if (decode_root_id(data, root_id_out)) {
-        s = StatusBuilder(Status::kCorruption)
-                .append("root ID \"")
-                .append_escaped(data)
-                .append("\" is corrupted")
-                .build();
+    if (decode_root_id(data.data(), root_id_out)) {
+        s = Status::corruption("root ID is corrupted");
     } else if (root_id_out.value > pager.page_count()) {
         s = StatusBuilder::corruption("root ID %u is out of bounds (page count is %u)",
                                       root_id_out.value, pager.page_count());
-    }
-    if (!s.is_ok()) {
         pager.set_status(s);
     }
     return s;

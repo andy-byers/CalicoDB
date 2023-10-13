@@ -38,11 +38,14 @@ public:
     // Create a mapping between the given `key` and the given `value`
     virtual auto put(const Slice &key, const Slice &value) -> Status = 0;
 
+    // Assign the given `value` to the record pointed to by `c`
+    virtual auto put(Cursor &c, const Slice &value) -> Status = 0;
+
     // Erase the record identified by `key`
     // This method cannot be used to remove a nested bucket. Use drop_bucket() instead.
     virtual auto erase(const Slice &key) -> Status = 0;
 
-    virtual auto put(Cursor &c, const Slice &value) -> Status = 0;
+    // Erase the record pointed to by `c`
     virtual auto erase(Cursor &c) -> Status = 0;
 };
 

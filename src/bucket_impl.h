@@ -29,8 +29,8 @@ public:
     auto drop_bucket(const Slice &key) -> Status override;
     auto new_cursor() const -> Cursor * override;
     auto put(const Slice &key, const Slice &value) -> Status override;
-    auto erase(const Slice &key) -> Status override;
     auto put(Cursor &c, const Slice &value) -> Status override;
+    auto erase(const Slice &key) -> Status override;
     auto erase(Cursor &c) -> Status override;
 
     auto TEST_validate() const -> void;

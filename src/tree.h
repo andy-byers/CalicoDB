@@ -54,7 +54,6 @@ public:
     ~Tree();
 
     explicit Tree(Pager &pager, Stats &stat, char *scratch, Id root_id);
-    static auto get_tree(TreeCursor &c) -> Tree *;
 
     auto activate_cursor(TreeCursor &target, bool requires_position) const -> void;
     auto deactivate_cursors(TreeCursor *exclude) const -> void;
@@ -70,7 +69,6 @@ public:
 
     auto put(TreeCursor &c, const Slice &key, const Slice &value, bool is_bucket) -> Status;
     auto erase(TreeCursor &c) -> Status;
-    auto erase(TreeCursor &c, const Slice &key) -> Status;
     auto vacuum() -> Status;
 
     enum AllocationType {
@@ -143,7 +141,7 @@ private:
     auto read_key(const Cell &cell, char *scratch, Slice *key_out, uint32_t limit = 0) const -> Status;
     auto read_value(const Cell &cell, char *scratch, Slice *value_out) const -> Status;
     auto overwrite_value(const Cell &cell, const Slice &value) -> Status;
-    auto emplace(Node &node, const Slice &key, const Slice &value, bool flag, uint32_t index, bool &overflow) -> Status;
+    auto emplace(Node &node, Slice key, Slice value, bool flag, uint32_t index, bool &overflow) -> Status;
     auto free_overflow(Id head_id) -> Status;
 
     auto relocate_page(PageRef *&free, PointerMap::Entry entry, Id last_id) -> Status;
@@ -342,7 +340,7 @@ public:
     // Return true if the cursor is positioned on a valid key, false otherwise
     [[nodiscard]] auto on_record() const -> bool
     {
-        return on_node() && m_idx < NodeHdr::get_cell_count(m_node.hdr());
+        return on_node() && m_idx < m_node.cell_count();
     }
 
     // Called by CursorImpl. If the cursor is saved, then m_cell.is_bucket contains the bucket flag
@@ -356,6 +354,20 @@ public:
     {
         CALICODB_EXPECT_TRUE(on_node());
         return m_node.ref->page_id;
+    }
+
+    [[nodiscard]] auto bucket_root_id() const -> Id
+    {
+        CALICODB_EXPECT_TRUE(is_valid());
+        CALICODB_EXPECT_TRUE(m_cell.is_bucket);
+        return get_bucket_root_id(m_cell);
+    }
+
+    auto overwrite_bucket_root_id(Id root_id) -> void
+    {
+        CALICODB_EXPECT_TRUE(is_valid());
+        CALICODB_EXPECT_TRUE(m_cell.is_bucket);
+        put_bucket_root_id(m_cell, root_id);
     }
 
     enum ReleaseType {

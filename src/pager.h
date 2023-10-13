@@ -182,7 +182,8 @@ private:
 template <class Operation>
 auto pager_read(Pager &pager, const Operation &operation) -> Status
 {
-    CALICODB_EXPECT_EQ(pager.mode(), Pager::kRead);
+    CALICODB_EXPECT_GE(pager.mode(), Pager::kRead);
+    CALICODB_EXPECT_LT(pager.mode(), Pager::kError);
     if (pager.page_count() == 0) {
         return Status::invalid_argument("database is empty");
     }

@@ -38,7 +38,7 @@ constexpr uint32_t kCellPtrSize = sizeof(uint16_t);
 
 [[nodiscard]] auto cell_area_offset(const Node &node) -> uint32_t
 {
-    return cell_slots_offset(node) + NodeHdr::get_cell_count(node.hdr()) * kCellPtrSize;
+    return cell_slots_offset(node) + node.cell_count() * kCellPtrSize;
 }
 
 [[nodiscard]] auto read_next_id(const PageRef &page) -> Id
@@ -88,7 +88,7 @@ auto write_child_id(Cell &cell, Id child_id)
     std::memcpy(area, child.ref->data + cell_start, area_size);
 
     // Copy the header and cell pointers.
-    area_size = NodeHdr::get_cell_count(child.hdr()) * kCellPtrSize;
+    area_size = child.cell_count() * kCellPtrSize;
     area = root.ref->data + cell_slots_offset(root);
     std::memcpy(area, child.ref->data + cell_slots_offset(child), area_size);
     std::memcpy(root.hdr(), child.hdr(), NodeHdr::kSize);
@@ -106,7 +106,7 @@ auto write_child_id(Cell &cell, Id child_id)
 
 [[nodiscard]] auto is_underflowing(const Node &node)
 {
-    return NodeHdr::get_cell_count(node.hdr()) == 0;
+    return node.cell_count() == 0;
 }
 
 constexpr uint32_t kLinkContentOffset = sizeof(uint32_t);
@@ -241,7 +241,7 @@ private:
     static auto traverse_impl(Tree &tree, Node node, const Callback &cb, uint32_t level) -> Status
     {
         Status s;
-        for (uint32_t i = 0, n = NodeHdr::get_cell_count(node.hdr()); s.is_ok() && i <= n; ++i) {
+        for (uint32_t i = 0, n = node.cell_count(); s.is_ok() && i <= n; ++i) {
             if (!node.is_leaf()) {
                 const auto save_id = node.ref->page_id;
                 const auto next_id = node.read_child_id(i);
@@ -264,12 +264,6 @@ private:
         return s;
     }
 };
-
-[[nodiscard]] constexpr auto is_overflow_type(PageType type) -> bool
-{
-    return type == kOverflowHead ||
-           type == kOverflowLink;
-}
 
 } // namespace
 
@@ -295,6 +289,9 @@ auto TreeCursor::read_user_value() -> Status
 {
     CALICODB_EXPECT_TRUE(on_record());
     CALICODB_EXPECT_TRUE(m_value.is_empty());
+    if (m_cell.is_bucket) {
+        return Status::ok();
+    }
     const auto value_size = m_cell.total_size - m_cell.key_size;
     if (m_tree->m_writable || m_cell.total_size > m_cell.local_size) {
         if (m_value_buf.len() < value_size &&
@@ -349,7 +346,7 @@ auto TreeCursor::ensure_correct_leaf() -> void
 {
     CALICODB_EXPECT_TRUE(on_node());
     CALICODB_EXPECT_TRUE(m_node.is_leaf());
-    if (m_idx == NodeHdr::get_cell_count(m_node.hdr())) {
+    if (m_idx == m_node.cell_count()) {
         move_right();
     }
 }
@@ -360,7 +357,7 @@ auto TreeCursor::move_right() -> void
     CALICODB_EXPECT_TRUE(m_node.is_leaf());
     const auto leaf_level = m_level;
     for (uint32_t adjust = 0;; adjust = 1) {
-        const auto ncells = NodeHdr::get_cell_count(m_node.hdr());
+        const auto ncells = m_node.cell_count();
         if (++m_idx < ncells + adjust) {
             break;
         } else if (m_level == 0) {
@@ -403,7 +400,7 @@ auto TreeCursor::move_left() -> void
         if (!m_status.is_ok()) {
             return;
         }
-        m_idx = NodeHdr::get_cell_count(m_node.hdr()) - m_node.is_leaf();
+        m_idx = m_node.cell_count() - m_node.is_leaf();
     }
     if (m_level != leaf_level) {
         m_status = Status::corruption();
@@ -424,7 +421,7 @@ auto TreeCursor::seek_to_last_leaf() -> void
     seek_to_root();
     while (m_status.is_ok()) {
         CALICODB_EXPECT_EQ(m_state, kValidState);
-        m_idx = NodeHdr::get_cell_count(m_node.hdr());
+        m_idx = m_node.cell_count();
         if (m_node.is_leaf()) {
             m_idx -= m_idx > 0;
             break;
@@ -439,7 +436,7 @@ auto TreeCursor::search_node(const Slice &key) -> bool
     CALICODB_EXPECT_NE(m_node.ref, nullptr);
 
     auto exact = false;
-    auto upper = NodeHdr::get_cell_count(m_node.hdr());
+    auto upper = m_node.cell_count();
     uint32_t lower = 0;
 
     while (lower < upper) {
@@ -531,7 +528,7 @@ auto TreeCursor::on_last_node() const -> bool
     CALICODB_EXPECT_TRUE(on_node());
     for (int i = 0; i < m_level; ++i) {
         const auto &node = m_node_path[i];
-        if (m_idx_path[i] < NodeHdr::get_cell_count(node.hdr())) {
+        if (m_idx_path[i] < node.cell_count()) {
             return false;
         }
     }
@@ -690,11 +687,6 @@ auto Tree::corrupted_node(Id page_id) const -> Status
         m_pager->set_status(s); // TODO: Don't set errors in the tree, just return the status and let the caller handle it
     }
     return s;
-}
-
-auto Tree::get_tree(TreeCursor &c) -> Tree *
-{
-    return c.m_tree;
 }
 
 auto Tree::create(Id &root_id_out) -> Status
@@ -1065,7 +1057,7 @@ auto Tree::fix_links(Node &node, Id parent_id) -> Status
         parent_id = node.ref->page_id;
     }
     Status s;
-    for (uint32_t i = 0, n = NodeHdr::get_cell_count(node.hdr()); s.is_ok() && i < n; ++i) {
+    for (uint32_t i = 0, n = node.cell_count(); s.is_ok() && i < n; ++i) {
         Cell cell;
         if (node.read(i, cell)) {
             s = corrupted_node(node.ref->page_id);
@@ -1126,7 +1118,7 @@ auto Tree::split_root(TreeCursor &c) -> Status
         std::memcpy(child.hdr(), root.hdr(), NodeHdr::kSize);
         std::memcpy(child.ref->data + cell_slots_offset(child),
                     root.ref->data + cell_slots_offset(root),
-                    NodeHdr::get_cell_count(root.hdr()) * kCellPtrSize);
+                    root.cell_count() * kCellPtrSize);
 
         CALICODB_EXPECT_TRUE(m_ovfl.exists());
         child.gap_size = root.gap_size;
@@ -1166,7 +1158,7 @@ auto Tree::split_nonroot(TreeCursor &c) -> Status
 
     if (s.is_ok()) {
         left = Node::from_new_page(node_options, *left.ref, node.is_leaf());
-        const auto ncells = NodeHdr::get_cell_count(node.hdr());
+        const auto ncells = node.cell_count();
         if (m_ovfl.idx >= ncells && c.on_last_node()) {
             return split_nonroot_fast(c, parent, move(left));
         }
@@ -1174,7 +1166,7 @@ auto Tree::split_nonroot(TreeCursor &c) -> Status
     }
     if (s.is_ok()) {
         // Correct the cursor position. It may not be correct after the split.
-        const auto before = NodeHdr::get_cell_count(left.hdr()) + !left.is_leaf();
+        const auto before = left.cell_count() + !left.is_leaf();
         if (c.m_idx < before) {
             auto temp = exchange(node, move(left));
             left = move(temp);
@@ -1203,7 +1195,7 @@ auto Tree::split_nonroot_fast(TreeCursor &c, Node &parent, Node right) -> Status
     Cell pivot;
     if (left.is_leaf()) {
         Cell left_cell;
-        if (left.read(NodeHdr::get_cell_count(left.hdr()) - 1, left_cell)) {
+        if (left.read(left.cell_count() - 1, left_cell)) {
             s = corrupted_node(right.ref->page_id);
             goto cleanup;
         }
@@ -1216,7 +1208,7 @@ auto Tree::split_nonroot_fast(TreeCursor &c, Node &parent, Node right) -> Status
         };
         s = make_pivot(opt, pivot);
     } else {
-        auto cell_count = NodeHdr::get_cell_count(left.hdr());
+        auto cell_count = left.cell_count();
         if (left.read(cell_count - 1, pivot)) {
             s = corrupted_node(left.ref->page_id);
             goto cleanup;
@@ -1248,7 +1240,7 @@ auto Tree::split_nonroot_fast(TreeCursor &c, Node &parent, Node right) -> Status
 
 cleanup:
     const auto before =
-        NodeHdr::get_cell_count(left.hdr()) + // # cells moved to left
+        left.cell_count() + // # cells moved to left
         !left.is_leaf();                      // 1 pivot cell posted to parent
     if (c.m_idx >= before) {
         ++c.m_idx_path[c.m_level - 1];
@@ -1298,13 +1290,13 @@ auto Tree::redistribute_cells(Node &left, Node &right, Node &parent, uint32_t pi
     const auto is_leaf_level = tmp.is_leaf();
 
     Node *p_src, *p_left, *p_right;
-    if (0 < NodeHdr::get_cell_count(left.hdr())) {
-        CALICODB_EXPECT_EQ(0, NodeHdr::get_cell_count(right.hdr()));
+    if (0 < left.cell_count()) {
+        CALICODB_EXPECT_EQ(0, right.cell_count());
         p_src = &left;
         p_left = &tmp;
         p_right = &right;
     } else {
-        CALICODB_EXPECT_LT(0, NodeHdr::get_cell_count(right.hdr()));
+        CALICODB_EXPECT_LT(0, right.cell_count());
         p_src = &right;
         p_left = &left;
         p_right = &tmp;
@@ -1316,7 +1308,7 @@ auto Tree::redistribute_cells(Node &left, Node &right, Node &parent, uint32_t pi
         // The new node is empty, so only the next pointer from p_src is relevant.
         NodeHdr::put_next_id(tmp.hdr(), NodeHdr::get_next_id(p_src->hdr()));
     }
-    CALICODB_EXPECT_EQ(0, NodeHdr::get_cell_count(tmp.hdr()));
+    CALICODB_EXPECT_EQ(0, tmp.cell_count());
     CALICODB_EXPECT_EQ(0, NodeHdr::get_free_start(tmp.hdr()));
     CALICODB_EXPECT_EQ(0, NodeHdr::get_frag_count(tmp.hdr()));
 
@@ -1526,7 +1518,7 @@ auto Tree::fix_nonroot(TreeCursor &c, Node &parent, uint32_t idx) -> Status
             if (was_left) {
                 c.m_idx = 0;
             } else {
-                c.m_idx = NodeHdr::get_cell_count(c.m_node.hdr());
+                c.m_idx = c.m_node.cell_count();
             }
         }
     }
@@ -1559,7 +1551,7 @@ auto Tree::fix_root(TreeCursor &c) -> Status
         // child instead.
         Cell cell;
         const auto path_loc = c.m_idx_path[1];
-        const auto cell_count = NodeHdr::get_cell_count(child.hdr());
+        const auto cell_count = child.cell_count();
         const auto split_loc = minval(path_loc, cell_count - 1);
         if (child.read(split_loc, cell)) {
             s = corrupted_node(c.page_id());
@@ -1702,34 +1694,26 @@ auto Tree::put(TreeCursor &c, const Slice &key, const Slice &value, bool flag) -
     return s;
 }
 
-auto Tree::emplace(Node &node, const Slice &key, const Slice &value, bool flag, uint32_t index, bool &overflow) -> Status
+auto Tree::emplace(Node &node, Slice key, Slice value, bool flag, uint32_t index, bool &overflow) -> Status
 {
     CALICODB_EXPECT_TRUE(node.is_leaf());
-    auto k = key.size();
-    auto v = value.size();
-    const auto local_size = compute_local_size(k, v, node.min_local, node.max_local);
-    const auto has_remote = k + v > local_size;
-
-    if (k > local_size) {
-        k = local_size;
-        v = 0;
-    } else if (has_remote) {
-        v = local_size - k;
-    }
-
-    CALICODB_EXPECT_EQ(k + v, local_size);
     // Serialize the cell header for the external cell and determine the number
     // of bytes needed for the cell.
-    char header[kVarintMaxLength * 2];
-    auto *ptr = header;
-    ptr = encode_varint(ptr, static_cast<uint32_t>(value.size()));
-    const SizeWithFlag swf = {static_cast<uint32_t>(key.size()), flag};
-    ptr = encode_size_with_flag(swf, ptr);
+    char header[kMaxCellHeaderSize];
+    const auto key_size = static_cast<uint32_t>(key.size());
+    const auto value_size = static_cast<uint32_t>(value.size());
+    const auto [k, v, o] = describe_leaf_payload(key_size, value_size, flag,
+                                                 node.min_local, node.max_local);
+    char *ptr = header;
+    if (flag) {
+        ptr = encode_leaf_record_cell_hdr(ptr, key_size, value_size);
+    } else {
+        ptr = prepare_bucket_cell_hdr(ptr, key_size);
+        put_bucket_root_id(ptr, value);
+        value.clear();
+    }
     const auto hdr_size = static_cast<uintptr_t>(ptr - header);
-    const auto pad_size = hdr_size > kMinCellHeaderSize ? 0 : kMinCellHeaderSize - hdr_size;
-    const auto cell_size = local_size + hdr_size + pad_size + sizeof(uint32_t) * has_remote;
-    // External cell headers are padded out to 4 bytes.
-    std::memset(ptr, 0, pad_size);
+    const auto cell_size = hdr_size + k + v + o;
 
     // Attempt to allocate space for the cell in the node. If this is not possible,
     // write the cell to scratch memory. allocate_block() should not return an offset
@@ -1747,16 +1731,16 @@ auto Tree::emplace(Node &node, const Slice &key, const Slice &value, bool flag, 
         return corrupted_node(node.ref->page_id);
     }
     // Write the cell header.
-    std::memcpy(ptr, header, hdr_size + pad_size);
-    ptr += hdr_size + pad_size;
+    std::memcpy(ptr, header, hdr_size);
+    ptr += hdr_size;
 
-    PageRef *prev = nullptr;
+    auto src = key;
+    auto len = k + v;
     auto payload_left = key.size() + value.size();
     auto prev_pgno = node.ref->page_id;
     auto prev_type = kOverflowHead;
-    auto *next_ptr = ptr + local_size;
-    auto len = local_size;
-    auto src = key;
+    auto *next_ptr = ptr + len;
+    PageRef *prev = nullptr;
 
     Status s;
     while (s.is_ok()) {
@@ -1802,29 +1786,12 @@ auto Tree::emplace(Node &node, const Slice &key, const Slice &value, bool flag, 
     return s;
 }
 
-auto Tree::erase(TreeCursor &c, const Slice &key) -> Status
-{
-    // This call may invalidate `key`, if `key` was returned by `c->key()`. In
-    // this case, seek_to_leaf() with kSeekReader should cause `c->key()` to
-    // return the same key bytes that `key` formerly held.
-    const auto key_exists = c.start_write(key, true);
-    auto s = c.m_status;
-    if (key_exists && s.is_ok()) {
-        s = erase(c);
-    } else {
-        c.finish_write(s);
-    }
-    return s;
-}
-
 auto Tree::erase(TreeCursor &c) -> Status
 {
     if (!c.is_valid()) {
         return c.m_status.is_ok()
-                   ? Status::invalid_argument()
+                   ? Status::invalid_argument("cursor is invalid")
                    : c.m_status;
-    } else if (c.is_bucket()) {
-        return Status::invalid_argument("cannot erase bucket record");
     }
     CALICODB_EXPECT_TRUE(c.assert_state());
     c.start_write();
@@ -1866,7 +1833,7 @@ auto Tree::relocate_page(PageRef *&free, PointerMap::Entry entry, Id last_id) ->
                 return s;
             }
             bool found = false;
-            for (uint32_t i = 0, n = NodeHdr::get_cell_count(parent.hdr()); i < n; ++i) {
+            for (uint32_t i = 0, n = parent.cell_count(); i < n; ++i) {
                 Cell cell;
                 if (parent.read(i, cell)) {
                     s = corrupted_node(parent.ref->page_id);
@@ -1898,7 +1865,7 @@ auto Tree::relocate_page(PageRef *&free, PointerMap::Entry entry, Id last_id) ->
                 return corrupted_node(entry.back_ptr);
             }
             bool found = false;
-            for (uint32_t i = 0, n = NodeHdr::get_cell_count(parent.hdr()); !found && i <= n; ++i) {
+            for (uint32_t i = 0, n = parent.cell_count(); !found && i <= n; ++i) {
                 const auto child_id = parent.read_child_id(i);
                 found = child_id == last_id;
                 if (found) {
@@ -1936,7 +1903,7 @@ auto Tree::relocate_page(PageRef *&free, PointerMap::Entry entry, Id last_id) ->
         PageRef *last;
         s = m_pager->acquire(last_id, last);
         if (s.is_ok()) {
-            if (is_overflow_type(entry.type)) {
+            if (entry.type == kOverflowHead || entry.type == kOverflowLink) {
                 const auto next_id = read_next_id(*last);
                 if (!next_id.is_null()) {
                     s = PointerMap::read_entry(*m_pager, next_id, entry);
