@@ -128,7 +128,7 @@ public:
     {
         EXPECT_OK(m_pager->lock_reader(nullptr));
         EXPECT_OK(m_pager->begin_writer());
-        m_tree = new Tree(*m_pager, m_stat, m_pager->scratch(), Id::root());
+        m_tree = new Tree(*m_pager, m_stat, Id::root());
         m_c = new (std::nothrow) CursorImpl(*m_tree);
     }
 
@@ -1267,7 +1267,7 @@ public:
     struct TreeWrapper {
         TestBucket b;
         TestCursor c;
-        Tree *tree;
+        Tree *tree; // Owned by b
     };
 
     std::unique_ptr<Schema> m_schema;
@@ -1306,16 +1306,36 @@ public:
         TreeTests::TearDown();
     }
 
+    auto tree_name(size_t tid)
+    {
+        // Makes sure keys for nested trees don't interfere with normal keys.
+        return "tree_" + numeric_key(tid);
+    }
+
     auto create_tree(size_t tid)
     {
         EXPECT_EQ(multi_tree.find(tid), end(multi_tree));
 
         Bucket *b;
-        const auto name = numeric_key(tid);
+        const auto name = tree_name(tid);
         EXPECT_OK(m_main->create_bucket(name, &b));
         auto *c = b->new_cursor();
         multi_tree.emplace(tid, TreeWrapper{TestBucket(b), TestCursor(c),
                                             &tree_cursor_cast(*c).tree()});
+    }
+
+    auto create_nested_tree(size_t parent_tid, size_t child_tid)
+    {
+        EXPECT_EQ(multi_tree.find(child_tid), end(multi_tree));
+        auto itr = multi_tree.find(parent_tid);
+        EXPECT_NE(itr, end(multi_tree));
+
+        Bucket *b;
+        const auto name = tree_name(child_tid);
+        EXPECT_OK(itr->second.b->create_bucket(name, &b));
+        auto *c = b->new_cursor();
+        multi_tree.emplace(child_tid, TreeWrapper{TestBucket(b), TestCursor(c),
+                                                  &tree_cursor_cast(*c).tree()});
     }
 
     auto fill_tree(size_t tid, bool shuffle = false)
@@ -1366,10 +1386,30 @@ public:
 
     auto drop_tree(size_t tid)
     {
-        const auto key = numeric_key(tid);
+        const auto name = tree_name(tid);
         ASSERT_NE(multi_tree.find(tid), end(multi_tree));
-        multi_tree.erase(tid); // TODO: Allow buckets to be dropped while a handle is still open.
-        ASSERT_OK(m_main->drop_bucket(key.c_str()));
+
+        // Allow buckets to be dropped while a handle is still open.
+        ASSERT_OK(m_main->drop_bucket(name.c_str()));
+        fill_tree(tid, true); // Handle is still usable
+        multi_tree.erase(tid);
+    }
+
+    auto drop_nested_tree(size_t parent_tid, size_t child_tid)
+    {
+        EXPECT_NE(multi_tree.find(child_tid), end(multi_tree));
+        auto itr = multi_tree.find(parent_tid);
+        EXPECT_NE(itr, end(multi_tree));
+
+        const auto key = tree_name(child_tid);
+        // Allow buckets to be dropped while a handle is still open.
+        ASSERT_OK(itr->second.b->drop_bucket(key.c_str()));
+        fill_tree(child_tid, true); // Handle is still usable
+    }
+
+    auto close_nested_tree(size_t child_tid)
+    {
+        multi_tree.erase(child_tid);
     }
 
     auto check_roots(size_t num_roots) -> void
@@ -1388,7 +1428,13 @@ public:
     }
 };
 
-TEST_F(MultiTreeTests, CreateA)
+TEST_F(MultiTreeTests, Create1)
+{
+    create_tree(0);
+    check_roots(1);
+}
+
+TEST_F(MultiTreeTests, Create2)
 {
     for (size_t i = 0; i < kN; ++i) {
         create_tree(i);
@@ -1396,7 +1442,7 @@ TEST_F(MultiTreeTests, CreateA)
     }
 }
 
-TEST_F(MultiTreeTests, CreateB)
+TEST_F(MultiTreeTests, Create3)
 {
     for (size_t i = 0; i < kN; ++i) {
         create_tree(i);
@@ -1405,7 +1451,7 @@ TEST_F(MultiTreeTests, CreateB)
     }
 }
 
-TEST_F(MultiTreeTests, CreateC)
+TEST_F(MultiTreeTests, Create4)
 {
     for (size_t i = 0; i < kN; ++i) {
         create_tree(i);
@@ -1415,7 +1461,7 @@ TEST_F(MultiTreeTests, CreateC)
     }
 }
 
-TEST_F(MultiTreeTests, CreateD)
+TEST_F(MultiTreeTests, Create5)
 {
     for (size_t i = 0; i < kN; ++i) {
         create_tree(i);
@@ -1476,7 +1522,22 @@ TEST_F(MultiTreeTests, CannotDropNonexistentBucket)
     ASSERT_TRUE(b->drop_bucket("nonexistent").is_invalid_argument());
 }
 
-TEST_F(MultiTreeTests, DropA)
+TEST_F(MultiTreeTests, Drop1)
+{
+    create_tree(0);
+    drop_tree(0);
+    check_roots(0);
+}
+
+TEST_F(MultiTreeTests, Drop2)
+{
+    create_tree(0);
+    fill_tree(0);
+    drop_tree(0);
+    check_roots(0);
+}
+
+TEST_F(MultiTreeTests, Drop3)
 {
     create_tree(0);
     fill_tree(0, true);
@@ -1485,7 +1546,7 @@ TEST_F(MultiTreeTests, DropA)
     fill_tree(1, false);
 }
 
-TEST_F(MultiTreeTests, DropB)
+TEST_F(MultiTreeTests, Drop4)
 {
     for (size_t i = 0; i < kN; ++i) {
         create_tree(i);
@@ -1497,7 +1558,7 @@ TEST_F(MultiTreeTests, DropB)
     }
 }
 
-TEST_F(MultiTreeTests, DropC)
+TEST_F(MultiTreeTests, Drop5)
 {
     for (size_t i = 0; i < kN; ++i) {
         create_tree(i);
@@ -1508,7 +1569,7 @@ TEST_F(MultiTreeTests, DropC)
     }
 }
 
-TEST_F(MultiTreeTests, DropD)
+TEST_F(MultiTreeTests, Drop6)
 {
     for (size_t i = 0; i < 2; ++i) {
         create_tree(1);
@@ -1621,6 +1682,130 @@ TEST_F(MultiTreeTests, VacuumRoots)
 
     ASSERT_OK(m_schema->vacuum());
     check_roots(num_roots);
+}
+
+TEST_F(MultiTreeTests, CreateNested1)
+{
+    create_tree(0);
+    create_nested_tree(0, 1);
+    check_roots(2);
+}
+
+TEST_F(MultiTreeTests, CreateNested2)
+{
+    create_tree(0);
+    create_nested_tree(0, 1);
+    fill_tree(0);
+    fill_tree(1);
+    check_roots(2);
+
+    check_tree(0);
+    check_tree(1);
+}
+
+TEST_F(MultiTreeTests, CreateNested3)
+{
+    create_tree(0);
+    // Fill first, so that some page in 0 must be moved to make room for the root page
+    // for tree 1.
+    fill_tree(0);
+    create_nested_tree(0, 1);
+    fill_tree(1);
+    check_roots(2);
+
+    check_tree(0);
+    check_tree(1);
+}
+
+TEST_F(MultiTreeTests, CreateNested4)
+{
+    size_t tid = 1;
+    create_tree(0);
+
+    fill_tree(0);
+    create_nested_tree(0, tid++);
+    create_nested_tree(0, tid++);
+    create_nested_tree(0, tid++);
+
+    fill_tree(1);
+    create_nested_tree(1, tid++);
+    create_nested_tree(1, tid++);
+    create_nested_tree(1, tid++);
+
+    fill_tree(2);
+    create_nested_tree(2, tid++);
+    create_nested_tree(2, tid++);
+    create_nested_tree(2, tid++);
+
+    fill_tree(3);
+    create_nested_tree(3, tid++);
+    create_nested_tree(3, tid++);
+    create_nested_tree(3, tid++);
+
+    for (size_t i = 0; i < tid; ++i) {
+        fill_tree(i);
+        check_tree(i);
+    }
+    check_roots(tid);
+}
+
+TEST_F(MultiTreeTests, DropNested1)
+{
+    create_tree(0);
+    create_nested_tree(0, 1);
+    drop_nested_tree(0, 1);
+    close_nested_tree(1);
+    check_roots(1);
+}
+
+TEST_F(MultiTreeTests, DropNested2)
+{
+    create_tree(0);
+    fill_tree(0);
+
+    create_nested_tree(0, 1);
+    create_nested_tree(1, 2);
+    create_nested_tree(2, 3);
+
+    drop_nested_tree(0, 1);
+    drop_nested_tree(1, 2);
+    drop_nested_tree(2, 3);
+
+    close_nested_tree(1);
+    close_nested_tree(2);
+    close_nested_tree(3);
+
+    check_roots(1);
+}
+
+TEST_F(MultiTreeTests, DropNested3)
+{
+    create_tree(0);
+    fill_tree(0);
+    for (size_t i = 0; i < kN - 1; ++i) {
+        create_nested_tree(i, i + 1);
+    }
+    for (size_t i = 0; i < kN - 1; ++i) {
+        drop_nested_tree(i, i + 1);
+    }
+    for (size_t i = 1; i < kN; ++i) {
+        close_nested_tree(i);
+    }
+    check_roots(1);
+}
+
+TEST_F(MultiTreeTests, DropNested4)
+{
+    create_tree(0);
+    fill_tree(0);
+    for (size_t i = 0; i < kN - 1; ++i) {
+        create_nested_tree(i, i + 1);
+        drop_nested_tree(i, i + 1);
+    }
+    for (size_t i = 1; i < kN; ++i) {
+        close_nested_tree(i);
+    }
+    check_roots(1);
 }
 
 template <class T>

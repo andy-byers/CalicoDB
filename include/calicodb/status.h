@@ -27,6 +27,7 @@ public:
         kNone,
         kRetry,
         kNoMemory,
+        kIncompatibleValue,
         kMaxSubCode
     };
 
@@ -89,6 +90,11 @@ public:
         return aborted(kNoMemory);
     }
 
+    static auto incompatible_value() -> Status
+    {
+        return invalid_argument(kIncompatibleValue);
+    }
+
     static auto invalid_argument(const char *msg) -> Status;
     static auto not_supported(const char *msg) -> Status;
     static auto corruption(const char *msg) -> Status;
@@ -98,6 +104,7 @@ public:
     static auto aborted(const char *msg) -> Status;
     static auto retry(const char *msg) -> Status;
     static auto no_memory(const char *msg) -> Status;
+    static auto incompatible_value(const char *msg) -> Status;
 
     // Return true if the status is OK, false otherwise
     [[nodiscard]] auto is_ok() const -> bool
@@ -148,6 +155,11 @@ public:
     [[nodiscard]] auto is_no_memory() const -> bool
     {
         return is_aborted() && subcode() == kNoMemory;
+    }
+
+    [[nodiscard]] auto is_incompatible_value() const -> bool
+    {
+        return is_invalid_argument() && subcode() == kIncompatibleValue;
     }
 
     [[nodiscard]] auto code() const -> Code;

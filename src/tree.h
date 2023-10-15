@@ -53,7 +53,7 @@ public:
 
     ~Tree();
 
-    explicit Tree(Pager &pager, Stats &stat, char *scratch, Id root_id);
+    explicit Tree(Pager &pager, Stats &stat, Id root_id);
 
     auto activate_cursor(TreeCursor &target, bool requires_position) const -> void;
     auto deactivate_cursors(TreeCursor *exclude) const -> void;
@@ -64,8 +64,8 @@ public:
     };
 
     // Called on the "main" tree. Needs Tree::allocate() method. TODO
-    auto create(Id &root_id_out) -> Status;
-    auto destroy(Reroot &rr) -> Status;
+    auto create(Id parent_id, Id &root_id_out) -> Status;
+    auto destroy(Reroot &rr, Buffer<Id> &children) -> Status;
 
     auto put(TreeCursor &c, const Slice &key, const Slice &value, bool is_bucket) -> Status;
     auto erase(TreeCursor &c) -> Status;
@@ -107,6 +107,11 @@ public:
         return m_root_id;
     }
 
+    auto set_root(Id root_id) -> void
+    {
+        m_root_id = root_id;
+    }
+
     auto check_integrity() -> Status;
 
     auto print_structure(String &repr_out) -> Status;
@@ -114,7 +119,7 @@ public:
     auto TEST_validate() -> void;
 
 private:
-    friend class DBImpl;
+    friend class BucketImpl;
     friend class Schema;
     friend class TreeCursor;
     friend class TreePrinter;
@@ -204,6 +209,15 @@ private:
     Pager *const m_pager;
     Id m_root_id;
     const bool m_writable;
+
+    uint32_t m_refcount = 0;
+
+    // True if the tree was dropped, false otherwise. If true, the tree's pages will be removed
+    // from the database when the destructor is run. This flag is here so that trees that are still
+    // open, but have been dropped by their parent, can still be used until they are closed. When
+    // Schema::drop_tree() is called, we set this flag on all open child trees and remove the tree
+    // root reference from the parent.
+    bool m_dropped = false;
 };
 
 class TreeCursor
@@ -360,14 +374,14 @@ public:
     {
         CALICODB_EXPECT_TRUE(is_valid());
         CALICODB_EXPECT_TRUE(m_cell.is_bucket);
-        return get_bucket_root_id(m_cell);
+        return read_bucket_root_id(m_cell);
     }
 
     auto overwrite_bucket_root_id(Id root_id) -> void
     {
         CALICODB_EXPECT_TRUE(is_valid());
         CALICODB_EXPECT_TRUE(m_cell.is_bucket);
-        put_bucket_root_id(m_cell, root_id);
+        write_bucket_root_id(m_cell, root_id);
     }
 
     enum ReleaseType {

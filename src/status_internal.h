@@ -170,6 +170,14 @@ public:
             .append_format(fmt, forward<Args>(args)...)
             .build();
     }
+
+    template <class... Args>
+    static auto incompatible_value(const char *fmt, Args &&...args) -> Status
+    {
+        return StatusBuilder(Status::kInvalidArgument, Status::kIncompatibleValue)
+            .append_format(fmt, forward<Args>(args)...)
+            .build();
+    }
 };
 
 } // namespace calicodb

@@ -232,7 +232,7 @@ inline auto test_open_bucket(const Bucket &b, const Slice &key, TestBucket &b_ou
 inline auto test_create_and_open_bucket(Tx &tx, const Slice &name, TestBucket &b_out) -> Status
 {
     Bucket *b;
-    auto s = tx.create_bucket(name, &b);
+    auto s = tx.create_bucket_if_missing(name, &b);
     b_out.reset(b);
     return s;
 }
@@ -240,7 +240,7 @@ inline auto test_create_and_open_bucket(Tx &tx, const Slice &name, TestBucket &b
 inline auto test_create_and_open_bucket(Bucket &b, const Slice &key, TestBucket &b_out) -> Status
 {
     Bucket *b2;
-    auto s = b.create_bucket(key, &b2);
+    auto s = b.create_bucket_if_missing(key, &b2);
     b_out.reset(b2);
     return s;
 }

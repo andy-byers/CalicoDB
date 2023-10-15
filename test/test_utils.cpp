@@ -9,10 +9,18 @@
 #include "config_internal.h"
 #include "encoding.h"
 #include "logging.h"
+#include "model.h"
 #include "status_internal.h"
 
 namespace calicodb::test
 {
+
+TEST(UserStringTests, PointerIsNotNull)
+{
+    CALICODB_STRING str;
+    ASSERT_NE(str.data(), nullptr);
+    ASSERT_NE(str.c_str(), nullptr);
+}
 
 TEST(ConfigTests, ConfigAllocator)
 {
@@ -450,6 +458,7 @@ TEST(Status, StatusMessages)
 
     ASSERT_EQ(Slice("busy: retry"), Status::retry().message());
     ASSERT_EQ(Slice("aborted: no memory"), Status::no_memory().message());
+    ASSERT_EQ(Slice("invalid argument: incompatible value"), Status::incompatible_value().message());
 
     static constexpr auto kMsg = "message";
     ASSERT_EQ(Slice(kMsg), Status::io_error(kMsg).message());
@@ -461,6 +470,7 @@ TEST(Status, StatusMessages)
 
     ASSERT_EQ(Slice(kMsg), Status::retry(kMsg).message());
     ASSERT_EQ(Slice(kMsg), Status::no_memory(kMsg).message());
+    ASSERT_EQ(Slice(kMsg), Status::incompatible_value(kMsg).message());
 }
 
 TEST(Status, StatusBuilderMessages)
@@ -475,6 +485,7 @@ TEST(Status, StatusBuilderMessages)
     ASSERT_EQ(Slice(kExpected), StatusBuilder::aborted(kFmt, 42, "hello").message());
     ASSERT_EQ(Slice(kExpected), StatusBuilder::retry(kFmt, 42, "hello").message());
     ASSERT_EQ(Slice(kExpected), StatusBuilder::no_memory(kFmt, 42, "hello").message());
+    ASSERT_EQ(Slice(kExpected), StatusBuilder::incompatible_value(kFmt, 42, "hello").message());
 }
 
 TEST(Status, StatusBuilderFallback)
@@ -492,6 +503,7 @@ TEST(Status, StatusBuilderFallback)
     ASSERT_EQ(Slice(Status::aborted().message()), StatusBuilder::aborted(kFmt, 42, "hello").message());
     ASSERT_EQ(Slice(Status::retry().message()), StatusBuilder::retry(kFmt, 42, "hello").message());
     ASSERT_EQ(Slice(Status::no_memory().message()), StatusBuilder::no_memory(kFmt, 42, "hello").message());
+    ASSERT_EQ(Slice(Status::incompatible_value().message()), StatusBuilder::incompatible_value(kFmt, 42, "hello").message());
 
     // Reset memory limit back to the default.
     DebugAllocator::set_limit(0);
@@ -519,6 +531,7 @@ TEST(Status, StatusCodes)
 
     CHECK_SUBCODE(retry, kBusy, kRetry);
     CHECK_SUBCODE(no_memory, kAborted, kNoMemory);
+    CHECK_SUBCODE(incompatible_value, kInvalidArgument, kIncompatibleValue);
 
 #undef CHECK_CODE
 #undef CHECK_SUBCODE

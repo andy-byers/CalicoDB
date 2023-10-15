@@ -29,6 +29,11 @@ auto TxImpl::create_bucket(const Slice &name, Bucket **b_out) -> Status
     return m_main.create_bucket(name, b_out);
 }
 
+auto TxImpl::create_bucket_if_missing(const Slice &name, Bucket **b_out) -> Status
+{
+    return m_main.create_bucket_if_missing(name, b_out);
+}
+
 auto TxImpl::open_bucket(const Slice &name, Bucket *&b_out) const -> Status
 {
     return m_main.open_bucket(name, b_out);

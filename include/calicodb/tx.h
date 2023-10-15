@@ -41,6 +41,9 @@ public:
     // Create a toplevel bucket
     virtual auto create_bucket(const Slice &name, Bucket **b_out) -> Status = 0;
 
+    // Create a toplevel bucket if a toplevel bucket with the given `name` does not exist
+    virtual auto create_bucket_if_missing(const Slice &name, Bucket **b_out) -> Status = 0;
+
     // Open a toplevel bucket
     virtual auto open_bucket(const Slice &name, Bucket *&b_out) const -> Status = 0;
 

@@ -18,7 +18,7 @@ class Fuzzer
 
     Options m_options;
     DB *m_db = nullptr;
-    KVStore m_store;
+    ModelStore m_store;
 
     auto reopen_db() -> void
     {
@@ -66,20 +66,21 @@ public:
         reopen_db();
 
         const auto s = m_db->update([&stream, &db = *m_db](auto &tx) {
-            std::unique_ptr<Cursor> cursors[kMaxBuckets];
+            TestBucket buckets[kMaxBuckets];
+            TestCursor cursors[kMaxBuckets];
             std::string str;
             std::string str2;
 
             while (!stream.is_empty()) {
                 const auto idx = stream.extract_integral_in_range<uint16_t>(0, kMaxBuckets - 1);
-                if (cursors[idx] == nullptr) {
-                    Cursor *cursor;
+                if (!buckets[idx]) {
                     str = std::to_string(idx);
-                    CHECK_OK(tx.create_bucket(BucketOptions(), to_slice(str), &cursor));
-                    cursors[idx].reset(cursor);
+                    CHECK_OK(test_create_and_open_bucket(tx, str, buckets[idx]));
+                    cursors[idx] = test_new_cursor(*buckets[idx]);
                 }
 
                 Status s;
+                auto *b = buckets[idx].get();
                 auto *c = cursors[idx].get();
                 switch (stream.extract_enum<OperationType>()) {
                     case kOpNext:
@@ -98,22 +99,22 @@ public:
                         break;
                     case kOpSeek:
                         str = stream.extract_random();
-                        c->seek(to_slice(str));
+                        c->seek(str);
                         break;
                     case kOpModify:
                         if (c->is_valid()) {
                             str = stream.extract_random();
-                            s = tx.put(*c, c->key(), to_slice(str));
+                            s = b->put(*c, str);
                             break;
                         }
                         [[fallthrough]];
                     case kOpPut:
                         str = stream.extract_random();
                         str2 = stream.extract_random();
-                        s = tx.put(*c, to_slice(str), to_slice(str2));
+                        s = b->put(str, str2);
                         break;
                     case kOpErase:
-                        s = tx.erase(*c);
+                        s = b->erase(*c);
                         break;
                     case kOpVacuum:
                         s = tx.vacuum();
@@ -124,7 +125,7 @@ public:
                     case kOpDrop:
                         cursors[idx].reset();
                         str = std::to_string(idx);
-                        s = tx.drop_bucket(to_slice(str));
+                        s = tx.drop_bucket(str);
                         c = nullptr;
                         break;
                     case kOpCheck:

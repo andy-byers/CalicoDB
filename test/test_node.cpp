@@ -117,7 +117,6 @@ public:
                other.total_size == cell.total_size &&
                other.footprint == cell.footprint &&
                other.is_bucket == cell.is_bucket;
-
     }
 
     using TestNodeType = uint32_t;

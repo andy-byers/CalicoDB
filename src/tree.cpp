@@ -689,7 +689,7 @@ auto Tree::corrupted_node(Id page_id) const -> Status
     return s;
 }
 
-auto Tree::create(Id &root_id_out) -> Status
+auto Tree::create(Id parent_id, Id &root_id_out) -> Status
 {
     // Determine the next root page. This is the lowest-numbered page that is
     // not already a root, and not a pointer map page.
@@ -724,12 +724,8 @@ auto Tree::create(Id &root_id_out) -> Status
     }
 
     if (s.is_ok()) {
-        auto *hdr = page->data + page_offset(page->page_id);
-        std::memset(hdr, 0, NodeHdr::kSize);
-        NodeHdr::put_type(hdr, true);
-        NodeHdr::put_cell_start(hdr, page_size);
-        PointerMap::write_entry(*m_pager, target,
-                                {Id::null(), kTreeRoot}, s);
+        Node::from_new_page(Node::Options(page_size, nullptr), *page, true);
+        fix_parent_id(target, parent_id, kTreeRoot, s);
     }
 
     if (s.is_ok()) {
@@ -741,14 +737,24 @@ auto Tree::create(Id &root_id_out) -> Status
     return s;
 }
 
-auto Tree::destroy(Reroot &rr) -> Status
+auto Tree::destroy(Reroot &rr, Buffer<Id> &children) -> Status
 {
     CALICODB_EXPECT_FALSE(m_root_id.is_root());
     rr.after = m_root_id;
+    auto nc = children.len();
+    const auto push_child = [&children, &nc](const auto &cell) {
+        if (nc >= children.len()) {
+            if (children.realloc((children.len() + 1) * 2)) {
+                return -1;
+            }
+        }
+        children[nc++] = read_bucket_root_id(cell);
+        return 0;
+    };
 
     // Push all pages belonging to `tree` onto the freelist, except for the root page.
     auto s = InorderTraversal::traverse(
-        *this, [this](auto &node, const auto &info) {
+        *this, [this, &push_child](auto &node, const auto &info) {
             if (info.idx == info.ncells) {
                 if (node.ref->page_id == m_root_id) {
                     return Status::ok();
@@ -762,8 +768,14 @@ auto Tree::destroy(Reroot &rr) -> Status
             if (cell.local_size < cell.total_size) {
                 return free_overflow(read_overflow_id(cell));
             }
-            return Status::ok();
+            return cell.is_bucket && push_child(cell) ? Status::no_memory()
+                                                      : Status::ok();
         });
+
+    // Trim the allocation.
+    if (children.realloc(nc)) {
+        s = Status::no_memory();
+    }
     if (!s.is_ok()) {
         return s;
     }
@@ -773,10 +785,14 @@ auto Tree::destroy(Reroot &rr) -> Status
     if (rr.before != rr.after) {
         // Replace the destroyed tree's root page with the highest-numbered root page.
         PageRef *unused_page;
+        PointerMap::Entry root_info;
         s = m_pager->acquire(rr.after, unused_page);
         if (s.is_ok()) {
             CALICODB_EXPECT_EQ(rr.after, unused_page->page_id);
-            const PointerMap::Entry root_info = {Id::null(), kTreeRoot};
+            s = find_parent_id(rr.before, root_info.back_ptr);
+            root_info.type = kTreeRoot;
+        }
+        if (s.is_ok()) {
             s = relocate_page(unused_page, root_info, rr.before);
             m_pager->release(unused_page);
         }
@@ -958,9 +974,7 @@ auto Tree::make_pivot(const PivotOptions &opt, Cell &pivot_out) -> Status
             } else {
                 write_overflow_id(pivot_out, dst->page_id);
             }
-            PointerMap::write_entry(*m_pager, dst->page_id,
-                                    {dst_bptr, dst_type}, s);
-
+            fix_parent_id(dst->page_id, dst_bptr, dst_type, s);
             dst_type = kOverflowLink;
             dst_bptr = dst->page_id;
             prev = dst;
@@ -1047,39 +1061,38 @@ auto Tree::free_overflow(Id head_id) -> Status
     return s;
 }
 
-// It is assumed that the children of `node` have incorrect parent pointers. This routine fixes
-// these parent pointers using the pointer map. Using a pointer map is vital here: it allows us
-// to access way fewer pages when updating the parent pointers (usually just a few as opposed to
-// the number of children in `node` which can be very large).
+// It is assumed that the children of and/or overflow chains rooted at `node` have incorrect
+// parent pointers. This routine fixes them using the pointer map. Using a pointer map is
+// vital here: it allows us to access way fewer pages when updating the parent pointers
+// (usually just a few as opposed to the number of children in `node` which can be large).
+// Also updates back pointers for nested bucket root pages.
 auto Tree::fix_links(Node &node, Id parent_id) -> Status
 {
     if (parent_id.is_null()) {
         parent_id = node.ref->page_id;
     }
     Status s;
-    for (uint32_t i = 0, n = node.cell_count(); s.is_ok() && i < n; ++i) {
+    auto fix_ovfl_cell = m_ovfl.exists();
+    for (uint32_t i = 0, n = node.cell_count(); s.is_ok() && i < n;) {
         Cell cell;
-        if (node.read(i, cell)) {
+        if (fix_ovfl_cell) {
+            cell = m_ovfl.cell;
+            fix_ovfl_cell = false;
+        } else if (node.read(i++, cell)) {
             s = corrupted_node(node.ref->page_id);
+            break;
         }
         // Fix the back pointer for the head of an overflow chain rooted at `node`.
         maybe_fix_overflow_chain(cell, parent_id, s);
         if (!node.is_leaf()) {
             // Fix the parent pointer for the current child node.
-            fix_parent_id(read_child_id(cell), parent_id,
-                          kTreeNode, s);
+            fix_parent_id(read_child_id(cell), parent_id, kTreeNode, s);
+        } else if (cell.is_bucket) {
+            fix_parent_id(read_bucket_root_id(cell), parent_id, kTreeRoot, s);
         }
     }
     if (!node.is_leaf()) {
-        fix_parent_id(NodeHdr::get_next_id(node.hdr()), parent_id,
-                      kTreeNode, s);
-    }
-    if (m_ovfl.exists()) {
-        maybe_fix_overflow_chain(m_ovfl.cell, parent_id, s);
-        if (!node.is_leaf()) {
-            fix_parent_id(read_child_id(m_ovfl.cell), parent_id,
-                          kTreeNode, s);
-        }
+        fix_parent_id(NodeHdr::get_next_id(node.hdr()), parent_id, kTreeNode, s);
     }
     return s;
 }
@@ -1241,7 +1254,7 @@ auto Tree::split_nonroot_fast(TreeCursor &c, Node &parent, Node right) -> Status
 cleanup:
     const auto before =
         left.cell_count() + // # cells moved to left
-        !left.is_leaf();                      // 1 pivot cell posted to parent
+        !left.is_leaf();    // 1 pivot cell posted to parent
     if (c.m_idx >= before) {
         ++c.m_idx_path[c.m_level - 1];
         c.m_idx -= before;
@@ -1580,16 +1593,16 @@ auto Tree::fix_root(TreeCursor &c) -> Status
     return s;
 }
 
-Tree::Tree(Pager &pager, Stats &stat, char *scratch, Id root_id)
+Tree::Tree(Pager &pager, Stats &stat, Id root_id)
     : list_entry{this, nullptr, nullptr},
       page_size(pager.page_size()),
-      node_options(page_size, scratch + page_size * 2),
+      node_options(page_size, pager.scratch() + page_size * 2),
       m_stat(&stat),
       m_cell_scratch{
-          scratch,
-          scratch + page_size / 2,
-          scratch + page_size,
-          scratch + page_size * 3 / 2,
+          pager.scratch(),
+          pager.scratch() + page_size / 2,
+          pager.scratch() + page_size,
+          pager.scratch() + page_size * 3 / 2,
       },
       m_pager(&pager),
       m_root_id(root_id),
@@ -1602,6 +1615,10 @@ Tree::Tree(Pager &pager, Stats &stat, char *scratch, Id root_id)
 
 Tree::~Tree()
 {
+    // BucketImpl makes sure there is only 1 reference to this tree before calling
+    // delete (m_refcount is decremented beforehand, so it should be 0).
+    CALICODB_EXPECT_EQ(m_refcount, 0);
+
     for (const auto &scratch : m_key_scratch) {
         Mem::deallocate(scratch.buf);
     }
@@ -1618,6 +1635,9 @@ Tree::~Tree()
         IntrusiveList::remove(*entry);
         IntrusiveList::initialize(*entry);
     }
+
+    // Remove this tree from the list of open trees.
+    IntrusiveList::remove(list_entry);
 }
 
 auto Tree::allocate(AllocationType type, Id nearby, PageRef *&page_out) -> Status
@@ -1704,13 +1724,13 @@ auto Tree::emplace(Node &node, Slice key, Slice value, bool flag, uint32_t index
     const auto value_size = static_cast<uint32_t>(value.size());
     const auto [k, v, o] = describe_leaf_payload(key_size, value_size, flag,
                                                  node.min_local, node.max_local);
-    char *ptr = header;
+    char *ptr;
     if (flag) {
-        ptr = encode_leaf_record_cell_hdr(ptr, key_size, value_size);
-    } else {
-        ptr = prepare_bucket_cell_hdr(ptr, key_size);
-        put_bucket_root_id(ptr, value);
+        ptr = prepare_bucket_cell_hdr(header, key_size);
+        write_bucket_root_id(ptr, value);
         value.clear();
+    } else {
+        ptr = encode_leaf_record_cell_hdr(header, key_size, value_size);
     }
     const auto hdr_size = static_cast<uintptr_t>(ptr - header);
     const auto cell_size = hdr_size + k + v + o;
@@ -1770,8 +1790,7 @@ auto Tree::emplace(Node &node, Slice key, Slice value, bool flag, uint32_t index
                 if (prev) {
                     m_pager->release(prev, Pager::kNoCache);
                 }
-                PointerMap::write_entry(*m_pager, ovfl->page_id,
-                                        {prev_pgno, prev_type}, s);
+                fix_parent_id(ovfl->page_id, prev_pgno, prev_type, s);
                 prev_type = kOverflowLink;
                 prev_pgno = ovfl->page_id;
                 prev = ovfl;
@@ -1883,13 +1902,39 @@ auto Tree::relocate_page(PageRef *&free, PointerMap::Entry entry, Id last_id) ->
                 return s;
             }
             // Update references.
-            Node last;
-            s = acquire(last_id, last, true);
+            Node node;
+            s = acquire(last_id, node, true);
             if (!s.is_ok()) {
                 return s;
             }
-            s = fix_links(last, free->page_id);
-            release(move(last));
+            s = fix_links(node, free->page_id);
+            release(move(node));
+
+            if (s.is_ok() && entry.type == kTreeRoot) {
+                // There is a reference to this root node in the leaf node referred to by
+                // entry.back_ptr. Find that reference and update it to point to the new
+                // location.
+                auto found_ref = false;
+                s = acquire(entry.back_ptr, node, true);
+                for (uint32_t i = 0; s.is_ok() && i < node.cell_count(); ++i) {
+                    Cell cell;
+                    if (node.read(i, cell)) {
+                        s = corrupted_node(node.page_id());
+                    } else if (cell.is_bucket) {
+                        const auto root_id = read_bucket_root_id(cell);
+                        if (root_id == last_id) {
+                            write_bucket_root_id(cell, free->page_id);
+                            found_ref = true;
+                            break;
+                        }
+                    }
+                }
+                if (s.is_ok() && !found_ref) {
+                    s = StatusBuilder::corruption("missing bucket root reference %u in node %u",
+                                                  last_id.value, node.page_id().value);
+                }
+                release(move(node));
+            }
             break;
         }
         default:
@@ -2049,16 +2094,8 @@ public:
             }
 
             auto accumulated = cell.local_size;
-            auto requested = cell.key_size;
-            if (node.is_leaf()) {
-                uint32_t value_size = 0;
-                if (!decode_varint(cell.ptr, node.ref->data + tree.page_size, value_size)) {
-                    return Status::corruption("corrupted varint");
-                }
-                requested += value_size;
-            }
-
-            if (cell.local_size != cell.total_size) {
+            auto requested = cell.total_size;
+            if (accumulated != requested) {
                 const auto overflow_id = read_overflow_id(cell);
                 PageRef *head;
                 auto s = tree.m_pager->acquire(overflow_id, head);
@@ -2078,7 +2115,7 @@ public:
                     return s;
                 }
                 if (requested != accumulated) {
-                    return StatusBuilder::corruption("overflow chain is too long (expected %u but accumulated %u)",
+                    return StatusBuilder::corruption("overflow chain is wrong length (expected %u but accumulated %u)",
                                                      requested, accumulated);
                 }
             }

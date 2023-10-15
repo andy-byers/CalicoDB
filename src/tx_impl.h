@@ -39,6 +39,7 @@ public:
     }
 
     auto create_bucket(const Slice &name, Bucket **b_out) -> Status override;
+    auto create_bucket_if_missing(const Slice &name, Bucket **b_out) -> Status override;
     auto open_bucket(const Slice &name, Bucket *&b_out) const -> Status override;
     auto drop_bucket(const Slice &name) -> Status override;
 

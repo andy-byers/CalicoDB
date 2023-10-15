@@ -20,6 +20,7 @@ class Schema final
 {
 public:
     explicit Schema(Pager &pager, Stats &stat);
+    ~Schema();
 
     auto main_tree() -> Tree &
     {
@@ -31,10 +32,25 @@ public:
         return *m_pager;
     }
 
-    auto create_tree(Id &root_id_out) -> Status;
-    auto drop_tree(Id root_id) -> Status;
-    auto open_tree(Id root_id) -> Tree *;
     auto use_tree(Tree *tree) -> void;
+    auto create_tree(Id parent_id, Id &root_id_out) -> Status;
+    auto open_tree(Id root_id) -> Tree *;
+
+    // Remove a tree from the database
+    // This routine will not drop a tree if it is currently open. Instead, a flag is
+    // set on the bucket structure that contains the tree object, and the work is
+    // deferred until the bucket is closed. It is the responsibility of the caller to
+    // remove the referring bucket record from the parent.
+    // Sub-buckets are dropped recursively, with each traversal stopping at the first
+    // open bucket. For example, if an open bucket b needs to be dropped, and it has
+    // sub-buckets s1,s2,... of its own, then only b is flagged to be dropped,
+    // even if one or more of the s* are open. It doesn't matter if the open s* are
+    // closed before b, since they are only accessible through b itself, and the
+    // reference to b no longer exists in its parent. Furthermore, the s* have not
+    // been dropped, so they should be locatable in b. When b is closed, the dropping
+    // process is continued. b is no longer open, so its pages are put on the
+    // freelist, and drop_tree() is called on the s*.
+    auto drop_tree(Id root_id) -> Status;
     auto close_trees() -> void;
     auto find_open_tree(Id root_id) -> Tree *;
     auto vacuum() -> Status;

@@ -198,7 +198,7 @@ class CrashTests : public testing::Test
 protected:
     const std::string m_filename;
     CrashEnv *m_env;
-    KVStore m_store;
+    ModelStore m_store;
 
     explicit CrashTests()
         : m_filename(get_full_filename(testing::TempDir() + "calicodb_crashes")),
@@ -286,11 +286,14 @@ protected:
 
         auto c1 = test_new_cursor(*b1);
         auto c2 = test_new_cursor(*b2);
+        if (!c1 || !c2) {
+            return Status::no_memory();
+        }
         c1->seek_first();
         for (size_t i = 0; i < kNumRecords; ++i) {
             if (c1->is_valid()) {
                 EXPECT_EQ(c1->key(), make_key(i));
-                EXPECT_EQ(to_string(c1->value()), make_value(i));
+                EXPECT_EQ(c1->value(), make_value(i));
                 s = b2->put(c1->key(), c1->value());
                 if (!s.is_ok()) {
                     break;
@@ -321,13 +324,13 @@ protected:
         EXPECT_OK(tx.status());
 
         std::string b_name;
-        auto &schema = tx.schema();
-        schema.seek_first();
-        if (schema.is_valid()) {
-            b_name = to_string(schema.key());
+        auto &toplevel = tx.toplevel();
+        toplevel.seek_first();
+        if (toplevel.is_valid()) {
+            b_name = to_string(toplevel.key());
             EXPECT_EQ(b_name, std::to_string((iteration + 1) % kNumIterations));
         } else {
-            return schema.status();
+            return toplevel.status();
         }
 
         TestBucket b;
@@ -336,11 +339,14 @@ protected:
             return s;
         }
         auto c = test_new_cursor(*b);
+        if (!c) {
+            return Status::no_memory();
+        }
         for (size_t i = 0; i < kNumRecords; ++i) {
             const auto key = make_key(i);
             c->find(key);
             if (c->is_valid()) {
-                EXPECT_EQ(to_string(c->value()), make_value(i));
+                EXPECT_EQ(c->value().to_string(), make_value(i));
             } else {
                 return c->status();
             }
@@ -404,7 +410,7 @@ protected:
         CrashEnv::reset_counter(m_env->m_oom_state);
         CrashEnv::reset_counter(m_env->m_syscall_state);
 
-        m_store.clear();
+        m_store.tree.clear();
 
         // Make sure all files created during the test are unlinked.
         auto s = m_env->remove_file(m_filename.c_str());
@@ -596,21 +602,20 @@ protected:
             DB *db;
             ASSERT_OK(ModelDB::open(options, m_filename.c_str(), m_store, db));
             ASSERT_OK(db->update([](auto &tx) {
-                TestCursor c, keep_open;
-                auto s = test_create_and_open_bucket(tx, BucketOptions(), "b", c);
+                TestBucket b;
+                auto s = test_create_and_open_bucket(tx, "b", b);
                 if (!s.is_ok()) {
                     return s;
                 }
-                if (s.is_ok()) {
-                    s = test_open_bucket(tx, "b", keep_open);
-                }
-                if (!s.is_ok()) {
-                    return s;
+                auto c = test_new_cursor(*b);
+                auto keep_open = test_new_cursor(*b);
+                if (!c || !keep_open) {
+                    return Status::no_memory();
                 }
                 keep_open->seek_first();
                 for (size_t j = 0; s.is_ok() && j < kNumRecords; ++j) {
                     const auto v = make_value(j);
-                    s = tx.put(*c, make_key(j), v);
+                    s = b->put(make_key(j), v);
                 }
                 if (!c->status().is_ok()) {
                     const auto before_status = c->status();
@@ -624,10 +629,14 @@ protected:
             set_fault_injection_type(param.fault_type);
             run_until_completion([&db] {
                 return db->view([](const auto &tx) {
-                    TestCursor c;
-                    auto s = test_open_bucket(tx, "b", c);
+                    TestBucket b;
+                    auto s = test_open_bucket(tx, "b", b);
                     if (!s.is_ok()) {
                         return s;
+                    }
+                    auto c = test_new_cursor(*b);
+                    if (!c) {
+                        return Status::no_memory();
                     }
                     c->seek_first();
                     for (size_t j = 0; c->is_valid() && j < kNumRecords; ++j) {
@@ -694,26 +703,25 @@ protected:
 
             run_until_completion([&db] {
                 return db->update([](auto &tx) {
-                    TestCursor c;
-                    auto s = test_create_and_open_bucket(tx, BucketOptions(), "b", c);
+                    TestBucket b;
+                    auto s = test_create_and_open_bucket(tx, "b", b);
                     for (size_t j = 0; s.is_ok() && j < kNumRecords; ++j) {
                         const auto key = make_key(j);
                         const auto value = make_value(j);
-                        s = tx.put(*c, key, value);
-                        if (s.is_ok()) {
-                            EXPECT_TRUE(c->is_valid());
-                            EXPECT_EQ(c->key(), key);
-                            EXPECT_EQ(to_string(c->value()), value);
-                        }
+                        s = b->put(key, value);
                     }
-                    if (s.is_ok()) {
-                        c->seek_last();
-                        s = c->status();
+                    if (!s.is_ok()) {
+                        return s;
                     }
+                    auto c = test_new_cursor(*b);
+                    if (!c) {
+                        return Status::no_memory();
+                    }
+                    c->seek_last();
                     while (s.is_ok() && c->is_valid()) {
                         auto v = to_string(c->value());
                         v.append(v);
-                        s = tx.put(*c, c->key(), v);
+                        s = b->put(*c, v);
                         if (s.is_ok()) {
                             EXPECT_TRUE(c->is_valid());
                             EXPECT_EQ(to_string(c->value()), v);
@@ -725,7 +733,7 @@ protected:
                         s = c->status();
                     }
                     while (s.is_ok() && c->is_valid()) {
-                        s = tx.erase(*c);
+                        s = b->erase(*c);
                     }
                     return s;
                 });
@@ -1099,12 +1107,12 @@ public:
         // Don't drop any records until the commit.
         m_env->m_drop_file = "";
         return m_db->update([num_writes, version, &param, this](auto &tx) {
-            TestCursor c;
-            EXPECT_OK(test_create_and_open_bucket(tx, BucketOptions(), "bucket", c));
+            TestBucket b;
+            EXPECT_OK(test_create_and_open_bucket(tx, "bucket", b));
             for (size_t i = 0; i < num_writes; ++i) {
                 const auto key = numeric_key(i);
                 const auto value = numeric_key(i + version * num_writes);
-                EXPECT_OK(tx.put(*c, key, value));
+                EXPECT_OK(b->put(key, value));
             }
             m_env->m_loss_type = param.loss_type;
             m_env->m_drop_file = param.loss_file;
@@ -1132,8 +1140,12 @@ public:
     auto check_records(size_t num_writes, size_t version)
     {
         return m_db->view([=](const auto &tx) {
-            TestCursor c;
-            auto s = test_open_bucket(tx, "bucket", c);
+            TestBucket b;
+            auto s = test_open_bucket(tx, "bucket", b);
+            if (!s.is_ok()) {
+                return s;
+            }
+            auto c = test_new_cursor(*b);
             for (size_t i = 0; i < num_writes && s.is_ok(); ++i) {
                 const auto key = numeric_key(i);
                 c->find(key);

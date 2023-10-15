@@ -102,20 +102,24 @@ constexpr auto describe_leaf_payload(
     uint32_t min_local,
     uint32_t max_local) -> PayloadDescriptor
 {
-    CALICODB_EXPECT_TRUE(!is_bucket || value_size == 0);
-    const uint32_t root_size = is_bucket * sizeof(uint32_t);
+    uint32_t root_size = 0;
+    if (is_bucket) {
+        value_size = 0;
+        root_size = sizeof(uint32_t);
+    }
     const auto local_size = compute_local_size(root_size + key_size, value_size,
-                                               min_local, max_local) - root_size;
-    uint32_t overflow_id_size = sizeof(uint32_t);
+                                               min_local, max_local) -
+                            root_size;
+    uint32_t ovfl_id_size = sizeof(uint32_t);
     if (key_size > local_size) {
         key_size = local_size;
         value_size = 0;
     } else if (key_size + value_size > local_size) {
         value_size = local_size - key_size;
     } else {
-        overflow_id_size = 0;
+        ovfl_id_size = 0;
     }
-    return {key_size, value_size, overflow_id_size};
+    return {key_size, value_size, ovfl_id_size};
 }
 
 struct SizeWithFlag {
@@ -193,9 +197,9 @@ struct Cell {
 };
 
 // Helpers for working with bucket cell root IDs.
-auto get_bucket_root_id(const Cell &cell) -> Id;
-auto put_bucket_root_id(Cell &cell, Id root_id) -> void;
-auto put_bucket_root_id(char *key, const Slice &root_id) -> void;
+auto read_bucket_root_id(const Cell &cell) -> Id;
+auto write_bucket_root_id(Cell &cell, Id root_id) -> void;
+auto write_bucket_root_id(char *key, const Slice &root_id) -> void;
 
 // Helpers for encoding cell headers. Returns the address of the byte
 // immediately following the written header. Overflow ID is not written.
@@ -229,7 +233,7 @@ struct Node final {
     };
 
     [[nodiscard]] static auto from_existing_page(const Options &options, PageRef &page, Node &node_out) -> int;
-    [[nodiscard]] static auto from_new_page(const Options &options, PageRef &page, bool is_leaf) -> Node;
+    static auto from_new_page(const Options &options, PageRef &page, bool is_leaf) -> Node;
 
     explicit Node()
         : ref(nullptr)

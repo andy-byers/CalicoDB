@@ -3,7 +3,6 @@
 // LICENSE.md. See AUTHORS.md for a list of contributor names.
 
 #include "schema.h"
-#include "bucket_impl.h"
 #include "calicodb/bucket.h"
 #include "encoding.h"
 #include "status_internal.h"
@@ -14,10 +13,16 @@ namespace calicodb
 Schema::Schema(Pager &pager, Stats &stat)
     : m_pager(&pager),
       m_stat(&stat),
-      m_main(pager, stat, pager.scratch(), Id::root()),
+      m_main(pager, stat, Id::root()),
       m_trees{&m_main, nullptr, nullptr}
 {
     IntrusiveList::initialize(m_trees);
+}
+
+Schema::~Schema()
+{
+    // Tree destructor asserts that the refcount is 0 to help catch leaked buckets.
+    m_main.m_refcount = 0;
 }
 
 auto Schema::find_parent_id(Id root_id, Id &parent_id_out) -> Status
@@ -44,11 +49,11 @@ auto Schema::close_trees() -> void
     m_main.deactivate_cursors(nullptr);
 }
 
-auto Schema::create_tree(Id &root_id_out) -> Status
+auto Schema::create_tree(Id parent_id, Id &root_id_out) -> Status
 {
     CALICODB_EXPECT_GT(m_pager->page_count(), 0);
     use_tree(&m_main);
-    return m_main.create(root_id_out);
+    return m_main.create(parent_id, root_id_out);
 }
 
 auto Schema::find_open_tree(Id root_id) -> Tree *
@@ -67,14 +72,14 @@ auto Schema::find_open_tree(Id root_id) -> Tree *
 auto Schema::open_tree(Id root_id) -> Tree *
 {
     CALICODB_EXPECT_GT(m_pager->page_count(), 0);
-    if (auto *already_open = find_open_tree(root_id)) {
-        return already_open;
+    if (auto *tree = find_open_tree(root_id)) {
+        return tree;
     }
-    auto *tree = Mem::new_object<Tree>(*m_pager, *m_stat, m_pager->scratch(), root_id);
-    if (tree) {
+    if (auto *tree = Mem::new_object<Tree>(*m_pager, *m_stat, root_id)) {
         IntrusiveList::add_tail(tree->list_entry, m_trees);
+        return tree;
     }
-    return tree;
+    return nullptr;
 }
 
 auto Schema::use_tree(Tree *tree) -> void
@@ -90,29 +95,55 @@ auto Schema::use_tree(Tree *tree) -> void
 auto Schema::drop_tree(Id root_id) -> Status
 {
     use_tree(nullptr);
-
     ObjectPtr<Tree> drop(open_tree(root_id));
     if (!drop) {
         return Status::no_memory();
     }
-    IntrusiveList::remove(drop->list_entry);
-    drop->deactivate_cursors(nullptr);
 
-    Tree::Reroot rr;
-    auto s = drop->destroy(rr);
-    if (s.is_ok() && rr.before != rr.after) {
-        // Update the in-memory root ID.
-        map_trees(false, [rr](auto &t) {
-            if (t.tree->m_root_id == rr.before) {
-                t.tree->m_root_id = rr.after;
-                return false;
+    Status s;
+    Buffer<Id> children;
+    auto *next = drop.get();
+    for (size_t nc = 0; next && s.is_ok(); ++nc) {
+        if (drop->m_refcount) {
+            // Trees that the user has a handle to cannot be dropped. Set the "dropped" flag instead.
+            // Tree pages will be removed when the tree is closed.
+            drop->m_dropped = true;
+            drop.release();
+        } else {
+            IntrusiveList::remove(drop->list_entry);
+            drop->deactivate_cursors(nullptr);
+
+            Tree::Reroot rr;
+            s = drop->destroy(rr, children);
+            if (!s.is_ok()) {
+                break;
             }
-            return true;
-        });
-        // Update the on-disk root ID.
-        // TODO: Use back pointer in pointer map for root_id to find target node. Search that node for the
-        //       record with value root_id. Could also follow back pointers to the root of the parent bucket,
-        //       then open that tree. Then, use the tree object to modify the record.
+            if (rr.before != rr.after) {
+                map_trees(false, [rr](auto &t) {
+                    if (t.tree->root() == rr.before) {
+                        t.tree->set_root(rr.after);
+                        return false;
+                    }
+                    return true;
+                });
+                for (size_t i = nc; i < children.len(); ++i) {
+                    if (children[i] == rr.before) {
+                        children[i] = rr.after;
+                        break;
+                    }
+                }
+            }
+        }
+
+        next = nullptr;
+        if (nc < children.len()) {
+            drop.reset(open_tree(children[nc]));
+            if (drop) {
+                next = drop.get();
+            } else {
+                s = Status::no_memory();
+            }
+        }
     }
     return s;
 }

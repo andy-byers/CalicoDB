@@ -264,17 +264,17 @@ auto decode_size_with_flag(const char *input, SizeWithFlag &swf_out) -> const ch
 
 static_assert(kMaxAllocation < 0x80000000U);
 
-auto get_bucket_root_id(const Cell &cell) -> Id
+auto read_bucket_root_id(const Cell &cell) -> Id
 {
     return Id(get_u32(cell.key - sizeof(uint32_t)));
 }
 
-auto put_bucket_root_id(Cell &cell, Id root_id) -> void
+auto write_bucket_root_id(Cell &cell, Id root_id) -> void
 {
     put_u32(cell.key - sizeof(uint32_t), root_id.value);
 }
 
-auto put_bucket_root_id(char *key, const Slice &root_id) -> void
+auto write_bucket_root_id(char *key, const Slice &root_id) -> void
 {
     // root_id is already encoded. Caller must have called put_u32(ptr, val) at some
     // point, where ptr is equal to root_id.ptr(), and val is a 4-byte root ID.

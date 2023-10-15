@@ -24,10 +24,15 @@ public:
     void operator=(Bucket &) = delete;
 
     // Return a cursor over the contents of this bucket
-    virtual auto new_cursor() const -> Cursor * = 0;
+    // The returned handle is owned by the caller and must be deleted when it is no
+    // longer needed. Returns nullptr if the allocation fails.
+    [[nodiscard]] virtual auto new_cursor() const -> Cursor * = 0;
 
     // Create a nested bucket associated with the given `key`
     virtual auto create_bucket(const Slice &key, Bucket **b_out) -> Status = 0;
+
+    // Create a nested bucket associated with the given `key`
+    virtual auto create_bucket_if_missing(const Slice &key, Bucket **b_out) -> Status = 0;
 
     // Open the nested bucket associated with the given `key`
     virtual auto open_bucket(const Slice &key, Bucket *&b_out) const -> Status = 0;
@@ -38,14 +43,17 @@ public:
     // Create a mapping between the given `key` and the given `value`
     virtual auto put(const Slice &key, const Slice &value) -> Status = 0;
 
-    // Assign the given `value` to the record pointed to by `c`
-    virtual auto put(Cursor &c, const Slice &value) -> Status = 0;
+    // Get the record value associated with the given `key`
+    virtual auto get(const Slice &key, CALICODB_STRING *value_out) const -> Status = 0;
 
     // Erase the record identified by `key`
     // This method cannot be used to remove a nested bucket. Use drop_bucket() instead.
     virtual auto erase(const Slice &key) -> Status = 0;
 
-    // Erase the record pointed to by `c`
+    // Assign the given `value` to the record referenced by `c`
+    virtual auto put(Cursor &c, const Slice &value) -> Status = 0;
+
+    // Erase the record referenced by `c`
     virtual auto erase(Cursor &c) -> Status = 0;
 };
 
