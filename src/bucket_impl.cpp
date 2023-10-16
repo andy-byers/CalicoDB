@@ -142,7 +142,7 @@ auto BucketImpl::drop_bucket(const Slice &key) -> Status
         CALICODB_EXPECT_TRUE(s.is_ok()); // Cursor invariant
         const auto root_id = TREE_CURSOR(m_cursor)->bucket_root_id();
 
-        s = m_tree->erase(*TREE_CURSOR(m_cursor));
+        s = m_tree->erase(*TREE_CURSOR(m_cursor), true);
         if (!s.is_ok()) {
             return s;
         }
@@ -207,7 +207,7 @@ auto BucketImpl::erase(const Slice &key) -> Status
             if (m_cursor.is_bucket()) {
                 return Status::incompatible_value();
             }
-            return m_tree->erase(*TREE_CURSOR(m_cursor));
+            return m_tree->erase(*TREE_CURSOR(m_cursor), false);
         }
         return m_cursor.status();
     });
@@ -217,7 +217,13 @@ auto BucketImpl::erase(Cursor &c) -> Status
 {
     CALICODB_EXPECT_EQ(&TREE_CURSOR(c)->tree(), m_tree);
     return pager_write(m_schema->pager(), [this, &c] {
-        return m_tree->erase(*TREE_CURSOR(c));
+        if (c.is_valid()) {
+            return m_tree->erase(*TREE_CURSOR(c), false);
+        } else if (c.status().is_ok()) {
+            return Status::invalid_argument();
+        } else {
+            return c.status();
+        }
     });
 }
 

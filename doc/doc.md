@@ -147,7 +147,7 @@ const calicodb::Options options = {
 calicodb::DB *db;
 s = calicodb::DB::open(options, "/tmp/calicodb_cats_example", db);
 
-// Handle failure. s.message() provides a string representation of the status.
+// Handle failure. s.message() provides a human-readable representation of the status.
 if (!s.is_ok()) {
 
 }
@@ -245,8 +245,10 @@ Each open bucket is represented by a `calicodb::Bucket` handle.
 #include "calicodb/tx.h"
 
 // The main bucket is created when the first transaction starts. Just like 
-// any other bucket, it can contain key-value pairs, or key-sub-bucket pairs.
-calicodb::Bucket &b = tx->main();
+// any other bucket, it can contain key-value pairs, or key-bucket pairs.
+// Some users may be able to get away with just using this bucket, and
+// never have to bother with the Bucket::*_bucket() methods.
+calicodb::Bucket &b = tx->main_bucket();
 
 s = b.put("lilly", "calico");
 if (s.is_ok()) {
@@ -272,7 +274,8 @@ if (s.is_ok()) {
 
 // Create a sub-bucket. Note that this bucket will not persist in the database 
 // unless Tx::commit() is called prior to the transaction ending. It is an
-// error if the bucket already exists.
+// error if the bucket already exists. Note that the second parameter to
+// create_bucket() is optional. If omitted, the bucket is created but not opened.
 calicodb::Bucket *b2 = nullptr;
 s = b.create_bucket("cats", &b2);
 if (s.is_ok()) {

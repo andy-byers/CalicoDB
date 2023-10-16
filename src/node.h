@@ -128,7 +128,7 @@ struct SizeWithFlag {
 };
 
 auto encode_size_with_flag(const SizeWithFlag &swf, char *output) -> char *;
-auto decode_size_with_flag(const char *input, SizeWithFlag &swf_out) -> const char *;
+auto decode_size_with_flag(const char *input, const char *limit, SizeWithFlag &swf_out) -> const char *;
 
 // Branch cell format:
 //     Size   | Name
@@ -282,7 +282,7 @@ struct Node final {
 
     [[nodiscard]] auto hdr() const -> char *
     {
-        return ref->data + page_offset(ref->page_id);
+        return ref->data + page_offset(page_id());
     }
 
     [[nodiscard]] auto is_leaf() const -> bool

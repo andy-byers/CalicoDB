@@ -308,7 +308,7 @@ protected:
         c2.reset();
 
         if (s.is_ok()) {
-            s = tx.main().drop_bucket(name1);
+            s = tx.main_bucket().drop_bucket(name1);
         }
         if (s.is_ok()) {
             s = tx.vacuum();
@@ -324,7 +324,7 @@ protected:
         EXPECT_OK(tx.status());
 
         std::string b_name;
-        auto toplevel = test_new_cursor(tx.main());
+        auto toplevel = test_new_cursor(tx.main_bucket());
         if (!toplevel) {
             return Status::no_memory();
         }

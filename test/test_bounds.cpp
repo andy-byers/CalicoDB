@@ -2,8 +2,10 @@
 // This source code is licensed under the MIT License, which can be found in
 // LICENSE.md. See AUTHORS.md for a list of contributor names.
 
+#include "bucket_impl.h"
 #include "calicodb/db.h"
 #include "common.h"
+#include "db_impl.h"
 #include "encoding.h"
 #include "internal.h"
 #include "test.h"
@@ -314,7 +316,7 @@ TEST_F(StressTests, LargeVacuum)
         }
         for (size_t i = 0; s.is_ok() && i < kDroppedBuckets; ++i) {
             const auto name2 = numeric_key(i);
-            s = tx.main().drop_bucket(name2);
+            s = tx.main_bucket().drop_bucket(name2);
         }
         if (s.is_ok()) {
             // Run a vacuum while there are many buckets open.

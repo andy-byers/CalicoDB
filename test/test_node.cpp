@@ -170,7 +170,7 @@ public:
         // Make the gap large so BlockAllocator doesn't get confused.
         NodeHdr::put_cell_start(
             m_node.hdr(),
-            page_offset(m_node.ref->page_id) + NodeHdr::kSize);
+            page_offset(m_node.page_id()) + NodeHdr::kSize);
         ASSERT_LT(n, TEST_PAGE_SIZE - FileHdr::kSize - NodeHdr::kSize)
             << "reserve_for_test(" << n << ") leaves no room for possible headers";
         m_size = n;

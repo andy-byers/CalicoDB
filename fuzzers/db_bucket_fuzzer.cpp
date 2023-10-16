@@ -14,7 +14,10 @@ namespace calicodb
 
 class Fuzzer
 {
-    static constexpr size_t kMaxBuckets = 8;
+    static constexpr const char *kBucketNames[] = {"A", "B", "C", "D",
+                                                   "E", "F", "G", "H",
+                                                   "I", "J", "K", "L"};
+    static constexpr auto kMaxBuckets = ARRAY_SIZE(kBucketNames);
 
     Options m_options;
     DB *m_db = nullptr;
@@ -56,7 +59,8 @@ public:
             kOpModify,
             kOpDrop,
             kOpVacuum,
-            kOpSelect,
+            kOpNest,
+            kOpUnnest,
             kOpCommit,
             kOpFinish,
             kOpCheck,
@@ -66,22 +70,20 @@ public:
         reopen_db();
 
         const auto s = m_db->update([&stream, &db = *m_db](auto &tx) {
-            TestBucket buckets[kMaxBuckets];
-            TestCursor cursors[kMaxBuckets];
-            std::string str;
-            std::string str2;
+            struct NestedBucket {
+                TestBucket b;
+                TestCursor c;
+            } nested_buckets[kMaxBuckets] = {};
+
+            auto *main_bucket = &tx.main_bucket();
+            auto main_cursor = test_new_cursor(*main_bucket);
+            int level = -1;
 
             while (!stream.is_empty()) {
-                const auto idx = stream.extract_integral_in_range<uint16_t>(0, kMaxBuckets - 1);
-                if (!buckets[idx]) {
-                    str = std::to_string(idx);
-                    CHECK_OK(test_create_and_open_bucket(tx, str, buckets[idx]));
-                    cursors[idx] = test_new_cursor(*buckets[idx]);
-                }
-
                 Status s;
-                auto *b = buckets[idx].get();
-                auto *c = cursors[idx].get();
+                std::string str;
+                auto *b = level >= 0 ? nested_buckets[level].b.get() : main_bucket;
+                auto *c = level >= 0 ? nested_buckets[level].c.get() : main_cursor.get();
                 switch (stream.extract_enum<OperationType>()) {
                     case kOpNext:
                         if (c->is_valid()) {
@@ -98,20 +100,17 @@ public:
                         }
                         break;
                     case kOpSeek:
-                        str = stream.extract_random();
-                        c->seek(str);
+                        c->seek(stream.extract_random());
                         break;
                     case kOpModify:
                         if (c->is_valid()) {
-                            str = stream.extract_random();
-                            s = b->put(*c, str);
+                            s = b->put(*c, stream.extract_random());
                             break;
                         }
                         [[fallthrough]];
                     case kOpPut:
                         str = stream.extract_random();
-                        str2 = stream.extract_random();
-                        s = b->put(str, str2);
+                        s = b->put(str, stream.extract_random());
                         break;
                     case kOpErase:
                         s = b->erase(*c);
@@ -123,25 +122,45 @@ public:
                         s = tx.commit();
                         break;
                     case kOpDrop:
-                        cursors[idx].reset();
-                        buckets[idx].reset();
-                        str = std::to_string(idx);
-                        s = tx.main().drop_bucket(str);
-                        c = nullptr;
+                        // It shouldn't matter if this ends up dropping the bucket open on the next level. All records
+                        // and nested buckets should remain valid until the dropped bucket is closed.
+                        s = b->drop_bucket(stream.extract_random());
                         break;
-                    case kOpCheck:
-                        for (const auto &to_check : cursors) {
-                            if (to_check) {
-                                check_bucket(*to_check);
+                    case kOpNest:
+                        if (level < static_cast<int>(kMaxBuckets - 1)) {
+                            ++level;
+                            // Open or create a nested bucket rooted at the current level, if one is not already open.
+                            if (!nested_buckets[level].b) {
+                                str = stream.extract_random();
+                                s = test_open_bucket(*b, str, nested_buckets[level].b);
                             }
+                            if (s.is_invalid_argument()) {
+                                CHECK_FALSE(nested_buckets[level].b); // test_open_bucket() failed
+                                s = test_create_and_open_bucket(*b, str, nested_buckets[level].b);
+                            }
+                            if (s.is_ok()) {
+                                nested_buckets[level].c = test_new_cursor(*nested_buckets[level].b);
+                            }
+                            break;
                         }
+                        [[fallthrough]];
+                    case kOpUnnest:
+                        if (level >= 0) {
+                            // Move up a level, but don't close the bucket at the current level. It will be closed
+                            // during kOpNest if necessary.
+                            --level;
+                            break;
+                        }
+                        [[fallthrough]];
+                    case kOpCheck:
                         reinterpret_cast<ModelDB &>(db).check_consistency();
                         reinterpret_cast<ModelTx &>(tx).check_consistency();
+                        check_bucket(*c);
                         break;
                     default:
                         return Status::not_supported("ROLLBACK");
                 }
-                if (s.is_not_found() || s.is_invalid_argument()) {
+                if (s.is_not_found() || s.is_invalid_argument() || s.is_incompatible_value()) {
                     // Forgive non-fatal errors.
                     s = Status::ok();
                 }

@@ -32,7 +32,7 @@ public:
     // The main bucket is created when the first transaction is started on a newly-
     // created database. It can only be written to when a read-write transaction is
     // active, however.
-    [[nodiscard]] virtual auto main() const -> Bucket & = 0;
+    [[nodiscard]] virtual auto main_bucket() const -> Bucket & = 0;
 
     // Return the status associated with this transaction
     // On creation, a Tx will always have an OK status. Only read-write transactions

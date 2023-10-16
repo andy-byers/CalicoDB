@@ -3,9 +3,7 @@
 // LICENSE.md. See AUTHORS.md for a list of contributor names.
 //
 // This file contains classes that model the intended behavior of higher-level
-// CalicoDB components. Note that these classes don't attempt to catch certain
-// types of API misuse (for example, ModelBucket will write to a bucket in a read-
-// only transaction without complaint).
+// CalicoDB components.
 
 #ifndef CALICODB_UTILS_MODEL_H
 #define CALICODB_UTILS_MODEL_H
@@ -359,7 +357,7 @@ class ModelTx : public Tx
 
 public:
     explicit ModelTx(ModelStore &store, Tx &tx)
-        : m_main(new ModelBucket("", m_temp, tx.main())),
+        : m_main(new ModelBucket("", m_temp, tx.main_bucket())),
           m_base(&store),
           m_temp(store),
           m_tx(&tx)
@@ -373,7 +371,7 @@ public:
         return m_tx->status();
     }
 
-    [[nodiscard]] auto main() const -> Bucket & override
+    [[nodiscard]] auto main_bucket() const -> Bucket & override
     {
         return *m_main;
     }

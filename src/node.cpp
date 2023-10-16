@@ -16,7 +16,7 @@ constexpr uint32_t kMinBlockSize = 2 * kSlotWidth;
 
 [[nodiscard]] auto node_header_offset(const Node &node)
 {
-    return page_offset(node.ref->page_id);
+    return page_offset(node.page_id());
 }
 
 [[nodiscard]] auto cell_slots_offset(const Node &node) -> uint32_t
@@ -79,7 +79,7 @@ auto remove_ivec_slot(Node &node, uint32_t index)
 [[nodiscard]] auto external_parse_cell(char *data, const char *limit, uint32_t min_local, uint32_t max_local, Cell &cell_out)
 {
     SizeWithFlag swf;
-    const auto *ptr = decode_size_with_flag(data, swf);
+    const auto *ptr = decode_size_with_flag(data, limit, swf);
     if (!ptr) {
         return -1;
     }
@@ -251,10 +251,10 @@ auto encode_size_with_flag(const SizeWithFlag &swf, char *output) -> char *
     return encode_varint(output, value);
 }
 
-auto decode_size_with_flag(const char *input, SizeWithFlag &swf_out) -> const char *
+auto decode_size_with_flag(const char *input, const char *limit, SizeWithFlag &swf_out) -> const char *
 {
     uint32_t value;
-    input = decode_varint(input, input + kVarintMaxLength, value);
+    input = decode_varint(input, limit, value);
     if (input) {
         swf_out.size = value >> 1;
         swf_out.flag = value & 1;
@@ -266,11 +266,13 @@ static_assert(kMaxAllocation < 0x80000000U);
 
 auto read_bucket_root_id(const Cell &cell) -> Id
 {
+    CALICODB_EXPECT_TRUE(cell.is_bucket);
     return Id(get_u32(cell.key - sizeof(uint32_t)));
 }
 
 auto write_bucket_root_id(Cell &cell, Id root_id) -> void
 {
+    CALICODB_EXPECT_TRUE(cell.is_bucket);
     put_u32(cell.key - sizeof(uint32_t), root_id.value);
 }
 
@@ -642,7 +644,7 @@ auto Node::check_integrity() const -> Status
 {
 #define CORRUPTED_NODE(fmt, ...)                                 \
     StatusBuilder::corruption("tree node %u is corrupted: " fmt, \
-                              ref->page_id.value, __VA_ARGS__)
+                              page_id().value, __VA_ARGS__)
 
     const auto account = [this](auto from, auto size, const auto *name, auto &s) {
         if (from > total_space || from + size > total_space) {

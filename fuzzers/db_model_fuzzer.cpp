@@ -47,7 +47,7 @@ class Fuzzer
     {
         delete m_c;
         delete m_b;
-        CHECK_OK(m_tx->main().create_bucket_if_missing("BUCKET", &m_b));
+        CHECK_OK(m_tx->main_bucket().create_bucket_if_missing("BUCKET", &m_b));
         m_c = m_b->new_cursor();
     }
 
@@ -122,7 +122,7 @@ public:
         std::string str2;
         Status s;
 
-        auto toplevel = test_new_cursor(m_tx->main());
+        auto toplevel = test_new_cursor(m_tx->main_bucket());
         toplevel->seek_first();
         CHECK_TRUE(toplevel->is_valid());
 

@@ -206,7 +206,7 @@ inline auto test_new_cursor(const Bucket &b) -> TestCursor
 inline auto test_open_bucket(const Tx &tx, const Slice &name, TestBucket &b_out) -> Status
 {
     Bucket *b;
-    auto s = tx.main().open_bucket(name, b);
+    auto s = tx.main_bucket().open_bucket(name, b);
     b_out.reset(b);
     return s;
 }
@@ -222,7 +222,7 @@ inline auto test_open_bucket(const Bucket &b, const Slice &key, TestBucket &b_ou
 inline auto test_create_and_open_bucket(Tx &tx, const Slice &name, TestBucket &b_out) -> Status
 {
     Bucket *b;
-    auto s = tx.main().create_bucket_if_missing(name, &b);
+    auto s = tx.main_bucket().create_bucket_if_missing(name, &b);
     b_out.reset(b);
     return s;
 }

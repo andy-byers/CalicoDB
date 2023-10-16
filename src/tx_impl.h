@@ -33,7 +33,7 @@ public:
         return m_schema.pager().status();
     }
 
-    auto main() const -> Bucket & override
+    auto main_bucket() const -> Bucket & override
     {
         return m_main;
     }

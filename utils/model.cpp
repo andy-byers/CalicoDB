@@ -57,7 +57,6 @@ ModelTx::~ModelTx()
 
 auto ModelTx::check_consistency() const -> void
 {
-    // Only buckets are allowed on the first level.
     for (const auto &[name, subtree_or_value] : m_temp.tree) {
         CHECK_TRUE(std::holds_alternative<ModelStore>(subtree_or_value));
         auto &subtree = std::get<ModelStore>(subtree_or_value).tree;
@@ -108,6 +107,10 @@ auto ModelBucket::close() -> void
     }
     while (!m_child_buckets.empty()) {
         m_child_buckets.front()->close();
+    }
+    for (auto &c : m_cursors) {
+        c->invalidate();
+        c->m_live = false;
     }
 }
 

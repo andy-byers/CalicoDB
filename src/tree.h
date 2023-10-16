@@ -55,7 +55,7 @@ public:
 
     explicit Tree(Pager &pager, Stats &stat, Id root_id);
 
-    auto activate_cursor(TreeCursor &target, bool requires_position) const -> void;
+    auto activate_cursor(TreeCursor &target, bool requires_position) const -> bool;
     auto deactivate_cursors(TreeCursor *exclude) const -> void;
 
     struct Reroot {
@@ -68,7 +68,7 @@ public:
     auto destroy(Reroot &rr, Buffer<Id> &children) -> Status;
 
     auto put(TreeCursor &c, const Slice &key, const Slice &value, bool is_bucket) -> Status;
-    auto erase(TreeCursor &c) -> Status;
+    auto erase(TreeCursor &c, bool is_bucket) -> Status;
     auto vacuum() -> Status;
 
     enum AllocationType {
@@ -141,7 +141,6 @@ private:
         size_t len;
     };
 
-    auto extract_key(Node &node, uint32_t index, KeyScratch &scratch, Slice &key_out, uint32_t limit = 0) const -> Status;
     auto extract_key(const Cell &cell, KeyScratch &scratch, Slice &key_out, uint32_t limit = 0) const -> Status;
     auto read_key(const Cell &cell, char *scratch, Slice *key_out, uint32_t limit = 0) const -> Status;
     auto read_value(const Cell &cell, char *scratch, Slice *value_out) const -> Status;
@@ -163,6 +162,7 @@ private:
     auto find_parent_id(Id page_id, Id &out) const -> Status;
     auto fix_parent_id(Id page_id, Id parent_id, PageType type, Status &s) -> void;
     auto maybe_fix_overflow_chain(const Cell &cell, Id parent_id, Status &s) -> void;
+    auto fix_cell(const Cell &cell, bool is_leaf, Id parent_id, Status &s) -> void;
     auto fix_links(Node &node, Id parent_id = Id::null()) -> Status;
 
     struct CursorEntry {
@@ -263,13 +263,15 @@ class TreeCursor
         release_nodes(kAllLevels);
     }
 
-    auto activate(bool write) -> void
+    auto activate(bool write) -> bool
     {
-        m_tree->activate_cursor(*this, write);
+        return m_tree->activate_cursor(*this, write);
     }
 
-    // Seek back to the saved position.
-    auto ensure_position_loaded() -> void;
+    // Seek back to the saved position
+    // Return true if the cursor is on a different record, false otherwise. May set
+    // the cursor status.
+    auto ensure_position_loaded() -> bool;
 
     // When the cursor is being used to read records, this routine is used to move
     // cursors that are one-past-the-end in a leaf node to the first position in
@@ -279,8 +281,8 @@ class TreeCursor
     auto seek_to_root() -> void;
     auto search_node(const Slice &key) -> bool;
 
-    auto start_write() -> void;
-    auto start_write(const Slice &key, bool is_erase) -> bool;
+    [[nodiscard]] auto start_write() -> bool;
+    [[nodiscard]] auto start_write(const Slice &key, bool is_erase) -> bool;
     auto finish_write(Status &s) -> void;
 
     auto read_user_key() -> Status;
@@ -300,7 +302,7 @@ public:
     auto handle_split_root(Node child) -> void
     {
         static constexpr auto kNumSlots = ARRAY_SIZE(m_node_path);
-        CALICODB_EXPECT_EQ(m_node.ref->page_id, m_tree->root());
+        CALICODB_EXPECT_EQ(m_node.page_id(), m_tree->root());
         CALICODB_EXPECT_EQ(m_node_path[0].ref, nullptr);             // m_node goes here
         CALICODB_EXPECT_EQ(m_node_path[kNumSlots - 1].ref, nullptr); // Overwrite this slot
         CALICODB_EXPECT_EQ(m_level, 0);
@@ -320,7 +322,7 @@ public:
     {
         // m_node is the root node. It always belongs at m_node_path[0]. The node in
         // m_node_path[1] was destroyed.
-        CALICODB_EXPECT_EQ(m_node.ref->page_id, m_tree->root());
+        CALICODB_EXPECT_EQ(m_node.page_id(), m_tree->root());
         CALICODB_EXPECT_EQ(m_node_path[0].ref, nullptr); // m_node goes here
         CALICODB_EXPECT_EQ(m_node_path[1].ref, nullptr); // Overwrite this slot
         CALICODB_EXPECT_EQ(m_level, 0);
@@ -367,7 +369,7 @@ public:
     [[nodiscard]] auto page_id() const -> Id
     {
         CALICODB_EXPECT_TRUE(on_node());
-        return m_node.ref->page_id;
+        return m_node.page_id();
     }
 
     [[nodiscard]] auto bucket_root_id() const -> Id

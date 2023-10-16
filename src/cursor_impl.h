@@ -42,7 +42,6 @@ public:
         return m_c.m_tree->check_integrity();
     }
 
-    auto TEST_tree_cursor() -> TreeCursor &;
     auto TEST_check_state() const -> void;
 };
 
