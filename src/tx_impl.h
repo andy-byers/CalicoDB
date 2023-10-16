@@ -33,15 +33,10 @@ public:
         return m_schema.pager().status();
     }
 
-    auto toplevel() const -> Cursor & override
+    auto main() const -> Bucket & override
     {
-        return m_toplevel;
+        return m_main;
     }
-
-    auto create_bucket(const Slice &name, Bucket **b_out) -> Status override;
-    auto create_bucket_if_missing(const Slice &name, Bucket **b_out) -> Status override;
-    auto open_bucket(const Slice &name, Bucket *&b_out) const -> Status override;
-    auto drop_bucket(const Slice &name) -> Status override;
 
     auto vacuum() -> Status override;
     auto commit() -> Status override;

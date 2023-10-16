@@ -227,7 +227,7 @@ protected:
             // Let the keys get increasingly long so that the overflow chain code gets tested.
             s_keys[n].resize(s_keys[n].size() + n * 32, '0');
         }
-        return to_slice(s_keys[n]);
+        return s_keys[n];
     }
     [[nodiscard]] static auto make_value(size_t n) -> std::string
     {
@@ -308,7 +308,7 @@ protected:
         c2.reset();
 
         if (s.is_ok()) {
-            s = tx.drop_bucket(name1);
+            s = tx.main().drop_bucket(name1);
         }
         if (s.is_ok()) {
             s = tx.vacuum();
@@ -324,13 +324,16 @@ protected:
         EXPECT_OK(tx.status());
 
         std::string b_name;
-        auto &toplevel = tx.toplevel();
-        toplevel.seek_first();
-        if (toplevel.is_valid()) {
-            b_name = to_string(toplevel.key());
+        auto toplevel = test_new_cursor(tx.main());
+        if (!toplevel) {
+            return Status::no_memory();
+        }
+        toplevel->seek_first();
+        if (toplevel->is_valid()) {
+            b_name = toplevel->key().to_string();
             EXPECT_EQ(b_name, std::to_string((iteration + 1) % kNumIterations));
         } else {
-            return toplevel.status();
+            return toplevel->status();
         }
 
         TestBucket b;
@@ -361,7 +364,7 @@ protected:
             }
             c->next();
         }
-        EXPECT_FALSE(c->is_valid()) << "key = \"" << to_string(c->key()) << '\"';
+        EXPECT_FALSE(c->is_valid()) << "key = \"" << c->key().to_string() << '\"';
         return s;
     }
 
@@ -641,7 +644,7 @@ protected:
                     c->seek_first();
                     for (size_t j = 0; c->is_valid() && j < kNumRecords; ++j) {
                         EXPECT_EQ(c->key(), make_key(j));
-                        EXPECT_EQ(to_string(c->value()), make_value(j));
+                        EXPECT_EQ(c->value(), make_value(j));
                         c->next();
                     }
                     s = c->status();
@@ -652,7 +655,7 @@ protected:
                     c->seek_last();
                     for (size_t j = 0; c->is_valid() && j < kNumRecords; ++j) {
                         EXPECT_EQ(c->key(), make_key(kNumRecords - j - 1));
-                        EXPECT_EQ(to_string(c->value()), make_value(kNumRecords - j - 1));
+                        EXPECT_EQ(c->value(), make_value(kNumRecords - j - 1));
                         c->previous();
                     }
                     if (s.is_ok()) {
@@ -665,7 +668,7 @@ protected:
                             break;
                         }
                         EXPECT_EQ(c->key(), make_key(j));
-                        EXPECT_EQ(to_string(c->value()), make_value(j));
+                        EXPECT_EQ(c->value(), make_value(j));
                     }
                     if (s.is_ok()) {
                         s = c->status();
@@ -719,12 +722,12 @@ protected:
                     }
                     c->seek_last();
                     while (s.is_ok() && c->is_valid()) {
-                        auto v = to_string(c->value());
+                        auto v = c->value().to_string();
                         v.append(v);
                         s = b->put(*c, v);
                         if (s.is_ok()) {
                             EXPECT_TRUE(c->is_valid());
-                            EXPECT_EQ(to_string(c->value()), v);
+                            EXPECT_EQ(c->value(), v);
                             c->previous();
                         }
                     }
@@ -1146,11 +1149,12 @@ public:
                 return s;
             }
             auto c = test_new_cursor(*b);
+            EXPECT_NE(c, nullptr);
             for (size_t i = 0; i < num_writes && s.is_ok(); ++i) {
                 const auto key = numeric_key(i);
                 c->find(key);
                 if (c->is_valid()) {
-                    EXPECT_EQ(to_string(c->value()), numeric_key(i + version * num_writes));
+                    EXPECT_EQ(c->value(), numeric_key(i + version * num_writes));
                 }
             }
             return s;

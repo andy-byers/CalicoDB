@@ -1004,7 +1004,7 @@ TEST_F(StringBuilderTests, Append)
 
     const auto str = build_string();
     ASSERT_EQ(str.size(), (msg_a + msg_b + msg_c).size());
-    ASSERT_EQ(Slice(str.c_str(), str.size()), to_slice(msg_a + msg_b + msg_c));
+    ASSERT_EQ(Slice(str.c_str(), str.size()), msg_a + msg_b + msg_c);
 }
 
 TEST_F(StringBuilderTests, AppendFormat)

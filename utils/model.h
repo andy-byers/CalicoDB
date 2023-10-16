@@ -55,6 +55,7 @@ namespace calicodb
 {
 
 class ModelBucket;
+class ModelCursor;
 class ModelTx;
 
 struct ModelStore {
@@ -62,6 +63,9 @@ struct ModelStore {
     using Tree = std::map<std::string, Node>;
     Tree tree;
 };
+
+using BucketList = std::list<ModelBucket *>;
+using CursorList = std::list<ModelCursor *>;
 
 class ModelDB : public DB
 {
@@ -99,7 +103,7 @@ class ModelCursor : public Cursor
 {
     friend class ModelBucket;
 
-    std::list<ModelCursor *>::iterator m_backref;
+    CursorList::iterator m_backref;
     mutable ModelStore::Tree::iterator m_itr;
     ModelStore::Tree *m_tree;
     const ModelBucket *const m_b;
@@ -113,8 +117,8 @@ class ModelCursor : public Cursor
     auto save_position() const -> void
     {
         if (!m_saved && m_c->is_valid()) {
-            m_saved_key = to_string(m_c->key());
-            m_saved_val = to_string(m_c->value());
+            m_saved_key = m_c->key().to_string();
+            m_saved_val = m_c->value().to_string();
             // The element at m_itr may have been erased. This will cause m_itr to be
             // invalidated, but we won't be able to tell, since it probably won't equal
             // end(*m_tree). This makes sure the iterator can still be used as a hint in
@@ -124,14 +128,12 @@ class ModelCursor : public Cursor
         }
     }
 
-    auto load_position() const -> std::pair<bool, std::string>
+    auto load_position() const -> void
     {
         if (m_saved) {
             m_saved = false;
             m_itr = m_tree->lower_bound(m_saved_key);
-            return {true, m_saved_key};
         }
-        return {false, ""};
     }
 
     auto move_to(typename ModelStore::Tree::iterator position) const -> void
@@ -146,7 +148,7 @@ class ModelCursor : public Cursor
     }
 
 public:
-    explicit ModelCursor(Cursor &c, const ModelBucket &b, ModelStore::Tree &tree, std::list<ModelCursor *>::iterator backref)
+    explicit ModelCursor(Cursor &c, const ModelBucket &b, ModelStore::Tree &tree, CursorList::iterator backref)
         : m_backref(backref),
           m_itr(end(tree)),
           m_tree(&tree),
@@ -171,8 +173,7 @@ public:
     [[nodiscard]] auto is_valid() const -> bool override
     {
         if (m_c->status().is_ok()) {
-            CHECK_EQ(m_c->is_valid(),
-                     m_itr != end(*m_tree) || m_saved);
+            CHECK_EQ(m_c->is_valid(), m_itr != end(*m_tree) || m_saved);
             check_record();
         }
         return m_c->is_valid();
@@ -188,14 +189,25 @@ public:
         return m_c->status();
     }
 
+    auto model_key() const -> const std::string &
+    {
+        CHECK_TRUE(m_c->is_valid());
+        return m_saved ? m_saved_key : m_itr->first;
+    }
+
+    auto model_value() const -> const std::string &
+    {
+        CHECK_TRUE(m_c->is_valid());
+        CHECK_FALSE(m_c->is_bucket());
+        return m_saved ? m_saved_val : std::get<std::string>(m_itr->second);
+    }
+
     auto check_record() const -> void
     {
         if (m_c->is_valid()) {
-            CHECK_EQ(m_c->key().to_string(),
-                     m_saved ? m_saved_key : m_itr->first);
+            CHECK_EQ(m_c->key().to_string(), model_key());
             if (!m_c->is_bucket()) {
-                CHECK_EQ(m_c->value().to_string(),
-                         m_saved ? m_saved_val : std::get<std::string>(m_itr->second));
+                CHECK_EQ(m_c->value().to_string(), model_value());
             }
         }
     }
@@ -213,14 +225,14 @@ public:
     auto find(const Slice &key) -> void override
     {
         m_saved = false;
-        m_itr = m_tree->find(to_string(key));
+        m_itr = m_tree->find(key.to_string());
         m_c->find(key);
     }
 
     auto seek(const Slice &key) -> void override
     {
         m_saved = false;
-        m_itr = m_tree->lower_bound(to_string(key));
+        m_itr = m_tree->lower_bound(key.to_string());
         m_c->seek(key);
     }
 
@@ -243,6 +255,7 @@ public:
 
     auto next() -> void override
     {
+        CHECK_TRUE(m_c->is_valid());
         load_position();
         if (m_itr != end(*m_tree)) {
             ++m_itr;
@@ -252,8 +265,11 @@ public:
 
     auto previous() -> void override
     {
+        CHECK_TRUE(m_c->is_valid());
         load_position();
-        if (m_itr == begin(*m_tree)) {
+        if (m_itr == end(*m_tree)) {
+            // load_position()
+        } else if (m_itr == begin(*m_tree)) {
             m_itr = end(*m_tree);
         } else {
             --m_itr;
@@ -273,13 +289,14 @@ class ModelBucket : public Bucket
     friend class ModelTx;
 
     const std::string m_name;
-    std::list<ModelBucket *>::iterator m_backref;
-    std::list<ModelBucket *> *const m_parent_buckets;
-    mutable std::list<ModelBucket *> m_child_buckets;
-    mutable std::list<ModelCursor *> m_cursors;
-    ModelStore::Tree *const m_temp;
+    BucketList::iterator m_backref;
+    BucketList *m_parent_buckets;
+    mutable BucketList m_child_buckets;
+    mutable CursorList m_cursors;
+    ModelStore::Tree m_drop_data;
+    ModelStore::Tree *m_temp;
     Bucket *const m_b;
-    bool m_live = true;
+    const bool m_is_main;
 
     auto use_cursor(Cursor &c) const -> ModelCursor &
     {
@@ -289,18 +306,30 @@ class ModelBucket : public Bucket
         return m;
     }
 
+    auto close() -> void;
     auto open_model_bucket(std::string name, Bucket &b, ModelStore &store) const -> Bucket *;
     auto open_model_cursor(Cursor &c, ModelStore::Tree &tree) const -> Cursor *;
     auto save_cursors(Cursor *exclude = nullptr) const -> void;
-    auto deactivate() -> void;
+    auto deactivate(ModelStore::Tree &drop_data) -> void;
 
 public:
-    explicit ModelBucket(std::string name, ModelStore &store, Bucket &b, std::list<ModelBucket *> &parent_buckets, std::list<ModelBucket *>::iterator backref)
+    explicit ModelBucket(std::string name, ModelStore &store, Bucket &b, BucketList &parent_buckets, BucketList::iterator backref)
         : m_name(std::move(name)),
           m_backref(backref),
           m_parent_buckets(&parent_buckets),
           m_temp(&store.tree),
-          m_b(&b)
+          m_b(&b),
+          m_is_main(false)
+    {
+    }
+
+    explicit ModelBucket(std::string name, ModelStore &store, Bucket &b)
+        : m_name(std::move(name)),
+          m_parent_buckets(nullptr),
+          m_temp(&store.tree),
+          m_b(&b),
+          m_is_main(true)
+
     {
     }
 
@@ -321,19 +350,18 @@ class ModelTx : public Tx
 {
     friend class ModelBucket;
 
-    mutable std::list<ModelBucket *> m_buckets;
-    mutable ModelStore m_temp;
+    ModelBucket *const m_main;
     ModelStore *const m_base;
+    mutable ModelStore m_temp;
     Tx *const m_tx;
 
-    auto open_model_bucket(std::string name, Bucket &b, ModelStore &store) const -> Bucket *;
-    auto save_cursors(Cursor *exclude) const -> void;
     auto check_consistency(const ModelStore::Tree &tree, const Bucket &bucket) const -> void;
 
 public:
     explicit ModelTx(ModelStore &store, Tx &tx)
-        : m_temp(store),
+        : m_main(new ModelBucket("", m_temp, tx.main())),
           m_base(&store),
+          m_temp(store),
           m_tx(&tx)
     {
     }
@@ -345,14 +373,13 @@ public:
         return m_tx->status();
     }
 
-    [[nodiscard]] auto toplevel() const -> Cursor & override
+    [[nodiscard]] auto main() const -> Bucket & override
     {
-        return m_tx->toplevel();
+        return *m_main;
     }
 
     auto vacuum() -> Status override
     {
-        save_cursors(nullptr);
         return m_tx->vacuum();
     }
 
@@ -364,11 +391,6 @@ public:
         }
         return s;
     }
-
-    auto create_bucket(const Slice &name, Bucket **b_out) -> Status override;
-    auto create_bucket_if_missing(const Slice &name, Bucket **b_out) -> Status override;
-    auto open_bucket(const Slice &name, Bucket *&b_out) const -> Status override;
-    auto drop_bucket(const Slice &name) -> Status override;
 
     auto check_consistency() const -> void;
 };

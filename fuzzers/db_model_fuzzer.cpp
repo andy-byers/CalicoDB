@@ -26,6 +26,7 @@ class Fuzzer
         delete m_tx;
         delete m_db;
         m_c = nullptr;
+        m_b = nullptr;
         m_tx = nullptr;
         CHECK_OK(ModelDB::open(m_options, "InMemory", m_store, m_db));
         reopen_tx();
@@ -46,9 +47,7 @@ class Fuzzer
     {
         delete m_c;
         delete m_b;
-        // This should be a NOOP if the bucket handle has already been created
-        // since this transaction was started. The same exact handle is returned.
-        CHECK_OK(m_tx->create_bucket("BUCKET", &m_b));
+        CHECK_OK(m_tx->main().create_bucket_if_missing("BUCKET", &m_b));
         m_c = m_b->new_cursor();
     }
 
@@ -65,6 +64,7 @@ public:
     ~Fuzzer()
     {
         delete m_c;
+        delete m_b;
         delete m_tx;
         delete m_db;
     }
@@ -122,9 +122,9 @@ public:
         std::string str2;
         Status s;
 
-        auto &toplevel = m_tx->toplevel();
-        toplevel.seek_first();
-        CHECK_TRUE(toplevel.is_valid());
+        auto toplevel = test_new_cursor(m_tx->main());
+        toplevel->seek_first();
+        CHECK_TRUE(toplevel->is_valid());
 
         switch (op_type) {
             case kBucketGet:

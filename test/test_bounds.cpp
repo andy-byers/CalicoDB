@@ -288,8 +288,8 @@ TEST_F(StressTests, CursorLimit)
                 c->next();
             }
             EXPECT_TRUE(c->is_valid());
-            EXPECT_EQ(to_string(c->key()), numeric_key(i));
-            EXPECT_EQ(to_string(c->value()), numeric_key(i));
+            EXPECT_EQ(c->key(), numeric_key(i));
+            EXPECT_EQ(c->value(), numeric_key(i));
         }
         return s;
     }));
@@ -314,7 +314,7 @@ TEST_F(StressTests, LargeVacuum)
         }
         for (size_t i = 0; s.is_ok() && i < kDroppedBuckets; ++i) {
             const auto name2 = numeric_key(i);
-            s = tx.drop_bucket(name2);
+            s = tx.main().drop_bucket(name2);
         }
         if (s.is_ok()) {
             // Run a vacuum while there are many buckets open.

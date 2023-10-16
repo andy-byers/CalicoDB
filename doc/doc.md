@@ -244,33 +244,17 @@ Each open bucket is represented by a `calicodb::Bucket` handle.
 #include "calicodb/db.h"
 #include "calicodb/tx.h"
 
-calicodb::Bucket *b;
+// The main bucket is created when the first transaction starts. Just like 
+// any other bucket, it can contain key-value pairs, or key-sub-bucket pairs.
+calicodb::Bucket &b = tx->main();
 
-// Create the bucket. Note that this bucket will not persist in the database 
-// unless Tx::commit() is called prior to the transaction ending.
-s = tx->create_bucket("cats", &b);
-if (s.is_ok()) {
-    // c holds a cursor over the bucket "cats". The bucket will remain open
-    // until c is delete'd, which must happen before the transaction is
-    // finished. 
-}
-
-// Release memory occupied by the bucket.
-delete b;
-
-// Since the bucket "cats" already exists, we can open it via the following:
-s = tx->open_bucket("cats", b);
-if (s.is_ok()) {
-    // c holds a cursor on the open bucket "cats".
-}
-
-s = b->put("lilly", "calico");
+s = b.put("lilly", "calico");
 if (s.is_ok()) {
     // Mapping from "lilly" -> "tuxedo" has been added to b.
 }
 
 std::string value;
-s = b->get("lilly", &value);
+s = b.get("lilly", &value);
 if (s.is_ok()) {
     // value contains "calico".
 } else if (s.is_not_found()) {
@@ -279,31 +263,53 @@ if (s.is_ok()) {
     // Some other error occurred. Probably an I/O error.
 }
 
-s = b->erase("key");
+s = b.erase("key");
 if (s.is_ok()) {
     // No record with key "key" exists in b.
 } else {
     // An error occurred. Note it is not an error if "key" does not exist. 
 }
 
-// Nested buckets are supported.
+// Create a sub-bucket. Note that this bucket will not persist in the database 
+// unless Tx::commit() is called prior to the transaction ending. It is an
+// error if the bucket already exists.
 calicodb::Bucket *b2 = nullptr;
-s = b->create_bucket_if_missing("nest", &b2);
+s = b.create_bucket("cats", &b2);
+if (s.is_ok()) {
+    // b holds a handle to the bucket "cats". The bucket will remain open until
+    // b is delete'd, which must happen before the transaction is finished. 
+}
+
+// Release memory occupied by the sub-bucket.
+delete b2;
+
+// Since the bucket "cats" already exists, we can open it via the following:
+s = b.open_bucket("cats", b2);
+if (s.is_ok()) {
+    // b2 holds a handle to the open bucket "cats".
+}
+
+// Buckets can be nested arbitrarily.
+calicodb::Bucket *b3 = nullptr;
+s = b2->create_bucket_if_missing("nest", &b3);
 if (s.is_ok()) {
     
 }
 
+// Parent bucket can be closed now. It isn't needed for working with b3.
+delete b2;
+
 // Remove the nested bucket. If the removed bucket itself contains any 
 // buckets, those buckets are removed as well. Note that we can access 
 // the records and sub-buckets in "nest" through b2 until it is delete'd.
-s = b->drop_bucket("nest");
+s = b.drop_bucket("nest");
 if (s.is_ok()) {
     
 }
 
 // Close the last (and only) handle to "nest". Since it has been dropped
 // already, its pages are recycled now.
-delete b2;
+delete b3;
 ```
 
 ### Cursors
@@ -315,14 +321,15 @@ They can also be used to help modify the database during [read-write transaction
 #include "calicodb/db.h"
 #include "calicodb/tx.h"
 
-auto *c = b->new_cursor();
+// Allocate a cursor handle. c must be delete'd when it is no longer needed.
+auto *c = b.new_cursor();
 
 // Scan the entire bucket forwards.
 c->seek_first();
 while (c->is_valid()) {
     // If c->is_bucket() evaluates to true, then the cursor is referencing a bucket
     // record and c->value() will equal "". The sub-bucket can be opened by calling
-    // b->open_bucket(c->key(), b2).
+    // b.open_bucket(c->key(), b2).
     const calicodb::Slice key = c->key();
     const calicodb::Slice val = c->value();
     c->next();
@@ -357,7 +364,7 @@ if (c->is_valid()) {
 // Modify a record. c is used to determine what bucket to put the record in.
 // If c is already positioned near where the new record should go, a root-to-leaf 
 // traversal may be avoided.
-s = b->put(*c, "cute");
+s = b.put(*c, "cute");
 if (s.is_ok()) {
     // c is left on the modified record.
     assert(c->is_valid());
@@ -366,7 +373,7 @@ if (s.is_ok()) {
 }
 
 // Erase the record pointed to by the cursor.
-s = b->erase(*c);
+s = b.erase(*c);
 if (s.is_ok()) {
     // c is on the record immediately following the erased record, if such a 
     // record exists. Otherwise, c is invalidated.

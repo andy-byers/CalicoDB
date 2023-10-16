@@ -124,8 +124,9 @@ public:
                         break;
                     case kOpDrop:
                         cursors[idx].reset();
+                        buckets[idx].reset();
                         str = std::to_string(idx);
-                        s = tx.drop_bucket(str);
+                        s = tx.main().drop_bucket(str);
                         c = nullptr;
                         break;
                     case kOpCheck:

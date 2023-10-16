@@ -238,8 +238,8 @@ protected:
             // Check the results.
             for (size_t i = 0; i + 1 < co.result.size(); ++i) {
                 uint64_t n;
-                auto slice = to_slice(co.result[i]);
-                ASSERT_LE(slice, to_slice(co.result[i + 1]));
+                Slice slice = co.result[i];
+                ASSERT_LE(slice, co.result[i + 1]);
                 ASSERT_TRUE(consume_decimal_number(slice, &n));
                 ASSERT_TRUE(slice.is_empty());
                 m_sanity_check = maxval(m_sanity_check, n);
@@ -336,7 +336,7 @@ protected:
                         }
                         co.result.emplace_back(value.data(), value.size());
                     } else {
-                        EXPECT_EQ(c->value(), to_slice(co.result.back())) << "non repeatable read";
+                        EXPECT_EQ(c->value(), co.result.back()) << "non repeatable read";
                     }
                 }
                 return t.is_not_found() ? Status::ok() : t;
@@ -514,8 +514,8 @@ protected:
             // Check the results.
             for (size_t i = 0; i + 1 < co.result.size(); ++i) {
                 uint64_t n;
-                auto slice = to_slice(co.result[i]);
-                ASSERT_LE(slice, to_slice(co.result[i + 1]));
+                Slice slice = co.result[i];
+                ASSERT_LE(slice, co.result[i + 1]);
                 ASSERT_TRUE(consume_decimal_number(slice, &n));
                 ASSERT_TRUE(slice.is_empty());
                 m_sanity_check = maxval(m_sanity_check, n);

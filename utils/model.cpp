@@ -50,6 +50,8 @@ auto ModelDB::new_reader(Tx *&tx_out) const -> Status
 
 ModelTx::~ModelTx()
 {
+    m_main->deactivate(m_main->m_drop_data);
+    delete m_main;
     delete m_tx;
 }
 
@@ -90,88 +92,23 @@ auto ModelTx::check_consistency(const ModelStore::Tree &tree, const Bucket &buck
     CHECK_TRUE(copy_keys.empty());
 }
 
-auto ModelTx::save_cursors(Cursor *exclude) const -> void
-{
-    for (auto &b : m_buckets) {
-        b->save_cursors(exclude);
-    }
-}
-
-auto ModelTx::create_bucket(const Slice &name, Bucket **b_out) -> Status
-{
-    auto name_copy = name.to_string();
-    auto s = m_tx->create_bucket(name, b_out);
-    if (s.is_ok()) {
-        // NOOP if `name` already exists.
-        auto [itr, _] = m_temp.tree.insert({name_copy, ModelStore()});
-        if (b_out) {
-            CHECK_TRUE(*b_out != nullptr);
-            *b_out = open_model_bucket(std::move(name_copy), **b_out,
-                                       std::get<ModelStore>(itr->second));
-        }
-    } else if (b_out) {
-        CHECK_EQ(*b_out, nullptr);
-    }
-    return s;
-}
-
-auto ModelTx::create_bucket_if_missing(const Slice &name, Bucket **b_out) -> Status
-{
-    auto name_copy = name.to_string();
-    auto s = m_tx->create_bucket_if_missing(name, b_out);
-    if (s.is_ok()) {
-        auto [itr, _] = m_temp.tree.insert({name_copy, ModelStore()});
-        if (b_out) {
-            CHECK_TRUE(*b_out != nullptr);
-            *b_out = open_model_bucket(std::move(name_copy), **b_out,
-                                       std::get<ModelStore>(itr->second));
-        }
-    } else if (b_out) {
-        CHECK_EQ(*b_out, nullptr);
-    }
-    return s;
-}
-
-auto ModelTx::open_bucket(const Slice &name, Bucket *&b_out) const -> Status
-{
-    auto name_copy = name.to_string();
-    auto s = m_tx->open_bucket(name, b_out);
-    if (s.is_ok()) {
-        auto itr = m_temp.tree.find(name_copy);
-        CHECK_TRUE(itr != end(m_temp.tree));
-        CHECK_TRUE(std::holds_alternative<ModelStore>(itr->second));
-        b_out = open_model_bucket(std::move(name_copy), *b_out,
-                                  std::get<ModelStore>(itr->second));
-    } else {
-        CHECK_EQ(b_out, nullptr);
-    }
-    return s;
-}
-
-auto ModelTx::drop_bucket(const Slice &name) -> Status
-{
-    const auto name_copy = name.to_string();
-    auto s = m_tx->drop_bucket(name);
-    if (s.is_ok()) {
-        CHECK_EQ(1, m_temp.tree.erase(name_copy));
-    }
-    return s;
-}
-
-auto ModelTx::open_model_bucket(std::string name, Bucket &b, ModelStore &store) const -> Bucket *
-{
-    m_buckets.emplace_front();
-    m_buckets.front() = new ModelBucket(
-        std::move(name), store, b, m_buckets, begin(m_buckets));
-    return m_buckets.front();
-}
-
 ModelBucket::~ModelBucket()
 {
-    if (m_live) {
-        m_parent_buckets->erase(m_backref);
+    close();
+    if (!m_is_main) {
+        delete m_b;
     }
-    delete m_b;
+}
+
+auto ModelBucket::close() -> void
+{
+    if (m_parent_buckets) {
+        m_parent_buckets->erase(m_backref);
+        m_parent_buckets = nullptr;
+    }
+    while (!m_child_buckets.empty()) {
+        m_child_buckets.front()->close();
+    }
 }
 
 auto ModelBucket::open_model_bucket(std::string name, Bucket &b, ModelStore &store) const -> Bucket *
@@ -190,14 +127,23 @@ auto ModelBucket::open_model_cursor(Cursor &c, ModelStore::Tree &tree) const -> 
     return m_cursors.front();
 }
 
-auto ModelBucket::deactivate() -> void
+auto ModelBucket::deactivate(ModelStore::Tree &drop_data) -> void
 {
-    m_live = false;
     for (auto *c : m_cursors) {
+        c->invalidate();
         c->m_live = false;
     }
-    for (auto *b : m_child_buckets) {
-        b->deactivate();
+    if (m_parent_buckets) {
+        m_parent_buckets->erase(m_backref);
+        m_parent_buckets = nullptr;
+    }
+    m_drop_data = drop_data;
+    m_temp = &m_drop_data;
+    while (!m_child_buckets.empty()) {
+        auto *&b = m_child_buckets.front();
+        auto itr = m_drop_data.find(b->m_name);
+        CALICODB_EXPECT_TRUE(std::holds_alternative<ModelStore>(itr->second));
+        b->deactivate(std::get<ModelStore>(itr->second).tree);
     }
 }
 
@@ -211,6 +157,7 @@ auto ModelBucket::new_cursor() const -> Cursor *
 
 auto ModelBucket::create_bucket(const Slice &name, Bucket **b_out) -> Status
 {
+    save_cursors(nullptr);
     auto name_copy = name.to_string();
     auto s = m_b->create_bucket(name, b_out);
     if (s.is_ok()) {
@@ -230,6 +177,7 @@ auto ModelBucket::create_bucket(const Slice &name, Bucket **b_out) -> Status
 
 auto ModelBucket::create_bucket_if_missing(const Slice &name, Bucket **b_out) -> Status
 {
+    save_cursors(nullptr);
     auto name_copy = name.to_string();
     auto s = m_b->create_bucket_if_missing(name, b_out);
     if (s.is_ok()) {
@@ -247,13 +195,21 @@ auto ModelBucket::create_bucket_if_missing(const Slice &name, Bucket **b_out) ->
 
 auto ModelBucket::drop_bucket(const Slice &name) -> Status
 {
+    save_cursors(nullptr);
     const auto name_copy = name.to_string();
     auto s = m_b->drop_bucket(name);
     if (s.is_ok()) {
-        for (auto &b : m_child_buckets) {
-            b->deactivate();
+        auto itr = m_temp->find(name_copy);
+        auto child = begin(m_child_buckets);
+        while (child != end(m_child_buckets)) {
+            auto next_child = next(child);
+            if ((*child)->m_name == name_copy) {
+                (*child)->deactivate(std::get<ModelStore>(itr->second).tree);
+                break;
+            }
+            child = next_child;
         }
-        CHECK_EQ(1, m_temp->erase(name_copy));
+        m_temp->erase(itr);
     }
     return s;
 }
@@ -290,6 +246,7 @@ auto ModelBucket::get(const Slice &key, CALICODB_STRING *value_out) const -> Sta
 
 auto ModelBucket::put(const Slice &key, const Slice &value) -> Status
 {
+    save_cursors(nullptr);
     const auto key_copy = key.to_string();
     const auto value_copy = value.to_string();
     auto s = m_b->put(key, value);
@@ -315,10 +272,11 @@ auto ModelBucket::put(Cursor &c, const Slice &value) -> Status
 
 auto ModelBucket::erase(const Slice &key) -> Status
 {
-    const auto key_copy = to_string(key);
+    save_cursors(nullptr);
+    const auto key_copy = key.to_string();
     auto s = m_b->erase(key);
     if (s.is_ok()) {
-        CHECK_EQ(m_temp->erase(key_copy), 1);
+        m_temp->erase(key_copy);
     }
     return s;
 }

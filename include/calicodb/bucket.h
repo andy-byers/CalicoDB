@@ -29,9 +29,12 @@ public:
     [[nodiscard]] virtual auto new_cursor() const -> Cursor * = 0;
 
     // Create a nested bucket associated with the given `key`
+    // If a bucket with the given `key` already exists, a status is returned for which
+    // Status::is_invalid_argument() evaluates to true.
     virtual auto create_bucket(const Slice &key, Bucket **b_out) -> Status = 0;
 
     // Create a nested bucket associated with the given `key`
+    // It is not an error is the bucket already exists.
     virtual auto create_bucket_if_missing(const Slice &key, Bucket **b_out) -> Status = 0;
 
     // Open the nested bucket associated with the given `key`

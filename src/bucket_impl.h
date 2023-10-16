@@ -17,12 +17,6 @@ class BucketImpl;
 class Pager;
 struct Stats;
 
-struct BucketList {
-    BucketImpl *b;
-    BucketList *prev_entry;
-    BucketList *next_entry;
-};
-
 class BucketImpl
     : public Bucket,
       public HeapObject

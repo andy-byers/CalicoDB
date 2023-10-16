@@ -410,16 +410,18 @@ auto TreeCursor::move_left() -> void
 auto TreeCursor::seek_to_root() -> void
 {
     reset();
-    m_status = m_tree->acquire(m_tree->root(), m_node);
-    if (m_status.is_ok()) {
-        m_state = kValidState;
+    if (m_tree->m_pager->page_count()) {
+        m_status = m_tree->acquire(m_tree->root(), m_node);
+        if (m_status.is_ok()) {
+            m_state = kValidState;
+        }
     }
 }
 
 auto TreeCursor::seek_to_last_leaf() -> void
 {
     seek_to_root();
-    while (m_status.is_ok()) {
+    while (on_node()) {
         CALICODB_EXPECT_EQ(m_state, kValidState);
         m_idx = m_node.cell_count();
         if (m_node.is_leaf()) {
@@ -562,8 +564,9 @@ auto TreeCursor::start_write(const Slice &key, bool is_erase) -> bool
 
 auto TreeCursor::start_write() -> void
 {
-    // State must be kSavedState or kValidState.
-    CALICODB_EXPECT_TRUE(is_valid());
+    if (!is_valid()) {
+        return;
+    }
     m_tree->deactivate_cursors(this);
     activate(true); // Load saved position.
     if (on_record()) {
@@ -612,7 +615,7 @@ auto TreeCursor::seek_to_leaf(const Slice &key, bool read_payload) -> bool
     if (!on_correct_node) {
         seek_to_root();
     }
-    while (m_status.is_ok()) {
+    while (on_node()) {
         CALICODB_EXPECT_EQ(m_state, kValidState);
         CALICODB_EXPECT_EQ(m_state, kValidState);
         const auto found_exact_key = search_node(key);
@@ -1807,17 +1810,17 @@ auto Tree::emplace(Node &node, Slice key, Slice value, bool flag, uint32_t index
 
 auto Tree::erase(TreeCursor &c) -> Status
 {
-    if (!c.is_valid()) {
-        return c.m_status.is_ok()
-                   ? Status::invalid_argument("cursor is invalid")
-                   : c.m_status;
-    }
-    CALICODB_EXPECT_TRUE(c.assert_state());
     c.start_write();
     auto s = c.m_status;
-    if (s.is_ok()) {
+    if (c.is_valid()) {
+        CALICODB_EXPECT_TRUE(s.is_ok());
+        CALICODB_EXPECT_TRUE(c.assert_state());
         s = remove_cell(c.m_node, c.m_idx);
+    } else {
+        return s.is_ok() ? Status::invalid_argument("cursor is invalid")
+                         : c.m_status;
     }
+
     if (s.is_ok()) {
         s = resolve_underflow(c);
     }

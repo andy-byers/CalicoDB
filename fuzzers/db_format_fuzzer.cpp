@@ -101,7 +101,7 @@ public:
                     c2.reset();
 
                     if (s.is_ok()) {
-                        s = tx.drop_bucket("b2");
+                        s = tx.main().drop_bucket("b2");
                     }
                     if (s.is_ok()) {
                         s = tx.vacuum();

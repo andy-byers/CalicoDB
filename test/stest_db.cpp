@@ -121,7 +121,7 @@ struct DatabaseState {
         check_status(kOKMask);
         auto b = bucket_selector(false);
         Bucket *bucket;
-        s = tx->open_bucket(kBucketNames[b.bucket_id], bucket);
+        s = tx->main().open_bucket(kBucketNames[b.bucket_id], bucket);
         if (s.is_ok()) {
             b.state_addr->bucket.reset(bucket);
             b.state_addr->cursor.reset(bucket->new_cursor());
@@ -135,7 +135,7 @@ struct DatabaseState {
         check_status(kOKMask);
         const auto b = bucket_selector(false);
         Bucket *bucket;
-        s = tx->create_bucket(kBucketNames[b.bucket_id], &bucket);
+        s = tx->main().create_bucket_if_missing(kBucketNames[b.bucket_id], &bucket);
         if (s.is_ok()) {
             b.state_addr->bucket.reset(bucket);
             b.state_addr->cursor.reset(bucket->new_cursor());
@@ -146,8 +146,8 @@ struct DatabaseState {
     {
         check_status(kOKMask);
         if (const auto b = bucket_selector(true)) {
-            b.state_addr->bucket.reset();
             b.state_addr->cursor.reset();
+            b.state_addr->bucket.reset();
         }
     }
 
@@ -155,7 +155,7 @@ struct DatabaseState {
     {
         check_status(kOKMask);
         if (const auto b = bucket_selector(true)) {
-            s = tx->drop_bucket(kBucketNames[b.bucket_id]);
+            s = tx->main().drop_bucket(kBucketNames[b.bucket_id]);
             // It shouldn't matter that the bucket is dropped before the cursors positioned
             // on it are delete'd.
             buckets[b.bucket_id].bucket.reset();

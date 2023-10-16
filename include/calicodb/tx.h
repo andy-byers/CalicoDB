@@ -28,27 +28,18 @@ public:
     Tx(Tx &) = delete;
     void operator=(Tx &) = delete;
 
+    // Return a reference to the main bucket
+    // The main bucket is created when the first transaction is started on a newly-
+    // created database. It can only be written to when a read-write transaction is
+    // active, however.
+    [[nodiscard]] virtual auto main() const -> Bucket & = 0;
+
     // Return the status associated with this transaction
     // On creation, a Tx will always have an OK status. Only read-write transactions
     // can have a non-OK status. The status is set when a routine on this object fails
     // such that the consistency of the underlying data store becomes questionable, or
     // corruption is detected in one of the files.
     virtual auto status() const -> Status = 0;
-
-    // Return a cursor over the toplevel buckets
-    virtual auto toplevel() const -> Cursor & = 0;
-
-    // Create a toplevel bucket
-    virtual auto create_bucket(const Slice &name, Bucket **b_out) -> Status = 0;
-
-    // Create a toplevel bucket if a toplevel bucket with the given `name` does not exist
-    virtual auto create_bucket_if_missing(const Slice &name, Bucket **b_out) -> Status = 0;
-
-    // Open a toplevel bucket
-    virtual auto open_bucket(const Slice &name, Bucket *&b_out) const -> Status = 0;
-
-    // Remove a toplevel bucket
-    virtual auto drop_bucket(const Slice &name) -> Status = 0;
 
     // Defragment the database
     // This routine reclaims all unused pages in the database. The database file will be
