@@ -35,7 +35,6 @@ class TreeCursor;
         }
     }
     n = minval(n + 1, rhs.size());
-    // `lhs` <= result <= `rhs`
     prefix_out = rhs.range(0, n);
     return 0;
 }
@@ -210,7 +209,7 @@ private:
     Id m_root_id;
     const bool m_writable;
 
-    uint32_t m_refcount = 0;
+    uint64_t m_refcount = 0;
 
     // True if the tree was dropped, false otherwise. If true, the tree's pages will be removed
     // from the database when the destructor is run. This flag is here so that trees that are still

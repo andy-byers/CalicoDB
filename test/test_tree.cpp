@@ -252,7 +252,10 @@ TEST_F(TreeTests, LongVsShortKeys)
         ASSERT_OK(m_tree->put(tree_cursor_cast(*m_c), std::string(actual_key_len, 'a'), make_value('1', true), false));
         ASSERT_OK(m_tree->put(tree_cursor_cast(*m_c), std::string(actual_key_len, 'b'), make_value('2', true), false));
         ASSERT_OK(m_tree->put(tree_cursor_cast(*m_c), std::string(actual_key_len, 'c'), make_value('3', true), false));
-
+        String st;
+        ASSERT_OK(m_tree->print_nodes(st));
+        std::cerr << i << ":\n"
+                  << st.c_str() << '\n';
         m_c->seek(std::string(search_key_len, i == 0 ? 'A' : 'a'));
         ASSERT_TRUE(m_c->is_valid());
         ASSERT_EQ(std::string(actual_key_len, 'a'), m_c->key());

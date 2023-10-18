@@ -102,6 +102,19 @@ TEST(ConcurrencyTestsTools, BarrierIsReusable)
     }
 }
 
+class WaitForever : public BusyHandler
+{
+public:
+    std::atomic<uint64_t> counter = 0;
+    explicit WaitForever() = default;
+    ~WaitForever() override = default;
+    auto exec(unsigned) -> bool override
+    {
+        counter.fetch_add(1, std::memory_order_relaxed);
+        return true;
+    }
+};
+
 class ConcurrencyTests : public testing::Test
 {
 protected:
@@ -110,18 +123,7 @@ protected:
     UserPtr<DelayEnv> m_env;
     uint64_t m_sanity_check = 0;
 
-    static class WaitForever : public BusyHandler
-    {
-    public:
-        std::atomic<uint64_t> counter = 0;
-        explicit WaitForever() = default;
-        ~WaitForever() override = default;
-        auto exec(unsigned) -> bool override
-        {
-            counter.fetch_add(1, std::memory_order_relaxed);
-            return true;
-        }
-    } s_busy_handler;
+    static WaitForever s_busy_handler;
 
     explicit ConcurrencyTests()
         : m_filename(get_full_filename(testing::TempDir() + "concurrency")),
@@ -556,7 +558,7 @@ protected:
     }
 };
 
-ConcurrencyTests::WaitForever ConcurrencyTests::s_busy_handler;
+WaitForever ConcurrencyTests::s_busy_handler;
 
 TEST_F(ConcurrencyTests, Consistency0)
 {
@@ -665,5 +667,177 @@ TEST_F(ConcurrencyTests, AutoCheckpointer4)
     run_checkpointer_test({10, 50, true});
     run_checkpointer_test({50, 50, true});
 }
+
+class MultiProcessTests : public testing::TestWithParam<size_t>
+{
+public:
+    const size_t m_num_processes;
+    const std::string m_filename;
+
+    explicit MultiProcessTests()
+        : m_num_processes(GetParam()),
+          m_filename(testing::TempDir() + "calicodb_multi_process_tests")
+    {
+    }
+
+    ~MultiProcessTests() override = default;
+
+    template <class Test>
+    auto run_test_instance(const Test &test)
+    {
+        std::vector<int> pipes(m_num_processes);
+        for (size_t n = 0; n < m_num_processes; ++n) {
+            int pipefd[2];
+            ASSERT_EQ(pipe(pipefd), 0);
+            pipes[n] = pipefd[0];
+
+            const auto pid = fork();
+            ASSERT_NE(-1, pid) << strerror(errno);
+            if (pid) {
+                close(pipefd[1]);
+            } else {
+                close(pipefd[0]);
+                dup2(pipefd[1], STDOUT_FILENO);
+                dup2(pipefd[1], STDERR_FILENO);
+                test();
+                std::exit(testing::Test::HasFailure());
+            }
+        }
+        for (size_t n = 0; n < m_num_processes; ++n) {
+            int s;
+            const auto pid = wait(&s);
+            ASSERT_NE(pid, -1)
+                << "wait failed: " << strerror(errno);
+            if (!WIFEXITED(s) || WEXITSTATUS(s)) {
+                std::string msg;
+                for (char buf[256];;) {
+                    if (const auto rc = read(pipes[n], buf, sizeof(buf))) {
+                        ASSERT_GT(rc, 0) << strerror(errno);
+                        msg.append(buf, static_cast<size_t>(rc));
+                    } else {
+                        break;
+                    }
+                }
+                ADD_FAILURE()
+                    << "exited " << (WIFEXITED(s) ? "" : "ab")
+                    << "normally with exit status " << WEXITSTATUS(s)
+                    << "\nOUTPUT:\n"
+                    << msg << "\n";
+            }
+        }
+    }
+
+    static auto writer_thread(const char *filename, BusyHandler *busy)
+    {
+        DB *db = nullptr;
+        Options options;
+        options.busy = busy;
+        auto s = DB::open(options, filename, db);
+        for (size_t i = 0; s.is_ok() && i < 10;) {
+            s = db->update([](auto &tx) {
+                Status s;
+                std::string value;
+                auto &b = tx.main_bucket();
+                for (size_t i = 0; i < 10; ++i) {
+                    s = b.get(numeric_key(i), &value);
+                    if (s.is_ok()) {
+                        const auto n = std::stoul(value);
+                        s = b.put(numeric_key(i), numeric_key(n + 1));
+                    } else if (s.is_not_found()) {
+                        s = b.put(numeric_key(i), numeric_key(0));
+                    }
+                    if (!s.is_ok()) {
+                        return s;
+                    }
+                }
+                return s;
+            });
+            if (s.is_ok()) {
+                ++i;
+            } else if (s.is_busy()) {
+                s = Status::ok();
+            }
+        }
+        delete db;
+        ASSERT_OK(s);
+    }
+
+    static auto reader_thread(const char *filename, BusyHandler *busy)
+    {
+        DB *db = nullptr;
+        Options options;
+        options.busy = busy;
+        auto s = DB::open(options, filename, db);
+        for (size_t i = 0; s.is_ok() && i < 10;) {
+            s = db->view([](auto &tx) {
+                std::string value;
+                auto c = test_new_cursor(tx.main_bucket());
+                c->seek_first();
+                while (c->is_valid()) {
+                    EXPECT_FALSE(c->is_bucket());
+                    if (value.empty()) {
+                        value = c->value().to_string();
+                    } else {
+                        EXPECT_EQ(value, c->value().to_string());
+                    }
+                    c->next();
+                }
+                return c->status();
+            });
+            if (s.is_ok()) {
+                ++i;
+            } else if (s.is_busy()) {
+                s = Status::ok();
+            }
+        }
+        delete db;
+        ASSERT_OK(s);
+    }
+
+    auto run_test(size_t num_threads)
+    {
+        static WaitForever s_busy_handler;
+        remove_calicodb_files(m_filename);
+        run_test_instance([num_threads, filename = m_filename] {
+            std::vector<std::thread> threads;
+            threads.reserve(num_threads);
+            const auto num_writers = maxval<size_t>(1, num_threads / 4);
+            for (size_t t = 0; t < num_threads; ++t) {
+                threads.emplace_back(t < num_writers ? reader_thread : writer_thread,
+                                     filename.c_str(), &s_busy_handler);
+            }
+            for (auto &thread : threads) {
+                thread.join();
+            }
+        });
+
+        reader_thread(m_filename.c_str(), &s_busy_handler);
+    }
+};
+
+TEST_P(MultiProcessTests, 0)
+{
+    run_test(1);
+}
+
+TEST_P(MultiProcessTests, 1)
+{
+    run_test(2);
+}
+
+TEST_P(MultiProcessTests, 2)
+{
+    run_test(3);
+}
+
+TEST_P(MultiProcessTests, 3)
+{
+    run_test(25);
+}
+
+INSTANTIATE_TEST_SUITE_P(
+    MultiProcessTests,
+    MultiProcessTests,
+    ::testing::Values(1, 3, 5));
 
 } // namespace calicodb::test

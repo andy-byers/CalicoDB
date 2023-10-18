@@ -1,15 +1,19 @@
 # CalicoDB Documentation
+CalicoDB is a persistent, transactional key-value store that aims to be useful in memory-constrained environments.
+The library allows keys and values (arbitrary byte arrays) to be stored in multiple (possibly nested) buckets.
+CalicoDB uses ideas from multiple popular embedded databases, such as SQLite, LevelDB, and BoltDB.
 
 + [Build](#build)
 + [API](#api)
-    + [Slices](#slices)
     + [Statuses](#statuses)
-    + [Global options](#Global options)
     + [Opening a database](#opening-a-database)
+    + [Global options](#global-options)
     + [Readonly transactions](#readonly-transactions)
     + [Read-write transactions](#read-write-transactions)
     + [Manual transactions](#manual-transactions)
+    + [Concurrency](#concurrency)
     + [Buckets](#buckets)
+    + [Slices](#slices)
     + [Cursors](#cursors)
     + [Database properties](#database-properties)
     + [Checkpoints](#checkpoints)
@@ -26,40 +30,63 @@ mkdir -p build && cd ./build
 
 followed by
 ```bash
-cmake -DCMAKE_BUILD_TYPE=RelWithAssertions .. && cmake --build .
+cmake .. && cmake --build .
 ```
 
 to build the library and tests.
-Note that the tests must be built with assertions, hence the `RelWithAssertions`.
-To build the library in release file_lock without tests, the last command would look like:
+To build the library without tests, the last command would look like:
 ```bash
-cmake -DCMAKE_BUILD_TYPE=Release -DCALICODB_Test=Off .. && cmake --build .
+cmake -DCALICODB_BuildTests=Off .. && cmake --build .
 ```
+
+Additional options can be found in the toplevel CMakeLists.txt.
 
 ## API
 
-### Slices
+### Statuses
+All CalicoDB routines that have the possibility of failure will return (or otherwise expose) a status object that indicates what went wrong.
+Status objects hold 3 pieces of information: a code, a subcode, and an optional message.
+If a `Status` has a message, then it is stored on the heap, along with the code and subcode.
+Otherwise, or if the heap allocation fails, the code and subcode are packed into the state pointer.
 
 ```C++
-#include "calicodb/slice.h"
+#include "calicodb/status.h"
 
-static constexpr auto *kCString = "abc";
+// Create an "OK" status.
+calicodb::Status s;
+assert(s.is_ok());
+assert(s == calicodb::Status::ok());
 
-// Slices can be created from C-style strings, or from a pointer and a size.
-calicodb::Slice s1(kCString);
-calicodb::Slice s2(kCString, 3);
+// Create an error status.
+s = calicodb::Status::io_error();
+s = calicodb::Status::invalid_argument();
+s = calicodb::Status::busy(calicodb::Status::kRetry); // Equivalent to Status::retry()
 
-// Slices have methods for modifying the size and pointer position. These methods do not change the underlying data, 
-// they just change what range of bytes the slice is currently viewing. advance() increments the underlying pointer...
-s1.advance(1);
+// Check the status type.
+if (s.is_ok()) {
+    assert(s.code() == Status::kOK);
+} else if (s.is_io_error()) {
+    assert(s.code() == Status::kIOError);
+} else if (s.is_retry()) {
+    assert(s.code() == Status::kBusy);
+    assert(s.subcode() == Status::kRetry);
+}
 
-// ...and truncate() decreases the size.
-s1.truncate(1);
+// A human-readable C-style string representing the status can be accessed with:
+std::cerr << s.message();
+```
 
-// Comparison operations are implemented.
-assert(s1 == "b");
-assert(s2 < "bc");
-assert(s2.starts_with("ab"));
+### Opening a database
+A CalicoDB database lives in a single file on disk.
+The name of the database is the same as that of the file.
+
+```C++
+#include "calicodb/db.h"
+
+calicodb::DB *db;
+calicodb::Options options;
+s = calicodb::DB::open(options, "/tmp/calicodb_example", db);
+assert(s.is_ok());
 ```
 
 ### Global options
@@ -70,7 +97,6 @@ Changing the allocator while the library is using heap memory can cause a malloc
 
 ```C++
 #include "calicodb/config.h"
-#include "calicodb/status.h"
 
 // Query the general-purpose allocator that is currently in-use.
 calicodb::AllocatorConfig config;
@@ -83,81 +109,10 @@ if (rc.is_ok()) {
 }
 ```
 
-### Statuses
-All CalicoDB routines that have the possibility of failure will return (or otherwise expose) a status object.
-Status objects have a code, a subcode, and possibly a message.
-If a `Status` has a message, then it is stored on the heap, along with the code and subcode.
-Otherwise, or if the heap allocation fails, the code and subcode are packed into the state pointer.
-
-```C++
-#include "calicodb/status.h"
-
-// The default constructor creates an OK status. An OK status is a status for which 
-// Status::is_ok() returns true (not an error status).
-calicodb::Status s;
-
-// The following static method also creates an OK status.
-s = calicodb::Status::ok();
-
-// The code and subcode can be retrieved as follows:
-std::printf("code = %d, subcode = %d\n", int(s.code()), int(s.subcode()));
-
-// A human-readable C-style string representing the status can be accessed with:
-std::printf("s = %s\n", s.message());
-
-// Non-OK statuses must be created through one of the static methods.
-s = calicodb::Status::io_error();
-s = calicodb::Status::invalid_argument();
-s = calicodb::Status::busy(calicodb::Status::kRetry); // Equivalent to Status::retry()
-
-// One can check the type of status with one of the following methods:
-if (s.is_ok()) {
-    
-} else if (s.is_io_error()) {
-    
-} else if (s.is_retry()) { 
-    // Equivalent to s.is_busy() && s.subcode() == Status::kRetry
-}
-```
-
-### Opening a database
-
-```C++
-#include "calicodb/db.h"
-
-// Set some initialization options. See include/calicodb/options.h for descriptions
-// and default values.
-const calicodb::Options options = {
-    4'096, // page_size
-    1'024 * 4'096,  // cache_size
-    1'000, // auto_checkpoint
-    "wal-filename", // wal_filename
-    nullptr, // info_log
-    nullptr, // env
-    nullptr, // wal
-    nullptr, // busy
-    true, // create_if_missing
-    false, // error_if_exists
-    false, // temp_database
-    calicodb::Options::kSyncNormal, // sync_mode
-    calicodb::Options::kLockNormal, // lock_mode
-};
-
-// Create or open a database at the given path.
-calicodb::DB *db;
-s = calicodb::DB::open(options, "/tmp/calicodb_cats_example", db);
-
-// Handle failure. s.message() provides a human-readable representation of the status.
-if (!s.is_ok()) {
-
-}
-```
-
 ### Readonly transactions
 Readonly transactions are typically run using `DB::view(fn)`, where `fn` is a callback that reads from the database.
 
 ```C++
-#include "calicodb/db.h"
 #include "calicodb/tx.h"
 
 const char *bucket_name = "all_kittens"; // Lambda captures are supported.
@@ -175,7 +130,6 @@ If this happens, the transaction object, and any buckets created from it, will r
 The only possible course-of-action in this case is to return from `fn` and let the database clean up.
 
 ```C++
-#include "calicodb/db.h"
 #include "calicodb/tx.h"
 
 s = db->update([](calicodb::Tx &tx) {
@@ -184,8 +138,7 @@ s = db->update([](calicodb::Tx &tx) {
     // Otherwise, the transaction is rolled back and the original non-OK 
     // status is forwarded to the caller (rollback itself cannot fail). Note 
     // that calling Tx::commit() early does not invalidate the transaction 
-    // handle. This allows one to perform multiple batches of writes per 
-    // DB::run().
+    // handle.
     return calicodb::Status::ok();
 });
 ```
@@ -195,9 +148,6 @@ Transactions can also be run manually.
 The caller is responsible for `delete`ing the `Tx` handle when it is no longer needed.
 
 ```C++
-#include "calicodb/db.h"
-#include "calicodb/tx.h"
-
 calicodb::Tx *reader;
 
 // Start a readonly transaction.
@@ -234,20 +184,22 @@ if (!s.is_ok()) {
 auto *tx = writer;
 ```
 
+### Concurrency
+The concurrency code in CalicoDB is based off of SQLite's WAL module.
+Both multithread and multiprocess concurrency are supported, with some caveats.
+First, `DB` handles are not safe to use from multiple threads simultaneously: each thread in a given process must have its own database connection.
+Second, only a single writer is allowed to access the database at any given time, but readers can run at the same time as the writer.
+Also, a `calicodb::kCheckpointPassive` checkpoint can run at the same time as a reader or writer.
+
 ### Buckets
 In CalicoDB, buckets are persistent, ordered mappings from keys to values.
 Each open bucket is represented by a `calicodb::Bucket` handle.
+The database manages a "main bucket" that is created when the first transaction starts.
+Additional buckets can be created inside this bucket.
 
 ```C++
 #include "calicodb/bucket.h"
-#include "calicodb/cursor.h"
-#include "calicodb/db.h"
-#include "calicodb/tx.h"
 
-// The main bucket is created when the first transaction starts. Just like 
-// any other bucket, it can contain key-value pairs, or key-bucket pairs.
-// Some users may be able to get away with just using this bucket, and
-// never have to bother with the Bucket::*_bucket() methods.
 calicodb::Bucket &b = tx->main_bucket();
 
 s = b.put("lilly", "calico");
@@ -271,7 +223,14 @@ if (s.is_ok()) {
 } else {
     // An error occurred. Note it is not an error if "key" does not exist. 
 }
+```
 
+A nested bucket is a bucket that is rooted at some record in another bucket.
+Records representing buckets cannot be accessed or modified via the normal put-get-erase machinery.
+They must be managed using the `Bucket::*_bucket()` methods.
+Failure to adhere to this rule will result in a status for which `Status::is_incompatible_value()` evaluates to true.
+
+```C++
 // Create a sub-bucket. Note that this bucket will not persist in the database 
 // unless Tx::commit() is called prior to the transaction ending. It is an
 // error if the bucket already exists. Note that the second parameter to
@@ -288,16 +247,12 @@ delete b2;
 
 // Since the bucket "cats" already exists, we can open it via the following:
 s = b.open_bucket("cats", b2);
-if (s.is_ok()) {
-    // b2 holds a handle to the open bucket "cats".
-}
+assert(s.is_ok());
 
 // Buckets can be nested arbitrarily.
 calicodb::Bucket *b3 = nullptr;
 s = b2->create_bucket_if_missing("nest", &b3);
-if (s.is_ok()) {
-    
-}
+assert(s.is_ok());
 
 // Parent bucket can be closed now. It isn't needed for working with b3.
 delete b2;
@@ -306,23 +261,50 @@ delete b2;
 // buckets, those buckets are removed as well. Note that we can access 
 // the records and sub-buckets in "nest" through b2 until it is delete'd.
 s = b.drop_bucket("nest");
-if (s.is_ok()) {
-    
-}
+assert(s.is_ok());
 
 // Close the last (and only) handle to "nest". Since it has been dropped
 // already, its pages are recycled now.
 delete b3;
 ```
 
+### Slices
+The `Bucket::*()` methods above accept keys and values as `calicodb::Slice` objects.
+`calicodb::Slice` is used to represent an unowned pointer to `char` and a length.
+Slices can be created from C-style strings, `CALICODB_STRING`, or directly from a pointer and a length.
+`CALICODB_STRING`, the user-facing string type used by CalicoDB, defaults to `std::string`, but can be redefined if necessary.
+
+```C++
+#include "calicodb/slice.h"
+
+static constexpr auto *kCString = "abc";
+CALICODB_STRING cpp_string(kCString);
+
+calicodb::Slice s1(kCString);
+calicodb::Slice s2(cpp_string);
+calicodb::Slice s3(kCString, 1);
+
+// Conversion back to CALICODB_STRING.
+cpp_string = s3.to_string();
+```
+
+Slices have some convenience methods for modifying the size and pointer position. 
+These methods do not change the underlying data, they just change what range of bytes the slice is currently viewing. 
+Comparisons operators are also defined.
+
+```C++
+// advance() increments the underlying pointer...
+s1.advance(1);
+
+// ...and truncate() decreases the length.
+s1.truncate(1);
+```
+
 ### Cursors
 Cursors are used to perform full-bucket scans and range queries.
-They can also be used to help modify the database during [read-write transactions](#read-write-transactions).
 
 ```C++
 #include "calicodb/cursor.h"
-#include "calicodb/db.h"
-#include "calicodb/tx.h"
 
 // Allocate a cursor handle. c must be delete'd when it is no longer needed.
 auto *c = b.new_cursor();
@@ -330,9 +312,6 @@ auto *c = b.new_cursor();
 // Scan the entire bucket forwards.
 c->seek_first();
 while (c->is_valid()) {
-    // If c->is_bucket() evaluates to true, then the cursor is referencing a bucket
-    // record and c->value() will equal "". The sub-bucket can be opened by calling
-    // b.open_bucket(c->key(), b2).
     const calicodb::Slice key = c->key();
     const calicodb::Slice val = c->value();
     c->next();
@@ -363,10 +342,12 @@ if (c->is_valid()) {
     // An I/O error occurred.
     assert(!c->status().is_ok());
 }
+```
 
-// Modify a record. c is used to determine what bucket to put the record in.
-// If c is already positioned near where the new record should go, a root-to-leaf 
-// traversal may be avoided.
+Cursors can also be used to help modify the database during [read-write transactions](#read-write-transactions).
+
+```C++
+// Modify a record.
 s = b.put(*c, "cute");
 if (s.is_ok()) {
     // c is left on the modified record.
@@ -375,21 +356,36 @@ if (s.is_ok()) {
     assert(c->value() == "cute");
 }
 
-// Erase the record pointed to by the cursor.
+// Erase a record.
 s = b.erase(*c);
 if (s.is_ok()) {
     // c is on the record immediately following the erased record, if such a 
     // record exists. Otherwise, c is invalidated.
+    assert(!c->is_valid() || "lilly" < c->key());
 }
+```
 
+Since CalicoDB supports nested buckets, a cursor valid cursor can be on either a normal record or a bucket record.
+Given that `Cursor::is_valid()` has returned true and the cursor has not moved, `Cursor::is_bucket()` can be used to check if the cursor is positioned on a bucket record.
+Bucket records always return an empty slice from `Cursor::value()`, and `Cursor::key()` returns the nested bucket's name (which can be passed to `Bucket::open_bucket()`).
+```C++
+if (!c->is_valid()) {
+    // Not on a record
+} else if (c->is_bucket()) {
+    // On a bucket record
+} else {
+    // On a normal record
+}
+```
+
+Close the cursor.
+```C++
 delete c;
 ```
 
 ### Database properties
 
 ```C++
-#include "calicodb/db.h"
-
 calicodb::Stats stats;
 s = db->get_property("calicodb.stats", &stats);
 if (s.is_ok()) {
@@ -401,9 +397,7 @@ if (s.is_ok()) {
 // Passing nullptr for the property value causes get_property() to perform a simple existence check, 
 // without attempting to populate the property value.
 s = db->get_property("calicodb.stats", nullptr);
-if (s.is_ok()) {
-    // Property "calicodb.stats" exists.
-}
+assert(s.is_ok());
 ```
 
 ### Checkpoints
@@ -414,14 +408,12 @@ Note that automatic checkpoints can be run using the `auto_checkpoint` option (s
 Automatic checkpoints are attempted when transactions are started.
 
 ```C++
-#include "calicodb/db.h"
-
 // This transaction was started earlier, in #manual-transactions. It must be
 // finished before the database can be checkpointed.
 delete tx;
 
-// Now we can run a checkpoint. See DB::run() for an API that takes away some
-// of the pain associated with transaction lifetimes.
+// Now we can run a checkpoint. See DB::view/DB::update for an API that eases
+// some pain associated with transaction lifetimes.
 
 calicodb::CheckpointInfo info = {};
 
@@ -441,7 +433,7 @@ if (s.is_ok()) {
 
 ### Closing a database
 To close the database, just `delete` the handle.
-The last connection to a particular database to close will unlink the WAL.
+The last connection to a particular database to close will checkpoint and unlink the WAL file.
 If a WAL is left behind after closing, then something has gone wrong.
 CalicoDB will attempt recovery on the next startup.
 
@@ -452,12 +444,8 @@ delete db;
 ### Destroying a database
 
 ```C++
-#include "calicodb/db.h"
-
-s = calicodb::DB::destroy(options, "/tmp/calicodb_cats_example");
-if (s.is_ok()) {
-    // Database has been destroyed.
-}
+s = calicodb::DB::destroy(options, "/tmp/calicodb_example");
+assert(s.is_ok());
 ```
 
 ## Resources

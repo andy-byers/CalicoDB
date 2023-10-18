@@ -189,10 +189,22 @@ constexpr auto minval(T t1, T t2) -> T
     return t1 < t2 ? t1 : t2;
 }
 
+template <class T, class... Ts>
+constexpr auto minval(T t1, T t2, Ts... rest) -> T
+{
+    return minval(minval(t1, t2), rest...);
+}
+
 template <class T>
 constexpr auto maxval(T t1, T t2) -> T
 {
     return t1 > t2 ? t1 : t2;
+}
+
+template <class T, class... Ts>
+constexpr auto maxval(T t1, T t2, Ts... rest) -> T
+{
+    return maxval(maxval(t1, t2), rest...);
 }
 
 } // namespace calicodb

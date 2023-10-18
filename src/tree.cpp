@@ -112,6 +112,42 @@ auto write_child_id(Cell &cell, Id child_id)
 constexpr uint32_t kLinkContentOffset = sizeof(uint32_t);
 
 struct PayloadManager {
+    static auto compare(Pager &pager, const Slice &key, const Cell &cell, int &cmp_out) -> Status
+    {
+        auto rest = key;
+        PageRef *page = nullptr;
+        auto remaining = cell.key_size;
+        Slice rhs(cell.key, minval(remaining, cell.local_size));
+        for (int i = 0;; ++i) {
+            const auto lhs = rest.range(0, minval(rest.size(), rhs.size()));
+            cmp_out = lhs.compare(rhs);
+            remaining -= rhs.size();
+            rest.advance(lhs.size());
+            if (cmp_out) {
+                break;
+            } else if (rest.is_empty()) {
+                cmp_out = remaining ? -1 : 0;
+                break;
+            } else if (remaining == 0) {
+                cmp_out = 1;
+                break;
+            }
+            // Get the next part of the record key to compare.
+            const auto next_id = i ? read_next_id(*page)
+                                   : read_overflow_id(cell);
+            pager.release(page);
+            auto s = pager.acquire(next_id, page);
+            if (!s.is_ok()) {
+                return s;
+            }
+            rhs = Slice(page->data + kLinkContentOffset,
+                        pager.page_size() - kLinkContentOffset);
+            rhs.truncate(minval<size_t>(remaining, rhs.size()));
+        }
+        pager.release(page);
+        return Status::ok();
+    }
+
     static auto access(
         Pager &pager,
         const Cell &cell,   // The `cell` containing the payload being accessed
@@ -454,17 +490,11 @@ auto TreeCursor::search_node(const Slice &key) -> bool
             m_status = Status::corruption();
             return false;
         }
-        Slice rhs;
-        // This call to Tree::extract_key() may return a partial key, if the whole key wasn't
-        // needed for the comparison. We read at most 1 byte more than is present in `key` so
-        // that we still have the necessary length information to break ties. This lets us avoid
-        // reading overflow chains if it isn't really necessary.
-        m_status = m_tree->extract_key(m_cell, m_tree->m_key_scratch[0], rhs,
-                                       static_cast<uint32_t>(key.size() + 1));
+        int cmp;
+        m_status = PayloadManager::compare(*m_tree->m_pager, key, m_cell, cmp);
         if (!m_status.is_ok()) {
-            break;
+            return false;
         }
-        const auto cmp = key.compare(rhs);
         if (cmp < 0) {
             upper = index;
         } else if (cmp > 0) {
@@ -682,9 +712,7 @@ auto TreeCursor::assert_state() const -> bool
             CALICODB_EXPECT_EQ(node.gap_size, m_node_path[i].gap_size);
             CALICODB_EXPECT_EQ(node.usable_space, m_node_path[i].usable_space);
             CALICODB_EXPECT_EQ(node.read_child_id(m_idx_path[i]),
-                               m_node_path[i + 1].ref
-                                   ? m_node_path[i + 1].page_id()
-                                   : m_node.page_id());
+                               m_node_path[i + 1].ref ? m_node_path[i + 1].page_id() : m_node.page_id());
         }
     }
     return true;
@@ -692,12 +720,7 @@ auto TreeCursor::assert_state() const -> bool
 
 auto Tree::corrupted_node(Id page_id) const -> Status
 {
-    auto s = corrupted_page(page_id, kTreeNode);
-    if (m_pager->mode() >= Pager::kWrite) {
-        // Pager status should never be set unless a rollback is needed.
-        m_pager->set_status(s); // TODO: Don't set errors in the tree, just return the status and let the caller handle it
-    }
-    return s;
+    return corrupted_page(page_id, page_id == root() ? kTreeRoot : kTreeNode);
 }
 
 auto Tree::create(Id parent_id, Id &root_id_out) -> Status
@@ -2119,8 +2142,9 @@ public:
                 }
                 s = traverse_chain(*tree.m_pager, head, [&](auto *) {
                     if (requested <= accumulated) {
-                        return StatusBuilder::corruption("overflow chain is too long (expected %u but accumulated %u)",
-                                                         requested, accumulated);
+                        return StatusBuilder::corruption(
+                            "overflow chain is too long (expected %u but accumulated %u)",
+                            requested, accumulated);
                     }
                     accumulated += minval(tree.page_size - kLinkContentOffset,
                                           requested - accumulated);
@@ -2130,8 +2154,9 @@ public:
                     return s;
                 }
                 if (requested != accumulated) {
-                    return StatusBuilder::corruption("overflow chain is wrong length (expected %u but accumulated %u)",
-                                                     requested, accumulated);
+                    return StatusBuilder::corruption(
+                        "overflow chain is wrong length (expected %u but accumulated %u)",
+                        requested, accumulated);
                 }
             }
             return Status::ok();
@@ -2248,22 +2273,34 @@ public:
                     if (node.read(i, cell)) {
                         return tree.corrupted_node(node.page_id());
                     }
-                    msg.append("  Cell(");
-                    if (!node.is_leaf()) {
-                        msg.append_format("%u,", read_child_id(cell).value);
-                    }
-                    const auto key_len = minval(32U, minval(cell.key_size, cell.local_size));
+                    msg.append("  Cell(key=");
+                    const auto local_key_size = minval(cell.key_size, cell.local_size);
+                    const auto short_key_size = minval(32U, local_key_size);
                     msg.append('"');
-                    msg.append_escaped(Slice(cell.key, key_len));
+                    msg.append_escaped(Slice(cell.key, short_key_size));
                     msg.append('"');
-                    if (cell.key_size > key_len) {
+                    if (cell.key_size > short_key_size) {
                         msg.append("...");
+                        msg.append_format(" (%zu bytes total)", cell.key_size);
                     }
-                    msg.append_format(" (%zu bytes total)", cell.key_size);
                     if (!node.is_leaf()) {
                         msg.append_format(", child_id=%u", read_child_id(cell).value);
                     } else if (cell.is_bucket) {
                         msg.append_format(", bucket_id=%u", read_bucket_root_id(cell).value);
+                    } else {
+                        msg.append(", value=");
+                        const auto total_value_size = cell.total_size - cell.key_size;
+                        const auto local_value_size = cell.local_size - local_key_size;
+                        const auto short_value_size = minval(32U, total_value_size, local_value_size);
+                        if (short_value_size) {
+                            msg.append('"');
+                            msg.append_escaped(Slice(cell.key + local_key_size, short_value_size));
+                            msg.append('"');
+                        }
+                        if (short_value_size < total_value_size) {
+                            msg.append("...");
+                            msg.append_format(" (%zu bytes total)", total_value_size);
+                        }
                     }
                     msg.append(")\n");
                 }

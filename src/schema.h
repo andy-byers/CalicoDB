@@ -55,9 +55,6 @@ public:
     auto find_open_tree(Id root_id) -> Tree *;
     auto vacuum() -> Status;
 
-    // Locate the page containing the reference to the sub-bucket rooted at `root_id`
-    auto find_parent_id(Id root_id, Id &parent_id_out) -> Status;
-
     auto TEST_validate() const -> void;
 
 private:
