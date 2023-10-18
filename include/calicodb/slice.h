@@ -16,6 +16,7 @@
 //     CALICODB_STRING(const char *, size_t)
 //     size_t size() const
 //     const char* data() const
+//     void resize(size_t)
 #ifndef CALICODB_STRING
 #include <string>
 #define CALICODB_STRING std::string

@@ -74,11 +74,11 @@ public:
 
     // Start a transaction manually
     // Stores a pointer to the heap-allocated transaction object in `tx_out` and returns OK on
-    // success. Stores nullptr in `tx_out` and returns a non-OK status on failure. If the
-    // WriteOptions overload is used, then the transaction is a read-write transaction, otherwise
-    // it is a readonly transaction. The caller is responsible for calling delete on the Tx
-    // pointer when it is no longer needed.
-    // NOTE: Consider using the DB::run() API instead.
+    // success. Stores nullptr in `tx_out` and returns a non-OK status on failure. If new_writer()
+    // is called, then the transaction is a read-write transaction. Otherwise, the transaction is
+    // readonly. The caller is responsible for calling delete on the Tx handle when it is no longer
+    // needed.
+    // NOTE: Consider using the view()/update() API instead.
     virtual auto new_reader(Tx *&tx_out) const -> Status = 0;
     virtual auto new_writer(Tx *&tx_out) -> Status = 0;
 };

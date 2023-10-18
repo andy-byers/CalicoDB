@@ -29,14 +29,13 @@ struct DatabaseState {
 
     std::string filename = "/tmp/calicodb_stest_db";
     Options db_opt;
-    BucketOptions b_opt;
 
     static constexpr uint32_t kOKMask = 1 << Status::kOK;
     uint32_t error_mask = kOKMask;
 
     // A std::map<std::string, std::map<std::string, std::string>> representing
     // the expected contents of the database.
-    KVStore model_store;
+    ModelStore model_store;
 
     DB *db = nullptr;
     Tx *tx = nullptr;
@@ -70,26 +69,24 @@ struct DatabaseState {
     static constexpr size_t kMaxBuckets = ARRAY_SIZE(kBucketNames);
 
     struct BucketState final {
-        static constexpr size_t kCursorsPerBucket = 3;
-        Cursor *cursors[kCursorsPerBucket] = {};
+        TestBucket bucket;
+        TestCursor cursor;
     } buckets[kMaxBuckets];
 
     struct BucketSelection {
-        Cursor **cursor_addr;
+        BucketState *state_addr;
         size_t bucket_id;
 
         explicit operator bool() const
         {
-            return cursor_addr != nullptr;
+            return state_addr != nullptr;
         }
     };
 
     std::function<BucketSelection(bool)> select_next_bucket_callback = [this](bool find_existing) {
         for (size_t i = 0; i < kMaxBuckets; ++i) {
-            for (auto *&c : buckets[i].cursors) {
-                if ((c != nullptr) == find_existing) {
-                    return BucketSelection{&c, i};
-                }
+            if (!!buckets[i].bucket == find_existing) {
+                return BucketSelection{&buckets[i], i};
             }
         }
         return BucketSelection{};
@@ -102,10 +99,8 @@ struct DatabaseState {
             if (seen[i]) {
                 continue;
             }
-            for (auto *&c : buckets[i].cursors) {
-                if ((c != nullptr) == find_existing) {
-                    return BucketSelection{&c, i};
-                }
+            if (!!buckets[i].bucket == find_existing) {
+                return BucketSelection{&buckets[i], i};
             }
             seen[i] = true;
             ++num_seen;
@@ -125,8 +120,12 @@ struct DatabaseState {
     {
         check_status(kOKMask);
         auto b = bucket_selector(false);
-        s = tx->open_bucket(kBucketNames[b.bucket_id], *b.cursor_addr);
-        if (s.is_invalid_argument()) {
+        Bucket *bucket;
+        s = tx->main_bucket().open_bucket(kBucketNames[b.bucket_id], bucket);
+        if (s.is_ok()) {
+            b.state_addr->bucket.reset(bucket);
+            b.state_addr->cursor.reset(bucket->new_cursor());
+        } else if (s.is_invalid_argument()) {
             s = Status::ok();
         }
     }
@@ -135,15 +134,20 @@ struct DatabaseState {
     {
         check_status(kOKMask);
         const auto b = bucket_selector(false);
-        s = tx->create_bucket(b_opt, kBucketNames[b.bucket_id], b.cursor_addr);
+        Bucket *bucket;
+        s = tx->main_bucket().create_bucket_if_missing(kBucketNames[b.bucket_id], &bucket);
+        if (s.is_ok()) {
+            b.state_addr->bucket.reset(bucket);
+            b.state_addr->cursor.reset(bucket->new_cursor());
+        }
     }
 
     auto close_bucket() -> void
     {
         check_status(kOKMask);
         if (const auto b = bucket_selector(true)) {
-            delete *b.cursor_addr;
-            *b.cursor_addr = nullptr;
+            b.state_addr->cursor.reset();
+            b.state_addr->bucket.reset();
         }
     }
 
@@ -151,10 +155,11 @@ struct DatabaseState {
     {
         check_status(kOKMask);
         if (const auto b = bucket_selector(true)) {
-            s = tx->drop_bucket(kBucketNames[b.bucket_id]);
+            s = tx->main_bucket().drop_bucket(kBucketNames[b.bucket_id]);
             // It shouldn't matter that the bucket is dropped before the cursors positioned
             // on it are delete'd.
-            close_all_cursors(buckets[b.bucket_id]);
+            buckets[b.bucket_id].bucket.reset();
+            buckets[b.bucket_id].cursor.reset();
         }
     }
 
@@ -164,11 +169,11 @@ struct DatabaseState {
         if (!selected_bucket) {
             return;
         }
-        auto &c = **selected_bucket.cursor_addr;
+        auto &b = *selected_bucket.state_addr->bucket;
         for (size_t i = 0, n = rng.Next(1'234); i < n && s.is_ok(); ++i) {
             const auto key = random_chunk(kMaxKeyLen);
             const auto value = random_chunk(kMaxValueLen);
-            s = tx->put(c, key, value);
+            s = b.put(key, value);
         }
     }
 
@@ -176,10 +181,11 @@ struct DatabaseState {
     {
         check_status(kOKMask);
         if (selected_bucket) {
-            auto &c = **selected_bucket.cursor_addr;
+            auto &b = *selected_bucket.state_addr->bucket;
+            auto &c = *selected_bucket.state_addr->cursor;
             for (size_t i = 0, n = rng.Next(1'234); i < n && s.is_ok(); ++i) {
                 if (try_attach_and_move_cursor(c, i)) {
-                    s = tx->put(c, c.key(), random_chunk(kMaxValueLen));
+                    s = b.put(c, random_chunk(kMaxValueLen));
                 }
             }
         }
@@ -218,7 +224,7 @@ struct DatabaseState {
         if (!selected_bucket) {
             return;
         }
-        auto &c = **selected_bucket.cursor_addr;
+        auto &c = *selected_bucket.state_addr->cursor;
         for (size_t i = 0, n = rng.Next(1'234); i < n && s.is_ok(); ++i) {
             if (!try_attach_cursor(c, i)) {
                 break;
@@ -233,18 +239,15 @@ struct DatabaseState {
         if (!selected_bucket) {
             return;
         }
-        auto &c = **selected_bucket.cursor_addr;
+        auto &b = *selected_bucket.state_addr->bucket;
+        auto &c = *selected_bucket.state_addr->cursor;
         for (size_t i = 0, n = rng.Next(123); i < n && s.is_ok(); ++i) {
             if (!try_attach_cursor(c, i)) {
                 break;
             }
             c.seek(rng.Generate(kMaxKeyLen));
             if (c.is_valid()) {
-                if (i & 1) {
-                    s = tx->erase(c);
-                } else {
-                    s = tx->erase(c, c.key());
-                }
+                s = b.erase(c);
             }
         }
     }
@@ -308,7 +311,7 @@ struct DatabaseState {
     {
         check_status(error_mask);
         ASSERT_NE(state, kNone);
-        close_all_cursors();
+        close_all_buckets();
 
         state = kNone;
         s = Status::ok();
@@ -317,18 +320,11 @@ struct DatabaseState {
         tx = nullptr;
     }
 
-    static auto close_all_cursors(BucketState &b) -> void
-    {
-        for (auto *&c : b.cursors) {
-            delete c;
-            c = nullptr;
-        }
-    }
-
-    auto close_all_cursors() -> void
+    auto close_all_buckets() -> void
     {
         for (auto &b : buckets) {
-            close_all_cursors(b);
+            b.bucket.reset();
+            b.cursor.reset();
         }
     }
 };
@@ -790,6 +786,8 @@ protected:
 
 TEST_F(STestDB, SanityCheck)
 {
+    s_debug_file = fopen("/tmp/test_log_", "w");
+
     Scenario<DatabaseState> *sequences[][2] = {
         {
             &g_routines.start_read_write_tx,

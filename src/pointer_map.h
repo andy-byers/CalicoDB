@@ -13,19 +13,9 @@ namespace calicodb
 class Pager;
 
 struct PointerMap {
-    enum Type : char {
-        kEmpty,
-        kTreeNode,
-        kTreeRoot,
-        kOverflowHead,
-        kOverflowLink,
-        kFreelistPage,
-        kTypeCount
-    };
-
     struct Entry {
         Id back_ptr;
-        Type type = kEmpty;
+        PageType type = kInvalidPage;
     };
 
     // Return true if page "page_id" is a pointer map page, false otherwise.

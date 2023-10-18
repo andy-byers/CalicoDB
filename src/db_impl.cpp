@@ -183,30 +183,6 @@ auto DBImpl::destroy(const Options &options, const char *filename) -> Status
     return s;
 }
 
-auto DBImpl::check_integrity() -> Status
-{
-    Tx *tx;
-    auto s = prepare_tx(false, tx);
-    if (s.is_ok()) {
-        auto &schema = tx->schema();
-        schema.seek_first();
-        while (s.is_ok() && schema.is_valid()) {
-            Cursor *c;
-            s = tx->open_bucket(schema.key(), c);
-            if (s.is_ok()) {
-                s = reinterpret_cast<CursorImpl *>(c)->check_integrity();
-            }
-            schema.next();
-            delete c;
-        }
-        if (s.is_ok()) {
-            s = schema.status();
-        }
-        delete tx;
-    }
-    return s;
-}
-
 auto DBImpl::get_property(const Slice &name, void *value_out) const -> Status
 {
     static constexpr char kBasePrefix[] = "calicodb.";
@@ -256,12 +232,11 @@ auto DBImpl::prepare_tx(bool write, TxType *&tx_out) const -> Status
     if (s.is_ok()) {
         CALICODB_EXPECT_TRUE(m_status.is_ok());
         m_tx = new (std::nothrow) TxImpl(TxImpl::Parameters{
-            &m_status,
             m_pager.get(),
             &m_stats,
             write,
         });
-        if (m_tx && m_tx->m_schema.cursor()) {
+        if (m_tx) {
             m_tx->m_backref = &m_tx;
             // The Schema object sets the pager status to Status::no_memory() if it was unable to
             // acquire memory for its bucket cursor. m_tx will be cleaned up below in this case.

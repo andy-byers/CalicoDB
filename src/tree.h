@@ -44,7 +44,6 @@ class Tree final
 {
 public:
     struct ListEntry {
-        Slice name;
         Tree *const tree;
         ListEntry *prev_entry;
         ListEntry *next_entry;
@@ -54,23 +53,22 @@ public:
 
     ~Tree();
 
-    explicit Tree(Pager &pager, Stats &stat, char *scratch, Id root_id, String name, bool unique);
-    static auto get_tree(TreeCursor &c) -> Tree *;
+    explicit Tree(Pager &pager, Stats &stat, Id root_id);
 
-    auto activate_cursor(TreeCursor &target, bool requires_position) const -> void;
+    auto activate_cursor(TreeCursor &target, bool requires_position) const -> bool;
     auto deactivate_cursors(TreeCursor *exclude) const -> void;
 
     struct Reroot {
         Id before;
         Id after;
     };
-    // Must be called on the schema tree.
-    auto create(Id &root_id_out) -> Status;
-    auto destroy(Tree &tree, Reroot &rr) -> Status;
 
-    auto put(TreeCursor &c, const Slice &key, const Slice &value) -> Status;
-    auto erase(TreeCursor &c) -> Status;
-    auto erase(TreeCursor &c, const Slice &key) -> Status;
+    // Called on the "main" tree. Needs Tree::allocate() method. TODO
+    auto create(Id parent_id, Id &root_id_out) -> Status;
+    auto destroy(Reroot &rr, Buffer<Id> &children) -> Status;
+
+    auto put(TreeCursor &c, const Slice &key, const Slice &value, bool is_bucket) -> Status;
+    auto erase(TreeCursor &c, bool is_bucket) -> Status;
     auto vacuum() -> Status;
 
     enum AllocationType {
@@ -109,6 +107,11 @@ public:
         return m_root_id;
     }
 
+    auto set_root(Id root_id) -> void
+    {
+        m_root_id = root_id;
+    }
+
     auto check_integrity() -> Status;
 
     auto print_structure(String &repr_out) -> Status;
@@ -116,9 +119,8 @@ public:
     auto TEST_validate() -> void;
 
 private:
-    friend class DBImpl;
+    friend class BucketImpl;
     friend class Schema;
-    friend class SchemaCursor;
     friend class TreeCursor;
     friend class TreePrinter;
     friend class TreeValidator;
@@ -139,12 +141,11 @@ private:
         size_t len;
     };
 
-    auto extract_key(Node &node, uint32_t index, KeyScratch &scratch, Slice &key_out, uint32_t limit = 0) const -> Status;
     auto extract_key(const Cell &cell, KeyScratch &scratch, Slice &key_out, uint32_t limit = 0) const -> Status;
     auto read_key(const Cell &cell, char *scratch, Slice *key_out, uint32_t limit = 0) const -> Status;
     auto read_value(const Cell &cell, char *scratch, Slice *value_out) const -> Status;
     auto overwrite_value(const Cell &cell, const Slice &value) -> Status;
-    auto emplace(Node &node, const Slice &key, const Slice &value, uint32_t index, bool &overflow) -> Status;
+    auto emplace(Node &node, Slice key, Slice value, bool flag, uint32_t index, bool &overflow) -> Status;
     auto free_overflow(Id head_id) -> Status;
 
     auto relocate_page(PageRef *&free, PointerMap::Entry entry, Id last_id) -> Status;
@@ -159,8 +160,9 @@ private:
     auto insert_cell(Node &node, uint32_t idx, const Cell &cell) -> Status;
     auto remove_cell(Node &node, uint32_t idx) -> Status;
     auto find_parent_id(Id page_id, Id &out) const -> Status;
-    auto fix_parent_id(Id page_id, Id parent_id, PointerMap::Type type, Status &s) -> void;
+    auto fix_parent_id(Id page_id, Id parent_id, PageType type, Status &s) -> void;
     auto maybe_fix_overflow_chain(const Cell &cell, Id parent_id, Status &s) -> void;
+    auto fix_cell(const Cell &cell, bool is_leaf, Id parent_id, Status &s) -> void;
     auto fix_links(Node &node, Id parent_id = Id::null()) -> Status;
 
     struct CursorEntry {
@@ -204,11 +206,18 @@ private:
     static constexpr size_t kNumCellBuffers = 4;
     char *const m_cell_scratch[kNumCellBuffers];
 
-    String m_name;
     Pager *const m_pager;
     Id m_root_id;
     const bool m_writable;
-    const bool m_unique;
+
+    uint32_t m_refcount = 0;
+
+    // True if the tree was dropped, false otherwise. If true, the tree's pages will be removed
+    // from the database when the destructor is run. This flag is here so that trees that are still
+    // open, but have been dropped by their parent, can still be used until they are closed. When
+    // Schema::drop_tree() is called, we set this flag on all open child trees and remove the tree
+    // root reference from the parent.
+    bool m_dropped = false;
 };
 
 class TreeCursor
@@ -254,13 +263,15 @@ class TreeCursor
         release_nodes(kAllLevels);
     }
 
-    auto activate(bool write) -> void
+    auto activate(bool write) -> bool
     {
-        m_tree->activate_cursor(*this, write);
+        return m_tree->activate_cursor(*this, write);
     }
 
-    // Seek back to the saved position.
-    auto ensure_position_loaded() -> void;
+    // Seek back to the saved position
+    // Return true if the cursor is on a different record, false otherwise. May set
+    // the cursor status.
+    auto ensure_position_loaded() -> bool;
 
     // When the cursor is being used to read records, this routine is used to move
     // cursors that are one-past-the-end in a leaf node to the first position in
@@ -268,28 +279,30 @@ class TreeCursor
     auto ensure_correct_leaf() -> void;
 
     auto seek_to_root() -> void;
-    auto search_branch(const Slice &key) -> void;
-    auto search_leaf(const Slice &key) -> bool;
+    auto search_node(const Slice &key) -> bool;
 
-    auto start_write() -> void;
-    auto start_write(const Slice &key, bool is_erase) -> bool;
+    [[nodiscard]] auto start_write() -> bool;
+    [[nodiscard]] auto start_write(const Slice &key, bool is_erase) -> bool;
     auto finish_write(Status &s) -> void;
 
     auto read_user_key() -> Status;
     auto read_user_value() -> Status;
 
-    auto perform_comparison(uint32_t index, const Slice &lhs, int &cmp_out) -> int;
-
 public:
     explicit TreeCursor(Tree &tree);
     ~TreeCursor();
+
+    auto tree() const -> Tree &
+    {
+        return *m_tree;
+    }
 
     auto reset(const Status &s = Status::ok()) -> void;
 
     auto handle_split_root(Node child) -> void
     {
         static constexpr auto kNumSlots = ARRAY_SIZE(m_node_path);
-        CALICODB_EXPECT_EQ(m_node.ref->page_id, m_tree->root());
+        CALICODB_EXPECT_EQ(m_node.page_id(), m_tree->root());
         CALICODB_EXPECT_EQ(m_node_path[0].ref, nullptr);             // m_node goes here
         CALICODB_EXPECT_EQ(m_node_path[kNumSlots - 1].ref, nullptr); // Overwrite this slot
         CALICODB_EXPECT_EQ(m_level, 0);
@@ -309,7 +322,7 @@ public:
     {
         // m_node is the root node. It always belongs at m_node_path[0]. The node in
         // m_node_path[1] was destroyed.
-        CALICODB_EXPECT_EQ(m_node.ref->page_id, m_tree->root());
+        CALICODB_EXPECT_EQ(m_node.page_id(), m_tree->root());
         CALICODB_EXPECT_EQ(m_node_path[0].ref, nullptr); // m_node goes here
         CALICODB_EXPECT_EQ(m_node_path[1].ref, nullptr); // Overwrite this slot
         CALICODB_EXPECT_EQ(m_level, 0);
@@ -343,13 +356,36 @@ public:
     // Return true if the cursor is positioned on a valid key, false otherwise
     [[nodiscard]] auto on_record() const -> bool
     {
-        return on_node() && m_idx < NodeHdr::get_cell_count(m_node.hdr());
+        return on_node() && m_idx < m_node.cell_count();
+    }
+
+    // Called by CursorImpl. If the cursor is saved, then m_cell.is_bucket contains the bucket flag
+    // for the record that the cursor is saved on. Note, however, that the bucket root ID cannot
+    // be read until the cursor position is loaded.
+    [[nodiscard]] auto is_bucket() const -> bool
+    {
+        CALICODB_EXPECT_TRUE(is_valid());
+        return m_cell.is_bucket;
     }
 
     [[nodiscard]] auto page_id() const -> Id
     {
         CALICODB_EXPECT_TRUE(on_node());
-        return m_node.ref->page_id;
+        return m_node.page_id();
+    }
+
+    [[nodiscard]] auto bucket_root_id() const -> Id
+    {
+        CALICODB_EXPECT_TRUE(is_bucket());
+        CALICODB_EXPECT_EQ(m_state, kValidState);
+        return read_bucket_root_id(m_cell);
+    }
+
+    auto overwrite_bucket_root_id(Id root_id) -> void
+    {
+        CALICODB_EXPECT_TRUE(is_bucket());
+        CALICODB_EXPECT_EQ(m_state, kValidState);
+        write_bucket_root_id(m_cell, root_id);
     }
 
     enum ReleaseType {

@@ -35,8 +35,6 @@ public:
     auto new_writer(Tx *&tx) -> Status override;
     auto checkpoint(CheckpointMode mode, CheckpointInfo *info_out) -> Status override;
 
-    auto check_integrity() -> Status;
-
     [[nodiscard]] auto TEST_pager() const -> Pager &;
 
 private:

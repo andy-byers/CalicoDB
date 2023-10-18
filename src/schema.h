@@ -16,55 +16,59 @@ namespace calicodb
 class Pager;
 struct Stats;
 
-// Representation of the database schema
-// NOTE: The routines *_bucket(), where * is "create" or "open", do not set their
-//       `c_out` parameter to nullptr on failure. It is the responsibility of the
-//       caller to do so.
 class Schema final
 {
 public:
-    explicit Schema(Pager &pager, const Status &status, Stats &stat);
+    explicit Schema(Pager &pager, Stats &stat);
+    ~Schema();
 
-    [[nodiscard]] auto cursor() -> Cursor *
+    auto main_tree() -> Tree &
     {
-        return m_schema;
+        return m_main;
     }
 
-    auto close() -> void;
-    auto create_bucket(const BucketOptions &options, const Slice &name, Cursor **c_out) -> Status;
-    auto open_bucket(const Slice &name, Cursor *&c_out) -> Status;
-    auto drop_bucket(const Slice &name) -> Status;
+    auto pager() const -> Pager &
+    {
+        return *m_pager;
+    }
 
-    struct UnpackedCursor {
-        Tree *tree;
-        TreeCursor *c;
-    };
-    auto unpack_cursor(Cursor &c) -> UnpackedCursor;
     auto use_tree(Tree *tree) -> void;
+    auto create_tree(Id parent_id, Id &root_id_out) -> Status;
+    auto open_tree(Id root_id) -> Tree *;
 
+    // Remove a tree from the database
+    // This routine will not drop a tree if it is currently open. Instead, a flag is
+    // set on the bucket structure that contains the tree object, and the work is
+    // deferred until the bucket is closed. It is the responsibility of the caller to
+    // remove the referring bucket record from the parent.
+    // Sub-buckets are dropped recursively, with each traversal stopping at the first
+    // open bucket. For example, if an open bucket b needs to be dropped, and it has
+    // sub-buckets s1,s2,... of its own, then only b is flagged to be dropped,
+    // even if one or more of the s* are open. It doesn't matter if the open s* are
+    // closed before b, since they are only accessible through b itself, and the
+    // reference to b no longer exists in its parent. Furthermore, the s* have not
+    // been dropped, so they should be locatable in b. When b is closed, the dropping
+    // process is continued. b is no longer open, so its pages are put on the
+    // freelist, and drop_tree() is called on the s*.
+    auto drop_tree(Id root_id) -> Status;
+    auto close_trees() -> void;
+    auto find_open_tree(Id root_id) -> Tree *;
     auto vacuum() -> Status;
 
-    struct RootInfo {
-        Id root_id;
-        bool unique;
-    };
+    // Locate the page containing the reference to the sub-bucket rooted at `root_id`
+    auto find_parent_id(Id root_id, Id &parent_id_out) -> Status;
 
     auto TEST_validate() const -> void;
 
 private:
-    auto decode_and_check_root_info(const Slice &data, RootInfo &info_out) -> Status;
-    auto open_cursor(const Slice &name, const RootInfo &info, Cursor *&c_out) -> Status;
-    auto construct_or_reference_tree(const Slice &name, const RootInfo &info) -> Tree *;
-    auto find_open_tree(const Slice &name) -> Tree *;
-
     template <class Action>
-    auto map_trees(bool include_schema, Action &&action) const -> void
+    auto map_trees(bool include_main, Action &&action) const -> void
     {
         auto *t = &m_trees;
         do {
-            // Don't access t after action() is called: it may get destroyed.
+            // Don't access t after action() is called: it might have been destroyed.
             auto *next_t = t->next_entry;
-            if (t->tree != &m_map || include_schema) {
+            if (t->tree != &m_main || include_main) {
                 if (!action(*t)) {
                     break;
                 }
@@ -73,22 +77,13 @@ private:
         } while (t != &m_trees);
     }
 
-    friend class Tree;
-
-    const Status *const m_status;
     Pager *const m_pager;
-    char *const m_scratch;
     Stats *const m_stat;
 
-    Tree m_map;
-    CursorImpl m_internal;
-    CursorImpl m_exposed;
+    Tree m_main;
 
-    // List containing a tree for each open bucket (including the schema tree).
+    // List containing a tree for each open bucket (including m_main).
     mutable Tree::ListEntry m_trees = {};
-
-    // Wrapper over m_exposed, returns a human-readable string for Cursor::value().
-    Cursor *const m_schema;
 };
 
 } // namespace calicodb

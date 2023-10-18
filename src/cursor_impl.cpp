@@ -17,6 +17,11 @@ CursorImpl::CursorImpl(Tree &tree)
 
 CursorImpl::~CursorImpl() = default;
 
+auto CursorImpl::is_bucket() const -> bool
+{
+    return m_c.is_bucket();
+}
+
 auto CursorImpl::is_valid() const -> bool
 {
     return m_c.is_valid();
@@ -71,8 +76,12 @@ auto CursorImpl::find(const Slice &key) -> void
 auto CursorImpl::next() -> void
 {
     CALICODB_EXPECT_TRUE(m_c.is_valid());
-    m_c.activate(true);
-    if (m_c.is_valid()) {
+    // If the cursor was saved, and gets loaded back to a different position, then the
+    // record it was on must have been erased. If it is still on a valid record, then
+    // that record must have a key that compares greater than the key the cursor was
+    // saved on.
+    const auto moved = m_c.activate(true);
+    if (!moved && m_c.is_valid()) {
         m_c.move_right();
     }
     m_c.fetch_record_if_valid();
@@ -86,11 +95,6 @@ auto CursorImpl::previous() -> void
         m_c.move_left();
     }
     m_c.fetch_record_if_valid();
-}
-
-auto CursorImpl::TEST_tree_cursor() -> TreeCursor &
-{
-    return m_c;
 }
 
 auto CursorImpl::TEST_check_state() const -> void

@@ -5,6 +5,7 @@
 #include "pointer_map.h"
 #include "encoding.h"
 #include "pager.h"
+#include "status_internal.h"
 
 namespace calicodb
 {
@@ -26,7 +27,7 @@ auto decode_entry(const char *data) -> PointerMap::Entry
 {
     return {
         Id(get_u32(data + 1)),
-        PointerMap::Type{*data},
+        static_cast<PageType>(*data),
     };
 }
 
@@ -59,8 +60,10 @@ auto PointerMap::read_entry(Pager &pager, Id page_id, Entry &entry_out) -> Statu
     if (s.is_ok()) {
         entry_out = decode_entry(map->data + offset);
         pager.release(map);
-        if (entry_out.type <= kEmpty || entry_out.type >= kTypeCount) {
-            s = Status::corruption();
+        if (entry_out.type == kInvalidPage ||
+            entry_out.type >= kPageTypeCount) {
+            s = StatusBuilder::corruption("pointer map page type %u is invalid",
+                                          entry_out.type);
         }
     }
     return s;
@@ -89,7 +92,7 @@ auto PointerMap::write_entry(Pager &pager, Id page_id, Entry entry, Status &s) -
         if (entry.back_ptr != back_ptr || entry.type != type) {
             pager.mark_dirty(*map);
             auto *data = map->data + offset;
-            *data++ = entry.type;
+            *data++ = static_cast<char>(entry.type);
             put_u32(data, entry.back_ptr.value);
         }
         pager.release(map);

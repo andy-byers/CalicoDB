@@ -160,6 +160,8 @@ auto Status::message() const -> const char *
         return "busy: retry";
     } else if (is_no_memory()) {
         return "aborted: no memory";
+    } else if (is_incompatible_value()) {
+        return "invalid argument: incompatible value";
     }
     switch (code()) {
         case Status::kOK:
@@ -245,6 +247,13 @@ auto Status::retry(const char *msg) -> Status
 auto Status::no_memory(const char *msg) -> Status
 {
     return StatusBuilder(kAborted, kNoMemory)
+        .append(msg)
+        .build();
+}
+
+auto Status::incompatible_value(const char *msg) -> Status
+{
+    return StatusBuilder(kInvalidArgument, kIncompatibleValue)
         .append(msg)
         .build();
 }

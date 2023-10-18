@@ -32,13 +32,6 @@ public:
         m_options.env = &env;
         m_options.page_size = kMinPageSize;
         CHECK_OK(default_env().new_logger("/tmp/format_log", m_options.info_log));
-        m_options.integrity_check =
-#ifdef INTEGRITY_CHECK
-            Options::kCheckFull
-#else
-            Options::kCheckOff
-#endif
-            ;
     }
 
     ~Fuzzer()
@@ -61,17 +54,18 @@ public:
 
         if (s.is_ok()) {
             s = db->update([](auto &tx) {
-                TestCursor c1;
-                TestCursor c2;
-                auto s = test_open_bucket(tx, "b1", c1);
+                TestBucket b1, b2;
+                auto s = test_open_bucket(tx, "b1", b1);
                 if (s.is_ok()) {
-                    s = test_open_bucket(tx, "b2", c2);
+                    s = test_open_bucket(tx, "b2", b2);
                 }
                 if (s.is_ok()) {
+                    auto c1 = test_new_cursor(*b1);
+                    auto c2 = test_new_cursor(*b2);
                     // Copy all records from b1 to b2.
                     c1->seek_last();
                     while (c1->is_valid() && s.is_ok()) {
-                        s = tx.put(*c2, c1->key(), c1->value());
+                        s = b2->put(c1->key(), c1->value());
                         if (s.is_ok()) {
                             c1->previous();
                         }
@@ -83,7 +77,7 @@ public:
                         // Copy reverse mapping from b2 to b1.
                         c2->seek_first();
                         while (c2->is_valid() && s.is_ok()) {
-                            s = tx.put(*c1, c2->value(), c2->key());
+                            s = b1->put(c2->value(), c2->key());
                             c2->next();
                         }
                         if (s.is_ok()) {
@@ -93,7 +87,7 @@ public:
                         c2->seek_first();
                         while (c2->is_valid() && s.is_ok()) {
                             if (c2->key() < c2->value()) {
-                                s = tx.erase(*c2);
+                                s = b2->erase(*c2);
                                 CHECK_TRUE(s == c2->status());
                             } else {
                                 c2->next();
@@ -107,7 +101,7 @@ public:
                     c2.reset();
 
                     if (s.is_ok()) {
-                        s = tx.drop_bucket("b2");
+                        s = tx.main_bucket().drop_bucket("b2");
                     }
                     if (s.is_ok()) {
                         s = tx.vacuum();

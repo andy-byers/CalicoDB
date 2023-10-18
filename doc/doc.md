@@ -147,7 +147,7 @@ const calicodb::Options options = {
 calicodb::DB *db;
 s = calicodb::DB::open(options, "/tmp/calicodb_cats_example", db);
 
-// Handle failure. s.message() provides a string representation of the status.
+// Handle failure. s.message() provides a human-readable representation of the status.
 if (!s.is_ok()) {
 
 }
@@ -235,48 +235,84 @@ auto *tx = writer;
 ```
 
 ### Buckets
-In CalicoDB, buckets are persistent mappings from string keys to string values.
-Each open bucket is represented by a `calicodb::Cursor` over its contents.
-Multiple cursors can be opened on each bucket.
+In CalicoDB, buckets are persistent, ordered mappings from keys to values.
+Each open bucket is represented by a `calicodb::Bucket` handle.
 
 ```C++
+#include "calicodb/bucket.h"
 #include "calicodb/cursor.h"
 #include "calicodb/db.h"
 #include "calicodb/tx.h"
 
-calicodb::Cursor *c;
+// The main bucket is created when the first transaction starts. Just like 
+// any other bucket, it can contain key-value pairs, or key-bucket pairs.
+// Some users may be able to get away with just using this bucket, and
+// never have to bother with the Bucket::*_bucket() methods.
+calicodb::Bucket &b = tx->main_bucket();
 
-// Set some initialization options. Enforces that the bucket "cats" must
-// not exist. Note that readonly transactions cannot create new buckets by
-// virtue of the fact that they must be used through pointers to const, 
-// and Tx::create_bucket() is not a const method. Tx::open_bucket() can be
-// used by a readonly transaction to open an existing bucket.
-calicodb::BucketOptions b_opt;
-b_opt.error_if_exists = true;
-
-// Create the bucket. Note that this bucket will not persist in the database 
-// unless Tx::commit() is called prior to the transaction ending.
-s = tx->create_bucket(b_opt, "cats", &c);
+s = b.put("lilly", "calico");
 if (s.is_ok()) {
-    // c holds a cursor over the bucket "cats". The bucket will remain open
-    // until c is delete'd, which must happen before the transaction is
-    // finished. 
+    // Mapping from "lilly" -> "tuxedo" has been added to b.
 }
 
-// Release memory occupied by the cursor.
-delete c;
+std::string value;
+s = b.get("lilly", &value);
+if (s.is_ok()) {
+    // value contains "calico".
+} else if (s.is_not_found()) {
+    // Key "lilly" was not found in b.
+} else {
+    // Some other error occurred. Probably an I/O error.
+}
+
+s = b.erase("key");
+if (s.is_ok()) {
+    // No record with key "key" exists in b.
+} else {
+    // An error occurred. Note it is not an error if "key" does not exist. 
+}
+
+// Create a sub-bucket. Note that this bucket will not persist in the database 
+// unless Tx::commit() is called prior to the transaction ending. It is an
+// error if the bucket already exists. Note that the second parameter to
+// create_bucket() is optional. If omitted, the bucket is created but not opened.
+calicodb::Bucket *b2 = nullptr;
+s = b.create_bucket("cats", &b2);
+if (s.is_ok()) {
+    // b holds a handle to the bucket "cats". The bucket will remain open until
+    // b is delete'd, which must happen before the transaction is finished. 
+}
+
+// Release memory occupied by the sub-bucket.
+delete b2;
 
 // Since the bucket "cats" already exists, we can open it via the following:
-s = tx->open_bucket("cats", c);
+s = b.open_bucket("cats", b2);
 if (s.is_ok()) {
-    // c holds a cursor on the open bucket "cats".
+    // b2 holds a handle to the open bucket "cats".
 }
 
-// Remove the bucket named "fish" from the database.
-s = tx->drop_bucket("fish");
+// Buckets can be nested arbitrarily.
+calicodb::Bucket *b3 = nullptr;
+s = b2->create_bucket_if_missing("nest", &b3);
 if (s.is_ok()) {
     
 }
+
+// Parent bucket can be closed now. It isn't needed for working with b3.
+delete b2;
+
+// Remove the nested bucket. If the removed bucket itself contains any 
+// buckets, those buckets are removed as well. Note that we can access 
+// the records and sub-buckets in "nest" through b2 until it is delete'd.
+s = b.drop_bucket("nest");
+if (s.is_ok()) {
+    
+}
+
+// Close the last (and only) handle to "nest". Since it has been dropped
+// already, its pages are recycled now.
+delete b3;
 ```
 
 ### Cursors
@@ -288,9 +324,15 @@ They can also be used to help modify the database during [read-write transaction
 #include "calicodb/db.h"
 #include "calicodb/tx.h"
 
+// Allocate a cursor handle. c must be delete'd when it is no longer needed.
+auto *c = b.new_cursor();
+
 // Scan the entire bucket forwards.
 c->seek_first();
 while (c->is_valid()) {
+    // If c->is_bucket() evaluates to true, then the cursor is referencing a bucket
+    // record and c->value() will equal "". The sub-bucket can be opened by calling
+    // b.open_bucket(c->key(), b2).
     const calicodb::Slice key = c->key();
     const calicodb::Slice val = c->value();
     c->next();
@@ -322,38 +364,22 @@ if (c->is_valid()) {
     assert(!c->status().is_ok());
 }
 
-// Insert a new record. c is used to determine what bucket to put the record in.
+// Modify a record. c is used to determine what bucket to put the record in.
 // If c is already positioned near where the new record should go, a root-to-leaf 
 // traversal may be avoided.
-s = tx->put(*c, "junie", "tabby");
+s = b.put(*c, "cute");
 if (s.is_ok()) {
-    // c is placed on the newly-inserted record.
+    // c is left on the modified record.
     assert(c->is_valid());
-    assert(c->key() == "junie");
-    assert(c->value() == "tabby");
-}
-
-// Modify a record using a cursor.
-s = tx->put(*c, c->key(), "brown tabby");
-if (s.is_ok()) {
-    assert(c->is_valid());
-    assert(c->key() == "junie");
-    assert(c->value() == "brown tabby");
+    assert(c->key() == "lilly");
+    assert(c->value() == "cute");
 }
 
 // Erase the record pointed to by the cursor.
-s = tx->erase(*c);
+s = b.erase(*c);
 if (s.is_ok()) {
     // c is on the record immediately following the erased record, if such a 
     // record exists. Otherwise, c is invalidated.
-}
-
-// For convenience, an overload of erase() is provided that takes a key directly. 
-// It is not an error if the key does not exist in this case (Status::ok() is 
-// returned unless there was an actual system-level error).
-s = tx->erase(*c, "some key");
-if (s.is_ok()) {
-    // "some key" is guaranteed to be absent from the bucket that c represents.
 }
 
 delete c;

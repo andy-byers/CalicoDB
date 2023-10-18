@@ -73,7 +73,64 @@ struct LocalBounds {
     return maxval(min_local, static_cast<uint32_t>(key_size));
 }
 
-// Internal cell format:
+struct PayloadDescriptor {
+    uint32_t local_key_size;
+    uint32_t local_value_size;
+    uint32_t overflow_id_size;
+};
+
+constexpr auto describe_branch_payload(
+    uint32_t key_size,
+    uint32_t min_local,
+    uint32_t max_local) -> PayloadDescriptor
+{
+    const auto local_size = compute_local_size(key_size, 0, min_local, max_local);
+    const auto has_remote = key_size > local_size;
+    key_size = has_remote ? local_size : key_size;
+    uint32_t overflow_id_size = 0;
+    if (has_remote) {
+        key_size = local_size;
+        overflow_id_size = sizeof(uint32_t);
+    }
+    return {key_size, 0, overflow_id_size};
+}
+
+constexpr auto describe_leaf_payload(
+    uint32_t key_size,
+    uint32_t value_size,
+    bool is_bucket,
+    uint32_t min_local,
+    uint32_t max_local) -> PayloadDescriptor
+{
+    uint32_t root_size = 0;
+    if (is_bucket) {
+        value_size = 0;
+        root_size = sizeof(uint32_t);
+    }
+    const auto local_size = compute_local_size(root_size + key_size, value_size,
+                                               min_local, max_local) -
+                            root_size;
+    uint32_t ovfl_id_size = sizeof(uint32_t);
+    if (key_size > local_size) {
+        key_size = local_size;
+        value_size = 0;
+    } else if (key_size + value_size > local_size) {
+        value_size = local_size - key_size;
+    } else {
+        ovfl_id_size = 0;
+    }
+    return {key_size, value_size, ovfl_id_size};
+}
+
+struct SizeWithFlag {
+    uint32_t size;
+    bool flag;
+};
+
+auto encode_size_with_flag(const SizeWithFlag &swf, char *output) -> char *;
+auto decode_size_with_flag(const char *input, const char *limit, SizeWithFlag &swf_out) -> const char *;
+
+// Branch cell format:
 //     Size   | Name
 //    --------|---------------
 //     4      | child_id
@@ -81,18 +138,38 @@ struct LocalBounds {
 //     n      | key
 //     4      | overflow_id*
 //
-// External cell format:
+// Record cell format:
 //     Size   | Name
 //    --------|---------------
-//     varint | value_size
+//     varint | value_size/bucket_flag=0**
 //     varint | key_size
 //     n      | key
 //     m      | value
-//     4      | overflow_id*
+//     4      | overflow_id**
+//
+// Bucket cell format:
+//     Size   | Name
+//    --------|---------------
+//     varint | key_size/bucket_flag=1**
+//     4      | root_id
+//     n      | key
+//     4      | overflow_id**
 //
 // * overflow_id field is only present when the cell payload is unable to
 //   fit entirely within the node page. In this case, it holds the page ID
 //   of the first overflow chain page that the payload has spilled onto.
+// ** The first varint field for a leaf node cell contains an extra field.
+//    The maximum key or value length is already limited such that a
+//    maximally-sized payload can fit in a single heap allocation. Heap
+//    allocations are limited to less than 2 GiB, so a valid key or value
+//    size will never require all 32 bits available to a varint. So, we use
+//    the least-significant bit of the first (decoded) varint to distinguish
+//    between record and bucket cells. It is important that a fixed-width
+//    rood ID is used, and that the root ID field is placed before the key
+//    field in a bucket cell. This allows the root ID to be changed without
+//    looking at overflow pages, even if the key is overflowing. This would
+//    not be possible if we used the record cell format with the root ID
+//    stored in the value field.
 struct Cell {
     // Pointer to the start of the cell.
     char *ptr;
@@ -103,15 +180,32 @@ struct Cell {
     // Number of bytes contained in the key.
     uint32_t key_size;
 
-    // Number of bytes contained in both the key and the value.
+    // Number of bytes contained in both the key and the value. In a
+    // bucket cell, this is always equal to key_size + 4.
     uint32_t total_size;
 
     // Number of payload bytes stored locally (embedded in a node).
+    // Includes the size of the root_id (4 B) if is_bucket is true.
     uint32_t local_size;
 
     // Number of bytes occupied by this cell when embedded.
     uint32_t footprint;
+
+    // True if this cell refers to a nested sub-bucket, false otherwise.
+    // Always false for internal cells.
+    bool is_bucket;
 };
+
+// Helpers for working with bucket cell root IDs.
+auto read_bucket_root_id(const Cell &cell) -> Id;
+auto write_bucket_root_id(Cell &cell, Id root_id) -> void;
+auto write_bucket_root_id(char *key, const Slice &root_id) -> void;
+
+// Helpers for encoding cell headers. Returns the address of the byte
+// immediately following the written header. Overflow ID is not written.
+auto encode_branch_record_cell_hdr(char *output, uint32_t key_size, Id child_id) -> char *;
+auto encode_leaf_record_cell_hdr(char *output, uint32_t key_size, uint32_t value_size) -> char *;
+auto prepare_bucket_cell_hdr(char *output, uint32_t key_size) -> char *;
 
 // Simple construct representing a tree node
 struct Node final {
@@ -139,7 +233,7 @@ struct Node final {
     };
 
     [[nodiscard]] static auto from_existing_page(const Options &options, PageRef &page, Node &node_out) -> int;
-    [[nodiscard]] static auto from_new_page(const Options &options, PageRef &page, bool is_leaf) -> Node;
+    static auto from_new_page(const Options &options, PageRef &page, bool is_leaf) -> Node;
 
     explicit Node()
         : ref(nullptr)
@@ -181,14 +275,24 @@ struct Node final {
         return *this;
     }
 
+    [[nodiscard]] auto page_id() const -> Id
+    {
+        return ref->page_id;
+    }
+
     [[nodiscard]] auto hdr() const -> char *
     {
-        return ref->data + page_offset(ref->page_id);
+        return ref->data + page_offset(page_id());
     }
 
     [[nodiscard]] auto is_leaf() const -> bool
     {
         return hdr()[NodeHdr::kTypeOffset] == NodeHdr::kExternal;
+    }
+
+    [[nodiscard]] auto cell_count() const -> uint32_t
+    {
+        return NodeHdr::get_cell_count(hdr());
     }
 
     [[nodiscard]] auto read_child_id(uint32_t index) const -> Id;

@@ -62,7 +62,10 @@ endif()
 
 add_library(calicodb STATIC)
 target_sources(calicodb
-        PRIVATE src/buffer.h
+        PRIVATE src/bucket.cpp
+                src/bucket_impl.cpp
+                src/bucket_impl.h
+                src/buffer.h
                 src/bufmgr.cpp
                 src/bufmgr.h
                 src/config.cpp
@@ -112,6 +115,7 @@ target_sources(calicodb
                 src/wal_internal.h
                 port/port.h
         $<$<VERSION_GREATER:CMAKE_VERSION,3.2>:PUBLIC>
+            include/calicodb/bucket.h
             include/calicodb/config.h
             include/calicodb/cursor.h
             include/calicodb/db.h

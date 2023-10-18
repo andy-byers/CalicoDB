@@ -3,272 +3,83 @@
 // LICENSE.md. See AUTHORS.md for a list of contributor names.
 
 #include "schema.h"
+#include "calicodb/bucket.h"
 #include "encoding.h"
 #include "status_internal.h"
 
 namespace calicodb
 {
 
-namespace
-{
-
-constexpr size_t kMaxRootEntrySize = 17; // "4294967295,unique"
-constexpr Slice kUniqueLabel = ",unique";
-
-auto no_bucket(const Slice &name) -> Status
-{
-    return StatusBuilder(Status::kInvalidArgument)
-        .append("bucket \"")
-        .append_escaped(name)
-        .append("\" does not exist")
-        .build();
-}
-
-auto decode_root_info(const Slice &data, Schema::RootInfo &info_out) -> Status
-{
-    uint64_t number;
-    auto copy = data;
-    if (!consume_decimal_number(copy, &number)) {
-        return Status::corruption("root ID is invalid");
-    }
-    if (number > UINT32_MAX) {
-        return StatusBuilder::corruption("root ID %llu is out of bounds (maximum is %u)",
-                                         number, UINT32_MAX);
-    }
-    if (!copy.is_empty() && copy != kUniqueLabel) {
-        return Status::corruption("unique tag is invalid");
-    }
-    info_out.root_id.value = static_cast<uint32_t>(number);
-    info_out.unique = !copy.is_empty();
-    return Status::ok();
-}
-
-auto encode_root_info(const Schema::RootInfo &info, char *root_id_out) -> size_t
-{
-    static constexpr auto kMaxRootIdSize = kMaxRootEntrySize - kUniqueLabel.size();
-    const auto n = std::snprintf(root_id_out, kMaxRootIdSize, "%u", info.root_id.value);
-    CALICODB_EXPECT_LE(static_cast<size_t>(n), kMaxRootIdSize);
-    auto *ptr = root_id_out + n;
-
-    if (info.unique) {
-        std::memcpy(ptr, kUniqueLabel.data(), kUniqueLabel.size());
-        ptr += kUniqueLabel.size();
-    }
-    return static_cast<size_t>(ptr - root_id_out);
-}
-
-class SchemaCursor : public Cursor
-{
-    CursorImpl *const m_c;
-
-public:
-    explicit SchemaCursor(CursorImpl &c)
-        : m_c(&c)
-    {
-    }
-
-    ~SchemaCursor() override = default;
-
-    [[nodiscard]] auto handle() -> void * override
-    {
-        return m_c->handle();
-    }
-
-    [[nodiscard]] auto is_valid() const -> bool override
-    {
-        return m_c->is_valid();
-    }
-
-    auto status() const -> Status override
-    {
-        return m_c->status();
-    }
-
-    [[nodiscard]] auto key() const -> Slice override
-    {
-        return m_c->key();
-    }
-
-    [[nodiscard]] auto value() const -> Slice override
-    {
-        return m_c->value();
-    }
-
-    auto find(const Slice &key) -> void override
-    {
-        return m_c->find(key);
-    }
-
-    auto seek(const Slice &key) -> void override
-    {
-        return m_c->seek(key);
-    }
-
-    auto seek_first() -> void override
-    {
-        m_c->seek_first();
-    }
-
-    auto seek_last() -> void override
-    {
-        m_c->seek_last();
-    }
-
-    auto next() -> void override
-    {
-        m_c->next();
-    }
-
-    auto previous() -> void override
-    {
-        m_c->previous();
-    }
-};
-
-} // namespace
-
-Schema::Schema(Pager &pager, const Status &status, Stats &stat)
-    : m_status(&status),
-      m_pager(&pager),
-      m_scratch(pager.scratch()),
+Schema::Schema(Pager &pager, Stats &stat)
+    : m_pager(&pager),
       m_stat(&stat),
-      m_map(pager, stat, pager.scratch(), Id::root(), String(), true),
-      m_internal(m_map),
-      m_exposed(m_map),
-      m_trees{"", &m_map, nullptr, nullptr},
-      m_schema(Mem::new_object<SchemaCursor>(m_exposed))
+      m_main(pager, stat, Id::root()),
+      m_trees{&m_main, nullptr, nullptr}
 {
     IntrusiveList::initialize(m_trees);
 }
 
-auto Schema::close() -> void
+Schema::~Schema()
+{
+    // Tree destructor asserts that the refcount is 0 to help catch leaked buckets.
+    m_main.m_refcount = 0;
+}
+
+auto Schema::find_parent_id(Id root_id, Id &parent_id_out) -> Status
+{
+    PointerMap::Entry entry;
+    auto s = PointerMap::read_entry(*m_pager, root_id, entry);
+    if (s.is_ok()) {
+        if (entry.type != kTreeNode &&
+            entry.type != kTreeRoot) {
+            return Status::corruption();
+        }
+        parent_id_out = entry.back_ptr;
+    }
+    return s;
+}
+
+auto Schema::close_trees() -> void
 {
     map_trees(false, [](auto &t) {
         Mem::delete_object(t.tree);
         return true;
     });
     IntrusiveList::initialize(m_trees);
-
-    Mem::delete_object(m_schema);
-    m_map.deactivate_cursors(nullptr);
+    m_main.deactivate_cursors(nullptr);
 }
 
-auto Schema::open_cursor(const Slice &name, const RootInfo &info, Cursor *&c_out) -> Status
-{
-    if (auto *tree = construct_or_reference_tree(name, info)) {
-        c_out = new (std::nothrow) CursorImpl(*tree);
-    }
-    return c_out ? Status::ok() : Status::no_memory();
-}
-
-auto Schema::create_bucket(const BucketOptions &options, const Slice &name, Cursor **c_out) -> Status
+auto Schema::create_tree(Id parent_id, Id &root_id_out) -> Status
 {
     CALICODB_EXPECT_GT(m_pager->page_count(), 0);
-
-    RootInfo info;
-    auto [_, c] = unpack_cursor(m_internal);
-    m_internal.find(name);
-    auto s = m_internal.status();
-    if (m_internal.is_valid()) {
-        CALICODB_EXPECT_TRUE(s.is_ok());
-        if (options.error_if_exists) {
-            s = Status::invalid_argument("bucket already exists");
-        } else {
-            s = decode_and_check_root_info(m_internal.value(), info);
-        }
-    } else if (s.is_ok()) {
-        use_tree(&m_map);
-        s = m_map.create(info.root_id);
-        if (s.is_ok()) {
-            char buf[kMaxRootEntrySize];
-            info.unique = options.unique;
-            const auto len = encode_root_info(info, buf);
-            // On success, this call will leave c on the schema record of the bucket that we need to
-            // open a cursor on below. It may invalidate `name`, so m_cursor.key() is used instead.
-            // The 2 should be equivalent.
-            s = m_map.put(*c, name, Slice(buf, len));
-        }
-    }
-
-    if (s.is_ok() && c_out) {
-        s = open_cursor(m_internal.key(), info, *c_out);
-    }
-    return s;
+    use_tree(nullptr);
+    return m_main.create(parent_id, root_id_out);
 }
 
-auto Schema::open_bucket(const Slice &name, Cursor *&c_out) -> Status
-{
-    if (m_pager->page_count() == 0) {
-        return Status::invalid_argument();
-    }
-    m_internal.find(name);
-    auto s = m_internal.status();
-
-    RootInfo info;
-    if (!m_internal.is_valid()) {
-        return s.is_ok() ? no_bucket(name) : s;
-    }
-    CALICODB_EXPECT_TRUE(s.is_ok()); // Cursor invariant
-    s = decode_and_check_root_info(m_internal.value(), info);
-    if (s.is_ok()) {
-        s = open_cursor(m_internal.key(), info, c_out);
-    }
-    return s;
-}
-
-auto Schema::decode_and_check_root_info(const Slice &data, RootInfo &info_out) -> Status
-{
-    auto s = decode_root_info(data, info_out);
-    if (s.is_ok() && info_out.root_id.value > m_pager->page_count()) {
-        s = StatusBuilder::corruption("root ID %u is out of bounds (page count is %u)",
-                                      info_out.root_id.value, m_pager->page_count());
-    }
-    if (!s.is_ok()) {
-        m_pager->set_status(s);
-    }
-    return s;
-}
-
-auto Schema::find_open_tree(const Slice &name) -> Tree *
+auto Schema::find_open_tree(Id root_id) -> Tree *
 {
     Tree *target = nullptr;
-    map_trees(false, [name, &target](auto &t) {
-        if (name == t.name) {
+    map_trees(false, [root_id, &target](auto &t) {
+        if (root_id == t.tree->root()) {
             target = t.tree;
             return false;
-        } else if (IntrusiveList::is_empty(t.tree->m_active_list) &&
-                   IntrusiveList::is_empty(t.tree->m_inactive_list)) {
-            IntrusiveList::remove(t);
-            Mem::delete_object(t.tree);
         }
         return true;
     });
     return target;
 }
 
-auto Schema::construct_or_reference_tree(const Slice &name, const RootInfo &info) -> Tree *
+auto Schema::open_tree(Id root_id) -> Tree *
 {
-    if (auto *already_open = find_open_tree(name)) {
-        return already_open;
+    CALICODB_EXPECT_GT(m_pager->page_count(), 0);
+    if (auto *tree = find_open_tree(root_id)) {
+        return tree;
     }
-
-    String name_str;
-    if (!info.root_id.is_root() && append_strings(name_str, name)) {
-        return nullptr;
-    }
-
-    auto *tree = Mem::new_object<Tree>(*m_pager, *m_stat, m_scratch, info.root_id,
-                                       move(name_str), info.unique);
-    if (tree) {
+    if (auto *tree = Mem::new_object<Tree>(*m_pager, *m_stat, root_id)) {
         IntrusiveList::add_tail(tree->list_entry, m_trees);
+        return tree;
     }
-    return tree;
-}
-
-auto Schema::unpack_cursor(Cursor &c) -> UnpackedCursor
-{
-    auto *c_impl = static_cast<TreeCursor *>(c.handle());
-    return {Tree::get_tree(*c_impl), c_impl};
+    return nullptr;
 }
 
 auto Schema::use_tree(Tree *tree) -> void
@@ -281,66 +92,57 @@ auto Schema::use_tree(Tree *tree) -> void
     });
 }
 
-auto Schema::drop_bucket(const Slice &name) -> Status
+auto Schema::drop_tree(Id root_id) -> Status
 {
-    auto [_, c] = unpack_cursor(m_internal);
-
-    m_internal.find(name);
-    auto s = m_internal.status();
-    if (!m_internal.is_valid()) {
-        return s.is_ok() ? no_bucket(name) : s;
-    }
-    CALICODB_EXPECT_TRUE(s.is_ok());
-    use_tree(&m_map);
-
-    RootInfo info;
-    s = decode_and_check_root_info(m_internal.value(), info);
-    if (!s.is_ok()) {
-        return s;
-    }
-    ObjectPtr<Tree> drop(construct_or_reference_tree(m_internal.key(), info));
+    use_tree(nullptr);
+    ObjectPtr<Tree> drop(open_tree(root_id));
     if (!drop) {
         return Status::no_memory();
     }
-    IntrusiveList::remove(drop->list_entry);
-    drop->deactivate_cursors(nullptr);
-    m_map.deactivate_cursors(nullptr);
 
-    Tree::Reroot rr;
-    s = m_map.destroy(*drop, rr);
-    if (s.is_ok()) {
-        s = m_map.erase(*c);
-    }
-    if (s.is_ok() && rr.before != rr.after) {
-        map_trees(false, [rr](auto &t) {
-            if (t.tree->m_root_id == rr.before) {
-                t.tree->m_root_id = rr.after;
-                return false;
-            }
-            return true;
-        });
-        // TODO: This is unfortunate. Keep a reverse mapping?
-        auto found = false;
-        m_internal.seek_first();
-        s = m_internal.status();
-        while (m_internal.is_valid()) {
-            CALICODB_EXPECT_TRUE(s.is_ok());
-            s = decode_and_check_root_info(m_internal.value(), info);
+    Status s;
+    Buffer<Id> children;
+    auto *next = drop.get();
+    for (size_t nc = 0; next && s.is_ok(); ++nc) {
+        if (drop->m_refcount) {
+            // Trees that the user has a handle to cannot be dropped. Set the "dropped" flag instead.
+            // Tree pages will be removed when the tree is closed.
+            drop->m_dropped = true;
+            drop.release();
+        } else {
+            IntrusiveList::remove(drop->list_entry);
+            drop->deactivate_cursors(nullptr);
+
+            Tree::Reroot rr;
+            s = drop->destroy(rr, children);
             if (!s.is_ok()) {
-                return s;
-            }
-            if (info.root_id == rr.before) {
-                info.root_id = rr.after;
-                char buf[kMaxRootEntrySize];
-                const auto len = encode_root_info(info, buf);
-                s = m_map.put(*c, m_internal.key(), Slice(buf, len));
-                found = true;
                 break;
             }
-            m_internal.next();
+            if (rr.before != rr.after) {
+                map_trees(false, [rr](auto &t) {
+                    if (t.tree->root() == rr.before) {
+                        t.tree->set_root(rr.after);
+                        return false;
+                    }
+                    return true;
+                });
+                for (size_t i = nc; i < children.len(); ++i) {
+                    if (children[i] == rr.before) {
+                        children[i] = rr.after;
+                        break;
+                    }
+                }
+            }
         }
-        if (s.is_ok() && !found) {
-            s = Status::corruption();
+
+        next = nullptr;
+        if (nc < children.len()) {
+            drop.reset(open_tree(children[nc]));
+            if (drop) {
+                next = drop.get();
+            } else {
+                s = Status::no_memory();
+            }
         }
     }
     return s;
@@ -349,7 +151,7 @@ auto Schema::drop_bucket(const Slice &name) -> Status
 auto Schema::vacuum() -> Status
 {
     use_tree(nullptr);
-    return m_map.vacuum();
+    return m_main.vacuum();
 }
 
 auto Schema::TEST_validate() const -> void

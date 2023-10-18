@@ -25,6 +25,7 @@ Feedback is appreciated!
 + Supports multiple readers and a single writer simultaneously (readers have snapshot isolation)
 + Per-bucket bidirectional iteration using cursors
 + Live defragmentation is supported
++ Allows nested buckets
 + In-memory databases
 + Virtual WAL interface
 
@@ -56,7 +57,6 @@ Recent results can be found [here](https://github.com/andy-byers/leveldb/blob/db
 ## TODO
 1. Get everything code reviewed!
 2. Support Windows (write an `Env` implementation)
-3. Support duplicate keys (`allow_duplicates` option or similar added to `BucketOptions`?)
 
 ## Documentation
 Check out CalicoDB's [usage and design documents](doc).

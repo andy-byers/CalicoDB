@@ -85,7 +85,7 @@ public:
 
     [[nodiscard]] auto append_escaped(const Slice &s) -> StatusBuilder &
     {
-        m_builder.append(s);
+        m_builder.append_escaped(s);
         return *this;
     }
 
@@ -167,6 +167,14 @@ public:
     static auto no_memory(const char *fmt, Args &&...args) -> Status
     {
         return StatusBuilder(Status::kAborted, Status::kNoMemory)
+            .append_format(fmt, forward<Args>(args)...)
+            .build();
+    }
+
+    template <class... Args>
+    static auto incompatible_value(const char *fmt, Args &&...args) -> Status
+    {
+        return StatusBuilder(Status::kInvalidArgument, Status::kIncompatibleValue)
             .append_format(fmt, forward<Args>(args)...)
             .build();
     }

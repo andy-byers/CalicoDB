@@ -13,17 +13,20 @@ namespace calicodb
 class Fuzzer
 {
     Options m_options;
-    KVStore m_store;
+    ModelStore m_store;
     DB *m_db = nullptr;
     Tx *m_tx = nullptr;
+    Bucket *m_b = nullptr;
     Cursor *m_c = nullptr;
 
     auto reopen_db() -> void
     {
         delete m_c;
+        delete m_b;
         delete m_tx;
         delete m_db;
         m_c = nullptr;
+        m_b = nullptr;
         m_tx = nullptr;
         CHECK_OK(ModelDB::open(m_options, "InMemory", m_store, m_db));
         reopen_tx();
@@ -32,8 +35,10 @@ class Fuzzer
     auto reopen_tx() -> void
     {
         delete m_c;
+        delete m_b;
         delete m_tx;
         m_c = nullptr;
+        m_b = nullptr;
         CHECK_OK(m_db->new_writer(m_tx));
         reopen_bucket();
     }
@@ -41,9 +46,9 @@ class Fuzzer
     auto reopen_bucket() -> void
     {
         delete m_c;
-        // This should be a NOOP if the bucket handle has already been created
-        // since this transaction was started. The same exact handle is returned.
-        CHECK_OK(m_tx->create_bucket(BucketOptions(), "BUCKET", &m_c));
+        delete m_b;
+        CHECK_OK(m_tx->main_bucket().create_bucket_if_missing("BUCKET", &m_b));
+        m_c = m_b->new_cursor();
     }
 
 public:
@@ -59,6 +64,7 @@ public:
     ~Fuzzer()
     {
         delete m_c;
+        delete m_b;
         delete m_tx;
         delete m_db;
     }
@@ -116,31 +122,31 @@ public:
         std::string str2;
         Status s;
 
-        auto &schema = m_tx->schema();
-        schema.seek_first();
-        CHECK_TRUE(schema.is_valid());
+        auto toplevel = test_new_cursor(m_tx->main_bucket());
+        toplevel->seek_first();
+        CHECK_TRUE(toplevel->is_valid());
 
         switch (op_type) {
             case kBucketGet:
                 str = stream.extract_random();
-                m_c->find(to_slice(str));
+                m_c->find(str);
                 s = m_c->status();
                 break;
             case kBucketPut:
                 str = stream.extract_random();
                 str2 = stream.extract_random();
-                s = m_tx->put(*m_c, to_slice(str), to_slice(str2));
+                s = m_b->put(str, str2);
                 break;
             case kBucketErase:
                 str = stream.extract_random();
-                s = m_tx->erase(*m_c, to_slice(str));
+                s = m_b->erase(str);
                 break;
             case kCursorErase:
-                s = m_tx->erase(*m_c);
+                s = m_b->erase(*m_c);
                 break;
             case kCursorSeek:
                 str = stream.extract_random();
-                m_c->seek(to_slice(str));
+                m_c->seek(str);
                 break;
             case kCursorNext:
                 if (m_c->is_valid()) {

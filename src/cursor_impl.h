@@ -24,8 +24,9 @@ public:
     explicit CursorImpl(Tree &tree);
     ~CursorImpl() override;
 
-    [[nodiscard]] auto is_valid() const -> bool override;
     [[nodiscard]] auto handle() -> void * override;
+    [[nodiscard]] auto is_valid() const -> bool override;
+    [[nodiscard]] auto is_bucket() const -> bool override;
     auto key() const -> Slice override;
     auto value() const -> Slice override;
     auto status() const -> Status override;
@@ -41,7 +42,6 @@ public:
         return m_c.m_tree->check_integrity();
     }
 
-    auto TEST_tree_cursor() -> TreeCursor &;
     auto TEST_check_state() const -> void;
 };
 

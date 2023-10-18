@@ -14,11 +14,14 @@ namespace calicodb
 
 class Fuzzer
 {
-    static constexpr size_t kMaxBuckets = 8;
+    static constexpr const char *kBucketNames[] = {"A", "B", "C", "D",
+                                                   "E", "F", "G", "H",
+                                                   "I", "J", "K", "L"};
+    static constexpr auto kMaxBuckets = ARRAY_SIZE(kBucketNames);
 
     Options m_options;
     DB *m_db = nullptr;
-    KVStore m_store;
+    ModelStore m_store;
 
     auto reopen_db() -> void
     {
@@ -56,7 +59,8 @@ public:
             kOpModify,
             kOpDrop,
             kOpVacuum,
-            kOpSelect,
+            kOpNest,
+            kOpUnnest,
             kOpCommit,
             kOpFinish,
             kOpCheck,
@@ -66,22 +70,49 @@ public:
         reopen_db();
 
         const auto s = m_db->update([&stream, &db = *m_db](auto &tx) {
-            std::unique_ptr<Cursor> cursors[kMaxBuckets];
-            std::string str;
-            std::string str2;
+            struct NestedBucket {
+                TestBucket b;
+                TestCursor c;
+            } nested_buckets[kMaxBuckets] = {};
+
+            auto *main_bucket = &tx.main_bucket();
+            auto main_cursor = test_new_cursor(*main_bucket);
+            int level = -1;
 
             while (!stream.is_empty()) {
-                const auto idx = stream.extract_integral_in_range<uint16_t>(0, kMaxBuckets - 1);
-                if (cursors[idx] == nullptr) {
-                    Cursor *cursor;
-                    str = std::to_string(idx);
-                    CHECK_OK(tx.create_bucket(BucketOptions(), to_slice(str), &cursor));
-                    cursors[idx].reset(cursor);
-                }
-
                 Status s;
-                auto *c = cursors[idx].get();
-                switch (stream.extract_enum<OperationType>()) {
+                std::string str;
+                auto *b = level >= 0 ? nested_buckets[level].b.get() : main_bucket;
+                auto *c = level >= 0 ? nested_buckets[level].c.get() : main_cursor.get();
+                const auto op_type = stream.extract_enum<OperationType>();
+
+#ifdef FUZZER_TRACE
+                static constexpr const char *kOperationTypeNames[kMaxValue + 1] = {
+                    "kOpNext",
+                    "kOpPrevious",
+                    "kOpSeek",
+                    "kOpPut",
+                    "kOpErase",
+                    "kOpModify",
+                    "kOpDrop",
+                    "kOpVacuum",
+                    "kOpNest",
+                    "kOpUnnest",
+                    "kOpCommit",
+                    "kOpFinish",
+                    "kOpCheck",
+                };
+                String repr;
+                const auto sample_len = std::min(stream.length(), 8UL);
+                CHECK_EQ(0, append_escaped_string(repr, stream.peek(sample_len)));
+                if (sample_len < stream.length()) {
+                    CHECK_EQ(0, append_strings(repr, "..."));
+                }
+                std::cout << "TRACE: Level: " << level << " OpType: " << kOperationTypeNames[op_type]
+                          << " Input: " << repr.c_str() << " (" << stream.length() << " bytes total)\n";
+#endif // FUZZER_TRACE
+
+                switch (op_type) {
                     case kOpNext:
                         if (c->is_valid()) {
                             c->next();
@@ -97,23 +128,20 @@ public:
                         }
                         break;
                     case kOpSeek:
-                        str = stream.extract_random();
-                        c->seek(to_slice(str));
+                        c->seek(stream.extract_random());
                         break;
                     case kOpModify:
                         if (c->is_valid()) {
-                            str = stream.extract_random();
-                            s = tx.put(*c, c->key(), to_slice(str));
+                            s = b->put(*c, stream.extract_random());
                             break;
                         }
                         [[fallthrough]];
                     case kOpPut:
                         str = stream.extract_random();
-                        str2 = stream.extract_random();
-                        s = tx.put(*c, to_slice(str), to_slice(str2));
+                        s = b->put(str, stream.extract_random());
                         break;
                     case kOpErase:
-                        s = tx.erase(*c);
+                        s = b->erase(*c);
                         break;
                     case kOpVacuum:
                         s = tx.vacuum();
@@ -122,32 +150,56 @@ public:
                         s = tx.commit();
                         break;
                     case kOpDrop:
-                        cursors[idx].reset();
-                        str = std::to_string(idx);
-                        s = tx.drop_bucket(to_slice(str));
-                        c = nullptr;
+                        // It shouldn't matter if this ends up dropping the bucket open on the next level. All records
+                        // and nested buckets should remain valid until the dropped bucket is closed.
+                        s = b->drop_bucket(stream.extract_random());
                         break;
-                    case kOpCheck:
-                        for (const auto &to_check : cursors) {
-                            if (to_check) {
-                                check_bucket(*to_check);
+                    case kOpNest:
+                        if (level < static_cast<int>(kMaxBuckets - 1)) {
+                            if (nested_buckets[level + 1].b) {
+                                break;
                             }
+                            ++level;
+                            // Open or create a nested bucket rooted at the current level.
+                            str = stream.extract_random();
+                            s = test_open_bucket(*b, str, nested_buckets[level].b);
+                            if (s.is_incompatible_value()) {
+                                --level;
+                                break;
+                            } else if (s.is_invalid_argument()) {
+                                CHECK_FALSE(nested_buckets[level].b); // test_open_bucket() failed
+                                s = test_create_and_open_bucket(*b, str, nested_buckets[level].b);
+                            }
+                            if (s.is_ok()) {
+                                nested_buckets[level].c = test_new_cursor(*nested_buckets[level].b);
+                            }
+                            break;
                         }
+                        [[fallthrough]];
+                    case kOpUnnest:
+                        if (level >= 0) {
+                            // Move up a level, but don't close the bucket at the current level. It will be closed
+                            // during kOpNest if necessary.
+                            --level;
+                            break;
+                        }
+                        [[fallthrough]];
+                    case kOpCheck:
                         reinterpret_cast<ModelDB &>(db).check_consistency();
                         reinterpret_cast<ModelTx &>(tx).check_consistency();
+                        check_bucket(*c);
                         break;
                     default:
                         return Status::not_supported("ROLLBACK");
                 }
-                if (s.is_not_found() || s.is_invalid_argument()) {
+                if (s.is_not_found() || s.is_invalid_argument() || s.is_incompatible_value()) {
                     // Forgive non-fatal errors.
                     s = Status::ok();
                 }
-                if (s.is_ok() && c) {
-                    s = c->status();
-                }
                 CHECK_OK(s);
                 CHECK_OK(tx.status());
+                reinterpret_cast<ModelDB &>(db).check_consistency();
+                reinterpret_cast<ModelTx &>(tx).check_consistency();
             }
             return Status::ok();
         });
