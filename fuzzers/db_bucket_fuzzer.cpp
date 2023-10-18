@@ -84,7 +84,35 @@ public:
                 std::string str;
                 auto *b = level >= 0 ? nested_buckets[level].b.get() : main_bucket;
                 auto *c = level >= 0 ? nested_buckets[level].c.get() : main_cursor.get();
-                switch (stream.extract_enum<OperationType>()) {
+                const auto op_type = stream.extract_enum<OperationType>();
+
+#ifdef FUZZER_TRACE
+                static constexpr const char *kOperationTypeNames[kMaxValue + 1] = {
+                    "kOpNext",
+                    "kOpPrevious",
+                    "kOpSeek",
+                    "kOpPut",
+                    "kOpErase",
+                    "kOpModify",
+                    "kOpDrop",
+                    "kOpVacuum",
+                    "kOpNest",
+                    "kOpUnnest",
+                    "kOpCommit",
+                    "kOpFinish",
+                    "kOpCheck",
+                };
+                String repr;
+                const auto sample_len = std::min(stream.length(), 8UL);
+                CHECK_EQ(0, append_escaped_string(repr, stream.peek(sample_len)));
+                if (sample_len < stream.length()) {
+                    CHECK_EQ(0, append_strings(repr, "..."));
+                }
+                std::cout << "TRACE: Level: " << level << " OpType: " << kOperationTypeNames[op_type]
+                          << " Input: " << repr.c_str() << " (" << stream.length() << " bytes total)\n";
+#endif // FUZZER_TRACE
+
+                switch (op_type) {
                     case kOpNext:
                         if (c->is_valid()) {
                             c->next();
@@ -128,13 +156,17 @@ public:
                         break;
                     case kOpNest:
                         if (level < static_cast<int>(kMaxBuckets - 1)) {
-                            ++level;
-                            // Open or create a nested bucket rooted at the current level, if one is not already open.
-                            if (!nested_buckets[level].b) {
-                                str = stream.extract_random();
-                                s = test_open_bucket(*b, str, nested_buckets[level].b);
+                            if (nested_buckets[level + 1].b) {
+                                break;
                             }
-                            if (s.is_invalid_argument()) {
+                            ++level;
+                            // Open or create a nested bucket rooted at the current level.
+                            str = stream.extract_random();
+                            s = test_open_bucket(*b, str, nested_buckets[level].b);
+                            if (s.is_incompatible_value()) {
+                                --level;
+                                break;
+                            } else if (s.is_invalid_argument()) {
                                 CHECK_FALSE(nested_buckets[level].b); // test_open_bucket() failed
                                 s = test_create_and_open_bucket(*b, str, nested_buckets[level].b);
                             }
@@ -164,11 +196,10 @@ public:
                     // Forgive non-fatal errors.
                     s = Status::ok();
                 }
-                if (s.is_ok() && c) {
-                    s = c->status();
-                }
                 CHECK_OK(s);
                 CHECK_OK(tx.status());
+                reinterpret_cast<ModelDB &>(db).check_consistency();
+                reinterpret_cast<ModelTx &>(tx).check_consistency();
             }
             return Status::ok();
         });

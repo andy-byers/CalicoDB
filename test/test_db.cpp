@@ -2187,4 +2187,47 @@ TEST_F(ModelDBTests, DropBuckets3)
     }
 }
 
+TEST_F(ModelDBTests, DeleteCursorAfterBucket)
+{
+    setup_buckets(*this, 3);
+
+    ASSERT_OK(m_db->update([](auto &tx) {
+        TestBucket b;
+        EXPECT_OK(test_open_bucket(tx, kBucketNames[0], b));
+        EXPECT_OK(put_range(*b, 0, 10));
+
+        auto c = test_new_cursor(*b);
+        c->seek_first();
+
+        b.reset();
+        c.reset();
+        return Status::ok();
+    }));
+
+    check_buckets(*this, 0);
+}
+
+TEST_F(ModelDBTests, SeekAndErase)
+{
+    ASSERT_OK(m_db->update([](auto &tx) {
+        auto &b = tx.main_bucket();
+        EXPECT_OK(put_range(b, 0, 500));
+
+        auto c = test_new_cursor(b);
+        c->seek(make_kv(100).first);
+        EXPECT_TRUE(c->is_valid());
+
+        for (size_t i = 0; i < 300; ++i) {
+            EXPECT_TRUE(c->is_valid());
+            EXPECT_OK(b.erase(*c));
+        }
+        for (size_t i = 0; i < 100; ++i) {
+            EXPECT_TRUE(c->is_valid());
+            EXPECT_EQ(c->key(), make_kv(i + 400).first);
+            c->next();
+        }
+        return Status::ok();
+    }));
+}
+
 } // namespace calicodb::test

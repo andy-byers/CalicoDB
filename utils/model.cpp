@@ -58,12 +58,13 @@ ModelTx::~ModelTx()
 auto ModelTx::check_consistency() const -> void
 {
     for (const auto &[name, subtree_or_value] : m_temp.tree) {
-        CHECK_TRUE(std::holds_alternative<ModelStore>(subtree_or_value));
-        auto &subtree = std::get<ModelStore>(subtree_or_value).tree;
+        if (std::holds_alternative<ModelStore>(subtree_or_value)) {
+            auto &subtree = std::get<ModelStore>(subtree_or_value).tree;
 
-        TestBucket b;
-        CHECK_OK(test_open_bucket(*m_tx, name, b));
-        check_consistency(subtree, *b);
+            TestBucket b;
+            CHECK_OK(test_open_bucket(*m_tx, name, b));
+            check_consistency(subtree, *b);
+        }
     }
 }
 
@@ -109,8 +110,10 @@ auto ModelBucket::close() -> void
         m_child_buckets.front()->close();
     }
     for (auto &c : m_cursors) {
-        c->invalidate();
-        c->m_live = false;
+        if (c->m_live) {
+            c->invalidate();
+            c->m_live = false;
+        }
     }
 }
 
@@ -136,6 +139,7 @@ auto ModelBucket::deactivate(ModelStore::Tree &drop_data) -> void
         c->invalidate();
         c->m_live = false;
     }
+    m_cursors.clear();
     if (m_parent_buckets) {
         m_parent_buckets->erase(m_backref);
         m_parent_buckets = nullptr;
@@ -160,7 +164,7 @@ auto ModelBucket::new_cursor() const -> Cursor *
 
 auto ModelBucket::create_bucket(const Slice &name, Bucket **b_out) -> Status
 {
-    save_cursors(nullptr);
+    use_bucket(this);
     auto name_copy = name.to_string();
     auto s = m_b->create_bucket(name, b_out);
     if (s.is_ok()) {
@@ -180,7 +184,7 @@ auto ModelBucket::create_bucket(const Slice &name, Bucket **b_out) -> Status
 
 auto ModelBucket::create_bucket_if_missing(const Slice &name, Bucket **b_out) -> Status
 {
-    save_cursors(nullptr);
+    use_bucket(this);
     auto name_copy = name.to_string();
     auto s = m_b->create_bucket_if_missing(name, b_out);
     if (s.is_ok()) {
@@ -198,7 +202,7 @@ auto ModelBucket::create_bucket_if_missing(const Slice &name, Bucket **b_out) ->
 
 auto ModelBucket::drop_bucket(const Slice &name) -> Status
 {
-    save_cursors(nullptr);
+    use_bucket(nullptr); // Save all cursors, one may be positioned on `name`
     const auto name_copy = name.to_string();
     auto s = m_b->drop_bucket(name);
     if (s.is_ok()) {
@@ -264,10 +268,10 @@ auto ModelBucket::put(Cursor &c, const Slice &value) -> Status
     const auto key_copy = c.key().to_string();
     const auto value_copy = value.to_string();
     auto &m = use_cursor(c);
-    auto s = m_b->put(c, value);
+    auto s = m_b->put(*m.m_c, value);
     if (s.is_ok()) {
         m.move_to(m_temp->insert_or_assign(m.m_itr, key_copy, value_copy));
-    } else {
+    } else if (!m.m_c->is_valid()) {
         m.invalidate();
     }
     return s;
@@ -287,11 +291,10 @@ auto ModelBucket::erase(const Slice &key) -> Status
 auto ModelBucket::erase(Cursor &c) -> Status
 {
     auto &m = use_cursor(c);
-    auto s = m_b->erase(c);
+    auto s = m_b->erase(*m.m_c);
     if (s.is_ok()) {
         m.move_to(m_temp->erase(m.m_itr));
-        m.check_record();
-    } else {
+    } else if (!m.m_c->is_valid()) {
         m.invalidate();
     }
     return s;
@@ -303,6 +306,16 @@ auto ModelBucket::save_cursors(Cursor *exclude) const -> void
         if (c != exclude) {
             c->save_position();
         }
+    }
+}
+
+auto ModelBucket::use_bucket(Bucket *exclude) const -> void
+{
+    if (exclude != this) {
+        save_cursors(nullptr);
+    }
+    for (auto *b : m_child_buckets) {
+        b->use_bucket(exclude);
     }
 }
 

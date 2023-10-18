@@ -338,8 +338,8 @@ auto TreeCursor::fetch_record_if_valid() -> void
 auto TreeCursor::ensure_position_loaded() -> bool
 {
     if (m_state == kSavedState) {
-        const auto buf = move(m_key_buf);
-        const Slice key(buf.ptr(), buf.len());
+        const auto buf = move(m_key_buf); // m_key.size() is the correct key length
+        const auto key = m_key.is_empty() ? "" : Slice(buf.ptr(), m_key.size());
         // Seek the cursor back to where it was before.
         seek_to_leaf(key, true);
         // Return true if the cursor is in a different position than it was before, false otherwise. If the
@@ -916,10 +916,13 @@ auto Tree::make_pivot(const PivotOptions &opt, Cell &pivot_out) -> Status
             opt.cells[i]->local_size);
         keys[i] = Slice(opt.cells[i]->key, local_key_size);
     }
-    if (keys[0] >= keys[1]) {
+    if (keys[0] >= keys[1] || opt.cells[0]->is_bucket != opt.cells[1]->is_bucket) {
         // The left key must be less than the right key. If this cannot be seen in the local
         // keys, then 1 of the 2 must be overflowing. The nonlocal part is needed to perform
-        // suffix truncation.
+        // suffix truncation. We also need to read the full keys if 1 cell is a bucket cell
+        // and the other is not. The different cell types can store different amounts of key
+        // locally. If they are both overflowing, and the local parts are the same, it will
+        // look like the keys are the same, when really they are not.
         for (size_t i = 0; i < 2; ++i) {
             if (opt.cells[i]->key_size > keys[i].size()) {
                 // Read just enough of the key to determine the ordering.
@@ -967,8 +970,7 @@ auto Tree::make_pivot(const PivotOptions &opt, Cell &pivot_out) -> Status
             const auto copy_size = minval<size_t>(
                 prefix.size(), page_size - kLinkContentOffset);
             std::memcpy(dst->data + kLinkContentOffset,
-                        prefix.data(),
-                        copy_size);
+                        prefix.data(), copy_size);
             prefix.advance(copy_size);
 
             if (prev) {
@@ -1421,6 +1423,13 @@ auto Tree::redistribute_cells(Node &left, Node &right, Node &parent, uint32_t pi
                 // the cell that p_left has no room for will be posted to the parent instead.
                 sep -= is_leaf_level;
                 break;
+            } else if (right_accum == 0) {
+                // This can happen if the rightmost cell is larger than all other cells combined, and
+                // this method is called right after a call to split_root() that splits the database
+                // root page. The space occupied by the file header can prevent left_accum from
+                // exceeding the merge_threshold.
+                CALICODB_EXPECT_GT(left_accum, 0);
+                --sep;
             }
         } while (left_accum < right_accum);
     }
@@ -1668,7 +1677,7 @@ auto Tree::put(TreeCursor &c, const Slice &key, const Slice &value, bool flag) -
         CALICODB_EXPECT_TRUE(c.assert_state());
         if (key_exists) {
             if (c.is_bucket() && !flag) {
-                s = Status::invalid_argument("cannot overwrite bucket record");
+                s = Status::incompatible_value();
                 goto cleanup;
             }
             const auto value_size = c.m_cell.total_size - c.m_cell.key_size;
@@ -2248,7 +2257,13 @@ public:
                     msg.append_escaped(Slice(cell.key, key_len));
                     msg.append('"');
                     if (cell.key_size > key_len) {
-                        msg.append_format(" + <%zu bytes>", cell.key_size - key_len);
+                        msg.append("...");
+                    }
+                    msg.append_format(" (%zu bytes total)", cell.key_size);
+                    if (!node.is_leaf()) {
+                        msg.append_format(", child_id=%u", read_child_id(cell).value);
+                    } else if (cell.is_bucket) {
+                        msg.append_format(", bucket_id=%u", read_bucket_root_id(cell).value);
                     }
                     msg.append(")\n");
                 }

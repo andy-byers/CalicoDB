@@ -13,13 +13,9 @@ namespace calicodb
 namespace
 {
 
-auto no_bucket(const Slice &name) -> Status
+auto no_bucket(const Status &s) -> Status
 {
-    return StatusBuilder(Status::kInvalidArgument)
-        .append("bucket \"")
-        .append_escaped(name)
-        .append("\" does not exist")
-        .build();
+    return s.is_ok() ? Status::invalid_argument("bucket does not exist") : s;
 }
 
 } // namespace
@@ -81,6 +77,8 @@ auto BucketImpl::create_bucket_impl(const Slice &key, bool error_if_exists, Buck
                 put_u32(buf, root_id.value); // Root ID encoded as record value
                 s = m_tree->put(*TREE_CURSOR(m_cursor), key, Slice(buf, sizeof(buf)), true);
             }
+        } else if (!m_cursor.is_bucket()) {
+            s = Status::incompatible_value();
         } else if (error_if_exists) {
             s = Status::invalid_argument("bucket already exists");
         } else {
@@ -103,7 +101,9 @@ auto BucketImpl::open_bucket(const Slice &key, Bucket *&b_out) const -> Status
         m_cursor.find(key);
         auto s = m_cursor.status();
         if (!m_cursor.is_valid()) {
-            return s.is_ok() ? no_bucket(key) : s;
+            return no_bucket(s);
+        } else if (!m_cursor.is_bucket()) {
+            return Status::incompatible_value();
         }
 
         CALICODB_EXPECT_TRUE(s.is_ok()); // Cursor invariant
@@ -136,7 +136,9 @@ auto BucketImpl::drop_bucket(const Slice &key) -> Status
         m_cursor.find(key);
         auto s = m_cursor.status();
         if (!m_cursor.is_valid()) {
-            return s.is_ok() ? no_bucket(key) : s;
+            return no_bucket(s);
+        } else if (!m_cursor.is_bucket()) {
+            return Status::incompatible_value();
         }
 
         CALICODB_EXPECT_TRUE(s.is_ok()); // Cursor invariant

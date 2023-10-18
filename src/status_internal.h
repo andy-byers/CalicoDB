@@ -85,7 +85,7 @@ public:
 
     [[nodiscard]] auto append_escaped(const Slice &s) -> StatusBuilder &
     {
-        m_builder.append(s);
+        m_builder.append_escaped(s);
         return *this;
     }
 

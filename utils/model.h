@@ -170,15 +170,12 @@ public:
 
     [[nodiscard]] auto is_valid() const -> bool override
     {
-        if (m_c->status().is_ok()) {
-            CHECK_EQ(m_c->is_valid(), m_itr != end(*m_tree) || m_saved);
-            check_record();
-        }
         return m_c->is_valid();
     }
 
     [[nodiscard]] auto is_bucket() const -> bool override
     {
+        CHECK_TRUE(is_valid());
         return m_c->is_bucket();
     }
 
@@ -202,11 +199,12 @@ public:
 
     auto check_record() const -> void
     {
-        if (m_c->is_valid()) {
-            CHECK_EQ(m_c->key().to_string(), model_key());
-            if (!m_c->is_bucket()) {
-                CHECK_EQ(m_c->value().to_string(), model_value());
-            }
+        CHECK_TRUE(m_c->is_valid());
+        CHECK_EQ(m_c->key().to_string(), model_key());
+        if (m_c->is_bucket()) {
+            CHECK_EQ(m_c->value().to_string(), "");
+        } else {
+            CHECK_EQ(m_c->value().to_string(), model_value());
         }
     }
 
@@ -254,9 +252,12 @@ public:
     auto next() -> void override
     {
         CHECK_TRUE(m_c->is_valid());
+        const auto was_saved = m_saved;
         load_position();
         if (m_itr != end(*m_tree)) {
-            ++m_itr;
+            if (!was_saved || m_saved_key == m_itr->first) {
+                ++m_itr;
+            }
         }
         m_c->next();
     }
@@ -266,7 +267,7 @@ public:
         CHECK_TRUE(m_c->is_valid());
         load_position();
         if (m_itr == end(*m_tree)) {
-            // load_position()
+            // load_position() caused the cursor to be moved off the end of the key range.
         } else if (m_itr == begin(*m_tree)) {
             m_itr = end(*m_tree);
         } else {
@@ -308,6 +309,7 @@ class ModelBucket : public Bucket
     auto open_model_bucket(std::string name, Bucket &b, ModelStore &store) const -> Bucket *;
     auto open_model_cursor(Cursor &c, ModelStore::Tree &tree) const -> Cursor *;
     auto save_cursors(Cursor *exclude = nullptr) const -> void;
+    auto use_bucket(Bucket *exclude = nullptr) const -> void;
     auto deactivate(ModelStore::Tree &drop_data) -> void;
 
 public:
@@ -378,6 +380,7 @@ public:
 
     auto vacuum() -> Status override
     {
+        m_main->use_bucket(nullptr);
         return m_tx->vacuum();
     }
 

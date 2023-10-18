@@ -52,7 +52,7 @@ auto Schema::close_trees() -> void
 auto Schema::create_tree(Id parent_id, Id &root_id_out) -> Status
 {
     CALICODB_EXPECT_GT(m_pager->page_count(), 0);
-    use_tree(&m_main);
+    use_tree(nullptr);
     return m_main.create(parent_id, root_id_out);
 }
 

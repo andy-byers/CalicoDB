@@ -360,10 +360,12 @@ public:
     }
 
     // Called by CursorImpl. If the cursor is saved, then m_cell.is_bucket contains the bucket flag
-    // for the record that the cursor is saved on.
+    // for the record that the cursor is saved on. Note, however, that the bucket root ID cannot
+    // be read until the cursor position is loaded.
     [[nodiscard]] auto is_bucket() const -> bool
     {
-        return is_valid() && m_cell.is_bucket;
+        CALICODB_EXPECT_TRUE(is_valid());
+        return m_cell.is_bucket;
     }
 
     [[nodiscard]] auto page_id() const -> Id
@@ -374,15 +376,15 @@ public:
 
     [[nodiscard]] auto bucket_root_id() const -> Id
     {
-        CALICODB_EXPECT_TRUE(is_valid());
-        CALICODB_EXPECT_TRUE(m_cell.is_bucket);
+        CALICODB_EXPECT_TRUE(is_bucket());
+        CALICODB_EXPECT_EQ(m_state, kValidState);
         return read_bucket_root_id(m_cell);
     }
 
     auto overwrite_bucket_root_id(Id root_id) -> void
     {
-        CALICODB_EXPECT_TRUE(is_valid());
-        CALICODB_EXPECT_TRUE(m_cell.is_bucket);
+        CALICODB_EXPECT_TRUE(is_bucket());
+        CALICODB_EXPECT_EQ(m_state, kValidState);
         write_bucket_root_id(m_cell, root_id);
     }
 
