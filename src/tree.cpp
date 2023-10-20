@@ -7,7 +7,6 @@
 #include "encoding.h"
 #include "internal.h"
 #include "logging.h"
-#include "mem.h"
 #include "pager.h"
 #include "schema.h"
 #include "status_internal.h"
@@ -591,7 +590,7 @@ auto TreeCursor::start_write(const Slice &key, bool is_erase) -> bool
 
     // Seek to where the given key is, if it exists, or should go, if it does not. Don't read
     // the record where the cursor ends up: the payload slices being written might have come
-    // from those buffers.
+    // from the internal buffers.
     const auto result = seek_to_leaf(key, is_erase);
     if (on_node()) {
         m_tree->upgrade(m_node);
@@ -855,28 +854,6 @@ auto Tree::destroy(Reroot &rr, Buffer<Id> &children) -> Status
     return s;
 }
 
-auto Tree::extract_key(const Cell &cell, KeyScratch &scratch, Slice &key_out, uint32_t limit) const -> Status
-{
-    if (limit == 0 || limit > cell.key_size) {
-        limit = cell.key_size;
-    }
-    if (limit <= cell.local_size) {
-        key_out = Slice(cell.key, limit);
-        return Status::ok();
-    }
-    if (limit > scratch.len) {
-        auto *buf = Mem::reallocate(
-            scratch.buf, limit);
-        if (buf) {
-            scratch.buf = static_cast<char *>(buf);
-            scratch.len = limit;
-        } else {
-            return Status::no_memory();
-        }
-    }
-    return read_key(cell, scratch.buf, &key_out, limit);
-}
-
 auto Tree::read_key(const Cell &cell, char *scratch, Slice *key_out, uint32_t limit) const -> Status
 {
     if (limit == 0 || limit > cell.key_size) {
@@ -932,88 +909,140 @@ auto Tree::maybe_fix_overflow_chain(const Cell &cell, Id parent_id, Status &s) -
 
 auto Tree::make_pivot(const PivotOptions &opt, Cell &pivot_out) -> Status
 {
-    Slice keys[2];
-    for (size_t i = 0; i < 2; ++i) {
-        const auto local_key_size = minval(
-            opt.cells[i]->key_size,
-            opt.cells[i]->local_size);
-        keys[i] = Slice(opt.cells[i]->key, local_key_size);
-    }
-    if (keys[0] >= keys[1] || opt.cells[0]->is_bucket != opt.cells[1]->is_bucket) {
-        // The left key must be less than the right key. If this cannot be seen in the local
-        // keys, then 1 of the 2 must be overflowing. The nonlocal part is needed to perform
-        // suffix truncation. We also need to read the full keys if 1 cell is a bucket cell
-        // and the other is not. The different cell types can store different amounts of key
-        // locally. If they are both overflowing, and the local parts are the same, it will
-        // look like the keys are the same, when really they are not.
-        for (size_t i = 0; i < 2; ++i) {
-            if (opt.cells[i]->key_size > keys[i].size()) {
-                // Read just enough of the key to determine the ordering.
-                auto s = extract_key(
-                    *opt.cells[i],
-                    m_key_scratch[i],
-                    keys[i],
-                    opt.cells[1 - i]->key_size + 1);
-                if (!s.is_ok()) {
-                    return s;
-                }
-            }
-        }
-    }
-    Slice prefix;
-    if (truncate_suffix(keys[0], keys[1], prefix)) {
-        return Status::corruption();
-    }
-    pivot_out.ptr = opt.scratch;
-    pivot_out.key_size = static_cast<uint32_t>(prefix.size());
-    pivot_out.total_size = pivot_out.key_size;
-    auto *ptr = pivot_out.ptr + sizeof(uint32_t); // Skip the left child ID.
-    pivot_out.key = encode_varint(ptr, pivot_out.key_size);
-    pivot_out.local_size = compute_local_size(prefix.size(), 0, opt.parent->min_local,
-                                              opt.parent->max_local);
-    pivot_out.footprint = pivot_out.local_size + static_cast<uint32_t>(pivot_out.key - opt.scratch);
+    const auto ovfl_local = m_pager->page_size() - kLinkContentOffset;
+    const auto [cells, parent, scratch] = opt;
+
+    struct {
+        Cell cell;
+        Slice chunk;
+        PageRef *page;
+        uint32_t total;
+    } items[2] = {};
+
+    // The keys are processed in multiple chunks, if they are overflowing. The keys need to be
+    // tracked separately. If one is a bucket record and the other is not, then the cells will have
+    // different local key sizes. Note that we generally only need to consider enough of each key
+    // to determine an ordering between the two records. If the first key is a prefix of the second,
+    // then we will require an extra char from the second key to distinguish between the 2 child key
+    // ranges. For example, if the left key is "abc" and the right key is "abccc", we need to store
+    // "abcc" as the pivot.
+    items[0].cell = *cells[0];
+    items[1].cell = *cells[1];
+    items[0].total = minval(cells[0]->key_size, cells[1]->key_size);
+    items[1].total = minval(cells[0]->key_size + 1, cells[1]->key_size);
+    items[0].chunk = Slice(cells[0]->key, minval(items[0].total, cells[0]->local_size));
+    items[1].chunk = Slice(cells[1]->key, minval(items[1].total, cells[1]->local_size));
+    const auto original = items[1].total;
+
+    pivot_out.key = scratch + sizeof(uint32_t) + kVarintMaxLength;
     pivot_out.is_bucket = false;
-    std::memcpy(pivot_out.key, prefix.data(), pivot_out.local_size);
-    prefix.advance(pivot_out.local_size);
+
+    auto target_local = compute_local_size(m_pager->page_size(), 0, parent->min_local, parent->max_local);
+    auto target_bptr = opt.parent->page_id();
+    auto target_type = kOverflowHead;
+    auto *target = pivot_out.key;
 
     Status s;
-    if (!prefix.is_empty()) {
-        // The pivot is too long to fit on a single page. Transfer the portion that
-        // won't fit to an overflow chain.
-        PageRef *prev = nullptr;
-        auto dst_type = kOverflowHead;
-        auto dst_bptr = opt.parent->page_id();
-        while (s.is_ok() && !prefix.is_empty()) {
-            PageRef *dst;
-            // Allocate a new overflow page.
-            s = allocate(kAllocateAny, opt.parent->page_id(), dst);
+    Id overflow_id;
+    PageRef *target_page = nullptr;
+    PageRef *target_prev = nullptr;
+    for (Slice prefix;;) {
+        const auto max_prefix_size = minval<size_t>(target_local, items[0].chunk.size(), items[1].chunk.size());
+        const auto lhs = items[0].chunk.range(0, max_prefix_size);
+        const auto rhs = items[1].chunk.range(0, max_prefix_size);
+        if (max_prefix_size) {
+            if (truncate_suffix(lhs, rhs, prefix)) {
+                return Status::corruption("keys are out of order");
+            }
+            const auto prefix_size = prefix.size();
+            std::memcpy(target, prefix.data(), prefix_size);
+            items[0].chunk.advance(prefix_size);
+            items[1].chunk.advance(prefix_size);
+            items[0].total -= prefix_size;
+            items[1].total -= prefix_size;
+            target_local -= prefix_size;
+            target += prefix_size;
+        } else {
+            // The left key is a prefix of the right key.
+            CALICODB_EXPECT_TRUE(items[0].chunk.is_empty());
+            CALICODB_EXPECT_EQ(items[1].chunk.size(), 1);
+            target[0] = items[1].chunk[0];
+            --items[1].total;
+            break;
+        }
+
+        const auto last = prefix.size() - 1;
+        if (lhs.size() != rhs.size() || lhs[last] != rhs[last]) {
+            // Stop early if the pivot key has enough information to distinguish between the left
+            // and right key ranges. This is clearly the case when truncate_suffix() has performed
+            // suffix truncation. Also, catch the case where the keys are the same length and differ
+            // only at the last character.
+            break;
+        }
+        if (items[0].total + items[1].total == 0) {
+            // The left and right keys are exhausted. We have to continue until both are finished,
+            // otherwise we miss the case where the left key is a prefix of the right key (we need
+            // an extra char from the right key).
+            break;
+        }
+        for (auto &[cell, chunk, page, total] : items) {
+            if (!chunk.is_empty() || !total) {
+                continue;
+            }
+            const auto next_id = page ? read_next_id(*page)
+                                      : read_overflow_id(cell);
+            m_pager->release(page, Pager::kNoCache);
+            s = m_pager->acquire(next_id, page);
             if (!s.is_ok()) {
                 break;
             }
-            const auto copy_size = minval<size_t>(
-                prefix.size(), page_size - kLinkContentOffset);
-            std::memcpy(dst->data + kLinkContentOffset,
-                        prefix.data(), copy_size);
-            prefix.advance(copy_size);
+            chunk = Slice(page->data + kLinkContentOffset,
+                          minval<size_t>(ovfl_local, total));
+        }
 
-            if (prev) {
-                put_u32(prev->data, dst->page_id.value);
-                m_pager->release(prev, Pager::kNoCache);
-            } else {
-                write_overflow_id(pivot_out, dst->page_id);
+        if (target_local == 0) {
+            s = allocate(kAllocateAny, opt.parent->page_id(), target_page);
+            if (!s.is_ok()) {
+                break;
             }
-            fix_parent_id(dst->page_id, dst_bptr, dst_type, s);
-            dst_type = kOverflowLink;
-            dst_bptr = dst->page_id;
-            prev = dst;
+            if (target_prev) {
+                write_next_id(*target_prev, target_page->page_id);
+                m_pager->release(target_prev, Pager::kNoCache);
+            } else {
+                // Overflow ID is written once we know where to put it. Requires knowing the
+                // local key size.
+                overflow_id = target_page->page_id;
+            }
+            fix_parent_id(target_page->page_id, target_bptr, target_type, s);
+            target = target_page->data + kLinkContentOffset;
+            target_local = ovfl_local;
+            target_type = kOverflowLink;
+            target_bptr = target_page->page_id;
+            target_prev = target_page;
         }
-        if (s.is_ok()) {
-            CALICODB_EXPECT_NE(nullptr, prev);
-            put_u32(prev->data, 0);
-            pivot_out.footprint += sizeof(uint32_t);
-        }
-        m_pager->release(prev, Pager::kNoCache);
     }
+
+    if (s.is_ok()) {
+        const auto prefix_size = original - items[1].total;
+        const auto varint_size = varint_length(prefix_size);
+        auto *varint_ptr = pivot_out.key - varint_size;
+        encode_varint(varint_ptr, prefix_size);
+        pivot_out.ptr = varint_ptr - sizeof(uint32_t);
+        pivot_out.key_size = prefix_size;
+        pivot_out.total_size = prefix_size;
+        pivot_out.local_size = compute_local_size(prefix_size, 0, parent->min_local, parent->max_local);
+        pivot_out.footprint = static_cast<uint32_t>(pivot_out.key - pivot_out.ptr) + pivot_out.local_size;
+
+        if (target_prev) {
+            CALICODB_EXPECT_NE(nullptr, target_prev);
+            write_overflow_id(pivot_out, overflow_id);
+            pivot_out.footprint += sizeof(uint32_t);
+            put_u32(target_prev->data, 0);
+        }
+    }
+    m_pager->release(target_prev, Pager::kNoCache);
+    m_pager->release(items[0].page, Pager::kNoCache);
+    m_pager->release(items[1].page, Pager::kNoCache);
     return s;
 }
 
@@ -1127,14 +1156,17 @@ auto Tree::fix_links(Node &node, Id parent_id) -> Status
 auto Tree::resolve_overflow(TreeCursor &c) -> Status
 {
     Status s;
-    while (s.is_ok() && m_ovfl.exists()) {
+    do {
         if (c.page_id() == root()) {
             s = split_root(c);
         } else {
             s = split_nonroot(c);
         }
+        if (!s.is_ok()) {
+            break;
+        }
         ++m_stat->tree_smo;
-    }
+    } while (m_ovfl.exists());
     return s;
 }
 
@@ -1646,10 +1678,6 @@ Tree::~Tree()
     // delete (m_refcount is decremented beforehand, so it should be 0).
     CALICODB_EXPECT_EQ(m_refcount, 0);
 
-    for (const auto &scratch : m_key_scratch) {
-        Mem::deallocate(scratch.buf);
-    }
-
     // Make sure all cursors are in the inactive list with their nodes released.
     deactivate_cursors(nullptr);
 
@@ -1979,8 +2007,8 @@ auto Tree::relocate_page(PageRef *&free, PointerMap::Entry entry, Id last_id) ->
             return corrupted_node(PointerMap::lookup(last_id, page_size));
     }
 
-    PointerMap::write_entry(*m_pager, last_id, {}, s);
-    PointerMap::write_entry(*m_pager, free->page_id, entry, s);
+    fix_parent_id(last_id, Id::null(), kInvalidPage, s);
+    fix_parent_id(free->page_id, entry.back_ptr, entry.type, s);
 
     if (s.is_ok()) {
         PageRef *last;
@@ -1990,10 +2018,7 @@ auto Tree::relocate_page(PageRef *&free, PointerMap::Entry entry, Id last_id) ->
                 const auto next_id = read_next_id(*last);
                 if (!next_id.is_null()) {
                     s = PointerMap::read_entry(*m_pager, next_id, entry);
-                    if (s.is_ok()) {
-                        entry.back_ptr = free->page_id;
-                        PointerMap::write_entry(*m_pager, next_id, entry, s);
-                    }
+                    fix_parent_id(next_id, free->page_id, entry.type, s);
                 }
             }
             const auto new_location = free->page_id;

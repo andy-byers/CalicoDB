@@ -21,11 +21,8 @@ class TreeCursor;
 
 [[nodiscard]] inline auto truncate_suffix(const Slice &lhs, const Slice &rhs, Slice &prefix_out) -> int
 {
-    const auto end = minval(
-        lhs.size(), rhs.size());
-
     size_t n = 0;
-    for (; n < end; ++n) {
+    for (const auto end = minval(lhs.size(), rhs.size()); n < end; ++n) {
         const auto u = static_cast<uint8_t>(lhs[n]);
         const auto v = static_cast<uint8_t>(rhs[n]);
         if (u < v) {
@@ -135,12 +132,6 @@ private:
     auto fix_root(TreeCursor &c) -> Status;
     auto fix_nonroot(TreeCursor &c, Node &parent, uint32_t index) -> Status;
 
-    struct KeyScratch {
-        char *buf;
-        size_t len;
-    };
-
-    auto extract_key(const Cell &cell, KeyScratch &scratch, Slice &key_out, uint32_t limit = 0) const -> Status;
     auto read_key(const Cell &cell, char *scratch, Slice *key_out, uint32_t limit = 0) const -> Status;
     auto read_value(const Cell &cell, char *scratch, Slice *value_out) const -> Status;
     auto overwrite_value(const Cell &cell, const Slice &value) -> Status;
@@ -196,9 +187,6 @@ private:
         Id pid;
         uint32_t idx;
     } m_ovfl;
-
-    // Scratch buffers for holding overflowing keys. See extract_key().
-    KeyScratch m_key_scratch[2] = {};
 
     // Scratch memory for cells that aren't embedded in nodes. Use m_cell_scratch[n] to get a pointer to
     // the start of cell scratch buffer n, where n < kNumCellBuffers.
