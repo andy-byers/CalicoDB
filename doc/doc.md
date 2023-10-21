@@ -59,17 +59,14 @@ assert(s == calicodb::Status::ok());
 
 // Create an error status.
 s = calicodb::Status::io_error();
-s = calicodb::Status::invalid_argument();
+s = calicodb::Status::invalid_argument("error message");
 s = calicodb::Status::busy(calicodb::Status::kRetry); // Equivalent to Status::retry()
 
 // Check the status type.
 if (s.is_ok()) {
-    assert(s.code() == Status::kOK);
-} else if (s.is_io_error()) {
-    assert(s.code() == Status::kIOError);
-} else if (s.is_retry()) {
-    assert(s.code() == Status::kBusy);
-    assert(s.subcode() == Status::kRetry);
+    // ...
+} else if (s.is_invalid_argument()) {
+    // ...
 }
 
 // A human-readable C-style string representing the status can be accessed with:
