@@ -251,14 +251,13 @@ calicodb::Bucket *b3 = nullptr;
 s = b2->create_bucket_if_missing("nest", &b3);
 assert(s.is_ok());
 
-// Parent bucket can be closed now. It isn't needed for working with b3.
-delete b2;
-
 // Remove the nested bucket. If the removed bucket itself contains any 
 // buckets, those buckets are removed as well. Note that we can access 
-// the records and sub-buckets in "nest" through b2 until it is delete'd.
-s = b.drop_bucket("nest");
+// the records and sub-buckets in "nest" through b3 until it is delete'd.
+s = b2->drop_bucket("nest");
 assert(s.is_ok());
+
+delete b2;
 
 // Close the last (and only) handle to "nest". Since it has been dropped
 // already, its pages are recycled now.
