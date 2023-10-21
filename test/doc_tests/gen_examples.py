@@ -9,7 +9,7 @@ import re
 CODE_BLOCK_RE = re.compile(r'```(\S+)\n([\s\S]*?)\n```')
 
 SOURCE_LAYOUT = '''
-#include <cstdio>
+#include <iostream>
 {}
 int main() {{
 {} 

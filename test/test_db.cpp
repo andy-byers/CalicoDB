@@ -710,6 +710,40 @@ TEST_F(DBTests, VacuumEmptyDB)
     } while (change_options(true));
 }
 
+TEST_F(DBTests, MultipleBucketReferences)
+{
+    ASSERT_OK(m_db->update([](auto &tx) {
+        TestBucket b1, b2, b3;
+        EXPECT_OK(test_create_and_open_bucket(tx, "b", b1));
+        EXPECT_OK(test_create_and_open_bucket(tx, "b", b2));
+        EXPECT_OK(test_create_and_open_bucket(tx, "b", b3));
+        // Pages in b will be recycled once b1, b2, and b3 are destroyed.
+        EXPECT_OK(tx.main_bucket().drop_bucket("b"));
+
+        EXPECT_OK(b1->put("key", "value"));
+        EXPECT_OK(b1->put("key2", "value"));
+        b1.reset();
+
+        auto c2 = test_new_cursor(*b2);
+        c2->find("key");
+        for (int i = 0; i < 2; ++i) {
+            EXPECT_TRUE(c2->is_valid());
+            EXPECT_EQ(c2->key(), "key");
+            EXPECT_EQ(c2->value(), "value");
+            // Causes c2 to be saved.
+            EXPECT_OK(b3->erase("key"));
+        }
+        b2.reset();
+        c2.reset();
+
+        std::string value;
+        EXPECT_OK(b3->get("key2", &value));
+        EXPECT_EQ(value, "value");
+        b3.reset();
+        return tx.vacuum();
+    }));
+}
+
 TEST_F(DBTests, AutoCheckpoint)
 {
     static constexpr size_t kN = 1'000;
@@ -1409,6 +1443,35 @@ protected:
 TEST_F(DBOpenTests, HandlesEmptyFilename)
 {
     ASSERT_NOK(DB::open(Options(), "", m_db));
+}
+
+TEST_F(DBOpenTests, a)
+{
+    AllocatorConfig al = {
+        std::malloc,
+        std::realloc,
+        std::free,
+    };
+    ASSERT_OK(configure(kSetAllocator, &al));
+
+    Options options;
+    options.temp_database = true;
+    ASSERT_OK(DB::open(options, "", m_db));
+    ASSERT_OK(m_db->update([](auto &tx) {
+        auto &b = tx.main_bucket();
+        for (size_t i = 0; i < 10'000'000; ++i) {
+            EXPECT_OK(b.put(numeric_key(i), numeric_key(i)));
+        }
+        return Status::ok();
+    }));
+
+    //    std::map<std::string, std::string> map;
+    //    for (size_t i = 0; i < 100'000; ++i) {
+    //        map.insert_or_assign(numeric_key(i), numeric_key(i));
+    //    }
+
+    delete m_db;
+    m_db = nullptr;
 }
 
 TEST_F(DBOpenTests, CreatesMissingDb)

@@ -222,25 +222,25 @@ TEST_F(TreeTests, RecordsAreErased)
 
 TEST_F(TreeTests, HandlesLargePayloads)
 {
-    ASSERT_OK(m_tree->put(tree_cursor_cast(*m_c), make_long_key('a'), "1", false));
-    ASSERT_OK(m_tree->put(tree_cursor_cast(*m_c), "b", make_value('2', true), false));
-    ASSERT_OK(m_tree->put(tree_cursor_cast(*m_c), make_long_key('c'), make_value('3', true), false));
+    ASSERT_OK(m_tree->put(tree_cursor_cast(*m_c), make_long_key('1'), "1", false));
+    ASSERT_OK(m_tree->put(tree_cursor_cast(*m_c), "2", make_value('2', true), false));
+    ASSERT_OK(m_tree->put(tree_cursor_cast(*m_c), make_long_key('3'), make_value('3', true), false));
 
-    m_c->find(make_long_key('a'));
+    m_c->find(make_long_key('1'));
     ASSERT_TRUE(m_c->is_valid());
     ASSERT_EQ(m_c->value(), "1");
-    m_c->find("b");
+    m_c->find("2");
     ASSERT_TRUE(m_c->is_valid());
     ASSERT_EQ(m_c->value(), make_value('2', true));
-    m_c->find(make_long_key('c'));
+    m_c->find(make_long_key('3'));
     ASSERT_TRUE(m_c->is_valid());
     ASSERT_EQ(m_c->value(), make_value('3', true));
 
-    m_c->find(make_long_key('a'));
+    m_c->find(make_long_key('1'));
     ASSERT_OK(m_tree->erase(tree_cursor_cast(*m_c), false));
-    m_c->find("b");
+    m_c->find("2");
     ASSERT_OK(m_tree->erase(tree_cursor_cast(*m_c), false));
-    m_c->find(make_long_key('c'));
+    m_c->find(make_long_key('3'));
     ASSERT_OK(m_tree->erase(tree_cursor_cast(*m_c), false));
 }
 
@@ -252,7 +252,10 @@ TEST_F(TreeTests, LongVsShortKeys)
         ASSERT_OK(m_tree->put(tree_cursor_cast(*m_c), std::string(actual_key_len, 'a'), make_value('1', true), false));
         ASSERT_OK(m_tree->put(tree_cursor_cast(*m_c), std::string(actual_key_len, 'b'), make_value('2', true), false));
         ASSERT_OK(m_tree->put(tree_cursor_cast(*m_c), std::string(actual_key_len, 'c'), make_value('3', true), false));
-
+        String st;
+        ASSERT_OK(m_tree->print_nodes(st));
+        std::cerr << i << ":\n"
+                  << st.c_str() << '\n';
         m_c->seek(std::string(search_key_len, i == 0 ? 'A' : 'a'));
         ASSERT_TRUE(m_c->is_valid());
         ASSERT_EQ(std::string(actual_key_len, 'a'), m_c->key());
@@ -327,8 +330,8 @@ TEST_F(TreeTests, ResolvesOverflowsOnLeftmostPosition2)
 {
     for (size_t i = 0; i < 100; ++i) {
         ASSERT_OK(m_tree->put(tree_cursor_cast(*m_c), make_long_key(99 - i), make_value('*', true), false));
+        validate();
     }
-    validate();
 }
 
 TEST_F(TreeTests, ResolvesOverflowsOnRightmostPosition1)
@@ -636,6 +639,65 @@ INSTANTIATE_TEST_SUITE_P(
         0b01,
         0b10,
         0b11));
+
+class RemoteComparisonTests
+    : public TreeTestHarness,
+      public testing::TestWithParam<uint32_t>
+{
+public:
+    auto SetUp() -> void override
+    {
+        open();
+    }
+
+    auto TearDown() -> void override
+    {
+        close();
+    }
+
+    auto random_write(size_t k) -> void
+    {
+        // The part of the key necessary to determine ordering relationships may be located on
+        // an overflow page.
+        const auto prefix_size = m_random.Next(0, 64) + m_base_size;
+        auto key = std::string(prefix_size, '0') + numeric_key(k);
+        EXPECT_OK(m_tree->put(tree_cursor_cast(*m_c), key, key, false));
+        m_keys.push_back(std::move(key));
+    }
+
+    auto check_records() -> void
+    {
+        for (const auto &key : m_keys) {
+            m_c->find(key);
+            ASSERT_TRUE(m_c->is_valid());
+            ASSERT_EQ(m_c->key(), key);
+            ASSERT_EQ(m_c->value(), key);
+        }
+    }
+
+    const size_t m_base_size = GetParam();
+    std::vector<std::string> m_keys;
+    RandomGenerator m_random;
+};
+
+TEST_P(RemoteComparisonTests, Comparisons)
+{
+    for (size_t i = 0; i < 1'024; ++i) {
+        random_write(i);
+    }
+    validate();
+    check_records();
+}
+
+INSTANTIATE_TEST_SUITE_P(
+    SmallerThanPage,
+    RemoteComparisonTests,
+    ::testing::Range(1U, TEST_PAGE_SIZE, 16));
+
+INSTANTIATE_TEST_SUITE_P(
+    LargerThanPage,
+    RemoteComparisonTests,
+    ::testing::Range(TEST_PAGE_SIZE / 2, TEST_PAGE_SIZE * 2, 32));
 
 class EmptyTreeCursorTests : public TreeTests
 {

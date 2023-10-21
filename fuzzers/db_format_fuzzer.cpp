@@ -65,7 +65,14 @@ public:
                     // Copy all records from b1 to b2.
                     c1->seek_last();
                     while (c1->is_valid() && s.is_ok()) {
-                        s = b2->put(c1->key(), c1->value());
+                        if (c1->is_bucket()) {
+                            s = b2->create_bucket_if_missing(c1->key(), nullptr);
+                        } else {
+                            s = b2->put(c1->key(), c1->value());
+                        }
+                        if (s.is_incompatible_value()) {
+                            s = Status::ok();
+                        }
                         if (s.is_ok()) {
                             c1->previous();
                         }
@@ -74,10 +81,15 @@ public:
                         s = c1->status();
                     }
                     if (s.is_ok()) {
-                        // Copy reverse mapping from b2 to b1.
+                        // Copy reverse record mapping from b2 to b1.
                         c2->seek_first();
                         while (c2->is_valid() && s.is_ok()) {
-                            s = b1->put(c2->value(), c2->key());
+                            if (!c2->is_bucket()) {
+                                s = b1->put(c2->value(), c2->key());
+                            }
+                            if (s.is_incompatible_value()) {
+                                s = Status::ok();
+                            }
                             c2->next();
                         }
                         if (s.is_ok()) {
@@ -86,7 +98,10 @@ public:
                         // Erase some records from b2.
                         c2->seek_first();
                         while (c2->is_valid() && s.is_ok()) {
-                            if (c2->key() < c2->value()) {
+                            if (c2->is_bucket()) {
+                                s = b2->drop_bucket(c2->key());
+                                CHECK_TRUE(s == c2->status());
+                            } else if (c2->key() < c2->value()) {
                                 s = b2->erase(*c2);
                                 CHECK_TRUE(s == c2->status());
                             } else {

@@ -15,17 +15,13 @@ namespace calicodb
 // Every heap-allocated object that CalicoDB uses must ultimately come from a call to either
 // Mem::allocate() or Mem::reallocate(), and eventually be passed back to
 // Mem::deallocate(). Differences between these routines and std::malloc(), std::realloc(),
-// and std::free() are detailed here and below. The main difference is that a nonnull low-
-// address pointer is returned from Mem::allocate(0) and Mem::reallocate(..., 0). This
-// pointer must not be dereferenced, or passed to library functions that expect a valid
-// pointer (like std::memcpy()). It can, however, be reallocated and/or freed. See
-// https://yarchive.net/comp/linux/malloc_0.html for more details.
+// and std::free() are detailed below.
 class Mem
 {
 public:
     // Calls the registered memory allocation function, which defaults to std::malloc()
     // Guarantees that allocate(0), the result of which is implementation-defined for
-    // std::malloc(), returns a pointer to a zero-sized allocation with no side effects.
+    // std::malloc(), returns nullptr with no side effects.
     // Source: https://en.cppreference.com/w/c/memory/malloc
     [[nodiscard]] static auto allocate(size_t len) -> void *;
 
@@ -33,10 +29,10 @@ public:
     // Defines behavior for the following two cases, which are implementation-defined for
     // std::realloc():
     //
-    //      Pattern                | Return                | Side effects
-    //     ------------------------|-----------------------|--------------
-    //      reallocate(nullptr, 0) | Zero-sized allocation | None
-    //      reallocate(ptr, 0)     | Zero-sized allocation | ptr is freed
+    //      Pattern                | Return  | Side effects
+    //     ------------------------|---------|--------------
+    //      reallocate(nullptr, 0) | nullptr | None
+    //      reallocate(ptr, 0)     | nullptr | ptr is freed
     //
     // Source: https://en.cppreference.com/w/c/memory/realloc
     [[nodiscard]] static auto reallocate(void *ptr, size_t len) -> void *;
@@ -48,8 +44,7 @@ public:
     [[nodiscard]] static auto new_object(Args &&...args) -> Object *
     {
         Object *object;
-        // NOTE: This probably won't work for types that require a stricter alignment than
-        //       alignof(uint64_t).
+        static_assert(alignof(Object) <= alignof(void *));
         if (auto *storage = allocate(sizeof(Object))) {
             object = new (storage) Object(forward<Args &&>(args)...);
         } else {

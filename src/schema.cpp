@@ -21,22 +21,8 @@ Schema::Schema(Pager &pager, Stats &stat)
 
 Schema::~Schema()
 {
-    // Tree destructor asserts that the refcount is 0 to help catch leaked buckets.
+    // Tree destructor asserts that the refcount is 0 to catch leaked bucket handles.
     m_main.m_refcount = 0;
-}
-
-auto Schema::find_parent_id(Id root_id, Id &parent_id_out) -> Status
-{
-    PointerMap::Entry entry;
-    auto s = PointerMap::read_entry(*m_pager, root_id, entry);
-    if (s.is_ok()) {
-        if (entry.type != kTreeNode &&
-            entry.type != kTreeRoot) {
-            return Status::corruption();
-        }
-        parent_id_out = entry.back_ptr;
-    }
-    return s;
 }
 
 auto Schema::close_trees() -> void

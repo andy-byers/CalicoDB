@@ -14,10 +14,7 @@ namespace calicodb
 
 class Fuzzer
 {
-    static constexpr const char *kBucketNames[] = {"A", "B", "C", "D",
-                                                   "E", "F", "G", "H",
-                                                   "I", "J", "K", "L"};
-    static constexpr auto kMaxBuckets = ARRAY_SIZE(kBucketNames);
+    static constexpr auto kMaxBuckets = 16;
 
     Options m_options;
     DB *m_db = nullptr;

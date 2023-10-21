@@ -24,7 +24,7 @@ namespace
 #define ATOMIC_STORE(p, v) __atomic_store_n(p, v, __ATOMIC_RELAXED)
 
 #if defined(__clang__) && !defined(NO_TSAN)
-#define NO_TSAN __attribute__((no_sanitize_thread))
+#define NO_TSAN __attribute((no_sanitize_thread))
 #else
 #define NO_TSAN
 #endif
