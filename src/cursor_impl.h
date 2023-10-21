@@ -39,7 +39,7 @@ public:
 
     auto check_integrity() const -> Status
     {
-        return m_c.m_tree->check_integrity();
+        return m_c.tree().check_integrity();
     }
 
     auto TEST_check_state() const -> void;

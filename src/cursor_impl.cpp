@@ -17,9 +17,9 @@ CursorImpl::CursorImpl(Tree &tree)
 
 CursorImpl::~CursorImpl() = default;
 
-auto CursorImpl::is_bucket() const -> bool
+auto CursorImpl::handle() -> void *
 {
-    return m_c.is_bucket();
+    return &m_c;
 }
 
 auto CursorImpl::is_valid() const -> bool
@@ -27,9 +27,9 @@ auto CursorImpl::is_valid() const -> bool
     return m_c.is_valid();
 }
 
-auto CursorImpl::handle() -> void *
+auto CursorImpl::is_bucket() const -> bool
 {
-    return &m_c;
+    return m_c.is_bucket();
 }
 
 auto CursorImpl::key() const -> Slice
@@ -56,19 +56,23 @@ auto CursorImpl::seek_last() -> void
 {
     m_c.activate(false);
     m_c.seek_to_last_leaf();
-    m_c.fetch_record_if_valid();
+    m_c.read_record();
 }
 
 auto CursorImpl::seek(const Slice &key) -> void
 {
     m_c.activate(false);
-    m_c.seek_to_leaf(key, true);
+    m_c.seek_to_leaf(key);
+    m_c.ensure_correct_leaf();
+    m_c.read_record();
 }
 
 auto CursorImpl::find(const Slice &key) -> void
 {
     m_c.activate(false);
-    if (!m_c.seek_to_leaf(key, true)) {
+    if (m_c.seek_to_leaf(key)) {
+        m_c.read_record();
+    } else {
         m_c.reset(m_c.status());
     }
 }
@@ -81,10 +85,12 @@ auto CursorImpl::next() -> void
     // that record must have a key that compares greater than the key the cursor was
     // saved on.
     const auto moved = m_c.activate(true);
-    if (!moved && m_c.is_valid()) {
-        m_c.move_right();
+    if (m_c.is_valid()) {
+        if (!moved) {
+            m_c.move_right();
+        }
+        m_c.read_record();
     }
-    m_c.fetch_record_if_valid();
 }
 
 auto CursorImpl::previous() -> void
@@ -93,8 +99,8 @@ auto CursorImpl::previous() -> void
     m_c.activate(true);
     if (m_c.is_valid()) {
         m_c.move_left();
+        m_c.read_record();
     }
-    m_c.fetch_record_if_valid();
 }
 
 auto CursorImpl::TEST_check_state() const -> void

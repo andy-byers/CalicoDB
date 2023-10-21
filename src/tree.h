@@ -51,7 +51,7 @@ public:
 
     explicit Tree(Pager &pager, Stats &stat, Id root_id);
 
-    auto activate_cursor(TreeCursor &target, bool requires_position) const -> bool;
+    auto activate_cursor(TreeCursor &target) const -> void;
     auto deactivate_cursors(TreeCursor *exclude) const -> void;
 
     struct Reroot {
@@ -207,9 +207,193 @@ private:
     bool m_dropped = false;
 };
 
+// Cursor over the contents of a tree
+// Each cursor contains a tree node, as well as the index of a cell in that node. Cursors also keep
+// track of the path taken from the root to their current location.
+// It is the cursor's responsibility to ensure that
 class TreeCursor
 {
-    friend class CursorImpl;
+public:
+    explicit TreeCursor(Tree &tree);
+    ~TreeCursor();
+
+    auto tree() const -> Tree &
+    {
+        return *m_tree;
+    }
+
+    auto reset(const Status &s = Status::ok()) -> void;
+
+    // When the cursor is being used to read records, this routine is used to move
+    // cursors that are one-past-the-end in a leaf node to the first position in
+    // the right sibling node.
+    auto ensure_correct_leaf() -> void;
+
+    auto seek_to_leaf(const Slice &key) -> bool;
+    auto seek_to_last_leaf() -> void;
+    auto move_right() -> void;
+    auto move_left() -> void;
+    auto read_record() -> void;
+
+    // Called by CursorImpl. If the cursor is saved, then m_cell.is_bucket contains the bucket flag
+    // for the record that the cursor is saved on. Note, however, that the bucket root ID cannot
+    // be read until the cursor position is loaded.
+    [[nodiscard]] auto is_bucket() const -> bool
+    {
+        CALICODB_EXPECT_TRUE(is_valid());
+        return m_cell.is_bucket;
+    }
+
+    [[nodiscard]] auto page_id() const -> Id
+    {
+        CALICODB_EXPECT_TRUE(has_valid_position(false));
+        return m_node.page_id();
+    }
+
+    [[nodiscard]] auto bucket_root_id() const -> Id
+    {
+        CALICODB_EXPECT_TRUE(has_valid_position(true));
+        return read_bucket_root_id(m_cell);
+    }
+
+    enum ReleaseType {
+        kCurrentLevel,
+        kAllLevels,
+    };
+
+    auto release_nodes(ReleaseType type) -> void;
+    auto key() const -> Slice;
+    auto value() const -> Slice;
+
+    [[nodiscard]] auto handle() -> void *
+    {
+        return this;
+    }
+
+    [[nodiscard]] auto is_valid() const -> bool
+    {
+        return has_valid_position(true) || m_state == kSaved;
+    }
+
+    auto status() const -> Status
+    {
+        return m_status;
+    }
+
+    auto activate(bool load) -> bool
+    {
+        m_tree->activate_cursor(*this);
+        return load && ensure_position_loaded();
+    }
+
+    auto assert_state() const -> bool;
+
+    auto TEST_tree() -> Tree &
+    {
+        return *m_tree;
+    }
+
+private:
+    [[nodiscard]] auto has_valid_position(bool on_record = false) const -> bool
+    {
+        if (!m_status.is_ok() || !m_node.ref) {
+            return false;
+        } else if (on_record) {
+            return m_idx < m_node.cell_count();
+        }
+        return true;
+    }
+
+    auto save_position() -> void
+    {
+        if (m_state == kHasRecord) {
+            m_state = kSaved;
+        }
+        release_nodes(kAllLevels);
+    }
+
+    // Seek back to the saved position
+    // Return true if the cursor is on a different record, false otherwise. May set
+    // the cursor status.
+    auto ensure_position_loaded() -> bool;
+
+    // Move the cursor to the root node of the tree
+    // This routine is called right before a root-to-leaf traversal is performed.
+    // When a cursor is accessed by a user, it must always be positioned on a valid
+    // record in a leaf node. This means that the caller of this function is
+    // responsible for either moving the cursor to a leaf node, or invalidating it.
+    auto seek_to_root() -> void;
+
+    // Move the cursor to the record with a key that is greater than or equal to the
+    // given `key` in the current node
+    // Returns true if a record with the search key is found, false otherwise.
+    auto search_node(const Slice &key) -> bool;
+
+    auto read_user_key() -> Status;
+    auto read_user_value() -> Status;
+
+    auto handle_split_root(Node child) -> void
+    {
+        static constexpr auto kNumSlots = ARRAY_SIZE(m_node_path);
+        CALICODB_EXPECT_EQ(m_node.page_id(), m_tree->root());
+        CALICODB_EXPECT_EQ(m_node_path[0].ref, nullptr);             // m_node goes here
+        CALICODB_EXPECT_EQ(m_node_path[kNumSlots - 1].ref, nullptr); // Overwrite this slot
+        CALICODB_EXPECT_EQ(m_level, 0);
+        // Shift the node and index paths to make room for the new level. Nodes are not trivially
+        // copiable.
+        for (size_t i = 1; i < kNumSlots; ++i) {
+            m_node_path[kNumSlots - i] = move(m_node_path[kNumSlots - i - 1]);
+        }
+        std::memmove(m_idx_path + 1, m_idx_path,
+                     (kNumSlots - 1) * sizeof *m_idx_path);
+        assign_child(move(child));
+        // Root is empty until split_nonroot() is called.
+        m_idx_path[0] = 0;
+    }
+
+    auto handle_merge_root() -> void
+    {
+        // m_node is the root node. It always belongs at m_node_path[0]. The node in
+        // m_node_path[1] was destroyed.
+        CALICODB_EXPECT_EQ(m_node.page_id(), m_tree->root());
+        CALICODB_EXPECT_EQ(m_node_path[0].ref, nullptr); // m_node goes here
+        CALICODB_EXPECT_EQ(m_node_path[1].ref, nullptr); // Overwrite this slot
+        CALICODB_EXPECT_EQ(m_level, 0);
+        static constexpr auto kNumSlots = ARRAY_SIZE(m_node_path);
+        for (size_t i = 0; i < kNumSlots - 1; ++i) {
+            m_node_path[i] = move(m_node_path[i + 1]);
+        }
+        std::memmove(m_idx_path, m_idx_path + 1,
+                     (kNumSlots - 1) * sizeof *m_idx_path);
+        m_idx = m_idx_path[0];
+    }
+
+    // Prepare to modify the current record
+    // If the cursor is saved, then it is moved back to where it was when save_position() was called.
+    // Returns true if the cursor is in a different position than it was before, false otherwise.
+    [[nodiscard]] auto start_write() -> bool;
+
+    // Prepare to insert a new record
+    // Seeks the cursor to where the new record should go. Returns true if a record with the given
+    // `key` already exists, false otherwise.
+    [[nodiscard]] auto start_write(const Slice &key) -> bool;
+
+    // Finish a write operation
+    // Must be called once after start_write() has been called. If the cursor was used to perform
+    // splits and/or merges on the tree, then it will not be left on a leaf node. This is a problem,
+    // since users of TreeCursor expect that cursors will either be invalid, saved, or on a leaf.
+    // This routine moves the cursor back down to the leaf node that it belongs in. The tree
+    // rebalancing methods fix the cursor history path as necessary, so all this method has to do
+    // is follow the m_node_path/m_idx_path path back down.
+    auto finish_write(Status &s) -> void;
+
+    auto move_to_parent(bool preserve_path) -> void;
+    auto move_to_child(Id child_id) -> void;
+    auto assign_child(Node child) -> void;
+
+    auto read_current_cell() -> void;
+    [[nodiscard]] auto on_last_node() const -> bool;
+
     friend class InorderTraversal;
     friend class Tree;
     friend class TreeValidator;
@@ -236,175 +420,11 @@ class TreeCursor
     Slice m_key;
     Slice m_value;
 
-    enum State {
-        kInvalidState,
-        kSavedState,
-        kValidState,
-    } m_state = kInvalidState;
-
-    auto save_position() -> void
-    {
-        if (m_state == kValidState && on_record()) {
-            m_state = kSavedState;
-        }
-        release_nodes(kAllLevels);
-    }
-
-    auto activate(bool write) -> bool
-    {
-        return m_tree->activate_cursor(*this, write);
-    }
-
-    // Seek back to the saved position
-    // Return true if the cursor is on a different record, false otherwise. May set
-    // the cursor status.
-    auto ensure_position_loaded() -> bool;
-
-    // When the cursor is being used to read records, this routine is used to move
-    // cursors that are one-past-the-end in a leaf node to the first position in
-    // the right sibling node.
-    auto ensure_correct_leaf() -> void;
-
-    auto seek_to_root() -> void;
-    auto search_node(const Slice &key) -> bool;
-
-    [[nodiscard]] auto start_write() -> bool;
-    [[nodiscard]] auto start_write(const Slice &key, bool is_erase) -> bool;
-    auto finish_write(Status &s) -> void;
-
-    auto read_user_key() -> Status;
-    auto read_user_value() -> Status;
-
-public:
-    explicit TreeCursor(Tree &tree);
-    ~TreeCursor();
-
-    auto tree() const -> Tree &
-    {
-        return *m_tree;
-    }
-
-    auto reset(const Status &s = Status::ok()) -> void;
-
-    auto handle_split_root(Node child) -> void
-    {
-        static constexpr auto kNumSlots = ARRAY_SIZE(m_node_path);
-        CALICODB_EXPECT_EQ(m_node.page_id(), m_tree->root());
-        CALICODB_EXPECT_EQ(m_node_path[0].ref, nullptr);             // m_node goes here
-        CALICODB_EXPECT_EQ(m_node_path[kNumSlots - 1].ref, nullptr); // Overwrite this slot
-        CALICODB_EXPECT_EQ(m_level, 0);
-        // Shift the node and index paths to make room for the new level. Nodes are not trivially
-        // copiable.
-        for (size_t i = 1; i < kNumSlots; ++i) {
-            m_node_path[kNumSlots - i] = move(m_node_path[kNumSlots - i - 1]);
-        }
-        std::memmove(m_idx_path + 1, m_idx_path,
-                     (kNumSlots - 1) * sizeof *m_idx_path);
-        assign_child(move(child));
-        // Root is empty until split_nonroot() is called
-        m_idx_path[0] = 0;
-    }
-
-    auto handle_merge_root() -> void
-    {
-        // m_node is the root node. It always belongs at m_node_path[0]. The node in
-        // m_node_path[1] was destroyed.
-        CALICODB_EXPECT_EQ(m_node.page_id(), m_tree->root());
-        CALICODB_EXPECT_EQ(m_node_path[0].ref, nullptr); // m_node goes here
-        CALICODB_EXPECT_EQ(m_node_path[1].ref, nullptr); // Overwrite this slot
-        CALICODB_EXPECT_EQ(m_level, 0);
-        static constexpr auto kNumSlots = ARRAY_SIZE(m_node_path);
-        for (size_t i = 0; i < kNumSlots - 1; ++i) {
-            m_node_path[i] = move(m_node_path[i + 1]);
-        }
-        std::memmove(m_idx_path, m_idx_path + 1,
-                     (kNumSlots - 1) * sizeof *m_idx_path);
-        m_idx = m_idx_path[0];
-    }
-
-    auto seek_to_leaf(const Slice &key, bool read_payload) -> bool;
-    auto seek_to_last_leaf() -> void;
-    auto move_right() -> void;
-    auto move_left() -> void;
-    auto move_to_parent(bool preserve_path) -> void;
-    auto move_to_child(Id child_id) -> void;
-    auto assign_child(Node child) -> void;
-
-    auto fetch_record_if_valid() -> void;
-    auto fetch_user_payload() -> Status;
-    [[nodiscard]] auto on_last_node() const -> bool;
-
-    // Return true if the cursor is positioned on a valid node, false otherwise
-    [[nodiscard]] auto on_node() const -> bool
-    {
-        return m_status.is_ok() && m_node.ref != nullptr;
-    }
-
-    // Return true if the cursor is positioned on a valid key, false otherwise
-    [[nodiscard]] auto on_record() const -> bool
-    {
-        return on_node() && m_idx < m_node.cell_count();
-    }
-
-    // Called by CursorImpl. If the cursor is saved, then m_cell.is_bucket contains the bucket flag
-    // for the record that the cursor is saved on. Note, however, that the bucket root ID cannot
-    // be read until the cursor position is loaded.
-    [[nodiscard]] auto is_bucket() const -> bool
-    {
-        CALICODB_EXPECT_TRUE(is_valid());
-        return m_cell.is_bucket;
-    }
-
-    [[nodiscard]] auto page_id() const -> Id
-    {
-        CALICODB_EXPECT_TRUE(on_node());
-        return m_node.page_id();
-    }
-
-    [[nodiscard]] auto bucket_root_id() const -> Id
-    {
-        CALICODB_EXPECT_TRUE(is_bucket());
-        CALICODB_EXPECT_EQ(m_state, kValidState);
-        return read_bucket_root_id(m_cell);
-    }
-
-    auto overwrite_bucket_root_id(Id root_id) -> void
-    {
-        CALICODB_EXPECT_TRUE(is_bucket());
-        CALICODB_EXPECT_EQ(m_state, kValidState);
-        write_bucket_root_id(m_cell, root_id);
-    }
-
-    enum ReleaseType {
-        kCurrentLevel,
-        kAllLevels,
-    };
-
-    auto release_nodes(ReleaseType type) -> void;
-    auto key() const -> Slice;
-    auto value() const -> Slice;
-
-    [[nodiscard]] auto handle() -> void *
-    {
-        return this;
-    }
-
-    [[nodiscard]] auto is_valid() const -> bool
-    {
-        return on_record() || m_state == kSavedState;
-    }
-
-    auto status() const -> Status
-    {
-        return m_status;
-    }
-
-    auto assert_state() const -> bool;
-
-    auto TEST_tree() -> Tree &
-    {
-        return *m_tree;
-    }
+    enum {
+        kFloating,
+        kHasRecord,
+        kSaved,
+    } m_state = kFloating;
 };
 
 } // namespace calicodb

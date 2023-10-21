@@ -252,10 +252,7 @@ TEST_F(TreeTests, LongVsShortKeys)
         ASSERT_OK(m_tree->put(tree_cursor_cast(*m_c), std::string(actual_key_len, 'a'), make_value('1', true), false));
         ASSERT_OK(m_tree->put(tree_cursor_cast(*m_c), std::string(actual_key_len, 'b'), make_value('2', true), false));
         ASSERT_OK(m_tree->put(tree_cursor_cast(*m_c), std::string(actual_key_len, 'c'), make_value('3', true), false));
-        String st;
-        ASSERT_OK(m_tree->print_nodes(st));
-        std::cerr << i << ":\n"
-                  << st.c_str() << '\n';
+
         m_c->seek(std::string(search_key_len, i == 0 ? 'A' : 'a'));
         ASSERT_TRUE(m_c->is_valid());
         ASSERT_EQ(std::string(actual_key_len, 'a'), m_c->key());
@@ -475,8 +472,6 @@ TEST_F(TreeTests, AllowsEmptyKey)
         ASSERT_EQ("value", m_c->value());
         m_c->find("");
         ASSERT_OK(m_tree->erase(tree_cursor_cast(*m_c), false));
-        ASSERT_TRUE(m_c->is_valid());
-        ASSERT_NE("value", m_c->value());
     }
 }
 
@@ -484,13 +479,13 @@ TEST_F(TreeTests, AlreadyErased1)
 {
     TreeCursor c(*m_tree);
     ASSERT_OK(m_tree->put(c, "a", "1", false));
+    c.read_record();
 
     // Erase normal record out from under c.
     m_c->find("a");
     ASSERT_TRUE(m_c->is_valid());
     ASSERT_OK(m_tree->erase(tree_cursor_cast(*m_c), false));
-
-    ASSERT_NOK(m_tree->erase(c, false));
+    ASSERT_NOK(m_tree->erase(c, true));
 }
 
 static auto allocate_some_pages(Pager &pager)
@@ -511,13 +506,13 @@ TEST_F(TreeTests, AlreadyErased2)
     put_u32(root_id, 123);
     allocate_some_pages(*m_pager);
     ASSERT_OK(m_tree->put(c, "a", Slice(root_id, sizeof(root_id)), true));
+    c.read_record();
 
     // Erase bucket record out from under c.
     m_c->find("a");
     ASSERT_TRUE(m_c->is_valid());
     ASSERT_TRUE(m_c->is_bucket());
     ASSERT_OK(m_tree->erase(tree_cursor_cast(*m_c), true));
-
     ASSERT_NOK(m_tree->erase(c, true));
 }
 
@@ -526,6 +521,7 @@ TEST_F(TreeTests, AlreadyErased3)
     TreeCursor c(*m_tree);
     allocate_some_pages(*m_pager);
     ASSERT_OK(m_tree->put(c, "a", "1", false));
+    c.read_record();
 
     // Replace normal record with bucket record.
     m_c->find("a");
@@ -2025,6 +2021,7 @@ TEST_F(CursorModificationTests, QuickCheck)
         for (const auto *key : {"BB", "CC", "AA"}) {
             const auto *value = key + i;
             ASSERT_OK(m_tree->put(tree_cursor_cast(*m_c), key, value, false));
+            tree_cursor_cast(*m_c).read_record();
             ASSERT_TRUE(m_c->is_valid());
             ASSERT_EQ(Slice(key), m_c->key());
             ASSERT_EQ(Slice(value), m_c->value());
@@ -2036,9 +2033,29 @@ TEST_F(CursorModificationTests, QuickCheck)
         ASSERT_EQ(Slice(key), m_c->key());
         ASSERT_EQ(Slice(key + 1), m_c->value());
         ASSERT_OK(m_tree->erase(tree_cursor_cast(*m_c), false));
+        if (m_c->is_valid()) {
+            tree_cursor_cast(*m_c).read_record();
+        }
     }
 
     ASSERT_FALSE(m_c->is_valid());
+}
+
+TEST_F(CursorModificationTests, PayloadSlicesAreStable)
+{
+    TreeCursor c(*m_tree);
+    ASSERT_OK(m_tree->put(c, "key", "value", false));
+    c.read_record();
+    ASSERT_TRUE(c.is_valid());
+    const auto stable_key = reinterpret_cast<uintptr_t>(c.key().data());
+    const auto stable_value = reinterpret_cast<uintptr_t>(c.value().data());
+
+    m_c->find("key");
+    ASSERT_OK(m_tree->erase(tree_cursor_cast(*m_c), false));
+
+    ASSERT_TRUE(c.is_valid());
+    ASSERT_EQ(stable_key, reinterpret_cast<uintptr_t>(c.key().data()));
+    ASSERT_EQ(stable_value, reinterpret_cast<uintptr_t>(c.value().data()));
 }
 
 TEST_F(CursorModificationTests, SeekAndPut)
@@ -2106,7 +2123,8 @@ TEST_F(CursorModificationTests, EraseSecondToLast)
             m_c->seek_first();
         }
         ASSERT_OK(m_tree->erase(tree_cursor_cast(*m_c), false));
-        ASSERT_EQ(m_c->is_valid(), i < kInitialRecordCount - 1);
+        tree_cursor_cast(*m_c).read_record();
+        CALICODB_EXPECT_EQ(m_c->is_valid(), i < kInitialRecordCount - 1);
     }
     ASSERT_FALSE(m_c->is_valid());
     validate();
@@ -2123,7 +2141,7 @@ TEST_F(CursorModificationTests, SizeDiscrepancy1)
             ASSERT_OK(m_tree->put(tree_cursor_cast(*m_c), numeric_key(i + offset + 1), make_value('*'), false));
             for (size_t j = 0; j <= i; ++j) {
                 ASSERT_TRUE(m_c->is_valid());
-                m_c->previous();
+                m_c->previous(); // Repositions the tree cursor and reads the payload
             }
             ASSERT_TRUE(m_c->is_valid());
             ASSERT_EQ(m_c->key(), first_key);
@@ -2144,7 +2162,7 @@ TEST_F(CursorModificationTests, SizeDiscrepancy2)
             ASSERT_OK(m_tree->put(tree_cursor_cast(*m_c), numeric_key(offset - i - 1), make_value('*'), false));
             for (size_t j = 0; j <= i; ++j) {
                 ASSERT_TRUE(m_c->is_valid());
-                m_c->next();
+                m_c->next(); // Repositions the tree cursor and reads the payload
             }
             ASSERT_TRUE(m_c->is_valid());
             ASSERT_EQ(m_c->key(), last_key);

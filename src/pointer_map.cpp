@@ -60,8 +60,7 @@ auto PointerMap::read_entry(Pager &pager, Id page_id, Entry &entry_out) -> Statu
     if (s.is_ok()) {
         entry_out = decode_entry(map->data + offset);
         pager.release(map);
-        if (entry_out.type == kInvalidPage ||
-            entry_out.type >= kPageTypeCount) {
+        if (entry_out.type == kInvalidPage || entry_out.type >= kPageTypeCount) {
             s = StatusBuilder::corruption("pointer map page type %u is invalid",
                                           entry_out.type);
         }
