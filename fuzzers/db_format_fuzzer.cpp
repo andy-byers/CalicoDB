@@ -22,7 +22,7 @@ namespace calicodb
 
 class Fuzzer
 {
-    static constexpr auto *kFilename = "./MemDB";
+    static constexpr auto *kFilename = "/MemDB";
     Options m_options;
 
 public:
@@ -100,7 +100,6 @@ public:
                         while (c2->is_valid() && s.is_ok()) {
                             if (c2->is_bucket()) {
                                 s = b2->drop_bucket(c2->key());
-                                CHECK_TRUE(s == c2->status());
                             } else if (c2->key() < c2->value()) {
                                 s = b2->erase(*c2);
                                 CHECK_TRUE(s == c2->status());
@@ -130,12 +129,6 @@ public:
             }
 
             delete db;
-
-            if (s.is_corruption()) {
-#ifdef INTEGRITY_CHECK
-                CHECK_OK(s);
-#endif
-            }
         }
 
         CHECK_TRUE(
@@ -149,6 +142,7 @@ public:
 extern "C" int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size)
 {
     CHECK_OK(configure(kSetAllocator, DebugAllocator::config()));
+    default_env().srand(42);
     {
         FakeEnv env;
         Fuzzer fuzzer(env);

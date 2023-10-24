@@ -512,13 +512,13 @@ Node::Options::Options(uint32_t page_size, char *scratch)
 
 auto Node::from_existing_page(const Options &options, PageRef &page, Node &node_out) -> int
 {
-    const auto max_cell_count = MAX_CELL_COUNT(options.total_space);
     const auto hdr_offset = page_offset(page.page_id);
     const auto *hdr = page.data + hdr_offset;
     const auto type = NodeHdr::get_type(hdr);
     if (type == NodeHdr::kInvalid) {
         return -1;
     }
+    const auto max_cell_count = MAX_CELL_COUNT(options.total_space);
     const auto ncells = NodeHdr::get_cell_count(hdr);
     if (ncells > max_cell_count) {
         return -1;

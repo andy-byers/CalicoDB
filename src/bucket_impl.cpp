@@ -13,7 +13,7 @@ namespace calicodb
 namespace
 {
 
-auto no_bucket(const Status &s) -> Status
+auto error_or_no_bucket(const Status &s) -> Status
 {
     return s.is_ok() ? Status::invalid_argument("bucket does not exist") : s;
 }
@@ -80,7 +80,7 @@ auto BucketImpl::create_bucket_impl(const Slice &key, bool error_if_exists, Buck
             if (s.is_ok()) {
                 char buf[sizeof(uint32_t)];
                 put_u32(buf, root_id.value); // Root ID encoded as record value
-                s = m_tree->put(*TREE_CURSOR(m_cursor), key, Slice(buf, sizeof(buf)), true);
+                s = m_tree->insert(*TREE_CURSOR(m_cursor), key, Slice(buf, sizeof(buf)), true);
             }
         } else if (!m_cursor.is_bucket()) {
             s = Status::incompatible_value();
@@ -106,7 +106,7 @@ auto BucketImpl::open_bucket(const Slice &key, Bucket *&b_out) const -> Status
         m_cursor.find(key);
         auto s = m_cursor.status();
         if (!m_cursor.is_valid()) {
-            return no_bucket(s);
+            return error_or_no_bucket(s);
         } else if (!m_cursor.is_bucket()) {
             return Status::incompatible_value();
         }
@@ -141,7 +141,7 @@ auto BucketImpl::drop_bucket(const Slice &key) -> Status
         m_cursor.find(key);
         auto s = m_cursor.status();
         if (!m_cursor.is_valid()) {
-            return no_bucket(s);
+            return error_or_no_bucket(s);
         } else if (!m_cursor.is_bucket()) {
             return Status::incompatible_value();
         }
@@ -194,7 +194,7 @@ auto BucketImpl::get(const Slice &key, CALICODB_STRING *value_out) const -> Stat
 auto BucketImpl::put(const Slice &key, const Slice &value) -> Status
 {
     return pager_write(m_schema->pager(), [this, key, value] {
-        return m_tree->put(*TREE_CURSOR(m_cursor), key, value, false);
+        return m_tree->insert(*TREE_CURSOR(m_cursor), key, value, false);
     });
 }
 
@@ -206,7 +206,7 @@ auto BucketImpl::put(Cursor &c, const Slice &value) -> Status
         if (c.is_valid()) {
             CALICODB_EXPECT_TRUE(s.is_ok());
             auto &t = *TREE_CURSOR(c);
-            s = m_tree->put(t, c.key(), value, false);
+            s = m_tree->modify(t, value);
             if (s.is_ok()) {
                 t.read_record();
                 s = t.status();
@@ -223,9 +223,6 @@ auto BucketImpl::erase(const Slice &key) -> Status
     return pager_write(m_schema->pager(), [this, key] {
         m_cursor.find(key);
         if (m_cursor.is_valid()) {
-            if (m_cursor.is_bucket()) {
-                return Status::incompatible_value();
-            }
             return m_tree->erase(*TREE_CURSOR(m_cursor), false);
         }
         return m_cursor.status();

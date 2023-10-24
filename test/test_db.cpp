@@ -509,6 +509,108 @@ TEST_F(DBTests, BucketBehavior)
     }));
 }
 
+TEST_F(DBTests, UseInvalidCursor)
+{
+    ASSERT_OK(m_db->update([](auto &tx) {
+        auto &b = tx.main_bucket();
+        auto c = test_new_cursor(b);
+        EXPECT_FALSE(c->is_valid());
+        EXPECT_NOK(b.put(*c, "value"));
+        EXPECT_NOK(b.erase(*c));
+        return Status::ok();
+    }));
+}
+
+TEST_F(DBTests, IncompatibleValue1)
+{
+    ASSERT_OK(m_db->update([](auto &tx) {
+        auto &b = tx.main_bucket();
+        EXPECT_OK(b.create_bucket("key", nullptr));
+        EXPECT_NOK(b.put("key", "value"));
+        EXPECT_NOK(b.get("key", nullptr));
+        auto c = test_new_cursor(b);
+        c->find("key");
+        EXPECT_TRUE(c->is_valid());
+        EXPECT_TRUE(c->is_bucket());
+        EXPECT_NOK(b.erase("key"));
+        EXPECT_NOK(b.erase(*c));
+        EXPECT_NOK(b.put(*c, "value"));
+        return Status::ok();
+    }));
+}
+
+TEST_F(DBTests, IncompatibleValue2)
+{
+    ASSERT_OK(m_db->update([](auto &tx) {
+        TestBucket t;
+        auto &b = tx.main_bucket();
+        EXPECT_OK(b.put("key", "value"));
+        EXPECT_NOK(test_create_and_open_bucket(tx, "key", t));
+        EXPECT_NOK(test_open_bucket(tx, "key", t));
+        EXPECT_NOK(b.drop_bucket("key"));
+        return Status::ok();
+    }));
+}
+
+TEST_F(DBTests, SwitchRecordTypesFromUnderCursor1)
+{
+    ASSERT_OK(m_db->update([](auto &tx) {
+        auto &b = tx.main_bucket();
+        EXPECT_OK(b.put("key", "value"));
+        auto c1 = test_new_cursor(b);
+        auto c2 = test_new_cursor(b);
+        c1->find("key");
+        c2->find("key");
+
+        EXPECT_OK(b.erase("key"));
+        EXPECT_OK(b.create_bucket("key", nullptr));
+
+        for (const auto *c : {c1.get(), c2.get()}) {
+            EXPECT_TRUE(c->is_valid());
+            EXPECT_FALSE(c->is_bucket());
+            EXPECT_EQ(c->key(), "key");
+            EXPECT_EQ(c->value(), "value");
+        }
+
+        auto s = b.put(*c1, "value");
+        EXPECT_TRUE(s.is_incompatible_value()) << s.message();
+
+        s = b.erase(*c2);
+        EXPECT_TRUE(s.is_incompatible_value()) << s.message();
+
+        return Status::ok();
+    }));
+}
+
+TEST_F(DBTests, SwitchRecordTypesFromUnderCursor2)
+{
+    ASSERT_OK(m_db->update([](auto &tx) {
+        auto &b = tx.main_bucket();
+        EXPECT_OK(b.create_bucket("key", nullptr));
+        auto c1 = test_new_cursor(b);
+        auto c2 = test_new_cursor(b);
+        c1->find("key");
+        c2->find("key");
+
+        EXPECT_OK(b.drop_bucket("key"));
+        EXPECT_OK(b.put("key", "value"));
+
+        for (const auto *c : {c1.get(), c2.get()}) {
+            EXPECT_TRUE(c->is_valid());
+            EXPECT_TRUE(c->is_bucket());
+            EXPECT_EQ(c->key(), "key");
+        }
+
+        auto s = b.put(*c1, "value");
+        EXPECT_TRUE(s.is_incompatible_value()) << s.message();
+
+        s = b.erase(*c2);
+        EXPECT_TRUE(s.is_incompatible_value()) << s.message();
+
+        return Status::ok();
+    }));
+}
+
 TEST_F(DBTests, ReadonlyTxDisallowsWrites)
 {
     ASSERT_OK(m_db->update([](auto &tx) {
@@ -759,6 +861,18 @@ TEST_F(DBTests, AutoCheckpoint)
             }));
         }
     }
+}
+
+TEST_F(DBTests, CheckpointDuringTransaction)
+{
+    ASSERT_OK(m_db->view([&db = *m_db](auto &) {
+        EXPECT_NOK(db.checkpoint(kCheckpointPassive, nullptr));
+        return Status::ok();
+    }));
+    ASSERT_OK(m_db->update([&db = *m_db](auto &) {
+        EXPECT_NOK(db.checkpoint(kCheckpointPassive, nullptr));
+        return Status::ok();
+    }));
 }
 
 TEST_F(DBTests, CheckpointResize)
@@ -1170,10 +1284,50 @@ protected:
     }
 };
 
+// Make sure that buckets can be closed before the cursors open on them. Such orphaned cursors
+// are invalidated when the bucket is closed. Calling seek*() or find() is not allowed.
+TEST_F(DBBucketTests, CursorsAreInvalidatedOnBucketClose)
+{
+    ASSERT_OK(reopen_db(false));
+    ASSERT_OK(m_db->update([](auto &tx) {
+        TestBucket b1, b2, b3;
+        EXPECT_OK(test_open_bucket(tx, "b1", b1));
+        EXPECT_OK(test_open_bucket(*b1, "b2", b2));
+        EXPECT_OK(test_open_bucket(*b2, "b3", b3));
+        EXPECT_OK(b3->put("key", "value"));
+        auto c1 = test_new_cursor(*b1);
+        auto c2 = test_new_cursor(*b2);
+        auto c3 = test_new_cursor(*b3);
+        c1->seek_first();
+        c2->seek_first();
+        c3->seek_first();
+        EXPECT_TRUE(c1->is_valid());
+        EXPECT_TRUE(c2->is_valid());
+        EXPECT_TRUE(c3->is_valid());
+
+        EXPECT_OK(b1->drop_bucket("b2"));
+        EXPECT_OK(b2->drop_bucket("b3"));
+        b1.reset();
+        b2.reset();
+
+        // b1: reset
+        // b2: dropped + reset
+        // b3: dropped
+        EXPECT_FALSE(c1->is_valid());
+        EXPECT_FALSE(c2->is_valid());
+        EXPECT_TRUE(c3->is_valid());
+        EXPECT_OK(c1->status());
+        EXPECT_OK(c2->status());
+        EXPECT_OK(c3->status());
+
+        return Status::ok();
+    }));
+}
+
 TEST_F(DBBucketTests, BucketsPersist1)
 {
     ASSERT_OK(reopen_db(false));
-    ASSERT_OK(m_db->view([](auto &tx) {
+    ASSERT_OK(m_db->view([](const auto &tx) {
         TestBucket b1, b2, b3;
         EXPECT_OK(test_open_bucket(tx, "b1", b1));
         EXPECT_OK(test_open_bucket(*b1, "b2", b2));
@@ -1445,6 +1599,13 @@ TEST_F(DBOpenTests, HandlesEmptyFilename)
     ASSERT_NOK(DB::open(Options(), "", m_db));
 }
 
+TEST_F(DBOpenTests, HandlesInvalidPageSize)
+{
+    Options options;
+    options.page_size = TEST_PAGE_SIZE + 1;
+    ASSERT_NOK(DB::open(options, m_db_name.c_str(), m_db));
+}
+
 TEST_F(DBOpenTests, CreatesMissingDb)
 {
     Options options;
@@ -1508,8 +1669,9 @@ TEST_F(DBOpenTests, CustomLogger)
     options.info_log = &logger;
     // DB will warn (through the log) about the fact that options.env is not nullptr.
     // It will clear that field and use it to hold a custom Env that helps implement
-    // in-memory databases.
-    options.env = &default_env();
+    // in-memory databases. Same with options.wal.
+    options.env = reinterpret_cast<Env *>(1);
+    options.wal = reinterpret_cast<Wal *>(1);
     options.temp_database = true;
     // In-memory databases can have an empty filename.
     ASSERT_OK(DB::open(options, "", m_db));

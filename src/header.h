@@ -52,54 +52,53 @@ struct FileHdr {
     };
     static_assert(kReservedOffset < kSize);
 
-    [[nodiscard]] static auto get_page_count(const char *root) -> uint32_t
+    [[nodiscard]] static constexpr auto get_page_count(const char *root) -> uint32_t
     {
         return get_u32(root + kPageCountOffset);
     }
 
-    static auto put_page_count(char *root, uint32_t value) -> void
+    static constexpr auto put_page_count(char *root, uint32_t value) -> void
     {
         put_u32(root + kPageCountOffset, value);
     }
 
-    [[nodiscard]] static auto get_freelist_head(const char *root) -> Id
+    [[nodiscard]] static constexpr auto get_freelist_head(const char *root) -> Id
     {
         return Id(get_u32(root + kFreelistHeadOffset));
     }
 
-    static auto put_freelist_head(char *root, Id value) -> void
+    static constexpr auto put_freelist_head(char *root, Id value) -> void
     {
         put_u32(root + kFreelistHeadOffset, value.value);
     }
 
-    [[nodiscard]] static auto get_freelist_length(const char *root) -> uint32_t
+    [[nodiscard]] static constexpr auto get_freelist_length(const char *root) -> uint32_t
     {
         return get_u32(root + kFreelistLengthOffset);
     }
 
-    static auto put_freelist_length(char *root, uint32_t value) -> void
+    static constexpr auto put_freelist_length(char *root, uint32_t value) -> void
     {
         put_u32(root + kFreelistLengthOffset, value);
     }
 
-    [[nodiscard]] static auto get_largest_root(const char *root) -> Id
+    [[nodiscard]] static constexpr auto get_largest_root(const char *root) -> Id
     {
         return Id(get_u32(root + kLargestRootOffset));
     }
 
-    static auto put_largest_root(char *root, Id value) -> void
+    static constexpr auto put_largest_root(char *root, Id value) -> void
     {
         put_u32(root + kLargestRootOffset, value.value);
     }
 
-    [[nodiscard]] static auto get_page_size(const char *root) -> uint32_t
+    [[nodiscard]] static constexpr auto get_page_size(const char *root) -> uint32_t
     {
         return get_u16(root + kPageSizeOffset);
     }
 
-    static auto put_page_size(char *root, uint32_t value) -> void
+    static constexpr auto put_page_size(char *root, uint32_t value) -> void
     {
-        CALICODB_EXPECT_TRUE(check_page_size(value).is_ok());
         put_u16(root + kPageSizeOffset, static_cast<uint16_t>(value));
     }
 };
@@ -112,8 +111,9 @@ struct FileHdr {
 //     3       2     Cell area start
 //     5       2     Freelist start
 //     7       1     Fragment count
-//     8       4     Next ID
-// TODO: Only internal nodes need a "Next ID".
+//     8       4     Next ID*
+//
+// * Only external nodes have this field.
 struct NodeHdr {
     enum Type : char {
         kInvalid = 0,
@@ -131,7 +131,7 @@ struct NodeHdr {
         kSize = kNextIdOffset + sizeof(uint32_t)
     };
 
-    [[nodiscard]] static auto get_type(const char *root) -> Type
+    [[nodiscard]] static constexpr auto get_type(const char *root) -> Type
     {
         switch (root[kTypeOffset]) {
             case kInternal:
@@ -142,53 +142,53 @@ struct NodeHdr {
                 return kInvalid;
         }
     }
-    static auto put_type(char *root, bool is_external) -> void
+    static constexpr auto put_type(char *root, bool is_external) -> void
     {
         root[kTypeOffset] = static_cast<char>(kInternal + is_external);
     }
 
-    [[nodiscard]] static auto get_cell_count(const char *root) -> uint32_t
+    [[nodiscard]] static constexpr auto get_cell_count(const char *root) -> uint32_t
     {
         return get_u16(root + kCellCountOffset);
     }
-    static auto put_cell_count(char *root, uint32_t value) -> void
+    static constexpr auto put_cell_count(char *root, uint32_t value) -> void
     {
         put_u16(root + kCellCountOffset, static_cast<uint16_t>(value));
     }
 
-    [[nodiscard]] static auto get_cell_start(const char *root) -> uint32_t
+    [[nodiscard]] static constexpr auto get_cell_start(const char *root) -> uint32_t
     {
         return get_u16(root + kCellStartOffset);
     }
-    static auto put_cell_start(char *root, uint32_t value) -> void
+    static constexpr auto put_cell_start(char *root, uint32_t value) -> void
     {
         put_u16(root + kCellStartOffset, static_cast<uint16_t>(value));
     }
 
-    [[nodiscard]] static auto get_free_start(const char *root) -> uint32_t
+    [[nodiscard]] static constexpr auto get_free_start(const char *root) -> uint32_t
     {
         return get_u16(root + kFreeStartOffset);
     }
-    static auto put_free_start(char *root, uint32_t value) -> void
+    static constexpr auto put_free_start(char *root, uint32_t value) -> void
     {
         put_u16(root + kFreeStartOffset, static_cast<uint16_t>(value));
     }
 
-    [[nodiscard]] static auto get_frag_count(const char *root) -> uint32_t
+    [[nodiscard]] static constexpr auto get_frag_count(const char *root) -> uint32_t
     {
         // This cast prevents sign extension.
         return static_cast<uint8_t>(root[kFragCountOffset]);
     }
-    static auto put_frag_count(char *root, uint32_t value) -> void
+    static constexpr auto put_frag_count(char *root, uint32_t value) -> void
     {
         root[kFragCountOffset] = static_cast<char>(value);
     }
 
-    [[nodiscard]] static auto get_next_id(const char *root) -> Id
+    [[nodiscard]] static constexpr auto get_next_id(const char *root) -> Id
     {
         return Id(get_u32(root + kNextIdOffset));
     }
-    static auto put_next_id(char *root, Id value) -> void
+    static constexpr auto put_next_id(char *root, Id value) -> void
     {
         put_u32(root + kNextIdOffset, value.value);
     }

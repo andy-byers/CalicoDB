@@ -47,6 +47,7 @@ endfunction()
 
 build_test(test_bounds)
 build_test(test_concurrency)
+build_test(test_corruption)
 build_test(test_crashes)
 build_test(test_db)
 build_test(test_env)
