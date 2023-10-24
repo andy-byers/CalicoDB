@@ -18,6 +18,11 @@ auto no_bucket(const Status &s) -> Status
     return s.is_ok() ? Status::invalid_argument("bucket does not exist") : s;
 }
 
+auto invalid_cursor() -> Status
+{
+    return Status::invalid_argument("cursor is invalid");
+}
+
 } // namespace
 
 #define TREE_CURSOR(c) (static_cast<TreeCursor *>((c).handle()))
@@ -197,7 +202,19 @@ auto BucketImpl::put(Cursor &c, const Slice &value) -> Status
 {
     CALICODB_EXPECT_EQ(&TREE_CURSOR(c)->tree(), m_tree);
     return pager_write(m_schema->pager(), [this, &c, value] {
-        return m_tree->put(*TREE_CURSOR(c), c.key(), value, false);
+        auto s = c.status();
+        if (c.is_valid()) {
+            CALICODB_EXPECT_TRUE(s.is_ok());
+            auto &t = *TREE_CURSOR(c);
+            s = m_tree->put(t, c.key(), value, false);
+            if (s.is_ok()) {
+                t.read_record();
+                s = t.status();
+            }
+        } else if (s.is_ok()) {
+            s = invalid_cursor();
+        }
+        return s;
     });
 }
 
@@ -219,13 +236,18 @@ auto BucketImpl::erase(Cursor &c) -> Status
 {
     CALICODB_EXPECT_EQ(&TREE_CURSOR(c)->tree(), m_tree);
     return pager_write(m_schema->pager(), [this, &c] {
+        auto s = c.status();
         if (c.is_valid()) {
-            return m_tree->erase(*TREE_CURSOR(c), false);
-        } else if (c.status().is_ok()) {
-            return Status::invalid_argument();
-        } else {
-            return c.status();
+            auto &t = *TREE_CURSOR(c);
+            s = m_tree->erase(t, false);
+            if (s.is_ok()) {
+                t.read_record();
+                s = t.status();
+            }
+        } else if (s.is_ok()) {
+            return invalid_cursor();
         }
+        return s;
     });
 }
 

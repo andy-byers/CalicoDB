@@ -1445,35 +1445,6 @@ TEST_F(DBOpenTests, HandlesEmptyFilename)
     ASSERT_NOK(DB::open(Options(), "", m_db));
 }
 
-TEST_F(DBOpenTests, a)
-{
-    AllocatorConfig al = {
-        std::malloc,
-        std::realloc,
-        std::free,
-    };
-    ASSERT_OK(configure(kSetAllocator, &al));
-
-    Options options;
-    options.temp_database = true;
-    ASSERT_OK(DB::open(options, "", m_db));
-    ASSERT_OK(m_db->update([](auto &tx) {
-        auto &b = tx.main_bucket();
-        for (size_t i = 0; i < 10'000'000; ++i) {
-            EXPECT_OK(b.put(numeric_key(i), numeric_key(i)));
-        }
-        return Status::ok();
-    }));
-
-    //    std::map<std::string, std::string> map;
-    //    for (size_t i = 0; i < 100'000; ++i) {
-    //        map.insert_or_assign(numeric_key(i), numeric_key(i));
-    //    }
-
-    delete m_db;
-    m_db = nullptr;
-}
-
 TEST_F(DBOpenTests, CreatesMissingDb)
 {
     Options options;
