@@ -199,13 +199,9 @@ protected:
         proto.op_args[1] = param.num_records;
 
         std::vector<Connection> connections;
-        proto.op = test_reader;
-        for (size_t i = 0; i < param.num_readers; ++i) {
-            connections.emplace_back(proto);
-        }
         proto.op = test_writer;
         for (size_t i = 0; i < param.num_writers; ++i) {
-            connections.emplace_back(proto);
+            connections.push_back(proto);
         }
         // Write some records to the WAL.
         ASSERT_OK(test_writer(proto, nullptr));
@@ -213,11 +209,17 @@ protected:
         proto.op = test_checkpointer;
         proto.op_args[1] = param.checkpoint_reset;
         for (size_t i = 0; i < param.num_checkpointers; ++i) {
-            connections.emplace_back(proto);
+            connections.push_back(proto);
         }
         // Write the WAL back to the database. If `param.checkpoint_reset` is true, then the WAL will be
         // reset such that writers start at the beginning again.
         ASSERT_OK(test_checkpointer(proto, nullptr));
+
+        proto.op = test_reader;
+        proto.op_args[0] = param.num_iterations * 10;
+        for (size_t i = 0; i < param.num_readers; ++i) {
+            connections.push_back(proto);
+        }
 
         m_env->m_delay_sync.store(param.delay_barrier, std::memory_order_release);
         m_env->m_delay_sync.store(param.delay_sync, std::memory_order_release);
@@ -257,7 +259,7 @@ protected:
     auto run_consistency_test(const ConsistencyTestParameters &param) -> void
     {
         uint64_t highest_wait_count = 0;
-        for (size_t i = 1; i <= 4; ++i) {
+        for (size_t i = 1; i <= 12; i += 4) {
             for (size_t j = 1; j <= 4; ++j) {
                 for (size_t k = 1; k <= 4; ++k) {
                     run_consistency_test_instance({
@@ -306,11 +308,7 @@ protected:
         co.options.create_if_missing = false;
         auto s = reopen_connection(co);
         for (size_t n = 0; s.is_ok() && n < co.op_args[0]; ++n) {
-            barrier_wait(barrier);
-
-            s = co.db->view([&co, barrier](const auto &tx) {
-                barrier_wait(barrier);
-
+            s = co.db->view([&co](const auto &tx) {
                 TestBucket b;
                 // Oddly enough, if we name this Status "s", some platforms complain about shadowing,
                 // even though s is not captured in this lambda.
@@ -338,14 +336,15 @@ protected:
                         }
                         co.result.emplace_back(value.data(), value.size());
                     } else {
-                        EXPECT_EQ(c->value(), co.result.back()) << "non repeatable read";
+                        EXPECT_EQ(c->value(), co.result.back())
+                            << "non repeatable read on record " << i % co.op_args[1]
+                            << ", round " << i / co.op_args[1];
                     }
                 }
                 return t.is_not_found() ? Status::ok() : t;
             });
         }
 
-        barrier_wait(barrier);
         co.op = nullptr;
         delete co.db;
         // Forgive invalid argument errors that happen when a writer hasn't created the database
@@ -362,11 +361,7 @@ protected:
 
         auto s = reopen_connection(co);
         for (size_t n = 0; s.is_ok() && n < co.op_args[0]; ++n) {
-            barrier_wait(barrier);
-
-            s = co.db->update([&co, barrier](auto &tx) {
-                barrier_wait(barrier);
-
+            s = co.db->update([&co](auto &tx) {
                 TestBucket b;
                 auto t = test_create_and_open_bucket(tx, "b", b);
                 if (!t.is_ok()) {
@@ -401,12 +396,10 @@ protected:
             });
 
             if (s.is_busy()) {
-                barrier_wait(barrier);
                 s = Status::ok();
             }
         }
 
-        barrier_wait(barrier);
         co.op = nullptr;
         delete co.db;
         return s;
@@ -421,8 +414,6 @@ protected:
         co.options.create_if_missing = false;
         auto s = reopen_connection(co);
         for (size_t n = 0; s.is_ok() && n < co.op_args[0]; ++n) {
-            barrier_wait(barrier);
-            barrier_wait(barrier);
             s = co.db->checkpoint(co.op_args[1] ? kCheckpointRestart
                                                 : kCheckpointPassive,
                                   nullptr);
@@ -432,7 +423,6 @@ protected:
             }
         }
 
-        barrier_wait(barrier);
         co.op = nullptr;
         delete co.db;
         return s;
@@ -470,11 +460,7 @@ protected:
         std::vector<Connection> connections;
         proto.op = test_writer;
         for (size_t i = 0; i < param.num_writers; ++i) {
-            connections.emplace_back(proto);
-        }
-        proto.op = test_reader;
-        for (size_t i = 0; i < param.num_readers; ++i) {
-            connections.emplace_back(proto);
+            connections.push_back(proto);
         }
         proto.op = [param](auto &co, auto *) {
             // Checkpointers should call File::sync() once on the WAL file before any pages are read,
@@ -494,7 +480,13 @@ protected:
             }
             return s;
         };
-        connections.emplace_back(proto);
+        connections.push_back(proto);
+
+        proto.op = test_reader;
+        proto.op_args[0] = param.num_iterations * 10;
+        for (size_t i = 0; i < param.num_readers; ++i) {
+            connections.push_back(proto);
+        }
 
         m_env->m_delay_sync.store(param.delay_sync, std::memory_order_release);
 
@@ -531,7 +523,7 @@ protected:
     auto run_checkpointer_test(const CheckpointerTestParameters &param) -> void
     {
         uint64_t highest_wait_count = 0;
-        for (size_t num_iterations = 1; num_iterations <= 4; ++num_iterations) {
+        for (size_t num_iterations = 1; num_iterations < 12; num_iterations += 4) {
             for (size_t num_records = 1; num_records <= 4; ++num_records) {
                 for (CheckpointMode checkpoint_mode = kCheckpointPassive;
                      checkpoint_mode <= kCheckpointRestart;
@@ -550,6 +542,132 @@ protected:
                             });
                             highest_wait_count = maxval(highest_wait_count, s_busy_handler.counter.load(std::memory_order_relaxed));
                         }
+                    }
+                }
+            }
+        }
+        TEST_LOG << "Highest wait count = " << highest_wait_count << '\n';
+    }
+
+    struct SingleWriterParameters {
+        size_t num_readers = 0;
+        bool auto_checkpoint = false;
+
+        // Set by run_single_writer_test().
+        size_t num_iterations = 0;
+        size_t num_records = 0;
+        bool delay_sync = false;
+    };
+
+    auto run_single_writer_test_instance(const SingleWriterParameters &param) -> void
+    {
+        TEST_LOG << "ConcurrencyTests.SingleWriter*\n";
+        remove_calicodb_files(m_filename);
+        s_busy_handler.counter = 0;
+
+        Connection proto;
+        proto.filename = m_filename.c_str();
+        proto.env = m_env.get();
+        proto.op_args[0] = param.num_iterations;
+        proto.op_args[1] = param.num_records;
+
+        std::vector<Connection> connections;
+        proto.op = [](auto &co, auto *) {
+            auto s = reopen_connection(co);
+            s = co.db->update([&co](auto &tx) {
+                TestBucket b;
+                auto s = test_create_and_open_bucket(tx, "b", b);
+                if (!s.is_ok()) {
+                    return s;
+                }
+                for (size_t iteration = 0; iteration < co.op_args[0]; ++iteration) {
+                    std::cerr << "iter=" << iteration << '\n';
+                    std::string value;
+                    for (size_t i = 0; i < co.op_args[1]; ++i) {
+                        s = b->get(numeric_key(i), &value);
+                        if (s.is_ok()) {
+                            value = numeric_key(std::stoul(value) + 1);
+                        } else if (s.is_not_found()) {
+                            value = numeric_key(0);
+                            s = Status::ok();
+                        }
+                        if (s.is_ok()) {
+                            s = b->put(numeric_key(i), value);
+                        }
+                        if (!s.is_ok()) {
+                            return s;
+                        }
+                    }
+                    s = tx.commit();
+                    if (!s.is_ok()) {
+                        return s;
+                    }
+                }
+                return s;
+            });
+            if (s.is_busy()) {
+                s = Status::ok();
+            } else {
+                co.op = nullptr;
+            }
+            delete co.db;
+            return s;
+        };
+        connections.push_back(proto);
+
+        proto.op = test_reader;
+        proto.op_args[0] = param.num_iterations * 100;
+        for (size_t i = 0; i < param.num_readers; ++i) {
+            connections.push_back(proto);
+        }
+
+        m_env->m_delay_sync.store(param.delay_sync, std::memory_order_release);
+
+        std::vector<std::thread> threads;
+        threads.reserve(connections.size());
+        for (auto &co : connections) {
+            threads.emplace_back([&co] {
+                while (connection_main(co, nullptr)) {
+                    // Run until the connection clears its own callback.
+                }
+            });
+        }
+
+        for (auto &t : threads) {
+            t.join();
+        }
+
+        for (const auto &co : connections) {
+            // Check the results.
+            for (size_t i = 0; i + 1 < co.result.size(); ++i) {
+                uint64_t n;
+                Slice slice = co.result[i];
+                ASSERT_LE(slice, co.result[i + 1]);
+                ASSERT_TRUE(consume_decimal_number(slice, &n));
+                ASSERT_TRUE(slice.is_empty());
+                m_sanity_check = maxval(m_sanity_check, n);
+                std::cerr << n << ',';
+            }
+            if (!co.result.empty())
+                std::cerr << '\n';
+        }
+    }
+
+    auto run_single_writer_test(const SingleWriterParameters &param) -> void
+    {
+        uint64_t highest_wait_count = 0;
+        for (size_t num_iterations = 1; num_iterations < 12; num_iterations += 4) {
+            for (size_t num_records = 1; num_records <= 4; ++num_records) {
+                for (size_t delay_sync = 0; delay_sync <= 1; ++delay_sync) {
+                    for (size_t busy_wait = 0; busy_wait <= 1; ++busy_wait) {
+                        run_single_writer_test_instance({
+                            param.num_readers,
+                            param.auto_checkpoint,
+                            num_iterations,
+                            num_records,
+                            delay_sync != 0,
+                        });
+                        highest_wait_count = maxval(highest_wait_count, s_busy_handler.counter.load(std::memory_order_relaxed));
                     }
                 }
             }
@@ -582,17 +700,6 @@ TEST_F(ConcurrencyTests, Consistency2)
 {
     run_consistency_test({2, 2, 2});
     run_consistency_test({10, 10, 10});
-}
-
-TEST_F(ConcurrencyTests, Consistency3)
-{
-    run_consistency_test({100, 10, 10});
-    run_consistency_test({10, 100, 10});
-    run_consistency_test({10, 10, 100});
-}
-
-TEST_F(ConcurrencyTests, Consistency4)
-{
     run_consistency_test({50, 50, 50});
 }
 
@@ -610,26 +717,10 @@ TEST_F(ConcurrencyTests, Checkpointer1)
 
 TEST_F(ConcurrencyTests, Checkpointer2)
 {
-    run_checkpointer_test({2, 0});
-    run_checkpointer_test({2, 1});
-    run_checkpointer_test({1, 2});
-    run_checkpointer_test({2, 2});
-}
-
-TEST_F(ConcurrencyTests, Checkpointer3)
-{
     run_checkpointer_test({10, 0});
-    run_checkpointer_test({10, 2});
+    run_checkpointer_test({2, 10});
     run_checkpointer_test({2, 10});
     run_checkpointer_test({10, 10});
-}
-
-TEST_F(ConcurrencyTests, Checkpointer4)
-{
-    run_checkpointer_test({50, 0});
-    run_checkpointer_test({10, 50});
-    run_checkpointer_test({10, 50});
-    run_checkpointer_test({50, 50});
 }
 
 TEST_F(ConcurrencyTests, AutoCheckpointer0)
@@ -646,26 +737,28 @@ TEST_F(ConcurrencyTests, AutoCheckpointer1)
 
 TEST_F(ConcurrencyTests, AutoCheckpointer2)
 {
-    run_checkpointer_test({2, 0, true});
-    run_checkpointer_test({2, 1, true});
-    run_checkpointer_test({1, 2, true});
-    run_checkpointer_test({2, 2, true});
-}
-
-TEST_F(ConcurrencyTests, AutoCheckpointer3)
-{
     run_checkpointer_test({10, 0, true});
-    run_checkpointer_test({10, 2, true});
+    run_checkpointer_test({2, 10, true});
     run_checkpointer_test({2, 10, true});
     run_checkpointer_test({10, 10, true});
 }
 
-TEST_F(ConcurrencyTests, AutoCheckpointer4)
+TEST_F(ConcurrencyTests, SingleWriter0)
 {
-    run_checkpointer_test({50, 0, true});
-    run_checkpointer_test({10, 50, true});
-    run_checkpointer_test({10, 50, true});
-    run_checkpointer_test({50, 50, true});
+    run_single_writer_test({0, false});
+    run_single_writer_test({0, true});
+}
+
+TEST_F(ConcurrencyTests, SingleWriter1)
+{
+    run_single_writer_test({1, false});
+    run_single_writer_test({1, true});
+}
+
+TEST_F(ConcurrencyTests, SingleWriter2)
+{
+    run_single_writer_test({10, false});
+    run_single_writer_test({10, true});
 }
 
 class MultiProcessTests : public testing::TestWithParam<size_t>
@@ -794,7 +887,7 @@ public:
         ASSERT_OK(s);
     }
 
-    auto run_test(size_t num_threads)
+    auto run_basic_test(size_t num_threads)
     {
         static WaitForever s_busy_handler;
         remove_calicodb_files(m_filename);
@@ -813,26 +906,208 @@ public:
 
         reader_thread(m_filename.c_str(), &s_busy_handler);
     }
+
+    struct BankInfo {
+        std::vector<uint64_t> accounts;
+        uint64_t ledger_index;
+    };
+    static auto parse_bank_info(const Bucket &values, const Bucket &ledger)
+    {
+        BankInfo info;
+        auto vc = test_new_cursor(values);
+        std::string record_accum;
+        vc->seek_first();
+        while (vc->is_valid()) {
+            const auto key = vc->key().to_string();
+            const auto total = vc->value().to_string();
+            info.accounts.emplace_back(std::stoull(total));
+            record_accum.append(key + total);
+            vc->next();
+        }
+
+        auto lc = test_new_cursor(ledger);
+        lc->seek_last();
+        EXPECT_TRUE(lc->is_valid());
+        const auto record_hash = std::hash<std::string>{}(record_accum);
+        EXPECT_EQ(record_hash, std::stoull(lc->value().to_string()));
+        info.ledger_index = std::stoull(lc->key().to_string());
+        return info;
+    }
+
+    static auto bank_thread(const char *filename, BusyHandler *busy, uint64_t micros_to_run)
+    {
+        const auto update_accounts = [](auto &tx) {
+            TestBucket values, ledger;
+            ASSERT_OK(test_open_bucket(tx, "values", values));
+            ASSERT_OK(test_open_bucket(tx, "ledger", ledger));
+            auto info = parse_bank_info(*values, *ledger);
+
+            // Give money to the lucky winner!
+            uint64_t award = 0;
+            for (auto &a : info.accounts) {
+                if (a > 5) {
+                    const auto r = static_cast<uint64_t>(rand()) % (a - 5);
+                    award += r;
+                    a -= r;
+                }
+            }
+            const auto lucky = static_cast<size_t>(rand()) % info.accounts.size();
+            info.accounts[lucky] += award;
+
+            auto vc = test_new_cursor(*values);
+            vc->seek_first();
+            std::string accum;
+            for (auto a : info.accounts) {
+                const auto total = numeric_key(a);
+                ASSERT_OK(values->put(*vc, total));
+                accum.append(vc->key().to_string() + total);
+                vc->next();
+            }
+
+            auto lc = test_new_cursor(*ledger);
+            lc->seek_last();
+            ASSERT_TRUE(lc->is_valid());
+            const auto new_hash = std::hash<std::string>{}(accum);
+            ASSERT_OK(ledger->put(numeric_key(info.ledger_index + 1), std::to_string(new_hash)));
+        };
+
+        const auto check_accounts = [](const auto &tx) {
+            TestBucket values, ledger;
+            ASSERT_OK(test_open_bucket(tx, "values", values));
+            ASSERT_OK(test_open_bucket(tx, "ledger", ledger));
+            auto info1 = parse_bank_info(*values, *ledger);
+            CALICODB_DEBUG_DELAY(default_env());
+            auto info2 = parse_bank_info(*values, *ledger);
+            ASSERT_EQ(info1.accounts, info2.accounts);
+            ASSERT_EQ(info1.ledger_index, info2.ledger_index);
+        };
+
+        DB *db = nullptr;
+        Options options;
+        options.busy = busy;
+        const auto start_time = std::chrono::system_clock::now();
+        auto s = DB::open(options, filename, db);
+        while (s.is_ok()) {
+            s = db->update([&update_accounts](auto &tx) {
+                update_accounts(tx);
+                return Status::ok();
+            });
+            if (s.is_ok()) {
+                s = db->view([&check_accounts](auto &tx) {
+                    check_accounts(tx);
+                    return Status::ok();
+                });
+            } else if (s.is_busy()) {
+                s = Status::ok();
+            }
+            const auto current_time = std::chrono::system_clock::now();
+            const auto elapsed = std::chrono::duration_cast<std::chrono::microseconds>(
+                current_time - start_time);
+            if (micros_to_run < static_cast<uint64_t>(elapsed.count())) {
+                break;
+            }
+        }
+        delete db;
+        ASSERT_OK(s);
+    }
+
+    // Bank test: Accounts are in a bucket named "values", and the ledger is in a bucket named
+    // "ledger". There are N accounts, and each account starts out with $10. bank_thread() runs 2
+    // transactions. First, a read-write transaction is run, and the account totals are mixed up,
+    // keeping the overall total constant. Then, the contents of "values" are hashed and appended
+    // to "ledger" (with a sequential integer key). A readonly transaction is then run, where the
+    // contents of "values" are checked against the ledger. Every connection created in this test
+    // will make a call to bank_thread(), which will loop for roughly 5 seconds. Once the child
+    // connections are finished, the main thread makes sure that the total amount of money is
+    // still the same as before.
+    auto run_bank_test(size_t num_threads)
+    {
+        DB *db;
+        remove_calicodb_files(m_filename);
+        auto s = DB::open(Options(), m_filename.c_str(), db);
+        ASSERT_OK(db->update([](auto &tx) {
+            TestBucket values;
+            EXPECT_OK(test_create_and_open_bucket(tx, "values", values));
+
+            std::string accum;
+            const auto value = numeric_key(10);
+            for (const auto *key : {"a", "b", "c", "d", "e", "f", "g"}) {
+                EXPECT_OK(values->put(key, value));
+                accum.append(key + value);
+            }
+
+            TestBucket ledger;
+            const auto hash = std::hash<std::string>{}(accum);
+            EXPECT_OK(test_create_and_open_bucket(tx, "ledger", ledger));
+            return ledger->put(numeric_key(0), std::to_string(hash));
+        }));
+
+        static WaitForever s_busy_handler;
+        run_test_instance([num_threads, filename = m_filename] {
+            std::vector<std::thread> threads;
+            threads.reserve(num_threads);
+            for (size_t t = 0; t < num_threads; ++t) {
+                threads.emplace_back([&] {
+                    bank_thread(filename.c_str(), &s_busy_handler, 5'000'000);
+                });
+            }
+            for (auto &thread : threads) {
+                thread.join();
+            }
+        });
+
+        bank_thread(m_filename.c_str(), &s_busy_handler, 1);
+
+        ASSERT_OK(db->view([](auto &tx) {
+            TestBucket values, ledger;
+            EXPECT_OK(test_open_bucket(tx, "values", values));
+            EXPECT_OK(test_open_bucket(tx, "ledger", ledger));
+            auto vc = test_new_cursor(*values);
+            vc->seek_first();
+            uint64_t total_value = 0;
+            while (vc->is_valid()) {
+                total_value += std::stoull(vc->value().to_string());
+                vc->next();
+            }
+            EXPECT_EQ(total_value, 70);
+
+            auto lc = test_new_cursor(*ledger);
+            lc->seek_last();
+            TEST_LOG << "Updates: " << std::stoull(lc->key().to_string()) << '\n';
+            return lc->status();
+        }));
+        delete db;
+    }
 };
 
-TEST_P(MultiProcessTests, 0)
+TEST_P(MultiProcessTests, Basic0)
 {
-    run_test(1);
+    run_basic_test(1);
 }
 
-TEST_P(MultiProcessTests, 1)
+TEST_P(MultiProcessTests, Basic1)
 {
-    run_test(2);
+    run_basic_test(2);
 }
 
-TEST_P(MultiProcessTests, 2)
+TEST_P(MultiProcessTests, Basic2)
 {
-    run_test(3);
+    run_basic_test(5);
 }
 
-TEST_P(MultiProcessTests, 3)
+TEST_P(MultiProcessTests, Bank0)
 {
-    run_test(25);
+    run_bank_test(1);
+}
+
+TEST_P(MultiProcessTests, Bank1)
+{
+    run_bank_test(2);
+}
+
+TEST_P(MultiProcessTests, Bank2)
+{
+    run_bank_test(5);
 }
 
 INSTANTIATE_TEST_SUITE_P(

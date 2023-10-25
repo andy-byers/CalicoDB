@@ -19,12 +19,6 @@
 #define CALICODB_DEBUG_DELAY(env) debug_delay_impl(env)
 #endif
 
-#if defined(__clang__) && !defined(NO_COVERAGE)
-#define NO_COVERAGE __attribute((no_sanitize("coverage")))
-#else
-#define NO_COVERAGE
-#endif
-
 #define CALICODB_EXPECT_TRUE(expr) assert(expr)
 #define CALICODB_EXPECT_FALSE(expr) CALICODB_EXPECT_TRUE(!(expr))
 #define CALICODB_EXPECT_EQ(lhs, rhs) CALICODB_EXPECT_TRUE((lhs) == (rhs))

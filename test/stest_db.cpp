@@ -766,7 +766,7 @@ struct Routines {
           many_bucket_accesses("ManyBucketAccessOps", random_bucket_accesses, kManyIterations)
     {
     }
-} g_routines;
+} g_db_routines;
 
 class STestDB : public testing::Test
 {
@@ -790,20 +790,20 @@ TEST_F(STestDB, SanityCheck)
 
     Scenario<DatabaseState> *sequences[][2] = {
         {
-            &g_routines.start_read_write_tx,
-            &g_routines.all_read_write_ops_many,
+            &g_db_routines.start_read_write_tx,
+            &g_db_routines.all_read_write_ops_many,
         },
         {
-            &g_routines.start_read_write_tx,
-            &g_routines.many_reads_and_writes,
+            &g_db_routines.start_read_write_tx,
+            &g_db_routines.many_reads_and_writes,
         },
         {
-            &g_routines.start_readonly_tx,
-            &g_routines.all_readonly_ops_many,
+            &g_db_routines.start_readonly_tx,
+            &g_db_routines.all_readonly_ops_many,
         },
     };
 
-    g_routines.open_db.run(m_state);
+    g_db_routines.open_db.run(m_state);
 
     static constexpr const char *kSequenceNames[] = {"1", "2", "3"};
     for (size_t i = 0; i < ARRAY_SIZE(sequences); ++i) {
@@ -815,11 +815,11 @@ TEST_F(STestDB, SanityCheck)
         scenario.run(m_state);
         ASSERT_OK(m_state.s);
 
-        g_routines.validate_db.run(m_state);
-        g_routines.finish_tx.run(m_state);
+        g_db_routines.validate_db.run(m_state);
+        g_db_routines.finish_tx.run(m_state);
     }
 
-    g_routines.close_db.run(m_state);
+    g_db_routines.close_db.run(m_state);
 }
 
 } // namespace calicodb::test
