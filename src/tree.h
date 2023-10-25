@@ -63,7 +63,8 @@ public:
     auto create(Id parent_id, Id &root_id_out) -> Status;
     auto destroy(Reroot &rr, Buffer<Id> &children) -> Status;
 
-    auto put(TreeCursor &c, const Slice &key, const Slice &value, bool is_bucket) -> Status;
+    auto insert(TreeCursor &c, const Slice &key, const Slice &value, bool is_bucket) -> Status;
+    auto modify(TreeCursor &c, const Slice &value) -> Status;
     auto erase(TreeCursor &c, bool is_bucket) -> Status;
     auto vacuum() -> Status;
 
@@ -123,6 +124,7 @@ private:
 
     auto corrupted_node(Id page_id) const -> Status;
 
+    auto write_record(TreeCursor &c, const Slice &key, const Slice &value, bool is_bucket, bool overwrite) -> Status;
     auto redistribute_cells(Node &left, Node &right, Node &parent, uint32_t pivot_idx) -> Status;
     auto resolve_overflow(TreeCursor &c) -> Status;
     auto split_root(TreeCursor &c) -> Status;
@@ -280,10 +282,13 @@ public:
         return m_status;
     }
 
-    auto activate(bool load) -> bool
+    auto activate(bool load, bool *changed_type_out = nullptr) -> bool
     {
+        if (changed_type_out) {
+            *changed_type_out = false;
+        }
         m_tree->activate_cursor(*this);
-        return load && ensure_position_loaded();
+        return load && ensure_position_loaded(changed_type_out);
     }
 
     auto assert_state() const -> bool;
@@ -315,7 +320,7 @@ private:
     // Seek back to the saved position
     // Return true if the cursor is on a different record, false otherwise. May set
     // the cursor status.
-    auto ensure_position_loaded() -> bool;
+    auto ensure_position_loaded(bool *changed_type_out) -> bool;
 
     // Move the cursor to the root node of the tree
     // This routine is called right before a root-to-leaf traversal is performed.
@@ -370,8 +375,10 @@ private:
 
     // Prepare to modify the current record
     // If the cursor is saved, then it is moved back to where it was when save_position() was called.
-    // Returns true if the cursor is in a different position than it was before, false otherwise.
-    [[nodiscard]] auto start_write() -> bool;
+    // Returns OK if the cursor is in the same position as it was before, non-OK otherwise. Also
+    // returns non-OK if the record was erased and reinserted as a different type of record with the
+    // same key.
+    auto start_write() -> Status;
 
     // Prepare to insert a new record
     // Seeks the cursor to where the new record should go. Returns true if a record with the given

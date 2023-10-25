@@ -28,7 +28,7 @@ class Fuzzer
         m_c = nullptr;
         m_b = nullptr;
         m_tx = nullptr;
-        CHECK_OK(ModelDB::open(m_options, "InMemory", m_store, m_db));
+        CHECK_OK(ModelDB::open(m_options, "/InMemory", m_store, m_db));
         reopen_tx();
     }
 
@@ -200,6 +200,7 @@ public:
 extern "C" int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size)
 {
     CHECK_OK(configure(kSetAllocator, DebugAllocator::config()));
+    default_env().srand(42);
     {
         FakeEnv env;
         Fuzzer fuzzer(env);

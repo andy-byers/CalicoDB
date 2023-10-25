@@ -99,7 +99,6 @@ struct FileHdr {
 
     static auto put_page_size(char *root, uint32_t value) -> void
     {
-        CALICODB_EXPECT_TRUE(check_page_size(value).is_ok());
         put_u16(root + kPageSizeOffset, static_cast<uint16_t>(value));
     }
 };
@@ -112,8 +111,9 @@ struct FileHdr {
 //     3       2     Cell area start
 //     5       2     Freelist start
 //     7       1     Fragment count
-//     8       4     Next ID
-// TODO: Only internal nodes need a "Next ID".
+//     8       4     Next ID*
+//
+// * Only external nodes have this field.
 struct NodeHdr {
     enum Type : char {
         kInvalid = 0,

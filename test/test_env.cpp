@@ -751,20 +751,28 @@ public:
 
 TEST_P(TempEnvTests, Operations)
 {
+    ASSERT_OK(m_file->resize(123));
+    uint64_t file_size;
+    ASSERT_OK(m_file->get_size(file_size));
+    ASSERT_EQ(file_size, 123);
+
     // NOOPs.
-    EXPECT_OK(m_file->file_lock(FileLockMode()));
+    m_file->shm_barrier();
+    ASSERT_OK(m_file->sync());
+    ASSERT_OK(m_file->file_lock(FileLockMode()));
     m_file->file_unlock();
 
     // Not supported.
-    EXPECT_NOK(m_file->shm_lock(0, 1, ShmLockFlag()));
+    ASSERT_NOK(m_file->shm_lock(0, 1, ShmLockFlag()));
     volatile void *ptr;
-    EXPECT_NOK(m_file->shm_map(0, false, ptr));
+    ASSERT_NOK(m_file->shm_map(0, false, ptr));
     m_file->shm_unmap(true);
 
     // File should still be accessible through the pointer returned by new_file().
-    EXPECT_TRUE(m_env->file_exists("temp"));
-    EXPECT_OK(m_env->remove_file("temp"));
-    EXPECT_FALSE(m_env->file_exists("temp"));
+    ASSERT_TRUE(m_env->file_exists("temp"));
+    ASSERT_OK(m_env->remove_file("temp"));
+    ASSERT_NOK(m_env->remove_file("temp"));
+    ASSERT_FALSE(m_env->file_exists("temp"));
 
     m_file.reset();
 

@@ -14,6 +14,16 @@ namespace calicodb
 // calicodb/cursor.h
 class Cursor;
 
+// Sorted collection of key-value pairs in a database
+// Buckets contain mappings from string keys to string values, as well as string keys
+// to nested buckets. The Tx object in tx.h provides a reference to a single bucket,
+// called the main bucket, which represents the entire database. All records and
+// buckets are created inside the main bucket.
+// Records and nested buckets are not compatible, that is, the methods provided for
+// working with normal records (get, put, and erase) cannot be used to access or modify
+// nested buckets. The *_bucket*() methods must be used to work with buckets. Accessing
+// the wrong type of record will result in a status s for which s.is_incompatible_value()
+// evaluates to true.
 class Bucket
 {
 public:
@@ -30,17 +40,22 @@ public:
 
     // Create a nested bucket associated with the given `key`
     // If a bucket with the given `key` already exists, a status is returned for which
-    // Status::is_invalid_argument() evaluates to true.
+    // Status::is_invalid_argument() evaluates to true. The bucket handle `b_out` is
+    // optional: if omitted, a bucket is created but not opened.
     virtual auto create_bucket(const Slice &key, Bucket **b_out) -> Status = 0;
 
     // Create a nested bucket associated with the given `key`
-    // It is not an error is the bucket already exists.
+    // It is not an error is the bucket already exists. The bucket handle `b_out` is
+    // optional: if omitted, a bucket is created but not opened.
     virtual auto create_bucket_if_missing(const Slice &key, Bucket **b_out) -> Status = 0;
 
     // Open the nested bucket associated with the given `key`
     virtual auto open_bucket(const Slice &key, Bucket *&b_out) const -> Status = 0;
 
     // Drop the nested bucket associated with the given `key`
+    // If the nested bucket named `key` is still open, i.e. there is a Bucket * handle
+    // referencing it that hasn't been deleted, then the records in `key` can be accessed
+    // through that handle until it is closed.
     virtual auto drop_bucket(const Slice &key) -> Status = 0;
 
     // Create a mapping between the given `key` and the given `value`

@@ -17,8 +17,7 @@ class FakeEnv : public Env
 {
 public:
     [[nodiscard]] virtual auto clone() const -> Env *;
-    [[nodiscard]] virtual auto get_file_contents(const char *filename) const -> std::string;
-    virtual auto put_file_contents(const char *filename, std::string contents) -> void;
+    [[nodiscard]] virtual auto get_file_contents(const char *filename) const -> std::string *;
 
     ~FakeEnv() override = default;
 

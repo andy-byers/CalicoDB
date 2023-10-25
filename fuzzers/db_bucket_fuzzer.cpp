@@ -23,7 +23,7 @@ class Fuzzer
     auto reopen_db() -> void
     {
         delete m_db;
-        CHECK_OK(ModelDB::open(m_options, "MemDB", m_store, m_db));
+        CHECK_OK(ModelDB::open(m_options, "/MemDB", m_store, m_db));
     }
 
 public:
@@ -207,6 +207,7 @@ public:
 extern "C" int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size)
 {
     CHECK_OK(configure(kSetAllocator, DebugAllocator::config()));
+    default_env().srand(42);
     {
         FuzzedInputProvider stream(data, size);
         Fuzzer fuzzer;

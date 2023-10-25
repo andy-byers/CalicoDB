@@ -121,6 +121,7 @@ auto main(int argc, char **argv) -> int
     using namespace calicodb;
     using namespace calicodb::test;
     ::testing::InitGoogleTest(&argc, argv);
+    default_env().srand(42);
 
 #define STR(name) #name
 #define XSTR(name) STR(name)

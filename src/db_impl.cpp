@@ -111,7 +111,6 @@ DBImpl::DBImpl(Parameters param)
       m_auto_ckpt(param.sanitized.auto_checkpoint),
       m_db_filename(move(param.db_name)),
       m_wal_filename(move(param.wal_name)),
-      m_owns_log(param.original.info_log != param.sanitized.info_log),
       m_owns_env(param.original.env != param.sanitized.env &&
                  param.sanitized.env != &default_env())
 {
@@ -126,9 +125,6 @@ DBImpl::~DBImpl()
     }
     m_file.reset();
 
-    if (m_owns_log) {
-        delete m_log;
-    }
     if (m_owns_env) {
         delete m_env;
     }

@@ -8,6 +8,7 @@
 #include "slice.h"
 #include "status.h"
 #include <cstdarg>
+#include <cstdint>
 
 namespace calicodb
 {

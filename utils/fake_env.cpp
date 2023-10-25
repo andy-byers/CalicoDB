@@ -3,33 +3,25 @@
 // LICENSE.md. See AUTHORS.md for a list of contributor names.
 
 #include "fake_env.h"
+#include "internal.h"
 
 namespace calicodb
 {
 
-auto FakeEnv::get_file_contents(const char *filename) const -> std::string
+auto FakeEnv::get_file_contents(const char *filename) const -> std::string *
 {
+
     const auto file = m_state.find(filename);
     if (file == end(m_state) || !file->second.created) {
-        return "";
+        return nullptr;
     }
-    return file->second.buffer;
-}
-
-auto FakeEnv::put_file_contents(const char *filename, std::string contents) -> void
-{
-    auto file = m_state.find(filename);
-    if (file == end(m_state)) {
-        file = m_state.insert(file, {filename, FileState()});
-    }
-    file->second.buffer = std::move(contents);
-    file->second.created = true;
+    return &file->second.buffer;
 }
 
 auto FakeEnv::read_file_at(const FileState &mem, size_t offset, size_t size, char *scratch, Slice *out) -> Status
 {
     if (offset < mem.buffer.size()) {
-        const auto read_size = std::min(size, mem.buffer.size() - offset);
+        const auto read_size = minval(size, mem.buffer.size() - offset);
         std::memcpy(scratch, mem.buffer.data() + offset, read_size);
         if (out != nullptr) {
             *out = Slice(scratch, read_size);

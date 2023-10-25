@@ -15,6 +15,13 @@ namespace calicodb
 // Cursors are obtained by calling Bucket::new_cursor(). It should be noted that a
 // freshly-allocated cursor is not considered valid (is_valid() returns false) until
 // find() or one of the seek*() methods returns an OK status.
+// Cursors enforce certain guarantees to make working with them easier. If a cursor
+// returns true for is_valid(), then the slices returned by key() and value() will
+// not be invalidated until the cursor is moved, even if the bucket is modified by a
+// different cursor. The bucket that a cursor is open on can be closed before the
+// cursor itself. Such a cursor will be invalidated, however, calling seek*() or
+// find() is not allowed. The only thing one can do with a stranded cursor is call
+// delete on it.
 class Cursor
 {
 public:

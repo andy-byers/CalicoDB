@@ -365,7 +365,7 @@ auto TreeCursor::read_current_cell() -> void
     }
 }
 
-auto TreeCursor::ensure_position_loaded() -> bool
+auto TreeCursor::ensure_position_loaded(bool *changed_type_out) -> bool
 {
     if (m_state == kSaved) {
         CALICODB_EXPECT_TRUE(m_tree->m_writable);
@@ -374,11 +374,13 @@ auto TreeCursor::ensure_position_loaded() -> bool
         // key buffer (unless the key has 0 length). If m_key were to reference memory on a page,
         // it would be invalidated once we start the traversal in seek_to_leaf().
         CALICODB_EXPECT_TRUE(m_key.is_empty() || m_key.data() == m_key_buf.ptr());
+        const auto was_bucket = m_cell.is_bucket;
         // Seek the cursor back to where it was before.
         if (seek_to_leaf(m_key)) {
-            auto s = read_user_key();
-            if (!s.is_ok()) {
-                reset(s);
+            // Record with key m_key was found. Make sure it is still the same type of record. We
+            // don't consider the record value.
+            if (changed_type_out) {
+                *changed_type_out = was_bucket != m_cell.is_bucket;
             }
         } else {
             return true;
@@ -617,14 +619,21 @@ auto TreeCursor::start_write(const Slice &key) -> bool
     return result;
 }
 
-auto TreeCursor::start_write() -> bool
+auto TreeCursor::start_write() -> Status
 {
+    bool changed_types;
     m_tree->deactivate_cursors(this);
-    const auto moved = activate(true); // Load saved position.
-    if (!moved && has_valid_position()) {
+    const auto moved = activate(true, &changed_types); // Load saved position.
+    const auto can_write = !moved && !changed_types;
+    if (can_write) {
+        CALICODB_EXPECT_TRUE(has_valid_position());
         m_tree->upgrade(m_node);
+    } else if (moved) {
+        return Status::invalid_argument("record was erased");
+    } else if (changed_types) {
+        return Status::incompatible_value();
     }
-    return moved;
+    return Status::ok();
 }
 
 auto TreeCursor::finish_write(Status &s) -> void
@@ -791,7 +800,9 @@ auto Tree::create(Id parent_id, Id &root_id_out) -> Status
 
 auto Tree::destroy(Reroot &rr, Buffer<Id> &children) -> Status
 {
-    CALICODB_EXPECT_FALSE(m_root_id.is_root());
+    if (m_root_id.is_root()) {
+        return Status::corruption();
+    }
     rr.after = m_root_id;
     auto nc = children.len();
     const auto push_child = [&children, &nc](const auto &cell) {
@@ -846,8 +857,8 @@ auto Tree::destroy(Reroot &rr, Buffer<Id> &children) -> Status
         }
         if (s.is_ok()) {
             s = relocate_page(unused_page, root_info, rr.before);
-            m_pager->release(unused_page);
         }
+        m_pager->release(unused_page);
     }
     if (s.is_ok()) {
         PageRef *largest_root;
@@ -1709,6 +1720,7 @@ Tree::~Tree()
     // destructor returns.
     while (!IntrusiveList::is_empty(m_inactive_list)) {
         auto *entry = m_inactive_list.next_entry;
+        entry->cursor->reset(); // Invalidate
         IntrusiveList::remove(*entry);
         IntrusiveList::initialize(*entry);
     }
@@ -1736,7 +1748,38 @@ auto Tree::allocate(AllocationType type, Id nearby, PageRef *&page_out) -> Statu
     return s;
 }
 
-auto Tree::put(TreeCursor &c, const Slice &key, const Slice &value, bool flag) -> Status
+auto Tree::insert(TreeCursor &c, const Slice &key, const Slice &value, bool is_bucket) -> Status
+{
+    const auto key_exists = c.start_write(key);
+    auto s = c.status();
+    if (s.is_ok()) {
+        CALICODB_EXPECT_TRUE(c.has_valid_position());
+        CALICODB_EXPECT_TRUE(c.assert_state());
+        s = write_record(c, key, value, is_bucket, key_exists);
+    }
+    c.finish_write(s);
+    return s;
+}
+
+auto Tree::modify(TreeCursor &c, const Slice &value) -> Status
+{
+    Status s;
+    CALICODB_EXPECT_TRUE(c.is_valid());
+    if (c.is_bucket()) {
+        s = Status::incompatible_value();
+    } else {
+        s = c.start_write();
+    }
+    if (s.is_ok()) {
+        CALICODB_EXPECT_TRUE(c.has_valid_position(true));
+        CALICODB_EXPECT_TRUE(c.assert_state());
+        s = write_record(c, c.key(), value, false, true);
+    }
+    c.finish_write(s);
+    return s;
+}
+
+auto Tree::write_record(TreeCursor &c, const Slice &key, const Slice &value, bool is_bucket, bool overwrite) -> Status
 {
     if (key.size() > kMaxAllocation) {
         return Status::invalid_argument("key is too long");
@@ -1744,46 +1787,40 @@ auto Tree::put(TreeCursor &c, const Slice &key, const Slice &value, bool flag) -
         return Status::invalid_argument("value is too long");
     }
 
-    const auto key_exists = c.start_write(key);
-    auto s = c.m_status;
+    Status s;
+    CALICODB_EXPECT_TRUE(c.assert_state());
+    if (overwrite) {
+        CALICODB_EXPECT_FALSE(is_bucket);
+        if (c.is_bucket()) {
+            return Status::incompatible_value();
+        }
+        const auto value_size = c.m_cell.total_size - c.m_cell.key_size;
+        if (value_size == value.size()) {
+            return overwrite_value(c.m_cell, value);
+        }
+        s = remove_cell(c.m_node, c.m_idx);
+    }
+    bool overflow;
     if (s.is_ok()) {
-        CALICODB_EXPECT_TRUE(c.assert_state());
-        if (key_exists) {
-            if (c.is_bucket() && !flag) {
-                s = Status::incompatible_value();
-                goto cleanup;
-            }
-            const auto value_size = c.m_cell.total_size - c.m_cell.key_size;
-            if (value_size == value.size()) {
-                s = overwrite_value(c.m_cell, value);
-                goto cleanup;
-            }
-            s = remove_cell(c.m_node, c.m_idx);
-        }
-        bool overflow;
-        if (s.is_ok()) {
-            // Attempt to write a cell representing the `key` and `value` directly to the page.
-            // This routine also populates any overflow pages necessary to hold a `key` and/or
-            // `value` that won't fit on a single node page. If the cell itself cannot fit in
-            // `node`, it will be written to m_cell_scratch[0] instead.
-            s = emplace(c.m_node, key, value, flag, c.m_idx, overflow);
-        }
+        // Attempt to write a cell representing the `key` and `value` directly to the page.
+        // This routine also populates any overflow pages necessary to hold a `key` and/or
+        // `value` that won't fit on a single node page. If the cell itself cannot fit in
+        // `node`, it will be written to m_cell_scratch[0] instead.
+        s = emplace(c.m_node, key, value, is_bucket, c.m_idx, overflow);
+    }
 
-        if (s.is_ok() && overflow) {
-            // There wasn't enough room for the cell in `node`, so it was built in
-            // m_cell_scratch[0] instead.
-            Cell ovfl;
-            if (c.m_node.parser(m_cell_scratch[0], m_cell_scratch[1],
-                                c.m_node.min_local, c.m_node.max_local, ovfl)) {
-                s = corrupted_node(c.page_id());
-            } else {
-                CALICODB_EXPECT_FALSE(m_ovfl.exists());
-                m_ovfl = {ovfl, c.page_id(), c.m_idx};
-                s = resolve_overflow(c);
-            }
+    if (s.is_ok() && overflow) {
+        // There wasn't enough room for the cell in `node`, so it was built in
+        // m_cell_scratch[0] instead.
+        Cell ovfl;
+        if (c.m_node.parser(m_cell_scratch[0], m_cell_scratch[1],
+                            c.m_node.min_local, c.m_node.max_local, ovfl)) {
+            s = corrupted_node(c.page_id());
+        } else {
+            CALICODB_EXPECT_FALSE(m_ovfl.exists());
+            m_ovfl = {ovfl, c.page_id(), c.m_idx};
+            s = resolve_overflow(c);
         }
-    cleanup:
-        c.finish_write(s);
     }
     return s;
 }
@@ -1887,20 +1924,20 @@ auto Tree::emplace(Node &node, Slice key, Slice value, bool flag, uint32_t index
 
 auto Tree::erase(TreeCursor &c, bool is_bucket) -> Status
 {
+    Status s;
     CALICODB_EXPECT_TRUE(c.is_valid());
-    if (c.start_write()) {
-        // The record that the cursor was on was erased out from under it. It may have been a bucket record,
-        // or a normal record, but we cannot tell which at this point.
-        return Status::invalid_argument("already erased");
-    } else if (c.is_bucket() != is_bucket) {
-        // Unexpected record type. Checking this after loading the position catches the case where the
-        // cursor position is saved, then the record in question is deleted and a different type of record
-        // created in its place (with the same key), then the saved cursor is passed to this function.
-        return Status::incompatible_value();
+    if (c.is_bucket() != is_bucket) {
+        // Incompatible record type. TreeCursor::start_write() will return true if the record type has changed.
+        // This check is to make sure that if the cursor was saved, it is saved on the expected record type.
+        s = Status::incompatible_value();
+    } else {
+        s = c.start_write();
     }
-    CALICODB_EXPECT_TRUE(c.has_valid_position(true));
-    CALICODB_EXPECT_TRUE(c.assert_state());
-    auto s = remove_cell(c.m_node, c.m_idx);
+    if (s.is_ok()) {
+        CALICODB_EXPECT_TRUE(c.has_valid_position(true));
+        CALICODB_EXPECT_TRUE(c.assert_state());
+        s = remove_cell(c.m_node, c.m_idx);
+    }
     if (s.is_ok()) {
         s = resolve_underflow(c);
     }
@@ -2042,8 +2079,8 @@ auto Tree::relocate_page(PageRef *&free, PointerMap::Entry entry, Id last_id) ->
             m_pager->release(free, Pager::kDiscard);
             if (s.is_ok()) {
                 m_pager->move_page(*last, new_location);
-                m_pager->release(last);
             }
+            m_pager->release(last);
         }
     }
     return s;

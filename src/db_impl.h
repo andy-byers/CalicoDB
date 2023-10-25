@@ -64,7 +64,6 @@ private:
     const size_t m_auto_ckpt;
     const String m_db_filename;
     const String m_wal_filename;
-    const bool m_owns_log;
     const bool m_owns_env;
 };
 

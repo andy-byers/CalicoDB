@@ -819,9 +819,9 @@ TEST_F(CrashTests, CursorModification_Syscall)
 TEST_F(CrashTests, CursorModification_OOM)
 {
     run_cursor_modify_test({kOOMFaults, false, false});
-//    run_cursor_modify_test({kOOMFaults, true, false});
-//    run_cursor_modify_test({kOOMFaults, false, true});
-//    run_cursor_modify_test({kOOMFaults, true, true});
+    //    run_cursor_modify_test({kOOMFaults, true, false});
+    //    run_cursor_modify_test({kOOMFaults, false, true});
+    //    run_cursor_modify_test({kOOMFaults, true, true});
 }
 
 #undef MAYBE_CRASH
