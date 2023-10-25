@@ -165,7 +165,7 @@ public:
 
     ~BlockAllocatorTests() override = default;
 
-    auto reserve_for_test(uint32_t n, bool is_external = true) -> void
+    auto reserve_for_test(uint32_t n) -> void
     {
         // Make the gap large so BlockAllocator doesn't get confused.
         NodeHdr::put_cell_start(
