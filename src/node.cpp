@@ -21,7 +21,7 @@ constexpr uint32_t kMinBlockSize = 2 * kSlotWidth;
 
 [[nodiscard]] auto cell_slots_offset(const Node &node) -> uint32_t
 {
-    return node_header_offset(node) + NodeHdr::kSize;
+    return node_header_offset(node) + NodeHdr::size(node.is_leaf());
 }
 
 [[nodiscard]] auto cell_area_offset(const Node &node) -> uint32_t
@@ -220,13 +220,13 @@ auto allocate_from_gap(Node &node, uint32_t needed_size) -> uint32_t
 
 [[nodiscard]] constexpr auto min_local_payload_size(uint32_t total_space) -> uint32_t
 {
-    return static_cast<uint32_t>((total_space - NodeHdr::kSize) * 32 / 256 -
+    return static_cast<uint32_t>((total_space - NodeHdr::size(false)) * 32 / 256 -
                                  kMaxCellHeaderSize - kSlotWidth);
 }
 
 [[nodiscard]] constexpr auto max_local_payload_size(uint32_t total_space) -> uint32_t
 {
-    return static_cast<uint32_t>((total_space - NodeHdr::kSize) * 64 / 256 -
+    return static_cast<uint32_t>((total_space - NodeHdr::size(false)) * 64 / 256 -
                                  kMaxCellHeaderSize - kSlotWidth);
 }
 
@@ -237,7 +237,7 @@ auto allocate_from_gap(Node &node, uint32_t needed_size) -> uint32_t
 
 [[nodiscard]] constexpr auto max_leaf_payload_size(uint32_t total_space) -> uint32_t
 {
-    return static_cast<uint32_t>((total_space - NodeHdr::kSize) * 128 / 256 -
+    return static_cast<uint32_t>((total_space - NodeHdr::size(true)) * 128 / 256 -
                                  kMaxCellHeaderSize - kSlotWidth);
 }
 
@@ -507,8 +507,8 @@ Node::Options::Options(uint32_t page_size, char *scratch)
 {
 }
 
-#define MAX_CELL_COUNT(total_space) (((total_space)-NodeHdr::kSize) / \
-                                     (kMinCellHeaderSize + kSlotWidth))
+#define MAX_CELL_COUNT(total_space, is_external) (((total_space)-NodeHdr::size(is_external)) / \
+                                                  (kMinCellHeaderSize + kSlotWidth))
 
 auto Node::from_existing_page(const Options &options, PageRef &page, Node &node_out) -> int
 {
@@ -518,13 +518,14 @@ auto Node::from_existing_page(const Options &options, PageRef &page, Node &node_
     if (type == NodeHdr::kInvalid) {
         return -1;
     }
-    const auto max_cell_count = MAX_CELL_COUNT(options.total_space);
+    const auto is_external = type == NodeHdr::kExternal;
+    const auto max_cell_count = MAX_CELL_COUNT(options.total_space, is_external);
     const auto ncells = NodeHdr::get_cell_count(hdr);
     if (ncells > max_cell_count) {
         return -1;
     }
     const auto gap_upper = NodeHdr::get_cell_start(hdr);
-    const auto gap_lower = hdr_offset + NodeHdr::kSize + ncells * kSlotWidth;
+    const auto gap_lower = hdr_offset + NodeHdr::size(is_external) + ncells * kSlotWidth;
     if (gap_upper < gap_lower || gap_upper > options.total_space) {
         return -1;
     }
@@ -561,14 +562,14 @@ auto Node::from_new_page(const Options &options, PageRef &page, bool is_leaf) ->
     node.min_local = is_leaf ? options.min_leaf : options.min_local;
     node.max_local = is_leaf ? options.max_leaf : options.max_local;
 
+    std::memset(node.hdr(), 0, NodeHdr::size(is_leaf));
+    NodeHdr::put_cell_start(node.hdr(), options.total_space);
+    NodeHdr::put_type(node.hdr(), is_leaf);
+
     const auto usable_space = static_cast<uint32_t>(
         options.total_space - cell_slots_offset(node));
     node.gap_size = usable_space;
     node.usable_space = usable_space;
-
-    std::memset(node.hdr(), 0, NodeHdr::kSize);
-    NodeHdr::put_cell_start(node.hdr(), options.total_space);
-    NodeHdr::put_type(node.hdr(), is_leaf);
     return node;
 }
 
@@ -674,9 +675,9 @@ auto Node::check_integrity() const -> Status
         return CORRUPTED_NODE("fragment count of %u exceeds maximum of %u",
                               NodeHdr::get_frag_count(hdr()), Node::kMaxFragCount);
     }
-    if (MAX_CELL_COUNT(total_space) < NodeHdr::get_cell_count(hdr())) {
+    if (MAX_CELL_COUNT(total_space, is_leaf()) < NodeHdr::get_cell_count(hdr())) {
         return CORRUPTED_NODE("cell count of %u exceeds maximum of %u",
-                              NodeHdr::get_cell_count(hdr()), MAX_CELL_COUNT(total_space));
+                              NodeHdr::get_cell_count(hdr()), MAX_CELL_COUNT(total_space, is_leaf()));
     }
     if (total_space < NodeHdr::get_free_start(hdr())) {
         return CORRUPTED_NODE("first free block at %u is out of bounds",

@@ -581,7 +581,6 @@ protected:
                     return s;
                 }
                 for (size_t iteration = 0; iteration < co.op_args[0]; ++iteration) {
-                    std::cerr << "iter=" << iteration << '\n';
                     std::string value;
                     for (size_t i = 0; i < co.op_args[1]; ++i) {
                         s = b->get(numeric_key(i), &value);
@@ -646,10 +645,7 @@ protected:
                 ASSERT_TRUE(consume_decimal_number(slice, &n));
                 ASSERT_TRUE(slice.is_empty());
                 m_sanity_check = maxval(m_sanity_check, n);
-                std::cerr << n << ',';
             }
-            if (!co.result.empty())
-                std::cerr << '\n';
         }
     }
 
