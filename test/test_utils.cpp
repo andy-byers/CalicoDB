@@ -1089,4 +1089,11 @@ TEST_F(StringBuilderTests, AppendFormatMultiple)
     ASSERT_EQ(Slice(str.c_str()), answer);
 }
 
+TEST(BufferTests, SelfMove)
+{
+    Buffer<int> buffer;
+    buffer = move(buffer);
+    [[maybe_unused]] const auto buffer2 = move(buffer);
+}
+
 } // namespace calicodb::test
