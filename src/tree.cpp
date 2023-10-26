@@ -30,14 +30,14 @@ constexpr uint32_t kCellPtrSize = sizeof(uint16_t);
                                      page_type_name(page_type), page_id.value);
 }
 
-[[nodiscard]] auto ivec_offset(const Node &node) -> uint32_t
+[[nodiscard]] auto ivec_offset(Id page_id, bool is_leaf) -> uint32_t
 {
-    return page_offset(node.page_id()) + NodeHdr::kSize;
+    return page_offset(page_id) + NodeHdr::size(is_leaf);
 }
 
 [[nodiscard]] auto cell_area_offset(const Node &node) -> uint32_t
 {
-    return ivec_offset(node) + node.cell_count() * kCellPtrSize;
+    return ivec_offset(node.page_id(), node.is_leaf()) + node.cell_count() * kCellPtrSize;
 }
 
 [[nodiscard]] auto read_next_id(const PageRef &page) -> Id
@@ -81,16 +81,16 @@ auto write_child_id(Cell &cell, Id child_id)
 
     // Copy the cell content area.
     const auto cell_start = NodeHdr::get_cell_start(child.hdr());
-    CALICODB_EXPECT_GE(cell_start, ivec_offset(root));
+    CALICODB_EXPECT_GE(cell_start, ivec_offset(root.page_id(), child.is_leaf()));
     auto area_size = page_size - cell_start;
     auto *area = root.ref->data + cell_start;
     std::memcpy(area, child.ref->data + cell_start, area_size);
 
     // Copy the header and cell pointers.
     area_size = child.cell_count() * kCellPtrSize;
-    area = root.ref->data + ivec_offset(root);
-    std::memcpy(area, child.ref->data + ivec_offset(child), area_size);
-    std::memcpy(root.hdr(), child.hdr(), NodeHdr::kSize);
+    area = root.ref->data + ivec_offset(root.page_id(), child.is_leaf());
+    std::memcpy(area, child.ref->data + ivec_offset(child.page_id(), child.is_leaf()), area_size);
+    std::memcpy(root.hdr(), child.hdr(), NodeHdr::size(child.is_leaf()));
 
     // Transfer/recompute metadata.
     const auto size_difference = root.page_id().is_root() ? FileHdr::kSize : 0U;
@@ -816,6 +816,8 @@ auto Tree::destroy(Reroot &rr, Buffer<Id> &children) -> Status
     };
 
     // Push all pages belonging to `tree` onto the freelist, except for the root page.
+    // Add nested buckets to the list of children. They will be freed in a subsequent
+    // call to destroy().
     auto s = InorderTraversal::traverse(
         *this, [this, &push_child](auto &node, const auto &info) {
             if (info.idx == info.ncells) {
@@ -1220,9 +1222,9 @@ auto Tree::split_root(TreeCursor &c) -> Status
                     page_size - after_root_ivec);
 
         // Copy the header and cell pointers.
-        std::memcpy(child.hdr(), root.hdr(), NodeHdr::kSize);
-        std::memcpy(child.ref->data + ivec_offset(child),
-                    root.ref->data + ivec_offset(root),
+        std::memcpy(child.hdr(), root.hdr(), NodeHdr::size(root.is_leaf()));
+        std::memcpy(child.ref->data + ivec_offset(child.page_id(), root.is_leaf()),
+                    root.ref->data + ivec_offset(root.page_id(), root.is_leaf()),
                     root.cell_count() * kCellPtrSize);
 
         CALICODB_EXPECT_TRUE(m_ovfl.exists());
@@ -1454,7 +1456,7 @@ auto Tree::redistribute_cells(Node &left, Node &right, Node &parent, uint32_t pi
     }
     if (page_size != right_accum + p_src->usable_space +
                          page_offset(p_src->page_id()) +
-                         NodeHdr::kSize + cell_count * kCellPtrSize -
+                         NodeHdr::size(is_leaf_level) + cell_count * kCellPtrSize -
                          (is_split ? cells[m_ovfl.idx].footprint : 0)) {
         s = corrupted_node(p_src->page_id());
         goto cleanup;

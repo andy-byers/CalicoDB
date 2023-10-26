@@ -27,7 +27,7 @@ The record store consists of 0 or more B<sup>+</sup>-trees and is located in a f
 Given that a process accessing a CalicoDB database shuts down properly, the record store is all that is left on disk.
 
 While running, however, 2 additional files are maintained:
-+ `-wal`: The `-wal` file is named like the database file, but with a suffix of `-wal`.
++ `-wal`: By default, the `-wal` file is named like the database file, but with a suffix of `-wal`.
 Pages to database pages are written here, rather than the database file.
 See [WAL file](#wal-file) for details.
 + `-shm`: The `-shm` file is named like the `-wal` file, but with a suffix of `-shm` in place of `-wal`.
@@ -49,25 +49,31 @@ In this design, the pager is never allowed to write directly to the database fil
 Instead, modified pages are flushed to the WAL on commit or eviction from the cache.
 
 ### Tree
-As mentioned earlier, CalicoDB uses B<sup>+</sup>-trees, hereafter called trees, to store records on disk.
+As mentioned earlier, CalicoDB uses B<sup>+</sup>-trees, hereafter called trees, to organize records on disk.
+Every bucket in a database is backed by a single tree, which stores an ordered mapping from keys to values.
+Keys are strings (arbitrary byte arrays), and values are either strings or nested buckets.
+String keys and values are of variable length, and bucket values consist of 4-byte unsigned integers that indicate where the backing tree is rooted.
 Every tree is rooted on some database page, called its root page.
 The tree that is rooted on the first database page is called the main tree.
-The main tree is used to maintain a name-to-root mapping for the other trees, if any exist.
-Additional trees will be rooted on pages after the second database page, which is always a pointer map page (see [Pointer Map](#pointer-map)).
+The main tree represents the entire database: all records and trees are created inside this tree, or in one of its subtrees.
+Additional trees are rooted on pages after the second database page, which is always a pointer map page (see [Pointer Map](#pointer-map)).
 Trees are of variable order, so splits are performed when nodes (pages that are part of a tree) have run out of physical space.
-Merges/rotations are performed when a node has become totally empty.
+Merges/rotations are performed when a node has become completely empty.
 
-#### Tree nodes
-A tree node is a database page that is part of a tree.
 Tree nodes can be 1 of 2 types: internal or external.
-External nodes store records (key-value pairs) sorted by key.
-They are arranged as a doubly-linked list, with the leftmost node containing the smallest keys.
-The external nodes in a tree can be thought of as a single sorted array of records, split up over multiple pages.
-This makes sequential and reverse sequential scans very fast.
-We just walk the linked list of external nodes, iterating through each node in order.
-Internal nodes are used to direct searches to the correct external node.
-They contain only keys, called pivot keys in this document.
-CalicoDB uses the suffix truncation described in [2] to reduce pivot key lengths (see [Rebalancing](#rebalancing)).
+External nodes store records (key-value pairs) sorted by key, while internal nodes store only keys.
+The external nodes together can be considered the "heap" part of the tree, and the internal nodes the "index" part. 
+Conceptually, the heap part consists of a doubly-linked list of nodes, where each node stores a sorted non-overlapping sub-range of records, with the leftmost node containing the lowest-ranked keys.
+Note that we don't actually store any sibling pointers in external nodes, instead, the tree is traversed more like a B-tree (essentially an inorder traversal).
+This is to avoid having to update too many nodes when rebalancing takes place.
+
+Within an external node, records are sorted by key, so they can be located quickly using binary search.
+The problem is that it takes linear time to reach a specific node from the start of the heap.
+This is where the index part of the tree comes in: given a search key `k`, the index allows the node that `k` belongs in to be found in logarithmic time.
+The only purpose of the index part is to facilitate search; it doesn't contain any actual data.
+This means we can store shortened keys in internal nodes, just enough to direct traversals to the correct external node.
+See [2] for an explanation of this technique (called suffix truncation).
+Keys in internal nodes are called pivot keys in this document.
 
 All nodes use a type of "slotted pages" layout that consists of the following 5 regions:
 1. Header(s)
@@ -97,7 +103,7 @@ This means that a free block can be no less than 4 bytes in length.
 If less than 4 bytes are released back to the node, there will not be enough room to store the intrusive list information.
 In this case, the memory region becomes a fragment.
 The total size of all fragments on a page is kept in the node header.
-When a free blocks is created, an attempt is made to merge it with an adjacent free block, consuming intervening fragments if possible.
+When a free block is created, an attempt is made to merge it with an adjacent free block, consuming intervening fragments if possible.
 Note that fragments are only created when only part of a free block is used to fulfill an allocation, and less than 4 bytes are left over.
 Cell headers are padded to 4 bytes, so the smallest possible cell will become a free block.
 
@@ -160,7 +166,7 @@ The root page may only hold 3 cells due to the space occupied by the file header
 ### Freelist
 Sometimes, database pages end up becoming unused.
 This happens, for example, when a record with an overflow chain is erased.
-Unused database pages are managed using the freelist.
+Unused database pages are managed by a structure called the freelist.
 There are 2 types of freelist pages: trunks and leaves.
 Like overflow chain pages, freelist trunk pages form a linked list threaded through the database file.
 Each trunk page contains the following information:

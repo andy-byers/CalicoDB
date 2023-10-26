@@ -170,8 +170,8 @@ public:
         // Make the gap large so BlockAllocator doesn't get confused.
         NodeHdr::put_cell_start(
             m_node.hdr(),
-            page_offset(m_node.page_id()) + NodeHdr::kSize);
-        ASSERT_LT(n, TEST_PAGE_SIZE - FileHdr::kSize - NodeHdr::kSize)
+            page_offset(m_node.page_id()) + NodeHdr::size(m_node.is_leaf()));
+        ASSERT_LT(n, TEST_PAGE_SIZE - FileHdr::kSize - NodeHdr::size(m_node.is_leaf()))
             << "reserve_for_test(" << n << ") leaves no room for possible headers";
         m_size = n;
         m_base = TEST_PAGE_SIZE - n;
@@ -471,7 +471,7 @@ TEST_F(CorruptedNodeTests, InvalidCellCount)
     assert_corrupted_node();
     // Lower bound of the gap is greater than the upper bound.
     NodeHdr::put_cell_count(m_node.hdr(), 512);
-    NodeHdr::put_cell_start(m_node.hdr(), NodeHdr::kSize);
+    NodeHdr::put_cell_start(m_node.hdr(), NodeHdr::size(m_node.is_leaf()));
     assert_corrupted_node();
 }
 

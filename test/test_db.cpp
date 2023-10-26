@@ -782,7 +782,7 @@ TEST_F(DBTests, RollbackUpdate)
 
 TEST_F(DBTests, ModifyRecordSpecialCase)
 {
-    const std::string long_key(kPageSize - NodeHdr::kSize - kMaxCellHeaderSize - 2, '*');
+    const std::string long_key(kPageSize - NodeHdr::size(false) - kMaxCellHeaderSize - 2, '*');
     ASSERT_OK(m_db->update([&long_key](auto &tx) {
         TestBucket b;
         EXPECT_OK(test_create_and_open_bucket(tx, "b", b));
@@ -2424,6 +2424,167 @@ TEST_F(ModelDBTests, SeekAndErase)
         }
         return Status::ok();
     }));
+}
+
+class SeedFormatFuzzer : public testing::Test
+{
+public:
+    static int s_seed_number;
+    const std::string m_prefix;
+    RandomGenerator m_rng;
+    DB *m_db;
+
+    explicit SeedFormatFuzzer()
+        : m_prefix(testing::TempDir() + "calicodb_format_fuzzer_seed_")
+    {
+    }
+
+    ~SeedFormatFuzzer() override
+    {
+        delete m_db;
+    }
+
+    auto SetUp() -> void override
+    {
+        const auto filename = m_prefix + std::to_string(s_seed_number++);
+        remove_calicodb_files(filename);
+
+        Options options;
+        options.page_size = TEST_PAGE_SIZE;
+        ASSERT_OK(DB::open(options, filename.c_str(), m_db));
+        ASSERT_OK(m_db->update([](auto &tx) {
+            auto &b = tx.main_bucket();
+            EXPECT_OK(b.create_bucket_if_missing("x1", nullptr));
+            EXPECT_OK(b.create_bucket_if_missing("b1", nullptr));
+            EXPECT_OK(b.create_bucket_if_missing("x2", nullptr));
+            EXPECT_OK(b.create_bucket_if_missing("b2", nullptr));
+            EXPECT_OK(b.create_bucket_if_missing("x3", nullptr));
+            return Status::ok();
+        }));
+    }
+
+    auto insert_random_records(const std::string &name)
+    {
+        ASSERT_OK(m_db->update([&name, &rng = m_rng](auto &tx) {
+            TestBucket b;
+            EXPECT_OK(test_open_bucket(tx, name, b));
+            for (size_t i = 0, n = static_cast<size_t>(rng.Next(1, 10)); i < n; ++i) {
+                EXPECT_OK(b->put(rng.Generate(rng.Next(TEST_PAGE_SIZE * 2)),
+                                 rng.Generate(rng.Next(TEST_PAGE_SIZE * 2))));
+            }
+            for (size_t i = 0, n = static_cast<size_t>(rng.Next(1, 100)); i < n; ++i) {
+                EXPECT_OK(b->put(rng.Generate(rng.Next(TEST_PAGE_SIZE / 2)),
+                                 rng.Generate(rng.Next(TEST_PAGE_SIZE / 2))));
+            }
+            for (size_t i = 0, n = static_cast<size_t>(rng.Next(1, 1'000)); i < n; ++i) {
+                EXPECT_OK(b->put(rng.Generate(rng.Next(16)),
+                                 rng.Generate(rng.Next(100))));
+            }
+            return Status::ok();
+        }));
+    }
+
+    auto insert_nested_buckets(const std::string &name)
+    {
+        ASSERT_OK(m_db->update([&name, &rng = m_rng](auto &tx) {
+            TestBucket parent, b;
+            EXPECT_OK(test_open_bucket(tx, name, parent));
+            EXPECT_OK(test_create_and_open_bucket(*parent, rng.Generate(42), b));
+            for (size_t i = 0, n = static_cast<size_t>(rng.Next(1, 370)); i < n; ++i) {
+                EXPECT_OK(b->put(rng.Generate(rng.Next(TEST_PAGE_SIZE)),
+                                 rng.Generate(rng.Next(TEST_PAGE_SIZE))));
+            }
+            return Status::ok();
+        }));
+    }
+
+    auto erase_random_records(const std::string &name)
+    {
+        ASSERT_OK(m_db->update([&name, &rng = m_rng](auto &tx) {
+            TestBucket b;
+            EXPECT_OK(test_open_bucket(tx, name, b));
+            auto c = test_new_cursor(*b);
+            c->seek_first();
+            while (c->is_valid()) {
+                EXPECT_OK(b->erase(*c));
+                const auto skip = static_cast<size_t>(rng.Next(1, 370));
+                for (size_t i = 0; c->is_valid() && i < skip; ++i) {
+                    c->next();
+                }
+            }
+            return Status::ok();
+        }));
+    }
+
+    auto add_to_all_buckets()
+    {
+        insert_random_records("x1");
+        insert_random_records("x2");
+        insert_random_records("x3");
+        insert_random_records("b1");
+        insert_random_records("b2");
+    }
+
+    auto remove_from_all_buckets()
+    {
+        erase_random_records("x1");
+        erase_random_records("x2");
+        erase_random_records("x3");
+        erase_random_records("b1");
+        erase_random_records("b2");
+    }
+};
+
+int SeedFormatFuzzer::s_seed_number = 0;
+
+TEST_F(SeedFormatFuzzer, 0)
+{
+    // Get rid of the extra buckets "x1", "x2", and "x3".
+    ASSERT_OK(m_db->update([](auto &tx) {
+        auto &b = tx.main_bucket();
+        EXPECT_OK(b.drop_bucket("x1"));
+        EXPECT_OK(b.drop_bucket("x2"));
+        EXPECT_OK(b.drop_bucket("x3"));
+        return tx.vacuum();
+    }));
+}
+
+TEST_F(SeedFormatFuzzer, 1)
+{
+    // Leave all buckets empty.
+}
+
+TEST_F(SeedFormatFuzzer, 2)
+{
+    insert_random_records("b1");
+    insert_random_records("b2");
+}
+
+TEST_F(SeedFormatFuzzer, 3)
+{
+    add_to_all_buckets();
+}
+
+TEST_F(SeedFormatFuzzer, 4)
+{
+    add_to_all_buckets();
+    erase_random_records("x1");
+    erase_random_records("x2");
+    erase_random_records("x3");
+}
+
+TEST_F(SeedFormatFuzzer, 5)
+{
+    add_to_all_buckets();
+    remove_from_all_buckets();
+}
+
+TEST_F(SeedFormatFuzzer, 6)
+{
+    add_to_all_buckets();
+    insert_nested_buckets("b1");
+    insert_nested_buckets("b2");
+    remove_from_all_buckets();
 }
 
 } // namespace calicodb::test

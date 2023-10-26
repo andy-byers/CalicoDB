@@ -286,9 +286,9 @@ auto Pager::begin_writer() -> Status
         if (m_wal == nullptr) {
             s = open_wal();
             if (s.is_ok()) {
-                // start_reader() must have been called at some point to get the pager
+                // lock_reader() must have been called at some point to get the pager
                 // into kRead mode. The WAL must not have existed at that point. It does
-                // now, so call start_reader() again to start a read transaction on it.
+                // now, so call lock_reader() again to start a read transaction on it.
                 s = lock_reader(nullptr);
             }
         }
