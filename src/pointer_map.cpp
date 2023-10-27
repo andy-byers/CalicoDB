@@ -52,9 +52,8 @@ auto PointerMap::read_entry(Pager &pager, Id page_id, Entry &entry_out) -> Statu
         return Status::corruption();
     }
     const auto offset = entry_offset(map_id, page_id);
-    if (offset + kEntrySize > pager.page_size()) {
-        return Status::corruption();
-    }
+    CALICODB_EXPECT_LE(offset + kEntrySize, pager.page_size());
+
     PageRef *map;
     auto s = pager.acquire(map_id, map);
     if (s.is_ok()) {
@@ -82,10 +81,8 @@ auto PointerMap::write_entry(Pager &pager, Id page_id, Entry entry, Status &s) -
     s = pager.acquire(map_id, map);
     if (s.is_ok()) {
         const auto offset = entry_offset(map_id, page_id);
-        if (offset + kEntrySize > pager.page_size()) {
-            s = Status::corruption();
-            return;
-        }
+        CALICODB_EXPECT_LE(offset + kEntrySize, pager.page_size());
+
         const auto [back_ptr, type] = decode_entry(
             map->data + offset);
         if (entry.back_ptr != back_ptr || entry.type != type) {

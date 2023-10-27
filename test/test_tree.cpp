@@ -1209,6 +1209,22 @@ TEST_F(PointerMapTests, LookupBeforeFirstMap)
     ASSERT_TRUE(PointerMap::lookup(Id(1), TEST_PAGE_SIZE).is_null());
 }
 
+TEST_F(PointerMapTests, ReadCorruption)
+{
+    PointerMap::Entry entry;
+    ASSERT_NOK(PointerMap::read_entry(*m_pager, Id(0), entry));
+    ASSERT_NOK(PointerMap::read_entry(*m_pager, Id(2), entry));
+}
+
+TEST_F(PointerMapTests, WriteCorruption)
+{
+    Status s, t;
+    PointerMap::write_entry(*m_pager, Id(0), PointerMap::Entry(), s);
+    ASSERT_NOK(s);
+    PointerMap::write_entry(*m_pager, Id(2), PointerMap::Entry(), t);
+    ASSERT_NOK(t);
+}
+
 class MultiTreeTests : public TreeTests
 {
 public:

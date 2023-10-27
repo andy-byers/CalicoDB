@@ -1059,6 +1059,15 @@ TEST_F(DBTests, ReadWithoutWAL)
     ASSERT_FALSE(m_env->file_exists(wal_name.c_str()));
 }
 
+TEST_F(DBTests, DebugDatabaseOverview)
+{
+    ASSERT_OK(m_db->update([this](auto &tx) {
+        EXPECT_OK(put_range(tx, "b", 0, 100));
+        print_database_overview(TEST_LOG, reinterpret_cast<DBImpl &>(*m_db).TEST_pager());
+        return Status::ok();
+    }));
+}
+
 class DBFileFormatTests : public DBTests
 {
 protected:
@@ -1290,6 +1299,9 @@ protected:
             EXPECT_OK(b2->put("a3", "3a"));
             EXPECT_OK(b2->put("c3", "3c"));
             EXPECT_OK(test_create_bucket_if_missing(*b2, "b3", b3));
+            reinterpret_cast<BucketImpl &>(*b1).TEST_validate();
+            reinterpret_cast<BucketImpl &>(*b2).TEST_validate();
+            reinterpret_cast<BucketImpl &>(*b3).TEST_validate();
             return Status::ok();
         }));
     }
@@ -1457,6 +1469,16 @@ TEST_F(DBBucketTests, RecognizesRecordTypes)
         auto c3 = test_new_cursor(*b3);
         c3->seek_first();
         EXPECT_FALSE(c3->is_valid());
+        return Status::ok();
+    }));
+}
+
+TEST_F(DBBucketTests, EraseInvalidCursor)
+{
+    ASSERT_OK(m_db->update([](auto &tx) {
+        auto &b = tx.main_bucket();
+        auto c = test_new_cursor(b);
+        EXPECT_NOK(b.erase(*c));
         return Status::ok();
     }));
 }
