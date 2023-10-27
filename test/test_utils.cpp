@@ -1020,13 +1020,10 @@ TEST_F(StringBuilderTests, AppendFormat)
 
 TEST_F(StringBuilderTests, AppendEscaped)
 {
-    const std::string long_str(512, '*');
-    m_builder.append_format("hello %d %s", 42, "goodbye")
-        .append_format("%s", long_str.data())
-        .append_format("empty");
-    const auto lhs = build_string();
-    const auto rhs = "hello 42 goodbye" + long_str + "empty";
-    ASSERT_EQ(Slice(lhs.c_str()), rhs);
+    String str;
+    ASSERT_EQ(0, append_escaped_string(str, "\x01\x02"
+                                            "123\xFE\xFF"));
+    ASSERT_EQ(Slice(str.c_str()), "\\x01\\x02123\\xFE\\xFF");
 }
 
 static constexpr const char *kTestMessages[] = {
@@ -1087,6 +1084,23 @@ TEST_F(StringBuilderTests, AppendFormatMultiple)
     }
     const auto str = build_string();
     ASSERT_EQ(Slice(str.c_str()), answer);
+}
+
+TEST(BufferTests, SelfMove)
+{
+    Buffer<int> buffer;
+    buffer = move(buffer);
+    [[maybe_unused]] const auto buffer2 = move(buffer);
+}
+
+TEST(InternalTests, PageTypeNames)
+{
+    ASSERT_NE(nullptr, page_type_name(kInvalidPage));
+    ASSERT_NE(nullptr, page_type_name(kTreeRoot));
+    ASSERT_NE(nullptr, page_type_name(kTreeNode));
+    ASSERT_NE(nullptr, page_type_name(kOverflowHead));
+    ASSERT_NE(nullptr, page_type_name(kOverflowLink));
+    ASSERT_NE(nullptr, page_type_name(kFreelistPage));
 }
 
 } // namespace calicodb::test

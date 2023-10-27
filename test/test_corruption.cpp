@@ -29,6 +29,7 @@ protected:
     {
         m_options.env = &m_env;
         m_options.page_size = TEST_PAGE_SIZE;
+        m_options.create_if_missing = true;
 
         while (m_junk.size() < 256) {
             m_junk.append(m_junk);
@@ -43,9 +44,9 @@ protected:
         DB *db;
         ASSERT_OK(DB::open(m_options, m_filename.c_str(), db));
         ASSERT_OK(db->update([](auto &tx) {
-            TestBucket b;
+            BucketPtr b;
             auto &main = tx.main_bucket();
-            EXPECT_OK(test_create_and_open_bucket(main, "b1", b));
+            EXPECT_OK(test_create_bucket_if_missing(main, "b1", b));
             for (size_t i = 0; i < kN; ++i) {
                 EXPECT_OK(b->put(numeric_key(i), numeric_key(i)));
                 EXPECT_OK(b->put("*" + numeric_key(i), numeric_key(i)));
@@ -111,7 +112,7 @@ protected:
     {
         // Scan through "b1".
         return db.view([](const auto &tx) {
-            TestBucket b1;
+            BucketPtr b1;
             auto s = test_open_bucket(tx, "b1", b1);
             if (s.is_ok()) {
                 auto c = test_new_cursor(*b1);
@@ -129,11 +130,11 @@ protected:
     {
         // Transfer records from "b1" to "b2"
         return db.update([](auto &tx) {
-            TestBucket b1, b2;
+            BucketPtr b1, b2;
             auto &main = tx.main_bucket();
             auto s = test_open_bucket(main, "b1", b1);
             if (s.is_ok()) {
-                s = test_create_and_open_bucket(main, "b2", b2);
+                s = test_create_bucket_if_missing(main, "b2", b2);
             }
             if (!s.is_ok()) {
                 return s;
@@ -159,7 +160,7 @@ protected:
         check_status(s);
 
         s = db->update([](auto &tx) {
-            TestBucket b1;
+            BucketPtr b1;
             auto &main = tx.main_bucket();
             auto s = test_open_bucket(main, "b1", b1);
             if (!s.is_ok()) {
@@ -184,7 +185,7 @@ protected:
         check_status(s);
 
         s = db->view([](const auto &tx) {
-            TestBucket b2;
+            BucketPtr b2;
             auto &main = tx.main_bucket();
             auto s = test_open_bucket(main, "b2", b2);
             if (!s.is_ok()) {
@@ -243,7 +244,7 @@ TEST_F(CorruptionTests, CorruptedPageSize1)
 TEST_F(CorruptionTests, CorruptedPageSize2)
 {
     auto &file = set_normal_contents();
-    FileHdr::put_page_size(file.data(), kMaxPageSize * 2);
+    FileHdr::put_page_size(file.data(), kMaxPageSize + 1);
 
     auto s = run_read_transaction(*open_database());
     ASSERT_TRUE(s.is_corruption()) << s.message();

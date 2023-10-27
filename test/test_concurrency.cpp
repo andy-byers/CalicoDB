@@ -197,6 +197,7 @@ protected:
         proto.env = m_env.get();
         proto.op_args[0] = param.num_iterations;
         proto.op_args[1] = param.num_records;
+        proto.options.create_if_missing = true;
 
         std::vector<Connection> connections;
         proto.op = test_writer;
@@ -309,7 +310,7 @@ protected:
         auto s = reopen_connection(co);
         for (size_t n = 0; s.is_ok() && n < co.op_args[0]; ++n) {
             s = co.db->view([&co](const auto &tx) {
-                TestBucket b;
+                BucketPtr b;
                 // Oddly enough, if we name this Status "s", some platforms complain about shadowing,
                 // even though s is not captured in this lambda.
                 auto t = test_open_bucket(tx, "b", b);
@@ -362,8 +363,8 @@ protected:
         auto s = reopen_connection(co);
         for (size_t n = 0; s.is_ok() && n < co.op_args[0]; ++n) {
             s = co.db->update([&co](auto &tx) {
-                TestBucket b;
-                auto t = test_create_and_open_bucket(tx, "b", b);
+                BucketPtr b;
+                auto t = test_create_bucket_if_missing(tx, "b", b);
                 if (!t.is_ok()) {
                     return t;
                 }
@@ -456,6 +457,7 @@ protected:
         // thread.
         proto.options.sync_mode = Options::kSyncOff;
         proto.options.auto_checkpoint = param.auto_checkpoint * 1'000;
+        proto.options.create_if_missing = true;
 
         std::vector<Connection> connections;
         proto.op = test_writer;
@@ -570,13 +572,14 @@ protected:
         proto.env = m_env.get();
         proto.op_args[0] = param.num_iterations;
         proto.op_args[1] = param.num_records;
+        proto.options.create_if_missing = true;
 
         std::vector<Connection> connections;
         proto.op = [](auto &co, auto *) {
             auto s = reopen_connection(co);
             s = co.db->update([&co](auto &tx) {
-                TestBucket b;
-                auto s = test_create_and_open_bucket(tx, "b", b);
+                BucketPtr b;
+                auto s = test_create_bucket_if_missing(tx, "b", b);
                 if (!s.is_ok()) {
                     return s;
                 }
@@ -670,6 +673,81 @@ protected:
         }
         TEST_LOG << "Highest wait count = " << highest_wait_count << '\n';
     }
+
+    auto run_destruction_test(size_t num_connections) -> void
+    {
+        TEST_LOG << "ConcurrencyTests.Destruction*\n";
+        remove_calicodb_files(m_filename);
+        s_busy_handler.counter = 0;
+
+        Connection proto;
+        proto.filename = m_filename.c_str();
+        proto.env = m_env.get();
+
+        std::vector<Connection> connections;
+        proto.options.create_if_missing = false;
+        proto.op = [](auto &co, auto *) {
+            auto s = reopen_connection(co);
+            if (s.is_ok()) {
+                // Take some locks and check for bucket "b", which should exist for as long
+                // as the database exists.
+                s = co.db->view([](const auto &tx) {
+                    BucketPtr b;
+                    return test_open_bucket(tx, "b", b);
+                });
+                if (s.is_ok()) {
+                    s = co.db->update([](auto &tx) {
+                        BucketPtr b;
+                        return test_open_bucket(tx, "b", b);
+                    });
+                    if (s.is_busy()) {
+                        s = Status::ok();
+                    }
+                }
+            } else if (s.is_invalid_argument()) {
+                // Database no longer exists. Finished.
+                co.op = nullptr;
+                s = Status::ok();
+            }
+
+            delete co.db;
+            return s;
+        };
+        for (size_t i = 0; i < num_connections; ++i) {
+            connections.push_back(proto);
+        }
+
+        DBPtr db;
+        proto.options.create_if_missing = true;
+        ASSERT_OK(test_open_db(proto.options, m_filename, db));
+        ASSERT_OK(db->update([](auto &tx) {
+            BucketPtr b;
+            return test_create_bucket(tx, "b", b);
+        }));
+        db.reset();
+
+        std::vector<std::thread> threads;
+        threads.reserve(connections.size());
+        for (auto &co : connections) {
+            threads.emplace_back([&co] {
+                while (connection_main(co, nullptr)) {
+                    // Run until the connection clears its own callback.
+                }
+            });
+        }
+
+        proto.env->sleep(1'000);
+
+        Status s;
+        do {
+            s = DB::destroy(proto.options, m_filename.c_str());
+        } while (s.is_busy());
+        ASSERT_OK(s);
+
+        for (auto &t : threads) {
+            t.join();
+        }
+    }
 };
 
 WaitForever ConcurrencyTests::s_busy_handler;
@@ -757,6 +835,13 @@ TEST_F(ConcurrencyTests, SingleWriter2)
     run_single_writer_test({10, true});
 }
 
+TEST_F(ConcurrencyTests, Destruction)
+{
+    run_destruction_test(0);
+    run_destruction_test(1);
+    run_destruction_test(5);
+}
+
 class MultiProcessTests : public testing::TestWithParam<size_t>
 {
 public:
@@ -821,6 +906,7 @@ public:
         DB *db = nullptr;
         Options options;
         options.busy = busy;
+        options.create_if_missing = true;
         auto s = DB::open(options, filename, db);
         for (size_t i = 0; s.is_ok() && i < 10;) {
             s = db->update([](auto &tx) {
@@ -856,6 +942,7 @@ public:
         DB *db = nullptr;
         Options options;
         options.busy = busy;
+        options.create_if_missing = true;
         auto s = DB::open(options, filename, db);
         for (size_t i = 0; s.is_ok() && i < 10;) {
             s = db->view([](auto &tx) {
@@ -933,7 +1020,7 @@ public:
     static auto bank_thread(const char *filename, BusyHandler *busy, uint64_t micros_to_run)
     {
         const auto update_accounts = [](auto &tx) {
-            TestBucket values, ledger;
+            BucketPtr values, ledger;
             ASSERT_OK(test_open_bucket(tx, "values", values));
             ASSERT_OK(test_open_bucket(tx, "ledger", ledger));
             auto info = parse_bank_info(*values, *ledger);
@@ -968,7 +1055,7 @@ public:
         };
 
         const auto check_accounts = [](const auto &tx) {
-            TestBucket values, ledger;
+            BucketPtr values, ledger;
             ASSERT_OK(test_open_bucket(tx, "values", values));
             ASSERT_OK(test_open_bucket(tx, "ledger", ledger));
             auto info1 = parse_bank_info(*values, *ledger);
@@ -981,6 +1068,7 @@ public:
         DB *db = nullptr;
         Options options;
         options.busy = busy;
+        options.create_if_missing = true;
         const auto start_time = std::chrono::system_clock::now();
         auto s = DB::open(options, filename, db);
         while (s.is_ok()) {
@@ -1020,10 +1108,12 @@ public:
     {
         DB *db;
         remove_calicodb_files(m_filename);
-        auto s = DB::open(Options(), m_filename.c_str(), db);
+        Options options;
+        options.create_if_missing = true;
+        auto s = DB::open(options, m_filename.c_str(), db);
         ASSERT_OK(db->update([](auto &tx) {
-            TestBucket values;
-            EXPECT_OK(test_create_and_open_bucket(tx, "values", values));
+            BucketPtr values;
+            EXPECT_OK(test_create_bucket_if_missing(tx, "values", values));
 
             std::string accum;
             const auto value = numeric_key(10);
@@ -1032,9 +1122,9 @@ public:
                 accum.append(key + value);
             }
 
-            TestBucket ledger;
+            BucketPtr ledger;
             const auto hash = std::hash<std::string>{}(accum);
-            EXPECT_OK(test_create_and_open_bucket(tx, "ledger", ledger));
+            EXPECT_OK(test_create_bucket_if_missing(tx, "ledger", ledger));
             return ledger->put(numeric_key(0), std::to_string(hash));
         }));
 
@@ -1055,7 +1145,7 @@ public:
         bank_thread(m_filename.c_str(), &s_busy_handler, 1);
 
         ASSERT_OK(db->view([](auto &tx) {
-            TestBucket values, ledger;
+            BucketPtr values, ledger;
             EXPECT_OK(test_open_bucket(tx, "values", values));
             EXPECT_OK(test_open_bucket(tx, "ledger", ledger));
             auto vc = test_new_cursor(*values);

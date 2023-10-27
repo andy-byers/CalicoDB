@@ -95,12 +95,10 @@ auto DB::open(const Options &options, const char *filename, DB *&db) -> Status
     // Determine absolute paths for the database and WAL.
     s = get_full_filename(*sanitized.env, filename, db_name);
     if (s.is_ok()) {
-        if (!sanitized.wal_filename || !sanitized.wal_filename[0]) {
-            if (append_strings(wal_name, Slice(db_name), kDefaultWalSuffix)) {
-                s = Status::no_memory();
-            }
-        } else {
+        if (sanitized.wal_filename) {
             s = get_full_filename(*sanitized.env, sanitized.wal_filename, wal_name);
+        } else if (append_strings(wal_name, Slice(db_name), kDefaultWalSuffix)) {
+            s = Status::no_memory();
         }
     }
     if (!s.is_ok()) {

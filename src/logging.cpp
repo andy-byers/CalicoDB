@@ -82,7 +82,7 @@ auto StringBuilder::append_escaped(const Slice &s) -> StringBuilder &
             append(chr);
         } else {
             char buffer[10];
-            std::snprintf(buffer, sizeof(buffer), "\\x%02x", static_cast<unsigned>(chr) & 0xFF);
+            std::snprintf(buffer, sizeof(buffer), "\\x%02X", static_cast<unsigned>(chr) & 0xFF);
             append(buffer);
         }
     }

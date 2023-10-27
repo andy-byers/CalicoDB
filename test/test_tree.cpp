@@ -144,7 +144,7 @@ public:
     auto validate() const -> void
     {
         m_tree->deactivate_cursors(nullptr);
-        m_tree->TEST_validate();
+        ASSERT_OK(m_tree->check_integrity());
         ASSERT_TRUE(Freelist::assert_state(*m_pager));
         m_pager->assert_state();
     }
@@ -1209,18 +1209,34 @@ TEST_F(PointerMapTests, LookupBeforeFirstMap)
     ASSERT_TRUE(PointerMap::lookup(Id(1), TEST_PAGE_SIZE).is_null());
 }
 
+TEST_F(PointerMapTests, ReadCorruption)
+{
+    PointerMap::Entry entry;
+    ASSERT_NOK(PointerMap::read_entry(*m_pager, Id(0), entry));
+    ASSERT_NOK(PointerMap::read_entry(*m_pager, Id(2), entry));
+}
+
+TEST_F(PointerMapTests, WriteCorruption)
+{
+    Status s, t;
+    PointerMap::write_entry(*m_pager, Id(0), PointerMap::Entry(), s);
+    ASSERT_NOK(s);
+    PointerMap::write_entry(*m_pager, Id(2), PointerMap::Entry(), t);
+    ASSERT_NOK(t);
+}
+
 class MultiTreeTests : public TreeTests
 {
 public:
     static constexpr size_t kN = 32;
     struct TreeWrapper {
-        TestBucket b;
-        TestCursor c;
+        BucketPtr b;
+        CursorPtr c;
         Tree *tree; // Owned by b
     };
 
     std::unique_ptr<Schema> m_schema;
-    TestBucket m_main;
+    BucketPtr m_main;
     std::unordered_map<size_t, TreeWrapper> multi_tree;
     std::vector<std::string> payload_values;
 
@@ -1269,7 +1285,7 @@ public:
         const auto name = tree_name(tid);
         EXPECT_OK(m_main->create_bucket(name, &b));
         auto *c = b->new_cursor();
-        multi_tree.emplace(tid, TreeWrapper{TestBucket(b), TestCursor(c),
+        multi_tree.emplace(tid, TreeWrapper{BucketPtr(b), CursorPtr(c),
                                             &tree_cursor_cast(*c).tree()});
     }
 
@@ -1283,7 +1299,7 @@ public:
         const auto name = tree_name(child_tid);
         EXPECT_OK(itr->second.b->create_bucket(name, &b));
         auto *c = b->new_cursor();
-        multi_tree.emplace(child_tid, TreeWrapper{TestBucket(b), TestCursor(c),
+        multi_tree.emplace(child_tid, TreeWrapper{BucketPtr(b), CursorPtr(c),
                                                   &tree_cursor_cast(*c).tree()});
     }
 
@@ -1311,7 +1327,7 @@ public:
             ASSERT_EQ(c->key(), key);
             ASSERT_EQ(c->value(), value);
         }
-        tree->TEST_validate();
+        ASSERT_OK(tree->check_integrity());
     }
 
     auto check_tree(size_t tid)

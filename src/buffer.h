@@ -108,13 +108,13 @@ public:
     {
         auto *ptr = static_cast<T *>(Mem::reallocate(
             m_ptr.get(), len * sizeof(T)));
-        if (!ptr && len) {
-            return -1;
+        if (ptr || len == 0) {
+            m_ptr.release();
+            m_ptr.reset(ptr);
+            m_len = len;
+            return 0;
         }
-        m_ptr.release();
-        m_ptr.reset(ptr);
-        m_len = len;
-        return 0;
+        return -1;
     }
 };
 

@@ -69,8 +69,8 @@ struct DatabaseState {
     static constexpr size_t kMaxBuckets = ARRAY_SIZE(kBucketNames);
 
     struct BucketState final {
-        TestBucket bucket;
-        TestCursor cursor;
+        BucketPtr bucket;
+        CursorPtr cursor;
     } buckets[kMaxBuckets];
 
     struct BucketSelection {
@@ -272,6 +272,7 @@ struct DatabaseState {
 
     auto open_db() -> void
     {
+        db_opt.create_if_missing = true;
         s = ModelDB::open(db_opt, filename.c_str(), model_store, db);
     }
 

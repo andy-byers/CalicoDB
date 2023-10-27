@@ -239,7 +239,7 @@ private:
                     page = static_cast<char *>(ptr);
                 } else {
                     // Clear the rest of the pointers so the destructor doesn't mess up.
-                    std::memset(page, 0, (new_len - i) * sizeof(char *));
+                    std::memset(&page, 0, (new_len - i) * sizeof(char *));
                     return -1;
                 }
             }
@@ -268,9 +268,8 @@ public:
     {
         auto *wal = Mem::new_object<TempWal>(
             reinterpret_cast<TempEnv &>(*options.env),
-            *options.stat,
-            page_size);
-        if (wal->m_table.grow()) {
+            *options.stat, page_size);
+        if (wal && wal->m_table.grow()) {
             Mem::deallocate(wal);
             return nullptr;
         }

@@ -54,7 +54,7 @@ public:
 
         if (s.is_ok()) {
             s = db->update([](auto &tx) {
-                TestBucket b1, b2;
+                BucketPtr b1, b2;
                 auto s = test_open_bucket(tx, "b1", b1);
                 if (s.is_ok()) {
                     s = test_open_bucket(tx, "b2", b2);

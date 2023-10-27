@@ -47,7 +47,7 @@ struct Options final {
 
     // Alternate filename to use for the WAL. If empty, creates the WAL at
     // "dbname-wal", where "dbname" is the name of the database.
-    const char *wal_filename = "";
+    const char *wal_filename = nullptr;
 
     // Destination for info log messages.
     Logger *info_log = nullptr;
@@ -62,7 +62,7 @@ struct Options final {
     BusyHandler *busy = nullptr;
 
     // If true, create the database if it is missing.
-    bool create_if_missing = true;
+    bool create_if_missing = false;
 
     // If true, return with an error if the database already exists.
     bool error_if_exists = false;

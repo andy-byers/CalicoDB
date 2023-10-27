@@ -34,6 +34,7 @@ public:
     {
         env = &default_env();
         m_ref->page_id = Id(3);
+        std::memset(m_ref->data, 0, TEST_PAGE_SIZE);
         m_node = Node::from_new_page(m_options, *m_ref, true);
 
         encode_leaf_record_cell_hdr(m_external_cell, 2, 0);
@@ -444,11 +445,13 @@ public:
     {
         Node corrupted;
         ASSERT_NE(Node::from_existing_page(m_options, *m_node.ref, corrupted), 0);
+        ASSERT_NOK(m_node.check_integrity());
     }
     auto assert_valid_node() -> void
     {
         Node valid;
         ASSERT_EQ(Node::from_existing_page(m_options, *m_node.ref, valid), 0);
+        ASSERT_OK(m_node.check_integrity());
     }
 };
 
@@ -479,6 +482,40 @@ TEST_F(CorruptedNodeTests, InvalidCellStart)
 {
     NodeHdr::put_cell_start(m_node.hdr(), TEST_PAGE_SIZE + 1);
     assert_corrupted_node();
+}
+
+TEST_F(CorruptedNodeTests, CorruptedChunks)
+{
+    TEST_LOG << "CorruptedNodeTests.CorruptedChunks\n";
+    static constexpr uint32_t kNumChunks = 8;
+    static constexpr uint32_t kChunkSize = TEST_PAGE_SIZE / kNumChunks;
+    static_assert(kNumChunks * kChunkSize == TEST_PAGE_SIZE);
+    const std::string junk(kChunkSize, '*');
+    TEST_LOG << "Chunk size = " << kChunkSize << '\n';
+    TEST_LOG << "Junk string = " << junk << '\n';
+    for (uint32_t i = 0;; ++i) {
+        if (!m_node.insert(i, make_cell(i))) {
+            break;
+        }
+    }
+    for (uint32_t i = 0; i < m_node.cell_count(); i += 3) {
+        Cell cell;
+        ASSERT_EQ(0, m_node.read(i, cell));
+        m_node.erase(i, cell.footprint);
+    }
+    for (uint32_t i = 0; i < kNumChunks; ++i) {
+        const auto offset = kChunkSize * i;
+        const auto saved = Slice(m_node.ref->data + offset, kChunkSize)
+                               .to_string();
+
+        // Corrupt the node.
+        std::memcpy(m_node.ref->data + offset, junk.data(), kChunkSize);
+        ASSERT_NOK(m_node.check_integrity());
+
+        // Restore the chunk to its original contents.
+        std::memcpy(m_node.ref->data + offset, saved.data(), kChunkSize);
+        assert_valid_node();
+    }
 }
 
 class CorruptedNodeFreelistTests : public CorruptedNodeTests
