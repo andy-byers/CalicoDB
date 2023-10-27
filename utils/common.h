@@ -195,15 +195,41 @@ auto operator<<(std::ostream &os, const Slice &slice) -> std::ostream &
 // Print information about each database page to `os`
 auto print_database_overview(std::ostream &os, Pager &pager) -> void;
 
-using TestBucket = std::unique_ptr<Bucket>;
-using TestCursor = std::unique_ptr<Cursor>;
+using DBPtr = std::unique_ptr<DB>;
+using TxPtr = std::unique_ptr<Tx>;
+using BucketPtr = std::unique_ptr<Bucket>;
+using CursorPtr = std::unique_ptr<Cursor>;
 
-inline auto test_new_cursor(const Bucket &b) -> TestCursor
+inline auto test_open_db(const Options &options, const std::string &name, DBPtr &db_out) -> Status
 {
-    return TestCursor(b.new_cursor());
+    DB *db;
+    auto s = DB::open(options, name.c_str(), db);
+    db_out.reset(db);
+    return s;
 }
 
-inline auto test_open_bucket(const Tx &tx, const Slice &name, TestBucket &b_out) -> Status
+inline auto test_new_reader(const DB &db, TxPtr &tx_out) -> Status
+{
+    Tx *tx;
+    auto s = db.new_reader(tx);
+    tx_out.reset(tx);
+    return s;
+}
+
+inline auto test_new_writer(DB &db, TxPtr &tx_out) -> Status
+{
+    Tx *tx;
+    auto s = db.new_writer(tx);
+    tx_out.reset(tx);
+    return s;
+}
+
+inline auto test_new_cursor(const Bucket &b) -> CursorPtr
+{
+    return CursorPtr(b.new_cursor());
+}
+
+inline auto test_open_bucket(const Tx &tx, const Slice &name, BucketPtr &b_out) -> Status
 {
     Bucket *b;
     auto s = tx.main_bucket().open_bucket(name, b);
@@ -211,7 +237,7 @@ inline auto test_open_bucket(const Tx &tx, const Slice &name, TestBucket &b_out)
     return s;
 }
 
-inline auto test_open_bucket(const Bucket &b, const Slice &key, TestBucket &b_out) -> Status
+inline auto test_open_bucket(const Bucket &b, const Slice &key, BucketPtr &b_out) -> Status
 {
     Bucket *b2;
     auto s = b.open_bucket(key, b2);
@@ -219,7 +245,23 @@ inline auto test_open_bucket(const Bucket &b, const Slice &key, TestBucket &b_ou
     return s;
 }
 
-inline auto test_create_and_open_bucket(Tx &tx, const Slice &name, TestBucket &b_out) -> Status
+inline auto test_create_bucket(Tx &tx, const Slice &name, BucketPtr &b_out) -> Status
+{
+    Bucket *b;
+    auto s = tx.main_bucket().create_bucket(name, &b);
+    b_out.reset(b);
+    return s;
+}
+
+inline auto test_create_bucket(Bucket &b, const Slice &key, BucketPtr &b_out) -> Status
+{
+    Bucket *b2;
+    auto s = b.create_bucket(key, &b2);
+    b_out.reset(b2);
+    return s;
+}
+
+inline auto test_create_bucket_if_missing(Tx &tx, const Slice &name, BucketPtr &b_out) -> Status
 {
     Bucket *b;
     auto s = tx.main_bucket().create_bucket_if_missing(name, &b);
@@ -227,7 +269,7 @@ inline auto test_create_and_open_bucket(Tx &tx, const Slice &name, TestBucket &b
     return s;
 }
 
-inline auto test_create_and_open_bucket(Bucket &b, const Slice &key, TestBucket &b_out) -> Status
+inline auto test_create_bucket_if_missing(Bucket &b, const Slice &key, BucketPtr &b_out) -> Status
 {
     Bucket *b2;
     auto s = b.create_bucket_if_missing(key, &b2);

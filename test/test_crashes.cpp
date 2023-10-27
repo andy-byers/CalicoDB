@@ -249,13 +249,13 @@ protected:
         EXPECT_OK(tx.status());
 
         Status s;
-        TestBucket b1, b2;
+        BucketPtr b1, b2;
         const auto name1 = std::to_string(iteration);
         const auto name2 = std::to_string((iteration + 1) % kNumIterations);
 
         s = test_open_bucket(tx, name1, b1);
         if (s.is_invalid_argument()) {
-            s = test_create_and_open_bucket(tx, name1, b1);
+            s = test_create_bucket_if_missing(tx, name1, b1);
             if (s.is_ok()) {
                 std::vector<uint32_t> keys(kNumRecords);
                 std::iota(begin(keys), end(keys), 0);
@@ -276,7 +276,7 @@ protected:
             }
             return s;
         }
-        s = test_create_and_open_bucket(tx, name2, b2);
+        s = test_create_bucket_if_missing(tx, name2, b2);
         if (!s.is_ok()) {
             if (!s.is_no_memory()) {
                 EXPECT_EQ(s, tx.status());
@@ -336,7 +336,7 @@ protected:
             return toplevel->status();
         }
 
-        TestBucket b;
+        BucketPtr b;
         auto s = test_open_bucket(tx, b_name, b);
         if (!s.is_ok()) {
             return s;
@@ -461,6 +461,7 @@ protected:
         FaultType fault_type = kNoFaults;
         bool auto_checkpoint = false;
         bool test_sync_mode = false;
+        bool in_memory = false;
     };
     auto run_operations_test(const OperationsParameters &param) -> void
     {
@@ -487,6 +488,8 @@ protected:
 
         Options options;
         options.env = m_env;
+        options.create_if_missing = true;
+        options.temp_database = param.in_memory;
         options.auto_checkpoint = param.auto_checkpoint ? 500 : 0;
         options.sync_mode = param.test_sync_mode
                                 ? Options::kSyncFull
@@ -496,6 +499,9 @@ protected:
             set_fault_injection_type(param.fault_type);
 
             run_until_completion([this, i, &options, &src_counters] {
+                if (options.temp_database) {
+                    m_store.tree.clear();
+                }
                 UserPtr<DB> db;
                 ++src_counters[kSrcOpen];
                 auto s = ModelDB::open(options, m_filename.c_str(), m_store, db.ref());
@@ -533,6 +539,7 @@ protected:
                 }
                 CALICODB_EXPECT_TRUE(db);
                 validate(*db);
+
                 return s;
             });
         }
@@ -556,6 +563,7 @@ protected:
 
         Options options;
         options.env = m_env;
+        options.create_if_missing = true;
 
         size_t tries = 0;
         for (size_t i = 0; i < param.num_iterations; ++i) {
@@ -597,6 +605,7 @@ protected:
 
         Options options;
         options.env = m_env;
+        options.create_if_missing = true;
         options.sync_mode = Options::kSyncFull;
 
         for (size_t i = 0; i < kNumIterations; ++i) {
@@ -605,8 +614,8 @@ protected:
             DB *db;
             ASSERT_OK(ModelDB::open(options, m_filename.c_str(), m_store, db));
             ASSERT_OK(db->update([](auto &tx) {
-                TestBucket b;
-                auto s = test_create_and_open_bucket(tx, "b", b);
+                BucketPtr b;
+                auto s = test_create_bucket_if_missing(tx, "b", b);
                 if (!s.is_ok()) {
                     return s;
                 }
@@ -632,7 +641,7 @@ protected:
             set_fault_injection_type(param.fault_type);
             run_until_completion([&db] {
                 return db->view([](const auto &tx) {
-                    TestBucket b;
+                    BucketPtr b;
                     auto s = test_open_bucket(tx, "b", b);
                     if (!s.is_ok()) {
                         return s;
@@ -687,6 +696,7 @@ protected:
 
         Options options;
         options.env = m_env;
+        options.create_if_missing = true;
         options.sync_mode = param.test_sync_mode
                                 ? Options::kSyncFull
                                 : Options::kSyncNormal;
@@ -706,8 +716,8 @@ protected:
 
             run_until_completion([&db] {
                 return db->update([](auto &tx) {
-                    TestBucket b;
-                    auto s = test_create_and_open_bucket(tx, "b", b);
+                    BucketPtr b;
+                    auto s = test_create_bucket_if_missing(tx, "b", b);
                     for (size_t j = 0; s.is_ok() && j < kNumRecords; ++j) {
                         const auto key = make_key(j);
                         const auto value = make_value(j);
@@ -745,6 +755,39 @@ protected:
             delete db;
         }
     }
+
+    auto run_destruction_test(FaultType fault_type)
+    {
+        TEST_LOG << "CrashTests.Destruction_*\n";
+
+        Options options;
+        options.env = m_env;
+        options.create_if_missing = true;
+
+        run_until_completion([this, &options, fault_type] {
+            const auto oom_state = m_env->m_oom_state;
+            const auto syscall_state = m_env->m_syscall_state;
+            hard_reset();
+
+            DB *db;
+            EXPECT_OK(ModelDB::open(options, m_filename.c_str(), m_store, db));
+            EXPECT_OK(db->update([](auto &tx) {
+                auto &b = tx.main_bucket();
+                EXPECT_OK(b.create_bucket("a", nullptr));
+                EXPECT_OK(b.create_bucket("b", nullptr));
+                EXPECT_OK(b.create_bucket("c", nullptr));
+                return Status::ok();
+            }));
+            set_fault_injection_type(fault_type);
+            delete db;
+
+            m_env->m_oom_state = oom_state;
+            m_env->m_syscall_state = syscall_state;
+            set_fault_injection_type(fault_type);
+
+            return DB::destroy(options, m_filename.c_str());
+        });
+    }
 };
 
 TEST_F(CrashTests, Operations_None)
@@ -770,6 +813,11 @@ TEST_F(CrashTests, Operations_OOM)
     run_operations_test({kOOMFaults, true, false});
     run_operations_test({kOOMFaults, false, true});
     run_operations_test({kOOMFaults, true, true});
+}
+
+TEST_F(CrashTests, InMemory_OOM)
+{
+    run_operations_test({kOOMFaults, false, false, true});
 }
 
 TEST_F(CrashTests, OpenClose_None)
@@ -819,12 +867,20 @@ TEST_F(CrashTests, CursorModification_Syscall)
 TEST_F(CrashTests, CursorModification_OOM)
 {
     run_cursor_modify_test({kOOMFaults, false, false});
-    //    run_cursor_modify_test({kOOMFaults, true, false});
-    //    run_cursor_modify_test({kOOMFaults, false, true});
-    //    run_cursor_modify_test({kOOMFaults, true, true});
+    run_cursor_modify_test({kOOMFaults, true, false});
+    run_cursor_modify_test({kOOMFaults, false, true});
+    run_cursor_modify_test({kOOMFaults, true, true});
 }
 
-#undef MAYBE_CRASH
+TEST_F(CrashTests, Destruction_Syscall)
+{
+    run_destruction_test(kSyscallFaults);
+}
+
+TEST_F(CrashTests, Destruction_OOM)
+{
+    run_destruction_test(kOOMFaults);
+}
 
 class DataLossEnv : public EnvWrapper
 {
@@ -1097,6 +1153,7 @@ public:
         Options options;
         options.env = m_env;
         options.auto_checkpoint = 0;
+        options.create_if_missing = true;
         options.sync_mode = Options::kSyncFull;
         ASSERT_OK(DB::open(options, m_filename.c_str(), m_db));
     }
@@ -1110,8 +1167,8 @@ public:
         // Don't drop any records until the commit.
         m_env->m_drop_file = "";
         return m_db->update([num_writes, version, &param, this](auto &tx) {
-            TestBucket b;
-            EXPECT_OK(test_create_and_open_bucket(tx, "bucket", b));
+            BucketPtr b;
+            EXPECT_OK(test_create_bucket_if_missing(tx, "bucket", b));
             for (size_t i = 0; i < num_writes; ++i) {
                 const auto key = numeric_key(i);
                 const auto value = numeric_key(i + version * num_writes);
@@ -1143,7 +1200,7 @@ public:
     auto check_records(size_t num_writes, size_t version)
     {
         return m_db->view([=](const auto &tx) {
-            TestBucket b;
+            BucketPtr b;
             auto s = test_open_bucket(tx, "bucket", b);
             if (!s.is_ok()) {
                 return s;

@@ -33,6 +33,7 @@ protected:
         remove_calicodb_files(m_filename);
         m_options.auto_checkpoint = 0;
         m_options.page_size = kMaxPageSize;
+        m_options.create_if_missing = true;
     }
 
     ~BoundaryValueTests() override
@@ -61,8 +62,8 @@ protected:
 
         ASSERT_OK(DB::open(m_options, m_filename.c_str(), m_db));
         ASSERT_OK(m_db->update([=](auto &tx) {
-            TestBucket b;
-            auto s = test_create_and_open_bucket(tx, "bucket", b);
+            BucketPtr b;
+            auto s = test_create_bucket_if_missing(tx, "bucket", b);
             if (s.is_ok()) {
                 s = b->put(payload(key_size), payload(value_size));
             }
@@ -72,7 +73,7 @@ protected:
         ASSERT_OK(m_db->checkpoint(kCheckpointPassive, nullptr));
 
         ASSERT_OK(m_db->view([=](const auto &tx) {
-            TestBucket b;
+            BucketPtr b;
             auto s = test_open_bucket(tx, "bucket", b);
             if (s.is_ok()) {
                 auto c = test_new_cursor(*b);
@@ -91,8 +92,8 @@ protected:
 
         ASSERT_OK(DB::open(m_options, m_filename.c_str(), m_db));
         ASSERT_OK(m_db->update([=](auto &tx) {
-            TestBucket b;
-            auto s = test_create_and_open_bucket(tx, "bucket", b);
+            BucketPtr b;
+            auto s = test_create_bucket_if_missing(tx, "bucket", b);
             if (s.is_ok()) {
                 EXPECT_TRUE((s = b->put(payload(key_size), payload(value_size))).is_invalid_argument()) << s.message();
             }
@@ -114,14 +115,15 @@ protected:
         static_assert(kNumIterations * kPayloadSize > std::numeric_limits<uint32_t>::max());
 
         Options options;
+        options.create_if_missing = true;
         options.page_size = kMaxPageSize;
         options.auto_checkpoint = auto_checkpoint ? options.auto_checkpoint : 0;
         ASSERT_OK(DB::open(options, m_filename.c_str(), m_db));
 
         for (size_t i = 0; i < kNumIterations; ++i) {
             ASSERT_OK(m_db->update([&buffer, i](auto &tx) {
-                TestBucket b;
-                auto s = test_create_and_open_bucket(tx, "b", b);
+                BucketPtr b;
+                auto s = test_create_bucket_if_missing(tx, "b", b);
                 if (s.is_ok()) {
                     put_u64(buffer.get(), i);
                     s = b->put(Slice(buffer.get(), kPayloadSize),
@@ -139,14 +141,14 @@ TEST_F(BoundaryValueTests, BoundaryBucketName)
 {
     ASSERT_OK(DB::open(m_options, m_filename.c_str(), m_db));
     ASSERT_OK(m_db->update([=](auto &tx) {
-        TestBucket b;
-        return test_create_and_open_bucket(tx, payload(kMaxLen), b);
+        BucketPtr b;
+        return test_create_bucket_if_missing(tx, payload(kMaxLen), b);
     }));
 
     ASSERT_OK(m_db->checkpoint(kCheckpointPassive, nullptr));
 
     ASSERT_OK(m_db->view([=](const auto &tx) {
-        TestBucket b;
+        BucketPtr b;
         return test_open_bucket(tx, payload(kMaxLen), b);
     }));
 }
@@ -155,14 +157,14 @@ TEST_F(BoundaryValueTests, OverflowBucketName)
 {
     ASSERT_OK(DB::open(m_options, m_filename.c_str(), m_db));
     ASSERT_NOK(m_db->update([=](auto &tx) {
-        TestBucket b;
-        return test_create_and_open_bucket(tx, payload(kMaxLen + 1), b);
+        BucketPtr b;
+        return test_create_bucket_if_missing(tx, payload(kMaxLen + 1), b);
     }));
 
     ASSERT_OK(m_db->checkpoint(kCheckpointPassive, nullptr));
 
     ASSERT_NOK(m_db->view([=](const auto &tx) {
-        TestBucket b;
+        BucketPtr b;
         return test_open_bucket(tx, payload(kMaxLen + 1), b);
     }));
 }
@@ -236,13 +238,15 @@ TEST_F(StressTests, LotsOfBuckets)
     // There isn't really a limit on the number of buckets one can create. Just create a
     // bunch of them.
     static constexpr size_t kNumBuckets = 100'000;
-    ASSERT_OK(DB::open(Options(), m_filename.c_str(), m_db));
+    Options options;
+    options.create_if_missing = true;
+    ASSERT_OK(DB::open(options, m_filename.c_str(), m_db));
     ASSERT_OK(m_db->update([](auto &tx) {
         Status s;
         for (size_t i = 0; s.is_ok() && i < kNumBuckets; ++i) {
-            TestBucket b;
+            BucketPtr b;
             const auto name = numeric_key(i);
-            s = test_create_and_open_bucket(tx, name, b);
+            s = test_create_bucket_if_missing(tx, name, b);
             if (s.is_ok()) {
                 s = b->put(name, name);
             }
@@ -252,7 +256,7 @@ TEST_F(StressTests, LotsOfBuckets)
     ASSERT_OK(m_db->view([](const auto &tx) {
         Status s;
         for (size_t i = 0; s.is_ok() && i < kNumBuckets; ++i) {
-            TestBucket b;
+            BucketPtr b;
             const auto name = numeric_key(i);
             s = test_open_bucket(tx, name, b);
             if (s.is_ok()) {
@@ -269,12 +273,14 @@ TEST_F(StressTests, LotsOfBuckets)
 
 TEST_F(StressTests, CursorLimit)
 {
-    ASSERT_OK(DB::open(Options(), m_filename.c_str(), m_db));
+    Options options;
+    options.create_if_missing = true;
+    ASSERT_OK(DB::open(options, m_filename.c_str(), m_db));
     ASSERT_OK(m_db->update([](auto &tx) {
         Status s;
-        std::vector<TestBucket> buckets(1'000);
+        std::vector<BucketPtr> buckets(1'000);
         for (size_t i = 0; s.is_ok() && i < buckets.size(); ++i) {
-            s = test_create_and_open_bucket(tx, "bucket", buckets[i]);
+            s = test_create_bucket_if_missing(tx, "bucket", buckets[i]);
             if (s.is_ok()) {
                 const auto name = numeric_key(i);
                 s = buckets[i]->put(name, name);
@@ -302,13 +308,15 @@ TEST_F(StressTests, LargeVacuum)
     static constexpr size_t kNumRecords = 1'234;
     static constexpr size_t kTotalBuckets = 2'500;
     static constexpr size_t kDroppedBuckets = kTotalBuckets / 10;
-    ASSERT_OK(DB::open(Options(), m_filename.c_str(), m_db));
+    Options options;
+    options.create_if_missing = true;
+    ASSERT_OK(DB::open(options, m_filename.c_str(), m_db));
     ASSERT_OK(m_db->update([](auto &tx) {
         Status s;
         for (size_t i = 0; s.is_ok() && i < kTotalBuckets; ++i) {
-            TestBucket b;
+            BucketPtr b;
             const auto name = numeric_key(i);
-            s = test_create_and_open_bucket(tx, name, b);
+            s = test_create_bucket_if_missing(tx, name, b);
             for (size_t j = 0; s.is_ok() && j < kNumRecords; ++j) {
                 const auto name2 = numeric_key(j);
                 s = b->put(name2, name2);
@@ -327,7 +335,7 @@ TEST_F(StressTests, LargeVacuum)
     ASSERT_OK(m_db->view([](const auto &tx) {
         Status s;
         for (size_t i = 0; s.is_ok() && i < kTotalBuckets; ++i) {
-            TestBucket b;
+            BucketPtr b;
             const auto name = numeric_key(i);
             s = test_open_bucket(tx, name, b);
             if (i < kDroppedBuckets) {

@@ -155,6 +155,9 @@ auto DBImpl::destroy(const Options &options, const char *filename) -> Status
             // Remove the database file from disk. The WAL file should be cleaned up
             // automatically.
             s = env->remove_file(filename);
+            if (!s.is_ok()) {
+                goto cleanup;
+            }
 
             // This DB doesn't use a shm file, since it was opened in exclusive locking
             // mode. shm files left by other connections must be removed manually.
@@ -174,6 +177,7 @@ auto DBImpl::destroy(const Options &options, const char *filename) -> Status
                 }
             }
         }
+    cleanup:
         delete db;
     }
     return s;
@@ -210,24 +214,24 @@ auto DBImpl::prepare_tx(bool write, TxType *&tx_out) const -> Status
     if (m_tx) {
         return already_running_error();
     }
-
-    // Forward error statuses. If an error is set at this point, then something
-    // has gone very wrong.
-    auto s = m_status;
-    if (s.is_ok() && m_auto_ckpt) {
+    // Pager::finish(), which is called in Tx::~Tx(), clears m_status unconditionally.
+    // There is not an active transaction, so m_status must be OK. m_status is never
+    // set outside a transaction.
+    CALICODB_EXPECT_TRUE(m_status.is_ok());
+    Status s;
+    if (m_auto_ckpt) {
         s = m_pager->auto_checkpoint(m_auto_ckpt);
         s = s.is_busy() ? Status::ok() : s;
     }
-    if (!s.is_ok()) {
-        return s;
+    if (s.is_ok()) {
+        s = m_pager->lock_reader(nullptr);
     }
-    s = m_pager->lock_reader(nullptr);
     if (s.is_ok() && write) {
         s = m_pager->begin_writer();
     }
     if (s.is_ok()) {
         CALICODB_EXPECT_TRUE(m_status.is_ok());
-        m_tx = new (std::nothrow) TxImpl(TxImpl::Parameters{
+        m_tx = new (std::nothrow) TxImpl({
             m_pager.get(),
             &m_stats,
             write,
@@ -244,6 +248,7 @@ auto DBImpl::prepare_tx(bool write, TxType *&tx_out) const -> Status
     if (s.is_ok()) {
         tx_out = m_tx;
     } else if (m_tx) {
+        // Tx::~Tx() calls Pager::finish().
         delete m_tx;
         m_tx = nullptr;
     } else {

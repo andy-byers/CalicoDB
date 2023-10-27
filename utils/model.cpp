@@ -61,7 +61,7 @@ auto ModelTx::check_consistency() const -> void
         if (std::holds_alternative<ModelStore>(subtree_or_value)) {
             auto &subtree = std::get<ModelStore>(subtree_or_value).tree;
 
-            TestBucket b;
+            BucketPtr b;
             CHECK_OK(test_open_bucket(*m_tx, name, b));
             check_consistency(subtree, *b);
         }
@@ -83,7 +83,7 @@ auto ModelTx::check_consistency(const ModelStore::Tree &tree, const Bucket &buck
             CHECK_EQ(value, std::get<std::string>(subtree_or_value));
             continue;
         }
-        TestBucket subbucket;
+        BucketPtr subbucket;
         CHECK_OK(test_open_bucket(bucket, key, subbucket));
         auto &subtree = std::get<ModelStore>(subtree_or_value).tree;
         check_consistency(subtree, *subbucket);

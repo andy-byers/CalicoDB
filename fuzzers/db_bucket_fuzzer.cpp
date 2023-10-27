@@ -68,8 +68,8 @@ public:
 
         const auto s = m_db->update([&stream, &db = *m_db](auto &tx) {
             struct NestedBucket {
-                TestBucket b;
-                TestCursor c;
+                BucketPtr b;
+                CursorPtr c;
             } nested_buckets[kMaxBuckets] = {};
 
             auto *main_bucket = &tx.main_bucket();
@@ -165,7 +165,7 @@ public:
                                 break;
                             } else if (s.is_invalid_argument()) {
                                 CHECK_FALSE(nested_buckets[level].b); // test_open_bucket() failed
-                                s = test_create_and_open_bucket(*b, str, nested_buckets[level].b);
+                                s = test_create_bucket_if_missing(*b, str, nested_buckets[level].b);
                             }
                             if (s.is_ok()) {
                                 nested_buckets[level].c = test_new_cursor(*nested_buckets[level].b);

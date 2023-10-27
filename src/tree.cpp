@@ -301,9 +301,14 @@ auto TreeCursor::read_user_key() -> Status
     CALICODB_EXPECT_TRUE(has_valid_position(true));
     m_key.clear();
     if (m_tree->m_writable || m_cell.key_size > m_cell.local_size) {
-        if (m_key_buf.len() < m_cell.key_size &&
-            m_key_buf.realloc(m_cell.key_size)) {
-            return Status::no_memory();
+        if (m_key_buf.len() < m_cell.key_size) {
+            // Make sure to free the old buffer first, so that Buffer ends up calling malloc() instead of
+            // realloc(). We do not need the old key anymore, and realloc() will copy it over in case it
+            // cannot grow the allocation in-place, which is slower than just getting a new buffer entirely.
+            m_key_buf.reset();
+            if (m_key_buf.realloc(m_cell.key_size)) {
+                return Status::no_memory();
+            }
         }
         if (m_cell.key_size) {
             return m_tree->read_key(m_cell, m_key_buf.ptr(), &m_key);
@@ -323,9 +328,11 @@ auto TreeCursor::read_user_value() -> Status
     }
     const auto value_size = m_cell.total_size - m_cell.key_size;
     if (m_tree->m_writable || m_cell.total_size > m_cell.local_size) {
-        if (m_value_buf.len() < value_size &&
-            m_value_buf.realloc(value_size)) {
-            return Status::no_memory();
+        if (m_value_buf.len() < value_size) {
+            m_value_buf.reset();
+            if (m_value_buf.realloc(value_size)) {
+                return Status::no_memory();
+            }
         }
         if (value_size) {
             return m_tree->read_value(m_cell, m_value_buf.ptr(), &m_value);
@@ -2396,16 +2403,6 @@ public:
         return InorderTraversal::traverse(tree, print);
     }
 };
-
-auto Tree::TEST_validate() -> void
-{
-    const auto s = check_integrity();
-    if (!s.is_ok()) {
-        log(m_pager->logger(), "validation failed for tree rooted at %u: %s",
-            m_root_id.value, s.message());
-        std::abort();
-    }
-}
 
 auto Tree::print_structure(String &repr_out) -> Status
 {

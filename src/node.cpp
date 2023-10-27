@@ -19,14 +19,14 @@ constexpr uint32_t kMinBlockSize = 2 * kSlotWidth;
     return page_offset(node.page_id());
 }
 
-[[nodiscard]] auto cell_slots_offset(const Node &node) -> uint32_t
+[[nodiscard]] auto ivec_offset(const Node &node) -> uint32_t
 {
     return node_header_offset(node) + NodeHdr::size(node.is_leaf());
 }
 
-[[nodiscard]] auto cell_area_offset(const Node &node) -> uint32_t
+[[nodiscard]] auto gap_offset(const Node &node) -> uint32_t
 {
-    return cell_slots_offset(node) + node.cell_count() * kSlotWidth;
+    return ivec_offset(node) + node.cell_count() * kSlotWidth;
 }
 
 [[nodiscard]] auto get_ivec_slot(const Node &node, uint32_t index) -> uint32_t
@@ -37,13 +37,13 @@ constexpr uint32_t kMinBlockSize = 2 * kSlotWidth;
     // called, where ptr points to the last byte on the page, without running into undefined behavior).
     const auto mask = static_cast<uint16_t>(node.total_space - 1);
     CALICODB_EXPECT_LT(index, node.cell_count());
-    return mask & get_u16(node.ref->data + cell_slots_offset(node) + index * kSlotWidth);
+    return mask & get_u16(node.ref->data + ivec_offset(node) + index * kSlotWidth);
 }
 
 auto put_ivec_slot(Node &node, uint32_t index, uint32_t slot)
 {
     CALICODB_EXPECT_LT(index, node.cell_count());
-    return put_u16(node.ref->data + cell_slots_offset(node) + index * kSlotWidth, static_cast<uint16_t>(slot));
+    return put_u16(node.ref->data + ivec_offset(node) + index * kSlotWidth, static_cast<uint16_t>(slot));
 }
 
 auto insert_ivec_slot(Node &node, uint32_t index, uint32_t slot)
@@ -51,7 +51,7 @@ auto insert_ivec_slot(Node &node, uint32_t index, uint32_t slot)
     CALICODB_EXPECT_GE(node.gap_size, kSlotWidth);
     const auto count = node.cell_count();
     CALICODB_EXPECT_LE(index, count);
-    const auto offset = cell_slots_offset(node) + index * kSlotWidth;
+    const auto offset = ivec_offset(node) + index * kSlotWidth;
     const auto size = (count - index) * kSlotWidth;
     auto *data = node.ref->data + offset;
 
@@ -66,7 +66,7 @@ auto remove_ivec_slot(Node &node, uint32_t index)
 {
     const auto count = node.cell_count();
     CALICODB_EXPECT_LT(index, count);
-    const auto offset = cell_slots_offset(node) + index * kSlotWidth;
+    const auto offset = ivec_offset(node) + index * kSlotWidth;
     const auto size = (count - index) * kSlotWidth;
     auto *data = node.ref->data + offset;
 
@@ -468,7 +468,7 @@ auto BlockAllocator::defragment(Node &node, int skip) -> int
     uint32_t end = node.total_space;
 
     // Copy everything before the indirection vector.
-    std::memcpy(node.scratch, ptr, cell_slots_offset(node));
+    std::memcpy(node.scratch, ptr, ivec_offset(node));
     for (uint32_t index = 0; index < n; ++index) {
         if (index != to_skip) {
             // Pack cells at the end of the scratch page and write the indirection
@@ -479,7 +479,7 @@ auto BlockAllocator::defragment(Node &node, int skip) -> int
             }
             end -= cell.footprint;
             std::memcpy(node.scratch + end, cell.ptr, cell.footprint);
-            put_u16(node.scratch + cell_slots_offset(node) + index * kSlotWidth,
+            put_u16(node.scratch + ivec_offset(node) + index * kSlotWidth,
                     static_cast<uint16_t>(end));
         }
     }
@@ -488,7 +488,7 @@ auto BlockAllocator::defragment(Node &node, int skip) -> int
     NodeHdr::put_free_start(node.hdr(), 0);
     NodeHdr::put_frag_count(node.hdr(), 0);
     NodeHdr::put_cell_start(node.hdr(), end);
-    node.gap_size = end - cell_area_offset(node);
+    node.gap_size = end - gap_offset(node);
 
     const auto gap_adjust = skip < 0 ? 0 : kSlotWidth;
     if (node.gap_size + gap_adjust != node.usable_space) {
@@ -567,7 +567,7 @@ auto Node::from_new_page(const Options &options, PageRef &page, bool is_leaf) ->
     NodeHdr::put_type(node.hdr(), is_leaf);
 
     const auto usable_space = static_cast<uint32_t>(
-        options.total_space - cell_slots_offset(node));
+        options.total_space - ivec_offset(node));
     node.gap_size = usable_space;
     node.usable_space = usable_space;
     return node;
@@ -667,7 +667,7 @@ auto Node::check_integrity() const -> Status
     std::memset(scratch, 0, total_space);
 
     Status s;
-    if (account(0U, cell_area_offset(*this), "header/indirection vector", s)) {
+    if (account(0U, gap_offset(*this), "header/indirection vector", s)) {
         return s;
     }
     // Make sure the header fields are not obviously wrong.
@@ -679,12 +679,18 @@ auto Node::check_integrity() const -> Status
         return CORRUPTED_NODE("cell count of %u exceeds maximum of %u",
                               NodeHdr::get_cell_count(hdr()), MAX_CELL_COUNT(total_space, is_leaf()));
     }
-    if (total_space < NodeHdr::get_free_start(hdr())) {
-        return CORRUPTED_NODE("first free block at %u is out of bounds",
-                              NodeHdr::get_free_start(hdr()));
+    // All free blocks are located in the cell content area, which must be between the end of the
+    // indirection vector and the end of the page.
+    const auto free_start = NodeHdr::get_free_start(hdr());
+    const auto cell_start = NodeHdr::get_cell_start(hdr());
+    if ((free_start && cell_start > free_start) || total_space < free_start) {
+        return CORRUPTED_NODE("first free block at %u is out of bounds", free_start);
+    }
+    if (gap_offset(*this) > cell_start || total_space < cell_start) {
+        return CORRUPTED_NODE("cell area offset at %u is out of bounds", cell_start);
     }
 
-    if (account(cell_area_offset(*this), gap_size, "gap", s)) {
+    if (account(gap_offset(*this), gap_size, "gap", s)) {
         return s;
     }
 

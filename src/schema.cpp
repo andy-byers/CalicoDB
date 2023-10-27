@@ -142,8 +142,8 @@ auto Schema::vacuum() -> Status
 
 auto Schema::TEST_validate() const -> void
 {
-    map_trees(true, [](auto &t) {
-        t.tree->TEST_validate();
+    map_trees(true, []([[maybe_unused]] auto &t) {
+        CALICODB_EXPECT_TRUE(t.tree->check_integrity().is_ok());
         return true;
     });
 }

@@ -119,17 +119,7 @@ public:
         return m_scratch.ptr();
     }
 
-    auto logger() const -> Logger *
-    {
-        return m_log;
-    }
-
     auto set_status(const Status &error) const -> void;
-
-    auto TEST_wal() const -> const Wal *
-    {
-        return m_wal;
-    }
 
 private:
     friend class Mem;

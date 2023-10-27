@@ -444,11 +444,13 @@ public:
     {
         Node corrupted;
         ASSERT_NE(Node::from_existing_page(m_options, *m_node.ref, corrupted), 0);
+        ASSERT_NOK(m_node.check_integrity());
     }
     auto assert_valid_node() -> void
     {
         Node valid;
         ASSERT_EQ(Node::from_existing_page(m_options, *m_node.ref, valid), 0);
+        ASSERT_OK(m_node.check_integrity());
     }
 };
 

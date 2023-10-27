@@ -82,6 +82,7 @@ The name of the database is the same as that of the file.
 
 calicodb::DB *db;
 calicodb::Options options;
+options.create_if_missing = true;
 s = calicodb::DB::open(options, "/tmp/calicodb_example", db);
 assert(s.is_ok());
 ```
@@ -225,7 +226,7 @@ if (s.is_ok()) {
 A nested bucket is a bucket that is rooted at some record in another bucket.
 Records representing buckets cannot be accessed or modified via the normal put-get-erase machinery.
 They must be managed using the `Bucket::*_bucket()` methods.
-Failure to adhere to this rule will result in a status for which `Status::is_incompatible_value()` evaluates to true.
+If a record/bucket is accessed via the wrong method, a status will be returned for which `Status::is_incompatible_value()` evaluates to true.
 
 ```C++
 // Create a sub-bucket. Note that this bucket will not persist in the database 
@@ -267,7 +268,7 @@ delete b3;
 ### Slices
 The `Bucket::*()` methods above accept keys and values as `calicodb::Slice` objects.
 `calicodb::Slice` is used to represent an unowned pointer to `char` and a length.
-Slices can be created from C-style strings, `CALICODB_STRING`, or directly from a pointer and a length.
+Slices can be created from C-style strings, `CALICODB_STRING`, or directly from their constituent parts.
 `CALICODB_STRING`, the user-facing string type used by CalicoDB, defaults to `std::string`, but can be redefined if necessary.
 
 ```C++
@@ -361,7 +362,7 @@ if (s.is_ok()) {
 }
 ```
 
-Since CalicoDB supports nested buckets, a cursor valid cursor can be on either a normal record or a bucket record.
+Since CalicoDB supports nested buckets, a valid cursor can be on either a normal record or a bucket record.
 Given that `Cursor::is_valid()` has returned true and the cursor has not moved, `Cursor::is_bucket()` can be used to check if the cursor is positioned on a bucket record.
 Bucket records always return an empty slice from `Cursor::value()`, and `Cursor::key()` returns the nested bucket's name (which can be passed to `Bucket::open_bucket()`).
 ```C++
