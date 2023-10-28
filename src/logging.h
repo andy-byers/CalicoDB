@@ -19,7 +19,7 @@ class StringBuilder final
 {
     // Buffer for accumulating string data. The length stored in the buffer type is the capacity,
     // and m_len is the number of bytes that have been written.
-    Buffer<char> m_buf;
+    String m_str;
     size_t m_len = 0;
     bool m_ok = true;
 
@@ -29,10 +29,10 @@ class StringBuilder final
 
 public:
     explicit StringBuilder() = default;
-    explicit StringBuilder(String str);
+    explicit StringBuilder(String str, size_t offset = 0);
 
     StringBuilder(StringBuilder &&rhs) noexcept
-        : m_buf(move(rhs.m_buf)),
+        : m_str(move(rhs.m_str)),
           m_len(exchange(rhs.m_len, 0U))
     {
     }
@@ -40,7 +40,7 @@ public:
     auto operator=(StringBuilder &&rhs) noexcept -> StringBuilder &
     {
         if (this != &rhs) {
-            m_buf = move(rhs.m_buf);
+            m_str = move(rhs.m_str);
             m_len = exchange(rhs.m_len, 0U);
         }
         return *this;

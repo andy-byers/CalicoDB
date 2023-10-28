@@ -5,7 +5,7 @@
 #ifndef CALICODB_INTERNAL_STRING_H
 #define CALICODB_INTERNAL_STRING_H
 
-#include "calicodb/slice.h"
+#include "internal.h"
 
 namespace calicodb
 {
@@ -37,7 +37,7 @@ public:
 
     [[nodiscard]] auto is_empty() const -> bool
     {
-        return size() == 0;
+        return m_size == 0;
     }
 
     [[nodiscard]] auto size() const -> size_t
@@ -53,6 +53,24 @@ public:
     [[nodiscard]] auto data() -> char *
     {
         return m_data;
+    }
+
+    auto operator[](size_t idx) -> char &
+    {
+        CALICODB_EXPECT_LT(idx, m_size);
+        return m_data[idx];
+    }
+
+    auto operator[](size_t idx) const -> const char &
+    {
+        CALICODB_EXPECT_LT(idx, m_size);
+        return m_data[idx];
+    }
+
+    [[nodiscard]] auto release() -> char *
+    {
+        m_size = 0;
+        return exchange(m_data, nullptr);
     }
 
     [[nodiscard]] auto resize(size_t size, char c = '\0') -> int;
