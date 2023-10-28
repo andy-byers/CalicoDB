@@ -529,7 +529,12 @@ auto new_temp_env(size_t sector_size) -> Env *
 
 auto new_temp_wal(const WalOptionsExtra &options, uint32_t page_size) -> Wal *
 {
-    return TempWal::create(options, page_size);
+    auto *wal = TempWal::create(options, page_size);
+    if (wal) {
+        [[maybe_unused]] const auto s = wal->open(options, nullptr);
+        CALICODB_EXPECT_TRUE(s.is_ok());
+    }
+    return wal;
 }
 
 } // namespace calicodb

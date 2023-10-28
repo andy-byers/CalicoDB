@@ -100,6 +100,8 @@ target_sources(calicodb
                 src/pointer_map.h
                 src/schema.cpp
                 src/schema.h
+                src/dsl.cpp
+                src/dsl.h
                 src/status.cpp
                 src/status_internal.h
                 src/temp.cpp
