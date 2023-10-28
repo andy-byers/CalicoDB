@@ -49,21 +49,9 @@ constexpr uint8_t kIsHexTable[] = {
     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0};
 
-constexpr auto fast_isspace(char c) -> bool
-{
-    return kIsSpaceTable[static_cast<uint8_t>(c)];
-}
-
-constexpr auto fast_ishex(char c) -> bool
-{
-    return kIsHexTable[static_cast<uint8_t>(c)];
-}
-
-constexpr auto fast_hexval(char c) -> int
-{
-    CALICODB_EXPECT_TRUE(fast_ishex(c));
-    return kIsHexTable[static_cast<uint8_t>(c)] - 1;
-}
+#define ISSPACE(c) (kIsSpaceTable[static_cast<uint8_t>(c)])
+#define ISHEX(c) (kIsHexTable[static_cast<uint8_t>(c)])
+#define HEXVAL(c) (kIsHexTable[static_cast<uint8_t>(c)] - 1)
 
 struct Token {
     enum Kind {
@@ -139,19 +127,23 @@ public:
 
     auto unget() -> void
     {
-        assert(!m_unget);
-        assert(m_itr != m_begin);
+        CALICODB_EXPECT_FALSE(m_unget);
+        CALICODB_EXPECT_NE(m_itr, m_begin);
         m_unget = true;
     }
 
     [[nodiscard]] auto scan() -> Token
     {
         skip_whitespace();
-        skip_comments();
-        skip_whitespace();
+        while (m_char == '/') {
+            if (skip_comments()) {
+                return make_error("");
+            }
+            skip_whitespace();
+        }
 
         for (;;) {
-            switch (get()) {
+            switch (m_char) {
                 case '{':
                     return make_token(Token::kBeginObject, 1);
                 case '}':
@@ -163,24 +155,31 @@ public:
                 case '"':
                     return scan_string();
                 case '\0':
-                case EOF:
                     return make_token(Token::kEndOfInput);
                 default:
-                    return make_token(Token::kParseError);
+                    return make_error("unexpected token");
             }
         }
     }
 
-    [[nodiscard]] auto get_string() -> String
+    [[nodiscard]] auto borrow_backing() -> String
     {
-        return move(m_scratch);
+        return exchange(m_scratch, move(m_backup));
+    }
+
+    auto replace_backing(String str) -> void
+    {
+        if (!m_backup.is_empty()) {
+            CALICODB_EXPECT_TRUE(m_scratch.is_empty());
+            m_scratch = move(m_backup);
+        }
+        m_backup = move(str);
     }
 
     auto skip_comments() -> int
     {
-        if (m_char != '/') {
-            return 0; // Not a comment
-        } else if (get() != '*') {
+        CALICODB_EXPECT_EQ(m_char, '/');
+        if (get() != '*') {
             return -1; // Parse error
         }
         for (;;) {
@@ -188,28 +187,30 @@ public:
                 case '*':
                     if (get() == '/') {
                         return 0;
-                    } else {
-                        unget();
                     }
+                    unget();
                     break;
                 case '\0':
+                    // End of input.
                     return -1;
                 default:
-                    break;
+                    continue;
             }
         }
     }
 
     auto skip_whitespace() -> void
     {
-        while (fast_isspace(peek())) {
+        do {
             get();
-        }
+        } while (ISSPACE(m_char));
     }
 
     [[nodiscard]] auto make_token(Token::Kind kind, size_t size = 0) const -> Token
     {
-        assert(size <= remaining() + 1);
+        // Already advanced past the char that was read into m_char, which is the start
+        // of the token, hence the +/- 1 in this function.
+        CALICODB_EXPECT_LE(size, remaining() + 1);
         // Pointer to char stored in m_char is right before m_itr.
         const auto start = m_itr - 1;
         return {kind, start, start + size};
@@ -236,9 +237,9 @@ public:
     auto get_hexcode() -> int
     {
         if (const auto *ptr = get(2)) {
-            if (fast_ishex(ptr[0]) && fast_ishex(ptr[1])) {
-                return fast_hexval(ptr[2]) << 4 |
-                       fast_hexval(ptr[3]);
+            if (ISHEX(ptr[0]) && ISHEX(ptr[1])) {
+                return HEXVAL(ptr[0]) << 4 |
+                       HEXVAL(ptr[1]);
             }
         }
         return -1;
@@ -247,12 +248,12 @@ public:
     auto get_codepoint() -> int
     {
         if (const auto *ptr = get(4)) {
-            if (fast_ishex(ptr[0]) && fast_ishex(ptr[1]) &&
-                fast_ishex(ptr[2]) && fast_ishex(ptr[3])) {
-                return fast_hexval(ptr[0]) << 12 |
-                       fast_hexval(ptr[1]) << 8 |
-                       fast_hexval(ptr[2]) << 4 |
-                       fast_hexval(ptr[3]);
+            if (ISHEX(ptr[0]) && ISHEX(ptr[1]) &&
+                ISHEX(ptr[2]) && ISHEX(ptr[3])) {
+                return HEXVAL(ptr[0]) << 12 |
+                       HEXVAL(ptr[1]) << 8 |
+                       HEXVAL(ptr[2]) << 4 |
+                       HEXVAL(ptr[3]);
             }
         }
         return -1;
@@ -294,7 +295,41 @@ public:
                             if (codepoint < 0) {
                                 return make_error("missing 4 hex digits after `\\u`");
                             }
-                            // TODO
+                            if (0xD800 <= codepoint && codepoint <= 0xDFFF) {
+                                // Codepoint is part of a surrogate pair. Expect a high surrogate (U+D800–U+DBFF) followed
+                                // by a low surrogate (U+DC00–U+DFFF).
+                                if (codepoint <= 0xDBFF) {
+                                    if (get() != '\\' || get() != 'u') {
+                                        return make_error("missing low surrogate");
+                                    }
+                                    const auto codepoint2 = get_codepoint();
+                                    if (codepoint2 < 0xDC00 || codepoint2 > 0xDFFF) {
+                                        return make_error("low surrogate is malformed");
+                                    }
+                                    codepoint = (((codepoint - 0xD800) << 10) |
+                                                 (codepoint2 - 0xDC00)) +
+                                                0x10000;
+                                } else {
+                                    return make_error("missing high surrogate");
+                                }
+                            }
+                            // Translate the codepoint into bytes. Modified from @Tencent/rapidjson.
+                            if (codepoint <= 0x7F) {
+                                sb.append(static_cast<char>(codepoint));
+                            } else if (codepoint <= 0x7FF) {
+                                sb.append(static_cast<char>(0xC0 | ((codepoint >> 6) & 0xFF)));
+                                sb.append(static_cast<char>(0x80 | ((codepoint & 0x3F))));
+                            } else if (codepoint <= 0xFFFF) {
+                                sb.append(static_cast<char>(0xE0 | ((codepoint >> 12) & 0xFF)));
+                                sb.append(static_cast<char>(0x80 | ((codepoint >> 6) & 0x3F)));
+                                sb.append(static_cast<char>(0x80 | (codepoint & 0x3F)));
+                            } else {
+                                CALICODB_EXPECT_LE(codepoint, 0x10FFFF);
+                                sb.append(static_cast<char>(0xF0 | ((codepoint >> 18) & 0xFF)));
+                                sb.append(static_cast<char>(0x80 | ((codepoint >> 12) & 0x3F)));
+                                sb.append(static_cast<char>(0x80 | ((codepoint >> 6) & 0x3F)));
+                                sb.append(static_cast<char>(0x80 | (codepoint & 0x3F)));
+                            }
                             break;
                         }
                         case 'x': {
@@ -317,12 +352,13 @@ public:
                     // backing string buffer.
                     return Token{Token::kValueString, m_scratch.c_str(),
                                  m_scratch.c_str() + m_scratch.size()};
-                case '\n':
-                case '\0':
-                case EOF:
-                    return make_error("unexpected token");
                 default:
-                    sb.append(m_char);
+                    const auto c = static_cast<uint8_t>(m_char);
+                    if (c >= 0x20) {
+                        sb.append(m_char);
+                    } else {
+                        return make_error("unexpected token");
+                    }
             }
         }
     }
@@ -330,6 +366,7 @@ public:
     Position m_pos = {};
     mutable const char *m_error_msg = nullptr;
     String m_scratch;
+    String m_backup;
     const char *m_begin;
     const char *m_itr;
     const char *m_end;
@@ -346,10 +383,18 @@ auto DSLReader::register_event(EventType type, const Event &event) -> void
 
 auto DSLReader::read(const Slice &input, void *event_arg) -> Status
 {
-    Slice key_value[2];
-    String backing[2];
-    int depth = 0;
-
+    // This parser is a simple state machine with states described by the State enum. The
+    // kBefore* states indicate that the parser is expecting a token of type *. The word "Value"
+    // in the k*Value states refers to either a string value or a nested object. The following
+    // state transitions are possible:
+    //
+    //  Before      | Token::Kind     | After
+    // -------------|-----------------|--------------
+    // kBeforeKey   | kValueString    | kAfterKey
+    // kAfterKey    | kNameSeparator  | kBeforeValue
+    // kBeforeValue | kBeginObject    | kBeforeKey
+    // kBeforeValue | kValueString    | kAfterValue
+    // kAfterValue  | kValueSeparator | kBeforeKey
     enum State {
         kBeforeKey = 0,
         kAfterKey = 1,
@@ -359,40 +404,43 @@ auto DSLReader::read(const Slice &input, void *event_arg) -> Status
     Lexer lexer(input);
 
     const auto failure = [&lexer, &state](const char *message) {
-        const auto &pos = lexer.position();
-        const auto *msg = message;
-        const auto *sep = ": ";
-        if (!message) {
-            sep = "";
-            msg = "";
-        }
-        const char *exp;
+        CALICODB_EXPECT_TRUE(message);
+        const auto [line, column] = lexer.position();
+        const char *expected;
         switch (state) {
             case kBeforeKey:
-                exp = "key";
+                expected = "key";
                 break;
             case kAfterKey:
-                exp = "':'";
+                expected = "':'";
                 break;
             case kBeforeValue:
-                exp = "value or '{'";
+                expected = "value or '{'";
                 break;
             case kAfterValue:
-                exp = "',' or '}'";
+                expected = "',' or '}'";
                 break;
         }
-        return StatusBuilder::corruption("parse error at %d:%d%s%s (expected %s)",
-                                         pos.line, pos.column, sep, msg, exp);
+        return StatusBuilder::corruption("parse error at %d:%d%s (expected %s)",
+                                         line, column, message, expected);
     };
 
     const auto dispatch = [=](auto type, const Slice *output) {
-        m_events[type](event_arg, output);
+        if (m_events[type]) {
+            m_events[type](event_arg, output);
+        }
     };
 
-    Token token;
-    Token last;
+    int depth = 0;
+    Slice key_value[2];
+    String backing[2];
+    Token::Kind last;
+    Token token = {};
+
+    // Parse loop. Lexer::scan() is called once at the start of each iteration. The "last"
+    // variable is used to detect empty objects.
     for (;;) {
-        last = token;
+        last = token.kind;
         token = lexer.scan();
         switch (token.kind) {
             case Token::kValueString:
@@ -400,13 +448,17 @@ auto DSLReader::read(const Slice &input, void *event_arg) -> Status
                     return failure("expected value string");
                 } else {
                     const auto idx = state / 2;
-                    backing[idx] = lexer.get_string();
+                    backing[idx] = lexer.borrow_backing();
                     key_value[idx] = Slice(backing[idx].c_str(),
                                            backing[idx].size());
                     state = static_cast<State>(state + 1);
                 }
                 if (state == kAfterValue) {
                     dispatch(kReadKeyValue, key_value);
+                    // A string key and value are stored in the backing strings. Give them back to
+                    // the lexer so that they can be reused.
+                    lexer.replace_backing(move(backing[0]));
+                    lexer.replace_backing(move(backing[1]));
                 }
                 break;
             case Token::kBeginObject:
@@ -417,11 +469,13 @@ auto DSLReader::read(const Slice &input, void *event_arg) -> Status
                     return failure("exceeded maximum object nesting");
                 }
                 dispatch(kBeginObject, key_value);
+                // backing[0] contains the key string. It is not needed after the event finishes.
+                lexer.replace_backing(move(backing[0]));
                 state = kBeforeKey;
                 ++depth;
                 break;
             case Token::kEndObject:
-                if (last.kind == Token::kBeginObject) {
+                if (last == Token::kBeginObject) {
                     // Object is empty.
                     state = kAfterValue;
                 } else if (state != kAfterValue) {

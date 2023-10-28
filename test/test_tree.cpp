@@ -390,6 +390,7 @@ TEST_F(TreeTests, PrintStructure)
     ASSERT_OK(m_tree->print_structure(normal_keys));
     init_tree(*this, kInitLongKeys);
     ASSERT_OK(m_tree->print_structure(long_keys));
+
     // empty may or may not be empty...
     ASSERT_FALSE(normal_keys.is_empty());
     ASSERT_FALSE(long_keys.is_empty());
@@ -403,6 +404,7 @@ TEST_F(TreeTests, PrintRecords)
     ASSERT_OK(m_tree->print_nodes(normal_keys));
     init_tree(*this, kInitLongKeys);
     ASSERT_OK(m_tree->print_nodes(long_keys));
+
     // empty may or may not be empty...
     ASSERT_FALSE(normal_keys.is_empty());
     ASSERT_FALSE(long_keys.is_empty());

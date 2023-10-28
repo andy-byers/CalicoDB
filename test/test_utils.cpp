@@ -1013,7 +1013,8 @@ TEST_F(StringBuilderTests, Append)
 TEST_F(StringBuilderTests, AppendFormat)
 {
     const std::string long_str(512, '*');
-    m_builder.append_format("hello %d %s", 42, "goodbye")
+    m_builder
+        .append_format("hello %d %s", 42, "goodbye")
         .append_format("%s", long_str.data())
         .append_format("empty");
     const auto lhs = build_string();
