@@ -9,7 +9,6 @@
 #include "config_internal.h"
 #include "encoding.h"
 #include "logging.h"
-#include "model.h"
 #include "status_internal.h"
 
 namespace calicodb::test
