@@ -111,6 +111,8 @@ auto write_child_id(Cell &cell, Id child_id)
 constexpr uint32_t kLinkContentOffset = sizeof(uint32_t);
 
 struct PayloadManager {
+    PayloadManager() = delete;
+
     static auto compare(Pager &pager, const Slice &key, const Cell &cell, int &cmp_out) -> Status
     {
         auto rest = key;
@@ -301,17 +303,13 @@ auto TreeCursor::read_user_key() -> Status
     CALICODB_EXPECT_TRUE(has_valid_position(true));
     m_key.clear();
     if (m_tree->m_writable || m_cell.key_size > m_cell.local_size) {
-        if (m_key_buf.len() < m_cell.key_size) {
-            // Make sure to free the old buffer first, so that Buffer ends up calling malloc() instead of
-            // realloc(). We do not need the old key anymore, and realloc() will copy it over in case it
-            // cannot grow the allocation in-place, which is slower than just getting a new buffer entirely.
-            m_key_buf.reset();
+        if (m_key_buf.size() < m_cell.key_size) {
             if (m_key_buf.realloc(m_cell.key_size)) {
                 return Status::no_memory();
             }
         }
         if (m_cell.key_size) {
-            return m_tree->read_key(m_cell, m_key_buf.ptr(), &m_key);
+            return m_tree->read_key(m_cell, m_key_buf.data(), &m_key);
         }
     } else {
         m_key = Slice(m_cell.key, m_cell.key_size);
@@ -328,14 +326,13 @@ auto TreeCursor::read_user_value() -> Status
     }
     const auto value_size = m_cell.total_size - m_cell.key_size;
     if (m_tree->m_writable || m_cell.total_size > m_cell.local_size) {
-        if (m_value_buf.len() < value_size) {
-            m_value_buf.reset();
+        if (m_value_buf.size() < value_size) {
             if (m_value_buf.realloc(value_size)) {
                 return Status::no_memory();
             }
         }
         if (value_size) {
-            return m_tree->read_value(m_cell, m_value_buf.ptr(), &m_value);
+            return m_tree->read_value(m_cell, m_value_buf.data(), &m_value);
         }
     } else {
         m_value = Slice(m_cell.key + m_cell.key_size, value_size);
@@ -380,7 +377,7 @@ auto TreeCursor::ensure_position_loaded(bool *changed_type_out) -> bool
         // m_state equal to kHasRecord. When m_state == kHasRecord, m_key references the internal
         // key buffer (unless the key has 0 length). If m_key were to reference memory on a page,
         // it would be invalidated once we start the traversal in seek_to_leaf().
-        CALICODB_EXPECT_TRUE(m_key.is_empty() || m_key.data() == m_key_buf.ptr());
+        CALICODB_EXPECT_TRUE(m_key.is_empty() || m_key.data() == m_key_buf.data());
         const auto was_bucket = m_cell.is_bucket;
         // Seek the cursor back to where it was before.
         if (seek_to_leaf(m_key)) {
@@ -805,21 +802,14 @@ auto Tree::create(Id parent_id, Id &root_id_out) -> Status
     return s;
 }
 
-auto Tree::destroy(Reroot &rr, Buffer<Id> &children) -> Status
+auto Tree::destroy(Reroot &rr, Vector<Id> &children) -> Status
 {
     if (m_root_id.is_root()) {
         return Status::corruption();
     }
     rr.after = m_root_id;
-    auto nc = children.len();
-    const auto push_child = [&children, &nc](const auto &cell) {
-        if (nc >= children.len()) {
-            if (children.realloc((children.len() + 1) * 2)) {
-                return -1;
-            }
-        }
-        children[nc++] = read_bucket_root_id(cell);
-        return 0;
+    const auto push_child = [&children](const auto &cell) {
+        return children.push_back(read_bucket_root_id(cell));
     };
 
     // Push all pages belonging to `tree` onto the freelist, except for the root page.
@@ -844,10 +834,6 @@ auto Tree::destroy(Reroot &rr, Buffer<Id> &children) -> Status
                                                       : Status::ok();
         });
 
-    // Trim the allocation.
-    if (children.realloc(nc)) {
-        s = Status::no_memory();
-    }
     if (!s.is_ok()) {
         return s;
     }
@@ -1428,14 +1414,14 @@ auto Tree::redistribute_cells(Node &left, Node &right, Node &parent, uint32_t pi
     CALICODB_EXPECT_TRUE(!is_split || p_src == &right);
 
     // Cells that need to be redistributed, in order.
-    Buffer<Cell> cell_buffer;
-    if (cell_buffer.realloc(cell_count + 2)) {
+    Vector<Cell> cell_buffer;
+    if (cell_buffer.reserve(cell_count + 2)) {
         m_pager->release(unused);
         return Status::no_memory();
     }
     int ncells, idx;
     int sep = -1;
-    auto *cells = cell_buffer.ptr() + 1;
+    auto *cells = cell_buffer.data() + 1;
     auto *cell_itr = cells;
     uint32_t left_accum = 0;
     uint32_t right_accum = 0;

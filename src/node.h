@@ -14,6 +14,8 @@ namespace calicodb
 struct Node;
 
 struct BlockAllocator {
+    BlockAllocator() = delete;
+
     // Count the total number of bytes in the intra-node freelist
     // Returns a nonnegative number on success and -1 on failure. This routine should
     // fail if the freelist is not valid. The following properties are checked:

@@ -36,6 +36,7 @@ struct FileHdr {
     static constexpr char kFmtString[18] = "CalicoDB format 1";
     static constexpr char kFmtVersion = 1;
 
+    FileHdr() = delete;
     [[nodiscard]] static auto check_db_support(const char *root) -> Status;
     [[nodiscard]] static auto check_page_size(size_t page_size) -> Status;
     static auto make_supported_db(char *root, size_t page_size) -> void;
@@ -130,6 +131,8 @@ struct NodeHdr {
         kNextIdOffset = kFragCountOffset + sizeof(char),
         kSizeExternal = kNextIdOffset
     };
+
+    NodeHdr() = delete;
 
     [[nodiscard]] static constexpr auto size(bool is_external) -> uint32_t
     {

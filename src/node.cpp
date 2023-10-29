@@ -245,8 +245,11 @@ auto allocate_from_gap(Node &node, uint32_t needed_size) -> uint32_t
 
 auto encode_size_with_flag(const SizeWithFlag &swf, char *output) -> char *
 {
-    // Sizes stored with an extra flag bit must not use the most-significant bit.
-    CALICODB_EXPECT_EQ(swf.size & 0x80000000U, 0);
+    // Sizes stored with an extra flag bit must not use the most-significant bit. If kMaxAllocation
+    // is limited such that this bit not used, then all valid allocation sizes will have this bit
+    // available for use as well.
+    static_assert(kMaxAllocation < 0x80000000U);
+    CALICODB_EXPECT_LE(swf.size, kMaxAllocation);
     const auto value = swf.size << 1 | swf.flag;
     return encode_varint(output, value);
 }
@@ -261,8 +264,6 @@ auto decode_size_with_flag(const char *input, const char *limit, SizeWithFlag &s
     }
     return input;
 }
-
-static_assert(kMaxAllocation < 0x80000000U);
 
 auto read_bucket_root_id(const Cell &cell) -> Id
 {
@@ -279,7 +280,7 @@ auto write_bucket_root_id(Cell &cell, Id root_id) -> void
 auto write_bucket_root_id(char *key, const Slice &root_id) -> void
 {
     // root_id is already encoded. Caller must have called put_u32(ptr, val) at some
-    // point, where ptr is equal to root_id.ptr(), and val is a 4-byte root ID.
+    // point, where ptr is equal to root_id.data(), and val is a 4-byte root ID.
     CALICODB_EXPECT_EQ(root_id.size(), sizeof(uint32_t));
     std::memcpy(key - sizeof(uint32_t), root_id.data(), sizeof(uint32_t));
 }

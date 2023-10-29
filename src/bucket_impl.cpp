@@ -172,10 +172,14 @@ auto BucketImpl::get(const Slice &key, CALICODB_STRING *value_out) const -> Stat
         CALICODB_EXPECT_TRUE(s.is_ok()); // Cursor invariant
         if (value_out) {
             const auto value = m_cursor.value();
-            // CALICODB_STRING must return a valid address from its data() method, even if it has 0 length. This
-            // is how std::string behaves (see https://en.cppreference.com/w/cpp/string/basic_string/data).
             value_out->resize(value.size());
-            if (value_out->size() == value.size()) {
+            if (value.is_empty()) {
+                // std::string, the default for CALICODB_STRING, will return the address of a single null char
+                // from its data() method if its empty() method returns true. This may not be the case for non-
+                // conforming string implementations like calicodb::String (returns nullptr), so just handle this
+                // as a special case. It is UB to call mem*() on a nullptr.
+                // See https://en.cppreference.com/w/cpp/string/basic_string/data.
+            } else if (value_out->size() == value.size()) {
                 std::memcpy(value_out->data(), value.data(), value.size());
             } else {
                 // CALICODB_STRING was not able to get enough memory to resize. This will never happen when using

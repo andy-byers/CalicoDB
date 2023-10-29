@@ -9,13 +9,12 @@
 namespace calicodb
 {
 
-StringBuilder::StringBuilder(String str)
+StringBuilder::StringBuilder(String str, size_t offset)
 {
-    if (auto *ptr = exchange(str.m_data, nullptr)) {
-        m_buf.reset(ptr, str.m_size);
-        m_len = str.m_size;
-        str.clear();
-    }
+    const auto [data, size, capacity] = String::into_raw_parts(move(str));
+    CALICODB_EXPECT_LE(offset, size);
+    m_data.reset({data, capacity});
+    m_size = offset;
 }
 
 auto StringBuilder::ensure_capacity(size_t len) -> int
@@ -23,22 +22,20 @@ auto StringBuilder::ensure_capacity(size_t len) -> int
     if (!m_ok) {
         return -1;
     }
-    // NOTE: This routine only fails if len_with_null is greater than kMaxAllocation
-    //       ("capacity > kMaxAllocation" might end up being true below, but that is OK).
-    const auto len_with_null = len + 1;
-    if (len_with_null <= m_buf.len()) {
+    ++len; // Account for the null terminator.
+    if (len <= m_data.size()) {
+        // String already has enough memory.
         return 0;
     }
-    if (len_with_null > kMaxAllocation) {
+    // Make sure the capacity (unsigned) isn't going to wrap and become small.
+    if (len > kMaxAllocation) {
         return -1;
     }
-    auto capacity = m_buf.is_empty()
-                        ? len + 1
-                        : m_buf.len();
-    while (len_with_null > capacity) {
-        capacity *= 2;
+    auto capacity = m_data.size();
+    while (capacity < len) {
+        capacity = (capacity + 1) * 2;
     }
-    if (m_buf.realloc(minval<size_t>(capacity, kMaxAllocation))) {
+    if (m_data.resize(capacity)) {
         m_ok = false;
         return -1;
     }
@@ -47,30 +44,28 @@ auto StringBuilder::ensure_capacity(size_t len) -> int
 
 auto StringBuilder::build(String &string_out) -> int
 {
-    // Trim the allocation.
-    if (m_ok && m_len + 1 < m_buf.len()) {
-        m_ok = m_buf.realloc(m_len + 1) == 0;
+    const auto [data, capacity] = move(m_data).release();
+    const auto size = exchange(m_size, 0U);
+    const auto ok = exchange(m_ok, true);
+    if (ok && size) {
+        string_out = String::from_raw_parts({data, size, capacity});
+        data[size] = '\0';
+        return 0;
     }
-    if (!m_ok) {
-        return -1;
-    }
-    if (!m_buf.is_empty()) {
-        CALICODB_EXPECT_EQ(m_buf.len(), m_len + 1);
-        m_buf[m_len] = '\0';
-    }
-    string_out = String(m_buf.release(), m_len);
-    m_len = 0;
-    return 0;
+    Mem::deallocate(data);
+    string_out = String();
+    return ok ? 0 : -1;
 }
 
 auto StringBuilder::append(const Slice &s) -> StringBuilder &
 {
-    if (ensure_capacity(m_len + s.size())) {
+    // Empty check prevents allocating a null terminator if no data is to be added.
+    if (s.is_empty() || ensure_capacity(m_size + s.size())) {
         return *this;
     }
     CALICODB_EXPECT_TRUE(m_ok);
-    std::memcpy(m_buf.ptr() + m_len, s.data(), s.size());
-    m_len += s.size();
+    std::memcpy(m_data.data() + m_size, s.data(), s.size());
+    m_size += s.size();
     return *this;
 }
 
@@ -109,9 +104,9 @@ auto StringBuilder::append_format_va(const char *fmt, std::va_list args) -> Stri
     for (int i = 0; i < 2; ++i) {
         std::va_list args_copy;
         va_copy(args_copy, args);
-        auto rc = std::vsnprintf(m_buf.ptr() + m_len,
-                                 m_buf.len() - m_len,
-                                 fmt, args_copy);
+        const auto rc = std::vsnprintf(m_data.data() + m_size,
+                                       m_data.size() - m_size,
+                                       fmt, args_copy);
         va_end(args_copy);
 
         if (rc < 0) {
@@ -119,17 +114,17 @@ auto StringBuilder::append_format_va(const char *fmt, std::va_list args) -> Stri
             CALICODB_DEBUG_TRAP;
             break;
         }
-        const auto len = m_len + static_cast<size_t>(rc);
-        if (len + 1 <= m_buf.len()) {
+        const auto size = m_size + static_cast<size_t>(rc);
+        if (size + 1 <= m_data.size()) {
             // Success: m_buf had enough room for the message + '\0'.
-            m_len = len;
+            m_size = size;
             ok = true;
             break;
         } else if (i) {
             // Already tried reallocating once. std::vsnprintf() may have a bug.
             CALICODB_DEBUG_TRAP;
             break;
-        } else if (ensure_capacity(len)) {
+        } else if (ensure_capacity(size)) {
             // Out of memory.
             break;
         }
@@ -140,33 +135,36 @@ auto StringBuilder::append_format_va(const char *fmt, std::va_list args) -> Stri
 
 auto append_strings(String &str, const Slice &s, const Slice &t) -> int
 {
-    return StringBuilder(move(str))
+    const auto offset = str.size();
+    return StringBuilder(move(str), offset)
         .append(s)
         .append(t)
         .build(str);
 }
 
-auto append_escaped_string(String &target, const Slice &s) -> int
+auto append_escaped_string(String &str, const Slice &s) -> int
 {
-    return StringBuilder(move(target))
+    const auto offset = str.size();
+    return StringBuilder(move(str), offset)
         .append_escaped(s)
-        .build(target);
+        .build(str);
 }
 
-auto append_format_string(String &target, const char *fmt, ...) -> int
+auto append_format_string(String &str, const char *fmt, ...) -> int
 {
     std::va_list args;
     va_start(args, fmt);
-    const auto rc = append_format_string_va(target, fmt, args);
+    const auto rc = append_format_string_va(str, fmt, args);
     va_end(args);
     return rc;
 }
 
-auto append_format_string_va(String &target, const char *fmt, std::va_list args) -> int
+auto append_format_string_va(String &str, const char *fmt, std::va_list args) -> int
 {
-    return StringBuilder(move(target))
+    const auto offset = str.size();
+    return StringBuilder(move(str), offset)
         .append_format_va(fmt, args)
-        .build(target);
+        .build(str);
 }
 
 // Modified from LevelDB.

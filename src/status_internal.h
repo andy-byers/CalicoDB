@@ -95,7 +95,7 @@ public:
         if (m_builder.build(string)) {
             return m_fallback;
         }
-        return Status(StringBuilder::release_string(
+        return Status(StringBuilder::into_c_str(
             move(string)));
     }
 

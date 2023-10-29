@@ -562,11 +562,11 @@ auto HashIterator::init(uint32_t backfill) -> Status
     // Temporary buffer for mergesort. Freed before returning from this routine. Possibly a bit
     // larger than necessary due to platform alignment requirements (see alloc.h).
     Buffer<Hash> temp;
-    if (temp.realloc(last_value < kNIndexKeys ? last_value : kNIndexKeys)) {
+    if (temp.resize(last_value < kNIndexKeys ? last_value : kNIndexKeys)) {
         // m_state will be freed in the destructor.
         return Status::no_memory();
     }
-    std::memset(temp.ptr(), 0, temp.len() * sizeof(Hash));
+    std::memset(temp.data(), 0, temp.size() * sizeof(Hash));
 
     Status s;
     for (uint32_t i = index_group_number(backfill + 1); i < m_num_groups; ++i) {
@@ -592,7 +592,7 @@ auto HashIterator::init(uint32_t backfill) -> Status
         }
 
         auto *keys = const_cast<Key *>(group.keys);
-        mergesort(keys, index_buf, temp.ptr(), group_size);
+        mergesort(keys, index_buf, temp.data(), group_size);
         m_state->groups[i] = {
             keys,
             index_buf,
@@ -1201,7 +1201,7 @@ auto WalImpl::rewrite_checksums(uint32_t end) -> Status
     const auto frame_size = WalFrameHdr::kSize + m_page_size;
 
     Buffer<char> frame;
-    if (frame.realloc(frame_size)) {
+    if (frame.resize(frame_size)) {
         return Status::no_memory();
     }
 
@@ -1222,26 +1222,26 @@ auto WalImpl::rewrite_checksums(uint32_t end) -> Status
     }
     m_stat->read_wal += frame_size;
 
-    m_hdr.frame_cksum[0] = get_u32(frame.ptr());
-    m_hdr.frame_cksum[1] = get_u32(frame.ptr() + sizeof(uint32_t));
+    m_hdr.frame_cksum[0] = get_u32(frame.data());
+    m_hdr.frame_cksum[1] = get_u32(frame.data() + sizeof(uint32_t));
 
     auto redo = m_redo_cksum;
     m_redo_cksum = 0;
 
     for (; redo < end; ++redo) {
         const auto offset = frame_offset(redo, m_page_size);
-        s = m_wal->read_exact(offset, frame_size, frame.ptr());
+        s = m_wal->read_exact(offset, frame_size, frame.data());
         if (!s.is_ok()) {
             break;
         }
         m_stat->read_wal += frame_size;
 
         WalFrameHdr hdr;
-        hdr.pgno = get_u32(frame.ptr());
-        hdr.db_size = get_u32(frame.ptr() + sizeof(uint32_t));
+        hdr.pgno = get_u32(frame.data());
+        hdr.db_size = get_u32(frame.data() + sizeof(uint32_t));
 
         char buffer[WalFrameHdr::kSize];
-        encode_frame(hdr, frame.ptr() + WalFrameHdr::kSize, buffer);
+        encode_frame(hdr, frame.data() + WalFrameHdr::kSize, buffer);
         s = m_wal->write(offset, Slice(buffer, sizeof(buffer)));
         if (!s.is_ok()) {
             break;
@@ -1293,7 +1293,7 @@ auto WalImpl::recover_index() -> Status
         std::memcpy(m_hdr.salt, &header[16], sizeof(m_hdr.salt));
 
         Buffer<char> frame;
-        if (frame.realloc(WalFrameHdr::kSize + m_page_size)) {
+        if (frame.resize(WalFrameHdr::kSize + m_page_size)) {
             s = Status::no_memory();
             goto cleanup;
         }
@@ -1319,7 +1319,7 @@ auto WalImpl::recover_index() -> Status
                 const auto first = 1 + (n_group == 0 ? 0 : kNIndexKeys0 + (n_group - 1) * kNIndexKeys);
                 for (auto n_frame = first; n_frame <= last; ++n_frame) {
                     const auto offset = frame_offset(n_frame, m_page_size);
-                    s = m_wal->read_exact(offset, frame_size, frame.ptr());
+                    s = m_wal->read_exact(offset, frame_size, frame.data());
                     if (!s.is_ok()) {
                         goto cleanup;
                     }
@@ -1330,7 +1330,7 @@ auto WalImpl::recover_index() -> Status
                     // are no more valid frames in this WAL. The WAL implementation may start to overwrite
                     // frames from the start of the file, once the file has reached some threshold size.
                     // Obsolete frames will fail decoding.
-                    if (decode_frame(frame.ptr(), hdr)) {
+                    if (decode_frame(frame.data(), hdr)) {
                         goto cleanup;
                     }
                     s = m_index.assign(hdr.pgno, n_frame);

@@ -58,7 +58,7 @@ auto Bufmgr::reallocate(size_t page_size) -> int
     }
     m_num_buffers = m_min_buffers;
     // Reserve the first page buffer for page 1.
-    m_root = m_metadata.ptr();
+    m_root = m_metadata.data();
     m_root->page_id = Id::root();
     IntrusiveList::remove(*m_root);
     std::memset(m_root->data, 0, page_size);

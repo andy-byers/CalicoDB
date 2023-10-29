@@ -18,9 +18,9 @@ namespace calicodb
 class StringBuilder final
 {
     // Buffer for accumulating string data. The length stored in the buffer type is the capacity,
-    // and m_len is the number of bytes that have been written.
-    Buffer<char> m_buf;
-    size_t m_len = 0;
+    // and m_size is the number of bytes that have been written.
+    Buffer<char> m_data;
+    size_t m_size = 0;
     bool m_ok = true;
 
     // Make sure the underlying buffer is large enough to hold `len` bytes of string data, plus
@@ -29,27 +29,26 @@ class StringBuilder final
 
 public:
     explicit StringBuilder() = default;
-    explicit StringBuilder(String str);
+    explicit StringBuilder(String str, size_t offset = 0);
 
     StringBuilder(StringBuilder &&rhs) noexcept
-        : m_buf(move(rhs.m_buf)),
-          m_len(exchange(rhs.m_len, 0U))
+        : m_data(move(rhs.m_data)),
+          m_size(exchange(rhs.m_size, 0U))
     {
     }
 
     auto operator=(StringBuilder &&rhs) noexcept -> StringBuilder &
     {
         if (this != &rhs) {
-            m_buf = move(rhs.m_buf);
-            m_len = exchange(rhs.m_len, 0U);
+            m_data = move(rhs.m_data);
+            m_size = exchange(rhs.m_size, 0U);
         }
         return *this;
     }
 
-    [[nodiscard]] static auto release_string(String str) -> char *
+    [[nodiscard]] static auto into_c_str(String str) -> char *
     {
-        str.m_size = 0;
-        return exchange(str.m_data, nullptr);
+        return String::into_raw_parts(move(str)).data;
     }
 
     auto append(const Slice &s) -> StringBuilder &;

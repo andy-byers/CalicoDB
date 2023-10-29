@@ -87,7 +87,7 @@ auto Schema::drop_tree(Id root_id) -> Status
     }
 
     Status s;
-    Buffer<Id> children;
+    Vector<Id> children;
     auto *next = drop.get();
     for (size_t nc = 0; next && s.is_ok(); ++nc) {
         if (drop->m_refcount) {
@@ -112,7 +112,7 @@ auto Schema::drop_tree(Id root_id) -> Status
                     }
                     return true;
                 });
-                for (size_t i = nc; i < children.len(); ++i) {
+                for (size_t i = nc; i < children.size(); ++i) {
                     if (children[i] == rr.before) {
                         children[i] = rr.after;
                         break;
@@ -122,7 +122,7 @@ auto Schema::drop_tree(Id root_id) -> Status
         }
 
         next = nullptr;
-        if (nc < children.len()) {
+        if (nc < children.size()) {
             drop.reset(open_tree(children[nc]));
             if (drop) {
                 next = drop.get();

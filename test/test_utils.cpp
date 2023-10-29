@@ -8,8 +8,8 @@
 #include "calicodb/config.h"
 #include "config_internal.h"
 #include "encoding.h"
+#include "internal_vector.h"
 #include "logging.h"
-#include "model.h"
 #include "status_internal.h"
 
 namespace calicodb::test
@@ -242,13 +242,13 @@ TEST_F(AllocTests, DeathTest)
     // Give back more memory than was allocated in-total. If more than 1 byte were already allocated, this
     // corruption would go undetected.
     *size_ptr = saved_value + 1;
-    ASSERT_DEATH(Mem::deallocate(ptr), "Assert");
-    ASSERT_DEATH((void)Mem::reallocate(ptr, 123), "Assert");
+    ASSERT_DEATH(Mem::deallocate(ptr), "");
+    ASSERT_DEATH((void)Mem::reallocate(ptr, 123), "");
     // Actual allocations must not be zero-length. Mem::malloc() returns a nullptr if 0 bytes are
     // requested.
     *size_ptr = saved_value - 1;
-    ASSERT_DEATH(Mem::deallocate(ptr), "Assert");
-    ASSERT_DEATH((void)Mem::reallocate(ptr, 123), "Assert");
+    ASSERT_DEATH(Mem::deallocate(ptr), "");
+    ASSERT_DEATH((void)Mem::reallocate(ptr, 123), "");
 
     *size_ptr = saved_value;
     Mem::deallocate(ptr);
@@ -960,15 +960,15 @@ TEST(Slice, DeathTest)
     Slice slice("Hello, world!");
     const auto oob = slice.size() + 1;
 
-    ASSERT_DEATH(slice.advance(oob), "Assert");
-    ASSERT_DEATH(slice.truncate(oob), "Assert");
-    ASSERT_DEATH((void)slice.range(oob, 1), "Assert");
-    ASSERT_DEATH((void)slice.range(0, oob), "Assert");
-    ASSERT_DEATH((void)slice.range(oob / 2, oob - 1), "Assert");
-    ASSERT_DEATH((void)slice.range(oob), "Assert");
-    ASSERT_DEATH((void)slice[oob], "Assert");
-    ASSERT_DEATH(Slice(nullptr), "Assert");
-    ASSERT_DEATH(Slice(nullptr, 123), "Assert");
+    ASSERT_DEATH(slice.advance(oob), "");
+    ASSERT_DEATH(slice.truncate(oob), "");
+    ASSERT_DEATH((void)slice.range(oob, 1), "");
+    ASSERT_DEATH((void)slice.range(0, oob), "");
+    ASSERT_DEATH((void)slice.range(oob / 2, oob - 1), "");
+    ASSERT_DEATH((void)slice.range(oob), "");
+    ASSERT_DEATH((void)slice[oob], "");
+    ASSERT_DEATH(Slice(nullptr), "");
+    ASSERT_DEATH(Slice(nullptr, 123), "");
 }
 #endif // not NDEBUG
 
@@ -1102,5 +1102,137 @@ TEST(InternalTests, PageTypeNames)
     ASSERT_NE(nullptr, page_type_name(kOverflowLink));
     ASSERT_NE(nullptr, page_type_name(kFreelistPage));
 }
+
+TEST(VectorTests, FromRawParts)
+{
+    auto *data = static_cast<int *>(Mem::allocate(sizeof(int) * 2));
+    auto vector = Vector<int>::from_raw_parts({data, 2, 2});
+    ASSERT_EQ(vector.data(), data);
+    ASSERT_EQ(vector.size(), 2);
+    vector[1] = 42;
+    ASSERT_EQ(data[1], 42);
+}
+
+TEST(VectorTests, EmptyVector)
+{
+    Vector<int> vector;
+    ASSERT_TRUE(vector.is_empty());
+    ASSERT_EQ(vector.data(), nullptr);
+    ASSERT_EQ(vector.size(), 0);
+}
+
+TEST(VectorTests, NonEmptyVector)
+{
+    Vector<int> vector;
+    ASSERT_EQ(0, vector.push_back(1));
+    ASSERT_FALSE(vector.is_empty());
+    ASSERT_NE(vector.data(), nullptr);
+    ASSERT_EQ(vector.size(), 1);
+    ASSERT_EQ(vector.front(), 1);
+    ASSERT_EQ(vector.back(), 1);
+}
+
+TEST(VectorTests, FrontAndBackReferences)
+{
+    Vector<int> vector;
+    ASSERT_EQ(0, vector.push_back(1));
+    ASSERT_EQ(vector.front(), vector.back());
+    ASSERT_EQ(&vector.front(), &vector.back());
+
+    ASSERT_EQ(0, vector.push_back(2));
+    ASSERT_NE(vector.front(), vector.back());
+
+    vector.front() = vector.back();
+    ASSERT_EQ(vector.front(), vector.back());
+    ASSERT_NE(&vector.front(), &vector.back());
+}
+
+TEST(VectorTests, BasicOperations)
+{
+    Vector<int> vector;
+    ASSERT_EQ(0, vector.push_back(1));
+    ASSERT_EQ(0, vector.emplace_back(2));
+    ASSERT_EQ(vector.back(), 2);
+    vector.pop_back();
+    ASSERT_EQ(vector.back(), 1);
+    vector.pop_back();
+    ASSERT_TRUE(vector.is_empty());
+    // Elements are value initialized, so resize() only works if T has a
+    // parameterless constructor.
+    ASSERT_EQ(0, vector.resize(1));
+    ASSERT_EQ(vector.front(), 0);
+}
+
+TEST(VectorTests, MoveOnlyElements)
+{
+    struct UniqueIntWrapper {
+        int value;
+
+        UniqueIntWrapper(int v) : value(v) {}
+        UniqueIntWrapper(const UniqueIntWrapper &) = delete;
+        auto operator=(const UniqueIntWrapper &) -> UniqueIntWrapper & = delete;
+        UniqueIntWrapper(UniqueIntWrapper &&) = default;
+        auto operator=(UniqueIntWrapper &&) -> UniqueIntWrapper & = default;
+    } v(1);
+
+    Vector<UniqueIntWrapper> vector;
+    ASSERT_EQ(0, vector.push_back(move(v)));
+    ASSERT_EQ(vector.front().value, 1);
+    ASSERT_EQ(0, vector.emplace_back(2));
+    ASSERT_EQ(vector.back().value, 2);
+}
+
+TEST(VectorTests, ReserveMemory)
+{
+    Vector<int> vector;
+    for (size_t i : {0U, 1U, 5U, 10U, 5U, 1U, 0U}) {
+        ASSERT_EQ(0, vector.reserve(i));
+        vector.reserve(i); // Method is not [[nodiscard]]
+        ASSERT_EQ(vector.size(), 0);
+    }
+}
+
+TEST(VectorTests, PushAndPop)
+{
+    Vector<int> vector;
+    ASSERT_EQ(0, vector.reserve(4));
+    for (int i = 0; i < 256; ++i) {
+        ASSERT_EQ(0, vector.push_back(i));
+        ASSERT_EQ(vector.size(), static_cast<size_t>(i + 1));
+    }
+    for (int i = 255; i >= 0; --i) {
+        ASSERT_EQ(vector.back(), i);
+        vector.pop_back();
+        ASSERT_EQ(vector.size(), static_cast<size_t>(i));
+    }
+}
+
+TEST(VectorTests, GrowAndShrink)
+{
+    Vector<int> vector;
+    ASSERT_EQ(0, vector.reserve(4));
+    for (size_t i = 1; i < 256; i *= 2) {
+        ASSERT_EQ(0, vector.resize(i));
+        ASSERT_EQ(vector.size(), i);
+    }
+    // First resize() is a NOOP.
+    for (size_t i = 256; i > 0; i /= 2) {
+        ASSERT_EQ(0, vector.resize(i));
+        ASSERT_EQ(vector.size(), i);
+    }
+}
+
+#if not NDEBUG
+TEST(VectorTests, OutOfBoundsDeathTest)
+{
+    Vector<int> vector;
+    ASSERT_EQ(0, vector.resize(1));
+    ASSERT_DEATH(vector[1], "");
+    ASSERT_DEATH(vector[100], "");
+    ASSERT_EQ(0, vector.reserve(1'000));
+    ASSERT_DEATH(vector[1], "");
+    ASSERT_DEATH(vector[100], "");
+}
+#endif // not NDEBUG
 
 } // namespace calicodb::test
