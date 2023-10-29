@@ -20,6 +20,8 @@ auto corrupted_freelist() -> Status
 }
 
 struct FreePage {
+    FreePage() = delete;
+
     static auto capacity(uint32_t page_size) -> size_t
     {
         return (page_size - 2 * sizeof(uint32_t)) / sizeof(uint32_t);

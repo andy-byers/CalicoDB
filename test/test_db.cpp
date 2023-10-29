@@ -2216,7 +2216,7 @@ TEST_F(ModelDBTests, Operations)
         EXPECT_OK(tx.main_bucket().put("key", "value"));
         return Status::ok();
     }));
-    ASSERT_OK(m_db->view([](auto &tx) {
+    ASSERT_OK(m_db->view([](const auto &tx) {
         EXPECT_NOK(tx.main_bucket().create_bucket("nonexistent", nullptr));
         EXPECT_NOK(tx.main_bucket().create_bucket_if_missing("nonexistent", nullptr));
         EXPECT_NOK(tx.main_bucket().drop_bucket("nonexistent"));

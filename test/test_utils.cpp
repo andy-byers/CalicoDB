@@ -1169,21 +1169,51 @@ TEST(VectorTests, BasicOperations)
 
 TEST(VectorTests, MoveOnlyElements)
 {
+    static int s_constructor_calls = 0;
+    static int s_destructor_calls = 0;
+
     struct UniqueIntWrapper {
         int value;
 
-        UniqueIntWrapper(int v) : value(v) {}
+        UniqueIntWrapper(int v)
+            : value(v)
+        {
+            ++s_constructor_calls;
+        }
+
+        ~UniqueIntWrapper()
+        {
+            ++s_destructor_calls;
+        }
+
         UniqueIntWrapper(const UniqueIntWrapper &) = delete;
         auto operator=(const UniqueIntWrapper &) -> UniqueIntWrapper & = delete;
         UniqueIntWrapper(UniqueIntWrapper &&) = default;
         auto operator=(UniqueIntWrapper &&) -> UniqueIntWrapper & = default;
-    } v(1);
+    };
+    {
+        UniqueIntWrapper v(1);
+        Vector<UniqueIntWrapper> vector;
+        ASSERT_EQ(0, vector.push_back(move(v)));
+        ASSERT_EQ(vector.front().value, 1);
+        ASSERT_EQ(s_constructor_calls, 1);
+        ASSERT_EQ(0, vector.emplace_back(2));
+        ASSERT_EQ(vector.back().value, 2);
+        ASSERT_EQ(s_constructor_calls, 2);
+        ASSERT_EQ(s_destructor_calls, 0);
 
-    Vector<UniqueIntWrapper> vector;
-    ASSERT_EQ(0, vector.push_back(move(v)));
-    ASSERT_EQ(vector.front().value, 1);
-    ASSERT_EQ(0, vector.emplace_back(2));
-    ASSERT_EQ(vector.back().value, 2);
+        vector.pop_back();
+        ASSERT_EQ(s_destructor_calls, 1);
+        vector.pop_back();
+        ASSERT_EQ(s_destructor_calls, 2);
+
+        // Add a few for the destructor to clean up.
+        ASSERT_EQ(0, vector.emplace_back(1));
+        ASSERT_EQ(0, vector.emplace_back(2));
+        ASSERT_EQ(0, vector.emplace_back(3));
+    }
+    ASSERT_EQ(s_constructor_calls, 5);
+    ASSERT_EQ(s_destructor_calls, 5 /* b/c non-destructive moves */ + 1);
 }
 
 TEST(VectorTests, ReserveMemory)

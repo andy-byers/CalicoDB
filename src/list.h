@@ -9,6 +9,8 @@ namespace calicodb
 {
 
 struct IntrusiveList {
+    IntrusiveList() = delete;
+
     template <class Entry>
     [[nodiscard]] static auto is_empty(const Entry &entry) -> bool
     {

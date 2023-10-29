@@ -11,23 +11,39 @@
 namespace calicodb
 {
 
+enum Event {
+    kEventValueString,
+    kEventValueNumber,
+    kEventValueBoolean,
+    kEventValueNull,
+    kEventBeginObject,
+    kEventEndObject,
+    kEventBeginArray,
+    kEventEndArray,
+    kEventKey, // Special event for object key
+    kEventCount
+};
+
+union Value {
+    void *null = nullptr;
+    bool boolean;
+    double number;
+    Slice string;
+};
+
+using Action = void (*)(void *, const Value *);
+
 class DSLReader
 {
 public:
-    enum EventType {
-        kReadKeyValue,
-        kBeginObject,
-        kEndObject,
-        kNumEvents
-    };
-    using Event = void (*)(void *, const Slice *);
-
     explicit DSLReader() = default;
-    auto register_event(EventType type, const Event &event) -> void;
-    auto read(const Slice &input, void *event_arg) -> Status;
+    auto register_action(Event event, const Action &action) -> void;
+    auto read(const Slice &input, void *action_arg) -> Status;
 
 private:
-    Event m_events[kNumEvents] = {};
+    auto dispatch(Event event, void *action_arg, const Value *value) -> void;
+
+    Action m_actions[kEventCount] = {};
 };
 
 } // namespace calicodb

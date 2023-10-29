@@ -19,6 +19,7 @@ public:
         size_t size;
         size_t capacity;
     };
+
     static auto from_raw_parts(const RawParts &parts) -> Vector
     {
         Vector v;
@@ -102,25 +103,25 @@ public:
 
     [[nodiscard]] auto front() -> T &
     {
-        CALICODB_EXPECT_NE(m_begin, m_end);
+        CALICODB_EXPECT_FALSE(is_empty());
         return m_begin[0];
     }
 
     [[nodiscard]] auto front() const -> const T &
     {
-        CALICODB_EXPECT_NE(m_begin, m_end);
+        CALICODB_EXPECT_FALSE(is_empty());
         return m_begin[0];
     }
 
     [[nodiscard]] auto back() -> T &
     {
-        CALICODB_EXPECT_NE(m_begin, m_end);
+        CALICODB_EXPECT_FALSE(is_empty());
         return m_end[-1];
     }
 
     [[nodiscard]] auto back() const -> const T &
     {
-        CALICODB_EXPECT_NE(m_begin, m_end);
+        CALICODB_EXPECT_FALSE(is_empty());
         return m_end[-1];
     }
 

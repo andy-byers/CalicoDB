@@ -253,6 +253,8 @@ public:
         uint32_t level;
     };
 
+    InorderTraversal() = delete;
+
     // Call the callback for every record and pivot in the tree, in sort order, plus once when the node
     // is no longer required for determining the rest of the traversal
     template <class Callback>
@@ -2141,6 +2143,8 @@ auto Tree::vacuum() -> Status
 
 class TreeValidator
 {
+    TreeValidator() = delete;
+
     template <class PageCallback>
     static auto traverse_chain(Pager &pager, PageRef *page, const PageCallback &cb) -> Status
     {
@@ -2256,6 +2260,8 @@ class TreePrinter
         std::vector<String> levels;
         std::vector<uint32_t> spaces;
     };
+
+    TreePrinter() = delete;
 
     static auto add_to_level(StructuralData &data, const String &message, uint32_t target) -> void
     {
