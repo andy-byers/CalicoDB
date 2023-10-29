@@ -61,7 +61,7 @@ public:
 
     // Called on the "main" tree. Needs Tree::allocate() method. TODO
     auto create(Id parent_id, Id &root_id_out) -> Status;
-    auto destroy(Reroot &rr, Buffer<Id> &children) -> Status;
+    auto destroy(Reroot &rr, Vector<Id> &children) -> Status;
 
     auto insert(TreeCursor &c, const Slice &key, const Slice &value, bool is_bucket) -> Status;
     auto modify(TreeCursor &c, const Slice &value) -> Status;

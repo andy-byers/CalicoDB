@@ -84,8 +84,8 @@ target_sources(calicodb
                 src/header.cpp
                 src/header.h
                 src/internal.h
-                src/internal_string.cpp
                 src/internal_string.h
+                src/internal_vector.h
                 src/list.h
                 src/logging.cpp
                 src/logging.h

@@ -81,7 +81,7 @@ public:
                     size = m_file->actual_size - offset;
                 }
                 const auto max_chunk = m_file->sector_size;
-                auto *sectors = m_file->sectors.ptr();
+                auto *sectors = m_file->sectors.data();
                 auto *out = scratch;
                 auto idx = offset / max_chunk;
                 offset %= max_chunk;
@@ -105,7 +105,7 @@ public:
                     return Status::no_memory();
                 }
                 const auto max_chunk = m_file->sector_size;
-                auto *sectors = m_file->sectors.ptr();
+                auto *sectors = m_file->sectors.data();
                 auto idx = offset / max_chunk;
                 offset %= max_chunk;
                 for (auto in = data; !in.is_empty(); ++idx) {
@@ -217,14 +217,14 @@ private:
         {
             const auto new_len = (size + sector_size - 1) / sector_size;
             // Free pages if shrinking the file.
-            const auto old_len = sectors.len();
+            const auto old_len = sectors.size();
             for (size_t i = new_len; i < old_len; ++i) {
                 Mem::deallocate(sectors[i]);
                 // Clear pointers in case realloc() fails.
                 sectors[i] = nullptr;
             }
             // Resize the page pointer array.
-            if (sectors.realloc(new_len)) {
+            if (sectors.resize(new_len)) {
                 // Alloc::reallocate() might fail when trimming an allocation, but not if the new size
                 // is 0. In that case, the underlying reallocation function is not called. Instead, the
                 // memory is freed using Alloc::deallocate().
@@ -249,10 +249,10 @@ private:
 
         [[nodiscard]] auto ensure_large_enough(size_t size) -> int
         {
-            if (size > sectors.len() * sector_size && resize(size)) {
+            if (size > sectors.size() * sector_size && resize(size)) {
                 return -1;
             }
-            CALICODB_EXPECT_LE(size, sectors.len() * sector_size);
+            CALICODB_EXPECT_LE(size, sectors.size() * sector_size);
             return 0;
         }
     } m_file;
@@ -317,7 +317,7 @@ public:
     {
         CALICODB_EXPECT_EQ(m_page_size, page_size);
         for (; writer.value(); writer.next()) {
-            if (m_table.occupied * 2 >= m_table.data.len()) {
+            if (m_table.occupied * 2 >= m_table.data.size()) {
                 if (m_table.grow()) {
                     return Status::no_memory();
                 }
@@ -443,13 +443,13 @@ private:
 
         [[nodiscard]] auto end() -> PageEntry **
         {
-            return data.ptr() + data.len();
+            return data.data() + data.size();
         }
 
         template <class Action>
         auto for_each(Action &&action) -> int
         {
-            for (size_t i = 0; i < data.len(); ++i) {
+            for (size_t i = 0; i < data.size(); ++i) {
                 if (data[i] && action(data[i])) {
                     return -1;
                 }
@@ -460,7 +460,7 @@ private:
         [[nodiscard]] auto find(uint32_t key) -> PageEntry **
         {
             // grow() must succeed at least once before this method is called.
-            CALICODB_EXPECT_LT(occupied, data.len());
+            CALICODB_EXPECT_LT(occupied, data.size());
             CALICODB_EXPECT_FALSE(data.is_empty());
 
             // Robert Jenkins' 32-bit integer hash function
@@ -477,8 +477,8 @@ private:
 
             size_t tries = 0;
             for (auto h = hash(key);; ++h, ++tries) {
-                CALICODB_EXPECT_LT(tries, data.len());
-                auto *&ptr = data[h & (data.len() - 1)];
+                CALICODB_EXPECT_LT(tries, data.size());
+                auto *&ptr = data[h & (data.size() - 1)];
                 if (ptr == nullptr || ptr->key == key) {
                     return &ptr;
                 }
@@ -488,14 +488,14 @@ private:
         [[nodiscard]] auto grow() -> int
         {
             uint32_t capacity = 4;
-            while (capacity <= data.len()) {
+            while (capacity <= data.size()) {
                 capacity *= 2;
             }
             PageTable table;
-            if (table.data.realloc(capacity)) {
+            if (table.data.resize(capacity)) {
                 return -1;
             }
-            std::memset(table.data.ptr(), 0, capacity * sizeof(PageEntry *));
+            std::memset(table.data.data(), 0, capacity * sizeof(PageEntry *));
             for_each([&table](auto *page) {
                 *table.find(page->key) = page;
                 return 0;

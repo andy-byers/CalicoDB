@@ -36,7 +36,7 @@ auto Pager::set_page_size(uint32_t value) -> Status
         return Status::no_memory();
     }
     m_page_size = value;
-    std::memset(m_scratch.ptr(), 0, scratch_size);
+    std::memset(m_scratch.data(), 0, scratch_size);
     log(m_log, "database page size is set to %u", value);
     return Status::ok();
 }
@@ -157,7 +157,7 @@ auto Pager::close_wal() -> Status
         // NOOP, since the file is already locked in this mode. Released in Pager::close().
         s = m_file->file_lock(kFileExclusive);
         if (s.is_ok()) {
-            s = m_wal->close(m_scratch.ptr(), m_page_size); // TODO: Page size may not be correct if a transaction was never started.
+            s = m_wal->close(m_scratch.data(), m_page_size); // TODO: Page size may not be correct if a transaction was never started.
         } else if (s.is_busy()) {
             s = Status::ok();
         }
@@ -427,7 +427,7 @@ auto Pager::checkpoint(CheckpointMode mode, CheckpointInfo *info_out) -> Status
         finish();
     }
     if (m_wal) {
-        return m_wal->checkpoint(mode, m_scratch.ptr(), m_page_size,
+        return m_wal->checkpoint(mode, m_scratch.data(), m_page_size,
                                  mode == kCheckpointPassive ? nullptr : m_busy,
                                  info_out);
     }

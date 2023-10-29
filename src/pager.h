@@ -116,7 +116,7 @@ public:
 
     auto scratch() -> char *
     {
-        return m_scratch.ptr();
+        return m_scratch.data();
     }
 
     auto set_status(const Status &error) const -> void;

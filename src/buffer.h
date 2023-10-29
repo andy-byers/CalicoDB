@@ -16,105 +16,119 @@ class Buffer final
 {
     static_assert(std::is_trivially_copyable_v<T>);
 
-    UniquePtr<T> m_ptr;
-    size_t m_len;
+    T *m_data = nullptr;
+    size_t m_size = 0;
 
 public:
-    explicit Buffer()
-        : m_len(0)
+    struct RawParts {
+        T *data;
+        size_t size;
+    };
+
+    explicit Buffer() = default;
+
+    explicit Buffer(const RawParts &parts)
+        : m_data(parts.data),
+          m_size(parts.size)
     {
+        CALICODB_EXPECT_EQ(!parts.data, !parts.size);
     }
 
-    explicit Buffer(T *ptr, size_t len)
-        : m_ptr(ptr),
-          m_len(len)
+    ~Buffer()
     {
-        CALICODB_EXPECT_EQ(ptr == nullptr, len == 0);
+        Mem::deallocate(m_data);
     }
 
     Buffer(Buffer &&rhs) noexcept
-        : m_ptr(move(rhs.m_ptr)),
-          m_len(exchange(rhs.m_len, 0U))
+        : m_data(exchange(rhs.m_data, nullptr)),
+          m_size(exchange(rhs.m_size, 0U))
     {
     }
 
     auto operator=(Buffer &&rhs) noexcept -> Buffer &
     {
         if (this != &rhs) {
-            m_ptr = move(rhs.m_ptr);
-            m_len = exchange(rhs.m_len, 0U);
+            Mem::deallocate(m_data);
+            m_data = exchange(rhs.m_data, nullptr);
+            m_size = exchange(rhs.m_size, 0U);
         }
         return *this;
     }
 
     auto operator[](size_t idx) -> T &
     {
-        CALICODB_EXPECT_LT(idx, m_len);
-        return m_ptr.get()[idx];
+        CALICODB_EXPECT_LT(idx, m_size);
+        return m_data[idx];
     }
 
     auto operator[](size_t idx) const -> const T &
     {
-        CALICODB_EXPECT_LT(idx, m_len);
-        return m_ptr.get()[idx];
+        CALICODB_EXPECT_LT(idx, m_size);
+        return m_data[idx];
     }
 
     [[nodiscard]] auto is_empty() const -> bool
     {
-        return m_len == 0;
+        return m_size == 0;
     }
 
-    [[nodiscard]] auto len() const -> size_t
+    [[nodiscard]] auto size() const -> size_t
     {
-        return m_len;
+        return m_size;
     }
 
-    [[nodiscard]] auto ptr() -> T *
+    [[nodiscard]] auto data() -> T *
     {
-        return m_ptr.get();
+        return m_data;
     }
 
-    [[nodiscard]] auto ptr() const -> const T *
+    [[nodiscard]] auto data() const -> const T *
     {
-        return m_ptr.get();
-    }
-
-    [[nodiscard]] auto ref() -> T *&
-    {
-        return m_ptr.ref();
+        return m_data;
     }
 
     auto reset() -> void
     {
-        m_ptr.reset(nullptr);
-        m_len = 0;
+        Mem::deallocate(m_data);
+        m_data = nullptr;
+        m_size = 0;
     }
 
-    auto reset(char *ptr, size_t len) -> void
+    auto reset(const RawParts &parts) -> void
     {
-        CALICODB_EXPECT_NE(ptr, nullptr);
-        CALICODB_EXPECT_NE(len, 0);
-        m_ptr.reset(ptr);
-        m_len = len;
+        CALICODB_EXPECT_EQ(!parts.data, !parts.size);
+        Mem::deallocate(m_data);
+        m_data = parts.data;
+        m_size = parts.size;
     }
 
-    auto release() -> T *
+    auto release() && -> RawParts
     {
-        m_len = 0;
-        return m_ptr.release();
+        return {
+            exchange(m_data, nullptr),
+            exchange(m_size, 0U),
+        };
     }
 
-    [[nodiscard]] auto realloc(size_t len) -> int
+    [[nodiscard]] auto resize(size_t size) -> int
     {
-        auto *ptr = static_cast<T *>(Mem::reallocate(
-            m_ptr.get(), len * sizeof(T)));
-        if (ptr || len == 0) {
-            m_ptr.release();
-            m_ptr.reset(ptr);
-            m_len = len;
+        auto *data = static_cast<T *>(Mem::reallocate(
+            m_data, size * sizeof(T)));
+        if (data || size == 0) {
+            m_data = data;
+            m_size = size;
             return 0;
         }
         return -1;
+    }
+
+    [[nodiscard]] auto realloc(size_t size) -> int
+    {
+        // Free the old allocation. This method should be chosen over resize() if the old buffer
+        // contents are not important. Avoids an unnecessary copy if the allocator could not grow
+        // the allocation inplace.
+        reset();
+        return resize(size);
     }
 };
 
