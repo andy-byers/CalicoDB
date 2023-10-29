@@ -153,13 +153,13 @@ public:
         m_capacity = nullptr;
     }
 
-    template <class... Ts>
-    [[nodiscard]] auto emplace_back(Ts &&...ts) -> int
+    template <class... Args>
+    [[nodiscard]] auto emplace_back(Args &&...args) -> int
     {
         if (reserve1()) {
             return -1;
         }
-        new (m_end++) T(forward<Ts>(ts)...);
+        new (m_end++) T(forward<Args>(args)...);
         return 0;
     }
 
