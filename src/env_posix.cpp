@@ -2,6 +2,7 @@
 // This source code is licensed under the MIT License, which can be found in
 // LICENSE.md. See AUTHORS.md for a list of contributor names.
 
+#include "calicodb/config.h"
 #include "calicodb/env.h"
 #include "internal.h"
 #include "logging.h"
@@ -23,11 +24,71 @@ namespace
 {
 
 class PosixFile;
-struct FileId;
 struct INode;
-struct PosixFs;
 struct PosixShm;
-struct ShmNode;
+
+// Calls the correct form of open()
+[[nodiscard]] auto open_wrapper(const char *path, int mode, int permissions) -> int
+{
+    return ::open(path, mode, permissions);
+}
+
+struct SystemCall {
+    const char *name;
+    void *current;
+    void *replace;
+} s_syscalls[] = {
+    {"open", reinterpret_cast<void *>(open_wrapper), nullptr},
+#define sys_open (reinterpret_cast<decltype(open_wrapper) *>(s_syscalls[0].current))
+
+    {"close", reinterpret_cast<void *>(::close), nullptr},
+#define sys_close (reinterpret_cast<decltype(::close) *>(s_syscalls[1].current))
+
+    {"access", reinterpret_cast<void *>(::access), nullptr},
+#define sys_access (reinterpret_cast<decltype(::access) *>(s_syscalls[2].current))
+
+    {"fstat", reinterpret_cast<void *>(::fstat), nullptr},
+#define sys_fstat (reinterpret_cast<decltype(::fstat) *>(s_syscalls[3].current))
+
+    {"ftruncate", reinterpret_cast<void *>(::ftruncate), nullptr},
+#define sys_ftruncate (reinterpret_cast<decltype(::ftruncate) *>(s_syscalls[4].current))
+
+    {"fcntl", reinterpret_cast<void *>(::fcntl), nullptr},
+#define sys_fcntl (reinterpret_cast<decltype(::fcntl) *>(s_syscalls[5].current))
+
+    {"lseek", reinterpret_cast<void *>(::lseek), nullptr},
+#define sys_lseek (reinterpret_cast<decltype(::lseek) *>(s_syscalls[6].current))
+
+    {"read", reinterpret_cast<void *>(::read), nullptr},
+#define sys_read (reinterpret_cast<decltype(::read) *>(s_syscalls[7].current))
+
+    {"write", reinterpret_cast<void *>(::write), nullptr},
+#define sys_write (reinterpret_cast<decltype(::write) *>(s_syscalls[8].current))
+
+    {"fsync", reinterpret_cast<void *>(::fsync), nullptr},
+#define sys_fsync (reinterpret_cast<decltype(::fsync) *>(s_syscalls[9].current))
+
+    {"unlink", reinterpret_cast<void *>(::unlink), nullptr},
+#define sys_unlink (reinterpret_cast<decltype(::unlink) *>(s_syscalls[10].current))
+
+    {"mmap", reinterpret_cast<void *>(::mmap), nullptr},
+#define sys_mmap (reinterpret_cast<decltype(::mmap) *>(s_syscalls[11].current))
+
+    {"munmap", reinterpret_cast<void *>(::munmap), nullptr},
+#define sys_munmap (reinterpret_cast<decltype(::munmap) *>(s_syscalls[12].current))
+
+    {"readlink", reinterpret_cast<void *>(::readlink), nullptr},
+#define sys_readlink (reinterpret_cast<decltype(::readlink) *>(s_syscalls[13].current))
+
+    {"lstat", reinterpret_cast<void *>(::lstat), nullptr},
+#define sys_lstat (reinterpret_cast<decltype(::lstat) *>(s_syscalls[14].current))
+
+    {"getcwd", reinterpret_cast<void *>(::getcwd), nullptr},
+#define sys_getcwd (reinterpret_cast<decltype(::getcwd) *>(s_syscalls[15].current))
+
+    {"stat", reinterpret_cast<void *>(::stat), nullptr},
+#define sys_stat (reinterpret_cast<decltype(::stat) *>(s_syscalls[16].current))
+};
 
 class PosixEnv
     : public Env,
@@ -39,7 +100,7 @@ public:
     explicit PosixEnv();
     ~PosixEnv() override = default;
 
-    auto max_filename() const -> size_t override;
+    [[nodiscard]] auto max_filename() const -> size_t override;
     auto full_filename(const char *filename, char *out, size_t out_size) -> Status override;
     auto new_logger(const char *filename, Logger *&out) -> Status override;
     auto new_file(const char *filename, OpenMode mode, File *&out) -> Status override;
@@ -88,8 +149,7 @@ struct ShmNode final {
     bool is_unlocked = false;
 
     // 32-KB blocks of shared memory.
-    UniquePtr<char *> regions;
-    size_t num_regions = 0;
+    Vector<char *> regions;
 
     // List of PosixShm objects that reference this ShmNode.
     PosixShm *refs = nullptr;
@@ -143,7 +203,15 @@ struct INode final {
 
 auto posix_file_lock(int file, const struct flock &lock) -> int
 {
-    return fcntl(file, F_SETLK, &lock);
+    const auto rc = sys_fcntl(file, F_SETLK, &lock);
+    if (rc < 0 && errno == EACCES) {
+        // Either EACCES or EAGAIN is set when fcntl() detects that a conflicting lock is held by
+        // another process. open() also sets EACCES due to inadequate permissions, so convert to a
+        // different error code to avoid ambiguity (EAGAIN already converts to a busy status).
+        // Source: https://man7.org/linux/man-pages/man2/fcntl.2.html
+        errno = EAGAIN;
+    }
+    return rc;
 }
 
 [[nodiscard]] auto posix_shm_lock(ShmNode &snode, short type, size_t offset, size_t n) -> int
@@ -164,7 +232,6 @@ auto posix_file_lock(int file, const struct flock &lock) -> int
 {
     CALICODB_EXPECT_NE(error, 0);
     switch (error) {
-        case EACCES:
         case EAGAIN:
         case EBUSY:
         case EINTR:
@@ -178,12 +245,12 @@ auto posix_file_lock(int file, const struct flock &lock) -> int
     }
 }
 
-constexpr size_t kOpenCloseTimeout = 100;
+constexpr size_t kInterruptTimeout = 100;
 
 [[nodiscard]] auto posix_open(const char *filename, int mode) -> int
 {
-    for (size_t t = 0; t < kOpenCloseTimeout; ++t) {
-        const auto fd = open(filename, mode | O_CLOEXEC, kFilePermissions);
+    for (size_t t = 0; t < kInterruptTimeout; ++t) {
+        const auto fd = sys_open(filename, mode | O_CLOEXEC, kFilePermissions);
         if (fd < 0 && errno == EINTR) {
             continue;
         }
@@ -194,8 +261,8 @@ constexpr size_t kOpenCloseTimeout = 100;
 
 auto posix_close(int fd) -> int
 {
-    for (size_t t = 0; t < kOpenCloseTimeout; ++t) {
-        const auto rc = close(fd);
+    for (size_t t = 0; t < kInterruptTimeout; ++t) {
+        const auto rc = sys_close(fd);
         if (rc < 0 && errno == EINTR) {
             continue;
         }
@@ -208,7 +275,7 @@ auto posix_close(int fd) -> int
 {
     auto rest = size;
     while (rest > 0) {
-        const auto n = read(file, scratch, rest);
+        const auto n = sys_read(file, scratch, rest);
         if (n <= 0) {
             if (n == 0) {
                 break;
@@ -225,10 +292,11 @@ auto posix_close(int fd) -> int
     }
     return 0;
 }
+
 auto posix_write(int file, Slice in) -> int
 {
     while (!in.is_empty()) {
-        const auto n = write(file, in.data(), in.size());
+        const auto n = sys_write(file, in.data(), in.size());
         if (n >= 0) {
             in.advance(static_cast<size_t>(n));
         } else if (errno != EINTR) {
@@ -240,14 +308,15 @@ auto posix_write(int file, Slice in) -> int
 
 [[nodiscard]] auto seek_and_read(int file, size_t offset, size_t size, char *scratch, Slice *out) -> int
 {
-    if (const auto rc = lseek(file, static_cast<off_t>(offset), SEEK_SET); rc < 0) {
+    if (const auto rc = sys_lseek(file, static_cast<off_t>(offset), SEEK_SET); rc < 0) {
         return -1;
     }
     return posix_read(file, size, scratch, out);
 }
+
 [[nodiscard]] auto seek_and_write(int file, size_t offset, Slice in) -> int
 {
-    if (const auto rc = lseek(file, static_cast<off_t>(offset), SEEK_SET); rc < 0) {
+    if (const auto rc = sys_lseek(file, static_cast<off_t>(offset), SEEK_SET); rc < 0) {
         return -1;
     }
     return posix_write(file, in);
@@ -255,13 +324,14 @@ auto posix_write(int file, Slice in) -> int
 
 [[nodiscard]] auto posix_truncate(int fd, size_t size) -> int
 {
-    for (;;) {
-        const auto rc = ftruncate(fd, static_cast<off_t>(size));
+    for (size_t t = 0; t < kInterruptTimeout; ++t) {
+        const auto rc = sys_ftruncate(fd, static_cast<off_t>(size));
         if (rc && errno == EINTR) {
             continue;
         }
         return rc;
     }
+    return -1;
 }
 
 struct PathHelper {
@@ -306,7 +376,7 @@ auto append_one_element(PathHelper &path, const char *name, size_t size) -> void
     struct stat st;
     path.output[path.used] = '\0';
     const auto *input = path.output;
-    if (lstat(input, &st)) {
+    if (sys_lstat(input, &st)) {
         if (errno != ENOENT) {
             path.s = posix_error(errno);
         }
@@ -315,7 +385,7 @@ auto append_one_element(PathHelper &path, const char *name, size_t size) -> void
         if (path.symlinks++ > kMaxSymlinks) {
             path.s = Status::invalid_argument();
         }
-        const auto got = readlink(input, link, kPathMax);
+        const auto got = sys_readlink(input, link, kPathMax);
         if (got <= 0 || got >= static_cast<ssize_t>(kPathMax)) {
             path.s = Status::io_error("readlink");
             return;
@@ -454,7 +524,7 @@ public:
 
             if (offset + 1 >= L) {
                 if (i == 0) {
-                    L = offset + 2; // +1 for '\n'
+                    L = offset + 2; // Account for '\n'
                     var = static_cast<char *>(Mem::allocate(L));
                     if (var == nullptr) {
                         // Write just this generic message if the system could not fulfill the allocation.
@@ -480,13 +550,8 @@ public:
 // Per-process singleton for managing filesystem state
 struct PosixFs final {
     explicit PosixFs()
+        : page_size(static_cast<size_t>(sysconf(_SC_PAGESIZE)))
     {
-        const auto pgsz = sysconf(_SC_PAGESIZE);
-        if (pgsz < 0) {
-            page_size = 4'096;
-        } else {
-            page_size = static_cast<size_t>(pgsz);
-        }
         if (page_size < File::kShmRegionSize) {
             mmap_scale = 1;
         } else {
@@ -499,7 +564,7 @@ struct PosixFs final {
         // REQUIRES: Mutex "inode.mutex" is locked by the caller
         for (auto *file = inode.unused; file;) {
             auto *next = file->next;
-            close(file->file);
+            posix_close(file->file);
             Mem::deallocate(file);
             file = next;
         }
@@ -512,7 +577,7 @@ struct PosixFs final {
         struct stat st;
         mutex.lock();
 
-        if (inode_list && 0 == stat(path, &st)) {
+        if (inode_list && 0 == sys_stat(path, &st)) {
             auto *inode = inode_list;
             while (inode && (inode->key.device != st.st_dev ||
                              inode->key.inode != st.st_ino)) {
@@ -542,7 +607,7 @@ struct PosixFs final {
     {
         // REQUIRES: "mutex" member is locked by the caller
         FileId key;
-        if (struct stat st = {}; fstat(fd, &st)) {
+        if (struct stat st = {}; sys_fstat(fd, &st)) {
             return posix_error(errno);
         } else {
             key.device = st.st_dev;
@@ -680,15 +745,15 @@ struct PosixFs final {
 
         if (--snode->refcount == 0) {
             const auto interval = mmap_scale;
-            for (size_t i = 0; i < snode->num_regions; i += interval) {
-                munmap(snode->regions.get()[i], File::kShmRegionSize);
+            for (size_t i = 0; i < snode->regions.size(); i += interval) {
+                sys_munmap(snode->regions[i], File::kShmRegionSize);
             }
             if (unlink_if_last) {
                 // Take a write lock on the DMS byte to make sure no other processes are
                 // using this shm file.
                 if (0 == posix_shm_lock(*snode, F_WRLCK, kShmDMS, 1)) {
                     // This should drop the lock we just took.
-                    unlink(snode->filename.c_str());
+                    sys_unlink(snode->filename.c_str());
                 }
             }
             inode->snode.reset();
@@ -743,7 +808,7 @@ auto sync_parent_dir(const char *filename) -> void
     if (open_parent_dir(filename, dir)) {
         return;
     }
-    if (fsync(dir)) {
+    if (sys_fsync(dir)) {
         // TODO: Use a default logger, log errors like this one.
     }
     posix_close(dir);
@@ -766,7 +831,7 @@ auto PosixEnv::full_filename(const char *filename, char *out, size_t out_size) -
     PathHelper path = {Status::ok(), 0, out, out_size, 0};
     if (filename[0] != '/') {
         char pwd[kPathMax + 2];
-        if (getcwd(pwd, kPathMax) == nullptr) {
+        if (!sys_getcwd(pwd, kPathMax)) {
             return posix_error(errno);
         }
         append_elements(path, pwd);
@@ -781,7 +846,7 @@ auto PosixEnv::full_filename(const char *filename, char *out, size_t out_size) -
 
 auto PosixEnv::remove_file(const char *filename) -> Status
 {
-    if (unlink(filename)) {
+    if (sys_unlink(filename)) {
         return posix_error(errno);
     }
     sync_parent_dir(filename);
@@ -790,7 +855,7 @@ auto PosixEnv::remove_file(const char *filename) -> Status
 
 auto PosixEnv::file_exists(const char *filename) const -> bool
 {
-    return access(filename, F_OK) == 0;
+    return sys_access(filename, F_OK) == 0;
 }
 
 auto PosixEnv::new_file(const char *filename, OpenMode mode, File *&out) -> Status
@@ -900,7 +965,7 @@ auto PosixEnv::sleep(unsigned micros) -> void
 auto PosixFile::get_size(uint64_t &size_out) const -> Status
 {
     struct stat st;
-    if (fstat(file, &st)) {
+    if (sys_fstat(file, &st)) {
         return posix_error(errno);
     }
     size_out = static_cast<uint64_t>(st.st_size);
@@ -983,13 +1048,13 @@ auto PosixFile::sync() -> Status
     // NOTE: This will certainly make performance quite a bit worse on macOS, however, it is
     //       necessary for durability. On macOS, fcntl() returns before the storage device's
     //       volatile write cache has been flushed.
-    rc = fcntl(file, F_FULLFSYNC);
+    rc = sys_fcntl(file, F_FULLFSYNC);
 #else
     rc = 1;
 #endif
 
     if (rc) {
-        rc = fsync(file);
+        rc = sys_fsync(file);
     }
     return rc ? posix_error(errno) : Status::ok();
 }
@@ -1030,9 +1095,9 @@ auto PosixFile::shm_map(size_t r, bool extend, volatile void *&out) -> Status
         snode->is_unlocked = false;
     }
 
-    if (snode->num_regions < request) {
+    if (snode->regions.size() < request) {
         uint64_t file_size;
-        if (struct stat st = {}; fstat(snode->file, &st)) {
+        if (struct stat st = {}; sys_fstat(snode->file, &st)) {
             s = posix_error(errno);
             goto cleanup;
         } else {
@@ -1054,38 +1119,31 @@ auto PosixFile::shm_map(size_t r, bool extend, volatile void *&out) -> Status
             }
         }
 
-        // Make room for a pointer to the requested shm region.
-        if (auto **realloc_ptr = static_cast<char **>(Mem::reallocate(
-                snode->regions.get(), request * sizeof(char *)))) {
-            snode->regions.release();
-            snode->regions.reset(realloc_ptr);
-        } else {
-            s = Status::no_memory();
-            goto cleanup;
-        }
-
-        while (snode->num_regions < request) {
+        snode->regions.reserve(request);
+        while (snode->regions.size() < request) {
             // Map "mmap_scale" shared memory regions into this address space.
-            auto *p = mmap(
+            auto *p = sys_mmap(
                 nullptr, File::kShmRegionSize * mmap_scale,
                 PROT_READ | PROT_WRITE, MAP_SHARED, snode->file,
-                static_cast<ssize_t>(File::kShmRegionSize * snode->num_regions));
+                static_cast<ssize_t>(File::kShmRegionSize * snode->regions.size()));
             if (p == MAP_FAILED) {
                 s = posix_error(errno);
                 break;
             }
             // Store a pointer to the start of each memory region.
             for (size_t i = 0; i < mmap_scale; ++i) {
-                const auto n = snode->num_regions++;
-                snode->regions.get()[n] = static_cast<char *>(p) +
-                                          File::kShmRegionSize * i;
+                if (snode->regions.push_back(static_cast<char *>(p) +
+                                             File::kShmRegionSize * i)) {
+                    s = Status::no_memory();
+                    goto cleanup;
+                }
             }
         }
     }
 
 cleanup:
-    if (r < snode->num_regions) {
-        out = snode->regions.get()[r];
+    if (r < snode->regions.size()) {
+        out = snode->regions[r];
     }
     snode->mutex.unlock();
     return s;
@@ -1218,7 +1276,7 @@ auto ShmNode::take_dms_lock() -> int
     lock.l_type = F_WRLCK;
 
     int rc = 0;
-    if (fcntl(file, F_GETLK, &lock)) {
+    if (sys_fcntl(file, F_GETLK, &lock)) {
         rc = -1;
     } else if (lock.l_type == F_UNLCK) {
         // The DMS byte is unlocked, meaning this must be the first connection.
@@ -1368,6 +1426,37 @@ auto default_env() -> Env &
 {
     static PosixEnv s_env;
     return s_env;
+}
+
+auto replace_syscall(const SyscallConfig &config) -> Status
+{
+    if (config.syscall == nullptr) {
+        return Status::invalid_argument("syscall pointer is null");
+    }
+    for (auto &saved : s_syscalls) {
+        if (0 == std::strcmp(config.name, saved.name)) {
+            if (saved.replace == nullptr) {
+                saved.replace = saved.current;
+            }
+            saved.current = config.syscall;
+            return Status::ok();
+        }
+    }
+    return Status::invalid_argument("unrecognized syscall");
+}
+
+auto restore_syscall(const char *name) -> Status
+{
+    for (auto &saved : s_syscalls) {
+        if (0 == std::strcmp(name, saved.name)) {
+            if (saved.replace) {
+                saved.current = saved.replace;
+                saved.replace = nullptr;
+            }
+            return Status::ok();
+        }
+    }
+    return Status::invalid_argument("unrecognized syscall");
 }
 
 } // namespace calicodb

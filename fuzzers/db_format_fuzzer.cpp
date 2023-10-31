@@ -141,7 +141,7 @@ public:
 
 extern "C" int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size)
 {
-    CHECK_OK(configure(kSetAllocator, DebugAllocator::config()));
+    CHECK_OK(configure(kReplaceAllocator, DebugAllocator::config()));
     default_env().srand(42);
     {
         FakeEnv env;

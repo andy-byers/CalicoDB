@@ -1297,10 +1297,8 @@ auto WalImpl::recover_index() -> Status
             s = Status::no_memory();
             goto cleanup;
         }
-        compute_checksum(
-            Slice(header, kWalHdrSize - 8),
-            nullptr,
-            m_hdr.frame_cksum);
+        compute_checksum(Slice(header, kWalHdrSize - 8),
+                         nullptr, m_hdr.frame_cksum);
         if (m_hdr.frame_cksum[0] == get_u32(&header[24]) &&
             m_hdr.frame_cksum[1] == get_u32(&header[28])) {
             // Checksums match, meaning there is valid WAL data. Reconstruct the hash index from it

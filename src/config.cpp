@@ -3,8 +3,6 @@
 // LICENSE.md. See AUTHORS.md for a list of contributor names.
 
 #include "config_internal.h"
-#include "internal.h"
-#include <cstdarg>
 
 namespace calicodb
 {
@@ -25,24 +23,37 @@ Config g_config = {
     kDefaultAllocatorConfig,
 };
 
-auto configure(ConfigTarget target, void *value) -> Status
+// Defined in src/env_*.cpp
+auto replace_syscall(const SyscallConfig &config) -> Status;
+auto restore_syscall(const char *name) -> Status;
+
+auto configure(ConfigTarget target, const void *value) -> Status
 {
-    Status s;
     switch (target) {
-        case kGetAllocator:
-            *static_cast<AllocatorConfig *>(value) = g_config.allocator;
+        case kReplaceAllocator: {
+            const auto *config = static_cast<const AllocatorConfig *>(value);
+            if (config->malloc) {
+                g_config.allocator.malloc = config->malloc;
+            }
+            if (config->realloc) {
+                g_config.allocator.realloc = config->realloc;
+            }
+            if (config->free) {
+                g_config.allocator.free = config->free;
+            }
             break;
-        case kSetAllocator:
-            g_config.allocator = value ? *static_cast<const AllocatorConfig *>(value)
-                                       : kDefaultAllocatorConfig;
-            CALICODB_EXPECT_NE(g_config.allocator.malloc, nullptr);
-            CALICODB_EXPECT_NE(g_config.allocator.realloc, nullptr);
-            CALICODB_EXPECT_NE(g_config.allocator.free, nullptr);
+        }
+        case kRestoreAllocator:
+            g_config.allocator = kDefaultAllocatorConfig;
             break;
+        case kReplaceSyscall:
+            return replace_syscall(*reinterpret_cast<const SyscallConfig *>(value));
+        case kRestoreSyscall:
+            return restore_syscall(reinterpret_cast<const char *>(value));
         default:
-            s = Status::invalid_argument();
+            return Status::invalid_argument();
     }
-    return s;
+    return Status::ok();
 }
 
 } // namespace calicodb

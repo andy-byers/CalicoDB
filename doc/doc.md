@@ -7,7 +7,6 @@ CalicoDB uses ideas from multiple popular embedded databases, such as SQLite, Le
 + [API](#api)
     + [Statuses](#statuses)
     + [Opening a database](#opening-a-database)
-    + [Global options](#global-options)
     + [Readonly transactions](#readonly-transactions)
     + [Read-write transactions](#read-write-transactions)
     + [Manual transactions](#manual-transactions)
@@ -19,6 +18,7 @@ CalicoDB uses ideas from multiple popular embedded databases, such as SQLite, Le
     + [Checkpoints](#checkpoints)
     + [Closing a database](#closing-a-database)
     + [Destroying a database](#destroying-a-database)
+    + [Global options](#global-options)
 + [Resources](#resources)
 
 ## Build
@@ -85,26 +85,6 @@ calicodb::Options options;
 options.create_if_missing = true;
 s = calicodb::DB::open(options, "/tmp/calicodb_example", db);
 assert(s.is_ok());
-```
-
-### Global options
-Per-process options are queried and set using `calicodb::configure()`.
-This API is not thread safe, and options should be set before any other library functions are called or objects created.
-For example, `calicodb::configure()` can be used to set the general-purpose allocator used to get heap memory for the library.
-Changing the allocator while the library is using heap memory can cause a malloc/free mismatch, which is undefined behavior.
-
-```C++
-#include "calicodb/config.h"
-
-// Query the general-purpose allocator that is currently in-use.
-calicodb::AllocatorConfig config;
-const calicodb::Status rc = calicodb::configure(calicodb::kGetAllocator, &config);
-if (rc.is_ok()) {
-    // config contains the default allocation routines.
-    assert(config.malloc == CALICODB_DEFAULT_MALLOC);
-    assert(config.realloc == CALICODB_DEFAULT_REALLOC);
-    assert(config.free == CALICODB_DEFAULT_FREE);
-}
 ```
 
 ### Readonly transactions
@@ -443,6 +423,29 @@ delete db;
 ```C++
 s = calicodb::DB::destroy(options, "/tmp/calicodb_example");
 assert(s.is_ok());
+```
+
+### Global options
+Per-process options are queried and set using `calicodb::configure()`.
+This API is not thread safe, and options should be set before any other library functions are called or objects created.
+For example, `calicodb::configure()` can be used to set the general-purpose allocator used to get heap memory for the library.
+Changing the allocator while the library is using heap memory can cause a malloc/free mismatch, which is undefined behavior.
+
+```C++
+#include "calicodb/config.h"
+
+// Set allocation routines that always fail.
+calicodb::AllocatorConfig config = {
+    [](auto) -> void * {return nullptr;},
+    [](auto *, auto) -> void * {return nullptr;},
+    [](auto *) -> void {},
+};
+calicodb::Status rc = calicodb::configure(calicodb::kReplaceAllocator, &config);
+assert(rc.is_ok());
+
+// Use the default allocator again.
+rc = calicodb::configure(calicodb::kRestoreAllocator, nullptr);
+assert(rc.is_ok());
 ```
 
 ## Resources

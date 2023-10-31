@@ -3,7 +3,6 @@
 // LICENSE.md. See AUTHORS.md for a list of contributor names.
 
 #include "tree.h"
-#include "cursor_impl.h"
 #include "encoding.h"
 #include "internal.h"
 #include "logging.h"
@@ -722,6 +721,7 @@ auto TreeCursor::value() const -> Slice
 
 auto TreeCursor::assert_state() const -> bool
 {
+#ifndef NDEBUG
     if (m_state == kHasRecord) {
         CALICODB_EXPECT_TRUE(has_valid_position(true));
     } else if (m_state == kSaved) {
@@ -746,6 +746,7 @@ auto TreeCursor::assert_state() const -> bool
                                m_node_path[i + 1].ref ? m_node_path[i + 1].page_id() : m_node.page_id());
         }
     }
+#endif // NDEBUG
     return true;
 }
 
