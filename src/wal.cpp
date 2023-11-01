@@ -1520,8 +1520,12 @@ auto WalImpl::write(Pages &writer, uint32_t page_size, size_t db_size) -> Status
     // Write each dirty page to the WAL.
     auto next_frame = m_hdr.max_frame + 1;
     auto offset = frame_offset(next_frame, m_page_size);
-    while (writer.value()) {
-        auto ref = *writer.value();
+    // Put the page reference pointer in a local variable and check that for null, rather
+    // than calling writer.value() twice. GCC can't prove that it returns the same pointer
+    // each time and complains under -Werror=null-dereference.
+    Wal::Pages::Data *ref_ptr;
+    while ((ref_ptr = writer.value())) {
+        const auto ref = *ref_ptr;
         // After this call, writer.value() will contain the next page reference that
         // needs to be written, or nullptr if ref is the last page.
         writer.next();
@@ -1584,10 +1588,8 @@ auto WalImpl::write(Pages &writer, uint32_t page_size, size_t db_size) -> Status
 
     next_frame = m_hdr.max_frame;
     for (writer.reset(); s.is_ok(); writer.next()) {
-        // Put the page reference pointer in a local variable and check that for null, rather
-        // than calling writer.value() twice. GCC can't prove that it returns the same pointer
-        // each time and complains under -Werror=null-dereference.
-        auto *ref = writer.value();
+        // NOTE: See previous comment about avoiding null-dereference
+        const auto *ref = writer.value();
         if (!ref) {
             break;
         }
