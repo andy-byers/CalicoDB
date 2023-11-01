@@ -44,7 +44,7 @@ constexpr uint32_t kCellPtrSize = sizeof(uint16_t);
     return Id(get_u32(page.data + page_offset(page.page_id)));
 }
 
-auto write_next_id(PageRef &page, Id next_id) -> void
+void write_next_id(PageRef &page, Id next_id)
 {
     put_u32(page.data + page_offset(page.page_id), next_id.value);
 }
@@ -121,7 +121,7 @@ struct PayloadManager {
         for (int i = 0;; ++i) {
             const auto lhs = rest.range(0, minval(rest.size(), rhs.size()));
             cmp_out = lhs.compare(rhs);
-            remaining -= rhs.size();
+            remaining -= static_cast<uint32_t>(rhs.size());
             rest.advance(lhs.size());
             if (cmp_out) {
                 break;
@@ -215,7 +215,7 @@ struct PayloadManager {
     }
 };
 
-auto detach_cell(Cell &cell, char *backing) -> void
+void detach_cell(Cell &cell, char *backing)
 {
     CALICODB_EXPECT_NE(backing, nullptr);
     if (cell.ptr != backing) {
@@ -339,7 +339,7 @@ auto TreeCursor::read_user_value() -> Status
     return Status::ok();
 }
 
-auto TreeCursor::read_record() -> void
+void TreeCursor::read_record()
 {
     CALICODB_EXPECT_NE(m_state, kSaved);
     if (!has_valid_position(true)) {
@@ -357,7 +357,7 @@ auto TreeCursor::read_record() -> void
     }
 }
 
-auto TreeCursor::read_current_cell() -> void
+void TreeCursor::read_current_cell()
 {
     CALICODB_EXPECT_NE(m_state, kSaved);
     CALICODB_EXPECT_TRUE(has_valid_position());
@@ -392,7 +392,7 @@ auto TreeCursor::ensure_position_loaded(bool *changed_type_out) -> bool
     return false;
 }
 
-auto TreeCursor::ensure_correct_leaf() -> void
+void TreeCursor::ensure_correct_leaf()
 {
     if (has_valid_position()) {
         CALICODB_EXPECT_TRUE(m_node.is_leaf());
@@ -402,7 +402,7 @@ auto TreeCursor::ensure_correct_leaf() -> void
     }
 }
 
-auto TreeCursor::move_right() -> void
+void TreeCursor::move_right()
 {
     CALICODB_EXPECT_TRUE(has_valid_position()); // May be one past the end
     CALICODB_EXPECT_TRUE(m_node.is_leaf());
@@ -434,7 +434,7 @@ auto TreeCursor::move_right() -> void
     }
 }
 
-auto TreeCursor::move_left() -> void
+void TreeCursor::move_left()
 {
     CALICODB_EXPECT_TRUE(has_valid_position(true));
     CALICODB_EXPECT_TRUE(m_node.is_leaf());
@@ -465,7 +465,7 @@ auto TreeCursor::move_left() -> void
     }
 }
 
-auto TreeCursor::seek_to_root() -> void
+void TreeCursor::seek_to_root()
 {
     reset();
     if (m_tree->m_pager->page_count()) {
@@ -473,7 +473,7 @@ auto TreeCursor::seek_to_root() -> void
     }
 }
 
-auto TreeCursor::seek_to_last_leaf() -> void
+void TreeCursor::seek_to_last_leaf()
 {
     seek_to_root();
     if (!has_valid_position(true)) {
@@ -546,7 +546,7 @@ TreeCursor::~TreeCursor()
     }
 }
 
-auto TreeCursor::move_to_parent(bool preserve_path) -> void
+void TreeCursor::move_to_parent(bool preserve_path)
 {
     CALICODB_EXPECT_GT(m_level, 0);
     if (preserve_path) {
@@ -559,7 +559,7 @@ auto TreeCursor::move_to_parent(bool preserve_path) -> void
     m_node = move(m_node_path[m_level]);
 }
 
-auto TreeCursor::assign_child(Node child) -> void
+void TreeCursor::assign_child(Node child)
 {
     CALICODB_EXPECT_TRUE(has_valid_position());
     m_idx_path[m_level] = m_idx;
@@ -568,7 +568,7 @@ auto TreeCursor::assign_child(Node child) -> void
     ++m_level;
 }
 
-auto TreeCursor::move_to_child(Id child_id) -> void
+void TreeCursor::move_to_child(Id child_id)
 {
     CALICODB_EXPECT_TRUE(has_valid_position());
     if (m_level < static_cast<int>(kMaxDepth - 1)) {
@@ -596,7 +596,7 @@ auto TreeCursor::on_last_node() const -> bool
     return true;
 }
 
-auto TreeCursor::reset(const Status &s) -> void
+void TreeCursor::reset(const Status &s)
 {
     release_nodes(kAllLevels);
     m_state = kFloating;
@@ -639,7 +639,7 @@ auto TreeCursor::start_write() -> Status
     return Status::ok();
 }
 
-auto TreeCursor::finish_write(Status &s) -> void
+void TreeCursor::finish_write(Status &s)
 {
     if (!s.is_ok()) {
         reset(s);
@@ -696,7 +696,7 @@ auto TreeCursor::seek_to_leaf(const Slice &key) -> bool
     return false;
 }
 
-auto TreeCursor::release_nodes(ReleaseType type) -> void
+void TreeCursor::release_nodes(ReleaseType type)
 {
     m_tree->release(move(m_node));
     if (type < kAllLevels) {
@@ -921,12 +921,12 @@ auto Tree::find_parent_id(Id page_id, Id &out) const -> Status
     return s;
 }
 
-auto Tree::fix_parent_id(Id page_id, Id parent_id, PageType type, Status &s) -> void
+void Tree::fix_parent_id(Id page_id, Id parent_id, PageType type, Status &s)
 {
     PointerMap::write_entry(*m_pager, page_id, {parent_id, type}, s);
 }
 
-auto Tree::maybe_fix_overflow_chain(const Cell &cell, Id parent_id, Status &s) -> void
+void Tree::maybe_fix_overflow_chain(const Cell &cell, Id parent_id, Status &s)
 {
     if (s.is_ok() && cell.local_size != cell.total_size) {
         fix_parent_id(read_overflow_id(cell), parent_id, kOverflowHead, s);
@@ -986,9 +986,9 @@ auto Tree::make_pivot(const PivotOptions &opt, Cell &pivot_out) -> Status
             std::memcpy(target, prefix.data(), prefix_size);
             items[0].chunk.advance(prefix_size);
             items[1].chunk.advance(prefix_size);
-            items[0].total -= prefix_size;
-            items[1].total -= prefix_size;
-            target_local -= prefix_size;
+            items[0].total -= static_cast<uint32_t>(prefix_size);
+            items[1].total -= static_cast<uint32_t>(prefix_size);
+            target_local -= static_cast<uint32_t>(prefix_size);
             target += prefix_size;
         } else {
             // The left key is a prefix of the right key.
@@ -1140,7 +1140,7 @@ auto Tree::free_overflow(Id head_id) -> Status
     return s;
 }
 
-auto Tree::fix_cell(const Cell &cell, bool is_leaf, Id parent_id, Status &s) -> void
+void Tree::fix_cell(const Cell &cell, bool is_leaf, Id parent_id, Status &s)
 {
     if (!s.is_ok()) {
         return;
@@ -2257,7 +2257,7 @@ class TreePrinter
         std::vector<uint32_t> spaces;
     };
 
-    static auto add_to_level(StructuralData &data, const String &message, uint32_t target) -> void
+    static void add_to_level(StructuralData &data, const String &message, uint32_t target)
     {
         // If target is equal to levels.size(), add spaces to all levels.
         CALICODB_EXPECT_TRUE(target <= data.levels.size());
@@ -2284,7 +2284,7 @@ class TreePrinter
         }
     }
 
-    static auto ensure_level_exists(StructuralData &data, uint32_t level) -> void
+    static void ensure_level_exists(StructuralData &data, uint32_t level)
     {
         while (level >= data.levels.size()) {
             data.levels.emplace_back();
@@ -2356,7 +2356,7 @@ public:
                     msg.append('"');
                     if (cell.key_size > short_key_size) {
                         msg.append("...");
-                        msg.append_format(" (%zu bytes total)", cell.key_size);
+                        msg.append_format(" (%u bytes total)", cell.key_size);
                     }
                     if (!node.is_leaf()) {
                         msg.append_format(", child_id=%u", read_child_id(cell).value);
@@ -2374,7 +2374,7 @@ public:
                         }
                         if (short_value_size < total_value_size) {
                             msg.append("...");
-                            msg.append_format(" (%zu bytes total)", total_value_size);
+                            msg.append_format(" (%u bytes total)", total_value_size);
                         }
                     }
                     msg.append(")\n");
@@ -2403,7 +2403,7 @@ auto Tree::print_nodes(String &repr_out) -> Status
 
 #else
 
-auto Tree::TEST_validate() -> void
+void Tree::TEST_validate()
 {
 }
 
@@ -2419,13 +2419,13 @@ auto Tree::print_nodes(String &) -> Status
 
 #endif // CALICODB_TEST
 
-auto Tree::activate_cursor(TreeCursor &target) const -> void
+void Tree::activate_cursor(TreeCursor &target) const
 {
     IntrusiveList::remove(target.m_list_entry);
     IntrusiveList::add_head(target.m_list_entry, m_active_list);
 }
 
-auto Tree::deactivate_cursors(TreeCursor *exclude) const -> void
+void Tree::deactivate_cursors(TreeCursor *exclude) const
 {
     // Clear the active cursor list.
     auto *entry = m_active_list.next_entry;

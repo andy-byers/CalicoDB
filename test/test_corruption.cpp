@@ -39,7 +39,7 @@ protected:
 
     ~CorruptionTests() override = default;
 
-    auto SetUp() -> void override
+    void SetUp() override
     {
         DB *db;
         ASSERT_OK(DB::open(m_options, m_filename.c_str(), db));
@@ -101,9 +101,11 @@ protected:
     auto check_status(const Status &s)
     {
         // Only 1 of the following s.is_*() will ever be true.
-        const auto index = s.is_ok() +
-                           s.is_invalid_argument() * 2 +
-                           s.is_corruption() * 3;
+        const auto a = s.is_ok();
+        const auto b = s.is_invalid_argument();
+        const auto c = s.is_corruption();
+        const auto index = a + b * 2 + c * 3;
+        ASSERT_EQ(1, a + b + c);
         ASSERT_GT(index, 0) << s.message();
         ++m_status_counters[index - 1];
     }

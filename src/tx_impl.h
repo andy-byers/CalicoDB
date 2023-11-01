@@ -41,7 +41,7 @@ public:
     auto vacuum() -> Status override;
     auto commit() -> Status override;
 
-    auto TEST_validate() const -> void
+    void TEST_validate() const
     {
         m_schema.TEST_validate();
     }

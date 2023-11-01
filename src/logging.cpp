@@ -31,9 +31,9 @@ auto StringBuilder::ensure_capacity(size_t len) -> int
     if (len > kMaxAllocation) {
         return -1;
     }
-    auto capacity = m_data.size();
+    size_t capacity = 4;
     while (capacity < len) {
-        capacity = (capacity + 1) * 2;
+        capacity *= 2;
     }
     if (m_data.resize(capacity)) {
         m_ok = false;

@@ -56,8 +56,8 @@ public:
     auto assign(Key key, Value value) -> Status;
     [[nodiscard]] auto header() -> volatile HashIndexHdr *;
     [[nodiscard]] auto groups() const -> volatile char **;
-    auto cleanup() -> void;
-    auto close() -> void;
+    void cleanup();
+    void close();
 
 private:
     friend class WalImpl;
@@ -130,13 +130,13 @@ using ConstStablePtr = const char *;
 // in shared memory. The other parameter must be a pointer to a local copy of the
 // header.
 template <class Src, class Dst>
-auto read_hdr(const volatile Src *src, Dst *dst) -> void
+void read_hdr(const volatile Src *src, Dst *dst)
 {
     std::memcpy(dst, ConstStablePtr(src), sizeof(HashIndexHdr));
 }
 
 template <class Src, class Dst>
-auto write_hdr(const Src *src, volatile Dst *dst) -> void
+void write_hdr(const Src *src, volatile Dst *dst)
 {
     std::memcpy(StablePtr(dst), src, sizeof(HashIndexHdr));
 }
@@ -403,7 +403,7 @@ auto HashIndex::groups() const -> volatile char **
     return m_groups;
 }
 
-auto HashIndex::cleanup() -> void
+void HashIndex::cleanup()
 {
     if (m_hdr->max_frame) {
         const auto n = index_group_number(m_hdr->max_frame);
@@ -426,7 +426,7 @@ auto HashIndex::cleanup() -> void
     }
 }
 
-auto HashIndex::close() -> void
+void HashIndex::close()
 {
     if (m_file) {
         m_file->shm_unmap(true);
@@ -717,7 +717,7 @@ public:
                     BusyHandler *busy,
                     CheckpointInfo *info_out) -> Status override;
 
-    auto rollback(const Rollback &hook, void *object) -> void override
+    void rollback(const Rollback &hook, void *object) override
     {
         CALICODB_EXPECT_TRUE(m_writer_lock);
         const auto max_frame = m_hdr.max_frame;
@@ -762,7 +762,7 @@ public:
         return s;
     }
 
-    auto finish_read() -> void override
+    void finish_read() override
     {
         finish_write();
         if (m_reader_lock >= 0) {
@@ -798,7 +798,7 @@ public:
         return Status::ok();
     }
 
-    auto finish_write() -> void override
+    void finish_write() override
     {
         if (m_writer_lock) {
             unlock_exclusive(kWriteLock, 1);
@@ -829,7 +829,7 @@ private:
         return m_db->shm_lock(r, 1, kShmLock | kShmReader);
     }
 
-    auto unlock_shared(size_t r) -> void
+    void unlock_shared(size_t r)
     {
         if (m_lock_mode != Options::kLockExclusive) {
             (void)m_db->shm_lock(r, 1, kShmUnlock | kShmReader);
@@ -844,7 +844,7 @@ private:
         return m_db->shm_lock(r, n, kShmLock | kShmWriter);
     }
 
-    auto unlock_exclusive(size_t r, size_t n) -> void
+    void unlock_exclusive(size_t r, size_t n)
     {
         if (m_lock_mode != Options::kLockExclusive) {
             (void)m_db->shm_lock(r, n, kShmUnlock | kShmWriter);
@@ -927,7 +927,7 @@ private:
         return s;
     }
 
-    NO_TSAN auto write_index_header() -> void
+    NO_TSAN void write_index_header()
     {
         m_hdr.is_init = true;
         m_hdr.version = kWalVersion;
@@ -945,7 +945,7 @@ private:
     // of the log file
     // Readers are attached to readmark 0 and reading exclusively from the database
     // file. This connection holds kWriteLock and the whole WAL has been checkpointed.
-    auto restart_header(uint32_t salt1) -> void
+    void restart_header(uint32_t salt1)
     {
         CALICODB_EXPECT_TRUE(m_writer_lock);
         volatile auto *info = get_ckpt_info();
@@ -1128,7 +1128,7 @@ private:
     auto rewrite_checksums(uint32_t end) -> Status;
     auto recover_index() -> Status;
     [[nodiscard]] auto decode_frame(const char *frame, WalFrameHdr &out) -> int;
-    auto encode_frame(const WalFrameHdr &hdr, const char *page, char *out) -> void;
+    void encode_frame(const WalFrameHdr &hdr, const char *page, char *out);
     auto write_frame(const WalFrameHdr &hdr, const char *page, size_t offset) -> Status;
 
     HashIndexHdr m_hdr = {};
@@ -1393,7 +1393,7 @@ auto WalImpl::write_frame(const WalFrameHdr &hdr, const char *page, size_t offse
     return s;
 }
 
-auto WalImpl::encode_frame(const WalFrameHdr &hdr, const char *page, char *out) -> void
+void WalImpl::encode_frame(const WalFrameHdr &hdr, const char *page, char *out)
 {
     put_u32(&out[0], hdr.pgno);
     put_u32(&out[4], hdr.db_size);
@@ -1520,8 +1520,12 @@ auto WalImpl::write(Pages &writer, uint32_t page_size, size_t db_size) -> Status
     // Write each dirty page to the WAL.
     auto next_frame = m_hdr.max_frame + 1;
     auto offset = frame_offset(next_frame, m_page_size);
-    while (writer.value()) {
-        auto ref = *writer.value();
+    // Put the page reference pointer in a local variable and check that for null, rather
+    // than calling writer.value() twice. GCC can't prove that it returns the same pointer
+    // each time and complains under -Werror=null-dereference.
+    Wal::Pages::Data *ref_ptr;
+    while ((ref_ptr = writer.value())) {
+        const auto ref = *ref_ptr;
         // After this call, writer.value() will contain the next page reference that
         // needs to be written, or nullptr if ref is the last page.
         writer.next();
@@ -1583,13 +1587,17 @@ auto WalImpl::write(Pages &writer, uint32_t page_size, size_t db_size) -> Status
     }
 
     next_frame = m_hdr.max_frame;
-    for (writer.reset(); s.is_ok() && writer.value(); writer.next()) {
-        auto ref = *writer.value();
-        if (*ref.flag & PageRef::kAppend) {
+    for (writer.reset(); s.is_ok(); writer.next()) {
+        // NOTE: See previous comment about avoiding null-dereference
+        const auto *ref = writer.value();
+        if (!ref) {
+            break;
+        }
+        if (*ref->flag & PageRef::kAppend) {
             ++next_frame;
-            s = m_index.assign(ref.page_id, next_frame);
+            s = m_index.assign(ref->page_id, next_frame);
             if (s.is_ok()) {
-                *ref.flag &= ~PageRef::kAppend;
+                *ref->flag = static_cast<uint16_t>(*ref->flag & ~PageRef::kAppend);
             }
         }
     }
@@ -1827,7 +1835,7 @@ auto WalPagesImpl::value() const -> Data *
     return nullptr;
 }
 
-auto WalPagesImpl::next() -> void
+void WalPagesImpl::next()
 {
     if (m_itr) {
         // Move to the next dirty page in the transient dirty list.
@@ -1836,7 +1844,7 @@ auto WalPagesImpl::next() -> void
     }
 }
 
-auto WalPagesImpl::reset() -> void
+void WalPagesImpl::reset()
 {
     m_itr = m_first;
 }

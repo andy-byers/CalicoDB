@@ -200,8 +200,8 @@ struct Cell {
 
 // Helpers for working with bucket cell root IDs.
 auto read_bucket_root_id(const Cell &cell) -> Id;
-auto write_bucket_root_id(Cell &cell, Id root_id) -> void;
-auto write_bucket_root_id(char *key, const Slice &root_id) -> void;
+void write_bucket_root_id(Cell &cell, Id root_id);
+void write_bucket_root_id(char *key, const Slice &root_id);
 
 // Helpers for encoding cell headers. Returns the address of the byte
 // immediately following the written header. Overflow ID is not written.
@@ -298,7 +298,7 @@ struct Node final {
     }
 
     [[nodiscard]] auto read_child_id(uint32_t index) const -> Id;
-    auto write_child_id(uint32_t index, Id child_id) -> void;
+    void write_child_id(uint32_t index, Id child_id);
 
     [[nodiscard]] auto defrag() -> int;
     [[nodiscard]] auto alloc(uint32_t index, uint32_t size) -> int;

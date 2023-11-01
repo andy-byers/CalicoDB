@@ -41,7 +41,7 @@ public:
     std::function<void()> m_write_callback;
     bool m_in_callback = false;
 
-    auto call_read_callback() -> void
+    void call_read_callback()
     {
         if (m_read_callback && !m_in_callback) {
             m_in_callback = true;
@@ -49,7 +49,7 @@ public:
             m_in_callback = false;
         }
     }
-    auto call_write_callback() -> void
+    void call_write_callback()
     {
         if (m_write_callback && !m_in_callback) {
             m_in_callback = true;
@@ -154,7 +154,7 @@ public:
         EXPECT_EQ(DebugAllocator::bytes_used(), 0);
     }
 
-    auto SetUp() -> void override
+    void SetUp() override
     {
         ASSERT_OK(reopen_db(false));
     }
@@ -387,7 +387,7 @@ public:
         }
         return DB::open(options, m_db_name.c_str(), m_db);
     }
-    auto close_db() -> void
+    void close_db()
     {
         delete m_db;
         m_db = nullptr;
@@ -1292,7 +1292,7 @@ protected:
     //     }
     ~DBBucketTests() override = default;
 
-    auto SetUp() -> void override
+    void SetUp() override
     {
         DBTests::SetUp();
         ASSERT_OK(m_db->update([](auto &tx) {
@@ -1626,7 +1626,7 @@ class DBOpenTests : public DBTests
 protected:
     ~DBOpenTests() override = default;
 
-    auto SetUp() -> void override
+    void SetUp() override
     {
         // Don't call DBTests::SetUp(). DB is opened in test body.
     }
@@ -1688,12 +1688,12 @@ TEST_F(DBOpenTests, CustomLogger)
     public:
         std::string m_str;
 
-        auto append(const Slice &msg) -> void override
+        void append(const Slice &msg) override
         {
             m_str.append(msg.to_string());
         }
 
-        auto logv(const char *fmt, std::va_list args) -> void override
+        void logv(const char *fmt, std::va_list args) override
         {
             char fixed[1'024];
             std::va_list args_copy;
@@ -1753,7 +1753,7 @@ public:
     }
 
     template <class Fn>
-    auto for_each_page_size(const Fn &fn) const -> void
+    void for_each_page_size(const Fn &fn) const
     {
         for (auto ps1 = kMinPageSize; ps1 <= kMaxPageSize; ps1 *= 2) {
             for (auto ps2 = kMinPageSize; ps2 <= kMaxPageSize; ps2 *= 2) {
@@ -1928,7 +1928,7 @@ protected:
 
     ~CheckpointTests() override = default;
 
-    auto SetUp() -> void override
+    void SetUp() override
     {
         ASSERT_OK(open_db(m_db));
     }
@@ -2048,7 +2048,7 @@ protected:
 
     ~DBVacuumTests() override = default;
 
-    auto test_configurations_impl(const std::vector<uint8_t> &bitmaps) const -> void
+    void test_configurations_impl(const std::vector<uint8_t> &bitmaps) const
     {
         static constexpr auto *kName = "12345678_BUCKET_NAMES";
         static constexpr size_t kN = 10;
@@ -2094,7 +2094,7 @@ protected:
         });
     }
 
-    auto test_configurations(std::vector<uint8_t> bitmaps) const -> void
+    void test_configurations(std::vector<uint8_t> bitmaps) const
     {
         for (uint32_t i = 0; i < 8; ++i) {
             for (auto &b : bitmaps) {
@@ -2170,7 +2170,7 @@ public:
         close_db();
     }
 
-    auto SetUp() -> void override
+    void SetUp() override
     {
         DBOpenTests::SetUp();
         Options options;
@@ -2257,7 +2257,7 @@ TEST_F(ModelDBTests, EmptyDatabase)
     ASSERT_OK(m_db->update(operations));
 }
 
-static auto setup_buckets(DBTests &tests, size_t levels) -> void
+static void setup_buckets(DBTests &tests, size_t levels)
 {
     ASSERT_LE(levels, ARRAY_SIZE(ModelDBTests::kBucketNames));
     ASSERT_OK(tests.m_db->update([&tests, levels](auto &tx) {
@@ -2279,7 +2279,7 @@ static auto setup_buckets(DBTests &tests, size_t levels) -> void
     }));
 }
 
-static auto check_bucket_at_level(const ModelDBTests &tests, const Bucket &b, size_t level) -> void
+static void check_bucket_at_level(const ModelDBTests &tests, const Bucket &b, size_t level)
 {
     auto c = test_new_cursor(b);
     if (level) {
@@ -2289,7 +2289,7 @@ static auto check_bucket_at_level(const ModelDBTests &tests, const Bucket &b, si
     }
 }
 
-static auto check_buckets(const ModelDBTests &tests, size_t reachable_level) -> void
+static void check_buckets(const ModelDBTests &tests, size_t reachable_level)
 {
     ASSERT_OK(tests.m_db->view([&tests, reachable_level](const auto &tx) {
         auto *parent = &tx.main_bucket();
@@ -2495,7 +2495,7 @@ public:
         delete m_db;
     }
 
-    auto SetUp() -> void override
+    void SetUp() override
     {
         const auto filename = m_prefix + std::to_string(s_seed_number++);
         remove_calicodb_files(filename);

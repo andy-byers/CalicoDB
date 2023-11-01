@@ -38,7 +38,7 @@ public:
     [[nodiscard]] static auto reallocate(void *ptr, size_t len) -> void *;
 
     // Call the registered memory deallocation function, which defaults to std::free()
-    static auto deallocate(void *ptr) -> void;
+    static void deallocate(void *ptr);
 
     template <class Object, class... Args>
     [[nodiscard]] static auto new_object(Args &&...args) -> Object *
@@ -54,7 +54,7 @@ public:
     }
 
     template <class Object>
-    static auto delete_object(Object *ptr) -> void
+    static void delete_object(Object *ptr)
     {
         if (ptr) {
             ptr->~Object();
@@ -79,7 +79,7 @@ struct HeapObject {
         return Mem::allocate(size);
     }
 
-    static auto operator delete(void *ptr) -> void
+    static void operator delete(void *ptr)
     {
         Mem::deallocate(ptr);
     }

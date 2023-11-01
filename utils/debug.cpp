@@ -15,7 +15,7 @@
 namespace calicodb
 {
 
-auto print_database_overview(std::ostream &os, Pager &pager) -> void
+void print_database_overview(std::ostream &os, Pager &pager)
 {
 #define SEP "|-----------|-----------|----------------|---------------------------------|\n"
 
@@ -135,7 +135,7 @@ struct {
     char junk_byte = '\xAA'; // 10101010
 } s_debug;
 
-auto set_junk_memory(void *data, size_t size) -> void
+void set_junk_memory(void *data, size_t size)
 {
     auto *ptr = static_cast<volatile char *>(data);
     for (auto *end = ptr + size; ptr != end;) {
@@ -172,7 +172,7 @@ auto debug_malloc(size_t size) -> void *
     return ptr;
 }
 
-auto debug_free(void *ptr) -> void
+void debug_free(void *ptr)
 {
     CALICODB_EXPECT_NE(ptr, nullptr);
     const auto alloc_size = DebugAllocator::size_of(ptr);
@@ -248,7 +248,7 @@ auto DebugAllocator::set_limit(size_t limit) -> size_t
     return 0;
 }
 
-auto DebugAllocator::set_hook(Hook hook, void *arg) -> void
+void DebugAllocator::set_hook(Hook hook, void *arg)
 {
     s_debug.hook = hook;
     s_debug.hook_arg = arg;

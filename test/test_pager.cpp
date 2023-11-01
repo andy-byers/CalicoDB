@@ -30,7 +30,7 @@ public:
 
     ~BufmgrTests() override = default;
 
-    auto SetUp() -> void override
+    void SetUp() override
     {
         ASSERT_EQ(mgr.reallocate(TEST_PAGE_SIZE), 0);
     }
@@ -58,7 +58,7 @@ public:
         return ref;
     }
 
-    auto insert(uint32_t key, uint32_t value) -> void
+    void insert(uint32_t key, uint32_t value)
     {
         if (auto *ref = insert_and_reference(key, value)) {
             mgr.unref(*ref);
@@ -168,7 +168,7 @@ TEST_F(BufmgrTests, DeathTests)
 class DirtylistTests : public BufmgrTests
 {
 public:
-    auto add(uint32_t key) -> void
+    void add(uint32_t key)
     {
         auto *ref = insert_and_reference(key, key);
         ASSERT_NE(ref, nullptr);
@@ -176,19 +176,19 @@ public:
         mgr.unref(*ref);
     }
 
-    auto remove(uint32_t key) -> void
+    void remove(uint32_t key)
     {
         auto *ref = mgr.lookup(Id(key));
         ASSERT_NE(ref, nullptr);
         remove(*ref);
     }
-    auto remove(PageRef &ref) -> void
+    void remove(PageRef &ref)
     {
         m_dirtylist.remove(ref);
     }
 
     // NOTE: This is destructive.
-    auto sort_and_check() -> void
+    void sort_and_check()
     {
         std::vector<uint32_t> pgno;
         auto *list = m_dirtylist.sort();
@@ -255,7 +255,7 @@ struct PagerContext {
     Status status;
     Stats stats;
 
-    auto open(Env &env, bool exclusive = false) -> void
+    void open(Env &env, bool exclusive = false)
     {
         pager.reset();
         file.reset();
@@ -287,7 +287,7 @@ struct PagerContext {
     }
 
     template <class Fn>
-    auto reader(const Fn &fn) -> void
+    void reader(const Fn &fn)
     {
         bool changed;
         ASSERT_OK(pager->lock_reader(&changed));
@@ -296,7 +296,7 @@ struct PagerContext {
     }
 
     template <class Fn>
-    auto writer(const Fn &fn) -> void
+    void writer(const Fn &fn)
     {
         reader([&fn](auto &p, auto &f, auto) {
             ASSERT_OK(p.begin_writer());
@@ -332,24 +332,24 @@ protected:
         delete m_env;
     }
 
-    auto SetUp() -> void override
+    void SetUp() override
     {
         reopen();
     }
 
-    auto open_wal_if_present() -> void
+    void open_wal_if_present()
     {
         m_wal_file.reset();
         auto s = m_env->new_file(m_wal_name.c_str(), Env::kReadWrite, m_wal_file.ref());
         ASSERT_TRUE(s.is_ok() || s.is_not_found());
     }
 
-    auto open_pager(Options::LockMode lock_mode) -> void
+    void open_pager(Options::LockMode lock_mode)
     {
         m_ctx.open(*m_env, lock_mode);
     }
 
-    auto reopen(Options::LockMode lock_mode = Options::kLockNormal) -> void
+    void reopen(Options::LockMode lock_mode = Options::kLockNormal)
     {
         close();
         (void)m_env->remove_file(m_db_name.c_str());
@@ -359,7 +359,7 @@ protected:
         open_pager(lock_mode);
     }
 
-    auto close() -> void
+    void close()
     {
         m_ctx.pager.reset();
     }
@@ -381,13 +381,13 @@ protected:
         m_ctx.pager->release(page);
         return id;
     }
-    auto alter_page(PageRef &page) -> void
+    void alter_page(PageRef &page)
     {
         m_ctx.pager->mark_dirty(page);
         const auto value = get_u32(page.data + TEST_PAGE_SIZE - 4);
         put_u32(page.data + TEST_PAGE_SIZE - 4, value + 1);
     }
-    auto alter_page(size_t index) -> void
+    void alter_page(size_t index)
     {
         PageRef *page;
         EXPECT_OK(m_ctx.pager->acquire(m_page_ids.at(index), page));
@@ -678,6 +678,7 @@ TEST_F(PagerTests, MovePage)
 {
     static constexpr uint32_t kSpecialValue = 123'456;
     static constexpr uint32_t kNumPages = 32;
+    (void)kSpecialValue; // NOTE (Andy): For some reason, I get an unused variable warning on this. Silence it.
     m_ctx.writer([](auto &pager, auto &) {
         for (uint32_t i = 0; i < kNumPages; ++i) {
             PageRef *pg;
@@ -735,7 +736,7 @@ class MultiPagerTests : public PagerTests
 public:
     PagerContext m_ctx2;
 
-    auto SetUp() -> void override
+    void SetUp() override
     {
         delete m_env;
         m_env = &default_env();
@@ -744,7 +745,7 @@ public:
         m_ctx2.open(*m_env, Options::kLockNormal);
     }
 
-    auto TearDown() -> void override
+    void TearDown() override
     {
         // Don't delete the default Env.
         m_env = nullptr;

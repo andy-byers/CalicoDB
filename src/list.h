@@ -16,14 +16,14 @@ struct IntrusiveList {
     }
 
     template <class Entry>
-    static auto initialize(Entry &entry) -> void
+    static void initialize(Entry &entry)
     {
         entry.prev_entry = &entry;
         entry.next_entry = &entry;
     }
 
     template <class Entry>
-    static auto add_between(Entry &entry, Entry &prev, Entry &next) -> void
+    static void add_between(Entry &entry, Entry &prev, Entry &next)
     {
         next.prev_entry = &entry;
         entry.next_entry = &next;
@@ -32,19 +32,19 @@ struct IntrusiveList {
     }
 
     template <class Entry>
-    static auto add_head(Entry &ref, Entry &head) -> void
+    static void add_head(Entry &ref, Entry &head)
     {
         IntrusiveList::add_between(ref, head, *head.next_entry);
     }
 
     template <class Entry>
-    static auto add_tail(Entry &entry, Entry &head) -> void
+    static void add_tail(Entry &entry, Entry &head)
     {
         IntrusiveList::add_between(entry, *head.prev_entry, head);
     }
 
     template <class Entry>
-    static auto remove(Entry &entry) -> void
+    static void remove(Entry &entry)
     {
         entry.next_entry->prev_entry = entry.prev_entry;
         entry.prev_entry->next_entry = entry.next_entry;

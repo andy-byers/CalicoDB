@@ -24,7 +24,7 @@ Bufmgr::~Bufmgr()
     free_buffers();
 }
 
-auto Bufmgr::free_buffers() -> void
+void Bufmgr::free_buffers()
 {
     shrink_to_fit();
     m_backing.reset();
@@ -106,7 +106,7 @@ auto Bufmgr::allocate(size_t page_size) -> PageRef *
     return ref;
 }
 
-auto Bufmgr::register_page(PageRef &page) -> void
+void Bufmgr::register_page(PageRef &page)
 {
     if (Id::root() < page.page_id) {
         CALICODB_EXPECT_EQ(query(page.page_id), nullptr);
@@ -116,7 +116,7 @@ auto Bufmgr::register_page(PageRef &page) -> void
     }
 }
 
-auto Bufmgr::erase(PageRef &ref) -> void
+void Bufmgr::erase(PageRef &ref)
 {
     if (Id::root() < ref.page_id) {
         if (ref.get_flag(PageRef::kCached)) {
@@ -128,7 +128,7 @@ auto Bufmgr::erase(PageRef &ref) -> void
     }
 }
 
-auto Bufmgr::purge() -> void
+void Bufmgr::purge()
 {
     CALICODB_EXPECT_TRUE(IntrusiveList::is_empty(m_in_use));
     CALICODB_EXPECT_EQ(m_refsum, 0);
@@ -140,7 +140,7 @@ auto Bufmgr::purge() -> void
     m_table.clear();
 }
 
-auto Bufmgr::ref(PageRef &ref) -> void
+void Bufmgr::ref(PageRef &ref)
 {
     ++ref.refs;
     ++m_refsum;
@@ -150,7 +150,7 @@ auto Bufmgr::ref(PageRef &ref) -> void
     }
 }
 
-auto Bufmgr::unref(PageRef &ref) -> void
+void Bufmgr::unref(PageRef &ref)
 {
     CALICODB_EXPECT_GT(ref.refs, 0);
     CALICODB_EXPECT_GT(m_refsum, 0);
@@ -163,7 +163,7 @@ auto Bufmgr::unref(PageRef &ref) -> void
     }
 }
 
-auto Bufmgr::shrink_to_fit() -> void
+void Bufmgr::shrink_to_fit()
 {
     CALICODB_EXPECT_EQ(m_refsum, 0);
     for (auto *ref = m_extra; ref;) {
@@ -231,7 +231,7 @@ auto Bufmgr::PageTable::allocate(size_t min_buffers) -> int
     return -1;
 }
 
-auto Bufmgr::PageTable::insert(PageRef *ref) -> void
+void Bufmgr::PageTable::insert(PageRef *ref)
 {
     auto **ptr = find_pointer(ref->key());
     CALICODB_EXPECT_NE(ptr, nullptr);
@@ -268,7 +268,7 @@ auto Dirtylist::remove(PageRef &ref) -> DirtyHdr *
     return ref.dirty_hdr.next_entry;
 }
 
-auto Dirtylist::add(PageRef &ref) -> void
+void Dirtylist::add(PageRef &ref)
 {
     CALICODB_EXPECT_FALSE(TEST_contains(ref));
     CALICODB_EXPECT_FALSE(ref.get_flag(PageRef::kDirty));

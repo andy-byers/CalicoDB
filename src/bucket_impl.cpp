@@ -252,7 +252,7 @@ auto BucketImpl::erase(Cursor &c) -> Status
     });
 }
 
-auto BucketImpl::TEST_validate() const -> void
+void BucketImpl::TEST_validate() const
 {
     CALICODB_EXPECT_TRUE(m_tree->check_integrity().is_ok());
 }

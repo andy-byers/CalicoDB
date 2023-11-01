@@ -94,7 +94,7 @@ public:
         return extract_random(m_len);
     }
 
-    auto advance(size_t len) -> void
+    void advance(size_t len)
     {
         CHECK_TRUE(len <= m_len);
         m_len -= len;

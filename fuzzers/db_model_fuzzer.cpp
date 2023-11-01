@@ -19,7 +19,7 @@ class Fuzzer
     Bucket *m_b = nullptr;
     Cursor *m_c = nullptr;
 
-    auto reopen_db() -> void
+    void reopen_db()
     {
         delete m_c;
         delete m_b;
@@ -28,11 +28,11 @@ class Fuzzer
         m_c = nullptr;
         m_b = nullptr;
         m_tx = nullptr;
-        CHECK_OK(ModelDB::open(m_options, "/InMemory", m_store, m_db));
+        CHECK_OK(ModelDB::open(m_options, "/tmp/calicodb_model_fuzzer_db", m_store, m_db));
         reopen_tx();
     }
 
-    auto reopen_tx() -> void
+    void reopen_tx()
     {
         delete m_c;
         delete m_b;
@@ -43,7 +43,7 @@ class Fuzzer
         reopen_bucket();
     }
 
-    auto reopen_bucket() -> void
+    void reopen_bucket()
     {
         delete m_c;
         delete m_b;
@@ -58,6 +58,7 @@ public:
         m_options.env = &env;
         m_options.cache_size = 0;
         m_options.page_size = kMinPageSize;
+        m_options.create_if_missing = true;
         reopen_db();
     }
 

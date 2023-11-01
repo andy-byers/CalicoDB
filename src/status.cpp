@@ -81,7 +81,7 @@ auto incref(char *state) -> int
     return 0;
 }
 
-auto decref(char *state) -> void
+void decref(char *state)
 {
     if (is_heap(state)) {
         CALICODB_EXPECT_GT(heap_hdr(state)->refs, 0);

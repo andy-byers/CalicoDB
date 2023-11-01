@@ -144,7 +144,7 @@ public:
         return m_end;
     }
 
-    auto clear() -> void
+    void clear()
     {
         shrink(0); // Call destructors if necessary
         Mem::deallocate(m_begin);
@@ -181,7 +181,7 @@ public:
         return 0;
     }
 
-    auto pop_back() -> void
+    void pop_back()
     {
         CALICODB_EXPECT_LT(m_begin, m_end);
         --m_end;
@@ -241,7 +241,7 @@ private:
         return static_cast<size_t>(m_capacity - m_begin);
     }
 
-    auto shrink(size_t target_size) -> void
+    void shrink(size_t target_size)
     {
         CALICODB_EXPECT_LE(target_size, size());
         const auto new_end = m_begin + target_size;

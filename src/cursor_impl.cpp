@@ -47,19 +47,19 @@ auto CursorImpl::status() const -> Status
     return m_c.status();
 }
 
-auto CursorImpl::seek_first() -> void
+void CursorImpl::seek_first()
 {
     seek("");
 }
 
-auto CursorImpl::seek_last() -> void
+void CursorImpl::seek_last()
 {
     m_c.activate(false);
     m_c.seek_to_last_leaf();
     m_c.read_record();
 }
 
-auto CursorImpl::seek(const Slice &key) -> void
+void CursorImpl::seek(const Slice &key)
 {
     m_c.activate(false);
     m_c.seek_to_leaf(key);
@@ -67,7 +67,7 @@ auto CursorImpl::seek(const Slice &key) -> void
     m_c.read_record();
 }
 
-auto CursorImpl::find(const Slice &key) -> void
+void CursorImpl::find(const Slice &key)
 {
     m_c.activate(false);
     if (m_c.seek_to_leaf(key)) {
@@ -77,7 +77,7 @@ auto CursorImpl::find(const Slice &key) -> void
     }
 }
 
-auto CursorImpl::next() -> void
+void CursorImpl::next()
 {
     CALICODB_EXPECT_TRUE(m_c.is_valid());
     // If the cursor was saved, and gets loaded back to a different position, then the
@@ -93,7 +93,7 @@ auto CursorImpl::next() -> void
     }
 }
 
-auto CursorImpl::previous() -> void
+void CursorImpl::previous()
 {
     CALICODB_EXPECT_TRUE(m_c.is_valid());
     m_c.activate(true);
@@ -103,7 +103,7 @@ auto CursorImpl::previous() -> void
     }
 }
 
-auto CursorImpl::TEST_check_state() const -> void
+void CursorImpl::TEST_check_state() const
 {
     CALICODB_EXPECT_TRUE(m_c.assert_state());
 }

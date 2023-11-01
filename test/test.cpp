@@ -13,19 +13,19 @@
 namespace calicodb
 {
 
-auto PrintTo(const Slice &s, std::ostream *os) -> void
+void PrintTo(const Slice &s, std::ostream *os)
 {
     String str;
     ASSERT_EQ(append_escaped_string(str, s), 0);
     *os << str.c_str();
 }
 
-auto PrintTo(const Status &s, std::ostream *os) -> void
+void PrintTo(const Status &s, std::ostream *os)
 {
     *os << s.message();
 }
 
-auto PrintTo(const Cursor &c, std::ostream *os) -> void
+void PrintTo(const Cursor &c, std::ostream *os)
 {
     *os << "Cursor{";
     if (c.is_valid()) {
@@ -69,7 +69,7 @@ auto read_file_to_string(Env &env, const char *filename) -> std::string
     return buffer;
 }
 
-auto write_string_to_file(Env &env, const char *filename, const std::string &buffer, long offset) -> void
+void write_string_to_file(Env &env, const char *filename, const std::string &buffer, long offset)
 {
     File *file;
     ASSERT_OK(env.new_file(filename, Env::kCreate, file));
@@ -85,7 +85,7 @@ auto write_string_to_file(Env &env, const char *filename, const std::string &buf
     delete file;
 }
 
-auto remove_calicodb_files(const std::string &db_name) -> void
+void remove_calicodb_files(const std::string &db_name)
 {
     std::filesystem::remove_all(db_name);
     std::filesystem::remove_all(db_name + kDefaultWalSuffix.to_string());
@@ -116,7 +116,7 @@ std::ostream *g_logger = &g_null_stream;
 // to *g_logger.
 #define REPORT_DRIVER_ERROR std::cerr << "driver error (" __FILE__ << ':' << __LINE__ << ")\n"
 
-auto main(int argc, char **argv) -> int
+int main(int argc, char **argv)
 {
     using namespace calicodb;
     using namespace calicodb::test;

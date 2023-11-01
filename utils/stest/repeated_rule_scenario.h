@@ -33,7 +33,7 @@ protected:
         return false;
     }
 
-    auto reset_scenario() -> void override
+    void reset_scenario() override
     {
     }
 

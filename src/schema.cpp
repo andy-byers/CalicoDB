@@ -25,7 +25,7 @@ Schema::~Schema()
     m_main.m_refcount = 0;
 }
 
-auto Schema::close_trees() -> void
+void Schema::close_trees()
 {
     map_trees(false, [](auto &t) {
         Mem::delete_object(t.tree);
@@ -68,7 +68,7 @@ auto Schema::open_tree(Id root_id) -> Tree *
     return nullptr;
 }
 
-auto Schema::use_tree(Tree *tree) -> void
+void Schema::use_tree(Tree *tree)
 {
     map_trees(true, [tree](auto &t) {
         if (t.tree != tree) {
@@ -140,7 +140,7 @@ auto Schema::vacuum() -> Status
     return m_main.vacuum();
 }
 
-auto Schema::TEST_validate() const -> void
+void Schema::TEST_validate() const
 {
     map_trees(true, []([[maybe_unused]] auto &t) {
         CALICODB_EXPECT_TRUE(t.tree->check_integrity().is_ok());

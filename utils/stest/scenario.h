@@ -30,7 +30,7 @@ public:
         return is_done_scenario();
     }
 
-    auto reset() -> void
+    void reset()
     {
         return reset_scenario();
     }
@@ -46,7 +46,7 @@ public:
     }
 
 protected:
-    auto apply_rule(Rule<State> &rule, State &state) const -> void
+    void apply_rule(Rule<State> &rule, State &state) const
     {
         if (s_debug_file) {
             std::fprintf(s_debug_file,
@@ -71,7 +71,7 @@ protected:
 
     virtual auto next_rule_scenario(State &state) -> Rule<State> * = 0;
     [[nodiscard]] virtual auto is_done_scenario() const -> bool = 0;
-    virtual auto reset_scenario() -> void = 0;
+    virtual void reset_scenario() = 0;
 };
 
 template <class State>
@@ -89,7 +89,7 @@ public:
         assert(scenarios && size);
     }
 
-    auto reset() -> void
+    void reset()
     {
         m_sequence_index = 0;
         for (size_t i = 0; i < size; ++i) {
@@ -143,7 +143,7 @@ protected:
         return is_done_iterated();
     }
 
-    auto reset_scenario() -> void override
+    void reset_scenario() override
     {
         m_current_scenario = nullptr;
         reset_iterated();
@@ -171,7 +171,7 @@ protected:
 
     [[nodiscard]] virtual auto is_done_iterated() const -> bool = 0;
     virtual auto next_scenario_iterated(State &state) -> Scenario<State> * = 0;
-    virtual auto reset_iterated() -> void = 0;
+    virtual void reset_iterated() = 0;
 
 private:
     Scenario<State> *m_current_scenario;
@@ -190,7 +190,7 @@ public:
     ~ConditionalScenario() override = default;
 
 protected:
-    auto reset_scenario() -> void override
+    void reset_scenario() override
     {
         m_scenario->reset();
         reset_conditional();
@@ -212,8 +212,8 @@ protected:
     }
 
     [[nodiscard]] virtual auto condition_conditional(const State &) const -> bool = 0;
-    virtual auto next_rule_conditional(const Rule<State> *next_rule) -> void = 0;
-    virtual auto reset_conditional() -> void = 0;
+    virtual void next_rule_conditional(const Rule<State> *next_rule) = 0;
+    virtual void reset_conditional() = 0;
 
 private:
     Scenario<State> *const m_scenario;
