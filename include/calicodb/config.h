@@ -38,18 +38,25 @@ struct AllocatorConfig {
     Free free;
 };
 
-// Specifies a target for configure(). configure() expects different variadic parameters depending on
-// the configuration target.
-enum ConfigTarget {
-    kGetAllocator, // AllocatorConfig * (valid address)
-    kSetAllocator, // AllocatorConfig *
+struct SyscallConfig {
+    const char *name;
+    void *syscall;
+};
+
+// Specifies a target for configure(). configure() expects a different argument depending on the config
+// target.                 Type                    | Details
+enum ConfigTarget {    // -------------------------|------------------------------------------------------
+    kReplaceAllocator, //  const AllocatorConfig * | Replace the general-purpose allocator
+    kRestoreAllocator, //  nullptr                 | Restore the general-purpose allocator to the default
+    kReplaceSyscall,   //  const SyscallConfig *   | Replace a system call
+    kRestoreSyscall,   //  const char *            | Restore the named syscall to its default
 };
 
 // Configure per-process options
 // This function is not safe to call from multiple threads simultaneously.
 // If `target` is recognized and the configuration option set successfully, an OK status is returned.
 // Otherwise, a non-OK status is returned with no side effects.
-auto configure(ConfigTarget target, void *value) -> Status;
+auto configure(ConfigTarget target, const void *value) -> Status;
 
 } // namespace calicodb
 

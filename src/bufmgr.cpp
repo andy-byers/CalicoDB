@@ -181,6 +181,7 @@ auto Bufmgr::shrink_to_fit() -> void
 
 auto Bufmgr::assert_state() const -> bool
 {
+#ifndef NDEBUG
     // Make sure the refcounts add up to the "refsum".
     uint32_t refsum = 0;
     for (auto p = m_in_use.next_entry; p != &m_in_use; p = p->next_entry) {
@@ -207,6 +208,9 @@ auto Bufmgr::assert_state() const -> bool
         CALICODB_EXPECT_EQ(p->refs, 0);
     }
     return refsum == m_refsum;
+#else
+    return true;
+#endif // NDEBUG
 }
 
 auto Bufmgr::PageTable::allocate(size_t min_buffers) -> int

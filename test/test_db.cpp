@@ -21,7 +21,7 @@ TEST(FileFormatTests, ReportsUnrecognizedFormatString)
     char page[TEST_PAGE_SIZE];
     FileHdr::make_supported_db(page, TEST_PAGE_SIZE);
 
-    ++page[0];
+    page[0] = '*';
     ASSERT_NOK(FileHdr::check_db_support(page));
 }
 
@@ -1221,8 +1221,11 @@ TEST(DestructionTests, OnlyDeletesCalicoWals)
     options.create_if_missing = true;
     options.wal_filename = "/tmp/calicodb_destruction_wal";
 
+    const std::string filename = "/tmp/calicodb_destruction_test";
+    remove_calicodb_files(filename);
+
     DB *db;
-    ASSERT_OK(DB::open(options, "/tmp/calicodb_destruction_test", db));
+    ASSERT_OK(DB::open(options, filename.c_str(), db));
     delete db;
 
     // These files are not part of the DB.
@@ -1232,7 +1235,7 @@ TEST(DestructionTests, OnlyDeletesCalicoWals)
     ASSERT_OK(options.env->new_file("/tmp/calicodb_destruction_test.db", Env::kCreate, file));
     delete file;
 
-    ASSERT_OK(DB::destroy(options, "/tmp/calicodb_destruction_test"));
+    ASSERT_OK(DB::destroy(options, filename.c_str()));
     ASSERT_TRUE(options.env->file_exists("/tmp/calicodb_destruction_wal_"));
     ASSERT_TRUE(options.env->file_exists("/tmp/calicodb_destruction_test.db"));
 }
@@ -1242,6 +1245,8 @@ TEST(DestructionTests, DeletesWalAndShm)
     Options options;
     options.create_if_missing = true;
     options.env = &default_env();
+
+    remove_calicodb_files("./test");
 
     DB *db;
     ASSERT_OK(DB::open(options, "./test", db));
@@ -2226,7 +2231,7 @@ TEST_F(ModelDBTests, Operations)
         EXPECT_EQ(value, "value");
 
         auto c = test_new_cursor(tx.main_bucket());
-        reinterpret_cast<const ModelCursor &>(c).validate();
+        reinterpret_cast<const ModelCursor &>(*c).validate();
         c->seek("key");
         EXPECT_TRUE(c->is_valid());
         EXPECT_NOK(tx.main_bucket().put(*c, "value"));

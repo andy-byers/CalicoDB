@@ -630,7 +630,7 @@ TEST_P(TreeSanityChecks, SmallRecords)
 INSTANTIATE_TEST_SUITE_P(
     TreeSanityChecks,
     TreeSanityChecks,
-    ::testing::Values(
+    testing::Values(
         0b00,
         0b01,
         0b10,
@@ -688,12 +688,12 @@ TEST_P(RemoteComparisonTests, Comparisons)
 INSTANTIATE_TEST_SUITE_P(
     SmallerThanPage,
     RemoteComparisonTests,
-    ::testing::Range(1U, TEST_PAGE_SIZE, 16));
+    testing::Range(1U, TEST_PAGE_SIZE, 16));
 
 INSTANTIATE_TEST_SUITE_P(
     LargerThanPage,
     RemoteComparisonTests,
-    ::testing::Range(TEST_PAGE_SIZE / 2, TEST_PAGE_SIZE * 2, 32));
+    testing::Range(TEST_PAGE_SIZE / 2, TEST_PAGE_SIZE * 2, 32));
 
 class EmptyTreeCursorTests : public TreeTests
 {
@@ -952,7 +952,7 @@ TEST_P(CursorTests, InvalidCursorDeathTest)
 INSTANTIATE_TEST_SUITE_P(
     CursorTests,
     CursorTests,
-    ::testing::Values(0, 1));
+    testing::Values(0, 1));
 
 class MultiCursorTests : public TreeTests
 {
@@ -1931,7 +1931,7 @@ TEST_P(RebalanceTests, E)
 INSTANTIATE_TEST_SUITE_P(
     RebalanceTests,
     RebalanceTests,
-    ::testing::Values(1, 2, 5));
+    testing::Values(1, 2, 5));
 
 TEST(SuffixTruncationTests, SuffixTruncation)
 {

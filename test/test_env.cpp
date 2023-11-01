@@ -143,7 +143,7 @@ static auto write_out_randomly(RandomGenerator &random, File &writer, const Slic
 
 struct EnvWithFiles final {
     explicit EnvWithFiles()
-        : m_dirname(testing::TempDir())
+        : m_dirname(testing::TempDir() + "calicodb_env_test")
     {
     }
 
@@ -326,7 +326,7 @@ TEST_P(FileTests, UseUnlinkedFile)
 INSTANTIATE_TEST_SUITE_P(
     FileTests,
     FileTests,
-    ::testing::Values(1, 2, 5, 10, 100));
+    testing::Values(1, 2, 5, 10, 100));
 
 class LoggerTests : public testing::Test
 {
@@ -335,7 +335,7 @@ protected:
         "0000/00/00-00:00:00.000000 ");
 
     explicit LoggerTests()
-        : m_log_filename(get_full_filename(testing::TempDir() + "logger"))
+        : m_log_filename(get_full_filename(testing::TempDir() + "calicodb_test_logger"))
     {
     }
 
@@ -537,7 +537,7 @@ TEST_P(EnvLockStateTests, InvalidRequestDeathTest)
 INSTANTIATE_TEST_SUITE_P(
     EnvLockStateTests,
     EnvLockStateTests,
-    ::testing::Values(1, 2, 5, 10, 100));
+    testing::Values(1, 2, 5, 10, 100));
 
 class EnvShmTests : public testing::Test
 {
@@ -942,7 +942,7 @@ TEST_P(FileConcurrencyTests, Run)
 INSTANTIATE_TEST_SUITE_P(
     FileConcurrencyTests,
     FileConcurrencyTests,
-    ::testing::Combine(
+    testing::Combine(
         testing::Values(1, 2, 5, 10),
         testing::Values(0, 1, 2, 5, 10)));
 
@@ -1168,7 +1168,7 @@ TEST_P(ShmConcurrencyTests, Run)
 INSTANTIATE_TEST_SUITE_P(
     SingleLock,
     ShmConcurrencyTests,
-    ::testing::Values(                            // 01234567
+    testing::Values(                              // 01234567
         std::vector<ShmLockPattern>{{0, 1, 1}},   // w.......
         std::vector<ShmLockPattern>{{0, 1, 0},    // r.......
                                     {0, 1, 1}},   // w.......
@@ -1184,7 +1184,7 @@ INSTANTIATE_TEST_SUITE_P(
 INSTANTIATE_TEST_SUITE_P(
     MultiLock,
     ShmConcurrencyTests,
-    ::testing::Values(                            // 01234567
+    testing::Values(                              // 01234567
         std::vector<ShmLockPattern>{{0, 2, 1}},   // ww......
         std::vector<ShmLockPattern>{{0, 1, 0},    // r.......
                                     {0, 2, 1}},   // ww......

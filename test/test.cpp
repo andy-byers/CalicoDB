@@ -120,7 +120,7 @@ auto main(int argc, char **argv) -> int
 {
     using namespace calicodb;
     using namespace calicodb::test;
-    ::testing::InitGoogleTest(&argc, argv);
+    testing::InitGoogleTest(&argc, argv);
     default_env().srand(42);
 
 #define STR(name) #name
@@ -140,7 +140,7 @@ auto main(int argc, char **argv) -> int
     TEST_LOG << "Running \"" << argv[0] << "\"...\n";
 
     int rc = 0;
-    auto s = configure(kSetAllocator, DebugAllocator::config());
+    auto s = configure(kReplaceAllocator, DebugAllocator::config());
     if (!s.is_ok()) {
         TEST_LOG << "failed to set debug allocator: " << s.message() << '\n';
         REPORT_DRIVER_ERROR;

@@ -10,6 +10,10 @@
 #include "model.h"
 #include "test.h"
 
+#include <fcntl.h>
+#include <sys/mman.h>
+#include <unistd.h>
+
 namespace calicodb::test
 {
 
@@ -1311,6 +1315,269 @@ TEST_F(DataLossTests, Transactions)
 TEST_F(DataLossTests, Checkpoints)
 {
     run_test(&DataLossTests::run_checkpoint_test);
+}
+
+static struct SyscallState {
+    int num;
+    int max;
+} s_syscall_state = {};
+
+static auto should_next_syscall_fail() -> bool
+{
+    if (s_syscall_state.num++ >= s_syscall_state.max) {
+        s_syscall_state.num = 0;
+        ++s_syscall_state.max;
+        return true;
+    }
+    return false;
+}
+
+static SyscallConfig kFaultySyscalls[] = {
+    {"open", reinterpret_cast<void *>(+[](const char *a, int b, int c) -> int {
+         return should_next_syscall_fail() ? -1 : ::open(a, b, c);
+     })},
+    {"close", reinterpret_cast<void *>(+[](int a) -> int {
+         return should_next_syscall_fail() ? -1 : ::close(a);
+     })},
+    {"access", reinterpret_cast<void *>(+[](const char *a, int b) -> int {
+         return should_next_syscall_fail() ? -1 : ::access(a, b);
+     })},
+    {"fstat", reinterpret_cast<void *>(+[](int a, struct stat *b) -> int {
+         return should_next_syscall_fail() ? -1 : ::fstat(a, b);
+     })},
+    {"ftruncate", reinterpret_cast<void *>(+[](int a, off_t b) -> int {
+         return should_next_syscall_fail() ? -1 : ::ftruncate(a, b);
+     })},
+    {"fcntl", reinterpret_cast<void *>(+[](int a, int b, int c /* should be ... */) -> int {
+         return should_next_syscall_fail() ? -1 : ::fcntl(a, b, c);
+     })},
+    {"lseek", reinterpret_cast<void *>(+[](int a, off_t b, int c) -> off_t {
+         return should_next_syscall_fail() ? -1 : ::lseek(a, b, c);
+     })},
+    {"read", reinterpret_cast<void *>(+[](int a, void *b, size_t c) -> ssize_t {
+         return should_next_syscall_fail() ? -1 : ::read(a, b, c);
+     })},
+    {"write", reinterpret_cast<void *>(+[](int a, const void *b, size_t c) -> ssize_t {
+         return should_next_syscall_fail() ? -1 : ::write(a, b, c);
+     })},
+    {"fsync", reinterpret_cast<void *>(+[](int a) -> int {
+         return should_next_syscall_fail() ? -1 : ::fsync(a);
+     })},
+    {"unlink", reinterpret_cast<void *>(+[](const char *a) -> int {
+         return should_next_syscall_fail() ? -1 : ::unlink(a);
+     })},
+    {"mmap", reinterpret_cast<void *>(+[](void *a, size_t b, int c, int d, int e, off_t f) -> void * {
+         return should_next_syscall_fail() ? MAP_FAILED : ::mmap(a, b, c, d, e, f);
+     })},
+    {"munmap", reinterpret_cast<void *>(+[](void *a, size_t b) -> int {
+         return should_next_syscall_fail() ? -1 : ::munmap(a, b);
+     })},
+    {"readlink", reinterpret_cast<void *>(+[](const char *a, char *b, size_t c) -> ssize_t {
+         return should_next_syscall_fail() ? -1 : ::readlink(a, b, c);
+     })},
+    {"lstat", reinterpret_cast<void *>(+[](const char *a, struct stat *b) -> int {
+         return should_next_syscall_fail() ? -1 : ::lstat(a, b);
+     })},
+    {"getcwd", reinterpret_cast<void *>(+[](char *a, size_t b) -> char * {
+         return should_next_syscall_fail() ? nullptr : ::getcwd(a, b);
+     })},
+    {"stat", reinterpret_cast<void *>(+[](const char *a, struct stat *b) -> int {
+         return should_next_syscall_fail() ? -1 : ::stat(a, b);
+     })},
+};
+
+static const size_t kNumSyscalls = ARRAY_SIZE(kFaultySyscalls);
+
+class SyscallCrashTests : public testing::TestWithParam<uint32_t>
+{
+public:
+    const std::string m_filename;
+
+    SyscallCrashTests()
+        : m_filename(testing::TempDir() + "calicodb_syscall_crash_tests")
+    {
+        remove_calicodb_files(m_filename);
+    }
+
+    ~SyscallCrashTests() override = default;
+
+    template <class Setup, class Run>
+    auto run_test(Setup &&setup, Run &&run) -> void
+    {
+        setup();
+        ASSERT_OK(run()); // Sanity check: no faults
+
+        for (size_t i = 0; i < kNumSyscalls; ++i) {
+            if (i == 5) {
+                // TODO: fcntl(int, ...) is called multiple different ways.
+                //       The lambda above doesn't work properly. Skip for now.
+                TEST_LOG << "SyscallCrashTests: Skipping fcntl(int, ...)...\n";
+                continue;
+            }
+            s_syscall_state = {};
+
+            Status s;
+            do {
+                setup();
+                ASSERT_OK(configure(kReplaceSyscall, &kFaultySyscalls[i]));
+                s = run();
+                ASSERT_OK(configure(kRestoreSyscall, kFaultySyscalls[i].name));
+            } while (!s.is_ok());
+        }
+    }
+
+    static auto write_to_db(DB &db)
+    {
+        return db.update([](auto &tx) {
+            Status s;
+            RandomGenerator random;
+            auto &b = tx.main_bucket();
+            for (size_t i = 0; s.is_ok() && i < 500; ++i) {
+                s = b.put(numeric_key(i), random.Generate(250));
+            }
+            return s;
+        });
+    }
+};
+
+TEST_F(SyscallCrashTests, UnrecognizedSyscall)
+{
+    SyscallConfig config = {"open", nullptr};
+    ASSERT_NOK(configure(kReplaceSyscall, &config));
+    config.name = "not_a_syscall";
+    config.syscall = &kFaultySyscalls[0];
+    ASSERT_NOK(configure(kReplaceSyscall, &config));
+    ASSERT_NOK(configure(kRestoreSyscall, config.name));
+}
+
+TEST_F(SyscallCrashTests, OpenClose)
+{
+    run_test([] {}, [this] {
+        DBPtr db;
+        Options options;
+        options.create_if_missing = true;
+        remove_calicodb_files(m_filename);
+        return test_open_db(options, m_filename, db); });
+}
+
+TEST_F(SyscallCrashTests, Writes)
+{
+    DBPtr db;
+    run_test(
+        [&db, this] {
+            Options options;
+            options.create_if_missing = true;
+            options.sync_mode = Options::kSyncFull;
+            remove_calicodb_files(m_filename);
+            ASSERT_OK(test_open_db(options, m_filename, db));
+        },
+        [&db] {
+            auto s = write_to_db(*db);
+            if (s.is_ok()) {
+                s = db->checkpoint(kCheckpointRestart, nullptr);
+            }
+            return s;
+        });
+}
+
+TEST_F(SyscallCrashTests, Reads)
+{
+    DBPtr db;
+    run_test(
+        [&db, this] {
+            Options options;
+            options.create_if_missing = true;
+            remove_calicodb_files(m_filename);
+            ASSERT_OK(test_open_db(options, m_filename, db));
+            ASSERT_OK(write_to_db(*db));
+        },
+        [&db] {
+            return db->view([](auto &tx) {
+                auto c = test_new_cursor(tx.main_bucket());
+                c->seek_first();
+                for (size_t i = 0; c->is_valid(); ++i) {
+                    EXPECT_EQ(c->key(), numeric_key(i));
+                    c->next();
+                }
+                return c->status();
+            });
+        });
+}
+
+TEST_F(SyscallCrashTests, InterruptedOpen)
+{
+    const auto faulty_open = [](const char *, int, int) -> int {
+        errno = EINTR;
+        return -1;
+    };
+    const SyscallConfig config = {"open", reinterpret_cast<void *>(+faulty_open)};
+    ASSERT_OK(configure(kReplaceSyscall, &config));
+
+    File *file;
+    Logger *logger;
+    auto &env = default_env();
+    remove_calicodb_files(m_filename);
+    ASSERT_NOK(env.new_file(m_filename.c_str(), Env::kCreate, file));
+    ASSERT_NOK(env.new_logger(m_filename.c_str(), logger));
+
+    ASSERT_OK(configure(kRestoreSyscall, "open"));
+}
+
+TEST_F(SyscallCrashTests, InterruptedClose)
+{
+    const auto faulty_close = [](int) -> int {
+        errno = EINTR;
+        return -1;
+    };
+    const SyscallConfig config = {"close", reinterpret_cast<void *>(+faulty_close)};
+    ASSERT_OK(configure(kReplaceSyscall, &config));
+
+    File *file;
+    auto &env = default_env();
+    remove_calicodb_files(m_filename);
+    ASSERT_OK(env.new_file(m_filename.c_str(), Env::kCreate, file));
+    delete file;
+
+    ASSERT_OK(configure(kRestoreSyscall, "close"));
+}
+
+TEST_F(SyscallCrashTests, InterruptedFtruncate)
+{
+    File *file;
+    auto &env = default_env();
+    remove_calicodb_files(m_filename);
+    ASSERT_OK(env.new_file(m_filename.c_str(), Env::kCreate, file));
+
+    const auto faulty_ftruncate = [](int, off_t) -> int {
+        errno = EINTR;
+        return -1;
+    };
+    const SyscallConfig config = {"ftruncate", reinterpret_cast<void *>(+faulty_ftruncate)};
+    ASSERT_OK(configure(kReplaceSyscall, &config));
+    ASSERT_NOK(file->resize(123));
+    ASSERT_OK(configure(kRestoreSyscall, "ftruncate"));
+    delete file;
+}
+
+static auto faulty_lock(int, ...) -> int
+{
+    errno = EACCES;
+    return -1;
+}
+
+TEST_F(SyscallCrashTests, FileLock)
+{
+    File *file;
+    auto &env = default_env();
+    remove_calicodb_files(m_filename);
+    ASSERT_OK(env.new_file(m_filename.c_str(), Env::kCreate, file));
+
+    const SyscallConfig config = {"fcntl", reinterpret_cast<void *>(faulty_lock)};
+    ASSERT_OK(configure(kReplaceSyscall, &config));
+    const auto s = file->file_lock(kFileShared);
+    ASSERT_TRUE(s.is_busy()) << s.message();
+    ASSERT_OK(configure(kRestoreSyscall, "fcntl"));
+    delete file;
 }
 
 } // namespace calicodb::test

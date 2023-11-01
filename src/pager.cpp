@@ -449,15 +449,14 @@ auto Pager::flush_dirty_pages() -> Status
     while (dirty != m_dirtylist.end()) {
         auto *page = dirty->get_page_ref();
         CALICODB_EXPECT_TRUE(page->get_flag(PageRef::kDirty));
-        if (page->page_id.value > m_page_count) {
-            // This page is past the current end of the file due to a vacuum operation
-            // decreasing the page count. Just remove the page from the dirty list. It
-            // wouldn't be transferred back to the DB on checkpoint anyway since it is
-            // out of bounds.
-            dirty = m_dirtylist.remove(*page);
-        } else {
+        if (page->page_id.value <= m_page_count) {
             page->clear_flag(PageRef::kDirty);
             dirty = dirty->next_entry;
+        } else {
+            // This page is past the current end of the file due the page count having
+            // been decreased. Just remove the page from the dirty list. It wouldn't be
+            // transferred back to the DB on checkpoint anyway since it is out of bounds.
+            dirty = m_dirtylist.remove(*page);
         }
     }
     // These pages are no longer considered dirty. If the call to Wal::write() fails,
@@ -735,6 +734,7 @@ auto Pager::set_status(const Status &error) const -> void
 
 auto Pager::assert_state() const -> bool
 {
+#ifndef NDEBUG
     switch (m_mode) {
         case kOpen:
             CALICODB_EXPECT_EQ(m_bufmgr.refsum(), 0);
@@ -761,6 +761,7 @@ auto Pager::assert_state() const -> bool
         default:
             CALICODB_EXPECT_TRUE(false && "unrecognized Pager::Mode");
     }
+#endif // NDEBUG
     return true;
 }
 

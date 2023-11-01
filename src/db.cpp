@@ -48,6 +48,7 @@ auto get_full_filename(Env &env, const char *filename, String &result_out) -> St
 
 auto DB::open(const Options &options, const char *filename, DB *&db) -> Status
 {
+    db = nullptr;
     DBImpl *impl = nullptr;
     auto sanitized = options;
     clip_to_range(sanitized.page_size, kMinPageSize, kMaxPageSize);

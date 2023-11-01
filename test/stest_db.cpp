@@ -49,23 +49,8 @@ struct DatabaseState {
     } state = kNone;
 
     static constexpr const char *kBucketNames[] = {
-        "A",
-        "B",
-        "C",
-        "D",
-        "E",
-        "F",
-        "G",
-        "H",
-        "I",
-        "J",
-        "K",
-        "L",
-        "M",
-        "N",
-        "O",
-        "P",
-    };
+        "A", "B", "C", "D", "E", "F", "G", "H", "I",
+        "J", "K", "L", "M", "N", "O", "P", "Q", "R"};
     static constexpr size_t kMaxBuckets = ARRAY_SIZE(kBucketNames);
 
     struct BucketState final {

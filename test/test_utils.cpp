@@ -24,10 +24,9 @@ TEST(UserStringTests, PointerIsNotNull)
 
 TEST(ConfigTests, ConfigAllocator)
 {
-    AllocatorConfig config;
-    ASSERT_OK(configure(kGetAllocator, &config));
-    ASSERT_OK(configure(kSetAllocator, DebugAllocator::config()));
-    ASSERT_OK(configure(kSetAllocator, &config));
+    ASSERT_OK(configure(kRestoreAllocator, nullptr)); // NOOP
+    ASSERT_OK(configure(kReplaceAllocator, DebugAllocator::config()));
+    ASSERT_OK(configure(kRestoreAllocator, reinterpret_cast<void *>(42))); // Argument is not accessed
 }
 
 class AllocTests : public testing::Test
@@ -50,7 +49,7 @@ public:
         ASSERT_EQ(DebugAllocator::bytes_used(), 0);
         DebugAllocator::set_limit(0);
         DebugAllocator::set_hook(nullptr, nullptr);
-        ASSERT_OK(configure(kSetAllocator, DebugAllocator::config()));
+        ASSERT_OK(configure(kReplaceAllocator, DebugAllocator::config()));
     }
 };
 
@@ -59,7 +58,7 @@ public:
 alignas(uint64_t) char AllocTests::s_fake_allocation[kFakeAllocationSize];
 void *AllocTests::s_alloc_data_ptr = s_fake_allocation;
 
-static AllocatorConfig s_fake_config = {
+static constexpr AllocatorConfig kFakeConfig = {
     [](auto) -> void * {
         return AllocTests::s_fake_allocation;
     },
@@ -72,7 +71,7 @@ static AllocatorConfig s_fake_config = {
     },
 };
 
-static AllocatorConfig s_faulty_config = {
+static constexpr AllocatorConfig kFaultyConfig = {
     [](auto) -> void * {
         return nullptr;
     },
@@ -84,20 +83,18 @@ static AllocatorConfig s_faulty_config = {
 
 TEST_F(AllocTests, Configure)
 {
-    AllocatorConfig saved;
-    ASSERT_OK(configure(kGetAllocator, &saved));
-    auto *ptr = saved.malloc(42);
-    ASSERT_OK(configure(kSetAllocator, &s_fake_config));
+    auto *ptr = Mem::allocate(42);
+    ASSERT_OK(configure(kReplaceAllocator, &kFakeConfig));
     Mem::deallocate(Mem::reallocate(Mem::allocate(123), 42));
-    ASSERT_OK(configure(kSetAllocator, &saved));
+    ASSERT_OK(configure(kRestoreAllocator, nullptr));
     Mem::deallocate(ptr);
 
-    AllocatorConfig config = {
+    const AllocatorConfig config = {
         CALICODB_DEFAULT_MALLOC,
         CALICODB_DEFAULT_REALLOC,
         CALICODB_DEFAULT_FREE,
     };
-    ASSERT_OK(configure(kSetAllocator, &config));
+    ASSERT_OK(configure(kReplaceAllocator, &config));
     Mem::deallocate(Mem::reallocate(Mem::allocate(123), 42));
 }
 
@@ -110,14 +107,14 @@ TEST_F(AllocTests, Methods)
 
     Mem::deallocate(new_ptr);
 
-    ASSERT_OK(configure(kSetAllocator, &s_fake_config));
+    ASSERT_OK(configure(kReplaceAllocator, &kFakeConfig));
     ASSERT_EQ(ptr = Mem::allocate(123), s_alloc_data_ptr);
     ASSERT_EQ(Mem::reallocate(ptr, 321), ptr);
     ASSERT_EQ(Mem::reallocate(ptr, 42), ptr);
     Mem::deallocate(nullptr);
     Mem::deallocate(ptr);
 
-    ASSERT_OK(configure(kSetAllocator, &s_faulty_config));
+    ASSERT_OK(configure(kReplaceAllocator, &kFaultyConfig));
     ASSERT_EQ(Mem::allocate(123), nullptr);
     ASSERT_EQ(Mem::reallocate(nullptr, 123), nullptr);
 }
@@ -176,7 +173,7 @@ TEST_F(AllocTests, AllocationHook)
 TEST_F(AllocTests, LargeAllocations)
 {
     // Don't actually allocate anything.
-    ASSERT_OK(configure(kSetAllocator, &s_fake_config));
+    ASSERT_OK(configure(kReplaceAllocator, &kFakeConfig));
 
     void *p;
     ASSERT_EQ(nullptr, Mem::allocate(kMaxAllocation + 1));
@@ -326,6 +323,12 @@ TEST(UniquePtr, DestructorIsCalled)
 
     ptr3.reset();
     ASSERT_EQ(destruction_count, 3);
+}
+
+TEST(UniquePtr, SelfMove)
+{
+    UniquePtr<int> ptr;
+    ptr = move(ptr);
 }
 
 TEST(Encoding, Fixed32)
