@@ -48,9 +48,10 @@ struct FileHdr {
         kLargestRootOffset = kFreelistLengthOffset + sizeof(uint32_t),
         kPageSizeOffset = kLargestRootOffset + sizeof(uint32_t),
         kFmtVersionOffset = kPageSizeOffset + sizeof(uint16_t),
-        kReservedOffset = kFmtVersionOffset + sizeof(char),
-        kSize = 64
+        kReservedOffset = kFmtVersionOffset + sizeof(char)
     };
+
+    static constexpr uint32_t kSize = 64;
     static_assert(kReservedOffset < kSize);
 
     [[nodiscard]] static auto get_page_count(const char *root) -> uint32_t
@@ -128,10 +129,11 @@ struct NodeHdr {
         kCellStartOffset = kCellCountOffset + sizeof(uint16_t),
         kFreeStartOffset = kCellStartOffset + sizeof(uint16_t),
         kFragCountOffset = kFreeStartOffset + sizeof(uint16_t),
-        kNextIdOffset = kFragCountOffset + sizeof(char),
-        kSizeExternal = kNextIdOffset,
-        kSizeInternal = kSizeExternal + sizeof(uint32_t)
+        kNextIdOffset = kFragCountOffset + sizeof(char)
     };
+
+    static constexpr uint32_t kSizeExternal = kNextIdOffset;
+    static constexpr uint32_t kSizeInternal = kSizeExternal + sizeof(uint32_t);
 
     NodeHdr() = delete;
 

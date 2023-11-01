@@ -121,7 +121,7 @@ struct PayloadManager {
         for (int i = 0;; ++i) {
             const auto lhs = rest.range(0, minval(rest.size(), rhs.size()));
             cmp_out = lhs.compare(rhs);
-            remaining -= rhs.size();
+            remaining -= static_cast<uint32_t>(rhs.size());
             rest.advance(lhs.size());
             if (cmp_out) {
                 break;
@@ -986,9 +986,9 @@ auto Tree::make_pivot(const PivotOptions &opt, Cell &pivot_out) -> Status
             std::memcpy(target, prefix.data(), prefix_size);
             items[0].chunk.advance(prefix_size);
             items[1].chunk.advance(prefix_size);
-            items[0].total -= prefix_size;
-            items[1].total -= prefix_size;
-            target_local -= prefix_size;
+            items[0].total -= static_cast<uint32_t>(prefix_size);
+            items[1].total -= static_cast<uint32_t>(prefix_size);
+            target_local -= static_cast<uint32_t>(prefix_size);
             target += prefix_size;
         } else {
             // The left key is a prefix of the right key.
