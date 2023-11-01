@@ -129,14 +129,15 @@ struct NodeHdr {
         kFreeStartOffset = kCellStartOffset + sizeof(uint16_t),
         kFragCountOffset = kFreeStartOffset + sizeof(uint16_t),
         kNextIdOffset = kFragCountOffset + sizeof(char),
-        kSizeExternal = kNextIdOffset
+        kSizeExternal = kNextIdOffset,
+        kSizeInternal = kSizeExternal + sizeof(uint32_t)
     };
 
     NodeHdr() = delete;
 
     [[nodiscard]] static constexpr auto size(bool is_external) -> uint32_t
     {
-        return kSizeExternal + !is_external * sizeof(uint32_t);
+        return is_external ? kSizeExternal : kSizeInternal;
     }
 
     [[nodiscard]] static auto get_type(const char *root) -> Type

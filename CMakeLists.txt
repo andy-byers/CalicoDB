@@ -46,7 +46,6 @@ else() # Clang OR GNU
             -Woverloaded-virtual
             -Wpedantic
             -Wconversion
-#            -Wformat=2
             -Wsign-conversion
             -Wnull-dereference
             -Wdouble-promotion

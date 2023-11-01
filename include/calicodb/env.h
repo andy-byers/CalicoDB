@@ -130,11 +130,7 @@ public:
     virtual void logv(const char *fmt, std::va_list args) = 0;
 };
 
-void log(Logger *sink, const char *fmt, ...)
-#if defined(__GNUC__) || defined(__clang__)
-    __attribute((__format__(__printf__, 2, 3)))
-#endif
-    ;
+void log(Logger *sink, const char *fmt, ...);
 
 class EnvWrapper : public Env
 {
