@@ -1589,7 +1589,7 @@ auto WalImpl::write(Pages &writer, uint32_t page_size, size_t db_size) -> Status
             ++next_frame;
             s = m_index.assign(ref.page_id, next_frame);
             if (s.is_ok()) {
-                *ref.flag &= ~PageRef::kAppend;
+                *ref.flag &= ~static_cast<uint16_t>(PageRef::kAppend);
             }
         }
     }
