@@ -168,7 +168,7 @@ struct ShmNode final {
     // knows it is the first connection if it can get a writer lock on the DMS
     // byte.
     [[nodiscard]] auto take_dms_lock() -> int;
-    [[nodiscard]] auto check_locks() const -> bool;
+    [[nodiscard]] [[maybe_unused]] auto check_locks() const -> bool;
 };
 
 struct UnusedFd final {
