@@ -1583,13 +1583,19 @@ auto WalImpl::write(Pages &writer, uint32_t page_size, size_t db_size) -> Status
     }
 
     next_frame = m_hdr.max_frame;
-    for (writer.reset(); s.is_ok() && writer.value(); writer.next()) {
-        auto ref = *writer.value();
-        if (*ref.flag & PageRef::kAppend) {
+    for (writer.reset(); s.is_ok(); writer.next()) {
+        // Put the page reference pointer in a local variable and check that for null, rather
+        // than calling writer.value() twice. GCC can't prove that it returns the same pointer
+        // each time and complains under -Werror=null-dereference.
+        auto *ref = writer.value();
+        if (!ref) {
+            break;
+        }
+        if (*ref->flag & PageRef::kAppend) {
             ++next_frame;
-            s = m_index.assign(ref.page_id, next_frame);
+            s = m_index.assign(ref->page_id, next_frame);
             if (s.is_ok()) {
-                *ref.flag = static_cast<uint16_t>(*ref.flag & ~PageRef::kAppend);
+                *ref->flag = static_cast<uint16_t>(*ref->flag & ~PageRef::kAppend);
             }
         }
     }
