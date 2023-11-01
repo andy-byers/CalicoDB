@@ -678,6 +678,7 @@ TEST_F(PagerTests, MovePage)
 {
     static constexpr uint32_t kSpecialValue = 123'456;
     static constexpr uint32_t kNumPages = 32;
+    (void)kSpecialValue; // NOTE (Andy): For some reason, I get an unused variable warning on this. Silence it.
     m_ctx.writer([](auto &pager, auto &) {
         for (uint32_t i = 0; i < kNumPages; ++i) {
             PageRef *pg;
