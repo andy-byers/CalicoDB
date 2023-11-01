@@ -51,8 +51,8 @@ public:
 
     explicit Tree(Pager &pager, Stats &stat, Id root_id);
 
-    auto activate_cursor(TreeCursor &target) const -> void;
-    auto deactivate_cursors(TreeCursor *exclude) const -> void;
+    void activate_cursor(TreeCursor &target) const;
+    void deactivate_cursors(TreeCursor *exclude) const;
 
     struct Reroot {
         Id before;
@@ -89,12 +89,12 @@ public:
         return s;
     }
 
-    auto upgrade(Node &node) const -> void
+    void upgrade(Node &node) const
     {
         m_pager->mark_dirty(*node.ref);
     }
 
-    auto release(Node node, Pager::ReleaseAction action = Pager::kKeep) const -> void
+    void release(Node node, Pager::ReleaseAction action = Pager::kKeep) const
     {
         m_pager->release(node.ref, action);
     }
@@ -104,7 +104,7 @@ public:
         return m_root_id;
     }
 
-    auto set_root(Id root_id) -> void
+    void set_root(Id root_id)
     {
         m_root_id = root_id;
     }
@@ -113,7 +113,7 @@ public:
 
     auto print_structure(String &repr_out) -> Status;
     auto print_nodes(String &repr_out) -> Status;
-    auto TEST_validate() -> void;
+    void TEST_validate();
 
 private:
     friend class BucketImpl;
@@ -152,9 +152,9 @@ private:
     auto insert_cell(Node &node, uint32_t idx, const Cell &cell) -> Status;
     auto remove_cell(Node &node, uint32_t idx) -> Status;
     auto find_parent_id(Id page_id, Id &out) const -> Status;
-    auto fix_parent_id(Id page_id, Id parent_id, PageType type, Status &s) -> void;
-    auto maybe_fix_overflow_chain(const Cell &cell, Id parent_id, Status &s) -> void;
-    auto fix_cell(const Cell &cell, bool is_leaf, Id parent_id, Status &s) -> void;
+    void fix_parent_id(Id page_id, Id parent_id, PageType type, Status &s);
+    void maybe_fix_overflow_chain(const Cell &cell, Id parent_id, Status &s);
+    void fix_cell(const Cell &cell, bool is_leaf, Id parent_id, Status &s);
     auto fix_links(Node &node, Id parent_id = Id::null()) -> Status;
 
     struct CursorEntry {
@@ -180,7 +180,7 @@ private:
         }
 
         // Discard the overflow cell
-        auto clear() -> void
+        void clear()
         {
             pid = Id::null();
         }
@@ -224,18 +224,18 @@ public:
         return *m_tree;
     }
 
-    auto reset(const Status &s = Status::ok()) -> void;
+    void reset(const Status &s = Status::ok());
 
     // When the cursor is being used to read records, this routine is used to move
     // cursors that are one-past-the-end in a leaf node to the first position in
     // the right sibling node.
-    auto ensure_correct_leaf() -> void;
+    void ensure_correct_leaf();
 
     auto seek_to_leaf(const Slice &key) -> bool;
-    auto seek_to_last_leaf() -> void;
-    auto move_right() -> void;
-    auto move_left() -> void;
-    auto read_record() -> void;
+    void seek_to_last_leaf();
+    void move_right();
+    void move_left();
+    void read_record();
 
     // Called by CursorImpl. If the cursor is saved, then m_cell.is_bucket contains the bucket flag
     // for the record that the cursor is saved on. Note, however, that the bucket root ID cannot
@@ -263,7 +263,7 @@ public:
         kAllLevels,
     };
 
-    auto release_nodes(ReleaseType type) -> void;
+    void release_nodes(ReleaseType type);
     auto key() const -> Slice;
     auto value() const -> Slice;
 
@@ -309,7 +309,7 @@ private:
         return true;
     }
 
-    auto save_position() -> void
+    void save_position()
     {
         if (m_state == kHasRecord) {
             m_state = kSaved;
@@ -327,7 +327,7 @@ private:
     // When a cursor is accessed by a user, it must always be positioned on a valid
     // record in a leaf node. This means that the caller of this function is
     // responsible for either moving the cursor to a leaf node, or invalidating it.
-    auto seek_to_root() -> void;
+    void seek_to_root();
 
     // Move the cursor to the record with a key that is greater than or equal to the
     // given `key` in the current node
@@ -337,7 +337,7 @@ private:
     auto read_user_key() -> Status;
     auto read_user_value() -> Status;
 
-    auto handle_split_root(Node child) -> void
+    void handle_split_root(Node child)
     {
         static constexpr auto kNumSlots = ARRAY_SIZE(m_node_path);
         CALICODB_EXPECT_EQ(m_node.page_id(), m_tree->root());
@@ -356,7 +356,7 @@ private:
         m_idx_path[0] = 0;
     }
 
-    auto handle_merge_root() -> void
+    void handle_merge_root()
     {
         // m_node is the root node. It always belongs at m_node_path[0]. The node in
         // m_node_path[1] was destroyed.
@@ -392,13 +392,13 @@ private:
     // This routine moves the cursor back down to the leaf node that it belongs in. The tree
     // rebalancing methods fix the cursor history path as necessary, so all this method has to do
     // is follow the m_node_path/m_idx_path path back down.
-    auto finish_write(Status &s) -> void;
+    void finish_write(Status &s);
 
-    auto move_to_parent(bool preserve_path) -> void;
-    auto move_to_child(Id child_id) -> void;
-    auto assign_child(Node child) -> void;
+    void move_to_parent(bool preserve_path);
+    void move_to_child(Id child_id);
+    void assign_child(Node child);
 
-    auto read_current_cell() -> void;
+    void read_current_cell();
     [[nodiscard]] auto on_last_node() const -> bool;
 
     friend class InorderTraversal;

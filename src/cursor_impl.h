@@ -27,22 +27,22 @@ public:
     [[nodiscard]] auto handle() -> void * override;
     [[nodiscard]] auto is_valid() const -> bool override;
     [[nodiscard]] auto is_bucket() const -> bool override;
-    auto key() const -> Slice override;
-    auto value() const -> Slice override;
+    [[nodiscard]] auto key() const -> Slice override;
+    [[nodiscard]] auto value() const -> Slice override;
     auto status() const -> Status override;
-    auto seek_first() -> void override;
-    auto seek_last() -> void override;
-    auto seek(const Slice &key) -> void override;
-    auto find(const Slice &key) -> void override;
-    auto next() -> void override;
-    auto previous() -> void override;
+    void seek_first() override;
+    void seek_last() override;
+    void seek(const Slice &key) override;
+    void find(const Slice &key) override;
+    void next() override;
+    void previous() override;
 
     auto check_integrity() const -> Status
     {
         return m_c.tree().check_integrity();
     }
 
-    auto TEST_check_state() const -> void;
+    void TEST_check_state() const;
 };
 
 } // namespace calicodb

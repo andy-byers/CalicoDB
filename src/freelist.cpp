@@ -50,17 +50,17 @@ struct FreePage {
         return Id(get_u32(FreePage::get_leaf_ptr(ref, index)));
     }
 
-    static auto put_next_id(PageRef &ref, Id value) -> void
+    static void put_next_id(PageRef &ref, Id value)
     {
         put_u32(ref.data, value.value);
     }
 
-    static auto put_leaf_count(PageRef &ref, uint32_t value) -> void
+    static void put_leaf_count(PageRef &ref, uint32_t value)
     {
         put_u32(ref.data + sizeof(uint32_t), value);
     }
 
-    static auto put_leaf_id(PageRef &ref, size_t index, uint32_t value) -> void
+    static void put_leaf_id(PageRef &ref, size_t index, uint32_t value)
     {
         put_u32(get_leaf_ptr(ref, index), value);
     }

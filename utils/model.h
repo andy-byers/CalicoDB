@@ -81,7 +81,7 @@ public:
 
     ~ModelDB() override;
 
-    auto check_consistency() const -> void;
+    void check_consistency() const;
 
     auto get_property(const Slice &name, void *value_out) const -> Status override
     {
@@ -112,7 +112,7 @@ class ModelCursor : public Cursor
     mutable bool m_saved;
     bool m_live = true;
 
-    auto save_position() const -> void
+    void save_position() const
     {
         if (!m_saved && m_c->is_valid()) {
             m_saved_key = m_c->key().to_string();
@@ -126,7 +126,7 @@ class ModelCursor : public Cursor
         }
     }
 
-    auto load_position() const -> void
+    void load_position() const
     {
         if (m_saved) {
             m_saved = false;
@@ -134,13 +134,13 @@ class ModelCursor : public Cursor
         }
     }
 
-    auto move_to(typename ModelStore::Tree::iterator position) const -> void
+    void move_to(typename ModelStore::Tree::iterator position) const
     {
         m_saved = false;
         m_itr = position;
     }
 
-    auto invalidate() const -> void
+    void invalidate() const
     {
         move_to(end(*m_tree));
     }
@@ -197,14 +197,14 @@ public:
         return m_saved ? m_saved_val : std::get<std::string>(m_itr->second);
     }
 
-    auto check_record() const -> void
+    void check_record() const
     {
         CHECK_TRUE(m_c->is_valid());
-        CHECK_EQ(m_c->key().to_string(), model_key());
+        CHECK_EQ(m_c->key(), model_key());
         if (m_c->is_bucket()) {
-            CHECK_EQ(m_c->value().to_string(), "");
+            CHECK_EQ(m_c->value(), "");
         } else {
-            CHECK_EQ(m_c->value().to_string(), model_value());
+            CHECK_EQ(m_c->value(), model_value());
         }
     }
 
@@ -218,28 +218,28 @@ public:
         return m_c->value();
     }
 
-    auto find(const Slice &key) -> void override
+    void find(const Slice &key) override
     {
         m_saved = false;
         m_itr = m_tree->find(key.to_string());
         m_c->find(key);
     }
 
-    auto seek(const Slice &key) -> void override
+    void seek(const Slice &key) override
     {
         m_saved = false;
         m_itr = m_tree->lower_bound(key.to_string());
         m_c->seek(key);
     }
 
-    auto seek_first() -> void override
+    void seek_first() override
     {
         m_saved = false;
         m_itr = begin(*m_tree);
         m_c->seek_first();
     }
 
-    auto seek_last() -> void override
+    void seek_last() override
     {
         m_saved = false;
         m_itr = end(*m_tree);
@@ -249,7 +249,7 @@ public:
         m_c->seek_last();
     }
 
-    auto next() -> void override
+    void next() override
     {
         CHECK_TRUE(m_c->is_valid());
         const auto was_saved = m_saved;
@@ -262,7 +262,7 @@ public:
         m_c->next();
     }
 
-    auto previous() -> void override
+    void previous() override
     {
         CHECK_TRUE(m_c->is_valid());
         load_position();
@@ -276,7 +276,7 @@ public:
         m_c->previous();
     }
 
-    auto validate() const -> void
+    void validate() const
     {
         reinterpret_cast<const CursorImpl *>(m_c)->TEST_check_state();
     }
@@ -305,12 +305,12 @@ class ModelBucket : public Bucket
         return m;
     }
 
-    auto close() -> void;
+    void close();
     auto open_model_bucket(std::string name, Bucket &b, ModelStore &store) const -> Bucket *;
     auto open_model_cursor(Cursor &c, ModelStore::Tree &tree) const -> Cursor *;
-    auto save_cursors(Cursor *exclude = nullptr) const -> void;
-    auto use_bucket(Bucket *exclude = nullptr) const -> void;
-    auto deactivate(ModelStore::Tree &drop_data) -> void;
+    void save_cursors(Cursor *exclude = nullptr) const;
+    void use_bucket(Bucket *exclude = nullptr) const;
+    void deactivate(ModelStore::Tree &drop_data);
 
 public:
     explicit ModelBucket(std::string name, ModelStore &store, Bucket &b, BucketList &parent_buckets, BucketList::iterator backref)
@@ -355,7 +355,7 @@ class ModelTx : public Tx
     mutable ModelStore m_temp;
     Tx *const m_tx;
 
-    auto check_consistency(const ModelStore::Tree &tree, const Bucket &bucket) const -> void;
+    void check_consistency(const ModelStore::Tree &tree, const Bucket &bucket) const;
 
 public:
     explicit ModelTx(ModelStore &store, Tx &tx)
@@ -393,7 +393,7 @@ public:
         return s;
     }
 
-    auto check_consistency() const -> void;
+    void check_consistency() const;
 };
 
 } // namespace calicodb

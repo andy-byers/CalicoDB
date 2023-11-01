@@ -48,7 +48,7 @@ public:
                 return m_target->sync();
             }
 
-            auto shm_barrier() -> void override
+            void shm_barrier() override
             {
                 if (m_env->rand() % 8 == 0) {
                     m_env->sleep(100);
@@ -135,7 +135,7 @@ protected:
         EXPECT_OK(configure(kReplaceAllocator, DebugAllocator::config()));
     }
 
-    auto TearDown() -> void override
+    void TearDown() override
     {
         m_env.reset();
         TEST_LOG << "Sanity check: " << m_sanity_check << '\n';
@@ -176,7 +176,7 @@ protected:
         size_t num_records = 0;
         bool checkpoint_reset = false;
     };
-    auto run_consistency_test_instance(const ConsistencyTestParameters &param) -> void
+    void run_consistency_test_instance(const ConsistencyTestParameters &param)
     {
         TEST_LOG << "ConcurrencyTests.Consistency*\n";
         remove_calicodb_files(m_filename);
@@ -247,7 +247,7 @@ protected:
     // 0000013, for example). Each write connection should see monotonically increasing
     // values, since writers are serialized. Read connections might see the same value multiple
     // times in-a-row, but the values should never decrease.
-    auto run_consistency_test(const ConsistencyTestParameters &param) -> void
+    void run_consistency_test(const ConsistencyTestParameters &param)
     {
         uint64_t highest_wait_count = 0;
         for (size_t i = 1; i <= 12; i += 4) {
@@ -274,7 +274,7 @@ protected:
         return DB::open(opt, co.filename, co.db);
     }
 
-    static auto barrier_wait(Barrier *barrier) -> void
+    static void barrier_wait(Barrier *barrier)
     {
         if (barrier) {
             barrier->wait();
@@ -426,7 +426,7 @@ protected:
         CheckpointMode checkpoint_mode = kCheckpointPassive;
     };
 
-    auto run_checkpointer_test_instance(const CheckpointerTestParameters &param) -> void
+    void run_checkpointer_test_instance(const CheckpointerTestParameters &param)
     {
         TEST_LOG << "ConcurrencyTests.Checkpointer*\n";
         remove_calicodb_files(m_filename);
@@ -504,7 +504,7 @@ protected:
     // Similar to run_consistency_test(), except sometimes we disable sync and auto
     // checkpoint behavior in the readers and writers. Instead, we have a single
     // background thread run the checkpoints. Also, there are no barriers.
-    auto run_checkpointer_test(const CheckpointerTestParameters &param) -> void
+    void run_checkpointer_test(const CheckpointerTestParameters &param)
     {
         uint64_t highest_wait_count = 0;
         for (size_t num_iterations = 1; num_iterations < 12; num_iterations += 4) {
@@ -536,7 +536,7 @@ protected:
         size_t num_records = 0;
     };
 
-    auto run_single_writer_test_instance(const SingleWriterParameters &param) -> void
+    void run_single_writer_test_instance(const SingleWriterParameters &param)
     {
         TEST_LOG << "ConcurrencyTests.SingleWriter*\n";
         remove_calicodb_files(m_filename);
@@ -625,7 +625,7 @@ protected:
         }
     }
 
-    auto run_single_writer_test(const SingleWriterParameters &param) -> void
+    void run_single_writer_test(const SingleWriterParameters &param)
     {
         uint64_t highest_wait_count = 0;
         for (size_t num_iterations = 1; num_iterations < 12; num_iterations += 4) {
@@ -642,7 +642,7 @@ protected:
         TEST_LOG << "Highest wait count = " << highest_wait_count << '\n';
     }
 
-    auto run_destruction_test(size_t num_connections) -> void
+    void run_destruction_test(size_t num_connections)
     {
         TEST_LOG << "ConcurrencyTests.Destruction*\n";
         remove_calicodb_files(m_filename);
@@ -913,7 +913,7 @@ public:
         return db;
     }
 
-    static auto write_data(Bucket &b, const std::vector<size_t> &keys) -> void
+    static void write_data(Bucket &b, const std::vector<size_t> &keys)
     {
         auto c = test_new_cursor(b);
         for (auto k : keys) {
@@ -927,7 +927,7 @@ public:
         }
     }
 
-    static auto write_data(DB &db, const std::vector<size_t> &keys) -> void
+    static void write_data(DB &db, const std::vector<size_t> &keys)
     {
         Status s;
         do {
@@ -959,7 +959,7 @@ public:
         for (size_t i = 0; i < data.size(); ++i) {
             if (data[i] >= 0) {
                 EXPECT_EQ(c->key(), numeric_key(i));
-                EXPECT_EQ(c->value().to_string(), numeric_key(static_cast<size_t>(data[i])));
+                EXPECT_EQ(c->value(), numeric_key(static_cast<size_t>(data[i])));
                 c->next();
             }
         }
@@ -1009,7 +1009,7 @@ public:
         expect_identical_values(keys, read_data(db));
     }
 
-    static auto run_checkpoint(DB &db, CheckpointMode mode = kCheckpointRestart) -> void
+    static void run_checkpoint(DB &db, CheckpointMode mode = kCheckpointRestart)
     {
         Status s;
         do {
@@ -1019,7 +1019,7 @@ public:
     }
 
     template <class Callback>
-    static auto run_for(ssize_t millis_to_run, Callback &&cb) -> void
+    static void run_for(ssize_t millis_to_run, Callback &&cb)
     {
         using namespace std::chrono;
         using milli = milliseconds;

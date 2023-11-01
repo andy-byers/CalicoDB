@@ -41,7 +41,7 @@ auto Pager::set_page_size(uint32_t value) -> Status
     return Status::ok();
 }
 
-auto Pager::purge_page(PageRef &victim) -> void
+void Pager::purge_page(PageRef &victim)
 {
     if (victim.get_flag(PageRef::kDirty)) {
         m_dirtylist.remove(victim);
@@ -217,7 +217,7 @@ Pager::~Pager()
     }
 }
 
-auto Pager::close() -> void
+void Pager::close()
 {
     finish();
     auto s = close_wal();
@@ -346,7 +346,7 @@ auto Pager::commit() -> Status
     return s;
 }
 
-auto Pager::move_page(PageRef &page, Id destination) -> void
+void Pager::move_page(PageRef &page, Id destination)
 {
     // Caller must have called Pager::release(<page at `destination`>, Pager::kDiscard).
     CALICODB_EXPECT_EQ(m_bufmgr.query(destination), nullptr);
@@ -360,7 +360,7 @@ auto Pager::move_page(PageRef &page, Id destination) -> void
     }
 }
 
-auto Pager::undo_callback(void *arg, uint32_t key) -> void
+void Pager::undo_callback(void *arg, uint32_t key)
 {
     const Id id(key);
     if (id.is_root()) {
@@ -372,7 +372,7 @@ auto Pager::undo_callback(void *arg, uint32_t key) -> void
     }
 }
 
-auto Pager::finish() -> void
+void Pager::finish()
 {
     CALICODB_EXPECT_TRUE(assert_state());
 
@@ -396,7 +396,7 @@ auto Pager::finish() -> void
     m_mode = kOpen;
 }
 
-auto Pager::purge_pages(bool purge_all) -> void
+void Pager::purge_pages(bool purge_all)
 {
     for (auto *dirty = m_dirtylist.begin(); dirty != m_dirtylist.end();) {
         auto *save = dirty->get_page_ref();
@@ -468,7 +468,7 @@ auto Pager::flush_dirty_pages() -> Status
     return m_wal->write(pages, m_page_size, m_page_count);
 }
 
-auto Pager::set_page_count(uint32_t page_count) -> void
+void Pager::set_page_count(uint32_t page_count)
 {
     CALICODB_EXPECT_GT(page_count, 0);
     CALICODB_EXPECT_GE(m_mode, kWrite);
@@ -604,7 +604,7 @@ auto Pager::get_root() -> PageRef &
     return *m_bufmgr.root();
 }
 
-auto Pager::mark_dirty(PageRef &page) -> void
+void Pager::mark_dirty(PageRef &page)
 {
     CALICODB_EXPECT_GE(m_mode, kWrite);
     if (page.get_flag(PageRef::kDirty)) {
@@ -619,7 +619,7 @@ auto Pager::mark_dirty(PageRef &page) -> void
     }
 }
 
-auto Pager::release(PageRef *&page, ReleaseAction action) -> void
+void Pager::release(PageRef *&page, ReleaseAction action)
 {
     if (page) {
         CALICODB_EXPECT_GE(m_mode, kRead);
@@ -643,7 +643,7 @@ auto Pager::release(PageRef *&page, ReleaseAction action) -> void
     }
 }
 
-auto Pager::initialize_root() -> void
+void Pager::initialize_root()
 {
     CALICODB_EXPECT_EQ(m_mode, kWrite);
     CALICODB_EXPECT_EQ(m_page_count, 0);
@@ -717,7 +717,7 @@ auto Pager::refresh_state() -> Status
     return s;
 }
 
-auto Pager::set_status(const Status &error) const -> void
+void Pager::set_status(const Status &error) const
 {
     if (m_status->is_ok() && m_mode >= kWrite) {
         const auto is_fatal_error = error.is_io_error() ||

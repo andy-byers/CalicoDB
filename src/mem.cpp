@@ -46,7 +46,7 @@ auto Mem::reallocate(void *old_ptr, size_t new_size) -> void *
     return new_ptr;
 }
 
-auto Mem::deallocate(void *ptr) -> void
+void Mem::deallocate(void *ptr)
 {
     if (ptr) {
         s_state.mutex.lock();

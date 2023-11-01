@@ -42,6 +42,18 @@ auto numeric_key(size_t key, char padding = '0') -> std::string
     return std::string(Length - key_string.size(), padding) + key_string;
 }
 
+inline auto operator<<(std::ostream &os, const Slice &s) -> std::ostream &
+{
+    os << s.to_string();
+    return os;
+}
+
+inline auto operator<<(std::ostream &os, Id id) -> std::ostream &
+{
+    os << "Id(" << id.value << ')';
+    return os;
+}
+
 // NOTE: Member functions are not thread-safe.
 class DebugAllocator
 {
@@ -57,7 +69,7 @@ public:
     // Set a callback that is called in malloc() and realloc() with the provided `arg`.
     // If the result is nonzero, a nullptr is returned immediately, before the actual
     // allocation routine is called. Used for injecting random errors during testing.
-    static auto set_hook(Hook hook, void *arg) -> void;
+    static void set_hook(Hook hook, void *arg);
 
     // Get the total number of bytes allocated through malloc() and realloc() that have
     // not yet been passed to free()
@@ -106,7 +118,7 @@ public:
         return m_target->file_lock(mode);
     }
 
-    auto file_unlock() -> void override
+    void file_unlock() override
     {
         return m_target->file_unlock();
     }
@@ -121,12 +133,12 @@ public:
         return m_target->shm_lock(r, n, flags);
     }
 
-    auto shm_unmap(bool unlink) -> void override
+    void shm_unmap(bool unlink) override
     {
         return m_target->shm_unmap(unlink);
     }
 
-    auto shm_barrier() -> void override
+    void shm_barrier() override
     {
         return m_target->shm_barrier();
     }
@@ -193,7 +205,7 @@ auto operator<<(std::ostream &os, const Slice &slice) -> std::ostream &
 }
 
 // Print information about each database page to `os`
-auto print_database_overview(std::ostream &os, Pager &pager) -> void;
+void print_database_overview(std::ostream &os, Pager &pager);
 
 using DBPtr = std::unique_ptr<DB>;
 using TxPtr = std::unique_ptr<Tx>;
@@ -293,7 +305,7 @@ public:
     Semaphore(Semaphore &) = delete;
     void operator=(Semaphore &) = delete;
 
-    auto wait() -> void
+    void wait()
     {
         std::unique_lock lock(m_mu);
         m_cv.wait(lock, [this] {
@@ -302,7 +314,7 @@ public:
         --m_available;
     }
 
-    auto signal(size_t n = 1) -> void
+    void signal(size_t n = 1)
     {
         m_mu.lock();
         m_available += n;
@@ -330,7 +342,7 @@ public:
     void operator=(Barrier &) = delete;
 
     // Wait for m_max_count threads to call this routine
-    auto wait() -> void
+    void wait()
     {
         m_mu.lock();
         if (++m_count == m_max_count) {

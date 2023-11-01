@@ -149,13 +149,13 @@ constexpr Node::ParseCell kParsers[2] = {
     return get_u16(node.ref->data + offset + kSlotWidth);
 }
 
-auto set_next_pointer(Node &node, uint32_t offset, uint32_t value) -> void
+void set_next_pointer(Node &node, uint32_t offset, uint32_t value)
 {
     CALICODB_EXPECT_LT(value, node.total_space);
     return put_u16(node.ref->data + offset, static_cast<uint16_t>(value));
 }
 
-auto set_block_size(Node &node, uint32_t offset, uint32_t value) -> void
+void set_block_size(Node &node, uint32_t offset, uint32_t value)
 {
     CALICODB_EXPECT_GE(value, kMinBlockSize);
     CALICODB_EXPECT_LT(value, node.total_space);
@@ -271,13 +271,13 @@ auto read_bucket_root_id(const Cell &cell) -> Id
     return Id(get_u32(cell.key - sizeof(uint32_t)));
 }
 
-auto write_bucket_root_id(Cell &cell, Id root_id) -> void
+void write_bucket_root_id(Cell &cell, Id root_id)
 {
     CALICODB_EXPECT_TRUE(cell.is_bucket);
     put_u32(cell.key - sizeof(uint32_t), root_id.value);
 }
 
-auto write_bucket_root_id(char *key, const Slice &root_id) -> void
+void write_bucket_root_id(char *key, const Slice &root_id)
 {
     // root_id is already encoded. Caller must have called put_u32(ptr, val) at some
     // point, where ptr is equal to root_id.data(), and val is a 4-byte root ID.
@@ -583,7 +583,7 @@ auto Node::read_child_id(uint32_t idx) const -> Id
     return Id(get_u32(ref->data + get_ivec_slot(*this, idx)));
 }
 
-auto Node::write_child_id(uint32_t idx, Id child_id) -> void
+void Node::write_child_id(uint32_t idx, Id child_id)
 {
     CALICODB_EXPECT_FALSE(is_leaf());
     if (idx >= NodeHdr::get_cell_count(hdr())) {

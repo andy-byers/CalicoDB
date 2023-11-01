@@ -39,12 +39,12 @@ public:
     explicit AllocTests() = default;
     ~AllocTests() override = default;
 
-    auto SetUp() -> void override
+    void SetUp() override
     {
         ASSERT_EQ(DebugAllocator::bytes_used(), 0);
     }
 
-    auto TearDown() -> void override
+    void TearDown() override
     {
         ASSERT_EQ(DebugAllocator::bytes_used(), 0);
         DebugAllocator::set_limit(0);
@@ -259,7 +259,7 @@ TEST(UniquePtr, PointerWidth)
     static_assert(sizeof(UniquePtr<int, UserObjectDestructor>) == sizeof(void *));
 
     struct Destructor1 {
-        auto operator()(void *) -> void
+        void operator()(void *)
         {
         }
     };
@@ -268,7 +268,7 @@ TEST(UniquePtr, PointerWidth)
 
     struct Destructor2 {
         uint8_t u8;
-        auto operator()(void *) -> void
+        void operator()(void *)
         {
         }
     };
@@ -289,7 +289,7 @@ TEST(UniquePtr, DestructorIsCalled)
         {
         }
 
-        auto operator()(int *ptr) const -> void
+        void operator()(int *ptr) const
         {
             // Ignore calls that result in "delete nullptr".
             *count += ptr != nullptr;
@@ -398,7 +398,7 @@ TEST(Encoding, EncodingOutput)
     ASSERT_EQ(0x08, static_cast<int>(dst[7]));
 }
 
-auto append_varint(std::string *s, uint32_t v) -> void
+void append_varint(std::string *s, uint32_t v)
 {
     const auto len = varint_length(v);
     s->resize(s->size() + len);

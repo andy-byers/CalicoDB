@@ -35,7 +35,7 @@ public:
     }
 
 protected:
-    auto action(State &state) -> void override
+    void action(State &state) override
     {
         ++state.count;
         ++runs;

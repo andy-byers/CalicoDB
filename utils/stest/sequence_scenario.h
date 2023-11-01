@@ -36,7 +36,7 @@ protected:
         return scenario;
     }
 
-    auto reset_iterated() -> void override
+    void reset_iterated() override
     {
         m_scenarios.reset();
         m_done = false;

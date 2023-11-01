@@ -21,7 +21,7 @@ public:
         return 0;
     }
 
-    auto append(const char *, size_t) -> void
+    void append(const char *, size_t)
     {
     }
 };
@@ -29,7 +29,7 @@ public:
 #define CALICODB_STRING CustomString
 #include "calicodb/slice.h"
 
-auto main(int, const char *[]) -> int
+int main(int, const char *[])
 {
     CALICODB_STRING string("42", 2);
     (void)calicodb::Slice(string);

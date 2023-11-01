@@ -62,13 +62,13 @@ public:
     virtual auto start_read(bool &changed) -> Status = 0;
 
     // Unconditionally switch the WAL into "Open" mode
-    virtual auto finish_read() -> void = 0;
+    virtual void finish_read() = 0;
 
     // REQUIRES: WAL is in "Reader" mode
     virtual auto start_write() -> Status = 0;
 
     // REQUIRES: WAL is in "Writer" mode
-    virtual auto finish_write() -> void = 0;
+    virtual void finish_write() = 0;
 
     // Iterator over a set of pages that needs to be written to the WAL
     class Pages
@@ -84,8 +84,8 @@ public:
         };
 
         virtual auto value() const -> Data * = 0;
-        virtual auto next() -> void = 0;
-        virtual auto reset() -> void = 0;
+        virtual void next() = 0;
+        virtual void reset() = 0;
     };
 
     // REQUIRES: WAL is in "Reader" mode
@@ -97,7 +97,7 @@ public:
     using Rollback = void (*)(void *, uint32_t);
 
     // REQUIRES: WAL is in "Writer" mode
-    virtual auto rollback(const Rollback &hook, void *arg) -> void = 0;
+    virtual void rollback(const Rollback &hook, void *arg) = 0;
 
     // REQUIRES: WAL is in "Open" mode
     virtual auto checkpoint(CheckpointMode mode,

@@ -51,25 +51,25 @@ public:
         disable_oom_faults();
     }
 
-    auto enable_oom_faults() -> void
+    void enable_oom_faults()
     {
         DebugAllocator::set_hook(should_next_allocation_fail, this);
         m_oom_state.enabled = true;
     }
 
-    auto disable_oom_faults() -> void
+    void disable_oom_faults()
     {
         DebugAllocator::set_hook(nullptr, nullptr);
         m_oom_state.enabled = false;
     }
 
-    static auto reset_counter(CrashState &state) -> void
+    static void reset_counter(CrashState &state)
     {
         state.max_num = 0;
         state.num = 0;
     }
 
-    static auto advance_counter(CrashState &state) -> void
+    static void advance_counter(CrashState &state)
     {
         ++state.max_num;
         state.num = 0;
@@ -111,7 +111,7 @@ public:
             std::string m_backup;
             CrashEnv *m_env;
 
-            auto save_to_backup() -> void
+            void save_to_backup()
             {
                 const auto crash_state = m_env->m_syscall_state.enabled;
                 m_env->m_syscall_state.enabled = false;
@@ -124,7 +124,7 @@ public:
                 m_env->m_syscall_state.enabled = crash_state;
             }
 
-            auto load_from_backup() -> void
+            void load_from_backup()
             {
                 const auto crash_state = m_env->m_syscall_state.enabled;
                 m_env->m_syscall_state.enabled = false;
@@ -372,15 +372,15 @@ protected:
         return s;
     }
 
-    auto run_until_completion(const std::function<Status()> &task) -> void
+    void run_until_completion(const std::function<Status()> &task)
     {
         CrashEnv::reset_counter(m_env->m_oom_state);
         CrashEnv::reset_counter(m_env->m_syscall_state);
         Status s;
-        do {
+        while (is_injected_fault(s = task())) {
             CrashEnv::advance_counter(m_env->m_oom_state);
             CrashEnv::advance_counter(m_env->m_syscall_state);
-        } while (is_injected_fault(s = task()));
+        }
 
         ASSERT_OK(s);
         CrashEnv::reset_counter(m_env->m_oom_state);
@@ -467,7 +467,7 @@ protected:
         bool test_sync_mode = false;
         bool in_memory = false;
     };
-    auto run_operations_test(const OperationsParameters &param) -> void
+    void run_operations_test(const OperationsParameters &param)
     {
         enum SourceLocation {
             kSrcOpen,
@@ -561,7 +561,7 @@ protected:
         FaultType fault_type = kNoFaults;
         size_t num_iterations = 1;
     };
-    auto run_open_close_test(const OpenCloseParameters &param) -> void
+    void run_open_close_test(const OpenCloseParameters &param)
     {
         TEST_LOG << "CrashTests.OpenClose_*\n";
 
@@ -603,7 +603,7 @@ protected:
     struct CursorReadParameters {
         FaultType fault_type = kNoFaults;
     };
-    auto run_cursor_read_test(const CursorReadParameters &param) -> void
+    void run_cursor_read_test(const CursorReadParameters &param)
     {
         TEST_LOG << "CrashTests.CursorRead_*\n";
 
@@ -694,7 +694,7 @@ protected:
         }
     }
 
-    auto run_cursor_modify_test(const OperationsParameters &param) -> void
+    void run_cursor_modify_test(const OperationsParameters &param)
     {
         TEST_LOG << "CrashTests.CursorModify_*\n";
 
@@ -792,6 +792,50 @@ protected:
             return DB::destroy(options, m_filename.c_str());
         });
     }
+
+    auto run_file_io_oom_test()
+    {
+        set_fault_injection_type(kOOMFaults);
+
+        run_until_completion([this] {
+            File *file = nullptr;
+            auto s = m_env->new_file(m_filename.c_str(), Env::kCreate | Env::kReadWrite, file);
+            if (s.is_ok()) {
+                s = file->write(0, "Hello, world!");
+            }
+            if (s.is_ok()) {
+                s = file->sync();
+            }
+            if (s.is_ok()) {
+                char buffer[13 + 1] = {};
+                s = file->read_exact(0, 13, buffer);
+                if (s.is_ok()) {
+                    EXPECT_EQ(Slice(buffer), "Hello, world!");
+                }
+            }
+            delete file;
+            return s;
+        });
+    }
+
+    auto run_logger_oom_test()
+    {
+        set_fault_injection_type(kOOMFaults);
+
+        run_until_completion([this] {
+            Logger *logger;
+            const auto logger_name = m_filename + "-log";
+            auto s = m_env->new_logger(logger_name.c_str(), logger);
+            if (s.is_ok()) {
+                log(logger, "%s", std::string(1, 'a').c_str());
+                log(logger, "%s", std::string(10, 'b').c_str());
+                log(logger, "%s", std::string(100, 'c').c_str());
+                log(logger, "%s", std::string(1'000, 'd').c_str());
+                delete logger;
+            }
+            return s;
+        });
+    }
 };
 
 TEST_F(CrashTests, Operations_None)
@@ -886,6 +930,16 @@ TEST_F(CrashTests, Destruction_OOM)
     run_destruction_test(kOOMFaults);
 }
 
+TEST_F(CrashTests, FileIO_OOM)
+{
+    run_file_io_oom_test();
+}
+
+TEST_F(CrashTests, Logger_OOM)
+{
+    run_logger_oom_test();
+}
+
 class DataLossEnv : public EnvWrapper
 {
     class DataLossFile : public FileWrapper
@@ -909,13 +963,13 @@ class DataLossEnv : public EnvWrapper
             delete m_target;
         }
 
-        auto initialize_buffer(uint64_t file_size) -> void
+        void initialize_buffer(uint64_t file_size)
         {
             m_env->m_buffer.resize(file_size);
             EXPECT_OK(FileWrapper::read(0, file_size, m_env->m_buffer.data(), nullptr));
         }
 
-        auto perform_writes() -> void
+        void perform_writes()
         {
             std::uniform_int_distribution dist;
             const auto buffer = m_env->m_buffer;
@@ -1144,7 +1198,7 @@ public:
         delete m_env;
     }
 
-    auto reopen_db(bool clear = false) -> void
+    void reopen_db(bool clear = false)
     {
         delete m_db;
         m_db = nullptr;
@@ -1327,9 +1381,27 @@ static auto should_next_syscall_fail() -> bool
     if (s_syscall_state.num++ >= s_syscall_state.max) {
         s_syscall_state.num = 0;
         ++s_syscall_state.max;
+        errno = EIO;
         return true;
     }
     return false;
+}
+
+static auto faulty_fcntl(int a, int b, ...) -> int
+{
+    int rc = 0;
+    std::va_list args;
+    va_start(args, b);
+    if (should_next_syscall_fail()) {
+        if (b == F_SETLK && F_UNLCK == va_arg(args, struct flock *)->l_type) {
+            return 0; // F_UNLCK isn't checked
+        }
+        rc = -1;
+    } else if (b == F_GETLK) {
+        rc = ::fcntl(a, b, va_arg(args, struct flock *));
+    }
+    va_end(args);
+    return rc;
 }
 
 static SyscallConfig kFaultySyscalls[] = {
@@ -1348,9 +1420,7 @@ static SyscallConfig kFaultySyscalls[] = {
     {"ftruncate", reinterpret_cast<void *>(+[](int a, off_t b) -> int {
          return should_next_syscall_fail() ? -1 : ::ftruncate(a, b);
      })},
-    {"fcntl", reinterpret_cast<void *>(+[](int a, int b, int c /* should be ... */) -> int {
-         return should_next_syscall_fail() ? -1 : ::fcntl(a, b, c);
-     })},
+    {"fcntl", reinterpret_cast<void *>(faulty_fcntl)},
     {"lseek", reinterpret_cast<void *>(+[](int a, off_t b, int c) -> off_t {
          return should_next_syscall_fail() ? -1 : ::lseek(a, b, c);
      })},
@@ -1402,18 +1472,12 @@ public:
     ~SyscallCrashTests() override = default;
 
     template <class Setup, class Run>
-    auto run_test(Setup &&setup, Run &&run) -> void
+    void run_test(Setup &&setup, Run &&run)
     {
         setup();
         ASSERT_OK(run()); // Sanity check: no faults
 
         for (size_t i = 0; i < kNumSyscalls; ++i) {
-            if (i == 5) {
-                // TODO: fcntl(int, ...) is called multiple different ways.
-                //       The lambda above doesn't work properly. Skip for now.
-                TEST_LOG << "SyscallCrashTests: Skipping fcntl(int, ...)...\n";
-                continue;
-            }
             s_syscall_state = {};
 
             Status s;

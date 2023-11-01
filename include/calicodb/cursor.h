@@ -68,36 +68,36 @@ public:
     // If the record is found, then c->is_valid() will return true on the cursor c,
     // otherwise, it will return false. If an error is encountered, c->status() will
     // return a non-OK status describing what happened.
-    virtual auto find(const Slice &key) -> void = 0;
+    virtual void find(const Slice &key) = 0;
 
     // Move the cursor to the first record with a key that is greater than or equal
     // to the given `key`
     // Invalidates the cursor if a read fails or the key is out of range.
-    virtual auto seek(const Slice &key) -> void = 0;
+    virtual void seek(const Slice &key) = 0;
 
     // Move the cursor to the record with the lowest-ranked key in the bucket
     // Invalidates the cursor if a read fails or the database is empty. On success,
     // the cursor is left on the leftmost key in the bucket. Calling previous() on
     // such a cursor will cause it to be invalidated.
-    virtual auto seek_first() -> void = 0;
+    virtual void seek_first() = 0;
 
     // Move the cursor to the record with the highest-ranked key in the bucket
     // Invalidates the cursor if a read fails or the database is empty. On success,
     // the cursor is left on the rightmost key in the bucket. Calling next() on such
     // a cursor will cause it to be invalidated.
-    virtual auto seek_last() -> void = 0;
+    virtual void seek_last() = 0;
 
     // Move the cursor to the next record
     // REQUIRES: is_valid()
     // The cursor is invalidated if it was on the last record, i.e. at the same
     // position as a cursor that just had seek_last() called on it.
-    virtual auto next() -> void = 0;
+    virtual void next() = 0;
 
     // Move the cursor to the previous record
     // REQUIRES: is_valid()
     // The cursor is invalidated if it was on the first record, i.e. at the same
     // position as a cursor that just had seek_first() called on it.
-    virtual auto previous() -> void = 0;
+    virtual void previous() = 0;
 };
 
 } // namespace calicodb

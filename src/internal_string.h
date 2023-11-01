@@ -86,7 +86,7 @@ public:
         return m_vec[idx];
     }
 
-    auto clear() -> void
+    void clear()
     {
         m_vec.clear();
     }

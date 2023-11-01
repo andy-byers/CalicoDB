@@ -45,10 +45,10 @@ public:
     virtual auto full_filename(const char *filename, char *out, size_t out_size) -> Status = 0;
     virtual auto remove_file(const char *filename) -> Status = 0;
 
-    virtual auto srand(unsigned seed) -> void = 0;
+    virtual void srand(unsigned seed) = 0;
     virtual auto rand() -> unsigned = 0;
 
-    virtual auto sleep(unsigned micros) -> void = 0;
+    virtual void sleep(unsigned micros) = 0;
 };
 
 // Available modes for the file locking API
@@ -104,7 +104,7 @@ public:
     virtual auto file_lock(FileLockMode mode) -> Status = 0;
 
     // Release a lock on the file
-    virtual auto file_unlock() -> void = 0;
+    virtual void file_unlock() = 0;
 
     // Size of a shared memory region, i.e. the number of bytes pointed to by `out`
     // when `shm_map()` returns successfully.
@@ -113,8 +113,8 @@ public:
 
     virtual auto shm_map(size_t r, bool extend, volatile void *&out) -> Status = 0;
     virtual auto shm_lock(size_t r, size_t n, ShmLockFlag flags) -> Status = 0;
-    virtual auto shm_unmap(bool unlink) -> void = 0;
-    virtual auto shm_barrier() -> void = 0;
+    virtual void shm_unmap(bool unlink) = 0;
+    virtual void shm_barrier() = 0;
 };
 
 class Logger
@@ -126,11 +126,15 @@ public:
     Logger(Logger &) = delete;
     void operator=(Logger &) = delete;
 
-    virtual auto append(const Slice &msg) -> void = 0;
-    virtual auto logv(const char *fmt, std::va_list args) -> void = 0;
+    virtual void append(const Slice &msg) = 0;
+    virtual void logv(const char *fmt, std::va_list args) = 0;
 };
 
-auto log(Logger *sink, const char *fmt, ...) -> void;
+void log(Logger *sink, const char *fmt, ...)
+#if defined(__GNUC__) || defined(__clang__)
+    __attribute((__format__(__printf__, 2, 3)))
+#endif
+    ;
 
 class EnvWrapper : public Env
 {
@@ -149,10 +153,10 @@ public:
     auto full_filename(const char *filename, char *out, size_t out_size) -> Status override;
     auto remove_file(const char *filename) -> Status override;
 
-    auto srand(unsigned seed) -> void override;
+    void srand(unsigned seed) override;
     auto rand() -> unsigned override;
 
-    auto sleep(unsigned micros) -> void override;
+    void sleep(unsigned micros) override;
 
 private:
     Env *m_target;

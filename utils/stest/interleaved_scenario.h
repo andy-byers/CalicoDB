@@ -28,7 +28,7 @@ public:
     }
 
 protected:
-    auto reset_scenario() -> void override
+    void reset_scenario() override
     {
         m_scenarios.reset();
     }

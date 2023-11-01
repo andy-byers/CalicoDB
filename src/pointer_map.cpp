@@ -67,7 +67,7 @@ auto PointerMap::read_entry(Pager &pager, Id page_id, Entry &entry_out) -> Statu
     return s;
 }
 
-auto PointerMap::write_entry(Pager &pager, Id page_id, Entry entry, Status &s) -> void
+void PointerMap::write_entry(Pager &pager, Id page_id, Entry entry, Status &s)
 {
     if (!s.is_ok()) {
         return;

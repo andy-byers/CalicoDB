@@ -30,8 +30,8 @@ public:
     ~WalPagesImpl() override;
 
     auto value() const -> Data * override;
-    auto next() -> void override;
-    auto reset() -> void override;
+    void next() override;
+    void reset() override;
 };
 
 } // namespace calicodb

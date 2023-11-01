@@ -61,24 +61,24 @@ public:
     }
 
     static auto open(const Parameters &param, Pager *&out) -> Status;
-    auto close() -> void;
+    void close();
 
     auto lock_reader(bool *changed_out) -> Status;
     auto begin_writer() -> Status;
     auto commit() -> Status;
-    auto finish() -> void;
+    void finish();
 
     auto checkpoint(CheckpointMode mode, CheckpointInfo *info_out) -> Status;
     auto auto_checkpoint(size_t frame_limit) -> Status;
 
     auto allocate(PageRef *&page_out) -> Status;
     auto acquire(Id page_id, PageRef *&page_out) -> Status;
-    auto mark_dirty(PageRef &page) -> void;
+    void mark_dirty(PageRef &page);
     [[nodiscard]] auto get_root() -> PageRef &;
 
-    auto set_page_count(uint32_t page_count) -> void;
+    void set_page_count(uint32_t page_count);
     auto assert_state() const -> bool;
-    auto purge_pages(bool purge_all) -> void;
+    void purge_pages(bool purge_all);
 
     // Action to take when a page is released
     // Actions other than kKeep exist as optimizations. Using kKeep for every
@@ -104,10 +104,10 @@ public:
 
     // Release a referenced page back to the pager
     // This routine is a NOOP if page was already released.
-    auto release(PageRef *&page, ReleaseAction action = kKeep) -> void;
+    void release(PageRef *&page, ReleaseAction action = kKeep);
 
     auto get_unused_page(PageRef *&page_out) -> Status;
-    auto move_page(PageRef &page, Id location) -> void;
+    void move_page(PageRef &page, Id location);
 
     auto status() const -> Status
     {
@@ -119,13 +119,13 @@ public:
         return m_scratch.data();
     }
 
-    auto set_status(const Status &error) const -> void;
+    void set_status(const Status &error) const;
 
 private:
     friend class Mem;
     explicit Pager(const Parameters &param);
 
-    auto initialize_root() -> void;
+    void initialize_root();
     auto lock_reader_impl(bool refresh) -> Status;
     auto get_page_count(uint32_t &value_out) -> Status;
     auto open_wal_if_present() -> Status;
@@ -137,9 +137,9 @@ private:
     auto read_page_from_file(PageRef &ref, size_t *size_out) const -> Status;
     auto ensure_available_buffer() -> Status;
     auto flush_dirty_pages() -> Status;
-    auto purge_page(PageRef &victim) -> void;
+    void purge_page(PageRef &victim);
 
-    static auto undo_callback(void *arg, uint32_t id) -> void;
+    static void undo_callback(void *arg, uint32_t id);
 
     mutable Mode m_mode = kOpen;
 

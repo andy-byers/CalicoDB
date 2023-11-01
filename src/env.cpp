@@ -78,7 +78,7 @@ auto EnvWrapper::remove_file(const char *filename) -> Status
     return m_target->remove_file(filename);
 }
 
-auto EnvWrapper::srand(unsigned seed) -> void
+void EnvWrapper::srand(unsigned seed)
 {
     m_target->srand(seed);
 }
@@ -88,12 +88,12 @@ auto EnvWrapper::rand() -> unsigned
     return m_target->rand();
 }
 
-auto EnvWrapper::sleep(unsigned micros) -> void
+void EnvWrapper::sleep(unsigned micros)
 {
     m_target->sleep(micros);
 }
 
-auto log(Logger *logger, const char *fmt, ...) -> void
+void log(Logger *logger, const char *fmt, ...)
 {
     if (logger) {
         std::va_list args;

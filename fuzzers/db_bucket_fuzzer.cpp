@@ -20,7 +20,7 @@ class Fuzzer
     DB *m_db = nullptr;
     ModelStore m_store;
 
-    auto reopen_db() -> void
+    void reopen_db()
     {
         delete m_db;
         CHECK_OK(ModelDB::open(m_options, "/MemDB", m_store, m_db));
@@ -40,12 +40,12 @@ public:
         delete m_db;
     }
 
-    static auto check_bucket(Cursor &c) -> void
+    static void check_bucket(Cursor &c)
     {
         reinterpret_cast<const ModelCursor &>(c).validate();
     }
 
-    auto consume_input(FuzzedInputProvider &stream) -> void
+    void consume_input(FuzzedInputProvider &stream)
     {
         enum OperationType : char {
             kOpNext,

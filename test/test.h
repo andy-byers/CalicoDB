@@ -19,9 +19,9 @@ namespace calicodb
 {
 
 class Cursor;
-auto PrintTo(const Slice &s, std::ostream *os) -> void;
-auto PrintTo(const Status &s, std::ostream *os) -> void;
-auto PrintTo(const Cursor &c, std::ostream *os) -> void;
+void PrintTo(const Slice &s, std::ostream *os);
+void PrintTo(const Status &s, std::ostream *os);
+void PrintTo(const Cursor &c, std::ostream *os);
 
 namespace test
 {
@@ -41,8 +41,8 @@ extern std::ostream *g_logger;
 auto check_status(const char *expr, const Status &s) -> testing::AssertionResult;
 
 auto read_file_to_string(Env &env, const char *filename) -> std::string;
-auto write_string_to_file(Env &env, const char *filename, const std::string &buffer, long offset = -1) -> void;
-auto remove_calicodb_files(const std::string &db_name) -> void;
+void write_string_to_file(Env &env, const char *filename, const std::string &buffer, long offset = -1);
+void remove_calicodb_files(const std::string &db_name);
 
 } // namespace test
 

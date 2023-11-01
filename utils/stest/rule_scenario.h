@@ -28,7 +28,7 @@ protected:
         return m_done;
     }
 
-    auto reset_scenario() -> void override
+    void reset_scenario() override
     {
         m_done = false;
     }

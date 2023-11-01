@@ -55,7 +55,7 @@ protected:
         return {m_backing, size};
     }
 
-    auto test_boundary_payload(bool test_key, bool test_value) -> void
+    void test_boundary_payload(bool test_key, bool test_value)
     {
         const uint32_t key_size = test_key * kMaxLen;
         const uint32_t value_size = test_value * kMaxLen;
@@ -85,7 +85,7 @@ protected:
         }));
     }
 
-    auto test_overflow_payload(bool test_key, bool test_value) -> void
+    void test_overflow_payload(bool test_key, bool test_value)
     {
         const uint32_t key_size = test_key * (kMaxLen + 1);
         const uint32_t value_size = test_value * (kMaxLen + 1);
@@ -101,7 +101,7 @@ protected:
         }));
     }
 
-    auto test_32_bit_overflow(bool auto_checkpoint) -> void
+    void test_32_bit_overflow(bool auto_checkpoint)
     {
         // Keep the number of iterations low and the payload size high. Otherwise, the WAL grows
         // to be way too large, since we retain many versions of each page. Still, these settings

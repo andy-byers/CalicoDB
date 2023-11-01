@@ -15,7 +15,7 @@ namespace calicodb
 
 struct ObjectDestructor {
     template <class Object>
-    auto operator()(Object *ptr) const -> void
+    void operator()(Object *ptr) const
     {
         Mem::delete_object(ptr);
     }
@@ -23,14 +23,14 @@ struct ObjectDestructor {
 
 struct UserObjectDestructor {
     template <class Object>
-    auto operator()(Object *ptr) const -> void
+    void operator()(Object *ptr) const
     {
         delete ptr;
     }
 };
 
 struct DefaultDestructor {
-    auto operator()(void *ptr) const -> void
+    void operator()(void *ptr) const
     {
         Mem::deallocate(ptr);
     }
@@ -126,7 +126,7 @@ public:
         return m_ptr;
     }
 
-    auto reset(Object *ptr = nullptr) -> void
+    void reset(Object *ptr = nullptr)
     {
         destroy();
         m_ptr = ptr;

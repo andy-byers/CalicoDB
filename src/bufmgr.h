@@ -50,22 +50,22 @@ public:
 
     [[nodiscard]] auto next_victim() -> PageRef *;
     [[nodiscard]] auto allocate(size_t page_size) -> PageRef *;
-    auto register_page(PageRef &ref) -> void;
-    auto shrink_to_fit() -> void;
+    void register_page(PageRef &ref);
+    void shrink_to_fit();
 
     // Erase a specific entry, if it exists
     // This is the only way that an entry can be removed from the cache. Eviction
     // works by first calling "next_victim()" and then erasing the returned entry.
     // Returns true if the entry was erased, false otherwise.
-    auto erase(PageRef &ref) -> void;
-    auto purge() -> void;
+    void erase(PageRef &ref);
+    void purge();
 
     // Increment the reference count associated with a page reference
-    auto ref(PageRef &ref) -> void;
+    void ref(PageRef &ref);
 
     // Decrement the reference count associated with a page reference
     // REQUIRES: Refcount of `ref` is not already 0
-    auto unref(PageRef &ref) -> void;
+    void unref(PageRef &ref);
 
     // Return the number of live page references
     [[nodiscard]] auto refsum() const -> size_t
@@ -80,7 +80,7 @@ public:
     Bufmgr(Bufmgr &) = delete;
 
 private:
-    auto free_buffers() -> void;
+    void free_buffers();
 
     // Hash table modified from LevelDB. Maps each cached page ID to a page reference:
     // a structure that contains the page contents from disk, as well as some other
@@ -103,7 +103,7 @@ private:
             Mem::deallocate(m_table);
         }
 
-        auto clear() -> void
+        void clear()
         {
             std::memset(m_table, 0, m_capacity * sizeof(PageRef *));
         }
@@ -116,7 +116,7 @@ private:
         [[nodiscard]] auto allocate(size_t min_buffers) -> int;
 
         // NOTE: PageRef with key `ref->key()` must not exist.
-        auto insert(PageRef *ref) -> void;
+        void insert(PageRef *ref);
         auto remove(uint32_t key) -> PageRef *;
 
     private:
@@ -198,7 +198,7 @@ public:
 
     [[nodiscard]] auto is_empty() const -> bool;
     auto remove(PageRef &ref) -> DirtyHdr *;
-    auto add(PageRef &ref) -> void;
+    void add(PageRef &ref);
     auto sort() -> DirtyHdr *;
 
     [[nodiscard]] auto TEST_contains(const PageRef &ref) const -> bool;

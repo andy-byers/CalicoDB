@@ -4,7 +4,7 @@
 
 #include <calicodb/env.h>
 
-auto main(int, const char *[]) -> int
+int main(int, const char *[])
 {
     (void)calicodb::default_env();
     return 0;

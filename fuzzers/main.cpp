@@ -12,7 +12,7 @@
 
 extern "C" int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size);
 
-auto main(int argc, const char *argv[]) -> int
+int main(int argc, const char *argv[])
 {
     const auto run_input = [](const auto *filename) {
         std::fprintf(stderr, "Running: %s\n", filename);

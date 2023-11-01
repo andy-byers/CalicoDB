@@ -21,10 +21,10 @@ public:
     ~Mutex();
 
     Mutex(Mutex &) = delete;
-    auto operator=(Mutex &) -> void = delete;
+    void operator=(Mutex &) = delete;
 
-    auto lock() -> void;
-    auto unlock() -> void;
+    void lock();
+    void unlock();
 
 private:
     pthread_mutex_t m_mu;

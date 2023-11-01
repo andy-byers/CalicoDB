@@ -166,7 +166,7 @@ public:
 
     ~BlockAllocatorTests() override = default;
 
-    auto reserve_for_test(uint32_t n) -> void
+    void reserve_for_test(uint32_t n)
     {
         // Make the gap large so BlockAllocator doesn't get confused.
         NodeHdr::put_cell_start(
@@ -441,13 +441,13 @@ TEST(NodeHeaderTests, ReportsInvalidNodeType)
 class CorruptedNodeTests : public NodeTests
 {
 public:
-    auto assert_corrupted_node() -> void
+    void assert_corrupted_node()
     {
         Node corrupted;
         ASSERT_NE(Node::from_existing_page(m_options, *m_node.ref, corrupted), 0);
         ASSERT_NOK(m_node.check_integrity());
     }
-    auto assert_valid_node() -> void
+    void assert_valid_node()
     {
         Node valid;
         ASSERT_EQ(Node::from_existing_page(m_options, *m_node.ref, valid), 0);
@@ -525,7 +525,7 @@ public:
     char *m_ptrs[kNumBlocks];
     uint32_t m_reset[kNumBlocks];
 
-    auto SetUp() -> void override
+    void SetUp() override
     {
         char *cell_ptrs[kNumBlocks * 2];
         uint32_t cell_sizes[kNumBlocks * 2];
