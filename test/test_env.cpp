@@ -105,7 +105,7 @@ static auto make_filename(size_t n)
     return numeric_key<10>(n);
 }
 
-static auto write_out_randomly(RandomGenerator &random, File &writer, const Slice &message) -> void
+static void write_out_randomly(RandomGenerator &random, File &writer, const Slice &message)
 {
     constexpr size_t kChunks = 20;
     ASSERT_GT(message.size(), kChunks) << "File is too small for this test";
@@ -155,7 +155,7 @@ struct EnvWithFiles final {
         }
     }
 
-    auto cleanup_files() -> void
+    void cleanup_files()
     {
         for (auto *file : files) {
             file->shm_unmap(true);
@@ -229,7 +229,7 @@ public:
         return out;
     }
 
-    auto write(size_t offset, const Slice &in) -> void
+    void write(size_t offset, const Slice &in)
     {
         const auto r1 = offset / File::kShmRegionSize;
         Slice copy(in);
@@ -265,7 +265,7 @@ public:
 
     ~FileTests() override = default;
 
-    auto test_same_inode() -> void
+    void test_same_inode()
     {
         const auto message = m_random.Generate(1'024);
         auto *original = m_helper.open_unowned_file(EnvWithFiles::kDifferentName, Env::kCreate);
@@ -344,12 +344,12 @@ protected:
         delete m_logger;
     }
 
-    auto SetUp() -> void override
+    void SetUp() override
     {
         reset();
     }
 
-    auto reset() -> void
+    void reset()
     {
         delete m_logger;
         m_logger = nullptr;
@@ -438,7 +438,7 @@ public:
         return file;
     }
 
-    auto test_sequence(bool) -> void
+    void test_sequence(bool)
     {
         auto *f = new_file(m_filename.c_str());
         ASSERT_OK(f->file_lock(kFileShared));
@@ -446,7 +446,7 @@ public:
         f->file_unlock();
     }
 
-    auto test_shared() -> void
+    void test_shared()
     {
         auto *a = new_file(m_filename.c_str());
         auto *b = new_file(m_filename.c_str());
@@ -459,7 +459,7 @@ public:
         a->file_unlock();
     }
 
-    auto test_exclusive() -> void
+    void test_exclusive()
     {
         auto *a = new_file(m_filename.c_str());
         auto *b = new_file(m_filename.c_str());
@@ -640,7 +640,7 @@ TEST_F(EnvShmTests, LockCompatibility)
     delete c;
 }
 
-static auto busy_wait_file_lock(File &file, bool is_writer) -> void
+static void busy_wait_file_lock(File &file, bool is_writer)
 {
     Status s;
     do {
@@ -661,7 +661,7 @@ static auto busy_wait_file_lock(File &file, bool is_writer) -> void
     } while (s.is_busy());
     ASSERT_OK(s);
 }
-static auto busy_wait_shm_lock(File &file, size_t r, size_t n, ShmLockFlag flags) -> void
+static void busy_wait_shm_lock(File &file, size_t r, size_t n, ShmLockFlag flags)
 {
     ASSERT_LE(r + n, File::kShmLockCount);
     for (;;) {
@@ -714,7 +714,7 @@ public:
 
     ~TempEnvTests() override = default;
 
-    auto SetUp() -> void override
+    void SetUp() override
     {
         File *file;
         ASSERT_OK(m_env->new_file("temp", Env::OpenMode(), file));
@@ -731,14 +731,14 @@ public:
         return m_random.Generate(random_size(offset));
     }
 
-    auto write_file(size_t offset, const Slice &data) -> void
+    void write_file(size_t offset, const Slice &data)
     {
         ASSERT_OK(m_file->write(offset, data));
         ASSERT_LE(offset + data.size(), m_result.size());
         std::memcpy(m_result.data() + offset, data.data(), data.size());
     }
 
-    auto check_file(size_t offset, size_t size) -> void
+    void check_file(size_t offset, size_t size)
     {
         std::fill(begin(m_buffer), end(m_buffer), '\0');
         ASSERT_LT(offset, m_buffer.size());
@@ -868,7 +868,7 @@ public:
         std::filesystem::remove_all(m_filename.c_str());
     }
 
-    auto run_test() -> void
+    void run_test()
     {
         const size_t num_readers = std::get<0>(m_options);
         const size_t num_writers = std::get<1>(m_options);
@@ -912,12 +912,12 @@ public:
             state.file);
     }
 
-    static auto close_file(State &state) -> void
+    static void close_file(State &state)
     {
         delete std::exchange(state.file, nullptr);
     }
 
-    static auto reader(State &state) -> void
+    static void reader(State &state)
     {
         ASSERT_OK(open_file(state));
         busy_wait_file_lock(*state.file, false);
@@ -925,7 +925,7 @@ public:
         close_file(state);
     }
 
-    static auto writer(State &state) -> void
+    static void writer(State &state)
     {
         ASSERT_OK(open_file(state));
         busy_wait_file_lock(*state.file, true);
@@ -972,7 +972,7 @@ public:
         return file;
     }
 
-    auto run_test(size_t readers, size_t writers) -> void
+    void run_test(size_t readers, size_t writers)
     {
         auto *keep_open = open_file(*m_env, m_filename.c_str(), true);
         ASSERT_NE(keep_open, nullptr);
@@ -1059,7 +1059,7 @@ public:
         std::filesystem::remove_all(m_shared.filename.c_str());
     }
 
-    auto SetUp() -> void override
+    void SetUp() override
     {
         ASSERT_OK(default_env().new_file(
             m_shared.filename.c_str(),
@@ -1069,13 +1069,13 @@ public:
         ASSERT_OK(m_file->shm_map(0, true, ptr));
     }
 
-    auto TearDown() -> void override
+    void TearDown() override
     {
         m_file->shm_unmap(true);
         delete std::exchange(m_file, nullptr);
     }
 
-    auto run_test() -> void
+    void run_test()
     {
         static constexpr size_t kNumRounds = 256;
         const auto num_threads = m_options.size();
@@ -1124,12 +1124,12 @@ public:
             state.file);
     }
 
-    static auto close_file(State &state) -> void
+    static void close_file(State &state)
     {
         delete std::exchange(state.file, nullptr);
     }
 
-    static auto reader(SharedState &shared, State &state) -> void
+    static void reader(SharedState &shared, State &state)
     {
         ASSERT_EQ(state.lock_len, 1);
         ASSERT_OK(open_file(state, shared.filename.c_str()));
@@ -1143,7 +1143,7 @@ public:
         close_file(state);
     }
 
-    static auto writer(SharedState &shared, State &state) -> void
+    static void writer(SharedState &shared, State &state)
     {
         ASSERT_OK(open_file(state, shared.filename.c_str()));
 

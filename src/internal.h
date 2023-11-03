@@ -36,7 +36,7 @@ namespace calicodb
 
 // Possibly cause the calling thread to sleep for a random length of time
 // Used to provoke timing problems in code that uses atomics.
-inline auto debug_delay_impl(Env &env) -> void
+inline void debug_delay_impl(Env &env)
 {
     if (env.rand() % 250 == 0) {
         env.sleep(env.rand() % 1'000);

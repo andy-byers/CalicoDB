@@ -85,7 +85,7 @@ public:
         return range(offset, m_size - offset);
     }
 
-    constexpr auto clear() -> void
+    constexpr void clear()
     {
         m_data = "";
         m_size = 0;

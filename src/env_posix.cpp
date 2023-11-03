@@ -107,10 +107,10 @@ public:
     [[nodiscard]] auto file_exists(const char *filename) const -> bool override;
     auto remove_file(const char *filename) -> Status override;
 
-    auto srand(unsigned seed) -> void override;
+    void srand(unsigned seed) override;
     [[nodiscard]] auto rand() -> unsigned override;
 
-    auto sleep(unsigned micros) -> void override;
+    void sleep(unsigned micros) override;
 };
 
 constexpr size_t kPathMax = 512;       // Maximum path length from SQLite.
@@ -168,7 +168,7 @@ struct ShmNode final {
     // knows it is the first connection if it can get a writer lock on the DMS
     // byte.
     [[nodiscard]] auto take_dms_lock() -> int;
-    [[nodiscard]] auto check_locks() const -> bool;
+    [[nodiscard]] [[maybe_unused]] auto check_locks() const -> bool;
 };
 
 struct UnusedFd final {
@@ -342,9 +342,9 @@ struct PathHelper {
     size_t used;
 };
 
-auto append_elements(PathHelper &path, const char *elements) -> void;
+void append_elements(PathHelper &path, const char *elements);
 
-auto append_one_element(PathHelper &path, const char *name, size_t size) -> void
+void append_one_element(PathHelper &path, const char *name, size_t size)
 {
     CALICODB_EXPECT_GT(size, 0);
     CALICODB_EXPECT_NE(name, nullptr);
@@ -400,7 +400,7 @@ auto append_one_element(PathHelper &path, const char *name, size_t size) -> void
     }
 }
 
-auto append_elements(PathHelper &path, const char *elements) -> void
+void append_elements(PathHelper &path, const char *elements)
 {
     size_t i = 0;
     size_t j = 0;
@@ -453,12 +453,12 @@ public:
     auto resize(uint64_t size) -> Status override;
     auto sync() -> Status override;
     auto file_lock(FileLockMode mode) -> Status override;
-    auto file_unlock() -> void override;
+    void file_unlock() override;
 
     auto shm_map(size_t r, bool extend, volatile void *&out) -> Status override;
     auto shm_lock(size_t r, size_t n, ShmLockFlag flags) -> Status override;
-    auto shm_unmap(bool unlink) -> void override;
-    auto shm_barrier() -> void override;
+    void shm_unmap(bool unlink) override;
+    void shm_barrier() override;
 
     auto file_lock_impl(FileLockMode mode) -> Status;
 
@@ -491,13 +491,13 @@ public:
         (void)posix_close(m_file);
     }
 
-    auto append(const Slice &msg) -> void override
+    void append(const Slice &msg) override
     {
         posix_write(m_file, msg);
     }
 
     // Modified from LevelDB.
-    auto logv(const char *fmt, std::va_list args) -> void override
+    void logv(const char *fmt, std::va_list args) override
     {
         timeval now_tv;
         std::tm now_tm;
@@ -559,7 +559,7 @@ struct PosixFs final {
         }
     }
 
-    static auto close_pending_files(INode &inode) -> void
+    static void close_pending_files(INode &inode)
     {
         // REQUIRES: Mutex "inode.mutex" is locked by the caller
         for (auto *file = inode.unused; file;) {
@@ -638,7 +638,7 @@ struct PosixFs final {
         return Status::ok();
     }
 
-    auto unref_inode(INode *&inode) -> void
+    void unref_inode(INode *&inode)
     {
         CALICODB_EXPECT_GT(inode->refcount, 0);
         if (--inode->refcount == 0) {
@@ -726,7 +726,7 @@ struct PosixFs final {
         return Status::ok();
     }
 
-    auto unref_snode(PosixShm &shm, bool unlink_if_last) const -> void
+    void unref_snode(PosixShm &shm, bool unlink_if_last) const
     {
         auto *snode = shm.snode;
         auto *inode = snode->inode;
@@ -774,7 +774,7 @@ struct PosixFs final {
     size_t mmap_scale = 0;
 } s_fs;
 
-auto seed_prng_state(uint16_t *state, uint32_t seed) -> void
+void seed_prng_state(uint16_t *state, uint32_t seed)
 {
     state[0] = 0x330E;
     std::memcpy(&state[1], &seed, sizeof(seed));
@@ -802,7 +802,7 @@ auto open_parent_dir(const char *filename, int &fd_out) -> int
     return fd_out < 0 ? -1 : 0;
 }
 
-auto sync_parent_dir(const char *filename) -> void
+void sync_parent_dir(const char *filename)
 {
     int dir;
     if (open_parent_dir(filename, dir)) {
@@ -941,7 +941,7 @@ auto PosixEnv::new_logger(const char *filename, Logger *&out) -> Status
     return s;
 }
 
-auto PosixEnv::srand(unsigned seed) -> void
+void PosixEnv::srand(unsigned seed)
 {
     seed_prng_state(m_rng, seed);
 }
@@ -951,7 +951,7 @@ auto PosixEnv::rand() -> unsigned
     return static_cast<unsigned>(nrand48(m_rng));
 }
 
-auto PosixEnv::sleep(unsigned micros) -> void
+void PosixEnv::sleep(unsigned micros)
 {
     static constexpr unsigned kMicrosPerSecond = 1'000'000;
     if (micros >= kMicrosPerSecond) {
@@ -1059,7 +1059,7 @@ auto PosixFile::sync() -> Status
     return rc ? posix_error(errno) : Status::ok();
 }
 
-auto PosixFile::shm_unmap(bool unlink) -> void
+void PosixFile::shm_unmap(bool unlink)
 {
     if (shm) {
         s_fs.unref_snode(*shm, unlink);
@@ -1157,7 +1157,7 @@ auto PosixFile::shm_lock(size_t r, size_t n, ShmLockFlag flags) -> Status
     return Status::io_error("shm is unmapped");
 }
 
-auto PosixFile::shm_barrier() -> void
+void PosixFile::shm_barrier()
 {
     CALICODB_DEBUG_DELAY(*env);
 
@@ -1395,7 +1395,7 @@ auto PosixFile::file_lock_impl(FileLockMode mode) -> Status
     return s;
 }
 
-auto PosixFile::file_unlock() -> void
+void PosixFile::file_unlock()
 {
     if (local_lock == kLockUnlocked) {
         return;

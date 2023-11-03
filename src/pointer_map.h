@@ -32,7 +32,7 @@ struct PointerMap {
     static auto read_entry(Pager &pager, Id page_id, Entry &entry_out) -> Status;
 
     // Write an entry to the pointer map.
-    static auto write_entry(Pager &pager, Id page_id, Entry entry, Status &s) -> void;
+    static void write_entry(Pager &pager, Id page_id, Entry entry, Status &s);
 };
 
 } // namespace calicodb

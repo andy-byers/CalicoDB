@@ -24,7 +24,7 @@ public:
 
     virtual ~Rule() = default;
 
-    auto apply(State &state) -> void
+    void apply(State &state)
     {
         assert(precondition(state));
         action(state);
@@ -33,7 +33,7 @@ public:
     virtual auto precondition(const State &) -> bool = 0;
 
 protected:
-    virtual auto action(State &state) -> void = 0;
+    virtual void action(State &state) = 0;
 };
 
 } // namespace stest

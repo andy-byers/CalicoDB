@@ -15,7 +15,7 @@ namespace calicodb::port
 namespace
 {
 // Call a pthread_*() function that will never fail given proper use.
-auto pthread_call(const char *name, int rc) -> void
+void pthread_call(const char *name, int rc)
 {
     if (rc) {
         std::fprintf(stderr, "%s: %s", name, strerror(errno));
@@ -31,12 +31,12 @@ Mutex::~Mutex()
     PTHREAD_CALL(pthread_mutex_destroy, &m_mu);
 }
 
-auto Mutex::lock() -> void
+void Mutex::lock()
 {
     PTHREAD_CALL(pthread_mutex_lock, &m_mu);
 }
 
-auto Mutex::unlock() -> void
+void Mutex::unlock()
 {
     PTHREAD_CALL(pthread_mutex_unlock, &m_mu);
 }

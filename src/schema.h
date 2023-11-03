@@ -32,7 +32,7 @@ public:
         return *m_pager;
     }
 
-    auto use_tree(Tree *tree) -> void;
+    void use_tree(Tree *tree);
     auto create_tree(Id parent_id, Id &root_id_out) -> Status;
     auto open_tree(Id root_id) -> Tree *;
 
@@ -51,15 +51,15 @@ public:
     // process is continued. b is no longer open, so its pages are put on the
     // freelist, and drop_tree() is called on the s*.
     auto drop_tree(Id root_id) -> Status;
-    auto close_trees() -> void;
+    void close_trees();
     auto find_open_tree(Id root_id) -> Tree *;
     auto vacuum() -> Status;
 
-    auto TEST_validate() const -> void;
+    void TEST_validate() const;
 
 private:
     template <class Action>
-    auto map_trees(bool include_main, Action &&action) const -> void
+    void map_trees(bool include_main, Action &&action) const
     {
         auto *t = &m_trees;
         do {

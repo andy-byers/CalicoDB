@@ -101,7 +101,7 @@ struct DatabaseState {
         return select_random_bucket_callback(true);
     }
 
-    auto open_bucket() -> void
+    void open_bucket()
     {
         check_status(kOKMask);
         auto b = bucket_selector(false);
@@ -115,7 +115,7 @@ struct DatabaseState {
         }
     }
 
-    auto create_bucket() -> void
+    void create_bucket()
     {
         check_status(kOKMask);
         const auto b = bucket_selector(false);
@@ -127,7 +127,7 @@ struct DatabaseState {
         }
     }
 
-    auto close_bucket() -> void
+    void close_bucket()
     {
         check_status(kOKMask);
         if (const auto b = bucket_selector(true)) {
@@ -136,7 +136,7 @@ struct DatabaseState {
         }
     }
 
-    auto drop_bucket() -> void
+    void drop_bucket()
     {
         check_status(kOKMask);
         if (const auto b = bucket_selector(true)) {
@@ -148,7 +148,7 @@ struct DatabaseState {
         }
     }
 
-    auto write_records(BucketSelection &selected_bucket) -> void
+    void write_records(BucketSelection &selected_bucket)
     {
         check_status(kOKMask);
         if (!selected_bucket) {
@@ -162,7 +162,7 @@ struct DatabaseState {
         }
     }
 
-    auto modify_records(BucketSelection &selected_bucket) -> void
+    void modify_records(BucketSelection &selected_bucket)
     {
         check_status(kOKMask);
         if (selected_bucket) {
@@ -203,7 +203,7 @@ struct DatabaseState {
         return c.is_valid();
     }
 
-    auto read_records(const BucketSelection &selected_bucket) -> void
+    void read_records(const BucketSelection &selected_bucket)
     {
         check_status(kOKMask);
         if (!selected_bucket) {
@@ -218,7 +218,7 @@ struct DatabaseState {
         }
     }
 
-    auto erase_records(BucketSelection &selected_bucket) -> void
+    void erase_records(BucketSelection &selected_bucket)
     {
         check_status(kOKMask);
         if (!selected_bucket) {
@@ -237,7 +237,7 @@ struct DatabaseState {
         }
     }
 
-    auto check_status(uint32_t mask) const -> void
+    void check_status(uint32_t mask) const
     {
         ASSERT_EQ(mask, mask & (1 << s.code())) << s.message();
         if (tx) {
@@ -255,13 +255,13 @@ struct DatabaseState {
         return has_readable_tx() && state >= kWritable;
     }
 
-    auto open_db() -> void
+    void open_db()
     {
         db_opt.create_if_missing = true;
         s = ModelDB::open(db_opt, filename.c_str(), model_store, db);
     }
 
-    auto close_db() -> void
+    void close_db()
     {
         check_status(error_mask);
         ASSERT_EQ(state, kNone);
@@ -271,7 +271,7 @@ struct DatabaseState {
         db = nullptr;
     }
 
-    auto start_readonly_tx() -> void
+    void start_readonly_tx()
     {
         CALICODB_EXPECT_NE(db, nullptr);
         CALICODB_EXPECT_EQ(tx, nullptr);
@@ -282,7 +282,7 @@ struct DatabaseState {
         }
     }
 
-    auto start_read_write_tx() -> void
+    void start_read_write_tx()
     {
         CALICODB_EXPECT_NE(db, nullptr);
         CALICODB_EXPECT_EQ(tx, nullptr);
@@ -293,7 +293,7 @@ struct DatabaseState {
         }
     }
 
-    auto finish_tx() -> void
+    void finish_tx()
     {
         check_status(error_mask);
         ASSERT_NE(state, kNone);
@@ -306,7 +306,7 @@ struct DatabaseState {
         tx = nullptr;
     }
 
-    auto close_all_buckets() -> void
+    void close_all_buckets()
     {
         for (auto &b : buckets) {
             b.bucket.reset();
@@ -331,7 +331,7 @@ public:
     }
 
 protected:
-    auto action(DatabaseState &state) -> void override
+    void action(DatabaseState &state) override
     {
         state.open_db();
     }
@@ -353,7 +353,7 @@ public:
     }
 
 protected:
-    auto action(DatabaseState &state) -> void override
+    void action(DatabaseState &state) override
     {
         state.close_db();
     }
@@ -375,7 +375,7 @@ public:
     }
 
 protected:
-    auto action(DatabaseState &state) -> void override
+    void action(DatabaseState &state) override
     {
         state.start_readonly_tx();
     }
@@ -397,7 +397,7 @@ public:
     }
 
 protected:
-    auto action(DatabaseState &state) -> void override
+    void action(DatabaseState &state) override
     {
         state.start_read_write_tx();
     }
@@ -419,7 +419,7 @@ public:
     }
 
 protected:
-    auto action(DatabaseState &state) -> void override
+    void action(DatabaseState &state) override
     {
         state.finish_tx();
     }
@@ -441,7 +441,7 @@ public:
     }
 
 protected:
-    auto action(DatabaseState &state) -> void override
+    void action(DatabaseState &state) override
     {
         state.create_bucket();
     }
@@ -463,7 +463,7 @@ public:
     }
 
 protected:
-    auto action(DatabaseState &state) -> void override
+    void action(DatabaseState &state) override
     {
         state.open_bucket();
     }
@@ -485,7 +485,7 @@ public:
     }
 
 protected:
-    auto action(DatabaseState &state) -> void override
+    void action(DatabaseState &state) override
     {
         state.close_bucket();
     }
@@ -507,7 +507,7 @@ public:
     }
 
 protected:
-    auto action(DatabaseState &state) -> void override
+    void action(DatabaseState &state) override
     {
         state.drop_bucket();
     }
@@ -529,7 +529,7 @@ public:
     }
 
 protected:
-    auto action(DatabaseState &state) -> void override
+    void action(DatabaseState &state) override
     {
         if (auto b = state.select_bucket()) {
             state.read_records(b);
@@ -560,7 +560,7 @@ public:
     }
 
 protected:
-    auto action(DatabaseState &state) -> void override
+    void action(DatabaseState &state) override
     {
         if (auto b = state.select_bucket()) {
             if constexpr (Type == ModType::kWriteRecords) {
@@ -590,7 +590,7 @@ public:
     }
 
 protected:
-    auto action(DatabaseState &state) -> void override
+    void action(DatabaseState &state) override
     {
         state.check_status(DatabaseState::kOKMask);
         state.s = state.tx->vacuum();
@@ -613,7 +613,7 @@ public:
     }
 
 protected:
-    auto action(DatabaseState &state) -> void override
+    void action(DatabaseState &state) override
     {
         state.check_status(DatabaseState::kOKMask);
         reinterpret_cast<const ModelDB *>(state.db)->check_consistency();
@@ -764,7 +764,7 @@ protected:
         remove_calicodb_files(m_state.filename);
     }
 
-    auto TearDown() -> void override
+    void TearDown() override
     {
         ASSERT_EQ(m_state.db, nullptr);
     }

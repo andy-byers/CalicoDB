@@ -31,6 +31,7 @@ public:
         env.srand(42);
         m_options.env = &env;
         m_options.page_size = kMinPageSize;
+        m_options.create_if_missing = true;
         CHECK_OK(default_env().new_logger("/tmp/format_log", m_options.info_log));
     }
 
@@ -39,7 +40,7 @@ public:
         delete m_options.info_log;
     }
 
-    auto consume_input(const Slice &data) -> void
+    void consume_input(const Slice &data)
     {
         // Write the fuzzer input to a file.
         File *file;

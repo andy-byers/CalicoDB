@@ -87,14 +87,14 @@ public:
         return m_data;
     }
 
-    auto reset() -> void
+    void reset()
     {
         Mem::deallocate(m_data);
         m_data = nullptr;
         m_size = 0;
     }
 
-    auto reset(const RawParts &parts) -> void
+    void reset(const RawParts &parts)
     {
         CALICODB_EXPECT_EQ(!parts.data, !parts.size);
         Mem::deallocate(m_data);

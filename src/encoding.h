@@ -53,14 +53,14 @@ inline auto get_u64(const Slice &slice) -> uint64_t
     return get_u64(slice.data());
 }
 
-inline auto put_u16(char *ptr, uint16_t value) -> void
+inline void put_u16(char *ptr, uint16_t value)
 {
     auto *buf = reinterpret_cast<uint8_t *>(ptr);
     buf[0] = static_cast<uint8_t>(value);
     buf[1] = static_cast<uint8_t>(value >> 8);
 }
 
-inline auto put_u32(char *ptr, uint32_t value) -> void
+inline void put_u32(char *ptr, uint32_t value)
 {
     auto *buf = reinterpret_cast<uint8_t *>(ptr);
     buf[0] = static_cast<uint8_t>(value);
@@ -69,7 +69,7 @@ inline auto put_u32(char *ptr, uint32_t value) -> void
     buf[3] = static_cast<uint8_t>(value >> 24);
 }
 
-inline auto put_u64(char *ptr, uint64_t value) -> void
+inline void put_u64(char *ptr, uint64_t value)
 {
     auto *buf = reinterpret_cast<uint8_t *>(ptr);
     buf[0] = static_cast<uint8_t>(value);

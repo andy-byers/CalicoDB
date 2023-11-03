@@ -36,10 +36,10 @@ public:
     [[nodiscard]] auto file_exists(const char *filename) const -> bool override;
     auto remove_file(const char *filename) -> Status override;
 
-    auto srand(unsigned seed) -> void override;
+    void srand(unsigned seed) override;
     [[nodiscard]] auto rand() -> unsigned override;
 
-    auto sleep(unsigned) -> void override {}
+    void sleep(unsigned) override {}
 
 protected:
     friend class FakeFile;
@@ -75,9 +75,9 @@ public:
     auto file_lock(FileLockMode) -> Status override { return Status::ok(); }
     auto shm_map(size_t r, bool extend, volatile void *&out) -> Status override;
     auto shm_lock(size_t, size_t, ShmLockFlag) -> Status override { return Status::ok(); }
-    auto shm_unmap(bool unlink) -> void override;
-    auto shm_barrier() -> void override {}
-    auto file_unlock() -> void override {}
+    void shm_unmap(bool unlink) override;
+    void shm_barrier() override {}
+    void file_unlock() override {}
 
     [[nodiscard]] auto env() -> FakeEnv &
     {

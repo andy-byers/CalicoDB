@@ -56,6 +56,7 @@ public:
     {
         return append(Slice(&c, 1));
     }
+
     auto append_format(const char *fmt, ...) -> StringBuilder &;
     auto append_format_va(const char *fmt, std::va_list args) -> StringBuilder &;
     auto append_escaped(const Slice &s) -> StringBuilder &;
@@ -63,9 +64,9 @@ public:
     [[nodiscard]] auto build(String &string_out) -> int;
 };
 
+[[nodiscard]] auto append_format_string(String &target, const char *fmt, ...) -> int;
 [[nodiscard]] auto append_strings(String &target, const Slice &s, const Slice &t = "") -> int;
 [[nodiscard]] auto append_escaped_string(String &target, const Slice &s) -> int;
-[[nodiscard]] auto append_format_string(String &target, const char *fmt, ...) -> int;
 [[nodiscard]] auto append_format_string_va(String &target, const char *fmt, std::va_list args) -> int;
 auto consume_decimal_number(Slice &data, uint64_t *val) -> bool;
 

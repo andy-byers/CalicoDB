@@ -77,7 +77,7 @@ auto FakeFile::shm_map(size_t r, bool, volatile void *&out) -> Status
     return Status::ok();
 }
 
-auto FakeFile::shm_unmap(bool unlink) -> void
+void FakeFile::shm_unmap(bool unlink)
 {
     if (unlink) {
         m_shm.clear();
@@ -129,7 +129,7 @@ auto FakeEnv::file_exists(const char *filename) const -> bool
     return false;
 }
 
-auto FakeEnv::srand(unsigned seed) -> void
+void FakeEnv::srand(unsigned seed)
 {
     ::srand(seed);
 }

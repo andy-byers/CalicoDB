@@ -36,7 +36,7 @@ public:
     auto erase(const Slice &key) -> Status override;
     auto erase(Cursor &c) -> Status override;
 
-    auto TEST_validate() const -> void;
+    void TEST_validate() const;
 
 private:
     auto create_bucket_impl(const Slice &key, bool error_if_exists, Bucket **b_out) -> Status;

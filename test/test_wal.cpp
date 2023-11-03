@@ -68,7 +68,7 @@ public:
         std::filesystem::remove_all(m_filename);
     }
 
-    auto SetUp() -> void override
+    void SetUp() override
     {
         const WalOptionsExtra param = {
             {&default_env(),
@@ -81,7 +81,7 @@ public:
         std::tie(m_env, m_wal, m_db_file) = GetParam()(param, m_filename.c_str());
     }
 
-    auto rollback() -> void
+    void rollback()
     {
         m_wal->rollback(
             [](auto *object, auto page_id) {
@@ -193,7 +193,7 @@ public:
         return Status::ok();
     }
 
-    auto expect_missing(Id id) const -> void
+    void expect_missing(Id id) const
     {
         char buffer[TEST_PAGE_SIZE];
 

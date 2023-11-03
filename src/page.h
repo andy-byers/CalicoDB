@@ -65,7 +65,7 @@ struct PageRef {
         return ref;
     }
 
-    static auto init(PageRef &ref, char *page) -> void
+    static void init(PageRef &ref, char *page)
     {
         IntrusiveList::initialize(ref);
         IntrusiveList::initialize(ref.dirty_hdr);
@@ -83,7 +83,7 @@ struct PageRef {
         };
     }
 
-    static auto free(PageRef *ref) -> void
+    static void free(PageRef *ref)
     {
         Mem::deallocate(ref);
     }
@@ -92,11 +92,11 @@ struct PageRef {
     {
         return flag & f;
     }
-    auto set_flag(Flag f) -> void
+    void set_flag(Flag f)
     {
         flag = static_cast<Flag>(flag | f);
     }
-    auto clear_flag(Flag f) -> void
+    void clear_flag(Flag f)
     {
         flag = static_cast<Flag>(flag & ~f);
     }

@@ -17,7 +17,7 @@ namespace
 {
 
 template <class T, class V>
-constexpr auto clip_to_range(T &t, V min, V max) -> void
+constexpr void clip_to_range(T &t, V min, V max)
 {
     if (static_cast<V>(t) > max) {
         t = max;
@@ -67,13 +67,13 @@ auto DB::open(const Options &options, const char *filename, DB *&db) -> Status
             log(sanitized.info_log,
                 "warning: ignoring options.env object @ %p "
                 "(custom Env must not be used with temp database)",
-                sanitized.env);
+                static_cast<void *>(sanitized.env));
         }
         if (sanitized.wal) {
             log(sanitized.info_log,
                 "warning: ignoring options.wal object @ %p "
                 "(custom Wal must not be used with temp database)",
-                sanitized.wal);
+                static_cast<void *>(sanitized.wal));
             // Created in DBImpl::open().
             sanitized.wal = nullptr;
         }

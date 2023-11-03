@@ -29,12 +29,12 @@ protected:
         return m_steps < m_bound;
     }
 
-    auto next_rule_conditional(const Rule<State> *next_rule) -> void override
+    void next_rule_conditional(const Rule<State> *next_rule) override
     {
         m_steps += next_rule != nullptr;
     }
 
-    auto reset_conditional() -> void override
+    void reset_conditional() override
     {
         m_steps = 0;
     }

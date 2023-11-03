@@ -124,7 +124,7 @@ public:
         return std::string(size, c);
     }
 
-    auto open() -> void
+    void open()
     {
         EXPECT_OK(m_pager->lock_reader(nullptr));
         EXPECT_OK(m_pager->begin_writer());
@@ -132,7 +132,7 @@ public:
         m_c = new (std::nothrow) CursorImpl(*m_tree);
     }
 
-    auto close() const -> void
+    void close() const
     {
         delete m_c;
         m_c = nullptr;
@@ -141,7 +141,7 @@ public:
         delete m_tree;
     }
 
-    auto validate() const -> void
+    void validate() const
     {
         m_tree->deactivate_cursors(nullptr);
         ASSERT_OK(m_tree->check_integrity());
@@ -157,12 +157,12 @@ class TreeTests
 public:
     ~TreeTests() override = default;
 
-    auto SetUp() -> void override
+    void SetUp() override
     {
         open();
     }
 
-    auto TearDown() -> void override
+    void TearDown() override
     {
         close();
     }
@@ -542,11 +542,11 @@ class TreeSanityChecks
       public testing::TestWithParam<uint32_t>
 {
 public:
-    auto SetUp() -> void override
+    void SetUp() override
     {
         open();
     }
-    auto TearDown() -> void override
+    void TearDown() override
     {
         close();
     }
@@ -643,17 +643,17 @@ class RemoteComparisonTests
       public testing::TestWithParam<uint32_t>
 {
 public:
-    auto SetUp() -> void override
+    void SetUp() override
     {
         open();
     }
 
-    auto TearDown() -> void override
+    void TearDown() override
     {
         close();
     }
 
-    auto random_write(size_t k) -> void
+    void random_write(size_t k)
     {
         // The part of the key necessary to determine ordering relationships may be located on
         // an overflow page.
@@ -663,7 +663,7 @@ public:
         m_keys.push_back(std::move(key));
     }
 
-    auto check_records() -> void
+    void check_records()
     {
         for (const auto &key : m_keys) {
             m_c->find(key);
@@ -726,7 +726,7 @@ protected:
         m_schema->close_trees();
         delete m_schema;
     }
-    auto SetUp() -> void override
+    void SetUp() override
     {
         open();
         m_schema = new Schema(*m_pager, m_stat);
@@ -961,13 +961,13 @@ class MultiCursorTests : public TreeTests
 protected:
     std::vector<CursorImpl *> m_cursors;
 
-    auto SetUp() -> void override
+    void SetUp() override
     {
         TreeTests::SetUp();
         init_tree(*this, kInitLongValues);
     }
 
-    auto TearDown() -> void override
+    void TearDown() override
     {
         while (!m_cursors.empty()) {
             del_cursor(0);
@@ -981,7 +981,7 @@ protected:
         return m_cursors.back();
     }
 
-    auto del_cursor(size_t idx) -> void
+    void del_cursor(size_t idx)
     {
         delete m_cursors.at(idx);
         m_cursors.erase(begin(m_cursors) + static_cast<std::ptrdiff_t>(idx));
@@ -1252,7 +1252,7 @@ public:
 
     ~MultiTreeTests() override = default;
 
-    auto SetUp() -> void override
+    void SetUp() override
     {
         TreeTests::SetUp();
         m_schema = std::make_unique<Schema>(
@@ -1263,7 +1263,7 @@ public:
             m_schema->main_tree());
     }
 
-    auto TearDown() -> void override
+    void TearDown() override
     {
         multi_tree.clear();
         m_schema->close_trees();
@@ -1379,7 +1379,7 @@ public:
         multi_tree.erase(child_tid);
     }
 
-    auto check_roots(size_t num_roots) -> void
+    void check_roots(size_t num_roots)
     {
         std::set<Id> roots;
         for (const auto &[name, tree] : multi_tree) {
@@ -1833,11 +1833,11 @@ public:
     static constexpr size_t kValueSizes[] = {10, 100, 500, TEST_PAGE_SIZE};
     ~RebalanceTests() override = default;
 
-    auto SetUp() -> void override
+    void SetUp() override
     {
         open();
     }
-    auto TearDown() -> void override
+    void TearDown() override
     {
         close();
     }
@@ -1852,7 +1852,7 @@ public:
         }
     };
 
-    auto run(const std::vector<size_t> &size_idx) -> void
+    void run(const std::vector<size_t> &size_idx)
     {
         std::vector<RecordInfo> info;
         info.reserve(size_idx.size());
@@ -1983,16 +1983,16 @@ class CursorModificationTests
 public:
     ~CursorModificationTests() override = default;
 
-    auto SetUp() -> void override
+    void SetUp() override
     {
         open();
     }
-    auto TearDown() -> void override
+    void TearDown() override
     {
         close();
     }
 
-    auto test_sequential_overwrite(size_t size_step, bool forward) -> void
+    void test_sequential_overwrite(size_t size_step, bool forward)
     {
         for (size_t i = 0; i < kInitialRecordCount; ++i) {
             ASSERT_OK(m_tree->insert(tree_cursor_cast(*m_c), numeric_key(i), "", false));
@@ -2381,18 +2381,18 @@ public:
     {
     }
 
-    auto SetUp() -> void override
+    void SetUp() override
     {
         TreeTests::SetUp();
     }
 
-    auto shuffle_order() -> void
+    void shuffle_order()
     {
         std::shuffle(begin(m_ordering), end(m_ordering), m_rng);
     }
 
     static constexpr size_t kFreelistLen = TEST_PAGE_SIZE * 5;
-    auto populate_freelist(bool shuffle) -> void
+    void populate_freelist(bool shuffle)
     {
         PageRef *page;
         for (size_t i = 0; i < kFreelistLen; ++i) {
@@ -2520,7 +2520,7 @@ public:
 
     ~VacuumTests() override = default;
 
-    auto SetUp() -> void override
+    void SetUp() override
     {
         MultiTreeTests::SetUp();
         m_root = m_tree;
@@ -2530,7 +2530,7 @@ public:
         m_c = static_cast<CursorImpl *>(multi_tree.at(1).c.get());
     }
 
-    auto TearDown() -> void override
+    void TearDown() override
     {
         m_tree = m_root;
         m_c = m_root_c;

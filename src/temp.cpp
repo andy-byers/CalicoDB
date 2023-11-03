@@ -150,9 +150,9 @@ public:
                 return Status::not_supported();
             }
 
-            auto shm_unmap(bool) -> void override {}
-            auto shm_barrier() -> void override {}
-            auto file_unlock() -> void override {}
+            void shm_unmap(bool) override {}
+            void shm_barrier() override {}
+            void file_unlock() override {}
         };
 
         file_out = new (std::nothrow) TempFile(m_file);
@@ -174,7 +174,7 @@ public:
                Slice(m_filename.c_str(), m_filename.size()) == Slice(filename);
     }
 
-    auto srand(unsigned seed) -> void override
+    void srand(unsigned seed) override
     {
         ::srand(seed);
     }
@@ -186,7 +186,7 @@ public:
         return 0;
     }
 
-    auto sleep(unsigned micros) -> void override
+    void sleep(unsigned micros) override
     {
         default_env().sleep(micros);
     }
@@ -340,7 +340,7 @@ public:
         return Status::ok();
     }
 
-    auto rollback(const Rollback &hook, void *object) -> void override
+    void rollback(const Rollback &hook, void *object) override
     {
         // This routine will call undo() on frames in a different order than the normal WAL
         // class. This shouldn't make a difference to the pager (the only caller).
@@ -350,12 +350,12 @@ public:
         });
     }
 
-    auto finish_write() -> void override
+    void finish_write() override
     {
         m_table.clear();
     }
 
-    auto finish_read() -> void override
+    void finish_read() override
     {
         CALICODB_EXPECT_EQ(m_table.occupied, 0);
     }
@@ -504,7 +504,7 @@ private:
             return 0;
         }
 
-        auto clear() -> void
+        void clear()
         {
             for_each([this](auto *&page) {
                 Mem::deallocate(page);

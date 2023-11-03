@@ -34,7 +34,7 @@ auto FileHdr::check_db_support(const char *root) -> Status
     return check_page_size(FileHdr::get_page_size(root));
 }
 
-auto FileHdr::make_supported_db(char *root, size_t page_size) -> void
+void FileHdr::make_supported_db(char *root, size_t page_size)
 {
     // Initialize the file header.
     std::memcpy(root, kFmtString, sizeof(kFmtString));

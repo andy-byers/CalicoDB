@@ -25,7 +25,7 @@ ModelDB::~ModelDB()
     delete m_db;
 }
 
-auto ModelDB::check_consistency() const -> void
+void ModelDB::check_consistency() const
 {
     reinterpret_cast<const DBImpl *>(m_db)->TEST_pager().assert_state();
 }
@@ -55,7 +55,7 @@ ModelTx::~ModelTx()
     delete m_tx;
 }
 
-auto ModelTx::check_consistency() const -> void
+void ModelTx::check_consistency() const
 {
     for (const auto &[name, subtree_or_value] : m_temp.tree) {
         if (std::holds_alternative<ModelStore>(subtree_or_value)) {
@@ -68,7 +68,7 @@ auto ModelTx::check_consistency() const -> void
     }
 }
 
-auto ModelTx::check_consistency(const ModelStore::Tree &tree, const Bucket &bucket) const -> void
+void ModelTx::check_consistency(const ModelStore::Tree &tree, const Bucket &bucket) const
 {
     std::set<std::string> copy_keys;
     std::transform(begin(tree), end(tree), inserter(copy_keys, begin(copy_keys)), [](auto &entry) {
@@ -100,7 +100,7 @@ ModelBucket::~ModelBucket()
     }
 }
 
-auto ModelBucket::close() -> void
+void ModelBucket::close()
 {
     if (m_parent_buckets) {
         m_parent_buckets->erase(m_backref);
@@ -133,7 +133,7 @@ auto ModelBucket::open_model_cursor(Cursor &c, ModelStore::Tree &tree) const -> 
     return m_cursors.front();
 }
 
-auto ModelBucket::deactivate(ModelStore::Tree &drop_data) -> void
+void ModelBucket::deactivate(ModelStore::Tree &drop_data)
 {
     for (auto *c : m_cursors) {
         c->invalidate();
@@ -221,15 +221,15 @@ auto ModelBucket::drop_bucket(const Slice &name) -> Status
     return s;
 }
 
-auto ModelBucket::open_bucket(const Slice &name, Bucket *&b_out) const -> Status
+auto ModelBucket::open_bucket(const Slice &key, Bucket *&b_out) const -> Status
 {
-    auto name_copy = name.to_string();
-    auto s = m_b->open_bucket(name, b_out);
+    auto key_copy = key.to_string();
+    auto s = m_b->open_bucket(key, b_out);
     if (s.is_ok()) {
-        auto itr = m_temp->find(name.to_string());
+        auto itr = m_temp->find(key_copy);
         CHECK_TRUE(itr != end(*m_temp));
         CHECK_TRUE(std::holds_alternative<ModelStore>(itr->second));
-        b_out = open_model_bucket(std::move(name_copy), *b_out,
+        b_out = open_model_bucket(std::move(key_copy), *b_out,
                                   std::get<ModelStore>(itr->second));
     } else {
         CHECK_EQ(b_out, nullptr);
@@ -300,7 +300,7 @@ auto ModelBucket::erase(Cursor &c) -> Status
     return s;
 }
 
-auto ModelBucket::save_cursors(Cursor *exclude) const -> void
+void ModelBucket::save_cursors(Cursor *exclude) const
 {
     for (auto *c : m_cursors) {
         if (c != exclude) {
@@ -309,7 +309,7 @@ auto ModelBucket::save_cursors(Cursor *exclude) const -> void
     }
 }
 
-auto ModelBucket::use_bucket(Bucket *exclude) const -> void
+void ModelBucket::use_bucket(Bucket *exclude) const
 {
     if (exclude != this) {
         save_cursors(nullptr);
