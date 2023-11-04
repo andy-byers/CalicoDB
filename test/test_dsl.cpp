@@ -882,35 +882,3 @@ TEST_F(DSLWriterTests, IntegersAsReals)
 }
 
 } // namespace calicodb::test
-
-#include <filesystem>
-#include <fstream>
-TEST(SpeedTest, XYZ)
-{
-    using namespace calicodb;
-    AllocatorConfig config = {
-        std::malloc,
-        std::realloc,
-        std::free,
-    };
-    ASSERT_OK(configure(kReplaceAllocator, &config));
-    size_t total_bytes = 0;
-    for (int idx = 0; idx < 100; ++idx) {
-        std::string base = "/Users/andy-byers/CLionProjects/CalicoDB/data";
-        for (const auto &itr : std::filesystem::directory_iterator(base)) {
-            std::ifstream ifs(itr.path());
-            ASSERT_TRUE(ifs.is_open());
-            ifs.seekg(0, std::ios::end);
-            const auto sz = ifs.tellg();
-            std::string data(static_cast<size_t>(sz), '\0');
-            ifs.seekg(0, std::ios::beg);
-            ifs.read(data.data(), sz);
-
-            DSLReader reader;
-            ASSERT_OK(reader.read(data, nullptr));
-            total_bytes += data.size();
-        }
-    }
-    std::cerr << total_bytes << " bytes parsed\n";
-    ASSERT_OK(configure(kRestoreAllocator, nullptr));
-}
