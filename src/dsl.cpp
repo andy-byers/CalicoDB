@@ -197,7 +197,13 @@ private:
 
     [[nodiscard]] auto peek() const -> char
     {
-        return is_empty() ? '\0' : m_itr[-m_unget];
+        if (m_unget) {
+            return m_itr[-1];
+        } else if (is_empty()) {
+            return '\0';
+        } else {
+            return m_itr[0];
+        }
     }
 
     auto get() -> char

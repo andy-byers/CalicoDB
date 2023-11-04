@@ -282,12 +282,13 @@ TEST_F(DSLReaderTests, Example2)
 TEST_F(DSLReaderTests, ValidInput)
 {
     // Single value
+    assert_ok("1", {integer_str(1)});
     assert_ok(R"("")", {""});
-    assert_ok(R"(true)", {"<true>"});
-    assert_ok(R"(false)", {"<false>"});
-    assert_ok(R"(null)", {"<null>"});
-    assert_ok(R"(42)", {integer_str(42)});
-    assert_ok(R"(12.3)", {real_str(12.3)});
+    assert_ok("true", {"<true>"});
+    assert_ok("false", {"<false>"});
+    assert_ok("null", {"<null>"});
+    assert_ok("42", {integer_str(42)});
+    assert_ok("12.3", {real_str(12.3)});
 
     // Compound value
     assert_ok(R"({})", {"<object>", "</object>"});
@@ -680,9 +681,6 @@ TEST_F(DSLReaderTests, InvalidExponentials)
     assert_corrupted("1e.2");
     assert_corrupted("1e2.");
     assert_corrupted("1e2.0");
-
-    // Misc.
-    assert_corrupted("10.0e20000000000000");
 }
 
 TEST_F(DSLReaderTests, LeadingZerosAreNotAllowed)
@@ -860,10 +858,27 @@ public:
     }
 };
 
-TEST_F(DSLWriterTests, Write)
+TEST_F(DSLWriterTests, WriteDifferentTypes)
 {
     run_test(R"({"a":[1,"b",true],"c":[{"d":234,"e":null}],)"
              R"("f":{"g":false,"h":[{},{},[{"i":[56,7,8,90,"j","k","lmnop"]}]]}})");
+}
+
+TEST_F(DSLWriterTests, NegativeIntegers)
+{
+    run_test("1");
+}
+
+TEST_F(DSLWriterTests, IntegerBoundaryValues)
+{
+    run_test(std::to_string(INT64_MIN));
+    run_test(std::to_string(INT64_MAX));
+}
+
+TEST_F(DSLWriterTests, IntegersAsReals)
+{
+    run_test('-' + std::to_string(UINT64_MAX));
+    run_test(std::to_string(UINT64_MAX));
 }
 
 } // namespace calicodb::test

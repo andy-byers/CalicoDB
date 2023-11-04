@@ -198,11 +198,14 @@ public:
     auto write_integer(int64_t value) -> DSLWriter &
     {
         char buffer[32];
-        const auto n = std::snprintf(buffer, sizeof(buffer), "%ld", value);
-        CALICODB_EXPECT_GE(n, 0); // snprintf() shouldn't fail
+        auto *p = buffer;
+        do {
+            *p++ = static_cast<char>(value % 10 + '0');
+            value /= 10;
+        } while (value);
 
         start_next_write();
-        write_to_stream(Slice(buffer, n));
+        write_to_stream(Slice(buffer, static_cast<size_t>(p - buffer)));
         advance_index();
         return *this;
     }
