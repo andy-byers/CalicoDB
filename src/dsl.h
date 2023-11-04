@@ -198,7 +198,7 @@ public:
     auto write_integer(int64_t value) -> DSLWriter &
     {
         char buffer[32];
-        const auto n = std::snprintf(buffer, sizeof(buffer), "%lld", value);
+        const auto n = std::snprintf(buffer, sizeof(buffer), "%ld", value);
         CALICODB_EXPECT_GE(n, 0); // snprintf() shouldn't fail
 
         start_next_write();
