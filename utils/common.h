@@ -190,6 +190,11 @@ public:
         std::uniform_int_distribution<size_t> dist(t_min, t_max);
         return dist(m_rng);
     }
+
+    auto Rng() -> Engine &
+    {
+        return m_rng;
+    }
 };
 
 template <class T>

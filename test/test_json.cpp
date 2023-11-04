@@ -4,142 +4,168 @@
 
 #include "calicodb/config.h"
 #include "common.h"
-#include "dsl.h"
+#include "json.h"
 #include "test.h"
 #include <iomanip>
 
 namespace calicodb::test
 {
 
-class DSLReaderTests : public testing::Test
+using namespace json;
+
+static auto integer_str(int64_t i) -> std::string
+{
+    return "<integer=" + std::to_string(i) + '>';
+}
+
+static auto real_str(double r) -> std::string
+{
+    return "<real=" + std::to_string(r) + '>';
+}
+
+class TestHandler : public Handler
 {
 public:
-    std::vector<std::string> m_records;
-    std::string m_current;
-    uint32_t m_open_objects = 0;
-    uint32_t m_closed_objects = 0;
-    uint32_t m_open_arrays = 0;
-    uint32_t m_closed_arrays = 0;
+    std::vector<std::string> records;
+    std::string current;
+    uint32_t open_objects = 0;
+    uint32_t closed_objects = 0;
+    uint32_t open_arrays = 0;
+    uint32_t closed_arrays = 0;
 
-    ~DSLReaderTests() override = default;
+    explicit TestHandler() = default;
+    ~TestHandler() override = default;
 
-    static auto integer_str(int64_t i) -> std::string
+    [[nodiscard]] auto accept_key(const Slice &value) -> bool override
     {
-        return "<integer=" + std::to_string(i) + '>';
+        current = value.to_string() + ':';
+        return true;
     }
 
-    static auto real_str(double r) -> std::string
+    [[nodiscard]] auto accept_string(const Slice &value) -> bool override
     {
-        return "<real=" + std::to_string(r) + '>';
+        records.push_back(current + value.to_string());
+        current.clear();
+        return true;
     }
 
-    auto register_actions(DSLReader &reader)
+    [[nodiscard]] auto accept_integer(int64_t value) -> bool override
     {
-        m_records.clear();
-        m_open_objects = 0;
-        m_closed_objects = 0;
+        records.push_back(current + integer_str(value));
+        current.clear();
+        return true;
+    }
 
-        reader.register_action(kEventBeginObject, [](auto *self, const auto *) {
-            auto *test = static_cast<DSLReaderTests *>(self);
-            ++test->m_open_objects;
-            test->m_records.push_back(test->m_current + "<object>");
-            test->m_current.clear();
-        });
-        reader.register_action(kEventEndObject, [](auto *self, const auto *) {
-            auto *test = static_cast<DSLReaderTests *>(self);
-            if (!test->m_current.empty()) {
-                test->m_records.push_back(test->m_current);
-                test->m_current.clear();
-            }
-            test->m_records.emplace_back("</object>");
-            ++test->m_closed_objects;
-        });
-        reader.register_action(kEventBeginArray, [](auto *self, const auto *) {
-            auto *test = static_cast<DSLReaderTests *>(self);
-            ++test->m_open_arrays;
-            test->m_records.push_back(test->m_current + "<array>");
-            test->m_current.clear();
-        });
-        reader.register_action(kEventEndArray, [](auto *self, const auto *) {
-            auto *test = static_cast<DSLReaderTests *>(self);
-            if (!test->m_current.empty()) {
-                test->m_records.push_back(test->m_current);
-                test->m_current.clear();
-            }
-            test->m_records.emplace_back("</array>");
-            ++test->m_closed_arrays;
-        });
-        reader.register_action(kEventKey, [](auto *self, const auto *output) {
-            static_cast<DSLReaderTests *>(self)
-                ->m_current = output->string.to_string() + ':';
-        });
-        reader.register_action(kEventValueString, [](auto *self, const auto *output) {
-            auto *test = static_cast<DSLReaderTests *>(self);
-            test->m_records.push_back(test->m_current + output->string.to_string());
-            test->m_current.clear();
-        });
-        reader.register_action(kEventValueInteger, [](auto *self, const auto *output) {
-            auto *test = static_cast<DSLReaderTests *>(self);
-            test->m_records.push_back(test->m_current + integer_str(output->integer));
-            test->m_current.clear();
-        });
-        reader.register_action(kEventValueReal, [](auto *self, const auto *output) {
-            auto *test = static_cast<DSLReaderTests *>(self);
-            test->m_records.push_back(test->m_current + real_str(output->real));
-            test->m_current.clear();
-        });
-        reader.register_action(kEventValueNull, [](auto *self, const auto *output) {
-            auto *test = static_cast<DSLReaderTests *>(self);
-            ASSERT_EQ(output->null, nullptr);
-            test->m_records.push_back(test->m_current + "<null>");
-            test->m_current.clear();
-        });
-        reader.register_action(kEventValueBoolean, [](auto *self, const auto *output) {
-            auto *test = static_cast<DSLReaderTests *>(self);
-            test->m_records.push_back(test->m_current + (output->boolean ? "<true>" : "<false>"));
-            test->m_current.clear();
-        });
+    [[nodiscard]] auto accept_real(double value) -> bool override
+    {
+        records.push_back(current + real_str(value));
+        current.clear();
+        return true;
+    }
+
+    [[nodiscard]] auto accept_boolean(bool value) -> bool override
+    {
+        records.push_back(current + (value ? "<true>" : "<false>"));
+        current.clear();
+        return true;
+    }
+
+    [[nodiscard]] auto accept_null() -> bool override
+    {
+        records.push_back(current + "<null>");
+        current.clear();
+        return true;
+    }
+
+    [[nodiscard]] auto begin_object() -> bool override
+    {
+        ++open_objects;
+        records.push_back(current + "<object>");
+        current.clear();
+        return true;
+    }
+
+    [[nodiscard]] auto end_object() -> bool override
+    {
+        if (!current.empty()) {
+            records.push_back(current);
+            current.clear();
+        }
+        records.emplace_back("</object>");
+        ++closed_objects;
+        return true;
+    }
+
+    [[nodiscard]] auto begin_array() -> bool override
+    {
+        ++open_arrays;
+        records.push_back(current + "<array>");
+        current.clear();
+        return true;
+    }
+
+    [[nodiscard]] auto end_array() -> bool override
+    {
+        if (!current.empty()) {
+            records.push_back(current);
+            current.clear();
+        }
+        records.emplace_back("</array>");
+        ++closed_arrays;
+        return true;
+    }
+};
+
+class ReaderTests : public testing::Test
+{
+public:
+    TestHandler m_handler;
+
+    ~ReaderTests() override = default;
+
+    auto reset_test_state()
+    {
+        m_handler.records.clear();
+        m_handler.current.clear();
+        m_handler.open_objects = 0;
+        m_handler.closed_objects = 0;
+        m_handler.open_arrays = 0;
+        m_handler.closed_arrays = 0;
     }
 
     auto run_example_test(const std::vector<std::string> &target, size_t num_objects, size_t num_arrays, const Slice &input)
     {
-        DSLReader reader;
-        register_actions(reader);
-        ASSERT_OK(reader.read(input, this));
-        ASSERT_EQ(m_records, target);
-        ASSERT_EQ(m_open_objects, num_objects);
-        ASSERT_EQ(m_closed_objects, num_objects);
-        ASSERT_EQ(m_open_arrays, num_arrays);
-        ASSERT_EQ(m_closed_arrays, num_arrays);
+        reset_test_state();
+        Reader reader(m_handler);
+        ASSERT_OK(reader.read(input));
+        ASSERT_EQ(m_handler.records, target);
+        ASSERT_EQ(m_handler.open_objects, num_objects);
+        ASSERT_EQ(m_handler.closed_objects, num_objects);
+        ASSERT_EQ(m_handler.open_arrays, num_arrays);
+        ASSERT_EQ(m_handler.closed_arrays, num_arrays);
     }
 
     auto assert_ok(const Slice &input, const std::vector<std::string> &target)
     {
-        DSLReader reader;
-        register_actions(reader);
-        ASSERT_OK(reader.read(input, this));
-        ASSERT_EQ(m_open_objects, m_closed_objects);
-        ASSERT_EQ(m_open_arrays, m_closed_arrays);
-        ASSERT_EQ(m_records, target);
+        reset_test_state();
+        Reader reader(m_handler);
+        ASSERT_OK(reader.read(input));
+        ASSERT_EQ(m_handler.open_objects, m_handler.closed_objects);
+        ASSERT_EQ(m_handler.open_arrays, m_handler.closed_arrays);
+        ASSERT_EQ(m_handler.records, target);
     }
 
     auto assert_corrupted(const Slice &input)
     {
-        DSLReader reader;
-        register_actions(reader);
-        const auto s = reader.read(input, this);
+        reset_test_state();
+        Reader reader(m_handler);
+        const auto s = reader.read(input);
         ASSERT_TRUE(s.is_corruption()) << input.to_string();
     }
 };
 
-TEST_F(DSLReaderTests, MissingEvents)
-{
-    DSLReader reader;
-    ASSERT_OK(reader.read("[1,true,null]", this));
-}
-
 // Just objects and strings
-TEST_F(DSLReaderTests, Example1)
+TEST_F(ReaderTests, Example1)
 {
     const std::vector<std::string> target = {
         "<object>", // Toplevel bucket
@@ -217,7 +243,7 @@ static const std::vector<std::string> s_example_target_2 = {
     "id:0001",
     "type:donut",
     "name:Cake",
-    "ppu:" + DSLReaderTests::real_str(0.55),
+    "ppu:" + real_str(0.55),
     "batters:<object>",
     "batter:<array>",
     "<object>",
@@ -271,7 +297,7 @@ static const std::vector<std::string> s_example_target_2 = {
     "</object>",
     "</array>"};
 
-TEST_F(DSLReaderTests, Example2)
+TEST_F(ReaderTests, Example2)
 {
 
     // Example 5 from https://opensource.adobe.com/Spry/samples/data_region/JSONDataSetSample.html,
@@ -279,7 +305,7 @@ TEST_F(DSLReaderTests, Example2)
     run_example_test(s_example_target_2, 13, 3, kExample2);
 }
 
-TEST_F(DSLReaderTests, ValidInput)
+TEST_F(ReaderTests, ValidInput)
 {
     // Single value
     assert_ok("1", {integer_str(1)});
@@ -305,7 +331,7 @@ TEST_F(DSLReaderTests, ValidInput)
     assert_ok(R"(["v"])", {"<array>", "v", "</array>"});
 }
 
-TEST_F(DSLReaderTests, OnlyAllowsSingleValue)
+TEST_F(ReaderTests, OnlyAllowsSingleValue)
 {
     assert_corrupted(R"(0, 1)");
     assert_corrupted(R"([], {})");
@@ -316,7 +342,7 @@ TEST_F(DSLReaderTests, OnlyAllowsSingleValue)
     assert_corrupted(R"({}, [0, 1])");
 }
 
-TEST_F(DSLReaderTests, TrailingCommasAreNotAllowed)
+TEST_F(ReaderTests, TrailingCommasAreNotAllowed)
 {
     // Single value
     assert_corrupted(R"("",)");
@@ -337,7 +363,7 @@ TEST_F(DSLReaderTests, TrailingCommasAreNotAllowed)
     assert_corrupted(R"(["v1",2,])");
 }
 
-TEST_F(DSLReaderTests, HandlesMissingQuotes)
+TEST_F(ReaderTests, HandlesMissingQuotes)
 {
     assert_corrupted(R"({"k:"v"})");
     assert_corrupted(R"({k":"v"})");
@@ -347,7 +373,7 @@ TEST_F(DSLReaderTests, HandlesMissingQuotes)
     assert_corrupted(R"([v"])");
 }
 
-TEST_F(DSLReaderTests, HandlesMissingSeparators)
+TEST_F(ReaderTests, HandlesMissingSeparators)
 {
     assert_corrupted(R"({"k""v"})");
     assert_corrupted(R"({"k1":"v1""k2":2})");
@@ -359,7 +385,7 @@ TEST_F(DSLReaderTests, HandlesMissingSeparators)
     assert_corrupted(R"([1,2"3"])");
 }
 
-TEST_F(DSLReaderTests, HandlesExcessiveNesting)
+TEST_F(ReaderTests, HandlesExcessiveNesting)
 {
     std::string input;
     for (int i = 0; i < 50'000; ++i) {
@@ -370,7 +396,7 @@ TEST_F(DSLReaderTests, HandlesExcessiveNesting)
     assert_corrupted(input);
 }
 
-TEST_F(DSLReaderTests, InvalidInput1)
+TEST_F(ReaderTests, InvalidInput1)
 {
     assert_corrupted(R"()");
     assert_corrupted(R"( )");
@@ -384,7 +410,7 @@ TEST_F(DSLReaderTests, InvalidInput1)
     assert_corrupted(R"(a)");
 }
 
-TEST_F(DSLReaderTests, InvalidInput2)
+TEST_F(ReaderTests, InvalidInput2)
 {
     assert_corrupted(R"(,[])");
     assert_corrupted(R"(,{})");
@@ -394,7 +420,7 @@ TEST_F(DSLReaderTests, InvalidInput2)
     assert_corrupted(R"({"k": "v",})");
 }
 
-TEST_F(DSLReaderTests, InvalidInput3)
+TEST_F(ReaderTests, InvalidInput3)
 {
     assert_corrupted(R"([[null]]abc)");
     assert_corrupted(R"({{"k":"v"})");
@@ -405,7 +431,7 @@ TEST_F(DSLReaderTests, InvalidInput3)
     assert_corrupted(R"(["v"]])");
 }
 
-TEST_F(DSLReaderTests, SkipsComments1)
+TEST_F(ReaderTests, SkipsComments1)
 {
     assert_ok(R"({/*comment*/})",
               {"<object>", "</object>"});
@@ -421,7 +447,7 @@ TEST_F(DSLReaderTests, SkipsComments1)
               {"<object>", "</object>"});
 }
 
-TEST_F(DSLReaderTests, SkipsComments2)
+TEST_F(ReaderTests, SkipsComments2)
 {
     assert_ok(R"({"k"/*the key*/: "v" /*the value*/})",
               {"<object>", "k:v", "</object>"});
@@ -431,7 +457,7 @@ TEST_F(DSLReaderTests, SkipsComments2)
               {"<object>", "k:v", "</object>"});
 }
 
-TEST_F(DSLReaderTests, InvalidComments)
+TEST_F(ReaderTests, InvalidComments)
 {
     assert_corrupted(R"({/})");
     assert_corrupted(R"({/*})");
@@ -439,7 +465,7 @@ TEST_F(DSLReaderTests, InvalidComments)
     assert_corrupted(R"({/*comment*})");
 }
 
-TEST_F(DSLReaderTests, InvalidLiterals)
+TEST_F(ReaderTests, InvalidLiterals)
 {
     for (const auto *literal : {"true", "false", "null"}) {
         for (size_t i = 1, n = std::strlen(literal); i < n; ++i) {
@@ -450,7 +476,13 @@ TEST_F(DSLReaderTests, InvalidLiterals)
     }
 }
 
-TEST_F(DSLReaderTests, ValidEscapes)
+TEST_F(ReaderTests, ControlCharacters)
+{
+    assert_ok("\"\x7F\"", {"\x7F"});
+    assert_corrupted("\"\x0A\"");
+}
+
+TEST_F(ReaderTests, ValidEscapes)
 {
     assert_ok(R"(["\/"])", {"<array>", "/", "</array>"});
     assert_ok(R"(["\\"])", {"<array>", "\\", "</array>"});
@@ -461,14 +493,14 @@ TEST_F(DSLReaderTests, ValidEscapes)
     assert_ok(R"(["\t"])", {"<array>", "\t", "</array>"});
 }
 
-TEST_F(DSLReaderTests, InvalidEscapes)
+TEST_F(ReaderTests, InvalidEscapes)
 {
     assert_corrupted(R"(["\"])");
     assert_corrupted(R"(["\z"])");
     assert_corrupted(R"(["\0"])");
 }
 
-TEST_F(DSLReaderTests, ValidUnicodeEscapes)
+TEST_F(ReaderTests, ValidUnicodeEscapes)
 {
     assert_ok(R"({"\u006b": "\u0076"})", {"<object>", "k:v", "</object>"});
     assert_ok(R"(["\u007F"])", {"<array>", "\u007F", "</array>"});
@@ -476,7 +508,7 @@ TEST_F(DSLReaderTests, ValidUnicodeEscapes)
     assert_ok(R"(["\uFFFF"])", {"<array>", "\uFFFF", "</array>"});
 }
 
-TEST_F(DSLReaderTests, InvalidUnicodeEscapes1)
+TEST_F(ReaderTests, InvalidUnicodeEscapes1)
 {
     assert_corrupted(R"(["\u.000"])");
     assert_corrupted(R"(["\u0.00"])");
@@ -484,7 +516,7 @@ TEST_F(DSLReaderTests, InvalidUnicodeEscapes1)
     assert_corrupted(R"(["\u000."])");
 }
 
-TEST_F(DSLReaderTests, InvalidUnicodeEscapes2)
+TEST_F(ReaderTests, InvalidUnicodeEscapes2)
 {
     assert_corrupted(R"(["\u"])");
     assert_corrupted(R"(["\u0"])");
@@ -492,7 +524,7 @@ TEST_F(DSLReaderTests, InvalidUnicodeEscapes2)
     assert_corrupted(R"(["\u000"])");
 }
 
-TEST_F(DSLReaderTests, ControlCharactersAreNotAllowed)
+TEST_F(ReaderTests, ControlCharactersAreNotAllowed)
 {
     assert_corrupted("[\"\x01\"]");
     assert_corrupted("[\"\x02\"]");
@@ -500,26 +532,26 @@ TEST_F(DSLReaderTests, ControlCharactersAreNotAllowed)
     assert_corrupted("[\"\x1F\"]");
 }
 
-TEST_F(DSLReaderTests, 0x20IsAllowed)
+TEST_F(ReaderTests, 0x20IsAllowed)
 {
     // U+0020 is the Unicode "Space" character.
     assert_ok("[\"\x20\"]", {"<array>", " ", "</array>"});
 }
 
-TEST_F(DSLReaderTests, ValidSurrogatePairs)
+TEST_F(ReaderTests, ValidSurrogatePairs)
 {
     assert_ok(R"(["\uD800\uDC00"])", {"<array>", "\U00010000", "</array>"});
     assert_ok(R"(["\uDBFF\uDFFF"])", {"<array>", "\U0010FFFF", "</array>"});
 }
 
-TEST_F(DSLReaderTests, InvalidSurrogatePairs1)
+TEST_F(ReaderTests, InvalidSurrogatePairs1)
 {
     // High surrogate (U+D800–U+DBFF) by itself.
     assert_corrupted(R"({"k": "\uD800")");
     assert_corrupted(R"({"k": "\uDBFE")");
 }
 
-TEST_F(DSLReaderTests, InvalidSurrogatePairs2)
+TEST_F(ReaderTests, InvalidSurrogatePairs2)
 {
     // High surrogate followed by an invalid codepoint.
     assert_corrupted(R"({"k": "\uD800\")");
@@ -527,20 +559,20 @@ TEST_F(DSLReaderTests, InvalidSurrogatePairs2)
     assert_corrupted(R"({"k": "\uD800\u0")");
 }
 
-TEST_F(DSLReaderTests, InvalidSurrogatePairs3)
+TEST_F(ReaderTests, InvalidSurrogatePairs3)
 {
     // High surrogate followed by a codepoint that isn't a low surrogate (U+DC00–U+DFFF).
     assert_corrupted(R"({"k": "\uD800\uDBFE")"); // High, high
     assert_corrupted(R"({"k": "\uDBFE\uE000")"); // High, non-surrogate
 }
 
-TEST_F(DSLReaderTests, InvalidSurrogatePairs4)
+TEST_F(ReaderTests, InvalidSurrogatePairs4)
 {
     // Low surrogate by itself.
     assert_corrupted(R"({"k": "\uDC00")");
 }
 
-TEST_F(DSLReaderTests, NestedArrays)
+TEST_F(ReaderTests, NestedArrays)
 {
     assert_ok(R"([[[[[[[[[], [], [], []]]]]]]]])",
               {"<array>", "<array>", "<array>", "<array>",
@@ -553,7 +585,7 @@ TEST_F(DSLReaderTests, NestedArrays)
                "</array>", "</array>", "</array>", "</array>"});
 }
 
-TEST_F(DSLReaderTests, NestedObjects)
+TEST_F(ReaderTests, NestedObjects)
 {
     assert_ok(R"({"a": {"b": {"c": {"d": {"e": {"f": {"g": {)"
               R"("h": {}, "i": {}, "j": {}, "k": {}}}}}}}}})",
@@ -567,7 +599,7 @@ TEST_F(DSLReaderTests, NestedObjects)
                "</object>", "</object>", "</object>", "</object>"});
 }
 
-TEST_F(DSLReaderTests, ObjectsAndArrays)
+TEST_F(ReaderTests, ObjectsAndArrays)
 {
     assert_ok(R"([{"a": [{}, true]}, {"b": "2"}, ["c", "d", {"e": {"f":null}}]])",
               {"<array>", "<object>", "a:<array>", "<object>", "</object>", "<true>",
@@ -576,7 +608,7 @@ TEST_F(DSLReaderTests, ObjectsAndArrays)
                "</array>", "</array>"});
 }
 
-TEST_F(DSLReaderTests, RecognizesAllValueTypes)
+TEST_F(ReaderTests, RecognizesAllValueTypes)
 {
     assert_ok(R"([null, false, true, 123, 4.56, "789", {}, []])",
               {"<array>", "<null>", "<false>", "<true>", integer_str(123),
@@ -584,7 +616,7 @@ TEST_F(DSLReaderTests, RecognizesAllValueTypes)
                "</array>", "</array>"});
 }
 
-TEST_F(DSLReaderTests, BasicNumbers)
+TEST_F(ReaderTests, BasicNumbers)
 {
     assert_ok("[123,\n"
               " 1230,\n"
@@ -613,21 +645,21 @@ TEST_F(DSLReaderTests, BasicNumbers)
                "</array>"});
 }
 
-TEST_F(DSLReaderTests, SmallIntegers)
+TEST_F(ReaderTests, SmallIntegers)
 {
     assert_ok(std::to_string(INT64_MIN), {integer_str(INT64_MIN)});
     assert_ok(std::to_string(INT64_MIN + 1), {integer_str(INT64_MIN + 1)});
     assert_ok(std::to_string(INT64_MIN + 2), {integer_str(INT64_MIN + 2)});
 }
 
-TEST_F(DSLReaderTests, LargeIntegers)
+TEST_F(ReaderTests, LargeIntegers)
 {
     assert_ok(std::to_string(INT64_MAX), {integer_str(INT64_MAX)});
     assert_ok(std::to_string(INT64_MAX - 1), {integer_str(INT64_MAX - 1)});
     assert_ok(std::to_string(INT64_MAX - 2), {integer_str(INT64_MAX - 2)});
 }
 
-TEST_F(DSLReaderTests, ValidExponentials)
+TEST_F(ReaderTests, ValidExponentials)
 {
     assert_ok("123e0", {real_str(123e0)});
     assert_ok("123e1", {real_str(123e1)});
@@ -644,9 +676,31 @@ TEST_F(DSLReaderTests, ValidExponentials)
     assert_ok("123e-3", {real_str(123e-3)});
 }
 
-TEST_F(DSLReaderTests, InvalidExponentials)
+TEST_F(ReaderTests, InvalidRealIntegralParts)
 {
-    // Missing integral part
+    assert_corrupted("01.23");
+    assert_corrupted("02.34");
+    assert_corrupted(".1");
+    assert_corrupted(".12");
+    assert_corrupted(".123");
+}
+
+TEST_F(ReaderTests, InvalidRealFractionalParts)
+{
+    // More than 1 dot
+    assert_corrupted("1.23.");
+    assert_corrupted("1.2.3");
+    assert_corrupted("1..23");
+
+    // Misc
+    assert_corrupted("1.");
+    assert_corrupted("12.");
+    assert_corrupted("123.");
+}
+
+TEST_F(ReaderTests, InvalidRealExponentialParts)
+{
+    // Missing integral and/or fractional part
     assert_corrupted("-e2");
     assert_corrupted("-E2");
     assert_corrupted("-e+2");
@@ -658,10 +712,15 @@ TEST_F(DSLReaderTests, InvalidExponentials)
     assert_corrupted("1e");
     assert_corrupted("1e-");
     assert_corrupted("1e+");
+    assert_corrupted("1.2e");
+    assert_corrupted("1.2e+");
+    assert_corrupted("1.2e-");
 
     // Missing fractional part
     assert_corrupted("123.");
     assert_corrupted("123.e2");
+    assert_corrupted("123.e+2");
+    assert_corrupted("123.e-2");
 
     // Extra e or E
     assert_corrupted("1ee+2");
@@ -676,6 +735,10 @@ TEST_F(DSLReaderTests, InvalidExponentials)
     assert_corrupted("1e-2-");
     assert_corrupted("1e--2");
 
+    // Extra dot
+    assert_corrupted("1.0.e+2");
+    assert_corrupted("1..0e+2");
+
     // Fractional power
     assert_corrupted("1e.");
     assert_corrupted("1e.2");
@@ -683,26 +746,27 @@ TEST_F(DSLReaderTests, InvalidExponentials)
     assert_corrupted("1e2.0");
 }
 
-TEST_F(DSLReaderTests, LeadingZerosAreNotAllowed)
+TEST_F(ReaderTests, LeadingZerosAreNotAllowed)
 {
+    assert_corrupted("00");
     assert_corrupted("01");
-    assert_corrupted("01");
+    assert_corrupted("02");
 }
 
-TEST_F(DSLReaderTests, LowerBoundary)
+TEST_F(ReaderTests, LowerBoundary)
 {
     assert_ok("-9223372036854775809", {real_str(-9223372036854775809.0)});
     assert_ok("-92233720368547758080", {real_str(-92233720368547758080.0)});
 }
 
-TEST_F(DSLReaderTests, UpperBoundary)
+TEST_F(ReaderTests, UpperBoundary)
 {
     assert_ok("9223372036854775808", {real_str(9223372036854775808.0)});
     assert_ok("9223372036854775809", {real_str(9223372036854775809.0)});
     assert_ok("92233720368547758080", {real_str(92233720368547758080.0)});
 }
 
-TEST_F(DSLReaderTests, OverflowingIntegersBecomeReals)
+TEST_F(ReaderTests, OverflowingIntegersBecomeReals)
 {
     static constexpr uint64_t kOffset = 9223372036854775807ULL;
     for (uint64_t i = 1; i < 64; ++i) {
@@ -710,39 +774,37 @@ TEST_F(DSLReaderTests, OverflowingIntegersBecomeReals)
     }
 }
 
-TEST_F(DSLReaderTests, UnderflowingIntegersBecomeReals)
+TEST_F(ReaderTests, UnderflowingIntegersBecomeReals)
 {
-    DSLReader reader;
-    register_actions(reader);
+    Reader reader(m_handler);
     for (const auto *str : {"-9223372036854775809",
                             "-9223372036854775810",
                             "-9223372036854775908",
                             "-123456789012345678901234567890"}) {
-        m_current.clear();
-        m_records.clear();
-        ASSERT_OK(reader.read(str, this));
-        ASSERT_EQ(m_records[0].find("<real="), 0);
+        reset_test_state();
+        ASSERT_OK(reader.read(str));
+        ASSERT_EQ(m_handler.records[0].find("<real="), 0);
     }
 }
 
-TEST_F(DSLReaderTests, LargeRealsAreValidated)
+TEST_F(ReaderTests, LargeRealsAreValidated)
 {
     assert_corrupted("123456789012345678901234567890..");
     assert_corrupted("123456789012345678901234567890ee");
     assert_corrupted("123456789012345678901234567890e10.1");
 }
 
-class DSLReaderOOMTests : public DSLReaderTests
+class ReaderOOMTests : public ReaderTests
 {
 public:
     size_t m_num_allocations = 0;
     size_t m_max_allocations = 0;
 
-    ~DSLReaderOOMTests() override = default;
+    ~ReaderOOMTests() override = default;
 
     static auto should_next_allocation_fail(void *self) -> int
     {
-        auto &s = *static_cast<DSLReaderOOMTests *>(self);
+        auto &s = *static_cast<ReaderOOMTests *>(self);
         if (s.m_num_allocations >= s.m_max_allocations) {
             return -1;
         }
@@ -761,124 +823,21 @@ public:
     }
 };
 
-TEST_F(DSLReaderOOMTests, OOM)
+TEST_F(ReaderOOMTests, OOM)
 {
-    TEST_LOG << "DSLReaderOOMTests.OOM\n";
+    TEST_LOG << "ReaderOOMTests.OOM\n";
     Status s;
-    DSLReader reader;
-    register_actions(reader);
+    Reader reader(m_handler);
     do {
-        m_current.clear();
-        m_records.clear();
-        s = reader.read(kExample2, this);
+        reset_test_state();
+        s = reader.read(kExample2);
         ++m_max_allocations;
         m_num_allocations = 0;
     } while (s.is_no_memory());
     ASSERT_OK(s);
 
-    ASSERT_EQ(m_records, s_example_target_2);
+    ASSERT_EQ(m_handler.records, s_example_target_2);
     TEST_LOG << "Number of failures: " << m_max_allocations << '\n';
-}
-
-class DSLWriterTests : public testing::Test
-{
-public:
-    Buffer<char> m_buffer;
-    OutputStream<decltype(m_buffer)> m_os;
-    DSLWriter<decltype(m_os)> m_writer;
-    DSLReader m_reader;
-
-    explicit DSLWriterTests()
-        : m_os(m_buffer),
-          m_writer(m_os)
-    {
-    }
-
-    ~DSLWriterTests() override = default;
-
-    void SetUp() override
-    {
-        m_reader.register_action(kEventBeginObject, [](auto *self, const auto *) {
-            static_cast<DSLWriterTests *>(self)
-                ->m_writer.begin_object();
-        });
-        m_reader.register_action(kEventEndObject, [](auto *self, const auto *) {
-            static_cast<DSLWriterTests *>(self)
-                ->m_writer.end_object();
-        });
-        m_reader.register_action(kEventBeginArray, [](auto *self, const auto *) {
-            static_cast<DSLWriterTests *>(self)
-                ->m_writer.begin_array();
-        });
-        m_reader.register_action(kEventEndArray, [](auto *self, const auto *) {
-            static_cast<DSLWriterTests *>(self)
-                ->m_writer.end_array();
-        });
-        m_reader.register_action(kEventKey, [](auto *self, const auto *output) {
-            static_cast<DSLWriterTests *>(self)
-                ->m_writer.write_key(output->string);
-        });
-        m_reader.register_action(kEventValueString, [](auto *self, const auto *output) {
-            static_cast<DSLWriterTests *>(self)
-                ->m_writer.write_string(output->string);
-        });
-        m_reader.register_action(kEventValueInteger, [](auto *self, const auto *output) {
-            static_cast<DSLWriterTests *>(self)
-                ->m_writer.write_integer(output->integer);
-        });
-        m_reader.register_action(kEventValueReal, [](auto *self, const auto *output) {
-            static_cast<DSLWriterTests *>(self)
-                ->m_writer.write_real(output->real);
-        });
-        m_reader.register_action(kEventValueNull, [](auto *self, const auto *output) {
-            static_cast<DSLWriterTests *>(self)
-                ->m_writer.write_null();
-        });
-        m_reader.register_action(kEventValueBoolean, [](auto *self, const auto *output) {
-            static_cast<DSLWriterTests *>(self)
-                ->m_writer.write_boolean(output->boolean);
-        });
-    }
-
-    auto read_and_write(const Slice &data)
-    {
-        m_os.reset();
-        m_writer.reset();
-        m_buffer.reset();
-        EXPECT_OK(m_reader.read(data, this));
-        EXPECT_FALSE(m_buffer.is_empty());
-        return std::string(m_buffer.data(), m_os.size());
-    }
-
-    void run_test(const Slice &data)
-    {
-        const auto json1 = read_and_write(data);
-        const auto json2 = read_and_write(data);
-        ASSERT_EQ(json1, json2);
-    }
-};
-
-TEST_F(DSLWriterTests, WriteDifferentTypes)
-{
-    run_test(R"({"a":[1,"b",true],"c":[{"d":234,"e":null}],)"
-             R"("f":{"g":false,"h":[{},{},[{"i":[56,7,8,90,"j","k","lmnop"]}]]}})");
-}
-
-TEST_F(DSLWriterTests, NegativeIntegers)
-{
-    run_test("1");
-}
-
-TEST_F(DSLWriterTests, IntegerBoundaryValues)
-{
-    run_test(std::to_string(INT64_MIN));
-    run_test(std::to_string(INT64_MAX));
-}
-
-TEST_F(DSLWriterTests, IntegersAsReals)
-{
-    run_test('-' + std::to_string(UINT64_MAX));
-    run_test(std::to_string(UINT64_MAX));
 }
 
 } // namespace calicodb::test

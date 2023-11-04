@@ -2,13 +2,13 @@
 // This source code is licensed under the MIT License, which can be found in
 // LICENSE.md. See AUTHORS.md for a list of contributor names.
 
-#include "dsl.h"
+#include "json.h"
+#include "buffer.h"
 #include "internal.h"
-#include "internal_vector.h" // TODO: Write a wrapper that uses a single bit per bool, instead of a whole byte
-#include "logging.h"
+#include "internal_vector.h"
 #include "status_internal.h"
 
-namespace calicodb
+namespace calicodb::json
 {
 
 namespace
@@ -74,6 +74,20 @@ constexpr uint8_t kIsHexTable[] = {
 #define ISHEX(c) (kIsHexTable[static_cast<uint8_t>(c)])
 #define HEXVAL(c) (kIsHexTable[static_cast<uint8_t>(c)] - 1)
 
+enum Event {
+    kEventValueString,
+    kEventValueInteger,
+    kEventValueReal,
+    kEventValueBoolean,
+    kEventValueNull,
+    kEventBeginObject,
+    kEventEndObject,
+    kEventBeginArray,
+    kEventEndArray,
+    kEventKey, // Special event for object key
+    kEventCount
+};
+
 enum Token {
     kTokenValueString = kEventValueString,
     kTokenValueInteger = kEventValueInteger,
@@ -86,16 +100,83 @@ enum Token {
     kTokenEndArray = kEventEndArray,
     kTokenNameSeparator,
     kTokenValueSeparator,
-    kTokenParseError,
+    kTokenError,
     kTokenCount
+};
+
+union Value {
+    void *null = nullptr;
+    bool boolean;
+    int64_t integer;
+    double real;
+    Slice string;
+};
+
+class Accumulator
+{
+public:
+    size_t total = 0;
+    bool ok = true;
+
+    explicit Accumulator(Buffer<char> &b)
+        : m_buffer(&b)
+    {
+    }
+
+    [[nodiscard]] auto result() const -> Slice
+    {
+        return m_buffer->is_empty() ? "" : Slice(m_buffer->data(), total);
+    }
+
+    void append(const Slice &data)
+    {
+        if (prepare_append(data.size())) {
+            ok = false;
+        } else {
+            std::memcpy(m_buffer->data() + total, data.data(), data.size());
+            total += data.size();
+        }
+    }
+
+    void append(char c)
+    {
+        if (prepare_append(1)) {
+            ok = false;
+        } else {
+            (*m_buffer)[total] = c;
+            ++total;
+        }
+    }
+
+private:
+    [[nodiscard]] auto prepare_append(size_t extra_size) -> int
+    {
+        CALICODB_EXPECT_GE(m_buffer->size(), total);
+        if (!ok) {
+            return -1;
+        }
+        const auto needed_size = total + extra_size;
+        if (needed_size > m_buffer->size()) {
+            size_t capacity = 4;
+            while (capacity < needed_size) {
+                capacity *= 2;
+            }
+            if (m_buffer->resize(capacity)) {
+                return -1;
+            }
+        }
+        return 0;
+    }
+
+    Buffer<char> *const m_buffer;
 };
 
 class Lexer
 {
 public:
     struct Position {
-        int line;
-        int column;
+        size_t line;
+        size_t column;
     };
 
     explicit Lexer(const Slice &input, Status &status)
@@ -187,19 +268,19 @@ public:
 private:
     [[nodiscard]] auto is_empty() const -> bool
     {
-        return m_itr == m_end;
+        CALICODB_EXPECT_LE(m_itr, m_end);
+        return m_itr >= m_end;
     }
 
     [[nodiscard]] auto remaining() const -> size_t
     {
+        CALICODB_EXPECT_LE(m_itr, m_end);
         return static_cast<size_t>(m_end - m_itr);
     }
 
     [[nodiscard]] auto peek() const -> char
     {
-        if (m_unget) {
-            return m_itr[-1];
-        } else if (is_empty()) {
+        if (is_empty()) {
             return '\0';
         } else {
             return m_itr[0];
@@ -208,9 +289,7 @@ private:
 
     auto get() -> char
     {
-        if (m_unget) {
-            m_unget = false;
-        } else if (is_empty()) {
+        if (is_empty()) {
             m_char = '\0';
         } else {
             m_char = *m_itr++;
@@ -224,20 +303,23 @@ private:
         return m_char;
     }
 
-    auto unget() -> void
+    auto get4() -> const char *
     {
-        CALICODB_EXPECT_FALSE(m_unget);
-        CALICODB_EXPECT_NE(m_itr, m_begin);
-        m_unget = true;
+        if (remaining() < 4) {
+            return nullptr;
+        }
+        get();
+        get();
+        get();
+        get();
+        return m_itr - 4;
     }
 
-    auto expect(char c) -> bool
+    void unget()
     {
-        if (peek() == c) {
-            get();
-            return true;
-        }
-        return false;
+        CALICODB_EXPECT_GE(m_itr, m_begin);
+        --m_itr;
+        m_char = m_itr == m_begin ? '\0' : m_itr[-1];
     }
 
     auto skip_comments() -> int
@@ -249,21 +331,25 @@ private:
         for (;;) {
             switch (get()) {
                 case '*':
-                    if (get() == '/') {
-                        return 0;
+                    switch (get()) {
+                        case '/':
+                            return 0;
+                        case '\0':
+                            return -1;
+                        default:
+                            unget();
                     }
-                    unget();
                     break;
                 case '\0':
                     // End of input.
                     return -1;
                 default:
-                    continue;
+                    break;
             }
         }
     }
 
-    auto skip_whitespace() -> void
+    void skip_whitespace()
     {
         do {
             get();
@@ -277,23 +363,12 @@ private:
         } else {
             *m_status = Status::no_memory();
         }
-        return kTokenParseError;
-    }
-
-    auto get(size_t n) -> const char *
-    {
-        if (remaining() < n) {
-            return nullptr;
-        }
-        for (size_t i = 0; i < n && get(); ++i) {
-            // Call get() so the position gets updated.
-        }
-        return m_itr - n;
+        return kTokenError;
     }
 
     auto get_codepoint() -> int
     {
-        if (const auto *ptr = get(4)) {
+        if (const auto *ptr = get4()) {
             if (ISHEX(ptr[0]) && ISHEX(ptr[1]) &&
                 ISHEX(ptr[2]) && ISHEX(ptr[3])) {
                 return HEXVAL(ptr[0]) << 12 |
@@ -308,34 +383,34 @@ private:
     [[nodiscard]] auto scan_string() -> Token
     {
         // Reuse the scratch buffer. Overwrite it starting at offset 0.
-        StringBuilder sb(move(m_scratch), 0);
+        Accumulator accum(m_scratch);
         for (;;) {
             switch (get()) {
                 case '\\':
                     switch (get()) {
                         case '\"':
-                            sb.append('\"');
+                            accum.append('\"');
                             break;
                         case '\\':
-                            sb.append('\\');
+                            accum.append('\\');
                             break;
                         case '/':
-                            sb.append('/');
+                            accum.append('/');
                             break;
                         case 'b':
-                            sb.append('\b');
+                            accum.append('\b');
                             break;
                         case 'f':
-                            sb.append('\f');
+                            accum.append('\f');
                             break;
                         case 'n':
-                            sb.append('\n');
+                            accum.append('\n');
                             break;
                         case 'r':
-                            sb.append('\r');
+                            accum.append('\r');
                             break;
                         case 't':
-                            sb.append('\t');
+                            accum.append('\t');
                             break;
                         case 'u': {
                             auto codepoint = get_codepoint();
@@ -362,20 +437,20 @@ private:
                             }
                             // Translate the codepoint into bytes. Modified from @Tencent/rapidjson.
                             if (codepoint <= 0x7F) {
-                                sb.append(static_cast<char>(codepoint));
+                                accum.append(static_cast<char>(codepoint));
                             } else if (codepoint <= 0x7FF) {
-                                sb.append(static_cast<char>(0xC0 | ((codepoint >> 6) & 0xFF)));
-                                sb.append(static_cast<char>(0x80 | ((codepoint & 0x3F))));
+                                accum.append(static_cast<char>(0xC0 | ((codepoint >> 6) & 0xFF)));
+                                accum.append(static_cast<char>(0x80 | ((codepoint & 0x3F))));
                             } else if (codepoint <= 0xFFFF) {
-                                sb.append(static_cast<char>(0xE0 | ((codepoint >> 12) & 0xFF)));
-                                sb.append(static_cast<char>(0x80 | ((codepoint >> 6) & 0x3F)));
-                                sb.append(static_cast<char>(0x80 | (codepoint & 0x3F)));
+                                accum.append(static_cast<char>(0xE0 | ((codepoint >> 12) & 0xFF)));
+                                accum.append(static_cast<char>(0x80 | ((codepoint >> 6) & 0x3F)));
+                                accum.append(static_cast<char>(0x80 | (codepoint & 0x3F)));
                             } else {
                                 CALICODB_EXPECT_LE(codepoint, 0x10FFFF);
-                                sb.append(static_cast<char>(0xF0 | ((codepoint >> 18) & 0xFF)));
-                                sb.append(static_cast<char>(0x80 | ((codepoint >> 12) & 0x3F)));
-                                sb.append(static_cast<char>(0x80 | ((codepoint >> 6) & 0x3F)));
-                                sb.append(static_cast<char>(0x80 | (codepoint & 0x3F)));
+                                accum.append(static_cast<char>(0xF0 | ((codepoint >> 18) & 0xFF)));
+                                accum.append(static_cast<char>(0x80 | ((codepoint >> 12) & 0x3F)));
+                                accum.append(static_cast<char>(0x80 | ((codepoint >> 6) & 0x3F)));
+                                accum.append(static_cast<char>(0x80 | (codepoint & 0x3F)));
                             }
                             break;
                         }
@@ -384,17 +459,17 @@ private:
                     }
                     break;
                 case '"':
-                    if (sb.build(m_scratch)) {
+                    if (!accum.ok) {
                         return make_error(nullptr);
                     }
                     // Closing double quote finishes the string. Call get_string() to get the
                     // backing string buffer.
-                    m_value.string = Slice(m_scratch);
+                    m_value.string = accum.result();
                     return kTokenValueString;
                 default:
                     const auto c = static_cast<uint8_t>(m_char);
                     if (c >= 0x20) {
-                        sb.append(m_char);
+                        accum.append(m_char);
                     } else {
                         return make_error("unexpected token");
                     }
@@ -404,7 +479,7 @@ private:
 
     auto scan_number() -> Token
     {
-        const auto negative = m_itr[-1] == '-';
+        const auto negative = m_char == '-';
         const auto *begin = m_itr - 1;
         if (!negative) {
             unget();
@@ -412,12 +487,12 @@ private:
 
         if (peek() == 'e' || peek() == 'E') {
             // Catches cases like "-e2" and "-E5".
-            return kTokenParseError;
+            return kTokenError;
         }
         if (get() == '0') {
             if (ISNUMERIC(peek())) {
                 // '0' followed by another digit.
-                return kTokenParseError;
+                return kTokenError;
             }
         }
         unget();
@@ -474,13 +549,13 @@ private:
             kEnd,
             kError,
             kBegin,
-            kFrac,   // Read a '.'
+            kFrac,   // Read a '.' to start "frac" part
             kDigits, // Read "frac" part digits
-            kExp,    // Read an 'e' or 'E'
-            kSign,   // Read a '+' or '-' in kExp
+            kExp,    // Read an 'e' or 'E' to start "exp" part
+            kSign,   // Read a '+' or '-' in "exp" part
             kPower,  // Read "exp" part digits
             kRealStateCount
-        } phase = kBegin;
+        } state = kBegin;
 
         enum RealToken {
             kDot,   // .
@@ -492,7 +567,7 @@ private:
         };
 
         static constexpr RealState kTransitions[kRealStateCount][kRealTokenCount] = {
-            //               kDot      kE     kPM    k123   kOther
+            //    Tokens = kDot,   kE,     kPM,    k123,   kOther
             /*    kEnd */ {kError, kError, kError, kError, kError}, // Sink
             /*  kError */ {kError, kError, kError, kError, kError}, // Sink
             /*  kBegin */ {kFrac, kExp, kError, kError, kEnd},      // Source
@@ -541,16 +616,16 @@ private:
                 default:
                     token = kOther;
             }
-            phase = kTransitions[phase][token];
-        } while (phase > kBegin);
+            state = kTransitions[state][token];
+        } while (state > kBegin);
 
-        if (phase == kEnd) {
+        if (state == kEnd) {
             char *end;
             m_value.real = strtod(begin, &end);
             m_itr = end;
             return kTokenValueReal;
         }
-        return kTokenParseError;
+        return kTokenError;
     }
 
     auto scan_null() -> Token
@@ -562,7 +637,7 @@ private:
             m_value.null = nullptr;
             return kTokenValueNull;
         }
-        return kTokenParseError;
+        return kTokenError;
     }
 
     auto scan_true() -> Token
@@ -574,7 +649,7 @@ private:
             m_value.boolean = true;
             return kTokenValueBoolean;
         }
-        return kTokenParseError;
+        return kTokenError;
     }
 
     auto scan_false() -> Token
@@ -587,18 +662,17 @@ private:
             m_value.boolean = false;
             return kTokenValueBoolean;
         }
-        return kTokenParseError;
+        return kTokenError;
     }
 
     Position m_pos = {};
-    String m_scratch;
+    Buffer<char> m_scratch;
     Value m_value;
     Status *const m_status;
     const char *const m_begin;
     const char *const m_end;
     const char *m_itr;
-    bool m_unget = false;
-    char m_char;
+    char m_char = '\0';
 };
 
 class Parser
@@ -608,6 +682,7 @@ public:
     // types are tracked using a bit vector. The general idea is from @Tencent/rapidjson.
     enum State {
         kStateEnd,
+        kStateStop,
         kStateError,
         kStateBegin,
         kAB, // Array begin
@@ -625,18 +700,27 @@ public:
     };
 
     explicit Parser(const Slice &input)
-        : m_lexer(input, m_status)
+        : m_lex(input, m_status)
     {
     }
 
-    template <class Dispatch>
-    auto parse(const Dispatch &dispatch) -> Status
+    using Callback = bool (*)(Handler &, Event, const Value &);
+
+    struct Context {
+        Handler *h;
+        Callback cb;
+    };
+
+    auto parse(const Context &ctx) -> Status
     {
         Token token;
         State src = kStateBegin;
         while (advance(token)) {
             const auto dst = predict(src, token);
-            src = transit(token, dst, dispatch);
+            src = transit(token, dst, ctx);
+            if (src == kStateStop) {
+                return m_status; // User-requested stop
+            }
         }
         return finish(src);
     }
@@ -652,7 +736,7 @@ private:
     auto corruption(const char *message) -> State
     {
         CALICODB_EXPECT_TRUE(m_status.is_ok());
-        const auto [line, column] = m_lexer.get_position();
+        const auto [line, column] = m_lex.get_position();
         m_status = StatusBuilder::corruption("corruption detected at %d:%d (%s)",
                                              line, column, message);
         return kStateError;
@@ -676,29 +760,33 @@ private:
 
     [[nodiscard]] auto advance(Token &token) -> bool
     {
-        return m_status.is_ok() && m_lexer.scan(token);
+        return m_status.is_ok() && m_lex.scan(token);
     }
 
     // Predict the next state based on the current state and a token read by the lexer
     [[nodiscard]] auto predict(State src, Token token) -> State
     {
         // Note the comments to the right of each table row. The kStateBegin state (named "beg"
-        // below) is marked "Source" because it is the starting state. If each state is imagined
+        // below) is marked "source" because it is the starting state. If each state is imagined
         // to be a vertex in a directed graph, and each state transition an edge, then kStateBegin
-        // has no edges leading into it. Likewise, states marked "Sink" have no edges leading out
-        // of them. If a state is marked "Push", then we are entering a nested object or array.
-        // We need to remember what type of structure we are currently in, so we push the current
-        // state onto a stack. A "Pop" state indicates that control is leaving a nested structure.
-        // The top of the stack is popped off to reveal the type of structure the parser has just
-        // moved back into. The parser needs to make sure it doesn't end up in a pop state at the
-        // end of the iteration. It is the responsibility of transit() to make sure the parser is
-        // transitioned to either kA1 or kO2, depending on the value that is now at the top of the
-        // stack, so that further values can be parsed.
+        // has no edges leading into it. Likewise, states marked "sink" have no edges leading out
+        // of them (or more accurately, all edges lead to the error state). If a state is marked
+        // "push", then we are entering a nested object or array. We need to remember what type of
+        // structure we are currently in, so we push the current state onto a stack. A "pop" state
+        // indicates that control is leaving a nested structure. The top of the stack is popped off
+        // to reveal the type of structure the parser has just moved back into.
+        // Note that all "pop" states are also sinks. This is because the parser needs information
+        // contained in the stack in order to make a decision on what state to transition into.
+        // The decision cannot be made in this function. It is the responsibility of transit() to
+        // make sure the parser is transitioned to either kA1 or kO2, depending on the type of
+        // structure that the parser has moved back into, so that additional values in that
+        // structure can be parsed properly.
         static constexpr State kTransitions[kStateCount][kTokenCount] = {
 #define end kStateEnd
 #define ex_ kStateError
             // Token = "s"  123  1.0  T/F  nul   {    }    [    ]    :    ,   err
             /* end */ {ex_, ex_, ex_, ex_, ex_, ex_, ex_, ex_, ex_, ex_, ex_, ex_}, // sink
+            /* stp */ {ex_, ex_, ex_, ex_, ex_, ex_, ex_, ex_, ex_, ex_, ex_, ex_}, // sink
             /* ex_ */ {ex_, ex_, ex_, ex_, ex_, ex_, ex_, ex_, ex_, ex_, ex_, ex_}, // sink
             /* beg */ {kV1, kV1, kV1, kV1, kV1, kOB, ex_, kAB, ex_, ex_, ex_, ex_}, // source
             /* kAB */ {kA1, kA1, kA1, kA1, kA1, kOB, ex_, kAB, kAE, ex_, ex_, ex_}, // push
@@ -719,22 +807,29 @@ private:
     }
 
     // Transition into the next state
-    template <class Dispatch>
-    [[nodiscard]] auto transit(Token token, State dst, const Dispatch &dispatch) -> State
+    [[nodiscard]] auto transit(Token token, State dst, const Context &ctx) -> State
     {
         static constexpr int kMaxDepth = 10'000;
-        const Value *value = nullptr;
+        auto emit_key = false; // Emit kEventKey if true
+        // `dst` is the next state as predicted by predict(), upon reading token `token`.
+        // We need to make sure that the destination state is not a transient state (either
+        // kOE or kAE). As described in predict(), kOE (object end) and kAE (array end) are
+        // "pop" states, meaning we pop an element off the stack and leave a nested structure.
+        // After doing so, we examine the new stack top. Using that value, we transition to
+        // either kO2 (object member value) or kA1 (array element). Normally, these states
+        // are entered when we have just read an object member value or array element,
+        // respectively, so basically, we are just treating the object or array as a child
+        // member/element in its parent object/array.
         switch (dst) {
             case kV1:
             case kA1:
             case kO2:
                 // Read a freestanding value, an array element, or an object member value.
-                value = &m_lexer.get_value();
                 break;
             case kO1:
                 // Special case for reading an object key.
-                dispatch(kEventKey, &m_lexer.get_value());
-                return dst;
+                emit_key = true;
+                break;
             case kAx:
             case kOx:
             case kOy:
@@ -746,6 +841,7 @@ private:
                 if (m_stack.size() == kMaxDepth) {
                     return corruption("exceeded maximum structure depth");
                 }
+                // Save the current state on the stack.
                 if (m_stack.push_back(dst == kOB)) {
                     return out_of_memory();
                 }
@@ -772,36 +868,55 @@ private:
             default: // kStateEnd | kStateError
                 return dst;
         }
-        CALICODB_EXPECT_LT(token, kTokenNameSeparator);
-        dispatch(static_cast<Event>(token), value);
+        CALICODB_EXPECT_TRUE(emit_key || token < kTokenNameSeparator);
+        const auto event = emit_key ? kEventKey : static_cast<Event>(token);
+        if (!ctx.cb(*ctx.h, event, m_lex.get_value())) {
+            return kStateStop;
+        }
         return dst;
     }
 
     Status m_status;
     Vector<bool> m_stack;
-    Lexer m_lexer;
+    Lexer m_lex;
 };
 
-} // namespace
-
-auto DSLReader::register_action(Event event, const Action &action) -> void
+auto dispatch(Handler &handler, Event event, const Value &value) -> bool
 {
-    m_actions[event] = action;
-}
-
-auto DSLReader::dispatch(Event event, void *action_arg, const Value *value) -> void
-{
-    if (m_actions[event]) {
-        m_actions[event](action_arg, value);
+    switch (event) {
+        case kEventKey:
+            return handler.accept_key(value.string);
+        case kEventValueString:
+            return handler.accept_string(value.string);
+        case kEventValueInteger:
+            return handler.accept_integer(value.integer);
+        case kEventValueReal:
+            return handler.accept_real(value.real);
+        case kEventValueBoolean:
+            return handler.accept_boolean(value.boolean);
+        case kEventValueNull:
+            return handler.accept_null();
+        case kEventBeginObject:
+            return handler.begin_object();
+        case kEventEndObject:
+            return handler.end_object();
+        case kEventBeginArray:
+            return handler.begin_array();
+        default:
+            return handler.end_array();
     }
 }
 
-auto DSLReader::read(const Slice &input, void *action_arg) -> Status
+} // namespace
+
+Handler::Handler() = default;
+
+Handler::~Handler() = default;
+
+auto Reader::read(const Slice &input) -> Status
 {
-    return Parser(input).parse(
-        [this, action_arg](Event event, const Value *value) {
-            dispatch(event, action_arg, value);
-        });
+    return Parser(input)
+        .parse({m_handler, dispatch});
 }
 
-} // namespace calicodb
+} // namespace calicodb::json
