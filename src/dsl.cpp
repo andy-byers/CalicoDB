@@ -32,6 +32,24 @@ constexpr uint8_t kIsSpaceTable[] = {
     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0};
 
+constexpr uint8_t kIsNumericTable[] = {
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0};
+
 constexpr uint8_t kIsHexTable[] = {
     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
@@ -51,12 +69,15 @@ constexpr uint8_t kIsHexTable[] = {
     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0};
 
 #define ISSPACE(c) (kIsSpaceTable[static_cast<uint8_t>(c)])
+#define ISNUMERIC(c) (kIsNumericTable[static_cast<uint8_t>(c)])
+#define NUMVAL(c) (kIsNumericTable[static_cast<uint8_t>(c)] - 1)
 #define ISHEX(c) (kIsHexTable[static_cast<uint8_t>(c)])
 #define HEXVAL(c) (kIsHexTable[static_cast<uint8_t>(c)] - 1)
 
 enum Token {
     kTokenValueString = kEventValueString,
-    kTokenValueNumber = kEventValueNumber,
+    kTokenValueInteger = kEventValueInteger,
+    kTokenValueReal = kEventValueReal,
     kTokenValueBoolean = kEventValueBoolean,
     kTokenValueNull = kEventValueNull,
     kTokenBeginObject = kEventBeginObject,
@@ -98,6 +119,7 @@ public:
 
     [[nodiscard]] auto scan(Token &token) -> bool
     {
+        CALICODB_EXPECT_TRUE(m_status->is_ok());
         skip_whitespace();
         while (m_char == '/') {
             if (skip_comments()) {
@@ -153,7 +175,7 @@ public:
                     token = kTokenEndArray;
                     break;
                 default:
-                    token = make_error("unexpected token");
+                    token = make_error("unexpected character");
                     [[fallthrough]];
                 case '\0':
                     return false;
@@ -175,7 +197,7 @@ private:
 
     [[nodiscard]] auto peek() const -> char
     {
-        return is_empty() ? '\0' : *m_itr;
+        return is_empty() ? '\0' : m_itr[-m_unget];
     }
 
     auto get() -> char
@@ -201,6 +223,15 @@ private:
         CALICODB_EXPECT_FALSE(m_unget);
         CALICODB_EXPECT_NE(m_itr, m_begin);
         m_unget = true;
+    }
+
+    auto expect(char c) -> bool
+    {
+        if (peek() == c) {
+            get();
+            return true;
+        }
+        return false;
     }
 
     auto skip_comments() -> int
@@ -367,10 +398,153 @@ private:
 
     auto scan_number() -> Token
     {
-        char *end;
-        m_value.number = strtod(m_itr - 1, &end); // TODO: Actually parse the number
-        m_itr = end;
-        return kTokenValueNumber;
+        const auto negative = m_itr[-1] == '-';
+        const auto *begin = m_itr - 1;
+        if (!negative) {
+            unget();
+        }
+
+        if (peek() == 'e' || peek() == 'E') {
+            // Catches cases like "-e2" and "-E5".
+            return kTokenParseError;
+        }
+        if (get() == '0') {
+            if (ISNUMERIC(peek())) {
+                // '0' followed by another digit.
+                return kTokenParseError;
+            }
+        }
+        unget();
+
+        int64_t value = 0;
+        while (ISNUMERIC(peek())) {
+            const unsigned v = NUMVAL(get());
+            const auto is_last = !ISNUMERIC(peek());
+            if (value > INT64_MAX / 10) {
+                // This number is definitely too large to be represented as an int64_t. Parse
+                // it as a double instead.
+                goto call_scan_real;
+            } else if (value == INT64_MAX / 10) {
+                // This number might be too large. Handle the special cases (modified from
+                // SQLite). Note that INT64_MAX is equal to 9223372036854775807. In this
+                // branch, v is referring to the least-significant digit of INT64_MAX, since
+                // the value * 10 below will yield 9223372036854775800.
+                if (v == 9 || !is_last) {
+                    goto call_scan_real;
+                } else if (v == 8) {
+                    if (negative && is_last) {
+                        m_value.integer = INT64_MIN;
+                        return kTokenValueInteger;
+                    }
+                    goto call_scan_real;
+                }
+            }
+            value = value * 10 + v;
+        }
+
+        switch (peek()) {
+            case 'e':
+            case 'E':
+            case '.':
+                break;
+            default:
+                m_value.integer = negative ? -value : value;
+                return kTokenValueInteger;
+        }
+
+    call_scan_real:
+        return scan_real(begin);
+    }
+
+    auto scan_real(const char *begin) -> Token
+    {
+        // According to RFC 8259, the ABNF for a number looks like:
+        //     [ minus ] int [ frac ] [ exp ]
+        // We have already parsed the "[ minus ]" and "int" parts. Either the "int" part overflowed, or there
+        // exists a "frac" or "exp" part that needs to be scanned. Since parsing floating-point numbers is
+        // extremely complicated, we are using strtod(). All we have to do is make sure the rest of the number
+        // is formatted correctly.
+        enum RealState {
+            kEnd,
+            kError,
+            kBegin,
+            kFrac,   // Read a '.'
+            kDigits, // Read "frac" part digits
+            kExp,    // Read an 'e' or 'E'
+            kSign,   // Read a '+' or '-' in kExp
+            kPower,  // Read "exp" part digits
+            kRealStateCount
+        } phase = kBegin;
+
+        enum RealToken {
+            kDot,   // .
+            kE,     // e or E
+            kPM,    // + or -
+            k123,   // One of 0-9
+            kOther, // None of the above
+            kRealTokenCount
+        };
+
+        static constexpr RealState kTransitions[kRealStateCount][kRealTokenCount] = {
+            //               kDot      kE     kPM    k123   kOther
+            /*    kEnd */ {kError, kError, kError, kError, kError}, // Sink
+            /*  kError */ {kError, kError, kError, kError, kError}, // Sink
+            /*  kBegin */ {kFrac, kExp, kError, kError, kEnd},      // Source
+            /*    kDot */ {kError, kError, kError, kDigits, kError},
+            /* kDigits */ {kError, kExp, kError, kDigits, kEnd},
+            /*      kE */ {kError, kError, kSign, kPower, kError},
+            /*   kSign */ {kError, kError, kError, kPower, kError},
+            /*  kPower */ {kError, kError, kError, kPower, kEnd},
+        };
+
+        // If an integer overflowed, then there might be some digits left. The code below
+        // expects just the fractional or exponential parts, so skip any remaining digits
+        // in the integral part.
+        while (ISNUMERIC(peek())) {
+            get();
+        }
+
+        // Validate the rest of the number.
+        do {
+            RealToken token;
+            switch (get()) {
+                case '0':
+                case '1':
+                case '2':
+                case '3':
+                case '4':
+                case '5':
+                case '6':
+                case '7':
+                case '8':
+                case '9':
+                    // Leading 0s are allowed in both the "frac" and "exp" parts.
+                    token = k123;
+                    break;
+                case '.':
+                    token = kDot;
+                    break;
+                case 'e':
+                case 'E':
+                    token = kE;
+                    break;
+                case '+':
+                case '-':
+                    token = kPM;
+                    break;
+                default:
+                    token = kOther;
+            }
+            phase = kTransitions[phase][token];
+        } while (phase > kBegin);
+
+        if (phase == kEnd) {
+            char *end;
+            m_value.real = strtod(begin, &end);
+            m_itr = end;
+            return kTokenValueReal;
+        }
+        return kTokenParseError;
     }
 
     auto scan_null() -> Token
@@ -517,21 +691,21 @@ private:
         static constexpr State kTransitions[kStateCount][kTokenCount] = {
 #define end kStateEnd
 #define ex_ kStateError
-            // Token = "s"  123  T/F  nul   {    }    [    ]    :    ,   err
-            /* end */ {ex_, ex_, ex_, ex_, ex_, ex_, ex_, ex_, ex_, ex_, ex_}, // sink
-            /* ex_ */ {ex_, ex_, ex_, ex_, ex_, ex_, ex_, ex_, ex_, ex_, ex_}, // sink
-            /* beg */ {kV1, kV1, kV1, kV1, kOB, ex_, kAB, ex_, ex_, ex_, ex_}, // source
-            /* kAB */ {kA1, kA1, kA1, kA1, kOB, ex_, kAB, kAE, ex_, ex_, ex_}, // push
-            /* kA1 */ {ex_, ex_, ex_, ex_, ex_, ex_, ex_, kAE, ex_, kAx, ex_},
-            /* kAx */ {kA1, kA1, kA1, kA1, kOB, ex_, kAB, ex_, ex_, ex_, ex_},
-            /* kAE */ {ex_, ex_, ex_, ex_, ex_, ex_, ex_, ex_, ex_, ex_, ex_}, // pop
-            /* kOB */ {kO1, ex_, ex_, ex_, ex_, kOE, ex_, ex_, ex_, ex_, ex_}, // push
-            /* kO1 */ {ex_, ex_, ex_, ex_, ex_, ex_, ex_, ex_, kOx, ex_, ex_},
-            /* kOx */ {kO2, kO2, kO2, kO2, kOB, ex_, kAB, ex_, ex_, ex_, ex_},
-            /* kO2 */ {ex_, ex_, ex_, ex_, ex_, kOE, ex_, ex_, ex_, kOy, ex_},
-            /* kOy */ {kO1, ex_, ex_, ex_, ex_, ex_, ex_, ex_, ex_, ex_, ex_},
-            /* kOE */ {ex_, ex_, ex_, ex_, ex_, ex_, ex_, ex_, ex_, ex_, ex_}, // pop
-            /* kV1 */ {ex_, ex_, ex_, ex_, ex_, ex_, ex_, ex_, ex_, ex_, ex_}, // sink
+            // Token = "s"  123  1.0  T/F  nul   {    }    [    ]    :    ,   err
+            /* end */ {ex_, ex_, ex_, ex_, ex_, ex_, ex_, ex_, ex_, ex_, ex_, ex_}, // sink
+            /* ex_ */ {ex_, ex_, ex_, ex_, ex_, ex_, ex_, ex_, ex_, ex_, ex_, ex_}, // sink
+            /* beg */ {kV1, kV1, kV1, kV1, kV1, kOB, ex_, kAB, ex_, ex_, ex_, ex_}, // source
+            /* kAB */ {kA1, kA1, kA1, kA1, kA1, kOB, ex_, kAB, kAE, ex_, ex_, ex_}, // push
+            /* kA1 */ {ex_, ex_, ex_, ex_, ex_, ex_, ex_, ex_, kAE, ex_, kAx, ex_},
+            /* kAx */ {kA1, kA1, kA1, kA1, kA1, kOB, ex_, kAB, ex_, ex_, ex_, ex_},
+            /* kAE */ {ex_, ex_, ex_, ex_, ex_, ex_, ex_, ex_, ex_, ex_, ex_, ex_}, // pop
+            /* kOB */ {kO1, ex_, ex_, ex_, ex_, ex_, kOE, ex_, ex_, ex_, ex_, ex_}, // push
+            /* kO1 */ {ex_, ex_, ex_, ex_, ex_, ex_, ex_, ex_, ex_, kOx, ex_, ex_},
+            /* kOx */ {kO2, kO2, kO2, kO2, kO2, kOB, ex_, kAB, ex_, ex_, ex_, ex_},
+            /* kO2 */ {ex_, ex_, ex_, ex_, ex_, ex_, kOE, ex_, ex_, ex_, kOy, ex_},
+            /* kOy */ {kO1, ex_, ex_, ex_, ex_, ex_, ex_, ex_, ex_, ex_, ex_, ex_},
+            /* kOE */ {ex_, ex_, ex_, ex_, ex_, ex_, ex_, ex_, ex_, ex_, ex_, ex_}, // pop
+            /* kV1 */ {ex_, ex_, ex_, ex_, ex_, ex_, ex_, ex_, ex_, ex_, ex_, ex_}, // sink
 #undef end
 #undef ex_
         };
@@ -584,6 +758,11 @@ private:
                     dst = m_stack.back() ? kO2 : kA1; // After value
                 }
                 break;
+            case kStateError:
+                if (m_status.is_ok()) {
+                    return corruption("fail");
+                }
+                [[fallthrough]];
             default: // kStateEnd | kStateError
                 return dst;
         }

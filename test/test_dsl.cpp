@@ -23,9 +23,14 @@ public:
 
     ~DSLReaderTests() override = default;
 
-    static auto dtos(double d) -> std::string
+    static auto integer_str(int64_t i) -> std::string
     {
-        return "<number=" + std::to_string(d) + '>';
+        return "<integer=" + std::to_string(i) + '>';
+    }
+
+    static auto real_str(double r) -> std::string
+    {
+        return "<real=" + std::to_string(r) + '>';
     }
 
     auto register_actions(DSLReader &reader)
@@ -73,9 +78,14 @@ public:
             test->m_records.push_back(test->m_current + output->string.to_string());
             test->m_current.clear();
         });
-        reader.register_action(kEventValueNumber, [](auto *self, const auto *output) {
+        reader.register_action(kEventValueInteger, [](auto *self, const auto *output) {
             auto *test = static_cast<DSLReaderTests *>(self);
-            test->m_records.push_back(test->m_current + dtos(output->number));
+            test->m_records.push_back(test->m_current + integer_str(output->integer));
+            test->m_current.clear();
+        });
+        reader.register_action(kEventValueReal, [](auto *self, const auto *output) {
+            auto *test = static_cast<DSLReaderTests *>(self);
+            test->m_records.push_back(test->m_current + real_str(output->real));
             test->m_current.clear();
         });
         reader.register_action(kEventValueNull, [](auto *self, const auto *output) {
@@ -207,7 +217,7 @@ static const std::vector<std::string> s_example_target_2 = {
     "id:0001",
     "type:donut",
     "name:Cake",
-    "ppu:" + DSLReaderTests::dtos(0.55),
+    "ppu:" + DSLReaderTests::real_str(0.55),
     "batters:<object>",
     "batter:<array>",
     "<object>",
@@ -276,7 +286,8 @@ TEST_F(DSLReaderTests, ValidInput)
     assert_ok(R"(true)", {"<true>"});
     assert_ok(R"(false)", {"<false>"});
     assert_ok(R"(null)", {"<null>"});
-    assert_ok(R"(42)", {dtos(42)});
+    assert_ok(R"(42)", {integer_str(42)});
+    assert_ok(R"(12.3)", {real_str(12.3)});
 
     // Compound value
     assert_ok(R"({})", {"<object>", "</object>"});
@@ -385,12 +396,12 @@ TEST_F(DSLReaderTests, InvalidInput2)
 TEST_F(DSLReaderTests, InvalidInput3)
 {
     assert_corrupted(R"([[null]]abc)");
-    //    assert_corrupted(R"({{"k":"v"})");
-    //    assert_corrupted(R"({"k":"v"}})");
-    //    assert_corrupted(R"([true)");
-    //    assert_corrupted(R"(null])");
-    //    assert_corrupted(R"([["v"])");
-    //    assert_corrupted(R"(["v"]])");
+    assert_corrupted(R"({{"k":"v"})");
+    assert_corrupted(R"({"k":"v"}})");
+    assert_corrupted(R"([true)");
+    assert_corrupted(R"(null])");
+    assert_corrupted(R"([["v"])");
+    assert_corrupted(R"(["v"]])");
 }
 
 TEST_F(DSLReaderTests, SkipsComments1)
@@ -566,25 +577,161 @@ TEST_F(DSLReaderTests, ObjectsAndArrays)
 
 TEST_F(DSLReaderTests, RecognizesAllValueTypes)
 {
-    assert_ok(R"([null, false, true, 0, "1", {}, []])",
-              {"<array>", "<null>", "<false>", "<true>", dtos(0), "1",
-               "<object>", "</object>", "<array>", "</array>", "</array>"});
+    assert_ok(R"([null, false, true, 123, 4.56, "789", {}, []])",
+              {"<array>", "<null>", "<false>", "<true>", integer_str(123),
+               real_str(4.56), "789", "<object>", "</object>", "<array>",
+               "</array>", "</array>"});
 }
 
-TEST_F(DSLReaderTests, Numbers)
+TEST_F(DSLReaderTests, BasicNumbers)
 {
+    assert_ok("[123,\n"
+              " 1230,\n"
+              " 12300,\n"
+              " 123000,\n"
+              " 1230000]",
+              {"<array>",
+               integer_str(123),
+               integer_str(1230),
+               integer_str(12300),
+               integer_str(123000),
+               integer_str(1230000),
+               "</array>"});
+
     assert_ok("[0.0123,\n"
               " 0.1230,\n"
               " 1.2300,\n"
               " 12.300,\n"
               " 123.00]",
               {"<array>",
-               dtos(0.0123),
-               dtos(0.1230),
-               dtos(1.2300),
-               dtos(12.300),
-               dtos(123.00),
+               real_str(0.0123),
+               real_str(0.1230),
+               real_str(1.2300),
+               real_str(12.300),
+               real_str(123.00),
                "</array>"});
+}
+
+TEST_F(DSLReaderTests, SmallIntegers)
+{
+    assert_ok(std::to_string(INT64_MIN), {integer_str(INT64_MIN)});
+    assert_ok(std::to_string(INT64_MIN + 1), {integer_str(INT64_MIN + 1)});
+    assert_ok(std::to_string(INT64_MIN + 2), {integer_str(INT64_MIN + 2)});
+}
+
+TEST_F(DSLReaderTests, LargeIntegers)
+{
+    assert_ok(std::to_string(INT64_MAX), {integer_str(INT64_MAX)});
+    assert_ok(std::to_string(INT64_MAX - 1), {integer_str(INT64_MAX - 1)});
+    assert_ok(std::to_string(INT64_MAX - 2), {integer_str(INT64_MAX - 2)});
+}
+
+TEST_F(DSLReaderTests, ValidExponentials)
+{
+    assert_ok("123e0", {real_str(123e0)});
+    assert_ok("123e1", {real_str(123e1)});
+    assert_ok("123e2", {real_str(123e2)});
+    assert_ok("123e3", {real_str(123e3)});
+    // '+' has no effect
+    assert_ok("123e+0", {real_str(123e+0)});
+    assert_ok("123e+1", {real_str(123e+1)});
+    assert_ok("123e+2", {real_str(123e+2)});
+    assert_ok("123e+3", {real_str(123e+3)});
+    assert_ok("123e-0", {real_str(123e-0)});
+    assert_ok("123e-1", {real_str(123e-1)});
+    assert_ok("123e-2", {real_str(123e-2)});
+    assert_ok("123e-3", {real_str(123e-3)});
+}
+
+TEST_F(DSLReaderTests, InvalidExponentials)
+{
+    // Missing integral part
+    assert_corrupted("-e2");
+    assert_corrupted("-E2");
+    assert_corrupted("-e+2");
+    assert_corrupted("-e-2");
+    assert_corrupted(".");
+    assert_corrupted(".123");
+
+    // Missing exponential part
+    assert_corrupted("1e");
+    assert_corrupted("1e-");
+    assert_corrupted("1e+");
+
+    // Missing fractional part
+    assert_corrupted("123.");
+    assert_corrupted("123.e2");
+
+    // Extra e or E
+    assert_corrupted("1ee+2");
+    assert_corrupted("1EE+2");
+    assert_corrupted("1e+2e");
+
+    // Extra sign
+    assert_corrupted("1e++2");
+    assert_corrupted("1e+2+");
+    assert_corrupted("1e+2-");
+    assert_corrupted("1e-2+");
+    assert_corrupted("1e-2-");
+    assert_corrupted("1e--2");
+
+    // Fractional power
+    assert_corrupted("1e.");
+    assert_corrupted("1e.2");
+    assert_corrupted("1e2.");
+    assert_corrupted("1e2.0");
+
+    // Misc.
+    assert_corrupted("10.0e20000000000000");
+}
+
+TEST_F(DSLReaderTests, LeadingZerosAreNotAllowed)
+{
+    assert_corrupted("01");
+    assert_corrupted("01");
+}
+
+TEST_F(DSLReaderTests, LowerBoundary)
+{
+    assert_ok("-9223372036854775809", {real_str(-9223372036854775809.0)});
+    assert_ok("-92233720368547758080", {real_str(-92233720368547758080.0)});
+}
+
+TEST_F(DSLReaderTests, UpperBoundary)
+{
+    assert_ok("9223372036854775808", {real_str(9223372036854775808.0)});
+    assert_ok("9223372036854775809", {real_str(9223372036854775809.0)});
+    assert_ok("92233720368547758080", {real_str(92233720368547758080.0)});
+}
+
+TEST_F(DSLReaderTests, OverflowingIntegersBecomeReals)
+{
+    static constexpr uint64_t kOffset = 9223372036854775807ULL;
+    for (uint64_t i = 1; i < 64; ++i) {
+        assert_ok(std::to_string(i + kOffset), {real_str(static_cast<double>(i + kOffset))});
+    }
+}
+
+TEST_F(DSLReaderTests, UnderflowingIntegersBecomeReals)
+{
+    DSLReader reader;
+    register_actions(reader);
+    for (const auto *str : {"-9223372036854775809",
+                            "-9223372036854775810",
+                            "-9223372036854775908",
+                            "-123456789012345678901234567890"}) {
+        m_current.clear();
+        m_records.clear();
+        ASSERT_OK(reader.read(str, this));
+        ASSERT_EQ(m_records[0].find("<real="), 0);
+    }
+}
+
+TEST_F(DSLReaderTests, LargeRealsAreValidated)
+{
+    assert_corrupted("123456789012345678901234567890..");
+    assert_corrupted("123456789012345678901234567890ee");
+    assert_corrupted("123456789012345678901234567890e10.1");
 }
 
 class DSLReaderOOMTests : public DSLReaderTests
@@ -635,4 +782,120 @@ TEST_F(DSLReaderOOMTests, OOM)
     TEST_LOG << "Number of failures: " << m_max_allocations << '\n';
 }
 
+class DSLWriterTests : public testing::Test
+{
+public:
+    Buffer<char> m_buffer;
+    OutputStream<decltype(m_buffer)> m_os;
+    DSLWriter<decltype(m_os)> m_writer;
+    DSLReader m_reader;
+
+    explicit DSLWriterTests()
+        : m_os(m_buffer),
+          m_writer(m_os)
+    {
+    }
+
+    ~DSLWriterTests() override = default;
+
+    void SetUp() override
+    {
+        m_reader.register_action(kEventBeginObject, [](auto *self, const auto *) {
+            static_cast<DSLWriterTests *>(self)
+                ->m_writer.begin_object();
+        });
+        m_reader.register_action(kEventEndObject, [](auto *self, const auto *) {
+            static_cast<DSLWriterTests *>(self)
+                ->m_writer.end_object();
+        });
+        m_reader.register_action(kEventBeginArray, [](auto *self, const auto *) {
+            static_cast<DSLWriterTests *>(self)
+                ->m_writer.begin_array();
+        });
+        m_reader.register_action(kEventEndArray, [](auto *self, const auto *) {
+            static_cast<DSLWriterTests *>(self)
+                ->m_writer.end_array();
+        });
+        m_reader.register_action(kEventKey, [](auto *self, const auto *output) {
+            static_cast<DSLWriterTests *>(self)
+                ->m_writer.write_key(output->string);
+        });
+        m_reader.register_action(kEventValueString, [](auto *self, const auto *output) {
+            static_cast<DSLWriterTests *>(self)
+                ->m_writer.write_string(output->string);
+        });
+        m_reader.register_action(kEventValueInteger, [](auto *self, const auto *output) {
+            static_cast<DSLWriterTests *>(self)
+                ->m_writer.write_integer(output->integer);
+        });
+        m_reader.register_action(kEventValueReal, [](auto *self, const auto *output) {
+            static_cast<DSLWriterTests *>(self)
+                ->m_writer.write_real(output->real);
+        });
+        m_reader.register_action(kEventValueNull, [](auto *self, const auto *output) {
+            static_cast<DSLWriterTests *>(self)
+                ->m_writer.write_null();
+        });
+        m_reader.register_action(kEventValueBoolean, [](auto *self, const auto *output) {
+            static_cast<DSLWriterTests *>(self)
+                ->m_writer.write_boolean(output->boolean);
+        });
+    }
+
+    auto read_and_write(const Slice &data)
+    {
+        m_os.reset();
+        m_writer.reset();
+        m_buffer.reset();
+        EXPECT_OK(m_reader.read(data, this));
+        EXPECT_FALSE(m_buffer.is_empty());
+        return std::string(m_buffer.data(), m_os.size());
+    }
+
+    void run_test(const Slice &data)
+    {
+        const auto json1 = read_and_write(data);
+        const auto json2 = read_and_write(data);
+        ASSERT_EQ(json1, json2);
+    }
+};
+
+TEST_F(DSLWriterTests, Write)
+{
+    run_test(R"({"a":[1,"b",true],"c":[{"d":234,"e":null}],)"
+             R"("f":{"g":false,"h":[{},{},[{"i":[56,7,8,90,"j","k","lmnop"]}]]}})");
+}
+
 } // namespace calicodb::test
+
+#include <filesystem>
+#include <fstream>
+TEST(SpeedTest, XYZ)
+{
+    using namespace calicodb;
+    AllocatorConfig config = {
+        std::malloc,
+        std::realloc,
+        std::free,
+    };
+    ASSERT_OK(configure(kReplaceAllocator, &config));
+    size_t total_bytes = 0;
+    for (int idx = 0; idx < 100; ++idx) {
+        std::string base = "/Users/andy-byers/CLionProjects/CalicoDB/data";
+        for (const auto &itr : std::filesystem::directory_iterator(base)) {
+            std::ifstream ifs(itr.path());
+            ASSERT_TRUE(ifs.is_open());
+            ifs.seekg(0, std::ios::end);
+            const auto sz = ifs.tellg();
+            std::string data(static_cast<size_t>(sz), '\0');
+            ifs.seekg(0, std::ios::beg);
+            ifs.read(data.data(), sz);
+
+            DSLReader reader;
+            ASSERT_OK(reader.read(data, nullptr));
+            total_bytes += data.size();
+        }
+    }
+    std::cerr << total_bytes << " bytes parsed\n";
+    ASSERT_OK(configure(kRestoreAllocator, nullptr));
+}
