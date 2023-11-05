@@ -2,10 +2,10 @@
 // This source code is licensed under the MIT License, which can be found in
 // LICENSE.md. See AUTHORS.md for a list of contributor names.
 
-#include "json.h"
 #include "buffer.h"
 #include "internal.h"
 #include "internal_vector.h"
+#include "json.h"
 #include "status_internal.h"
 
 namespace calicodb::json
@@ -104,8 +104,7 @@ enum Token {
     kTokenCount
 };
 
-union Value {
-    void *null = nullptr;
+union Scalar {
     bool boolean;
     int64_t integer;
     double real;
@@ -179,16 +178,16 @@ public:
         size_t column;
     };
 
-    explicit Lexer(const Slice &input, Status &status)
-        : m_value{nullptr},
-          m_status(&status),
+    explicit Lexer(const Slice &input, Error &error)
+        : m_value{false},
+          m_error(&error),
           m_begin(input.data()),
           m_end(m_begin + input.size()),
           m_itr(m_begin)
     {
     }
 
-    [[nodiscard]] auto get_value() const -> const Value &
+    [[nodiscard]] auto get_value() const -> const Scalar &
     {
         return m_value;
     }
@@ -200,11 +199,11 @@ public:
 
     [[nodiscard]] auto scan(Token &token) -> bool
     {
-        CALICODB_EXPECT_TRUE(m_status->is_ok());
+        CALICODB_EXPECT_EQ(*m_error, Error::kNone);
         skip_whitespace();
         while (m_char == '/') {
             if (skip_comments()) {
-                token = make_error("");
+                token = make_error(Error::kInvalidComment);
                 return false;
             }
             skip_whitespace();
@@ -255,10 +254,10 @@ public:
                 case ']':
                     token = kTokenEndArray;
                     break;
-                default:
-                    token = make_error("unexpected character");
-                    [[fallthrough]];
                 case '\0':
+                    return false;
+                default:
+                    token = make_error(Error::kInvalidDocument);
                     return false;
             }
             return true;
@@ -356,13 +355,9 @@ private:
         } while (ISSPACE(m_char));
     }
 
-    [[nodiscard]] auto make_error(const char *message) const -> Token
+    [[nodiscard]] auto make_error(Error error) const -> Token
     {
-        if (message) {
-            *m_status = Status::corruption(message);
-        } else {
-            *m_status = Status::no_memory();
-        }
+        *m_error = error;
         return kTokenError;
     }
 
@@ -415,24 +410,24 @@ private:
                         case 'u': {
                             auto codepoint = get_codepoint();
                             if (codepoint < 0) {
-                                return make_error("missing 4 hex digits after `\\u`");
+                                return make_error(Error::kInvalidCodepoint);
                             }
                             if (0xD800 <= codepoint && codepoint <= 0xDFFF) {
                                 // Codepoint is part of a surrogate pair. Expect a high surrogate (U+D800–U+DBFF) followed
                                 // by a low surrogate (U+DC00–U+DFFF).
                                 if (codepoint <= 0xDBFF) {
                                     if (get() != '\\' || get() != 'u') {
-                                        return make_error("missing low surrogate");
+                                        return make_error(Error::kInvalidCodepoint);
                                     }
                                     const auto codepoint2 = get_codepoint();
                                     if (codepoint2 < 0xDC00 || codepoint2 > 0xDFFF) {
-                                        return make_error("low surrogate is malformed");
+                                        return make_error(Error::kInvalidCodepoint);
                                     }
                                     codepoint = (((codepoint - 0xD800) << 10) |
                                                  (codepoint2 - 0xDC00)) +
                                                 0x10000;
                                 } else {
-                                    return make_error("missing high surrogate");
+                                    return make_error(Error::kInvalidCodepoint);
                                 }
                             }
                             // Translate the codepoint into bytes. Modified from @Tencent/rapidjson.
@@ -455,15 +450,14 @@ private:
                             break;
                         }
                         default:
-                            return make_error("unrecognized escape");
+                            return make_error(Error::kInvalidEscape);
                     }
                     break;
                 case '"':
                     if (!accum.ok) {
-                        return make_error(nullptr);
+                        return make_error(Error::kNoMemory);
                     }
-                    // Closing double quote finishes the string. Call get_string() to get the
-                    // backing string buffer.
+                    // Closing double quote finishes the string.
                     m_value.string = accum.result();
                     return kTokenValueString;
                 default:
@@ -471,7 +465,7 @@ private:
                     if (c >= 0x20) {
                         accum.append(m_char);
                     } else {
-                        return make_error("unexpected token");
+                        return make_error(Error::kInvalidString);
                     }
             }
         }
@@ -487,12 +481,12 @@ private:
 
         if (peek() == 'e' || peek() == 'E') {
             // Catches cases like "-e2" and "-E5".
-            return kTokenError;
+            return make_error(Error::kInvalidNumber);
         }
         if (get() == '0') {
             if (ISNUMERIC(peek())) {
                 // '0' followed by another digit.
-                return kTokenError;
+                return make_error(Error::kInvalidNumber);
             }
         }
         unget();
@@ -569,7 +563,7 @@ private:
         static constexpr RealState kTransitions[kRealStateCount][kRealTokenCount] = {
             //    Tokens = kDot,   kE,     kPM,    k123,   kOther
             /*    kEnd */ {kError, kError, kError, kError, kError}, // Sink
-            /*  kError */ {kError, kError, kError, kError, kError}, // Sink
+            /*  Error::k */ {kError, kError, kError, kError, kError}, // Sink
             /*  kBegin */ {kFrac, kExp, kError, kError, kEnd},      // Source
             /*    kDot */ {kError, kError, kError, kDigits, kError},
             /* kDigits */ {kError, kExp, kError, kDigits, kEnd},
@@ -625,7 +619,7 @@ private:
             m_itr = end;
             return kTokenValueReal;
         }
-        return kTokenError;
+        return make_error(Error::kInvalidNumber);
     }
 
     auto scan_null() -> Token
@@ -634,10 +628,9 @@ private:
         if (get() == 'u' &&
             get() == 'l' &&
             get() == 'l') {
-            m_value.null = nullptr;
             return kTokenValueNull;
         }
-        return kTokenError;
+        return make_error(Error::kInvalidLiteral);
     }
 
     auto scan_true() -> Token
@@ -649,7 +642,7 @@ private:
             m_value.boolean = true;
             return kTokenValueBoolean;
         }
-        return kTokenError;
+        return make_error(Error::kInvalidLiteral);
     }
 
     auto scan_false() -> Token
@@ -662,13 +655,13 @@ private:
             m_value.boolean = false;
             return kTokenValueBoolean;
         }
-        return kTokenError;
+        return make_error(Error::kInvalidLiteral);
     }
 
     Position m_pos = {};
     Buffer<char> m_scratch;
-    Value m_value;
-    Status *const m_status;
+    Scalar m_value;
+    Error *const m_error;
     const char *const m_begin;
     const char *const m_end;
     const char *m_itr;
@@ -700,18 +693,18 @@ public:
     };
 
     explicit Parser(const Slice &input)
-        : m_lex(input, m_status)
+        : m_lex(input, m_error)
     {
     }
 
-    using Callback = bool (*)(Handler &, Event, const Value &);
+    using Callback = bool (*)(Handler &, Event, const Scalar &);
 
     struct Context {
         Handler *h;
         Callback cb;
     };
 
-    auto parse(const Context &ctx) -> Status
+    auto parse(const Context &ctx) -> Result
     {
         Token token;
         State src = kStateBegin;
@@ -719,48 +712,42 @@ public:
             const auto dst = predict(src, token);
             src = transit(token, dst, ctx);
             if (src == kStateStop) {
-                return m_status; // User-requested stop
+                return make_result(); // User-requested stop
             }
         }
         return finish(src);
     }
 
 private:
-    auto out_of_memory() -> State
+    auto make_result() const -> Result
     {
-        CALICODB_EXPECT_TRUE(m_status.is_ok());
-        m_status = Status::no_memory();
-        return kStateError;
-    }
-
-    auto corruption(const char *message) -> State
-    {
-        CALICODB_EXPECT_TRUE(m_status.is_ok());
         const auto [line, column] = m_lex.get_position();
-        m_status = StatusBuilder::corruption("corruption detected at %d:%d (%s)",
-                                             line, column, message);
+        return {line, column, m_error};
+    }
+    
+    auto make_error(Error error) -> State
+    {
+        CALICODB_EXPECT_EQ(m_error, Error::kNone);
+        m_error = error;
         return kStateError;
     }
 
-    auto finish(State state) -> Status
+    auto finish(State state) -> Result
     {
-        if (!m_status.is_ok()) {
-            return m_status;
+        if (m_error == Error::kNone) {
+            if (!m_stack.is_empty() || (state != kStateEnd &&
+                                        state != kV1 &&
+                                        state != kA1 &&
+                                        state != kO2)) {
+                make_error(Error::kInvalidDocument);
+            }
         }
-        if (!m_stack.is_empty()) {
-            corruption("structure was not closed");
-        } else if (state != kStateEnd &&
-                   state != kV1 &&
-                   state != kA1 &&
-                   state != kO2) {
-            corruption("incomplete or missing structure");
-        }
-        return m_status;
+        return make_result();
     }
 
     [[nodiscard]] auto advance(Token &token) -> bool
     {
-        return m_status.is_ok() && m_lex.scan(token);
+        return m_error == Error::kNone && m_lex.scan(token);
     }
 
     // Predict the next state based on the current state and a token read by the lexer
@@ -838,12 +825,12 @@ private:
             case kAB:
             case kOB:
                 // Opened a new array or object.
-                if (m_stack.size() == kMaxDepth) {
-                    return corruption("exceeded maximum structure depth");
+                if (m_stack.size() >= kMaxDepth) {
+                    return make_error(Error::kExceededMaxDepth);
                 }
                 // Save the current state on the stack.
                 if (m_stack.push_back(dst == kOB)) {
-                    return out_of_memory();
+                    return make_error(Error::kNoMemory);
                 }
                 break;
             case kAE:
@@ -860,11 +847,6 @@ private:
                     dst = m_stack.back() ? kO2 : kA1; // After value
                 }
                 break;
-            case kStateError:
-                if (m_status.is_ok()) {
-                    return corruption("fail");
-                }
-                [[fallthrough]];
             default: // kStateEnd | kStateError
                 return dst;
         }
@@ -876,12 +858,12 @@ private:
         return dst;
     }
 
-    Status m_status;
+    Error m_error = Error::kNone;
     Vector<bool> m_stack;
     Lexer m_lex;
 };
 
-auto dispatch(Handler &handler, Event event, const Value &value) -> bool
+auto dispatch(Handler &handler, Event event, const Scalar &value) -> bool
 {
     switch (event) {
         case kEventKey:
@@ -913,7 +895,7 @@ Handler::Handler() = default;
 
 Handler::~Handler() = default;
 
-auto Reader::read(const Slice &input) -> Status
+auto Reader::read(const Slice &input) -> Result
 {
     return Parser(input)
         .parse({m_handler, dispatch});

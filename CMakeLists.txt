@@ -87,8 +87,9 @@ target_sources(calicodb
                 src/internal.h
                 src/internal_string.h
                 src/internal_vector.h
-                src/json.cpp
-                src/json.h
+        src/json_dom.cpp
+        src/json_sax.cpp
+        src/json.h
                 src/list.h
                 src/logging.cpp
                 src/logging.h

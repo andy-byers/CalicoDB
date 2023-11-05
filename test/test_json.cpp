@@ -13,6 +13,44 @@ namespace calicodb::test
 
 using namespace json;
 
+static auto result_to_string(const Result &r) -> std::string
+{
+    std::string result;
+    switch (r.error) {
+        case Error::kNone:
+            return "kNone";
+        case Error::kNoMemory:
+            result = "kNoMemory";
+            break;
+        case Error::kInvalidDocument:
+            result = "kInvalidDocument";
+            break;
+        case Error::kInvalidEscape:
+            result = "kInvalidEscape";
+            break;
+        case Error::kInvalidCodepoint:
+            result = "kInvalidCodepoint";
+            break;
+        case Error::kInvalidLiteral:
+            result = "kInvalidLiteral";
+            break;
+        case Error::kInvalidString:
+            result = "kInvalidString";
+            break;
+        case Error::kInvalidNumber:
+            result = "kInvalidNumber";
+            break;
+        case Error::kInvalidComment:
+            result = "kInvalidComment";
+            break;
+        case Error::kExceededMaxDepth:
+            result = "kExceededMaxDepth";
+            break;
+    }
+    return result + '@' + std::to_string(r.line) + ':' + std::to_string(r.column);
+
+}
+
 static auto integer_str(int64_t i) -> std::string
 {
     return "<integer=" + std::to_string(i) + '>';
@@ -137,7 +175,8 @@ public:
     {
         reset_test_state();
         Reader reader(m_handler);
-        ASSERT_OK(reader.read(input));
+        const auto r = reader.read(input);
+        ASSERT_TRUE(r) << result_to_string(r);
         ASSERT_EQ(m_handler.records, target);
         ASSERT_EQ(m_handler.open_objects, num_objects);
         ASSERT_EQ(m_handler.closed_objects, num_objects);
@@ -149,7 +188,8 @@ public:
     {
         reset_test_state();
         Reader reader(m_handler);
-        ASSERT_OK(reader.read(input));
+        const auto r = reader.read(input);
+        ASSERT_TRUE(r) << result_to_string(r);
         ASSERT_EQ(m_handler.open_objects, m_handler.closed_objects);
         ASSERT_EQ(m_handler.open_arrays, m_handler.closed_arrays);
         ASSERT_EQ(m_handler.records, target);
@@ -159,8 +199,7 @@ public:
     {
         reset_test_state();
         Reader reader(m_handler);
-        const auto s = reader.read(input);
-        ASSERT_TRUE(s.is_corruption()) << input.to_string();
+        ASSERT_FALSE(reader.read(input));
     }
 };
 
@@ -782,7 +821,8 @@ TEST_F(ReaderTests, UnderflowingIntegersBecomeReals)
                             "-9223372036854775908",
                             "-123456789012345678901234567890"}) {
         reset_test_state();
-        ASSERT_OK(reader.read(str));
+        const auto r = reader.read(str);
+        ASSERT_TRUE(r) << result_to_string(r);
         ASSERT_EQ(m_handler.records[0].find("<real="), 0);
     }
 }
@@ -826,18 +866,35 @@ public:
 TEST_F(ReaderOOMTests, OOM)
 {
     TEST_LOG << "ReaderOOMTests.OOM\n";
-    Status s;
+    Result r;
     Reader reader(m_handler);
     do {
         reset_test_state();
-        s = reader.read(kExample2);
+        r = reader.read(kExample2);
         ++m_max_allocations;
         m_num_allocations = 0;
-    } while (s.is_no_memory());
-    ASSERT_OK(s);
+    } while (r.error == json::Error::kNoMemory);
+    ASSERT_TRUE(r);
 
     ASSERT_EQ(m_handler.records, s_example_target_2);
     TEST_LOG << "Number of failures: " << m_max_allocations << '\n';
+}
+
+TEST(DomTests, BuildDocument)
+{
+    TestHandler handler;
+    Reader reader(handler);
+    Document *doc = nullptr;
+    const std::string str = R"([1, [2, {"a":"b"},{"a": "Hello, world!", "c": true}], 3])";
+    auto r = reader.read(str);
+    ASSERT_TRUE(r) << result_to_string(r);
+
+    r = new_document(str, doc);
+    ASSERT_TRUE(r) << result_to_string(r);
+
+    r = reader.read(doc->TODO_render_to_std_string());
+    ASSERT_TRUE(r) << result_to_string(r);
+    delete doc;
 }
 
 } // namespace calicodb::test

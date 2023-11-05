@@ -7,9 +7,47 @@
 
 #include "calicodb/slice.h"
 #include "calicodb/status.h"
+#include "mem.h"
 
 namespace calicodb::json
 {
+
+struct Node;
+
+enum class Error {
+    kNone,
+    kNoMemory,
+    kInvalidDocument,
+    kInvalidEscape,
+    kInvalidCodepoint,
+    kInvalidLiteral,
+    kInvalidString,
+    kInvalidNumber,
+    kInvalidComment,
+    kExceededMaxDepth,
+};
+
+enum class Type {
+    kKey,
+    kString,
+    kInteger,
+    kReal,
+    kBoolean,
+    kNull,
+    kObject,
+    kArray,
+};
+
+struct [[nodiscard]] Result {
+    size_t line;
+    size_t column;
+    Error error;
+
+    explicit operator bool() const
+    {
+        return error == Error::kNone;
+    }
+};
 
 class Handler
 {
@@ -37,11 +75,43 @@ public:
     {
     }
 
-    auto read(const Slice &input) -> Status;
+    auto read(const Slice &input) -> Result;
+
+    Reader(Reader &) = delete;
+    void operator=(Reader &) = delete;
 
 private:
     Handler *const m_handler;
 };
+
+class Document final : public HeapObject
+{
+public:
+    ~Document();
+
+    // TODO: Write an API. The following method should be removed eventually. It is just for testing.
+    [[nodiscard]] auto TODO_render_to_std_string() const -> std::string;
+
+    Document(const Document &) = delete;
+    auto operator=(const Document &) -> Document & = delete;
+    Document(Document &&rhs) noexcept;
+    auto operator=(Document &&rhs) noexcept -> Document &;
+
+private:
+    friend auto new_document(const Slice &, Document *&) -> Result;
+    friend auto new_document() -> Document *;
+    class DocumentImpl;
+
+    explicit Document(DocumentImpl &impl)
+        : m_impl(&impl)
+    {
+    }
+
+    DocumentImpl *m_impl;
+};
+
+auto new_document(const Slice &input, Document *&doc_out) -> Result;
+auto new_document() -> Document *;
 
 } // namespace calicodb::json
 
